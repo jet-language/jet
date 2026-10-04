@@ -1,0 +1,16 @@
+// Rust crates/jet-devserver/src/lib.rs:79–94. Shared CLI/devserver watch policy.
+pub enum WatchPolicy { Auto Restart Swap Once }
+
+// Only exact recognized flags affect policy; later recognized flags override.
+pub fn watch_policy_from(raw: [String], default: WatchPolicy) -> WatchPolicy Never! {
+    policy := default
+    loop argument in raw {
+        if argument == {
+            "--restart" -> policy = WatchPolicy.Restart
+            "--swap" -> policy = WatchPolicy.Swap
+            "--watch=off" -> policy = WatchPolicy.Once
+            else -> {}
+        }
+    }
+    policy
+}

@@ -1,0 +1,310 @@
+// Source/LSP/Server.rs:2839–3108,3222–3400. Sole W38 LSPServer and
+// W36 document state; Completion/Features (0734/0736/0737), checked source
+// snapshots (0741), and the sole Syntax keyword table remain dependencies.
+use core.encoding.[DataTree]
+use core.files.runtime.kernel_path_components as lsp_reference_path
+use jet_foundation.[Span, foundation_json_quote]
+use jet_lexer.[Token, TOKEN_IDENT, TOKEN_KW_MUTATE, TOKEN_KW_MOVE]
+use jet_semindex.[SemIndex, SymbolDB, SymDef, SymKind]
+
+pub fn lsp_impact_report_json_with_provenance(report: String) -> String Never! {
+    trimmed := report.trim_end() // #4303
+    if !trimmed.ends_with("}") -> return ~report
+    body := trimmed.slice(0, trimmed.len() - 1) // #4303
+    "{body},\"evidence\":\"checked_static\",\"runtime_observation\":\"not_run\",\"provenance_scope\":\"checked_semantic_index\"}}"
+}
+
+pub fn lsp_references_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri :: if (td.field("uri") ?? return None) == { .Text(text) -> text else -> return None }
+    doc :: server.diagnostic_state.docs.get(uri) ?? return None
+    pos :: value.field("position") ?? return None
+    line :: lsp_uinteger(pos.field("line") ?? return None) ?? return None
+    character :: lsp_uinteger(pos.field("character") ?? return None) ?? return None
+    offset :: lsp_pos_to_offset(doc.text, LSPPos{line: line, character: character})
+    include_decl := false
+    if value.field("context") == .Val(context) {
+        if context.field("includeDeclaration") == .Val(flag) {
+            if flag == .Bool(include) -> include_decl = include
+        }
+    }
+    shared_tokens :: server.lex(doc)
+    token_permit :: shared_tokens.guard_read()
+    tokens :: token_permit.value
+    checked :: server.check_with_bundle(doc)
+    permit :: checked.checked.guard_read()
+    result :: permit.value.result
+    if result.graph == None -> return Val(lsp_response(id, "[]"))
+    db :: lsp_build_navigation_symbol_db(result)
+    module_index :: lsp_checked_module(result, lsp_reference_path.display(doc.path), doc.path.platform) ?? return None
+    module :: result.module_sources[module_index]
+    refs :: lsp_compute_references(db, tokens, module.display, offset, include_decl)
+    data := ""
+    if lsp_semantic_symbol_at(db, tokens, module.display, offset) == .Val(symbol) {
+        if lsp_semantic_symbol_metadata_json(db, symbol) == .Val(metadata) -> data = ",\"data\":{metadata}"
+    }
+    items := [String]{}
+    loop ref in refs {
+        snapshot :: lsp_checked_source_snapshot(server.diagnostic_state, result, checked.checked_versions, ref.0, server.snapshot.cwd.platform) ?? return Val(lsp_error_response(id, -32603, "reference source is not in a checked snapshot"))
+        source :: result.module_sources[snapshot.module_index]
+        range :: lsp_checked_byte_span_to_range(source.loaded_source, ref.1) ?? return Val(lsp_error_response(id, -32603, "reference range is outside the checked snapshot"))
+        ref_uri :: lsp_path_to_uri(source.path)
+        &items.push("{{\"uri\":{foundation_json_quote(ref_uri)},\"range\":{lsp_range_json(range)}{data}}}")
+    }
+    Val(lsp_response(id, "[{items.join(",")}]"))
+}
+
+pub fn lsp_prepare_rename_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri :: if (td.field("uri") ?? return None) == { .Text(text) -> text else -> return None }
+    doc :: server.diagnostic_state.docs.get(uri) ?? return None
+    pos :: value.field("position") ?? return None
+    line :: lsp_uinteger(pos.field("line") ?? return None) ?? return None
+    character :: lsp_uinteger(pos.field("character") ?? return None) ?? return None
+    offset :: lsp_pos_to_offset(doc.text, LSPPos{line: line, character: character})
+    shared_tokens :: server.lex(doc)
+    token_permit :: shared_tokens.guard_read()
+    tokens :: token_permit.value
+    selected := Int?{None}
+    loop (index, token) in tokens {
+        if token.span.start == offset { selected = Val(index); break }
+    }
+    if selected == None -> selected = lsp_token_at(tokens, offset)
+    index :: selected ?? return Val(lsp_response(id, "null"))
+    token :: tokens[index]
+    text := lsp_token_text(doc.text, token) // #4303
+    if token.kind != TOKEN_IDENT {
+        if lsp_is_keyword_token(token, text) -> return Val(lsp_error_response(id, -32600, "`{text}` is Jet syntax, not a name you can rename"))
+        return Val(lsp_response(id, "null"))
+    }
+    checked :: server.check_with_bundle(doc)
+    permit :: checked.checked.guard_read()
+    result :: permit.value.result
+    if result.graph == None -> return Val(lsp_response(id, "null"))
+    db :: lsp_build_navigation_symbol_db(result)
+    module_index :: lsp_checked_module(result, lsp_reference_path.display(doc.path), doc.path.platform) ?? return None
+    module :: result.module_sources[module_index]
+    rename :: lsp_checked_rename_span_at(db, tokens, module.display, offset) ?? return Val(lsp_response(id, "null"))
+    range :: lsp_checked_byte_span_to_range(doc.text, rename.1) ?? return Val(lsp_error_response(id, -32603, "rename range is outside the checked snapshot"))
+    Val(lsp_response(id, "{{\"range\":{lsp_range_json(range)},\"placeholder\":{foundation_json_quote(token.payload.text)}}}"))
+}
+
+pub fn lsp_rename_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri :: if (td.field("uri") ?? return None) == { .Text(text) -> text else -> return None }
+    doc :: server.diagnostic_state.docs.get(uri) ?? return None
+    pos :: value.field("position") ?? return None
+    line :: lsp_uinteger(pos.field("line") ?? return None) ?? return None
+    character :: lsp_uinteger(pos.field("character") ?? return None) ?? return None
+    offset :: lsp_pos_to_offset(doc.text, LSPPos{line: line, character: character})
+    new_name :: if (value.field("newName") ?? return None) == { .Text(text) -> text else -> return None }
+    shared_tokens :: server.lex(doc)
+    token_permit :: shared_tokens.guard_read()
+    tokens :: token_permit.value
+    checked :: server.check_with_bundle(doc)
+    permit :: checked.checked.guard_read()
+    result :: permit.value.result
+    if result.graph == None -> return Val(lsp_error_response(id, -32603, "document did not check cleanly"))
+    db :: lsp_build_navigation_symbol_db(result)
+    module_index :: lsp_checked_module(result, lsp_reference_path.display(doc.path), doc.path.platform) ?? return None
+    module :: result.module_sources[module_index]
+    spans :: lsp_compute_rename(db, tokens, module.display, offset, new_name) ?? return Val(lsp_error_response(id, -32600, err.message))
+    by_file := [String:[Span]]{}
+    loop ref in spans {
+        if !by_file.has_key(ref.0) -> by_file[ref.0] = [Span]{}
+        &by_file[ref.0].push(ref.1)
+    }
+    // Rust BTreeMap iteration is lexical, independently of Jet map order.
+    paths := [String]{}
+    loop (path, _) in by_file -> &paths.push(~path)
+    &paths.sort()
+    changes := [String]{}
+    loop path in paths {
+        snapshot :: lsp_checked_source_snapshot(server.diagnostic_state, result, checked.checked_versions, path, server.snapshot.cwd.platform) ?? return Val(lsp_error_response(id, -32603, "rename source is not in a checked snapshot"))
+        source :: result.module_sources[snapshot.module_index]
+        edits := [String]{}
+        loop span in by_file[path] {
+            range :: lsp_checked_byte_span_to_range(source.loaded_source, span) ?? return Val(lsp_error_response(id, -32603, "rename range is outside the checked snapshot"))
+            &edits.push("{{\"range\":{lsp_range_json(range)},\"newText\":{foundation_json_quote(new_name)}}}")
+        }
+        file_uri :: lsp_path_to_uri(source.path)
+        version :: if snapshot.version == { .Val(number) -> "{number}" None -> "null" }
+        &changes.push("{{\"textDocument\":{{\"uri\":{foundation_json_quote(file_uri)},\"version\":{version}}},\"edits\":[{edits.join(",")}]}}")
+    }
+    old_name :: lsp_ident_at(tokens, offset) ?? ""
+    identity :: lsp_checked_semantic_identity_at(db, tokens, module.display, offset) ?? ""
+    semantic_op :: lsp_rename_semantic_op(db.index, identity, old_name, new_name)
+    data := ""
+    if lsp_semantic_symbol_at(db, tokens, module.display, offset) == .Val(symbol) {
+        if lsp_semantic_symbol_metadata_json(db, symbol) == .Val(metadata) -> data = ",\"data\":{metadata}"
+    }
+    Val(lsp_response(id, "{{\"documentChanges\":[{changes.join(",")}],\"semantic_ops\":[{semantic_op}]{data}}}"))
+}
+
+pub fn lsp_rename_semantic_op(index: SemIndex, identity: String, from: String, to: String) -> String Never! {
+    targets := [String]{}
+    loop fact in index.definition_facts() {
+        if fact.human_identity != identity -> next
+        after := ~to
+        if fact.human_identity.ends_with(from) {
+            prefix := fact.human_identity.slice(0, fact.human_identity.len() - from.len()) // #4303
+            after = "{prefix}{to}"
+        }
+        &targets.push("{{\"stable_id\":{foundation_json_quote(fact.stable_id)},\"before\":{foundation_json_quote(fact.human_identity)},\"after\":{foundation_json_quote(after)},\"kind\":{foundation_json_quote(fact.kind)},\"module_path\":{foundation_json_quote(fact.module_path)}}}")
+    }
+    "{{\"kind\":\"rename\",\"rule_id\":\"lsp.rename\",\"from\":{foundation_json_quote(from)},\"to\":{foundation_json_quote(to)},\"targets\":[{targets.join(",")}],\"files\":[]}}"
+}
+
+pub struct LSPActiveCall {
+    pub name: String
+    pub active_param: Int
+    pub active_label: String?
+    pub consumed_labels: [String]
+}
+
+pub fn lsp_active_call(src: String, offset: Int) -> LSPActiveCall? Never! {
+    bytes :: src.bytes()
+    bounded :: if offset < bytes.len() -> offset else -> bytes.len()
+    i := bounded
+    nested := 0
+    active_param := 0
+    active_start := i
+    loop i > 0 {
+        i -= 1
+        byte :: Int.from_u8(bytes[i])
+        if byte == {
+            41 | 93 | 125 -> nested += 1
+            40 -> {
+                if nested == 0 {
+                    name :: lsp_callee_name_before_paren(bytes, i) ?? return None
+                    if active_param == 0 -> active_start = i + 1
+                    argument := String.from_bytes(bytes[active_start..<bounded]) ?? panic("call cursor must be a UTF-8 boundary") // #4303
+                    active_label :: lsp_call_argument_label(argument)
+                    prior_end :: if active_start > 0 -> active_start - 1 else -> 0
+                    consumed_labels := [String]{}
+                    if prior_end > i + 1 {
+                        prior := String.from_bytes(bytes[i + 1..<prior_end]) ?? panic("ASCII argument separator boundary") // #4303
+                        consumed_labels = lsp_call_argument_labels(prior)
+                    }
+                    return Val(LSPActiveCall{name: name, active_param: active_param, active_label: active_label, consumed_labels: consumed_labels})
+                }
+                if nested > 0 -> nested -= 1
+            }
+            91 | 123 -> if nested > 0 -> nested -= 1
+            44 -> if nested == 0 { active_start = i + 1; active_param += 1 }
+            else -> {}
+        }
+    }
+    None
+}
+
+pub fn lsp_call_argument_label(argument: String) -> String? Never! {
+    trimmed := argument.trim_start() // #4303
+    bytes :: trimmed.bytes()
+    label_len := 0
+    loop label_len < bytes.len() && lsp_is_ident_byte(bytes[label_len]) -> label_len += 1
+    if label_len == 0 -> return None
+    rest := trimmed.slice(label_len, trimmed.len()).trim_start() // #4303: prefix is ASCII
+    if !rest.starts_with(":") || rest.starts_with("::") -> return None
+    Val(trimmed.slice(0, label_len))
+}
+
+pub fn lsp_call_argument_labels(arguments: String) -> [String] Never! {
+    bytes :: arguments.bytes()
+    labels := [String]{}
+    start := 0
+    nested := 0
+    loop (index, byte) in bytes {
+        code :: Int.from_u8(byte)
+        if code == {
+            40 | 91 | 123 -> nested += 1
+            41 | 93 | 125 -> if nested > 0 -> nested -= 1
+            44 -> if nested == 0 {
+                argument := String.from_bytes(bytes[start..<index]) ?? panic("ASCII comma boundary") // #4303
+                if lsp_call_argument_label(argument) == .Val(label) -> &labels.push(label)
+                start = index + 1
+            }
+            else -> {}
+        }
+    }
+    argument := String.from_bytes(bytes[start..<bytes.len()]) ?? panic("ASCII comma boundary") // #4303
+    if lsp_call_argument_label(argument) == .Val(label) -> &labels.push(label)
+    labels
+}
+
+pub fn lsp_callee_name_before_paren(bytes: [U8], paren: Int) -> String? Never! {
+    end := paren
+    loop end > 0 {
+        code :: Int.from_u8(bytes[end - 1])
+        if code != 9 && code != 10 && code != 12 && code != 13 && code != 32 -> break
+        end -= 1
+    }
+    start := end
+    loop start > 0 && lsp_is_ident_byte(bytes[start - 1]) -> start -= 1
+    if start == end -> return None
+    String.from_bytes(bytes[start..<end])
+}
+
+pub fn lsp_is_ident_byte(byte: U8) -> Bool Never! {
+    code :: Int.from_u8(byte)
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95
+}
+
+// Return the resident index, not a copied Token or an ownerless borrowed view.
+pub fn lsp_token_at(tokens: [Token], offset: Int) -> Int? Never! {
+    loop (index, token) in tokens {
+        if token.span.start <= offset && offset <= token.span.end -> return Val(index)
+    }
+    None
+}
+
+pub fn lsp_token_text(src: String, token: Token) -> String Never! {
+    bytes :: src.bytes()
+    end :: if token.span.end < bytes.len() -> token.span.end else -> bytes.len()
+    if token.span.start < 0 || token.span.start > end -> return ""
+    String.from_bytes(bytes[token.span.start..<end]) ?? ""
+}
+
+pub fn lsp_is_keyword_token(token: Token, text: String) -> Bool Never! {
+    // Sole language keyword table (Syntax packet), not a second hardcoded list.
+    loop keyword in JET_KEYWORD_LIST {
+        if keyword == text -> return true
+    }
+    token.kind == TOKEN_KW_MUTATE || token.kind == TOKEN_KW_MOVE
+}
+
+pub fn lsp_document_symbol_kind(kind: SymKind) -> Int? Never! {
+    if kind == {
+        .Function{..} -> Val(12)
+        .Struct{..} -> Val(23)
+        .Enum{..} -> Val(10)
+        .Trait | .Tag -> Val(11)
+        .Type{..} -> Val(5)
+        .Const -> Val(14)
+        else -> None
+    }
+}
+
+pub fn lsp_call_hierarchy_item_json(def: SymDef, src: String) -> String? Never! {
+    if def.kind != .Function{..} -> return None
+    uri :: lsp_path_to_uri(def.module_path)
+    range :: lsp_range_json(lsp_byte_span_to_range(src, def.def_span))
+    Val("{{\"name\":{foundation_json_quote(def.name)},\"kind\":12,\"uri\":{foundation_json_quote(uri)},\"range\":{range},\"selectionRange\":{range}}}")
+}
+
+pub fn lsp_type_hierarchy_item_json(def: SymDef, src: String) -> String? Never! {
+    kind :: if def.kind == { .Struct{..} -> 23 .Enum{..} -> 10 .Trait | .Tag -> 11 else -> return None }
+    uri :: lsp_path_to_uri(def.module_path)
+    range :: lsp_range_json(lsp_byte_span_to_range(src, def.def_span))
+    Val("{{\"name\":{foundation_json_quote(def.name)},\"kind\":{kind},\"uri\":{foundation_json_quote(uri)},\"range\":{range},\"selectionRange\":{range}}}")
+}
+
+pub fn lsp_type_hierarchy_item_params(params: DataTree?) -> (uri: String, name: String)? Never! {
+    item :: (params ?? return None).field("item") ?? return None
+    uri :: if (item.field("uri") ?? return None) == { .Text(text) -> text else -> return None }
+    name :: if (item.field("name") ?? return None) == { .Text(text) -> text else -> return None }
+    Val((uri: uri, name: name))
+}

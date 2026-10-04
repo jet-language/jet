@@ -1,0 +1,18 @@
+// Rust Syntax/core_surface.rs and Syntax/package_files.rs: shared path spellings.
+pub FILE_EXT :: prep { "jet" }
+pub UNIFIED_LOCK_FILE :: prep { ".jet/lock" }
+
+// Rust Syntax/predicates.rs classify_identifier: only the underscore prefix
+// affects source visibility. Bare `_` remains an ordinary binding spelling.
+pub enum IdentifierClass {
+    Ordinary
+    SoftPublic
+    Reserved
+}
+
+pub fn classify_identifier(name: String) -> IdentifierClass Never! {
+    if name.starts_with("__") -> return IdentifierClass.Reserved
+    // After the ASCII `_` prefix, a second scalar also means >1 UTF-8 bytes.
+    if name.starts_with("_") && name.len() > 1 -> return IdentifierClass.SoftPublic
+    IdentifierClass.Ordinary
+}

@@ -1,0 +1,972 @@
+// PORT-PENDING 0775 crates-jet-devserver-src-liveinspect: crates/jet-devserver/src/LiveInspect.rs:1-968
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-OBSERVE-LIVE1=A: bounded readers and projections for the runtime-owned
+//RS //! live snapshot. This module never reads process memory and never exposes
+//RS //! channel payloads, locals, environment values, or credentials.
+//RS 
+//RS use jet_foundation::Devtools::{JetDevtoolsEnvelope, JET_DEVTOOLS_MAX_ENVELOPE_BYTES};
+//RS use jet_foundation::DevtoolsControl::JetDevtoolsDecodedEnvelope;
+//RS use jet_foundation::DataTree::DataTree;
+//RS use jet_foundation::JSON::{json_get, json_int, json_str, parse_json};
+//RS use jet_foundation::MIR::MirDecisionLedger;
+//RS use std::collections::BTreeMap;
+//RS use std::path::{Path, PathBuf};
+//RS use std::time::{SystemTime, UNIX_EPOCH};
+//RS 
+//RS const MAX_SNAPSHOT_BYTES: u64 = 1024 * 1024;
+//RS const MAX_SNAPSHOT_AGE_MS: u128 = 2_000;
+//RS const MAX_SNAPSHOT_ITEMS: usize = 4096;
+//RS const MAX_DEVTOOLS_RELAY_BYTES: u64 = 4 * 1024 * 1024;
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct LiveTask {
+//RS     id: i64,
+//RS     parent: i64,
+//RS     state: String,
+//RS     wait: String,
+//RS     deadline_ms: Option<i64>,
+//RS     cancelled: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct LiveChannel {
+//RS     id: i64,
+//RS     depth: i64,
+//RS     capacity: Option<i64>,
+//RS     send_waiters: i64,
+//RS     recv_waiters: i64,
+//RS     closed: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct LiveEffects {
+//RS     compute: i64,
+//RS     waiting: i64,
+//RS     channel: i64,
+//RS     time: i64,
+//RS     io: i64,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct LiveInspectValue {
+//RS     pub value_id: String,
+//RS     pub type_identity: String,
+//RS     pub disposition: String,
+//RS     pub reason: String,
+//RS     pub rendered_value: Option<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct LiveInspectShape {
+//RS     pub type_identity: String,
+//RS     pub value_ids: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct LiveInspectProjection {
+//RS     pub plane: String,
+//RS     pub scope: String,
+//RS     pub pid: u32,
+//RS     pub protocol: String,
+//RS     pub session_id: String,
+//RS     pub source_id: String,
+//RS     pub build_id: String,
+//RS     pub revision: String,
+//RS     pub world_id: String,
+//RS     pub values: Vec<LiveInspectValue>,
+//RS     pub shapes: Vec<LiveInspectShape>,
+//RS     pub decision_ledger: Option<MirDecisionLedger>,
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct LiveResources {
+//RS     workers: i64,
+//RS     running: i64,
+//RS     queued: i64,
+//RS     cancelled: i64,
+//RS     arenas: i64,
+//RS     arena_allocations: i64,
+//RS     arena_bytes: i64,
+//RS }
+//RS 
+//RS /// Run-phase window published by the runtime itself: time since the Jet
+//RS /// runtime started (after any in-process compile), the process CPU consumed
+//RS /// in that window when the host clock is available, and whether this is the
+//RS /// synchronous publication at the shared exit seam.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct LiveRuntimeWindow {
+//RS     pub elapsed_ns: u64,
+//RS     pub cpu_ns: Option<u64>,
+//RS     pub exit: bool,
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct LiveSnapshot {
+//RS     protocol: String,
+//RS     session_id: String,
+//RS     source_id: String,
+//RS     build_id: String,
+//RS     revision: String,
+//RS     world_id: String,
+//RS     pid: i64,
+//RS     start_id: String,
+//RS     captured_ms: u128,
+//RS     tasks: Vec<LiveTask>,
+//RS     channels: Vec<LiveChannel>,
+//RS     effects: LiveEffects,
+//RS     resources: LiveResources,
+//RS     values: Vec<LiveInspectValue>,
+//RS     decision_ledger: Option<MirDecisionLedger>,
+//RS     has_event_observations: bool,
+//RS     runtime: Option<LiveRuntimeWindow>,
+//RS }
+//RS 
+//RS fn checked_object(
+//RS     value: &DataTree,
+//RS     required: &[&str],
+//RS     optional: &[&str],
+//RS     label: &str,
+//RS ) -> Result<BTreeMap<String, DataTree>, String> {
+//RS     let DataTree::Object(fields) = value else {
+//RS         return Err(format!("{label} must be an object"));
+//RS     };
+//RS     let fields: BTreeMap<String, DataTree> = fields.iter().cloned().collect();
+//RS     if fields
+//RS         .keys()
+//RS         .any(|key| !required.contains(&key.as_str()) && !optional.contains(&key.as_str()))
+//RS         || required.iter().any(|key| !fields.contains_key(*key))
+//RS     {
+//RS         return Err(format!("{label} has missing or unsafe fields"));
+//RS     }
+//RS     Ok(fields)
+//RS }
+//RS 
+//RS fn int_field(object: &DataTree, key: &str, label: &str, nonnegative: bool) -> Result<i64, String> {
+//RS     let value = json_get(object, key)
+//RS         .and_then(json_int)
+//RS         .ok_or_else(|| format!("{label} has invalid `{key}`"))?;
+//RS     if nonnegative && value < 0 {
+//RS         return Err(format!("{label} has negative `{key}`"));
+//RS     }
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn optional_int_field(
+//RS     object: &DataTree,
+//RS     key: &str,
+//RS     label: &str,
+//RS ) -> Result<Option<i64>, String> {
+//RS     match json_get(object, key) {
+//RS         None | Some(DataTree::Null) => Ok(None),
+//RS         Some(value) => json_int(value)
+//RS             .map(Some)
+//RS             .ok_or_else(|| format!("{label} has invalid `{key}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn string_field(object: &DataTree, key: &str, label: &str) -> Result<String, String> {
+//RS     let value = json_get(object, key)
+//RS         .and_then(json_str)
+//RS         .ok_or_else(|| format!("{label} has invalid `{key}`"))?;
+//RS     if value.chars().any(char::is_control) {
+//RS         return Err(format!("{label} has control characters in `{key}`"));
+//RS     }
+//RS     Ok(value.to_string())
+//RS }
+//RS 
+//RS fn bool_field(object: &DataTree, key: &str, label: &str) -> Result<bool, String> {
+//RS     match json_get(object, key) {
+//RS         Some(DataTree::Bool(value)) => Ok(*value),
+//RS         _ => Err(format!("{label} has invalid `{key}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn canonical_json_value(value: &DataTree) -> Result<String, String> {
+//RS     match value {
+//RS         DataTree::Null => Ok("null".to_string()),
+//RS         DataTree::Bool(value) => Ok(value.to_string()),
+//RS         DataTree::Int(value) => Ok(value.to_string()),
+//RS         DataTree::Float(value) if value.is_finite() => Ok(value.to_string()),
+//RS         DataTree::Float(_) => Err("decision ledger contains a non-finite number".to_string()),
+//RS         DataTree::Number(value) => Ok(value.clone()),
+//RS         DataTree::TypedText(value) | DataTree::Text(value) => {
+//RS             Ok(jet_foundation::JSON::quote(value))
+//RS         }
+//RS         DataTree::Bytes(values) => Ok(format!(
+//RS             "[{}]",
+//RS             values
+//RS                 .iter()
+//RS                 .map(ToString::to_string)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         )),
+//RS         DataTree::Array(values) => Ok(format!(
+//RS             "[{}]",
+//RS             values
+//RS                 .iter()
+//RS                 .map(canonical_json_value)
+//RS                 .collect::<Result<Vec<_>, _>>()?
+//RS                 .join(",")
+//RS         )),
+//RS         DataTree::Object(fields) => {
+//RS             let mut fields = fields.iter().collect::<Vec<_>>();
+//RS             fields.sort_by(|left, right| left.0.cmp(&right.0));
+//RS             let rendered = fields
+//RS                 .into_iter()
+//RS                 .map(|(key, value)| {
+//RS                     Ok(format!(
+//RS                         "{}:{}",
+//RS                         jet_foundation::JSON::quote(key),
+//RS                         canonical_json_value(value)?
+//RS                     ))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, String>>()?;
+//RS             Ok(format!("{{{}}}", rendered.join(",")))
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn parse_decision_ledger(value: Option<&DataTree>) -> Result<Option<MirDecisionLedger>, String> {
+//RS     let Some(value) = value else {
+//RS         return Ok(None);
+//RS     };
+//RS     if matches!(value, DataTree::Null) {
+//RS         return Ok(None);
+//RS     }
+//RS     let payload = canonical_json_value(value)?;
+//RS     if payload.len() > 512 * 1024 {
+//RS         return Err("live decision ledger exceeds its transport limit".to_string());
+//RS     }
+//RS     MirDecisionLedger::from_json(&payload).map(Some)
+//RS }
+//RS 
+//RS fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
+//RS     let root =
+//RS         parse_json(snapshot).map_err(|()| "live runtime snapshot is not valid JSON".to_string())?;
+//RS     let root_fields = checked_object(
+//RS         &root,
+//RS         &[
+//RS             "protocol",
+//RS             "session_id",
+//RS             "source_id",
+//RS             "build_id",
+//RS             "revision",
+//RS             "world_id",
+//RS             "values",
+//RS             "schema_version",
+//RS             "pid",
+//RS             "start_id",
+//RS             "captured_ms",
+//RS             "tasks",
+//RS             "channels",
+//RS             "effects",
+//RS             "resources",
+//RS         ],
+//RS         &["event_observations", "decisions", "runtime"],
+//RS         "live runtime snapshot",
+//RS     )?;
+//RS     let decision_ledger = parse_decision_ledger(root_fields.get("decisions"))?;
+//RS     let schema_version = int_field(&root, "schema_version", "live runtime snapshot", true)?;
+//RS     let protocol = string_field(&root, "protocol", "live runtime snapshot")?;
+//RS     if protocol != "jet.live.v1" {
+//RS         return Err("live runtime snapshot protocol must be jet.live.v1".to_string());
+//RS     }
+//RS     let session_id = string_field(&root, "session_id", "live runtime snapshot")?;
+//RS     let source_id = string_field(&root, "source_id", "live runtime snapshot")?;
+//RS     let build_id = string_field(&root, "build_id", "live runtime snapshot")?;
+//RS     let revision = string_field(&root, "revision", "live runtime snapshot")?;
+//RS     let world_id = string_field(&root, "world_id", "live runtime snapshot")?;
+//RS     if schema_version != 1 {
+//RS         return Err("live runtime snapshot has an unsupported schema version".to_string());
+//RS     }
+//RS     let pid = int_field(&root, "pid", "live runtime snapshot", true)?;
+//RS     let start_id = string_field(&root, "start_id", "live runtime snapshot")?;
+//RS     let captured = int_field(&root, "captured_ms", "live runtime snapshot", true)?;
+//RS     let captured_ms = u128::try_from(captured)
+//RS         .map_err(|_| "live runtime snapshot capture time is out of range".to_string())?;
+//RS 
+//RS     let values_value = root_fields
+//RS         .get("values")
+//RS         .ok_or_else(|| "live runtime snapshot has no values".to_string())?;
+//RS     let DataTree::Array(value_values) = values_value else {
+//RS         return Err("live runtime snapshot values are not an array".to_string());
+//RS     };
+//RS     if value_values.len() > MAX_SNAPSHOT_ITEMS {
+//RS         return Err("live runtime snapshot has too many values".to_string());
+//RS     }
+//RS     let mut values = Vec::with_capacity(value_values.len());
+//RS     for value in value_values {
+//RS         checked_object(
+//RS             value,
+//RS             &["value_id", "type_identity", "disposition", "reason"],
+//RS             &["rendered_value"],
+//RS             "live value",
+//RS         )?;
+//RS         let disposition = string_field(value, "disposition", "live value")?;
+//RS         if !matches!(disposition.as_str(), "kept" | "migrated" | "reset" | "rejected") {
+//RS             return Err("live value has an unsupported disposition".to_string());
+//RS         }
+//RS         let rendered_value = match json_get(value, "rendered_value") {
+//RS             None | Some(DataTree::Null) => None,
+//RS             Some(DataTree::Text(rendered)) => {
+//RS                 if rendered.len() > 16 * 1024 {
+//RS                     return Err("live value `rendered_value` exceeds the Prelude limit".to_string());
+//RS                 }
+//RS                 if rendered.chars().any(char::is_control) {
+//RS                     return Err("live value has control characters in `rendered_value`".to_string());
+//RS                 }
+//RS                 Some(rendered.to_string())
+//RS             }
+//RS             Some(_) => return Err("live value has invalid `rendered_value`".to_string()),
+//RS         };
+//RS         values.push(LiveInspectValue {
+//RS             value_id: string_field(value, "value_id", "live value")?,
+//RS             type_identity: string_field(value, "type_identity", "live value")?,
+//RS             disposition,
+//RS             reason: string_field(value, "reason", "live value")?,
+//RS             rendered_value,
+//RS         });
+//RS     }
+//RS     let tasks_value = root_fields
+//RS         .get("tasks")
+//RS         .ok_or_else(|| "live runtime snapshot has no tasks".to_string())?;
+//RS     let DataTree::Array(task_values) = tasks_value else {
+//RS         return Err("live runtime snapshot tasks are not an array".to_string());
+//RS     };
+//RS     if task_values.len() > MAX_SNAPSHOT_ITEMS {
+//RS         return Err("live runtime snapshot has too many tasks".to_string());
+//RS     }
+//RS     let mut tasks = Vec::with_capacity(task_values.len());
+//RS     for value in task_values {
+//RS         checked_object(
+//RS             value,
+//RS             &["id", "parent", "state", "wait", "deadline_ms", "cancelled"],
+//RS             &["label", "spawn_site"],
+//RS             "live task",
+//RS         )?;
+//RS         tasks.push(LiveTask {
+//RS             id: int_field(value, "id", "live task", true)?,
+//RS             parent: int_field(value, "parent", "live task", true)?,
+//RS             state: string_field(value, "state", "live task")?,
+//RS             wait: string_field(value, "wait", "live task")?,
+//RS             deadline_ms: optional_int_field(value, "deadline_ms", "live task")?,
+//RS             cancelled: bool_field(value, "cancelled", "live task")?,
+//RS         });
+//RS     }
+//RS 
+//RS     let channels_value = root_fields
+//RS         .get("channels")
+//RS         .ok_or_else(|| "live runtime snapshot has no channels".to_string())?;
+//RS     let DataTree::Array(channel_values) = channels_value else {
+//RS         return Err("live runtime snapshot channels are not an array".to_string());
+//RS     };
+//RS     if channel_values.len() > MAX_SNAPSHOT_ITEMS {
+//RS         return Err("live runtime snapshot has too many channels".to_string());
+//RS     }
+//RS     let mut channels = Vec::with_capacity(channel_values.len());
+//RS     for value in channel_values {
+//RS         checked_object(
+//RS             value,
+//RS             &[
+//RS                 "id",
+//RS                 "depth",
+//RS                 "capacity",
+//RS                 "send_waiters",
+//RS                 "recv_waiters",
+//RS                 "closed",
+//RS             ],
+//RS             &[],
+//RS             "live channel",
+//RS         )?;
+//RS         channels.push(LiveChannel {
+//RS             id: int_field(value, "id", "live channel", true)?,
+//RS             depth: int_field(value, "depth", "live channel", true)?,
+//RS             capacity: optional_int_field(value, "capacity", "live channel")?,
+//RS             send_waiters: int_field(value, "send_waiters", "live channel", true)?,
+//RS             recv_waiters: int_field(value, "recv_waiters", "live channel", true)?,
+//RS             closed: bool_field(value, "closed", "live channel")?,
+//RS         });
+//RS     }
+//RS 
+//RS     let effects = root_fields
+//RS         .get("effects")
+//RS         .ok_or_else(|| "live runtime snapshot has no effects".to_string())?;
+//RS     checked_object(
+//RS         effects,
+//RS         &["compute", "waiting", "channel", "time", "io"],
+//RS         &[],
+//RS         "live effects",
+//RS     )?;
+//RS     let effects = LiveEffects {
+//RS         compute: int_field(effects, "compute", "live effects", true)?,
+//RS         waiting: int_field(effects, "waiting", "live effects", true)?,
+//RS         channel: int_field(effects, "channel", "live effects", true)?,
+//RS         time: int_field(effects, "time", "live effects", true)?,
+//RS         io: int_field(effects, "io", "live effects", true)?,
+//RS     };
+//RS 
+//RS     let resources = root_fields
+//RS         .get("resources")
+//RS         .ok_or_else(|| "live runtime snapshot has no resources".to_string())?;
+//RS     checked_object(
+//RS         resources,
+//RS         &[
+//RS             "workers",
+//RS             "running",
+//RS             "queued",
+//RS             "cancelled",
+//RS             "arenas",
+//RS             "arena_allocations",
+//RS             "arena_bytes",
+//RS         ],
+//RS         &[],
+//RS         "live resources",
+//RS     )?;
+//RS     let resources = LiveResources {
+//RS         workers: int_field(resources, "workers", "live resources", true)?,
+//RS         running: int_field(resources, "running", "live resources", true)?,
+//RS         queued: int_field(resources, "queued", "live resources", true)?,
+//RS         cancelled: int_field(resources, "cancelled", "live resources", true)?,
+//RS         arenas: int_field(resources, "arenas", "live resources", true)?,
+//RS         arena_allocations: int_field(resources, "arena_allocations", "live resources", true)?,
+//RS         arena_bytes: int_field(resources, "arena_bytes", "live resources", true)?,
+//RS     };
+//RS 
+//RS     let runtime = match root_fields.get("runtime") {
+//RS         None => None,
+//RS         Some(runtime) => {
+//RS             checked_object(runtime, &["elapsed_ns", "cpu_ns", "exit"], &[], "live runtime window")?;
+//RS             let elapsed_ns = int_field(runtime, "elapsed_ns", "live runtime window", true)?;
+//RS             let cpu_ns = optional_int_field(runtime, "cpu_ns", "live runtime window")?;
+//RS             if cpu_ns.is_some_and(|value| value < 0) {
+//RS                 return Err("live runtime window has negative `cpu_ns`".to_string());
+//RS             }
+//RS             Some(LiveRuntimeWindow {
+//RS                 elapsed_ns: elapsed_ns as u64,
+//RS                 cpu_ns: cpu_ns.map(|value| value as u64),
+//RS                 exit: bool_field(runtime, "exit", "live runtime window")?,
+//RS             })
+//RS         }
+//RS     };
+//RS 
+//RS     Ok(LiveSnapshot {
+//RS         protocol,
+//RS         session_id,
+//RS         source_id,
+//RS         build_id,
+//RS         revision,
+//RS         world_id,
+//RS         pid,
+//RS         start_id,
+//RS         captured_ms,
+//RS         tasks,
+//RS         channels,
+//RS         effects,
+//RS         resources,
+//RS         values,
+//RS         decision_ledger,
+//RS         has_event_observations: root_fields.contains_key("event_observations"),
+//RS         runtime,
+//RS     })
+//RS }
+//RS 
+//RS /// The runtime-published run-phase window of a snapshot returned by [`read`],
+//RS /// if the runtime that wrote it publishes one.
+//RS pub fn runtime_window(snapshot: &str) -> Result<Option<LiveRuntimeWindow>, String> {
+//RS     Ok(parse_live_snapshot(snapshot)?.runtime)
+//RS }
+//RS 
+//RS pub fn snapshot_path(pid: u32) -> PathBuf {
+//RS     std::env::temp_dir().join(format!("jet-observe-{pid}.json"))
+//RS }
+//RS 
+//RS /// The process-scoped canonical `jet.devtools.v1` relay.  The runtime writes
+//RS /// one length-delimited envelope frame atomically; the envelope's bounded event
+//RS /// deque is the retained ring.
+//RS pub fn devtools_relay_path(pid: u32) -> PathBuf {
+//RS     std::env::temp_dir().join(format!("jet-devtools-relay-{pid}.ring"))
+//RS }
+//RS 
+//RS pub fn read_devtools_relay(pid: u32) -> Result<JetDevtoolsEnvelope, String> {
+//RS     if pid == 0 {
+//RS         return Err("process id must be greater than zero".to_string());
+//RS     }
+//RS     read_devtools_relay_path(&devtools_relay_path(pid))
+//RS }
+//RS 
+//RS /// Read a caller-provisioned relay (used by `jet perf run` after its child
+//RS /// exits).  This shares the LiveInspect transport and decoder with attach.
+//RS pub fn read_devtools_relay_path(path: &Path) -> Result<JetDevtoolsEnvelope, String> {
+//RS     let link_metadata = std::fs::symlink_metadata(path)
+//RS         .map_err(|_| "no live jet.devtools.v1 relay is available".to_string())?;
+//RS     if !link_metadata.file_type().is_file() {
+//RS         return Err("jet.devtools.v1 relay is not a regular file".to_string());
+//RS     }
+//RS     let mut options = std::fs::OpenOptions::new();
+//RS     options.read(true);
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     {
+//RS         use std::os::unix::fs::OpenOptionsExt;
+//RS         options.custom_flags(0o400000);
+//RS     }
+//RS     let file = options
+//RS         .open(path)
+//RS         .map_err(|_| "cannot securely open jet.devtools.v1 relay".to_string())?;
+//RS     let metadata = file
+//RS         .metadata()
+//RS         .map_err(|error| format!("cannot inspect jet.devtools.v1 relay: {error}"))?;
+//RS     if !metadata.file_type().is_file() {
+//RS         return Err("jet.devtools.v1 relay is not a regular file".to_string());
+//RS     }
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::{MetadataExt, PermissionsExt};
+//RS         if metadata.permissions().mode() & 0o077 != 0 {
+//RS             return Err("jet.devtools.v1 relay permissions expose runtime state".to_string());
+//RS         }
+//RS         if let Ok(self_metadata) = std::fs::metadata("/proc/self") {
+//RS             if metadata.uid() != self_metadata.uid() {
+//RS                 return Err("jet.devtools.v1 relay belongs to another user".to_string());
+//RS             }
+//RS         }
+//RS     }
+//RS     if metadata.len() > MAX_DEVTOOLS_RELAY_BYTES {
+//RS         return Err("jet.devtools.v1 relay exceeds its byte limit".to_string());
+//RS     }
+//RS     let mut bytes = Vec::new();
+//RS     use std::io::Read;
+//RS     file.take(MAX_DEVTOOLS_RELAY_BYTES + 1)
+//RS         .read_to_end(&mut bytes)
+//RS         .map_err(|error| format!("cannot read jet.devtools.v1 relay: {error}"))?;
+//RS     if bytes.len() as u64 > MAX_DEVTOOLS_RELAY_BYTES {
+//RS         return Err("jet.devtools.v1 relay exceeds its byte limit".to_string());
+//RS     }
+//RS     let mut offset = 0usize;
+//RS     let mut latest = None;
+//RS     while offset < bytes.len() {
+//RS         let header_end = offset
+//RS             .checked_add(4)
+//RS             .ok_or_else(|| "jet.devtools.v1 relay length overflow".to_string())?;
+//RS         if header_end > bytes.len() {
+//RS             return Err("jet.devtools.v1 relay has a truncated frame length".to_string());
+//RS         }
+//RS         let frame_len = u32::from_be_bytes(
+//RS             bytes[offset..header_end]
+//RS                 .try_into()
+//RS                 .map_err(|_| "jet.devtools.v1 relay frame length is invalid".to_string())?,
+//RS         ) as usize;
+//RS         if frame_len == 0 || frame_len > JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
+//RS             return Err("jet.devtools.v1 relay frame exceeds its envelope limit".to_string());
+//RS         }
+//RS         let frame_end = header_end
+//RS             .checked_add(frame_len)
+//RS             .ok_or_else(|| "jet.devtools.v1 relay frame length overflow".to_string())?;
+//RS         if frame_end > bytes.len() {
+//RS             return Err("jet.devtools.v1 relay has a truncated envelope frame".to_string());
+//RS         }
+//RS         latest = Some(&bytes[header_end..frame_end]);
+//RS         offset = frame_end;
+//RS     }
+//RS     let frame = latest.ok_or_else(|| "jet.devtools.v1 relay has no envelope frame".to_string())?;
+//RS     let payload = std::str::from_utf8(frame)
+//RS         .map_err(|_| "jet.devtools.v1 relay envelope is not UTF-8".to_string())?;
+//RS     match crate::WebHost::decode_devtools_envelope(payload)? {
+//RS         JetDevtoolsDecodedEnvelope::Events(envelope) => Ok(envelope),
+//RS         JetDevtoolsDecodedEnvelope::Commands(_) => Err(
+//RS             "jet.devtools.v1 relay must contain runtime events, not host commands".to_string(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS /// Read one canonical relay and enforce the identity promised by its
+//RS /// provisioning caller before any typed game bodies are projected.
+//RS pub fn read_devtools_relay_path_with_identity(
+//RS     path: &Path,
+//RS     expected_session_id: Option<&str>,
+//RS     expected_source_id: Option<&str>,
+//RS     expected_build_id: Option<&str>,
+//RS     expected_revision: Option<&str>,
+//RS     expected_world_id: Option<&str>,
+//RS ) -> Result<JetDevtoolsEnvelope, String> {
+//RS     let envelope = read_devtools_relay_path(path)?;
+//RS     validate_devtools_relay_identity(
+//RS         &envelope,
+//RS         expected_session_id,
+//RS         expected_source_id,
+//RS         expected_build_id,
+//RS         expected_revision,
+//RS         expected_world_id,
+//RS     )?;
+//RS     Ok(envelope)
+//RS }
+//RS 
+//RS /// Identity and completeness gate shared by `jet perf run` and `attach`.
+//RS /// Expectations are optional only where the caller cannot know a producer's
+//RS /// value (for example, attach does not provision the session id).
+//RS pub fn validate_devtools_relay_identity(
+//RS     envelope: &JetDevtoolsEnvelope,
+//RS     expected_session_id: Option<&str>,
+//RS     expected_source_id: Option<&str>,
+//RS     expected_build_id: Option<&str>,
+//RS     expected_revision: Option<&str>,
+//RS     expected_world_id: Option<&str>,
+//RS ) -> Result<(), String> {
+//RS     if envelope.truncated {
+//RS         return Err("jet.devtools.v1 relay is truncated; refusing incomplete trace".to_string());
+//RS     }
+//RS     if let Some(expected) = expected_session_id {
+//RS         if envelope.session_id != expected {
+//RS             return Err("jet.devtools.v1 relay session identity mismatch".to_string());
+//RS         }
+//RS     }
+//RS     let identity_expected = expected_source_id.is_some()
+//RS         || expected_build_id.is_some()
+//RS         || expected_revision.is_some()
+//RS         || expected_world_id.is_some();
+//RS     let identity = envelope.source_identity.as_ref();
+//RS     if identity_expected && identity.is_none() {
+//RS         return Err("jet.devtools.v1 relay is missing source/build identity".to_string());
+//RS     }
+//RS     if let Some(identity) = identity {
+//RS         identity.validate()?;
+//RS         for (expected, actual, label) in [
+//RS             (expected_source_id, identity.source_id.as_deref(), "source"),
+//RS             (expected_build_id, identity.build_id.as_deref(), "build"),
+//RS             (expected_revision, identity.revision.as_deref(), "revision"),
+//RS             (expected_world_id, identity.world_id.as_deref(), "world"),
+//RS         ] {
+//RS             if let Some(expected) = expected {
+//RS                 if actual != Some(expected) {
+//RS                     return Err(format!(
+//RS                         "jet.devtools.v1 relay {label} identity mismatch"
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn read(pid: u32) -> Result<String, String> {
+//RS     if pid == 0 {
+//RS         return Err("process id must be greater than zero".to_string());
+//RS     }
+//RS     let path = snapshot_path(pid);
+//RS     let link_metadata = std::fs::symlink_metadata(&path)
+//RS         .map_err(|_| format!("no live Jet runtime is observable at process {pid}"))?;
+//RS     if !link_metadata.file_type().is_file() {
+//RS         return Err("live runtime snapshot is not a regular file".to_string());
+//RS     }
+//RS     let mut options = std::fs::OpenOptions::new();
+//RS     options.read(true);
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     {
+//RS         use std::os::unix::fs::OpenOptionsExt;
+//RS         // Linux O_NOFOLLOW: refuse a symlink substituted after symlink_metadata.
+//RS         options.custom_flags(0o400000);
+//RS     }
+//RS     let file = options
+//RS         .open(&path)
+//RS         .map_err(|_| format!("cannot securely open live runtime snapshot for process {pid}"))?;
+//RS     let metadata = file
+//RS         .metadata()
+//RS         .map_err(|error| format!("cannot inspect live runtime snapshot: {error}"))?;
+//RS     if !metadata.file_type().is_file() {
+//RS         return Err("live runtime snapshot is not a regular file".to_string());
+//RS     }
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::{MetadataExt, PermissionsExt};
+//RS         if metadata.permissions().mode() & 0o077 != 0 {
+//RS             return Err("live runtime snapshot permissions expose runtime state".to_string());
+//RS         }
+//RS         #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS         if let Ok(self_metadata) = std::fs::metadata("/proc/self") {
+//RS             if metadata.uid() != self_metadata.uid() {
+//RS                 return Err("live runtime snapshot belongs to another user".to_string());
+//RS             }
+//RS         }
+//RS     }
+//RS     if metadata.len() > MAX_SNAPSHOT_BYTES {
+//RS         return Err("live runtime snapshot exceeds the 1 MiB safety limit".to_string());
+//RS     }
+//RS     let mut snapshot = String::new();
+//RS     use std::io::Read;
+//RS     file.take(MAX_SNAPSHOT_BYTES + 1)
+//RS         .read_to_string(&mut snapshot)
+//RS         .map_err(|error| format!("cannot read live runtime snapshot: {error}"))?;
+//RS     if snapshot.len() as u64 > MAX_SNAPSHOT_BYTES {
+//RS         return Err("live runtime snapshot exceeds the 1 MiB safety limit".to_string());
+//RS     }
+//RS     let parsed = parse_live_snapshot(&snapshot).map_err(|error| {
+//RS         format!("live runtime snapshot has an invalid or unsafe schema: {error}")
+//RS     })?;
+//RS     if parsed.pid != i64::from(pid) {
+//RS         return Err(format!(
+//RS             "live runtime snapshot does not belong to process {pid}"
+//RS         ));
+//RS     }
+//RS     jet_debug::render_event_observations(&snapshot)
+//RS         .map_err(|error| format!("live runtime event observations are invalid: {error}"))?;
+//RS     let now_ms = SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .unwrap_or_default()
+//RS         .as_millis();
+//RS     if now_ms.saturating_sub(parsed.captured_ms) > MAX_SNAPSHOT_AGE_MS {
+//RS         return Err(format!(
+//RS             "process {pid} is not publishing a live runtime snapshot"
+//RS         ));
+//RS     }
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     {
+//RS         let proc_path = PathBuf::from(format!("/proc/{pid}"));
+//RS         if !proc_path.is_dir() {
+//RS             return Err(format!("process {pid} is no longer running"));
+//RS         }
+//RS         let expected_start_id = std::fs::read_to_string(proc_path.join("stat"))
+//RS             .ok()
+//RS             .and_then(|stat| {
+//RS                 stat.rsplit_once(") ")
+//RS                     .and_then(|(_, tail)| tail.split_whitespace().nth(19))
+//RS                     .map(str::to_string)
+//RS             })
+//RS             .ok_or_else(|| format!("cannot verify process {pid} identity"))?;
+//RS         if parsed.start_id != expected_start_id {
+//RS             return Err(format!(
+//RS                 "live runtime snapshot does not belong to process {pid}"
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(snapshot)
+//RS }
+//RS /// Read the bounded live snapshot and project the values/shapes contract used
+//RS /// by `jet inspect <plane> --live PID`.
+//RS ///
+//RS /// The live runtime publishes canonical value identities and type identities,
+//RS /// not a plane-specific compiler table.  Every inspect plane therefore shares
+//RS /// this identity projection; a plane-specific caller selects the envelope
+//RS /// action while this API remains the one source of live facts.
+//RS pub fn read_plane(pid: u32, plane: &str) -> Result<LiveInspectProjection, String> {
+//RS     if !matches!(
+//RS         plane,
+//RS         "types" | "rights" | "claims" | "shapes" | "structure" | "build" | "gates"
+//RS             | "decisions"
+//RS     ) {
+//RS         return Err(format!("unknown live inspect plane `{plane}`"));
+//RS     }
+//RS     let snapshot = read(pid)?;
+//RS     let parsed = parse_live_snapshot(&snapshot)?;
+//RS     let pid = u32::try_from(parsed.pid)
+//RS         .map_err(|_| "live runtime snapshot pid is out of range".to_string())?;
+//RS     let mut shape_values = BTreeMap::<String, Vec<String>>::new();
+//RS     for value in &parsed.values {
+//RS         shape_values
+//RS             .entry(value.type_identity.clone())
+//RS             .or_default()
+//RS             .push(value.value_id.clone());
+//RS     }
+//RS     let shapes = shape_values
+//RS         .into_iter()
+//RS         .map(|(type_identity, value_ids)| LiveInspectShape {
+//RS             type_identity,
+//RS             value_ids,
+//RS         })
+//RS         .collect();
+//RS     Ok(LiveInspectProjection {
+//RS         plane: plane.to_string(),
+//RS         scope: "live".to_string(),
+//RS         pid,
+//RS         protocol: parsed.protocol,
+//RS         session_id: parsed.session_id,
+//RS         source_id: parsed.source_id,
+//RS         build_id: parsed.build_id,
+//RS         revision: parsed.revision,
+//RS         world_id: parsed.world_id,
+//RS         values: parsed.values,
+//RS         shapes,
+//RS         decision_ledger: parsed.decision_ledger,
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS pub fn render(snapshot: &str) -> String {
+//RS     let parsed = match parse_live_snapshot(snapshot) {
+//RS         Ok(parsed) => parsed,
+//RS         Err(error) => return format!("jet inspect live · invalid snapshot: {error}\n"),
+//RS     };
+//RS     let event_lines = if parsed.has_event_observations {
+//RS         match jet_debug::render_event_observations(snapshot) {
+//RS             Ok(events) => Some(events),
+//RS             Err(error) => return format!("jet inspect live · invalid snapshot: {error}\n"),
+//RS         }
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let pid = parsed.pid.to_string();
+//RS     let mut out = format!(
+//RS         "jet inspect live · pid {pid}\nprotocol={} session={} source={} build={} revision={} world={}\n\ntask tree\n",
+//RS         parsed.protocol,
+//RS         parsed.session_id,
+//RS         parsed.source_id,
+//RS         parsed.build_id,
+//RS         parsed.revision,
+//RS         parsed.world_id,
+//RS     );
+//RS     if parsed.tasks.is_empty() {
+//RS         out.push_str("  (no live tasks)\n");
+//RS     } else {
+//RS         for task in &parsed.tasks {
+//RS             let deadline = task
+//RS                 .deadline_ms
+//RS                 .map_or_else(|| "-".to_string(), |deadline| deadline.to_string());
+//RS             out.push_str(&format!(
+//RS                 "  task {:<5} parent {:<5} {:<8} wait={} deadline={} cancelled={}\n",
+//RS                 task.id,
+//RS                 task.parent,
+//RS                 task.state,
+//RS                 if task.wait.is_empty() {
+//RS                     "-"
+//RS                 } else {
+//RS                     &task.wait
+//RS                 },
+//RS                 deadline,
+//RS                 task.cancelled
+//RS             ));
+//RS         }
+//RS     }
+//RS     out.push_str("\nchannels\n");
+//RS     if parsed.channels.is_empty() {
+//RS         out.push_str("  (no live channels)\n");
+//RS     } else {
+//RS         for channel in &parsed.channels {
+//RS             let capacity = channel
+//RS                 .capacity
+//RS                 .map_or_else(|| "∞".to_string(), |capacity| capacity.to_string());
+//RS             out.push_str(&format!(
+//RS                 "  channel {:<5} depth {}/{} blocked send={} recv={} closed={}\n",
+//RS                 channel.id,
+//RS                 channel.depth,
+//RS                 capacity,
+//RS                 channel.send_waiters,
+//RS                 channel.recv_waiters,
+//RS                 channel.closed
+//RS             ));
+//RS         }
+//RS     }
+//RS     out.push_str(&format!(
+//RS         "\neffects: compute={} waiting={} channel={} time={} io={}\nresources: workers={} running={} queued={} cancelled={} arenas={} arena_allocations={} arena_bytes={}\n",
+//RS         parsed.effects.compute,
+//RS         parsed.effects.waiting,
+//RS         parsed.effects.channel,
+//RS         parsed.effects.time,
+//RS         parsed.effects.io,
+//RS         parsed.resources.workers,
+//RS         parsed.resources.running,
+//RS         parsed.resources.queued,
+//RS         parsed.resources.cancelled,
+//RS         parsed.resources.arenas,
+//RS         parsed.resources.arena_allocations,
+//RS         parsed.resources.arena_bytes,
+//RS     ));
+//RS     out.push_str("\nvalues\n");
+//RS     if parsed.values.is_empty() {
+//RS         out.push_str("  (no live value decisions)\n");
+//RS     } else {
+//RS         for value in &parsed.values {
+//RS             let rendered = value
+//RS                 .rendered_value
+//RS                 .as_deref()
+//RS                 .map(|value| format!(" value={value}"))
+//RS                 .unwrap_or_default();
+//RS             out.push_str(&format!(
+//RS                 "  {} type={} {}{}{}\n",
+//RS                 value.value_id,
+//RS                 value.type_identity,
+//RS                 value.disposition,
+//RS                 if value.reason.is_empty() {
+//RS                     String::new()
+//RS                 } else {
+//RS                     format!(" reason={}", value.reason)
+//RS                 },
+//RS                 rendered,
+//RS             ));
+//RS         }
+//RS     }
+//RS     if let Some(events) = event_lines {
+//RS         out.push_str("\nevents\n");
+//RS         if events.is_empty() {
+//RS             out.push_str("  (no runtime event observations)\n");
+//RS         } else {
+//RS             for event in events.lines() {
+//RS                 out.push_str("  ");
+//RS                 out.push_str(event);
+//RS                 out.push('\n');
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn render_uses_only_bounded_runtime_facts() {
+//RS         let snapshot = "{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world-1\",\"values\":[{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\"}],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"deadline_ms\":null,\"cancelled\":false},{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}],\"channels\":[{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}],\"effects\":{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0},\"resources\":{\"workers\":4,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}";
+//RS         let rendered = render(snapshot);
+//RS         assert!(rendered.contains("task 2"));
+//RS         assert!(rendered.contains("channel send"));
+//RS         assert!(rendered.contains("depth 4/4"));
+//RS         assert!(!rendered.contains("payload"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn runtime_window_is_optional_and_strictly_shaped() {
+//RS         let snapshot = |runtime: &str| {
+//RS             format!(
+//RS                 "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{runtime}}}"
+//RS             )
+//RS         };
+//RS         assert_eq!(runtime_window(&snapshot("")).unwrap(), None);
+//RS         assert_eq!(
+//RS             runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":7,\"cpu_ns\":5,\"exit\":true}")).unwrap(),
+//RS             Some(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: Some(5), exit: true })
+//RS         );
+//RS         assert_eq!(
+//RS             runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":7,\"cpu_ns\":null,\"exit\":false}")).unwrap(),
+//RS             Some(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: None, exit: false })
+//RS         );
+//RS         assert!(runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":-1,\"cpu_ns\":null,\"exit\":true}")).is_err());
+//RS         assert!(runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":7,\"cpu_ns\":-1,\"exit\":true}")).is_err());
+//RS         assert!(runtime_window(&snapshot(",\"runtime\":{\"elapsed_ns\":7,\"exit\":true}")).is_err());
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn reader_rejects_symlinks_and_open_permissions() {
+//RS         use std::os::unix::fs::{symlink, PermissionsExt};
+//RS 
+//RS         let pid = std::process::id().saturating_add(1_000_000_000);
+//RS         let path = snapshot_path(pid);
+//RS         let target = path.with_extension("hostile-target");
+//RS         let _ = std::fs::remove_file(&path);
+//RS         let _ = std::fs::remove_file(&target);
+//RS 
+//RS         std::fs::write(&target, "attacker-controlled").unwrap();
+//RS         symlink(&target, &path).unwrap();
+//RS         assert!(read(pid).unwrap_err().contains("not a regular file"));
+//RS         std::fs::remove_file(&path).unwrap();
+//RS 
+//RS         std::fs::write(&path, "{}").unwrap();
+//RS         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+//RS         assert!(read(pid).unwrap_err().contains("permissions expose"));
+//RS 
+//RS         std::fs::remove_file(&path).unwrap();
+//RS         std::fs::remove_file(&target).unwrap();
+//RS     }
+//RS }
+// END-PORT-PENDING 0775 crates/jet-devserver/src/LiveInspect.rs:1-968
+

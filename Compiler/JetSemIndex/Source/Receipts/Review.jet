@@ -1,0 +1,360 @@
+// Rust SemanticOps.rs:399–950. Checked facts alone align review subjects;
+// receipts (already decoded/applicability-filtered by S25/the caller) own intent.
+// No source, receipt parser, path normalization, or hash implementation here.
+pub enum ReviewOpKind { Added Removed Renamed Moved SignatureChanged BodyChanged EffectChanged }
+impl ReviewOpKind {
+    pub fn name(self) -> String Never! {
+        if self == {
+            .Added -> "added"
+            .Removed -> "removed"
+            .Renamed -> "renamed"
+            .Moved -> "moved"
+            .SignatureChanged -> "signature_changed"
+            .BodyChanged -> "body_changed"
+            .EffectChanged -> "effect_changed"
+        }
+    }
+}
+pub enum ReviewAlignment { Matched Recorded UnmatchedBefore UnmatchedAfter Ambiguous }
+impl ReviewAlignment {
+    pub fn name(self) -> String Never! {
+        if self == {
+            .Matched -> "matched"
+            .Recorded -> "recorded"
+            .UnmatchedBefore -> "unmatched_before"
+            .UnmatchedAfter -> "unmatched_after"
+            .Ambiguous -> "ambiguous"
+        }
+    }
+}
+pub struct ReviewSemanticOp {
+    pub kind: ReviewOpKind
+    pub stable_id: String
+    pub identity: String
+    pub before: String?
+    pub after: String?
+    pub before_identity: String?
+    pub after_identity: String?
+    pub alignment: ReviewAlignment
+    pub source_operation: String?
+}
+
+// Rust fact_keys/pair_by_key/unmatched_alignment. Real composite keys preserve
+// (kind, id) and (kind, signature, module), without colon-encoded collisions.
+// #4397: native composite-map Eq/Ord is a required compiler capability.
+struct ReviewFactKey { kind: String, value: String, module_path: String? }
+struct ReviewKeyBucket { index: Int, count: Int }
+struct ReviewFactPair { before_index: Int, after_index: Int }
+fn review_fact_key(fact: DefinitionFact, stage: Int) -> ReviewFactKey Never! {
+    if stage == 0 -> return ReviewFactKey{kind: ~fact.kind, value: ~fact.stable_id, module_path: None}
+    if stage == 1 -> return ReviewFactKey{kind: ~fact.kind, value: ~fact.human_identity, module_path: None}
+    ReviewFactKey{kind: ~fact.kind, value: ~fact.signature_id, module_path: Val(~fact.module_path)}
+}
+fn review_fact_keys(fact: DefinitionFact) -> [ReviewFactKey] Never! {
+    [ReviewFactKey]{review_fact_key(fact, 0), review_fact_key(fact, 1), review_fact_key(fact, 2)}
+}
+fn review_key_order(left: ReviewFactKey, right: ReviewFactKey) -> Ordering Never! {
+    (left.kind <=> right.kind).then(left.value <=> right.value).then(review_optional_order(left.module_path, right.module_path))
+}
+fn review_pair_by_key(before: View<DefinitionFact>, after: View<DefinitionFact>, matched_before: &[Int:Bool], matched_after: &[Int:Bool], stage: Int, pairs: &[ReviewFactPair]) Never! {
+    old_keys := [ReviewFactKey:ReviewKeyBucket]{}
+    new_keys := [ReviewFactKey:ReviewKeyBucket]{}
+    loop (index, fact) in before {
+        if matched_before.has_key(index) -> next
+        key :: review_fact_key(fact, stage)
+        bucket :: old_keys.get(key) ?? ReviewKeyBucket{index, count: 0}
+        old_keys[key] = ReviewKeyBucket{index: bucket.index, count: bucket.count + 1}
+    }
+    loop (index, fact) in after {
+        if matched_after.has_key(index) -> next
+        key :: review_fact_key(fact, stage)
+        bucket :: new_keys.get(key) ?? ReviewKeyBucket{index, count: 0}
+        new_keys[key] = ReviewKeyBucket{index: bucket.index, count: bucket.count + 1}
+    }
+    keys := old_keys.keys().to_list()
+    // #4343: comparator must be an inline closure.
+    &keys.sort_by((left: ReviewFactKey, right: ReviewFactKey) -> review_key_order(left, right))
+    loop key in keys {
+        old :: old_keys[key]
+        new :: new_keys.get(key) ?? next
+        if old.count == 1 && new.count == 1 && before[old.index].name == after[new.index].name {
+            matched_before[old.index] = true
+            matched_after[new.index] = true
+            &pairs.push(ReviewFactPair{before_index: old.index, after_index: new.index})
+        }
+    }
+}
+// Count each fact once for a key even when its stable/human keys coincide.
+// Precompute full-side counts once, not a whole-table scan per unmatched row.
+fn review_key_counts(facts: View<DefinitionFact>) -> [ReviewFactKey:Int] Never! {
+    counts := [ReviewFactKey:Int]{}
+    loop fact in facts {
+        keys :: review_fact_keys(fact)
+        loop position in 0..<keys.len() {
+            if position == 1 && keys[0] == keys[1] -> next
+            key :: keys[position]
+            counts[key] = (counts.get(key) ?? 0) + 1
+        }
+    }
+    counts
+}
+fn review_unmatched_alignment(fact: DefinitionFact, before: [ReviewFactKey:Int], after: [ReviewFactKey:Int], before_side: Bool) -> ReviewAlignment Never! {
+    loop key in review_fact_keys(fact) {
+        old_count :: before.get(key) ?? 0
+        new_count :: after.get(key) ?? 0
+        if old_count > 0 && new_count > 0 && (old_count != 1 || new_count != 1) -> return ReviewAlignment.Ambiguous
+    }
+    if before_side -> ReviewAlignment.UnmatchedBefore else -> ReviewAlignment.UnmatchedAfter
+}
+
+// Rust compiler_identity/matched_operation: derivation claims override the
+// display identity only when nonempty. Borrow the canonical derivation window.
+fn review_compiler_identity(index: SemIndex, fact: DefinitionFact) -> String Never! {
+    if index.derivation(fact.stable_id) == .Val(window) {
+        if window[0].claim != "" -> return ~window[0].claim
+    }
+    ~fact.human_identity
+}
+fn review_matched_operation(kind: ReviewOpKind, after: DefinitionFact, before_identity: ^String, after_identity: ^String, old: ^String?, new: ^String?) -> ReviewSemanticOp Never! {
+    ReviewSemanticOp{kind, stable_id: ~after.stable_id, identity: ~after_identity,
+        before: ^old, after: ^new, before_identity: Val(^before_identity), after_identity: Val(^after_identity),
+        alignment: ReviewAlignment.Matched, source_operation: None}
+}
+
+// Rust review_semantic_ops (476–599): progressively pair only unique remaining
+// keys; names MUST agree. Content participates only after semantic pairing.
+pub fn review_semantic_ops(before: SemIndex, after: SemIndex) -> [ReviewSemanticOp] Never! {
+    old_defs :: before.definition_facts()
+    new_defs :: after.definition_facts()
+    matched_before := [Int:Bool]{}
+    matched_after := [Int:Bool]{}
+    pairs := [ReviewFactPair]{}
+    loop stage in 0..<3 -> review_pair_by_key(old_defs, new_defs, &matched_before, &matched_after, stage, &pairs)
+    operations := [ReviewSemanticOp]{}
+    loop pair in pairs {
+        old :: old_defs[pair.before_index]
+        new :: new_defs[pair.after_index]
+        if old.module_path != new.module_path {
+            &operations.push(review_matched_operation(ReviewOpKind.Moved, new, ^review_compiler_identity(before, old), ^review_compiler_identity(after, new), ^Val(~old.module_path), ^Val(~new.module_path)))
+        }
+        if old.signature_id != new.signature_id {
+            &operations.push(review_matched_operation(ReviewOpKind.SignatureChanged, new, ^review_compiler_identity(before, old), ^review_compiler_identity(after, new), ^Val(~old.signature_id), ^Val(~new.signature_id)))
+        } else if old.content_id != new.content_id {
+            &operations.push(review_matched_operation(ReviewOpKind.BodyChanged, new, ^review_compiler_identity(before, old), ^review_compiler_identity(after, new), ^Val(~old.content_id), ^Val(~new.content_id)))
+        }
+    }
+    old_counts := [ReviewFactKey:Int]{}
+    new_counts := [ReviewFactKey:Int]{}
+    counts_ready := false
+    loop (index, fact) in old_defs {
+        if matched_before.has_key(index) -> next
+        if !counts_ready {
+            old_counts = review_key_counts(old_defs)
+            new_counts = review_key_counts(new_defs)
+            counts_ready = true
+        }
+        identity :: review_compiler_identity(before, fact)
+        &operations.push(ReviewSemanticOp{kind: ReviewOpKind.Removed, stable_id: ~fact.stable_id, identity: ~identity,
+            before: Val(~identity), after: None, before_identity: Val(^identity), after_identity: None,
+            alignment: review_unmatched_alignment(fact, old_counts, new_counts, true), source_operation: None})
+    }
+    loop (index, fact) in new_defs {
+        if matched_after.has_key(index) -> next
+        if !counts_ready {
+            old_counts = review_key_counts(old_defs)
+            new_counts = review_key_counts(new_defs)
+            counts_ready = true
+        }
+        identity :: review_compiler_identity(after, fact)
+        &operations.push(ReviewSemanticOp{kind: ReviewOpKind.Added, stable_id: ~fact.stable_id, identity: ~identity,
+            before: None, after: Val(~identity), before_identity: None, after_identity: Val(^identity),
+            alignment: review_unmatched_alignment(fact, old_counts, new_counts, false), source_operation: None})
+    }
+    review_append_effect_operations(&operations, before.effects(), after.effects())
+    review_sort_operations(&operations, false)
+    operations
+}
+
+// Rust rename_candidates (752–793): nonempty target identity wins over anchor
+// filtering; only empty target identity uses stable-id + module anchors.
+fn review_identity_matches(fact: DefinitionFact, requested: String) -> Bool Never! {
+    requested == fact.human_identity || requested == fact.name || fact.human_identity.ends_with("::{requested}")
+}
+fn review_rename_candidates(facts: View<DefinitionFact>, receipt: SemanticOp, requested: String?, before_side: Bool) -> [Int] Never! {
+    candidates := [Int]{}
+    loop (index, fact) in facts {
+        if receipt.targets.len() > 0 {
+            anchor :: receipt.targets[0]
+            identity :: if before_side -> anchor.before else -> anchor.after
+            if anchor.kind != "" && anchor.kind != fact.kind -> next
+            if identity == "" {
+                if (anchor.stable_id != "" && anchor.stable_id != fact.stable_id)
+                    || (anchor.module_path != "" && anchor.module_path != fact.module_path) -> next
+            } else if !review_identity_matches(fact, identity) -> next
+        }
+        if requested == .Val(name) { if !review_identity_matches(fact, name) -> next }
+        &candidates.push(index)
+    }
+    candidates
+}
+
+// Rust review_semantic_ops_with_receipts (604–720). Use only the first target;
+// from/to are fallbacks only when there is NO target (not an empty identity).
+pub fn review_semantic_ops_with_receipts(before: SemIndex, after: SemIndex, receipts: [SemanticOp]) -> [ReviewSemanticOp] Never! {
+    operations := review_semantic_ops(before, after)
+    old_defs :: before.definition_facts()
+    new_defs :: after.definition_facts()
+    removed_ids := [String:Bool]{}
+    // Full-record equality, including identities/alignment/source operation.
+    recorded := [ReviewSemanticOp:Bool]{} // #4397, not a lossy payload key.
+    loop receipt in receipts {
+        if receipt.kind != "rename" && receipt.kind != "move" && receipt.kind != "moved" -> next
+        is_move :: receipt.kind == "move" || receipt.kind == "moved"
+        // READ the sole owner directly; no cloned target vector or temporary
+        // optional-View owner is needed for Rust's first-target selection.
+        before_name :: if receipt.targets.len() > 0 -> Val(~receipt.targets[0].before) else -> ~receipt.from
+        after_name :: if receipt.targets.len() > 0 -> Val(~receipt.targets[0].after) else -> ~receipt.to
+        old_candidates :: review_rename_candidates(old_defs, receipt, before_name, true)
+        new_candidates :: review_rename_candidates(new_defs, receipt, after_name, false)
+        old_index :: if old_candidates.len() == 1 -> old_candidates[0] else -> -1
+        new_index :: if new_candidates.len() == 1 -> new_candidates[0] else -> -1
+        valid_pair := false
+        if old_index >= 0 && new_index >= 0 {
+            old :: old_defs[old_index]
+            new :: new_defs[new_index]
+            valid_pair = old.kind == new.kind && old.signature_id == new.signature_id
+                && (if is_move -> old.name == new.name && old.module_path != new.module_path
+                    else -> old.module_path == new.module_path && old.name != new.name)
+        }
+        alignment := ReviewAlignment.UnmatchedAfter
+        if valid_pair {
+            refused := false
+            if receipt.targets.len() > 0 {
+                id :: receipt.targets[0].stable_id
+                refused = id != "" && id != old_defs[old_index].stable_id && id != new_defs[new_index].stable_id
+            }
+            if refused -> alignment = ReviewAlignment.UnmatchedBefore
+            else {
+                removed_ids[old_defs[old_index].stable_id] = true
+                removed_ids[new_defs[new_index].stable_id] = true
+                alignment = ReviewAlignment.Recorded
+            }
+        } else if old_candidates.len() > 1 || new_candidates.len() > 1 -> alignment = ReviewAlignment.Ambiguous
+        else if old_candidates.len() == 0 -> alignment = ReviewAlignment.UnmatchedBefore
+        stable_id :: if new_index >= 0 -> ~new_defs[new_index].stable_id
+            else if old_index >= 0 -> ~old_defs[old_index].stable_id
+            else if receipt.targets.len() > 0 -> ~receipt.targets[0].stable_id
+            else -> "{receipt.kind}:unresolved"
+        before_identity :: if old_index >= 0 -> Val(~old_defs[old_index].human_identity) else -> ^before_name
+        after_identity :: if new_index >= 0 -> Val(~new_defs[new_index].human_identity) else -> ^after_name
+        identity :: if after_identity == {
+            .Val(name) -> ~name
+            None -> if before_identity == {
+                .Val(name) -> ~name
+                None -> "unknown"
+            }
+        }
+        old_payload :: if is_move {
+            if old_index >= 0 -> Val(~old_defs[old_index].module_path) else -> None
+        } else -> ~before_identity
+        new_payload :: if is_move {
+            if new_index >= 0 -> Val(~new_defs[new_index].module_path) else -> None
+        } else -> ~after_identity
+        source :: receipt.rule_id ?? receipt.kind
+        operation :: ReviewSemanticOp{kind: if is_move -> ReviewOpKind.Moved else -> ReviewOpKind.Renamed,
+            stable_id: ^stable_id, identity: ^identity, before: ^old_payload, after: ^new_payload,
+            before_identity: ^before_identity, after_identity: ^after_identity, alignment, source_operation: Val(~source)}
+        if recorded.has_key(operation) -> next
+        recorded[~operation] = true
+        &operations.push(^operation)
+    }
+    // Only Added/Removed can be discarded. Defer their removal to one pass;
+    // later receipt matching does not consult operations, so this is equivalent
+    // to Rust retain per recorded pair and avoids repeated whole-vector copies.
+    filtered := [ReviewSemanticOp]{}
+    &operations.reverse()
+    loop {
+        operation :: (&operations.pop()) ?? break
+        if (operation.kind == ReviewOpKind.Added || operation.kind == ReviewOpKind.Removed)
+            && removed_ids.has_key(operation.stable_id) -> next
+        &filtered.push(^operation)
+    }
+    review_sort_operations(&filtered, true)
+    filtered
+}
+
+// Rust sort_review_operations and inline base sort. Kind/alignment rank follows
+// the Rust declaration, and Option<String> explicitly orders None before Some.
+fn review_kind_rank(kind: ReviewOpKind) -> Int Never! {
+    if kind == {
+        .Added -> 0
+        .Removed -> 1
+        .Renamed -> 2
+        .Moved -> 3
+        .SignatureChanged -> 4
+        .BodyChanged -> 5
+        .EffectChanged -> 6
+    }
+}
+fn review_alignment_rank(alignment: ReviewAlignment) -> Int Never! {
+    if alignment == {
+        .Matched -> 0
+        .Recorded -> 1
+        .UnmatchedBefore -> 2
+        .UnmatchedAfter -> 3
+        .Ambiguous -> 4
+    }
+}
+fn review_optional_order(left: String?, right: String?) -> Ordering Never! {
+    if left == {
+        .Val(old) -> if right == {
+            .Val(new) -> old <=> new
+            None -> 1 <=> 0
+        }
+        None -> if right == {
+            .Val(_) -> 0 <=> 1
+            None -> 0 <=> 0
+        }
+    }
+}
+fn review_sort_operations(operations: &[ReviewSemanticOp], include_alignment: Bool) Never! {
+    &operations.sort_by((left: ReviewSemanticOp, right: ReviewSemanticOp) ->
+        (left.stable_id <=> right.stable_id).then(left.identity <=> right.identity)
+            .then(review_kind_rank(left.kind) <=> review_kind_rank(right.kind))
+            .then(review_optional_order(left.before, right.before)).then(review_optional_order(left.after, right.after))
+            .then(if include_alignment -> review_alignment_rank(left.alignment) <=> review_alignment_rank(right.alignment) else -> 0 <=> 0))
+}
+
+// Rust append_effect_operations/effect_shape/sorted_join (898–950). Last row
+// for a repeated function wins, including when the final row is checked-empty.
+fn review_append_effect_operations(operations: &[ReviewSemanticOp], before: View<EffectFact>, after: View<EffectFact>) Never! {
+    old_by_function := [String:Int]{}
+    new_by_function := [String:Int]{}
+    functions := [String:Bool]{}
+    loop (index, fact) in before { old_by_function[fact.function] = index; functions[fact.function] = true }
+    loop (index, fact) in after { new_by_function[fact.function] = index; functions[fact.function] = true }
+    names := functions.keys().to_list()
+    &names.sort()
+    loop function in names {
+        old_shape := String?{None}
+        new_shape := String?{None}
+        if old_by_function.get(function) == .Val(index) -> old_shape = Val(review_effect_shape(before[index]))
+        if new_by_function.get(function) == .Val(index) -> new_shape = Val(review_effect_shape(after[index]))
+        if old_shape == (new_shape) -> next
+        &operations.push(ReviewSemanticOp{kind: ReviewOpKind.EffectChanged, stable_id: "effect:{function}", identity: ~function,
+            before: ^old_shape, after: ^new_shape, before_identity: Val(~function), after_identity: Val(~function),
+            alignment: ReviewAlignment.Matched, source_operation: None})
+    }
+}
+fn review_effect_shape(effect: EffectFact) -> String Never! {
+    direct :: review_sorted_join(effect.direct)
+    inferred :: review_sorted_join(effect.inferred)
+    callees :: review_sorted_join(effect.callees)
+    maximal :: if effect.maximal -> "true" else -> "false"
+    "direct={direct};inferred={inferred};callees={callees};maximal={maximal}"
+}
+fn review_sorted_join(values: [String]) -> String Never! {
+    sorted := ~values
+    &sorted.sort()
+    sorted.dedup().join(",")
+}

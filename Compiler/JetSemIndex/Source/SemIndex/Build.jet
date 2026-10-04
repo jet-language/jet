@@ -1,0 +1,519 @@
+// crates/jet-semindex/src/Build.rs:1–513: the shared semantic-index symbol
+// database (SymKind/SymDef/SymRef/HoverEntry/InlayHint/SymbolDB), the walk
+// state (CallerFrame/WalkCtx) and SymbolDB new/finalize_index/
+// refresh_effect_hovers/attach_package_facts/align_reference_targets/hover_at/
+// arithmetic_hover_at/inlay_hints_for plus definition_matches_target.
+// One checked walk over Sema's checked graph, never a second checker: facts come
+// from SemaRegistrationGraph (checked/expanded items), SemaGraphResult
+// (checked modules and the sole MIRNameFacts name ledger), the caller's
+// SemaCompilerModuleSource rows and PackageModel's explicit effect projection.
+use jet_foundation.[
+    AccessConvention,
+    CallablePolicy,
+    EffectRowEntry,
+    FailureContract,
+    Item,
+    MIRDerivationMethod,
+    NamedSpan,
+    ParamZone,
+    Span,
+    Type,
+    TypeParam,
+    ViewProvenanceMap,
+    DerivationRecord,
+    derivation_identity,
+    derivation_record,
+    failure_contract_effective_type,
+    failure_contract_source,
+    mir_sha256_hex_bytes,
+    name_facts_exported,
+    foundation_member_name,
+    type_name,
+]
+use jet_sema.[
+    SemaCompilerModuleSource,
+    SemaGraphResult,
+    SemaRegistrationGraph,
+]
+use jet_pkg_model.[
+    EffectBudgetProgram,
+    PackageEffectSummary,
+    PackageFacts,
+    pkg_project_program_effects,
+    pkg_render_effect_projection_line,
+]
+
+// #4357: Rust `(String, AST::Type)` parameter and field rows, in declaration
+// order with duplicates retained.
+pub struct SymNameType {
+    pub name: String
+    pub ty: Type
+}
+
+// #4357: Rust `(String, String, AST::ParamZone)` public call contract row:
+// local binder name, public call label and zone (D-APILABEL1=A).
+pub struct SymParamContract {
+    pub name: String
+    pub label: String
+    pub zone: ParamZone
+}
+
+// Rust SymKind (25–87): LSP-facing semantic kind over AST types. Effects and
+// `via` keep the AST's own (name, span) carriers. A foreign boundary or a
+// generated name placeholder stays distinguishable from a checked empty row.
+pub enum SymKind {
+    Module
+    Function(params: [SymNameType], param_sources: [SourceSpan], signature_facts_available: Bool, param_contract: [SymParamContract], param_variadic: [Bool], return_type: Type?, failure_contract: CallableFactAvailability<FailureContract>, foreign_boundary: Bool, effects: [EffectRowEntry]?, effect_via: NamedSpan?, param_access: [AccessConvention], param_defaults: [CallableDefaultFact?], policies: [CallablePolicy], generic_parameters: CallableFactAvailability<[TypeParam]>)
+    Struct(fields: [SymNameType], derives: [String])
+    Enum(variants: [String], derives: [String])
+    Trait
+    // D-QUAL2: a `tag` marker qualifier.
+    Tag
+    // Alias, distinct, unit family, state set or protocol.
+    Type(derives: [String])
+    Const
+    EnumVariant(parent: String)
+    Field(ty: Type, parent: String)
+    Local(mutable: Bool, ty: Type?)
+    Param(ty: Type)
+}
+
+// Rust SymDef (89–97): one named definition.
+pub struct SymDef {
+    pub identity: String
+    pub name: String
+    pub def_span: Span
+    pub module_path: String
+    pub kind: SymKind
+}
+
+// Rust SymRef (99–108): one use site; an absent target is unresolved or
+// ambiguous and is never replaced by a spelling match.
+pub struct SymRef {
+    pub name: String
+    pub span: Span
+    pub module_path: String
+    pub scope_identity: String?
+    pub target: DefinitionAnchor?
+    pub fact: CompilerFact?
+}
+
+// Rust HoverEntry (110–116).
+pub struct HoverEntry {
+    pub span: Span
+    pub module_path: String
+    pub text: String
+}
+
+// Rust InlayHint (118–124).
+pub struct InlayHint {
+    pub span: Span
+    pub module_path: String
+    pub label: String
+}
+
+// Rust `structural_ordinals` key `(parent, slot)`: reordering unrelated siblings
+// never changes ancestry identity. A real composite map key (#4397 gates native
+// Ord/Eq emission), never an encoded string.
+struct StructuralOrdinalKey {
+    parent: Int?
+    slot: String
+}
+
+// Rust SymbolDB (126–148): one consumer of the shared semantic-index build.
+pub struct SymbolDB {
+    pub index: SemIndex
+    pub defs: [SymDef]
+    pub refs: [SymRef]
+    pub calls: [CallEdge]
+    pub members: [MemberFact]
+    pub hover: [HoverEntry]
+    pub inlay: [InlayHint]
+    // D-WRAP-SCOPE1=A: operation-level arithmetic policy provenance.
+    pub arithmetic: [ArithmeticOperationFact]
+    pub nodes: [StructuralNode]
+    // D-LINTPOLICY1=A: every spelled bypass collected during the walk.
+    pub bypasses: [BypassFact]
+    // Sema-owned returned-view summaries keyed by semantic function identity.
+    pub view_provenance: [String:ViewProvenanceMap]
+    pub slot_boundaries: [StructuralSlotBoundary]
+    pub symbols: SemanticSymbolIndex
+    structural_ordinals: [StructuralOrdinalKey:Int]
+}
+
+// Rust CallerFrame (150–154).
+struct CallerFrame {
+    name: String
+    owner: String?
+    identity: String
+}
+
+// Rust WalkCtx (156–168). Jet threads the writable `db: &SymbolDB` and the read
+// `names: MIRNameFacts` / `module: SemaRegistrationModule` as explicit
+// parameters of every walker (`(db, ctx, names, module, ...)`); the context owns
+// only walk state. `block_spans` is the per-module sorted copy Rust also makes.
+struct WalkCtx {
+    module_idx: Int
+    caller: CallerFrame?
+    scope_identity: String
+    structural_parents: [Int]
+    structural_slot: String
+    structural_slot_kind: StructuralSlotKind
+    block_spans: [Span]
+    claimed_block_spans: [SourceSpan:Bool]
+
+    // Rust build_symbol_db WalkCtx literal (1343–1355).
+    fn new(module_idx: Int, scope_identity: ^String, block_spans: ^[Span]) -> WalkCtx Never! {
+        WalkCtx{
+            module_idx: module_idx,
+            caller: None,
+            scope_identity: ^scope_identity,
+            structural_parents: [Int]{},
+            structural_slot: "root",
+            structural_slot_kind: StructuralSlotKind.List,
+            block_spans: ^block_spans,
+            claimed_block_spans: [SourceSpan:Bool]{},
+        }
+    }
+}
+
+impl SymbolDB {
+    // Rust SymbolDB::new (171–196).
+    pub fn new() -> SymbolDB Never! {
+        SymbolDB{
+            index: SemIndex.new([SymbolDef]{}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{}),
+            defs: [SymDef]{},
+            refs: [SymRef]{},
+            calls: [CallEdge]{},
+            members: [MemberFact]{},
+            hover: [HoverEntry]{},
+            inlay: [InlayHint]{},
+            arithmetic: [ArithmeticOperationFact]{},
+            nodes: [StructuralNode]{},
+            bypasses: [BypassFact]{},
+            view_provenance: [String:ViewProvenanceMap]{},
+            slot_boundaries: [StructuralSlotBoundary]{},
+            symbols: SemanticSymbolIndex.language(),
+            structural_ordinals: [StructuralOrdinalKey:Int]{},
+        }
+    }
+
+    // Rust SymbolDB::finalize_index (198–405). Definition facts consume the exact
+    // caller-owned module sources and checked.effect_facts.name_ledger.
+    // PackageModel's canonical program view and checked summaries remain explicit
+    // inputs; no source-inferred checked-to-budget adapter is constructed here.
+    fn finalize_index(&self, registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) Never! {
+        display_rows :: semindex_loaded_source_rows_by_registration_path(registration, module_sources, loaded_module_rows)
+        loop source_index in loaded_module_rows {
+            module :: registration.modules[semindex_loaded_registration_index(registration, module_sources[source_index])]
+            loop item in module.program.items {
+                if item == .CodeModule(instance) {
+                    if instance.instance_identity == .Val(identity) {
+                        semantic_identity :: "instance:{identity.fingerprint}"
+                        loop application in identity.applications {
+                            application_path :: if display_rows.get(application.source_module) == { .Val(index) -> module_sources[index].display, None -> application.source_module }
+                            if semindex_instance_application_defined(self.defs, semantic_identity, application.span, application_path) -> next
+                            &self.defs.push(SymDef{
+                                identity: ~application.semantic_identity,
+                                name: ~application.name,
+                                def_span: application.span,
+                                module_path: application_path,
+                                kind: SymKind.Module,
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        semindex_project_generated_presentation(&self, registration, checked.names, module_sources, loaded_module_rows)
+        // Checker anchors retain semantic registration paths; index locations
+        // use the original LoadedModule display (including Core/...).
+        loop index in 0..<self.refs.len() {
+            if self.refs[index].target == .Val(target) {
+                if display_rows.get(target.module_path) == .Val(source_index) {
+                    self.refs[index].target = Val(DefinitionAnchor{module_path: module_sources[source_index].display, kind: target.kind, def_span: target.def_span, semantic_identity: target.semantic_identity})
+                }
+            }
+        }
+        &self.align_reference_targets()
+        defs := semindex_convert_defs(self.defs, self.view_provenance, self.members, registration, checked.names, module_sources, loaded_module_rows)
+        refs := semindex_convert_refs(self.refs)
+        // CP-S20: required sema-produced carrier; no default-empty adapter.
+        effects := semindex_convert_effects(checked.effect_facts)
+        definition_facts := semindex_build_definition_facts(defs, self.nodes, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
+        derivations := [DerivationRecord]{}
+        loop fact in definition_facts {
+            &derivations.push(derivation_record(
+                ~fact.stable_id,
+                ~fact.human_identity,
+                "jet-sema",
+                MIRDerivationMethod.StaticDerivation,
+                "checked-definition",
+                [String]{~fact.signature_id, ~fact.content_id},
+                derivation_identity(~fact.content_id, ~fact.signature_id, "", ~fact.module_path),
+            ))
+        }
+        // The database keeps calls/members/nodes for LSP consumers (Rust clones).
+        self.index = SemIndex.new(^defs, ^refs, ~self.calls, ^effects, ~self.members, ~self.nodes, ^definition_facts)
+        &self.index.set_derivations(^derivations)
+        &self.arithmetic.sort_by((left: ArithmeticOperationFact, right: ArithmeticOperationFact) -> (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end))
+        &self.index.set_arithmetic(~self.arithmetic)
+        &self.index.set_effect_projection(pkg_project_program_effects(effect_program, effect_summaries, "run", None))
+        &self.index.set_state_graphs(semindex_build_state_graphs(registration, checked, module_sources, loaded_module_rows))
+        &self.index.set_bypasses(~self.bypasses)
+        &self.index.set_instances(semindex_instance_facts(registration, checked, module_sources, loaded_module_rows, display_rows))
+        &self.index.set_outputs(semindex_output_facts(registration, module_sources, loaded_module_rows, display_rows))
+    }
+
+    // Rust SymbolDB::refresh_effect_hovers (407–420): every `fn ` hover ends
+    // with exactly one current application-boundary projection line.
+    fn refresh_effect_hovers(&self) Never! {
+        line :: pkg_render_effect_projection_line(self.index.effect_projection)
+        semindex_refresh_effect_hover_rows(&self.hover, line)
+    }
+
+    // Rust SymbolDB::attach_package_facts (422–428): package policy reaches the
+    // index and the already-built hover projection without rebuilding symbols.
+    pub fn attach_package_facts(&self, facts: ^PackageFacts) Never! {
+        &self.index.attach_package_facts(^facts)
+        &self.refresh_effect_hovers()
+    }
+
+    // Rust SymbolDB::align_reference_targets (430–446): a checked anchor gains a
+    // semantic identity only when exactly one definition matches its module,
+    // span and kind; ambiguity leaves the anchor untouched.
+    fn align_reference_targets(&self) Never! {
+        loop index in 0..<self.refs.len() {
+            if self.refs[index].target == .Val(target) {
+                found := Int?{None}
+                unique := true
+                loop definition_index in 0..<self.defs.len() {
+                    if !semindex_definition_matches_target(self.defs[definition_index], target) -> next
+                    if found != None {
+                        unique = false
+                        break
+                    }
+                    found = Val(definition_index)
+                }
+                if unique && found == .Val(definition_index) {
+                    aligned := ~target
+                    aligned.semantic_identity = Val(~self.defs[definition_index].identity)
+                    self.refs[index].target = Val(^aligned)
+                }
+            }
+        }
+    }
+
+    // Rust SymbolDB::hover_at (448–454): first entry in the module whose span
+    // contains the offset, both endpoints inclusive. One owner-backed row.
+    fn hover_window(self, index: Int) -> View<HoverEntry> Never! { self.hover[index..index] }
+    pub fn hover_at(self, path: String, offset: Int) -> View<HoverEntry>? Never! {
+        if semindex_hover_index(self.hover, path, offset) == .Val(index) -> return Val(self.hover_window(index))
+        None
+    }
+
+    // Rust SymbolDB::arithmetic_hover_at (456–482): the innermost (first
+    // shortest) policy-tagged operation containing the offset, then the hover
+    // with exactly that span whose text is the fixed-width provenance.
+    pub fn arithmetic_hover_at(self, path: String, offset: Int) -> View<HoverEntry>? Never! {
+        if semindex_arithmetic_hover_index(self.arithmetic, self.hover, path, offset) == .Val(index) -> return Val(self.hover_window(index))
+        None
+    }
+
+    // Rust SymbolDB::inlay_hints_for (484–490): module hints in walk order.
+    // #4478: bind the borrowed window to the owner receiver; a free function
+    // with multiple borrowed arguments loses its return lifetime in codegen.
+    fn inlay_window(self, index: Int) -> View<InlayHint> Never! { self.inlay[index..index] }
+    pub fn inlay_hints_for(self, path: String) -> [View<InlayHint>] Never! {
+        matches := [View<InlayHint>]{}
+        loop index in 0..<self.inlay.len() {
+            if self.inlay[index].module_path == path -> &matches.push(self.inlay_window(index))
+        }
+        matches
+    }
+}
+
+// The SymbolDB query/refresh loops over retained rows. Keeping these leaf
+// operations separate makes their endpoint/order rules usable without a checked
+// graph, while the public methods still borrow the original owner-backed rows.
+fn semindex_refresh_effect_hover_rows(hover: &[HoverEntry], line: String) Never! {
+    loop index in 0..<hover.len() {
+        if !hover[index].text.starts_with("fn ") -> next
+        if hover[index].text.split_once("\nrequired effects:") == .Val(parts) {
+            kept := parts.before // #4303
+            hover[index].text = "{kept}\n{line}"
+        } else {
+            hover[index].text = "{hover[index].text}\n{line}"
+        }
+    }
+}
+
+fn semindex_hover_index(hover: [HoverEntry], path: String, offset: Int) -> Int? Never! {
+    loop index in 0..<hover.len() {
+        if hover[index].module_path == path && hover[index].span.start <= offset && offset <= hover[index].span.end -> return Val(index)
+    }
+    None
+}
+
+fn semindex_arithmetic_hover_index(arithmetic: [ArithmeticOperationFact], hover: [HoverEntry], path: String, offset: Int) -> Int? Never! {
+    chosen := Int?{None}
+    width := 0
+    loop index in 0..<arithmetic.len() {
+        if arithmetic[index].module_path != path -> next
+        start :: arithmetic[index].operation_span.start
+        end :: arithmetic[index].operation_span.end
+        if start > offset || offset > end -> next
+        candidate :: if end > start -> end - start else -> 0
+        // Strictly smaller preserves the first fact on equal-width ties,
+        // matching Iterator::min_by_key.
+        if chosen == None || candidate < width {
+            chosen = Val(index)
+            width = candidate
+        }
+    }
+    if chosen == .Val(fact_index) {
+        start :: arithmetic[fact_index].operation_span.start
+        end :: arithmetic[fact_index].operation_span.end
+        loop index in 0..<hover.len() {
+            if hover[index].module_path == path && hover[index].span.start == start && hover[index].span.end == end && hover[index].text.starts_with("fixed-width ") -> return Val(index)
+        }
+    }
+    None
+}
+
+
+// Rust definition_matches_target (493–512): same module and exact span, and a
+// checked anchor kind that names this definition's semantic kind.
+fn semindex_definition_matches_target(definition: SymDef, target: DefinitionAnchor) -> Bool Never! {
+    if definition.module_path != target.module_path || definition.def_span.start != target.def_span.start || definition.def_span.end != target.def_span.end -> return false
+    kind :: target.kind
+    if definition.kind == {
+        .Module -> kind == "module" || kind == "import_alias"
+        .Function(_, _, _, _, _, _, _, _, _, _, _, _, _, _) -> kind == "function" || kind == "method" || kind == "extern"
+        .Struct(_, _) -> kind == "struct"
+        .Enum(_, _) -> kind == "enum"
+        .Trait -> kind == "trait"
+        .Tag -> kind == "tag"
+        .Type(_) -> kind == "type" || kind == "state" || kind == "protocol"
+        .Const -> kind == "const"
+        .EnumVariant(_) -> kind == "enum_variant" || kind == "variant" || kind == "state"
+        .Field(_, _) -> kind == "field"
+        .Local(_, _) -> kind == "local"
+        .Param(_) -> kind == "param"
+    }
+}
+
+// Rust finalize_index 209–215: an instance application already defined with
+// the instance identity at the same span and module is not defined again.
+fn semindex_instance_application_defined(defs: [SymDef], identity: String, span: Span, module_path: String) -> Bool Never! {
+    loop index in 0..<defs.len() {
+        if defs[index].identity == identity && defs[index].def_span.start == span.start && defs[index].def_span.end == span.end && defs[index].module_path == module_path -> return true
+    }
+    false
+}
+
+// Rust finalize_index 278–367: every checked generic-module instance with its
+// key bytes as lowercase hex, applications and exported member names.
+fn semindex_instance_facts(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], display_rows: [String:Int]) -> [InstanceFact] Never! {
+    facts := [InstanceFact]{}
+    loop source_index in loaded_module_rows {
+        source :: module_sources[source_index]
+        module_index :: semindex_loaded_registration_index(registration, source)
+        loop item in registration.modules[module_index].program.items {
+            if item == .CodeModule(instance) {
+                if instance.instance_identity == .Val(identity) {
+                    arguments := [String]{}
+                    loop key in identity.argument_keys -> &arguments.push(mir_sha256_hex_bytes(key))
+                    applications := [InstanceApplicationFact]{}
+                    loop application in identity.applications {
+                        &applications.push(InstanceApplicationFact{
+                            name: ~application.name,
+                            module_path: if display_rows.get(application.source_module) == { .Val(index) -> module_sources[index].display, None -> application.source_module },
+                            semantic_identity: ~application.semantic_identity,
+                            span: semindex_source_span(application.span),
+                        })
+                    }
+                    exported := [String]{}
+                    if instance.body == .Val(body) {
+                        loop member in body {
+                            if semindex_instance_member_name(member) == .Val(name) {
+                                if name_facts_exported(checked.names, module_index, foundation_member_name(instance.name, name)) -> &exported.push(~name)
+                            }
+                        }
+                    }
+                    &facts.push(InstanceFact{
+                        name: ~instance.name,
+                        module_path: source.display,
+                        fingerprint: ~identity.fingerprint,
+                        full_key_hex: mir_sha256_hex_bytes(identity.full_key),
+                        template_definition_id: ~identity.definition_id,
+                        template_span: semindex_source_span(identity.template_span),
+                        arguments: ^arguments,
+                        argument_values: ~identity.argument_values,
+                        argument_provenance: ~identity.argument_provenance,
+                        applications: ^applications,
+                        exported_members: ^exported,
+                    })
+                }
+            }
+        }
+    }
+    facts
+}
+
+// Rust finalize_index 324–361: the member kinds an instance can export.
+fn semindex_instance_member_name(item: Item) -> String? Never! {
+    if item == {
+        .Func(definition) -> Val(definition.name)
+        .Struct(definition) -> Val(definition.name)
+        .Enum(definition) -> Val(definition.name)
+        .Trait(definition) -> Val(definition.name)
+        .Tag(definition) -> Val(definition.name)
+        else -> None
+    }
+}
+
+// Rust finalize_index 368–404: every checked `Output` binding with the
+// sema-resolved entry callable, effective failure fact and solved effect row.
+fn semindex_output_facts(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], display_rows: [String:Int]) -> [SemIndexOutputFact] Never! {
+    facts := [SemIndexOutputFact]{}
+    sources := [Int:Int]{}
+    loop source_index in loaded_module_rows -> sources[semindex_loaded_registration_index(registration, module_sources[source_index])] = source_index
+    loop source_index in loaded_module_rows {
+        source :: module_sources[source_index]
+        module :: registration.modules[semindex_loaded_registration_index(registration, source)]
+        loop item in module.program.items {
+            if item == .Const(value) {
+                if value.resolved_output == .Val(output) {
+                    target_source :: sources.get(output.module_id) ?? panic("checked Output target must belong to the loaded bundle")
+                    identity :: "{module_sources[target_source].alias}::{output.semantic_name}"
+                    params := [String]{}
+                    loop param in output.params -> &params.push(type_name(param.ty))
+                    return_type := String?{None}
+                    if output.return_type == .Val(ty) -> return_type = Val(type_name(ty))
+                    &facts.push(SemIndexOutputFact{
+                        binding: ~value.name,
+                        kind: output.kind.as_str(),
+                        name: ~output.output_name,
+                        module_path: source.display,
+                        span: semindex_source_span(value.span),
+                        entry: OutputEntryFact{
+                            identity: identity,
+                            name: ~output.source_name,
+                            module_path: if display_rows.get(output.source_path) == { .Val(index) -> module_sources[index].display, None -> output.source_path },
+                            definition_span: semindex_source_span(output.definition),
+                            reference_span: semindex_source_span(output.reference),
+                            params: ^params,
+                            return_type: ^return_type,
+                            failure_contract: type_name(failure_contract_effective_type(output.failure_contract)),
+                            failure_source: failure_contract_source(output.failure_contract),
+                            authority: output.authority.as_str(),
+                            effects: ~output.effects,
+                        },
+                    })
+                }
+            }
+        }
+    }
+    facts
+}

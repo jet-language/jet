@@ -1,0 +1,1775 @@
+// PORT-PENDING 0767 crates-jet-devserver-src-canvas-preview: crates/jet-devserver/src/Canvas/preview.rs:1-1771
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-DX-PREVIEW1=A: typed, source-identified preview/playground state for Canvas.
+//RS //!
+//RS //! This module owns only the bounded host state.  It does not parse source,
+//RS //! evaluate a second UI tree, or invent a renderer.  A caller supplies the
+//RS //! checked callback and the normal Canvas renderer through `evaluate` (or
+//RS //! `publish` when the renderer is driven by the dev session).  The same
+//RS //! `CanvasPreviewSession<T>` can therefore carry the canonical `UiNode` type
+//RS //! without making this crate depend on the code generator.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fmt;
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS use jet_foundation::Devtools::{
+//RS     JetDevtoolsFreshnessState, JetDevtoolsSourceSpan,
+//RS };
+//RS use jet_foundation::JSON::json_escape as preview_json_escape;
+//RS 
+//RS pub const CANVAS_PREVIEW_SCHEMA_VERSION: u32 = 1;
+//RS pub const CANVAS_PREVIEW_MAX_PREVIEWS: usize = 64;
+//RS pub const CANVAS_PREVIEW_MAX_SELECTED: usize = 16;
+//RS pub const CANVAS_PREVIEW_MAX_CONTEXTS: usize = 16;
+//RS pub const CANVAS_PREVIEW_MAX_INPUTS: usize = 32;
+//RS pub const CANVAS_PREVIEW_MAX_INPUT_BYTES: usize = 16 * 1024;
+//RS pub const CANVAS_PREVIEW_MAX_TEXT_BYTES: usize = 16 * 1024;
+//RS pub const CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES: usize = 16 * 1024;
+//RS pub const CANVAS_PREVIEW_MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
+//RS pub const CANVAS_PREVIEW_MAX_RESIDENT_BYTES: usize = 16 * 1024 * 1024;
+//RS pub const CANVAS_PREVIEW_MAX_CLIENTS: usize = 16;
+//RS pub const CANVAS_PREVIEW_CLIENT_IDLE_SECS: u64 = 60;
+//RS pub const CANVAS_PREVIEW_MAX_DIMENSION: u32 = 16_384;
+//RS pub const CANVAS_PREVIEW_MAX_SCALE: u16 = 8;
+//RS 
+//RS /// Foundation's source span is the one source-location vocabulary used by
+//RS /// Canvas, devtools, and the checked front end.
+//RS pub type CanvasPreviewSourceSpan = JetDevtoolsSourceSpan;
+//RS 
+//RS /// A preview identity is complete by construction: source, build, revision,
+//RS /// and the declaration span travel together.  A stale render can never be
+//RS /// presented as the current revision because the session compares this value
+//RS /// before accepting a frame.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewSourceIdentity {
+//RS     pub source_id: String,
+//RS     pub build_id: String,
+//RS     pub revision: String,
+//RS     pub span: CanvasPreviewSourceSpan,
+//RS }
+//RS 
+//RS impl CanvasPreviewSourceIdentity {
+//RS     pub fn new(
+//RS         source_id: impl Into<String>,
+//RS         build_id: impl Into<String>,
+//RS         revision: impl Into<String>,
+//RS         span: CanvasPreviewSourceSpan,
+//RS     ) -> Self {
+//RS         Self {
+//RS             source_id: source_id.into(),
+//RS             build_id: build_id.into(),
+//RS             revision: revision.into(),
+//RS             span,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         preview_text(&self.source_id, "source id", CANVAS_PREVIEW_MAX_TEXT_BYTES)?;
+//RS         preview_text(&self.build_id, "build id", CANVAS_PREVIEW_MAX_TEXT_BYTES)?;
+//RS         preview_text(&self.revision, "revision", CANVAS_PREVIEW_MAX_TEXT_BYTES)?;
+//RS         self.span
+//RS             .validate()
+//RS             .map_err(|_| CanvasPreviewError::InvalidSource("source span is invalid"))?;
+//RS         if self.span.source_id != self.source_id {
+//RS             return Err(CanvasPreviewError::InvalidSource(
+//RS                 "source span identity does not match preview source",
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum CanvasPreviewKind {
+//RS     Preview,
+//RS     Playground,
+//RS }
+//RS 
+//RS impl CanvasPreviewKind {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Preview => "preview",
+//RS             Self::Playground => "playground",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum CanvasPreviewDevice {
+//RS     Phone,
+//RS     Tablet,
+//RS     Desktop,
+//RS     Custom(String),
+//RS }
+//RS 
+//RS impl CanvasPreviewDevice {
+//RS     pub fn as_str(&self) -> &str {
+//RS         match self {
+//RS             Self::Phone => "phone",
+//RS             Self::Tablet => "tablet",
+//RS             Self::Desktop => "desktop",
+//RS             Self::Custom(value) => value,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewViewport {
+//RS     pub device: CanvasPreviewDevice,
+//RS     pub width: u32,
+//RS     pub height: u32,
+//RS     pub scale: u16,
+//RS }
+//RS 
+//RS impl CanvasPreviewViewport {
+//RS     pub fn new(
+//RS         device: CanvasPreviewDevice,
+//RS         width: u32,
+//RS         height: u32,
+//RS         scale: u16,
+//RS     ) -> Result<Self, CanvasPreviewError> {
+//RS         let viewport = Self {
+//RS             device,
+//RS             width,
+//RS             height,
+//RS             scale,
+//RS         };
+//RS         viewport.validate()?;
+//RS         Ok(viewport)
+//RS     }
+//RS 
+//RS     pub fn phone() -> Self {
+//RS         Self {
+//RS             device: CanvasPreviewDevice::Phone,
+//RS             width: 390,
+//RS             height: 844,
+//RS             scale: 2,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn tablet() -> Self {
+//RS         Self {
+//RS             device: CanvasPreviewDevice::Tablet,
+//RS             width: 834,
+//RS             height: 1_119,
+//RS             scale: 2,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn desktop() -> Self {
+//RS         Self {
+//RS             device: CanvasPreviewDevice::Desktop,
+//RS             width: 1_280,
+//RS             height: 800,
+//RS             scale: 1,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         if self.width == 0 || self.height == 0 {
+//RS             return Err(CanvasPreviewError::InvalidViewport(
+//RS                 "viewport dimensions must be positive",
+//RS             ));
+//RS         }
+//RS         if self.width > CANVAS_PREVIEW_MAX_DIMENSION
+//RS             || self.height > CANVAS_PREVIEW_MAX_DIMENSION
+//RS         {
+//RS             return Err(CanvasPreviewError::InvalidViewport(
+//RS                 "viewport dimension exceeds the preview bound",
+//RS             ));
+//RS         }
+//RS         if self.scale == 0 || self.scale > CANVAS_PREVIEW_MAX_SCALE {
+//RS             return Err(CanvasPreviewError::InvalidViewport(
+//RS                 "viewport scale is outside the preview bound",
+//RS             ));
+//RS         }
+//RS         if let CanvasPreviewDevice::Custom(name) = &self.device {
+//RS             preview_text(name, "viewport device", 128)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum CanvasPreviewTheme {
+//RS     System,
+//RS     Light,
+//RS     Dark,
+//RS     HighContrast,
+//RS     Custom(String),
+//RS }
+//RS 
+//RS impl CanvasPreviewTheme {
+//RS     pub fn as_str(&self) -> &str {
+//RS         match self {
+//RS             Self::System => "system",
+//RS             Self::Light => "light",
+//RS             Self::Dark => "dark",
+//RS             Self::HighContrast => "high-contrast",
+//RS             Self::Custom(value) => value,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum CanvasPreviewAccessibility {
+//RS     Default,
+//RS     ReducedMotion,
+//RS     LargeText,
+//RS     HighContrast,
+//RS     ScreenReader,
+//RS     Custom(String),
+//RS }
+//RS 
+//RS impl CanvasPreviewAccessibility {
+//RS     pub fn as_str(&self) -> &str {
+//RS         match self {
+//RS             Self::Default => "default",
+//RS             Self::ReducedMotion => "reduced-motion",
+//RS             Self::LargeText => "large-text",
+//RS             Self::HighContrast => "high-contrast",
+//RS             Self::ScreenReader => "screen-reader",
+//RS             Self::Custom(value) => value,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum CanvasPreviewLifecycle {
+//RS     Initial,
+//RS     Loading,
+//RS     Loaded,
+//RS     Empty,
+//RS     Error,
+//RS     Offline,
+//RS     Custom(String),
+//RS }
+//RS 
+//RS impl CanvasPreviewLifecycle {
+//RS     pub fn as_str(&self) -> &str {
+//RS         match self {
+//RS             Self::Initial => "initial",
+//RS             Self::Loading => "loading",
+//RS             Self::Loaded => "loaded",
+//RS             Self::Empty => "empty",
+//RS             Self::Error => "error",
+//RS             Self::Offline => "offline",
+//RS             Self::Custom(value) => value,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewTraits {
+//RS     pub theme: CanvasPreviewTheme,
+//RS     pub locale: String,
+//RS     pub accessibility: CanvasPreviewAccessibility,
+//RS     pub lifecycle: CanvasPreviewLifecycle,
+//RS }
+//RS 
+//RS impl Default for CanvasPreviewTraits {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             theme: CanvasPreviewTheme::System,
+//RS             locale: "en-US".to_string(),
+//RS             accessibility: CanvasPreviewAccessibility::Default,
+//RS             lifecycle: CanvasPreviewLifecycle::Initial,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl CanvasPreviewTraits {
+//RS     pub fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         preview_text(&self.locale, "locale", 128)?;
+//RS         for (value, field) in [
+//RS             (self.theme.as_str(), "theme"),
+//RS             (self.accessibility.as_str(), "accessibility"),
+//RS             (self.lifecycle.as_str(), "lifecycle"),
+//RS         ] {
+//RS             preview_text(value, field, 128)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum CanvasPreviewEffect {
+//RS     Read(String),
+//RS     Write(String),
+//RS     Network(String),
+//RS     Clock,
+//RS     Custom(String),
+//RS }
+//RS 
+//RS impl CanvasPreviewEffect {
+//RS     pub fn capability(&self) -> &str {
+//RS         match self {
+//RS             Self::Read(value) => value,
+//RS             Self::Write(value) => value,
+//RS             Self::Network(value) => value,
+//RS             Self::Clock => "Clock.Read",
+//RS             Self::Custom(value) => value,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         preview_text(self.capability(), "preview effect", 256)
+//RS     }
+//RS }
+//RS 
+//RS /// Authority is explicit and attenuating.  A preview starts loopback-only
+//RS /// with no capabilities; declaring an effect does not grant it.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewAuthority {
+//RS     loopback_only: bool,
+//RS     capabilities: BTreeSet<String>,
+//RS }
+//RS 
+//RS impl CanvasPreviewAuthority {
+//RS     pub fn development() -> Self {
+//RS         Self {
+//RS             loopback_only: true,
+//RS             capabilities: BTreeSet::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn new(loopback_only: bool) -> Self {
+//RS         Self {
+//RS             loopback_only,
+//RS             capabilities: BTreeSet::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn loopback_only(&self) -> bool {
+//RS         self.loopback_only
+//RS     }
+//RS 
+//RS     pub fn capabilities(&self) -> impl Iterator<Item = &str> {
+//RS         self.capabilities.iter().map(String::as_str)
+//RS     }
+//RS 
+//RS     pub fn with_capability(mut self, capability: impl Into<String>) -> Result<Self, CanvasPreviewError> {
+//RS         let capability = capability.into();
+//RS         preview_text(&capability, "authority capability", 256)?;
+//RS         self.capabilities.insert(capability);
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn allows_capability(&self, requested: &str) -> bool {
+//RS         self.capabilities.iter().any(|held| {
+//RS             held == requested
+//RS                 || requested
+//RS                     .strip_prefix(held)
+//RS                     .is_some_and(|tail| tail.starts_with('.') || tail.starts_with(':') || tail.starts_with('/'))
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn allows_effect(&self, effect: &CanvasPreviewEffect, loopback: bool) -> bool {
+//RS         (!self.loopback_only || loopback) && self.allows_capability(effect.capability())
+//RS     }
+//RS 
+//RS     pub fn attenuate<I>(&self, capabilities: I) -> Result<Self, CanvasPreviewError>
+//RS     where
+//RS         I: IntoIterator<Item = String>,
+//RS     {
+//RS         let mut narrowed = Self::new(self.loopback_only);
+//RS         for capability in capabilities {
+//RS             preview_text(&capability, "authority capability", 256)?;
+//RS             if !self.allows_capability(&capability) {
+//RS                 return Err(CanvasPreviewError::CapabilityDenied(capability));
+//RS             }
+//RS             narrowed.capabilities.insert(capability);
+//RS         }
+//RS         Ok(narrowed)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum CanvasPreviewInput {
+//RS     Text(String),
+//RS     Bool(bool),
+//RS     Integer(i64),
+//RS     Float(f64),
+//RS }
+//RS 
+//RS impl CanvasPreviewInput {
+//RS     pub fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         match self {
+//RS             Self::Text(value) => preview_text(value, "preview input", CANVAS_PREVIEW_MAX_INPUT_BYTES),
+//RS             Self::Float(value) if !value.is_finite() => Err(CanvasPreviewError::InvalidInput(
+//RS                 "preview float input must be finite",
+//RS             )),
+//RS             _ => Ok(()),
+//RS         }
+//RS     }
+//RS 
+//RS     fn encoded_len(&self) -> usize {
+//RS         match self {
+//RS             Self::Text(value) => value.len(),
+//RS             Self::Bool(_) => 1,
+//RS             Self::Integer(_) => 8,
+//RS             Self::Float(_) => 8,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct CanvasPreviewInputOverride {
+//RS     pub name: String,
+//RS     pub value: CanvasPreviewInput,
+//RS }
+//RS 
+//RS impl CanvasPreviewInputOverride {
+//RS     pub fn new(name: impl Into<String>, value: CanvasPreviewInput) -> Result<Self, CanvasPreviewError> {
+//RS         let input = Self {
+//RS             name: name.into(),
+//RS             value,
+//RS         };
+//RS         input.validate()?;
+//RS         Ok(input)
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         preview_text(&self.name, "preview input name", 256)?;
+//RS         self.value.validate()
+//RS     }
+//RS }
+//RS 
+//RS /// One immutable, explicitly named fixture context.  Variants may refer to
+//RS /// the same context id, but each render receives read-only cloned facts from
+//RS /// this value; mutable state never becomes ambient shared preview state.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct CanvasPreviewContext {
+//RS     pub id: String,
+//RS     pub source: CanvasPreviewSourceIdentity,
+//RS     values: BTreeMap<String, CanvasPreviewInput>,
+//RS     resident_bytes: usize,
+//RS }
+//RS 
+//RS impl CanvasPreviewContext {
+//RS     pub fn new<I>(
+//RS         id: impl Into<String>,
+//RS         source: CanvasPreviewSourceIdentity,
+//RS         values: I,
+//RS     ) -> Result<Self, CanvasPreviewError>
+//RS     where
+//RS         I: IntoIterator<Item = CanvasPreviewInputOverride>,
+//RS     {
+//RS         let id = id.into();
+//RS         preview_text(&id, "preview context id", 256)?;
+//RS         source.validate()?;
+//RS         let mut context = Self {
+//RS             id,
+//RS             source,
+//RS             values: BTreeMap::new(),
+//RS             resident_bytes: 0,
+//RS         };
+//RS         for value in values {
+//RS             value.validate()?;
+//RS             if context.values.len() >= CANVAS_PREVIEW_MAX_INPUTS {
+//RS                 return Err(CanvasPreviewError::TooManyInputs);
+//RS             }
+//RS             if context.values.contains_key(&value.name) {
+//RS                 return Err(CanvasPreviewError::DuplicateInput(value.name));
+//RS             }
+//RS             context.resident_bytes = context
+//RS                 .resident_bytes
+//RS                 .saturating_add(value.name.len())
+//RS                 .saturating_add(value.value.encoded_len());
+//RS             if context.resident_bytes > CANVAS_PREVIEW_MAX_INPUT_BYTES {
+//RS                 return Err(CanvasPreviewError::InputBudgetExceeded);
+//RS             }
+//RS             context.values.insert(value.name, value.value);
+//RS         }
+//RS         Ok(context)
+//RS     }
+//RS 
+//RS     pub fn values(&self) -> &BTreeMap<String, CanvasPreviewInput> {
+//RS         &self.values
+//RS     }
+//RS 
+//RS     pub fn resident_bytes(&self) -> usize {
+//RS         self.resident_bytes
+//RS     }
+//RS }
+//RS 
+//RS /// A checked callback identity.  The callback body itself stays in the
+//RS /// source/compiler runtime; Canvas only carries the identity for diagnostics.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewCallback {
+//RS     pub id: String,
+//RS }
+//RS 
+//RS impl CanvasPreviewCallback {
+//RS     pub fn checked(id: impl Into<String>) -> Result<Self, CanvasPreviewError> {
+//RS         let id = id.into();
+//RS         preview_text(&id, "preview callback id", 256)?;
+//RS         Ok(Self { id })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct CanvasPreviewDescriptor {
+//RS     kind: CanvasPreviewKind,
+//RS     name: String,
+//RS     callback: CanvasPreviewCallback,
+//RS     source: CanvasPreviewSourceIdentity,
+//RS     viewport: CanvasPreviewViewport,
+//RS     traits: CanvasPreviewTraits,
+//RS     effects: BTreeSet<CanvasPreviewEffect>,
+//RS     authority: CanvasPreviewAuthority,
+//RS     inputs: BTreeMap<String, CanvasPreviewInput>,
+//RS     context_id: Option<String>,
+//RS }
+//RS 
+//RS impl CanvasPreviewDescriptor {
+//RS     pub fn new(
+//RS         kind: CanvasPreviewKind,
+//RS         name: impl Into<String>,
+//RS         callback: CanvasPreviewCallback,
+//RS         source: CanvasPreviewSourceIdentity,
+//RS     ) -> Self {
+//RS         Self {
+//RS             kind,
+//RS             name: name.into(),
+//RS             callback,
+//RS             source,
+//RS             viewport: CanvasPreviewViewport::desktop(),
+//RS             traits: CanvasPreviewTraits::default(),
+//RS             effects: BTreeSet::new(),
+//RS             authority: CanvasPreviewAuthority::development(),
+//RS             inputs: BTreeMap::new(),
+//RS             context_id: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn preview(
+//RS         name: impl Into<String>,
+//RS         callback: CanvasPreviewCallback,
+//RS         source: CanvasPreviewSourceIdentity,
+//RS     ) -> Self {
+//RS         Self::new(CanvasPreviewKind::Preview, name, callback, source)
+//RS     }
+//RS 
+//RS     pub fn playground(
+//RS         name: impl Into<String>,
+//RS         callback: CanvasPreviewCallback,
+//RS         source: CanvasPreviewSourceIdentity,
+//RS     ) -> Self {
+//RS         Self::new(CanvasPreviewKind::Playground, name, callback, source)
+//RS     }
+//RS 
+//RS     pub fn kind(&self) -> CanvasPreviewKind {
+//RS         self.kind
+//RS     }
+//RS 
+//RS     pub fn name(&self) -> &str {
+//RS         &self.name
+//RS     }
+//RS 
+//RS     pub fn callback(&self) -> &CanvasPreviewCallback {
+//RS         &self.callback
+//RS     }
+//RS 
+//RS     pub fn source(&self) -> &CanvasPreviewSourceIdentity {
+//RS         &self.source
+//RS     }
+//RS 
+//RS     pub fn viewport(&self) -> &CanvasPreviewViewport {
+//RS         &self.viewport
+//RS     }
+//RS 
+//RS     pub fn traits(&self) -> &CanvasPreviewTraits {
+//RS         &self.traits
+//RS     }
+//RS 
+//RS     pub fn effects(&self) -> impl Iterator<Item = &CanvasPreviewEffect> {
+//RS         self.effects.iter()
+//RS     }
+//RS 
+//RS     pub fn authority(&self) -> &CanvasPreviewAuthority {
+//RS         &self.authority
+//RS     }
+//RS 
+//RS     pub fn inputs(&self) -> &BTreeMap<String, CanvasPreviewInput> {
+//RS         &self.inputs
+//RS     }
+//RS 
+//RS     pub fn context_id(&self) -> Option<&str> {
+//RS         self.context_id.as_deref()
+//RS     }
+//RS 
+//RS     pub fn set_viewport(&mut self, viewport: CanvasPreviewViewport) -> Result<(), CanvasPreviewError> {
+//RS         viewport.validate()?;
+//RS         self.viewport = viewport;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn set_authority(&mut self, authority: CanvasPreviewAuthority) {
+//RS         self.authority = authority;
+//RS     }
+//RS 
+//RS     pub fn add_effect(&mut self, effect: CanvasPreviewEffect) -> Result<(), CanvasPreviewError> {
+//RS         effect.validate()?;
+//RS         self.effects.insert(effect);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn set_input(&mut self, input: CanvasPreviewInputOverride) -> Result<(), CanvasPreviewError> {
+//RS         input.validate()?;
+//RS         if self.inputs.len() >= CANVAS_PREVIEW_MAX_INPUTS && !self.inputs.contains_key(&input.name) {
+//RS             return Err(CanvasPreviewError::TooManyInputs);
+//RS         }
+//RS         self.inputs.insert(input.name, input.value);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         preview_text(&self.name, "preview name", 256)?;
+//RS         self.callback.checked_id()?;
+//RS         self.source.validate()?;
+//RS         self.viewport.validate()?;
+//RS         self.traits.validate()?;
+//RS         for effect in &self.effects {
+//RS             effect.validate()?;
+//RS             if !self.authority.allows_capability(effect.capability()) {
+//RS                 return Err(CanvasPreviewError::CapabilityDenied(
+//RS                     effect.capability().to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         for (name, value) in &self.inputs {
+//RS             CanvasPreviewInputOverride {
+//RS                 name: name.clone(),
+//RS                 value: value.clone(),
+//RS             }
+//RS             .validate()?;
+//RS         }
+//RS         if self.inputs.len() > CANVAS_PREVIEW_MAX_INPUTS {
+//RS             return Err(CanvasPreviewError::TooManyInputs);
+//RS         }
+//RS         if let Some(context_id) = &self.context_id {
+//RS             preview_text(context_id, "preview context id", 256)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS impl CanvasPreviewCallback {
+//RS     fn checked_id(&self) -> Result<(), CanvasPreviewError> {
+//RS         preview_text(&self.id, "preview callback id", 256)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewPolicy {
+//RS     pub max_previews: usize,
+//RS     pub max_selected: usize,
+//RS     pub max_contexts: usize,
+//RS     pub max_inputs: usize,
+//RS     pub max_frame_bytes: usize,
+//RS     pub max_resident_bytes: usize,
+//RS     pub max_diagnostic_bytes: usize,
+//RS     pub max_clients: usize,
+//RS     pub client_idle_secs: u64,
+//RS }
+//RS 
+//RS impl Default for CanvasPreviewPolicy {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             max_previews: CANVAS_PREVIEW_MAX_PREVIEWS,
+//RS             max_selected: CANVAS_PREVIEW_MAX_SELECTED,
+//RS             max_contexts: CANVAS_PREVIEW_MAX_CONTEXTS,
+//RS             max_inputs: CANVAS_PREVIEW_MAX_INPUTS,
+//RS             max_frame_bytes: CANVAS_PREVIEW_MAX_FRAME_BYTES,
+//RS             max_resident_bytes: CANVAS_PREVIEW_MAX_RESIDENT_BYTES,
+//RS             max_diagnostic_bytes: CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES,
+//RS             max_clients: CANVAS_PREVIEW_MAX_CLIENTS,
+//RS             client_idle_secs: CANVAS_PREVIEW_CLIENT_IDLE_SECS,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl CanvasPreviewPolicy {
+//RS     pub fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         if self.max_previews == 0
+//RS             || self.max_previews > CANVAS_PREVIEW_MAX_PREVIEWS
+//RS             || self.max_selected == 0
+//RS             || self.max_selected > CANVAS_PREVIEW_MAX_SELECTED
+//RS             || self.max_contexts > CANVAS_PREVIEW_MAX_CONTEXTS
+//RS             || self.max_inputs > CANVAS_PREVIEW_MAX_INPUTS
+//RS             || self.max_frame_bytes == 0
+//RS             || self.max_frame_bytes > CANVAS_PREVIEW_MAX_FRAME_BYTES
+//RS             || self.max_resident_bytes == 0
+//RS             || self.max_resident_bytes > CANVAS_PREVIEW_MAX_RESIDENT_BYTES
+//RS             || self.max_diagnostic_bytes == 0
+//RS             || self.max_diagnostic_bytes > CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES
+//RS             || self.max_clients == 0
+//RS             || self.max_clients > CANVAS_PREVIEW_MAX_CLIENTS
+//RS             || self.client_idle_secs == 0
+//RS         {
+//RS             return Err(CanvasPreviewError::InvalidPolicy);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum CanvasPreviewStatus {
+//RS     Unrendered,
+//RS     Building,
+//RS     Ready,
+//RS     Error,
+//RS     Stale,
+//RS     Closed,
+//RS }
+//RS 
+//RS impl CanvasPreviewStatus {
+//RS     pub const fn as_str(&self) -> &'static str {
+//RS         match self {
+//RS             Self::Unrendered => "unrendered",
+//RS             Self::Building => "building",
+//RS             Self::Ready => "ready",
+//RS             Self::Error => "error",
+//RS             Self::Stale => "stale",
+//RS             Self::Closed => "closed",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewDiagnostic {
+//RS     pub code: String,
+//RS     pub message: String,
+//RS     pub source: CanvasPreviewSourceIdentity,
+//RS }
+//RS 
+//RS impl CanvasPreviewDiagnostic {
+//RS     pub fn new(
+//RS         code: impl Into<String>,
+//RS         message: impl Into<String>,
+//RS         source: CanvasPreviewSourceIdentity,
+//RS         max_bytes: usize,
+//RS     ) -> Result<Self, CanvasPreviewError> {
+//RS         let diagnostic = Self {
+//RS             code: code.into(),
+//RS             message: message.into(),
+//RS             source,
+//RS         };
+//RS         preview_text(&diagnostic.code, "preview diagnostic code", 128)?;
+//RS         preview_text(&diagnostic.message, "preview diagnostic", max_bytes)?;
+//RS         diagnostic.source.validate()?;
+//RS         Ok(diagnostic)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct CanvasPreviewRendered<T> {
+//RS     pub value: T,
+//RS     pub bytes: usize,
+//RS }
+//RS 
+//RS impl<T> CanvasPreviewRendered<T> {
+//RS     pub fn new(value: T, bytes: usize) -> Self {
+//RS         Self { value, bytes }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewRenderError {
+//RS     pub code: String,
+//RS     pub message: String,
+//RS }
+//RS 
+//RS impl CanvasPreviewRenderError {
+//RS     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Result<Self, CanvasPreviewError> {
+//RS         let error = Self {
+//RS             code: code.into(),
+//RS             message: message.into(),
+//RS         };
+//RS         preview_text(&error.code, "preview render error code", 128)?;
+//RS         preview_text(&error.message, "preview render error", CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES)?;
+//RS         Ok(error)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct CanvasPreviewFrame<T> {
+//RS     pub value: T,
+//RS     pub source: CanvasPreviewSourceIdentity,
+//RS     pub bytes: usize,
+//RS     pub sequence: u64,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct CanvasPreviewSnapshot<T> {
+//RS     pub session_id: String,
+//RS     pub name: String,
+//RS     pub kind: CanvasPreviewKind,
+//RS     pub source: CanvasPreviewSourceIdentity,
+//RS     pub status: CanvasPreviewStatus,
+//RS     pub freshness: JetDevtoolsFreshnessState,
+//RS     /// `current` is deliberately `None` whenever status is Error/Stale.  Use
+//RS     /// `last_good` for the visible retained frame and inspect freshness.
+//RS     pub current: Option<CanvasPreviewFrame<T>>,
+//RS     pub last_good: Option<CanvasPreviewFrame<T>>,
+//RS     pub diagnostic: Option<CanvasPreviewDiagnostic>,
+//RS     pub sequence: u64,
+//RS }
+//RS 
+//RS impl<T: Clone> CanvasPreviewSnapshot<T> {
+//RS     pub fn to_json(&self) -> String {
+//RS         let diagnostic = self
+//RS             .diagnostic
+//RS             .as_ref()
+//RS             .map(|value| {
+//RS                 format!(
+//RS                     "{{\"code\":\"{}\",\"message\":\"{}\",\"source\":{}}}",
+//RS                     preview_json_escape(&value.code),
+//RS                     preview_json_escape(&value.message),
+//RS                     preview_source_json(&value.source),
+//RS                 )
+//RS             })
+//RS             .unwrap_or_else(|| "null".to_string());
+//RS         let current_source = self
+//RS             .current
+//RS             .as_ref()
+//RS             .map(|frame| preview_source_json(&frame.source))
+//RS             .unwrap_or_else(|| "null".to_string());
+//RS         let last_good_source = self
+//RS             .last_good
+//RS             .as_ref()
+//RS             .map(|frame| preview_source_json(&frame.source))
+//RS             .unwrap_or_else(|| "null".to_string());
+//RS         format!(
+//RS             "{{\"schema_version\":{},\"session_id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"status\":\"{}\",\"freshness\":\"{}\",\"current\":{},\"last_good\":{},\"current_source\":{},\"last_good_source\":{},\"diagnostic\":{},\"sequence\":{}}}",
+//RS             CANVAS_PREVIEW_SCHEMA_VERSION,
+//RS             preview_json_escape(&self.session_id),
+//RS             preview_json_escape(&self.name),
+//RS             self.kind.as_str(),
+//RS             self.status.as_str(),
+//RS             self.freshness.as_str(),
+//RS             self.current.is_some(),
+//RS             self.last_good.is_some(),
+//RS             current_source,
+//RS             last_good_source,
+//RS             diagnostic,
+//RS             self.sequence,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct PreviewRecord<T> {
+//RS     descriptor: CanvasPreviewDescriptor,
+//RS     status: CanvasPreviewStatus,
+//RS     freshness: JetDevtoolsFreshnessState,
+//RS     last_good: Option<CanvasPreviewFrame<T>>,
+//RS     diagnostic: Option<CanvasPreviewDiagnostic>,
+//RS     sequence: u64,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct CanvasPreviewConnection {
+//RS     pub session_id: String,
+//RS     pub client_id: String,
+//RS     pub generation: u64,
+//RS     pub cursor: u64,
+//RS }
+//RS 
+//RS struct PreviewClientLease {
+//RS     generation: u64,
+//RS     cursor: u64,
+//RS     loopback: bool,
+//RS     last_seen: Instant,
+//RS }
+//RS 
+//RS /// One bounded resident development session.  `T` is normally the canonical
+//RS /// `UiNode` or the renderer's output value; this host stores only one retained
+//RS /// frame per named scenario and never builds an alternate UI tree.
+//RS pub struct CanvasPreviewSession<T: Clone> {
+//RS     id: String,
+//RS     secret: String,
+//RS     authority: CanvasPreviewAuthority,
+//RS     policy: CanvasPreviewPolicy,
+//RS     registry: CanvasPreviewRegistry,
+//RS     records: BTreeMap<String, PreviewRecord<T>>,
+//RS     clients: BTreeMap<String, PreviewClientLease>,
+//RS     resident_bytes: usize,
+//RS     sequence: u64,
+//RS     closed: bool,
+//RS }
+//RS 
+//RS impl<T: Clone> CanvasPreviewSession<T> {
+//RS     pub fn new(
+//RS         id: impl Into<String>,
+//RS         secret: impl Into<String>,
+//RS         authority: CanvasPreviewAuthority,
+//RS     ) -> Result<Self, CanvasPreviewError> {
+//RS         Self::with_policy(id, secret, authority, CanvasPreviewPolicy::default())
+//RS     }
+//RS 
+//RS     pub fn with_policy(
+//RS         id: impl Into<String>,
+//RS         secret: impl Into<String>,
+//RS         authority: CanvasPreviewAuthority,
+//RS         policy: CanvasPreviewPolicy,
+//RS     ) -> Result<Self, CanvasPreviewError> {
+//RS         let id = id.into();
+//RS         let secret = secret.into();
+//RS         preview_text(&id, "preview session id", 256)?;
+//RS         preview_text(&secret, "preview session secret", 256)?;
+//RS         policy.validate()?;
+//RS         Ok(Self {
+//RS             id,
+//RS             secret,
+//RS             authority,
+//RS             policy,
+//RS             registry: CanvasPreviewRegistry::default(),
+//RS             records: BTreeMap::new(),
+//RS             clients: BTreeMap::new(),
+//RS             resident_bytes: 0,
+//RS             sequence: 0,
+//RS             closed: false,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn id(&self) -> &str {
+//RS         &self.id
+//RS     }
+//RS 
+//RS     pub fn authority(&self) -> &CanvasPreviewAuthority {
+//RS         &self.authority
+//RS     }
+//RS 
+//RS     pub fn policy(&self) -> &CanvasPreviewPolicy {
+//RS         &self.policy
+//RS     }
+//RS 
+//RS     pub fn registry(&self) -> &CanvasPreviewRegistry {
+//RS         &self.registry
+//RS     }
+//RS 
+//RS     pub fn resident_bytes(&self) -> usize {
+//RS         self.resident_bytes
+//RS     }
+//RS 
+//RS     pub fn register_context(&mut self, context: CanvasPreviewContext) -> Result<(), CanvasPreviewError> {
+//RS         self.ensure_open()?;
+//RS         if self.registry.contexts_len() >= self.policy.max_contexts {
+//RS             return Err(CanvasPreviewError::TooManyContexts);
+//RS         }
+//RS         self.registry.insert_context(context)
+//RS     }
+//RS 
+//RS     pub fn select(&mut self, name: &str) -> Result<(), CanvasPreviewError> {
+//RS         self.ensure_open()?;
+//RS         if self.registry.selected_len() >= self.policy.max_selected
+//RS             && !self.registry.is_selected(name)
+//RS         {
+//RS             return Err(CanvasPreviewError::TooManySelected);
+//RS         }
+//RS         self.registry.select(name)
+//RS     }
+//RS 
+//RS     pub fn select_many<I>(&mut self, names: I) -> Result<(), CanvasPreviewError>
+//RS     where
+//RS         I: IntoIterator<Item = String>,
+//RS     {
+//RS         self.ensure_open()?;
+//RS         let names = names.into_iter().collect::<Vec<_>>();
+//RS         if names.len() > self.policy.max_selected {
+//RS             return Err(CanvasPreviewError::TooManySelected);
+//RS         }
+//RS         self.registry.select_many(names)
+//RS     }
+//RS 
+//RS     pub fn clear_selection(&mut self) {
+//RS         self.registry.clear_selection();
+//RS     }
+//RS 
+//RS     pub fn selected_names(&self) -> Vec<String> {
+//RS         self.registry.selected_names()
+//RS     }
+//RS 
+//RS     pub fn descriptor(&self, name: &str) -> Result<&CanvasPreviewDescriptor, CanvasPreviewError> {
+//RS         self.records
+//RS             .get(name)
+//RS             .map(|record| &record.descriptor)
+//RS             .ok_or_else(|| CanvasPreviewError::UnknownPreview(name.to_string()))
+//RS     }
+//RS 
+//RS     pub fn snapshot(&self, name: &str) -> Result<CanvasPreviewSnapshot<T>, CanvasPreviewError> {
+//RS         let record = self
+//RS             .records
+//RS             .get(name)
+//RS             .ok_or_else(|| CanvasPreviewError::UnknownPreview(name.to_string()))?;
+//RS         Ok(self.snapshot_record(name, record))
+//RS     }
+//RS 
+//RS     pub fn snapshots(&self) -> Vec<CanvasPreviewSnapshot<T>> {
+//RS         self.records
+//RS             .iter()
+//RS             .map(|(name, record)| self.snapshot_record(name, record))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub fn mark_building(&mut self, name: &str) -> Result<(), CanvasPreviewError> {
+//RS         self.ensure_open()?;
+//RS         let sequence = self.bump_sequence();
+//RS         let record = self.record_mut(name)?;
+//RS         record.status = CanvasPreviewStatus::Building;
+//RS         record.freshness = if record.last_good.is_some() {
+//RS             JetDevtoolsFreshnessState::Stale
+//RS         } else {
+//RS             JetDevtoolsFreshnessState::Unknown
+//RS         };
+//RS         record.diagnostic = None;
+//RS         record.sequence = sequence;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn mark_stale(
+//RS         &mut self,
+//RS         name: &str,
+//RS         code: impl Into<String>,
+//RS         message: impl Into<String>,
+//RS     ) -> Result<(), CanvasPreviewError> {
+//RS         self.ensure_open()?;
+//RS         let source = self.descriptor(name)?.source().clone();
+//RS         let diagnostic = CanvasPreviewDiagnostic::new(
+//RS             code,
+//RS             message,
+//RS             source,
+//RS             self.policy.max_diagnostic_bytes,
+//RS         )?;
+//RS         let sequence = self.bump_sequence();
+//RS         let record = self.record_mut(name)?;
+//RS         record.status = CanvasPreviewStatus::Stale;
+//RS         record.freshness = JetDevtoolsFreshnessState::Stale;
+//RS         record.diagnostic = Some(diagnostic);
+//RS         record.sequence = sequence;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn mark_error(
+//RS         &mut self,
+//RS         name: &str,
+//RS         code: impl Into<String>,
+//RS         message: impl Into<String>,
+//RS     ) -> Result<(), CanvasPreviewError> {
+//RS         self.ensure_open()?;
+//RS         let source = self.descriptor(name)?.source().clone();
+//RS         let diagnostic = CanvasPreviewDiagnostic::new(
+//RS             code,
+//RS             message,
+//RS             source,
+//RS             self.policy.max_diagnostic_bytes,
+//RS         )?;
+//RS         let sequence = self.bump_sequence();
+//RS         let record = self.record_mut(name)?;
+//RS         record.status = CanvasPreviewStatus::Error;
+//RS         record.freshness = JetDevtoolsFreshnessState::Stale;
+//RS         record.diagnostic = Some(diagnostic);
+//RS         record.sequence = sequence;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Pure previews can be evaluated directly.  A descriptor with effects
+//RS     /// must use `evaluate_authorized`, which ties the render to a live client
+//RS     /// connection and the exact declared effect set.
+//RS     pub fn evaluate<F>(
+//RS         &mut self,
+//RS         name: &str,
+//RS         render: F,
+//RS     ) -> Result<CanvasPreviewSnapshot<T>, CanvasPreviewError>
+//RS     where
+//RS         F: FnOnce(
+//RS             &CanvasPreviewDescriptor,
+//RS             Option<&CanvasPreviewContext>,
+//RS         ) -> Result<CanvasPreviewRendered<T>, CanvasPreviewRenderError>,
+//RS     {
+//RS         let descriptor = self.descriptor(name)?.clone();
+//RS         if descriptor.effects().next().is_some() {
+//RS             return Err(CanvasPreviewError::AuthorityRequired);
+//RS         }
+//RS         self.evaluate_inner(name, descriptor, render)
+//RS     }
+//RS 
+//RS     pub fn evaluate_authorized<F>(
+//RS         &mut self,
+//RS         connection: &CanvasPreviewConnection,
+//RS         name: &str,
+//RS         requested_effects: &[CanvasPreviewEffect],
+//RS         render: F,
+//RS     ) -> Result<CanvasPreviewSnapshot<T>, CanvasPreviewError>
+//RS     where
+//RS         F: FnOnce(
+//RS             &CanvasPreviewDescriptor,
+//RS             Option<&CanvasPreviewContext>,
+//RS         ) -> Result<CanvasPreviewRendered<T>, CanvasPreviewRenderError>,
+//RS     {
+//RS         self.touch(connection)?;
+//RS         let descriptor = self.descriptor(name)?.clone();
+//RS         self.authorize_descriptor(&descriptor, connection, requested_effects)?;
+//RS         self.evaluate_inner(name, descriptor, render)
+//RS     }
+//RS 
+//RS     fn evaluate_inner<F>(
+//RS         &mut self,
+//RS         name: &str,
+//RS         descriptor: CanvasPreviewDescriptor,
+//RS         render: F,
+//RS     ) -> Result<CanvasPreviewSnapshot<T>, CanvasPreviewError>
+//RS     where
+//RS         F: FnOnce(
+//RS             &CanvasPreviewDescriptor,
+//RS             Option<&CanvasPreviewContext>,
+//RS         ) -> Result<CanvasPreviewRendered<T>, CanvasPreviewRenderError>,
+//RS     {
+//RS         self.mark_building(name)?;
+//RS         let context = descriptor
+//RS             .context_id()
+//RS             .and_then(|id| self.registry.context(id).cloned());
+//RS         let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             render(&descriptor, context.as_ref())
+//RS         }));
+//RS         match rendered {
+//RS             Ok(Ok(rendered)) => {
+//RS                 self.publish_inner(name, descriptor.source().clone(), rendered)
+//RS             }
+//RS             Ok(Err(error)) => {
+//RS                 self.mark_error(name, error.code, error.message)?;
+//RS                 Err(CanvasPreviewError::RenderFailed)
+//RS             }
+//RS             Err(_) => {
+//RS                 self.mark_error(name, "E_PREVIEW_PANIC", "preview callback panicked")?;
+//RS                 Err(CanvasPreviewError::RenderFailed)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Publish a frame produced by the normal Canvas/UiNode renderer.  The
+//RS     /// zero-effect path stays convenient; effectful previews must call the
+//RS     /// connection-bound variant below.
+//RS     pub fn publish(
+//RS         &mut self,
+//RS         name: &str,
+//RS         source: CanvasPreviewSourceIdentity,
+//RS         rendered: CanvasPreviewRendered<T>,
+//RS     ) -> Result<CanvasPreviewSnapshot<T>, CanvasPreviewError> {
+//RS         let descriptor = self.descriptor(name)?.clone();
+//RS         if descriptor.effects().next().is_some() {
+//RS             return Err(CanvasPreviewError::AuthorityRequired);
+//RS         }
+//RS         self.publish_inner(name, source, rendered)
+//RS     }
+//RS 
+//RS     fn publish_inner(
+//RS         &mut self,
+//RS         name: &str,
+//RS         source: CanvasPreviewSourceIdentity,
+//RS         rendered: CanvasPreviewRendered<T>,
+//RS     ) -> Result<CanvasPreviewSnapshot<T>, CanvasPreviewError> {
+//RS         source.validate()?;
+//RS         let descriptor = self.descriptor(name)?.clone();
+//RS         if source != *descriptor.source() {
+//RS             return Err(CanvasPreviewError::SourceMismatch);
+//RS         }
+//RS         if rendered.bytes == 0 || rendered.bytes > self.policy.max_frame_bytes {
+//RS             return Err(CanvasPreviewError::FrameTooLarge);
+//RS         }
+//RS         let old_bytes = self
+//RS             .records
+//RS             .get(name)
+//RS             .and_then(|record| record.last_good.as_ref())
+//RS             .map_or(0, |frame| frame.bytes);
+//RS         let new_resident = self
+//RS             .resident_bytes
+//RS             .saturating_sub(old_bytes)
+//RS             .saturating_add(rendered.bytes);
+//RS         if new_resident > self.policy.max_resident_bytes {
+//RS             return Err(CanvasPreviewError::ResidentBudgetExceeded);
+//RS         }
+//RS         let sequence = self.bump_sequence();
+//RS         let frame = CanvasPreviewFrame {
+//RS             value: rendered.value,
+//RS             source,
+//RS             bytes: rendered.bytes,
+//RS             sequence,
+//RS         };
+//RS         let record = self.record_mut(name)?;
+//RS         record.status = CanvasPreviewStatus::Ready;
+//RS         record.freshness = JetDevtoolsFreshnessState::Fresh;
+//RS         record.last_good = Some(frame);
+//RS         record.diagnostic = None;
+//RS         record.sequence = sequence;
+//RS         self.resident_bytes = new_resident;
+//RS         Ok(self.snapshot(name)?)
+//RS     }
+//RS 
+//RS     fn authorize_descriptor(
+//RS         &self,
+//RS         descriptor: &CanvasPreviewDescriptor,
+//RS         connection: &CanvasPreviewConnection,
+//RS         requested_effects: &[CanvasPreviewEffect],
+//RS     ) -> Result<(), CanvasPreviewError> {
+//RS         if connection.session_id != self.id {
+//RS             return Err(CanvasPreviewError::Unauthorized);
+//RS         }
+//RS         if !connection_is_loopback(self.clients.get(&connection.client_id)) {
+//RS             return Err(CanvasPreviewError::LoopbackRequired);
+//RS         }
+//RS         let requested = requested_effects.iter().collect::<BTreeSet<_>>();
+//RS         let declared = descriptor.effects.iter().collect::<BTreeSet<_>>();
+//RS         if requested != declared {
+//RS             return Err(CanvasPreviewError::EffectSetMismatch);
+//RS         }
+//RS         for effect in &descriptor.effects {
+//RS             if !descriptor.authority.allows_effect(effect, true)
+//RS                 || !self.authority.allows_effect(effect, true)
+//RS             {
+//RS                 return Err(CanvasPreviewError::CapabilityDenied(
+//RS                     effect.capability().to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn connect(
+//RS         &mut self,
+//RS         client_id: impl Into<String>,
+//RS         presented_secret: &str,
+//RS         loopback: bool,
+//RS     ) -> Result<CanvasPreviewConnection, CanvasPreviewError> {
+//RS         self.ensure_open()?;
+//RS         self.prune_expired_at(Instant::now());
+//RS         let client_id = client_id.into();
+//RS         preview_text(&client_id, "preview client id", 256)?;
+//RS         self.authorize_connection(presented_secret, loopback)?;
+//RS         let cursor = 0;
+//RS         self.open_client(client_id, loopback, cursor)
+//RS     }
+//RS 
+//RS     pub fn reconnect(
+//RS         &mut self,
+//RS         connection: &CanvasPreviewConnection,
+//RS         presented_secret: &str,
+//RS         loopback: bool,
+//RS     ) -> Result<CanvasPreviewConnection, CanvasPreviewError> {
+//RS         self.ensure_open()?;
+//RS         self.authorize_connection(presented_secret, loopback)?;
+//RS         let generation = self
+//RS             .clients
+//RS             .get(&connection.client_id)
+//RS             .ok_or(CanvasPreviewError::StaleConnection)?
+//RS             .generation;
+//RS         if generation != connection.generation || connection.session_id != self.id {
+//RS             return Err(CanvasPreviewError::StaleConnection);
+//RS         }
+//RS         self.open_client(
+//RS             connection.client_id.clone(),
+//RS             loopback,
+//RS             connection.cursor.min(self.sequence),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn touch(&mut self, connection: &CanvasPreviewConnection) -> Result<(), CanvasPreviewError> {
+//RS         self.ensure_open()?;
+//RS         if connection.session_id != self.id {
+//RS             return Err(CanvasPreviewError::StaleConnection);
+//RS         }
+//RS         let lease = self
+//RS             .clients
+//RS             .get_mut(&connection.client_id)
+//RS             .ok_or(CanvasPreviewError::StaleConnection)?;
+//RS         if lease.generation != connection.generation {
+//RS             return Err(CanvasPreviewError::StaleConnection);
+//RS         }
+//RS         lease.last_seen = Instant::now();
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn acknowledge(
+//RS         &mut self,
+//RS         connection: &CanvasPreviewConnection,
+//RS         cursor: u64,
+//RS     ) -> Result<(), CanvasPreviewError> {
+//RS         self.touch(connection)?;
+//RS         if cursor > self.sequence {
+//RS             return Err(CanvasPreviewError::InvalidCursor);
+//RS         }
+//RS         let lease = self
+//RS             .clients
+//RS             .get_mut(&connection.client_id)
+//RS             .ok_or(CanvasPreviewError::StaleConnection)?;
+//RS         lease.cursor = cursor;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn disconnect(&mut self, connection: &CanvasPreviewConnection) -> Result<(), CanvasPreviewError> {
+//RS         let lease = self
+//RS             .clients
+//RS             .get(&connection.client_id)
+//RS             .ok_or(CanvasPreviewError::StaleConnection)?;
+//RS         if connection.session_id != self.id || lease.generation != connection.generation {
+//RS             return Err(CanvasPreviewError::StaleConnection);
+//RS         }
+//RS         self.clients.remove(&connection.client_id);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn prune_expired(&mut self) -> usize {
+//RS         self.prune_expired_at(Instant::now())
+//RS     }
+//RS 
+//RS     pub fn prune_expired_at(&mut self, now: Instant) -> usize {
+//RS         let timeout = Duration::from_secs(self.policy.client_idle_secs);
+//RS         let before = self.clients.len();
+//RS         self.clients
+//RS             .retain(|_, lease| now.saturating_duration_since(lease.last_seen) <= timeout);
+//RS         before.saturating_sub(self.clients.len())
+//RS     }
+//RS 
+//RS     pub fn close(&mut self) {
+//RS         self.closed = true;
+//RS         self.clients.clear();
+//RS         self.records.clear();
+//RS         self.registry = CanvasPreviewRegistry::default();
+//RS         self.resident_bytes = 0;
+//RS     }
+//RS 
+//RS     pub fn is_closed(&self) -> bool {
+//RS         self.closed
+//RS     }
+//RS 
+//RS     pub fn to_json(&self) -> String {
+//RS         let snapshots = self
+//RS             .snapshots()
+//RS             .iter()
+//RS             .map(CanvasPreviewSnapshot::to_json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"schema_version\":{},\"session_id\":\"{}\",\"closed\":{},\"selected\":[{}],\"resident_bytes\":{},\"sequence\":{},\"previews\":[{}]}}",
+//RS             CANVAS_PREVIEW_SCHEMA_VERSION,
+//RS             preview_json_escape(&self.id),
+//RS             self.closed,
+//RS             self.registry
+//RS                 .selected_names()
+//RS                 .iter()
+//RS                 .map(|name| format!("\"{}\"", preview_json_escape(name)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(","),
+//RS             self.resident_bytes,
+//RS             self.sequence,
+//RS             snapshots,
+//RS         )
+//RS     }
+//RS 
+//RS     fn open_client(
+//RS         &mut self,
+//RS         client_id: String,
+//RS         loopback: bool,
+//RS         cursor: u64,
+//RS     ) -> Result<CanvasPreviewConnection, CanvasPreviewError> {
+//RS         let generation = self
+//RS             .clients
+//RS             .get(&client_id)
+//RS             .map_or(1, |lease| lease.generation.saturating_add(1));
+//RS         if !self.clients.contains_key(&client_id) && self.clients.len() >= self.policy.max_clients {
+//RS             return Err(CanvasPreviewError::TooManyClients);
+//RS         }
+//RS         self.clients.insert(
+//RS             client_id.clone(),
+//RS             PreviewClientLease {
+//RS                 generation,
+//RS                 cursor,
+//RS                 loopback,
+//RS                 last_seen: Instant::now(),
+//RS             },
+//RS         );
+//RS         Ok(CanvasPreviewConnection {
+//RS             session_id: self.id.clone(),
+//RS             client_id,
+//RS             generation,
+//RS             cursor,
+//RS         })
+//RS     }
+//RS 
+//RS     fn authorize_connection(&self, presented_secret: &str, loopback: bool) -> Result<(), CanvasPreviewError> {
+//RS         if !constant_time_equal(&self.secret, presented_secret) {
+//RS             return Err(CanvasPreviewError::Unauthorized);
+//RS         }
+//RS         if self.authority.loopback_only() && !loopback {
+//RS             return Err(CanvasPreviewError::LoopbackRequired);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn record_mut(&mut self, name: &str) -> Result<&mut PreviewRecord<T>, CanvasPreviewError> {
+//RS         self.records
+//RS             .get_mut(name)
+//RS             .ok_or_else(|| CanvasPreviewError::UnknownPreview(name.to_string()))
+//RS     }
+//RS 
+//RS     fn snapshot_record(&self, name: &str, record: &PreviewRecord<T>) -> CanvasPreviewSnapshot<T> {
+//RS         CanvasPreviewSnapshot {
+//RS             session_id: self.id.clone(),
+//RS             name: name.to_string(),
+//RS             kind: record.descriptor.kind(),
+//RS             source: record.descriptor.source().clone(),
+//RS             status: record.status.clone(),
+//RS             freshness: record.freshness,
+//RS             current: (record.freshness == JetDevtoolsFreshnessState::Fresh)
+//RS                 .then(|| record.last_good.clone())
+//RS                 .flatten(),
+//RS             last_good: record.last_good.clone(),
+//RS             diagnostic: record.diagnostic.clone(),
+//RS             sequence: record.sequence,
+//RS         }
+//RS     }
+//RS 
+//RS     fn bump_sequence(&mut self) -> u64 {
+//RS         self.sequence = self.sequence.saturating_add(1);
+//RS         self.sequence
+//RS     }
+//RS 
+//RS     fn ensure_open(&self) -> Result<(), CanvasPreviewError> {
+//RS         if self.closed {
+//RS             Err(CanvasPreviewError::SessionClosed)
+//RS         } else {
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Clone> Drop for CanvasPreviewSession<T> {
+//RS     fn drop(&mut self) {
+//RS         self.clients.clear();
+//RS         self.records.clear();
+//RS         self.registry.clear();
+//RS         self.resident_bytes = 0;
+//RS     }
+//RS }
+//RS 
+//RS /// The descriptor registry is intentionally independent from the session's
+//RS /// retained frames.  This lets a checker publish a complete registry first,
+//RS /// then attach one bounded resident session to Canvas and `jet dev`.
+//RS #[derive(Clone, Debug, Default, PartialEq)]
+//RS pub struct CanvasPreviewRegistry {
+//RS     descriptors: BTreeMap<String, CanvasPreviewDescriptor>,
+//RS     contexts: BTreeMap<String, CanvasPreviewContext>,
+//RS     selected: BTreeSet<String>,
+//RS }
+//RS 
+//RS impl CanvasPreviewRegistry {
+//RS     pub fn new<I>(descriptors: I) -> Result<Self, CanvasPreviewError>
+//RS     where
+//RS         I: IntoIterator<Item = CanvasPreviewDescriptor>,
+//RS     {
+//RS         let mut registry = Self::default();
+//RS         for descriptor in descriptors {
+//RS             registry.insert(descriptor)?;
+//RS         }
+//RS         Ok(registry)
+//RS     }
+//RS 
+//RS     pub fn insert(&mut self, descriptor: CanvasPreviewDescriptor) -> Result<(), CanvasPreviewError> {
+//RS         descriptor.validate()?;
+//RS         if self.descriptors.len() >= CANVAS_PREVIEW_MAX_PREVIEWS {
+//RS             return Err(CanvasPreviewError::TooManyPreviews);
+//RS         }
+//RS         if self.descriptors.contains_key(descriptor.name()) {
+//RS             return Err(CanvasPreviewError::DuplicatePreview(
+//RS                 descriptor.name().to_string(),
+//RS             ));
+//RS         }
+//RS         self.descriptors
+//RS             .insert(descriptor.name().to_string(), descriptor);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn replace(&mut self, descriptor: CanvasPreviewDescriptor) -> Result<(), CanvasPreviewError> {
+//RS         descriptor.validate()?;
+//RS         if !self.descriptors.contains_key(descriptor.name()) {
+//RS             return self.insert(descriptor);
+//RS         }
+//RS         self.descriptors
+//RS             .insert(descriptor.name().to_string(), descriptor);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn remove(&mut self, name: &str) -> Result<(), CanvasPreviewError> {
+//RS         self.descriptors
+//RS             .remove(name)
+//RS             .ok_or_else(|| CanvasPreviewError::UnknownPreview(name.to_string()))?;
+//RS         self.selected.remove(name);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn get(&self, name: &str) -> Option<&CanvasPreviewDescriptor> {
+//RS         self.descriptors.get(name)
+//RS     }
+//RS 
+//RS     pub fn descriptors(&self) -> impl Iterator<Item = &CanvasPreviewDescriptor> {
+//RS         self.descriptors.values()
+//RS     }
+//RS 
+//RS     pub fn len(&self) -> usize {
+//RS         self.descriptors.len()
+//RS     }
+//RS 
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.descriptors.is_empty()
+//RS     }
+//RS 
+//RS     pub fn select(&mut self, name: &str) -> Result<(), CanvasPreviewError> {
+//RS         if !self.descriptors.contains_key(name) {
+//RS             return Err(CanvasPreviewError::UnknownPreview(name.to_string()));
+//RS         }
+//RS         if self.selected.len() >= CANVAS_PREVIEW_MAX_SELECTED && !self.selected.contains(name) {
+//RS             return Err(CanvasPreviewError::TooManySelected);
+//RS         }
+//RS         self.selected.insert(name.to_string());
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn select_many<I>(&mut self, names: I) -> Result<(), CanvasPreviewError>
+//RS     where
+//RS         I: IntoIterator<Item = String>,
+//RS     {
+//RS         let names = names.into_iter().collect::<Vec<_>>();
+//RS         if names.len() > CANVAS_PREVIEW_MAX_SELECTED {
+//RS             return Err(CanvasPreviewError::TooManySelected);
+//RS         }
+//RS         for name in &names {
+//RS             if !self.descriptors.contains_key(name) {
+//RS                 return Err(CanvasPreviewError::UnknownPreview(name.clone()));
+//RS             }
+//RS         }
+//RS         self.selected.clear();
+//RS         self.selected.extend(names);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn clear_selection(&mut self) {
+//RS         self.selected.clear();
+//RS     }
+//RS 
+//RS     pub fn selected_names(&self) -> Vec<String> {
+//RS         self.selected.iter().cloned().collect()
+//RS     }
+//RS 
+//RS     fn selected_len(&self) -> usize {
+//RS         self.selected.len()
+//RS     }
+//RS 
+//RS     fn is_selected(&self, name: &str) -> bool {
+//RS         self.selected.contains(name)
+//RS     }
+//RS 
+//RS     pub fn insert_context(&mut self, context: CanvasPreviewContext) -> Result<(), CanvasPreviewError> {
+//RS         if self.contexts.len() >= CANVAS_PREVIEW_MAX_CONTEXTS {
+//RS             return Err(CanvasPreviewError::TooManyContexts);
+//RS         }
+//RS         if self.contexts.contains_key(&context.id) {
+//RS             return Err(CanvasPreviewError::DuplicateContext(context.id));
+//RS         }
+//RS         context.source.validate()?;
+//RS         self.contexts.insert(context.id.clone(), context);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn context(&self, id: &str) -> Option<&CanvasPreviewContext> {
+//RS         self.contexts.get(id)
+//RS     }
+//RS 
+//RS     fn contexts_len(&self) -> usize {
+//RS         self.contexts.len()
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), CanvasPreviewError> {
+//RS         for descriptor in self.descriptors.values() {
+//RS             descriptor.validate()?;
+//RS             if let Some(context_id) = descriptor.context_id() {
+//RS                 let context = self
+//RS                     .contexts
+//RS                     .get(context_id)
+//RS                     .ok_or_else(|| CanvasPreviewError::UnknownContext(context_id.to_string()))?;
+//RS                 if context.source != *descriptor.source() {
+//RS                     return Err(CanvasPreviewError::ContextSourceMismatch);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn to_json(&self) -> String {
+//RS         let descriptors = self
+//RS             .descriptors
+//RS             .values()
+//RS             .map(|descriptor| {
+//RS                 format!(
+//RS                     "{{\"name\":\"{}\",\"kind\":\"{}\",\"callback\":\"{}\",\"source\":{},\"viewport\":{{\"device\":\"{}\",\"width\":{},\"height\":{},\"scale\":{}}},\"selected\":{}}}",
+//RS                     preview_json_escape(descriptor.name()),
+//RS                     descriptor.kind().as_str(),
+//RS                     preview_json_escape(&descriptor.callback().id),
+//RS                     preview_source_json(descriptor.source()),
+//RS                     preview_json_escape(descriptor.viewport().device.as_str()),
+//RS                     descriptor.viewport().width,
+//RS                     descriptor.viewport().height,
+//RS                     descriptor.viewport().scale,
+//RS                     self.selected.contains(descriptor.name()),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"schema_version\":{},\"selected\":[{}],\"contexts\":{},\"descriptors\":[{}]}}",
+//RS             CANVAS_PREVIEW_SCHEMA_VERSION,
+//RS             self.selected
+//RS                 .iter()
+//RS                 .map(|name| format!("\"{}\"", preview_json_escape(name)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(","),
+//RS             self.contexts.len(),
+//RS             descriptors,
+//RS         )
+//RS     }
+//RS 
+//RS     fn clear(&mut self) {
+//RS         self.descriptors.clear();
+//RS         self.contexts.clear();
+//RS         self.selected.clear();
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum CanvasPreviewError {
+//RS     InvalidText { field: &'static str, reason: &'static str },
+//RS     InvalidSource(&'static str),
+//RS     InvalidViewport(&'static str),
+//RS     InvalidInput(&'static str),
+//RS     InvalidPolicy,
+//RS     TooManyPreviews,
+//RS     TooManySelected,
+//RS     TooManyContexts,
+//RS     TooManyInputs,
+//RS     DuplicatePreview(String),
+//RS     UnknownPreview(String),
+//RS     DuplicateContext(String),
+//RS     UnknownContext(String),
+//RS     DuplicateInput(String),
+//RS     InputBudgetExceeded,
+//RS     AuthorityWidened,
+//RS     AuthorityRequired,
+//RS     CapabilityDenied(String),
+//RS     EffectSetMismatch,
+//RS     LoopbackRequired,
+//RS     Unauthorized,
+//RS     TooManyClients,
+//RS     StaleConnection,
+//RS     InvalidCursor,
+//RS     FrameTooLarge,
+//RS     ResidentBudgetExceeded,
+//RS     SourceMismatch,
+//RS     ContextSourceMismatch,
+//RS     RenderFailed,
+//RS     SessionClosed,
+//RS }
+//RS 
+//RS impl fmt::Display for CanvasPreviewError {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::InvalidText { field, reason } => write!(output, "invalid {field}: {reason}"),
+//RS             Self::InvalidSource(reason) => write!(output, "invalid preview source: {reason}"),
+//RS             Self::InvalidViewport(reason) => write!(output, "invalid preview viewport: {reason}"),
+//RS             Self::InvalidInput(reason) => write!(output, "invalid preview input: {reason}"),
+//RS             Self::InvalidPolicy => output.write_str("preview policy exceeds the bounded session contract"),
+//RS             Self::TooManyPreviews => output.write_str("preview registry is full"),
+//RS             Self::TooManySelected => output.write_str("preview selection exceeds the bounded limit"),
+//RS             Self::TooManyContexts => output.write_str("preview context registry is full"),
+//RS             Self::TooManyInputs => output.write_str("preview input overrides exceed the bounded limit"),
+//RS             Self::DuplicatePreview(name) => write!(output, "preview `{name}` is duplicated"),
+//RS             Self::UnknownPreview(name) => write!(output, "unknown preview `{name}`"),
+//RS             Self::DuplicateContext(id) => write!(output, "preview context `{id}` is duplicated"),
+//RS             Self::UnknownContext(id) => write!(output, "unknown preview context `{id}`"),
+//RS             Self::DuplicateInput(name) => write!(output, "preview input `{name}` is duplicated"),
+//RS             Self::InputBudgetExceeded => output.write_str("preview input budget exceeded"),
+//RS             Self::AuthorityWidened => output.write_str("preview authority widens the session authority"),
+//RS             Self::AuthorityRequired => output.write_str("preview effects require an authorized connection"),
+//RS             Self::CapabilityDenied(capability) => write!(output, "preview capability `{capability}` is denied"),
+//RS             Self::EffectSetMismatch => output.write_str("requested preview effects do not match the checked declaration"),
+//RS             Self::LoopbackRequired => output.write_str("preview session requires a loopback connection"),
+//RS             Self::Unauthorized => output.write_str("preview session authorization failed"),
+//RS             Self::TooManyClients => output.write_str("preview session client limit reached"),
+//RS             Self::StaleConnection => output.write_str("preview connection is stale; reconnect and resync"),
+//RS             Self::InvalidCursor => output.write_str("preview cursor is outside the session history"),
+//RS             Self::FrameTooLarge => output.write_str("preview frame exceeds the bounded frame limit"),
+//RS             Self::ResidentBudgetExceeded => output.write_str("preview resident frame budget exceeded"),
+//RS             Self::SourceMismatch => output.write_str("preview frame source identity does not match the checked declaration"),
+//RS             Self::ContextSourceMismatch => output.write_str("preview context source identity does not match the checked declaration"),
+//RS             Self::RenderFailed => output.write_str("preview callback failed; the last-good frame remains visible as stale"),
+//RS             Self::SessionClosed => output.write_str("preview session is closed"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for CanvasPreviewError {}
+//RS 
+//RS fn preview_text(value: &str, field: &'static str, max_bytes: usize) -> Result<(), CanvasPreviewError> {
+//RS     if value.trim().is_empty() {
+//RS         return Err(CanvasPreviewError::InvalidText {
+//RS             field,
+//RS             reason: "must not be empty",
+//RS         });
+//RS     }
+//RS     if value.len() > max_bytes {
+//RS         return Err(CanvasPreviewError::InvalidText {
+//RS             field,
+//RS             reason: "exceeds the bounded text size",
+//RS         });
+//RS     }
+//RS     if value.chars().any(char::is_control) {
+//RS         return Err(CanvasPreviewError::InvalidText {
+//RS             field,
+//RS             reason: "must not contain control characters",
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn preview_source_json(source: &CanvasPreviewSourceIdentity) -> String {
+//RS     format!(
+//RS         "{{\"source_id\":\"{}\",\"build_id\":\"{}\",\"revision\":\"{}\",\"span\":{{\"source_id\":\"{}\",\"file\":\"{}\",\"start_line\":{},\"start_column\":{},\"end_line\":{},\"end_column\":{}}}}}",
+//RS         preview_json_escape(&source.source_id),
+//RS         preview_json_escape(&source.build_id),
+//RS         preview_json_escape(&source.revision),
+//RS         preview_json_escape(&source.span.source_id),
+//RS         preview_json_escape(&source.span.file),
+//RS         source.span.start_line,
+//RS         source.span.start_column,
+//RS         source.span.end_line,
+//RS         source.span.end_column,
+//RS     )
+//RS }
+//RS 
+//RS fn constant_time_equal(left: &str, right: &str) -> bool {
+//RS     let mut difference = left.len() ^ right.len();
+//RS     let width = left.len().max(right.len());
+//RS     for index in 0..width {
+//RS         let left_byte = left.as_bytes().get(index).copied().unwrap_or(0);
+//RS         let right_byte = right.as_bytes().get(index).copied().unwrap_or(0);
+//RS         difference |= usize::from(left_byte ^ right_byte);
+//RS     }
+//RS     difference == 0
+//RS }
+//RS 
+//RS fn connection_is_loopback(lease: Option<&PreviewClientLease>) -> bool {
+//RS     lease.is_some_and(|lease| lease.loopback)
+//RS }
+// END-PORT-PENDING 0767 crates/jet-devserver/src/Canvas/preview.rs:1-1771
+

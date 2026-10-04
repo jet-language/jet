@@ -1,0 +1,668 @@
+// EditorHost.rs:1–1600. Host-neutral editor transport; never executes commands.
+// Shared Foundation facts/JSON come from their single published owner.
+// DevtoolsProjection/ResidentDevSession and WebHost decoder/render_json calls
+// retain Rust owner names pending Session/WebHost ABI reconciliation.
+use core.encoding.[DataTree]
+use jet_foundation.[JET_DEVTOOLS_PROTOCOL, JetDevtoolsEvent, JetDevtoolsSelection, JetDevtoolsViewState, foundation_parse_protocol_json_with_limit, foundation_json_write_quote]
+use core.devtools.runtime.kernel_devtools_panel_catalog as catalog
+use core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelDescriptor, JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsHostKind]
+
+pub EDITOR_PROTOCOL_VERSION :: U32{1}
+pub EDITOR_MAX_EVENTS :: 256
+pub EDITOR_MAX_HISTORY :: 256
+pub EDITOR_MAX_TEXT_BYTES :: 16384
+pub EDITOR_WORKBENCH_METHOD :: "jet/devtools/open"
+pub EDITOR_RECONNECT_METHOD :: "jet/devtools/reconnect"
+pub EDITOR_NAVIGATE_METHOD :: "jet/devtools/navigate"
+pub EDITOR_SELECT_METHOD :: "jet/devtools/select"
+pub EDITOR_COMMAND_METHOD :: "jet/devtools/command"
+
+pub enum EditorHost {
+    VsCode, Zed
+    pub fn wire_name(self) -> String Never! { if self == { .VsCode -> "vscode", .Zed -> "zed" } }
+    pub fn parse(value: String) -> EditorHost EditorHostError! {
+        if value == { "vscode" -> Ok(.VsCode), "zed" -> Ok(.Zed), else -> Err(EditorHostError.UnsupportedEditor(~value)) }
+    }
+}
+impl EditorHost.Display { fn display(^self) -> String { self.wire_name() } }
+pub enum EditorCommand {
+    Check, Build, Test, Run, Debug
+    pub fn wire_name(self) -> String Never! { if self == { .Check -> "check", .Build -> "build", .Test -> "test", .Run -> "run", .Debug -> "debug" } }
+    pub fn required_grant(self) -> String Never! { if self == { .Check -> "editor.command:check", .Build -> "editor.command:build", .Test -> "editor.command:test", .Run -> "editor.command:run", .Debug -> "editor.command:debug" } }
+    pub fn parse(value: String) -> EditorCommand EditorHostError! {
+        if value == { "check" -> Ok(.Check), "build" -> Ok(.Build), "test" -> Ok(.Test), "run" -> Ok(.Run), "debug" -> Ok(.Debug), else -> Err(EditorHostError.UnsupportedCommand(~value)) }
+    }
+}
+impl EditorCommand.Display { fn display(^self) -> String { self.wire_name() } }
+#Error
+pub enum EditorHostError {
+    InvalidRequest(String), InvalidEnvelope(String), UnsupportedEditor(String), UnsupportedCommand(String), UnsupportedMethod(String), LoopbackViolation(String), SourcePathRejected(String)
+    SessionMismatch{expected: String, actual: String}
+    SourceMismatch{expected: String, actual: String}
+    RevisionMismatch{expected: String, actual: String}
+    PanelNotFound(String)
+    CursorExpired{requested: U64, oldest: U64}
+    CommandDenied{command: EditorCommand, required_grant: String}
+    pub fn display(self) -> String Never! {
+        if self == {
+            .InvalidRequest(message) -> "invalid editor host request: {message}"
+            .InvalidEnvelope(message) -> "invalid jet.devtools.v1 envelope: {message}"
+            .UnsupportedEditor(editor) -> "unsupported editor host `{editor}`"
+            .UnsupportedCommand(command) -> "unsupported editor command `{command}`"
+            .UnsupportedMethod(method) -> "unsupported editor host method `{method}`"
+            .LoopbackViolation(message) -> "editor workbench must stay on loopback: {message}"
+            .SourcePathRejected(path) -> "source path rejected: {path}"
+            .SessionMismatch{expected, actual} -> "editor session mismatch: expected `{expected}`, got `{actual}`"
+            .SourceMismatch{expected, actual} -> "editor source mismatch: expected `{expected}`, got `{actual}`"
+            .RevisionMismatch{expected, actual} -> "editor revision mismatch: expected `{expected}`, got `{actual}`"
+            .PanelNotFound(panel) -> "unknown editor panel `{panel}`"
+            .CursorExpired{requested, oldest} -> "editor reconnect cursor `{requested}` is before the retained stream window `{oldest}`"
+            .CommandDenied{command, required_grant} -> "editor command `{command.wire_name()}` requires ungranted authority `{required_grant}`"
+        }
+    }
+}
+
+pub struct EditorSessionIdentity {
+    pub session_id: String, pub source_id: String, pub source_path: String, pub revision: String
+    pub fn new(^session_id: String, ^source_id: String, ^source_path: String, ^revision: String) -> EditorSessionIdentity EditorHostError! {
+        editor_validate_stable_text(session_id, "session_id")
+        editor_validate_source_identity(source_id)
+        path :: editor_clean_source_path(source_path)
+        editor_validate_stable_text(revision, "revision")
+        Ok(EditorSessionIdentity{session_id: ^session_id, source_id: ^source_id, source_path: path, revision: ^revision})
+    }
+}
+pub enum EditorFactValue {
+    Null, Bool(Bool), Integer(I64), Float(F64), Text(String), Array([EditorFactValue]), Object([String:EditorFactValue])
+    pub fn text(^value: String) -> EditorFactValue EditorHostError! {
+        editor_validate_stable_text(value, "fact text")
+        Ok(.Text(^value))
+    }
+    fn render(self, out: &[U8]) Never! {
+        if self == {
+            .Null -> editor_append(&out, "null")
+            .Bool(value) -> editor_append(&out, if value -> "true" else -> "false")
+            .Integer(value) -> editor_append(&out, "{value}")
+            .Float(value) -> editor_append(&out, "{value}")
+            .Text(value) -> editor_render_string(value, &out)
+            .Array(values) -> {
+                &out.push(U8{91})
+                loop (index, value) in values { if index != 0 -> &out.push(U8{44}); value.render(&out) }
+                &out.push(U8{93})
+            }
+            .Object(values) -> editor_render_fact_object(values, &out)
+        }
+    }
+}
+pub struct EditorStreamEvent {
+    pub sequence: U64, pub timestamp_ms: U64, pub source: String, pub kind: String, pub entity: String
+    pub fields: [String:EditorFactValue], pub payload: [String:EditorFactValue]?
+    pub fn new(sequence: U64, timestamp_ms: U64, ^source: String, ^kind: String, ^entity: String, ^fields: [String:EditorFactValue], ^payload: [String:EditorFactValue]?) -> EditorStreamEvent EditorHostError! {
+        event :: EditorStreamEvent{sequence, timestamp_ms, source: ^source, kind: ^kind, entity: ^entity, fields: ^fields, payload: ^payload}
+        event.validate()
+        Ok(event)
+    }
+    fn validate(self) EditorHostError! {
+        if self.sequence == (U64{0}) -> return Err(EditorHostError.InvalidEnvelope("event sequence must be greater than zero"))
+        editor_validate_stable_text(self.source, "event source")
+        editor_validate_stable_text(self.kind, "event kind")
+        editor_validate_stable_text(self.entity, "event entity")
+        editor_validate_fact_object(self.fields, "event fields")
+        if self.payload == .Val(payload) -> editor_validate_fact_object(payload, "event payload")
+    }
+    fn render(self, out: &[U8]) Never! {
+        editor_append(&out, "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":")
+        editor_render_string(self.source, &out)
+        editor_append(&out, ",\"kind\":"); editor_render_string(self.kind, &out)
+        editor_append(&out, ",\"entity\":"); editor_render_string(self.entity, &out)
+        editor_append(&out, ",\"fields\":"); editor_render_fact_object(self.fields, &out)
+        editor_append(&out, ",\"payload\":")
+        if self.payload == .Val(payload) -> editor_render_fact_object(payload, &out) else -> editor_append(&out, "null")
+        &out.push(U8{125})
+    }
+    pub fn serialize(self) -> String Never! { out := [U8]{}; self.render(&out); editor_finish(^out) }
+}
+pub struct EditorStreamSnapshot {
+    pub events: [EditorStreamEvent], pub resumed_from: U64?, pub next_cursor: U64?
+    pub fn serialize(self) -> String Never! {
+        out := [U8]{}
+        editor_append(&out, `{"events":`); editor_render_events(self.events, &out)
+        editor_append(&out, ",\"resumed_from\":"); editor_render_optional_u64(self.resumed_from, &out)
+        editor_append(&out, ",\"next_cursor\":"); editor_render_optional_u64(self.next_cursor, &out)
+        &out.push(U8{125}); editor_finish(^out)
+    }
+}
+pub struct EditorWorkbenchSnapshot {
+    pub host: EditorHost, pub protocol: String, pub protocol_version: U32, pub workbench_url: String
+    pub identity: EditorSessionIdentity, pub started_at_ms: U64
+    pub panels: [JetDevtoolsPanelDescriptor], pub panel_availability: [JetDevtoolsPanelAvailability]
+    pub selection: JetDevtoolsSelection, pub events: [EditorStreamEvent]
+    pub resumed_from: U64?, pub cursor: U64?, pub time_cursor: U64?
+    pub fn serialize(self) -> String Never! {
+        out := [U8]{}
+        editor_append(&out, `{"protocol":`); editor_render_string(self.protocol, &out)
+        editor_append(&out, ",\"protocol_version\":{self.protocol_version},\"editor\":"); editor_render_string(self.host.wire_name(), &out)
+        editor_append(&out, ",\"workbench_url\":"); editor_render_string(self.workbench_url, &out)
+        editor_render_identity(self.identity, true, &out)
+        editor_append(&out, ",\"started_at_ms\":{self.started_at_ms},\"panels\":[")
+        loop (index, panel) in self.panels {
+            if index != 0 -> &out.push(U8{44})
+            editor_append(&out, `{"id":`); editor_render_string("{panel.id.as_str()}", &out)
+            editor_append(&out, ",\"title\":"); editor_render_string("{panel.title}", &out)
+            editor_append(&out, ",\"ordinal\":{panel.order}}}")
+        }
+        editor_append(&out, "],\"panel_availability\":[")
+        loop (index, row) in self.panel_availability {
+            if index != 0 -> &out.push(U8{44})
+            editor_append(&out, `{"id":`); editor_render_string("{row.descriptor.id.as_str()}", &out)
+            editor_append(&out, ",\"available\":{row.is_available()},\"reasons\":[")
+            loop (reason_index, reason) in row.unavailable_reasons() {
+                if reason_index != 0 -> &out.push(U8{44})
+                editor_render_string("{reason.as_str()}", &out)
+            }
+            editor_append(&out, "]}")
+        }
+        editor_append(&out, "],\"selection\":"); editor_render_selection(self.selection, &out)
+        editor_append(&out, ",\"events\":"); editor_render_events(self.events, &out)
+        editor_append(&out, ",\"resumed_from\":"); editor_render_optional_u64(self.resumed_from, &out)
+        editor_append(&out, ",\"cursor\":"); editor_render_optional_u64(self.cursor, &out)
+        editor_append(&out, ",\"time_cursor\":"); editor_render_optional_u64(self.time_cursor, &out)
+        &out.push(U8{125}); editor_finish(^out)
+    }
+}
+pub struct EditorSourceNavigation {
+    pub host: EditorHost, pub identity: EditorSessionIdentity, pub line: U32, pub column: U32, pub source_url: String
+    pub fn serialize(self) -> String Never! {
+        out := [U8]{}; editor_render_response_context(self.host, self.identity, true, &out)
+        editor_append(&out, ",\"line\":{self.line},\"column\":{self.column},\"source_url\":")
+        editor_render_string(self.source_url, &out); &out.push(U8{125}); editor_finish(^out)
+    }
+}
+pub struct EditorCommandReceipt {
+    pub host: EditorHost, pub identity: EditorSessionIdentity, pub command: EditorCommand, pub required_grant: String
+    pub fn serialize(self) -> String Never! {
+        out := [U8]{}; editor_render_response_context(self.host, self.identity, false, &out)
+        editor_append(&out, ",\"command\":"); editor_render_string(self.command.wire_name(), &out)
+        editor_append(&out, ",\"required_grant\":"); editor_render_string(self.required_grant, &out)
+        editor_append(&out, ",\"status\":\"accepted\"}"); editor_finish(^out)
+    }
+}
+pub enum EditorHostResponse {
+    Workbench(EditorWorkbenchSnapshot), Stream(EditorStreamSnapshot), Navigation(EditorSourceNavigation), Selection(JetDevtoolsSelection), Command(EditorCommandReceipt)
+    pub fn serialize(self) -> String Never! {
+        if self == { .Workbench(value) -> value.serialize(), .Stream(value) -> value.serialize(), .Navigation(value) -> value.serialize(), .Selection(value) -> { out := [U8]{}; editor_render_selection(value, &out); editor_finish(^out) }, .Command(value) -> value.serialize() }
+    }
+}
+
+pub struct EditorWorkbenchOpenRequest {
+    pub host: EditorHost, pub session_id: String, pub source_id: String, pub source_path: String, pub revision: String
+    pub panel_id: String?, pub item_key: String?, pub cursor: U64?
+    pub fn new(host: EditorHost, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String) -> EditorWorkbenchOpenRequest Never! {
+        EditorWorkbenchOpenRequest{host, session_id: ^session_id, source_id: ^source_id, source_path: ^source_path, revision: ^revision, panel_id: None, item_key: None, cursor: None}
+    }
+    pub fn serialize(self) -> String Never! {
+        out := [U8]{}; editor_render_request_context(self.host, self.session_id, self.source_id, self.source_path, self.revision, &out)
+        editor_append(&out, ",\"panel_id\":"); editor_render_optional_string(self.panel_id, &out)
+        editor_append(&out, ",\"item_key\":"); editor_render_optional_string(self.item_key, &out)
+        editor_append(&out, ",\"cursor\":"); editor_render_optional_u64(self.cursor, &out)
+        &out.push(U8{125}); editor_finish(^out)
+    }
+}
+pub struct EditorReconnectRequest {
+    pub host: EditorHost, pub session_id: String, pub source_id: String, pub source_path: String, pub revision: String, pub cursor: U64?
+    pub fn new(host: EditorHost, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String, cursor: U64?) -> EditorReconnectRequest Never! {
+        EditorReconnectRequest{host, session_id: ^session_id, source_id: ^source_id, source_path: ^source_path, revision: ^revision, cursor}
+    }
+}
+pub struct EditorSourceNavigationRequest {
+    pub host: EditorHost, pub session_id: String, pub source_id: String, pub source_path: String, pub revision: String, pub line: U32, pub column: U32
+    pub fn new(host: EditorHost, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String, line: U32, column: U32) -> EditorSourceNavigationRequest Never! {
+        EditorSourceNavigationRequest{host, session_id: ^session_id, source_id: ^source_id, source_path: ^source_path, revision: ^revision, line, column}
+    }
+}
+pub struct EditorPanelSelectionRequest {
+    pub host: EditorHost, pub session_id: String, pub source_id: String, pub source_path: String, pub revision: String, pub panel_id: String, pub item_key: String?
+}
+pub struct EditorCommandRequest {
+    pub host: EditorHost, pub session_id: String, pub source_id: String, pub source_path: String, pub revision: String, pub command: EditorCommand, pub arguments: [String]
+    pub fn new(host: EditorHost, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String, command: EditorCommand) -> EditorCommandRequest Never! {
+        EditorCommandRequest{host, session_id: ^session_id, source_id: ^source_id, source_path: ^source_path, revision: ^revision, command, arguments: [String]{}}
+    }
+}
+
+// Ring slots move on insertion/eviction, never shift the retained event payloads.
+pub struct EditorHostTransport {
+    workbench: String, session_identity: EditorSessionIdentity, grant_set: [String:Bool]
+    events: [EditorStreamEvent?], head: Int, count: Int, next_sequence: U64, started_at_ms: U64, shared_view: JetDevtoolsViewState
+    pub fn new(^workbench_url: String, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String, grants: [String]) -> EditorHostTransport EditorHostError! {
+        editor_validate_loopback_url(workbench_url)
+        identity :: EditorSessionIdentity.new(^session_id, ^source_id, ^source_path, ^revision)
+        set := [String:Bool]{}
+        loop grant in grants { editor_validate_stable_text(grant, "command grant"); set[grant] = true }
+        slots :: editor_empty_ring()
+        Ok(EditorHostTransport{workbench: ^workbench_url, session_identity: identity, grant_set: set, events: slots, head: 0, count: 0, next_sequence: U64{1}, started_at_ms: U64{0}, shared_view: JetDevtoolsViewState.new(Val(JetDevtoolsSelection.new("build", None)), None)})
+    }
+    pub fn identity(self) -> @EditorSessionIdentity Never! from self { @self.session_identity }
+    pub fn workbench_url(self) -> @String Never! from self { @self.workbench }
+    pub fn grants(self) -> [String] Never! { out := [String]{}; loop (grant, _) in self.grant_set -> &out.push(~grant); &out.sort(); out }
+    pub fn event_count(self) -> Int Never! { self.count }
+    pub fn latest_cursor(self) -> U64? Never! {
+        if self.count == 0 -> return None
+        Val(self.event_at(self.count - 1).sequence)
+    }
+    fn event_at(self, index: Int) -> @EditorStreamEvent Never! from self {
+        if self.events[(self.head + index) % EDITOR_MAX_EVENTS] == .Val(event) -> return @event
+        panic("occupied editor event ring slot")
+    }
+    fn push_event(&self, ^event: EditorStreamEvent) Never! {
+        editor_ring_push(&self.events, &self.head, &self.count, ^event)
+    }
+    pub fn append_event(&self, ^event: EditorStreamEvent) EditorHostError! {
+        event.validate()
+        if self.latest_cursor() == .Val(previous) {
+            if event.sequence <= previous -> return Err(EditorHostError.InvalidEnvelope("event sequence must increase monotonically"))
+        }
+        self.next_sequence = editor_saturating_next(event.sequence)
+        self.shared_view.cursor = Val(event.sequence)
+        &self.push_event(^event)
+    }
+    pub fn stream_after(self, cursor: U64?) -> EditorStreamSnapshot EditorHostError! {
+        if cursor == .Val(requested) {
+            if self.count != 0 {
+                oldest :: self.event_at(0).sequence
+                if editor_saturating_next(requested) < oldest -> return Err(EditorHostError.CursorExpired{requested, oldest})
+            }
+        }
+        events := [EditorStreamEvent]{}
+        loop index in 0..<self.count {
+            event :: self.event_at(index)
+            if cursor == .Val(requested) { if event.sequence <= requested -> next }
+            &events.push(~event)
+        }
+        next_cursor := cursor
+        if events.len() != 0 -> next_cursor = Val(events[events.len() - 1].sequence)
+        else if next_cursor == None -> next_cursor = self.latest_cursor()
+        Ok(EditorStreamSnapshot{events, resumed_from: cursor, next_cursor})
+    }
+    pub fn panel_catalog(self) -> View<JetDevtoolsPanelDescriptor> Never! { catalog.descriptors() }
+    pub fn panel_availability(self) -> [JetDevtoolsPanelAvailability] Never! {
+        grants := [JetDevtoolsPanelCapability]{}
+        loop (index, capability) in catalog.CAPABILITY_ALL {
+            if self.grant_set.has_key(catalog.CAPABILITY_GRANTS[index]) -> &grants.push(capability)
+        }
+        catalog.available_for(JetDevtoolsHostKind.Editor, grants) ?? [JetDevtoolsPanelAvailability]{}
+    }
+    pub fn view(self) -> @JetDevtoolsViewState Never! from self { @self.shared_view }
+    fn validate_request(self, host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String) EditorHostError! {
+        editor_validate_stable_text(session_id, "session_id")
+        editor_validate_source_identity(source_id)
+        path :: editor_clean_source_path(source_path)
+        editor_validate_stable_text(revision, "revision")
+        expected :: self.session_identity
+        if session_id != expected.session_id -> return Err(EditorHostError.SessionMismatch{expected: ~expected.session_id, actual: ~session_id})
+        if source_id != expected.source_id -> return Err(EditorHostError.SourceMismatch{expected: ~expected.source_id, actual: ~source_id})
+        if path != expected.source_path -> return Err(EditorHostError.SourceMismatch{expected: ~expected.source_path, actual: path})
+        if revision != expected.revision -> return Err(EditorHostError.RevisionMismatch{expected: ~expected.revision, actual: ~revision})
+    }
+    pub fn open(&self, request: EditorWorkbenchOpenRequest) -> EditorWorkbenchSnapshot EditorHostError! {
+        self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
+        stream :: self.stream_after(request.cursor)
+        panel := "build"
+        if request.panel_id == .Val(value) -> panel = ~value
+        else if self.shared_view.selection == .Val(selection) -> panel = ~selection.panel_id
+        canonical :: editor_ensure_panel(panel)
+        item := String?{None}
+        if request.item_key == .Val(value) { editor_validate_stable_text(value, "selection item_key"); item = Val(~value) }
+        else if request.panel_id == None {
+            if self.shared_view.selection == .Val(selection) -> item = ~selection.item_key
+        }
+        self.shared_view.selection = Val(JetDevtoolsSelection.new(canonical, ^item))
+        Ok(self.snapshot(request.host, ^stream))
+    }
+    pub fn reconnect(self, request: EditorReconnectRequest) -> EditorWorkbenchSnapshot EditorHostError! {
+        self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
+        stream :: self.stream_after(request.cursor)
+        Ok(self.snapshot(request.host, ^stream))
+    }
+    pub fn navigate_source(self, request: EditorSourceNavigationRequest) -> EditorSourceNavigation EditorHostError! {
+        self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
+        Ok(EditorSourceNavigation{host: request.host, identity: ~self.session_identity, line: request.line, column: request.column, source_url: editor_source_url(self.workbench, self.session_identity.source_id, request.line, request.column)})
+    }
+    pub fn select_panel(&self, request: EditorPanelSelectionRequest) -> JetDevtoolsSelection EditorHostError! {
+        self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
+        panel :: editor_ensure_panel(request.panel_id)
+        if request.item_key == .Val(value) -> editor_validate_stable_text(value, "selection item_key")
+        selection :: JetDevtoolsSelection.new(panel, ~request.item_key)
+        self.shared_view.selection = Val(~selection)
+        Ok(selection)
+    }
+    pub fn command(self, request: EditorCommandRequest) -> EditorCommandReceipt EditorHostError! {
+        self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
+        loop argument in request.arguments -> editor_validate_stable_text(argument, "command argument")
+        grant :: request.command.required_grant()
+        if !self.grant_set.has_key(grant) -> return Err(EditorHostError.CommandDenied{command: request.command, required_grant: grant})
+        Ok(EditorCommandReceipt{host: request.host, identity: ~self.session_identity, command: request.command, required_grant: grant})
+    }
+    fn snapshot(self, host: EditorHost, ^stream: EditorStreamSnapshot) -> EditorWorkbenchSnapshot Never! {
+        EditorWorkbenchSnapshot{host, protocol: JET_DEVTOOLS_PROTOCOL, protocol_version: EDITOR_PROTOCOL_VERSION, workbench_url: ~self.workbench, identity: ~self.session_identity, started_at_ms: self.started_at_ms, panels: self.panel_catalog().to_list(), panel_availability: self.panel_availability(), selection: ~(self.shared_view.selection ?? JetDevtoolsSelection.new("build", None)), events: ^stream.events, resumed_from: stream.resumed_from, cursor: stream.next_cursor, time_cursor: self.shared_view.cursor}
+    }
+    pub fn replace_projection(&self, projection: DevtoolsProjection) EditorHostError! {
+        if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return Err(EditorHostError.InvalidEnvelope("projection protocol does not match jet.devtools.v1"))
+        &self.check_projection_identity(projection.session_id, projection.source_id, Val(projection.revision))
+        // Construct a temporary ring so failed conversion cannot mutate self.
+        replacement := editor_empty_ring()
+        head := 0
+        count := 0
+        loop event in projection.panels -> editor_ring_push(&replacement, &head, &count, editor_event_from_event(event))
+        self.events = ^replacement; self.head = head; self.count = count
+        self.next_sequence = if self.latest_cursor() == .Val(sequence) -> editor_saturating_next(sequence) else -> U64{1}
+        self.started_at_ms = projection.observed_at
+        self.shared_view.cursor = if projection.sequence != (U64{0}) -> Val(projection.sequence) else -> None
+        self.shared_view.selection = Val(JetDevtoolsSelection.new("build", None))
+        if projection.selection == .Val(selection) {
+            if editor_canonical_panel_id(selection.panel_id) == .Val(panel) {
+                item :: if selection.item_key.len() != 0 -> Val(~selection.item_key) else -> None
+                self.shared_view.selection = Val(JetDevtoolsSelection.new(panel, item))
+            }
+        }
+    }
+    fn check_projection_identity(&self, session_id: String, source_id: String?, revision: String?) EditorHostError! {
+        if session_id != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch{expected: ~self.session_identity.session_id, actual: ~session_id})
+        if revision == .Val(value) {
+            if value.len() != 0 && value != self.session_identity.revision -> return Err(EditorHostError.RevisionMismatch{expected: ~self.session_identity.revision, actual: ~value})
+        }
+        if source_id == .Val(value) {
+            if value != self.session_identity.source_id -> return Err(EditorHostError.SourceMismatch{expected: ~self.session_identity.source_id, actual: ~value})
+        }
+    }
+    pub fn sync_session(&self, session: ResidentDevSession) EditorHostError! {
+        if session.id() != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch{expected: ~self.session_identity.session_id, actual: ~session.id()})
+        projection :: session.devtools_events_since(None)
+        &self.replace_projection(projection)
+    }
+    pub fn replace_devtools_json(&self, payload: String) EditorHostError! {
+        // Sole wire decoder belongs to WebHost/Foundation, not this transport.
+        decoded :: decode_devtools_envelope(payload) ?? return Err(EditorHostError.InvalidEnvelope(err))
+        if decoded == {
+            .Commands(_) -> return Err(EditorHostError.InvalidEnvelope("editor host accepts runtime event envelopes, not command envelopes"))
+            .Events(envelope) -> {
+                if envelope.session_id != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch{expected: ~self.session_identity.session_id, actual: ~envelope.session_id})
+                if envelope.source_identity == .Val(identity) {
+                    // Wire precedence is source before revision (projection is opposite).
+                    if identity.source_id == .Val(source) {
+                        if source != self.session_identity.source_id -> return Err(EditorHostError.SourceMismatch{expected: ~self.session_identity.source_id, actual: ~source})
+                    }
+                    if identity.revision == .Val(revision) {
+                        if revision.len() != 0 && revision != self.session_identity.revision -> return Err(EditorHostError.RevisionMismatch{expected: ~self.session_identity.revision, actual: ~revision})
+                    }
+                }
+                replacement := editor_empty_ring()
+                head := 0
+                count := 0
+                loop event in envelope.events() -> editor_ring_push(&replacement, &head, &count, editor_event_from_event(event))
+                self.events = ^replacement; self.head = head; self.count = count
+                self.next_sequence = if self.latest_cursor() == .Val(sequence) -> editor_saturating_next(sequence) else -> U64{1}
+                self.started_at_ms = envelope.started_at_ms
+                self.shared_view.cursor = envelope.cursor()
+                self.shared_view.selection = Val(JetDevtoolsSelection.new("build", None))
+                if envelope.selection() == .Val(selection) {
+                    if editor_canonical_panel_id(selection.panel_id) == .Val(panel) -> self.shared_view.selection = Val(JetDevtoolsSelection.new(panel, ~selection.item_key))
+                }
+            }
+        }
+    }
+    pub fn handle_lsp_json(&self, payload: String) -> String EditorHostError! {
+        root :: foundation_parse_protocol_json_with_limit(payload, EDITOR_MAX_TEXT_BYTES) ?? return Err(EditorHostError.InvalidRequest("request is not valid bounded JSON"))
+        if root != .Object(_) -> return Err(EditorHostError.InvalidRequest("JSON-RPC request must be an object"))
+        if root.field("jsonrpc") != Val(DataTree.Text("2.0")) -> return Err(EditorHostError.InvalidRequest("JSON-RPC version must be `2.0`"))
+        id :: root.field("id") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an id"))
+        if id != .Null && id != .Text(_) && id != .Int(_) && id != .Float(_) -> return Err(EditorHostError.InvalidRequest("JSON-RPC id must be null, a string, or a number"))
+        method_value :: root.field("method") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires a method"))
+        method :: if method_value == .Text(value) -> ~value else -> return Err(EditorHostError.InvalidRequest("JSON-RPC request requires a method"))
+        params :: root.field("params") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an object params value"))
+        if params != .Object(_) -> return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an object params value"))
+        // Unsupported methods do not read common fields, matching Rust precedence.
+        if method != EDITOR_WORKBENCH_METHOD && method != EDITOR_RECONNECT_METHOD && method != EDITOR_NAVIGATE_METHOD && method != EDITOR_SELECT_METHOD && method != EDITOR_COMMAND_METHOD -> return Err(EditorHostError.UnsupportedMethod(method))
+        host :: EditorHost.parse(editor_field_text(params, "editor"))
+        session :: editor_field_text(params, "session_id")
+        source :: editor_field_text(params, "source_id")
+        path :: editor_field_text(params, "source_path")
+        revision :: editor_field_text(params, "revision")
+        response :: if method == {
+            EDITOR_WORKBENCH_METHOD -> {
+                request := EditorWorkbenchOpenRequest.new(host, session, source, path, revision)
+                request.panel_id = editor_optional_text(params, "panel_id")
+                request.item_key = editor_optional_text(params, "item_key")
+                request.cursor = editor_optional_cursor(params)
+                EditorHostResponse.Workbench(&self.open(request))
+            }
+            EDITOR_RECONNECT_METHOD -> EditorHostResponse.Workbench(self.reconnect(EditorReconnectRequest.new(host, session, source, path, revision, editor_optional_cursor(params))))
+            EDITOR_NAVIGATE_METHOD -> {
+                line :: editor_field_u64(params, "line")
+                column :: editor_field_u64(params, "column")
+                if line > (U64{4294967295}) -> return Err(EditorHostError.InvalidRequest("editor navigation line is out of range"))
+                if column > (U64{4294967295}) -> return Err(EditorHostError.InvalidRequest("editor navigation column is out of range"))
+                EditorHostResponse.Navigation(self.navigate_source(EditorSourceNavigationRequest.new(host, session, source, path, revision, U32.from_u64(line) ?? panic("checked line"), U32.from_u64(column) ?? panic("checked column"))))
+            }
+            EDITOR_SELECT_METHOD -> EditorHostResponse.Selection(&self.select_panel(EditorPanelSelectionRequest{host, session_id: session, source_id: source, source_path: path, revision, panel_id: editor_field_text(params, "panel_id"), item_key: editor_optional_text(params, "item_key")}))
+            else -> {
+                command :: EditorCommand.parse(editor_field_text(params, "command"))
+                arguments := [String]{}
+                if params.field("arguments") == .Val(value) {
+                    if value == .Array(values) {
+                        loop argument in values {
+                            if argument == .Text(text) -> &arguments.push(~text)
+                            else -> return Err(EditorHostError.InvalidRequest("editor command arguments must be text"))
+                        }
+                    } else -> return Err(EditorHostError.InvalidRequest("editor command arguments must be an array"))
+                }
+                EditorHostResponse.Command(self.command(EditorCommandRequest{host, session_id: session, source_id: source, source_path: path, revision, command, arguments}))
+            }
+        }
+        Ok("{{\"jsonrpc\":\"2.0\",\"id\":{render_json(id)},\"result\":{response.serialize()}}}")
+    }
+}
+
+fn editor_empty_ring() -> [EditorStreamEvent?] Never! {
+    slots := [EditorStreamEvent?]{}
+    loop _ in 0..<EDITOR_MAX_EVENTS -> &slots.push(None)
+    slots
+}
+fn editor_ring_push(slots: &[EditorStreamEvent?], head: &Int, count: &Int, ^event: EditorStreamEvent) Never! {
+    slot :: (head + count) % EDITOR_MAX_EVENTS
+    slots[slot] = Val(^event)
+    if count == EDITOR_MAX_EVENTS -> head = (head + 1) % EDITOR_MAX_EVENTS
+    else -> count += 1
+}
+
+fn editor_saturating_next(value: U64) -> U64 Never! { if value == (U64{18446744073709551615}) -> value else -> value + U64{1} }
+fn editor_has_control(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    loop (index, byte) in bytes {
+        code :: Int.from_u8(byte)
+        if code < 32 || code == 127 -> return true
+        if code == 194 && index + 1 < bytes.len() {
+            next_code :: Int.from_u8(bytes[index + 1])
+            if next_code >= 128 && next_code <= 159 -> return true
+        }
+    }
+    false
+}
+fn editor_validate_stable_text(value: String, label: String) EditorHostError! {
+    if value.bytes().len() == 0 || value.bytes().len() > EDITOR_MAX_TEXT_BYTES || editor_has_control(value) -> return Err(EditorHostError.InvalidRequest("{label} must be nonempty, bounded, and free of control characters"))
+}
+fn editor_rejected_path_shape(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    if value.contains("\\") || value.starts_with("/") -> return true
+    if bytes.len() > 1 && bytes[1] == (U8{58}) -> return true
+    loop component in value.split("/") { if component.len() == 0 || component == "." || component == ".." -> return true }
+    false
+}
+fn editor_validate_source_identity(value: String) EditorHostError! {
+    editor_validate_stable_text(value, "source_id")
+    if editor_rejected_path_shape(value) -> return Err(EditorHostError.SourcePathRejected(~value))
+}
+fn editor_clean_source_path(value: String) -> String EditorHostError! {
+    if value.bytes().len() == 0 || value.bytes().len() > EDITOR_MAX_TEXT_BYTES || editor_has_control(value) || editor_rejected_path_shape(value) -> return Err(EditorHostError.SourcePathRejected(~value))
+    // Every accepted component is already canonical; no split/join copy needed.
+    if !value.ends_with(".jet") -> return Err(EditorHostError.SourcePathRejected(~value))
+    Ok(~value)
+}
+fn editor_validate_loopback_url(value: String) EditorHostError! {
+    whitespace := false
+    loop byte in value.bytes() { code :: Int.from_u8(byte); if code == 32 || (code >= 9 && code <= 13) -> whitespace = true }
+    if value.bytes().len() == 0 || value.bytes().len() > EDITOR_MAX_TEXT_BYTES || editor_has_control(value) || whitespace -> return Err(EditorHostError.LoopbackViolation("URL must be bounded and contain no whitespace"))
+    if !value.starts_with("http://") -> return Err(EditorHostError.LoopbackViolation("only an http loopback URL is accepted"))
+    rest := value.slice(7, value.len()) // #4303
+    if rest.contains("?") || rest.contains("#") || rest.contains("@") -> return Err(EditorHostError.LoopbackViolation("workbench URL cannot contain query, fragment, or userinfo"))
+    slash :: rest.find("/") ?? rest.len()
+    authority := rest.slice(0, slash) // #4303
+    host := ""
+    port := ""
+    if authority.starts_with("[::1]:") { host = "[::1]"; port = authority.slice(6, authority.len()) }
+    else {
+        colon := Int?{None}
+        loop (index, byte) in authority.bytes() { if byte == (U8{58}) -> colon = Val(index) }
+        index :: colon ?? return Err(EditorHostError.LoopbackViolation("URL must include a loopback port"))
+        host = authority.slice(0, index); port = authority.slice(index + 1, authority.len())
+    }
+    if host != "127.0.0.1" && host != "localhost" && host != "[::1]" -> return Err(EditorHostError.LoopbackViolation("host `{host}` is not loopback"))
+    // Rust u16 FromStr accepts a leading +, but not whitespace or negatives.
+    digits := port // #4303
+    if digits.starts_with("+") -> digits = digits.slice(1, digits.len())
+    number := 0
+    if digits.len() == 0 -> return Err(EditorHostError.LoopbackViolation("URL port must be an integer from 1 to 65535"))
+    loop byte in digits.bytes() {
+        digit :: Int.from_u8(byte) - 48
+        if digit < 0 || digit > 9 || number > 6553 || (number == 6553 && digit > 5) -> return Err(EditorHostError.LoopbackViolation("URL port must be an integer from 1 to 65535"))
+        number = number * 10 + digit
+    }
+    if number == 0 -> return Err(EditorHostError.LoopbackViolation("URL port must be greater than zero"))
+    // Exclude the first separator: Rust's path starts after that separator.
+    if slash < rest.len() { tail := rest.slice(slash + 1, rest.len()); if tail.contains("//") -> return Err(EditorHostError.LoopbackViolation("workbench URL path must be canonical")) }
+}
+fn editor_canonical_panel_id(panel_id: String) -> String? Never! {
+    loop panel in catalog.descriptors() {
+        // The canonical catalog owns these spellings; no host-local vocabulary.
+        name :: catalog.PANEL_NAMES[Int.from_u16(panel.order) - 1]
+        if name == panel_id -> return Val(~name)
+    }
+    None
+}
+fn editor_ensure_panel(panel_id: String) -> String EditorHostError! { Ok(editor_canonical_panel_id(panel_id) ?? return Err(EditorHostError.PanelNotFound(~panel_id))) }
+fn editor_event_from_event(event: JetDevtoolsEvent) -> EditorStreamEvent EditorHostError! {
+    fields := [String:EditorFactValue]{}
+    fields["fields"] = EditorFactValue.text(~event.fields_json())
+    payload := [String:EditorFactValue]?{None}
+    if event.payload_json() == .Val(text) {
+        values := [String:EditorFactValue]{}; values["payload"] = EditorFactValue.text(~text); payload = Val(values)
+    }
+    EditorStreamEvent.new(event.sequence(), event.timestamp_ms, ~event.source(), ~event.kind(), ~event.entity(), fields, payload)
+}
+fn editor_source_url(workbench_url: String, source_id: String, line: U32, column: U32) -> String Never! {
+    end := workbench_url.bytes().len()
+    loop end > 0 && workbench_url.bytes()[end - 1] == (U8{47}) -> end -= 1
+    base := workbench_url.slice(0, end) // #4303
+    out := [U8]{}; editor_append(&out, base); editor_append(&out, "?source_id=")
+    editor_percent_encode(source_id, &out); editor_append(&out, "&line={line}&column={column}")
+    editor_finish(^out)
+}
+fn editor_percent_encode(value: String, out: &[U8]) Never! {
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 46 || code == 95 || code == 126 -> &out.push(byte)
+        else { &out.push(U8{37}); &out.push(editor_hex_digit(code >> 4)); &out.push(editor_hex_digit(code & 15)) }
+    }
+}
+fn editor_hex_digit(value: Int) -> U8 Never! { "0123456789ABCDEF".bytes()[value] }
+fn editor_validate_fact_object(values: [String:EditorFactValue], label: String) EditorHostError! {
+    if values.len() > EDITOR_MAX_HISTORY -> return Err(EditorHostError.InvalidEnvelope("{label} exceeds the bounded field limit"))
+    // Preserve BTreeMap's sorted error precedence.
+    keys :: editor_fact_keys(values)
+    loop key in keys { editor_validate_stable_text(key, "fact key"); editor_validate_fact_value(values[key]) }
+}
+fn editor_validate_fact_value(value: EditorFactValue) EditorHostError! {
+    if value == {
+        .Float(number) -> if !number.is_finite() -> return Err(EditorHostError.InvalidEnvelope("fact value contains a non-finite number"))
+        .Text(text) -> editor_validate_stable_text(text, "fact text")
+        .Array(values) -> {
+            if values.len() > EDITOR_MAX_HISTORY -> return Err(EditorHostError.InvalidEnvelope("fact array exceeds the bounded history limit"))
+            loop child in values -> editor_validate_fact_value(child)
+        }
+        .Object(values) -> editor_validate_fact_object(values, "fact object")
+        else -> {}
+    }
+}
+fn editor_field_text(params: DataTree, key: String) -> String EditorHostError! {
+    if params.field(key) == .Val(value) { if value == .Text(text) -> return Ok(~text) }
+    Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text"))
+}
+fn editor_optional_text(params: DataTree, key: String) -> String? EditorHostError! {
+    value :: params.field(key) ?? return Ok(None)
+    if value == { .Null -> Ok(None), .Text(text) -> Ok(Val(~text)), else -> Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text or null")) }
+}
+fn editor_field_u64(params: DataTree, key: String) -> U64 EditorHostError! {
+    if params.field(key) == .Val(value) {
+        if value == {
+            .Int(number) -> if number >= 0 { if U64.from_int(number) == .Val(result) -> return Ok(result) }
+            .Float(number) -> {
+                if number.is_finite() && number >= (F64{0.0}) && number <= (F64{18446744073709551616.0}) {
+                    integer :: Int{number}
+                    if F64{integer} == number {
+                        // Rust's float-to-u64 cast saturates at the rounded MAX.
+                        if number >= (F64{18446744073709551616.0}) -> return Ok(U64{18446744073709551615})
+                        return Ok(U64.from_int(integer) ?? panic("checked editor unsigned integer"))
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    Err(EditorHostError.InvalidRequest("editor request field `{key}` must be a nonnegative integer"))
+}
+fn editor_optional_cursor(params: DataTree) -> U64? EditorHostError! {
+    value :: params.field("cursor") ?? return Ok(None)
+    if value == .Null -> return Ok(None)
+    Ok(Val(editor_field_u64(params, "cursor")))
+}
+fn editor_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+fn editor_finish(^out: [U8]) -> String Never! { String.from_bytes(^out) ?? panic("editor JSON writer preserves UTF-8") }
+fn editor_render_string(value: String, out: &[U8]) Never! { foundation_json_write_quote(&out, value) }
+fn editor_render_optional_string(value: String?, out: &[U8]) Never! { if value == .Val(text) -> editor_render_string(text, &out) else -> editor_append(&out, "null") }
+fn editor_render_optional_u64(value: U64?, out: &[U8]) Never! { if value == .Val(number) -> editor_append(&out, "{number}") else -> editor_append(&out, "null") }
+fn editor_fact_keys(values: [String:EditorFactValue]) -> [String] Never! {
+    keys := [String]{}; loop (key, _) in values -> &keys.push(~key); &keys.sort(); keys
+}
+fn editor_render_fact_object(values: [String:EditorFactValue], out: &[U8]) Never! {
+    &out.push(U8{123})
+    loop (index, key) in editor_fact_keys(values) {
+        if index != 0 -> &out.push(U8{44})
+        editor_render_string(key, &out); &out.push(U8{58}); values[key].render(&out)
+    }
+    &out.push(U8{125})
+}
+fn editor_render_selection(selection: JetDevtoolsSelection, out: &[U8]) Never! {
+    editor_append(&out, `{"panel_id":`); editor_render_string(selection.panel_id, &out)
+    editor_append(&out, ",\"item_key\":"); editor_render_optional_string(selection.item_key, &out); &out.push(U8{125})
+}
+fn editor_render_events(events: [EditorStreamEvent], out: &[U8]) Never! {
+    &out.push(U8{91}); loop (index, event) in events { if index != 0 -> &out.push(U8{44}); event.render(&out) }; &out.push(U8{93})
+}
+fn editor_render_identity(identity: EditorSessionIdentity, include_path: Bool, out: &[U8]) Never! {
+    editor_append(&out, ",\"session_id\":"); editor_render_string(identity.session_id, &out)
+    editor_append(&out, ",\"source_id\":"); editor_render_string(identity.source_id, &out)
+    if include_path { editor_append(&out, ",\"source_path\":"); editor_render_string(identity.source_path, &out) }
+    editor_append(&out, ",\"revision\":"); editor_render_string(identity.revision, &out)
+}
+fn editor_render_response_context(host: EditorHost, identity: EditorSessionIdentity, include_path: Bool, out: &[U8]) Never! {
+    editor_append(&out, `{"protocol":`); editor_render_string(JET_DEVTOOLS_PROTOCOL, &out)
+    editor_append(&out, ",\"editor\":"); editor_render_string(host.wire_name(), &out)
+    editor_render_identity(identity, include_path, &out)
+}
+fn editor_render_request_context(host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, out: &[U8]) Never! {
+    editor_append(&out, `{"editor":`); editor_render_string(host.wire_name(), &out)
+    editor_append(&out, ",\"session_id\":"); editor_render_string(session_id, &out)
+    editor_append(&out, ",\"source_id\":"); editor_render_string(source_id, &out)
+    editor_append(&out, ",\"source_path\":"); editor_render_string(source_path, &out)
+    editor_append(&out, ",\"revision\":"); editor_render_string(revision, &out)
+}

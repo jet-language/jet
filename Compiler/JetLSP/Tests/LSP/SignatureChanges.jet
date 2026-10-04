@@ -1,0 +1,34 @@
+// New reachable controls for Server2537–2838. Sequential mutable String edit
+// tests must await real #4318/#4392/#4494 owner; no fake replacement provider.
+#Test("signature parameter presence wins over alias and document lookup") {
+    server :: lsp_handler_test_server("fn run() {{}}\n")
+    params :: lsp_handler_test_params("{{\"arguments\":[\"file:///closed.jet\",\"fn:run\",{{\"name\":\"extra\",\"type\":null,\"ty\":\"Int\"}}]}}")
+    assert_eq(lsp_signature_change_response(server, params, DataTree.Int(1)), lsp_error_response(DataTree.Int(1), -32602, "jet.changeSignature requires parameter.type"))
+    good :: lsp_handler_test_params("{{\"arguments\":[\"file:///closed.jet\",\"fn:run\",{{\"name\":\"extra\",\"ty\":\"Int\"}}]}}")
+    assert_eq(lsp_signature_change_response(server, good, DataTree.Int(1)), lsp_error_response(DataTree.Int(1), -32602, "document not open in LSP session"))
+}
+
+#Test("signature edit ordering is stable descending start then end without copying edit payloads") {
+    edits :: [SignatureChangeEdit]{
+        SignatureChangeEdit{path: "a", span: Span{start: 0, end: 1}, new_text: "a"},
+        SignatureChangeEdit{path: "a", span: Span{start: 4, end: 5}, new_text: "b"},
+        SignatureChangeEdit{path: "a", span: Span{start: 4, end: 6}, new_text: "c"},
+        SignatureChangeEdit{path: "a", span: Span{start: 4, end: 6}, new_text: "d"},
+    }
+    assert_eq(lsp_signature_edit_order(edits, [Int]{0, 1, 2, 3}), [Int]{2, 3, 1, 0})
+    assert_eq(lsp_signature_edit_order(edits, [Int]{3, 2}), [Int]{3, 2})
+}
+
+#Test("signature edit validity is byte indexed and refuses UTF8 interior boundaries") {
+    source :: "a😀z"
+    good :: SignatureChangeEdit{path: "a", span: Span{start: 1, end: 5}, new_text: "x"}
+    split :: SignatureChangeEdit{path: "a", span: Span{start: 2, end: 5}, new_text: "x"}
+    reversed :: SignatureChangeEdit{path: "a", span: Span{start: 5, end: 1}, new_text: "x"}
+    outside :: SignatureChangeEdit{path: "a", span: Span{start: 0, end: 7}, new_text: "x"}
+    assert(lsp_signature_edit_valid(source, good))
+    assert(!lsp_signature_edit_valid(source, split))
+    assert(!lsp_signature_edit_valid(source, reversed))
+    assert(!lsp_signature_edit_valid(source, outside))
+    assert_eq(lsp_data_tree_text(DataTree.TypedText("Int")), Val("Int"))
+    assert_eq(lsp_data_tree_text(DataTree.Int(1)), None)
+}

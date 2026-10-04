@@ -1,0 +1,1827 @@
+// PORT-PENDING 0782 crates-jet-devserver-src-session-slice-1: crates/jet-devserver/src/Session.rs:1-1823
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Resident `jet dev` session state shared by Canvas and application views.
+//RS //!
+//RS //! The session is deliberately transport-neutral.  The default web host
+//RS //! exposes separate Canvas and application listeners; the listener facets
+//RS //! below keep route ownership inspectable in the payload.
+//RS 
+//RS use std::collections::{BTreeMap, HashMap, VecDeque};
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS use std::sync::{Arc, Mutex};
+//RS use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+//RS 
+//RS use crate::Devtools::{
+//RS     JetDevtoolsHostKind, JetDevtoolsJobPanelFact, JetDevtoolsPanelCapability,
+//RS     JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError, JetDevtoolsPanelProjection,
+//RS };
+//RS 
+//RS use jet_foundation::Devtools::{
+//RS     JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventSink, JetDevtoolsEventSinkGuard,
+//RS     JetDevtoolsFreshnessFact, JetDevtoolsSelection,
+//RS     JetDevtoolsSourceIdentityFact, JetDevtoolsTimeCursor, JET_DEVTOOLS_MAX_ENVELOPE_BYTES,
+//RS     JET_DEVTOOLS_MAX_TEXT_BYTES,
+//RS };
+//RS use jet_foundation::DevtoolsControl::{
+//RS     JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsCommandReceipt,
+//RS     JetDevtoolsDatabaseExplainRequest, JetDevtoolsDatabaseExplainResult,
+//RS     JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlRequest,
+//RS     JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS,
+//RS };
+//RS use crate::SessionRecording::{
+//RS     RecordingError, ReplayCursor, ReplayProjection, SessionCheckpoint, SessionEvent, SessionIdentity,
+//RS     SessionRecording, TruncationFacts,
+//RS };
+//RS 
+//RS 
+//RS use jet_foundation::HotSwap::{HotSwapDecision, StateRetentionDecision};
+//RS use jet_foundation::DataTree::DataTree;
+//RS use jet_foundation::JSON::{json_escape, parse_json, parse_json_with_limit};
+//RS use jet_foundation::Persist::PersistRejectReason;
+//RS use crate::CapturePolicy::{CaptureFaultFact, CaptureIdentity, CaptureSkip, CaptureStartFact};
+//RS use crate::WatchService::{PersistOutcome, SessionSnapshot};
+//RS const DEVTOOLS_TEXT_LIMIT: usize = JET_DEVTOOLS_MAX_TEXT_BYTES;
+//RS pub(crate) const MAX_CLIENT_ID: usize = 128;
+//RS pub(crate) const MAX_CLIENTS: usize = 256;
+//RS pub(crate) const CLIENT_TTL_MS: u64 = 160;
+//RS pub(crate) const CLIENT_TTL: Duration = Duration::from_millis(CLIENT_TTL_MS);
+//RS const MAX_RECEIPTS: usize = 128;
+//RS const MAX_RETAINED_VIEW_BYTES: usize = 2 * 1024 * 1024;
+//RS static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+//RS pub use jet_foundation::Devtools::JET_DEVTOOLS_PROTOCOL;
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct LiveLineage {
+//RS     pub protocol: String,
+//RS     pub session_id: String,
+//RS     pub source_id: String,
+//RS     pub build_id: String,
+//RS     pub revision: String,
+//RS     pub world_id: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct LiveValueFact {
+//RS     pub value_id: String,
+//RS     pub type_identity: String,
+//RS     pub disposition: String,
+//RS     pub reason: String,
+//RS }
+//RS 
+//RS /// Typed capture lifecycle facts retained by the resident session.
+//RS ///
+//RS /// A skip is emitted from the start decision rather than reconstructed from
+//RS /// transport JSON.  Faults retain the same start eligibility and identity.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum CaptureSessionFact {
+//RS     Start(CaptureStartFact),
+//RS     Skip(CaptureSkip),
+//RS     Fault(CaptureFaultFact),
+//RS }
+//RS 
+//RS struct LiveReceipt {
+//RS     lineage: LiveLineage,
+//RS     values: Vec<LiveValueFact>,
+//RS }
+//RS 
+//RS struct Receipt {
+//RS     kind: String,
+//RS     status: String,
+//RS     before: String,
+//RS     after: String,
+//RS     client: String,
+//RS     output: String,
+//RS     live: Option<LiveReceipt>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct DebuggerSnapshot {
+//RS     state: String,
+//RS     session_id: String,
+//RS     source_id: String,
+//RS     revision: String,
+//RS     tier: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Default)]
+//RS struct RetainedView {
+//RS     revision: String,
+//RS     source_id: String,
+//RS     payload: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct DevtoolsSelectionFact {
+//RS     pub panel_id: String,
+//RS     pub item_key: String,
+//RS }
+//RS 
+//RS pub use jet_foundation::Devtools::JetDevtoolsLifecycleState as DevtoolsSessionState;
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct DevtoolsStatusFact {
+//RS     pub state: DevtoolsSessionState,
+//RS     pub diagnostic_code: Option<String>,
+//RS     pub diagnostic: Option<String>,
+//RS     pub accepted_revision: Option<String>,
+//RS     pub last_good_revision: Option<String>,
+//RS     pub run_target: Option<String>,
+//RS     pub run_output: Option<String>,
+//RS     pub test_state: Option<String>,
+//RS }
+//RS 
+//RS /// Command capabilities are explicit host facts.  A browser may render a
+//RS /// reason when the resident driver is not currently able to consume a command;
+//RS /// it must not infer support from a panel's presence.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct DevtoolsCommandCapabilities {
+//RS     pub project_rebuild: bool,
+//RS     pub project_rebuild_reason: Option<String>,
+//RS }
+//RS 
+//RS pub struct ProjectRebuildExecutorGuard {
+//RS     available: Arc<Mutex<bool>>,
+//RS }
+//RS 
+//RS impl Drop for ProjectRebuildExecutorGuard {
+//RS     fn drop(&mut self) {
+//RS         if let Ok(mut available) = self.available.lock() {
+//RS             *available = false;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Host-neutral, reconnect-safe view of the bounded devtools stream.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct DevtoolsProjection {
+//RS     pub protocol: String,
+//RS     pub session_id: String,
+//RS     pub source_id: Option<String>,
+//RS     pub build_id: Option<String>,
+//RS     pub revision: String,
+//RS     pub world_id: Option<String>,
+//RS     pub sequence: u64,
+//RS     pub observed_at: u64,
+//RS     pub panels: Vec<JetDevtoolsEvent>,
+//RS     pub selection: Option<DevtoolsSelectionFact>,
+//RS     pub status: DevtoolsStatusFact,
+//RS     pub command_capabilities: DevtoolsCommandCapabilities,
+//RS     pub command_receipts: Vec<JetDevtoolsCommandReceipt>,
+//RS     pub reset: bool,
+//RS     pub truncation: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct DevtoolsRecordingDivergence {
+//RS     pub divergent: bool,
+//RS     pub reason: Option<String>,
+//RS     pub identity: SessionIdentity,
+//RS     pub expected_sequence: Option<u64>,
+//RS     pub actual_sequence: Option<u64>,
+//RS     pub retained_events: usize,
+//RS     pub dropped_events: u64,
+//RS     pub truncation: TruncationFacts,
+//RS }
+//RS 
+//RS struct ResidentRecordingState {
+//RS     recording: SessionRecording,
+//RS     cursor: ReplayCursor,
+//RS     checkpoints: HashMap<String, SessionCheckpoint>,
+//RS     first_sequence: Option<u64>,
+//RS }
+//RS 
+//RS impl ResidentRecordingState {
+//RS     fn new(recording: SessionRecording, first_sequence: Option<u64>) -> Self {
+//RS         let cursor = recording.replay();
+//RS         Self {
+//RS             recording,
+//RS             cursor,
+//RS             checkpoints: HashMap::new(),
+//RS             first_sequence,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS const BROWSER_ASSET_WATCH_MAX_FILES: usize = 4096;
+//RS const BROWSER_ASSET_WATCH_MAX_EVENTS: usize = 256;
+//RS const BROWSER_ASSET_WATCH_MAX_PATH_BYTES: usize = 1024;
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS struct BrowserAssetStamp {
+//RS     modified: Option<SystemTime>,
+//RS     len: u64,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS struct BrowserAssetChange {
+//RS     path: PathBuf,
+//RS     kind: &'static str,
+//RS }
+//RS 
+//RS struct BrowserAssetWatcher {
+//RS     root: PathBuf,
+//RS     known: BTreeMap<PathBuf, BrowserAssetStamp>,
+//RS }
+//RS 
+//RS impl BrowserAssetWatcher {
+//RS     fn for_entry(entry: &str) -> Self {
+//RS         let entry = Path::new(entry);
+//RS         let parent = entry.parent().unwrap_or_else(|| Path::new("."));
+//RS         let root = parent.join("assets");
+//RS         let mut watcher = Self {
+//RS             root,
+//RS             known: BTreeMap::new(),
+//RS         };
+//RS         watcher.snapshot();
+//RS         watcher
+//RS     }
+//RS 
+//RS     fn reopen(&mut self, entry: &str) {
+//RS         let entry = Path::new(entry);
+//RS         let parent = entry.parent().unwrap_or_else(|| Path::new("."));
+//RS         self.root = parent.join("assets");
+//RS         self.snapshot();
+//RS     }
+//RS 
+//RS     fn stamp(path: &Path) -> Option<BrowserAssetStamp> {
+//RS         let metadata = fs::symlink_metadata(path).ok()?;
+//RS         if !metadata.file_type().is_file() {
+//RS             return None;
+//RS         }
+//RS         Some(BrowserAssetStamp {
+//RS             modified: metadata.modified().ok(),
+//RS             len: metadata.len(),
+//RS         })
+//RS     }
+//RS 
+//RS     fn collect(
+//RS         path: &Path,
+//RS         files: &mut BTreeMap<PathBuf, BrowserAssetStamp>,
+//RS         skipped: &mut usize,
+//RS     ) {
+//RS         if files.len() >= BROWSER_ASSET_WATCH_MAX_FILES {
+//RS             *skipped = skipped.saturating_add(1);
+//RS             return;
+//RS         }
+//RS         let Ok(metadata) = fs::symlink_metadata(path) else {
+//RS             return;
+//RS         };
+//RS         if metadata.file_type().is_symlink() {
+//RS             *skipped = skipped.saturating_add(1);
+//RS             return;
+//RS         }
+//RS         if metadata.file_type().is_file() {
+//RS             if let Some(stamp) = Self::stamp(path) {
+//RS                 if path.to_string_lossy().len() <= BROWSER_ASSET_WATCH_MAX_PATH_BYTES {
+//RS                     files.insert(path.to_path_buf(), stamp);
+//RS                 } else {
+//RS                     *skipped = skipped.saturating_add(1);
+//RS                 }
+//RS             }
+//RS             return;
+//RS         }
+//RS         if !metadata.file_type().is_dir() {
+//RS             *skipped = skipped.saturating_add(1);
+//RS             return;
+//RS         }
+//RS         let Ok(entries) = fs::read_dir(path) else {
+//RS             *skipped = skipped.saturating_add(1);
+//RS             return;
+//RS         };
+//RS         let mut children = entries
+//RS             .filter_map(Result::ok)
+//RS             .map(|entry| entry.path())
+//RS             .collect::<Vec<_>>();
+//RS         children.sort();
+//RS         for child in children {
+//RS             Self::collect(&child, files, skipped);
+//RS             if files.len() >= BROWSER_ASSET_WATCH_MAX_FILES {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn snapshot(&mut self) {
+//RS         let mut files = BTreeMap::new();
+//RS         let mut _skipped = 0;
+//RS         Self::collect(&self.root, &mut files, &mut _skipped);
+//RS         self.known = files;
+//RS     }
+//RS 
+//RS     fn poll(&mut self) -> (Vec<BrowserAssetChange>, usize) {
+//RS         let mut current = BTreeMap::new();
+//RS         let mut skipped = 0;
+//RS         Self::collect(&self.root, &mut current, &mut skipped);
+//RS         let mut changes = Vec::new();
+//RS         for (path, stamp) in &current {
+//RS             let kind = match self.known.get(path) {
+//RS                 None => "created",
+//RS                 Some(previous) if previous != stamp => "changed",
+//RS                 Some(_) => continue,
+//RS             };
+//RS             changes.push(BrowserAssetChange {
+//RS                 path: path.clone(),
+//RS                 kind,
+//RS             });
+//RS         }
+//RS         for path in self.known.keys() {
+//RS             if !current.contains_key(path) {
+//RS                 changes.push(BrowserAssetChange {
+//RS                     path: path.clone(),
+//RS                     kind: "deleted",
+//RS                 });
+//RS             }
+//RS         }
+//RS         let omitted = changes.len().saturating_sub(BROWSER_ASSET_WATCH_MAX_EVENTS);
+//RS         skipped = skipped.saturating_add(omitted);
+//RS         changes.truncate(BROWSER_ASSET_WATCH_MAX_EVENTS);
+//RS         self.known = current;
+//RS         (changes, skipped)
+//RS     }
+//RS 
+//RS     fn frame(&mut self, session_id: &str) -> String {
+//RS         let (changes, skipped) = self.poll();
+//RS         let events = changes
+//RS             .into_iter()
+//RS             .filter_map(|change| {
+//RS                 let logical = change.path.strip_prefix(&self.root).ok()?;
+//RS                 let logical = logical.to_string_lossy().replace('\\', "/");
+//RS                 if logical.is_empty() {
+//RS                     return None;
+//RS                 }
+//RS                 Some(format!(
+//RS                     "{{\"root\":{{\"id\":\"game\",\"path\":\".\"}},\"logical_path\":\"{}\",\"kind\":\"{}\"}}",
+//RS                     json_escape(&format!("assets/{logical}")),
+//RS                     json_escape(change.kind),
+//RS                 ))
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"{}\",\"started_at_ms\":{},\"direction\":\"host_to_runtime\",\"events\":[{}],\"skipped\":{}}}",
+//RS             json_escape(session_id),
+//RS             unix_time_ms(),
+//RS             events,
+//RS             skipped,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS struct DevtoolsState {
+//RS     envelope: JetDevtoolsEnvelope,
+//RS }
+//RS 
+//RS impl DevtoolsState {
+//RS     fn new(session_id: &str) -> Self {
+//RS         Self {
+//RS             envelope: JetDevtoolsEnvelope::new(session_id, unix_time_ms()),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One semantic resident development session.
+//RS ///
+//RS /// Every field is session state, not browser state.  Browser views can
+//RS /// reconnect or multiply without creating another source history or another
+//RS /// accepted-revision stream.
+//RS pub struct ResidentDevSession {
+//RS     source_transactions: crate::WatchService::SessionBroker,
+//RS     id: String,
+//RS     entry: String,
+//RS     canvas_host: String,
+//RS     canvas_port: u16,
+//RS     application_host: String,
+//RS     application_port: u16,
+//RS     current_revision: Mutex<String>,
+//RS     live_lineage: Mutex<Option<LiveLineage>>,
+//RS     live_values: Mutex<Vec<LiveValueFact>>,
+//RS     accepted_revision: Mutex<String>,
+//RS     last_good_revision: Mutex<String>,
+//RS     last_good_program: Mutex<String>,
+//RS     state: Mutex<String>,
+//RS     diagnostic_code: Mutex<String>,
+//RS     diagnostic: Mutex<String>,
+//RS     diagnostic_revision: Mutex<String>,
+//RS     selected_source_id: Mutex<String>,
+//RS     selected_output: Mutex<String>,
+//RS     selected_target: Mutex<String>,
+//RS     debugger: Mutex<DebuggerSnapshot>,
+//RS     test_state: Mutex<String>,
+//RS     capture_facts: Mutex<Vec<CaptureSessionFact>>,
+//RS     last_good_views: Mutex<HashMap<String, RetainedView>>,
+//RS     clients: Mutex<HashMap<String, Instant>>,
+//RS     receipts: Mutex<Vec<Receipt>>,
+//RS     devtools: Mutex<DevtoolsState>,
+//RS     /// Browser game controls stay in the resident session until the running
+//RS     /// Wasm guest polls the canonical host-to-runtime envelope. They are not
+//RS     /// interpreted or reimplemented by this host adapter.
+//RS     browser_game_controls: Mutex<VecDeque<JetDevtoolsGameControlRequest>>,
+//RS     browser_asset_watcher: Mutex<BrowserAssetWatcher>,
+//RS     recording: Mutex<Option<ResidentRecordingState>>,
+//RS     project_rebuild_executor: Arc<Mutex<bool>>,
+//RS }
+//RS 
+//RS impl ResidentDevSession {
+//RS     pub fn new(entry: &str, canvas_port: u16, application_port: u16) -> Self {
+//RS         Self::new_with_canvas_host(entry, "127.0.0.1", canvas_port, application_port)
+//RS     }
+//RS 
+//RS     pub fn new_with_canvas_host(
+//RS         entry: &str,
+//RS         canvas_host: &str,
+//RS         canvas_port: u16,
+//RS         application_port: u16,
+//RS     ) -> Self {
+//RS         Self::new_with_hosts(
+//RS             entry,
+//RS             canvas_host,
+//RS             canvas_port,
+//RS             "127.0.0.1",
+//RS             application_port,
+//RS         )
+//RS     }
+//RS 
+//RS     pub(crate) fn new_with_hosts(
+//RS         entry: &str,
+//RS         canvas_host: &str,
+//RS         canvas_port: u16,
+//RS         application_host: &str,
+//RS         application_port: u16,
+//RS     ) -> Self {
+//RS         let serial = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
+//RS         let id = format!("jet-session-{}-{}", std::process::id(), serial);
+//RS         Self {
+//RS             source_transactions: crate::WatchService::SessionBroker::default(),
+//RS             id: id.clone(),
+//RS             entry: entry.to_string(),
+//RS             canvas_host: canvas_host.to_string(),
+//RS             canvas_port,
+//RS             application_host: application_host.to_string(),
+//RS             application_port,
+//RS             current_revision: Mutex::new(String::new()),
+//RS             live_lineage: Mutex::new(None),
+//RS             live_values: Mutex::new(Vec::new()),
+//RS             accepted_revision: Mutex::new(String::new()),
+//RS             last_good_revision: Mutex::new(String::new()),
+//RS             last_good_program: Mutex::new(String::new()),
+//RS             state: Mutex::new("starting".to_string()),
+//RS             diagnostic_code: Mutex::new(String::new()),
+//RS             diagnostic: Mutex::new(String::new()),
+//RS             diagnostic_revision: Mutex::new(String::new()),
+//RS             selected_source_id: Mutex::new(String::new()),
+//RS             selected_output: Mutex::new(String::new()),
+//RS             selected_target: Mutex::new(String::new()),
+//RS             debugger: Mutex::new(DebuggerSnapshot {
+//RS                 state: "idle".to_string(),
+//RS                 session_id: String::new(),
+//RS                 source_id: String::new(),
+//RS                 revision: String::new(),
+//RS                 tier: String::new(),
+//RS             }),
+//RS             test_state: Mutex::new("idle".to_string()),
+//RS             capture_facts: Mutex::new(Vec::new()),
+//RS             last_good_views: Mutex::new(HashMap::new()),
+//RS             clients: Mutex::new(HashMap::new()),
+//RS             receipts: Mutex::new(Vec::new()),
+//RS             devtools: Mutex::new(DevtoolsState::new(&id)),
+//RS             browser_game_controls: Mutex::new(VecDeque::new()),
+//RS             browser_asset_watcher: Mutex::new(BrowserAssetWatcher::for_entry(entry)),
+//RS             recording: Mutex::new(None),
+//RS             project_rebuild_executor: Arc::new(Mutex::new(false)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn note_client(&self, client: &str) {
+//RS         if !client_id_is_valid(client) {
+//RS             return;
+//RS         }
+//RS         let now = Instant::now();
+//RS         let mut clients = self.clients.lock().unwrap();
+//RS         expire_clients(&mut clients, now);
+//RS         if !clients.contains_key(client) && clients.len() >= MAX_CLIENTS {
+//RS             return;
+//RS         }
+//RS         clients.insert(client.to_string(), now);
+//RS     }
+//RS 
+//RS     pub fn drop_client(&self, client: &str) {
+//RS         if !client_id_is_valid(client) {
+//RS             return;
+//RS         }
+//RS         let now = Instant::now();
+//RS         let mut clients = self.clients.lock().unwrap();
+//RS         expire_clients(&mut clients, now);
+//RS         clients.remove(client);
+//RS     }
+//RS     /// Return one bounded host-to-runtime game-control frame for the browser
+//RS     /// guest. The request objects were already admitted by the canonical
+//RS     /// Foundation decoder; this method only serializes the transport envelope.
+//RS     pub fn browser_game_control_frame(&self) -> Result<String, String> {
+//RS         const MAX_CONTROLS_PER_FRAME: usize = 32;
+//RS         let mut queued = self.browser_game_controls.lock().unwrap();
+//RS         let mut frame = JetDevtoolsCommandEnvelope::new(self.id.clone(), unix_time_ms());
+//RS         let mut selected = Vec::new();
+//RS         for _ in 0..MAX_CONTROLS_PER_FRAME {
+//RS             let Some(request) = queued.pop_front() else {
+//RS                 break;
+//RS             };
+//RS             frame.enqueue_command(JetDevtoolsCommand::GameControl(request.clone()))?;
+//RS             selected.push(request);
+//RS         }
+//RS         match frame.serialize() {
+//RS             Ok(body) => {
+//RS                 for request in &selected {
+//RS                     self.update_command_receipt(&request.request_id, "relayed", None);
+//RS                 }
+//RS                 Ok(body)
+//RS             }
+//RS             Err(error) => {
+//RS                 for request in selected.into_iter().rev() {
+//RS                     queued.push_front(request);
+//RS                 }
+//RS                 Err(error)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Poll the declared server-side asset root without following symlinks.
+//RS     /// The browser receives observations only; canonical GameDevSession
+//RS     /// validates, coalesces, and publishes their meaning in Wasm.
+//RS     pub fn browser_game_asset_frame(&self) -> Result<String, String> {
+//RS         Ok(self
+//RS             .browser_asset_watcher
+//RS             .lock()
+//RS             .map_err(|_| "browser asset watcher is poisoned".to_string())?
+//RS             .frame(&self.id))
+//RS     }
+//RS 
+//RS     /// Reset the browser asset baseline when the resident game session is
+//RS     /// reopened.  Reopening observes the current declared root as the new
+//RS     /// baseline; it does not manufacture a change event from the restart.
+//RS     pub fn reopen_game_asset_watcher(&self, entry: &str) -> Result<(), String> {
+//RS         if entry.trim().is_empty() {
+//RS             return Err("browser game asset watcher entry must not be empty".to_string());
+//RS         }
+//RS         self.browser_asset_watcher
+//RS             .lock()
+//RS             .map_err(|_| "browser asset watcher is poisoned".to_string())?
+//RS             .reopen(entry);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Return canonical typed events after `cursor` without making hosts parse
+//RS     /// `devtools_json`. A missing cursor requests the retained stream as a
+//RS     /// complete reset. A cursor older than the bounded history also requests
+//RS     /// reset and marks truncation so a host can discard stale panels.
+//RS     pub fn devtools_events_since(
+//RS         &self,
+//RS         cursor: Option<JetDevtoolsTimeCursor>,
+//RS     ) -> DevtoolsProjection {
+//RS         let current_revision = self.current_revision.lock().unwrap().clone();
+//RS         let observed_at = unix_time_ms();
+//RS         let state = self.devtools_lock();
+//RS         let envelope = &state.envelope;
+//RS         let source_identity = envelope.source_identity.clone();
+//RS         let revision = source_identity
+//RS             .as_ref()
+//RS             .and_then(|identity| identity.revision.clone())
+//RS             .unwrap_or(current_revision);
+//RS         let latest = envelope.latest_sequence().unwrap_or(0);
+//RS         let oldest = envelope.oldest_sequence();
+//RS         let truncation = envelope.truncated
+//RS             || cursor.is_some_and(|cursor| {
+//RS                 oldest.is_some_and(|oldest| cursor.saturating_add(1) < oldest)
+//RS             });
+//RS         let reset = envelope.reset || cursor.is_none() || truncation;
+//RS         let panels = envelope
+//RS             .events_since(cursor)
+//RS             .cloned()
+//RS             .collect();
+//RS         let selection = envelope
+//RS             .view()
+//RS             .selection()
+//RS             .map(|selection| DevtoolsSelectionFact {
+//RS                 panel_id: selection.panel_id.clone(),
+//RS                 item_key: selection.item_key.clone().unwrap_or_default(),
+//RS             });
+//RS         let diagnostic_code = self.diagnostic_code.lock().unwrap().clone();
+//RS         let diagnostic = self.diagnostic.lock().unwrap().clone();
+//RS         let accepted_revision = self.accepted_revision.lock().unwrap().clone();
+//RS         let last_good_revision = self.last_good_revision.lock().unwrap().clone();
+//RS         let run_target = self.selected_target.lock().unwrap().clone();
+//RS         let run_output = self.selected_output.lock().unwrap().clone();
+//RS         let test_state = self.test_state.lock().unwrap().clone();
+//RS         let status = DevtoolsStatusFact {
+//RS             state: envelope.lifecycle,
+//RS             diagnostic_code: optional_fact(&diagnostic_code),
+//RS             diagnostic: optional_fact(&diagnostic),
+//RS             accepted_revision: optional_fact(&accepted_revision),
+//RS             last_good_revision: optional_fact(&last_good_revision),
+//RS             run_target: optional_fact(&run_target),
+//RS             run_output: optional_fact(&run_output),
+//RS             test_state: optional_fact(&test_state),
+//RS         };
+//RS         let command_capabilities = self.devtools_command_capabilities();
+//RS         let command_receipts = self.devtools_command_receipts();
+//RS         DevtoolsProjection {
+//RS             protocol: JET_DEVTOOLS_PROTOCOL.to_string(),
+//RS             session_id: self.id.clone(),
+//RS             source_id: source_identity
+//RS                 .as_ref()
+//RS                 .and_then(|identity| identity.source_id.clone()),
+//RS             build_id: source_identity
+//RS                 .as_ref()
+//RS                 .and_then(|identity| identity.build_id.clone()),
+//RS             revision,
+//RS             world_id: source_identity
+//RS                 .as_ref()
+//RS                 .and_then(|identity| identity.world_id.clone()),
+//RS             sequence: latest,
+//RS             observed_at,
+//RS             panels,
+//RS             selection,
+//RS             status,
+//RS             command_capabilities,
+//RS             command_receipts,
+//RS             reset,
+//RS             truncation,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn observe_source(&self, revision: &str) {
+//RS         if revision.is_empty() {
+//RS             return;
+//RS         }
+//RS         *self.current_revision.lock().unwrap() = revision.to_string();
+//RS         let mut accepted = self.accepted_revision.lock().unwrap();
+//RS         if accepted.is_empty() {
+//RS             *accepted = revision.to_string();
+//RS         }
+//RS     }
+//RS 
+//RS     /// Install the complete identity required by the `jet.live.v1` snapshot.
+//RS     /// Empty or control-bearing values remain unavailable rather than being
+//RS     /// replaced by generated defaults.
+//RS     pub fn set_live_lineage(
+//RS         &self,
+//RS         source_id: &str,
+//RS         build_id: &str,
+//RS         revision: &str,
+//RS         world_id: &str,
+//RS     ) -> Result<(), String> {
+//RS         if [source_id, build_id, revision, world_id]
+//RS             .iter()
+//RS             .any(|value| value.is_empty() || value.chars().any(char::is_control))
+//RS         {
+//RS             return Err("live lineage is incomplete".to_string());
+//RS         }
+//RS         *self.live_lineage.lock().unwrap() = Some(LiveLineage {
+//RS             protocol: "jet.live.v1".to_string(),
+//RS             session_id: self.id.clone(),
+//RS             source_id: source_id.to_string(),
+//RS             build_id: build_id.to_string(),
+//RS             revision: revision.to_string(),
+//RS             world_id: world_id.to_string(),
+//RS         });
+//RS         self.observe_source(revision);
+//RS         self.set_devtools_source_identity(
+//RS             Some(source_id.to_string()),
+//RS             Some(build_id.to_string()),
+//RS             Some(revision.to_string()),
+//RS             Some(world_id.to_string()),
+//RS         )?;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Retain one typed capture start decision only when it belongs to this
+//RS     /// session's currently installed live lineage.
+//RS     pub fn record_capture_start(&self, fact: &CaptureStartFact) -> Result<(), String> {
+//RS         self.validate_capture_identity(&fact.identity)?;
+//RS         let mut facts = self.capture_facts.lock().unwrap();
+//RS         facts.push(CaptureSessionFact::Start(fact.clone()));
+//RS         if let Some(skip) = fact.eligibility.skip() {
+//RS             facts.push(CaptureSessionFact::Skip(skip.clone()));
+//RS         }
+//RS         trim_capture_facts(&mut facts);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Retain a typed capture fault under the exact start/live identity.
+//RS     pub fn record_capture_fault(&self, fact: &CaptureFaultFact) -> Result<(), String> {
+//RS         self.validate_capture_identity(&fact.identity)?;
+//RS         let mut facts = self.capture_facts.lock().unwrap();
+//RS         facts.push(CaptureSessionFact::Fault(fact.clone()));
+//RS         trim_capture_facts(&mut facts);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn capture_facts(&self) -> Vec<CaptureSessionFact> {
+//RS         self.capture_facts.lock().unwrap().clone()
+//RS     }
+//RS 
+//RS     fn validate_capture_identity(&self, identity: &CaptureIdentity) -> Result<(), String> {
+//RS         if !identity.is_exact() {
+//RS             return Err("capture identity is incomplete".to_string());
+//RS         }
+//RS         if identity.session_id != self.id {
+//RS             return Err("capture fact session does not match live session".to_string());
+//RS         }
+//RS         let lineage = self.live_lineage.lock().unwrap();
+//RS         let Some(lineage) = lineage.as_ref() else {
+//RS             return Err("capture fact has no live lineage".to_string());
+//RS         };
+//RS         if identity.source_id != lineage.source_id
+//RS             || identity.build_id != lineage.build_id
+//RS             || identity.revision != lineage.revision
+//RS         {
+//RS             return Err("capture fact does not match live lineage".to_string());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Record the typed value decisions from the canonical source transaction.
+//RS     /// This is a projection only; it never re-runs compatibility checks.
+//RS     pub fn record_live_transaction(
+//RS         &self,
+//RS         snapshot: &SessionSnapshot,
+//RS         decisions: &[PersistOutcome],
+//RS     ) -> Result<(), String> {
+//RS         let before = self.accepted_revision.lock().unwrap().clone();
+//RS         self.set_live_lineage(
+//RS             &snapshot.source_id,
+//RS             &snapshot.build_id,
+//RS             &snapshot.revision,
+//RS             &snapshot.world_id,
+//RS         )?;
+//RS         let values = decisions
+//RS             .iter()
+//RS             .map(persist_outcome_fact)
+//RS             .collect::<Vec<_>>();
+//RS         *self.live_values.lock().unwrap() = values.clone();
+//RS         let lineage = self
+//RS             .live_lineage
+//RS             .lock()
+//RS             .unwrap()
+//RS             .clone()
+//RS             .expect("validated live lineage");
+//RS         *self.accepted_revision.lock().unwrap() = snapshot.revision.clone();
+//RS         self.push_receipt(Receipt {
+//RS             kind: "live_swap".to_string(),
+//RS             status: "committed".to_string(),
+//RS             before,
+//RS             after: snapshot.revision.clone(),
+//RS             client: String::new(),
+//RS             output: String::new(),
+//RS             live: Some(LiveReceipt { lineage, values }),
+//RS         });
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn mark_building(&self) {
+//RS         *self.state.lock().unwrap() = "building".to_string();
+//RS         self.publish_session_state("building", "", "");
+//RS     }
+//RS 
+//RS     pub fn mark_ready(&self) {
+//RS         *self.state.lock().unwrap() = "ready".to_string();
+//RS         self.diagnostic_code.lock().unwrap().clear();
+//RS         self.diagnostic.lock().unwrap().clear();
+//RS         self.diagnostic_revision.lock().unwrap().clear();
+//RS         self.publish_session_state("ready", "", "");
+//RS     }
+//RS     pub fn mark_error(&self, code: &str, diagnostic: &str) {
+//RS         *self.state.lock().unwrap() = "error".to_string();
+//RS         *self.diagnostic_code.lock().unwrap() = code.to_string();
+//RS         *self.diagnostic.lock().unwrap() = diagnostic.to_string();
+//RS         *self.diagnostic_revision.lock().unwrap() =
+//RS             self.current_revision.lock().unwrap().clone();
+//RS         self.publish_session_state("error", code, diagnostic);
+//RS     }
+//RS     pub fn mark_stopped(&self) {
+//RS         *self.state.lock().unwrap() = "stopped".to_string();
+//RS         self.publish_session_state("stopped", "", "");
+//RS     }
+//RS 
+//RS 
+//RS     /// Return the one canonical devtools stream for this resident session.
+//RS     ///
+//RS     /// The wire shape deliberately stays the Prelude shape. Host-specific
+//RS     /// projections belong outside this adapter; reconnecting hosts receive
+//RS     /// the same bounded events and current selection/cursor.
+//RS     pub fn devtools_json(&self) -> String {
+//RS         self.devtools_lock()
+//RS             .envelope
+//RS             .serialize()
+//RS             .expect("resident devtools envelope must remain serializable")
+//RS     }
+//RS 
+//RS     pub fn devtools_panel_catalog(
+//RS         &self,
+//RS     ) -> Result<JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError> {
+//RS         JetDevtoolsPanelCatalog::canonical()
+//RS     }
+//RS 
+//RS     pub fn devtools_panels(
+//RS         &self,
+//RS         host: JetDevtoolsHostKind,
+//RS         grants: &[JetDevtoolsPanelCapability],
+//RS     ) -> Result<Vec<JetDevtoolsPanelProjection>, JetDevtoolsPanelCatalogError> {
+//RS         let catalog = self.devtools_panel_catalog()?;
+//RS         let state = self.devtools_lock();
+//RS         Ok(catalog.project(&state.envelope, host, grants))
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS     pub fn current_revision(&self) -> String {
+//RS         self.current_revision.lock().unwrap().clone()
+//RS     }
+//RS 
+//RS     pub fn devtools_command_receipts(&self) -> Vec<JetDevtoolsCommandReceipt> {
+//RS         jet_foundation::DevtoolsControl::jet_devtools_command_receipts(&self.id)
+//RS     }
+//RS 
+//RS     pub fn devtools_command_capabilities(&self) -> DevtoolsCommandCapabilities {
+//RS         let reason = if !self.project_rebuild_executor_available() {
+//RS             Some("no rebuild executor is registered for this host".to_string())
+//RS         } else if self.current_revision().is_empty() {
+//RS             Some("source revision is unavailable".to_string())
+//RS         } else {
+//RS             None
+//RS         };
+//RS         DevtoolsCommandCapabilities {
+//RS             project_rebuild: reason.is_none(),
+//RS             project_rebuild_reason: reason,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn register_project_rebuild_executor(
+//RS         &self,
+//RS     ) -> Result<ProjectRebuildExecutorGuard, String> {
+//RS         let mut available = self
+//RS             .project_rebuild_executor
+//RS             .lock()
+//RS             .map_err(|_| "project rebuild executor state is poisoned".to_string())?;
+//RS         if *available {
+//RS             return Err("a project rebuild executor is already registered".to_string());
+//RS         }
+//RS         *available = true;
+//RS         drop(available);
+//RS         Ok(ProjectRebuildExecutorGuard {
+//RS             available: Arc::clone(&self.project_rebuild_executor),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn project_rebuild_executor_available(&self) -> bool {
+//RS         self.project_rebuild_executor
+//RS             .lock()
+//RS             .map(|available| *available)
+//RS             .unwrap_or(false)
+//RS     }
+//RS 
+//RS     fn validate_devtools_command_admission(
+//RS         &self,
+//RS         command: &JetDevtoolsCommand,
+//RS     ) -> Result<(), String> {
+//RS         command.validate()?;
+//RS         if command.session_id() != self.id {
+//RS             return Err("jet.devtools.v1 command session identity mismatch".to_string());
+//RS         }
+//RS         if let JetDevtoolsCommand::ProjectRebuild(request) = command {
+//RS             if !self.project_rebuild_executor_available() {
+//RS                 return Err("no rebuild executor is registered for this host".to_string());
+//RS             }
+//RS             if request.expected_revision != self.current_revision() {
+//RS                 return Err("source changed since this rebuild was requested".to_string());
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn enqueue_devtools_command(&self, command: JetDevtoolsCommand) -> Result<(), String> {
+//RS         self.validate_devtools_command_admission(&command)?;
+//RS         jet_foundation::DevtoolsControl::jet_devtools_enqueue_command(command)
+//RS     }
+//RS 
+//RS     pub fn take_project_rebuild(
+//RS         &self,
+//RS     ) -> Result<Option<JetDevtoolsProjectRebuildRequest>, String> {
+//RS         let Some(command) = self.poll_devtools_command() else {
+//RS             return Ok(None);
+//RS         };
+//RS         let JetDevtoolsCommand::ProjectRebuild(request) = command else {
+//RS             jet_foundation::DevtoolsControl::jet_devtools_requeue_command_front(command)?;
+//RS             return Ok(None);
+//RS         };
+//RS         if request.session_id != self.id {
+//RS             self.update_command_receipt(
+//RS                 &request.request_id,
+//RS                 "failed",
+//RS                 Some("jet.devtools.v1 command session identity mismatch".to_string()),
+//RS             );
+//RS             return Err("jet.devtools.v1 command session identity mismatch".to_string());
+//RS         }
+//RS         if !self.project_rebuild_executor_available() {
+//RS             let error = "no rebuild executor is registered for this host".to_string();
+//RS             self.update_command_receipt(&request.request_id, "failed", Some(error.clone()));
+//RS             return Err(error);
+//RS         }
+//RS         if request.expected_revision != self.current_revision() {
+//RS             let error = "source changed since this rebuild was requested".to_string();
+//RS             self.update_command_receipt(&request.request_id, "failed", Some(error.clone()));
+//RS             return Err(error);
+//RS         }
+//RS         self.update_command_receipt(&request.request_id, "building", None);
+//RS         Ok(Some(request))
+//RS     }
+//RS 
+//RS     pub fn finish_project_rebuild(
+//RS         &self,
+//RS         request: &JetDevtoolsProjectRebuildRequest,
+//RS         result: Result<(), String>,
+//RS     ) -> Result<(), String> {
+//RS         request.validate()?;
+//RS         if request.session_id != self.id {
+//RS             return Err("jet.devtools.v1 command session identity mismatch".to_string());
+//RS         }
+//RS         match result {
+//RS             Ok(()) => {
+//RS                 jet_foundation::DevtoolsControl::jet_devtools_update_command_receipt(
+//RS                     &self.id,
+//RS                     &request.request_id,
+//RS                     "completed",
+//RS                     None,
+//RS                 )
+//RS             }
+//RS             Err(error) => {
+//RS                 jet_foundation::DevtoolsControl::jet_devtools_update_command_receipt(
+//RS                     &self.id,
+//RS                     &request.request_id,
+//RS                     "failed",
+//RS                     Some(error),
+//RS                 )
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn publish_devtools_event_typed(&self, event: JetDevtoolsEvent) -> Result<u64, String> {
+//RS         self.push_devtools_event(event)
+//RS     }
+//RS 
+//RS     pub fn enqueue_game_control(
+//RS         &self,
+//RS         request: JetDevtoolsGameControlRequest,
+//RS     ) -> Result<(), String> {
+//RS         self.enqueue_devtools_command(JetDevtoolsCommand::GameControl(request))
+//RS     }
+//RS 
+//RS     pub fn poll_devtools_command(&self) -> Option<JetDevtoolsCommand> {
+//RS         jet_foundation::DevtoolsControl::jet_devtools_poll_command(&self.id)
+//RS     }
+//RS 
+//RS     pub fn poll_database_explain(&self) -> Option<JetDevtoolsDatabaseExplainRequest> {
+//RS         jet_foundation::DevtoolsControl::jet_devtools_poll_database_explain(&self.id)
+//RS     }
+//RS 
+//RS     fn update_command_receipt(
+//RS         &self,
+//RS         request_id: &str,
+//RS         status: &str,
+//RS         error: Option<String>,
+//RS     ) {
+//RS         let _ = jet_foundation::DevtoolsControl::jet_devtools_update_command_receipt(
+//RS             &self.id,
+//RS             request_id,
+//RS             status,
+//RS             error,
+//RS         );
+//RS     }
+//RS     /// Dispatch a bounded FIFO slice. Database and game commands share the
+//RS     /// Foundation queue; a family-specific destination cannot consume or
+//RS     /// reorder the other family.
+//RS     pub fn dispatch_pending_devtools_commands(&self) -> Result<usize, String> {
+//RS         const MAX_COMMANDS_PER_TICK: usize = 32;
+//RS         let pending = jet_foundation::DevtoolsControl::jet_devtools_command_count(&self.id)
+//RS             .min(MAX_COMMANDS_PER_TICK);
+//RS         let mut dispatched = 0usize;
+//RS         for _ in 0..pending {
+//RS             let Some(command) = self.poll_devtools_command() else {
+//RS                 break;
+//RS             };
+//RS             match command {
+//RS                 JetDevtoolsCommand::DatabaseExplain(request) => {
+//RS                     if request.session_id != self.id {
+//RS                         jet_foundation::DevtoolsControl::jet_devtools_requeue_command_front(
+//RS                             JetDevtoolsCommand::DatabaseExplain(request),
+//RS                         )?;
+//RS                         return Err(
+//RS                             "jet.devtools.v1 command session identity mismatch".to_string()
+//RS                         );
+//RS                     }
+//RS                     match jet_foundation::Devtools::jet_devtools_dispatch_database_explain(
+//RS                         &request.session_id,
+//RS                         &request.request_id,
+//RS                         &request.statement_identity,
+//RS                         request.timeout_ms,
+//RS                         request.max_rows,
+//RS                     ) {
+//RS                         Ok(()) => {
+//RS                             self.update_command_receipt(&request.request_id, "dispatched", None);
+//RS                             dispatched = dispatched.saturating_add(1);
+//RS                         }
+//RS                         Err(error)
+//RS                             if error == "database EXPLAIN runtime callback is unavailable" =>
+//RS                         {
+//RS                             self.update_command_receipt(
+//RS                                 &request.request_id,
+//RS                                 "waiting",
+//RS                                 Some(error.clone()),
+//RS                             );
+//RS                             jet_foundation::DevtoolsControl::jet_devtools_requeue_command_front(
+//RS                                 JetDevtoolsCommand::DatabaseExplain(request),
+//RS                             )?;
+//RS                             return Ok(dispatched);
+//RS                         }
+//RS                         Err(error) => {
+//RS                             self.update_command_receipt(
+//RS                                 &request.request_id,
+//RS                                 "rejected",
+//RS                                 Some(error.clone()),
+//RS                             );
+//RS                             let result = JetDevtoolsDatabaseExplainResult::new(
+//RS                                 request.session_id.clone(),
+//RS                                 request.request_id.clone(),
+//RS                                 request.statement_identity.clone(),
+//RS                                 "error",
+//RS                                 0,
+//RS                                 false,
+//RS                                 0,
+//RS                                 Vec::new(),
+//RS                                 Some("dispatch_failed".to_string()),
+//RS                                 Some(error),
+//RS                             )
+//RS                             .and_then(|result| {
+//RS                                 self.publish_database_explain_result(
+//RS                                     result,
+//RS                                     unix_time_ms(),
+//RS                                     "devserver",
+//RS                                 )
+//RS                             });
+//RS                             if let Err(publish_error) = result {
+//RS                                 jet_foundation::DevtoolsControl::jet_devtools_requeue_command_front(
+//RS                                     JetDevtoolsCommand::DatabaseExplain(request),
+//RS                                 )?;
+//RS                                 return Err(publish_error);
+//RS                             }
+//RS                             dispatched = dispatched.saturating_add(1);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 JetDevtoolsCommand::GameControl(request) => {
+//RS                     if request.session_id != self.id {
+//RS                         jet_foundation::DevtoolsControl::jet_devtools_requeue_command_front(
+//RS                             JetDevtoolsCommand::GameControl(request),
+//RS                         )?;
+//RS                         return Err(
+//RS                             "jet.devtools.v1 game control session identity mismatch".to_string()
+//RS                         );
+//RS                     }
+//RS                     let payload = request.render_json();
+//RS                     match jet_foundation::Devtools::jet_devtools_dispatch_game_control(
+//RS                         &request.session_id,
+//RS                         &payload,
+//RS                     ) {
+//RS                         Ok(()) => {
+//RS                             self.update_command_receipt(&request.request_id, "dispatched", None);
+//RS                             dispatched = dispatched.saturating_add(1);
+//RS                         }
+//RS                         Err(error)
+//RS                             if error == "game control runtime callback is unavailable" =>
+//RS                         {
+//RS                             match jet_foundation::Devtools::jet_devtools_write_game_control_relay(
+//RS                                 &request.session_id,
+//RS                                 &payload,
+//RS                             ) {
+//RS                                 Ok(()) => {
+//RS                                     self.update_command_receipt(
+//RS                                         &request.request_id,
+//RS                                         "relayed",
+//RS                                         Some(error.clone()),
+//RS                                     );
+//RS                                     dispatched = dispatched.saturating_add(1);
+//RS                                 }
+//RS                                 Err(relay_error) => {
+//RS                                     self.update_command_receipt(
+//RS                                         &request.request_id,
+//RS                                         "waiting",
+//RS                                         Some(relay_error.clone()),
+//RS                                     );
+//RS                                     jet_foundation::DevtoolsControl::jet_devtools_requeue_command_front(
+//RS                                         JetDevtoolsCommand::GameControl(request),
+//RS                                     )?;
+//RS                                     return Err(relay_error);
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         Err(error) => {
+//RS                             self.update_command_receipt(
+//RS                                 &request.request_id,
+//RS                                 "rejected",
+//RS                                 Some(error.clone()),
+//RS                             );
+//RS                             jet_foundation::DevtoolsControl::jet_devtools_requeue_command_front(
+//RS                                 JetDevtoolsCommand::GameControl(request),
+//RS                             )?;
+//RS                             return Err(error);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 JetDevtoolsCommand::ProjectRebuild(request) => {
+//RS                     jet_foundation::DevtoolsControl::jet_devtools_requeue_command_front(
+//RS                         JetDevtoolsCommand::ProjectRebuild(request),
+//RS                     )?;
+//RS                     return Ok(dispatched);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(dispatched)
+//RS     }
+//RS 
+//RS     /// Compatibility name for existing database-only callers.
+//RS     pub fn dispatch_pending_database_explain(&self) -> Result<usize, String> {
+//RS         self.dispatch_pending_devtools_commands()
+//RS     }
+//RS 
+//RS     /// Publish a checked database EXPLAIN result as an ordinary typed event.
+//RS     /// The event stream remains the only result transport; no result queue is
+//RS     /// created beside the command queue.
+//RS     pub fn publish_database_explain_result(
+//RS         &self,
+//RS         result: JetDevtoolsDatabaseExplainResult,
+//RS         timestamp_ms: u64,
+//RS         source: impl Into<String>,
+//RS     ) -> Result<u64, String> {
+//RS         if result.session_id != self.id {
+//RS             return Err("jet.devtools.v1 EXPLAIN result session identity mismatch".to_string());
+//RS         }
+//RS         result.validate()?;
+//RS         let event = JetDevtoolsEvent::from_parts(
+//RS             timestamp_ms,
+//RS             source,
+//RS             "DatabaseExplainResult",
+//RS             result.statement_identity.clone(),
+//RS             result.render_json(),
+//RS         )?;
+//RS         self.publish_devtools_event_typed(event)
+//RS     }
+//RS 
+//RS     pub fn ingest_devtools_envelope(
+//RS         &self,
+//RS         decoded: JetDevtoolsDecodedEnvelope,
+//RS     ) -> Result<usize, String> {
+//RS         decoded.validate()?;
+//RS         if decoded.session_id() != self.id {
+//RS             return Err("jet.devtools.v1 envelope session identity mismatch".to_string());
+//RS         }
+//RS         match decoded {
+//RS             JetDevtoolsDecodedEnvelope::Events(envelope) => {
+//RS                 if let Some(identity) = envelope.source_identity.as_ref() {
+//RS                     self.set_devtools_source_identity(
+//RS                         identity.source_id.clone(),
+//RS                         identity.build_id.clone(),
+//RS                         identity.revision.clone(),
+//RS                         identity.world_id.clone(),
+//RS                     )?;
+//RS                 }
+//RS                 let events = envelope.events().cloned().collect::<Vec<_>>();
+//RS                 let count = self.publish_panel_events(events)?;
+//RS                 let mut state = self.devtools_lock();
+//RS                 state.envelope.set_selection(envelope.selection().cloned());
+//RS                 state.envelope.set_cursor(envelope.cursor());
+//RS                 state.envelope.set_lifecycle(envelope.lifecycle);
+//RS                 state.envelope.set_freshness(envelope.freshness);
+//RS                 state.envelope.privacy.loopback_only = envelope.privacy.loopback_only;
+//RS                 state.envelope.privacy.payload_free_by_default =
+//RS                     envelope.privacy.payload_free_by_default;
+//RS                 state.envelope.privacy.published_payloads |= envelope.privacy.published_payloads;
+//RS                 state.envelope.reset |= envelope.reset;
+//RS                 state.envelope.truncated |= envelope.truncated;
+//RS                 Ok(count)
+//RS             }
+//RS             JetDevtoolsDecodedEnvelope::Commands(envelope) => {
+//RS                 let commands = envelope.commands().cloned().collect::<Vec<_>>();
+//RS                 let count = commands.len();
+//RS                 for command in &commands {
+//RS                     self.validate_devtools_command_admission(command)?;
+//RS                 }
+//RS                 let game_count = commands
+//RS                     .iter()
+//RS                     .filter(|command| matches!(command, JetDevtoolsCommand::GameControl(_)))
+//RS                     .count();
+//RS                 let common_count = count.saturating_sub(game_count);
+//RS                 let queued_common =
+//RS                     jet_foundation::DevtoolsControl::jet_devtools_command_count(&self.id);
+//RS                 if queued_common > JET_DEVTOOLS_MAX_COMMANDS.saturating_sub(common_count) {
+//RS                     return Err("jet.devtools.v1 command queue is full".to_string());
+//RS                 }
+//RS                 let mut browser_controls = self.browser_game_controls.lock().unwrap();
+//RS                 if browser_controls.len() > JET_DEVTOOLS_MAX_COMMANDS.saturating_sub(game_count) {
+//RS                     return Err("jet.devtools.v1 browser game command queue is full".to_string());
+//RS                 }
+//RS                 for command in commands {
+//RS                     match command {
+//RS                         JetDevtoolsCommand::GameControl(request) => {
+//RS                             let game_command = JetDevtoolsCommand::GameControl(request.clone());
+//RS                             browser_controls.push_back(request);
+//RS                             jet_foundation::DevtoolsControl::jet_devtools_record_command_receipt(
+//RS                                 JetDevtoolsCommandReceipt::for_command(
+//RS                                     &game_command,
+//RS                                     "queued",
+//RS                                     None,
+//RS                                 ),
+//RS                             )?;
+//RS                         }
+//RS                         command => {
+//RS                             jet_foundation::DevtoolsControl::jet_devtools_enqueue_command(command)?;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Ok(count)
+//RS             }
+//RS         }
+//RS     }
+//RS     pub fn publish_panel_events<I>(&self, events: I) -> Result<usize, String>
+//RS     where
+//RS         I: IntoIterator<Item = JetDevtoolsEvent>,
+//RS     {
+//RS         let mut count = 0usize;
+//RS         for event in events {
+//RS             self.publish_devtools_event_typed(event)?;
+//RS             count = count.saturating_add(1);
+//RS         }
+//RS         Ok(count)
+//RS     }
+//RS 
+//RS     pub fn publish_job_fact(
+//RS         &self,
+//RS         fact: &JetDevtoolsJobPanelFact,
+//RS         source: impl Into<String>,
+//RS     ) -> Result<u64, String> {
+//RS         let event = fact.to_protocol_event(source)?;
+//RS         self.publish_devtools_event_typed(event)
+//RS     }
+//RS 
+//RS     /// Move the resident replay cursor to one retained sequence.
+//RS     pub fn scrub(&self, sequence: u64) -> Result<ReplayProjection, String> {
+//RS         let projection = {
+//RS             let mut recording = self.recording.lock().map_err(|_| {
+//RS                 "devtools recording state is unavailable because its lock is poisoned".to_string()
+//RS             })?;
+//RS             let state = recording
+//RS                 .as_mut()
+//RS                 .ok_or_else(recording_unavailable)?;
+//RS             state
+//RS                 .cursor
+//RS                 .seek(&state.recording, sequence)
+//RS                 .map_err(recording_error)
+//RS         };
+//RS         if let Ok(projection) = projection.as_ref() {
+//RS             self.sync_replay_cursor(projection);
+//RS         }
+//RS         projection
+//RS     }
+//RS 
+//RS     /// Move the resident replay cursor to the newest event at or before time.
+//RS     pub fn scrub_time(&self, timestamp_ms: u64) -> Result<ReplayProjection, String> {
+//RS         let projection = {
+//RS             let mut recording = self.recording.lock().map_err(|_| {
+//RS                 "devtools recording state is unavailable because its lock is poisoned".to_string()
+//RS             })?;
+//RS             let state = recording
+//RS                 .as_mut()
+//RS                 .ok_or_else(recording_unavailable)?;
+//RS             state
+//RS                 .cursor
+//RS                 .seek_time(&state.recording, timestamp_ms)
+//RS                 .map_err(recording_error)
+//RS         };
+//RS         if let Ok(projection) = projection.as_ref() {
+//RS             self.sync_replay_cursor(projection);
+//RS         }
+//RS         projection
+//RS     }
+//RS 
+//RS     /// Advance the resident replay cursor by one event.
+//RS     pub fn step(&self) -> Result<ReplayProjection, String> {
+//RS         let projection = {
+//RS             let mut recording = self.recording.lock().map_err(|_| {
+//RS                 "devtools recording state is unavailable because its lock is poisoned".to_string()
+//RS             })?;
+//RS             let state = recording
+//RS                 .as_mut()
+//RS                 .ok_or_else(recording_unavailable)?;
+//RS             state
+//RS                 .cursor
+//RS                 .step_forward(&state.recording)
+//RS                 .map_err(recording_error)
+//RS         };
+//RS         if let Ok(projection) = projection.as_ref() {
+//RS             self.sync_replay_cursor(projection);
+//RS         }
+//RS         projection
+//RS     }
+//RS 
+//RS     /// Advance the resident replay cursor by an explicit bounded count.
+//RS     pub fn skip(&self, count: u64) -> Result<ReplayProjection, String> {
+//RS         let projection = {
+//RS             let mut recording = self.recording.lock().map_err(|_| {
+//RS                 "devtools recording state is unavailable because its lock is poisoned".to_string()
+//RS             })?;
+//RS             let state = recording
+//RS                 .as_mut()
+//RS                 .ok_or_else(recording_unavailable)?;
+//RS             for _ in 0..count {
+//RS                 state
+//RS                     .cursor
+//RS                     .step_forward(&state.recording)
+//RS                     .map_err(recording_error)?;
+//RS             }
+//RS             state
+//RS                 .recording
+//RS                 .projection(&state.cursor)
+//RS                 .map_err(recording_error)
+//RS         };
+//RS         if let Ok(projection) = projection.as_ref() {
+//RS             self.sync_replay_cursor(projection);
+//RS         }
+//RS         projection
+//RS     }
+//RS 
+//RS     /// Save a named, identity- and generation-bound replay checkpoint.
+//RS     pub fn checkpoint(&self, name: &str) -> Result<SessionCheckpoint, String> {
+//RS         validate_devtools_text(name, "checkpoint name")?;
+//RS         let mut recording = self.recording.lock().map_err(|_| {
+//RS             "devtools recording state is unavailable because its lock is poisoned".to_string()
+//RS         })?;
+//RS         let state = recording
+//RS             .as_mut()
+//RS             .ok_or_else(recording_unavailable)?;
+//RS         let checkpoint = state
+//RS             .recording
+//RS             .checkpoint(&state.cursor)
+//RS             .map_err(recording_error)?;
+//RS         state
+//RS             .checkpoints
+//RS             .insert(name.to_string(), checkpoint.clone());
+//RS         Ok(checkpoint)
+//RS     }
+//RS 
+//RS     /// Restore a named checkpoint and return its canonical projection.
+//RS     pub fn restore(&self, name: &str) -> Result<ReplayProjection, String> {
+//RS         validate_devtools_text(name, "checkpoint name")?;
+//RS         let projection = {
+//RS             let mut recording = self.recording.lock().map_err(|_| {
+//RS                 "devtools recording state is unavailable because its lock is poisoned".to_string()
+//RS             })?;
+//RS             let state = recording
+//RS                 .as_mut()
+//RS                 .ok_or_else(recording_unavailable)?;
+//RS             let checkpoint = state
+//RS                 .checkpoints
+//RS                 .get(name)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| RecordingError::CheckpointUnavailable.to_string())?;
+//RS             state.cursor = state
+//RS                 .recording
+//RS                 .restore_checkpoint(&checkpoint)
+//RS                 .map_err(recording_error)?;
+//RS             state
+//RS                 .recording
+//RS                 .projection(&state.cursor)
+//RS                 .map_err(recording_error)
+//RS         };
+//RS         if let Ok(projection) = projection.as_ref() {
+//RS             self.sync_replay_cursor(projection);
+//RS         }
+//RS         projection
+//RS     }
+//RS 
+//RS     /// Compare the retained recording with the canonical resident event tail.
+//RS     pub fn divergence(&self) -> Result<DevtoolsRecordingDivergence, String> {
+//RS         let (envelope_sequence, envelope_identity) = {
+//RS             let state = self.devtools_lock();
+//RS             (
+//RS                 state.envelope.latest_sequence(),
+//RS                 state.envelope.source_identity.clone(),
+//RS             )
+//RS         };
+//RS         let recording = self.recording.lock().map_err(|_| {
+//RS             "devtools recording state is unavailable because its lock is poisoned".to_string()
+//RS         })?;
+//RS         let state = recording
+//RS             .as_ref()
+//RS             .ok_or_else(recording_unavailable)?;
+//RS         let expected_sequence = state.first_sequence.and_then(|first| {
+//RS             envelope_sequence.filter(|sequence| *sequence >= first)
+//RS         });
+//RS         let actual_sequence = state.recording.events().last().map(SessionEvent::sequence);
+//RS         let mut reason = None;
+//RS         if envelope_identity.as_ref().map_or(true, |identity| {
+//RS             identity.source_id.as_deref() != Some(state.recording.identity().source_id.as_str())
+//RS                 || identity.build_id.as_deref() != Some(state.recording.identity().build_id.as_str())
+//RS         }) {
+//RS             reason = Some("resident source/build identity differs from recording".to_string());
+//RS         } else if expected_sequence != actual_sequence {
+//RS             reason = Some("resident event tail differs from recording".to_string());
+//RS         } else if let Err(error) = state.recording.projection(&state.cursor) {
+//RS             reason = Some(error.to_string());
+//RS         }
+//RS         let truncation = state.recording.truncation();
+//RS         Ok(DevtoolsRecordingDivergence {
+//RS             divergent: reason.is_some(),
+//RS             reason,
+//RS             identity: state.recording.identity().clone(),
+//RS             expected_sequence,
+//RS             actual_sequence,
+//RS             retained_events: state.recording.event_count(),
+//RS             dropped_events: truncation.dropped_events,
+//RS             truncation,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Apply one typed replay operation from the HTTP boundary.
+//RS     pub fn recording_control(&self, payload: &str) -> Result<String, String> {
+//RS         let root = parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES)
+//RS             .map_err(|_| "recording control must be valid bounded JSON".to_string())?;
+//RS         let object = object_map(&root)
+//RS             .ok_or_else(|| "recording control must be a JSON object".to_string())?;
+//RS         let operation = object
+//RS             .get("op")
+//RS             .or_else(|| object.get("action"))
+//RS             .and_then(json_string)
+//RS             .ok_or_else(|| "recording control must include string op".to_string())?;
+//RS         match operation {
+//RS             "scrub" => {
+//RS                 let sequence = object
+//RS                     .get("sequence")
+//RS                     .and_then(json_u64)
+//RS                     .ok_or_else(|| "recording scrub requires non-negative sequence".to_string())?;
+//RS                 self.scrub(sequence)?;
+//RS             }
+//RS             "scrub_time" => {
+//RS                 let timestamp_ms = object
+//RS                     .get("timestamp_ms")
+//RS                     .and_then(json_u64)
+//RS                     .ok_or_else(|| {
+//RS                         "recording scrub_time requires non-negative timestamp_ms".to_string()
+//RS                     })?;
+//RS                 self.scrub_time(timestamp_ms)?;
+//RS             }
+//RS             "step" => match object.get("direction").and_then(json_string) {
+//RS                 None | Some("forward") => {
+//RS                     self.step()?;
+//RS                 }
+//RS                 Some("backward") | Some("reverse") => {
+//RS                     return Err("recording step is forward-only".to_string());
+//RS                 }
+//RS                 Some(direction) => {
+//RS                     return Err(format!("unknown recording step direction `{direction}`"));
+//RS                 }
+//RS             },
+//RS             "skip" => {
+//RS                 let count = object
+//RS                     .get("count")
+//RS                     .and_then(json_u64)
+//RS                     .ok_or_else(|| "recording skip requires non-negative count".to_string())?;
+//RS                 self.skip(count)?;
+//RS             }
+//RS             "checkpoint" => {
+//RS                 let name = object
+//RS                     .get("name")
+//RS                     .and_then(json_string)
+//RS                     .ok_or_else(|| "recording checkpoint requires string name".to_string())?;
+//RS                 self.checkpoint(name)?;
+//RS             }
+//RS             "restore" => {
+//RS                 let name = object
+//RS                     .get("name")
+//RS                     .and_then(json_string)
+//RS                     .ok_or_else(|| "recording restore requires string name".to_string())?;
+//RS                 self.restore(name)?;
+//RS             }
+//RS             "divergence" => {
+//RS                 self.divergence()?;
+//RS             }
+//RS             _ => return Err(format!("unknown recording operation `{operation}`")),
+//RS         }
+//RS         Ok(self.recording_json())
+//RS     }
+//RS 
+//RS     /// Serialize the canonical resident recording and current replay cursor.
+//RS     pub fn recording_json(&self) -> String {
+//RS         let divergence = self.divergence().ok();
+//RS         let state = match self.recording.lock() {
+//RS             Ok(state) => state,
+//RS             Err(_) => {
+//RS                 return recording_unavailable_json(
+//RS                     &self.id,
+//RS                     "devtools recording state is unavailable because its lock is poisoned",
+//RS                 )
+//RS             }
+//RS         };
+//RS         let Some(state) = state.as_ref() else {
+//RS             return recording_unavailable_json(
+//RS                 &self.id,
+//RS                 "source/build identity is unavailable",
+//RS             );
+//RS         };
+//RS         let projection = match state.recording.projection(&state.cursor) {
+//RS             Ok(projection) => projection,
+//RS             Err(error) => return recording_unavailable_json(&self.id, &error.to_string()),
+//RS         };
+//RS         recording_json_for_state(&self.id, state, &projection, divergence.as_ref())
+//RS     }
+//RS 
+//RS     pub fn set_devtools_source_identity(
+//RS         &self,
+//RS         source_id: Option<String>,
+//RS         build_id: Option<String>,
+//RS         revision: Option<String>,
+//RS         world_id: Option<String>,
+//RS     ) -> Result<(), String> {
+//RS         let recording_identity = match (source_id.as_deref(), build_id.as_deref()) {
+//RS             (Some(source_id), Some(build_id)) => Some(
+//RS                 SessionIdentity::new(source_id, build_id).map_err(recording_error)?,
+//RS             ),
+//RS             _ => None,
+//RS         };
+//RS         let identity =
+//RS             JetDevtoolsSourceIdentityFact::new(source_id, build_id, revision, world_id);
+//RS         let first_sequence = {
+//RS             let mut state = self.devtools_lock();
+//RS             state.envelope.set_source_identity(Some(identity))?;
+//RS             match state.envelope.latest_sequence() {
+//RS                 Some(sequence) => Some(
+//RS                     sequence
+//RS                         .checked_add(1)
+//RS                         .ok_or_else(|| "devtools event sequence exhausted".to_string())?,
+//RS                 ),
+//RS                 None => Some(1),
+//RS             }
+//RS         };
+//RS         self.set_recording_identity(recording_identity, first_sequence)
+//RS     }
+//RS 
+//RS     fn set_recording_identity(
+//RS         &self,
+//RS         identity: Option<SessionIdentity>,
+//RS         first_sequence: Option<u64>,
+//RS     ) -> Result<(), String> {
+//RS         let mut recording = self.recording.lock().map_err(|_| {
+//RS             "devtools recording state is unavailable because its lock is poisoned".to_string()
+//RS         })?;
+//RS         if let (Some(state), Some(identity)) = (recording.as_ref(), identity.as_ref()) {
+//RS             if state.recording.identity() == identity {
+//RS                 return Ok(());
+//RS             }
+//RS         }
+//RS         *recording = match identity {
+//RS             Some(identity) => Some(ResidentRecordingState::new(
+//RS                 SessionRecording::new(identity).map_err(recording_error)?,
+//RS                 first_sequence,
+//RS             )),
+//RS             None => None,
+//RS         };
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Project the sema-owned HotSwap verdict into the shared devtools
+//RS     /// stream.  Compatibility and retention are facts here; this adapter
+//RS     /// never recomputes them from source or runtime state.
+//RS     pub fn publish_hot_swap_decision(
+//RS         &self,
+//RS         decision: &HotSwapDecision,
+//RS     ) -> Result<(), String> {
+//RS         validate_devtools_text(&decision.module, "HotSwap module")?;
+//RS         let compatibility = if decision.is_compatible() {
+//RS             "compatible"
+//RS         } else {
+//RS             "incompatible"
+//RS         };
+//RS         let reason = decision.compatibility.reason().unwrap_or("");
+//RS         let (kept, reset): (Vec<_>, Vec<_>) = decision
+//RS             .state
+//RS             .iter()
+//RS             .partition(|fact| fact.is_preserved());
+//RS         let state = decision
+//RS             .state
+//RS             .iter()
+//RS             .map(retention_fact_json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let change_facts = decision
+//RS             .change_facts
+//RS             .iter()
+//RS             .map(game_change_fact_json)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let fields = format!(
+//RS             "{{\"module\":{},\"compatibility\":{},\"reason\":{},\"changed\":{},\"changed_functions\":{},\"state\":[{}],\"kept\":{},\"reset\":{},\"rechecked_items\":{},\"change_facts\":[{}]}}",
+//RS             json_value(&decision.module),
+//RS             json_value(compatibility),
+//RS             json_value(reason),
+//RS             string_array_json(&decision.changed),
+//RS             string_array_json(&decision.changed_functions),
+//RS             state,
+//RS             string_array_json(
+//RS                 &kept
+//RS                     .iter()
+//RS                     .map(|fact| fact.key.clone())
+//RS                     .collect::<Vec<_>>(),
+//RS             ),
+//RS             string_array_json(
+//RS                 &reset
+//RS                     .iter()
+//RS                     .map(|fact| fact.key.clone())
+//RS                     .collect::<Vec<_>>(),
+//RS             ),
+//RS             string_array_json(&decision.rechecked_items),
+//RS             change_facts,
+//RS         );
+//RS         let event = JetDevtoolsEvent::from_parts(
+//RS             unix_time_ms(),
+//RS             "sema",
+//RS             "HotSwap",
+//RS             "module",
+//RS             fields,
+//RS         )?;
+//RS         self.publish_devtools_event_typed(event).map(|_| ())
+//RS     }
+//RS 
+//RS     /// Last input wins for selection.  The update also feeds the existing
+//RS     /// Canvas selection fields so older Canvas clients and new hosts agree.
+//RS     pub fn set_devtools_selection(&self, request: &str) -> Result<(), String> {
+//RS         let root = parse_json(request)
+//RS             .map_err(|_| "devtools selection must be valid JSON".to_string())?;
+//RS         let object =
+//RS             object_map(&root).ok_or_else(|| "devtools selection must be an object".to_string())?;
+//RS         let nested = object.get("selection").and_then(object_map);
+//RS         let field = |key: &str| {
+//RS             object
+//RS                 .get(key)
+//RS                 .or_else(|| nested.as_ref().and_then(|selection| selection.get(key)))
+//RS                 .and_then(json_string)
+//RS                 .map(str::to_string)
+//RS         };
+//RS         let clear = object
+//RS             .get("clear")
+//RS             .is_some_and(|value| matches!(value, DataTree::Bool(true)))
+//RS             || matches!(object.get("selection"), Some(DataTree::Null));
+//RS         let panel_id = field("panel_id").or_else(|| field("target"));
+//RS         let item_key = field("item_key")
+//RS             .or_else(|| field("source_id"))
+//RS             .or_else(|| field("output"));
+//RS         let origin = field("origin").unwrap_or_else(|| "host".to_string());
+//RS         validate_devtools_text(&origin, "selection origin")?;
+//RS         for (value, label) in [
+//RS             (panel_id.as_deref(), "panel_id"),
+//RS             (item_key.as_deref(), "item_key"),
+//RS         ] {
+//RS             if let Some(value) = value {
+//RS                 validate_devtools_text(value, label)?;
+//RS             }
+//RS         }
+//RS         if !clear && panel_id.is_none() && item_key.is_none() {
+//RS             return Err("devtools selection has no selected value".to_string());
+//RS         }
+//RS         let source_id = field("source_id");
+//RS         let output = field("output");
+//RS         let target = field("target");
+//RS         if clear {
+//RS             *self.selected_source_id.lock().unwrap() = String::new();
+//RS             *self.selected_output.lock().unwrap() = String::new();
+//RS             *self.selected_target.lock().unwrap() = String::new();
+//RS         } else {
+//RS             if let Some(source_id) = source_id.as_deref().or(item_key.as_deref()) {
+//RS                 self.select_project_source(source_id);
+//RS             }
+//RS             self.select_output_values(
+//RS                 output.as_deref(),
+//RS                 target.as_deref().or(panel_id.as_deref()),
+//RS             );
+//RS         }
+//RS         {
+//RS             let mut state = self.devtools_lock();
+//RS             if clear {
+//RS                 state.envelope.set_selection(None);
+//RS             } else {
+//RS                 let previous_panel = state
+//RS                     .envelope
+//RS                     .view()
+//RS                     .selection()
+//RS                     .map(|selection| selection.panel_id.clone());
+//RS                 let selected_panel = panel_id
+//RS                     .clone()
+//RS                     .or(previous_panel)
+//RS                     .unwrap_or_default();
+//RS                 let selected_item = item_key.clone().or_else(|| {
+//RS                     state
+//RS                         .envelope
+//RS                         .view()
+//RS                         .selection()
+//RS                         .and_then(|selection| selection.item_key.clone())
+//RS                 });
+//RS                 state.envelope.set_selection(Some(JetDevtoolsSelection::new(
+//RS                     selected_panel,
+//RS                     selected_item,
+//RS                 )));
+//RS             }
+//RS         }
+//RS         let fields = format!(
+//RS             "{{\"panel_id\":{},\"item_key\":{},\"cleared\":{}}}",
+//RS             if clear {
+//RS                 "null".to_string()
+//RS             } else {
+//RS                 panel_id
+//RS                     .as_deref()
+//RS                     .map(json_value)
+//RS                     .unwrap_or_else(|| "null".to_string())
+//RS             },
+//RS             if clear {
+//RS                 "null".to_string()
+//RS             } else {
+//RS                 item_key
+//RS                     .as_deref()
+//RS                     .map(json_value)
+//RS                     .unwrap_or_else(|| "null".to_string())
+//RS             },
+//RS             clear,
+//RS         );
+//RS         let event = JetDevtoolsEvent::from_parts(
+//RS             unix_time_ms(),
+//RS             origin,
+//RS             "Selection",
+//RS             "session",
+//RS             fields,
+//RS         )?;
+//RS         self.publish_devtools_event_typed(event).map(|_| ())
+//RS     }
+//RS 
+//RS     /// Update the shared time cursor.  The canonical cursor is an event
+//RS     /// sequence, so all hosts can resolve it against the bounded history.
+//RS     pub fn set_devtools_cursor(&self, request: &str) -> Result<(), String> {
+//RS         let root = parse_json(request)
+//RS             .map_err(|_| "devtools cursor must be valid JSON".to_string())?;
+//RS         let object =
+//RS             object_map(&root).ok_or_else(|| "devtools cursor must be an object".to_string())?;
+//RS         let origin = object
+//RS             .get("origin")
+//RS             .and_then(json_string)
+//RS             .unwrap_or("host");
+//RS         validate_devtools_text(origin, "cursor origin")?;
+//RS         let cursor_value = object
+//RS             .get("cursor")
+//RS             .or_else(|| object.get("sequence"));
+//RS         let sequence = match cursor_value {
+//RS             None | Some(DataTree::Null) => None,
+//RS             Some(DataTree::Object(cursor)) => {
+//RS                 let cursor = cursor.iter().cloned().collect::<BTreeMap<_, _>>();
+//RS                 match cursor.get("sequence") {
+//RS                     Some(value) => Some(
+//RS                         json_u64(value)
+//RS                             .ok_or_else(|| "devtools cursor must be a sequence".to_string())?,
+//RS                     ),
+//RS                     None => {
+//RS                         return Err("devtools cursor must be a sequence".to_string());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Some(value) => Some(
+//RS                 json_u64(value)
+//RS                     .ok_or_else(|| "devtools cursor must be a sequence".to_string())?,
+//RS             ),
+//RS         };
+//RS         {
+//RS             self.devtools_lock().envelope.set_cursor(sequence);
+//RS         }
+//RS         let fields = format!(
+//RS             "{{\"sequence\":{}}}",
+//RS             sequence
+//RS                 .map(|value| value.to_string())
+//RS                 .unwrap_or_else(|| "null".to_string()),
+//RS         );
+//RS         let event = JetDevtoolsEvent::from_parts(
+//RS             unix_time_ms(),
+//RS             origin,
+//RS             "Cursor",
+//RS             "session",
+//RS             fields,
+//RS         )?;
+//RS         self.publish_devtools_event_typed(event).map(|_| ())
+//RS     }
+//RS 
+// END-PORT-PENDING 0782 crates/jet-devserver/src/Session.rs:1-1823
+

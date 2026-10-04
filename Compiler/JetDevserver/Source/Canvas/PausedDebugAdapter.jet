@@ -1,0 +1,451 @@
+// PORT-PENDING 0766 crates-jet-devserver-src-canvas-node-catalog-module-group: crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:1-447
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Typed bridge from a real `jet_debug` stop to the paused devtools kernel.
+//RS //!
+//RS //! This adapter owns no debugger process and parses no request JSON.  The
+//RS //! debugger backend publishes a bounded [`jet_debug::DebugSnapshot`]; this
+//RS //! module turns those facts into the canonical paused-session projections and
+//RS //! supplies read-only evaluation results to [`PausedEvaluateHost`].
+//RS 
+//RS use jet_foundation::Devtools::JetDevtoolsSourceIdentityFact;
+//RS use jet_debug::{DebugAggregateKind, DebugEvaluation, DebugSnapshot, DebugValue};
+//RS 
+//RS use crate::PausedEvaluate::{
+//RS     AggregateKind, AuthorityGrant, AuthorityRequirement, AuthoritySet, EvaluateRequest,
+//RS     EvaluationMode, EvaluationUsage, EvaluatorResult, LexicalScope, PausedEvaluateHost,
+//RS     PausedSession, SessionIdentity, SessionState, SourceLocation, TypedValue, ValueProjection,
+//RS     DEFAULT_EVALUATION_BUDGET, EVALUATE_AUTHORITY, INSPECT_AUTHORITY, MAX_VALUE_BYTES,
+//RS };
+//RS 
+//RS const UNKNOWN_TYPE: &str = "Unknown";
+//RS const MAX_SOURCE_COMPONENT_BYTES: usize = 256;
+//RS 
+//RS /// The one source-owned adapter for a paused Canvas debugger session.
+//RS ///
+//RS /// A clone is cheap and intentional: request handling can take a stable view
+//RS /// of the published stop while the owning `DebugSessions` entry is refreshed
+//RS /// by a later command boundary.
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct PausedDebugSessionAdapter {
+//RS     identity: SessionIdentity,
+//RS     source: JetDevtoolsSourceIdentityFact,
+//RS     scope_id: String,
+//RS     snapshot: DebugSnapshot,
+//RS     authority: AuthoritySet,
+//RS     state: SessionState,
+//RS }
+//RS 
+//RS impl PausedDebugSessionAdapter {
+//RS     pub(crate) fn new(
+//RS         identity: SessionIdentity,
+//RS         source: JetDevtoolsSourceIdentityFact,
+//RS         scope_id: impl Into<String>,
+//RS         snapshot: DebugSnapshot,
+//RS         authority: AuthoritySet,
+//RS     ) -> Result<Self, String> {
+//RS         let adapter = Self {
+//RS             identity,
+//RS             source,
+//RS             scope_id: scope_id.into(),
+//RS             snapshot,
+//RS             authority,
+//RS             state: SessionState::Paused,
+//RS         };
+//RS         adapter.validate()?;
+//RS         Ok(adapter)
+//RS     }
+//RS 
+//RS     /// Default capabilities for the ordinary read-only debugger view.
+//RS     pub(crate) fn debugger_authority(scope_id: &str) -> Result<AuthoritySet, String> {
+//RS         Ok(AuthoritySet::new(vec![
+//RS             AuthorityGrant::new(INSPECT_AUTHORITY, scope_id)?,
+//RS             AuthorityGrant::new(EVALUATE_AUTHORITY, scope_id)?,
+//RS         ]))
+//RS     }
+//RS 
+//RS     pub(crate) fn identity(&self) -> &SessionIdentity {
+//RS         &self.identity
+//RS     }
+//RS 
+//RS     pub(crate) fn is_paused(&self) -> bool {
+//RS         self.state == SessionState::Paused
+//RS     }
+//RS 
+//RS     /// Replace the published stop after a replayed command boundary.
+//RS     pub(crate) fn refresh_snapshot(
+//RS         &mut self,
+//RS         identity: SessionIdentity,
+//RS         snapshot: DebugSnapshot,
+//RS     ) -> Result<(), String> {
+//RS         if identity.session_id != self.identity.session_id
+//RS             || identity.source_id != self.identity.source_id
+//RS             || identity.source_revision != self.identity.source_revision
+//RS         {
+//RS             return Err("paused debugger refresh changed session or source identity".to_string());
+//RS         }
+//RS         self.identity = identity;
+//RS         self.snapshot = snapshot;
+//RS         self.state = SessionState::Paused;
+//RS         self.validate()
+//RS     }
+//RS 
+//RS     /// Inject the current real stop into the canonical paused host.
+//RS     pub(crate) fn inject_into(&self, host: &mut PausedEvaluateHost) -> Result<(), String> {
+//RS         if self.state != SessionState::Paused {
+//RS             host.clear_session();
+//RS             return Ok(());
+//RS         }
+//RS         let location = self.source_location()?;
+//RS         let mut bindings = Vec::with_capacity(self.snapshot.locals.len());
+//RS         for (index, local) in self.snapshot.locals.iter().enumerate() {
+//RS             let id = self.value_id(index, &local.name);
+//RS             let type_name = normalized_type_name(&local.type_name);
+//RS             let value = jet_debug::evaluate_snapshot(&self.snapshot, &local.name)
+//RS                 .ok()
+//RS                 .and_then(|evaluation| self.projection_value(&evaluation, &id, &location).ok());
+//RS             let mut projection = match value {
+//RS                 Some(value) => value,
+//RS                 None => ValueProjection::redacted(
+//RS                     id,
+//RS                     bounded_name(&local.name),
+//RS                     type_name,
+//RS                     location.clone(),
+//RS                 ),
+//RS             };
+//RS             if projection.type_name.is_empty() {
+//RS                 projection.type_name = UNKNOWN_TYPE.to_string();
+//RS             }
+//RS             bindings.push(projection);
+//RS         }
+//RS         let scope = LexicalScope::new(
+//RS             self.scope_id.clone(),
+//RS             bounded_scope_name(&self.snapshot.function),
+//RS             None,
+//RS             location,
+//RS             bindings,
+//RS         )?;
+//RS         let session = PausedSession::paused(
+//RS             self.identity.clone(),
+//RS             vec![scope],
+//RS             self.authority.clone(),
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS         )?;
+//RS         host.clear_evaluator_result();
+//RS         host.set_session(session);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Compute one evaluator fact from the published snapshot.  This is
+//RS     /// deliberately read-only: there is no mutation operation in the
+//RS     /// snapshot API and no fabricated observation is emitted.
+//RS     pub(crate) fn evaluate(&self, request: &EvaluateRequest) -> EvaluatorResult {
+//RS         let usage = EvaluationUsage::new(0, 0, 0, 0);
+//RS         if request.identity != self.identity || request.scope_id != self.scope_id {
+//RS             return EvaluatorResult::failed(
+//RS                 request.identity.clone(),
+//RS                 request.scope_id.clone(),
+//RS                 "paused debugger request does not match the published stop",
+//RS                 usage,
+//RS             );
+//RS         }
+//RS         if request.cancellation.requested || self.state == SessionState::Cancelled {
+//RS             return EvaluatorResult::cancelled(
+//RS                 request.identity.clone(),
+//RS                 request.scope_id.clone(),
+//RS                 usage,
+//RS             );
+//RS         }
+//RS         if self.state != SessionState::Paused {
+//RS             return EvaluatorResult::failed(
+//RS                 request.identity.clone(),
+//RS                 request.scope_id.clone(),
+//RS                 "paused debugger is no longer stopped",
+//RS                 usage,
+//RS             );
+//RS         }
+//RS         if request.mode == EvaluationMode::Mutate {
+//RS             return EvaluatorResult::failed(
+//RS                 request.identity.clone(),
+//RS                 request.scope_id.clone(),
+//RS                 "paused debugger evaluation is read-only; mutation is unsupported",
+//RS                 usage,
+//RS             );
+//RS         }
+//RS         let requirement = match AuthorityRequirement::new(EVALUATE_AUTHORITY, &self.scope_id) {
+//RS             Ok(requirement) => requirement,
+//RS             Err(error) => {
+//RS                 return EvaluatorResult::failed(
+//RS                     request.identity.clone(),
+//RS                     request.scope_id.clone(),
+//RS                     error,
+//RS                     usage,
+//RS                 )
+//RS             }
+//RS         };
+//RS         if !self.authority.allows(&requirement)
+//RS             || request
+//RS                 .authority
+//RS                 .iter()
+//RS                 .any(|requirement| !self.authority.allows(requirement))
+//RS         {
+//RS             return EvaluatorResult::failed(
+//RS                 request.identity.clone(),
+//RS                 request.scope_id.clone(),
+//RS                 "paused debugger lacks read-only evaluation authority",
+//RS                 usage,
+//RS             );
+//RS         }
+//RS         let evaluation = match jet_debug::evaluate_snapshot(&self.snapshot, &request.expression) {
+//RS             Ok(evaluation) => evaluation,
+//RS             Err(error) => {
+//RS                 return EvaluatorResult::failed(
+//RS                     request.identity.clone(),
+//RS                     request.scope_id.clone(),
+//RS                     error,
+//RS                     usage,
+//RS                 )
+//RS             }
+//RS         };
+//RS         let usage = EvaluationUsage::new(
+//RS             evaluation.usage.depth,
+//RS             evaluation.usage.nodes,
+//RS             evaluation.usage.bytes.min(MAX_VALUE_BYTES),
+//RS             evaluation.usage.steps,
+//RS         );
+//RS         let location = match self.source_location() {
+//RS             Ok(location) => location,
+//RS             Err(error) => {
+//RS                 return EvaluatorResult::failed(
+//RS                     request.identity.clone(),
+//RS                     request.scope_id.clone(),
+//RS                     error,
+//RS                     usage,
+//RS                 )
+//RS             }
+//RS         };
+//RS         let index = self
+//RS             .snapshot
+//RS             .locals
+//RS             .iter()
+//RS             .position(|local| local.name == evaluation.name)
+//RS             .unwrap_or(0);
+//RS         let id = self.value_id(index, &evaluation.name);
+//RS         let value = match self.projection_value(&evaluation, &id, &location) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 return EvaluatorResult::failed(
+//RS                     request.identity.clone(),
+//RS                     request.scope_id.clone(),
+//RS                     error,
+//RS                     usage,
+//RS                 )
+//RS             }
+//RS         };
+//RS         EvaluatorResult::completed(
+//RS             request.identity.clone(),
+//RS             request.scope_id.clone(),
+//RS             Some(value),
+//RS             usage,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Resume, cancel, or exit only the host session belonging to this
+//RS     /// adapter.  A different active session in the shared host is untouched.
+//RS     pub(crate) fn resume(&mut self, host: &mut PausedEvaluateHost) {
+//RS         self.state = SessionState::Running;
+//RS         self.clear_if_current(host);
+//RS     }
+//RS 
+//RS     pub(crate) fn cancel(
+//RS         &mut self,
+//RS         host: &mut PausedEvaluateHost,
+//RS         reason: impl Into<String>,
+//RS     ) -> Result<(), String> {
+//RS         self.state = SessionState::Cancelled;
+//RS         if self.host_is_current(host) {
+//RS             host.cancel_session(reason).map_err(|error| error.to_string())?;
+//RS             host.clear_evaluator_result();
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(crate) fn exit(&mut self, host: &mut PausedEvaluateHost) {
+//RS         self.state = SessionState::Finished;
+//RS         self.clear_if_current(host);
+//RS     }
+//RS 
+//RS     pub(crate) fn stale(&mut self, host: &mut PausedEvaluateHost) {
+//RS         self.state = SessionState::Stale;
+//RS         self.clear_if_current(host);
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), String> {
+//RS         if self.source.source_id.as_deref() != Some(self.identity.source_id.as_str()) {
+//RS             return Err("paused debugger source identity does not match the session".to_string());
+//RS         }
+//RS         if self.source.revision.as_deref() != Some(self.identity.source_revision.as_str()) {
+//RS             return Err("paused debugger revision identity does not match the session".to_string());
+//RS         }
+//RS         for (value, label) in [
+//RS             (self.source.build_id.as_deref(), "build identity"),
+//RS             (self.source.world_id.as_deref(), "world identity"),
+//RS         ] {
+//RS             if let Some(value) = value {
+//RS                 if value.is_empty()
+//RS                     || value.len() > MAX_SOURCE_COMPONENT_BYTES
+//RS                     || value.chars().any(char::is_control)
+//RS                 {
+//RS                     return Err(format!("{label} is outside the bounded identity contract"));
+//RS                 }
+//RS             }
+//RS         }
+//RS         if self.scope_id.is_empty()
+//RS             || self.scope_id.len() > MAX_SOURCE_COMPONENT_BYTES
+//RS             || self.scope_id.chars().any(char::is_control)
+//RS         {
+//RS             return Err("paused debugger scope identity is outside the bounded contract".to_string());
+//RS         }
+//RS         if self.snapshot.function.is_empty()
+//RS             || self.snapshot.line == 0
+//RS             || self.snapshot.locals.len() > 4_096
+//RS             || self.snapshot.call_stack.len() > 256
+//RS         {
+//RS             return Err("paused debugger snapshot is outside the bounded fact contract".to_string());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn source_location(&self) -> Result<SourceLocation, String> {
+//RS         let line = self.snapshot.line as u64;
+//RS         SourceLocation::new(
+//RS             self.identity.source_id.clone(),
+//RS             self.identity.source_revision.clone(),
+//RS             line,
+//RS             line,
+//RS         )
+//RS     }
+//RS 
+//RS     fn value_id(&self, index: usize, name: &str) -> String {
+//RS         let candidate = format!("{}-value-{}-{}", self.identity.session_id, index, bounded_name(name));
+//RS         if candidate.len() <= MAX_SOURCE_COMPONENT_BYTES && !candidate.chars().any(char::is_control) {
+//RS             candidate
+//RS         } else {
+//RS             let digest = jet_foundation::SHA256::sha256_hex(
+//RS                 format!("{}:{}:{}", self.identity.session_id, index, name).as_bytes(),
+//RS             );
+//RS             format!("value-{}", &digest[..32])
+//RS         }
+//RS     }
+//RS 
+//RS     fn projection_value(
+//RS         &self,
+//RS         evaluation: &DebugEvaluation,
+//RS         id: &str,
+//RS         location: &SourceLocation,
+//RS     ) -> Result<ValueProjection, String> {
+//RS         let mut projection = ValueProjection::published(
+//RS             id.to_string(),
+//RS             bounded_name(&evaluation.name),
+//RS             normalized_type_name(&evaluation.type_name),
+//RS             location.clone(),
+//RS             typed_value(&evaluation.value)?,
+//RS         );
+//RS         if let Some(TypedValue::Text(text)) = projection.value.as_mut() {
+//RS             let (bounded, truncated) = bounded_text(text);
+//RS             *text = bounded;
+//RS             projection.truncated = truncated;
+//RS         }
+//RS         Ok(projection)
+//RS     }
+//RS 
+//RS     fn host_is_current(&self, host: &PausedEvaluateHost) -> bool {
+//RS         host.session()
+//RS             .is_some_and(|session| session.identity == self.identity)
+//RS     }
+//RS 
+//RS     fn clear_if_current(&self, host: &mut PausedEvaluateHost) {
+//RS         if self.host_is_current(host) {
+//RS             host.clear_session();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn normalized_type_name(value: &str) -> String {
+//RS     let value = value.trim();
+//RS     if value.is_empty() || value.chars().any(char::is_control) {
+//RS         UNKNOWN_TYPE.to_string()
+//RS     } else {
+//RS         bounded_name(value)
+//RS     }
+//RS }
+//RS 
+//RS fn bounded_name(value: &str) -> String {
+//RS     let mut name = String::new();
+//RS     for ch in value.chars().filter(|ch| !ch.is_control()) {
+//RS         if name.len().saturating_add(ch.len_utf8()) > MAX_SOURCE_COMPONENT_BYTES {
+//RS             break;
+//RS         }
+//RS         name.push(ch);
+//RS     }
+//RS     if name.is_empty() {
+//RS         UNKNOWN_TYPE.to_string()
+//RS     } else {
+//RS         name
+//RS     }
+//RS }
+//RS 
+//RS fn bounded_scope_name(value: &str) -> String {
+//RS     bounded_name(value)
+//RS }
+//RS 
+//RS fn bounded_text(value: &str) -> (String, bool) {
+//RS     let mut result = String::new();
+//RS     let mut truncated = false;
+//RS     for ch in value.chars() {
+//RS         if ch.is_control() {
+//RS             match ch {
+//RS                 '\n' => result.push_str("\\n"),
+//RS                 '\r' => result.push_str("\\r"),
+//RS                 '\t' => result.push_str("\\t"),
+//RS                 _ => result.push('\u{fffd}'),
+//RS             }
+//RS         } else {
+//RS             result.push(ch);
+//RS         }
+//RS         if result.len() > MAX_VALUE_BYTES as usize {
+//RS             while result.len() > MAX_VALUE_BYTES as usize {
+//RS                 result.pop();
+//RS             }
+//RS             truncated = true;
+//RS             break;
+//RS         }
+//RS     }
+//RS     (result, truncated)
+//RS }
+//RS 
+//RS fn typed_value(value: &DebugValue) -> Result<TypedValue, String> {
+//RS     Ok(match value {
+//RS         DebugValue::Unit => TypedValue::Unit,
+//RS         DebugValue::Bool(value) => TypedValue::Bool(*value),
+//RS         DebugValue::Int(value) => TypedValue::Int(*value),
+//RS         DebugValue::FloatBits(bits) => TypedValue::FloatBits(*bits),
+//RS         DebugValue::Text(value) => TypedValue::Text(value.clone()),
+//RS         DebugValue::Bytes { length, sha256 } => TypedValue::Bytes {
+//RS             length: *length,
+//RS             sha256: sha256.clone(),
+//RS         },
+//RS         DebugValue::Aggregate { kind, length } => TypedValue::Aggregate {
+//RS             kind: match kind {
+//RS                 DebugAggregateKind::Record => AggregateKind::Record,
+//RS                 DebugAggregateKind::List => AggregateKind::List,
+//RS                 DebugAggregateKind::Map => AggregateKind::Map,
+//RS                 DebugAggregateKind::Set => AggregateKind::Set,
+//RS                 DebugAggregateKind::Tuple => AggregateKind::Tuple,
+//RS                 DebugAggregateKind::Variant => AggregateKind::Variant,
+//RS             },
+//RS             length: *length,
+//RS         },
+//RS     })
+//RS }
+// END-PORT-PENDING 0766 crates/jet-devserver/src/Canvas/paused_debug_adapter.rs:1-447
+

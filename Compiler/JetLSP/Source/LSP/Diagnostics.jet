@@ -1,0 +1,278 @@
+// Source/LSP/Server.rs:117–133,346–348,548–557,829–1031 and
+// Check.rs:110–119. All checks use the caller's canonical resident Driver.
+// Integration gates: C4/OsPath + pure PackageModel propagation; Foundation
+// Report/Diagnostic and card #4204 helper propagation; real stdio host loop
+// (L19) calls lsp_flush_dirty before every id-bearing request (Rust197–199).
+// These are dependencies, never successful unavailable providers or callbacks.
+use core.term as lsp_diag_term
+use core.text as lsp_diag_text
+use jet_driver.[JetDriverCompilerQueries, JetDriverQuerySnapshot, JetDriverCheckedQuery, JetDriverCompilerCheckResult, jet_driver_query_path, jet_driver_compiler_check_loaded_module_rows, jet_driver_present_checked_diagnostics]
+use jet_foundation.[Diagnostic, Span, ReportPath, DIAGNOSTIC_LINT, diagnostic_cause_matches, diagnostic_to_json_with_clears, diagnostic_report_clear_counts, diagnostic_escape_bidi_text, foundation_json_quote]
+
+// Rust346–348: one actual Stdout write and flush. Byte count is not Jet's
+// scalar String.len. IO errors propagate before any publication-state commit.
+pub fn lsp_write_message(stdout: &lsp_diag_term.Stdout, json: String) -[IO, Time.Wait]> IOError! {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR")
+    &stdout.write("Content-Length: {lsp_diag_text.byte_count(json)}{cr}\n{cr}\n{json}") ?? return Err(err)
+    &stdout.flush() ?? return Err(err)
+}
+
+// Rust5266–5269: exact/native component identity OR the frozen leading './'
+// spelling exception. No realpath, lexical collapse, display-to-native round
+// trip, or new n² path join. Windows native identity remains Core-owned.
+pub fn lsp_source_paths_equal(left: lsp_diag_path.OsPath, right: lsp_diag_path.OsPath) -> Bool Never! {
+    if lsp_diag_path.equals(left, right) -> return true
+    if left.platform != right.platform -> return false
+    a := 0
+    b := 0
+    loop a + 1 < left.encoded.len() && left.encoded[a] == (U8{46}) && left.encoded[a + 1] == (U8{47}) -> a += 2
+    loop b + 1 < right.encoded.len() && right.encoded[b] == (U8{46}) && right.encoded[b + 1] == (U8{47}) -> b += 2
+    if left.encoded.len() - a != right.encoded.len() - b -> return false
+    loop a < left.encoded.len() {
+        if left.encoded[a] != right.encoded[b] -> return false
+        a += 1
+        b += 1
+    }
+    true
+}
+
+// Rust117–133: no local cache or checked-result copy. Driver seals overlays
+// and returns a shared canonical checked owner, including original module rows.
+pub fn lsp_check_with_bundle(state: LSPDiagnosticState, queries: &JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, doc: LSPDocument) -> Shared<JetDriverCheckedQuery> {
+    loop (_, open) in state.docs -> &queries.set_document(snapshot.cwd, open.path, open.text)
+    &queries.check_text_lsp(snapshot, doc.path, doc.text)
+}
+
+// Rust829–856: drain first (including on failure), dirty roots sorted first,
+// then sorted open importers once each. Membership is the previous publication,
+// not a private query/SemIndex cache or a transitive source-text import scan.
+pub fn lsp_dirty_documents(state: &LSPDiagnosticState) -> [String] Never! {
+    dirty := [String]{}
+    dirty_set := [String:Bool]{}
+    changed := [lsp_diag_path.OsPath]{}
+    loop (uri, _) in state.dirty {
+        &dirty.push(uri)
+        dirty_set[uri] = true
+        if state.docs.get(uri) == .Val(doc) -> &changed.push(doc.path)
+    }
+    state.dirty = [String:Bool]{}
+    &dirty.sort()
+    dependents := [String]{}
+    loop (root, modules) in state.checked_modules {
+        if dirty_set.has_key(root) || !state.docs.has_key(root) -> next
+        found := false
+        loop module in modules {
+            loop path in changed {
+                if lsp_source_paths_equal(module, path) {
+                    found = true
+                    break
+                }
+            }
+            if found -> break
+        }
+        if found -> &dependents.push(root)
+    }
+    &dependents.sort()
+    loop root in dependents -> &dirty.push(root)
+    dirty
+}
+
+fn lsp_target_retained_elsewhere(state: LSPDiagnosticState, root: String, target: String) -> Bool Never! {
+    loop (other, targets) in state.diagnostic_targets {
+        if other != root && targets.has_key(target) -> return true
+    }
+    false
+}
+
+// Original loaded_module_rows are indices into module_sources, not into
+// registration.modules. Core placeholders never enter the original corpus.
+pub fn lsp_checked_module_paths(result: JetDriverCompilerCheckResult, platform: lsp_diag_path.PathPlatform) -> [lsp_diag_path.OsPath] Never! {
+    paths := [lsp_diag_path.OsPath]{}
+    loop index in jet_driver_compiler_check_loaded_module_rows(result) {
+        module :: result.module_sources[index]
+        path :: module.physical_path ?? lsp_diag_path.from_text(module.path, platform)
+        &paths.push(path)
+    }
+    paths
+}
+
+// Rust858–896: indices preserve diagnostic order inside lexically ordered
+// target groups. Root always exists, even with no diagnostics. Prior clears
+// do not become this root's new retained target set.
+pub fn lsp_diagnostic_groups(state: LSPDiagnosticState, uri: String, result: JetDriverCompilerCheckResult, diagnostics: [Diagnostic], platform: lsp_diag_path.PathPlatform, targets: &[String:Bool]) -> [String:[Int]] Never! {
+    groups := [String:[Int]]{}
+    groups[uri] = [Int]{}
+    loop (index, diagnostic) in diagnostics {
+        target := ~uri
+        if diagnostic.origin == .Val(origin) {
+            origin_path :: lsp_diag_path.from_text(origin.path, platform)
+            target = lsp_path_to_uri(origin.path)
+            loop (open_uri, open) in state.docs {
+                if lsp_source_paths_equal(open.path, origin_path) {
+                    target = ~open_uri
+                    break
+                }
+            }
+        }
+        // Append directly to the resident group, not copy an ever-growing
+        // group on each diagnostic. Map indexing has the native write receiver.
+        if !groups.has_key(target) -> groups[target] = [Int]{}
+        &groups[target].push(index)
+    }
+    loop (target, _) in groups -> targets[target] = true
+    if state.diagnostic_targets.get(uri) == .Val(previous) {
+        loop (target, _) in previous {
+            if groups.has_key(target) -> next
+            path :: lsp_diag_path.from_text(lsp_uri_to_path(target, platform == lsp_diag_path.PathPlatform.Windows), platform)
+            still_checked := false
+            loop index in jet_driver_compiler_check_loaded_module_rows(result) {
+                module :: result.module_sources[index]
+                native :: module.physical_path ?? lsp_diag_path.from_text(module.path, platform)
+                if lsp_source_paths_equal(native, path) {
+                    still_checked = true
+                    break
+                }
+            }
+            if still_checked || !lsp_target_retained_elsewhere(state, uri, target) -> groups[target] = [Int]{}
+        }
+    }
+    groups
+}
+
+// Rust928–953. Foundation owns exact JSON quote and the complete report data.
+pub fn lsp_publish_diagnostics(uri: String, file: ReportPath, src: String, version: Int?, diagnostics: [Diagnostic], indices: [Int], clears: [Int]) -[FS, Env]> String Never! {
+    items := [String]{}
+    loop index in indices -> &items.push(lsp_diagnostic_json_with_clears(diagnostics[index], file, src, clears[index], uri, diagnostics))
+    version_json := ""
+    if version == .Val(value) -> version_json = ",\"version\":{value}"
+    "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":{foundation_json_quote(uri)}{version_json},\"diagnostics\":[{items.join(",")}]}}}}"
+}
+
+// Rust967–994. Human-visible strings use the sole #4204 Foundation helper;
+// source snapshots, machine paths, report data and UTF-8 spans stay untouched.
+pub fn lsp_diagnostic_json_with_clears(diagnostic: Diagnostic, file: ReportPath, src: String, clears: Int, uri: String, diagnostics: [Diagnostic]) -[FS, Env]> String Never! {
+    severity :: if diagnostic.severity == DIAGNOSTIC_LINT -> 2 else -> 1
+    range :: if diagnostic.span == {.Val(span) -> lsp_byte_span_to_range(src, span) None -> lsp_full_document_range(src)}
+    related :: lsp_related_information_json(diagnostic, uri, src, diagnostics)
+    message :: foundation_json_quote(diagnostic_escape_bidi_text(~diagnostic.what))
+    data :: diagnostic_to_json_with_clears(diagnostic, file, src, clears)
+    "{{\"range\":{lsp_range_json(range)},\"severity\":{severity},\"code\":{foundation_json_quote(diagnostic.code)},\"source\":\"jet\",\"message\":{message},\"codeDescription\":{{\"href\":{foundation_json_quote(lsp_diagnostic_explanation_uri(diagnostic.code))}}}{related},\"data\":{data}}}"
+}
+
+pub fn lsp_diagnostic_explanation_uri(code: String) -> String Never! { "jet://explain/{code}" }
+
+// Rust1000–1031: first exact identity match WITH a span; repeat codes never
+// select another source. Cause origin owns its URI and UTF-16 range source.
+pub fn lsp_related_information_json(diagnostic: Diagnostic, uri: String, src: String, diagnostics: [Diagnostic]) -> String Never! {
+    related := [String]{}
+    loop identity in diagnostic.cause {
+        loop cause in diagnostics {
+            if !diagnostic_cause_matches(identity, cause) -> next
+            span :: cause.span ?? next
+            if cause.origin == {
+                .Val(origin) -> &related.push(lsp_related_location_json(lsp_path_to_uri(origin.path), origin.source, span, cause.what))
+                None -> &related.push(lsp_related_location_json(uri, src, span, cause.what))
+            }
+            break
+        }
+    }
+    if related.len() == 0 -> return ""
+    ",\"relatedInformation\":[{related.join(",")}]"
+}
+
+fn lsp_related_location_json(uri: String, src: String, span: Span, what: String) -> String Never! {
+    message :: foundation_json_quote(diagnostic_escape_bidi_text(~what))
+    "{{\"location\":{{\"uri\":{foundation_json_quote(uri)},\"range\":{lsp_range_json(lsp_byte_span_to_range(src, span))}}},\"message\":{message}}}"
+}
+
+// Check.rs110–119: the edit/action owner can filter already checked reports
+// through this function, with the canonical Driver cwd path (not a new cwd IO).
+pub fn lsp_retain_document_diagnostics(diagnostics: ^[Diagnostic], cwd: lsp_diag_path.OsPath, path: lsp_diag_path.OsPath, text: String) -> [Diagnostic] Never! {
+    canonical :: jet_driver_query_path(cwd, path)
+    retained := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        keep := true
+        if diagnostic.origin == .Val(origin) {
+            keep = lsp_diag_path.equals(lsp_diag_path.from_text(origin.path, canonical.platform), canonical) && origin.source == text
+        }
+        if keep -> &retained.push(diagnostic)
+    }
+    retained
+}
+
+// Rust829–856 /197–199. The host request loop invokes this before serving
+// requests. Do not retry, requeue or swallow an error here; Rust drains first.
+pub fn lsp_flush_dirty(state: &LSPDiagnosticState, queries: &JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, stdout: &lsp_diag_term.Stdout) -[IO, Time.Wait, FS, Env]> IOError! {
+    pending :: lsp_dirty_documents(&state)
+    loop uri in pending -> lsp_publish_document_diagnostics(&state, &queries, snapshot, uri, &stdout) ?? return Err(err)
+}
+
+// Rust858–925. The canonical retained-result presenter owns origin attachment
+// and aggregate -> local source mapping, including unsaved imported bytes.
+// It is never the old CLI snapshot presenter (which would reread disk text).
+pub fn lsp_publish_document_diagnostics(state: &LSPDiagnosticState, queries: &JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, uri: String, stdout: &lsp_diag_term.Stdout) -[IO, Time.Wait, FS, Env]> IOError! {
+    doc :: state.docs.get(uri) ?? return
+    checked :: lsp_check_with_bundle(state, &queries, snapshot, doc)
+    permit :: checked.guard_read()
+    diagnostics :: jet_driver_present_checked_diagnostics(permit.value.result)
+    targets := [String:Bool]{}
+    groups :: lsp_diagnostic_groups(state, uri, permit.value.result, diagnostics, snapshot.cwd.platform, &targets)
+    ordered := [String]{}
+    loop (target, _) in groups -> &ordered.push(target)
+    &ordered.sort()
+    clears :: diagnostic_report_clear_counts(diagnostics)
+    loop target in ordered {
+        notification :: lsp_document_group_json(state, target, diagnostics, groups[target], clears)
+        lsp_write_message(&stdout, notification) ?? return Err(err)
+    }
+    // Commit only after every actual write AND flush succeeded. Partial wire
+    // output on failure does not replace this root's prior publication facts.
+    state.diagnostic_targets[uri] = targets
+    state.checked_modules[uri] = lsp_checked_module_paths(permit.value.result, snapshot.cwd.platform)
+}
+
+pub fn lsp_document_group_json(state: LSPDiagnosticState, target: String, diagnostics: [Diagnostic], indices: [Int], clears: [Int]) -[FS, Env]> String Never! {
+    // Borrow the first origin rather than copy its potentially large source.
+    loop index in indices {
+        if diagnostics[index].origin == .Val(origin) {
+            version := Int?{None}
+            if state.docs.get(target) == .Val(open) {
+                if open.text == origin.source -> version = Val(open.version)
+            }
+            return lsp_publish_diagnostics(target, ReportPath.from_process(origin.path), origin.source, version, diagnostics, indices, clears)
+        }
+    }
+    if state.docs.get(target) == .Val(open) {
+        return lsp_publish_diagnostics(target, ReportPath.from_process(lsp_diag_path.display(open.path)), open.text, Val(open.version), diagnostics, indices, clears)
+    }
+    lsp_publish_diagnostics(target, ReportPath.from_process(""), "", None, diagnostics, indices, clears)
+}
+
+
+// didClose534–557: remove the overlay and mark importers before releasing
+// this root's target ownership. Other roots retain their target diagnostics.
+// The state removal precedes close clears, even if a real write fails, exactly
+// unlike publish_document's commit-after-all-writes ordering.
+pub fn lsp_close_document_diagnostics(state: &LSPDiagnosticState, queries: &JetDriverCompilerQueries, cwd: lsp_diag_path.OsPath, uri: String, stdout: &lsp_diag_term.Stdout) -[IO, Time.Wait, FS, Env]> IOError! {
+    if (&state.docs.remove(uri)) == .Val(doc) {
+        &queries.remove_document(cwd, doc.path)
+        loop (root, modules) in state.checked_modules {
+            if root == uri || !state.docs.has_key(root) -> next
+            loop module in modules {
+                if lsp_source_paths_equal(module, doc.path) {
+                    state.dirty[root] = true
+                    break
+                }
+            }
+        }
+    }
+    _ := &state.checked_modules.remove(uri)
+    _ := &state.dirty.remove(uri)
+    targets :: (&state.diagnostic_targets.remove(uri)) ?? return
+    loop (target, _) in targets {
+        if lsp_target_retained_elsewhere(state, uri, target) -> next
+        file :: ReportPath.from_process(lsp_uri_to_path(target, cwd.platform == lsp_diag_path.PathPlatform.Windows))
+        clear :: lsp_publish_diagnostics(target, file, "", None, [Diagnostic]{}, [Int]{}, [Int]{})
+        lsp_write_message(&stdout, clear) ?? return Err(err)
+    }
+}

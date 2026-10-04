@@ -1,0 +1,169 @@
+// crates/jet-repl/src/Notebook/eval.rs: one checked cell, transactional bindings.
+use jet_ast.[CtValue]
+use jet_foundation.[Diagnostic, Span]
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.files.host.retained_descriptor.[FileReader]
+// pending Wave-0807/Wave-0808 ABI reconciliation: Session and REPL helpers.
+// pending Comptime owner ABI reconciliation: exact Rust names, not providers.
+use jet_comptime.[ReplAuthorizer, ReplEffectRequest, DevSink, REPL_FUEL_BUDGET, ReplStepError, run_repl_step, run_repl_step_interruptible, repl_interruptible_turn_active]
+use jet_driver.[boot_mir_eval]
+
+// #4500: inner retains the caller's mutable authorizer loan for this turn.
+struct NotebookTrackingAuthorizer {
+    inner: &ReplAuthorizer
+    observed: Bool
+}
+impl NotebookTrackingAuthorizer.ReplAuthorizer {
+    fn preflight(&self, request: ReplEffectRequest, span: Span) Diagnostic! {
+        &self.inner.preflight(request, span) ?? return Err(err)
+    }
+    fn authorize(&self, request: ReplEffectRequest, span: Span) Diagnostic! {
+        &self.inner.authorize(request, span) ?? return Err(err)
+        self.observed = true
+    }
+    fn fs_read(&self, path: String) -> [U8] IOError! { &self.inner.fs_read(path) }
+    fn fs_write(&self, path: String, bytes: [U8], append: Bool) IOError! { &self.inner.fs_write(path, bytes, append) }
+    fn fs_exists(&self, path: String) -> Bool IOError! { &self.inner.fs_exists(path) }
+    fn fs_is_dir(&self, path: String) -> Bool IOError! { &self.inner.fs_is_dir(path) }
+    fn fs_create_dir(&self, path: String) IOError! { &self.inner.fs_create_dir(path) }
+    fn fs_remove(&self, path: String) IOError! { &self.inner.fs_remove(path) }
+    fn verified_root(&self) -> FileReader IOError! { &self.inner.verified_root() }
+    fn read_input(&self, prompt: String) -> String IOError! { &self.inner.read_input(prompt) }
+    fn reset_session(&self) Never! { &self.inner.reset_session() }
+}
+
+pub struct EvalResult {
+    pub text: String
+    pub status: ReplTurnStatus
+    pub had_effect: Bool
+    pub quit: Bool
+    pub value: CtValue?
+}
+fn notebook_eval_result(text: ^String, status: ReplTurnStatus, had_effect: Bool, quit: Bool, value: ^CtValue?) -> EvalResult Never! {
+    EvalResult{text: text, status: status, had_effect: had_effect, quit: quit, value: value}
+}
+fn notebook_eval_errors(session: &Session, input: String, errors: [Diagnostic]) -> EvalResult Never! {
+    lines := [String]{}
+    summaries := [String]{}
+    loop diagnostic in errors {
+        &lines.push("error [{diagnostic.code}]: {diagnostic.what}\n")
+        &summaries.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    &session.record_turn(input, ReplTurnStatus.Error, summaries.join("; "))
+    notebook_eval_result(lines.join(""), ReplTurnStatus.Error, false, false, None)
+}
+
+pub fn evaluate_step_with_items(session: &Session, input: String, base_dir: OSPath, authorizer: &ReplAuthorizer, notebook_items_preloaded: Bool) -> EvalResult Never! {
+    boot_mir_eval()
+    normalized :: normalize_repl_input(input)
+    trimmed := normalized.trim() // #4303
+    if trimmed.is_empty() -> return notebook_eval_result("", ReplTurnStatus.Ok, false, false, None)
+    session.step = session.step + 1
+    // File-wide item preload is parser-plane, not a keyword-head heuristic.
+    // Hard rejects still precede item recognition.
+    classified :: if notebook_items_preloaded && reject_feature(trimmed) == None && is_item_input(trimmed) {
+        Ok(InputKind.Item("{trimmed}\n"))
+    } else -> classify(trimmed, session.step)
+    kind :: classified ?? return notebook_eval_errors(&session, trimmed, err)
+    if kind == {
+        .Empty -> notebook_eval_result("", ReplTurnStatus.Ok, false, false, None)
+        .Meta(command, _) -> {
+            if command == "quit" || command == "q" || command == "exit" -> return notebook_eval_result("bye\n", ReplTurnStatus.Ok, false, true, None)
+            &session.record_turn(trimmed, ReplTurnStatus.Error, "meta:{command}")
+            notebook_eval_result("error: notebook cells do not run meta-command `:{command}`\n", ReplTurnStatus.Error, false, false, None)
+        }
+        .Reject(feature) -> {
+            diagnostic :: e1802(feature)
+            &session.record_turn(trimmed, ReplTurnStatus.Error, "E1802")
+            notebook_eval_result("error [E1802]: {diagnostic.what}\n", ReplTurnStatus.Error, false, false, None)
+        }
+        .Item(source) -> {
+            check_source :: if notebook_items_preloaded -> "" else -> source
+            bundle :: type_check_item(session, check_source) ?? return notebook_eval_errors(&session, trimmed, err)
+            if !notebook_items_preloaded -> &session.item_srcs.push(^source)
+            rebuild_funcs(&session)
+            update_core_imports_from_ledger(bundle, &session.core_imports)
+            &session.record_turn(trimmed, ReplTurnStatus.Ok, "ok")
+            &session.remember_success(trimmed)
+            notebook_eval_result("ok\n", ReplTurnStatus.Ok, false, false, None)
+        }
+        .Import(source) -> {
+            &session.import_srcs.push(^source)
+            bundle :: type_check_item(session, "") ?? {
+                _ :: &session.import_srcs.pop()
+                return notebook_eval_errors(&session, trimmed, err)
+            }
+            rebuild_funcs(&session)
+            update_core_imports_from_ledger(bundle, &session.core_imports)
+            &session.record_turn(trimmed, ReplTurnStatus.Ok, "ok")
+            &session.remember_success(trimmed)
+            notebook_eval_result("ok\n", ReplTurnStatus.Ok, false, false, None)
+        }
+        .Stmts(statements, suppress, check_source) -> {
+            checked :: type_check_stmts(session, statements, session.step, check_source) ?? return notebook_eval_errors(&session, trimmed, err)
+            (checked_statements, checked_core_imports) :: checked
+            before := Set<String>.new()
+            loop name in session.scope.keys() -> _ :: &before.insert(name)
+            newly_moved :: collect_moved_names(statements, before, session.scope)
+            executable :: repl_executable_stmts(~checked_statements)
+            core_imports := ~session.core_imports
+            loop name in checked_core_imports.keys() -> core_imports[name] = checked_core_imports[name]
+            // Jet read parameters loan the maps directly. No rebuilt reference
+            // maps or copied function/struct ASTs are needed (#4500).
+            // A trial copy is required for rollback; only success transfers it.
+            trial_scope := ~session.scope
+            sink := DevSink.new()
+            tracking := NotebookTrackingAuthorizer{inner: &authorizer, observed: false}
+            result :: if repl_interruptible_turn_active() {
+                run_repl_step_interruptible(executable, session.func_defs, base_dir, &sink, &trial_scope, REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking)
+            } else {
+                if run_repl_step(executable, session.func_defs, base_dir, &sink, &trial_scope, REPL_FUEL_BUDGET, suppress, core_imports, session.struct_defs, session.binding_types, &tracking) == {
+                    .Ok(value) -> Ok(value)
+                    .Err(diagnostic) -> Err(ReplStepError.Diagnostic(diagnostic))
+                }
+            }
+            if result == {
+                .Ok(echo_value) -> {
+                    loop name in newly_moved.values() -> _ :: &trial_scope.remove(name)
+                    session.scope = ^trial_scope
+                    loop name in newly_moved.values() -> _ :: &session.moved_names.insert(name)
+                    raw := trimmed.trim_end_matches(";").trim() // #4303
+                    if !raw.is_empty() && !raw.starts_with("__repl_echo__") -> &session.stmt_srcs.push("{raw};")
+                    only := String?{None}
+                    new_count := 0
+                    loop name in session.scope.keys() {
+                        if !before.contains(name) && name != "__repl_echo__" {
+                            new_count = new_count + 1
+                            if new_count == 1 -> only = Val(name)
+                        }
+                    }
+                    if new_count != 1 -> only = None
+                    &session.record_stmts(checked_statements)
+                    summary := [String]{}
+                    &summary.push(sink.stdout)
+                    &summary.push(sink.stderr)
+                    output := [String]{sink.stdout, sink.stderr}
+                    if echo_value == .Val(value) {
+                        if value != CtValue.Unit {
+                            shown :: display_value(value)
+                            &output.push("{shown}\n")
+                            &summary.push(shown)
+                        }
+                    }
+                    had_effect :: tracking.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty()
+                    &session.record_turn_ex(trimmed, ReplTurnStatus.Ok, summary.join(""), had_effect, ^only)
+                    &session.remember_success(trimmed)
+                    notebook_eval_result(output.join(""), ReplTurnStatus.Ok, had_effect, false, ^echo_value)
+                }
+                .Err(error) -> if error == {
+                    .Interrupted -> {
+                        had_effect :: tracking.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty()
+                        &session.record_turn_ex(trimmed, ReplTurnStatus.Interrupted, "Interrupted", had_effect, None)
+                        notebook_eval_result("Interrupted. External effects already performed were not rolled back.\n", ReplTurnStatus.Interrupted, had_effect, false, None)
+                    }
+                    .Diagnostic(diagnostic) -> notebook_eval_errors(&session, trimmed, [Diagnostic]{diagnostic})
+                }
+            }
+        }
+    }
+}

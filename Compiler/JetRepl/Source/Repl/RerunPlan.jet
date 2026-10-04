@@ -1,0 +1,80 @@
+// crates/jet-repl/src/RerunPlan.rs:1–113. Pure decisions and presentation only;
+// session replay and effect prompting belong to the caller, never this module.
+use jet_foundation.[diagnostic_theme_bold]
+
+// Rust StepKind, ReplayStep, ReplayPlan.
+pub enum StepKind {
+    Auto
+    ConfirmEffect
+}
+
+pub struct ReplayStep {
+    pub turn_id: Int
+    pub input: String
+    pub kind: StepKind
+}
+
+pub struct ReplayPlan {
+    pub from_id: Int
+    pub steps: [ReplayStep]
+}
+
+#Error
+pub struct ReplReplayPlanError { pub message: String }
+
+// Rust build_replay_plan: numeric ID filtering preserves recorded order.
+// Only the selected ID substitutes edited text; even duplicate IDs retain
+// the reference's substitution and independent observed effect flag.
+pub fn build_replay_plan(turns: [ReplTurn], from_id: Int, edited_input: String?) -> ReplayPlan ReplReplayPlanError! {
+    found := false
+    loop turn in turns {
+        if turn.id == from_id {
+            found = true
+            break
+        }
+    }
+    if !found -> return Err(ReplReplayPlanError{message: "turn #{from_id} does not exist"})
+    steps := [ReplayStep]{}
+    loop turn in turns {
+        if turn.id >= from_id {
+            input :: if turn.id == from_id -> edited_input ?? turn.input else -> turn.input
+            kind :: if turn.had_effect -> StepKind.ConfirmEffect else -> StepKind.Auto
+            &steps.push(ReplayStep{turn_id: turn.id, input: ~input, kind})
+        }
+    }
+    Ok(ReplayPlan{from_id, steps})
+}
+
+// Rust plan_needs_confirmation: observable effects alone gate prompting.
+pub fn plan_needs_confirmation(plan: ReplayPlan) -> Bool Never! {
+    loop step in plan.steps {
+        if step.kind == StepKind.ConfirmEffect -> return true
+    }
+    false
+}
+
+// Rust render_replay_plan: padding counts Unicode scalars, not display cells
+// or UTF-8 bytes. Build bytes once rather than recopy the growing output.
+pub fn render_replay_plan(plan: ReplayPlan, color: Bool) -> String Never! {
+    widest_input := 0
+    loop step in plan.steps {
+        width :: step.input.len()
+        if width > widest_input -> widest_input = width
+    }
+    out := "Replay plan:\n".bytes()
+    loop step in plan.steps {
+        step_label :: if step.kind == {
+            .Auto -> "auto"
+            .ConfirmEffect -> "confirm effect"
+        }
+        loop byte in "  {step.turn_id} {step.input}".bytes() -> &out.push(byte)
+        pad := widest_input - step.input.len() + 2
+        loop pad > 0 {
+            &out.push(U8{32})
+            pad -= 1
+        }
+        loop byte in "{step_label}\n".bytes() -> &out.push(byte)
+    }
+    loop byte in "Apply? [y/{diagnostic_theme_bold(color, "N")}]".bytes() -> &out.push(byte)
+    String.from_bytes(out) ?? ""
+}

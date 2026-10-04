@@ -1,0 +1,344 @@
+// crates/jet-repl/src/Notebook/protocol.rs: full headless notebook wire.
+use jet_foundation.[foundation_json_quote]
+use core.files.runtime.kernel_path_components as notebook_protocol_paths
+use core.files.runtime.kernel_path_components.[OSPath]
+// Kernel/KernelIdentity/RerunDecision/ClientKind: same jet_repl package,
+// canonical Kernel.jet owner (Wave-0803b; Main crate-graph ruling).
+
+pub enum ProtocolMessage {
+    Execute(client: ClientKind, cell_id: String)
+    Rerun(client: ClientKind, from_id: Int, edited: String?, decisions: [RerunDecision])
+    Confirm(client: ClientKind, cell_id: String)
+    Delete(cell_id: String)
+    SetLazy(cell_id: String, lazy: Bool)
+    Control(function: String, name: String, value: String)
+    Reconnect(source: String, build: String, session: String, authority: String)
+    Interrupt
+    Stdin(line: String)
+    DebugAttach
+    PerfAttach
+    Inspect(cell_id: String)
+    Complete(prefix: String)
+    ImportIpynb(text: String)
+    Open(path: OSPath)
+    Reopen
+    Edit(cell_id: String, source: String)
+    MergePath(path: OSPath)
+    Profile(client: ClientKind, cell_id: String)
+    Debug(cell_id: String)
+    State
+    ExportIpynb
+    ExportJet
+    Merge(theirs_json: String)
+    Save(path: OSPath)
+    AddCell(kind: NotebookCellKind, source: String)
+    Grant(cell_id: String, renderer: String)
+    VisibleOutput(client: ClientKind, cell_id: String)
+}
+pub enum ProtocolReply {
+    Ok(body: String)
+    Err(message: String)
+    pub fn ok(body: ^String) -> ProtocolReply Never! { ProtocolReply.Ok(body) }
+    pub fn err(message: ^String) -> ProtocolReply Never! { ProtocolReply.Err(message) }
+    pub fn to_json_line(self) -> String Never! {
+        if self == {
+            .Ok(body) -> "{{\"status\":\"ok\",\"body\":{foundation_json_quote(body)}}}\n"
+            .Err(message) -> "{{\"status\":\"err\",\"body\":{foundation_json_quote(message)}}}\n"
+        }
+    }
+}
+fn notebook_protocol_unknown(cell_id: String) -> ProtocolReply Never! { ProtocolReply.err("unknown cell `{cell_id}`") }
+fn notebook_protocol_join_ids(ids: [Int]) -> String Never! {
+    parts := [String]{}
+    loop id in ids -> &parts.push("{id}")
+    parts.join(",")
+}
+fn notebook_protocol_turn_id(id: Int?) -> String Never! {
+    if id == { .None -> "None" .Val(value) -> "Some({value})" }
+}
+fn notebook_protocol_kind(kind: NotebookCellKind) -> String Never! {
+    if kind == { .Jet -> "Jet" .Markdown -> "Markdown" }
+}
+
+pub fn handle_message(kernel: &Kernel, msg: ^ProtocolMessage) -> ProtocolReply Never! {
+    if msg == {
+        .AddCell(kind, source) -> {
+            id :: &kernel.add_cell(kind, ^source) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("cell_id={id}")
+        }
+        .Execute(client, id) -> {
+            result :: &kernel.execute_cell(client, id) ?? return ProtocolReply.err(err.message)
+            status :: if result.ok() -> "ok" else -> "error"
+            text :: result.bundle.text_plain.replace("\n", "\\n")
+            ProtocolReply.ok("status={status}; turn={notebook_protocol_turn_id(result.turn_id)}; count={result.execution_count}; text={text}")
+        }
+        .Rerun(client, from_id, edited, decisions) -> {
+            plan :: kernel.replay_plan(from_id, edited) ?? return ProtocolReply.err(err.message)
+            stale :: &kernel.apply_rerun(client, plan, decisions) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("stale={notebook_protocol_join_ids(stale)}; steps={plan.steps.len()}")
+        }
+        .Confirm(client, id) -> {
+            ran :: &kernel.confirm_reactive(client, id) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("confirmed={id}; reran={ran.join(",")}")
+        }
+        .Delete(id) -> {
+            scrubbed :: &kernel.delete_cell(id) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("deleted={id}; scrubbed={scrubbed.join(",")}")
+        }
+        .SetLazy(id, lazy) -> {
+            &kernel.set_cell_lazy(id, lazy) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("lazy={id};enabled={lazy}")
+        }
+        .Control(function, name, value) -> {
+            &kernel.set_control(function, name, ^value) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("control={function}.{name};updated")
+        }
+        .Reconnect(source, build, session, authority) -> {
+            kernel.reconnect(KernelIdentity{source: source, build: build, session: session, authority: authority}) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("reconnected")
+        }
+        .Interrupt -> { &kernel.request_interrupt(); ProtocolReply.ok("interrupt_requested") }
+        .Stdin(line) -> { &kernel.push_stdin(^line); ProtocolReply.ok("stdin_queued={kernel.stdin_queue.len()}") }
+        .DebugAttach -> { &kernel.attach_debug(); ProtocolReply.ok("debug_attached") }
+        .PerfAttach -> { &kernel.attach_perf(); ProtocolReply.ok("perf_attached") }
+        .Open(path) -> {
+            &kernel.open_document(path) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("opened={notebook_protocol_paths.display(path)}")
+        }
+        .Reopen -> {
+            &kernel.reopen_document() ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("reopened")
+        }
+        .Edit(id, source) -> {
+            &kernel.edit_cell(id, ^source) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("edited={id}")
+        }
+        .Profile(client, id) -> {
+            &kernel.attach_perf()
+            result :: &kernel.execute_cell(client, id) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("profiled={id}; elapsed_ms={result.elapsed_ms}; count={result.execution_count}")
+        }
+        .Debug(id) -> {
+            &kernel.attach_debug()
+            loop cell in kernel.notebook.cells {
+                if cell.id == id {
+                    names :: kernel.session.scope.keys().to_list()
+                    text :: cell.source.replace("\n", "\\n")
+                    return ProtocolReply.ok("debug cell={id}; source={text}; bindings={names.join(",")}")
+                }
+            }
+            notebook_protocol_unknown(id)
+        }
+        .State -> ProtocolReply.ok(kernel.state_json())
+        .Inspect(id) -> {
+            loop cell in kernel.notebook.cells {
+                if cell.id == id {
+                    output :: kernel.first_party_visible_output(id)
+                    plain :: if output == { .Val(bundle) -> bundle.text_plain .None -> "(no live output)" }
+                    text :: plain.replace("\n", "\\n")
+                    return ProtocolReply.ok("id={cell.id}; kind={notebook_protocol_kind(cell.kind)}; source_len={cell.source.bytes().len()}; output={text}")
+                }
+            }
+            notebook_protocol_unknown(id)
+        }
+        .Complete(prefix) -> {
+            names := [String]{}
+            loop name in kernel.session.scope.keys() { if name.starts_with(prefix) -> &names.push(name) }
+            &names.sort()
+            ProtocolReply.ok(names.join(","))
+        }
+        .ImportIpynb(text) -> {
+            imported :: notebook_import_ipynb(text) ?? return ProtocolReply.err(err.message)
+            &kernel.replace_notebook(^imported.notebook)
+            loss :: imported.loss.render().replace("\n", " | ")
+            ProtocolReply.ok("cells={kernel.notebook.cells.len()}; {loss}")
+        }
+        .ExportIpynb -> {
+            exported :: notebook_export_ipynb(kernel.notebook) ?? return ProtocolReply.err(err.message)
+            loss :: exported.loss.render().replace("\n", " | ")
+            ProtocolReply.ok("ipynb_bytes={exported.text.bytes().len()}; {loss}")
+        }
+        .ExportJet -> {
+            exported :: notebook_export_jet(kernel.notebook)
+            loss :: exported.loss.render().replace("\n", " | ")
+            ProtocolReply.ok("jet_bytes={exported.text.bytes().len()}; {loss}")
+        }
+        .Merge(json) -> {
+            theirs :: JetNotebook.from_canonical_bytes(json.bytes()) ?? return ProtocolReply.err(err.message)
+            &kernel.merge_notebook(theirs)
+            ProtocolReply.ok("cells={kernel.notebook.cells.len()}")
+        }
+        .MergePath(path) -> {
+            theirs :: load_jetnb(path) ?? return ProtocolReply.err(err.message)
+            &kernel.merge_notebook(theirs)
+            ProtocolReply.ok("cells={kernel.notebook.cells.len()}")
+        }
+        .Save(path) -> {
+            saved :: &kernel.save_document(Val(path)) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("saved={notebook_protocol_paths.display(saved)}")
+        }
+        .Grant(id, renderer) -> {
+            &kernel.grant_capability(id, renderer) ?? return ProtocolReply.err(err.message)
+            ProtocolReply.ok("granted")
+        }
+        .VisibleOutput(client, id) -> {
+            output :: if client == {
+                .FirstParty -> kernel.first_party_visible_output(id)
+                .CanvasLens -> kernel.canvas_visible_output(id)
+                .JupyterAdapter -> kernel.jupyter_visible_output(id)
+            }
+            if output == { .Val(bundle) -> ProtocolReply.ok(bundle.text_plain.replace("\n", "\\n")) .None -> ProtocolReply.ok("") }
+        }
+    }
+}
+
+pub fn run_headless_script(kernel: &Kernel, lines: [String]) -> String Never! {
+    replies := [String]{}
+    loop source in lines {
+        line := source.trim() // #4303
+        if line.is_empty() || line.starts_with("#") -> next
+        reply :: if notebook_parse_script_line(kernel, line) == {
+            .Ok(message) -> handle_message(&kernel, ^message)
+            .Err(error) -> ProtocolReply.err(error.message)
+        }
+        &replies.push(reply.to_json_line())
+    }
+    replies.join("")
+}
+// splitn predicate is ASCII-only (unlike split_whitespace). Empty segments
+// are significant for control/edit; do not collapse adjacent separators.
+fn notebook_protocol_split_ascii(text: String, limit: Int) -> [String] Never! {
+    out := [String]{}
+    bytes :: text.bytes()
+    start := 0
+    loop (at, byte) in bytes {
+        if out.len() + 1 < limit && (byte == (U8{32}) || (byte >= (U8{9}) && byte <= (U8{13}))) {
+            &out.push(String.from_bytes(bytes[start..<at]) ?? panic("ASCII split preserves UTF-8"))
+            start = at + 1
+        }
+    }
+    &out.push(String.from_bytes(bytes[start..<bytes.len()]) ?? panic("ASCII split preserves UTF-8"))
+    out
+}
+fn notebook_protocol_latest_id(kernel: Kernel, error: String) -> String Err! {
+    if kernel.notebook.cells.is_empty() -> return Err(error)
+    kernel.notebook.cells[kernel.notebook.cells.len() - 1].id
+}
+fn notebook_protocol_bit(bits: [String], at: Int, error: String) -> String Err! {
+    if at >= bits.len() -> return Err(error)
+    bits[at]
+}
+fn notebook_protocol_default(bits: [String], at: Int, fallback: String) -> String Never! {
+    if at < bits.len() -> bits[at] else -> fallback
+}
+// #4483: from_text native ingress must select the compiled target, never host.
+fn notebook_protocol_path(text: String) -> OSPath Never! {
+    notebook_native_path(text)
+}
+fn notebook_protocol_parse_client(name: String) -> ClientKind Err! {
+    if name == {
+        "first" | "first-party" -> ClientKind.FirstParty
+        "canvas" | "lens" -> ClientKind.CanvasLens
+        "jupyter" | "jp" -> ClientKind.JupyterAdapter
+        else -> return Err("unknown client `{name}`")
+    }
+}
+fn notebook_parse_script_line(kernel: Kernel, line: String) -> ProtocolMessage Err! {
+    parts :: notebook_protocol_split_ascii(line, 2)
+    command :: parts[0]
+    rest := notebook_protocol_default(parts, 1, "").trim() // #4303
+    if command == {
+        "add-jet" -> ProtocolMessage.AddCell(NotebookCellKind.Jet, rest)
+        "add-md" -> ProtocolMessage.AddCell(NotebookCellKind.Markdown, rest)
+        "exec" | "profile" | "visible" -> {
+            bits :: rest.split_whitespace().to_list()
+            client :: notebook_protocol_parse_client(notebook_protocol_default(bits, 0, "first")) ?? return Err(err)
+            id :: if bits.len() > 1 -> bits[1] else -> notebook_protocol_latest_id(kernel, "{command} needs cell id") ?? return Err(err)
+            if command == { "exec" -> ProtocolMessage.Execute(client, id) "profile" -> ProtocolMessage.Profile(client, id) else -> ProtocolMessage.VisibleOutput(client, id) }
+        }
+        "confirm" -> {
+            bits :: rest.split_whitespace().to_list()
+            first :: notebook_protocol_bit(bits, 0, "confirm needs cell id") ?? return Err(err)
+            if notebook_protocol_parse_client(first) == {
+                .Ok(client) -> ProtocolMessage.Confirm(client, notebook_protocol_bit(bits, 1, "confirm needs cell id") ?? return Err(err))
+                .Err(_) -> ProtocolMessage.Confirm(ClientKind.FirstParty, first)
+            }
+        }
+        "delete" -> ProtocolMessage.Delete(rest)
+        "lazy" -> {
+            bits :: rest.split_whitespace().to_list()
+            id :: notebook_protocol_bit(bits, 0, "lazy needs cell id") ?? return Err(err)
+            flag :: notebook_protocol_default(bits, 1, "")
+            ProtocolMessage.SetLazy(id, flag != "off" && flag != "false" && flag != "0")
+        }
+        "control" -> {
+            bits :: notebook_protocol_split_ascii(rest, 3)
+            function :: notebook_protocol_bit(bits, 0, "control needs function") ?? return Err(err)
+            name :: notebook_protocol_bit(bits, 1, "control needs argument") ?? return Err(err)
+            value := notebook_protocol_default(bits, 2, "").trim_start() // #4303
+            ProtocolMessage.Control(function, name, value)
+        }
+        "reconnect" -> {
+            bits :: rest.split_whitespace().to_list()
+            source :: notebook_protocol_bit(bits, 0, "reconnect needs source identity") ?? return Err(err)
+            build :: notebook_protocol_bit(bits, 1, "reconnect needs build identity") ?? return Err(err)
+            session :: notebook_protocol_bit(bits, 2, "reconnect needs session identity") ?? return Err(err)
+            authority :: notebook_protocol_bit(bits, 3, "reconnect needs authority identity") ?? return Err(err)
+            ProtocolMessage.Reconnect(source, build, session, authority)
+        }
+        "interrupt" -> ProtocolMessage.Interrupt
+        "stdin" -> ProtocolMessage.Stdin(rest)
+        "debug" -> ProtocolMessage.DebugAttach
+        "perf" -> ProtocolMessage.PerfAttach
+        "open" -> ProtocolMessage.Open(notebook_protocol_path(rest))
+        "reopen" -> ProtocolMessage.Reopen
+        "edit" -> {
+            bits :: notebook_protocol_split_ascii(rest, 2)
+            id :: notebook_protocol_bit(bits, 0, "edit needs cell id") ?? return Err(err)
+            source := notebook_protocol_default(bits, 1, "").trim_start() // #4303
+            ProtocolMessage.Edit(id, source)
+        }
+        "save" -> ProtocolMessage.Save(notebook_protocol_path(rest))
+        "merge" -> ProtocolMessage.MergePath(notebook_protocol_path(rest))
+        "import-ipynb" -> ProtocolMessage.ImportIpynb(rest)
+        "state" -> ProtocolMessage.State
+        "inspect" -> ProtocolMessage.Inspect(if rest.is_empty() -> notebook_protocol_latest_id(kernel, "inspect needs cell id") ?? return Err(err) else -> rest)
+        "complete" -> ProtocolMessage.Complete(rest)
+        "export-ipynb" -> ProtocolMessage.ExportIpynb
+        "export-jet" -> ProtocolMessage.ExportJet
+        "grant" -> {
+            bits :: rest.split_whitespace().to_list()
+            id :: if bits.is_empty() -> notebook_protocol_latest_id(kernel, "grant needs cell id") ?? return Err(err) else -> bits[0]
+            ProtocolMessage.Grant(id, notebook_protocol_default(bits, 1, "jet-notebook"))
+        }
+        "rerun" -> {
+            bits :: rest.split_whitespace().to_list()
+            client :: notebook_protocol_parse_client(notebook_protocol_default(bits, 0, "jupyter")) ?? return Err(err)
+            number :: notebook_protocol_bit(bits, 1, "rerun needs turn id") ?? return Err(err)
+            // usize parse: leading + allowed, negative and target-width overflow rejected.
+            from :: notebook_protocol_turn_number(number) ?? return Err("bad turn id")
+            decisions := [RerunDecision]{}
+            loop at in 2..<bits.len() {
+                confirm :: bits[at] == "confirm" || bits[at] == "y"
+                &decisions.push(if confirm -> RerunDecision.Confirm else -> RerunDecision.SkipStale)
+            }
+            ProtocolMessage.Rerun(client, from, None, ^decisions)
+        }
+        else -> return Err("unknown protocol command `{command}`")
+    }
+}
+fn notebook_protocol_turn_number(number: String) -> Int Err! {
+    bytes :: number.bytes()
+    start :: if !bytes.is_empty() && bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return Err("bad turn id")
+    value := U64{0}
+    maximum :: core.sys.target.usize_max() // #4483
+    loop at in start..<bytes.len() {
+        byte :: bytes[at]
+        if byte < (U8{48}) || byte > (U8{57}) -> return Err("bad turn id")
+        digit :: U64{byte - (U8{48})}
+        if value > (maximum - digit) / (U64{10}) -> return Err("bad turn id")
+        value = value * (U64{10}) + digit
+    }
+    Int{value}
+}

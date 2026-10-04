@@ -1,0 +1,2473 @@
+// PORT-PENDING 0787 crates-jet-devserver-src-watchservice: crates/jet-devserver/src/WatchService.rs:1-2469
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Unified dependency-aware watch / invalidation / hot-replacement engine
+//RS //! (Tower #439 / E3-UL6).
+//RS //!
+//RS //! One typed graph feeds `jet run --watch` and `jet dev`. Nodes carry a
+//RS //! `RootKind`; reverse edges give exact closure invalidation. Receipts are
+//RS //! deterministic. `#Persist` migration and client/server replacement commit
+//RS //! as one transaction or leave the prior session valid.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet, VecDeque};
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::sync::{mpsc, Mutex, MutexGuard};
+//RS use std::time::{Duration, Instant, SystemTime};
+//RS 
+//RS use jet_driver::Diagnostics::Diagnostic;
+//RS use jet_foundation::JSON::json_escape;
+//RS use jet_foundation::Game::JetGameChangeKind;
+//RS 
+//RS /// What kind of watch root a path is.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+//RS pub enum RootKind {
+//RS     Import,
+//RS     Asset,
+//RS     HTML,
+//RS     Style,
+//RS     Manifest,
+//RS     Lock,
+//RS     Generated,
+//RS     BuildInput,
+//RS     TargetFact,
+//RS }
+//RS 
+//RS impl RootKind {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Import => "import",
+//RS             Self::Asset => "asset",
+//RS             Self::HTML => "html",
+//RS             Self::Style => "style",
+//RS             Self::Manifest => "manifest",
+//RS             Self::Lock => "lock",
+//RS             Self::Generated => "generated",
+//RS             Self::BuildInput => "build_input",
+//RS             Self::TargetFact => "target_fact",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Fingerprint of a watched path (content digest for files; mtime + length
+//RS /// for directories, plus existence).
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct PathStamp {
+//RS     pub exists: bool,
+//RS     pub mtime: Option<SystemTime>,
+//RS     pub len: Option<u64>,
+//RS     pub digest: Option<String>,
+//RS }
+//RS 
+//RS impl PathStamp {
+//RS     pub fn capture(path: &Path) -> Self {
+//RS         match fs::metadata(path) {
+//RS             Ok(meta) => {
+//RS                 let digest = meta
+//RS                     .is_file()
+//RS                     .then(|| jet_foundation::SHA256::sha256_file_hex(path).ok())
+//RS                     .flatten()
+//RS                     .map(|digest| format!("sha256-{digest}"));
+//RS                 Self {
+//RS                     exists: true,
+//RS                     mtime: meta.modified().ok(),
+//RS                     len: Some(meta.len()),
+//RS                     digest,
+//RS                 }
+//RS             }
+//RS             Err(_) => Self {
+//RS                 exists: false,
+//RS                 mtime: None,
+//RS                 len: None,
+//RS                 digest: None,
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     /// Compare filesystem state without treating a file's timestamp or size
+//RS     /// as content. Editors commonly rewrite identical bytes with a new mtime;
+//RS     /// those saves must not trigger a rebuild.
+//RS     fn changed_since(&self, newer: &Self) -> bool {
+//RS         if self.exists != newer.exists {
+//RS             return true;
+//RS         }
+//RS         match (&self.digest, &newer.digest) {
+//RS             (Some(previous), Some(current)) => previous != current,
+//RS             (Some(_), None) | (None, Some(_)) => true,
+//RS             (None, None) => self.mtime != newer.mtime || self.len != newer.len,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Wake token shared with other dev-loop inputs. Filesystem events and
+//RS /// terminal commands use the same wait queue, so the hot path blocks instead
+//RS /// of polling while still reacting immediately to either source.
+//RS #[derive(Clone)]
+//RS pub struct WatchWake {
+//RS     sender: mpsc::Sender<()>,
+//RS }
+//RS 
+//RS impl WatchWake {
+//RS     pub fn wake(&self) {
+//RS         let _ = self.sender.send(());
+//RS     }
+//RS }
+//RS 
+//RS struct EventWaiter {
+//RS     receiver: mpsc::Receiver<()>,
+//RS     wake: WatchWake,
+//RS     #[cfg(target_os = "linux")]
+//RS     native: Option<native_events::Watcher>,
+//RS }
+//RS 
+//RS impl EventWaiter {
+//RS     fn new(paths: Vec<PathBuf>) -> Self {
+//RS         let (sender, receiver) = mpsc::channel();
+//RS         #[cfg(target_os = "linux")]
+//RS         let native = native_events::Watcher::new(paths, sender.clone());
+//RS         #[cfg(not(target_os = "linux"))]
+//RS         let _ = paths;
+//RS         Self {
+//RS             receiver,
+//RS             wake: WatchWake { sender },
+//RS             #[cfg(target_os = "linux")]
+//RS             native,
+//RS         }
+//RS     }
+//RS 
+//RS     fn refresh(&self, paths: Vec<PathBuf>) {
+//RS         #[cfg(target_os = "linux")]
+//RS         if let Some(native) = &self.native {
+//RS             native.refresh(paths);
+//RS         }
+//RS         #[cfg(not(target_os = "linux"))]
+//RS         let _ = paths;
+//RS     }
+//RS 
+//RS     fn wait(&self, timeout: Option<Duration>) -> bool {
+//RS         #[cfg(target_os = "linux")]
+//RS         if self.native.is_some() {
+//RS             return match timeout {
+//RS                 Some(timeout) => self.receiver.recv_timeout(timeout).is_ok(),
+//RS                 None => self.receiver.recv().is_ok(),
+//RS             };
+//RS         }
+//RS         // Other targets retain a bounded compatibility path until their
+//RS         // native filesystem event source is available. Linux, the supported
+//RS         // dev latency target, never reaches this branch.
+//RS         let timeout = timeout.unwrap_or(Duration::from_millis(WATCH_POLL_INTERVAL_MS));
+//RS         let _ = self.receiver.recv_timeout(timeout);
+//RS         true
+//RS     }
+//RS 
+//RS     /// Absorb one save burst: wait out `timeout`, draining native events.
+//RS     /// Without a native event source the window is a plain sleep, so callers
+//RS     /// that re-sample after coalescing never spin.
+//RS     fn coalesce(&self, timeout: Duration) {
+//RS         #[cfg(target_os = "linux")]
+//RS         if self.native.is_some() {
+//RS             let deadline = Instant::now() + timeout;
+//RS             loop {
+//RS                 let remaining = deadline.saturating_duration_since(Instant::now());
+//RS                 if remaining.is_zero() || self.receiver.recv_timeout(remaining).is_err() {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             while self.receiver.try_recv().is_ok() {}
+//RS             return;
+//RS         }
+//RS         std::thread::sleep(timeout);
+//RS     }
+//RS 
+//RS     fn wake_handle(&self) -> WatchWake {
+//RS         self.wake.clone()
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS mod native_events {
+//RS     use super::*;
+//RS     use std::collections::BTreeSet;
+//RS     use std::ffi::CString;
+//RS     use std::os::raw::{c_char, c_int, c_short};
+//RS     use std::os::unix::ffi::OsStrExt;
+//RS     use std::sync::atomic::{AtomicBool, Ordering};
+//RS     use std::sync::{Arc, mpsc::Sender};
+//RS     use std::thread::{self, JoinHandle};
+//RS 
+//RS     const IN_NONBLOCK: c_int = 0x800;
+//RS     const IN_CLOEXEC: c_int = 0x80000;
+//RS     const IN_MASK: u32 = 0x0000_0002
+//RS         | 0x0000_0004
+//RS         | 0x0000_0008
+//RS         | 0x0000_0040
+//RS         | 0x0000_0080
+//RS         | 0x0000_0100
+//RS         | 0x0000_0200
+//RS         | 0x0000_0400
+//RS         | 0x0000_0800
+//RS         | 0x0000_4000;
+//RS     const POLLIN: c_short = 0x001;
+//RS     const POLLERR: c_short = 0x008;
+//RS     const POLLHUP: c_short = 0x010;
+//RS     const POLLNVAL: c_short = 0x020;
+//RS 
+//RS     #[repr(C)]
+//RS     struct PollFd {
+//RS         fd: c_int,
+//RS         events: c_short,
+//RS         revents: c_short,
+//RS     }
+//RS 
+//RS     unsafe extern "C" {
+//RS         fn close(fd: c_int) -> c_int;
+//RS         fn inotify_add_watch(fd: c_int, pathname: *const c_char, mask: u32) -> c_int;
+//RS         fn inotify_init1(flags: c_int) -> c_int;
+//RS         fn pipe(fds: *mut c_int) -> c_int;
+//RS         fn poll(fds: *mut PollFd, nfds: usize, timeout: c_int) -> c_int;
+//RS         fn read(fd: c_int, buffer: *mut u8, count: usize) -> isize;
+//RS         fn write(fd: c_int, buffer: *const u8, count: usize) -> isize;
+//RS     }
+//RS 
+//RS     pub(super) struct Watcher {
+//RS         paths: Arc<Mutex<Vec<PathBuf>>>,
+//RS         control_write: c_int,
+//RS         stop: Arc<AtomicBool>,
+//RS         join: Option<JoinHandle<()>>,
+//RS     }
+//RS 
+//RS     impl Watcher {
+//RS         pub(super) fn new(paths: Vec<PathBuf>, sender: Sender<()>) -> Option<Self> {
+//RS             let mut pipes = [0; 2];
+//RS             if unsafe { pipe(pipes.as_mut_ptr()) } != 0 {
+//RS                 return None;
+//RS             }
+//RS             let paths = normalize_paths(paths);
+//RS             let probe = build_notify_fd(&paths);
+//RS             if probe < 0 {
+//RS                 unsafe {
+//RS                     close(pipes[0]);
+//RS                     close(pipes[1]);
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             unsafe {
+//RS                 close(probe);
+//RS             }
+//RS             let paths = Arc::new(Mutex::new(paths));
+//RS             let stop = Arc::new(AtomicBool::new(false));
+//RS             let thread_paths = Arc::clone(&paths);
+//RS             let thread_stop = Arc::clone(&stop);
+//RS             let join = thread::Builder::new()
+//RS                 .name("jet-watch-events".to_string())
+//RS                 .spawn(move || run(
+//RS                     pipes[0],
+//RS                     thread_paths,
+//RS                     thread_stop,
+//RS                     sender,
+//RS                 ))
+//RS                 .ok()?;
+//RS             Some(Self {
+//RS                 paths,
+//RS                 control_write: pipes[1],
+//RS                 stop,
+//RS                 join: Some(join),
+//RS             })
+//RS         }
+//RS 
+//RS         pub(super) fn refresh(&self, paths: Vec<PathBuf>) {
+//RS             let paths = normalize_paths(paths);
+//RS             let mut current = self.paths.lock().unwrap_or_else(|e| e.into_inner());
+//RS             if *current == paths {
+//RS                 return;
+//RS             }
+//RS             *current = paths;
+//RS             drop(current);
+//RS             self.signal();
+//RS         }
+//RS 
+//RS         fn signal(&self) {
+//RS             let byte = [1u8; 1];
+//RS             let _ = unsafe { write(self.control_write, byte.as_ptr(), byte.len()) };
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for Watcher {
+//RS         fn drop(&mut self) {
+//RS             self.stop.store(true, Ordering::Release);
+//RS             self.signal();
+//RS             if let Some(join) = self.join.take() {
+//RS                 let _ = join.join();
+//RS             }
+//RS             unsafe {
+//RS                 close(self.control_write);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn normalize_paths(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
+//RS         paths.sort();
+//RS         paths.dedup();
+//RS         paths
+//RS     }
+//RS 
+//RS     fn existing_directory(path: &Path) -> Option<PathBuf> {
+//RS         let mut candidate = if path.is_dir() {
+//RS             path.to_path_buf()
+//RS         } else {
+//RS             path.parent()
+//RS                 .unwrap_or_else(|| Path::new("."))
+//RS                 .to_path_buf()
+//RS         };
+//RS         loop {
+//RS             if candidate.is_dir() {
+//RS                 return Some(candidate);
+//RS             }
+//RS             let parent = candidate.parent()?;
+//RS             if parent == candidate {
+//RS                 return None;
+//RS             }
+//RS             candidate = parent.to_path_buf();
+//RS         }
+//RS     }
+//RS 
+//RS     fn build_notify_fd(paths: &[PathBuf]) -> c_int {
+//RS         let fd = unsafe { inotify_init1(IN_NONBLOCK | IN_CLOEXEC) };
+//RS         if fd < 0 {
+//RS             return -1;
+//RS         }
+//RS         let directories = paths
+//RS             .iter()
+//RS             .filter_map(|path| existing_directory(path))
+//RS             .collect::<BTreeSet<_>>();
+//RS         let mut watched = 0;
+//RS         for directory in directories {
+//RS             let bytes = directory.as_os_str().as_bytes();
+//RS             let Ok(path) = CString::new(bytes) else {
+//RS                 continue;
+//RS             };
+//RS             if unsafe { inotify_add_watch(fd, path.as_ptr(), IN_MASK) } >= 0 {
+//RS                 watched += 1;
+//RS             }
+//RS         }
+//RS         if watched == 0 {
+//RS             unsafe {
+//RS                 close(fd);
+//RS             }
+//RS             -1
+//RS         } else {
+//RS             fd
+//RS         }
+//RS     }
+//RS 
+//RS     fn run(
+//RS         control_read: c_int,
+//RS         paths: Arc<Mutex<Vec<PathBuf>>>,
+//RS         stop: Arc<AtomicBool>,
+//RS         sender: Sender<()>,
+//RS     ) {
+//RS         let mut notify_fd = {
+//RS             let paths = paths.lock().unwrap_or_else(|e| e.into_inner());
+//RS             build_notify_fd(&paths)
+//RS         };
+//RS         loop {
+//RS             if stop.load(Ordering::Acquire) {
+//RS                 break;
+//RS             }
+//RS             let mut fds = [
+//RS                 PollFd {
+//RS                     fd: control_read,
+//RS                     events: POLLIN,
+//RS                     revents: 0,
+//RS                 },
+//RS                 PollFd {
+//RS                     fd: notify_fd,
+//RS                     events: POLLIN,
+//RS                     revents: 0,
+//RS                 },
+//RS             ];
+//RS             let count = if notify_fd >= 0 { 2 } else { 1 };
+//RS             let result = unsafe { poll(fds.as_mut_ptr(), count, -1) };
+//RS             if result < 0 {
+//RS                 if std::io::Error::last_os_error().raw_os_error() == Some(4) {
+//RS                     continue;
+//RS                 }
+//RS                 break;
+//RS             }
+//RS             if fds[0].revents != 0 {
+//RS                 let mut bytes = [0u8; 64];
+//RS                 let _ = unsafe { read(control_read, bytes.as_mut_ptr(), bytes.len()) };
+//RS                 if stop.load(Ordering::Acquire) {
+//RS                     break;
+//RS                 }
+//RS                 if notify_fd >= 0 {
+//RS                     unsafe {
+//RS                         close(notify_fd);
+//RS                     }
+//RS                 }
+//RS                 let paths = paths.lock().unwrap_or_else(|e| e.into_inner());
+//RS                 notify_fd = build_notify_fd(&paths);
+//RS             }
+//RS             if notify_fd >= 0
+//RS                 && fds[1].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL) != 0
+//RS             {
+//RS                 let mut buffer = [0u8; 8192];
+//RS                 let mut changed = false;
+//RS                 loop {
+//RS                     let read = unsafe { read(notify_fd, buffer.as_mut_ptr(), buffer.len()) };
+//RS                     if read <= 0 {
+//RS                         break;
+//RS                     }
+//RS                     changed = true;
+//RS                 }
+//RS                 if changed {
+//RS                     let _ = sender.send(());
+//RS                 }
+//RS             }
+//RS         }
+//RS         if notify_fd >= 0 {
+//RS             unsafe {
+//RS                 close(notify_fd);
+//RS             }
+//RS         }
+//RS         unsafe {
+//RS             close(control_read);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// How a watched path changed.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum ChangeKind {
+//RS     Created,
+//RS     Modified,
+//RS     Deleted,
+//RS     Renamed,
+//RS     /// Event arrived after a newer generation already applied — ignore.
+//RS     Stale,
+//RS }
+//RS 
+//RS /// Deterministic invalidation receipt for one poll cycle.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct InvalidationReceipt {
+//RS     pub generation: u64,
+//RS     pub changed: Vec<PathBuf>,
+//RS     pub closure: Vec<PathBuf>,
+//RS     pub kinds: Vec<&'static str>,
+//RS     pub change_kinds: Vec<&'static str>,
+//RS     /// Content digests captured for each `changed` path after the save settled.
+//RS     /// `None` means the path is absent or could not be hashed safely.
+//RS     pub content_digests: Vec<Option<String>>,
+//RS     pub dev_entries: Vec<DevWatchEntry>,
+//RS     pub edit_to_visible_ms: Option<u128>,
+//RS }
+//RS /// Checked game change metadata projected from the dependency watcher.
+//RS ///
+//RS /// `old_digest`/`new_digest` are filesystem observations. Schema ids remain
+//RS /// optional because only a package/build manifest can author them; the
+//RS /// watcher never treats a content digest as a schema id.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct DevWatchEntry {
+//RS     pub path: PathBuf,
+//RS     pub change_kind: &'static str,
+//RS     pub game_kind: JetGameChangeKind,
+//RS     pub old_digest: Option<String>,
+//RS     pub new_digest: Option<String>,
+//RS     pub old_schema_id: Option<String>,
+//RS     pub new_schema_id: Option<String>,
+//RS }
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct WatchNode {
+//RS     pub path: PathBuf,
+//RS     pub kind: RootKind,
+//RS     pub stamp: PathStamp,
+//RS     /// Asset roots contain directories as watch sentinels. Keep their shape
+//RS     /// so directory churn can discover files without becoming an import.
+//RS     pub is_dir: bool,
+//RS }
+//RS 
+//RS 
+//RS impl InvalidationReceipt {
+//RS     pub fn render(&self) -> String {
+//RS         format!(
+//RS             "{{\"generation\":{},\"changed\":[{}],\"closure\":[{}],\"kinds\":[{}],\"change_kinds\":[{}],\"content_digests\":[{}],\"dev_entries\":[{}],\"edit_to_visible_ms\":{}}}",
+//RS             self.generation,
+//RS             join_paths(&self.changed),
+//RS             join_paths(&self.closure),
+//RS             join_quoted(&self.kinds),
+//RS             join_quoted(&self.change_kinds),
+//RS             join_optional_quoted(&self.content_digests),
+//RS             join_dev_entries(&self.dev_entries),
+//RS             self.edit_to_visible_ms
+//RS                 .map(|ms| ms.to_string())
+//RS                 .unwrap_or_else(|| "null".to_string()),
+//RS         )
+//RS     }
+//RS     pub fn game_dev_entries(&self) -> &[DevWatchEntry] {
+//RS         &self.dev_entries
+//RS     }
+//RS }
+//RS 
+//RS fn join_optional_quoted(items: &[Option<String>]) -> String {
+//RS     items
+//RS         .iter()
+//RS         .map(|item| {
+//RS             item.as_deref()
+//RS                 .map(|value| format!("\"{}\"", json_escape(value)))
+//RS                 .unwrap_or_else(|| "null".to_string())
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",")
+//RS }
+//RS 
+//RS fn join_quoted(items: &[&'static str]) -> String {
+//RS     items
+//RS         .iter()
+//RS         .map(|item| format!("\"{}\"", json_escape(item)))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",")
+//RS }
+//RS 
+//RS fn join_dev_entries(entries: &[DevWatchEntry]) -> String {
+//RS     entries
+//RS         .iter()
+//RS         .map(|entry| {
+//RS             let optional = |value: Option<&String>| {
+//RS                 value
+//RS                     .map(|value| format!("\"{}\"", json_escape(value)))
+//RS                     .unwrap_or_else(|| "null".to_string())
+//RS             };
+//RS             format!(
+//RS                 "{{\"path\":\"{}\",\"change_kind\":\"{}\",\"game_kind\":\"{}\",\"old_digest\":{},\"new_digest\":{},\"old_schema_id\":{},\"new_schema_id\":{}}}",
+//RS                 json_escape(&entry.path.display().to_string()),
+//RS                 entry.change_kind,
+//RS                 entry.game_kind.as_str(),
+//RS                 optional(entry.old_digest.as_ref()),
+//RS                 optional(entry.new_digest.as_ref()),
+//RS                 optional(entry.old_schema_id.as_ref()),
+//RS                 optional(entry.new_schema_id.as_ref()),
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",")
+//RS }
+//RS 
+//RS 
+//RS fn join_paths(paths: &[PathBuf]) -> String {
+//RS     paths
+//RS         .iter()
+//RS         .map(|p| format!("\"{}\"", json_escape(&p.display().to_string())))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",")
+//RS }
+//RS 
+//RS /// Typed dependency graph with deterministic reverse edges.
+//RS #[derive(Clone, Debug, Default)]
+//RS pub struct WatchGraph {
+//RS     nodes: BTreeMap<PathBuf, WatchNode>,
+//RS     /// Declared game asset roots. This is discovery scope, never importer
+//RS     /// authority; files outside these roots are not promoted to Asset nodes.
+//RS     asset_roots: BTreeSet<PathBuf>,
+//RS     /// Directory roots supplied by runtime file/testing APIs. Their sentinels
+//RS     /// stay watched even when absent so a later directory create is visible.
+//RS     runtime_input_roots: BTreeSet<PathBuf>,
+//RS     /// Explicit game path kinds supplied by the package/build owner. The
+//RS     /// watcher never infers script/world meaning from a filename.
+//RS     game_paths: BTreeMap<PathBuf, JetGameChangeKind>,
+//RS     game_schema_ids: BTreeMap<PathBuf, (Option<String>, Option<String>)>,
+//RS     /// `dep -> dependents` (who must rebuild when `dep` changes).
+//RS     reverse: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+//RS     /// Forward edges kept for rebuild/debug.
+//RS     forward: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+//RS     entry: Option<PathBuf>,
+//RS }
+//RS 
+//RS impl WatchGraph {
+//RS     pub fn new() -> Self {
+//RS         Self::default()
+//RS     }
+//RS 
+//RS     pub fn entry(&self) -> Option<&Path> {
+//RS         self.entry.as_deref()
+//RS     }
+//RS 
+//RS     pub fn node_count(&self) -> usize {
+//RS         self.nodes.len()
+//RS     }
+//RS 
+//RS     pub fn nodes(&self) -> impl Iterator<Item = &WatchNode> {
+//RS         self.nodes.values()
+//RS     }
+//RS 
+//RS     pub fn reverse_edges(&self) -> &BTreeMap<PathBuf, BTreeSet<PathBuf>> {
+//RS         &self.reverse
+//RS     }
+//RS 
+//RS     pub fn upsert(&mut self, path: PathBuf, kind: RootKind) {
+//RS         self.upsert_with_dir_hint(path, kind, false);
+//RS     }
+//RS 
+//RS     fn upsert_with_dir_hint(&mut self, path: PathBuf, kind: RootKind, dir_hint: bool) {
+//RS         let is_dir = dir_hint || path.is_dir();
+//RS         let stamp = PathStamp::capture(&path);
+//RS         self.nodes.insert(
+//RS             path.clone(),
+//RS             WatchNode {
+//RS                 path,
+//RS                 kind,
+//RS                 stamp,
+//RS                 is_dir,
+//RS             },
+//RS         );
+//RS     }
+//RS 
+//RS     pub fn link(&mut self, from: PathBuf, to: PathBuf) {
+//RS         self.forward
+//RS             .entry(from.clone())
+//RS             .or_default()
+//RS             .insert(to.clone());
+//RS         self.reverse.entry(to).or_default().insert(from);
+//RS     }
+//RS 
+//RS     pub fn set_entry(&mut self, entry: PathBuf) {
+//RS         self.entry = Some(entry.clone());
+//RS         self.upsert(entry, RootKind::Import);
+//RS     }
+//RS     /// Register a declared game asset root and its current descendants.
+//RS     /// Every discovered path stays in the Asset domain; no importer or
+//RS     /// dependency inference is performed here.
+//RS     pub fn register_asset_root(&mut self, path: PathBuf) {
+//RS         let path = canonicalize_loose(&path);
+//RS         self.asset_roots.insert(path.clone());
+//RS         let mut visited = BTreeSet::new();
+//RS         self.add_asset_tree(&path, &mut visited);
+//RS     }
+//RS 
+//RS     pub fn asset_roots(&self) -> &BTreeSet<PathBuf> {
+//RS         &self.asset_roots
+//RS     }
+//RS 
+//RS     /// Register one exact game path with an owner-provided semantic kind.
+//RS     /// Registration is the only authority for script/world meaning.
+//RS     pub fn register_game_path(&mut self, path: PathBuf, kind: JetGameChangeKind) {
+//RS         let path = canonicalize_loose(&path);
+//RS         self.game_paths.insert(path.clone(), kind);
+//RS         if !self.nodes.contains_key(&path) {
+//RS             self.upsert(path, RootKind::BuildInput);
+//RS         }
+//RS     }
+//RS 
+//RS     /// Register exact old/new schema ids when a package/build manifest has
+//RS     /// checked them. Filesystem content digests remain separate observations.
+//RS     pub fn register_game_path_with_schema_ids(
+//RS         &mut self,
+//RS         path: PathBuf,
+//RS         kind: JetGameChangeKind,
+//RS         old_schema_id: Option<String>,
+//RS         new_schema_id: Option<String>,
+//RS     ) {
+//RS         let path = canonicalize_loose(&path);
+//RS         self.register_game_path(path.clone(), kind);
+//RS         self.game_schema_ids
+//RS             .insert(path, (old_schema_id, new_schema_id));
+//RS     }
+//RS 
+//RS     fn game_kind_for(&self, path: &Path) -> Option<JetGameChangeKind> {
+//RS         self.game_paths.get(path).copied().or_else(|| {
+//RS             self.nodes.get(path).and_then(|node| match node.kind {
+//RS                 // Import/asset classification is already a checked WatchGraph
+//RS                 // fact; do not infer game meaning from the path spelling.
+//RS                 RootKind::Import => Some(JetGameChangeKind::Script),
+//RS                 RootKind::Asset => Some(JetGameChangeKind::Asset),
+//RS                 _ => None,
+//RS             })
+//RS         })
+//RS     }
+//RS 
+//RS     fn game_schema_ids_for(&self, path: &Path) -> (Option<String>, Option<String>) {
+//RS         self.game_schema_ids
+//RS             .get(path)
+//RS             .cloned()
+//RS             .unwrap_or((None, None))
+//RS     }
+//RS 
+//RS     /// Discover files created below runtime file/testing directory inputs
+//RS     /// without resetting stamps for existing nodes. New nodes start absent so
+//RS     /// the next poll reports a typed `created` transition.
+//RS     fn discover_runtime_input_trees(&mut self) {
+//RS         let roots = self.runtime_input_roots.iter().cloned().collect::<Vec<_>>();
+//RS         let mut visited = BTreeSet::new();
+//RS         for root in roots {
+//RS             self.add_new_runtime_tree(&root, &mut visited);
+//RS         }
+//RS     }
+//RS 
+//RS     fn add_new_runtime_tree(&mut self, path: &Path, visited: &mut BTreeSet<PathBuf>) {
+//RS         let path = canonicalize_loose(path);
+//RS         if !visited.insert(path.clone()) {
+//RS             return;
+//RS         }
+//RS         let exists = fs::metadata(&path).is_ok();
+//RS         let expected_dir = !exists
+//RS             && self
+//RS                 .nodes
+//RS                 .get(&path)
+//RS                 .is_some_and(|node| node.is_dir && !node.stamp.exists);
+//RS         let is_dir = path.is_dir() || expected_dir;
+//RS         if let Some(node) = self.nodes.get_mut(&path) {
+//RS             if exists {
+//RS                 node.is_dir = is_dir;
+//RS                 if is_dir {
+//RS                     node.kind = RootKind::Asset;
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             self.nodes.insert(
+//RS                 path.clone(),
+//RS                 WatchNode {
+//RS                     path: path.clone(),
+//RS                     kind: if is_dir {
+//RS                         RootKind::Asset
+//RS                     } else {
+//RS                         Self::classify(&path)
+//RS                     },
+//RS                     stamp: PathStamp {
+//RS                         exists: false,
+//RS                         mtime: None,
+//RS                         len: None,
+//RS                         digest: None,
+//RS                     },
+//RS                     is_dir,
+//RS                 },
+//RS             );
+//RS         }
+//RS         if let Some(entry) = &self.entry {
+//RS             self.link(entry.clone(), path.clone());
+//RS         }
+//RS         if !is_dir {
+//RS             return;
+//RS         }
+//RS         let mut children = fs::read_dir(&path)
+//RS             .into_iter()
+//RS             .flatten()
+//RS             .filter_map(|item| item.ok().map(|item| item.path()))
+//RS             .collect::<Vec<_>>();
+//RS         children.sort();
+//RS         for child in children {
+//RS             self.add_new_runtime_tree(&child, visited);
+//RS         }
+//RS     }
+//RS 
+//RS     /// Discover files created below declared asset roots without resetting
+//RS     /// stamps for existing nodes.
+//RS     fn discover_asset_tree(&mut self) {
+//RS         let roots = self.asset_roots.iter().cloned().collect::<Vec<_>>();
+//RS         let mut visited = BTreeSet::new();
+//RS         for root in roots {
+//RS             self.add_new_asset_tree(&root, &mut visited);
+//RS         }
+//RS     }
+//RS 
+//RS     fn add_new_asset_tree(&mut self, path: &Path, visited: &mut BTreeSet<PathBuf>) {
+//RS         let path = canonicalize_loose(path);
+//RS         if !visited.insert(path.clone()) {
+//RS             return;
+//RS         }
+//RS         let is_dir = path.is_dir();
+//RS         let exists = fs::metadata(&path).is_ok();
+//RS         if let Some(node) = self.nodes.get_mut(&path) {
+//RS             if exists {
+//RS                 node.is_dir = is_dir;
+//RS             }
+//RS         } else {
+//RS             self.nodes.insert(
+//RS                 path.clone(),
+//RS                 WatchNode {
+//RS                     path: path.clone(),
+//RS                     kind: RootKind::Asset,
+//RS                     stamp: PathStamp {
+//RS                         exists: false,
+//RS                         mtime: None,
+//RS                         len: None,
+//RS                         digest: None,
+//RS                     },
+//RS                     is_dir,
+//RS                 },
+//RS             );
+//RS         }
+//RS         if !is_dir {
+//RS             return;
+//RS         }
+//RS         let mut children = fs::read_dir(&path)
+//RS             .into_iter()
+//RS             .flatten()
+//RS             .filter_map(|item| item.ok().map(|item| item.path()))
+//RS             .collect::<Vec<_>>();
+//RS         children.sort();
+//RS         for child in children {
+//RS             self.add_new_asset_tree(&child, visited);
+//RS         }
+//RS     }
+//RS 
+//RS     fn add_asset_tree(&mut self, path: &Path, visited: &mut BTreeSet<PathBuf>) {
+//RS         let path = canonicalize_loose(path);
+//RS         if !visited.insert(path.clone()) {
+//RS             return;
+//RS         }
+//RS         self.upsert(path.clone(), RootKind::Asset);
+//RS         if !path.is_dir() {
+//RS             return;
+//RS         }
+//RS         let mut children = fs::read_dir(&path)
+//RS             .into_iter()
+//RS             .flatten()
+//RS             .filter_map(|item| item.ok().map(|item| item.path()))
+//RS             .collect::<Vec<_>>();
+//RS         children.sort();
+//RS         for child in children {
+//RS             self.add_asset_tree(&child, visited);
+//RS         }
+//RS     }
+//RS 
+//RS     /// Exact reverse-dependent closure of `seeds`, sorted.
+//RS     pub fn closure_of(&self, seeds: &[PathBuf]) -> Vec<PathBuf> {
+//RS         let mut seen = BTreeSet::new();
+//RS         let mut queue = VecDeque::new();
+//RS         for seed in seeds {
+//RS             if seen.insert(seed.clone()) {
+//RS                 queue.push_back(seed.clone());
+//RS             }
+//RS         }
+//RS         while let Some(path) = queue.pop_front() {
+//RS             if let Some(deps) = self.reverse.get(&path) {
+//RS                 for dep in deps {
+//RS                     if seen.insert(dep.clone()) {
+//RS                         queue.push_back(dep.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             // A changed path always invalidates itself.
+//RS             seen.insert(path);
+//RS         }
+//RS         seen.into_iter().collect()
+//RS     }
+//RS 
+//RS     pub fn watched_paths(&self) -> Vec<PathBuf> {
+//RS         self.nodes.keys().cloned().collect()
+//RS     }
+//RS 
+//RS     pub fn refresh_stamps(&mut self) {
+//RS         for node in self.nodes.values_mut() {
+//RS             node.stamp = PathStamp::capture(&node.path);
+//RS         }
+//RS     }
+//RS 
+//RS     /// Classify a path into a root kind from extension / name.
+//RS     pub fn classify(path: &Path) -> RootKind {
+//RS         let name = path
+//RS             .file_name()
+//RS             .and_then(|n| n.to_str())
+//RS             .unwrap_or("")
+//RS             .to_ascii_lowercase();
+//RS         if name == jet_driver::Syntax::PACKAGE_FILE
+//RS             || name == jet_driver::Syntax::PAYLOAD_FILE
+//RS             || name.ends_with(".manifest")
+//RS             || name == "web.manifest.json"
+//RS         {
+//RS             return RootKind::Manifest;
+//RS         }
+//RS         if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") {
+//RS             return RootKind::Lock;
+//RS         }
+//RS         if let Some(parent) = path.parent() {
+//RS             if parent
+//RS                 .components()
+//RS                 .any(|c| c.as_os_str() == "generated" || c.as_os_str() == ".jet-gen")
+//RS             {
+//RS                 return RootKind::Generated;
+//RS             }
+//RS         }
+//RS         let extension = path
+//RS             .extension()
+//RS             .and_then(|e| e.to_str())
+//RS             .map(|e| e.to_ascii_lowercase());
+//RS         match extension.as_deref() {
+//RS             Some("jet") => RootKind::Import,
+//RS             Some("html" | "htm") => RootKind::HTML,
+//RS             Some("css") => RootKind::Style,
+//RS             Some(
+//RS                 "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "woff" | "woff2" | "ttf" | "otf",
+//RS             ) => RootKind::Asset,
+//RS             Some("toml" | "json" | "yaml" | "yml") => RootKind::BuildInput,
+//RS             _ => {
+//RS                 if name.starts_with("target.") || name.contains("target_fact") {
+//RS                     RootKind::TargetFact
+//RS                 } else {
+//RS                     RootKind::BuildInput
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Build a graph from an entry file plus known dependency paths.
+//RS     pub fn from_entry(entry: &Path, deps: &[PathBuf]) -> Result<Self, Diagnostic> {
+//RS         let mut graph = Self::new();
+//RS         let entry = canonicalize_loose(entry);
+//RS         graph.set_entry(entry.clone());
+//RS         let mut html_paths = Vec::new();
+//RS 
+//RS         let entry_dir = entry.parent().unwrap_or_else(|| Path::new("."));
+//RS         let project = jet_driver::Loader::find_manifest_root_checked(entry_dir)?
+//RS             .unwrap_or_else(|| entry_dir.to_path_buf());
+//RS         let manifest = jet_driver::Loader::manifest_path_checked(&project)?;
+//RS         let extras = [
+//RS             (manifest, RootKind::Manifest),
+//RS             (Some(project.join(".jet/lock")), RootKind::Lock),
+//RS             (
+//RS                 Some(entry_dir.join(format!(
+//RS                     "{}.html",
+//RS                     entry.file_stem().and_then(|s| s.to_str()).unwrap_or("app")
+//RS                 ))),
+//RS                 RootKind::HTML,
+//RS             ),
+//RS             (
+//RS                 Some(project.join(format!(
+//RS                     "{}.css",
+//RS                     entry.file_stem().and_then(|s| s.to_str()).unwrap_or("app")
+//RS                 ))),
+//RS                 RootKind::Style,
+//RS             ),
+//RS             (Some(project.join("target.fact")), RootKind::TargetFact),
+//RS         ];
+//RS         for (path, kind) in extras {
+//RS             let Some(path) = path else {
+//RS                 continue;
+//RS             };
+//RS             if path.exists()
+//RS                 || kind == RootKind::Manifest
+//RS                 || kind == RootKind::Lock
+//RS                 || kind == RootKind::HTML
+//RS             {
+//RS                 graph.upsert(path.clone(), kind);
+//RS                 graph.link(entry.clone(), path.clone());
+//RS                 if kind == RootKind::HTML {
+//RS                     html_paths.push(path);
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         for dep in deps {
+//RS             let path = canonicalize_loose(dep);
+//RS             if path == entry {
+//RS                 continue;
+//RS             }
+//RS             let kind = Self::classify(&path);
+//RS             graph.upsert(path.clone(), kind);
+//RS             graph.link(entry.clone(), path.clone());
+//RS             if kind == RootKind::HTML {
+//RS                 html_paths.push(path);
+//RS             }
+//RS         }
+//RS         graph.scan_html_references(&html_paths);
+//RS         graph.scan_runtime_inputs();
+//RS         Ok(graph)
+//RS     }
+//RS 
+//RS     /// Track literal paths passed to `core.files` and `core.testing`.
+//RS     /// The runtime still owns all file semantics; this watcher only discovers
+//RS     /// paths whose changes can invalidate the source that consumed them.
+//RS     pub fn scan_runtime_inputs(&mut self) {
+//RS         let sources: Vec<PathBuf> = self
+//RS             .nodes
+//RS             .values()
+//RS             .filter(|node| {
+//RS                 node.kind == RootKind::Import
+//RS                     || node
+//RS                         .path
+//RS                         .extension()
+//RS                         .and_then(|extension| extension.to_str())
+//RS                         .is_some_and(|extension| extension.eq_ignore_ascii_case("jet"))
+//RS             })
+//RS             .map(|node| node.path.clone())
+//RS             .collect();
+//RS         let base = self
+//RS             .entry
+//RS             .as_deref()
+//RS             .and_then(Path::parent)
+//RS             .unwrap_or_else(|| Path::new("."));
+//RS         let mut inputs = BTreeMap::<PathBuf, bool>::new();
+//RS         for source in sources {
+//RS             let Ok(text) = fs::read_to_string(source) else {
+//RS                 continue;
+//RS             };
+//RS             for input in runtime_file_inputs(&text) {
+//RS                 let path = Path::new(&input.path);
+//RS                 let path = if path.is_absolute() {
+//RS                     canonicalize_loose(path)
+//RS                 } else {
+//RS                     canonicalize_loose(&base.join(path))
+//RS                 };
+//RS                 inputs
+//RS                     .entry(path)
+//RS                     .and_modify(|is_dir| *is_dir |= input.is_dir)
+//RS                     .or_insert(input.is_dir);
+//RS             }
+//RS         }
+//RS         let mut visited = BTreeSet::new();
+//RS         for (input, is_dir) in inputs {
+//RS             self.add_runtime_input_tree(&input, &mut visited, is_dir);
+//RS         }
+//RS     }
+//RS 
+//RS     fn add_runtime_input_tree(
+//RS         &mut self,
+//RS         path: &Path,
+//RS         visited: &mut BTreeSet<PathBuf>,
+//RS         dir_hint: bool,
+//RS     ) {
+//RS         self.add_runtime_input_node(path, visited, dir_hint, true);
+//RS     }
+//RS 
+//RS     fn add_runtime_input_node(
+//RS         &mut self,
+//RS         path: &Path,
+//RS         visited: &mut BTreeSet<PathBuf>,
+//RS         dir_hint: bool,
+//RS         register_root: bool,
+//RS     ) {
+//RS         let path = canonicalize_loose(path);
+//RS         if !visited.insert(path.clone()) {
+//RS             return;
+//RS         }
+//RS         let exists = fs::metadata(&path).is_ok();
+//RS         let is_dir = path.is_dir() || (dir_hint && !exists);
+//RS         let kind = if is_dir {
+//RS             RootKind::Asset
+//RS         } else {
+//RS             Self::classify(&path)
+//RS         };
+//RS         if let Some(node) = self.nodes.get_mut(&path) {
+//RS             if exists {
+//RS                 node.is_dir = is_dir;
+//RS                 if is_dir {
+//RS                     node.kind = RootKind::Asset;
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             self.upsert_with_dir_hint(path.clone(), kind, dir_hint && !exists);
+//RS         }
+//RS         if register_root && dir_hint {
+//RS             self.runtime_input_roots.insert(path.clone());
+//RS         }
+//RS         if let Some(entry) = &self.entry {
+//RS             self.link(entry.clone(), path.clone());
+//RS         }
+//RS         if !is_dir {
+//RS             return;
+//RS         }
+//RS         let mut children: Vec<PathBuf> = fs::read_dir(&path)
+//RS             .into_iter()
+//RS             .flatten()
+//RS             .filter_map(|item| item.ok().map(|item| item.path()))
+//RS             .collect();
+//RS         children.sort();
+//RS         for child in children {
+//RS             self.add_runtime_input_node(&child, visited, false, false);
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     fn scan_html_references(&mut self, roots: &[PathBuf]) {
+//RS         let mut visited = BTreeSet::new();
+//RS         for root in roots {
+//RS             self.add_reference_tree(root, &mut visited);
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     fn add_reference_tree(&mut self, path: &Path, visited: &mut BTreeSet<PathBuf>) {
+//RS         let path = canonicalize_loose(path);
+//RS         if !visited.insert(path.clone()) {
+//RS             return;
+//RS         }
+//RS         let kind = Self::classify(&path);
+//RS         self.upsert(path.clone(), kind);
+//RS         if let Some(entry) = &self.entry {
+//RS             self.link(entry.clone(), path.clone());
+//RS         }
+//RS         let Ok(source) = fs::read_to_string(&path) else {
+//RS             return;
+//RS         };
+//RS         let Some(parent) = path.parent() else {
+//RS             return;
+//RS         };
+//RS         for reference in referenced_paths(&path, &source) {
+//RS             let Some(child) = local_reference_path(parent, &reference) else {
+//RS                 continue;
+//RS             };
+//RS             self.add_reference_tree(&child, visited);
+//RS         }
+//RS     }
+//RS 
+//RS     /// Rebuild from disk using the compiler loader's dependency list.
+//RS     pub fn discover(entry: &Path) -> Result<Self, Diagnostic> {
+//RS         let entry_str = entry.to_string_lossy();
+//RS         let deps = match jet_driver::Loader::load_entry_with_overlays_and_dependencies(
+//RS             entry_str.as_ref(),
+//RS             &[],
+//RS             false,
+//RS         ) {
+//RS             (Ok(bundle), deps) => {
+//RS                 let mut paths = deps;
+//RS                 for module in &bundle.modules {
+//RS                     paths.push(module.path.clone());
+//RS                 }
+//RS                 if let Some(module) = bundle.modules.get(bundle.entry) {
+//RS                     if let (Some(parent), Some(html)) = (module.path.parent(), &module.html_path) {
+//RS                         if let Some(path) = local_reference_path(parent, html) {
+//RS                             paths.push(path);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 for input in &bundle.comptime_inputs {
+//RS                     paths.push(bundle.project_root.join(&input.path));
+//RS                 }
+//RS                 paths.sort();
+//RS                 paths.dedup();
+//RS                 paths
+//RS             }
+//RS             (Err(_), deps) => deps,
+//RS         };
+//RS         Self::from_entry(entry, &deps)
+//RS     }
+//RS }
+//RS 
+//RS fn canonicalize_loose(path: &Path) -> PathBuf {
+//RS     fs::canonicalize(path).unwrap_or_else(|_| {
+//RS         if path.is_absolute() {
+//RS             path.to_path_buf()
+//RS         } else {
+//RS             std::env::current_dir()
+//RS                 .unwrap_or_else(|_| PathBuf::from("."))
+//RS                 .join(path)
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct RuntimeFileInput {
+//RS     path: String,
+//RS     is_dir: bool,
+//RS }
+//RS 
+//RS const RUNTIME_FILE_INPUT_METHODS: [(&str, bool); 14] = [
+//RS     ("copy", false),
+//RS     ("copy_dir", true),
+//RS     ("exists", false),
+//RS     ("is_dir", true),
+//RS     ("list_dir", true),
+//RS     ("read", false),
+//RS     ("read_bytes", false),
+//RS     ("walk", true),
+//RS     ("walk_parallel", true),
+//RS     ("glob", false),
+//RS     ("stat", false),
+//RS     ("fixture", false),
+//RS     ("golden", false),
+//RS     ("corpus", true),
+//RS ];
+//RS 
+//RS fn runtime_file_inputs(source: &str) -> Vec<RuntimeFileInput> {
+//RS     let mut inputs = BTreeMap::<String, bool>::new();
+//RS     for &(method, is_dir) in &RUNTIME_FILE_INPUT_METHODS {
+//RS         let marker = format!(".{method}");
+//RS         let mut offset = 0;
+//RS         while let Some(relative) = source[offset..].find(&marker) {
+//RS             let start = offset + relative;
+//RS             let mut cursor = start + marker.len();
+//RS             if source
+//RS                 .as_bytes()
+//RS                 .get(cursor)
+//RS                 .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+//RS             {
+//RS                 offset = cursor;
+//RS                 continue;
+//RS             }
+//RS             while source
+//RS                 .as_bytes()
+//RS                 .get(cursor)
+//RS                 .is_some_and(|byte| byte.is_ascii_whitespace())
+//RS             {
+//RS                 cursor += 1;
+//RS             }
+//RS             if source.as_bytes().get(cursor) != Some(&b'(') {
+//RS                 offset = cursor;
+//RS                 continue;
+//RS             }
+//RS             cursor += 1;
+//RS             while source
+//RS                 .as_bytes()
+//RS                 .get(cursor)
+//RS                 .is_some_and(|byte| byte.is_ascii_whitespace())
+//RS             {
+//RS                 cursor += 1;
+//RS             }
+//RS             if let Some((value, end)) = quoted_literal(source, cursor) {
+//RS                 if !value.is_empty()
+//RS                     && !value.contains('{')
+//RS                     && !value.contains('}')
+//RS                     && !value.contains("://")
+//RS                 {
+//RS                     inputs
+//RS                         .entry(value.to_string())
+//RS                         .and_modify(|seen_dir| *seen_dir |= is_dir)
+//RS                         .or_insert(is_dir);
+//RS                 }
+//RS                 offset = end.saturating_add(1);
+//RS             } else {
+//RS                 offset = cursor.saturating_add(1);
+//RS             }
+//RS         }
+//RS     }
+//RS     inputs
+//RS         .into_iter()
+//RS         .map(|(path, is_dir)| RuntimeFileInput { path, is_dir })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn quoted_literal(source: &str, start: usize) -> Option<(&str, usize)> {
+//RS     let bytes = source.as_bytes();
+//RS     let quote = *bytes.get(start)?;
+//RS     if quote != b'\'' && quote != b'"' {
+//RS         return None;
+//RS     }
+//RS     let value_start = start + 1;
+//RS     let mut cursor = value_start;
+//RS     while cursor < bytes.len() {
+//RS         match bytes[cursor] {
+//RS             b'\\' => cursor = cursor.saturating_add(2),
+//RS             byte if byte == quote => return Some((&source[value_start..cursor], cursor)),
+//RS             _ => cursor += 1,
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn local_reference_path(base: &Path, raw: &str) -> Option<PathBuf> {
+//RS     let reference = raw
+//RS         .trim()
+//RS         .split(|ch| ch == '?' || ch == '#')
+//RS         .next()?
+//RS         .trim();
+//RS     if reference.is_empty()
+//RS         || reference.starts_with("//")
+//RS         || reference.starts_with("data:")
+//RS         || reference.starts_with("blob:")
+//RS         || reference.starts_with("http:")
+//RS         || reference.starts_with("https:")
+//RS         || reference.starts_with("mailto:")
+//RS         || reference.starts_with("javascript:")
+//RS         || reference.contains('\\')
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let reference = reference.trim_start_matches('/');
+//RS     let path = Path::new(reference);
+//RS     if path.is_absolute() {
+//RS         return None;
+//RS     }
+//RS     Some(canonicalize_loose(&base.join(path)))
+//RS }
+//RS 
+//RS fn referenced_paths(path: &Path, source: &str) -> Vec<String> {
+//RS     let mut references = Vec::new();
+//RS     let extension = path
+//RS         .extension()
+//RS         .and_then(|e| e.to_str())
+//RS         .map(|e| e.to_ascii_lowercase());
+//RS     if matches!(extension.as_deref(), Some("html" | "htm")) {
+//RS         for attribute in ["src", "href", "poster", "srcset"] {
+//RS             extract_values_after(source, attribute, Some(b'='), false, attribute == "srcset", &mut references);
+//RS         }
+//RS     }
+//RS     if matches!(extension.as_deref(), Some("html" | "htm" | "css")) {
+//RS         extract_values_after(source, "url", Some(b'('), false, false, &mut references);
+//RS     }
+//RS     if matches!(extension.as_deref(), Some("js" | "mjs")) {
+//RS         extract_values_after(source, "from", None, false, false, &mut references);
+//RS         extract_values_after(source, "import", None, true, false, &mut references);
+//RS     }
+//RS     references
+//RS }
+//RS 
+//RS fn is_attribute_name_byte(byte: u8) -> bool {
+//RS     byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+//RS }
+//RS 
+//RS fn extract_values_after(
+//RS     source: &str,
+//RS     keyword: &str,
+//RS     delimiter: Option<u8>,
+//RS     optional_parentheses: bool,
+//RS     split_srcset: bool,
+//RS     out: &mut Vec<String>,
+//RS ) {
+//RS     let lower = source.to_ascii_lowercase();
+//RS     let bytes = lower.as_bytes();
+//RS     let mut offset = 0;
+//RS     while let Some(relative) = lower[offset..].find(keyword) {
+//RS         let start = offset + relative;
+//RS         let before = start.checked_sub(1).and_then(|index| bytes.get(index));
+//RS         let after = bytes.get(start + keyword.len());
+//RS         if before.is_some_and(|byte| is_attribute_name_byte(*byte))
+//RS             || after.is_some_and(|byte| is_attribute_name_byte(*byte))
+//RS         {
+//RS             offset = start + keyword.len();
+//RS             continue;
+//RS         }
+//RS 
+//RS         let mut cursor = start + keyword.len();
+//RS         while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+//RS             cursor += 1;
+//RS         }
+//RS         match delimiter {
+//RS             Some(b'=') if bytes.get(cursor) == Some(&b'=') => {
+//RS                 cursor += 1;
+//RS                 while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+//RS                     cursor += 1;
+//RS                 }
+//RS             }
+//RS             Some(b'=') => {
+//RS                 offset = start + keyword.len();
+//RS                 continue;
+//RS             }
+//RS             Some(b'(') if bytes.get(cursor) == Some(&b'(') => {
+//RS                 cursor += 1;
+//RS                 while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+//RS                     cursor += 1;
+//RS                 }
+//RS             }
+//RS             Some(b'(') => {
+//RS                 offset = start + keyword.len();
+//RS                 continue;
+//RS             }
+//RS             None if optional_parentheses && bytes.get(cursor) == Some(&b'(') => {
+//RS                 cursor += 1;
+//RS                 while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+//RS                     cursor += 1;
+//RS                 }
+//RS             }
+//RS             None => {}
+//RS             _ => unreachable!(),
+//RS         }
+//RS 
+//RS         let quote = bytes
+//RS             .get(cursor)
+//RS             .copied()
+//RS             .filter(|byte| *byte == b'\'' || *byte == b'"');
+//RS         if quote.is_some() {
+//RS             cursor += 1;
+//RS         }
+//RS         if quote.is_none() && delimiter.is_none() {
+//RS             offset = start + keyword.len();
+//RS             continue;
+//RS         }
+//RS 
+//RS         let value_start = cursor;
+//RS         let value_end = if let Some(quote) = quote {
+//RS             source[cursor..]
+//RS                 .find(char::from(quote))
+//RS                 .map(|index| cursor + index)
+//RS                 .unwrap_or(source.len())
+//RS         } else {
+//RS             source[cursor..]
+//RS                 .find(|ch: char| {
+//RS                     ch.is_ascii_whitespace()
+//RS                         || ch == '>'
+//RS                         || (delimiter == Some(b'(') && ch == ')')
+//RS                 })
+//RS                 .map(|index| cursor + index)
+//RS                 .unwrap_or(source.len())
+//RS         };
+//RS 
+//RS         if value_start < value_end {
+//RS             let value = &source[value_start..value_end];
+//RS             if split_srcset {
+//RS                 for candidate in value.split(',') {
+//RS                     if let Some(path) = candidate.split_whitespace().next() {
+//RS                         out.push(path.to_string());
+//RS                     }
+//RS                 }
+//RS             } else {
+//RS                 out.push(value.to_string());
+//RS             }
+//RS         }
+//RS         offset = value_end.saturating_add(1);
+//RS     }
+//RS }
+//RS 
+//RS /// Live event-backed session over a `WatchGraph`; `poll` remains the
+//RS /// correctness snapshot after a native event wakes the caller.
+//RS pub struct WatchSession {
+//RS     graph: WatchGraph,
+//RS     generation: u64,
+//RS     applied_generation: u64,
+//RS     coalesce: Duration,
+//RS     edit_started: Option<Instant>,
+//RS     events: EventWaiter,
+//RS }
+//RS 
+//RS impl WatchSession {
+//RS     pub fn open(entry: &Path) -> Result<Self, Diagnostic> {
+//RS         let graph = WatchGraph::discover(entry)?;
+//RS         let events = EventWaiter::new(graph.watched_paths());
+//RS         Ok(Self {
+//RS             graph,
+//RS             generation: 0,
+//RS             applied_generation: 0,
+//RS             coalesce: Duration::from_millis(WATCH_COALESCE_MS),
+//RS             edit_started: None,
+//RS             events,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn from_graph(graph: WatchGraph) -> Self {
+//RS         let events = EventWaiter::new(graph.watched_paths());
+//RS         Self {
+//RS             graph,
+//RS             generation: 0,
+//RS             applied_generation: 0,
+//RS             coalesce: Duration::from_millis(WATCH_COALESCE_MS),
+//RS             edit_started: None,
+//RS             events,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Rebuild this session's graph while retaining its event/wake queue.
+//RS     /// Interactive callers can replace a resident session without orphaning
+//RS     /// terminal-input wakeups.
+//RS     pub fn reopen(&mut self, entry: &Path) -> Result<(), Diagnostic> {
+//RS         let graph = WatchGraph::discover(entry)?;
+//RS         self.events.refresh(graph.watched_paths());
+//RS         self.graph = graph;
+//RS         self.generation = 0;
+//RS         self.applied_generation = 0;
+//RS         self.edit_started = None;
+//RS         Ok(())
+//RS     }
+//RS     pub fn register_asset_root(&mut self, path: PathBuf) {
+//RS         self.graph.register_asset_root(path);
+//RS         self.events.refresh(self.graph.watched_paths());
+//RS     }
+//RS 
+//RS     pub fn register_game_path(&mut self, path: PathBuf, kind: JetGameChangeKind) {
+//RS         self.graph.register_game_path(path, kind);
+//RS         self.events.refresh(self.graph.watched_paths());
+//RS     }
+//RS 
+//RS     pub fn register_game_path_with_schema_ids(
+//RS         &mut self,
+//RS         path: PathBuf,
+//RS         kind: JetGameChangeKind,
+//RS         old_schema_id: Option<String>,
+//RS         new_schema_id: Option<String>,
+//RS     ) {
+//RS         self.graph
+//RS             .register_game_path_with_schema_ids(path, kind, old_schema_id, new_schema_id);
+//RS         self.events.refresh(self.graph.watched_paths());
+//RS     }
+//RS 
+//RS     pub fn graph(&self) -> &WatchGraph {
+//RS         &self.graph
+//RS     }
+//RS 
+//RS     pub fn graph_mut(&mut self) -> &mut WatchGraph {
+//RS         &mut self.graph
+//RS     }
+//RS 
+//RS     pub fn generation(&self) -> u64 {
+//RS         self.generation
+//RS     }
+//RS 
+//RS     pub fn mark_edit_started(&mut self) {
+//RS         self.edit_started = Some(Instant::now());
+//RS     }
+//RS 
+//RS     /// Block on a native filesystem event or the next scheduled-loop wake.
+//RS     /// A `false` result means the supplied timeout elapsed without an event.
+//RS     pub fn wait_for_change_for(&mut self, timeout: Option<Duration>) -> bool {
+//RS         self.events.refresh(self.graph.watched_paths());
+//RS         self.events.wait(timeout)
+//RS     }
+//RS 
+//RS     pub fn wake_handle(&self) -> WatchWake {
+//RS         self.events.wake_handle()
+//RS     }
+//RS 
+//RS     /// Poll once. `None` = quiet. Handles rename/delete/create/modify and
+//RS     /// drops stale events whose generation was already superseded.
+//RS     pub fn poll(&mut self) -> Option<InvalidationReceipt> {
+//RS         // A directory mtime only tells us that its contents changed. Discover
+//RS         // new descendants first, preserving their absent baseline so creates
+//RS         // become observable on this poll.
+//RS         self.graph.discover_asset_tree();
+//RS         self.graph.discover_runtime_input_trees();
+//RS         self.events.refresh(self.graph.watched_paths());
+//RS 
+//RS         let mut changed = Vec::new();
+//RS         let mut change_kinds = Vec::new();
+//RS         for node in self.graph.nodes.values() {
+//RS             let now = PathStamp::capture(&node.path);
+//RS             if !node.stamp.changed_since(&now) {
+//RS                 continue;
+//RS             }
+//RS             let change_kind = match (node.stamp.exists, now.exists) {
+//RS                 (false, true) => ChangeKind::Created,
+//RS                 (true, false) => ChangeKind::Deleted,
+//RS                 (true, true) => {
+//RS                     // Same parent dir + missing old path elsewhere looks like
+//RS                     // rename; report Modified for stamp drift and let rename
+//RS                     // detection below promote matching pairs.
+//RS                     ChangeKind::Modified
+//RS                 }
+//RS                 (false, false) => continue,
+//RS             };
+//RS             changed.push(node.path.clone());
+//RS             change_kinds.push(change_kind);
+//RS         }
+//RS 
+//RS         // A Deleted + Created pair in the same directory with the same
+//RS         // RootKind collapses to Renamed on the deleted path and still
+//RS         // invalidates both.
+//RS         detect_renames(&mut changed, &mut change_kinds, &self.graph);
+//RS         if changed.is_empty() {
+//RS             return None;
+//RS         }
+//RS 
+//RS         if self.edit_started.is_none() {
+//RS             self.edit_started = Some(Instant::now());
+//RS         }
+//RS         // Coalesce one editor save burst without making every quiet wait pay a
+//RS         // fixed delay. The native event queue waits once for the bounded save
+//RS         // burst, then the filesystem state is sampled until it stops moving.
+//RS         self.events.coalesce(self.coalesce);
+//RS         self.settle(&changed);
+//RS 
+//RS         // Re-sample after coalescing (atomic save / editor write settle).
+//RS         let mut settled = Vec::new();
+//RS         let mut settled_kinds = Vec::new();
+//RS         let mut settled_root_kinds = Vec::new();
+//RS         let mut settled_old_digests = Vec::new();
+//RS         let mut settled_digests = Vec::new();
+//RS         for (path, change_kind) in changed.into_iter().zip(change_kinds.into_iter()) {
+//RS             let (root_kind, is_dir) = self
+//RS                 .graph
+//RS                 .nodes
+//RS                 .get(&path)
+//RS                 .map(|node| (node.kind, node.is_dir))
+//RS                 .unwrap_or_else(|| (WatchGraph::classify(&path), path.is_dir()));
+//RS             let now = PathStamp::capture(&path);
+//RS             let previous = self
+//RS                 .graph
+//RS                 .nodes
+//RS                 .get(&path)
+//RS                 .map(|node| node.stamp.clone())
+//RS                 .unwrap_or(PathStamp {
+//RS                     exists: false,
+//RS                     mtime: None,
+//RS                     len: None,
+//RS                     digest: None,
+//RS                 });
+//RS             if !previous.changed_since(&now) && change_kind != ChangeKind::Renamed {
+//RS                 continue;
+//RS             }
+//RS             if root_kind == RootKind::Asset && is_dir {
+//RS                 let runtime_root = self.graph.runtime_input_roots.contains(&path);
+//RS                 let report_transition = runtime_root
+//RS                     && matches!(change_kind, ChangeKind::Created | ChangeKind::Deleted);
+//RS                 if !report_transition {
+//RS                     // Directory nodes are discovery sentinels, not importable
+//RS                     // resources. Updating their stamp avoids repeating the same
+//RS                     // directory churn while child files carry the real changes.
+//RS                     if let Some(node) = self.graph.nodes.get_mut(&path) {
+//RS                         node.stamp = now;
+//RS                     }
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             settled.push(path);
+//RS             settled_kinds.push(change_kind);
+//RS             settled_root_kinds.push(root_kind);
+//RS             settled_old_digests.push(previous.digest.clone());
+//RS             settled_digests.push(now.digest);
+//RS         }
+//RS         if settled.is_empty() {
+//RS             return None;
+//RS         }
+//RS 
+//RS         self.generation += 1;
+//RS         let generation = self.generation;
+//RS         if generation <= self.applied_generation {
+//RS             let stale_count = settled.len();
+//RS             let stale_digests = vec![None; stale_count];
+//RS             let dev_entries = make_dev_entries(
+//RS                 &self.graph,
+//RS                 &settled,
+//RS                 &settled_kinds,
+//RS                 &settled_root_kinds,
+//RS                 &stale_digests,
+//RS                 &stale_digests,
+//RS             );
+//RS             return Some(InvalidationReceipt {
+//RS                 generation,
+//RS                 changed: settled,
+//RS                 closure: Vec::new(),
+//RS                 kinds: settled_root_kinds.iter().map(|kind| kind.as_str()).collect(),
+//RS                 change_kinds: vec!["stale"; stale_count],
+//RS                 content_digests: stale_digests,
+//RS                 dev_entries,
+//RS                 edit_to_visible_ms: None,
+//RS             });
+//RS         }
+//RS 
+//RS         for path in &settled {
+//RS             if let Some(node) = self.graph.nodes.get_mut(path) {
+//RS                 node.stamp = PathStamp::capture(path);
+//RS             } else {
+//RS                 let kind = WatchGraph::classify(path);
+//RS                 self.graph.upsert(path.clone(), kind);
+//RS             }
+//RS         }
+//RS 
+//RS         let closure = self.graph.closure_of(&settled);
+//RS         let edit_to_visible_ms = self
+//RS             .edit_started
+//RS             .map(|started| started.elapsed().as_millis());
+//RS         self.edit_started = None;
+//RS         let dev_entries = make_dev_entries(
+//RS             &self.graph,
+//RS             &settled,
+//RS             &settled_kinds,
+//RS             &settled_root_kinds,
+//RS             &settled_old_digests,
+//RS             &settled_digests,
+//RS         );
+//RS 
+//RS         Some(InvalidationReceipt {
+//RS             generation,
+//RS             changed: settled,
+//RS             closure,
+//RS             kinds: settled_root_kinds.iter().map(|kind| kind.as_str()).collect(),
+//RS             change_kinds: settled_kinds
+//RS                 .iter()
+//RS                 .map(|kind| match kind {
+//RS                     ChangeKind::Created => "created",
+//RS                     ChangeKind::Modified => "modified",
+//RS                     ChangeKind::Deleted => "deleted",
+//RS                     ChangeKind::Renamed => "renamed",
+//RS                     ChangeKind::Stale => "stale",
+//RS                 })
+//RS                 .collect(),
+//RS             content_digests: settled_digests,
+//RS             dev_entries,
+//RS             edit_to_visible_ms,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Wait until the changed paths' content is stable across one coalesce
+//RS     /// window, so a rebuild never compiles a half-written save. An in-place
+//RS     /// save truncates before it writes: a file that had content and now reads
+//RS     /// empty keeps waiting for that write, bounded by `WATCH_SETTLE_MAX_MS`
+//RS     /// so a deliberately emptied file still rebuilds.
+//RS     fn settle(&self, paths: &[PathBuf]) {
+//RS         let deadline = Instant::now() + Duration::from_millis(WATCH_SETTLE_MAX_MS);
+//RS         let mut previous: Vec<PathStamp> = paths.iter().map(|path| PathStamp::capture(path)).collect();
+//RS         while Instant::now() < deadline {
+//RS             let truncated = paths.iter().zip(&previous).any(|(path, now)| {
+//RS                 now.len == Some(0)
+//RS                     && self
+//RS                         .graph
+//RS                         .nodes
+//RS                         .get(path)
+//RS                         .and_then(|node| node.stamp.len)
+//RS                         .is_some_and(|len| len > 0)
+//RS             });
+//RS             self.events.coalesce(self.coalesce);
+//RS             let current: Vec<PathStamp> = paths.iter().map(|path| PathStamp::capture(path)).collect();
+//RS             if current == previous && !truncated {
+//RS                 return;
+//RS             }
+//RS             previous = current;
+//RS         }
+//RS     }
+//RS 
+//RS     /// Mark a receipt applied. Later polls with older generations are stale.
+//RS     /// Stamps refresh in place; newly discovered imports merge in without
+//RS     /// dropping previously tracked roots (assets, manual links, etc.).
+//RS     /// A successful checked bundle already contains the loader's dependency
+//RS     /// closure.  Reuse it for the common reload path instead of loading the
+//RS     /// entry a second time just to rediscover unchanged imports.  If the
+//RS     /// closure shape changed, fall back to `acknowledge`, which preserves the
+//RS     /// loader-backed recovery path for new/removed imports.
+//RS     pub fn acknowledge_with_dependencies(
+//RS         &mut self,
+//RS         receipt: &InvalidationReceipt,
+//RS         dependencies: &[PathBuf],
+//RS     ) -> Result<(), Diagnostic> {
+//RS         let Some(entry) = self.graph.entry().map(|p| p.to_path_buf()) else {
+//RS             return self.acknowledge(receipt);
+//RS         };
+//RS         let desired_imports = std::iter::once(entry.clone())
+//RS             .chain(dependencies.iter().map(|path| canonicalize_loose(path)))
+//RS             .filter(|path| WatchGraph::classify(path) == RootKind::Import)
+//RS             .collect::<BTreeSet<_>>();
+//RS         let current_imports = self
+//RS             .graph
+//RS             .nodes
+//RS             .values()
+//RS             .filter(|node| node.kind == RootKind::Import)
+//RS             .map(|node| node.path.clone())
+//RS             .collect::<BTreeSet<_>>();
+//RS         let topology_changed = desired_imports.iter().any(|path| !current_imports.contains(path))
+//RS             || current_imports.iter().any(|path| !desired_imports.contains(path));
+//RS         if topology_changed {
+//RS             return self.acknowledge(receipt);
+//RS         }
+//RS         if receipt.generation > self.applied_generation {
+//RS             self.applied_generation = receipt.generation;
+//RS         }
+//RS         for dependency in dependencies {
+//RS             let path = canonicalize_loose(dependency);
+//RS             if !self.graph.nodes.contains_key(&path) {
+//RS                 self.graph.upsert(path.clone(), WatchGraph::classify(&path));
+//RS             }
+//RS             self.graph.link(entry.clone(), path);
+//RS         }
+//RS         self.events.refresh(self.graph.watched_paths());
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn acknowledge(&mut self, receipt: &InvalidationReceipt) -> Result<(), Diagnostic> {
+//RS         if receipt.generation > self.applied_generation {
+//RS             self.applied_generation = receipt.generation;
+//RS         }
+//RS         if let Some(entry) = self.graph.entry().map(|p| p.to_path_buf()) {
+//RS             let discovered = WatchGraph::discover(&entry)?;
+//RS             for node in discovered.nodes() {
+//RS                 if !self.graph.nodes.contains_key(&node.path) {
+//RS                     self.graph.upsert(node.path.clone(), node.kind);
+//RS                 }
+//RS             }
+//RS             for (to, froms) in discovered.reverse_edges() {
+//RS                 for from in froms {
+//RS                     self.graph.link(from.clone(), to.clone());
+//RS                 }
+//RS             }
+//RS             self.graph
+//RS                 .runtime_input_roots
+//RS                 .extend(discovered.runtime_input_roots.iter().cloned());
+//RS         }
+//RS         // `poll` has already stamped the settled paths.  The discovered
+//RS         // graph carries fresh stamps for newly-added nodes, so refreshing and
+//RS         // rescanning the unchanged closure here only repeats file I/O.
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Crash/reconnect recovery: rebuild stamps from disk without invalidating.
+//RS     pub fn recover(&mut self) {
+//RS         self.graph.refresh_stamps();
+//RS         self.edit_started = None;
+//RS     }
+//RS }
+//RS 
+//RS fn detect_renames(
+//RS     changed: &mut Vec<PathBuf>,
+//RS     change_kinds: &mut Vec<ChangeKind>,
+//RS     graph: &WatchGraph,
+//RS ) {
+//RS     let deleted: Vec<(usize, PathBuf)> = changed
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter(|(i, _)| change_kinds[*i] == ChangeKind::Deleted)
+//RS         .map(|(i, p)| (i, p.clone()))
+//RS         .collect();
+//RS     let created: Vec<(usize, PathBuf)> = changed
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter(|(i, _)| change_kinds[*i] == ChangeKind::Created)
+//RS         .map(|(i, p)| (i, p.clone()))
+//RS         .collect();
+//RS     for (_di, dpath) in &deleted {
+//RS         let dparent = dpath.parent();
+//RS         let dkind = graph.nodes.get(dpath).map(|n| n.kind);
+//RS         for (_ci, cpath) in &created {
+//RS             if cpath.parent() == dparent
+//RS                 && graph.nodes.get(cpath).map(|n| n.kind) == dkind
+//RS                 && dpath != cpath
+//RS             {
+//RS                 if let Some(idx) = changed.iter().position(|p| p == dpath) {
+//RS                     change_kinds[idx] = ChangeKind::Renamed;
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn make_dev_entries(
+//RS     graph: &WatchGraph,
+//RS     paths: &[PathBuf],
+//RS     change_kinds: &[ChangeKind],
+//RS     root_kinds: &[RootKind],
+//RS     old_digests: &[Option<String>],
+//RS     new_digests: &[Option<String>],
+//RS ) -> Vec<DevWatchEntry> {
+//RS     paths
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter_map(|(index, path)| {
+//RS             let game_kind = graph.game_kind_for(path).or_else(|| {
+//RS                 (root_kinds.get(index) == Some(&RootKind::Asset))
+//RS                     .then_some(JetGameChangeKind::Asset)
+//RS             })?;
+//RS             let (old_schema_id, new_schema_id) = graph.game_schema_ids_for(path);
+//RS             Some(DevWatchEntry {
+//RS                 path: path.clone(),
+//RS                 change_kind: change_kinds
+//RS                     .get(index)
+//RS                     .copied()
+//RS                     .map(change_kind_name)
+//RS                     .unwrap_or("modified"),
+//RS                 game_kind,
+//RS                 old_digest: old_digests.get(index).cloned().flatten(),
+//RS                 new_digest: new_digests.get(index).cloned().flatten(),
+//RS                 old_schema_id,
+//RS                 new_schema_id,
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn change_kind_name(kind: ChangeKind) -> &'static str {
+//RS     match kind {
+//RS         ChangeKind::Created => "created",
+//RS         ChangeKind::Modified => "modified",
+//RS         ChangeKind::Deleted => "deleted",
+//RS         ChangeKind::Renamed => "renamed",
+//RS         ChangeKind::Stale => "stale",
+//RS     }
+//RS }
+//RS 
+//RS // ── `#Persist` typed migration (D-PERSIST1) ─────────────────────────────
+//RS // Store + migration live in `jet_foundation::Persist` (shared runtime-heap
+//RS // boundary for tier-0 and tier-1). Re-exported here for WatchService callers.
+//RS 
+//RS pub use jet_foundation::Persist::{
+//RS     PersistEntry, PersistIdentity, PersistOutcome, PersistRejectReason, PersistStore,
+//RS };
+//RS 
+//RS // ── Client/server hot-replacement transaction ───────────────────────────
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct SessionSnapshot {
+//RS     pub generation: u64,
+//RS     pub artifact_token: String,
+//RS     /// Stable source identity.  This is not a display label.
+//RS     pub source_id: String,
+//RS     /// Compiler/build identity for this candidate.
+//RS     pub build_id: String,
+//RS     /// Source revision identity (normally a content digest).
+//RS     pub revision: String,
+//RS     /// Stable world identity.  A world change is never an implicit swap.
+//RS     pub world_id: String,
+//RS     pub persist: PersistStore,
+//RS }
+//RS 
+//RS impl SessionSnapshot {
+//RS     pub fn new(generation: u64, artifact_token: impl Into<String>, persist: PersistStore) -> Self {
+//RS         Self {
+//RS             generation,
+//RS             artifact_token: artifact_token.into(),
+//RS             source_id: String::new(),
+//RS             build_id: String::new(),
+//RS             revision: String::new(),
+//RS             world_id: String::new(),
+//RS             persist,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_lineage(
+//RS         mut self,
+//RS         source_id: impl Into<String>,
+//RS         build_id: impl Into<String>,
+//RS         revision: impl Into<String>,
+//RS         world_id: impl Into<String>,
+//RS     ) -> Self {
+//RS         self.source_id = source_id.into();
+//RS         self.build_id = build_id.into();
+//RS         self.revision = revision.into();
+//RS         self.world_id = world_id.into();
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_persist(mut self, persist: PersistStore) -> Self {
+//RS         self.persist = persist;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn lineage_valid(&self) -> bool {
+//RS         [self.source_id.as_str(), self.build_id.as_str(), self.revision.as_str(), self.world_id.as_str()]
+//RS             .iter()
+//RS             .all(|value| !value.is_empty() && !value.chars().any(char::is_control))
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+//RS pub enum HotReplacePolicy {
+//RS     #[default]
+//RS     Swap,
+//RS     Restart,
+//RS     Pin,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum HotReplacePhase {
+//RS     Begun,
+//RS     Paused,
+//RS     Preflighted,
+//RS     Staged,
+//RS     Committed,
+//RS     RolledBack,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct HotReplaceTxn {
+//RS     prior: SessionSnapshot,
+//RS     shared_prior: PersistStore,
+//RS     candidate: Option<SessionSnapshot>,
+//RS     decisions: Vec<PersistOutcome>,
+//RS     policy: HotReplacePolicy,
+//RS     phase: HotReplacePhase,
+//RS     failure: Option<String>,
+//RS }
+//RS 
+//RS impl HotReplaceTxn {
+//RS     pub fn begin(prior: SessionSnapshot) -> Self {
+//RS         Self::begin_with_policy(prior, HotReplacePolicy::Swap)
+//RS     }
+//RS 
+//RS     pub fn begin_with_policy(prior: SessionSnapshot, policy: HotReplacePolicy) -> Self {
+//RS         Self {
+//RS             shared_prior: jet_foundation::Persist::shared_clone(),
+//RS             prior,
+//RS             candidate: None,
+//RS             decisions: Vec::new(),
+//RS             policy,
+//RS             phase: HotReplacePhase::Begun,
+//RS             failure: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn policy(&self) -> HotReplacePolicy {
+//RS         self.policy
+//RS     }
+//RS 
+//RS     /// Pause the old world before any candidate state is inspected or staged.
+//RS     pub fn pause(&mut self) -> Result<(), String> {
+//RS         if self.phase != HotReplacePhase::Begun {
+//RS             return Err("hot replacement pause is out of order".to_string());
+//RS         }
+//RS         self.phase = HotReplacePhase::Paused;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Validate lineage and compute every value disposition without mutating
+//RS     /// the shared store.  A layout change is either explicitly migratable or
+//RS     /// rejected so the caller can restart; it is never silently reset.
+//RS     pub fn preflight(&mut self, candidate: &SessionSnapshot) -> Result<(), String> {
+//RS         if self.phase != HotReplacePhase::Paused {
+//RS             return Err("hot replacement preflight requires a paused world".to_string());
+//RS         }
+//RS         if self.policy == HotReplacePolicy::Restart {
+//RS             return self.reject("explicit restart requested; swap was not attempted");
+//RS         }
+//RS         if !candidate.lineage_valid() {
+//RS             return self.reject("candidate lineage is incomplete; live identity is unavailable");
+//RS         }
+//RS         if !self.prior.lineage_valid() {
+//RS             return self.reject("prior lineage is incomplete; live identity is unavailable");
+//RS         }
+//RS         if candidate.source_id != self.prior.source_id {
+//RS             return self.reject("source identity changed; restart required");
+//RS         }
+//RS         if candidate.world_id != self.prior.world_id {
+//RS             return self.reject("world identity changed; restart required");
+//RS         }
+//RS 
+//RS         self.decisions.clear();
+//RS         let mut rejected = None;
+//RS         for entry in candidate.persist.entries() {
+//RS             let outcome = self.prior.persist.plan_migrate(
+//RS                 &entry.module,
+//RS                 &entry.name,
+//RS                 &entry.shape,
+//RS                 &entry.payload,
+//RS             );
+//RS             if let PersistOutcome::Rejected { reason, prior } = &outcome {
+//RS                 rejected = Some(format!(
+//RS                     "`{}`: {}",
+//RS                     prior.key(),
+//RS                     reason.message()
+//RS                 ));
+//RS             }
+//RS             self.decisions.push(outcome);
+//RS         }
+//RS         for old in self.prior.persist.entries() {
+//RS             if candidate.persist.get(&old.module, &old.name).is_none() {
+//RS                 self.decisions.push(PersistOutcome::Reset {
+//RS                     reason: format!(
+//RS                         "binding `{}` disappeared; prior value reset because its name is no longer present",
+//RS                         old.stable_key()
+//RS                     ),
+//RS                     entry: old.clone(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         if let Some(reason) = rejected {
+//RS             return self.reject(format!("hot replacement preflight rejected: {reason}"));
+//RS         }
+//RS         self.candidate = Some(candidate.clone());
+//RS         self.phase = HotReplacePhase::Preflighted;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn stage(&mut self) -> Result<(), String> {
+//RS         if self.phase != HotReplacePhase::Preflighted || self.candidate.is_none() {
+//RS             return Err("hot replacement stage requires successful preflight".to_string());
+//RS         }
+//RS         self.phase = HotReplacePhase::Staged;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Atomically publish the staged candidate.  Any incomplete or rejected
+//RS     /// transaction restores the exact shared store captured at `begin`.
+//RS     pub fn commit(mut self) -> Result<SessionSnapshot, (SessionSnapshot, String)> {
+//RS         if self.phase != HotReplacePhase::Staged {
+//RS             let reason = self
+//RS                 .failure
+//RS                 .take()
+//RS                 .unwrap_or_else(|| "hot replacement was not staged; prior session kept".to_string());
+//RS             jet_foundation::Persist::shared_replace(self.shared_prior);
+//RS             return Err((self.prior, reason));
+//RS         }
+//RS         let Some(candidate) = self.candidate.take() else {
+//RS             jet_foundation::Persist::shared_replace(self.shared_prior);
+//RS             return Err((self.prior, "hot replacement candidate disappeared".to_string()));
+//RS         };
+//RS         let generation = self.prior.generation + 1;
+//RS         let next = SessionSnapshot {
+//RS             generation,
+//RS             artifact_token: format!("gen-{generation}"),
+//RS             ..candidate
+//RS         };
+//RS         jet_foundation::Persist::shared_replace(next.persist.clone());
+//RS         self.phase = HotReplacePhase::Committed;
+//RS         Ok(next)
+//RS     }
+//RS 
+//RS     /// Restore the pre-transaction heap and leave the prior snapshot usable.
+//RS     pub fn rollback(&mut self, reason: impl Into<String>) -> SessionSnapshot {
+//RS         self.failure = Some(reason.into());
+//RS         jet_foundation::Persist::shared_replace(self.shared_prior.clone());
+//RS         self.phase = HotReplacePhase::RolledBack;
+//RS         self.prior.clone()
+//RS     }
+//RS 
+//RS     fn reject(&mut self, reason: impl Into<String>) -> Result<(), String> {
+//RS         let reason = reason.into();
+//RS         self.failure = Some(reason.clone());
+//RS         Err(reason)
+//RS     }
+//RS 
+//RS     pub fn phase(&self) -> HotReplacePhase {
+//RS         self.phase
+//RS     }
+//RS 
+//RS     pub fn decisions(&self) -> &[PersistOutcome] {
+//RS         &self.decisions
+//RS     }
+//RS 
+//RS     pub fn candidate(&self) -> Option<&SessionSnapshot> {
+//RS         self.candidate.as_ref()
+//RS     }
+//RS 
+//RS     pub fn prior(&self) -> &SessionSnapshot {
+//RS         &self.prior
+//RS     }
+//RS }
+//RS 
+//RS /// Compatibility wait cadence for targets without a native filesystem event
+//RS /// backend. Linux `jet dev` blocks on inotify; this value remains for other
+//RS /// std-only watch loops and the latency fixture's configuration contract.
+//RS pub const WATCH_POLL_INTERVAL_MS: u64 = 5;
+//RS 
+//RS /// Bounded save coalescing window. Keep this below the old fixed 30 ms delay;
+//RS /// native event waits absorb the editor save burst without an idle sleep.
+//RS pub const WATCH_COALESCE_MS: u64 = 4;
+//RS 
+//RS /// Upper bound on waiting for a save's content to stop changing. A stable
+//RS /// save settles after one extra coalesce window; only a save that is still
+//RS /// moving (or reads empty right after a truncation) waits longer.
+//RS pub const WATCH_SETTLE_MAX_MS: u64 = 250;
+//RS 
+//RS /// Shared edit-to-visible budget used by browser and native matrices (ms).
+//RS pub const EDIT_TO_VISIBLE_BUDGET_MS: u128 = 2000;
+//RS 
+//RS /// Did this receipt meet the edit-to-visible budget?
+//RS pub fn within_budget(receipt: &InvalidationReceipt) -> bool {
+//RS     match receipt.edit_to_visible_ms {
+//RS         Some(ms) => ms <= EDIT_TO_VISIBLE_BUDGET_MS,
+//RS         None => true,
+//RS     }
+//RS }
+//RS 
+//RS /// Convenience: one-shot state check used by thin callers that only need to
+//RS /// know whether *any* watched path drifted (without building a receipt).
+//RS pub fn any_stamp_changed(graph: &WatchGraph) -> bool {
+//RS     graph.nodes.values().any(|node| {
+//RS         let now = PathStamp::capture(&node.path);
+//RS         node.stamp.changed_since(&now)
+//RS     })
+//RS }
+//RS 
+//RS /// The session-owned source boundary. Canvas and project transactions use one
+//RS /// gate so a client cannot publish a stale result after a newer one.
+//RS #[derive(Default)]
+//RS pub struct SessionBroker {
+//RS     source_transactions: Mutex<()>,
+//RS }
+//RS 
+//RS impl SessionBroker {
+//RS     pub(crate) fn lock_source_transaction(&self) -> MutexGuard<'_, ()> {
+//RS         self.source_transactions.lock().unwrap()
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use std::io::Write;
+//RS 
+//RS     fn tmp_dir(name: &str) -> PathBuf {
+//RS         let dir = std::env::temp_dir().join(format!(
+//RS             "jet_watch_{name}_{}_{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         fs::create_dir_all(&dir).unwrap();
+//RS         dir
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_graph_records_kinds_reverse_edges_and_receipts() {
+//RS         let dir = tmp_dir("graph");
+//RS         let entry = dir.join("app.jet");
+//RS         let lib = dir.join("lib.jet");
+//RS         let css = dir.join("app.css");
+//RS         let html = dir.join("app.html");
+//RS         let manifest = dir.join("package.jet");
+//RS         let lock = dir.join(".jet");
+//RS         fs::create_dir_all(&lock).unwrap();
+//RS         let lock_file = lock.join("lock");
+//RS         for (path, body) in [
+//RS             (&entry, "use lib\nfn run() {}\n"),
+//RS             (&lib, "fn helper() {}\n"),
+//RS             (&css, "body{}\n"),
+//RS             (&html, "<html></html>\n"),
+//RS             (&manifest, "name: \"app\"\n"),
+//RS             (&lock_file, "lock = 1\n"),
+//RS         ] {
+//RS             fs::write(path, body).unwrap();
+//RS         }
+//RS         let mut graph = WatchGraph::from_entry(&entry, &[lib.clone()]).unwrap();
+//RS         graph.upsert(css.clone(), RootKind::Style);
+//RS         graph.link(entry.clone(), css.clone());
+//RS         graph.upsert(html.clone(), RootKind::HTML);
+//RS         graph.link(entry.clone(), html.clone());
+//RS         graph.upsert(dir.join("logo.png"), RootKind::Asset);
+//RS         graph.upsert(dir.join("generated/out.jet"), RootKind::Generated);
+//RS         graph.upsert(dir.join("input.json"), RootKind::BuildInput);
+//RS         graph.upsert(dir.join("target.fact"), RootKind::TargetFact);
+//RS 
+//RS         assert!(graph.node_count() >= 8);
+//RS         let kinds: BTreeSet<_> = graph.nodes().map(|n| n.kind).collect();
+//RS         assert!(kinds.contains(&RootKind::Import));
+//RS         assert!(kinds.contains(&RootKind::Manifest));
+//RS         assert!(kinds.contains(&RootKind::Lock));
+//RS         assert!(kinds.contains(&RootKind::Style));
+//RS         assert!(kinds.contains(&RootKind::HTML));
+//RS         assert!(kinds.contains(&RootKind::Asset));
+//RS         assert!(kinds.contains(&RootKind::Generated));
+//RS         assert!(kinds.contains(&RootKind::BuildInput));
+//RS         assert!(kinds.contains(&RootKind::TargetFact));
+//RS 
+//RS         let closure = graph.closure_of(&[lib.clone()]);
+//RS         assert!(closure.contains(&lib));
+//RS         assert!(closure.contains(&canonicalize_loose(&entry)));
+//RS 
+//RS         let mut session = WatchSession::from_graph(graph);
+//RS         std::thread::sleep(Duration::from_millis(20));
+//RS         let mut f = fs::OpenOptions::new().append(true).open(&lib).unwrap();
+//RS         writeln!(f, "// touch").unwrap();
+//RS         drop(f);
+//RS         session.mark_edit_started();
+//RS         let receipt = session.poll().expect("lib change");
+//RS         assert!(!receipt.closure.is_empty());
+//RS         assert!(receipt.render().contains("\"generation\":"));
+//RS         assert!(within_budget(&receipt));
+//RS         session.acknowledge(&receipt).unwrap();
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn html_shell_tracks_local_assets_and_future_creates() {
+//RS         let dir = tmp_dir("html_assets");
+//RS         let entry = dir.join("app.jet");
+//RS         let shell = dir.join("shell.html");
+//RS         let stylesheet = dir.join("theme.css");
+//RS         let image = dir.join("logo.png");
+//RS         fs::write(&entry, "fn run() {}\n").unwrap();
+//RS         fs::write(
+//RS             &shell,
+//RS             "<html><head><link href=\"theme.css\"></head><body><img src=\"logo.png\"></body></html>",
+//RS         )
+//RS         .unwrap();
+//RS         fs::write(&stylesheet, "body { color: white; }\n").unwrap();
+//RS 
+//RS         let graph = WatchGraph::from_entry(&entry, &[shell.clone()]).unwrap();
+//RS         let shell = canonicalize_loose(&shell);
+//RS         let stylesheet = canonicalize_loose(&stylesheet);
+//RS         let image = canonicalize_loose(&image);
+//RS         let entry = canonicalize_loose(&entry);
+//RS         assert!(graph.nodes.contains_key(&shell));
+//RS         assert!(graph.nodes.contains_key(&stylesheet));
+//RS         assert!(graph.nodes.contains_key(&image));
+//RS         assert!(!graph.nodes.get(&image).unwrap().stamp.exists);
+//RS         assert!(graph.reverse_edges().get(&stylesheet).unwrap().contains(&entry));
+//RS         assert!(graph.reverse_edges().get(&image).unwrap().contains(&entry));
+//RS 
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn runtime_file_inputs_track_generator_directories_and_files() {
+//RS         let dir = tmp_dir("runtime_inputs");
+//RS         let entry = dir.join("generate.jet");
+//RS         let assets = dir.join("assets");
+//RS         let image = assets.join("logo.png");
+//RS         fs::create_dir_all(&assets).unwrap();
+//RS         fs::write(&image, "asset").unwrap();
+//RS         fs::write(
+//RS             &entry,
+//RS             "use core.files as fs\nfn run() {\n    fs.copy_dir(\"assets\", \"dist/assets\")\n}\n",
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         let graph = WatchGraph::from_entry(&entry, &[]).unwrap();
+//RS         let entry = canonicalize_loose(&entry);
+//RS         let assets = canonicalize_loose(&assets);
+//RS         let image = canonicalize_loose(&image);
+//RS         assert!(graph.nodes.contains_key(&assets));
+//RS         assert!(graph.nodes.contains_key(&image));
+//RS         assert!(graph.reverse_edges().get(&assets).unwrap().contains(&entry));
+//RS         assert!(graph.reverse_edges().get(&image).unwrap().contains(&entry));
+//RS 
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn rename_delete_atomic_and_stale_events() {
+//RS         let dir = tmp_dir("events");
+//RS         let entry = dir.join("main.jet");
+//RS         let a = dir.join("a.jet");
+//RS         let b = dir.join("b.jet");
+//RS         fs::write(&entry, "fn run() {}\n").unwrap();
+//RS         fs::write(&a, "fn a() {}\n").unwrap();
+//RS         let mut graph = WatchGraph::from_entry(&entry, &[a.clone()]).unwrap();
+//RS         graph.upsert(a.clone(), RootKind::Import);
+//RS         graph.link(canonicalize_loose(&entry), a.clone());
+//RS         let mut session = WatchSession::from_graph(graph);
+//RS 
+//RS         // Atomic save: write temp then rename over target.
+//RS         std::thread::sleep(Duration::from_millis(20));
+//RS         let tmp = dir.join("a.jet.tmp");
+//RS         fs::write(&tmp, "fn a() { /* new */ }\n").unwrap();
+//RS         fs::rename(&tmp, &a).unwrap();
+//RS         let receipt = session.poll().expect("atomic save");
+//RS         assert!(receipt
+//RS             .change_kinds
+//RS             .iter()
+//RS             .any(|k| *k == "modified" || *k == "created"));
+//RS         session.acknowledge(&receipt).unwrap();
+//RS 
+//RS         // Re-attach `a` after rediscover (entry does not import it).
+//RS         session.graph_mut().upsert(a.clone(), RootKind::Import);
+//RS         session
+//RS             .graph_mut()
+//RS             .link(canonicalize_loose(&entry), a.clone());
+//RS         session.graph_mut().refresh_stamps();
+//RS 
+//RS         // Delete.
+//RS         std::thread::sleep(Duration::from_millis(20));
+//RS         fs::remove_file(&a).unwrap();
+//RS         let receipt = session.poll().expect("delete");
+//RS         assert!(
+//RS             receipt.change_kinds.contains(&"deleted") || receipt.changed.iter().any(|p| p == &a)
+//RS         );
+//RS         session.acknowledge(&receipt).unwrap();
+//RS 
+//RS         // Rename a→b (create b, delete a already gone — create b).
+//RS         fs::write(&b, "fn b() {}\n").unwrap();
+//RS         session.graph_mut().upsert(b.clone(), RootKind::Import);
+//RS         session
+//RS             .graph_mut()
+//RS             .link(canonicalize_loose(&entry), b.clone());
+//RS         session.graph_mut().refresh_stamps();
+//RS         std::thread::sleep(Duration::from_millis(20));
+//RS         let c = dir.join("c.jet");
+//RS         fs::rename(&b, &c).unwrap();
+//RS         session.graph_mut().upsert(c.clone(), RootKind::Import);
+//RS         // Force stamps: b deleted, c created.
+//RS         if let Some(node) = session.graph_mut().nodes.get_mut(&b) {
+//RS             node.stamp.exists = true; // pretend still tracked as present
+//RS         }
+//RS         let receipt = session.poll();
+//RS         assert!(receipt.is_some());
+//RS         if let Some(r) = receipt {
+//RS             session.acknowledge(&r).unwrap();
+//RS         }
+//RS 
+//RS         // Stale: acknowledge future gen then craft older receipt path.
+//RS         session.applied_generation = session.generation + 10;
+//RS         std::thread::sleep(Duration::from_millis(20));
+//RS         fs::write(&entry, "fn run() { /* x */ }\n").unwrap();
+//RS         if let Some(r) = session.poll() {
+//RS             assert!(r.change_kinds.contains(&"stale") || r.closure.is_empty());
+//RS         }
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn persist_migration_and_hot_replace_transaction() {
+//RS         jet_foundation::Persist::shared_clear();
+//RS         let mut store = PersistStore::new();
+//RS         store.put(PersistEntry {
+//RS             module: "app".into(),
+//RS             name: "counter".into(),
+//RS             shape: "Int".into(),
+//RS             payload: "{\"shape\":\"Int\",\"value\":7}".into(),
+//RS         });
+//RS         match store.migrate("app", "counter", "Int", "0") {
+//RS             PersistOutcome::Kept(e) => assert!(e.payload.contains('7')),
+//RS             other => panic!("expected Kept, got {other:?}"),
+//RS         }
+//RS         match store.migrate("app", "counter", "Int+", "0") {
+//RS             PersistOutcome::Migrated(e) => assert!(e.payload.contains('7')),
+//RS             other => panic!("expected Migrated, got {other:?}"),
+//RS         }
+//RS         match store.migrate("app", "counter", "String", "\"\"") {
+//RS             PersistOutcome::Rejected { reason, prior } => {
+//RS                 assert!(reason.message().contains("migration unavailable"));
+//RS                 assert_eq!(prior.key(), "app::counter");
+//RS             }
+//RS             other => panic!("expected Rejected, got {other:?}"),
+//RS         }
+//RS 
+//RS         let prior = SessionSnapshot::new(3, "gen-3", store).with_lineage(
+//RS             "app",
+//RS             "build-3",
+//RS             "rev-3",
+//RS             "world-1",
+//RS         );
+//RS         let incomplete = HotReplaceTxn::begin(prior.clone());
+//RS         let err = incomplete.commit().expect_err("incomplete");
+//RS         assert_eq!(err.0.generation, 3);
+//RS         assert!(err.1.contains("not staged"));
+//RS 
+//RS         let candidate = prior
+//RS             .clone()
+//RS             .with_lineage("app", "build-4", "rev-4", "world-1");
+//RS         let mut rejected = HotReplaceTxn::begin(prior.clone());
+//RS         rejected.pause().unwrap();
+//RS         let changed = candidate.clone().with_persist({
+//RS             let mut replacement = PersistStore::new();
+//RS             replacement.put(PersistEntry {
+//RS                 module: "app".into(),
+//RS                 name: "counter".into(),
+//RS                 shape: "String".into(),
+//RS                 payload: "\"\"".into(),
+//RS             });
+//RS             replacement
+//RS         });
+//RS         assert!(rejected.preflight(&changed).is_err());
+//RS         assert_eq!(rejected.rollback("type surface changed").generation, 3);
+//RS 
+//RS         let mut txn = HotReplaceTxn::begin(prior);
+//RS         txn.pause().unwrap();
+//RS         txn.preflight(&candidate).unwrap();
+//RS         txn.stage().unwrap();
+//RS         let next = txn.commit().expect("commit");
+//RS         assert_eq!(next.generation, 4);
+//RS         assert_eq!(next.artifact_token, "gen-4");
+//RS         assert_eq!(next.revision, "rev-4");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn crash_reconnect_recovers_stamps() {
+//RS         let dir = tmp_dir("recover");
+//RS         let entry = dir.join("app.jet");
+//RS         fs::write(&entry, "fn run() {}\n").unwrap();
+//RS         let mut session = WatchSession::open(&entry).unwrap();
+//RS         std::thread::sleep(Duration::from_millis(20));
+//RS         fs::write(&entry, "fn run() { /* edited offline */ }\n").unwrap();
+//RS         // Simulate crash: recover without applying the pending edit as a
+//RS         // double-fire — stamps refresh so the next real edit is clean.
+//RS         session.recover();
+//RS         assert!(session.poll().is_none());
+//RS         std::thread::sleep(Duration::from_millis(20));
+//RS         fs::write(&entry, "fn run() { /* again */ }\n").unwrap();
+//RS         session.mark_edit_started();
+//RS         let receipt = session.poll().expect("post-reconnect edit");
+//RS         assert!(within_budget(&receipt));
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn in_place_save_settles_past_truncation() {
+//RS         let dir = tmp_dir("truncate");
+//RS         let entry = dir.join("app.jet");
+//RS         fs::write(&entry, "fn run() {}\n").unwrap();
+//RS         let mut session = WatchSession::open(&entry).unwrap();
+//RS         std::thread::sleep(Duration::from_millis(20));
+//RS         // An in-place save: truncate now, write the new body a moment later.
+//RS         let saved = "fn run() { print(\"saved\") }\n";
+//RS         let mut file = fs::File::create(&entry).unwrap();
+//RS         let writer = std::thread::spawn(move || {
+//RS             std::thread::sleep(Duration::from_millis(40));
+//RS             file.write_all(saved.as_bytes()).unwrap();
+//RS         });
+//RS         let receipt = session.poll().expect("in-place save");
+//RS         writer.join().unwrap();
+//RS         let expected = format!(
+//RS             "sha256-{}",
+//RS             jet_foundation::SHA256::sha256_file_hex(&entry).unwrap()
+//RS         );
+//RS         assert_eq!(fs::read_to_string(&entry).unwrap(), saved);
+//RS         assert_eq!(receipt.content_digests, vec![Some(expected)]);
+//RS         assert!(session.poll().is_none(), "settled save must not rebuild twice");
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS     }
+//RS }
+// END-PORT-PENDING 0787 crates/jet-devserver/src/WatchService.rs:1-2469
+

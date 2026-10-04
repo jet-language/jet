@@ -1,0 +1,75 @@
+// Source/LSP/Server.rs:243–247,269–288,667–691. Core owns DataTree and
+// Foundation owns the strict bounded protocol parser and JSON quoting.
+use core.encoding.[DataTree]
+use core.term as lsp_protocol_term
+use jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
+
+#Error
+pub struct LSPRPCError {
+    pub code: Int
+    pub message: String
+}
+
+pub fn lsp_parse_rpc_message(body: String) -> DataTree LSPRPCError! {
+    message :: foundation_parse_protocol_json(body) ?? return Err(LSPRPCError{code: -32700, message: "Parse error"})
+    if message != .Object(_) -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
+    if (message.field("jsonrpc") ?? return Err(LSPRPCError{code: -32600, message: "Invalid Request"})) == {
+        .Text(version) -> {
+            if version != "2.0" -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
+        }
+        else -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
+    }
+    if (message.field("method") ?? return Err(LSPRPCError{code: -32600, message: "Invalid Request"})) != .Text(_) -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
+    if message.field("id") == .Val(id) {
+        if id == {
+            .Null | .Int(_) | .Text(_) -> {}
+            else -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
+        }
+    }
+    if message.field("params") == .Val(params) {
+        if params == {
+            .Array(_) | .Object(_) -> {}
+            else -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
+        }
+    }
+    Ok(message)
+}
+
+pub fn lsp_serialize_id(id: DataTree) -> String Never! {
+    if id == {
+        .Int(number) -> "{number}"
+        .Text(text) -> foundation_json_quote(text)
+        else -> "null"
+    }
+}
+
+pub fn lsp_response(id: DataTree, result_json: String) -> String Never! {
+    "{{\"jsonrpc\":\"2.0\",\"id\":{lsp_serialize_id(id)},\"result\":{result_json}}}"
+}
+
+pub fn lsp_error_response(id: DataTree, code: Int, message: String) -> String Never! {
+    "{{\"jsonrpc\":\"2.0\",\"id\":{lsp_serialize_id(id)},\"error\":{{\"code\":{code},\"message\":{foundation_json_quote(message)}}}}}"
+}
+
+pub fn lsp_cancellation_key(params: DataTree?) -> String? Never! {
+    value :: params ?? return None
+    // Presence takes priority, even if the first field has an invalid ID.
+    // Rust's or_else only reads requestId when id is absent, not invalid/null.
+    id :: value.field("id") ?? value.field("requestId") ?? return None
+    if id == {
+        .Int(_) | .Text(_) -> Val(lsp_serialize_id(id))
+        else -> None
+    }
+}
+
+// Rust318–326. The actual fallible Stderr methods are canonical
+// StreamHandles StderrWriteLine/StderrFlush, not the nonfallible eprint rail.
+pub fn lsp_write_log_line(stderr: &lsp_protocol_term.Stderr, line: String) -[IO, Time.Wait]> IOError! {
+    &stderr.write_line(line) ?? return Err(err)
+}
+
+pub fn lsp_write_log(message: String) -[IO, Time.Wait]> IOError! {
+    stderr := lsp_protocol_term.stderr()
+    lsp_write_log_line(&stderr, "[jet-lsp] {message}") ?? return Err(err)
+    &stderr.flush() ?? return Err(err)
+}

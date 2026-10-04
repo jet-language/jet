@@ -1,0 +1,38 @@
+// Features.rs1050–1125. Typed real PackageIndex inputs, no provider catalogue.
+use jetpack_provider.[PackageIndex, PackageIndexEntry, PackageOptionField]
+
+fn lsp_discovery_test_record() -> PackageIndexEntry Never! {
+    PackageIndexEntry{source: "npm", name: "react", reference: "npm:react@19", version: "19", platforms: [String]{"linux", "windows"}, docs: "Render interfaces", provenance: "local", tier: "native", gate_status: "signed;liveness=alive", options: [PackageOptionField]{PackageOptionField{name: "enable", default: "required", docs: "Service switch"}}}
+}
+
+#Test("identifier hover uses ASCII bytes end boundaries and never splits UTF8") {
+    assert_eq(lsp_identifier_at("alpha.beta", 0), Val("alpha"))
+    assert_eq(lsp_identifier_at("alpha.beta", 5), Val("alpha"))
+    assert_eq(lsp_identifier_at("alpha.beta", 10), Val("beta"))
+    assert_eq(lsp_identifier_at("alpha.beta", 100), Val("beta"))
+    assert_eq(lsp_identifier_at("", 0), None)
+    assert_eq(lsp_identifier_at("é alpha", 0), None)
+    assert_eq(lsp_identifier_at("é alpha", 3), Val("alpha"))
+    assert(lsp_is_identifier_byte(U8{95}))
+    assert(lsp_is_identifier_byte(U8{48}))
+    assert(!lsp_is_identifier_byte(U8{195}))
+}
+
+#Test("package hover preserves discovery metadata and empty-version sentinel") {
+    record := lsp_discovery_test_record()
+    assert_eq(lsp_package_hover(record), "`npm.react`\n\nref: `npm:react@19`\nversion: `19`\nplatforms: linux, windows\ntier: native\nmaintainer liveness: alive\nsource: local discovery index\n\nRender interfaces")
+    record.version = ""
+    record.gate_status = "not-applicable"
+    assert(lsp_package_hover(record).contains("version: `-`\n"))
+    assert(lsp_package_hover(record).contains("maintainer liveness: not-applicable\n"))
+    assert_eq(lsp_option_hover(record.options[0]), "Environment option `enable`\n\nDefault: `required`\n\nService switch\n\nSource: local discovery index")
+}
+
+#Test("discovery hover consumes exact local index and rejects unknown packages") {
+    index :: PackageIndex{packages: [PackageIndexEntry]{lsp_discovery_test_record()}}
+    assert_eq(lsp_compute_discovery_hover("npm.react", 9, index), Val(lsp_package_hover(index.packages[0])))
+    assert_eq(lsp_compute_discovery_hover("npm.missing", 9, index), None)
+    assert_eq(lsp_compute_discovery_hover("react", 2, index), None)
+    empty :: PackageIndex{packages: [PackageIndexEntry]{}}
+    assert_eq(lsp_compute_discovery_hover("npm.react", 9, empty), None)
+}

@@ -1,0 +1,129 @@
+// crates/jet-semindex/src/Docs.rs:658–1268. Protocol prepass and exhaustive
+// Foundation Item collection; Graph owns the schema/source helpers, Doctests
+// owns source_docs and Contracts owns checked enrichment. No textual contract
+// inference or second AST. project_root is the canonical loader root.
+use jet_foundation.[Item, Func, Span, Marker]
+
+// Rust collect_protocol_names: global leaf-name membership, including private
+// and generic nested modules, collected before any module's impl rows.
+pub fn doc_collect_protocol_names(items: [Item], protocol_names: &[String:Bool]) Never! {
+    loop item in items {
+        if item == {
+            .ProtocolDecl(definition) -> protocol_names[definition.name] = true
+            .CodeModule(definition) -> if definition.body == Val(body) -> doc_collect_protocol_names(body, &protocol_names)
+            .GenericModule(definition) -> doc_collect_protocol_names(definition.body, &protocol_names)
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+// Rust collect_items: authored order here is independent of Graph's final
+// stable rendering order. A public owner does not make its fields public.
+pub fn doc_collect_items(items: [Item], module_path: String, parent: String, inherited_public: Bool, file_path: doc_os_path.OsPath?, display_path: String, source: String, project_root: doc_os_path.OsPath?, protocol_names: [String:Bool], items_out: &[DocItem], impls_out: &[DocImpl]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> doc_add_function(function, module_path, parent, inherited_public, file_path, display_path, source, project_root, &items_out)
+            .Struct(definition) -> {
+                struct_index :: items_out.len()
+                public :: definition.is_pub || inherited_public
+                doc_add_item(&items_out, "struct", definition.name, parent, module_path, public, definition.is_package_pub, definition.span, definition.name_span, definition.type_markers, file_path, display_path, source, project_root)
+                if definition.state == Val(state) {
+                    state_names := [String]{}
+                    loop name in state.states -> &state_names.push(~name.name)
+                    // Keep the state suffix on the row inserted above, not the
+                    // latest method/field or an invented top-level state row.
+                    items_out[struct_index].signature = "{items_out[struct_index].signature} {{ state {{ {state_names.join(", ")} }} }}"
+                }
+                owner :: doc_qualified(parent, definition.name)
+                loop field in definition.fields -> doc_add_item(&items_out, "field", field.name, owner, module_path, field.is_pub, field.is_package_pub, field.name_span, field.name_span, field.serde_markers, file_path, display_path, source, project_root)
+                loop method in definition.methods -> doc_add_function(method, module_path, owner, public, file_path, display_path, source, project_root, &items_out)
+                loop nested in definition.trait_impls -> doc_add_nested_impl(nested.trait_name, definition.name, nested.methods, module_path, public, definition.span, file_path, display_path, source, project_root, &items_out, &impls_out)
+            }
+            .Enum(definition) -> {
+                public :: definition.is_pub || inherited_public
+                doc_add_item(&items_out, "enum", definition.name, parent, module_path, public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+                owner :: doc_qualified(parent, definition.name)
+                loop variant in definition.variants -> doc_add_item(&items_out, "variant", variant.name, owner, module_path, public, false, variant.name_span, variant.name_span, variant.serde_markers, file_path, display_path, source, project_root)
+                loop method in definition.methods -> doc_add_function(method, module_path, owner, public, file_path, display_path, source, project_root, &items_out)
+                loop nested in definition.trait_impls -> doc_add_nested_impl(nested.trait_name, definition.name, nested.methods, module_path, public, definition.span, file_path, display_path, source, project_root, &items_out, &impls_out)
+            }
+            .Distinct(definition) -> doc_add_item(&items_out, "distinct", definition.name, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, definition.type_markers, file_path, display_path, source, project_root)
+            .TypeAlias(definition) -> doc_add_item(&items_out, "type_alias", definition.name, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            // Family identity is canonical Foundation family/family_span, not
+            // a type reconstructed from member names or rendered dimensions.
+            .UnitFamily(definition) -> doc_add_item(&items_out, "unit_family", definition.family, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.family_span, [Marker]{}, file_path, display_path, source, project_root)
+            .Trait(definition) -> {
+                public :: definition.is_pub || inherited_public
+                doc_add_item(&items_out, "trait", definition.name, parent, module_path, public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+                owner :: doc_qualified(parent, definition.name)
+                // Trait method signatures are not Func nodes. Their source
+                // spans/visibility are collected directly; S24 consumes the
+                // canonical checked method failure/effective-return facts.
+                loop method in definition.methods -> doc_add_item(&items_out, "function", method.name, owner, module_path, public, false, method.span, method.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            }
+            .Tag(definition) -> doc_add_item(&items_out, "tag", definition.name, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            .ProtocolDecl(definition) -> doc_add_item(&items_out, "protocol", definition.name, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            .EffectDecl(definition) -> doc_add_item(&items_out, "effect", definition.name, parent, module_path, false, false, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            .Impl(definition) -> {
+                kind := "inherent_impl"
+                if definition.trait_name == Val(trait_name) {
+                    kind = "trait_impl"
+                    if protocol_names.has_key(trait_name) -> kind = "protocol_impl"
+                }
+                // Rust checks the terminal component only when a dot exists:
+                // bare Client/Server remain inherent or trait implementations.
+                if definition.type_name.ends_with(".Client") || definition.type_name.ends_with(".Server") -> kind = "protocol_impl"
+                method_names := [String]{}
+                loop method in definition.methods -> &method_names.push(~method.name)
+                &method_names.sort()
+                &impls_out.push(DocImpl{kind: ^kind, type_name: ~definition.type_name, trait_name: ~definition.trait_name, module_path: ~module_path, public: true, methods: ^method_names, source: doc_source_for(project_root, file_path, display_path, source, definition.span)})
+                owner :: doc_qualified(parent, definition.type_name)
+                loop method in definition.methods -> doc_add_function(method, module_path, owner, inherited_public, file_path, display_path, source, project_root, &items_out)
+            }
+            .CodeModule(definition) -> {
+                public :: definition.is_pub || inherited_public
+                doc_add_item(&items_out, "module", definition.name, parent, module_path, public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+                if definition.body == Val(body) -> doc_collect_items(body, module_path, doc_qualified(parent, definition.name), public, file_path, display_path, source, project_root, protocol_names, &items_out, &impls_out)
+            }
+            .GenericModule(definition) -> {
+                public :: definition.is_pub || inherited_public
+                doc_add_item(&items_out, "module", definition.name, parent, module_path, public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+                doc_collect_items(definition.body, module_path, doc_qualified(parent, definition.name), public, file_path, display_path, source, project_root, protocol_names, &items_out, &impls_out)
+            }
+            .ModuleAlias(definition) -> doc_add_item(&items_out, "module_alias", definition.name, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            .MarkerDecl(definition) -> doc_add_item(&items_out, "marker", definition.name, parent, module_path, true, false, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            .FactDecl(definition) -> doc_add_item(&items_out, "fact", definition.name, parent, module_path, true, false, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            .Const(definition) -> doc_add_item(&items_out, "const", definition.name, parent, module_path, false, false, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
+            // These eight canonical Item variants intentionally emit no docs,
+            // exactly as Rust's catchall. Explicit arms keep AST changes visible.
+            .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) -> {}
+        }
+    }
+}
+
+// Rust add_nested_impl: nested impl ownership is the unqualified type name,
+// even in a code module; unlike ordinary methods it does not include parent.
+fn doc_add_nested_impl(trait_name: String, type_name: String, methods: [Func], module_path: String, public: Bool, span: Span, file_path: doc_os_path.OsPath?, display_path: String, source: String, project_root: doc_os_path.OsPath?, items_out: &[DocItem], impls_out: &[DocImpl]) Never! {
+    method_names := [String]{}
+    loop method in methods -> &method_names.push(~method.name)
+    &method_names.sort()
+    &impls_out.push(DocImpl{kind: "trait_impl", type_name: ~type_name, trait_name: Val(~trait_name), module_path: ~module_path, public: public, methods: ^method_names, source: doc_source_for(project_root, file_path, display_path, source, span)})
+    loop method in methods -> doc_add_function(method, module_path, type_name, public, file_path, display_path, source, project_root, &items_out)
+}
+
+// Rust add_function: preserve source markers and both independent visibility
+// bits; contract enrichment is solely S24's checked-index operation.
+fn doc_add_function(function: Func, module_path: String, parent: String, inherited_public: Bool, file_path: doc_os_path.OsPath?, display_path: String, source: String, project_root: doc_os_path.OsPath?, items_out: &[DocItem]) Never! {
+    doc_add_item(&items_out, "function", function.name, parent, module_path, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, function.markers, file_path, display_path, source, project_root)
+}
+
+// Rust add_item: attachment uses name_span.start; declaration/source use the
+// whole declaration span. Owned output copies only the retained row fields.
+fn doc_add_item(items_out: &[DocItem], kind: String, name: String, parent: String, module_path: String, public: Bool, package_public: Bool, span: Span, name_span: Span, markers: [Marker], file_path: doc_os_path.OsPath?, display_path: String, source: String, project_root: doc_os_path.OsPath?) Never! {
+    summary := ""
+    examples := [String]{}
+    doc_source_docs(source, name_span.start, &summary, &examples)
+    marker_names := [String]{}
+    loop marker in markers -> &marker_names.push(~marker.name)
+    &items_out.push(DocItem{kind: ~kind, name: ~name, qualified_name: doc_qualified(parent, name), module_path: ~module_path, public: public, package_public: package_public, signature: doc_declaration_text(source, span), failure_contract: None, failure_source: None, summary: ^summary, examples: ^examples, markers: ^marker_names, source: doc_source_for(project_root, file_path, display_path, source, span)})
+}

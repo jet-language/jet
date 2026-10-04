@@ -1,0 +1,107 @@
+// crates/jet-semindex/src/Docs.rs:1270–1351: checked callable and nominal
+// trait-contract enrichment. Never recover contracts from source/signature text.
+// CallableSignatureFact delegates to Foundation's sole FailureContract helpers.
+use jet_sema.[SemaCompilerModuleSource]
+
+pub fn doc_enrich_callable_contracts(items: &[DocItem], index: SemIndex, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?) Never! {
+    candidates := [String:[Int]]{}
+    loop position in 0..<index.defs.len() {
+        if index.defs[position].kind != .Function(_, _, _) -> next
+        name :: index.defs[position].name
+        if !candidates.has_key(name) -> candidates[name] = [Int]{}
+        &candidates[name].push(position)
+    }
+    module_paths :: doc_contract_module_paths(module_sources, loaded_module_rows, root)
+    loop position in 0..<items.len() {
+        if items[position].kind != "function" -> next
+        name :: items[position].name
+        if !candidates.has_key(name) -> next
+        loop candidate in candidates[name] {
+            if !doc_definition_belongs_to_doc_item(index.defs[candidate], items[position], module_paths) -> next
+            // First matching definition wins even if its signature is absent.
+            if index.defs[candidate].callable_signature == .Val(signature) {
+                items[position].failure_contract = signature.failure_contract_name()
+                items[position].failure_source = signature.failure_source_name()
+                suffix := "\nfailure: unavailable"
+                if items[position].failure_contract == .Val(contract) {
+                    if items[position].failure_source == .Val(source) -> suffix = "\nfailure: {contract} ({source})"
+                }
+                items[position].signature += suffix
+            }
+            break
+        }
+    }
+}
+
+pub fn doc_enrich_type_contracts(items: &[DocItem], index: SemIndex, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?) Never! {
+    candidates := [String:[Int]]{}
+    loop position in 0..<index.defs.len() {
+        if index.defs[position].nominal_base == None -> next
+        name :: index.defs[position].name
+        if !candidates.has_key(name) -> candidates[name] = [Int]{}
+        &candidates[name].push(position)
+    }
+    module_paths :: doc_contract_module_paths(module_sources, loaded_module_rows, root)
+    loop position in 0..<items.len() {
+        if items[position].kind != "distinct" -> next
+        name :: items[position].name
+        if !candidates.has_key(name) -> next
+        loop candidate in candidates[name] {
+            if !doc_definition_belongs_to_doc_item(index.defs[candidate], items[position], module_paths) -> next
+            if index.defs[candidate].trait_contracts.len() == 0 -> break
+            blocks := [String]{}
+            &blocks.push(~items[position].signature)
+            loop contract in index.defs[candidate].trait_contracts -> &blocks.push(doc_render_trait_contract(contract))
+            items[position].signature = blocks.join("\n")
+            break
+        }
+    }
+}
+
+// Rust definition_belongs_to_doc_item: display/checked module name maps to the
+// loader's stable project-relative spelling; inclusive source containment is
+// required as well. Cache only row indices/path projections, never clone index,
+// registration/programs or the full definition vectors for each documented item.
+// Multiple checked modules with an equal visible spelling retain every path.
+// Display/alias membership comes from the original loaded bundle, not lifted
+// registration paths or names. Retain every equal visible spelling.
+fn doc_contract_module_paths(module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?) -> [String:[String]] Never! {
+    paths := [String:[String]]{}
+    loop source_index in loaded_module_rows {
+        loaded :: module_sources[source_index]
+        path :: doc_stable_module_path(root, loaded.physical_path, loaded.display)
+        display :: loaded.display
+        alias :: loaded.alias
+        if !paths.has_key(display) -> paths[display] = [String]{}
+        &paths[display].push(~path)
+        if alias != display {
+            if !paths.has_key(alias) -> paths[alias] = [String]{}
+            &paths[alias].push(~path)
+        }
+    }
+    paths
+}
+fn doc_definition_belongs_to_doc_item(definition: SymbolDef, item: DocItem, module_paths: [String:[String]]) -> Bool Never! {
+    if item.source.start > definition.def_span.start || definition.def_span.end > item.source.end -> return false
+    if definition.module_path == item.module_path -> return true
+    if module_paths.has_key(definition.module_path) {
+        loop path in module_paths[definition.module_path] {
+            if path == item.module_path -> return true
+        }
+    }
+    false
+}
+
+// Rust render_trait_contract. Missing associated implementations remain a bare
+// `type` declaration; associated types and method signatures retain fact order.
+pub fn doc_render_trait_contract(contract: TraitContractFact) -> String Never! {
+    lines := [String]{"implements {contract.trait_name}"}
+    loop associated in contract.associated_types {
+        if associated.implementation == {
+            .Val(ty) -> &lines.push("  type {associated.name} = {ty}")
+            None -> &lines.push("  type {associated.name}")
+        }
+    }
+    loop method in contract.methods -> &lines.push("  {method}")
+    lines.join("\n")
+}

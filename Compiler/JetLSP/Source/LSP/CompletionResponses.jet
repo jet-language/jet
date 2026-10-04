@@ -1,0 +1,107 @@
+// Source/LSP/Server.rs:1501–1691. Pending W38 Server ABI reconciliation.
+// Completion owns dynamic/static completion; SemIndex owns parameter binding.
+// lsp_build_symbol_db is pending canonical retained-bundle projection, not a
+// second symbol walk. No DTO or replacement semantic database is defined here.
+use core.encoding.[DataTree]
+use jet_foundation.[foundation_json_quote, type_name, failure_contract_effective_type, failure_contract_source]
+use jet_semindex.[SymbolDB, semindex_build_symbol_db, function_parameter_parts, binder_active_parameter]
+use jet_driver.[JetDriverCompilerCheckResult]
+use core.files.runtime.kernel_path_components as lsp_completion_path
+
+pub fn lsp_completion_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        position :: lsp_pos_from_json(value.field("position") ?? return None) ?? return None
+        offset :: lsp_pos_to_offset(doc.text, position)
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        result :: permit.value.result
+        current_path := lsp_completion_path.display(doc.path)
+        if lsp_checked_module(result, current_path, doc.path.platform) == .Val(index) -> current_path = result.module_sources[index].display
+        root :: lsp_workspace_root_for_path(server.workspace_roots, doc.path)
+        version :: if doc.version >= 0 -> U64.from_int(doc.version) ?? panic("i32 version fits u64") else -> U64{0}
+        dynamic :: lsp_dynamic_completion_json(value, doc.text, offset, version, if result.graph != None -> Val(result) else -> None, root)
+        if dynamic == {
+            .Err(message) -> return Val(lsp_error_response(id, -32602, message))
+            .Ok(result) -> { if result == .Val(json) -> return Val(lsp_response(id, json)) }
+        }
+        db := lsp_build_symbol_db(result)
+        lsp_merge_workspace_defs(server, doc, &db)
+        discovery :: lsp_load_discovery_index(lsp_completion_path.display(doc.path), doc.path.platform)
+        items :: lsp_compute_completions(db, doc.text, offset, current_path, doc.path, root, discovery, result)
+        rows := [String]{}
+        loop item in items -> &rows.push(item.to_json())
+        return Val(lsp_response(id, "{{\"isIncomplete\":false,\"items\":[{rows.join(",")}]}}"))
+    }
+    None
+}
+
+pub fn lsp_signature_help_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        position :: lsp_pos_from_json(value.field("position") ?? return None) ?? return None
+        call :: lsp_active_call(doc.text, lsp_pos_to_offset(doc.text, position)) ?? return Val(lsp_response(id, "null"))
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        db :: lsp_build_symbol_db(permit.value.result)
+        // First matching checked callable wins, as Rust Iterator::find does.
+        loop def in db.defs {
+            if def.name != call.name -> next
+            if def.kind == .Function(parameters, _, available, contract, variadic, ret, failure, _, effects, via, _, _, _, _) {
+                if !available -> next
+                parts :: function_parameter_parts(parameters, contract, variadic)
+                label := "fn {def.name}({parts.join(", ")})"
+                return_type := String?{None}
+                if failure == {
+                    .Checked(fact) -> return_type = Val(type_name(failure_contract_effective_type(fact)))
+                    .Unavailable(_) -> { if ret == .Val(ty) -> return_type = Val(type_name(ty)) }
+                }
+                if return_type == .Val(ty) -> label += " {ty}"
+                if via == {
+                    .Val(param) -> label += " -[via {param.name}]>"
+                    None -> {
+                        if effects == {
+                            .Val(row) -> {
+                                names := [String]{}
+                                loop entry in row -> &names.push(entry.name)
+                                label += " -[{names.join(", ")}]>"
+                            }
+                            None -> label += "\neffects: unavailable"
+                        }
+                    }
+                }
+                label += "\nfailure: "
+                if failure == {
+                    .Checked(fact) -> label += "{type_name(failure_contract_effective_type(fact))} ({failure_contract_source(fact)})"
+                    .Unavailable(unavailable) -> label += "unavailable ({unavailable.reason})"
+                }
+                rows := [String]{}
+                loop part in parts {
+                    if part != "/" && part != "*" -> &rows.push("{{\"label\":{foundation_json_quote(part)}}}")
+                }
+                active :: binder_active_parameter(call.active_label, call.active_param, call.consumed_labels, contract, rows.len())
+                result :: "{{\"signatures\":[{{\"label\":{foundation_json_quote(label)},\"parameters\":[{rows.join(",")}]}}],\"activeSignature\":0,\"activeParameter\":{active}}}"
+                return Val(lsp_response(id, result))
+            }
+        }
+        return Val(lsp_response(id, "null"))
+    }
+    None
+}
+
+// Retained checked facts are the only builder input. A loader/check failure has
+// no graph and retains Rust's empty DB behavior; a completed graph must retain
+// all six canonical projection inputs. No copied AST or local fact registry.
+pub fn lsp_build_symbol_db(result: JetDriverCompilerCheckResult) -> SymbolDB {
+    graph :: result.graph ?? return SymbolDB.new()
+    registration :: result.registration ?? panic("checked LSP graph lost its registration")
+    program :: result.effect_budget_program ?? panic("checked LSP graph lost its effect program")
+    summaries :: result.effect_budget_summaries ?? panic("checked LSP graph lost its effect summaries")
+    semindex_build_symbol_db(registration, graph, result.module_sources, result.loaded_module_rows, program, summaries)
+}

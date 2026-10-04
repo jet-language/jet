@@ -1,0 +1,1257 @@
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/canvas_cli_lifecycle.rs:1-34
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2168 criterion 8: native `jet dev --canvas` owns one resident lifecycle.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS #[test]
+//RS fn jet_dev_canvas_lifecycle_exit_reuse_and_cleanup() {
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let node = std::env::var_os("JET_CANVAS_NODE").unwrap_or_else(|| "node".into());
+//RS     let output = Command::new(node)
+//RS         .current_dir(&repo)
+//RS         .env("JET_BIN", env!("CARGO_BIN_EXE_jet"))
+//RS         .env(
+//RS             "JET_SOURCE",
+//RS             "Examples/features/tooling/canvas_blueprint_demo.jet",
+//RS         )
+//RS         .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
+//RS         .arg("Tools/canvas-test/native-lifecycle.mjs")
+//RS         .output()
+//RS         .expect("run native Canvas lifecycle probe");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "native Canvas lifecycle failed\n--- stdout ---\n{}\n--- stderr ---\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("PASS native jet dev --canvas lifecycle"),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS }
+// END-PORT-PENDING 0986 tests/canvas_cli_lifecycle.rs:1-34
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/dev_corpus.rs:1-14
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! The shared `collect_jit_coverage` corpus observation and its ratchets (#2020).
+//RS #![allow(dead_code, unused_imports)]
+//RS 
+//RS mod common;
+//RS include!("dev_parts/support.rs");
+//RS include!("dev_parts/corpus.rs");
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_with_the_dev_corpus_gate() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("dev-corpus")
+//RS         .expect("dev corpus semantic policy");
+//RS }
+// END-PORT-PENDING 0986 tests/dev_corpus.rs:1-14
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/dev_corpus_gate.rs:1-73
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! The strict JIT<->AOT differential example-corpus gate (#2020).
+//RS //!
+//RS //! parity: guard tests/dev_corpus_gate.rs::example_corpus_strict_jit_aot_differential_gate
+//RS #![allow(dead_code, unused_imports)]
+//RS 
+//RS mod common;
+//RS include!("dev_parts/support.rs");
+//RS include!("dev_parts/corpus_gate.rs");
+//RS 
+//RS const TOWER_DATATREE_POLICY_SITE: &str = "dogfood/tower/run.jet";
+//RS 
+//RS #[test]
+//RS fn tower_datatree_policy_keeps_mechanical_ops_and_named_exceptions() {
+//RS     let policy = common::corpus_policy::CorpusPolicy::load().expect("corpus manifest");
+//RS     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let source = std::fs::read_to_string(root.join(TOWER_DATATREE_POLICY_SITE))
+//RS         .expect("Tower recipe source is readable");
+//RS     let violations = policy
+//RS         .evaluate_source(TOWER_DATATREE_POLICY_SITE, &source)
+//RS         .expect("Tower recipe parses");
+//RS     assert!(
+//RS         violations.is_empty(),
+//RS         "Tower DataTree corpus policy failed:\n{}",
+//RS         violations
+//RS             .iter()
+//RS             .map(ToString::to_string)
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn tower_datatree_policy_rejects_duplicate_generic_ladders() {
+//RS     let policy = common::corpus_policy::CorpusPolicy::load().expect("corpus manifest");
+//RS     let violations = policy
+//RS         .evaluate_source(
+//RS             TOWER_DATATREE_POLICY_SITE,
+//RS             r#"
+//RS fn duplicate_equal(left: DataTree, right: DataTree) -> Bool { return true }
+//RS fn arrays_semantically_equal(left: [DataTree], right: [DataTree]) -> Bool { return true }
+//RS fn truthy(value: DataTree) -> Bool { return true }
+//RS fn javascript_truthy_duplicate(value: DataTree) -> Bool { return true }
+//RS "#,
+//RS         )
+//RS         .expect("synthetic Tower source parses");
+//RS     assert_eq!(
+//RS         violations.len(),
+//RS         4,
+//RS         "all duplicate generic helpers must be rejected once: {violations:?}"
+//RS     );
+//RS     assert!(
+//RS         violations
+//RS             .iter()
+//RS             .all(|violation| violation.rule == "datatree-domain-policy"),
+//RS         "one occurrence-scoped DataTree rule must own every rejection: {violations:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_after_dev_domain_checks() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("dev-corpus")
+//RS         .expect("dev corpus semantic policy");
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_corpus_policy_runs_with_core_conformance() {
+//RS     common::corpus_policy::CorpusPolicy::load()
+//RS         .expect("corpus manifest")
+//RS         .check_gate("conformance")
+//RS         .expect("Core conformance semantic policy");
+//RS }
+// END-PORT-PENDING 0986 tests/dev_corpus_gate.rs:1-73
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/dev_default_parity.rs:1-8
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Whole-corpus default-backend (tiered Cranelift) parity battery (#2020).
+//RS //!
+//RS //! parity: guard tests/dev_default_parity.rs::dev_default_matches_compiled_binary
+//RS #![allow(dead_code, unused_imports)]
+//RS 
+//RS mod common;
+//RS include!("dev_parts/support.rs");
+//RS include!("dev_parts/default_parity.rs");
+// END-PORT-PENDING 0986 tests/dev_default_parity.rs:1-8
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/dev_interp_parity.rs:1-8
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Whole-corpus pure-interpreter parity batteries for `jet dev` (#2020).
+//RS //!
+//RS //! parity: guard tests/dev_interp_parity.rs::interpreter_matches_compiled_binary
+//RS #![allow(dead_code, unused_imports)]
+//RS 
+//RS mod common;
+//RS include!("dev_parts/support.rs");
+//RS include!("dev_parts/interp_parity.rs");
+// END-PORT-PENDING 0986 tests/dev_interp_parity.rs:1-8
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/dev_latency.rs:1-139
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-DEV3 save-to-diagnostic latency budget, measured with nothing else running.
+//RS //!
+//RS //! Card #2005. This assertion used to live in `tests/dev.rs`, sharing one
+//RS //! process with the rest of the dev suite. Wall clock there reports scheduler
+//RS //! contention as much as compiler work: the same commit failed in the full
+//RS //! parallel run and passed under `--test-threads=1 --exact`, and the verdict
+//RS //! moved when the suite grew by 32 reached tests without the front end
+//RS //! changing at all. A verdict that moves with the suite's size is not a
+//RS //! latency detector.
+//RS //!
+//RS //! D-DEV3 is a wall-clock promise to the user — "a save gives feedback in well
+//RS //! under 200ms" (`Docs/spec/diagnostics.md`) — so the measurement basis stays
+//RS //! wall clock and the budget stays 200ms. What changed is where it is
+//RS //! measured. This file is its own cargo test target holding exactly one test,
+//RS //! and both `cargo test` and `Tools/ci/test-shards.sh` run one target per
+//RS //! process, one after another. So nothing else in the run is executing while
+//RS //! the number is taken, and the count of tests elsewhere cannot move it.
+//RS //!
+//RS //! It still catches the regression the budget exists for. The measured round is
+//RS //! the same front-end check the watch loop performs on every save, so any
+//RS //! change that pushes it past 200ms — a slower parse, a standard-library
+//RS //! re-read per check, a quadratic sema walk, a newly blocking lookup — fails
+//RS //! here.
+//RS //!
+//RS //! Two alternatives were considered and rejected. Counting work (steps, bytes)
+//RS //! instead of time needs a machine-specific steps-to-milliseconds constant
+//RS //! before it can say anything about the 200ms promise, and it stays green
+//RS //! through a regression that spends its time blocking rather than computing. A
+//RS //! ratio against a same-run baseline check cancels fixed per-save cost, since
+//RS //! both sides pay it — and fixed per-save cost is exactly what D-DEV3 bounds.
+//RS 
+//RS /// The example whose per-save round is measured.
+//RS const EXAMPLE: &str = "Examples/features/collections/wordcount.jet";
+//RS 
+//RS /// The D-DEV3 budget for one check-only save-to-diagnostic round, in
+//RS /// milliseconds. Never widen this to make a run agree: a trip is a latency
+//RS /// defect to report, not a limit to raise.
+//RS const BUDGET_MS: u128 = 200;
+//RS 
+//RS /// Rounds timed after the warm-up. The best of them is the sample least
+//RS /// disturbed by anything outside this process.
+//RS const ROUNDS: usize = 5;
+//RS const WATCH_LATENCY_MARGIN_MS: u128 = 20;
+//RS 
+//RS /// Measure the shared watcher itself, separately from front-end work. The
+//RS /// bound is derived from the configured coalescing window rather than widened
+//RS /// to make a slow implementation pass.
+//RS fn measure_watch_latency_ms() -> u128 {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_dev_latency_watch_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = std::fs::remove_dir_all(&dir);
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let file = dir.join("app.jet");
+//RS     std::fs::write(&file, "fn run() {}\n").unwrap();
+//RS     let mut watch = jet_devserver::WatchSession::open(&file).unwrap();
+//RS     let mut best = u128::MAX;
+//RS 
+//RS     for round in 0..ROUNDS {
+//RS         let source = format!(
+//RS             "fn run() {{ /* watch-round-{round} {} */ }}\n",
+//RS             "x".repeat(round + 1)
+//RS         );
+//RS         let started = std::time::Instant::now();
+//RS         watch.mark_edit_started();
+//RS         std::fs::write(&file, source).unwrap();
+//RS         let receipt = watch.poll().expect("watch edit");
+//RS         let elapsed = started.elapsed().as_millis();
+//RS         let reported = receipt.edit_to_visible_ms.expect("watch timing");
+//RS         best = best.min(elapsed.max(reported));
+//RS         watch.acknowledge(&receipt).unwrap();
+//RS     }
+//RS 
+//RS     let _ = std::fs::remove_dir_all(&dir);
+//RS     best
+//RS }
+//RS 
+//RS fn assert_watch_latency_contract() {
+//RS     assert!(
+//RS         jet_devserver::WATCH_COALESCE_MS < 5,
+//RS         "watch coalescing must stay below 5ms, got {}ms",
+//RS         jet_devserver::WATCH_COALESCE_MS
+//RS     );
+//RS     assert!(
+//RS         jet_devserver::WATCH_POLL_INTERVAL_MS <= 10,
+//RS         "idle watch polling must stay bounded, got {}ms",
+//RS         jet_devserver::WATCH_POLL_INTERVAL_MS
+//RS     );
+//RS     let best = measure_watch_latency_ms();
+//RS     let budget = jet_devserver::WATCH_COALESCE_MS as u128 + WATCH_LATENCY_MARGIN_MS;
+//RS     assert!(
+//RS         best <= budget,
+//RS         "watch save observation {best}ms exceeds coalescing contract {budget}ms"
+//RS     );
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn check_latency_under_budget_measured_alone() {
+//RS     // A second test in this target would run beside the measurement and put
+//RS     // #2005's load dependence straight back. Pinned rather than requested in a
+//RS     // comment. The needle is assembled at run time so it cannot match itself.
+//RS     let attribute = format!("{}{}", "#[", "test]");
+//RS     assert_eq!(
+//RS         include_str!("dev_latency.rs").matches(&attribute).count(),
+//RS         1,
+//RS         "this target measures wall clock, so it must hold exactly one test (#2005)"
+//RS     );
+//RS 
+//RS     // Warm up: the first load touches the filesystem and fills caches.
+//RS     let warm = jet::check_with_path(EXAMPLE);
+//RS     // A check that fails to load is fast for the wrong reason, and would hold
+//RS     // the budget green while measuring almost nothing.
+//RS     let errors = warm
+//RS         .iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .count();
+//RS     assert_eq!(
+//RS         errors, 0,
+//RS         "{EXAMPLE} must check clean, or the timed round is not a real check: {warm:?}"
+//RS     );
+//RS 
+//RS     // The watch engine owns the fixed save-observation costs that precede this
+//RS     // front-end round. Keep its coalescing and idle-poll contracts visible in
+//RS     // the same isolated latency target.
+//RS     assert_watch_latency_contract();
+//RS 
+//RS     let mut best = u128::MAX;
+//RS     for _ in 0..ROUNDS {
+//RS         let started = std::time::Instant::now();
+//RS         let _ = jet::check_with_path(EXAMPLE);
+//RS         best = best.min(started.elapsed().as_millis());
+//RS     }
+//RS     assert!(
+//RS         best < BUDGET_MS,
+//RS         "save-to-diagnostic latency {best} ms exceeds the {BUDGET_MS}ms budget (D-DEV3)"
+//RS     );
+//RS }
+// END-PORT-PENDING 0986 tests/dev_latency.rs:1-139
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/dev_schedule_wave_a.rs:1-44
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #3095 / Wave A: the process-local schedule restart boundary.
+//RS //!
+//RS //! This target deliberately exercises only the existing Prelude `JetJobClock`.
+//RS //! A fresh clock stands in for a new process: a wall-clock occurrence missed
+//RS //! before that process existed is not replayed, while the next day's matching
+//RS //! minute remains eligible. The test does not claim App shutdown cancellation
+//RS //! or full `jet dev`/generated-Core execution; those runtime boundaries still
+//RS //! need a focused App-lifetime receipt.
+//RS 
+//RS #[test]
+//RS fn local_schedule_restart_does_not_replay_a_missed_window() {
+//RS     use jet_jit::Job::{JetJobClock, JetJobSchedule};
+//RS 
+//RS     const DAY: u64 = 86_400;
+//RS     const THREE_AM: u64 = 3 * 3_600;
+//RS     let schedule = [(
+//RS         "nightly",
+//RS         JetJobSchedule::WallClockTime {
+//RS             hour: 3,
+//RS             minute: 0,
+//RS         },
+//RS     )];
+//RS 
+//RS     // A process that wakes after the one-minute local window has no due work.
+//RS     let missed = DAY + THREE_AM + 61;
+//RS     let mut before_restart = JetJobClock::new();
+//RS     assert!(
+//RS         before_restart.due_at(&schedule, missed).is_empty(),
+//RS         "a missed local schedule window must not be replayed before restart"
+//RS     );
+//RS 
+//RS     // Restarting a process-local schedule does not recover an unpersisted tick.
+//RS     let mut after_restart = JetJobClock::new();
+//RS     assert!(
+//RS         after_restart.due_at(&schedule, missed).is_empty(),
+//RS         "a fresh local clock must not replay an earlier missed occurrence"
+//RS     );
+//RS 
+//RS     // The next UTC day is a new occurrence, not a replay of the missed one.
+//RS     assert_eq!(
+//RS         after_restart.due_at(&schedule, DAY * 2 + THREE_AM),
+//RS         vec!["nightly".to_string()]
+//RS     );
+//RS }
+// END-PORT-PENDING 0986 tests/dev_schedule_wave_a.rs:1-44
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/dev_tier_parity.rs:1-100
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Curated per-topic interpreter/JIT/AOT tier batteries (#2020).
+//RS //!
+//RS //! parity: guard tests/dev_tier_parity.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
+//RS #![allow(dead_code, unused_imports)]
+//RS 
+//RS mod common;
+//RS include!("dev_parts/support.rs");
+//RS include!("dev_parts/tier_parity.rs");
+//RS #[test]
+//RS fn target_selected_prelude_parity() {
+//RS     // The ordinary hosted target must keep one meaning through the three
+//RS     // applicable execution tiers. The helper compares interpreter, resident
+//RS     // JIT, and compiled AOT stdout, stderr, and exit status.
+//RS     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let hosted = root.join("tests/target_witness/hosted_default.jet");
+//RS     assert_cranelift_three_way(
+//RS         hosted.to_string_lossy().as_ref(),
+//RS         "target_selected_prelude_parity_hosted",
+//RS     );
+//RS 
+//RS     use jet::TargetMachine::{
+//RS         ExecutionTier, TargetMachine, TargetMachineError,
+//RS     };
+//RS 
+//RS     // A no-OS target has no resident host to adapt to: Dev and JIT are
+//RS     // explicitly inapplicable, while AOT remains the selected execution tier.
+//RS     let no_os = TargetMachine::wasm_no_os();
+//RS     assert!(no_os.supports_execution_tier(ExecutionTier::Aot).is_ok());
+//RS     for tier in [ExecutionTier::Dev, ExecutionTier::Jit] {
+//RS         assert!(matches!(
+//RS             no_os.supports_execution_tier(tier),
+//RS             Err(TargetMachineError::ExecutionTierUnsupported { .. })
+//RS         ));
+//RS     }
+//RS 
+//RS     // The same heap-free source is admitted by each typed target. The AOT
+//RS     // emitter and the web adapter carry the selected provider and Prelude
+//RS     // closure from the checked dossier; neither adapter invents a profile
+//RS     // from its runtime environment.
+//RS     let source = root.join("tests/target_witness/heap_free_core.jet");
+//RS     let source = source.to_string_lossy().into_owned();
+//RS     for machine in [
+//RS         no_os,
+//RS         TargetMachine::wasm_wasi(),
+//RS         TargetMachine::wasm_browser(),
+//RS     ] {
+//RS         let provider = machine.provider_identity();
+//RS         let layer = machine.max_runtime_layer().as_str();
+//RS         let environment = machine.environment_identity();
+//RS         let output = jet::Driver::compile_bundle_path_with_target_machine(
+//RS             &source,
+//RS             jet::Sema::CompileMode::Run,
+//RS             &machine,
+//RS         )
+//RS         .unwrap_or_else(|error| {
+//RS             panic!(
+//RS                 "target-selected heap-free witness should compile for {}: {error:?}",
+//RS                 machine.name
+//RS             )
+//RS         });
+//RS 
+//RS         if machine.is_browser_target() {
+//RS             let web = output
+//RS                 .web
+//RS                 .as_ref()
+//RS                 .expect("browser target must emit web artifacts");
+//RS             assert!(
+//RS                 web.manifest_json
+//RS                     .contains(&format!("\"providerIdentity\": \"{provider}\"")),
+//RS                 "browser manifest lost provider identity: {}",
+//RS                 web.manifest_json
+//RS             );
+//RS             assert!(
+//RS                 web.manifest_json
+//RS                     .contains(&format!("\"targetEnvironment\": \"{environment}\"")),
+//RS                 "browser manifest lost target environment: {}",
+//RS                 web.manifest_json
+//RS             );
+//RS             assert!(
+//RS                 web.manifest_json
+//RS                     .contains("\"preludeClosureIdentity\": \"prelude-closure-v1:"),
+//RS                 "browser manifest lost Prelude closure identity: {}",
+//RS                 web.manifest_json
+//RS             );
+//RS         } else {
+//RS             let marker =
+//RS                 format!("// jet:target-dossier layer={layer} provider={provider}");
+//RS             assert!(
+//RS                 output.rust.contains(&marker),
+//RS                 "{} artifact lost target dossier marker {marker:?}",
+//RS                 machine.name
+//RS             );
+//RS             assert!(
+//RS                 output.rust.contains("closure=prelude-closure-v1:"),
+//RS                 "{} artifact lost Prelude closure identity",
+//RS                 machine.name
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0986 tests/dev_tier_parity.rs:1-100
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/impact.rs:1-75
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-IMPACT1 integration tests for blast-radius queries.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::path::PathBuf;
+//RS 
+//RS #[test]
+//RS fn impact_report_upstream_run() {
+//RS     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+//RS     let path =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/effects/effects.jet");
+//RS     let out = std::process::Command::new(bin)
+//RS         .args([
+//RS             "inspect",
+//RS             "impact",
+//RS             path.to_str().unwrap(),
+//RS             "report",
+//RS             "--depth=3",
+//RS         ])
+//RS         .output()
+//RS         .expect("jet inspect impact");
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let text = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(text.contains("blast radius for `report`"));
+//RS     assert!(text.contains("upstream"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn impact_json_output() {
+//RS     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+//RS     let path =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/effects/effects.jet");
+//RS     let out = std::process::Command::new(bin)
+//RS         .args([
+//RS             "inspect",
+//RS             "impact",
+//RS             path.to_str().unwrap(),
+//RS             "square",
+//RS             "--json",
+//RS             "--depth=2",
+//RS         ])
+//RS         .output()
+//RS         .expect("jet inspect impact --json");
+//RS     assert!(out.status.success());
+//RS     let text = String::from_utf8_lossy(&out.stdout);
+//RS     assert_eq!(
+//RS         jet_foundation::MachineOutput::read_machine_output(&text).unwrap(),
+//RS         vec![jet_foundation::MachineOutput::MachineRecord::Status]
+//RS     );
+//RS     assert!(text.starts_with("{\"schema\":\"jet.status/v1\""));
+//RS     assert!(text.contains("\"symbol\":\"square\""));
+//RS     assert!(text.contains("\"found\":true"));
+//RS     assert!(text.contains("\"check\":{\"status\":\"passed\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn impact_unknown_symbol_exits_error() {
+//RS     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+//RS     let path =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/effects/effects.jet");
+//RS     let out = std::process::Command::new(bin)
+//RS         .args([
+//RS             "inspect",
+//RS             "impact",
+//RS             path.to_str().unwrap(),
+//RS             "not_a_real_symbol_xyz",
+//RS         ])
+//RS         .output()
+//RS         .expect("jet inspect impact missing symbol");
+//RS     assert!(!out.status.success());
+//RS }
+// END-PORT-PENDING 0986 tests/impact.rs:1-75
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/notebook.rs:1-641
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #442 notebook kernel — D-NOTEBOOK-SURFACE1/DOC1/TRUST1=D.
+//RS 
+//RS mod common;
+//RS 
+//RS use jet::REPL::Notebook::{
+//RS     decide_render, export_ipynb, export_jet, import_ipynb, merge_by_id, quarantine_outputs,
+//RS     run_headless_script, save_jetnb, CellKind, ClientKind, JetNotebook, Kernel, MimeBundle,
+//RS     RenderDecision, RerunDecision, TrustStore, POLICY_VERSION,
+//RS };
+//RS use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS use jet_foundation::SHA256;
+//RS use std::io::{Read, Write};
+//RS use std::net::{TcpListener, TcpStream};
+//RS use std::process::{Child, Command, Stdio};
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS #[test]
+//RS fn notebook_token_generation_has_no_zero_entropy_fallback() {
+//RS     let source = include_str!("../Source/CmdNotebook.rs");
+//RS     let mint_token = source
+//RS         .split_once("fn mint_token()")
+//RS         .and_then(|(_, rest)| rest.split_once("fn is_loopback"))
+//RS         .map(|(body, _)| body)
+//RS         .expect("notebook token minting must remain a distinct function");
+//RS     assert!(mint_token.contains("read_exact(&mut bytes)"));
+//RS     assert!(mint_token.contains("map_err(|error| error.to_string())"));
+//RS     assert!(
+//RS         !mint_token.contains("unwrap_or"),
+//RS         "entropy read errors must not become a deterministic token"
+//RS     );
+//RS 
+//RS     let startup = source
+//RS         .split_once("let token = match explicit_token")
+//RS         .and_then(|(_, rest)| rest.split_once("let auto_open"))
+//RS         .map(|(body, _)| body)
+//RS         .expect("notebook startup must handle token creation explicitly");
+//RS     assert!(startup.contains("exit(ExitCodes::ICE)"));
+//RS     assert!(
+//RS         !startup.contains("unwrap_or_default"),
+//RS         "token creation failure must stop startup"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
+//RS     let mut kernel =
+//RS         Kernel::open(None, "entry-order-test").expect("open entry-order notebook kernel");
+//RS     let comptime_reader = kernel
+//RS         .notebook
+//RS         .add_cell(
+//RS             CellKind::Jet,
+//RS             "fn comptime_reader() -> Int { return FUTURE_ANSWER }",
+//RS         )
+//RS         .id
+//RS         .clone();
+//RS     let comptime_answer = kernel
+//RS         .notebook
+//RS         .add_cell(CellKind::Jet, "FUTURE_ANSWER :: prep { 42 }")
+//RS         .id
+//RS         .clone();
+//RS     let caller = kernel
+//RS         .notebook
+//RS         .add_cell(CellKind::Jet, "fn caller() -> Int { return helper().value }")
+//RS         .id
+//RS         .clone();
+//RS     let helper = kernel
+//RS         .notebook
+//RS         .add_cell(
+//RS             CellKind::Jet,
+//RS             "fn helper() -> Answer { return Answer{ value: 42 } }",
+//RS         )
+//RS         .id
+//RS         .clone();
+//RS     let answer_type = kernel
+//RS         .notebook
+//RS         .add_cell(CellKind::Jet, "struct Answer { value: Int }")
+//RS         .id
+//RS         .clone();
+//RS     let binding = kernel
+//RS         .notebook
+//RS         .add_cell(CellKind::Jet, "answer :: 7")
+//RS         .id
+//RS         .clone();
+//RS     let read = kernel
+//RS         .notebook
+//RS         .add_cell(CellKind::Jet, "print(answer)")
+//RS         .id
+//RS         .clone();
+//RS 
+//RS     assert!(
+//RS         kernel
+//RS             .execute_cell(ClientKind::FirstParty, &comptime_reader)
+//RS             .unwrap()
+//RS             .ok(),
+//RS         "function cells must see later comptime declarations"
+//RS     );
+//RS     assert!(kernel
+//RS         .execute_cell(ClientKind::FirstParty, &comptime_answer)
+//RS         .unwrap()
+//RS         .ok());
+//RS     assert!(
+//RS         kernel
+//RS             .execute_cell(ClientKind::FirstParty, &caller)
+//RS             .unwrap()
+//RS             .ok(),
+//RS         "caller must see later helper/type declarations"
+//RS     );
+//RS     assert!(kernel
+//RS         .execute_cell(ClientKind::FirstParty, &helper)
+//RS         .unwrap()
+//RS         .ok());
+//RS     assert!(kernel
+//RS         .execute_cell(ClientKind::FirstParty, &answer_type)
+//RS         .unwrap()
+//RS         .ok());
+//RS 
+//RS     assert!(
+//RS         !kernel
+//RS             .execute_cell(ClientKind::FirstParty, &read)
+//RS             .unwrap()
+//RS             .ok(),
+//RS         "state cells must not see a later binding"
+//RS     );
+//RS     assert!(kernel
+//RS         .execute_cell(ClientKind::FirstParty, &binding)
+//RS         .unwrap()
+//RS         .ok());
+//RS     let output = kernel.execute_cell(ClientKind::FirstParty, &read).unwrap();
+//RS     assert!(output.ok());
+//RS     assert!(output.bundle.text_plain.contains('7'));
+//RS }
+//RS 
+//RS #[test]
+//RS fn shared_session_identical_stale_rules_across_clients() {
+//RS     let mut kernel = Kernel::open(None, "env-test").expect("open shared-session notebook kernel");
+//RS     let a = kernel.notebook.add_cell(CellKind::Jet, "x :: 1").id.clone();
+//RS     let b = kernel
+//RS         .notebook
+//RS         .add_cell(CellKind::Jet, "print(\"fx\")")
+//RS         .id
+//RS         .clone();
+//RS     // Wire dependency so closure invalidation is meaningful.
+//RS     if let Some(cell) = kernel.notebook.cells.iter_mut().find(|c| c.id == b) {
+//RS         cell.depends_on.push(a.clone());
+//RS     }
+//RS 
+//RS     let observable_success = |result: &jet::REPL::Notebook::CellExecResult| {
+//RS         result.ok() && result.bundle.text_plain.contains("fx")
+//RS     };
+//RS     assert!(kernel
+//RS         .execute_cell(ClientKind::FirstParty, &a)
+//RS         .unwrap()
+//RS         .ok());
+//RS     let fx = kernel.execute_cell(ClientKind::JupyterAdapter, &b).unwrap();
+//RS 
+//RS     let broken = kernel
+//RS         .notebook
+//RS         .add_cell(CellKind::Jet, "print(\"fx\") +")
+//RS         .id
+//RS         .clone();
+//RS     let broken_result = kernel
+//RS         .execute_cell(ClientKind::JupyterAdapter, &broken)
+//RS         .unwrap();
+//RS     assert!(!observable_success(&broken_result));
+//RS     assert!(observable_success(&fx));
+//RS 
+//RS     let plan = kernel.replay_plan(1, Some("x :: 2")).expect("plan");
+//RS     assert!(
+//RS         plan.steps
+//RS             .iter()
+//RS             .any(|s| s.kind == jet::REPL::RerunPlan::StepKind::ConfirmEffect)
+//RS             || plan.steps.len() >= 1
+//RS     );
+//RS 
+//RS     // Skip effect → identical stale marking for every client surface.
+//RS     let stale_jp = kernel
+//RS         .apply_rerun(
+//RS             ClientKind::JupyterAdapter,
+//RS             &plan,
+//RS             &[RerunDecision::SkipStale],
+//RS         )
+//RS         .unwrap();
+//RS     let view_first = kernel.view(ClientKind::FirstParty);
+//RS     let view_canvas = kernel.view(ClientKind::CanvasLens);
+//RS     let view_jp = kernel.view(ClientKind::JupyterAdapter);
+//RS     assert_eq!(view_first.stale_ids, view_canvas.stale_ids);
+//RS     assert_eq!(view_first.stale_ids, view_jp.stale_ids);
+//RS     assert_eq!(view_first.stale_ids, stale_jp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss() {
+//RS     let mut nb = JetNotebook::new("env-doc");
+//RS     let c1 = nb.add_cell(CellKind::Jet, "answer :: 42").id.clone();
+//RS     nb.store_output(
+//RS         &c1,
+//RS         MimeBundle {
+//RS             text_plain: "answer : Int :: 42".into(),
+//RS             mime: vec![],
+//RS             quarantined: false,
+//RS             widget_id: None,
+//RS             requested_origins: vec![],
+//RS             requested_messages: vec![],
+//RS         },
+//RS         1,
+//RS         None,
+//RS     )
+//RS     .unwrap();
+//RS     assert!(nb.visible_output(&c1).is_some());
+//RS 
+//RS     // Edit source → closure key changes → stale output hidden.
+//RS     nb.cells[0].source = "answer :: 7".into();
+//RS     assert!(
+//RS         nb.visible_output(&c1).is_none(),
+//RS         "stale output must not display"
+//RS     );
+//RS 
+//RS     let mut theirs = JetNotebook::new("env-doc");
+//RS     let shared = c1.clone();
+//RS     theirs.cells.push(jet::REPL::Notebook::NotebookCell {
+//RS         id: shared.clone(),
+//RS         kind: CellKind::Jet,
+//RS         source: "answer :: 7".into(),
+//RS         output: None,
+//RS         depends_on: vec![],
+//RS     });
+//RS     theirs.add_cell(CellKind::Markdown, "# hi");
+//RS     let merged = merge_by_id(&nb, &theirs);
+//RS     assert!(merged.cells.iter().any(|c| c.kind == CellKind::Markdown));
+//RS     assert_eq!(
+//RS         merged.cells.iter().find(|c| c.id == shared).unwrap().source,
+//RS         "answer :: 7"
+//RS     );
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jetnb-442-{}", std::process::id()));
+//RS     let _ = std::fs::remove_dir_all(&dir);
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("demo.jetnb");
+//RS     // Re-store live output for export.
+//RS     nb.cells[0].source = "answer :: 42".into();
+//RS     nb.store_output(
+//RS         &c1,
+//RS         MimeBundle {
+//RS             text_plain: "42".into(),
+//RS             mime: vec![],
+//RS             quarantined: false,
+//RS             widget_id: None,
+//RS             requested_origins: vec![],
+//RS             requested_messages: vec![],
+//RS         },
+//RS         2,
+//RS         None,
+//RS     )
+//RS     .unwrap();
+//RS     save_jetnb(&nb, &path).unwrap();
+//RS     let loaded = jet::REPL::Notebook::load_jetnb(&path).unwrap();
+//RS     assert_eq!(loaded.cells.len(), 1);
+//RS 
+//RS     let (ipynb, loss) = export_ipynb(&loaded).unwrap();
+//RS     assert!(loss.render().contains("export loss") || loss.render().contains("omitted"));
+//RS     assert!(ipynb.contains("nbformat"));
+//RS     assert!(ipynb.contains(&c1));
+//RS 
+//RS     let (jet_src, jet_loss) = export_jet(&loaded);
+//RS     assert!(jet_loss.render().contains("stated-loss") || jet_loss.items.len() >= 2);
+//RS     assert!(jet_src.contains("answer"));
+//RS 
+//RS     // Round-trip ipynb with quarantined import.
+//RS     let ipynb_doc = CanonicalJson::object([
+//RS         ("nbformat".into(), CanonicalJson::integer("4").unwrap()),
+//RS         (
+//RS             "nbformat_minor".into(),
+//RS             CanonicalJson::integer("5").unwrap(),
+//RS         ),
+//RS         ("metadata".into(), CanonicalJson::object([]).unwrap()),
+//RS         (
+//RS             "cells".into(),
+//RS             CanonicalJson::Array(vec![CanonicalJson::object([
+//RS                 ("id".into(), CanonicalJson::String("keep-me".into())),
+//RS                 ("cell_type".into(), CanonicalJson::String("code".into())),
+//RS                 (
+//RS                     "source".into(),
+//RS                     CanonicalJson::Array(vec![CanonicalJson::String("1".into())]),
+//RS                 ),
+//RS                 ("metadata".into(), CanonicalJson::object([]).unwrap()),
+//RS                 (
+//RS                     "outputs".into(),
+//RS                     CanonicalJson::Array(vec![CanonicalJson::object([
+//RS                         (
+//RS                             "output_type".into(),
+//RS                             CanonicalJson::String("execute_result".into()),
+//RS                         ),
+//RS                         (
+//RS                             "data".into(),
+//RS                             CanonicalJson::object([(
+//RS                                 "text/plain".into(),
+//RS                                 CanonicalJson::String("1".into()),
+//RS                             )])
+//RS                             .unwrap(),
+//RS                         ),
+//RS                         ("metadata".into(), CanonicalJson::object([]).unwrap()),
+//RS                         (
+//RS                             "execution_count".into(),
+//RS                             CanonicalJson::integer("1").unwrap(),
+//RS                         ),
+//RS                     ])
+//RS                     .unwrap()]),
+//RS                 ),
+//RS                 ("execution_count".into(), CanonicalJson::Null),
+//RS             ])
+//RS             .unwrap()]),
+//RS         ),
+//RS     ])
+//RS     .unwrap();
+//RS     let (imported, import_loss) =
+//RS         import_ipynb(&String::from_utf8(ipynb_doc.bytes()).unwrap()).unwrap();
+//RS     assert!(import_loss.items.iter().any(|i| i.contains("quarantined")));
+//RS     let cell = &imported.cells[0];
+//RS     assert_eq!(cell.id, "keep-me");
+//RS     assert!(cell.output.as_ref().unwrap().bundle.quarantined);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rich_output_trust_quarantines_imports_and_binds_grants() {
+//RS     let store = TrustStore::default();
+//RS     let mut bundle = MimeBundle {
+//RS         text_plain: "hi".into(),
+//RS         mime: vec![("text/html".into(), "<b>hi</b>".into())],
+//RS         quarantined: false,
+//RS         widget_id: Some("w1".into()),
+//RS         requested_origins: vec!["https://evil.example".into()],
+//RS         requested_messages: vec!["click".into()],
+//RS     };
+//RS     quarantine_outputs(&mut bundle);
+//RS     assert!(matches!(
+//RS         decide_render(&store, "src", "env", "rend", &bundle),
+//RS         RenderDecision::FallbackPlain { .. }
+//RS     ));
+//RS 
+//RS     let mut live = MimeBundle {
+//RS         text_plain: "chart".into(),
+//RS         mime: vec![("application/javascript".into(), "1".into())],
+//RS         quarantined: false,
+//RS         widget_id: Some("sales".into()),
+//RS         requested_origins: vec!["https://data.example".into()],
+//RS         requested_messages: vec!["SelectionChanged".into()],
+//RS     };
+//RS     assert!(matches!(
+//RS         decide_render(&store, "src", "env", "rend", &live),
+//RS         RenderDecision::FallbackPlain { .. }
+//RS     ));
+//RS 
+//RS     let mut store = TrustStore::default();
+//RS     let payload_hash =
+//RS         SHA256::sha256_hex(format!("{:?}\0{:?}", live.mime, live.widget_id).as_bytes());
+//RS     let req = jet::REPL::Notebook::ActiveRequest {
+//RS         notebook_source_hash: "src".into(),
+//RS         payload_hash,
+//RS         renderer_hash: "rend".into(),
+//RS         environment_hash: "env".into(),
+//RS         policy_version: POLICY_VERSION.into(),
+//RS         widget_id: "sales".into(),
+//RS         origins: live.requested_origins.clone(),
+//RS         messages: live.requested_messages.clone(),
+//RS     };
+//RS     jet::REPL::Notebook::grant_active(&mut store, &req);
+//RS     assert!(matches!(
+//RS         decide_render(&store, "src", "env", "rend", &live),
+//RS         RenderDecision::AllowActive { .. }
+//RS     ));
+//RS 
+//RS     // Passive zero-capability path needs no grant.
+//RS     live.requested_origins.clear();
+//RS     live.requested_messages.clear();
+//RS     live.mime = vec![("image/svg+xml".into(), "<svg/>".into())];
+//RS     assert!(matches!(
+//RS         decide_render(&store, "src", "env", "rend", &live),
+//RS         RenderDecision::AllowPassive { .. }
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn headless_protocol_interrupt_stdin_debug_perf_and_clients() {
+//RS     let mut kernel =
+//RS         Kernel::open(None, "proto-env").expect("open headless-protocol notebook kernel");
+//RS     let out = run_headless_script(
+//RS         &mut kernel,
+//RS         &[
+//RS             "add-jet y :: 3",
+//RS             "exec first",
+//RS             "visible jupyter",
+//RS             "visible canvas",
+//RS             "visible first",
+//RS             "interrupt",
+//RS             "stdin hello",
+//RS             "debug",
+//RS             "perf",
+//RS             "complete y",
+//RS             "inspect",
+//RS             "export-jet",
+//RS             "export-ipynb",
+//RS         ],
+//RS     );
+//RS     assert!(out.contains("\"status\":\"ok\""), "{out}");
+//RS     assert!(out.contains("interrupt_requested"), "{out}");
+//RS     assert!(out.contains("stdin_queued=1"), "{out}");
+//RS     assert!(out.contains("debug_attached"), "{out}");
+//RS     assert!(out.contains("perf_attached"), "{out}");
+//RS     assert!(kernel.debug_attached() && kernel.perf_attached());
+//RS }
+//RS 
+//RS #[test]
+//RS fn notebook_first_hour_uses_shared_prelude_ambients_and_path() {
+//RS     let scratch = common::Scratch::new("notebook-first-hour");
+//RS     let document = scratch.join("journey.jetnb");
+//RS     let source = r#"#FX(authority: IO, FS) {
+//RS     eprint("ambient-eprint")
+//RS     name :: input("name: ") ?? "fallback"
+//RS     assert(name == "Ada")
+//RS     write_file("notes.txt", name) ?? panic("write failed")
+//RS     assert(file_exists("notes.txt"))
+//RS     assert_eq(file_exists("notes.txt"), true)
+//RS     print(read_file(Path.from("notes.txt")) ?? panic("read failed"))
+//RS }"#;
+//RS     let environment = Kernel::environment_hash(&scratch.path);
+//RS     let mut kernel = Kernel::open(Some(&document), environment.clone())
+//RS         .expect("open first-hour notebook document");
+//RS     let cell_id = kernel.notebook.add_cell(CellKind::Jet, source).id.clone();
+//RS     kernel.push_stdin("Ada");
+//RS 
+//RS     let result = kernel
+//RS         .execute_cell(ClientKind::FirstParty, &cell_id)
+//RS         .unwrap();
+//RS     assert!(
+//RS         result.ok(),
+//RS         "shared Prelude cell failed: {}",
+//RS         result.eval.text
+//RS     );
+//RS     assert!(result.bundle.text_plain.contains("ambient-eprint"));
+//RS     assert!(result.bundle.text_plain.contains("Ada"));
+//RS     assert_eq!(
+//RS         std::fs::read_to_string(scratch.join("notes.txt")).unwrap(),
+//RS         "Ada"
+//RS     );
+//RS 
+//RS     kernel.save_document(Some(&document)).unwrap();
+//RS     let reopened =
+//RS         Kernel::open(Some(&document), environment).expect("reopen first-hour notebook document");
+//RS     assert_eq!(reopened.document_path.as_deref(), Some(document.as_path()));
+//RS     assert_eq!(reopened.notebook.cells[0].source, source);
+//RS }
+//RS 
+//RS #[test]
+//RS fn notebook_cli_headless_journey_uses_production_session() {
+//RS     let scratch = common::Scratch::new("notebook-cli-headless");
+//RS     let document = scratch.join("journey.jetnb");
+//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["notebook", "journey.jetnb", "--protocol"])
+//RS         .current_dir(&scratch.path)
+//RS         .env("NO_COLOR", "1")
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("start production notebook protocol");
+//RS     let mut input = child.stdin.take().expect("protocol stdin");
+//RS     input
+//RS         .write_all(
+//RS             b"add-jet answer :: 42\nexec first\ncomplete answer\nsave journey.jetnb\nreopen\nexport-ipynb\nexport-jet\nquit\n",
+//RS         )
+//RS         .expect("write notebook protocol journey");
+//RS     drop(input);
+//RS 
+//RS     let output = child
+//RS         .wait_with_output()
+//RS         .expect("finish production notebook protocol");
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "protocol journey failed:\n{stdout}\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"status\":\"ok\""),
+//RS         "missing successful execution: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"body\":\"answer\""),
+//RS         "missing completion response: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("saved=journey.jetnb"),
+//RS         "missing save response: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("reopened"),
+//RS         "missing reopen response: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("ipynb_bytes=") && stdout.contains("jet_bytes="),
+//RS         "missing export responses: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         document.is_file(),
+//RS         "headless protocol did not save the notebook"
+//RS     );
+//RS }
+//RS 
+//RS struct RunningNotebook(Child);
+//RS 
+//RS impl Drop for RunningNotebook {
+//RS     fn drop(&mut self) {
+//RS         let _ = self.0.kill();
+//RS         let _ = self.0.wait();
+//RS     }
+//RS }
+//RS 
+//RS fn command_path(name: &str, environment_name: &str) -> std::ffi::OsString {
+//RS     std::env::var_os(environment_name).unwrap_or_else(|| name.into())
+//RS }
+//RS 
+//RS fn command_available(name: &str, environment_name: &str) -> bool {
+//RS     Command::new(command_path(name, environment_name))
+//RS         .arg("--version")
+//RS         .output()
+//RS         .is_ok()
+//RS }
+//RS 
+//RS fn free_loopback_port() -> u16 {
+//RS     TcpListener::bind(("127.0.0.1", 0))
+//RS         .unwrap()
+//RS         .local_addr()
+//RS         .unwrap()
+//RS         .port()
+//RS }
+//RS 
+//RS fn wait_for_notebook_server(port: u16, token: &str) {
+//RS     let deadline = Instant::now() + Duration::from_secs(10);
+//RS     loop {
+//RS         assert!(
+//RS             Instant::now() < deadline,
+//RS             "notebook server did not become ready"
+//RS         );
+//RS         if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+//RS             let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+//RS             let request = format!(
+//RS                 "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+//RS             );
+//RS             let _ = stream.write_all(request.as_bytes());
+//RS             let mut response = String::new();
+//RS             let _ = stream.read_to_string(&mut response);
+//RS             if response.starts_with("HTTP/1.1 200") && response.contains("\"ok\":true") {
+//RS                 return;
+//RS             }
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(25));
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn notebook_browser_matrix_uses_production_server() {
+//RS     if !command_available("node", "NODE") {
+//RS         eprintln!("skipping notebook browser matrix: node is unavailable");
+//RS         return;
+//RS     }
+//RS     let browsers = [
+//RS         ("chromium", command_available("chromium", "CHROMIUM")),
+//RS         (
+//RS             "firefox",
+//RS             command_available("firefox", "FIREFOX")
+//RS                 && command_available("geckodriver", "GECKODRIVER"),
+//RS         ),
+//RS     ];
+//RS     if !browsers.iter().any(|(_, available)| *available) {
+//RS         eprintln!("skipping notebook browser matrix: no supported browser is available");
+//RS         return;
+//RS     }
+//RS 
+//RS     let scratch = common::Scratch::new("notebook-browser");
+//RS     let mut ran = 0;
+//RS     for (browser, available) in browsers {
+//RS         if !available {
+//RS             continue;
+//RS         }
+//RS         let browser_root = scratch.join(browser);
+//RS         std::fs::create_dir_all(&browser_root).unwrap();
+//RS         let document = browser_root.join("journey.jetnb");
+//RS         let merge_document = browser_root.join("merge.jetnb");
+//RS         let mut merge = JetNotebook::new(Kernel::environment_hash(&browser_root));
+//RS         merge.add_cell(CellKind::Markdown, "# merged from another document");
+//RS         save_jetnb(&merge, &merge_document).unwrap();
+//RS 
+//RS         let port = free_loopback_port();
+//RS         let token = "notebook-browser-test-token";
+//RS         let bind = format!("127.0.0.1:{port}");
+//RS         let port_text = port.to_string();
+//RS         let child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS             .current_dir(&browser_root)
+//RS             .args([
+//RS                 "notebook",
+//RS                 document.to_str().unwrap(),
+//RS                 "--bind",
+//RS                 bind.as_str(),
+//RS                 "--token",
+//RS                 token,
+//RS             ])
+//RS             .stdin(Stdio::null())
+//RS             .stdout(Stdio::null())
+//RS             .stderr(Stdio::null())
+//RS             .spawn()
+//RS             .unwrap();
+//RS         let _server = RunningNotebook(child);
+//RS         wait_for_notebook_server(port, token);
+//RS 
+//RS         let output = Command::new(command_path("node", "NODE"))
+//RS             .current_dir(env!("CARGO_MANIFEST_DIR"))
+//RS             .args([
+//RS                 "Tools/notebook-test/acceptance.mjs",
+//RS                 "--browser",
+//RS                 browser,
+//RS                 "--port",
+//RS                 port_text.as_str(),
+//RS                 "--token",
+//RS                 token,
+//RS                 "--save-path",
+//RS                 document.to_str().unwrap(),
+//RS                 "--merge-path",
+//RS                 merge_document.to_str().unwrap(),
+//RS             ])
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{browser} notebook browser journey failed:\n{}\n{}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         ran += 1;
+//RS     }
+//RS     assert!(ran > 0);
+//RS }
+// END-PORT-PENDING 0986 tests/notebook.rs:1-641
+
+// PORT-PENDING 0986 tests-canvas-cli-lifecycle-module-group: tests/semantic_ops.rs:1-77
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-DEVR-SEMID1=A: semantic operation producers and blame consumers.
+//RS 
+//RS use jet_semindex::{open, semantic_blame, semantic_rename_ops, SemanticOp, SemanticOpTarget};
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS 
+//RS fn fixture(name: &str) -> (PathBuf, PathBuf) {
+//RS     let root =
+//RS         std::env::temp_dir().join(format!("jet_semantic_ops_{}_{}", name, std::process::id()));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     (root.clone(), root.join("run.jet"))
+//RS }
+//RS 
+//RS #[test]
+//RS fn tool_fix_pairing_records_rename_and_blame_reads_the_receipt() {
+//RS     let (root, path) = fixture("rename");
+//RS     let before = "fn report() -[]> Int { return 1 }\nfn run() { print(report()) }\n";
+//RS     let after = "fn summarize() -[]> Int { return 1 }\nfn run() { print(summarize()) }\n";
+//RS     fs::write(&path, before).unwrap();
+//RS     let before_index = open(&path).expect("before index");
+//RS     fs::write(&path, after).unwrap();
+//RS     let after_index = open(&path).expect("after index");
+//RS 
+//RS     let produced = semantic_rename_ops(&before_index, &after_index);
+//RS     assert_eq!(produced.len(), 1);
+//RS     assert_eq!(produced[0].kind, "rename");
+//RS     assert_eq!(produced[0].from.as_deref(), Some("report"));
+//RS     assert_eq!(produced[0].to.as_deref(), Some("summarize"));
+//RS     assert!(!produced[0].targets[0].stable_id.is_empty());
+//RS 
+//RS     let rows = semantic_blame(&after_index, &produced);
+//RS     let renamed = rows
+//RS         .iter()
+//RS         .find(|row| row.identity.ends_with("summarize"))
+//RS         .expect("renamed definition");
+//RS     assert_eq!(
+//RS         renamed.operation.as_ref().and_then(|op| op.from.as_deref()),
+//RS         Some("report")
+//RS     );
+//RS 
+//RS     let hand_edit_rows = semantic_blame(&after_index, &[]);
+//RS     assert!(hand_edit_rows.iter().all(|row| row.operation.is_none()));
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn blame_matches_recorded_targets_without_text_inference() {
+//RS     let (root, path) = fixture("receipt");
+//RS     let source = "fn summarize() -[]> Int { return 1 }\nfn run() { print(summarize()) }\n";
+//RS     fs::write(&path, source).unwrap();
+//RS     let index = open(&path).expect("index");
+//RS     let op = SemanticOp {
+//RS         kind: "rename".to_string(),
+//RS         rule_id: Some("test".to_string()),
+//RS         from: Some("report".to_string()),
+//RS         to: Some("summarize".to_string()),
+//RS         node: None,
+//RS         match_template: None,
+//RS         replace_template: None,
+//RS         targets: vec![SemanticOpTarget {
+//RS             stable_id: "def:before".to_string(),
+//RS             before: "report".to_string(),
+//RS             after: "summarize".to_string(),
+//RS             kind: "function".to_string(),
+//RS             module_path: "run".to_string(),
+//RS         }],
+//RS         files: Vec::new(),
+//RS     };
+//RS     let rows = semantic_blame(&index, &[op]);
+//RS     assert!(rows
+//RS         .iter()
+//RS         .find(|row| row.identity.ends_with("summarize"))
+//RS         .and_then(|row| row.operation.as_ref())
+//RS         .is_some_and(|operation| operation.kind == "rename"));
+//RS     let _ = fs::remove_dir_all(root);
+//RS }
+// END-PORT-PENDING 0986 tests/semantic_ops.rs:1-77
+

@@ -1,0 +1,860 @@
+// HistoryPlatform.rs:1–974, secure native history storage.
+// H1/H2 own storage and OS security policy, not History.rs retention or codec.
+// R10's sole repl_history_render(entries:[String])->[U8] renders ONCE; rewrite
+// below accepts those exact bytes. read returns raw bytes for R10 tail recovery.
+// Core/sys/host is the sole OS binding/layout/error owner (RtW31-OS-IMPORTS).
+// Native activation is gated by #4494 and the canonical raw atomic counter;
+// this file must never substitute pathname locks or Rust history callbacks.
+
+use core.files.runtime.kernel_path_components as repl_history_paths
+use core.files.host.retained_descriptor as repl_history_descriptors
+use core.sys.host.unix_fd as repl_history_unix
+use core.sys.host.windows_file as repl_history_win
+use core.sys.host.retained_buffers as repl_history_storage
+use core.sys.host.retained_counter as repl_history_atomic
+use core.sys.host.retained_clock as repl_history_clock
+use core.mem as repl_history_mem
+use core.sys as repl_history_sys
+use core.text as repl_history_text
+use c.c as repl_history_libc
+use c.kernel32 as repl_history_kernel32
+
+// Required canonical #4494 contracts, ratified by Main through ToolsLead-4:
+// unix_fd.stat(fd) has mode:U32,nlink:U64,dev:U64,ino:U64 from selected ABI;
+// last_error(operation,path) captures native code AND native text immediately.
+// retained_clock.monotonic_ns()/sleep_ms() are real native time primitives.
+// bytes[_mut]_ptr/wide[_mut]_ptr borrow contiguous payload, NEVER a list header.
+// Raw C imports are supplied only by the Runtime owner, selected per target.
+// The counter is one Runtime Relaxed old-value primitive, not a local engine.
+// Final required insertion homes/signatures are published by the sole Runtime
+// descriptor owner in RETAINED-DESCRIPTOR-ABI.md. Native proof is additionally
+// gated by #4392 (retained payload loans) and #4483 (selected target widths),
+// including pointer_bytes()/invalid_handle() and relative NT open_child.
+
+#Static REPL_HISTORY_ROOT_NAME :: [U8]{47, 0}
+#Static REPL_HISTORY_DIRECTORY_NAME :: [U8]{106, 101, 116, 0}
+#Static REPL_HISTORY_FILE_NAME :: [U8]{114, 101, 112, 108, 45, 104, 105, 115, 116, 111, 114, 121, 0}
+
+pub struct ReplHistoryUnixFlags {
+    pub read_only: Int
+    pub write_only: Int
+    pub directory: Int
+    pub nofollow: Int
+    pub cloexec: Int
+    pub create: Int
+    pub excl: Int
+}
+
+// Rust flags_for_target:22–106. Values are target ABI values, not host guesses.
+pub fn repl_history_flags_for_target(os: String, arch: String) -> ReplHistoryUnixFlags? Never! {
+    base := ReplHistoryUnixFlags{read_only: 0, write_only: 1, directory: 65536, nofollow: 131072, cloexec: 524288, create: 64, excl: 128}
+    if os == "linux" {
+        if arch == "x86" || arch == "x86_64" || arch == "s390x" || arch == "riscv32" || arch == "riscv64" || arch == "loongarch64" || arch == "csky" || arch == "hexagon" -> return Val(base)
+        if arch == "arm" || arch == "aarch64" || arch == "powerpc" || arch == "powerpc64" || arch == "m68k" {
+            base.directory = 16384
+            base.nofollow = 32768
+            return Val(base)
+        }
+        if arch == "mips" || arch == "mips64" {
+            base.create = 256
+            base.excl = 1024
+            return Val(base)
+        }
+        if arch == "sparc" || arch == "sparc64" {
+            base.cloexec = 4194304
+            base.create = 512
+            base.excl = 2048
+            return Val(base)
+        }
+        return None
+    }
+    if os == "android" {
+        if arch == "x86" || arch == "x86_64" -> return Val(base)
+        if arch == "arm" || arch == "aarch64" {
+            base.directory = 16384
+            base.nofollow = 32768
+            return Val(base)
+        }
+        if arch == "riscv64" {
+            base.directory = 2097152
+            base.nofollow = 4194304
+            return Val(base)
+        }
+        return None
+    }
+    bsd := ReplHistoryUnixFlags{read_only: 0, write_only: 1, directory: 0, nofollow: 256, cloexec: 0, create: 512, excl: 2048}
+    if os == "macos" || os == "ios" || os == "tvos" || os == "watchos" || os == "visionos" {
+        bsd.directory = 1048576
+        bsd.cloexec = 16777216
+        return Val(bsd)
+    }
+    if os == "freebsd" {
+        bsd.directory = 131072
+        bsd.cloexec = 1048576
+        return Val(bsd)
+    }
+    if os == "dragonfly" {
+        bsd.directory = 134217728
+        bsd.cloexec = 131072
+        return Val(bsd)
+    }
+    if os == "netbsd" {
+        bsd.directory = 2097152
+        bsd.cloexec = 4194304
+        return Val(bsd)
+    }
+    if os == "openbsd" {
+        bsd.directory = 131072
+        bsd.cloexec = 65536
+        return Val(bsd)
+    }
+    None
+}
+
+fn repl_history_context(message: ^String) -> IOContext Never! {
+    IOContext{operation: .Resolve, resource: None, os_code: None, cause: Val(message)}
+}
+fn repl_history_invalid(message: ^String) -> IOError Never! { IOError.InvalidInput(repl_history_context(message)) }
+fn repl_history_denied(message: ^String) -> IOError Never! { IOError.PermissionDenied(repl_history_context(message)) }
+fn repl_history_timeout() -> IOError Never! {
+    IOError.TimedOut(repl_history_context("history transaction lock timed out after 2 seconds"))
+}
+// Core has no Unsupported variant; Other is its canonical unsupported rail.
+fn repl_history_unsupported(message: ^String) -> IOError Never! { IOError.Other(repl_history_context(message)) }
+fn repl_history_error_code(error: IOError) -> Int? Never! {
+    if error == {
+        .InvalidInput(c) -> c.os_code
+        .NotFound(c) -> c.os_code
+        .PermissionDenied(c) -> c.os_code
+        .TimedOut(c) -> c.os_code
+        .Cancelled(c) -> c.os_code
+        .Closed(c) -> c.os_code
+        .Protocol(c) -> c.os_code
+        .Other(c) -> c.os_code
+        .ResourceLimit(_) -> None
+    }
+}
+fn repl_history_errno_is(error: IOError, code: Int) -> Bool Never! {
+    repl_history_error_code(error) == (Val(code))
+}
+fn repl_history_write_zero() -> IOError Never! {
+    IOError.Other(IOContext{operation: .Write, resource: None, os_code: None, cause: Val("failed to write whole buffer")})
+}
+fn repl_history_next_temp() -[Env]> String Never! {
+    // Shared Runtime process-static raw cell: exact Relaxed fetch-add OLD value,
+    // wrapping U64, initialized zero. No Tools-local cell or counter algorithm.
+    counter :: repl_history_atomic.temp_counter_next()
+    ".repl-history.{repl_history_sys.getpid()}.{counter}.tmp"
+}
+
+// File.set_permissions uses cvt_r; unlike explicit mkdirat/openat/dir-fsync,
+// the Rust std descriptor chmod retries EINTR. Tightening never follows a path.
+fn repl_history_unix_fchmod(fd: I32, mode: U32) -[FS]> IOError! {
+    loop {
+        #Unsafe("fchmod retries EINTR on the same retained descriptor; first noninterrupted native error survives cleanup") {
+            if repl_history_libc.fchmod(fd, mode) == (I32{0}) -> return Ok()
+            error :: repl_history_unix.last_error(.Write, None)
+            if repl_history_errno_is(error, 4) -> next
+            return Err(error)
+        }
+    }
+}
+fn repl_history_unix_sync_file(file: ReplHistoryUnixFile) -[FS]> IOError! {
+    loop {
+        #Unsafe("canonical selected-target file sync uses F_FULLFSYNC on Apple, fsync elsewhere; std sync_all retries EINTR") {
+            if repl_history_unix.sync_file(file.fd) == (I32{0}) -> return Ok()
+            error :: repl_history_unix.last_error(.Flush, None)
+            if repl_history_errno_is(error, 4) -> next
+            return Err(error)
+        }
+    }
+}
+
+// Rust unix_open_flags:108–119; do not refuse a table-supported platform merely
+// because its ABI provider has not yet been activated.
+pub fn repl_history_unix_open_flags() -[Env]> ReplHistoryUnixFlags IOError! {
+    os :: repl_history_sys.name()
+    arch :: repl_history_sys.arch()
+    flags :: repl_history_flags_for_target(os, arch) ?? return Err(repl_history_unsupported("secure history storage is unsupported on {os} {arch}"))
+    Ok(flags)
+}
+fn repl_history_i32(value: Int) -> I32 Never! { I32.from_int(value) ?? panic("history ABI flag exceeds I32") }
+fn repl_history_count(value: Int) -> U64 Never! { U64.from_int(value) ?? panic("history native buffer exceeds size_t") }
+
+// CString owns the only necessary component copy: C requires a terminating NUL,
+// whereas the path cursor borrows a possibly interior, nonterminated span.
+fn repl_history_unix_name(path: repl_history_paths.OsPath, span: repl_history_paths.PathSpan) -> [U8] IOError! {
+    out := [U8]{}
+    loop at in span.start..<span.end {
+        byte :: path.encoded[at]
+        if byte == (U8{0}) -> return Err(repl_history_invalid("NUL in state path"))
+        &out.push(byte)
+    }
+    &out.push(U8{0})
+    Ok(out)
+}
+
+struct ReplHistoryUnixFile { fd: I32 }
+impl ReplHistoryUnixFile.Close {
+    fn close(^self) {
+        // File drop ignores close's error, and never retries EINTR: the original
+        // descriptor may already be closed/reused. No cleanup replaces errno.
+        #Unsafe("owned Unix descriptor is released exactly once, never retried") {
+            _ := repl_history_libc.close(self.fd)
+        }
+    }
+}
+struct ReplHistoryUnixDirectory { file: ReplHistoryUnixFile }
+impl ReplHistoryUnixDirectory.Close {
+    fn close(^self) { close(^self.file) }
+}
+struct ReplHistoryUnixLock { file: ReplHistoryUnixFile }
+impl ReplHistoryUnixLock.Close {
+    fn close(^self) {
+        #Unsafe("drop releases flock on this held open-file description before close") {
+            _ := repl_history_libc.flock(self.file.fd, I32{8})
+        }
+        close(^self.file)
+    }
+}
+
+// Rust descend:298–320. Every lookup is relative to the retained parent, never
+// to a newly resolved pathname; only ENOENT may create, only EEXIST may race.
+fn repl_history_unix_descend(parent: ReplHistoryUnixFile, name: [U8], create: Bool, abi: ReplHistoryUnixFlags) -[FS]> ReplHistoryUnixFile IOError! {
+    #Unsafe("NUL-terminated component payload lives across synchronous openat/mkdirat; parent fd is retained") {
+        pointer :: repl_history_mem.Ptr<I8>.from_addr(repl_history_mem.address_of(repl_history_storage.bytes_ptr(name, 0).*))
+        flags :: repl_history_i32(abi.read_only | abi.directory | abi.nofollow | abi.cloexec)
+        fd := repl_history_libc.openat(parent.fd, pointer, flags, U32{0})
+        if fd < (I32{0}) {
+            error :: repl_history_unix.last_error(.Resolve, None)
+            if create && error == .NotFound(_) {
+                if repl_history_libc.mkdirat(parent.fd, pointer, U32{448}) != (I32{0}) {
+                    mkdir_error :: repl_history_unix.last_error(.Write, None)
+                    if !repl_history_errno_is(mkdir_error, 17) -> return Err(mkdir_error)
+                }
+                fd = repl_history_libc.openat(parent.fd, pointer, flags, U32{0})
+                if fd < (I32{0}) -> return Err(repl_history_unix.last_error(.Resolve, None))
+            } else -> return Err(error)
+        }
+        Ok(ReplHistoryUnixFile{fd: fd})
+    }
+}
+
+fn repl_history_unix_open(root: repl_history_paths.OsPath, abi: ReplHistoryUnixFlags) -[FS]> ReplHistoryUnixDirectory IOError! {
+    if !repl_history_paths.is_absolute(root) -> return Err(repl_history_invalid("platform state directory is not absolute"))
+    slash :: REPL_HISTORY_ROOT_NAME
+    fd := I32{-1}
+    loop {
+        #Unsafe("absolute root uses nofollow/directory flags; std OpenOptions retries EINTR, unlike the explicit component openat calls") {
+            p :: repl_history_mem.Ptr<I8>.from_addr(repl_history_mem.address_of(repl_history_storage.bytes_ptr(slash, 0).*))
+            fd = repl_history_libc.open(p, repl_history_i32(abi.read_only | abi.directory | abi.nofollow | abi.cloexec), U32{0})
+            if fd < (I32{0}) {
+                error :: repl_history_unix.last_error(.Resolve, None)
+                if repl_history_errno_is(error, 4) -> next
+                return Err(error)
+            }
+        }
+        break
+    }
+    current := ReplHistoryUnixFile{fd: fd}
+    cursor := repl_history_paths.components(root)
+    loop {
+        component :: repl_history_paths.next(root, &cursor) ?? break
+        if component.kind == {
+            .RootDir -> {}
+            .Normal -> {
+                name :: repl_history_unix_name(root, component.span) ?? return Err(err)
+                child :: repl_history_unix_descend(current, name, true, abi) ?? return Err(err)
+                close(^current)
+                current = child
+            }
+            else -> return Err(repl_history_invalid("platform state path has a non-normal component"))
+        }
+    }
+    dir :: repl_history_unix_descend(current, REPL_HISTORY_DIRECTORY_NAME, true, abi) ?? return Err(err)
+    repl_history_unix_fchmod(dir.fd, U32{448}) ?? return Err(err)
+    Ok(ReplHistoryUnixDirectory{file: dir})
+}
+
+fn repl_history_unix_lock(dir: ReplHistoryUnixDirectory) -[FS, Time, Time.Wait]> ReplHistoryUnixLock IOError! {
+    cloned := I32{-1}
+    #Unsafe("canonical dup_cloexec preserves std try_clone's CLOEXEC and open-file description, without re-resolving pathname") {
+        cloned = repl_history_unix.dup_cloexec(dir.file.fd)
+        if cloned < (I32{0}) -> return Err(repl_history_unix.last_error(.Resolve, None))
+    }
+    file :: ReplHistoryUnixFile{fd: cloned}
+    deadline :: (repl_history_clock.monotonic_ns() ?? return Err(err)) + 2000000000
+    loop {
+        #Unsafe("exclusive nonblocking flock on the held directory, exactly the Rust lock scope") {
+            if repl_history_libc.flock(file.fd, I32{6}) == (I32{0}) -> return Ok(ReplHistoryUnixLock{file: file})
+        }
+        // Rust retries ALL flock failures; lock expiry has precedence, not a
+        // new immediate errno failure. Wall-clock adjustments cannot extend it.
+        if (repl_history_clock.monotonic_ns() ?? return Err(err)) >= deadline -> return Err(repl_history_timeout())
+        repl_history_clock.sleep_ms(10) ?? return Err(err)
+    }
+}
+
+fn repl_history_unix_read(dir: ReplHistoryUnixDirectory) -[FS, Env]> [U8]? IOError! {
+    abi :: repl_history_unix_open_flags() ?? return Err(err)
+    name :: REPL_HISTORY_FILE_NAME
+    fd := I32{-1}
+    #Unsafe("history file is opened nofollow relative to the retained directory descriptor") {
+        p :: repl_history_mem.Ptr<I8>.from_addr(repl_history_mem.address_of(repl_history_storage.bytes_ptr(name, 0).*))
+        fd = repl_history_libc.openat(dir.file.fd, p, repl_history_i32(abi.read_only | abi.nofollow | abi.cloexec), U32{0})
+        if fd < (I32{0}) {
+            error :: repl_history_unix.last_error(.Read, None)
+            if error == .NotFound(_) -> return Ok(None)
+            return Err(error)
+        }
+    }
+    file :: ReplHistoryUnixFile{fd: fd}
+    metadata :: repl_history_unix.stat(file.fd) ?? return Err(err)
+    if (metadata.mode & U32{61440}) != (U32{32768}) || metadata.nlink != (U64{1}) -> return Err(repl_history_denied("history object is linked or not a regular file"))
+    repl_history_unix_fchmod(file.fd, U32{384}) ?? return Err(err)
+    bytes := [U8]{}
+    loop {
+        start :: bytes.len()
+        // Grow initialized destination storage once; native IO fills the actual
+        // result, not an intermediate buffer requiring another whole-byte copy.
+        loop _ in 0..<8192 -> &bytes.push(U8{0})
+        amount := I64{0}
+        loop {
+            #Unsafe("mutable native loan covers initialized destination payload only; EINTR retries the same live buffer without regrowth") {
+                amount = repl_history_unix.read(file.fd, repl_history_storage.bytes_mut_ptr(&bytes, start), U64{8192})
+                if amount < (I64{0}) {
+                    error :: repl_history_unix.last_error(.Read, None)
+                    if repl_history_errno_is(error, 4) -> next
+                    return Err(error)
+                }
+            }
+            break
+        }
+        end :: start + Int.from_i64(amount)
+        loop bytes.len() > end -> _ := &bytes.pop()
+        if amount == (I64{0}) -> return Ok(Val(bytes))
+    }
+}
+
+fn repl_history_unix_write_all(file: ReplHistoryUnixFile, bytes: [U8]) -[FS, Env]> IOError! {
+    at := 0
+    os :: repl_history_sys.name()
+    apple :: os == "macos" || os == "ios" || os == "tvos" || os == "watchos" || os == "visionos"
+    // Rust FileDesc READ_LIMIT applies to writes too: Apple rejects INT_MAX,
+    // other Unix targets cap at SSIZE_MAX, derived from true target usize facts.
+    limit :: if apple -> 2147483646 else -> Int.from_u64(repl_history_sys.usize_max() /% U64{2})
+    loop at < bytes.len() {
+        amount := I64{0}
+        remaining :: bytes.len() - at
+        count :: if remaining > limit -> limit else -> remaining
+        #Unsafe("write borrows the remaining original payload, with no slice allocation; handles short writes and EINTR") {
+            amount = repl_history_unix.write(file.fd, repl_history_storage.bytes_ptr(bytes, at), repl_history_count(count))
+            if amount < (I64{0}) {
+                error :: repl_history_unix.last_error(.Write, None)
+                if repl_history_errno_is(error, 4) -> next
+                return Err(error)
+            }
+        }
+        if amount == (I64{0}) -> return Err(repl_history_write_zero())
+        at += Int.from_i64(amount)
+    }
+    Ok()
+}
+
+// Rust rewrite:414–469. The temp is create-new, pid/counter named and held-root
+// relative. First failure survives best-effort cleanup; rename precedes dir sync.
+fn repl_history_unix_rewrite(dir: ReplHistoryUnixDirectory, bytes: [U8]) -[FS, Env]> IOError! {
+    abi :: repl_history_unix_open_flags() ?? return Err(err)
+    temp :: repl_history_next_temp()
+    temp_name := temp.bytes()
+    &temp_name.push(U8{0})
+    destination :: REPL_HISTORY_FILE_NAME
+    fd := I32{-1}
+    #Unsafe("create-new nofollow temp is confined to held directory; NUL buffers live throughout synchronous calls") {
+        p :: repl_history_mem.Ptr<I8>.from_addr(repl_history_mem.address_of(repl_history_storage.bytes_ptr(temp_name, 0).*))
+        fd = repl_history_libc.openat(dir.file.fd, p, repl_history_i32(abi.write_only | abi.create | abi.excl | abi.nofollow | abi.cloexec), U32{384})
+        if fd < (I32{0}) -> return Err(repl_history_unix.last_error(.Write, None))
+    }
+    file :: ReplHistoryUnixFile{fd: fd}
+    result :: repl_history_unix_publish(dir, file, bytes, temp_name, destination)
+    if result == .Err(_) {
+        #Unsafe("error cleanup unlinks only the pid/counter temp under the held root; it must not replace the captured original error") {
+            p :: repl_history_mem.Ptr<I8>.from_addr(repl_history_mem.address_of(repl_history_storage.bytes_ptr(temp_name, 0).*))
+            _ := repl_history_libc.unlinkat(dir.file.fd, p, I32{0})
+        }
+    }
+    result
+}
+fn repl_history_unix_publish(dir: ReplHistoryUnixDirectory, file: ReplHistoryUnixFile, bytes: [U8], temp: [U8], destination: [U8]) -[FS, Env]> IOError! {
+    repl_history_unix_write_all(file, bytes) ?? return Err(err)
+    repl_history_unix_sync_file(file) ?? return Err(err)
+    #Unsafe("persist file bytes before atomic held-root rename, then persist the directory; capture each failure before cleanup") {
+        old :: repl_history_mem.Ptr<I8>.from_addr(repl_history_mem.address_of(repl_history_storage.bytes_ptr(temp, 0).*))
+        new :: repl_history_mem.Ptr<I8>.from_addr(repl_history_mem.address_of(repl_history_storage.bytes_ptr(destination, 0).*))
+        if repl_history_libc.renameat(dir.file.fd, old, dir.file.fd, new) != (I32{0}) -> return Err(repl_history_unix.last_error(.Write, None))
+        if repl_history_libc.fsync(dir.file.fd) != (I32{0}) -> return Err(repl_history_unix.last_error(.Flush, None))
+    }
+    Ok()
+}
+fn repl_history_unix_clear(dir: ReplHistoryUnixDirectory) -[FS]> IOError! {
+    name :: REPL_HISTORY_FILE_NAME
+    #Unsafe("clear unlinks only the retained-root child; ENOENT still requires directory sync") {
+        p :: repl_history_mem.Ptr<I8>.from_addr(repl_history_mem.address_of(repl_history_storage.bytes_ptr(name, 0).*))
+        if repl_history_libc.unlinkat(dir.file.fd, p, I32{0}) != (I32{0}) {
+            error :: repl_history_unix.last_error(.Write, None)
+            if error != .NotFound(_) -> return Err(error)
+        }
+        if repl_history_libc.fsync(dir.file.fd) != (I32{0}) -> return Err(repl_history_unix.last_error(.Flush, None))
+    }
+    Ok()
+}
+
+struct ReplHistoryWindowsFile { handle: *U8 }
+impl ReplHistoryWindowsFile.Close {
+    fn close(^self) {
+        #Unsafe("owned full-width HANDLE is closed exactly once; cleanup cannot replace the already captured primary error") {
+            _ := repl_history_kernel32.close_handle(self.handle)
+        }
+    }
+}
+struct ReplHistoryWindowsIdentity {
+    volume_serial: U32
+    index_high: U32
+    index_low: U32
+}
+struct ReplHistoryWindowsDirectory {
+    path: repl_history_paths.OsPath
+    file: ReplHistoryWindowsFile
+    final_path: String
+    identity: ReplHistoryWindowsIdentity
+}
+impl ReplHistoryWindowsDirectory.Close {
+    fn close(^self) { close(^self.file) }
+}
+enum ReplHistoryWindowsOverlapped {
+    Word32(repl_history_win.WindowsOverlapped32)
+    Word64(repl_history_win.WindowsOverlapped64)
+}
+struct ReplHistoryWindowsLock {
+    file: ReplHistoryWindowsFile
+    overlapped: ReplHistoryWindowsOverlapped
+}
+fn repl_history_windows_overlapped() -> ReplHistoryWindowsOverlapped Never! {
+    #Unsafe("OVERLAPPED event is a real null native pointer, with native-width zeroed internal words") {
+        null :: repl_history_mem.Ptr<U8>.from_addr(0)
+        if repl_history_win.pointer_bytes() == 4 -> return ReplHistoryWindowsOverlapped.Word32(repl_history_win.WindowsOverlapped32{internal: U32{0}, internal_high: U32{0}, offset: U32{0}, offset_high: U32{0}, event: null})
+        ReplHistoryWindowsOverlapped.Word64(repl_history_win.WindowsOverlapped64{internal: U64{0}, internal_high: U64{0}, offset: U32{0}, offset_high: U32{0}, event: null})
+    }
+}
+impl ReplHistoryWindowsLock.Close {
+    fn close(^self) {
+        #Unsafe("unlock the same retained handle and one-byte range/zero offsets before closing it; unlock failure is ignored on drop as in Rust") {
+            if self.overlapped == {
+                .Word32(slot) -> {
+                    p :: repl_history_mem.Ptr<repl_history_win.WindowsOverlapped32>.from_addr(repl_history_mem.address_of(slot))
+                    _ := repl_history_kernel32.unlock_file_ex32(self.file.handle, U32{0}, U32{1}, U32{0}, p)
+                }
+                .Word64(slot) -> {
+                    p :: repl_history_mem.Ptr<repl_history_win.WindowsOverlapped64>.from_addr(repl_history_mem.address_of(slot))
+                    _ := repl_history_kernel32.unlock_file_ex64(self.file.handle, U32{0}, U32{1}, U32{0}, p)
+                }
+            }
+        }
+        close(^self.file)
+    }
+}
+fn repl_history_windows_wide(path: repl_history_paths.OsPath) -> [U16] Never! {
+    wide := repl_history_paths.to_windows_wide(path)
+    &wide.push(U16{0})
+    wide
+}
+fn repl_history_windows_open_file(path: repl_history_paths.OsPath, access: U32, creation: U32, flags: U32) -[FS]> ReplHistoryWindowsFile IOError! {
+    wide :: repl_history_win.wide_for_win32(path) ?? return Err(err)
+    #Unsafe("CreateFileW borrows NUL-terminated UTF16, preserves raw surrogates, uses full-width native handle and share read/write/delete") {
+        null :: repl_history_mem.Ptr<U8>.from_addr(0)
+        handle :: repl_history_kernel32.create_file_w(repl_history_storage.wide_ptr(wide, 0), access, U32{7}, null, creation, flags, null)
+        if handle == (repl_history_win.invalid_handle()) -> return Err(repl_history_win.last_error(.Resolve, Val(path)))
+        Ok(ReplHistoryWindowsFile{handle: handle})
+    }
+}
+
+// Rust reject_windows_reparse:874–929. Attribute failure intentionally uses the
+// same permission error as a reparse attribute; CreateFileW failure uses native.
+fn repl_history_windows_reject_reparse(path: repl_history_paths.OsPath, directory: Bool) -[FS]> IOError! {
+    wide :: repl_history_windows_wide(path)
+    flags := U32{2097152}
+    if directory -> flags = flags | U32{33554432}
+    #Unsafe("original reparse check uses untransformed raw UTF16 for attributes and OPEN_REPARSE_POINT CreateFileW, then closes the checked full-width HANDLE") {
+        attrs :: repl_history_kernel32.get_file_attributes_w(repl_history_storage.wide_ptr(wide, 0))
+        if attrs == (U32.MAX) || (attrs & U32{1024}) != (U32{0}) -> return Err(repl_history_denied("state path contains a Windows reparse point"))
+        null :: repl_history_mem.Ptr<U8>.from_addr(0)
+        handle :: repl_history_kernel32.create_file_w(repl_history_storage.wide_ptr(wide, 0), U32{2147483648}, U32{7}, null, U32{3}, flags, null)
+        if handle == (repl_history_win.invalid_handle()) -> return Err(repl_history_win.last_error(.Resolve, Val(path)))
+        checked :: ReplHistoryWindowsFile{handle: handle}
+        close(^checked)
+    }
+    Ok()
+}
+fn repl_history_windows_exists(path: repl_history_paths.OsPath) -[FS]> Bool Never! {
+    // The generic canonical native exists follows metadata/reparse semantics,
+    // including a dangling link and inaccessible path returning false. Raw
+    // GetFileAttributesW alone is NOT Rust Path.exists.
+    repl_history_descriptors.exists(path)
+}
+fn repl_history_windows_ensure_directory(path: repl_history_paths.OsPath) -[FS]> IOError! {
+    if !repl_history_windows_exists(path) {
+        wide :: repl_history_win.wide_for_win32(path) ?? return Err(err)
+        #Unsafe("create only this normal path component; a racing existing object remains a native create error exactly as Rust") {
+            null :: repl_history_mem.Ptr<U8>.from_addr(0)
+            if repl_history_kernel32.create_directory_w(repl_history_storage.wide_ptr(wide, 0), null) == (I32{0}) -> return Err(repl_history_win.last_error(.Write, Val(path)))
+        }
+    }
+    repl_history_windows_reject_reparse(path, true)
+}
+fn repl_history_windows_open(root: repl_history_paths.OsPath) -[FS]> ReplHistoryWindowsDirectory IOError! {
+    if !repl_history_paths.is_absolute(root) -> return Err(repl_history_invalid("state path is not absolute"))
+    current := repl_history_paths.from_encoded([U8]{}, repl_history_paths.PathPlatform.Windows)
+    cursor := repl_history_paths.components(root)
+    loop {
+        component :: repl_history_paths.next(root, &cursor) ?? break
+        if component.kind == {
+            .Prefix -> repl_history_paths.push_component(&current, root, component)
+            .RootDir -> repl_history_paths.push_component(&current, root, component)
+            .Normal -> {
+                repl_history_paths.push_component(&current, root, component)
+                repl_history_windows_ensure_directory(current) ?? return Err(err)
+            }
+            else -> return Err(repl_history_invalid("non-normal state path"))
+        }
+    }
+    repl_history_paths.push(&current, repl_history_paths.from_text("jet", repl_history_paths.PathPlatform.Windows))
+    repl_history_windows_ensure_directory(current) ?? return Err(err)
+    file :: repl_history_windows_open_file(current, U32{3221225472}, U32{3}, U32{35651584}) ?? return Err(err)
+    final_path :: repl_history_windows_final_path(file) ?? return Err(err)
+    identity :: repl_history_windows_identity(file) ?? return Err(err)
+    Ok(ReplHistoryWindowsDirectory{path: current, file: file, final_path: final_path, identity: identity})
+}
+
+// Rust windows_final_path:841–872. The first query includes a terminating NUL;
+// the successful count excludes it. A changed/insufficient buffer is a native
+// failure, NOT a retry or a truncated/forged identity.
+fn repl_history_windows_final_path(file: ReplHistoryWindowsFile) -[FS]> String IOError! {
+    needed := U32{0}
+    #Unsafe("size query uses null UTF16 buffer; native result is checked before allocation") {
+        null :: repl_history_mem.Ptr<U16>.from_addr(0)
+        needed = repl_history_kernel32.get_final_path_name_by_handle_w(file.handle, null, U32{0}, U32{0})
+        if needed == (U32{0}) -> return Err(repl_history_win.last_error(.Resolve, None))
+    }
+    wide := [U16]{}
+    loop _ in 0..<Int.from_u32(needed) -> &wide.push(U16{0})
+    written := U32{0}
+    #Unsafe("GetFinalPathNameByHandleW fills one live initialized UTF16 buffer; zero/out-of-capacity result is checked before reading") {
+        written = repl_history_kernel32.get_final_path_name_by_handle_w(file.handle, repl_history_storage.wide_mut_ptr(&wide, 0), needed, U32{0})
+        if written == (U32{0}) || written >= needed -> return Err(repl_history_win.last_error(.Resolve, None))
+    }
+    loop wide.len() > Int.from_u32(written) -> _ := &wide.pop()
+    native_path :: repl_history_paths.from_windows_wide(wide)
+    Ok(repl_history_text.lower(repl_history_paths.display(native_path)))
+}
+fn repl_history_windows_info(file: ReplHistoryWindowsFile) -[FS]> repl_history_win.ByHandleFileInformation IOError! {
+    zero :: repl_history_win.WindowsFileTime{low: U32{0}, high: U32{0}}
+    info := repl_history_win.ByHandleFileInformation{attributes: U32{0}, creation: zero, access: zero, write: zero, volume_serial: U32{0}, size_high: U32{0}, size_low: U32{0}, nlink: U32{0}, index_high: U32{0}, index_low: U32{0}}
+    #Unsafe("canonical C-layout handle information is read only after native success from its live initialized out slot") {
+        p :: repl_history_mem.Ptr<repl_history_win.ByHandleFileInformation>.from_addr(repl_history_mem.address_of(info))
+        if repl_history_kernel32.get_file_information_by_handle(file.handle, p) == (I32{0}) -> return Err(repl_history_win.last_error(.Resolve, None))
+        info = ~p.*
+    }
+    Ok(info)
+}
+fn repl_history_windows_identity(file: ReplHistoryWindowsFile) -[FS]> ReplHistoryWindowsIdentity IOError! {
+    info :: repl_history_windows_info(file) ?? return Err(err)
+    Ok(ReplHistoryWindowsIdentity{volume_serial: info.volume_serial, index_high: info.index_high, index_low: info.index_low})
+}
+fn repl_history_windows_reject_handle_reparse(file: ReplHistoryWindowsFile) -[FS]> IOError! {
+    info :: repl_history_windows_info(file) ?? return Err(err)
+    if (info.attributes & U32{1024}) != (U32{0}) -> return Err(repl_history_denied("state path contains a Windows reparse point"))
+    Ok()
+}
+// Owner-ratified Windows cutover: unlike the original pathname child opens,
+// this Core primitive calls NtCreateFile with OBJECT_ATTRIBUTES.RootDirectory
+// equal to this retained HANDLE. Core owns exact NT ABI/UTF16/NTSTATUS mapping;
+// #4494 gates that capability, never a CreateFileW pathname fallback.
+fn repl_history_windows_open_child(dir: ReplHistoryWindowsDirectory, child: repl_history_paths.OsPath, component: repl_history_paths.PathComponent, access: U32, creation: U32) -[FS]> ReplHistoryWindowsFile IOError! {
+    #Unsafe("native NT relative open is rooted at held directory HANDLE with share-all/open-reparse semantics; child is a single internal component") {
+        // All callers construct one fixed or pid/counter-formatted ASCII name.
+        // Probe and open share the same native owner and its Normal span.
+        handle :: repl_history_win.open_child(dir.file.handle, child, component, access, U32{7}, creation, U32{2097152}) ?? return Err(err)
+        Ok(ReplHistoryWindowsFile{handle: handle})
+    }
+}
+fn repl_history_windows_verify(dir: ReplHistoryWindowsDirectory) -[FS]> IOError! {
+    repl_history_windows_reject_reparse(dir.path, true) ?? return Err(err)
+    current :: repl_history_windows_open_file(dir.path, U32{2147483648}, U32{3}, U32{35651584}) ?? return Err(err)
+    identity :: repl_history_windows_identity(current) ?? return Err(err)
+    held_identity :: repl_history_windows_identity(dir.file) ?? return Err(err)
+    if identity != dir.identity || held_identity != dir.identity -> return Err(repl_history_denied("state directory identity changed"))
+    if (repl_history_windows_final_path(current) ?? return Err(err)) != dir.final_path -> return Err(repl_history_denied("state directory identity changed"))
+    Ok()
+}
+fn repl_history_windows_trim_separators(path: String) -> String Never! {
+    end := path.len()
+    loop end > 0 {
+        char :: path.slice(end - 1, end)
+        if char != "\\" && char != "/" -> break
+        end -= 1
+    }
+    path.slice(0, end)
+}
+fn repl_history_windows_verify_child(dir: ReplHistoryWindowsDirectory, file: ReplHistoryWindowsFile) -[FS]> IOError! {
+    child :: repl_history_windows_final_path(file) ?? return Err(err)
+    // Reverify AFTER native relative child open. Same pathname/final-path text
+    // alone cannot prove identity after ordinary-directory substitution.
+    repl_history_windows_verify(dir) ?? return Err(err)
+    repl_history_windows_reject_handle_reparse(file) ?? return Err(err)
+    slash :: child.rfind("/")
+    backslash :: child.rfind("\\")
+    last :: if slash > backslash -> slash else -> backslash
+    parent :: if last < 0 -> "" else -> child.slice(0, last)
+    if repl_history_windows_trim_separators(parent) != repl_history_windows_trim_separators(dir.final_path) -> return Err(repl_history_denied("history object escaped held state directory"))
+    Ok()
+}
+fn repl_history_windows_lock(dir: ReplHistoryWindowsDirectory) -[FS, Time, Time.Wait]> ReplHistoryWindowsLock IOError! {
+    repl_history_windows_verify(dir) ?? return Err(err)
+    child :: repl_history_paths.from_text(".repl-history.lock", repl_history_paths.PathPlatform.Windows)
+    component :: repl_history_paths.PathComponent{kind: .Normal, span: repl_history_paths.PathSpan{start: 0, end: child.encoded.len()}}
+    file :: repl_history_windows_open_child(dir, child, component, U32{3221225472}, U32{4}) ?? return Err(err)
+    repl_history_windows_verify_child(dir, file) ?? return Err(err)
+    deadline :: (repl_history_clock.monotonic_ns() ?? return Err(err)) + 2000000000
+    loop {
+        overlapped := repl_history_windows_overlapped()
+        acquired := false
+        #Unsafe("native-width zeroed OVERLAPPED locks one byte exclusively/immediately; no pathname lock or overlapped async IO") {
+            if overlapped == {
+                .Word32(slot) -> {
+                    p :: repl_history_mem.Ptr<repl_history_win.WindowsOverlapped32>.from_addr(repl_history_mem.address_of(slot))
+                    acquired = repl_history_kernel32.lock_file_ex32(file.handle, U32{3}, U32{0}, U32{1}, U32{0}, p) != (I32{0})
+                }
+                .Word64(slot) -> {
+                    p :: repl_history_mem.Ptr<repl_history_win.WindowsOverlapped64>.from_addr(repl_history_mem.address_of(slot))
+                    acquired = repl_history_kernel32.lock_file_ex64(file.handle, U32{3}, U32{0}, U32{1}, U32{0}, p) != (I32{0})
+                }
+            }
+        }
+        if acquired -> return Ok(ReplHistoryWindowsLock{file: file, overlapped: overlapped})
+        if (repl_history_clock.monotonic_ns() ?? return Err(err)) >= deadline -> return Err(repl_history_timeout())
+        repl_history_clock.sleep_ms(10) ?? return Err(err)
+    }
+}
+
+// Real synchronous Win32 IO, with full-width retained handle, initialized count
+// slot, native error capture before cleanup and exact short-read/write progress.
+fn repl_history_windows_read_all(file: ReplHistoryWindowsFile) -[FS]> [U8] IOError! {
+    bytes := [U8]{}
+    loop {
+        start :: bytes.len()
+        loop _ in 0..<8192 -> &bytes.push(U8{0})
+        amount := U32{0}
+        status := I32{0}
+        #Unsafe("ReadFile writes bounded live payload/count slot; null OVERLAPPED is synchronous and native-width selected") {
+            out :: repl_history_mem.Ptr<U32>.from_addr(repl_history_mem.address_of(amount))
+            buf :: repl_history_storage.bytes_mut_ptr(&bytes, start)
+            if repl_history_win.pointer_bytes() == 4 {
+                null :: repl_history_mem.Ptr<repl_history_win.WindowsOverlapped32>.from_addr(0)
+                status = repl_history_kernel32.read_file32(file.handle, buf, U32{8192}, out, null)
+            } else {
+                null :: repl_history_mem.Ptr<repl_history_win.WindowsOverlapped64>.from_addr(0)
+                status = repl_history_kernel32.read_file64(file.handle, buf, U32{8192}, out, null)
+            }
+            if status == (I32{0}) -> return Err(repl_history_win.last_error(.Read, None))
+            amount = out.*
+        }
+        end :: start + Int.from_u32(amount)
+        loop bytes.len() > end -> _ := &bytes.pop()
+        if amount == (U32{0}) -> return Ok(bytes)
+    }
+}
+fn repl_history_windows_write_all(file: ReplHistoryWindowsFile, bytes: [U8]) -[FS]> IOError! {
+    at := 0
+    loop at < bytes.len() {
+        remaining :: bytes.len() - at
+        chunk :: if remaining > 4294967295 -> U32.MAX else -> U32.from_int(remaining) ?? panic("bounded DWORD IO count")
+        amount := U32{0}
+        status := I32{0}
+        #Unsafe("WriteFile borrows remaining original bytes without slice copy and a live written-count slot; short writes advance once") {
+            out :: repl_history_mem.Ptr<U32>.from_addr(repl_history_mem.address_of(amount))
+            buf :: repl_history_storage.bytes_ptr(bytes, at)
+            if repl_history_win.pointer_bytes() == 4 {
+                null :: repl_history_mem.Ptr<repl_history_win.WindowsOverlapped32>.from_addr(0)
+                status = repl_history_kernel32.write_file32(file.handle, buf, chunk, out, null)
+            } else {
+                null :: repl_history_mem.Ptr<repl_history_win.WindowsOverlapped64>.from_addr(0)
+                status = repl_history_kernel32.write_file64(file.handle, buf, chunk, out, null)
+            }
+            if status == (I32{0}) -> return Err(repl_history_win.last_error(.Write, None))
+            amount = out.*
+        }
+        if amount == (U32{0}) -> return Err(repl_history_write_zero())
+        at += Int.from_u32(amount)
+    }
+    Ok()
+}
+fn repl_history_windows_read(dir: ReplHistoryWindowsDirectory) -[FS]> [U8]? IOError! {
+    repl_history_windows_verify(dir) ?? return Err(err)
+    child :: repl_history_paths.from_text("repl-history", repl_history_paths.PathPlatform.Windows)
+    component :: repl_history_paths.PathComponent{kind: .Normal, span: repl_history_paths.PathSpan{start: 0, end: child.encoded.len()}}
+    // Rust Path.exists follows reparse targets and maps ANY metadata error
+    // to false. The canonical relative probe must preserve that policy.
+    exists :: repl_history_win.exists_child(dir.file.handle, child, component)
+    // The same held root is reverified even on the absent/error branch.
+    repl_history_windows_verify(dir) ?? return Err(err)
+    if !exists -> return Ok(None)
+    // Once existence was true, an intervening open failure remains an error.
+    file :: repl_history_windows_open_child(dir, child, component, U32{2147483648}, U32{3}) ?? return Err(err)
+    repl_history_windows_verify_child(dir, file) ?? return Err(err)
+    Ok(Val(repl_history_windows_read_all(file) ?? return Err(err)))
+}
+
+// The same target-C FILE_RENAME_INFO owner/layout as the binding packet.
+// Six aligned U64 words cover the original sizeof(header)+22-byte tail on both
+// Win32 (38 bytes) and Win64 (46 bytes); no header-only or pointer-tail fake.
+#Layout(c)
+struct ReplHistoryWindowsRenameStorage { words: [U64#6] }
+fn repl_history_windows_replace(dir: ReplHistoryWindowsDirectory, file: ReplHistoryWindowsFile) -[FS]> IOError! {
+    name :: [U16]{114, 101, 112, 108, 45, 104, 105, 115, 116, 111, 114, 121}
+    storage := ReplHistoryWindowsRenameStorage{words: [U64#6]{0, 0, 0, 0, 0, 0}}
+    size :: repl_history_win.FileRenameInfo.$layout.size + name.len() * 2 - 2
+    #Unsafe("canonical C header and inline UTF16 tail occupy SAME aligned live storage; held directory HANDLE is the rename root") {
+        addr :: repl_history_mem.address_of(storage)
+        info :: repl_history_mem.Ptr<repl_history_win.FileRenameInfo>.from_addr(addr)
+        info.*.replace_if_exists = I32{1}
+        info.*.root_directory = dir.file.handle
+        info.*.file_name_length = U32{24}
+        tail :: repl_history_mem.address_of(info.*.file_name[0])
+        loop index in 0..<name.len() {
+            p :: repl_history_mem.Ptr<U16>.from_addr(tail + index * 2)
+            p.* = name[index]
+        }
+        raw :: repl_history_mem.Ptr<U8>.from_addr(addr)
+        if repl_history_kernel32.set_file_information_by_handle(file.handle, I32{3}, raw, U32.from_int(size) ?? panic("rename ABI size")) == (I32{0}) -> return Err(repl_history_win.last_error(.Write, None))
+    }
+    Ok()
+}
+fn repl_history_windows_dispose(file: ReplHistoryWindowsFile) -[FS]> IOError! {
+    disposition := repl_history_win.FileDispositionInfo{delete_file: U8{1}}
+    #Unsafe("FILE_DISPOSITION_INFO is exactly one initialized byte and applies to the verified HANDLE, not its mutable pathname") {
+        p :: repl_history_mem.Ptr<U8>.from_addr(repl_history_mem.address_of(disposition))
+        if repl_history_kernel32.set_file_information_by_handle(file.handle, I32{4}, p, U32{1}) == (I32{0}) -> return Err(repl_history_win.last_error(.Write, None))
+    }
+    Ok()
+}
+fn repl_history_windows_rewrite(dir: ReplHistoryWindowsDirectory, bytes: [U8]) -[FS, Env]> IOError! {
+    repl_history_windows_verify(dir) ?? return Err(err)
+    temp_name :: repl_history_next_temp()
+    child :: repl_history_paths.from_text(temp_name, repl_history_paths.PathPlatform.Windows)
+    component :: repl_history_paths.PathComponent{kind: .Normal, span: repl_history_paths.PathSpan{start: 0, end: child.encoded.len()}}
+    file :: repl_history_windows_open_child(dir, child, component, U32{1073807360}, U32{1}) ?? return Err(err)
+    // Rust Windows rewrite leaves a failed create-new temp in place.
+    // Unix's best-effort unlink is a distinct backend policy, not shared here.
+    repl_history_windows_publish(dir, file, bytes)
+}
+fn repl_history_windows_publish(dir: ReplHistoryWindowsDirectory, file: ReplHistoryWindowsFile, bytes: [U8]) -[FS]> IOError! {
+    repl_history_windows_verify_child(dir, file) ?? return Err(err)
+    repl_history_windows_write_all(file, bytes) ?? return Err(err)
+    #Unsafe("FlushFileBuffers persists the held temp file before replacement") {
+        if repl_history_kernel32.flush_file_buffers(file.handle) == (I32{0}) -> return Err(repl_history_win.last_error(.Flush, None))
+    }
+    repl_history_windows_reject_handle_reparse(file) ?? return Err(err)
+    repl_history_windows_replace(dir, file) ?? return Err(err)
+    // Once renamed the file is committed. A directory flush failure must be
+    // returned but MUST NOT dispose/delete the committed destination.
+    Ok()
+}
+fn repl_history_windows_clear(dir: ReplHistoryWindowsDirectory) -[FS]> IOError! {
+    repl_history_windows_verify(dir) ?? return Err(err)
+    child :: repl_history_paths.from_text("repl-history", repl_history_paths.PathPlatform.Windows)
+    component :: repl_history_paths.PathComponent{kind: .Normal, span: repl_history_paths.PathSpan{start: 0, end: child.encoded.len()}}
+    file :: repl_history_windows_open_child(dir, child, component, U32{65536}, U32{3}) ?? {
+        if err == .NotFound(_) -> return Ok()
+        return Err(err)
+    }
+    repl_history_windows_verify_child(dir, file) ?? return Err(err)
+    repl_history_windows_dispose(file)
+}
+
+enum ReplHistoryHostStorage {
+    Unix(ReplHistoryUnixDirectory)
+    Windows(ReplHistoryWindowsDirectory)
+    Unsupported
+}
+pub struct ReplHistoryHost { storage: ReplHistoryHostStorage }
+enum ReplHistoryLockStorage {
+    Unix(ReplHistoryUnixLock)
+    Windows(ReplHistoryWindowsLock)
+    Unsupported
+}
+pub struct ReplHistoryLock { storage: ReplHistoryLockStorage }
+impl ReplHistoryHost.Close {
+    fn close(^self) {
+        if self.storage == {
+            .Unix(dir) -> close(^dir)
+            .Windows(dir) -> close(^dir)
+            .Unsupported -> {}
+        }
+    }
+}
+impl ReplHistoryLock.Close {
+    fn close(^self) {
+        if self.storage == {
+            .Unix(lock) -> close(^lock)
+            .Windows(lock) -> close(^lock)
+            .Unsupported -> {}
+        }
+    }
+}
+impl ReplHistoryHost {
+    pub fn open(root: repl_history_paths.OsPath) -[FS, Env]> ReplHistoryHost IOError! {
+        os :: repl_history_sys.name()
+        // Table supported Unix targets really enter native held-root descent.
+        // Windows really enters Win32; only the remaining targets are refused.
+        selected :: repl_history_flags_for_target(os, repl_history_sys.arch())
+        if selected == .Val(abi) -> return Ok(ReplHistoryHost{storage: .Unix(repl_history_unix_open(root, abi) ?? return Err(err))})
+        if os == "windows" -> return Ok(ReplHistoryHost{storage: .Windows(repl_history_windows_open(root) ?? return Err(err))})
+        // Unknown Unix architecture preserves the more precise table error.
+        if repl_history_sys.family() == "unix" -> return Err(repl_history_unsupported("secure history storage is unsupported on {os} {repl_history_sys.arch()}"))
+        Err(repl_history_unsupported("secure history storage is unsupported on this platform"))
+    }
+    pub fn lock(self) -[FS, Time, Time.Wait]> ReplHistoryLock IOError! {
+        if self.storage == {
+            .Unix(dir) -> Ok(ReplHistoryLock{storage: .Unix(repl_history_unix_lock(dir) ?? return Err(err))})
+            .Windows(dir) -> Ok(ReplHistoryLock{storage: .Windows(repl_history_windows_lock(dir) ?? return Err(err))})
+            .Unsupported -> Err(repl_history_unsupported("history unavailable"))
+        }
+    }
+    pub fn read(self) -[FS, Env]> [U8]? IOError! {
+        if self.storage == {
+            .Unix(dir) -> repl_history_unix_read(dir)
+            .Windows(dir) -> repl_history_windows_read(dir)
+            .Unsupported -> Err(repl_history_unsupported("history unavailable"))
+        }
+    }
+    pub fn rewrite(self, bytes: [U8]) -[FS, Env]> IOError! {
+        if self.storage == {
+            .Unix(dir) -> repl_history_unix_rewrite(dir, bytes)
+            .Windows(dir) -> {
+                repl_history_windows_rewrite(dir, bytes) ?? return Err(err)
+                #Unsafe("after replacement, persist held directory; native flush failure cannot delete committed destination") {
+                    if repl_history_kernel32.flush_file_buffers(dir.file.handle) == (I32{0}) -> return Err(repl_history_win.last_error(.Flush, None))
+                }
+                Ok()
+            }
+            .Unsupported -> Err(repl_history_unsupported("history unavailable"))
+        }
+    }
+    pub fn clear(self) -[FS]> IOError! {
+        if self.storage == {
+            .Unix(dir) -> repl_history_unix_clear(dir)
+            .Windows(dir) -> repl_history_windows_clear(dir)
+            .Unsupported -> Err(repl_history_unsupported("history unavailable"))
+        }
+    }
+}

@@ -1,0 +1,140 @@
+// Rust AST/metaprogramming.rs CompilerStage::ALL/as_str and producer status.
+#Test("compiler stages preserve every availability stage in order") {
+    stages :: COMPILER_STAGE_ALL
+    assert(stages == [CompilerStage]{CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed, CompilerStage.Prepared, CompilerStage.Emitted})
+    names :: loop stage in stages -> compiler_stage_as_str(stage)
+    assert(names == [String]{"Parsed", "Resolved", "Typed", "Prepared", "Emitted"})
+}
+
+#Test("metadata producer statuses remain three distinct obligations") {
+    statuses :: [MetadataProducerStatus]{MetadataProducerStatus.ContractOnly, MetadataProducerStatus.NotImplemented, MetadataProducerStatus.ExistingCallableProducerNeedsExtension}
+    loop index in 0..<statuses.len() {
+        actual :: if statuses[index] == {
+            .ContractOnly -> 0
+            .NotImplemented -> 1
+            .ExistingCallableProducerNeedsExtension -> 2
+        }
+        assert(actual == index)
+    }
+}
+
+// Rust AST/types.rs CallablePolicy::display; no argument parsing or reformatting.
+#Test("callable policy display preserves already textual arguments") {
+    assert(callable_policy_display(CallablePolicy{name: "retry", arguments: [String]{}}) == "retry()")
+    assert(callable_policy_display(CallablePolicy{name: "retry", arguments: [String]{"3"}}) == "retry(3)")
+    assert(callable_policy_display(CallablePolicy{name: "retry", arguments: [String]{"3", "\"net\"", "a(b, c)"}}) == "retry(3, \"net\", a(b, c))")
+    assert(callable_policy_display(CallablePolicy{name: "策略", arguments: [String]{"\"é🙂\"", "λ"}}) == "策略(\"é🙂\", λ)")
+    assert(callable_policy_display(CallablePolicy{name: "", arguments: [String]{"", "x"}}) == "(, x)")
+}
+
+// Rust Syntax/predicates.rs generated_name_tests original regression.
+#Test("underscore_ladder_has_one_source_classification") {
+    assert(classify_identifier("_") == IdentifierClass.Ordinary)
+    assert(classify_identifier("_name") == IdentifierClass.SoftPublic)
+    assert(classify_identifier("__name") == IdentifierClass.Reserved)
+    assert(classify_identifier("__name__") == IdentifierClass.Reserved)
+    assert(classify_identifier("name_") == IdentifierClass.Ordinary)
+}
+
+#Test("identifier classification preserves empty UTF8 and underscore boundaries") {
+    assert(classify_identifier("") == IdentifierClass.Ordinary)
+    assert(classify_identifier("name") == IdentifierClass.Ordinary)
+    assert(classify_identifier("é") == IdentifierClass.Ordinary)
+    assert(classify_identifier("🙂_") == IdentifierClass.Ordinary)
+    assert(classify_identifier("_é") == IdentifierClass.SoftPublic)
+    assert(classify_identifier("_🙂") == IdentifierClass.SoftPublic)
+    assert(classify_identifier("__") == IdentifierClass.Reserved)
+    assert(classify_identifier("___") == IdentifierClass.Reserved)
+    assert(classify_identifier("__é") == IdentifierClass.Reserved)
+    assert(classify_identifier("＿name") == IdentifierClass.Ordinary)
+}
+
+#Test("source and unified lock spellings use their sole canonical home") {
+    assert(FILE_EXT == "jet")
+    assert(UNIFIED_LOCK_FILE == ".jet/lock")
+}
+
+fn tool_facts_projection_matches(read: FactRead, member: String?, reflection: String?, detail: String?) -> Bool Never! {
+    if member == .Val(source) {
+        expected_read :: Val(read)
+        if fact_read_kind(source) != expected_read -> return false
+    }
+    expected_public :: if read == FactRead.Origin -> Val("OriginInfo?") else -> None
+    fact_read_source_member(read) == member &&
+        fact_read_reflection_kind(read) == reflection &&
+        fact_read_detail_field(read) == detail &&
+        fact_read_public_read_type(read) == expected_public
+}
+
+// Rust Registry.rs FactRead source/reflection/detail/public_read_type arms.
+#Test("all dedicated typed fact read projections retain exact spellings") {
+    assert(tool_facts_projection_matches(FactRead.Layout, Val("$layout"), Val("Layout"), None))
+    assert(tool_facts_projection_matches(FactRead.Name, Val("$name"), Val("Nominal"), None))
+    assert(tool_facts_projection_matches(FactRead.Fields, Val("$fields"), Val("Layout"), None))
+    assert(tool_facts_projection_matches(FactRead.Range, Val("$range"), Val("Range"), Val("range")))
+    assert(tool_facts_projection_matches(FactRead.Dimension, Val("$dimension"), Val("Dimension"), Val("dimension")))
+    assert(tool_facts_projection_matches(FactRead.Measure, Val("$measure"), Val("Measure"), Val("measure")))
+    assert(tool_facts_projection_matches(FactRead.Exactness, Val("$exactness"), Val("Exactness"), Val("exactness")))
+    assert(tool_facts_projection_matches(FactRead.Classification, Val("$classification"), Val("Classification"), Val("classification")))
+    assert(tool_facts_projection_matches(FactRead.Obligation, Val("$obligation"), Val("Obligation"), Val("obligation")))
+    assert(tool_facts_projection_matches(FactRead.States, Val("$states"), Val("States"), Val("state")))
+    assert(tool_facts_projection_matches(FactRead.Effects, Val("$effects"), Val("Effects"), None))
+    assert(tool_facts_projection_matches(FactRead.Sendability, Val("$sendability"), Val("Sendability"), Val("sendability")))
+    assert(tool_facts_projection_matches(FactRead.Movedness, Val("$movedness"), Val("Movedness"), Val("movedness")))
+    assert(tool_facts_projection_matches(FactRead.Attribution, Val("$attribution"), Val("Attribution"), Val("attribution")))
+    assert(tool_facts_projection_matches(FactRead.Origin, Val("$origin"), Val("Origin"), Val("origin")))
+    assert(tool_facts_projection_matches(FactRead.ViewProvenance, Val("$view_provenance"), Val("ViewProvenance"), Val("view_provenance")))
+    assert(tool_facts_projection_matches(FactRead.UnitScaleProvenance, Val("$unit_scale_provenance"), Val("UnitScaleProvenance"), Val("unit_scale_provenance")))
+    assert(tool_facts_projection_matches(FactRead.Maturity, Val("$maturity"), Val("Maturity"), Val("maturity")))
+}
+
+#Test("all build fact read projections exclude public and reflected value carriers") {
+    assert(tool_facts_projection_matches(FactRead.BuildProfile, Val("$profile"), None, None))
+    builds :: [FactRead]{FactRead.BuildPackageName, FactRead.BuildPackageVersion, FactRead.BuildOS, FactRead.BuildStampGit, FactRead.BuildStampDirty, FactRead.BuildStampToolchain, FactRead.BuildStampAt}
+    loop read in builds -> assert(tool_facts_projection_matches(read, None, None, None))
+}
+
+#Test("registered planes and unknown readers preserve dynamic selection") {
+    flow :: Val(FactRead.RegisteredPlane{name: "Flow"})
+    taint :: Val(FactRead.RegisteredPlane{name: "Taint"})
+    duty :: Val(FactRead.RegisteredPlane{name: "Duty"})
+    assert(fact_read_kind("$flow") == flow)
+    assert(fact_read_kind("$taint") == taint)
+    assert(fact_read_kind("$duty") == duty)
+    planes :: [String]{"Flow", "Taint", "Duty"}
+    loop plane in planes -> assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: plane}, None, Val(plane), None))
+    assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Type.Interval"}, None, Val("Range"), None))
+    assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Type.Exactness"}, None, Val("Exactness"), None))
+    assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: "Exactness"}, None, Val("Exactness"), None))
+    unknown :: [String]{"", "unknown", "Build.Profile", "Type.Unknown", "flow"}
+    loop plane in unknown -> assert(tool_facts_projection_matches(FactRead.RegisteredPlane{name: plane}, None, None, None))
+    spellings :: [String]{"", "layout", "$unknown", "$Flow", "$$range", "$build.profile", "$build.package.name", "$build.os", "$build.stamp.git"}
+    loop spelling in spellings -> assert(fact_read_kind(spelling) == None)
+}
+
+// Rust Registry.rs every_registered_plane_has_one_typed_read_projection.
+// The existing merged registry supplies both the plane list and source reader;
+// exercise its actual rows, not a test-local copy or second registry provider.
+#Test("every_registered_plane_has_one_typed_read_projection") {
+    seen := [String]{}
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        loop plane in row.planes {
+            member :: row.member ?? panic("registered plane has no source reader")
+            read :: fact_read_kind(member) ?? panic("registered plane has no typed reader")
+            assert(fact_read_reflection_kind(read) == fact_read_reflection_kind(FactRead.RegisteredPlane{name: plane}))
+            found := false
+            loop registered in FOUNDATION_FACT_READ_ROWS {
+                if registered.read == read && registered.planes.contains(plane) -> found = true
+            }
+            assert(found)
+            if !seen.contains(plane) -> &seen.push(~plane)
+        }
+    }
+    assert(seen.len() == 21)
+}
+
+#Test("fact read members retain complete typed build and registered order") {
+    expected :: [String]{"$layout", "$name", "$fields", "$range", "$dimension", "$measure", "$exactness", "$classification", "$obligation", "$states", "$effects", "$sendability", "$movedness", "$attribution", "$origin", "$view_provenance", "$unit_scale_provenance", "$maturity", "$profile", "$flow", "$taint", "$duty"}
+    assert(fact_read_members() == expected)
+    loop member in fact_read_members() -> assert(fact_read_kind(member) != None)
+}

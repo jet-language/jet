@@ -1,0 +1,484 @@
+// TOOLS-R17 focused consumer-visible boundaries for Console.rs:1–638 and its
+// private validation family. Rust has no inline or integration tests for
+// these carriers (Tools.md coverage gap); these are new fixtures from the
+// exact Rust contracts, not ported Rust tests. Real attached router/DB
+// sessions are the later R18–R23/C7 integration prerequisite.
+// Tests after the #4437 marker exercise validate_token/validate_text, whose
+// Rust char::is_control predicate is gated on the Core Cc ballot.
+use core.files as console_types_test_files
+use core.testing as console_types_test_testing
+
+fn console_types_test_project() -> ConsoleProject Never! {
+    ConsoleProject{root: "/srv/app", identity: ConsoleIdentity{project_id: "project-x", source_revision: "rev", session_id: "console-x"}, services: [ConsoleServiceHandle]{}, databases: [ConsoleDatabaseHandle]{}}
+}
+fn console_types_test_text(bytes: [U8]) -> String Never! { String.from_bytes(bytes) ?? panic("fixture is UTF-8") }
+fn console_types_test_method(method: String) -> String Never! {
+    validate_method(method) ?? return err.message()
+    "accepted"
+}
+fn console_types_test_safe(method: String, body: [U8]) -> String Never! {
+    validate_safe_request(method, body) ?? return err.message()
+    "accepted"
+}
+fn console_types_test_add_service(project: &ConsoleProject, handle: ^ConsoleServiceHandle) -> String Never! {
+    &project.add_service(^handle) ?? return err.message()
+    "accepted"
+}
+fn console_types_test_add_database(project: &ConsoleProject, handle: ^ConsoleDatabaseHandle) -> String Never! {
+    &project.add_database(^handle) ?? return err.message()
+    "accepted"
+}
+fn console_types_test_with_database(project: ConsoleProject, name: String, identity: String) -> ConsoleProject ConsoleError! {
+    owned := ~project
+    ^owned.with_database(ConsoleDatabaseHandle{name: ~name, identity: ~identity})
+}
+fn console_types_test_capability(capability: ConsoleCapability) -> String Never! { "{capability.as_str()} -> {capability.required_right()}" }
+fn console_types_test_mode(mode: ConsoleMode) -> String Never! { mode.as_str() }
+fn console_types_test_message(error: ConsoleError) -> String Never! { error.message() }
+fn console_types_test_bytes(count: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop _ in 0..<count -> &out.push(U8{120})
+    out
+}
+
+#Test("console_capability_aliases_rights_and_mode_spellings") {
+    assert_eq(console_types_test_mode(ConsoleMode.ReadOnly), "read-only")
+    assert_eq(console_types_test_mode(ConsoleMode.SandboxData), "sandbox-data")
+    aliases :: [String]{"repl", " REPL.Execute ", "Io", "service", "Service.Read", "db", "DB.READ", "db.write", "Write", "net", "Net.Connect", "http", "HTTP.Request", "db.commit", "COMMIT"}
+    expected :: [ConsoleCapability]{ConsoleCapability.Repl, ConsoleCapability.Repl, ConsoleCapability.Repl, ConsoleCapability.ServiceRead, ConsoleCapability.ServiceRead, ConsoleCapability.DBRead, ConsoleCapability.DBRead, ConsoleCapability.DBWrite, ConsoleCapability.DBWrite, ConsoleCapability.HTTPRequest, ConsoleCapability.HTTPRequest, ConsoleCapability.HTTPRequest, ConsoleCapability.HTTPRequest, ConsoleCapability.Commit, ConsoleCapability.Commit}
+    loop index in 0..<aliases.len() {
+        parsed :: ConsoleCapability.parse(aliases[index]) ?? panic("alias parses")
+        assert(parsed == expected[index])
+    }
+    // Unicode trim is distinct from ASCII-only case normalization.
+    assert(console_types_test_capability(ConsoleCapability.parse(" HTTP.Request ") ?? panic("NBSP-trimmed alias")) == "Net.Connect -> Net.Connect")
+    // Only listed aliases parse: no prefix, plural, or Unicode-case folding.
+    unknown_aliases :: [String]{"", "dbwrite", "db.writes", "net.listen", "repl.", "ꝛepl"}
+    loop rejected in unknown_aliases {
+        assert(ConsoleCapability.parse(rejected) == None)
+    }
+    assert_eq(console_types_test_capability(ConsoleCapability.Repl), "REPL.Execute -> IO")
+    assert_eq(console_types_test_capability(ConsoleCapability.ServiceRead), "Service.Read -> Service.Read")
+    assert_eq(console_types_test_capability(ConsoleCapability.DBRead), "DB.Read -> DB.Read")
+    assert_eq(console_types_test_capability(ConsoleCapability.DBWrite), "DB.Write -> DB.Write")
+    assert_eq(console_types_test_capability(ConsoleCapability.HTTPRequest), "Net.Connect -> Net.Connect")
+    // Commit is its own capability spelling but needs the DB.Write right.
+    assert_eq(console_types_test_capability(ConsoleCapability.Commit), "DB.Commit -> DB.Write")
+}
+
+#Test("console_error_display_strings") {
+    unavailable :: ConsoleError.ProjectUnavailable{reason: "gone"}
+    invalid_input :: ConsoleError.InvalidInput{reason: "x"}
+    invalid_request :: ConsoleError.InvalidRequest{reason: "x"}
+    unknown :: ConsoleError.UnknownCommand{command: "drop"}
+    confirmation :: ConsoleError.ConfirmationRequired{expected: "commit main"}
+    denied :: ConsoleError.Denied{required: "DB.Write", reason: "read-only"}
+    limit :: ConsoleError.LimitExceeded{what: "request body"}
+    backend :: ConsoleError.Backend{reason: "lock"}
+    assert_eq(console_types_test_message(ConsoleError.ReleaseUnavailable), "project console is unavailable in release builds")
+    assert_eq(unavailable.message(), "project console unavailable: gone")
+    // InvalidRequest renders with the same prefix as InvalidInput.
+    assert_eq(invalid_input.message(), "invalid console input: x")
+    assert_eq(invalid_request.message(), "invalid console input: x")
+    assert_eq(unknown.message(), "unknown console command `:drop`")
+    assert_eq(console_types_test_message(ConsoleError.Closed), "console session is closed")
+    assert_eq(console_types_test_message(ConsoleError.Cancelled), "console session is cancelled")
+    assert_eq(console_types_test_message(ConsoleError.RouterUnavailable), "in-process application router is not attached")
+    assert_eq(console_types_test_message(ConsoleError.DataBackendUnavailable), "project data backend is not attached")
+    assert_eq(console_types_test_message(ConsoleError.TransactionActive), "sandbox transaction is already active")
+    assert_eq(console_types_test_message(ConsoleError.NoTransaction), "no sandbox transaction is active")
+    assert_eq(console_types_test_message(ConsoleError.Expired), "console authority has expired; restart the console")
+    assert_eq(console_types_test_message(ConsoleError.NonLoopbackDenied), "non-loopback console request rejected before dispatch")
+    assert_eq(confirmation.message(), "explicit confirmation required: `commit main`")
+    assert_eq(denied.message(), "console capability `DB.Write` denied: read-only")
+    assert_eq(limit.message(), "console request body exceeds its bounded limit")
+    assert_eq(backend.message(), "console backend error: lock")
+}
+
+#Test("console_method_safe_request_and_secret_header_boundaries") {
+    assert_eq(console_types_test_method("GET"), "accepted")
+    assert_eq(console_types_test_method("M-SEARCH"), "accepted")
+    assert_eq(console_types_test_method("PATCH2"), "accepted")
+    bad_methods :: [String]{"get", "", "GE T", "GET/1", "GÉT"}
+    loop rejected in bad_methods {
+        assert_eq(console_types_test_method(rejected), "invalid console input: request method must be an uppercase HTTP token")
+    }
+    assert_eq(console_types_test_safe("GET", [U8]{}), "accepted")
+    assert_eq(console_types_test_safe("OPTIONS", [U8]{}), "accepted")
+    assert_eq(console_types_test_safe("HEAD", [U8]{U8{1}}), "invalid console input: safe console requests cannot carry a body")
+    denied :: "console capability `Net.Connect` denied: only GET, HEAD, and OPTIONS requests are allowed at the console boundary"
+    // The method denial precedes the body check, and matching is exact.
+    assert_eq(console_types_test_safe("POST", [U8]{}), denied)
+    assert_eq(console_types_test_safe("DELETE", [U8]{U8{1}}), denied)
+    assert_eq(console_types_test_safe("get", [U8]{}), denied)
+    secrets :: [String]{"authorization", "Proxy-Authorization", "COOKIE", "set-cookie", "X-Api-Key", "x-auth-token"}
+    loop secret in secrets {
+        assert(is_secret_header(secret))
+    }
+    publics :: [String]{"x-request-id", "authorization2", "cookies", "x-api-keys"}
+    loop public in publics {
+        assert(!is_secret_header(public))
+    }
+}
+
+#Test("console_loopback_host_ports_and_brackets") {
+    accepted :: [String]{"127.0.0.1", " LOCALHOST ", "loopback", "::1", "[::1]", "[::1]:80", "[::1]:+80", "[::1]:65535", "localhost:0", "localhost:0080", "127.0.0.1:000000065535", "Loopback:+1"}
+    loop host in accepted {
+        assert(is_loopback_host(host))
+    }
+    // Invalid u16 ports keep the whole host, which then fails to match; a
+    // malformed bracket suffix or missing `]` yields no host at all.
+    rejected :: [String]{"127.0.0.2", "localhost.", "localhost:", "localhost:65536", "localhost:-1", "localhost:+", "localhost: 80", "[::1]:65536", "[::1]x", "[::1]:", "[::1", "[localhost]:80:1", "::1:80", "", "lоcalhost"}
+    loop host in rejected {
+        assert(!is_loopback_host(host))
+    }
+    assert(console_parses_u16("+0"))
+    assert(console_parses_u16("0000000000"))
+    assert(!console_parses_u16("065536"))
+    assert(is_loopback_host("localhost:+00000000000065535"))
+    assert(is_loopback_host(" [::1]:0 "))
+    assert(!is_loopback_host("[::1]:+65536"))
+    assert(!is_loopback_host("localhost:８０"))
+    assert(!console_parses_u16("1e3"))
+}
+
+#Test("console_options_defaults_limits_and_canonical_denials") {
+    defaults :: ConsoleOptions.new(console_types_test_project())
+    assert(defaults.mode == ConsoleMode.ReadOnly)
+    assert_eq(defaults.authority.holds.join(","), "IO,Mem.Alloc")
+    assert_eq(defaults.denied.len(), 0)
+    assert_eq(defaults.session_nonce, "default")
+    assert(defaults.now_ms == U64{0})
+    assert(defaults.ttl_ms == U64{1800000})
+    assert(defaults.ttl_ms == CONSOLE_DEFAULT_TTL_MS)
+    assert(!defaults.release_build)
+    assert(defaults.loopback)
+    assert_eq(defaults.max_history, 256)
+    assert_eq(defaults.max_outputs, 256)
+    assert_eq(defaults.max_audit, 256)
+    assert(defaults.script == None)
+    configured := ConsoleOptions.new(console_types_test_project())
+    configured = ^configured.with_mode(ConsoleMode.SandboxData)
+    configured = ^configured.with_rights([String]{"db.write", "IO", "io", "net"})
+    configured = ^configured.with_denied([String]{"net", " fs.Read ", "Unknown", "net"})
+    configured = ^configured.with_ttl_ms(U64.MAX)
+    configured = ^configured.with_release_build(true)
+    configured = ^configured.with_script("1 + 1")
+    configured = ^configured.with_limits(0, 1, 1000)
+    assert(configured.mode == ConsoleMode.SandboxData)
+    // Rights keep their leaf spelling under a canonical root; duplicates merge.
+    assert_eq(configured.authority.holds.join(","), "DB.write,IO,Net")
+    assert_eq(configured.denied.join(","), "FS.Read,Net,Unknown")
+    // A grant never outranks the canonical denied set built here.
+    assert(authority_answer(configured.authority.holds, configured.denied, "Net.Connect") == AuthorityVerdict.Denied)
+    assert(authority_answer(configured.authority.holds, configured.denied, "DB.write") == AuthorityVerdict.Allowed)
+    assert(configured.ttl_ms == U64.MAX)
+    assert(configured.release_build)
+    assert_eq(configured.script ?? "none", "1 + 1")
+    assert_eq(configured.max_history, 1)
+    assert_eq(configured.max_outputs, 1)
+    assert_eq(configured.max_audit, 1000)
+    authority :: CanonicalAuthority.from_rights([String]{"DB.Read"})
+    replaced := ^configured.with_authority(^authority)
+    replaced = ^replaced.with_denied([String]{})
+    assert_eq(replaced.authority.holds.join(","), "DB.Read")
+    assert_eq(replaced.denied.len(), 0)
+    replaced = ^replaced.with_limits(0, 0, 0)
+    replaced = ^replaced.with_ttl_ms(U64{0})
+    assert_eq(replaced.max_history, 1)
+    assert_eq(replaced.max_outputs, 1)
+    assert_eq(replaced.max_audit, 1)
+    assert(replaced.ttl_ms == U64{0})
+}
+
+#Test("console_project_handles_sort_dedup_and_bindings_json") {
+    project := console_types_test_project()
+    assert_eq(console_types_test_add_service(&project, ConsoleServiceHandle{name: "web", identity: "svc-web", state: "ready"}), "accepted")
+    assert_eq(console_types_test_add_service(&project, ConsoleServiceHandle{name: "api", identity: "svc\"q", state: "ready"}), "accepted")
+    assert_eq(console_types_test_add_service(&project, ConsoleServiceHandle{name: "web", identity: "other", state: "down"}), "invalid console input: service `web` is declared more than once")
+    assert_eq(project.services.len(), 2)
+    assert_eq(project.services[0].name, "api")
+    assert_eq(project.services[1].identity, "svc-web")
+    assert(project.has_service("api"))
+    assert(!project.has_service("API"))
+    assert_eq(console_types_test_add_database(&project, ConsoleDatabaseHandle{name: "main", identity: "db-main"}), "accepted")
+    assert_eq(console_types_test_add_database(&project, ConsoleDatabaseHandle{name: "audit", identity: "db-audit"}), "accepted")
+    assert_eq(console_types_test_add_database(&project, ConsoleDatabaseHandle{name: "main", identity: "db-other"}), "invalid console input: database `main` is declared more than once")
+    // A service and a database may share a name; the namespaces are separate.
+    assert_eq(console_types_test_add_database(&project, ConsoleDatabaseHandle{name: "web", identity: "db-web"}), "accepted")
+    expected :: "{{\"project\":\"project-x\",\"services\":[{{\"name\":\"api\",\"identity\":\"svc\\\"q\",\"state\":\"ready\"}},{{\"name\":\"web\",\"identity\":\"svc-web\",\"state\":\"ready\"}}],\"databases\":[{{\"name\":\"audit\",\"identity\":\"db-audit\"}},{{\"name\":\"main\",\"identity\":\"db-main\"}},{{\"name\":\"web\",\"identity\":\"db-web\"}}]}}"
+    assert_eq(project.bindings_json(), expected)
+    empty :: console_types_test_project()
+    assert_eq(empty.bindings_json(), "{{\"project\":\"project-x\",\"services\":[],\"databases\":[]}}")
+    chained :: console_types_test_project().with_service(ConsoleServiceHandle{name: "b", identity: "1", state: "s"}) ?? panic("first service")
+    chained_twice :: ^chained.with_service(ConsoleServiceHandle{name: "a", identity: "2", state: "s"}) ?? panic("second service")
+    assert_eq(chained_twice.services[0].name, "a")
+    with_db :: console_types_test_with_database(chained_twice, "d", "1") ?? panic("first database")
+    refused :: if console_types_test_with_database(with_db, "d", "2") == {
+        .Err(error) -> error.message()
+        .Ok(_) -> "accepted"
+    }
+    assert_eq(refused, "invalid console input: database `d` is declared more than once")
+}
+
+// #4437: everything below calls validate_token/validate_text (Rust
+// char::is_control); full proof waits for the public Core Cc predicate.
+
+fn console_types_test_identity(root: String, revision: String, nonce: String) -> String Never! {
+    identity :: ConsoleIdentity.new(root, ~revision, nonce) ?? return err.message()
+    "{identity.project_id} {identity.source_revision} {identity.session_id}"
+}
+fn console_types_test_service(name: String, identity: String, state: String) -> String Never! {
+    ConsoleServiceHandle.new(~name, ~identity, ~state) ?? return err.message()
+    "accepted"
+}
+fn console_types_test_database(name: String, identity: String) -> String Never! {
+    ConsoleDatabaseHandle.new(~name, ~identity) ?? return err.message()
+    "accepted"
+}
+fn console_types_test_validate(project: ConsoleProject) -> String Never! {
+    project.validate() ?? return err.message()
+    "accepted"
+}
+fn console_types_test_project_at(root: String) -> String Never! {
+    ConsoleProject.new(~root, "rev-1") ?? return err.message()
+    "accepted"
+}
+fn console_types_test_path(path: String) -> String Never! {
+    ConsoleRequest.new("req-1", "console-x", "GET", ~path) ?? return err.message()
+    "accepted"
+}
+fn console_types_test_request(request_id: String, method: String) -> String Never! {
+    ConsoleRequest.new(~request_id, "console-x", method, "/") ?? return err.message()
+    "accepted"
+}
+fn console_types_test_origin(request: ConsoleRequest, origin: String) -> String Never! {
+    owned := ~request
+    updated :: ^owned.with_origin(~origin) ?? return err.message()
+    if updated.is_loopback() -> "loopback" else -> "remote"
+}
+fn console_types_test_request_header(request: ConsoleRequest, name: String, value: String) -> String Never! {
+    owned := ~request
+    updated :: ^owned.with_header(name, ~value) ?? return err.message()
+    updated.headers[name.to_ascii_lower()] ?? "missing"
+}
+fn console_types_test_request_body(request: ConsoleRequest, body: ^[U8]) -> String Never! {
+    owned := ~request
+    ^owned.with_body(^body) ?? return err.message()
+    "accepted"
+}
+fn console_types_test_status(code: U16) -> String Never! {
+    response :: ConsoleResponse.new("req-1", code) ?? return err.message()
+    "{response.status}"
+}
+fn console_types_test_response_header(response: ConsoleResponse, name: String, value: String) -> String Never! {
+    owned := ~response
+    updated :: ^owned.with_header(name, ~value) ?? return err.message()
+    updated.headers[name.to_ascii_lower()] ?? "missing"
+}
+fn console_types_test_response_body(response: ConsoleResponse, body: ^[U8]) -> String Never! {
+    owned := ~response
+    updated :: ^owned.with_body(^body) ?? return err.message()
+    "{updated.body.len()}"
+}
+
+#Test("console_identity_digests_bind_exact_root_revision_and_nonce") {
+    // Oracles: SHA-256 of the exact Rust seeds, computed outside Jet.
+    assert_eq(console_types_test_identity("/srv/app", "rev-7", "default"), "project-16e10af33491b32c83daa2f0 rev-7 console-faada3c48dbacbed6e7b8581")
+    // A fresh nonce changes only the session identity.
+    assert_eq(console_types_test_identity("/srv/app", "rev-7", "nonce-2"), "project-16e10af33491b32c83daa2f0 rev-7 console-ab727045ed0d82016e47aa74")
+    // The root spelling is hashed as given; no path canonicalization.
+    slashed :: console_types_test_identity("/srv/app/", "rev-7", "default")
+    assert_eq(slashed, "project-9fec57f25d044fd1fd963e10 rev-7 console-fdd69c130274f5ee2d23858a")
+    revised :: console_types_test_identity("/srv/app", "rev-8", "default")
+    assert_eq(revised, "project-16e10af33491b32c83daa2f0 rev-8 console-e426bbba843659bd02a83eb5")
+    assert_eq(console_types_test_identity("/srv/app", "rev 7", "default"), "invalid console input: source revision must be a bounded non-empty token")
+    assert_eq(console_types_test_identity("/srv/app", "rev-7", ""), "invalid console input: session nonce must be a bounded non-empty token")
+}
+
+#Test("console_tokens_count_utf8_bytes_and_refuse_control_or_whitespace") {
+    refused :: "invalid console input: service name must be a bounded non-empty token"
+    // 256 bytes is the bound, counted in UTF-8 bytes, not scalars.
+    assert_eq(console_types_test_service("é".repeat(128), "svc", "ready"), "accepted")
+    assert_eq(console_types_test_service("é".repeat(129), "svc", "ready"), refused)
+    assert_eq(console_types_test_service("a".repeat(256), "svc", "ready"), "accepted")
+    assert_eq(console_types_test_service("a".repeat(257), "svc", "ready"), refused)
+    assert_eq(console_types_test_service("", "svc", "ready"), refused)
+    // Unicode White_Space and Cc both fail; U+200B is neither and passes.
+    nbsp :: console_types_test_text([U8]{U8{194}, U8{160}})
+    nel :: console_types_test_text([U8]{U8{194}, U8{133}})
+    delete :: console_types_test_text([U8]{U8{127}})
+    zero_width :: console_types_test_text([U8]{U8{226}, U8{128}, U8{139}})
+    assert_eq(console_types_test_service("a{nbsp}b", "svc", "ready"), refused)
+    assert_eq(console_types_test_service("a{nel}b", "svc", "ready"), refused)
+    assert_eq(console_types_test_service("a{delete}b", "svc", "ready"), refused)
+    assert_eq(console_types_test_service("a\tb", "svc", "ready"), refused)
+    assert_eq(console_types_test_service("a{zero_width}b", "svc", "ready"), "accepted")
+    // Fields are checked in Rust order: name, identity, state.
+    assert_eq(console_types_test_service("api", "", ""), "invalid console input: service identity must be a bounded non-empty token")
+    assert_eq(console_types_test_service("api", "svc", "not ready"), "invalid console input: service state must be a bounded non-empty token")
+    assert_eq(console_types_test_database("main db", ""), "invalid console input: database name must be a bounded non-empty token")
+    assert_eq(console_types_test_database("main", "db main"), "invalid console input: database identity must be a bounded non-empty token")
+    // Text allows spaces and NBSP but no Cc, and is bounded at 64 KiB.
+    response :: ConsoleResponse.new("req-1", U16{200}) ?? panic("response")
+    c1 :: console_types_test_text([U8]{U8{194}, U8{128}})
+    text_refused :: "invalid console input: response header value contains a control character or exceeds its limit"
+    assert_eq(console_types_test_response_header(response, "x-note", "a b{nbsp}c"), "a b{nbsp}c")
+    assert_eq(console_types_test_response_header(response, "x-note", ""), "")
+    assert_eq(console_types_test_response_header(response, "x-note", "a\tb"), text_refused)
+    assert_eq(console_types_test_response_header(response, "x-note", "a{c1}b"), text_refused)
+    assert_eq(console_types_test_response_header(response, "x-note", "x".repeat(65536)), "x".repeat(65536))
+    assert_eq(console_types_test_response_header(response, "x-note", "x".repeat(65537)), text_refused)
+}
+
+#Test("console_project_root_and_declared_identity_validation") {
+    root :: console_types_test_testing.temp_dir("console-project-root")
+    other :: console_types_test_testing.temp_dir("console-project-other")
+    project :: ConsoleProject.new(~root, "rev-1") ?? panic("project")
+    expected :: ConsoleIdentity.new(root, "rev-1", "default") ?? panic("expected identity")
+    assert(project.identity == expected)
+    assert_eq(project.root, root)
+    assert_eq(project.services.len(), 0)
+    defaulted :: ConsoleProject.from_root(~root) ?? panic("default revision")
+    assert_eq(defaulted.identity.source_revision, "working-tree")
+    options :: ConsoleOptions.for_project(~root) ?? panic("project options")
+    assert_eq(options.project.identity.source_revision, "working-tree")
+    missing :: console_types_test_files.join(root, "missing")
+    assert_eq(console_types_test_project_at(missing), "project console unavailable: project root `{missing}` is not a directory")
+    file :: console_types_test_files.join(root, "file")
+    console_types_test_files.write(file, "x") ?? panic("file fixture")
+    assert_eq(console_types_test_project_at(file), "project console unavailable: project root `{file}` is not a directory")
+    // A per-session nonce changes only the session; validation re-derives the
+    // project identity from its root with the default nonce.
+    renewal_owner := ~project
+    renewed :: ^renewal_owner.with_identity("rev-2", "nonce-9") ?? panic("renewed identity")
+    assert_eq(renewed.identity.project_id, project.identity.project_id)
+    assert_eq(renewed.identity.source_revision, "rev-2")
+    assert(renewed.identity.session_id != project.identity.session_id)
+    assert_eq(console_types_test_validate(renewed), "accepted")
+    moved := ~renewed
+    moved.root = ~other
+    assert_eq(console_types_test_validate(moved), "invalid console input: project identity does not match its declared root")
+    duplicated := ~renewed
+    &duplicated.services.push(ConsoleServiceHandle{name: "api", identity: "a", state: "ready"})
+    &duplicated.services.push(ConsoleServiceHandle{name: "api", identity: "b", state: "ready"})
+    assert_eq(console_types_test_validate(duplicated), "invalid console input: project declares duplicate service handles")
+    // Every handle token is checked before any duplicate.
+    &duplicated.databases.push(ConsoleDatabaseHandle{name: "main", identity: ""})
+    assert_eq(console_types_test_validate(duplicated), "invalid console input: database identity must be a bounded non-empty token")
+    databases := ~renewed
+    &databases.databases.push(ConsoleDatabaseHandle{name: "main", identity: "a"})
+    &databases.databases.push(ConsoleDatabaseHandle{name: "main", identity: "b"})
+    assert_eq(console_types_test_validate(databases), "invalid console input: project declares duplicate database handles")
+    console_types_test_files.remove_all(root) ?? panic("remove root")
+    console_types_test_files.remove_all(other) ?? panic("remove other")
+    // A removed root is refused before identity checks.
+    assert_eq(console_types_test_validate(renewed), "project console unavailable: project root `{root}` is not a directory")
+}
+
+#Test("console_request_path_origin_header_and_body_boundaries") {
+    request :: ConsoleRequest.new("req-1", "console-x", "get", "/api/items?x=1") ?? panic("request")
+    assert_eq(request.method, "GET")
+    assert_eq(request.path, "/api/items?x=1")
+    assert_eq(request.origin, "127.0.0.1")
+    assert(request.is_loopback())
+    assert_eq(request.headers.len(), 0)
+    assert_eq(request.body.len(), 0)
+    non_loopback :: "non-loopback console request rejected before dispatch"
+    nul :: console_types_test_text([U8]{U8{0}})
+    delete :: console_types_test_text([U8]{U8{127}})
+    long_path :: "/{"x".repeat(65536)}"
+    escaping_paths :: [String]{"http://evil/x", "//evil/x", "/a/../b", "/..", "api", "", "/a\\b", "/a{nul}", long_path}
+    loop escaping in escaping_paths {
+        assert_eq(console_types_test_path(escaping), non_loopback)
+    }
+    // Only exact `..` segments escape; there is no percent normalization.
+    assert_eq(console_types_test_path("/a/..b"), "accepted")
+    assert_eq(console_types_test_path("/%2e%2e/secret"), "accepted")
+    assert_eq(console_types_test_path("/a{delete}"), "invalid console input: request path contains a control character")
+    assert_eq(console_types_test_request("req 1", "GET"), "invalid console input: request id must be a bounded non-empty token")
+    assert_eq(console_types_test_request("req-1", "get it"), "invalid console input: request method must be an uppercase HTTP token")
+    assert_eq(console_types_test_origin(request, "localhost:8080"), "loopback")
+    assert_eq(console_types_test_origin(request, "[::1]:3000"), "loopback")
+    // A valid origin is still not trusted unless it is loopback.
+    assert_eq(console_types_test_origin(request, "example.com"), "remote")
+    hostile_origins :: [String]{"user@127.0.0.1", "http://127.0.0.1", "127.0.0.1/x", "127.0.0.1?x", "127.0.0.1#x", "127.0.0.1\\x"}
+    loop hostile in hostile_origins {
+        assert_eq(console_types_test_origin(request, hostile), non_loopback)
+    }
+    assert_eq(console_types_test_origin(request, "127.0.0.1 "), "invalid console input: request origin must be a bounded non-empty token")
+    assert_eq(console_types_test_request_header(request, "X-Trace", "a b"), "a b")
+    assert_eq(console_types_test_request_header(request, "Authorization", "Bearer x"), "invalid console input: credential headers are not permitted")
+    assert_eq(console_types_test_request_header(request, "COOKIE", "a=b"), "invalid console input: credential headers are not permitted")
+    assert_eq(console_types_test_request_header(request, "X-Trace", "a\tb"), "invalid console input: header value contains a control character or exceeds its limit")
+    assert_eq(console_types_test_request_header(request, "X Trace", "a"), "invalid console input: header name must be a bounded non-empty token")
+    full := ~request
+    loop index in 0..<64 {
+        full = ^full.with_header("h{index}", "v") ?? panic("header within limit")
+    }
+    assert_eq(full.headers.len(), 64)
+    assert_eq(console_types_test_request_header(full, "h64", "v"), "console request headers exceeds its bounded limit")
+    // An existing (ASCII-lowercased) name replaces in place at the limit.
+    assert_eq(console_types_test_request_header(full, "H0", "w"), "w")
+    assert_eq(console_types_test_request_body(request, [U8]{U8{1}}), "invalid console input: safe console requests cannot carry a body")
+    post :: ConsoleRequest.new("req-2", "console-x", "post", "/api/items") ?? panic("constructing a POST request is not dispatching it")
+    assert_eq(post.method, "POST")
+    assert_eq(console_types_test_request_body(post, [U8]{}), "console capability `Net.Connect` denied: only GET, HEAD, and OPTIONS requests are allowed at the console boundary")
+    assert_eq(console_types_test_request_body(post, console_types_test_bytes(1048577)), "console request body exceeds its bounded limit")
+}
+
+#Test("console_response_status_header_and_body_bounds") {
+    assert_eq(console_types_test_status(U16{99}), "invalid console input: response status 99 is outside 100..=599")
+    assert_eq(console_types_test_status(U16{100}), "100")
+    assert_eq(console_types_test_status(U16{599}), "599")
+    assert_eq(console_types_test_status(U16{600}), "invalid console input: response status 600 is outside 100..=599")
+    response :: ConsoleResponse.new("req-1", U16{200}) ?? panic("response")
+    assert_eq(console_types_test_response_header(response, "Content-Type", "text/plain"), "text/plain")
+    // Responses do not refuse credential header names; only requests do.
+    assert_eq(console_types_test_response_header(response, "Set-Cookie", "a=b"), "a=b")
+    assert_eq(console_types_test_response_header(response, "Bad Name", "a"), "invalid console input: response header name must be a bounded non-empty token")
+    full := ~response
+    loop index in 0..<64 {
+        full = ^full.with_header("h{index}", "v") ?? panic("header within limit")
+    }
+    assert_eq(console_types_test_response_header(full, "h64", "v"), "console response headers exceeds its bounded limit")
+    assert_eq(console_types_test_response_header(full, "H0", "replacement"), "replacement")
+    assert_eq(console_types_test_response_body(response, "ok".bytes()), "2")
+    assert_eq(console_types_test_response_body(response, console_types_test_bytes(1048576)), "1048576")
+    assert_eq(console_types_test_response_body(response, console_types_test_bytes(1048577)), "console response body exceeds its bounded limit")
+}
+
+// Public carriers may be edited by a host: validators must not trust builders.
+#Test("console_request_and_response_revalidate_public_fields_in_rust_order") {
+    request := ConsoleRequest{request_id: "req", session_id: "session", method: "GET", path: "/", origin: "127.0.0.1", headers: [String:String]{}, body: [U8]{}}
+    request.request_id = ""
+    request.method = "get"
+    first :: if request.validate() == {
+        .Err(error) -> error.message()
+        .Ok(_) -> "accepted"
+    }
+    assert_eq(first, "invalid console input: request id must be a bounded non-empty token")
+    request.request_id = "req"
+    request.method = "GET"
+    request.headers["z-note"] = "\t"
+    request.headers["Authorization"] = "secret"
+    headers :: if request.validate() == {
+        .Err(error) -> error.message()
+        .Ok(_) -> "accepted"
+    }
+    // Rust BTreeMap / native JetMap key order: credential denial is first.
+    assert_eq(headers, "invalid console input: credential headers are not permitted")
+    response := ConsoleResponse{request_id: "req", status: U16{99}, headers: [String:String]{}, body: [U8]{}}
+    loop index in 0..<65 -> response.headers["h{index}"] = "v"
+    status :: if response.validate() == {
+        .Err(error) -> error.message()
+        .Ok(_) -> "accepted"
+    }
+    assert_eq(status, "invalid console input: response status 99 is outside 100..=599")
+    response.status = U16{200}
+    bounds :: if response.validate() == {
+        .Err(error) -> error.message()
+        .Ok(_) -> "accepted"
+    }
+    assert_eq(bounds, "console response headers exceeds its bounded limit")
+}

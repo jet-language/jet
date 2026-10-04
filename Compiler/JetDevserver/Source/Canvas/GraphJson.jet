@@ -1,0 +1,1135 @@
+// PORT-PENDING 0763 crates-jet-devserver-src-canvas-graph-json: crates/jet-devserver/src/Canvas/graph_json.rs:1-1131
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use jet_driver::Diagnostics::Span;
+//RS use jet_driver::AST;
+//RS use jet_foundation::Names::{NameLedger, NameVisibility};
+//RS use jet_semindex::SourceSpan;
+//RS 
+//RS use super::debug_source_git::span_overlaps;
+//RS use super::graph_helpers::{line_start, snippet};
+//RS use super::graph_projection::{GraphBuilder, InlineRec, NodeRec, PinRec, WireRec};
+//RS use super::validation_json::{attr_bounds, attr_span, attr_string, json_str, json_strs, span_json};
+//RS 
+//RS #[path = "node_catalog.rs"]
+//RS pub(super) mod node_catalog;
+//RS 
+//RS pub(super) fn add_node(
+//RS     g: &mut GraphBuilder,
+//RS     id: &str,
+//RS     descriptor_id: &str,
+//RS     title: &str,
+//RS     span: SourceSpan,
+//RS     x: i32,
+//RS     y: i32,
+//RS     badges: Vec<&str>,
+//RS     affordances: Vec<&str>,
+//RS ) {
+//RS     let descriptor = node_catalog::descriptor_for_id(descriptor_id);
+//RS     g.nodes.push(NodeRec {
+//RS         id: id.to_string(),
+//RS         kind: descriptor.kind.to_string(),
+//RS         archetype: descriptor.archetype.to_string(),
+//RS         title: title.to_string(),
+//RS         span,
+//RS         x,
+//RS         y,
+//RS         badges: badges.into_iter().map(str::to_string).collect(),
+//RS         affordances: affordances.into_iter().map(str::to_string).collect(),
+//RS         meta_json: None,
+//RS     });
+//RS }
+//RS 
+//RS pub(super) fn add_pin(
+//RS     g: &mut GraphBuilder,
+//RS     node_id: &str,
+//RS     name: &str,
+//RS     direction: &str,
+//RS     ty: &str,
+//RS     ability: &str,
+//RS     fallible: bool,
+//RS ) -> String {
+//RS     let id = format!("{node_id}:{direction}:{name}");
+//RS     let span = g
+//RS         .nodes
+//RS         .iter()
+//RS         .find(|n| n.id == node_id)
+//RS         .map(|n| n.span)
+//RS         .unwrap_or(SourceSpan { start: 0, end: 0 });
+//RS     g.pins.push(PinRec {
+//RS         id: id.clone(),
+//RS         node_id: node_id.to_string(),
+//RS         name: name.to_string(),
+//RS         direction: direction.to_string(),
+//RS         ty: ty.to_string(),
+//RS         role: None,
+//RS         pattern_source: None,
+//RS         ability: ability.to_string(),
+//RS         fallible,
+//RS         effect_grant_need: None,
+//RS         span,
+//RS         pattern_source_span: None,
+//RS         append_op: None,
+//RS         element_index: None,
+//RS     });
+//RS     id
+//RS }
+//RS 
+//RS pub(super) fn add_arm_pin(
+//RS     g: &mut GraphBuilder,
+//RS     node_id: &str,
+//RS     name: &str,
+//RS     pattern_source: &str,
+//RS     pattern_span: SourceSpan,
+//RS ) -> String {
+//RS     let id = format!("{node_id}:output:{name}");
+//RS     if !g.pins.iter().any(|pin| pin.id == id) {
+//RS         g.pins.push(PinRec {
+//RS             id: id.clone(),
+//RS             node_id: node_id.to_string(),
+//RS             name: name.to_string(),
+//RS             direction: "output".to_string(),
+//RS             ty: "exec".to_string(),
+//RS             role: Some("arm".to_string()),
+//RS             pattern_source: Some(pattern_source.to_string()),
+//RS             ability: "control".to_string(),
+//RS             fallible: false,
+//RS             effect_grant_need: None,
+//RS             span: pattern_span,
+//RS             pattern_source_span: Some(pattern_span),
+//RS             append_op: Some("edit_pattern_arm".to_string()),
+//RS             element_index: None,
+//RS         });
+//RS     }
+//RS     id
+//RS }
+//RS 
+//RS pub(super) fn set_pin_source_span(g: &mut GraphBuilder, pin_id: &str, span: SourceSpan) {
+//RS     if let Some(pin) = g.pins.iter_mut().find(|pin| pin.id == pin_id) {
+//RS         pin.span = span;
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn set_pin_append(g: &mut GraphBuilder, pin_id: &str, op: &str, index: usize) {
+//RS     if let Some(pin) = g.pins.iter_mut().find(|pin| pin.id == pin_id) {
+//RS         pin.append_op = Some(op.to_string());
+//RS         pin.element_index = Some(index);
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn add_wire(g: &mut GraphBuilder, from_pin: &str, to_pin: &str, kind: &str) {
+//RS     add_wire_with_span(g, from_pin, to_pin, kind, None);
+//RS }
+//RS 
+//RS pub(super) fn add_wire_with_span(
+//RS     g: &mut GraphBuilder,
+//RS     from_pin: &str,
+//RS     to_pin: &str,
+//RS     kind: &str,
+//RS     span: Option<SourceSpan>,
+//RS ) {
+//RS     g.next_wire += 1;
+//RS     g.wires.push(WireRec {
+//RS         id: format!("{}:wire:{}", g.graph_id, g.next_wire),
+//RS         from_pin: from_pin.to_string(),
+//RS         to_pin: to_pin.to_string(),
+//RS         kind: kind.to_string(),
+//RS         span,
+//RS         from_span: None,
+//RS         to_span: None,
+//RS     });
+//RS }
+//RS 
+//RS fn add_control_wire(
+//RS     g: &mut GraphBuilder,
+//RS     from_pin: &str,
+//RS     to_pin: &str,
+//RS     from_span: SourceSpan,
+//RS     to_span: SourceSpan,
+//RS ) {
+//RS     g.next_wire += 1;
+//RS     g.wires.push(WireRec {
+//RS         id: format!("{}:wire:{}", g.graph_id, g.next_wire),
+//RS         from_pin: from_pin.to_string(),
+//RS         to_pin: to_pin.to_string(),
+//RS         kind: "control".to_string(),
+//RS         span: Some(to_span),
+//RS         from_span: Some(from_span),
+//RS         to_span: Some(to_span),
+//RS     });
+//RS }
+//RS 
+//RS pub(super) fn add_region(
+//RS     g: &mut GraphBuilder,
+//RS     ordinal: usize,
+//RS     kind: &str,
+//RS     title: &str,
+//RS     span: Span,
+//RS ) {
+//RS     g.regions.push(format!(
+//RS         "{{\"region_id\":{},\"kind\":{},\"title\":{},\"source_span\":{}}}",
+//RS         json_str(&format!("{}:region:{ordinal}:{kind}", g.graph_id)),
+//RS         json_str(kind),
+//RS         json_str(title),
+//RS         span_json(span.into())
+//RS     ));
+//RS }
+//RS 
+//RS pub(super) fn add_authority_region(
+//RS     g: &mut GraphBuilder,
+//RS     ordinal: usize,
+//RS     title: &str,
+//RS     required_effects: &[String],
+//RS     granted_effects: &[String],
+//RS     denied_effects: &[String],
+//RS     binding: Option<&str>,
+//RS     span: Span,
+//RS ) {
+//RS     let authority = binding
+//RS         .map(|name| format!("Authority handle `{name}`"))
+//RS         .unwrap_or_else(|| "lexical #FX authority".to_string());
+//RS     g.regions.push(format!(
+//RS         "{{\"region_id\":{},\"kind\":\"authority\",\"title\":{},\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{},\"authority\":{},\"source_span\":{}}}",
+//RS         json_str(&format!("{}:region:{ordinal}:authority", g.graph_id)),
+//RS         json_str(title),
+//RS         json_strs(required_effects),
+//RS         json_strs(granted_effects),
+//RS         json_strs(denied_effects),
+//RS         json_str(&authority),
+//RS         span_json(span.into())
+//RS     ));
+//RS }
+//RS 
+//RS pub(super) fn meta_attr_json(meta: Option<&AST::MetaAttr>) -> Option<String> {
+//RS     let meta = meta?;
+//RS     let facts = meta.facts();
+//RS     if facts.category.is_none() && !facts.tunable {
+//RS         return None;
+//RS     }
+//RS     let category = facts
+//RS         .category
+//RS         .as_ref()
+//RS         .map(|s| json_str(s))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     Some(format!(
+//RS         "{{\"category\":{},\"tunable\":{}}}",
+//RS         category,
+//RS         if facts.tunable { "true" } else { "false" }
+//RS     ))
+//RS }
+//RS 
+//RS pub(super) fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AST::Func) {
+//RS     let func_span = func_source_span(f);
+//RS     for hint in canvas_comment_hints(src) {
+//RS         if !hint_belongs_to_function(src, hint.anchor, hint.hint_span, func_span) {
+//RS             continue;
+//RS         }
+//RS         g.regions.push(format!(
+//RS             "{{\"region_id\":{},\"kind\":\"comment\",\"title\":{},\"color\":{},\"alpha\":{},\"bounds\":{{\"x\":{},\"y\":{},\"w\":{},\"h\":{}}},\"source_span\":{},\"hint_span\":{}}}",
+//RS             json_str(&comment_region_id(&g.graph_id, hint.anchor)),
+//RS             json_str(&hint.title),
+//RS             json_str(&hint.color),
+//RS             json_str(&hint.alpha),
+//RS             hint.bounds.0,
+//RS             hint.bounds.1,
+//RS             hint.bounds.2,
+//RS             hint.bounds.3,
+//RS             span_json(hint.anchor),
+//RS             span_json(hint.hint_span)
+//RS         ));
+//RS     }
+//RS     for hint in canvas_collapse_hints(src) {
+//RS         if !hint_belongs_to_function(src, hint.anchor, hint.hint_span, func_span) {
+//RS             continue;
+//RS         }
+//RS         g.regions.push(format!(
+//RS             "{{\"region_id\":{},\"kind\":\"collapse\",\"title\":{},\"source_span\":{},\"hint_span\":{}}}",
+//RS             json_str(&collapse_region_id(&g.graph_id, hint.anchor)),
+//RS             json_str(&hint.title),
+//RS             span_json(hint.anchor),
+//RS             span_json(hint.hint_span)
+//RS         ));
+//RS     }
+//RS }
+//RS 
+//RS fn hint_belongs_to_function(
+//RS     src: &str,
+//RS     anchor: SourceSpan,
+//RS     hint_span: SourceSpan,
+//RS     func_span: SourceSpan,
+//RS ) -> bool {
+//RS     if span_overlaps(anchor, func_span) || span_overlaps(hint_span, func_span) {
+//RS         return true;
+//RS     }
+//RS     if hint_span.start < func_span.end {
+//RS         return false;
+//RS     }
+//RS     hint_span.start < next_function_start(src, func_span.end)
+//RS }
+//RS 
+//RS fn next_function_start(src: &str, offset: usize) -> usize {
+//RS     let mut cursor = offset.min(src.len());
+//RS     for line in src[cursor..].split_inclusive('\n') {
+//RS         let trimmed = line.trim_start();
+//RS         if trimmed.starts_with("fn ")
+//RS             || trimmed.starts_with("pub fn ")
+//RS             || trimmed.starts_with("pub(package) fn ")
+//RS         {
+//RS             return cursor + line.len() - trimmed.len();
+//RS         }
+//RS         cursor += line.len();
+//RS     }
+//RS     src.len()
+//RS }
+//RS 
+//RS pub(super) fn add_execution_overlay(g: &mut GraphBuilder, src: &str, body: &[AST::Stmt]) {
+//RS     let exec_nodes = g
+//RS         .nodes
+//RS         .iter()
+//RS         .filter(|node| node_wants_exec(node))
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS 
+//RS     for node in &exec_nodes {
+//RS         if node.kind != "entry" {
+//RS             ensure_exec_pin(g, &node.id, "exec", "input", node.span, None);
+//RS         }
+//RS         if node_has_arm_pins(g, &node.id) {
+//RS             ensure_exec_pin(g, &node.id, "else", "output", node.span, Some("else"));
+//RS         } else if node.kind == "loop" {
+//RS             ensure_exec_pin(g, &node.id, "body", "output", node.span, Some("loop_body"));
+//RS             ensure_exec_pin(g, &node.id, "done", "output", node.span, Some("loop_done"));
+//RS         } else if node.kind == "return" {
+//RS             ensure_exec_pin(
+//RS                 g,
+//RS                 &node.id,
+//RS                 "return",
+//RS                 "output",
+//RS                 node.span,
+//RS                 Some("early_return"),
+//RS             );
+//RS         } else if node.kind == "branch" || (node.kind == "function" && node.archetype == "control")
+//RS         {
+//RS             ensure_exec_pin(g, &node.id, "then", "output", node.span, None);
+//RS             ensure_exec_pin(g, &node.id, "else", "output", node.span, Some("else"));
+//RS         } else if node.kind != "return" {
+//RS             ensure_exec_pin(g, &node.id, "then", "output", node.span, None);
+//RS         }
+//RS     }
+//RS 
+//RS     let Some(entry) = g.nodes.iter().find(|node| node.kind == "entry") else {
+//RS         return;
+//RS     };
+//RS     let entry_id = entry.id.clone();
+//RS     let entry_span = entry.span;
+//RS     let flow = execution_block(g, src, body);
+//RS     if let Some(input) = flow.entry {
+//RS         add_control_wire_once(
+//RS             g,
+//RS             &format!("{entry_id}:output:then"),
+//RS             &input.pin,
+//RS             entry_span,
+//RS             input.span,
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn node_has_arm_pins(g: &GraphBuilder, node_id: &str) -> bool {
+//RS     g.pins.iter().any(|pin| {
+//RS         pin.node_id == node_id && pin.direction == "output" && pin.role.as_deref() == Some("arm")
+//RS     })
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ExecutionEndpoint {
+//RS     pin: String,
+//RS     span: SourceSpan,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct ExecutionFlow {
+//RS     entry: Option<ExecutionEndpoint>,
+//RS     exits: Vec<ExecutionEndpoint>,
+//RS }
+//RS 
+//RS fn execution_block(g: &mut GraphBuilder, src: &str, stmts: &[AST::Stmt]) -> ExecutionFlow {
+//RS     let mut flow = ExecutionFlow::default();
+//RS     let mut exits = Vec::new();
+//RS     let mut reachable = true;
+//RS 
+//RS     for stmt in stmts {
+//RS         if !reachable {
+//RS             break;
+//RS         }
+//RS         let current = execution_stmt(g, src, stmt);
+//RS         let Some(entry) = current.entry.clone() else {
+//RS             if !current.exits.is_empty() {
+//RS                 exits = current.exits;
+//RS                 reachable = true;
+//RS             }
+//RS             continue;
+//RS         };
+//RS         if flow.entry.is_none() {
+//RS             flow.entry = Some(entry.clone());
+//RS         }
+//RS         for previous in &exits {
+//RS             add_control_wire_once(g, &previous.pin, &entry.pin, previous.span, entry.span);
+//RS         }
+//RS         exits = current.exits;
+//RS         reachable = !exits.is_empty();
+//RS     }
+//RS 
+//RS     flow.exits = exits;
+//RS     flow
+//RS }
+//RS 
+//RS fn execution_stmt(g: &mut GraphBuilder, src: &str, stmt: &AST::Stmt) -> ExecutionFlow {
+//RS     match stmt {
+//RS         AST::Stmt::Switch {
+//RS             arms, else_body, ..
+//RS         }
+//RS         | AST::Stmt::ComptimeSwitch {
+//RS             arms, else_body, ..
+//RS         } => {
+//RS             let Some(node) = direct_execution_node(g, stmt) else {
+//RS                 return ExecutionFlow::default();
+//RS             };
+//RS             let mut exits = Vec::new();
+//RS             for (index, arm) in arms.iter().enumerate() {
+//RS                 let output_name = if node_has_arm_pins(g, &node.id) {
+//RS                     format!("arm{}", index + 1)
+//RS                 } else if index == 0 {
+//RS                     "then".to_string()
+//RS                 } else {
+//RS                     String::new()
+//RS                 };
+//RS                 let output = (!output_name.is_empty())
+//RS                     .then(|| exec_output(g, &node.id, &output_name))
+//RS                     .flatten();
+//RS                 append_branch_path(g, src, output, &arm.body, node.span, &mut exits);
+//RS             }
+//RS             let else_output = exec_output(g, &node.id, "else");
+//RS             if let Some(body) = else_body.as_deref() {
+//RS                 append_branch_path(g, src, else_output, body, node.span, &mut exits);
+//RS             } else if let Some(output) = else_output {
+//RS                 exits.push(ExecutionEndpoint {
+//RS                     pin: output,
+//RS                     span: node.span,
+//RS                 });
+//RS             }
+//RS             ExecutionFlow {
+//RS                 entry: exec_input(&node),
+//RS                 exits,
+//RS             }
+//RS         }
+//RS         AST::Stmt::ComptimeIf {
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             let Some(node) = direct_execution_node(g, stmt) else {
+//RS                 return ExecutionFlow::default();
+//RS             };
+//RS             let mut exits = Vec::new();
+//RS             let then_output = exec_output(g, &node.id, "then");
+//RS             append_branch_path(g, src, then_output, then_body, node.span, &mut exits);
+//RS             if let Some(body) = else_body.as_deref() {
+//RS                 let else_output = exec_output(g, &node.id, "else");
+//RS                 append_branch_path(g, src, else_output, body, node.span, &mut exits);
+//RS             } else if let Some(output) = exec_output(g, &node.id, "else") {
+//RS                 exits.push(ExecutionEndpoint {
+//RS                     pin: output,
+//RS                     span: node.span,
+//RS                 });
+//RS             }
+//RS             ExecutionFlow {
+//RS                 entry: exec_input(&node),
+//RS                 exits,
+//RS             }
+//RS         }
+//RS         AST::Stmt::While { body, .. }
+//RS         | AST::Stmt::For { body, .. }
+//RS         | AST::Stmt::Loop { body, .. }
+//RS         | AST::Stmt::CountedLoop { body, .. } => {
+//RS             let Some(node) = direct_execution_node(g, stmt) else {
+//RS                 return ExecutionFlow::default();
+//RS             };
+//RS             let body_output = exec_output(g, &node.id, "body");
+//RS             let body_flow = execution_block(g, src, body);
+//RS             if let Some(body_output) = body_output {
+//RS                 if let Some(body_entry) = body_flow.entry {
+//RS                     add_control_wire_once(
+//RS                         g,
+//RS                         &body_output,
+//RS                         &body_entry.pin,
+//RS                         node.span,
+//RS                         body_entry.span,
+//RS                     );
+//RS                 }
+//RS                 for exit in body_flow.exits {
+//RS                     add_control_wire_once(
+//RS                         g,
+//RS                         &exit.pin,
+//RS                         &format!("{}:input:exec", node.id),
+//RS                         exit.span,
+//RS                         node.span,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             ExecutionFlow {
+//RS                 entry: exec_input(&node),
+//RS                 exits: exec_output(g, &node.id, "done")
+//RS                     .into_iter()
+//RS                     .map(|pin| ExecutionEndpoint {
+//RS                         pin,
+//RS                         span: node.span,
+//RS                     })
+//RS                     .collect(),
+//RS             }
+//RS         }
+//RS         AST::Stmt::Switched { marker, .. } if AST::switched_off(marker) => ExecutionFlow::default(),
+//RS         AST::Stmt::Switched { body, .. } => execution_block(g, src, body),
+//RS         AST::Stmt::Unsafe { body, .. }
+//RS         | AST::Stmt::Impure { body, .. }
+//RS         | AST::Stmt::Reactive { body, .. }
+//RS         | AST::Stmt::Shield { body, .. }
+//RS         | AST::Stmt::Region { body, .. }
+//RS         | AST::Stmt::Policy { body, .. }
+//RS         | AST::Stmt::TaskGroup { body, .. }
+//RS         | AST::Stmt::Layout { body, .. }
+//RS         | AST::Stmt::AuthorityScope { body, .. }
+//RS         | AST::Stmt::ComptimeBlock { body, .. }
+//RS         | AST::Stmt::ContextBlock { body, .. }
+//RS         | AST::Stmt::Live { body, .. }
+//RS         | AST::Stmt::AssumeDet { body, .. }
+//RS         | AST::Stmt::Transact { body, .. }
+//RS         | AST::Stmt::ScopeMember { body, .. } => execution_block(g, src, body),
+//RS         _ => {
+//RS             let Some(node) = direct_execution_node(g, stmt) else {
+//RS                 return ExecutionFlow::default();
+//RS             };
+//RS             let exits = if matches!(
+//RS                 stmt,
+//RS                 AST::Stmt::Return(..)
+//RS                     | AST::Stmt::Break(..)
+//RS                     | AST::Stmt::BreakValue(..)
+//RS                     | AST::Stmt::BreakLabel(..)
+//RS                     | AST::Stmt::BreakLabelValue(..)
+//RS                     | AST::Stmt::Continue(..)
+//RS                     | AST::Stmt::ContinueLabel(..)
+//RS             ) {
+//RS                 Vec::new()
+//RS             } else {
+//RS                 exec_output(g, &node.id, "then")
+//RS                     .into_iter()
+//RS                     .map(|pin| ExecutionEndpoint {
+//RS                         pin,
+//RS                         span: node.span,
+//RS                     })
+//RS                     .collect()
+//RS             };
+//RS             ExecutionFlow {
+//RS                 entry: exec_input(&node),
+//RS                 exits,
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn append_branch_path(
+//RS     g: &mut GraphBuilder,
+//RS     src: &str,
+//RS     output: Option<String>,
+//RS     body: &[AST::Stmt],
+//RS     owner_span: SourceSpan,
+//RS     exits: &mut Vec<ExecutionEndpoint>,
+//RS ) {
+//RS     let Some(output) = output else {
+//RS         return;
+//RS     };
+//RS     let body_flow = execution_block(g, src, body);
+//RS     if let Some(entry) = body_flow.entry {
+//RS         add_control_wire_once(g, &output, &entry.pin, owner_span, entry.span);
+//RS         exits.extend(body_flow.exits);
+//RS     } else {
+//RS         exits.push(ExecutionEndpoint {
+//RS             pin: output,
+//RS             span: owner_span,
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn direct_execution_node(g: &GraphBuilder, stmt: &AST::Stmt) -> Option<NodeRec> {
+//RS     let anchor = stmt_execution_anchor(stmt)?;
+//RS     g.nodes
+//RS         .iter()
+//RS         .filter(|node| node_wants_exec(node) && node.kind != "entry")
+//RS         .find(|node| match stmt {
+//RS             AST::Stmt::Val(binding) => {
+//RS                 node.kind == "binding"
+//RS                     && node.title == binding.name
+//RS                     && node.span.start == binding.name_span.start
+//RS             }
+//RS             _ => node.span.start == anchor.start && node.span.end == anchor.end,
+//RS         })
+//RS         .cloned()
+//RS }
+//RS 
+//RS fn stmt_execution_anchor(stmt: &AST::Stmt) -> Option<SourceSpan> {
+//RS     Some(match stmt {
+//RS         AST::Stmt::Val(binding) => binding.name_span.into(),
+//RS         AST::Stmt::Assign { target, .. } => target.span().into(),
+//RS         AST::Stmt::Expr(expr) => expr_execution_anchor(expr),
+//RS         AST::Stmt::Return(_, span)
+//RS         | AST::Stmt::Break(span)
+//RS         | AST::Stmt::Continue(span)
+//RS         | AST::Stmt::BreakLabel(_, span)
+//RS         | AST::Stmt::ContinueLabel(_, span)
+//RS         | AST::Stmt::BreakValue(_, span)
+//RS         | AST::Stmt::BreakLabelValue(_, _, _, span)
+//RS         | AST::Stmt::DeferClose { span, .. }
+//RS         | AST::Stmt::Yield(_, span)
+//RS         | AST::Stmt::Unsafe { span, .. }
+//RS         | AST::Stmt::Impure { span, .. }
+//RS         | AST::Stmt::Reactive { span, .. }
+//RS         | AST::Stmt::Shield { span, .. }
+//RS         | AST::Stmt::Region { span, .. }
+//RS         | AST::Stmt::Policy { span, .. }
+//RS         | AST::Stmt::TaskGroup { span, .. }
+//RS         | AST::Stmt::Layout { span, .. }
+//RS         | AST::Stmt::AuthorityScope { span, .. }
+//RS         | AST::Stmt::ComptimeBlock { span, .. }
+//RS         | AST::Stmt::ContextBlock { span, .. }
+//RS         | AST::Stmt::Live { span, .. }
+//RS         | AST::Stmt::AssumeDet { span, .. }
+//RS         | AST::Stmt::Transact { span, .. }
+//RS         | AST::Stmt::ScopeMember { span, .. }
+//RS         | AST::Stmt::Switch { span, .. }
+//RS         | AST::Stmt::ComptimeSwitch { span, .. }
+//RS         | AST::Stmt::ComptimeIf { span, .. }
+//RS         | AST::Stmt::While { span, .. }
+//RS         | AST::Stmt::For { span, .. }
+//RS         | AST::Stmt::Loop { span, .. }
+//RS         | AST::Stmt::CountedLoop { span, .. }
+//RS         | AST::Stmt::Switched { span, .. } => (*span).into(),
+//RS     })
+//RS }
+//RS 
+//RS fn expr_execution_anchor(expr: &AST::Expr) -> SourceSpan {
+//RS     match expr {
+//RS         AST::Expr::Call(call) => call.name_span.into(),
+//RS         AST::Expr::MethodCall { method_span, .. } => (*method_span).into(),
+//RS         AST::Expr::Try(inner, span, ..) => {
+//RS             let _ = inner;
+//RS             (*span).into()
+//RS         }
+//RS         AST::Expr::OrFallback { value, .. } => expr_execution_anchor(value),
+//RS         _ => expr.span().into(),
+//RS     }
+//RS }
+//RS 
+//RS fn exec_input(node: &NodeRec) -> Option<ExecutionEndpoint> {
+//RS     (node.kind != "entry").then(|| ExecutionEndpoint {
+//RS         pin: format!("{}:input:exec", node.id),
+//RS         span: node.span,
+//RS     })
+//RS }
+//RS 
+//RS fn exec_output(g: &GraphBuilder, node_id: &str, name: &str) -> Option<String> {
+//RS     g.pins
+//RS         .iter()
+//RS         .find(|pin| pin.node_id == node_id && pin.direction == "output" && pin.name == name)
+//RS         .map(|pin| pin.id.clone())
+//RS }
+//RS 
+//RS fn add_control_wire_once(
+//RS     g: &mut GraphBuilder,
+//RS     from_pin: &str,
+//RS     to_pin: &str,
+//RS     from_span: SourceSpan,
+//RS     to_span: SourceSpan,
+//RS ) {
+//RS     if g.wires
+//RS         .iter()
+//RS         .any(|wire| wire.kind == "control" && wire.from_pin == from_pin && wire.to_pin == to_pin)
+//RS     {
+//RS         return;
+//RS     }
+//RS     add_control_wire(g, from_pin, to_pin, from_span, to_span);
+//RS }
+//RS 
+//RS fn node_wants_exec(node: &NodeRec) -> bool {
+//RS     matches!(
+//RS         node.archetype.as_str(),
+//RS         "entry" | "function_exec" | "control"
+//RS     )
+//RS }
+//RS 
+//RS fn ensure_exec_pin(
+//RS     g: &mut GraphBuilder,
+//RS     node_id: &str,
+//RS     name: &str,
+//RS     direction: &str,
+//RS     span: SourceSpan,
+//RS     role: Option<&str>,
+//RS ) -> String {
+//RS     let id = format!("{node_id}:{direction}:{name}");
+//RS     if !g.pins.iter().any(|pin| pin.id == id) {
+//RS         g.pins.push(PinRec {
+//RS             id: id.clone(),
+//RS             node_id: node_id.to_string(),
+//RS             name: name.to_string(),
+//RS             direction: direction.to_string(),
+//RS             ty: "exec".to_string(),
+//RS             role: role.map(str::to_string),
+//RS             pattern_source: None,
+//RS             ability: "control".to_string(),
+//RS             fallible: false,
+//RS             effect_grant_need: None,
+//RS             span,
+//RS             pattern_source_span: None,
+//RS             append_op: None,
+//RS             element_index: None,
+//RS         });
+//RS     }
+//RS     id
+//RS }
+//RS 
+//RS pub(super) fn func_source_span(f: &AST::Func) -> SourceSpan {
+//RS     f.span.into()
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(super) struct CommentHint {
+//RS     pub(super) anchor: SourceSpan,
+//RS     pub(super) hint_span: SourceSpan,
+//RS     pub(super) title: String,
+//RS     pub(super) color: String,
+//RS     pub(super) alpha: String,
+//RS     pub(super) bounds: (i32, i32, i32, i32),
+//RS }
+//RS 
+//RS pub(super) fn canvas_comment_hints(src: &str) -> Vec<CommentHint> {
+//RS     let mut out = Vec::new();
+//RS     let mut offset = 0usize;
+//RS     for line in src.split_inclusive('\n') {
+//RS         let trimmed = line.trim();
+//RS         if let Some(body) = trimmed.strip_prefix("// canvas:comment") {
+//RS             let anchor = attr_span(body, "span").unwrap_or(SourceSpan { start: 0, end: 0 });
+//RS             out.push(CommentHint {
+//RS                 anchor,
+//RS                 hint_span: SourceSpan {
+//RS                     start: offset,
+//RS                     end: offset + line.trim_end_matches('\n').len(),
+//RS                 },
+//RS                 title: attr_string(body, "title").unwrap_or_else(|| "Comment".to_string()),
+//RS                 color: attr_string(body, "color").unwrap_or_else(|| "#2563eb".to_string()),
+//RS                 alpha: attr_string(body, "alpha").unwrap_or_else(|| "0.18".to_string()),
+//RS                 bounds: attr_bounds(body, "bounds").unwrap_or((0, 0, 360, 180)),
+//RS             });
+//RS         }
+//RS         offset += line.len();
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn comment_region_id(graph_id: &str, span: SourceSpan) -> String {
+//RS     format!("{graph_id}:comment:{}-{}", span.start, span.end)
+//RS }
+//RS 
+//RS pub(super) fn canvas_collapse_hints(src: &str) -> Vec<CommentHint> {
+//RS     let mut out = Vec::new();
+//RS     let mut offset = 0usize;
+//RS     for line in src.split_inclusive('\n') {
+//RS         let trimmed = line.trim();
+//RS         if let Some(body) = trimmed.strip_prefix("// canvas:collapse") {
+//RS             let anchor = attr_span(body, "span").unwrap_or(SourceSpan { start: 0, end: 0 });
+//RS             out.push(CommentHint {
+//RS                 anchor,
+//RS                 hint_span: SourceSpan {
+//RS                     start: offset,
+//RS                     end: offset + line.trim_end_matches('\n').len(),
+//RS                 },
+//RS                 title: attr_string(body, "title").unwrap_or_else(|| "Collapsed".to_string()),
+//RS                 color: "#64748b".to_string(),
+//RS                 alpha: "0.16".to_string(),
+//RS                 bounds: (0, 0, 360, 120),
+//RS             });
+//RS         }
+//RS         offset += line.len();
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn collapse_region_id(graph_id: &str, span: SourceSpan) -> String {
+//RS     format!("{graph_id}:collapse:{}-{}", span.start, span.end)
+//RS }
+//RS 
+//RS pub(super) fn add_inline(
+//RS     g: &mut GraphBuilder,
+//RS     node_id: &str,
+//RS     ordinal: usize,
+//RS     role: &str,
+//RS     src: &str,
+//RS     span: Span,
+//RS ) {
+//RS     let source = snippet(src, span);
+//RS     let id = format!("{}:inline:{ordinal}:{role}", g.graph_id);
+//RS     g.inline_exprs.push(InlineRec {
+//RS         id,
+//RS         node_id: node_id.to_string(),
+//RS         role: role.to_string(),
+//RS         source,
+//RS         span: span.into(),
+//RS     });
+//RS }
+//RS 
+//RS pub(super) fn graph_to_json(
+//RS     g: &GraphBuilder,
+//RS     f: &AST::Func,
+//RS     src: &str,
+//RS     visibility: &'static str,
+//RS ) -> String {
+//RS     let nodes = g.nodes.iter().map(node_json).collect::<Vec<_>>().join(",");
+//RS     let pins = g.pins.iter().map(pin_json).collect::<Vec<_>>().join(",");
+//RS     let wires = g.wires.iter().map(wire_json).collect::<Vec<_>>().join(",");
+//RS     let inline = g
+//RS         .inline_exprs
+//RS         .iter()
+//RS         .map(inline_json)
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let exit_nodes = g
+//RS         .nodes
+//RS         .iter()
+//RS         .filter(|n| n.kind == "return")
+//RS         .map(|n| json_str(&n.id))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"graph_id\":{},\"title\":{},\"function\":{},\"event_views\":[{}],\"entry_node\":{},\"exit_nodes\":[{}],\"nodes\":[{}],\"pins\":[{}],\"wires\":[{}],\"regions\":[{}],\"inline_exprs\":[{}],\"rails\":{},\"layout_hints\":{{\"algorithm\":\"source-order-v1\",\"direction\":\"data-left-to-right/control-top-to-bottom\"}}}}",
+//RS         json_str(&g.graph_id),
+//RS         json_str(&f.name),
+//RS         function_metadata_json(src, f, visibility),
+//RS         callback_event_view_json(&g.graph_id, f).unwrap_or_default(),
+//RS         json_str(&format!("{}:entry", g.graph_id)),
+//RS         exit_nodes,
+//RS         nodes,
+//RS         pins,
+//RS         wires,
+//RS         g.regions.join(","),
+//RS         inline,
+//RS         rails_json(g)
+//RS     )
+//RS }
+//RS 
+//RS fn function_metadata_json(src: &str, f: &AST::Func, visibility: &'static str) -> String {
+//RS     let params = f
+//RS         .params
+//RS         .iter()
+//RS         .map(|p| {
+//RS             let default = p
+//RS                 .default
+//RS                 .as_ref()
+//RS                 .map(|expr| json_str(&snippet(src, expr.span())))
+//RS                 .unwrap_or_else(|| "null".to_string());
+//RS             format!(
+//RS                 "{{\"name\":{},\"type\":{},\"ability\":{},\"default\":{},\"default_source\":{},\"source_span\":{}}}",
+//RS                 json_str(&p.name),
+//RS                 json_str(&p.ty.name()),
+//RS                 json_str(p.convention.sigil()),
+//RS                 if p.default.is_some() { "true" } else { "false" },
+//RS                 default,
+//RS                 span_json(p.name_span.into())
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let ret = f.effective_return_type().name();
+//RS     let effects = f
+//RS         .declared_effects
+//RS         .as_ref()
+//RS         .map(|effects| {
+//RS             effects
+//RS                 .iter()
+//RS                 .map(|(name, _)| json_str(name))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         })
+//RS         .unwrap_or_default();
+//RS     let effect_via = f
+//RS         .effect_via
+//RS         .as_ref()
+//RS         .map(|(param, _)| json_str(param))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     format!(
+//RS         "{{\"name\":{},\"signature\":{},\"visibility\":{},\"docs\":{},\"pure\":{},\"unsafe\":{},\"effects\":[{}],\"effect_via\":{},\"returns\":{},\"params\":[{}],\"meta\":{},\"source_span\":{},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}",
+//RS         json_str(&f.name),
+//RS         json_str(&function_signature_text(src, f, visibility)),
+//RS         json_str(visibility),
+//RS         json_str(&doc_comment_before(src, f.name_span.start)),
+//RS         if f.is_pure { "true" } else { "false" },
+//RS         if f.is_unsafe { "true" } else { "false" },
+//RS         effects,
+//RS         effect_via,
+//RS         json_str(&ret),
+//RS         params,
+//RS         meta_attr_json(f.meta.as_ref()).unwrap_or_else(|| "null".to_string()),
+//RS         span_json(func_source_span(f))
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn ledger_function_visibility(
+//RS     ledger: &NameLedger,
+//RS     module_idx: usize,
+//RS     name: &str,
+//RS ) -> &'static str {
+//RS     match ledger
+//RS         .declaration(module_idx, name)
+//RS         .map(|declaration| declaration.visibility)
+//RS     {
+//RS         Some(NameVisibility::Package) => "package",
+//RS         Some(NameVisibility::Public) => "public",
+//RS         Some(NameVisibility::Private) => "private",
+//RS         None => "private",
+//RS     }
+//RS }
+//RS 
+//RS fn function_signature_text(src: &str, f: &AST::Func, visibility: &'static str) -> String {
+//RS     let mut out = String::new();
+//RS     match visibility {
+//RS         "package" => out.push_str("pub(package) "),
+//RS         "public" => out.push_str("pub "),
+//RS         _ => {}
+//RS     }
+//RS     out.push_str("fn ");
+//RS     out.push_str(&f.name);
+//RS     out.push('(');
+//RS     out.push_str(
+//RS         &f.params
+//RS             .iter()
+//RS             .map(|p| {
+//RS                 let mut s = format!("{}: {}", p.name, p.ty.name());
+//RS                 if let Some(default) = &p.default {
+//RS                     s.push('{');
+//RS                     s.push_str(&snippet(src, default.span()));
+//RS                     s.push('}');
+//RS                 }
+//RS                 s
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(", "),
+//RS     );
+//RS     out.push(')');
+//RS     out.push(' ');
+//RS     out.push_str(&f.effective_return_type().name());
+//RS     if let Some((param, _)) = &f.effect_via {
+//RS         out.push_str(" -[via ");
+//RS         out.push_str(param);
+//RS         out.push_str("]>");
+//RS     } else if let Some(effects) = &f.declared_effects {
+//RS         out.push_str(" -[");
+//RS         out.push_str(
+//RS             &effects
+//RS                 .iter()
+//RS                 .map(|(name, _)| name.as_str())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", "),
+//RS         );
+//RS         out.push_str("]>");
+//RS     } else if f.is_pure {
+//RS         out.push_str(" -[]>");
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn doc_comment_before(src: &str, name_start: usize) -> String {
+//RS     let mut docs = Vec::new();
+//RS     let mut cursor = line_start(src, name_start);
+//RS     while cursor > 0 {
+//RS         let prev_end = cursor.saturating_sub(1);
+//RS         let prev_start = line_start(src, prev_end);
+//RS         let line = src[prev_start..prev_end].trim();
+//RS         if let Some(doc) = line.strip_prefix("///") {
+//RS             docs.push(doc.trim().to_string());
+//RS             cursor = prev_start;
+//RS             continue;
+//RS         }
+//RS         if line.is_empty() {
+//RS             cursor = prev_start;
+//RS             continue;
+//RS         }
+//RS         break;
+//RS     }
+//RS     docs.reverse();
+//RS     docs.join("\n")
+//RS }
+//RS 
+//RS fn callback_event_view_json(graph_id: &str, f: &AST::Func) -> Option<String> {
+//RS     let event = callback_event_name(&f.name)?;
+//RS     Some(format!(
+//RS         "{{\"event_id\":{},\"kind\":\"callback_event\",\"title\":{},\"function\":{},\"entry_node\":{},\"semantics\":\"ordinary_jet_function\",\"dispatch\":\"framework_callback\",\"pending_first_class_events\":\"#286\",\"source_span\":{}}}",
+//RS         json_str(&format!("{graph_id}:event:{event}")),
+//RS         json_str(&event),
+//RS         json_str(&f.name),
+//RS         json_str(&format!("{graph_id}:entry")),
+//RS         span_json(func_source_span(f))
+//RS     ))
+//RS }
+//RS 
+//RS fn callback_event_name(name: &str) -> Option<String> {
+//RS     name.strip_prefix("on_")
+//RS         .filter(|rest| !rest.is_empty())
+//RS         .map(|rest| rest.to_string())
+//RS }
+//RS 
+//RS fn rails_json(g: &GraphBuilder) -> String {
+//RS     let mut kinds = Vec::new();
+//RS     push_rail(&mut kinds, "control");
+//RS     if !g.wires.is_empty() || !g.pins.is_empty() {
+//RS         push_rail(&mut kinds, "data");
+//RS     }
+//RS     if g.wires.iter().any(|w| w.kind == "fallible") || g.pins.iter().any(|p| p.fallible) {
+//RS         push_rail(&mut kinds, "fallible");
+//RS     }
+//RS     if g.regions
+//RS         .iter()
+//RS         .any(|r| r.contains("\"kind\":\"task.group\""))
+//RS         || g.nodes
+//RS             .iter()
+//RS             .any(|n| n.title == ".task" || n.title == "spawn" || n.title.ends_with(".spawn"))
+//RS     {
+//RS         push_rail(&mut kinds, "async");
+//RS     }
+//RS     if g.nodes
+//RS         .iter()
+//RS         .any(|n| n.badges.iter().any(|b| b == "effects"))
+//RS         || g.regions
+//RS             .iter()
+//RS             .any(|r| r.contains("\"kind\":\"authority\""))
+//RS     {
+//RS         push_rail(&mut kinds, "effect");
+//RS     }
+//RS     if g.regions
+//RS         .iter()
+//RS         .any(|r| r.contains("\"kind\":\"unsafe\"") || r.contains("\"kind\":\"comptime\""))
+//RS     {
+//RS         push_rail(&mut kinds, "proof");
+//RS     }
+//RS     push_rail(&mut kinds, "debug");
+//RS     format!(
+//RS         "{{\"kinds\":[{}],\"debug_overlay\":\"idle\",\"source\":\"front-end facts\"}}",
+//RS         json_strs(&kinds)
+//RS     )
+//RS }
+//RS 
+//RS fn push_rail(kinds: &mut Vec<String>, kind: &str) {
+//RS     if !kinds.iter().any(|k| k == kind) {
+//RS         kinds.push(kind.to_string());
+//RS     }
+//RS }
+//RS 
+//RS fn node_json(n: &NodeRec) -> String {
+//RS     let descriptor = node_catalog::descriptor_for(&n.kind, &n.archetype);
+//RS     let meta = n
+//RS         .meta_json
+//RS         .as_ref()
+//RS         .cloned()
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     format!(
+//RS         "{{\"node_id\":{},\"node_descriptor_id\":{},\"kind\":{},\"archetype\":{},\"title\":{},\"source_span\":{},\"layout\":{{\"x\":{},\"y\":{}}},\"badges\":[{}],\"edit_affordances\":[{}],\"meta\":{}}}",
+//RS         json_str(&n.id),
+//RS         json_str(descriptor.id),
+//RS         json_str(&n.kind),
+//RS         json_str(&n.archetype),
+//RS         json_str(&n.title),
+//RS         span_json(n.span),
+//RS         n.x,
+//RS         n.y,
+//RS         json_strs(&n.badges),
+//RS         json_strs(&n.affordances),
+//RS         meta
+//RS     )
+//RS }
+//RS 
+//RS fn pin_json(p: &PinRec) -> String {
+//RS     let grant = p
+//RS         .effect_grant_need
+//RS         .as_ref()
+//RS         .map(|s| json_str(s))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let role = p
+//RS         .role
+//RS         .as_ref()
+//RS         .map(|s| json_str(s))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let pattern_source = p
+//RS         .pattern_source
+//RS         .as_ref()
+//RS         .map(|s| json_str(s))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let pattern_source_span = p
+//RS         .pattern_source_span
+//RS         .map(span_json)
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let append_op = p
+//RS         .append_op
+//RS         .as_ref()
+//RS         .map(|s| json_str(s))
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let element_index = p
+//RS         .element_index
+//RS         .map(|n| n.to_string())
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     format!(
+//RS         "{{\"pin_id\":{},\"node_id\":{},\"name\":{},\"direction\":{},\"type\":{},\"role\":{},\"pattern_source\":{},\"pattern_source_span\":{},\"append_op\":{},\"element_index\":{},\"ability\":{},\"fallible\":{},\"effect_grant_need\":{},\"source_span\":{}}}",
+//RS         json_str(&p.id),
+//RS         json_str(&p.node_id),
+//RS         json_str(&p.name),
+//RS         json_str(&p.direction),
+//RS         json_str(&p.ty),
+//RS         role,
+//RS         pattern_source,
+//RS         pattern_source_span,
+//RS         append_op,
+//RS         element_index,
+//RS         json_str(&p.ability),
+//RS         if p.fallible { "true" } else { "false" },
+//RS         grant,
+//RS         span_json(p.span)
+//RS     )
+//RS }
+//RS 
+//RS fn wire_json(w: &WireRec) -> String {
+//RS     let source_span = w.span.map(span_json).unwrap_or_else(|| "null".to_string());
+//RS     let from_span = w
+//RS         .from_span
+//RS         .map(span_json)
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let to_span = w
+//RS         .to_span
+//RS         .map(span_json)
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     format!(
+//RS         "{{\"wire_id\":{},\"from_pin\":{},\"to_pin\":{},\"wire_kind\":{},\"source_span\":{},\"from_source_span\":{},\"to_source_span\":{}}}",
+//RS         json_str(&w.id),
+//RS         json_str(&w.from_pin),
+//RS         json_str(&w.to_pin),
+//RS         json_str(&w.kind),
+//RS         source_span,
+//RS         from_span,
+//RS         to_span
+//RS     )
+//RS }
+//RS 
+//RS fn inline_json(i: &InlineRec) -> String {
+//RS     format!(
+//RS         "{{\"inline_expr_id\":{},\"node_id\":{},\"role\":{},\"source\":{},\"source_span\":{},\"editable\":true}}",
+//RS         json_str(&i.id),
+//RS         json_str(&i.node_id),
+//RS         json_str(&i.role),
+//RS         json_str(&i.source),
+//RS         span_json(i.span)
+//RS     )
+//RS }
+// END-PORT-PENDING 0763 crates/jet-devserver/src/Canvas/graph_json.rs:1-1131
+

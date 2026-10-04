@@ -1,0 +1,95 @@
+use core.http as devserver_http
+use core.http.[HTTPError, HTTPRequest, Headers]
+use core.files as devserver_files
+use core.text as devserver_text
+
+pub MAX_REQUEST_BODY_BYTES :: 1048576
+pub MAX_REQUEST_LINE_BYTES :: 8192
+pub MAX_REQUEST_HEADER_BYTES :: 32768
+pub MAX_REQUEST_HEADER_COUNT :: 100
+
+#Error
+pub enum DevserverTransportError {
+    CoreHTTP(error: HTTPError)
+    InvalidData(message: String)
+    Net(error: NetError)
+}
+
+// Rust lib.rs:100–207. The sole framing/method/target/Host/size authority is
+// Core.http.parse_request. No devserver line reader or second HTTP parser.
+// Core's exact version law: HTTP/1.1 requires a single valid Host; HTTP/1.0
+// accepts an absent Host and validates it when present. Both require CRLF.
+// Main's strict cutover adopts Core's errors for metadata it rejects before
+// projection (duplicate Host/conflicting Content-Length/Transfer-Encoding).
+// Foundation Execution/WatchPolicy.jet owns WatchPolicy/watch_policy_from;
+// devserver consumers import that canonical package API, never a local enum.
+pub struct DevserverRequest {
+    pub method: String
+    pub target: String
+    pub headers: [String:String]
+    pub body: [U8]
+
+    // Complete buffered message adapter. Streaming BufRead acquisition remains
+    // DC1/DC2/DC5's native bounded transport prerequisite, not an EOF read-all.
+    // #4431 gates Core's before-proportional-allocation body budget guarantee:
+    // current parse_request slices the body before checking its 1 MiB cap.
+    // Keep Core's canonical error; never repair this with a Tools parser fork.
+    pub fn read(raw: [U8]) -> DevserverRequest? DevserverTransportError! {
+        if raw.len() == 0 -> return Ok(None)
+        parsed :: devserver_http.parse_request(raw) ?? return Err(.CoreHTTP{error: err})
+        request :: DevserverRequest.from_http(parsed)
+        Ok(Val(request))
+    }
+
+    // #4436 native integration gate: HTTPRequest.headers currently lacks its
+    // checked MIR owner type. Keep the real carrier API, not a local mirror.
+    pub fn from_http(parsed: HTTPRequest) -> DevserverRequest DevserverTransportError! {
+        headers :: devserver_request_headers(parsed.headers)
+        // #4428: Core currently rejects non-UTF8 wire bodies before this point.
+        // The adapter never coerces bytes into text or invents a binary fallback.
+        body :: devserver_http.body_as_bytes(parsed.body)
+        Ok(DevserverRequest{method: parsed.method, target: parsed.path, headers: headers, body: body})
+    }
+}
+
+// Rust's lowercased, last-value-wins map, except the five security headers.
+// Input is Core's ordered parsed Header facts; Core already validates syntax.
+// Core errors take precedence when Core rejects an unprojectable message.
+// #4438: native Core.Headers currently lowers to JetHTTPHeaders{entries},
+// whereas its public source field is fields. Header policy proof awaits that
+// carrier repair; no Tools-local carrier or textual reparse substitutes for it.
+pub fn devserver_request_headers(parsed: Headers) -> [String:String] DevserverTransportError! {
+    headers := [String:String]{}
+    loop field in parsed.fields {
+        name :: devserver_text.lower(field.name) // valid HTTP names are ASCII
+        security :: name == "authorization" || name == "content-length" || name == "host" || name == "origin" || name == "transfer-encoding"
+        if security && headers.has_key(name) -> return Err(.InvalidData{message: "duplicate devserver security header"})
+        if name == "transfer-encoding" -> return Err(.InvalidData{message: "devserver does not accept transfer-encoded requests"})
+        headers[name] = field.value
+    }
+    Ok(headers)
+}
+
+// Rust lib.rs:96–98. Provider metadata, not a clock/read-content surrogate.
+// Core exposes the OS modification stamp in milliseconds; failures are None.
+pub fn devserver_file_mtime(path: String) -[FS.Read]> Int? Never! {
+    metadata :: devserver_files.stat(path) ?? return None
+    Val(metadata.modified_ms)
+}
+
+// Rust query_param's raw-name/exact-first-match policy. This deliberately
+// returns encoded VALUE facts, not a pretend query_param implementation.
+// The public tolerant/lossy value decoder and query_param composition are
+// gated by ballot #4428. Neither bounded query_decode nor strict URL decoding
+// is an equivalent substitute; query names must never be decoded.
+pub fn devserver_query_param_raw_value(target: String, key: String) -> String? Never! {
+    if !target.contains("?") -> return None
+    loop part in target.after("?").split("&") {
+        if part.contains("=") {
+            if part.before("=") == key -> return Val(part.after("="))
+        } else if part == key {
+            return Val("")
+        }
+    }
+    None
+}

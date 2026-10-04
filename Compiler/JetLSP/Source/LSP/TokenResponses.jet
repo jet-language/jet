@@ -1,0 +1,72 @@
+// Source/LSP/Server.rs:3110–3220. Real W38 Server/W36 state and resident
+// checked query. Encoders/hint formatters are sole Features/Completion owners;
+// these handlers do not reimplement classification or reasoning.
+use core.encoding.[DataTree]
+use core.files.runtime.kernel_path_components as lsp_token_path
+use jet_foundation.[Span]
+use jet_semindex.[InlayHint]
+
+pub fn lsp_semantic_tokens_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri :: if (td.field("uri") ?? return None) == { .Text(text) -> text else -> return None }
+    doc :: server.diagnostic_state.docs.get(uri) ?? return None
+    shared_tokens :: server.lex(doc)
+    tokens :: shared_tokens.guard_read()
+    witness :: server.check_with_bundle(doc)
+    checked :: witness.checked.guard_read()
+    db :: lsp_build_symbol_db(checked.value.result)
+    data :: lsp_encode_semantic_tokens_with_arithmetic(tokens.value, doc.text, db.arithmetic)
+    Val(lsp_response(id, lsp_semantic_tokens_json(doc.text, data)))
+}
+
+pub fn lsp_semantic_tokens_range_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri :: if (td.field("uri") ?? return None) == { .Text(text) -> text else -> return None }
+    doc :: server.diagnostic_state.docs.get(uri) ?? return None
+    range :: lsp_range_from_json(value.field("range") ?? return Val(lsp_response(id, "{{\"data\":[]}}"))) ?? return Val(lsp_response(id, "{{\"data\":[]}}"))
+    start :: lsp_pos_to_offset(doc.text, range.start)
+    requested_end :: lsp_pos_to_offset(doc.text, range.end)
+    end :: if requested_end > start -> requested_end else -> start
+    shared_tokens :: server.lex(doc)
+    tokens :: shared_tokens.guard_read()
+    witness :: server.check_with_bundle(doc)
+    checked :: witness.checked.guard_read()
+    db :: lsp_build_symbol_db(checked.value.result)
+    data :: lsp_encode_semantic_tokens_in_span_with_arithmetic(tokens.value, doc.text, Span{start: start, end: end}, db.arithmetic)
+    Val(lsp_response(id, lsp_semantic_tokens_json(doc.text, data)))
+}
+
+pub fn lsp_semantic_tokens_delta_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+    // Rust3160–3177: LSP explicitly permits returning a full result for delta.
+    // Same inputs and same checked query as full, not a pretend delta cache.
+    lsp_semantic_tokens_response(server, params, id)
+}
+
+pub fn lsp_semantic_tokens_json(src: String, data: [U32]) -> String Never! {
+    values := [String]{}
+    loop number in data -> &values.push("{number}")
+    "{{\"resultId\":\"{lsp_semantic_tokens_result_id(src, data)}\",\"data\":[{values.join(",")}]}}"
+}
+
+pub fn lsp_semantic_tokens_result_id(src: String, data: [U32]) -> String Never! {
+    "{src.bytes().len()}:{data.len()}"
+}
+
+pub fn lsp_inlay_hint_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env]> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri :: if (td.field("uri") ?? return None) == { .Text(text) -> text else -> return None }
+    doc :: server.diagnostic_state.docs.get(uri) ?? return None
+    witness :: server.check_with_bundle(doc)
+    checked :: witness.checked.guard_read()
+    result :: checked.value.result
+    hints := [InlayHint]{}
+    if result.graph != None {
+        db :: lsp_build_symbol_db(result)
+        loop hint in db.inlay_hints_for(lsp_token_path.display(doc.path)) -> &hints.push(~hint[0])
+        loop hint in lsp_reasoning_inlay_hints(db, lsp_token_path.display(doc.path)) -> &hints.push(hint)
+    }
+    Val(lsp_response(id, lsp_format_inlay_hints(hints, doc.text)))
+}

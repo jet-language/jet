@@ -1,0 +1,394 @@
+// Rust: Source/LSP/Features.rs:1152–1813. Checked identity, never text inference.
+use jet_foundation.[Span, DerivationRecord, foundation_json_quote, derivation_record_json, fact_read_kind, KW_SELF]
+use jet_lexer.[Token, TOKEN_IDENT, TOKEN_DOT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_EQ_EQ, TOKEN_NOT_EQ, TOKEN_LT, TOKEN_GT, TOKEN_LE, TOKEN_GE, TOKEN_KW_IF, TOKEN_KW_FN, TOKEN_SELF, TOKEN_PIPE, TOKEN_UNIFIED_ARROW, TOKEN_LAMBDA_ARROW]
+use jet_semindex.[SymbolDB, SemanticSymbol, SymRef, SymDef, SymKind, DefinitionAnchor, SourceSpan, SemanticVisibilityAnchor]
+
+// Rust: Source/LSP/Features.rs:1152
+pub fn lsp_semantic_symbol_at(db: SymbolDB, tokens: [Token], path: String, offset: Int) -> View<SemanticSymbol>? Never! {
+    if db.symbols.at(path, offset) == .Val(window) -> return Val(window)
+    loop reference in db.refs {
+        if reference.module_path != path || reference.span.start > offset || offset > reference.span.end -> next
+        if reference.target == .Val(target) {
+            if target.semantic_identity == .Val(identity) {
+                if db.symbols.lookup_identity(identity) == .Val(window) -> return Val(window)
+            }
+            rows :: db.symbols.symbols()
+            loop (i, symbol) in rows {
+                if symbol.module_path == target.module_path && symbol.span == Val(target.def_span) { window :: rows[i..i]; return Val(window) }
+            }
+        }
+        break
+    }
+    // Pending 0737 sole enum_variant_identity_at body; do not infer variant by
+    // its spelling when the checked expression/owner facts are unavailable.
+    if enum_variant_identity_at(db, tokens, path, offset) == .Val(identity) {
+        if db.symbols.lookup_identity(identity) == .Val(window) -> return Val(window)
+    }
+    name :: lsp_find_ident_at(tokens, offset) ?? return None
+    db.symbols.resolve_visible_in(name, Val(path))
+}
+
+// Rust: Source/LSP/Features.rs:1188
+pub fn lsp_semantic_symbol_at_span(db: SymbolDB, path: String, span: Span) -> View<SemanticSymbol>? Never! {
+    rows :: db.symbols.symbols()
+    loop (i, symbol) in rows {
+        if symbol.module_path != path -> next
+        if symbol.span == .Val(source_span) {
+            if source_span.start == span.start && source_span.end == span.end { window :: rows[i..i]; return Val(window) }
+        }
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1202 (inner associated_types1229).
+pub fn lsp_semantic_symbol_metadata_json(db: SymbolDB, symbol: SemanticSymbol) -> String? Never! {
+    definition := db.index.lookup_identity(symbol.identity)
+    if definition == None {
+        span :: symbol.span ?? return None
+        rows :: db.index.definitions()
+        loop (i, row) in rows {
+            if row.module_path == symbol.module_path && row.def_span == span { window :: rows[i..i]; definition = Val(window); break }
+        }
+    }
+    window :: definition ?? return None
+    def :: window[0]
+    derivation := View<DerivationRecord>?{None}
+    loop fact in db.index.definition_facts() {
+        if fact.human_identity != def.identity -> next
+        records :: db.index.derivations()
+        loop (i, row) in records {
+            if row.subject == fact.stable_id { record :: records[i..i]; derivation = Val(record); break }
+        }
+        break
+    }
+    if def.nominal_base == None && def.trait_contracts.is_empty() && derivation == None -> return None
+    contracts := [String]{}
+    loop contract in def.trait_contracts {
+        associated := [String]{}
+        loop fact in contract.associated_types {
+            ty :: if fact.implementation == { .Val(value) -> foundation_json_quote(value) None -> "null" }
+            &associated.push("{{\"name\":{foundation_json_quote(fact.name)},\"type\":{ty}}}")
+        }
+        &contracts.push("{{\"name\":{foundation_json_quote(contract.trait_name)},\"associated_types\":[{associated.join(",")}],\"methods\":[{lsp_json_string_array(contract.methods)}]}}")
+    }
+    base :: if def.nominal_base == { .Val(value) -> foundation_json_quote(value) None -> "null" }
+    relation :: if derivation == { .Val(row) -> derivation_record_json(row[0]) None -> "null" }
+    Val("{{\"identity\":{foundation_json_quote(def.identity)},\"qualified_name\":{foundation_json_quote(def.qualified_name)},\"signature\":{foundation_json_quote(symbol.signature)},\"nominal_base\":{base},\"trait_contracts\":[{contracts.join(",")}],\"derivation\":{relation}}}")
+}
+
+// Rust: Source/LSP/Features.rs:1284
+pub fn lsp_compiler_fact_receiver_span(tokens: [Token], offset: Int) -> Span? Never! {
+    loop (index, token) in tokens {
+        if token.kind != TOKEN_IDENT || fact_read_kind(token.payload.text) == None || token.span.start > offset || offset > token.span.end -> next
+        if index < 2 -> return None
+        receiver :: tokens[index - 2]
+        if tokens[index - 1].kind == TOKEN_DOT && receiver.kind == TOKEN_IDENT -> return Val(receiver.span)
+        return None
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1295
+pub fn lsp_checked_anchor_identity(db: SymbolDB, anchor: DefinitionAnchor) -> String? Never! {
+    if anchor.semantic_identity == .Val(identity) { if !identity.is_empty() -> return Val(~identity) }
+    identity := String?{None}
+    loop definition in db.defs {
+        if definition.module_path != anchor.module_path || definition.def_span.start != anchor.def_span.start || definition.def_span.end != anchor.def_span.end -> next
+        if identity == .Val(existing) { if existing != definition.identity -> return None }
+        identity = Val(~definition.identity)
+    }
+    identity
+}
+
+// Rust: Source/LSP/Features.rs:1322. Two linear passes, no candidate cloning.
+// Unit failure distinguishes an ambiguous/unresolved smallest span from absent.
+pub fn lsp_checked_reference_in_span(db: SymbolDB, path: String, start: Int, end: Int) -> View<SymRef>? ()! {
+    min_len := Int?{None}
+    loop reference in db.refs {
+        if reference.module_path != path || reference.span.start > start || end > reference.span.end -> next
+        length :: reference.span.end.saturating_sub(reference.span.start).max(0)
+        if min_len == None || length < (min_len ?? Int.MAX) -> min_len = Val(length)
+    }
+    length :: min_len ?? return Ok(None)
+    selected := Int?{None}
+    identity := String?{None}
+    loop (i, reference) in db.refs {
+        if reference.module_path != path || reference.span.start > start || end > reference.span.end || reference.span.end.saturating_sub(reference.span.start).max(0) != length -> next
+        target :: reference.target ?? next
+        candidate :: lsp_checked_anchor_identity(db, target) ?? next
+        if identity == .Val(existing) { if existing != candidate -> return Err(()) }
+        identity = Val(candidate)
+        if selected == None -> selected = Val(i)
+    }
+    i :: selected ?? return Err(())
+    row :: db.refs[i..i]
+    Ok(Val(row))
+}
+
+// Rust: Source/LSP/Features.rs:1371
+pub fn lsp_checked_definition_in_span(db: SymbolDB, path: String, start: Int, end: Int) -> View<SymDef>? ()! {
+    min_len := Int?{None}
+    loop definition in db.defs {
+        if definition.module_path != path || definition.def_span.start > start || end > definition.def_span.end -> next
+        length :: definition.def_span.end.saturating_sub(definition.def_span.start).max(0)
+        if min_len == None || length < (min_len ?? Int.MAX) -> min_len = Val(length)
+    }
+    length :: min_len ?? return Ok(None)
+    selected := Int?{None}
+    identity := String?{None}
+    loop (i, definition) in db.defs {
+        if definition.module_path != path || definition.def_span.start > start || end > definition.def_span.end || definition.def_span.end.saturating_sub(definition.def_span.start).max(0) != length -> next
+        if identity == .Val(existing) { if existing != definition.identity -> return Err(()) }
+        identity = Val(~definition.identity)
+        if selected == None -> selected = Val(i)
+    }
+    if selected == .Val(i) { row :: db.defs[i..i]; return Ok(Val(row)) }
+    Ok(None)
+}
+
+// Rust: Source/LSP/Features.rs:1411
+pub fn lsp_checked_instance_identity(db: SymbolDB, path: String, start: Int, end: Int) -> String? ()! {
+    min_len := Int?{None}
+    loop instance in db.index.instances() {
+        loop application in instance.applications {
+            if application.module_path != path || application.span.start > start || end > application.span.end -> next
+            length :: application.span.end.saturating_sub(application.span.start).max(0)
+            if min_len == None || length < (min_len ?? Int.MAX) -> min_len = Val(length)
+        }
+    }
+    length :: min_len ?? return Ok(None)
+    identity := String?{None}
+    loop instance in db.index.instances() {
+        loop application in instance.applications {
+            if application.module_path != path || application.span.start > start || end > application.span.end || application.span.end.saturating_sub(application.span.start).max(0) != length -> next
+            if identity == .Val(existing) { if existing != application.semantic_identity -> return Err(()) }
+            identity = Val(~application.semantic_identity)
+        }
+    }
+    Ok(identity)
+}
+
+// Rust: Source/LSP/Features.rs:1451. Errors propagate before later priorities.
+pub fn lsp_checked_identity_in_span(db: SymbolDB, path: String, start: Int, end: Int) -> String? ()! {
+    reference :: lsp_checked_reference_in_span(db, path, start, end)?
+    if reference == .Val(row) {
+        if row[0].target == .Val(target) -> return Ok(lsp_checked_anchor_identity(db, target))
+        return Ok(None)
+    }
+    definition :: lsp_checked_definition_in_span(db, path, start, end)?
+    if definition == .Val(row) -> return Ok(Val(~row[0].identity))
+    lsp_checked_instance_identity(db, path, start, end)
+}
+
+// Rust: Source/LSP/Features.rs:1469
+pub fn lsp_previous_code_token(tokens: [Token], index: Int) -> Int? Never! {
+    cursor := index
+    loop while cursor > 0 {
+        cursor -= 1
+        if !is_trivia(tokens[cursor]) -> return Val(cursor) // 0737 Rust name pending.
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1477
+pub fn lsp_comparison_token(kind: Int) -> Bool Never! {
+    kind == TOKEN_EQ_EQ || kind == TOKEN_NOT_EQ || kind == TOKEN_LT || kind == TOKEN_GT || kind == TOKEN_LE || kind == TOKEN_GE
+}
+
+// Rust: Source/LSP/Features.rs:1494. Backward brace balance identifies exactly
+// the active dispatch braces without rescanning each brace's suffix (linear).
+pub fn lsp_active_pattern_subject(tokens: [Token], index: Int) -> Int? Never! {
+    cursor := index
+    closes := 0
+    loop while cursor > 0 {
+        cursor -= 1
+        kind :: tokens[cursor].kind
+        if kind == TOKEN_RBRACE { closes += 1; next }
+        if kind != TOKEN_LBRACE -> next
+        if closes > 0 { closes -= 1; next }
+        eq_index :: lsp_previous_code_token(tokens, cursor) ?? next
+        if !lsp_comparison_token(tokens[eq_index].kind) -> next
+        subject :: lsp_previous_code_token(tokens, eq_index) ?? next
+        if_index :: lsp_previous_code_token(tokens, subject) ?? next
+        if tokens[if_index].kind == TOKEN_KW_IF -> return Val(subject)
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1534
+pub fn lsp_bare_function_head_start(tokens: [Token], index: Int) -> Int? Never! {
+    open :: lsp_previous_code_token(tokens, index) ?? return None
+    if tokens[open].kind != TOKEN_LPAREN -> return None
+    next_index :: next_significant(tokens, index) ?? return None // 0737 Rust name pending.
+    if tokens[next_index].kind != TOKEN_LPAREN && tokens[next_index].kind != TOKEN_RPAREN -> return None
+    name := lsp_previous_code_token(tokens, open) ?? return None
+    if tokens[name].kind == TOKEN_GT {
+        depth := 1
+        loop {
+            cursor :: lsp_previous_code_token(tokens, name) ?? break
+            if tokens[cursor].kind == TOKEN_GT -> depth += 1
+            if tokens[cursor].kind == TOKEN_LT {
+                depth = (depth - 1).max(0)
+                if depth == 0 { name = lsp_previous_code_token(tokens, cursor) ?? return None; break }
+            }
+            name = cursor
+        }
+    }
+    if tokens[name].kind != TOKEN_IDENT -> return None
+    declaration := lsp_previous_code_token(tokens, name) ?? return None
+    if tokens[declaration].kind == TOKEN_DOT {
+        owner :: lsp_previous_code_token(tokens, declaration) ?? return None
+        if tokens[owner].kind != TOKEN_IDENT -> return None
+        declaration = lsp_previous_code_token(tokens, owner) ?? return None
+    }
+    if tokens[declaration].kind == TOKEN_KW_FN -> return Val(open)
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1579
+pub fn lsp_pattern_head_start(tokens: [Token], index: Int) -> Int? Never! {
+    if lsp_bare_function_head_start(tokens, index) == .Val(start) -> return Val(start)
+    previous :: lsp_previous_code_token(tokens, index) ?? return None
+    if tokens[previous].kind == TOKEN_LBRACE {
+        before :: lsp_previous_code_token(tokens, previous) ?? return None
+        if lsp_comparison_token(tokens[before].kind) -> return Val(previous)
+        return None
+    }
+    if tokens[previous].kind == TOKEN_PIPE {
+        cursor := previous
+        loop {
+            before :: lsp_previous_code_token(tokens, cursor) ?? return None
+            if tokens[before].kind == TOKEN_LBRACE {
+                before_brace :: lsp_previous_code_token(tokens, before) ?? return None
+                if lsp_comparison_token(tokens[before_brace].kind) -> return Val(before)
+                return None
+            }
+            if tokens[before].kind == TOKEN_UNIFIED_ARROW || tokens[before].kind == TOKEN_LAMBDA_ARROW -> return None
+            cursor = before
+        }
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1608. The identical nominal-type projection is
+// already canonical in 0734 CompletionFacts (Completion.rs196); reuse it.
+pub fn lsp_type_name_from_kind(kind: SymKind) -> String? Never! {
+    lsp_completion_type_name_from_kind(kind)
+}
+
+// Rust: Source/LSP/Features.rs:1631
+pub fn lsp_function_head_type_name(db: SymbolDB, tokens: [Token], path: String, head_start: Int) -> String? Never! {
+    if head_start >= tokens.len() -> return None
+    offset :: tokens[head_start].span.start
+    function_span := SourceSpan?{None}
+    min_len := Int.MAX
+    loop fact in db.index.definition_facts() {
+        if fact.module_path != path || fact.kind != "function" || fact.span.start > offset || offset > fact.span.end -> next
+        length :: fact.span.end.saturating_sub(fact.span.start).max(0)
+        if function_span == None || length < min_len { function_span = Val(fact.span); min_len = length }
+    }
+    if function_span == None {
+        latest := Int?{None}
+        loop definition in db.defs {
+            if definition.module_path != path || definition.def_span.start > offset -> next
+            if definition.kind != .Function(_, _, _, _, _, _, _, _, _, _, _, _, _, _) -> next
+            if latest == None || definition.def_span.start >= (latest ?? 0) {
+                latest = Val(definition.def_span.start)
+                function_span = Val(SourceSpan{start: definition.def_span.start, end: Int.MAX})
+            }
+        }
+    }
+    span :: function_span ?? return None
+    variant_index :: next_significant(tokens, head_start) ?? return None // 0737 Rust name pending.
+    if variant_index >= tokens.len() -> return None
+    variant :: tokens[variant_index]
+    if variant.span.start < span.start || span.end < variant.span.end || variant.kind != TOKEN_IDENT -> return None
+    // Checked head anchor, never Function.params (empty for unit heads).
+    identity := String?{None}
+    loop definition in db.defs {
+        if definition.module_path != path || definition.name != variant.payload.text || definition.kind != .EnumVariant(_) -> next
+        if identity == .Val(existing) { if existing != definition.identity -> return None }
+        if identity == None -> identity = Val(~definition.identity)
+    }
+    selected :: identity ?? return None
+    loop definition in db.defs {
+        if definition.identity == selected && definition.module_path == path {
+            if definition.kind == .EnumVariant(parent) -> return Val(~parent)
+        }
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1702. Identical checked scope projection exists
+// in 0734 CompletionFacts (Completion.rs219); reuse the same canonical body.
+pub fn lsp_method_owner_from_scope(scope: String) -> String? Never! {
+    lsp_completion_method_owner_from_scope(scope)
+}
+
+// Rust: Source/LSP/Features.rs:1711
+pub fn lsp_checked_subject_type_name(db: SymbolDB, tokens: [Token], path: String, subject_index: Int) -> String? Never! {
+    if subject_index >= tokens.len() -> return None
+    span :: tokens[subject_index].span
+    checked :: lsp_checked_identity_in_span(db, path, span.start, span.end)
+    if checked == .Ok(.Val(identity)) {
+        loop definition in db.defs {
+            if definition.identity != identity -> next
+            if lsp_type_name_from_kind(definition.kind) == .Val(name) -> return Val(name)
+            break
+        }
+    }
+    selected := Int?{None}
+    min_len := Int.MAX
+    loop (i, reference) in db.refs {
+        if reference.module_path != path || reference.span.start > span.start || span.end > reference.span.end -> next
+        length :: reference.span.end.saturating_sub(reference.span.start).max(0)
+        if selected == None || length < min_len { selected = Val(i); min_len = length }
+    }
+    index :: selected ?? return None
+    reference :: db.refs[index]
+    if tokens[subject_index].kind == TOKEN_SELF || reference.name == KW_SELF -> return lsp_method_owner_from_scope(reference.scope_identity ?? return None)
+    target :: reference.target ?? return None
+    identity :: lsp_checked_anchor_identity(db, target) ?? return None
+    loop definition in db.defs {
+        if definition.identity == identity -> return lsp_type_name_from_kind(definition.kind)
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1752
+pub fn lsp_dotted_receiver(tokens: [Token], index: Int) -> String? Never! {
+    names := [String]{}
+    cursor := index
+    loop {
+        if cursor >= tokens.len() || tokens[cursor].kind != TOKEN_IDENT -> return None
+        &names.push(~tokens[cursor].payload.text)
+        dot :: lsp_previous_code_token(tokens, cursor) ?? break
+        if tokens[dot].kind != TOKEN_DOT -> break
+        cursor = lsp_previous_code_token(tokens, dot) ?? return None
+    }
+    &names.reverse()
+    Val(names.join("."))
+}
+
+// Rust: Source/LSP/Features.rs:1772
+pub fn lsp_enum_definition_for_type(db: SymbolDB, type_name: String, current_path: String, offset: Int) -> View<SymDef>? Never! {
+    anchor :: SemanticVisibilityAnchor{module_path: current_path, offset: Val(offset), session_top_level: false}
+    if db.symbols.resolve_visible_at(type_name, anchor) == .Val(window) {
+        loop (i, definition) in db.defs {
+            if definition.identity == window[0].identity && definition.kind == .Enum(_, _) { row :: db.defs[i..i]; return Val(row) }
+        }
+    }
+    leaf := ~type_name
+    if type_name.rsplit_once(".") == .Val(pair) -> leaf = ~pair.1
+    identity := String?{None}
+    loop definition in db.defs {
+        if definition.kind != .Enum(_, _) || (definition.name != type_name && definition.name != leaf) -> next
+        if identity == .Val(existing) { if existing != definition.identity -> return None }
+        if identity == None -> identity = Val(~definition.identity)
+    }
+    selected :: identity ?? return None
+    loop (i, definition) in db.defs {
+        if definition.identity == selected && definition.kind == .Enum(_, _) { row :: db.defs[i..i]; return Val(row) }
+    }
+    None
+}

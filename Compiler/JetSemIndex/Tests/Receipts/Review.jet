@@ -1,0 +1,512 @@
+use jet_foundation.[derivation_record, derivation_identity, MIRDerivationMethod]
+
+// Independent record-algorithm tests below are NOT checked-source fixtures.
+// Full original fixtures at the bottom are explicitly UNREGISTERED: C4/S4/S5–
+// S12/S20 must produce the real checked indices; native #4397 must support the
+// real composite keys; #4378 path-law resolution + CLI review integration must
+// supply actual applicable receipts/output. No fake open/parser/CLI is used.
+fn review_test_fact(name: String, id: String, signature: String, body: String, path: String) -> DefinitionFact Never! {
+    DefinitionFact{stable_id: id, signature_id: signature, content_id: body, human_identity: "{path}::{name}", name, kind: "function", module_path: path, span: SourceSpan{start: 0, end: 1}}
+}
+fn review_test_index(facts: ^[DefinitionFact], effects: ^[EffectFact]) -> SemIndex Never! {
+    SemIndex.new(^[SymbolDef]{}, ^[SymbolRef]{}, ^[CallEdge]{}, ^effects, ^[MemberFact]{}, ^[StructuralNode]{}, ^facts)
+}
+fn review_test_receipt(kind: String, from: String?, to: String?) -> SemanticOp Never! {
+    SemanticOp{kind, rule_id: None, from, to, node: None, match_template: None, replace_template: None, targets: [SemanticOpTarget]{}, files: [SemanticOpFile]{}}
+}
+fn review_test_count(operations: [ReviewSemanticOp], kind: ReviewOpKind) -> Int Never! {
+    count := 0
+    loop operation in operations { if operation.kind == kind -> count += 1 }
+    count
+}
+fn review_test_effect(function: String, direct: [String], inferred: [String], callees: [String], maximal: Bool) -> EffectFact Never! {
+    EffectFact{function, direct, inferred, callees, maximal, provenance: [EffectProvenance]{}}
+}
+
+#Test("review_pairs_unique_stable_then_human_then_signature_module_keys") {
+    old :: review_test_fact("report", "old", "signature", "old-body", "run")
+    loop stage in 0..<3 {
+        new := ~old
+        new.content_id = "new-body"
+        if stage > 0 -> new.stable_id = "new"
+        if stage > 1 -> new.human_identity = "changed-compiler-identity"
+        before :: review_test_index(^[DefinitionFact]{~old}, ^[EffectFact]{})
+        after :: review_test_index(^[DefinitionFact]{^new}, ^[EffectFact]{})
+        ops :: review_semantic_ops(before, after)
+        assert_eq(ops.len(), 1)
+        assert_eq(ops[0].kind, ReviewOpKind.BodyChanged)
+        assert_eq(ops[0].before, Val("old-body"))
+        assert_eq(ops[0].after, Val("new-body"))
+        assert_eq(ops[0].alignment, ReviewAlignment.Matched)
+        assert(ops[0].source_operation == None)
+    }
+}
+#Test("review_never_infers_a_rename_or_body_pair_from_same_shape") {
+    old :: review_test_fact("report", "same", "signature", "same-body", "run")
+    new :: review_test_fact("summarize", "same", "signature", "same-body", "run")
+    before :: review_test_index(^[DefinitionFact]{old}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{new}, ^[EffectFact]{})
+    ops :: review_semantic_ops(before, after)
+    assert_eq(ops.len(), 2)
+    assert_eq(review_test_count(ops, ReviewOpKind.Removed), 1)
+    assert_eq(review_test_count(ops, ReviewOpKind.Added), 1)
+    assert_eq(review_test_count(ops, ReviewOpKind.Renamed), 0)
+    assert_eq(review_test_count(ops, ReviewOpKind.BodyChanged), 0)
+}
+#Test("review_uniqueness_is_recomputed_after_each_pairing_stage") {
+    first :: review_test_fact("first", "one", "shared-signature", "body", "run")
+    second :: review_test_fact("second", "two", "shared-signature", "body", "run")
+    new_second := ~second
+    new_second.stable_id = "changed"
+    new_second.human_identity = "changed-identity"
+    new_second.content_id = "changed-body"
+    before :: review_test_index(^[DefinitionFact]{~first, second}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{first, ^new_second}, ^[EffectFact]{})
+    ops :: review_semantic_ops(before, after)
+    assert_eq(ops.len(), 1)
+    assert_eq(ops[0].kind, ReviewOpKind.BodyChanged)
+    assert_eq(ops[0].stable_id, "changed")
+}
+#Test("review_ambiguous_same_kind_siblings_remain_unpaired") {
+    old :: review_test_fact("report", "shared", "shared", "old", "run")
+    duplicate :: review_test_fact("report", "shared", "shared", "other", "run")
+    new :: review_test_fact("report", "shared", "shared", "new", "run")
+    before :: review_test_index(^[DefinitionFact]{old, duplicate}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{new}, ^[EffectFact]{})
+    ops :: review_semantic_ops(before, after)
+    assert_eq(ops.len(), 3)
+    loop operation in ops -> assert_eq(operation.alignment, ReviewAlignment.Ambiguous)
+    assert_eq(review_test_count(ops, ReviewOpKind.BodyChanged), 0)
+    // An isolated addition/removal is not ambiguous.
+    empty :: review_test_index(^[DefinitionFact]{}, ^[EffectFact]{})
+    removed :: review_semantic_ops(before, empty)
+    added :: review_semantic_ops(empty, after)
+    loop operation in removed -> assert_eq(operation.alignment, ReviewAlignment.UnmatchedBefore)
+    loop operation in added -> assert_eq(operation.alignment, ReviewAlignment.UnmatchedAfter)
+}
+
+// Main ratified the composite key law and queues the frozen Rust tandem fix.
+// A human identity must not collide with a signature/module key. Duplicating
+// the human row also checks unmatched ambiguity counts, not only pair output.
+#Test("review_composite_keys_do_not_merge_human_and_signature_module_families") {
+    first := review_test_fact("first", "first-id", "old-one", "body", "before")
+    second := review_test_fact("second", "second-id", "old-two", "body", "before")
+    first.human_identity = "sig:module"
+    second.human_identity = "sig:module"
+    added :: review_test_fact("third", "after-id", "sig", "body", "module")
+    before :: review_test_index(^[DefinitionFact]{^first, ^second}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{added}, ^[EffectFact]{})
+    operations :: review_semantic_ops(before, after)
+    assert_eq(operations.len(), 3)
+    assert_eq(review_test_count(operations, ReviewOpKind.Removed), 2)
+    assert_eq(review_test_count(operations, ReviewOpKind.Added), 1)
+    loop operation in operations {
+        if operation.kind == ReviewOpKind.Removed -> assert_eq(operation.alignment, ReviewAlignment.UnmatchedBefore)
+        else {
+            assert_eq(operation.kind, ReviewOpKind.Added)
+            assert_eq(operation.alignment, ReviewAlignment.UnmatchedAfter)
+        }
+    }
+}
+#Test("review_signature_change_suppresses_body_change_but_not_move") {
+    old :: review_test_fact("report", "same", "old-signature", "old-body", "old.jet")
+    new :: review_test_fact("report", "same", "new-signature", "new-body", "new.jet")
+    before :: review_test_index(^[DefinitionFact]{old}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{new}, ^[EffectFact]{})
+    ops :: review_semantic_ops(before, after)
+    assert_eq(ops.len(), 2)
+    assert_eq(ops[0].kind, ReviewOpKind.Moved)
+    assert_eq(ops[0].before, Val("old.jet"))
+    assert_eq(ops[0].after, Val("new.jet"))
+    assert_eq(ops[1].kind, ReviewOpKind.SignatureChanged)
+    assert_eq(ops[1].before, Val("old-signature"))
+    assert_eq(ops[1].after, Val("new-signature"))
+    assert_eq(review_test_count(ops, ReviewOpKind.BodyChanged), 0)
+}
+#Test("review_derivation_claims_override_only_nonempty_matched_identities") {
+    old :: review_test_fact("report", "same", "signature", "old", "run")
+    new :: review_test_fact("report", "same", "signature", "new", "run")
+    before := review_test_index(^[DefinitionFact]{~old}, ^[EffectFact]{})
+    after := review_test_index(^[DefinitionFact]{new}, ^[EffectFact]{})
+    record := derivation_record("report", "checked:report", "compiler", MIRDerivationMethod.FormalProof, "rule", [String]{}, derivation_identity("source", "build", "run", "target"))
+    record.id = "same"
+    &before.set_derivations(^[DerivationRecord]{~record})
+    record.claim = ""
+    &after.set_derivations(^[DerivationRecord]{^record})
+    ops :: review_semantic_ops(before, after)
+    assert_eq(ops[0].before_identity, Val("checked:report"))
+    assert_eq(ops[0].after_identity, Val("run::report"))
+    assert_eq(ops[0].identity, "run::report")
+    empty :: review_test_index(^[DefinitionFact]{}, ^[EffectFact]{})
+    removed :: review_semantic_ops(before, empty)
+    assert_eq(removed[0].before, Val("checked:report"))
+    assert_eq(removed[0].before_identity, Val("checked:report"))
+}
+#Test("review_effect_shapes_sort_dedup_and_keep_last_function_row") {
+    first :: review_test_effect("report", [String]{"Net"}, [String]{}, [String]{}, false)
+    last :: review_test_effect("report", [String]{"IO", "FS", "IO"}, [String]{"Net", "IO", "Net"}, [String]{"z", "a", "z"}, false)
+    reordered :: review_test_effect("report", [String]{"FS", "IO"}, [String]{"IO", "Net"}, [String]{"a", "z"}, false)
+    before :: review_test_index(^[DefinitionFact]{}, ^[EffectFact]{first, ~last})
+    same :: review_test_index(^[DefinitionFact]{}, ^[EffectFact]{reordered})
+    assert_eq(review_semantic_ops(before, same).len(), 0)
+    assert_eq(review_effect_shape(last), "direct=FS,IO;inferred=IO,Net;callees=a,z;maximal=false")
+    changed := ~last
+    changed.maximal = true
+    after :: review_test_index(^[DefinitionFact]{}, ^[EffectFact]{^changed})
+    ops :: review_semantic_ops(before, after)
+    assert_eq(ops.len(), 1)
+    assert_eq(ops[0].kind, ReviewOpKind.EffectChanged)
+    assert_eq(ops[0].stable_id, "effect:report")
+    assert_eq(ops[0].before_identity, Val("report"))
+    assert_eq(ops[0].after_identity, Val("report"))
+    assert_eq(ops[0].alignment, ReviewAlignment.Matched)
+    assert_eq(ops[0].after, Val("direct=FS,IO;inferred=IO,Net;callees=a,z;maximal=true"))
+}
+#Test("review_effect_additions_removals_and_checked_empty_are_distinct") {
+    empty :: review_test_index(^[DefinitionFact]{}, ^[EffectFact]{})
+    checked :: review_test_index(^[DefinitionFact]{}, ^[EffectFact]{review_test_effect("report", [String]{}, [String]{}, [String]{}, false)})
+    added :: review_semantic_ops(empty, checked)
+    removed :: review_semantic_ops(checked, empty)
+    assert_eq(added.len(), 1)
+    assert_eq(removed.len(), 1)
+    assert(added[0].before == None)
+    assert_eq(added[0].after, Val("direct=;inferred=;callees=;maximal=false"))
+    assert_eq(removed[0].before, added[0].after)
+    assert(removed[0].after == None)
+}
+#Test("review_recorded_rename_uses_first_target_not_from_to_or_later_target") {
+    before :: review_test_index(^[DefinitionFact]{review_test_fact("report", "old", "signature", "body", "run")}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{review_test_fact("summarize", "new", "signature", "body", "run")}, ^[EffectFact]{})
+    receipt := review_test_receipt("rename", Val("wrong"), Val("wrong"))
+    receipt.rule_id = Val("jet-fix")
+    receipt.targets = [SemanticOpTarget]{
+        SemanticOpTarget{stable_id: "old", before: "report", after: "summarize", kind: "function", module_path: "ignored-nonempty-identities"},
+        SemanticOpTarget{stable_id: "bad", before: "wrong", after: "wrong", kind: "wrong", module_path: "wrong"},
+    }
+    ops :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{receipt})
+    assert_eq(ops.len(), 1)
+    assert_eq(ops[0].kind, ReviewOpKind.Renamed)
+    assert_eq(ops[0].alignment, ReviewAlignment.Recorded)
+    assert_eq(ops[0].stable_id, "new")
+    assert_eq(ops[0].before, Val("run::report"))
+    assert_eq(ops[0].after, Val("run::summarize"))
+    assert_eq(ops[0].source_operation, Val("jet-fix"))
+}
+#Test("review_recorded_move_requires_same_name_signature_kind_and_changed_module") {
+    old :: review_test_fact("report", "old", "signature", "body", "old.jet")
+    new :: review_test_fact("report", "new", "signature", "body", "new.jet")
+    before :: review_test_index(^[DefinitionFact]{~old}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{~new}, ^[EffectFact]{})
+    spellings :: [String]{"move", "moved"}
+    loop spelling in spellings {
+        receipt :: review_test_receipt(spelling, Val("report"), Val("report"))
+        ops :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{receipt})
+        assert_eq(ops.len(), 1)
+        assert_eq(ops[0].kind, ReviewOpKind.Moved)
+        assert_eq(ops[0].alignment, ReviewAlignment.Recorded)
+        assert_eq(ops[0].before, Val("old.jet"))
+        assert_eq(ops[0].after, Val("new.jet"))
+        assert_eq(ops[0].before_identity, Val("old.jet::report"))
+        assert_eq(ops[0].after_identity, Val("new.jet::report"))
+        assert_eq(ops[0].source_operation, Val(spelling))
+    }
+    rename :: review_test_receipt("rename", Val("report"), Val("report"))
+    invalid :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{rename})
+    assert_eq(review_test_count(invalid, ReviewOpKind.Removed), 1)
+    assert_eq(review_test_count(invalid, ReviewOpKind.Added), 1)
+    loop stage in 0..<4 {
+        changed := ~new
+        if stage == 0 -> changed.name = "other"
+        if stage == 1 -> changed.signature_id = "other"
+        if stage == 2 -> changed.kind = "type"
+        if stage == 3 -> changed.module_path = "old.jet"
+        invalid_after :: review_test_index(^[DefinitionFact]{^changed}, ^[EffectFact]{})
+        receipt :: review_test_receipt("move", Val("report"), Val("report"))
+        refused :: review_semantic_ops_with_receipts(before, invalid_after, [SemanticOp]{receipt})
+        loop operation in refused -> assert(operation.alignment != ReviewAlignment.Recorded)
+    }
+}
+#Test("review_rename_validity_and_stable_id_refusal_preserve_unmatched_ops") {
+    old :: review_test_fact("report", "old", "signature", "body", "run")
+    new :: review_test_fact("summarize", "new", "signature", "body", "run")
+    before :: review_test_index(^[DefinitionFact]{~old}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{~new}, ^[EffectFact]{})
+    receipt := review_test_receipt("rename", Val("report"), Val("summarize"))
+    receipt.targets = [SemanticOpTarget]{SemanticOpTarget{stable_id: "neither", before: "report", after: "summarize", kind: "function", module_path: "run"}}
+    ops :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{~receipt})
+    assert_eq(ops.len(), 3)
+    loop operation in ops {
+        if operation.kind == ReviewOpKind.Renamed -> assert_eq(operation.alignment, ReviewAlignment.UnmatchedBefore)
+    }
+    // Either side's stable ID authorizes a valid pair.
+    receipt.targets[0].stable_id = "new"
+    assert_eq(review_semantic_ops_with_receipts(before, after, [SemanticOp]{receipt}).len(), 1)
+    loop stage in 0..<3 {
+        changed := ~new
+        if stage == 0 -> changed.signature_id = "different"
+        if stage == 1 -> changed.module_path = "different"
+        if stage == 2 -> changed.kind = "type"
+        invalid_after :: review_test_index(^[DefinitionFact]{^changed}, ^[EffectFact]{})
+        invalid_receipt :: review_test_receipt("rename", Val("report"), Val("summarize"))
+        invalid :: review_semantic_ops_with_receipts(before, invalid_after, [SemanticOp]{invalid_receipt})
+        assert_eq(review_test_count(invalid, ReviewOpKind.Added), 1)
+        assert_eq(review_test_count(invalid, ReviewOpKind.Removed), 1)
+        loop operation in invalid -> assert(operation.alignment != ReviewAlignment.Recorded)
+    }
+}
+#Test("review_empty_target_identity_is_not_a_from_to_fallback") {
+    before :: review_test_index(^[DefinitionFact]{review_test_fact("report", "old", "signature", "body", "run")}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{review_test_fact("summarize", "new", "signature", "body", "run")}, ^[EffectFact]{})
+    receipt := review_test_receipt("rename", Val("report"), Val("summarize"))
+    receipt.targets = [SemanticOpTarget]{SemanticOpTarget{stable_id: "old", before: "", after: "", kind: "function", module_path: "run"}}
+    ops :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{receipt})
+    assert_eq(ops.len(), 3)
+    loop operation in ops {
+        if operation.kind == ReviewOpKind.Renamed {
+            assert_eq(operation.alignment, ReviewAlignment.UnmatchedBefore)
+            assert_eq(operation.before, Val(""))
+            assert_eq(operation.after, Val(""))
+            assert_eq(operation.stable_id, "old")
+        }
+    }
+}
+#Test("review_receipt_ambiguity_unmatched_sides_and_unresolved_payloads") {
+    old :: review_test_fact("report", "old", "signature", "body", "run")
+    new :: review_test_fact("summarize", "new", "signature", "body", "run")
+    before :: review_test_index(^[DefinitionFact]{~old, old}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{~new}, ^[EffectFact]{})
+    receipt :: review_test_receipt("rename", Val("report"), Val("summarize"))
+    ops :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{~receipt})
+    loop operation in ops {
+        if operation.kind == ReviewOpKind.Renamed {
+            assert_eq(operation.alignment, ReviewAlignment.Ambiguous)
+            assert_eq(operation.stable_id, "new")
+            assert_eq(operation.before_identity, Val("report"))
+            assert_eq(operation.after_identity, Val("run::summarize"))
+        }
+    }
+    empty :: review_test_index(^[DefinitionFact]{}, ^[EffectFact]{})
+    only_old :: review_test_index(^[DefinitionFact]{review_test_fact("report", "old", "signature", "body", "run")}, ^[EffectFact]{})
+    unmatched_after :: review_semantic_ops_with_receipts(only_old, empty, [SemanticOp]{~receipt})
+    loop operation in unmatched_after {
+        if operation.kind == ReviewOpKind.Renamed -> assert_eq(operation.alignment, ReviewAlignment.UnmatchedAfter)
+    }
+    unresolved :: review_semantic_ops_with_receipts(empty, empty, [SemanticOp]{review_test_receipt("move", None, None)})
+    assert_eq(unresolved.len(), 1)
+    assert_eq(unresolved[0].alignment, ReviewAlignment.UnmatchedBefore)
+    assert_eq(unresolved[0].stable_id, "move:unresolved")
+    assert_eq(unresolved[0].identity, "unknown")
+    assert(unresolved[0].before == None)
+    assert(unresolved[0].after == None)
+    assert(unresolved[0].before_identity == None)
+    assert(unresolved[0].after_identity == None)
+}
+#Test("review_deduplicates_full_receipt_operations_not_distinct_producers") {
+    before :: review_test_index(^[DefinitionFact]{review_test_fact("report", "old", "signature", "body", "run")}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{review_test_fact("summarize", "new", "signature", "body", "run")}, ^[EffectFact]{})
+    receipt :: review_test_receipt("rename", Val("report"), Val("summarize"))
+    distinct := ~receipt
+    distinct.rule_id = Val("second-producer")
+    ignored :: review_test_receipt("structural", None, None)
+    ops :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{~receipt, ~receipt, distinct, ignored})
+    assert_eq(ops.len(), 2)
+    assert_eq(ops[0].source_operation, Val("rename"))
+    assert_eq(ops[1].source_operation, Val("second-producer"))
+    loop operation in ops -> assert_eq(operation.alignment, ReviewAlignment.Recorded)
+    refused := ~receipt
+    refused.targets = [SemanticOpTarget]{SemanticOpTarget{stable_id: "neither", before: "report", after: "summarize", kind: "function", module_path: "run"}}
+    alignments :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{~refused, refused, receipt})
+    assert_eq(alignments.len(), 2)
+    assert_eq(alignments[0].alignment, ReviewAlignment.Recorded)
+    assert_eq(alignments[1].alignment, ReviewAlignment.UnmatchedBefore)
+    assert_eq(alignments[0].source_operation, alignments[1].source_operation)
+}
+
+#Test("review_unmatched_key_counts_count_a_fact_once_per_key") {
+    old := review_test_fact("report", "shared", "signature", "body", "run")
+    new := review_test_fact("summarize", "shared", "signature", "body", "run")
+    old.human_identity = "shared"
+    new.human_identity = "shared"
+    before :: review_test_index(^[DefinitionFact]{^old}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{^new}, ^[EffectFact]{})
+    ops :: review_semantic_ops(before, after)
+    assert_eq(ops.len(), 2)
+    loop operation in ops {
+        if operation.kind == ReviewOpKind.Removed -> assert_eq(operation.alignment, ReviewAlignment.UnmatchedBefore)
+        if operation.kind == ReviewOpKind.Added -> assert_eq(operation.alignment, ReviewAlignment.UnmatchedAfter)
+    }
+}
+#Test("review_empty_identity_candidate_filter_uses_kind_module_and_stable_anchor") {
+    facts :: review_test_index(^[DefinitionFact]{
+        review_test_fact("report", "one", "signature", "body", "run"),
+        review_test_fact("other", "two", "signature", "body", "run"),
+        review_test_fact("report", "one", "signature", "body", "elsewhere"),
+    }, ^[EffectFact]{})
+    receipt := review_test_receipt("rename", None, None)
+    receipt.targets = [SemanticOpTarget]{SemanticOpTarget{stable_id: "one", before: "", after: "", kind: "function", module_path: "run"}}
+    candidates :: review_rename_candidates(facts.definition_facts(), receipt, None, true)
+    assert_eq(candidates, [Int]{0})
+    receipt.targets[0].kind = "type"
+    assert_eq(review_rename_candidates(facts.definition_facts(), receipt, None, true).len(), 0)
+}
+#Test("review_rename_requires_changed_name_even_with_matching_signature_and_module") {
+    before :: review_test_index(^[DefinitionFact]{review_test_fact("report", "old", "signature", "body", "run")}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{review_test_fact("report", "new", "signature", "body", "run")}, ^[EffectFact]{})
+    receipt :: review_test_receipt("rename", Val("report"), Val("report"))
+    ops :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{receipt})
+    assert_eq(ops.len(), 1)
+    assert_eq(ops[0].kind, ReviewOpKind.Renamed)
+    assert_eq(ops[0].alignment, ReviewAlignment.UnmatchedAfter)
+}
+#Test("review_sort_uses_rust_none_before_some_and_alignment_tie_break") {
+    base :: ReviewSemanticOp{kind: ReviewOpKind.Renamed, stable_id: "same", identity: "same", before: None, after: None,
+        before_identity: None, after_identity: None, alignment: ReviewAlignment.Matched, source_operation: None}
+    some := ~base
+    some.before = Val("")
+    ambiguous := ~base
+    ambiguous.alignment = ReviewAlignment.Ambiguous
+    after := ~base
+    after.after = Val("")
+    rows := [ReviewSemanticOp]{some, ambiguous, after, ~base}
+    review_sort_operations(&rows, true)
+    assert_eq(rows[0], base)
+    assert_eq(rows[1].alignment, ReviewAlignment.Ambiguous)
+    assert_eq(rows[2].after, Val(""))
+    assert_eq(rows[3].before, Val(""))
+    // The base sort does NOT add an alignment tie breaker; stable ties retain
+    // insertion order, as do receipt source-operation-only differences above.
+    ties := [ReviewSemanticOp]{~rows[1], ~base}
+    review_sort_operations(&ties, false)
+    assert_eq(ties[0].alignment, ReviewAlignment.Ambiguous)
+}
+#Test("review_composite_keys_do_not_alias_colon_containing_fields") {
+    old := review_test_fact("report", "b:c", "old", "body", "run")
+    old.kind = "a"
+    new := review_test_fact("report", "c", "new", "body", "run")
+    new.kind = "a:b"
+    before :: review_test_index(^[DefinitionFact]{^old}, ^[EffectFact]{})
+    after :: review_test_index(^[DefinitionFact]{^new}, ^[EffectFact]{})
+    ops :: review_semantic_ops(before, after)
+    assert_eq(ops.len(), 2)
+    assert_eq(review_test_count(ops, ReviewOpKind.SignatureChanged), 0)
+}
+
+// Original tests/semantic_ops.rs16–76 and SemanticOps.rs244–288 are owned and
+// preserved in Tests/Receipts/SemanticOps.jet (S25), intentionally unchanged.
+// The following full review fixtures are unregistered acceptance hooks, NEVER
+// literal records pretending to be C4 output. Sources below are exact Rust
+// fixtures; the integration runner must load them and invoke the real CLI.
+fn review_test_comment_sources() -> [String] Never! {
+    [String]{"fn run() {{ print(\"same\") }}\n", "// review comment\nfn run() {{ print(\"same\") }}\n"}
+}
+fn review_test_rename_sources() -> [String] Never! {
+    [String]{"fn report() -> Int {{\n    return 1\n}}\n", "fn summarize() -> Int {{\n    return 1\n}}\n"}
+}
+fn review_test_move_source() -> String Never! { "fn report() -> Int {{\n    return 1\n}}\n" }
+fn review_test_effect_sources() -> [String] Never! {
+    [String]{"fn report() -> Int {{ return 1 }}\n", "fn report() -[IO]> Int {{\n    print(\"head\")\n    return 1\n}}\n"}
+}
+fn review_test_signature_sources() -> [String] Never! {
+    [String]{"fn report() -> Int {{\n    return 1\n}}\n", "fn report(value: Int) -> Int {{\n    return value\n}}\n"}
+}
+fn review_test_join_sources() -> [String] Never! {
+    [String]{"fn run() {{ print(\"base\") }}\n", "fn run() {{ print(\"head\") }}\n"}
+}
+
+// tests/review.rs293–320: actual checked comment-only comparison + CLI output.
+fn review_test_comment_only_change_has_no_semantic_operation(before: SemIndex, after: SemIndex, success: Bool, stdout: String) {
+    assert_eq(review_semantic_ops(before, after).len(), 0)
+    assert(success)
+    assert(stdout.contains(`"semantic_ops":[]`))
+    assert(stdout.contains(`"changes":[]`))
+}
+// tests/review.rs324–388: receipt belongs head/run.jet with BOTH source hashes;
+// hand/run.jet has identical head bytes but no applicable operation receipt.
+fn review_test_review_uses_a_recorded_rename_and_ignores_hand_spelling(before: SemIndex, after: SemIndex, applicable: [SemanticOp], recorded_success: Bool, recorded_stdout: String, hand_success: Bool, hand_stdout: String) {
+    recorded :: review_semantic_ops_with_receipts(before, after, applicable)
+    assert_eq(review_test_count(recorded, ReviewOpKind.Renamed), 1)
+    assert(recorded_success)
+    assert(recorded_stdout.contains(`"kind":"renamed"`))
+    hand :: review_semantic_ops_with_receipts(before, after, [SemanticOp]{})
+    assert_eq(review_test_count(hand, ReviewOpKind.Renamed), 0)
+    assert_eq(review_test_count(hand, ReviewOpKind.Removed), 1)
+    assert_eq(review_test_count(hand, ReviewOpKind.Added), 1)
+    assert(hand_success)
+    assert(!hand_stdout.contains(`"kind":"renamed"`))
+    assert(hand_stdout.contains(`"kind":"removed"`))
+    assert(hand_stdout.contains(`"kind":"added"`))
+}
+// tests/review.rs392–442: canonical before old.jet/after new.jet identities,
+// exact target and equal source hashes. S25/caller supplies applicable receipt.
+fn review_test_review_uses_a_recorded_move_across_module_paths(before: SemIndex, after: SemIndex, applicable: [SemanticOp], success: Bool, stdout: String) {
+    operations :: review_semantic_ops_with_receipts(before, after, applicable)
+    assert_eq(review_test_count(operations, ReviewOpKind.Renamed), 0)
+    assert_eq(review_test_count(operations, ReviewOpKind.Added), 0)
+    assert_eq(review_test_count(operations, ReviewOpKind.Removed), 0)
+    found := false
+    loop operation in operations {
+        if operation.kind == ReviewOpKind.Moved && operation.alignment == ReviewAlignment.Recorded {
+            assert_eq(operation.before, Val("old.jet"))
+            assert_eq(operation.after, Val("new.jet"))
+            assert_eq(operation.before_identity, Val("fn:module:old::report"))
+            assert_eq(operation.after_identity, Val("fn:module:new::report"))
+            assert_eq(operation.source_operation, Val("move"))
+            found = true
+        }
+    }
+    assert(found)
+    assert(success)
+    assert(stdout.contains(`"kind":"moved"`))
+    assert(stdout.contains(`"alignment":"recorded"`))
+    assert(stdout.contains(`"before":"old.jet"`))
+    assert(stdout.contains(`"after":"new.jet"`))
+    assert(stdout.contains(`"before_identity":"fn:module:old::report"`))
+    assert(stdout.contains(`"after_identity":"fn:module:new::report"`))
+    assert(stdout.contains(`"source_operation":"move"`))
+    assert(!stdout.contains(`"kind":"renamed"`))
+    assert(!stdout.contains(`"kind":"added"`))
+    assert(!stdout.contains(`"kind":"removed"`))
+}
+// tests/review.rs817–844: scan the real stale-before-hash receipt through S25,
+// then use its canonical applicability method (no local path/hash law).
+fn review_test_review_operation_fixture_matrix_ignores_changed_hash_receipts(before: SemIndex, after: SemIndex, scanned: [SemanticOp], paths: [String], before_hash: String, after_hash: String, success: Bool, stdout: String) -[FS, Env]> {
+    applicable := [SemanticOp]{}
+    loop operation in scanned {
+        if operation.matches_file_transition(paths, before_hash, after_hash) -> &applicable.push(~operation)
+    }
+    assert_eq(review_test_count(review_semantic_ops_with_receipts(before, after, applicable), ReviewOpKind.Renamed), 0)
+    assert(success)
+    assert(!stdout.contains(`"kind":"renamed"`))
+}
+// tests/review.rs958–984,989–1011: real effect solve and checked identity.
+fn review_test_review_reports_effect_changes_as_checked_semantic_operations(before: SemIndex, after: SemIndex, success: Bool, stdout: String) {
+    found := false
+    loop operation in review_semantic_ops(before, after) {
+        if operation.kind == ReviewOpKind.EffectChanged && operation.alignment == ReviewAlignment.Matched -> found = true
+    }
+    assert(found)
+    assert(success)
+    assert(stdout.contains(`"kind":"effect_changed"`))
+    assert(stdout.contains(`"alignment":"matched"`))
+}
+fn review_test_review_aligns_signature_changes_by_checked_identity(before: SemIndex, after: SemIndex, success: Bool, stdout: String) {
+    assert(review_test_count(review_semantic_ops(before, after), ReviewOpKind.SignatureChanged) > 0)
+    assert(success)
+    assert(stdout.contains(`"kind":"signature_changed"`))
+}
+// tests/review.rs179–289: semantic projection and all output assertions retained.
+// Actual authority/proof receipts/machine-record decoding belong the CLI lane;
+// decoded_status must come from its canonical MachineOutput reader, not JSON
+// reparsing or a fabricated literal. Source-only hooks do not prove CLI joins.
+fn review_test_review_joins_meaning_authority_and_receipt_changes(before: SemIndex, after: SemIndex, success: Bool, decoded_status: Bool, stdout: String) {
+    assert(review_test_count(review_semantic_ops(before, after), ReviewOpKind.BodyChanged) > 0)
+    assert(success)
+    assert(decoded_status)
+    assert(stdout.starts_with(`{"schema":"jet.status/v1"`))
+    assert(stdout.contains(`"kind":"review"`))
+    assert(stdout.contains("body_changed"))
+    assert(stdout.contains(`"status":"widened"`))
+    assert(stdout.contains(`"status":"lost"`))
+    assert(stdout.contains(`"status":"gained"`))
+    assert(!stdout.contains("text_diff"))
+}

@@ -1,0 +1,323 @@
+// crates/jet-semindex/src/JSON.rs:1357–1901: checked record conversions.
+// Build owns SymDef/SymKind/SymRef; S1/S2 own every public projection record.
+// Names are projected by the sole Symbols canonical helper (CP-NAMES gated).
+// Effects consume Sema's full SemIndexEffectFacts from the same checked solve.
+// That producer is queued: no reduced local carrier or second solve.
+use jet_foundation.[
+    CompilerStage, Item, MIRNameFacts, MetadataProducerStatus, NamedType,
+    ParamZone, ViewProvenance, ViewProvenanceMap,
+    failure_contract_effective_type, type_name,
+]
+use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph, SemIndexEffectFacts]
+
+// First member with an identity owns its callable presentation, even when a
+// later trait/inherent row has the same identity but a different owner.
+fn semindex_convert_member_owners(members: [MemberFact]) -> [String:String] Never! {
+    owners := [String:String]{}
+    loop member in members {
+        if owners.get(member.identity) == None -> owners[member.identity] = member.owner
+    }
+    owners
+}
+
+pub fn semindex_convert_defs(defs: [SymDef], view_provenance: [String:ViewProvenanceMap], members: [MemberFact], registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [SymbolDef] Never! {
+    owners :: semindex_convert_member_owners(members)
+    sources :: semindex_loaded_source_rows_by_path(module_sources, loaded_module_rows)
+    output := [SymbolDef]{}
+    loop definition in defs {
+        module_index := Int?{None}
+        if sources.get(definition.module_path) == .Val(source_index) -> module_index = Val(semindex_loaded_registration_index(registration, module_sources[source_index]))
+        metadata := SemIndexContractMetadata{nominal_base: None, trait_contracts: [TraitContractFact]{}}
+        if definition.kind == {
+            .Struct(_, _) -> metadata = semindex_contract_metadata(definition, registration, module_index, members)
+            .Enum(_, _) -> metadata = semindex_contract_metadata(definition, registration, module_index, members)
+            .Trait -> metadata = semindex_contract_metadata(definition, registration, module_index, members)
+            .Type(_) -> metadata = semindex_contract_metadata(definition, registration, module_index, members)
+            else -> {}
+        }
+        views := [ViewProvenanceFact]{}
+        if view_provenance.get(definition.identity) == .Val(map) {
+            loop entry in map.entries -> &views.push(semindex_convert_view_provenance(entry.slot, entry.value))
+        }
+        owner :: if definition.kind == {
+            .EnumVariant(parent) -> Val(parent)
+            .Field(_, parent) -> Val(parent)
+            .Function(_, _, _, _, _, _, _, _, _, _, _, _, _, _) -> owners.get(definition.identity)
+            else -> None
+        }
+        derives :: if definition.kind == {
+            .Struct(_, derives) -> derives
+            .Enum(_, derives) -> derives
+            .Type(derives) -> derives
+            else -> [String]{}
+        }
+        &output.push(SymbolDef{
+            identity: definition.identity,
+            declaration_identity_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "the semindex producer does not receive a checker-issued DeclarationHandle"},
+            name: definition.name,
+            qualified_name: semantic_canonical_symbol_name(names, module_index, definition.name, owner, Val(semindex_source_span(definition.def_span))),
+            module_path: definition.module_path, def_span: semindex_source_span(definition.def_span),
+            kind: semindex_convert_kind(definition.kind), view_provenance: views,
+            callable_signature: semindex_callable_signature(definition.kind, views),
+            derives: derives, nominal_base: metadata.nominal_base, trait_contracts: metadata.trait_contracts,
+        })
+    }
+    output
+}
+
+// #4357: Rust's (nominal_base, contracts) result, never another checked fact.
+struct SemIndexContractMetadata {
+    nominal_base: String?
+    trait_contracts: [TraitContractFact]
+}
+fn semindex_contract_metadata(definition: SymDef, registration: SemaRegistrationGraph, module_index: Int?, members: [MemberFact]) -> SemIndexContractMetadata Never! {
+    if module_index == .Val(index) {
+        module :: registration.modules[index]
+        if semindex_find_declaration(module.program.items, semindex_source_span(definition.def_span)) == .Val(item) -> return semindex_declaration_contract_metadata(item, module.program.items, members)
+    }
+    SemIndexContractMetadata{nominal_base: None, trait_contracts: [TraitContractFact]{}}
+}
+fn semindex_declaration_contract_metadata(item: Item, items: [Item], members: [MemberFact]) -> SemIndexContractMetadata Never! {
+    if item == {
+        .Distinct(definition) -> return SemIndexContractMetadata{nominal_base: Val(type_name(definition.base)), trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)}
+        .Struct(definition) -> return SemIndexContractMetadata{nominal_base: None, trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)}
+        .Enum(definition) -> return SemIndexContractMetadata{nominal_base: None, trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)}
+        .Trait(definition) -> {
+            associated := [SemIndexAssociatedTypeFact]{}
+            loop row in definition.assoc_types -> &associated.push(SemIndexAssociatedTypeFact{name: row.name, implementation: None})
+            return SemIndexContractMetadata{nominal_base: None, trait_contracts: [TraitContractFact]{TraitContractFact{
+                trait_name: definition.name, associated_types: associated,
+                methods: semindex_member_signatures(members, definition.name, MemberOrigin.TraitRequirement{trait_name: definition.name}),
+            }}}
+        }
+        else -> {}
+    }
+    SemIndexContractMetadata{nominal_base: None, trait_contracts: [TraitContractFact]{}}
+}
+fn semindex_find_declaration(items: [Item], span: SourceSpan) -> Item? Never! {
+    loop item in items {
+        declaration_span :: if item == {
+            .Distinct(definition) -> Val(semindex_source_span(definition.name_span))
+            .Struct(definition) -> Val(semindex_source_span(definition.name_span))
+            .Enum(definition) -> Val(semindex_source_span(definition.name_span))
+            .Trait(definition) -> Val(semindex_source_span(definition.name_span))
+            else -> None
+        }
+        if declaration_span == (Val(span)) -> return Val(item)
+        nested :: if item == {
+            .CodeModule(module_row) -> module_row.body
+            .GenericModule(module_row) -> Val(module_row.body)
+            else -> None
+        }
+        if nested == .Val(body) {
+            if semindex_find_declaration(body, span) == .Val(found) -> return Val(found)
+        }
+    }
+    None
+}
+fn semindex_trait_contracts_for_owner(items: [Item], owner: String, members: [MemberFact]) -> [TraitContractFact] Never! {
+    contracts := [TraitContractFact]{}
+    semindex_collect_trait_contracts(items, owner, members, &contracts)
+    contracts
+}
+fn semindex_collect_trait_contracts(items: [Item], owner: String, members: [MemberFact], contracts: &[TraitContractFact]) Never! {
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> {
+                leaves :: implementation.type_name.split(".")
+                leaf := leaves[leaves.len() - 1] // #4303
+                if leaf == owner {
+                    if implementation.trait_name == .Val(trait_name) -> &contracts.push(semindex_trait_contract(trait_name, implementation.assoc_type_impls, members, owner))
+                }
+            }
+            .Struct(definition) -> {
+                if definition.name == owner {
+                    loop implementation in definition.trait_impls -> &contracts.push(semindex_trait_contract(implementation.trait_name, implementation.assoc_type_impls, members, owner))
+                }
+            }
+            .Enum(definition) -> {
+                if definition.name == owner {
+                    loop implementation in definition.trait_impls -> &contracts.push(semindex_trait_contract(implementation.trait_name, implementation.assoc_type_impls, members, owner))
+                }
+            }
+            .CodeModule(module_row) -> {
+                if module_row.body == .Val(body) -> semindex_collect_trait_contracts(body, owner, members, &contracts)
+            }
+            .GenericModule(module_row) -> semindex_collect_trait_contracts(module_row.body, owner, members, &contracts)
+            else -> {}
+        }
+    }
+}
+fn semindex_trait_contract(trait_name: String, associated_types: [NamedType], members: [MemberFact], owner: String) -> TraitContractFact Never! {
+    associated := [SemIndexAssociatedTypeFact]{}
+    loop row in associated_types -> &associated.push(SemIndexAssociatedTypeFact{name: row.name, implementation: Val(type_name(row.ty))})
+    TraitContractFact{trait_name: trait_name, associated_types: associated, methods: semindex_member_signatures(members, owner, MemberOrigin.TraitImpl{trait_name: trait_name})}
+}
+fn semindex_member_signatures(members: [MemberFact], owner: String, origin: MemberOrigin) -> [String] Never! {
+    methods := [String]{}
+    loop member in members { if member.owner == owner && member.origin == origin -> &methods.push(member.signature) }
+    &methods.sort()
+    unique := [String]{}
+    loop method in methods {
+        if unique.len() == 0 || unique[unique.len() - 1] != method -> &unique.push(method)
+    }
+    unique
+}
+
+pub fn semindex_callable_signature(kind: SymKind, returned_views: [ViewProvenanceFact]) -> CallableSignatureFact? Never! {
+    if kind == .Function(params, param_sources, available, param_contract, param_variadic, return_type, failure_contract, _, effects, effect_via, param_access, param_defaults, policies, generic_parameters) {
+        if !available -> return None
+        parameters := [CallableParameterFact]{}
+        loop index in 0..<params.len() {
+            if index >= param_contract.len() -> panic("callable parameter contract facts must stay ordered")
+            if index >= param_sources.len() -> panic("callable parameter source facts must stay ordered")
+            if index >= param_defaults.len() -> panic("callable parameter defaults must stay ordered")
+            if index >= param_access.len() -> panic("callable parameter access facts must stay ordered")
+            if index >= param_variadic.len() -> panic("callable variadic facts must stay ordered")
+            &parameters.push(CallableParameterFact{
+                name: params[index].name, label: param_contract[index].label, source: param_sources[index],
+                default: param_defaults[index], access: param_access[index], zone: param_contract[index].zone,
+                ty: params[index].ty, variadic: param_variadic[index],
+            })
+        }
+        checked_effects := CallableEffectsFact.Unavailable{reason: CallableFactUnavailable{required_stage: CompilerStage.Typed, reason: "the checker has not published a checked callable effect row"}}
+        if effect_via == {
+            .Val(via) -> checked_effects = .Checked{effects: [CallableEffectFact]{CallableEffectFact.ViaParameter{name: via.name, source: semindex_source_span(via.span)}}}
+            None -> {
+                if effects == .Val(row) {
+                    facts := [CallableEffectFact]{}
+                    loop entry in row -> &facts.push(CallableEffectFact.Named{name: entry.name, source: semindex_source_span(entry.span)})
+                    checked_effects = .Checked{effects: facts}
+                }
+            }
+        }
+        return Val(CallableSignatureFact{
+            parameters: parameters, return_type: return_type, effects: checked_effects,
+            failure_contract: failure_contract, returned_views: returned_views, policies: policies,
+            generic_parameters: generic_parameters, metadata_producer_status: MetadataProducerStatus.ExistingCallableProducerNeedsExtension,
+        })
+    }
+    None
+}
+
+pub fn semindex_convert_refs(refs: [SymRef]) -> [SymbolRef] Never! {
+    output := [SymbolRef]{}
+    loop reference in refs -> &output.push(SymbolRef{
+        name: reference.name, module_path: reference.module_path, scope_identity: reference.scope_identity,
+        target: reference.target, fact: reference.fact, span: semindex_source_span(reference.span),
+    })
+    output
+}
+pub fn semindex_convert_kind(kind: SymKind) -> SemIndexSymbolKind Never! {
+    if kind == {
+        .Module -> .Module
+        .Function(params, _, _, param_contract, param_variadic, return_type, failure_contract, _, _, _, _, _, _, _) -> {
+            projected := [SemIndexNameTypeFact]{}
+            loop parameter in params -> &projected.push(SemIndexNameTypeFact{name: parameter.name, ty: type_name(parameter.ty)})
+            contract := [SemIndexCallContractEntry]{}
+            loop index in 0..<param_contract.len() {
+                zone :: if param_contract[index].zone == { .PositionalOnly -> "positional_only", .Either -> "either", .LabelOnly -> "label_only" }
+                &contract.push(SemIndexCallContractEntry{label: param_contract[index].label, zone: zone, variadic: index < param_variadic.len() && param_variadic[index]})
+            }
+            ret :: if failure_contract == {
+                .Checked(failure) -> Val(type_name(failure_contract_effective_type(failure)))
+                .Unavailable(_) -> if return_type == { .Val(ty) -> Val(type_name(ty)), None -> None }
+            }
+            .Function{params: projected, call_contract: contract, ret: ret}
+        }
+        .Struct(fields, _) -> {
+            projected := [SemIndexNameTypeFact]{}
+            loop field in fields -> &projected.push(SemIndexNameTypeFact{name: field.name, ty: type_name(field.ty)})
+            .Struct{fields: projected}
+        }
+        .Enum(variants, _) -> .Enum{variants: variants}
+        .Trait -> .Trait
+        .Tag -> .Tag
+        .Type(_) -> .Type
+        .Const -> .Const
+        .EnumVariant(parent) -> .EnumVariant{parent: parent}
+        .Field(ty, parent) -> .Field{ty: type_name(ty), parent: parent}
+        .Local(mutable, ty) -> .Local{mutable: mutable, ty: if ty == { .Val(value) -> Val(type_name(value)), None -> None }}
+        .Param(ty) -> .Param{ty: type_name(ty)}
+    }
+}
+pub fn semindex_convert_view_provenance(output_path: [String], provenance: ViewProvenance) -> ViewProvenanceFact Never! {
+    sources := [ViewSourcePathFact]{}
+    loop source_path in provenance.sources {
+        source :: if source_path.source == {
+            .Receiver -> ViewSourceFact.Receiver
+            .Parameter(index) -> ViewSourceFact.Parameter{index: index}
+            .Static(module_path, name) -> ViewSourceFact.Static{module_path: module_path, name: name}
+        }
+        projections := [ViewProjectionFact]{}
+        loop projection in source_path.projections {
+            converted :: if projection == {
+                .Field(name) -> ViewProjectionFact.Field{name: name}
+                .Index -> ViewProjectionFact.Index
+                .Range -> ViewProjectionFact.Range
+            }
+            &projections.push(converted)
+        }
+        &sources.push(ViewSourcePathFact{source: source, projections: projections})
+    }
+    ViewProvenanceFact{output_path: output_path, sources: sources, mutable: provenance.mutable}
+}
+
+// Effect sets/edges in the canonical producer are sorted, unique source facts.
+// The ancestry map is restored on every return, so sibling branches never share
+// visited descendants. This is Rust's branch-local seen.clone without allocating
+// a second set for each edge.
+fn semindex_effect_witness(function: String, effect_name: String, facts: SemIndexEffectFacts, seen: &[String:Bool]) -> EffectProvenance? Never! {
+    if seen.get(function) != None -> return None
+    seen[function] = true
+    result := semindex_effect_witness_entered(function, effect_name, facts, &seen)
+    _removed :: &seen.remove(function)
+    result
+}
+fn semindex_effect_witness_entered(function: String, effect_name: String, facts: SemIndexEffectFacts, seen: &[String:Bool]) -> EffectProvenance? Never! {
+    summary :: facts.summaries.get(function) ?? return None
+    loop direct in summary.direct {
+        if direct == effect_name {
+            spans := [SourceSpan]{}
+            if summary.direct_spans.get(effect_name) == .Val(span) -> &spans.push(semindex_source_span(span))
+            return Val(EffectProvenance{effect_name: effect_name, call_path: [String]{function}, spans: spans})
+        }
+    }
+    if summary.maximal {
+        spans := [SourceSpan]{}
+        if summary.maximal_span == .Val(span) -> &spans.push(semindex_source_span(span))
+        return Val(EffectProvenance{effect_name: effect_name, call_path: [String]{function}, spans: spans})
+    }
+    loop callee in summary.edges {
+        solved :: facts.solved.get(callee) ?? next
+        contains := false
+        loop name in solved { if name == effect_name { contains = true; break } }
+        if !contains -> next
+        if semindex_effect_witness(callee, effect_name, facts, &seen) == .Val(witness) {
+            retained := ^witness
+            &retained.call_path.insert(0, function)
+            loop call in summary.memory.calls {
+                if call.callee == callee {
+                    &retained.spans.insert(0, semindex_source_span(call.span))
+                    break
+                }
+            }
+            return Val(^retained)
+        }
+    }
+    None
+}
+pub fn semindex_convert_effects(facts: SemIndexEffectFacts) -> [EffectFact] Never! {
+    output := [EffectFact]{}
+    loop (function, summary) in facts.summaries {
+        inferred :: facts.solved.get(function) ?? [String]{}
+        provenance := [EffectProvenance]{}
+        loop effect_name in inferred {
+            seen := [String:Bool]{}
+            if semindex_effect_witness(function, effect_name, facts, &seen) == .Val(witness) -> &provenance.push(^witness)
+        }
+        &output.push(EffectFact{function: function, direct: summary.direct, callees: summary.edges, inferred: inferred, maximal: summary.maximal, provenance: provenance})
+    }
+    &output.sort_by((left: EffectFact, right: EffectFact) -> left.function <=> right.function)
+    output
+}

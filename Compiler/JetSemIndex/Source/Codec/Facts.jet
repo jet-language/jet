@@ -1,0 +1,627 @@
+// crates/jet-semindex/src/JSON.rs:145–154 json_strings/json_string_array and
+// 521–1043 fact presentation codecs: json_span, json_view_provenance,
+// json_callable_unavailable, json_callable_signature, json_kind, json_def,
+// json_trait_contract, json_ref, json_compiler_fact, json_call, json_effect,
+// json_arithmetic, json_member_kind, json_origin, json_member and
+// json_state_graph. Presentation JSON keeps source field order, array order,
+// duplicates and integer spelling; it is never RFC 8785 canonicalized. Absent
+// optional facts are `null`, checked empty collections are `[]`, and an
+// unavailable callable fact carries its own status object. Every string goes
+// through Foundation's canonical quote; there is no codec-local escaper.
+use jet_foundation.[
+    compiler_stage_as_str,
+    foundation_json_quote,
+    type_name,
+]
+// CP-REPORT-STATUS-API: consume the sole Foundation owner once its public
+// StatusValue/StatusFields API is published. Never parse presentation JSON.
+use jet_foundation.[StatusValue, StatusFields]
+
+// Rust json_strings (145–151): comma-joined quoted strings without brackets.
+pub fn semindex_json_strings(values: [String]) -> String Never! {
+    quoted :: loop value in values -> foundation_json_quote(value)
+    quoted.join(",")
+}
+
+// Rust json_string_array (152–154).
+pub fn semindex_json_string_array(values: [String]) -> String Never! {
+    "[{semindex_json_strings(values)}]"
+}
+
+// Rust bool Display inside the presentation format strings.
+fn semindex_json_bool(value: Bool) -> String Never! {
+    if value -> "true" else -> "false"
+}
+
+// Rust json_span (521–523): UTF-8 byte offsets exactly as recorded.
+pub fn semindex_json_span(span: SourceSpan) -> String Never! {
+    "{{\"start\":{span.start},\"end\":{span.end}}}"
+}
+
+// Rust json_view_provenance (525–567): every alternative source and every
+// projection stays in recorded order; the root output slot is `[]`.
+pub fn semindex_json_view_provenance(provenance: ViewProvenanceFact) -> String Never! {
+    sources := [String]{}
+    loop source_path in provenance.sources {
+        source :: if source_path.source == {
+            .Receiver -> "{{\"kind\":\"receiver\"}}"
+            .Parameter(index) -> "{{\"kind\":\"parameter\",\"index\":{index}}}"
+            .Static(module_path, name) -> {
+                module_json :: foundation_json_quote(module_path)
+                quoted_name :: foundation_json_quote(name)
+                "{{\"kind\":\"static\",\"module\":{module_json},\"name\":{quoted_name}}}"
+            }
+        }
+        projections := [String]{}
+        loop projection in source_path.projections {
+            text :: if projection == {
+                .Field(name) -> {
+                    quoted_name :: foundation_json_quote(name)
+                    "{{\"kind\":\"field\",\"name\":{quoted_name}}}"
+                }
+                .Index -> "{{\"kind\":\"index\"}}"
+                .Range -> "{{\"kind\":\"range\"}}"
+            }
+            &projections.push(text)
+        }
+        joined :: projections.join(",")
+        &sources.push("{{\"source\":{source},\"projections\":[{joined}]}}")
+    }
+    output_path :: semindex_json_strings(provenance.output_path)
+    joined_sources :: sources.join(",")
+    mutable :: semindex_json_bool(provenance.mutable)
+    "{{\"output_path\":[{output_path}],\"sources\":[{joined_sources}],\"mutable\":{mutable}}}"
+}
+
+// Rust json_callable_unavailable (568–574): the stage uses CompilerStage::as_str.
+pub fn semindex_json_callable_unavailable(unavailable: CallableFactUnavailable) -> String Never! {
+    stage :: foundation_json_quote(compiler_stage_as_str(unavailable.required_stage))
+    reason :: foundation_json_quote(unavailable.reason)
+    "{{\"status\":\"unavailable\",\"required_stage\":{stage},\"reason\":{reason}}}"
+}
+
+// Rust json_callable_signature (576–709). Checked empty effect/error/generic
+// rows are `[]` with a checked status; unavailable rows are `null` with the
+// unavailable status object. A parameter without a declared default has all
+// three default fields `null`; a declared default keeps its source text and
+// span while its prepared value remains explicitly unavailable.
+pub fn semindex_json_callable_signature(signature: CallableSignatureFact) -> String Never! {
+    parameters := [String]{}
+    loop parameter in signature.parameters {
+        default_text := "null"
+        default_source := "null"
+        default_value := "null"
+        if parameter.default == .Val(value) {
+            default_text = foundation_json_quote(value.source_text)
+            default_source = semindex_json_span(value.source)
+            default_value = semindex_json_callable_unavailable(value.value_unavailable)
+        }
+        name :: foundation_json_quote(parameter.name)
+        label :: foundation_json_quote(parameter.label)
+        source :: semindex_json_span(parameter.source)
+        access :: foundation_json_quote(parameter.access_name())
+        zone :: foundation_json_quote(parameter.zone_name())
+        ty :: foundation_json_quote(parameter.type_name())
+        variadic :: semindex_json_bool(parameter.variadic)
+        &parameters.push("{{\"name\":{name},\"label\":{label},\"source\":{source},\"default\":{default_text},\"default_source\":{default_source},\"default_value\":{default_value},\"access\":{access},\"zone\":{zone},\"type\":{ty},\"variadic\":{variadic}}}")
+    }
+    effects := "null"
+    effect_status := "null"
+    effect_facts := "null"
+    if signature.effects == {
+        .Checked(values) -> {
+            names :: loop callable_effect in values -> callable_effect.display_name()
+            facts := [String]{}
+            loop callable_effect in values {
+                fact :: if callable_effect == {
+                    .Named(name, source) -> {
+                        quoted_name :: foundation_json_quote(name)
+                        span :: semindex_json_span(source)
+                        "{{\"kind\":\"named\",\"name\":{quoted_name},\"source\":{span}}}"
+                    }
+                    .ViaParameter(name, source) -> {
+                        quoted_name :: foundation_json_quote(name)
+                        span :: semindex_json_span(source)
+                        "{{\"kind\":\"via_parameter\",\"name\":{quoted_name},\"source\":{span}}}"
+                    }
+                }
+                &facts.push(fact)
+            }
+            effects = semindex_json_string_array(names)
+            effect_status = "{{\"status\":\"checked\"}}"
+            joined_facts :: facts.join(",")
+            effect_facts = "[{joined_facts}]"
+        }
+        .Unavailable(unavailable) -> effect_status = semindex_json_callable_unavailable(unavailable)
+    }
+    errors :: if signature.error_names() == {
+        .Val(values) -> semindex_json_string_array(values)
+        .None -> "null"
+    }
+    // The checked effective type and source come from S1's Foundation-backed
+    // CallableSignatureFact helpers, never from re-parsing a display string.
+    failure_contract :: if signature.failure_contract_name() == {
+        .Val(value) -> foundation_json_quote(value)
+        .None -> "null"
+    }
+    failure_source :: if signature.failure_source_name() == {
+        .Val(value) -> foundation_json_quote(value)
+        .None -> "null"
+    }
+    failure_status :: if signature.failure_contract == {
+        .Checked(_) -> "{{\"status\":\"checked\"}}"
+        .Unavailable(unavailable) -> semindex_json_callable_unavailable(unavailable)
+    }
+    generic_parameters := "null"
+    generic_parameters_status := "null"
+    if signature.generic_parameters == {
+        .Checked(values) -> {
+            names :: loop parameter in values -> parameter.name
+            generic_parameters = semindex_json_string_array(names)
+            generic_parameters_status = "{{\"status\":\"checked\"}}"
+        }
+        .Unavailable(unavailable) -> generic_parameters_status = semindex_json_callable_unavailable(unavailable)
+    }
+    return_type :: if signature.return_type == {
+        .Val(ty) -> foundation_json_quote(type_name(ty))
+        .None -> "null"
+    }
+    views :: loop provenance in signature.returned_views -> semindex_json_view_provenance(provenance)
+    joined_parameters :: parameters.join(",")
+    joined_views :: views.join(",")
+    policies :: semindex_json_string_array(signature.policy_names())
+    producer_status :: if signature.metadata_producer_status == {
+        .ContractOnly -> "contract_only"
+        .NotImplemented -> "not_implemented"
+        .ExistingCallableProducerNeedsExtension -> "existing_callable_producer_needs_extension"
+    }
+    quoted_producer_status :: foundation_json_quote(producer_status)
+    "{{\"parameters\":[{joined_parameters}],\"return_type\":{return_type},\"return_type_status\":\"checked\",\"effects\":{effects},\"effect_status\":{effect_status},\"effect_facts\":{effect_facts},\"errors\":{errors},\"failure_contract\":{failure_contract},\"failure_source\":{failure_source},\"failure_status\":{failure_status},\"returned_views\":[{joined_views}],\"policies\":{policies},\"generic_parameters\":{generic_parameters},\"generic_parameters_status\":{generic_parameters_status},\"metadata_producer_status\":{quoted_producer_status}}}"
+}
+
+// Rust json_kind (711–783). Function params expose only their types; the
+// call contract keeps label/zone/variadic rows in declaration order.
+pub fn semindex_json_kind(kind: SemIndexSymbolKind) -> String Never! {
+    if kind == {
+        .Module -> "{{\"kind\":\"module\"}}"
+        .Function(params, call_contract, ret) -> {
+            param_rows :: loop param in params -> {
+                ty :: foundation_json_quote(param.ty)
+                "{{\"type\":{ty}}}"
+            }
+            contract_rows :: loop entry in call_contract -> {
+                label :: foundation_json_quote(entry.label)
+                zone :: foundation_json_quote(entry.zone)
+                variadic :: semindex_json_bool(entry.variadic)
+                "{{\"label\":{label},\"zone\":{zone},\"variadic\":{variadic}}}"
+            }
+            ret_json :: if ret == {
+                .Val(ty) -> foundation_json_quote(ty)
+                .None -> "null"
+            }
+            joined_params :: param_rows.join(",")
+            joined_contract :: contract_rows.join(",")
+            "{{\"kind\":\"function\",\"params\":[{joined_params}],\"call_contract\":[{joined_contract}],\"ret\":{ret_json}}}"
+        }
+        .Struct(fields) -> {
+            rows :: loop field in fields -> {
+                name :: foundation_json_quote(field.name)
+                ty :: foundation_json_quote(field.ty)
+                "{{\"name\":{name},\"type\":{ty}}}"
+            }
+            joined :: rows.join(",")
+            "{{\"kind\":\"struct\",\"fields\":[{joined}]}}"
+        }
+        .Enum(variants) -> {
+            joined :: semindex_json_strings(variants)
+            "{{\"kind\":\"enum\",\"variants\":[{joined}]}}"
+        }
+        .Trait -> "{{\"kind\":\"trait\"}}"
+        .Tag -> "{{\"kind\":\"tag\"}}"
+        .Type -> "{{\"kind\":\"type\"}}"
+        .Const -> "{{\"kind\":\"const\"}}"
+        .EnumVariant(parent) -> {
+            quoted_parent :: foundation_json_quote(parent)
+            "{{\"kind\":\"enum_variant\",\"parent\":{quoted_parent}}}"
+        }
+        .Field(ty, parent) -> {
+            quoted_ty :: foundation_json_quote(ty)
+            quoted_parent :: foundation_json_quote(parent)
+            "{{\"kind\":\"field\",\"type\":{quoted_ty},\"parent\":{quoted_parent}}}"
+        }
+        .Local(mutable, ty) -> {
+            quoted_mutable :: semindex_json_bool(mutable)
+            ty_json :: if ty == {
+                .Val(value) -> foundation_json_quote(value)
+                .None -> "null"
+            }
+            "{{\"kind\":\"local\",\"mutable\":{quoted_mutable},\"type\":{ty_json}}}"
+        }
+        .Param(ty) -> {
+            quoted_ty :: foundation_json_quote(ty)
+            "{{\"kind\":\"param\",\"type\":{quoted_ty}}}"
+        }
+    }
+}
+
+// Rust json_def (785–831). `name` is the qualified spelling and `leaf_name`
+// the declared leaf; declaration identity remains an explicit unavailable fact.
+pub fn semindex_json_def(definition: SymbolDef) -> String Never! {
+    views :: loop provenance in definition.view_provenance -> semindex_json_view_provenance(provenance)
+    joined_views :: views.join(",")
+    callable :: if definition.callable_signature == {
+        .Val(signature) -> semindex_json_callable_signature(signature)
+        .None -> "null"
+    }
+    declaration_identity :: semindex_json_callable_unavailable(definition.declaration_identity_unavailable)
+    derives :: semindex_json_strings(definition.derives)
+    nominal_base :: if definition.nominal_base == {
+        .Val(base) -> foundation_json_quote(base)
+        .None -> "null"
+    }
+    contracts :: loop contract in definition.trait_contracts -> semindex_json_trait_contract(contract)
+    joined_contracts :: contracts.join(",")
+    identity :: foundation_json_quote(definition.identity)
+    name :: foundation_json_quote(definition.qualified_name)
+    leaf_name :: foundation_json_quote(definition.name)
+    module_json :: foundation_json_quote(definition.module_path)
+    span :: semindex_json_span(definition.def_span)
+    detail :: semindex_json_kind(definition.kind)
+    "{{\"identity\":{identity},\"metadata_declaration_identity\":{declaration_identity},\"name\":{name},\"leaf_name\":{leaf_name},\"module\":{module_json},\"span\":{span},\"detail\":{detail},\"view_provenance\":[{joined_views}],\"callable_signature\":{callable},\"derives\":[{derives}],\"nominal_base\":{nominal_base},\"trait_contracts\":[{joined_contracts}]}}"
+}
+
+// Rust json_trait_contract (832–858): an associated type without a concrete
+// implementation is `null`, never an empty spelling.
+pub fn semindex_json_trait_contract(contract: TraitContractFact) -> String Never! {
+    associated_types :: loop associated in contract.associated_types -> {
+        name :: foundation_json_quote(associated.name)
+        ty :: if associated.implementation == {
+            .Val(value) -> foundation_json_quote(value)
+            .None -> "null"
+        }
+        "{{\"name\":{name},\"type\":{ty}}}"
+    }
+    joined_types :: associated_types.join(",")
+    methods :: semindex_json_strings(contract.methods)
+    trait_name :: foundation_json_quote(contract.trait_name)
+    "{{\"trait\":{trait_name},\"associated_types\":[{joined_types}],\"methods\":[{methods}]}}"
+}
+
+// Rust json_ref (860–892): an unresolved or ambiguous reference keeps a
+// `null` target; a target without a checked semantic identity keeps `null`.
+pub fn semindex_json_ref(reference: SymbolRef) -> String Never! {
+    scope :: if reference.scope_identity == {
+        .Val(identity) -> foundation_json_quote(identity)
+        .None -> "null"
+    }
+    target :: if reference.target == {
+        .Val(anchor) -> {
+            module_json :: foundation_json_quote(anchor.module_path)
+            kind :: foundation_json_quote(anchor.kind)
+            semantic_identity :: if anchor.semantic_identity == {
+                .Val(identity) -> foundation_json_quote(identity)
+                .None -> "null"
+            }
+            span :: semindex_json_span(anchor.def_span)
+            "{{\"module\":{module_json},\"kind\":{kind},\"semantic_identity\":{semantic_identity},\"span\":{span}}}"
+        }
+        .None -> "null"
+    }
+    fact :: if reference.fact == {
+        .Val(value) -> semindex_json_compiler_fact(value)
+        .None -> "null"
+    }
+    name :: foundation_json_quote(reference.name)
+    module_json :: foundation_json_quote(reference.module_path)
+    span :: semindex_json_span(reference.span)
+    "{{\"name\":{name},\"module\":{module_json},\"scope_identity\":{scope},\"target\":{target},\"fact\":{fact},\"span\":{span}}}"
+}
+
+// Rust json_compiler_fact (894–901).
+pub fn semindex_json_compiler_fact(fact: CompilerFact) -> String Never! {
+    name :: foundation_json_quote(fact.name)
+    kind :: foundation_json_quote(fact.kind)
+    ty :: foundation_json_quote(fact.type_name)
+    "{{\"name\":{name},\"kind\":{kind},\"type\":{ty}}}"
+}
+
+// Rust json_call (903–911).
+pub fn semindex_json_call(call: CallEdge) -> String Never! {
+    caller :: foundation_json_quote(call.caller)
+    callee :: foundation_json_quote(call.callee)
+    module_json :: foundation_json_quote(call.module_path)
+    span :: semindex_json_span(call.call_span)
+    "{{\"caller\":{caller},\"callee\":{callee},\"module\":{module_json},\"span\":{span}}}"
+}
+
+// Rust json_effect (913–951): provenance witnesses keep call-path and span
+// order; the Jet field effect_name is the wire key `effect`.
+pub fn semindex_json_effect(fact: EffectFact) -> String Never! {
+    provenance :: loop origin in fact.provenance -> {
+        effect_name :: foundation_json_quote(origin.effect_name)
+        path :: semindex_json_strings(origin.call_path)
+        spans :: loop span in origin.spans -> semindex_json_span(span)
+        joined_spans :: spans.join(",")
+        "{{\"effect\":{effect_name},\"call_path\":[{path}],\"spans\":[{joined_spans}]}}"
+    }
+    function :: foundation_json_quote(fact.function)
+    direct :: semindex_json_strings(fact.direct)
+    callees :: semindex_json_strings(fact.callees)
+    inferred :: semindex_json_strings(fact.inferred)
+    maximal :: semindex_json_bool(fact.maximal)
+    joined_provenance :: provenance.join(",")
+    "{{\"function\":{function},\"direct\":[{direct}],\"callees\":[{callees}],\"inferred\":[{inferred}],\"maximal\":{maximal},\"provenance\":[{joined_provenance}]}}"
+}
+
+// Rust json_arithmetic (953–962).
+pub fn semindex_json_arithmetic(value: ArithmeticOperationFact) -> String Never! {
+    operation :: foundation_json_quote(value.operation)
+    policy :: foundation_json_quote(value.policy)
+    module_json :: foundation_json_quote(value.module_path)
+    operation_span :: semindex_json_span(value.operation_span)
+    scope_span :: semindex_json_span(value.scope_span)
+    "{{\"operation\":{operation},\"policy\":{policy},\"module\":{module_json},\"operation_span\":{operation_span},\"scope_span\":{scope_span}}}"
+}
+
+// Rust json_member_kind (964–970).
+pub fn semindex_json_member_kind(kind: MemberKind) -> String Never! {
+    if kind == {
+        .Field -> "field"
+        .Variant -> "variant"
+        .Method -> "method"
+    }
+}
+
+// Rust json_origin (972–985).
+pub fn semindex_json_origin(origin: MemberOrigin) -> String Never! {
+    if origin == {
+        .TypeBody -> "{{\"kind\":\"type_body\"}}"
+        .InherentImpl -> "{{\"kind\":\"inherent_impl\"}}"
+        .TraitImpl(trait_name) -> {
+            quoted :: foundation_json_quote(trait_name)
+            "{{\"kind\":\"trait_impl\",\"trait\":{quoted}}}"
+        }
+        .TraitRequirement(trait_name) -> {
+            quoted :: foundation_json_quote(trait_name)
+            "{{\"kind\":\"trait_requirement\",\"trait\":{quoted}}}"
+        }
+    }
+}
+
+// Rust json_member (987–999).
+pub fn semindex_json_member(member: MemberFact) -> String Never! {
+    owner :: foundation_json_quote(member.owner)
+    name :: foundation_json_quote(member.name)
+    identity :: foundation_json_quote(member.identity)
+    kind :: foundation_json_quote(semindex_json_member_kind(member.kind))
+    origin :: semindex_json_origin(member.origin)
+    signature :: foundation_json_quote(member.signature)
+    module_json :: foundation_json_quote(member.module_path)
+    span :: semindex_json_span(member.span)
+    "{{\"owner\":{owner},\"name\":{name},\"identity\":{identity},\"kind\":{kind},\"origin\":{origin},\"signature\":{signature},\"module\":{module_json},\"span\":{span}}}"
+}
+
+// Rust json_state_graph (1001–1043): unknown reachability and an absent
+// from-state stay `null` rather than becoming false or an empty state.
+pub fn semindex_json_state_graph(graph: StateGraphFact) -> String Never! {
+    states :: loop state in graph.states -> {
+        name :: foundation_json_quote(state.name)
+        terminal :: semindex_json_bool(state.terminal)
+        reachable :: if state.reachable == {
+            .Val(value) -> semindex_json_bool(value)
+            .None -> "null"
+        }
+        span :: semindex_json_span(state.span)
+        "{{\"name\":{name},\"terminal\":{terminal},\"reachable\":{reachable},\"span\":{span}}}"
+    }
+    transitions :: loop transition in graph.transitions -> {
+        operation :: foundation_json_quote(transition.operation)
+        from :: if transition.from == {
+            .Val(value) -> foundation_json_quote(value)
+            .None -> "null"
+        }
+        to :: foundation_json_quote(transition.to)
+        "{{\"operation\":{operation},\"from\":{from},\"to\":{to}}}"
+    }
+    owner :: foundation_json_quote(graph.owner)
+    module_json :: foundation_json_quote(graph.module_path)
+    joined_states :: states.join(",")
+    joined_transitions :: transitions.join(",")
+    "{{\"owner\":{owner},\"module\":{module_json},\"states\":[{joined_states}],\"transitions\":[{joined_transitions}]}}"
+}
+
+// Typed Report projections of JSON.rs:145–154,521–1043. The raw helpers above
+// remain byte-specific: Foundation quote escapes DEL/C1, Report does not.
+// Both expose the same consumer values, with authored array order/duplicates.
+pub fn semindex_status_strings(values: [String]) -> StatusValue Never! {
+    rows :: loop value in values -> StatusValue.String(value)
+    StatusValue.Array(rows)
+}
+pub fn semindex_status_span(span: SourceSpan) -> StatusValue Never! {
+    StatusValue.Object(StatusFields.new().with("start", StatusValue.Integer(span.start)).with("end", StatusValue.Integer(span.end)))
+}
+pub fn semindex_status_view_provenance(provenance: ViewProvenanceFact) -> StatusValue Never! {
+    sources := [StatusValue]{}
+    loop path in provenance.sources {
+        source :: if path.source == {
+            .Receiver -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("receiver")))
+            .Parameter(index) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("parameter")).with("index", StatusValue.Integer(index)))
+            .Static(module_path, name) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("static")).with("module", StatusValue.String(module_path)).with("name", StatusValue.String(name)))
+        }
+        projections :: loop projection in path.projections -> if projection == {
+            .Field(name) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("field")).with("name", StatusValue.String(name)))
+            .Index -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("index")))
+            .Range -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("range")))
+        }
+        &sources.push(StatusValue.Object(StatusFields.new().with("source", source).with("projections", StatusValue.Array(projections))))
+    }
+    StatusValue.Object(StatusFields.new().with("output_path", semindex_status_strings(provenance.output_path)).with("sources", StatusValue.Array(sources)).with("mutable", StatusValue.Bool(provenance.mutable)))
+}
+pub fn semindex_status_callable_unavailable(unavailable: CallableFactUnavailable) -> StatusValue Never! {
+    StatusValue.Object(StatusFields.new().with("status", StatusValue.String("unavailable")).with("required_stage", StatusValue.String(compiler_stage_as_str(unavailable.required_stage))).with("reason", StatusValue.String(unavailable.reason)))
+}
+pub fn semindex_status_callable_signature(signature: CallableSignatureFact) -> StatusValue Never! {
+    parameters := [StatusValue]{}
+    loop parameter in signature.parameters {
+        default_text := StatusValue.Null
+        default_source := StatusValue.Null
+        default_value := StatusValue.Null
+        if parameter.default == .Val(value) {
+            default_text = StatusValue.String(value.source_text)
+            default_source = semindex_status_span(value.source)
+            default_value = semindex_status_callable_unavailable(value.value_unavailable)
+        }
+        &parameters.push(StatusValue.Object(StatusFields.new()
+            .with("name", StatusValue.String(parameter.name))
+            .with("label", StatusValue.String(parameter.label))
+            .with("source", semindex_status_span(parameter.source))
+            .with("default", default_text).with("default_source", default_source).with("default_value", default_value)
+            .with("access", StatusValue.String(parameter.access_name()))
+            .with("zone", StatusValue.String(parameter.zone_name()))
+            .with("type", StatusValue.String(parameter.type_name()))
+            .with("variadic", StatusValue.Bool(parameter.variadic))))
+    }
+    effects := StatusValue.Null
+    effect_status := StatusValue.Null
+    effect_facts := StatusValue.Null
+    if signature.effects == {
+        .Checked(values) -> {
+            names :: loop effect in values -> effect.display_name()
+            facts :: loop effect in values -> if effect == {
+                .Named(name, source) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("named")).with("name", StatusValue.String(name)).with("source", semindex_status_span(source)))
+                .ViaParameter(name, source) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("via_parameter")).with("name", StatusValue.String(name)).with("source", semindex_status_span(source)))
+            }
+            effects = semindex_status_strings(names)
+            effect_status = StatusValue.Object(StatusFields.new().with("status", StatusValue.String("checked")))
+            effect_facts = StatusValue.Array(facts)
+        }
+        .Unavailable(reason) -> effect_status = semindex_status_callable_unavailable(reason)
+    }
+    failure_status :: if signature.failure_contract == {
+        .Checked(_) -> StatusValue.Object(StatusFields.new().with("status", StatusValue.String("checked")))
+        .Unavailable(reason) -> semindex_status_callable_unavailable(reason)
+    }
+    generic_parameters := StatusValue.Null
+    generic_parameters_status := StatusValue.Null
+    if signature.generic_parameters == {
+        .Checked(values) -> {
+            names :: loop parameter in values -> parameter.name
+            generic_parameters = semindex_status_strings(names)
+            generic_parameters_status = StatusValue.Object(StatusFields.new().with("status", StatusValue.String("checked")))
+        }
+        .Unavailable(reason) -> generic_parameters_status = semindex_status_callable_unavailable(reason)
+    }
+    return_type :: if signature.return_type == {
+        .Val(ty) -> StatusValue.String(type_name(ty))
+        .None -> StatusValue.Null
+    }
+    views :: loop provenance in signature.returned_views -> semindex_status_view_provenance(provenance)
+    producer_status :: if signature.metadata_producer_status == {
+        .ContractOnly -> "contract_only"
+        .NotImplemented -> "not_implemented"
+        .ExistingCallableProducerNeedsExtension -> "existing_callable_producer_needs_extension"
+    }
+    StatusValue.Object(StatusFields.new()
+        .with("parameters", StatusValue.Array(parameters)).with("return_type", return_type)
+        .with("return_type_status", StatusValue.String("checked"))
+        .with("effects", effects).with("effect_status", effect_status).with("effect_facts", effect_facts)
+        .with("errors", semindex_status_optional_strings(signature.error_names()))
+        .with("failure_contract", semindex_status_optional_str(signature.failure_contract_name()))
+        .with("failure_source", semindex_status_optional_str(signature.failure_source_name()))
+        .with("failure_status", failure_status).with("returned_views", StatusValue.Array(views))
+        .with("policies", semindex_status_strings(signature.policy_names()))
+        .with("generic_parameters", generic_parameters).with("generic_parameters_status", generic_parameters_status)
+        .with("metadata_producer_status", StatusValue.String(producer_status)))
+}
+pub fn semindex_status_kind(kind: SemIndexSymbolKind) -> StatusValue Never! {
+    if kind == {
+        .Module -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("module")))
+        .Function(params, call_contract, ret) -> {
+            rows :: loop parameter in params -> StatusValue.Object(StatusFields.new().with("type", StatusValue.String(parameter.ty)))
+            contracts :: loop entry in call_contract -> StatusValue.Object(StatusFields.new().with("label", StatusValue.String(entry.label)).with("zone", StatusValue.String(entry.zone)).with("variadic", StatusValue.Bool(entry.variadic)))
+            StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("function")).with("params", StatusValue.Array(rows)).with("call_contract", StatusValue.Array(contracts)).with("ret", semindex_status_optional_str(ret)))
+        }
+        .Struct(fields) -> {
+            rows :: loop field in fields -> StatusValue.Object(StatusFields.new().with("name", StatusValue.String(field.name)).with("type", StatusValue.String(field.ty)))
+            StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("struct")).with("fields", StatusValue.Array(rows)))
+        }
+        .Enum(variants) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("enum")).with("variants", semindex_status_strings(variants)))
+        .Trait -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("trait")))
+        .Tag -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("tag")))
+        .Type -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("type")))
+        .Const -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("const")))
+        .EnumVariant(parent) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("enum_variant")).with("parent", StatusValue.String(parent)))
+        .Field(ty, parent) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("field")).with("type", StatusValue.String(ty)).with("parent", StatusValue.String(parent)))
+        .Local(mutable, ty) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("local")).with("mutable", StatusValue.Bool(mutable)).with("type", semindex_status_optional_str(ty)))
+        .Param(ty) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("param")).with("type", StatusValue.String(ty)))
+    }
+}
+pub fn semindex_status_def(definition: SymbolDef) -> StatusValue Never! {
+    views :: loop provenance in definition.view_provenance -> semindex_status_view_provenance(provenance)
+    callable :: if definition.callable_signature == {
+        .Val(signature) -> semindex_status_callable_signature(signature)
+        .None -> StatusValue.Null
+    }
+    contracts :: loop contract in definition.trait_contracts -> semindex_status_trait_contract(contract)
+    StatusValue.Object(StatusFields.new()
+        .with("identity", StatusValue.String(definition.identity))
+        .with("metadata_declaration_identity", semindex_status_callable_unavailable(definition.declaration_identity_unavailable))
+        .with("name", StatusValue.String(definition.qualified_name)).with("leaf_name", StatusValue.String(definition.name))
+        .with("module", StatusValue.String(definition.module_path)).with("span", semindex_status_span(definition.def_span))
+        .with("detail", semindex_status_kind(definition.kind)).with("view_provenance", StatusValue.Array(views))
+        .with("callable_signature", callable).with("derives", semindex_status_strings(definition.derives))
+        .with("nominal_base", semindex_status_optional_str(definition.nominal_base)).with("trait_contracts", StatusValue.Array(contracts)))
+}
+pub fn semindex_status_trait_contract(contract: TraitContractFact) -> StatusValue Never! {
+    rows :: loop associated in contract.associated_types -> StatusValue.Object(StatusFields.new().with("name", StatusValue.String(associated.name)).with("type", semindex_status_optional_str(associated.implementation)))
+    StatusValue.Object(StatusFields.new().with("trait", StatusValue.String(contract.trait_name)).with("associated_types", StatusValue.Array(rows)).with("methods", semindex_status_strings(contract.methods)))
+}
+pub fn semindex_status_ref(reference: SymbolRef) -> StatusValue Never! {
+    target :: if reference.target == {
+        .Val(anchor) -> StatusValue.Object(StatusFields.new().with("module", StatusValue.String(anchor.module_path)).with("kind", StatusValue.String(anchor.kind)).with("semantic_identity", semindex_status_optional_str(anchor.semantic_identity)).with("span", semindex_status_span(anchor.def_span)))
+        .None -> StatusValue.Null
+    }
+    fact :: if reference.fact == {
+        .Val(value) -> semindex_status_compiler_fact(value)
+        .None -> StatusValue.Null
+    }
+    StatusValue.Object(StatusFields.new().with("name", StatusValue.String(reference.name)).with("module", StatusValue.String(reference.module_path)).with("scope_identity", semindex_status_optional_str(reference.scope_identity)).with("target", target).with("fact", fact).with("span", semindex_status_span(reference.span)))
+}
+pub fn semindex_status_compiler_fact(fact: CompilerFact) -> StatusValue Never! {
+    StatusValue.Object(StatusFields.new().with("name", StatusValue.String(fact.name)).with("kind", StatusValue.String(fact.kind)).with("type", StatusValue.String(fact.type_name)))
+}
+pub fn semindex_status_call(call: CallEdge) -> StatusValue Never! {
+    StatusValue.Object(StatusFields.new().with("caller", StatusValue.String(call.caller)).with("callee", StatusValue.String(call.callee)).with("module", StatusValue.String(call.module_path)).with("span", semindex_status_span(call.call_span)))
+}
+pub fn semindex_status_effect(fact: EffectFact) -> StatusValue Never! {
+    provenance :: loop origin in fact.provenance -> {
+        spans :: loop span in origin.spans -> semindex_status_span(span)
+        StatusValue.Object(StatusFields.new().with("effect", StatusValue.String(origin.effect_name)).with("call_path", semindex_status_strings(origin.call_path)).with("spans", StatusValue.Array(spans)))
+    }
+    StatusValue.Object(StatusFields.new().with("function", StatusValue.String(fact.function)).with("direct", semindex_status_strings(fact.direct)).with("callees", semindex_status_strings(fact.callees)).with("inferred", semindex_status_strings(fact.inferred)).with("maximal", StatusValue.Bool(fact.maximal)).with("provenance", StatusValue.Array(provenance)))
+}
+pub fn semindex_status_arithmetic(value: ArithmeticOperationFact) -> StatusValue Never! {
+    StatusValue.Object(StatusFields.new().with("operation", StatusValue.String(value.operation)).with("policy", StatusValue.String(value.policy)).with("module", StatusValue.String(value.module_path)).with("operation_span", semindex_status_span(value.operation_span)).with("scope_span", semindex_status_span(value.scope_span)))
+}
+pub fn semindex_status_origin(origin: MemberOrigin) -> StatusValue Never! {
+    if origin == {
+        .TypeBody -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("type_body")))
+        .InherentImpl -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("inherent_impl")))
+        .TraitImpl(name) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("trait_impl")).with("trait", StatusValue.String(name)))
+        .TraitRequirement(name) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("trait_requirement")).with("trait", StatusValue.String(name)))
+    }
+}
+pub fn semindex_status_member(member: MemberFact) -> StatusValue Never! {
+    StatusValue.Object(StatusFields.new().with("owner", StatusValue.String(member.owner)).with("name", StatusValue.String(member.name)).with("identity", StatusValue.String(member.identity)).with("kind", StatusValue.String(semindex_json_member_kind(member.kind))).with("origin", semindex_status_origin(member.origin)).with("signature", StatusValue.String(member.signature)).with("module", StatusValue.String(member.module_path)).with("span", semindex_status_span(member.span)))
+}
+pub fn semindex_status_state_graph(graph: StateGraphFact) -> StatusValue Never! {
+    states :: loop state in graph.states -> {
+        reachable :: if state.reachable == {
+            .Val(value) -> StatusValue.Bool(value)
+            .None -> StatusValue.Null
+        }
+        StatusValue.Object(StatusFields.new().with("name", StatusValue.String(state.name)).with("terminal", StatusValue.Bool(state.terminal)).with("reachable", reachable).with("span", semindex_status_span(state.span)))
+    }
+    transitions :: loop transition in graph.transitions -> StatusValue.Object(StatusFields.new().with("operation", StatusValue.String(transition.operation)).with("from", semindex_status_optional_str(transition.from)).with("to", StatusValue.String(transition.to)))
+    StatusValue.Object(StatusFields.new().with("owner", StatusValue.String(graph.owner)).with("module", StatusValue.String(graph.module_path)).with("states", StatusValue.Array(states)).with("transitions", StatusValue.Array(transitions)))
+}

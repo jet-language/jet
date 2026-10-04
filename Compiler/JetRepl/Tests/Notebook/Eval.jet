@@ -1,0 +1,108 @@
+// Rust: Notebook/mod.rs:29-35 (same production browser asset).
+#Test("browser_client_consumes_only_fragment_authentication") {
+    assert(NOTEBOOK_CLIENT_HTML.contains("location.hash"))
+    assert(!NOTEBOOK_CLIENT_HTML.contains("location.search"))
+    assert(NOTEBOOK_CLIENT_HTML.contains("'Authorization':`Bearer ${{token}}`"))
+    assert(NOTEBOOK_CLIENT_HTML.contains("history.replaceState"))
+}
+
+// eval.rs has no original inline tests. These controls exercise the real
+// session/checker/authorizer path; no evaluator or authorizer mocks.
+fn notebook_eval_test_turn(session: &Session, source: String, preloaded: Bool) -> EvalResult Never! {
+    root :: notebook_native_path(".")
+    policy := ReplPolicy.for_notebook(ReplFlags.new([String]{}, [String]{}), root)
+    authorizer := &policy.authorizer(None)
+    evaluate_step_with_items(&session, source, root, &authorizer, preloaded)
+}
+#Test("notebook_eval_empty_and_quit_do_not_record_turns") {
+    session := Session.new()
+    empty :: notebook_eval_test_turn(&session, " \r\n\t", false)
+    assert_eq(empty.text, "")
+    assert_eq(empty.status, ReplTurnStatus.Ok)
+    assert(!empty.had_effect && !empty.quit && empty.value == None)
+    assert_eq(session.step, 0)
+    loop command in [String]{":quit", ":q", ":exit"} {
+        result :: notebook_eval_test_turn(&session, command, false)
+        assert_eq(result.text, "bye\n")
+        assert(result.quit)
+        assert_eq(result.status, ReplTurnStatus.Ok)
+        assert(!result.had_effect && result.value == None)
+    }
+    assert_eq(session.step, 3)
+    assert(session.turns.is_empty())
+}
+#Test("notebook_eval_rejects_meta_without_mutating_bindings") {
+    session := Session.new()
+    result :: notebook_eval_test_turn(&session, ":help", false)
+    assert_eq(result.text, "error: notebook cells do not run meta-command `:help`\n")
+    assert_eq(result.status, ReplTurnStatus.Error)
+    assert(!result.quit && !result.had_effect && result.value == None)
+    assert_eq(session.turns.len(), 1)
+    assert_eq(session.turns[0].summary, "meta:help")
+    assert(session.scope.is_empty())
+}
+#Test("notebook_eval_commits_checked_statement_and_rolls_back_failure") {
+    session := Session.new()
+    success :: notebook_eval_test_turn(&session, "number :: 7", false)
+    assert_eq(success.status, ReplTurnStatus.Ok)
+    assert(session.scope.has_key("number"))
+    assert_eq(session.turns[0].bound_name, Val("number"))
+    accepted_statements :: session.stmt_srcs.len()
+    failed :: notebook_eval_test_turn(&session, "other :: missing_name", false)
+    assert_eq(failed.status, ReplTurnStatus.Error)
+    assert(!failed.had_effect && failed.value == None)
+    assert(!session.scope.has_key("other"))
+    assert(session.scope.has_key("number"))
+    assert_eq(session.stmt_srcs.len(), accepted_statements)
+    echo :: notebook_eval_test_turn(&session, "number + 2", false)
+    assert_eq(echo.status, ReplTurnStatus.Ok)
+    assert_eq(echo.text, "9\n")
+    assert(echo.value != None)
+}
+#Test("notebook_eval_preloaded_nonkeyword_item_runs_item_lane") {
+    session := Session.new()
+    // File-wide declarations are present before evaluation of their own cell.
+    &session.replace_notebook_items([String]{"@answer :: 42\n"})
+    result :: notebook_eval_test_turn(&session, "@answer :: 42", true)
+    assert_eq(result.status, ReplTurnStatus.Ok)
+    assert_eq(result.text, "ok\n")
+    assert(!result.had_effect && result.value == None)
+    assert_eq(session.item_srcs.len(), 1)
+}
+#Test("notebook_eval_failed_import_removes_trial_source") {
+    session := Session.new()
+    before :: session.import_srcs.len()
+    result :: notebook_eval_test_turn(&session, "use nonexistent_notebook_module as missing", false)
+    assert_eq(result.status, ReplTurnStatus.Error)
+    assert_eq(session.import_srcs.len(), before)
+    assert(session.scope.is_empty())
+}
+#Test("notebook_eval_stdout_marks_observed_effect") {
+    session := Session.new()
+    result :: notebook_eval_test_turn(&session, "print(\"hello\")", false)
+    assert_eq(result.status, ReplTurnStatus.Ok)
+    assert(result.had_effect)
+    assert(result.text.contains("hello"))
+    assert(session.turns[0].had_effect)
+}
+#Test("notebook_eval_interrupt_rolls_back_bindings_and_keeps_exact_status") {
+    session := Session.new()
+    accepted :: notebook_eval_test_turn(&session, "kept :: 3", false)
+    assert_eq(accepted.status, ReplTurnStatus.Ok)
+    before :: session.stmt_srcs.len()
+    // Actual canonical interrupt state, not a mock evaluation reply.
+    jet_comptime.begin_repl_interruptible_turn()
+    jet_comptime.note_repl_interrupt()
+    interrupted :: notebook_eval_test_turn(&session, "trial :: 4", false)
+    jet_comptime.end_repl_interruptible_turn()
+    assert_eq(interrupted.status, ReplTurnStatus.Interrupted)
+    assert_eq(interrupted.text, "Interrupted. External effects already performed were not rolled back.\n")
+    assert(!interrupted.had_effect && !interrupted.quit && interrupted.value == None)
+    assert(session.scope.has_key("kept"))
+    assert(!session.scope.has_key("trial"))
+    assert_eq(session.stmt_srcs.len(), before)
+    assert_eq(session.turns[session.turns.len() - 1].summary, "Interrupted")
+    restored :: notebook_eval_test_turn(&session, "kept + 1", false)
+    assert_eq(restored.status, ReplTurnStatus.Ok)
+    assert_eq(restored.text, "4\n")
+}

@@ -1,0 +1,389 @@
+// Symbols.rs:824–1377: source conversions, CheckedText associated error,
+// one structural lexical-scope index, semantic shape, marker signatures/docs.
+// Canonical Foundation quantity/numeric/name/AST providers own meaning. Their
+// missing publication is a provider gate, never permission for local catalogs.
+use jet_foundation.[
+    Item, Type, Expr, Span, MIRNameFacts,
+    type_name, type_is_numeric, numeric_conversion_sources,
+    numeric_conversion_return, conversion_method_for_source,
+    unit_family_distinct_defs, CHECKED_TEXT, expr_span,
+    failure_contract_effective_type, failure_contract_source,
+]
+
+pub struct SemanticShape {
+    pub kind: SemanticSymbolKind
+    pub signature: String
+}
+pub struct SemanticSourceDocs {
+    pub summary: String
+    pub examples: [String]
+}
+
+// Rust collect_distinct_conversion_symbols: recurse only CodeModule, not generic
+// modules; CheckedText error lookup separately traverses both module families.
+pub fn semantic_collect_distinct_conversion_symbols(db: SymbolDB, items: [Item], module_path: String, scope_identity: String, lexical_scope: SemanticLexicalScope?, symbols: &[SemanticSymbol]) Never! {
+    loop item in items {
+        if item == {
+            .Distinct(definition) -> semantic_distinct_conversion_symbols(definition.name, definition.base, definition.range != None, semantic_checked_text_error(items, definition.name), module_path, scope_identity, semindex_source_span(definition.name_span), lexical_scope, &symbols)
+            .UnitFamily(family) -> {
+                loop definition in unit_family_distinct_defs(family) -> semantic_distinct_conversion_symbols(definition.name, definition.base, false, None, module_path, scope_identity, semindex_source_span(definition.name_span), lexical_scope, &symbols)
+            }
+            .CodeModule(module_value) -> {
+                if module_value.body == .Val(body) {
+                    scope :: semantic_inline_module_scope(db, module_path, module_value, lexical_scope)
+                    semantic_collect_distinct_conversion_symbols(db, body, module_path, scope.identity, Val(scope), &symbols)
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+// Rust distinct_conversion_symbols: append directly to caller storage, avoiding
+// the temporary full symbol vector. Numeric fallibility comes from the checker.
+pub fn semantic_distinct_conversion_symbols(owner: String, base: Type, ranged: Bool, checked_error: String?, module_path: String, scope_identity: String, span: SourceSpan, lexical_scope: SemanticLexicalScope?, symbols: &[SemanticSymbol]) Never! {
+    if type_is_numeric(base) {
+        loop source in numeric_conversion_sources() -> semantic_distinct_conversion_symbol(owner, base, ranged, checked_error, module_path, scope_identity, span, lexical_scope, source.method, source.source, &symbols)
+    } else {
+        source :: type_name(base)
+        semantic_distinct_conversion_symbol(owner, base, ranged, checked_error, module_path, scope_identity, span, lexical_scope, conversion_method_for_source(source), source, &symbols)
+    }
+}
+fn semantic_distinct_conversion_symbol(owner: String, base: Type, ranged: Bool, checked_error: String?, module_path: String, scope_identity: String, span: SourceSpan, lexical_scope: SemanticLexicalScope?, method: String, source: String, symbols: &[SemanticSymbol]) Never! {
+    fallible := checked_error != None || ranged
+    if !fallible {
+        if numeric_conversion_return(base, method, 1) == .Val(result) {
+            if result == { .Result(_, _) -> fallible = true, else -> {} }
+        }
+    }
+    qualified_name :: "{owner}.{method}"
+    signature := ""
+    summary := ""
+    if checked_error == {
+        .Val(error) -> {
+            signature = "{qualified_name}(value: {source}) -> {owner}\nfailure: {error} (CheckedText)"
+            summary = "Validates {source} through {owner}.CheckedText."
+        }
+        None -> {
+            suffix :: if fallible -> " !String" else -> ""
+            signature = "{qualified_name}(value: {source}) -> {owner}{suffix}"
+            summary = "Converts {source} to {owner}."
+        }
+    }
+    &symbols.push(SemanticSymbol{identity: "source:method:{scope_identity}:{qualified_name}", name: method, qualified_name: qualified_name, owner: Val(owner), module_path: module_path, kind: .Member, signature: signature, summary: summary, examples: [String]{}, provenance: .Source{module_path: module_path}, span: Val(span), lexical_scope: lexical_scope})
+}
+
+pub fn semantic_checked_text_error(items: [Item], owner: String) -> String? Never! {
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> {
+                if semantic_type_leaf(implementation.type_name) == owner && implementation.trait_name == (Val(CHECKED_TEXT)) {
+                    loop associated in implementation.assoc_type_impls {
+                        if associated.name == "Error" -> return Val(type_name(associated.ty))
+                    }
+                }
+            }
+            .CodeModule(module_value) -> {
+                if module_value.body == .Val(body) {
+                    if semantic_checked_text_error(body, owner) == .Val(error) -> return Val(error)
+                }
+            }
+            .GenericModule(module_value) -> {
+                if semantic_checked_text_error(module_value.body, owner) == .Val(error) -> return Val(error)
+            }
+            else -> {}
+        }
+    }
+    None
+}
+pub fn semantic_type_leaf(name: String) -> String Never! {
+    leaf := ""
+    loop part in name.split(".") -> leaf = part // #4303
+    leaf
+}
+
+// Real composite keys: #4397 gates native Ord/Eq. Stored values are node IDs,
+// never copied nodes or a copied SymbolDB. The caller supplies the SAME DB to
+// scope(), keeping its ownership and indexing unchanged throughout the build.
+struct SemanticScopeSpanKey {
+    module_path: String
+    start: Int
+    end: Int
+}
+struct SemanticScopeParentKey {
+    module_path: String
+    parent: Int
+}
+struct SemanticScopeBoundaryKey {
+    module_path: String
+    parent: Int
+    slot: String
+}
+struct SemanticScopeEnclosing {
+    initial: Int?
+    item: Int?
+}
+struct SemanticScopeSlot {
+    parent: Int
+    slot: String
+}
+pub struct LexicalScopeIndex {
+    enclosing: [SemanticScopeSpanKey:SemanticScopeEnclosing]
+    first_lexical_child: [SemanticScopeParentKey:Int]
+    boundaries: [SemanticScopeBoundaryKey:SourceSpan]
+}
+impl LexicalScopeIndex {
+    pub fn new(db: SymbolDB) -> LexicalScopeIndex Never! {
+        queries := [String:[SourceSpan]]{}
+        modules := [String]{}
+        loop definition in db.defs {
+            local :: if definition.kind == { .Local(_, _) | .Param(_) -> true, else -> false }
+            if local {
+                if !queries.has_key(definition.module_path) {
+                    queries[definition.module_path] = [SourceSpan]{}
+                    &modules.push(definition.module_path)
+                }
+                &queries[definition.module_path].push(semindex_source_span(definition.def_span))
+            }
+        }
+        module_nodes := [String:[Int]]{}
+        first_lexical_child := [SemanticScopeParentKey:Int]{}
+        loop node_index in 0..<db.nodes.len() {
+            node :: db.nodes[node_index]
+            if !queries.has_key(node.module_path) -> next
+            if !module_nodes.has_key(node.module_path) -> module_nodes[node.module_path] = [Int]{}
+            &module_nodes[node.module_path].push(node_index)
+            if node.parent == .Val(parent) {
+                if semindex_is_lexical_structural_slot(node.slot) {
+                    key :: SemanticScopeParentKey{module_path: node.module_path, parent: parent}
+                    if !first_lexical_child.has_key(key) -> first_lexical_child[key] = node.id
+                }
+            }
+        }
+        boundaries := [SemanticScopeBoundaryKey:SourceSpan]{}
+        loop boundary in db.slot_boundaries {
+            key :: SemanticScopeBoundaryKey{module_path: boundary.module_path, parent: boundary.parent, slot: boundary.slot}
+            if !boundaries.has_key(key) -> boundaries[key] = boundary.span
+        }
+        enclosing := [SemanticScopeSpanKey:SemanticScopeEnclosing]{}
+        loop module_path in modules {
+            ordered := &queries.remove(module_path) ?? panic("scope query module exists")
+            &ordered.sort_by((left: SourceSpan, right: SourceSpan) -> if left.start != right.start -> left.start <=> right.start else -> left.end <=> right.end)
+            nodes := &module_nodes.remove(module_path) ?? [Int]{}
+            // Stable equal-start order is the input structural order, not ID.
+            &nodes.sort_by((left: Int, right: Int) -> db.nodes[left].span.start <=> db.nodes[right].span.start)
+            next_node := 0
+            active := [Int]{}
+            loop span in ordered {
+                key :: SemanticScopeSpanKey{module_path: module_path, start: span.start, end: span.end}
+                if enclosing.has_key(key) -> next
+                loop next_node < nodes.len() && db.nodes[nodes[next_node]].span.start <= span.start {
+                    &active.push(nodes[next_node])
+                    next_node += 1
+                }
+                // Compact overlapping indices in place; do not allocate a
+                // fresh active vector per declaration.
+                kept := 0
+                loop index in 0..<active.len() {
+                    if db.nodes[active[index]].span.end >= span.start {
+                        active[kept] = active[index]
+                        kept += 1
+                    }
+                }
+                loop active.len() > kept -> _ :: &active.pop()
+                if span.end < span.start {
+                    enclosing[key] = SemanticScopeEnclosing{initial: semantic_smallest_enclosing(db.nodes, nodes, span.start, span.end, false), item: semantic_smallest_enclosing(db.nodes, nodes, span.start, span.end, true)}
+                } else {
+                    enclosing[key] = SemanticScopeEnclosing{initial: semantic_smallest_enclosing(db.nodes, active, span.start, span.end, false), item: semantic_smallest_enclosing(db.nodes, active, span.start, span.end, true)}
+                }
+            }
+        }
+        LexicalScopeIndex{enclosing: enclosing, first_lexical_child: first_lexical_child, boundaries: boundaries}
+    }
+    pub fn scope(self, db: SymbolDB, module_path: String, def_span: SourceSpan, is_param: Bool) -> SemanticLexicalScope? Never! {
+        key :: SemanticScopeSpanKey{module_path: module_path, start: def_span.start, end: def_span.end}
+        found :: self.enclosing.get(key) ?? return None
+        initial :: found.initial ?? return None
+        current := initial
+        innermost := SemanticScopeSlot?{None}
+        if self.first_lexical_child.get(SemanticScopeParentKey{module_path: module_path, parent: initial}) == .Val(child) {
+            if child < 0 || child >= db.nodes.len() -> return None
+            innermost = Val(SemanticScopeSlot{parent: initial, slot: db.nodes[child].slot})
+        }
+        depth := if innermost != None -> 1 else -> 0
+        loop {
+            if current < 0 || current >= db.nodes.len() -> return None
+            node :: db.nodes[current]
+            if semindex_is_lexical_structural_slot(node.slot) {
+                depth += 1
+                if innermost == None {
+                    parent :: node.parent ?? return None
+                    innermost = Val(SemanticScopeSlot{parent: parent, slot: node.slot})
+                }
+            }
+            if node.parent == { .Val(parent) -> current = parent, None -> break }
+        }
+        if innermost == None {
+            if found.item == .Val(item) -> innermost = Val(SemanticScopeSlot{parent: item, slot: "body"})
+        }
+        slot :: innermost ?? return None
+        span :: self.boundaries.get(SemanticScopeBoundaryKey{module_path: module_path, parent: slot.parent, slot: slot.slot}) ?? return None
+        Val(SemanticLexicalScope{identity: "scope:{module_path}:{slot.parent}:{slot.slot}", structural_parent: slot.parent, structural_slot: slot.slot, span: span, depth: if depth > 1 -> depth else -> 1, declaration_offset: if is_param -> 0 else -> def_span.start})
+    }
+}
+
+// Rust smallest_enclosing/is_lexical_slot. Nodes are addressed through the
+// candidate index vector; reversed spans retain the Rust enclosing predicate.
+pub fn semantic_smallest_enclosing(nodes: [StructuralNode], candidates: [Int], start: Int, end: Int, items_only: Bool) -> Int? Never! {
+    best := Int?{None}
+    best_size := 0
+    loop index in candidates {
+        node :: nodes[index]
+        if (items_only && node.class != "item") || node.span.start > start || end > node.span.end -> next
+        size :: if node.span.end > node.span.start -> node.span.end - node.span.start else -> 0
+        replace := true
+        if best == .Val(id) -> replace = size < best_size || (size == best_size && node.id < id)
+        if replace {
+            best = Val(node.id)
+            best_size = size
+        }
+    }
+    best
+}
+// Module and UTF-8 byte offset remain explicit; S13 is the sole visibility rank.
+pub fn semantic_checked_anchor(module_path: String, offset: Int) -> SemanticVisibilityAnchor Never! {
+    SemanticVisibilityAnchor{module_path: module_path, offset: Val(offset), session_top_level: false}
+}
+
+// Rust semantic_shape: name projection delegates to S14's canonical checked
+// display helper; S6 owns parameter labels/zones/variadic presentation.
+pub fn semantic_shape(name: String, kind: SymKind, owner: String?, names: MIRNameFacts, module_index: Int) -> SemanticShape Never! {
+    if kind == {
+        .Module -> SemanticShape{kind: .Module, signature: "module {name}"}
+        .Function(params, _, _, contract, variadic, return_type, failure_contract, _, effects, via, _, _, _, _) -> {
+            parts := semindex_function_parameter_parts(params, contract, variadic)
+            loop index in 0..<parts.len() {
+                loop parameter in params {
+                    raw :: type_name(parameter.ty)
+                    displayed :: semantic_display_type(names, module_index, raw)
+                    if raw != displayed -> parts[index] = parts[index].replace(raw, displayed)
+                }
+            }
+            prefix :: if owner == { .Val(owner_name) -> "{owner_name}.{name}", None -> "fn {name}" }
+            shown := [String]{}
+            if effects == .Val(row) {
+                loop entry in row {
+                    root := ""
+                    loop part in entry.name.split(".") {
+                        root = part // #4303
+                        break
+                    }
+                    if root != "Panic" && root != "Mem" -> &shown.push(entry.name)
+                }
+            }
+            result_type :: if failure_contract == { .Checked(failure) -> Val(failure_contract_effective_type(failure)), .Unavailable(_) -> return_type }
+            result :: if result_type == { .Val(ty) -> semantic_display_type(names, module_index, type_name(ty)), None -> "" }
+            ceiling :: if via == { .Val(parameter) -> " -[via {parameter.name}]>", None -> if shown.len() == 0 -> "" else -> " -[{shown.join(", ")}]>" }
+            suffix :: if ceiling != "" -> if result == "" -> ceiling else -> "{ceiling} {result}" else if result != "" -> " -> {result}" else -> ""
+            failure :: if failure_contract == { .Checked(failure) -> "{type_name(failure_contract_effective_type(failure))} ({failure_contract_source(failure)})", .Unavailable(unavailable) -> "unavailable ({unavailable.reason})" }
+            SemanticShape{kind: .Function, signature: "{prefix}({parts.join(", ")}){suffix}\nfailure: {failure}"}
+        }
+        .Struct(fields, _) -> {
+            parts := [String]{}
+            loop field in fields -> &parts.push("{field.name}: {semantic_display_type(names, module_index, type_name(field.ty))}")
+            SemanticShape{kind: .Type, signature: "struct {name} {{ {parts.join(", ")} }}"}
+        }
+        .Enum(variants, _) -> SemanticShape{kind: .Type, signature: "enum {name} {{ {variants.join(", ")} }}"}
+        .Trait -> SemanticShape{kind: .Type, signature: "trait {name}"}
+        .Tag -> SemanticShape{kind: .Type, signature: "tag {name}"}
+        .Type(_) -> SemanticShape{kind: .Type, signature: "type {name}"}
+        .Const -> SemanticShape{kind: .Constant, signature: "const {name}"}
+        .EnumVariant(parent) -> SemanticShape{kind: .Member, signature: "{parent}.{name}"}
+        .Field(ty, parent) -> SemanticShape{kind: .Member, signature: "{parent}.{name}: {semantic_display_type(names, module_index, type_name(ty))}"}
+        .Local(_, ty) -> {
+            shown :: if ty == { .Val(ty) -> semantic_display_type(names, module_index, type_name(ty)), None -> "value" }
+            SemanticShape{kind: .Local, signature: "{name}: {shown}"}
+        }
+        .Param(ty) -> SemanticShape{kind: .Parameter, signature: "{name}: {semantic_display_type(names, module_index, type_name(ty))}"}
+    }
+}
+
+// Rust marker_declaration_signature: exact top-level checked AST name+span,
+// not a source parser. The same module source supplies only expression spelling.
+pub fn semantic_marker_declaration_signature(items: [Item], def: SymDef, source: String) -> String? Never! {
+    if !def.identity.starts_with("rule:") -> return None
+    loop item in items {
+        if item == .MarkerDecl(declaration) {
+            if declaration.name != def.name || declaration.name_span.start != def.def_span.start || declaration.name_span.end != def.def_span.end -> next
+            parts := [String]{}
+            loop parameter in declaration.params {
+                if parameter.ty == {
+                    .Val(ty) -> {
+                        variadic :: if parameter.variadic -> "..." else -> ""
+                        default :: if parameter.value == { .Val(value) -> "{{{semantic_marker_expr_source(source, value)}}}", None -> "" }
+                        &parts.push("{parameter.name}: {variadic}{type_name(ty)}{default}")
+                    }
+                    None -> {
+                        value :: if parameter.value == { .Val(value) -> semantic_marker_expr_source(source, value), None -> "…" }
+                        &parts.push("{parameter.name}: {value}")
+                    }
+                }
+            }
+            return Val("marker {declaration.name}({parts.join(", ")})")
+        }
+    }
+    None
+}
+pub fn semantic_marker_expr_source(source: String, expression: Expr) -> String Never! {
+    semantic_marker_span_source(source, expr_span(expression))
+}
+pub fn semantic_marker_span_source(source: String, span: Span) -> String Never! {
+    bytes :: source.bytes()
+    if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return "…"
+    selected := bytes[span.start..<span.end] // #4303
+    value :: String.from_bytes(selected) ?? return "…"
+    trimmed := value.trim() // #4303
+    if trimmed != "" -> return trimmed
+    "…"
+}
+
+// Rust source_docs: adjacent /// lines only, first nonempty non-Example summary,
+// all Example rows retained in source order. def_start is UTF-8 bytes, not chars.
+pub fn semantic_source_docs(source: String, def_start: Int) -> SemanticSourceDocs Never! {
+    bytes :: source.bytes()
+    end :: if def_start < bytes.len() -> def_start else -> bytes.len()
+    before := end
+    loop before > 0 {
+        before -= 1
+        if bytes[before] == 10 -> break
+    }
+    lines := [String]{}
+    // Rust lines() does not yield an empty final line: its prefix can end in
+    // LF when there is one blank line immediately before the declaration.
+    cursor := if before > 0 && bytes[before - 1] == 10 -> before - 1 else -> before
+    loop cursor > 0 {
+        line_end := cursor
+        // Rust str.lines strips CR only on CRLF, and never yields trailing LF.
+        if bytes[line_end - 1] == 13 -> line_end -= 1
+        line_start := cursor
+        loop line_start > 0 && bytes[line_start - 1] != 10 -> line_start -= 1
+        selected := bytes[line_start..<line_end] // #4303
+        line := (String.from_bytes(selected) ?? panic("checked doc span must select UTF-8")).trim() // #4303
+        if !line.starts_with("///") -> break
+        doc := line.slice(3, line.len()).trim() // #4303
+        &lines.push(doc)
+        cursor = if line_start > 0 -> line_start - 1 else -> 0
+    }
+    summary := ""
+    examples := [String]{}
+    index := lines.len()
+    loop index > 0 {
+        index -= 1
+        line :: lines[index]
+        if line.starts_with("Example:") {
+            example := line.slice(8, line.len()).trim() // #4303
+            &examples.push(example)
+        } else if summary == "" && line != "" -> summary = line
+    }
+    SemanticSourceDocs{summary: summary, examples: examples}
+}

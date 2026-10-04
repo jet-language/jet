@@ -1,0 +1,30 @@
+// Rust: Source/LSP/Completion.rs:1184-1220.
+// Native identity stays in OSPath; display is used only for emitted source text.
+use core.files.runtime.kernel_path_components as lsp_completion_path
+use core.files.runtime.kernel_path_components.[OSPath, PathSpan]
+
+pub fn lsp_module_file_path(current_path: OSPath, workspace_root: OSPath?, module_path: OSPath) -> OSPath? Never! {
+    parent :: lsp_completion_path.parent_span(current_path) ?? return None
+    if lsp_completion_path.is_absolute(module_path) -> return Val(~module_path)
+    base := if workspace_root == { .Val(root) -> ~root, None -> lsp_completion_path.owned_span(current_path, parent) }
+    lsp_completion_path.push(&base, module_path)
+    Val(base)
+}
+pub fn lsp_use_statement_for_module(current_path: OSPath, workspace_root: OSPath?, module_path: OSPath) -> String? Never! {
+    parent :: lsp_completion_path.parent_span(current_path) ?? return None
+    base :: if workspace_root == { .Val(root) -> root, None -> lsp_completion_path.owned_span(current_path, parent) }
+    module :: lsp_module_file_path(current_path, workspace_root, module_path) ?? return None
+    relative :: lsp_completion_path.strip_prefix_span(module, base) ?? return None
+    // Path::strip_prefix has already checked native component equality.
+    // Preserve original MAIN_SEPARATOR split (including interior '.' spellings)
+    // instead of re-normalizing with a second private components scanner.
+    text :: lsp_completion_path.display_span(module, relative)
+    rel := text
+    loop rel.ends_with(".jet") -> rel = rel.removesuffix(".jet")
+    separator :: if module.platform == .Windows -> "\\" else -> "/"
+    parts := [String]{}
+    loop part in rel.split(separator) { if !part.is_empty() -> &parts.push(~part) }
+    name :: parts.join(".")
+    if name.is_empty() -> return None
+    Val("use {name}\n")
+}

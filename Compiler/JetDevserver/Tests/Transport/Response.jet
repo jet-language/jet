@@ -1,0 +1,28 @@
+#Test("response_preserves_status_content_type_and_close_policy") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    head :: devserver_response_head("201 Created", "application/octet-stream", 3) ?? panic("response head")
+    assert_eq(head, "HTTP/1.1 201 Created{cr}\nContent-Type: application/octet-stream{cr}\nContent-Length: 3{cr}\nCache-Control: no-store{cr}\nConnection: close{cr}\n{cr}\n")
+    empty :: devserver_response_head("204 No Content", "text/plain", 0) ?? panic("empty response")
+    assert(empty.contains("Content-Length: 0{cr}\n"))
+}
+
+#Test("response_content_length_counts_bytes_not_scalars") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    body :: "é界".bytes()
+    head :: devserver_response_head("200 OK", "text/plain; charset=utf-8", body.len()) ?? panic("response head")
+    assert(head.contains("Content-Length: 5{cr}\n"))
+}
+
+#Test("response_budget_is_checked_before_header_rendering_or_io") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    // Exercise the actual production pre-write gate without allocating 64 MiB.
+    head :: devserver_response_head("200 OK", "application/octet-stream", MAX_RESPONSE_BODY_BYTES) ?? panic("exact response budget")
+    assert(head.contains("Content-Length: {MAX_RESPONSE_BODY_BYTES}{cr}\n"))
+    assert(if devserver_response_head("200 OK", "application/octet-stream", MAX_RESPONSE_BODY_BYTES + 1) == {
+        .Err(.InvalidData(message)) -> message == "devserver response exceeds the response budget"
+        else -> false
+    })
+}
+
+// DC1/DC2/DC5 native integration: actual TCP peer verifies binary body bytes,
+// closed-peer write failure, and no IO at over-budget. No mock socket proof.

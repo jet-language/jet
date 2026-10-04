@@ -1,0 +1,1041 @@
+// crates/jet-repl/src/lib.rs:1–1794. Session facts and the real authorization
+// boundary; evaluation/sema/replay are the adjoining TurnFacts02 owner.
+use jet_ast.[Stmt, Expr, CallArg, AccessConvention, Func, StructDef, Type, CtValue, ProgramBundle, ImportKind]
+use jet_foundation.[Diagnostic, Span, name_ledger_effective_alias, is_known_core_module, authority_ascii_lower, ApplicationAuthority, AuthorityVerdict, authority_parse_right, authority_answer]
+use jetpack_foundation.[ColorChoice, TerminalPalette]
+use core.files.runtime.kernel_path_components as repl_paths
+use core.files.runtime.kernel_path_components.[OSPath, PathComponent, ComponentKind]
+use core.files.host.retained_descriptor as repl_files
+use core.files.host.retained_descriptor.[FileReader, Directory, OpenOptions]
+use core.sys.target as repl_target
+use core.sys.host.retained_counter as repl_counter
+use core.sys.host.os_path_ingress as repl_ingress
+use core.process.host.native_process as repl_process
+use core.term.host.stdio as repl_stdio
+use core.text as repl_text
+// pending runtime text owner ABI reconciliation: exact Rust UTF8 lossy law,
+// including invalid-prefix consumption, not a private REPL decoder.
+use core.text.runtime.kernel_unicode_string.[from_utf8_lossy, utf8_width_at]
+// pending retained stdio owner ABI reconciliation: original borrowed Write
+// sink; write failures are intentionally ignored at Rust's presentation sites.
+use core.term.host.stdio.[Write]
+use jet_lexer.[lex]
+use jet_parser.[parse_with_source]
+use jet_ast.[import_alias, import_walk_bindings]
+use core.sys.host.unix_fd as repl_unix
+use core.sys.host.retained_buffers as repl_buffers
+use core.mem as repl_mem
+use c.c as repl_libc
+// pending jet-comptime owner ABI reconciliation: no local evaluator/interrupt.
+use jet_comptime.[ReplAuthorizer, ReplEffectRequest, DevSink, run_repl_main_with_fuel]
+// pending Authority owner ABI reconciliation: canonical Rust-name producer.
+use jetpack_foundation.[repl_refusal_why]
+// pending Wave-0808 ABI reconciliation: rebuild_funcs and sema helpers.
+
+// Canonical notebook-control turn facts: crates/jet-repl/src/lib.rs:838–866.
+// Session (R2), replay planning, and interactive controls share this record.
+pub struct ReplTurn {
+    pub id: Int
+    pub input: String
+    pub summary: String
+    pub status: ReplTurnStatus
+    pub folded: Bool
+    pub pinned: Bool
+    // Retained for notebook truth, but did not contribute to rebuilt live state.
+    pub stale: Bool
+    // Observed effect flag, not inferred from summary text or turn status.
+    pub had_effect: Bool
+    // Exactly one introduced binding: the pin rail reads its live value.
+    pub bound_name: String?
+    // Full echo elided by auto-fold, retained for unfold controls.
+    pub pending_unfold: String?
+}
+
+pub enum ReplTurnStatus {
+    Ok
+    Error
+    Interrupted
+}
+
+pub struct ReplFlags {
+    pub allow: Set<String>
+    pub deny: Set<String>
+    pub color: ColorChoice
+    pub preload: String?
+}
+impl ReplFlags {
+    pub fn new(allow: [String], deny: [String]) -> ReplFlags Never! {
+        allowed := Set<String>.new()
+        denied := Set<String>.new()
+        loop flag in allow -> &allowed.insert(canonical_flag(flag))
+        loop flag in deny -> &denied.insert(canonical_flag(flag))
+        ReplFlags{allow: allowed, deny: denied, color: ColorChoice.Auto, preload: None}
+    }
+    pub fn default() -> ReplFlags Never! { ReplFlags.new([String]{}, [String]{}) }
+    pub fn with_color(^self, color: ColorChoice) -> ReplFlags Never! {
+        flags := self
+        flags.color = color
+        flags
+    }
+    pub fn with_preload(^self, file: String) -> ReplFlags Never! {
+        flags := self
+        flags.preload = Val(file)
+        flags
+    }
+}
+fn canonical_flag(value: String) -> String Never! {
+    authority_parse_right(value) ?? authority_ascii_lower(value)
+}
+
+pub enum PromptChoice { Once Session Deny Continue Revoke }
+pub trait EffectPrompt {
+    fn choose(&self, request: ReplEffectRequest, reused: Bool) -> PromptChoice Never!
+    fn read_input(&self, prompt: String) -[IO]> String IOError! { repl_read_prompt_line(prompt) }
+}
+
+pub struct Session {
+    pub item_srcs: [String]
+    pub import_srcs: [String]
+    pub sema_stmts: [Stmt]
+    pub func_defs: [String:Func]
+    pub struct_defs: [String:StructDef]
+    pub scope: [String:CtValue]
+    pub binding_types: [String:Type]
+    pub mutable_names: Set<String>
+    pub shown_preload_note: Bool
+    pub step: Int
+    pub moved_names: Set<String>
+    pub stmt_srcs: [String]
+    pub core_imports: [String:String]
+    baseline_item_srcs: [String]
+    baseline_import_srcs: [String]
+    baseline_func_defs: [String:Func]
+    baseline_struct_defs: [String:StructDef]
+    baseline_core_imports: [String:String]
+    pub turns: [ReplTurn]
+    pub history: ReplHistory
+}
+impl Session {
+    pub fn new() -> Session Never! {
+        Session{item_srcs: [], import_srcs: [], sema_stmts: [], func_defs: [:],
+            struct_defs: [:], scope: [:], binding_types: [:],
+            mutable_names: Set<String>.new(), shown_preload_note: false, step: 0,
+            moved_names: Set<String>.new(), stmt_srcs: [], core_imports: [:],
+            baseline_item_srcs: [], baseline_import_srcs: [], baseline_func_defs: [:],
+            baseline_struct_defs: [:], baseline_core_imports: [:], turns: [],
+            history: ReplHistory.session_only()}
+    }
+    pub fn default() -> Session Never! { Session.new() }
+    pub fn enable_persistent_history(&self) -[Env, FS, Time, Time.Wait, IO]> Never! {
+        opened := ReplHistory.open_from_env()
+        close(^self.history)
+        self.history = ^opened.history
+        if opened.warning == .Val(warning) -> eprint("{warning}\n")
+    }
+    pub fn reset(&self) Never! {
+        // These baseline copies are the original reset contract, not per-turn
+        // table scans. Retaining AST field loans is gated by #4500.
+        self.item_srcs = ~self.baseline_item_srcs
+        self.import_srcs = ~self.baseline_import_srcs
+        &self.sema_stmts.clear()
+        self.func_defs = ~self.baseline_func_defs
+        self.struct_defs = ~self.baseline_struct_defs
+        &self.scope.clear()
+        &self.binding_types.clear()
+        self.step = 0
+        &self.moved_names.clear()
+        &self.stmt_srcs.clear()
+        self.core_imports = ~self.baseline_core_imports
+        &self.turns.clear()
+        // The teaching-note flag and successful history intentionally survive.
+    }
+    pub fn preserve_project_baseline(&self) Never! {
+        self.baseline_item_srcs = ~self.item_srcs
+        self.baseline_import_srcs = ~self.import_srcs
+        self.baseline_func_defs = ~self.func_defs
+        self.baseline_struct_defs = ~self.struct_defs
+        self.baseline_core_imports = ~self.core_imports
+    }
+    pub fn record_turn(&self, input: String, status: ReplTurnStatus, summary: String) Never! {
+        &self.record_turn_ex(input, status, summary, false, None)
+    }
+    pub fn record_turn_ex(&self, input: String, status: ReplTurnStatus, summary: String, had_effect: Bool, bound_name: String?) Never! {
+        &self.turns.push(ReplTurn{id: self.turns.len() + 1, input: ~input,
+            summary: turn_summary(summary), status: status,
+            folded: repl_line_count(summary) > 6 || summary.bytes().len() > 240,
+            pinned: false, stale: false, had_effect: had_effect,
+            bound_name: ~bound_name, pending_unfold: None})
+    }
+    pub fn remember_success(&self, input: String) -[FS, Time, Time.Wait, IO]> Never! {
+        if &self.history.record(input) == .Val(warning) -> eprint("{warning}\n")
+    }
+    pub fn accumulated_src(self) -> String Never! { self.item_srcs.join("\n") }
+    pub fn replace_notebook_items(&self, item_srcs: [String]) Never! {
+        if self.item_srcs != item_srcs {
+            self.item_srcs = ^item_srcs
+            rebuild_funcs(&self)
+        }
+    }
+    pub fn import_src(self) -> String Never! {
+        if self.import_srcs.is_empty() -> "" else -> "{self.import_srcs.join("\n")}\n"
+    }
+    pub fn record_stmts(&self, stmts: [Stmt]) Never! {
+        loop stmt in stmts {
+            if stmt == .Val(binding) {
+                if binding.name == "__repl_echo__" -> next
+                if binding.mutable -> &self.mutable_names.insert(~binding.name)
+                else -> _ :: &self.mutable_names.remove(binding.name)
+                if binding.ty == .Val(ty) -> &self.binding_types.insert(~binding.name, ~ty)
+            }
+            &self.sema_stmts.push(~stmt)
+        }
+    }
+}
+
+pub EFFECT_MARKERS :: [String]{"print(", "eprint(", "input(", ".write(", ".append(",
+    ".delete(", ".remove_file(", "fs.write", "fs.append", "fs.delete", "fs.remove",
+    "io.print", "io.eprint", "io.read_line", "io.write", ".send(", ".emit(", ".emit_async("}
+pub fn looks_effectful(input: String) -> Bool Never! {
+    loop marker in EFFECT_MARKERS { if input.contains(marker) -> return true }
+    false
+}
+pub fn strip_terminal_control_bytes(input: String) -> String Never! {
+    bytes :: input.bytes() // #4318/#4392 borrowed byte leaf needed for parity.
+    out := [U8]{}
+    at := 0
+    loop at < bytes.len() {
+        byte :: bytes[at]
+        if byte < U8{32} && byte != U8{9} && byte != U8{10} && byte != U8{13} {
+            at += 1
+            next
+        }
+        if byte == U8{127} { at += 1; next }
+        if byte == U8{194} && at + 1 < bytes.len() && bytes[at + 1] >= U8{128} && bytes[at + 1] <= U8{159} {
+            at += 2
+            next
+        }
+        &out.push(byte)
+        at += 1
+    }
+    String.from_bytes(out) ?? panic("filtered original UTF8 scalars remain UTF8")
+}
+pub fn normalize_repl_input(input: String) -> String Never! {
+    bytes :: input.bytes()
+    end := bytes.len()
+    loop end > 0 && bytes[end - 1] == U8{10} -> end -= 1
+    loop end > 0 && bytes[end - 1] == U8{13} -> end -= 1
+    text := input.slice(0, end) // #4303
+    strip_terminal_control_bytes(text)
+}
+pub fn color_on() -[IO, Env]> Bool Never! { ColorChoice.Auto.resolve(repl_stdio.is_terminal(.Stdout)) }
+pub fn bold(s: String, color: Bool) -> String Never! { TerminalPalette.new(color).paint("1", s) }
+pub fn dim(s: String, color: Bool) -> String Never! { TerminalPalette.new(color).dim(s) }
+pub fn green(s: String, color: Bool) -> String Never! { TerminalPalette.new(color).success(s) }
+pub fn yellow(s: String, color: Bool) -> String Never! { TerminalPalette.new(color).warn(s) }
+pub fn e1801(steps: U64) -> Diagnostic Never! {
+    Diagnostic{severity: 1, code: "E1801",
+        what: "this snippet ran more than {steps} interpreter steps without finishing",
+        why: "the REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends",
+        fix: "check any loops for a condition that never becomes false; use `:run` to allow unbounded execution (compiles and runs instead of interpreting)"}
+}
+pub fn e1802(feature: String) -> Diagnostic Never! {
+    Diagnostic{severity: 1, code: "E1802", what: "the REPL interpreter can't run {feature}",
+        why: "the REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler",
+        fix: "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler"}
+}
+fn repl_line_count(text: String) -> Int Never! {
+    if text.is_empty() -> return 0
+    count := 0
+    loop byte in text.bytes() { if byte == U8{10} -> count += 1 }
+    if !text.ends_with("\n") -> count += 1
+    count
+}
+pub fn turn_summary(raw: String) -> String Never! {
+    trimmed := raw.trim() // #4303
+    if trimmed.is_empty() -> return "ok"
+    bytes :: trimmed.bytes()
+    end := 0
+    count := 0
+    loop end < bytes.len() && bytes[end] != U8{10} && count < 96 {
+        end += utf8_width_at(bytes, end)
+        count += 1
+    }
+    if end < bytes.len() && bytes[end] == U8{10} && end > 0 && bytes[end - 1] == U8{13} -> end -= 1
+    summary := trimmed.slice(0, end) // #4303
+    ~summary
+}
+pub fn parse_turn_id(arg: String?) -> Int Err! {
+    raw :: arg ?? return Err("usage: turn command needs a turn id")
+    trimmed := raw.trim() // #4303
+    bytes :: trimmed.bytes()
+    index := 0
+    if !bytes.is_empty() && bytes[0] == U8{43} -> index = 1
+    if index == bytes.len() -> return Err("`{raw}` is not a turn id")
+    id := U64{0}
+    limit :: repl_target.usize_max() // #4483, never host/exact-Int width.
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        if byte < U8{48} || byte > U8{57} -> return Err("`{raw}` is not a turn id")
+        digit :: U64{Int.from_u8(byte) - 48}
+        if id > (limit - digit) / U64{10} -> return Err("`{raw}` is not a turn id")
+        id = id * U64{10} + digit
+        index += 1
+    }
+    if id == U64{0} -> return Err("turn ids start at 1")
+    Ok(Int{id})
+}
+pub fn status_word(status: ReplTurnStatus) -> String Never! {
+    if status == { .Ok -> "ok" .Error -> "error" .Interrupted -> "interrupted" }
+}
+pub fn render_turns_text(session: Session) -> String Never! {
+    render_turns_colored_text(session, false)
+}
+fn render_turns_colored_text(session: Session, color: Bool) -> String Never! {
+    if session.turns.is_empty() -> return "No turns yet\n"
+    out := [U8]{}
+    loop turn in session.turns {
+        pin :: if turn.pinned -> " pinned" else -> ""
+        fold :: if turn.folded -> " folded" else -> ""
+        stale :: if turn.stale -> " stale" else -> ""
+        row :: "{bold("#{turn.id}", color)} {status_word(turn.status)}{pin}{fold}{stale}  {turn.summary}\n"
+        loop byte in row.bytes() -> &out.push(byte)
+    }
+    String.from_bytes(out) ?? panic("turn rendering is UTF8")
+}
+pub fn render_turns(session: Session, color: Bool) -[IO]> Never! {
+    print(render_turns_colored_text(session, color))
+}
+pub fn unfold_turn(session: &Session, id: Int) -> String? Err! {
+    loop index in 0..<session.turns.len() {
+        if session.turns[index].id != id -> next
+        session.turns[index].folded = false
+        text :: ^session.turns[index].pending_unfold
+        session.turns[index].pending_unfold = None
+        return Ok(text)
+    }
+    Err("turn #{id} does not exist")
+}
+pub fn set_turn_flag(session: &Session, id: Int, flag: String, value: Bool) Err! {
+    loop index in 0..<session.turns.len() {
+        if session.turns[index].id != id -> next
+        if flag == {
+            "folded" -> session.turns[index].folded = value
+            "pinned" -> session.turns[index].pinned = value
+            else -> {}
+        }
+        return Ok()
+    }
+    Err("turn #{id} does not exist")
+}
+
+pub fn ct_value_is_scalar(value: CtValue) -> Bool Never! {
+    if value == { .Int(_) -> true .Float(_) -> true .Bool(_) -> true .Char(_) -> true else -> false }
+}
+pub fn collect_moved_names(stmts: [Stmt], session_bindings: Set<String>, scope: [String:CtValue]) -> Set<String> Never! {
+    moved := Set<String>.new()
+    loop stmt in stmts -> collect_moved_in_stmt(stmt, session_bindings, scope, &moved)
+    moved
+}
+fn repl_note_move(name: String, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
+    if !bindings.contains(name) -> return
+    scalar :: if scope.get(name) == .Val(value) -> ct_value_is_scalar(value) else -> false
+    if !scalar -> &moved.insert(~name)
+}
+pub fn collect_moved_in_stmt(stmt: Stmt, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
+    if stmt == {
+        .Val(binding) -> {
+            if binding.init == .Ident(name, _) -> repl_note_move(name, bindings, scope, &moved)
+            else -> collect_moved_in_expr(binding.init, bindings, scope, &moved)
+        }
+        .Assign(_, _, _, value) -> collect_moved_in_expr(value, bindings, scope, &moved)
+        .Expr(expr) -> collect_moved_in_expr(expr, bindings, scope, &moved)
+        .DeferClose(expr, _) -> collect_moved_in_expr(expr, bindings, scope, &moved)
+        .Return(.Val(expr), _) -> collect_moved_in_expr(expr, bindings, scope, &moved)
+        else -> {}
+    }
+}
+pub fn collect_moved_in_expr(expr: Expr, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
+    if expr == {
+        .Call(call) -> { loop arg in call.args -> collect_moved_in_callarg(arg, bindings, scope, &moved) }
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> {
+            collect_moved_in_expr(receiver, bindings, scope, &moved)
+            loop arg in args -> collect_moved_in_callarg(arg, bindings, scope, &moved)
+        }
+        else -> {}
+    }
+}
+pub fn collect_moved_in_callarg(arg: CallArg, bindings: Set<String>, scope: [String:CtValue], moved: &Set<String>) Never! {
+    if arg.convention == AccessConvention.Move && arg.expr == .Ident(name, _) -> repl_note_move(name, bindings, scope, &moved)
+}
+
+pub enum InputKind {
+    Meta(command: String, arg: String?)
+    Stmts(stmts: [Stmt], suppress: Bool, check_src: String)
+    Item(source: String)
+    Import(source: String)
+    Empty
+    Reject(feature: String)
+}
+pub fn bracket_balance(s: String) -> I32 Never! {
+    balance := I32{0}
+    in_string := false
+    in_char := false
+    escaped := false
+    loop byte in s.bytes() {
+        if escaped { escaped = false; next }
+        if byte == {
+            U8{34} -> { if !in_char -> in_string = !in_string }
+            U8{39} -> { if !in_string -> in_char = !in_char }
+            U8{92} -> { if in_string || in_char -> escaped = true }
+            U8{123} | U8{40} | U8{91} -> { if !in_string && !in_char -> balance += I32{1} }
+            U8{125} | U8{41} | U8{93} -> { if !in_string && !in_char -> balance -= I32{1} }
+            else -> {}
+        }
+    }
+    balance
+}
+pub fn skip_leading_comments(text: String) -> String Never! {
+    bytes :: text.bytes()
+    at := 0
+    loop {
+        // Unicode trim_start retains the Rust whitespace law, without
+        // re-copying the ever-shorter remainder for every nested comment.
+        tail := text.slice(at, bytes.len()).trim_start() // #4303
+        at = bytes.len() - tail.bytes().len()
+        if at + 1 >= bytes.len() -> return tail
+        if bytes[at] == U8{47} && bytes[at + 1] == U8{47} {
+            loop at < bytes.len() && bytes[at] != U8{10} -> at += 1
+            if at < bytes.len() -> at += 1
+            next
+        }
+        if bytes[at] != U8{47} || bytes[at + 1] != U8{42} -> return tail
+        depth := 1
+        at += 2
+        loop depth > 0 {
+            if at == bytes.len() -> return ""
+            if at + 1 < bytes.len() && bytes[at] == U8{47} && bytes[at + 1] == U8{42} {
+                depth += 1; at += 2
+            } else if at + 1 < bytes.len() && bytes[at] == U8{42} && bytes[at + 1] == U8{47} {
+                depth -= 1; at += 2
+            } else -> at += 1
+        }
+    }
+}
+pub fn looks_like_item(text: String) -> Bool Never! {
+    t := skip_leading_comments(text) // #4303
+    if t.starts_with("pub") -> t = t.slice(3, t.bytes().len()).trim_start() // #4303
+    if t.starts_with("pure") -> t = t.slice(4, t.bytes().len()).trim_start() // #4303
+    t.starts_with("fn ") || t.starts_with("fn(") || t.starts_with("struct ")
+        || t.starts_with("enum ") || t.starts_with("trait ") || t.starts_with("impl ")
+        || t.starts_with("const ") || t.starts_with("module ")
+}
+pub fn looks_like_import(text: String) -> Bool Never! {
+    t := text.trim_start() // #4303
+    if t.starts_with("pub") -> t = t.slice(3, t.bytes().len()).trim_start() // #4303
+    t.starts_with("use ") || t == "use"
+}
+pub fn is_item_input(text: String) -> Bool Never! {
+    normalized :: normalize_repl_input(text)
+    trimmed := normalized.trim() // #4303
+    if trimmed.is_empty() || looks_like_import(trimmed) -> return false
+    if looks_like_item(trimmed) -> return true
+    lexed :: lex(trimmed.bytes())
+    if !lexed.diagnostics.is_empty() -> return false
+    parsed :: parse_with_source(lexed.tokens, trimmed.bytes())
+    if parsed.program == .Val(program) -> return !program.items.is_empty() && program.script_body.is_empty()
+    false
+}
+pub fn reject_feature(text: String) -> String? Never! {
+    t := text.trim() // #4303
+    import_text := t // #4303
+    if import_text.starts_with("pub ") -> import_text = import_text.slice(4, import_text.bytes().len()) // #4303
+    import := None as String?
+    if import_text.starts_with("use ") {
+        rest := import_text.slice(4, import_text.bytes().len()) // #4303
+        bytes :: rest.bytes()
+        start := 0
+        loop start < bytes.len() && repl_ascii_whitespace(bytes[start]) -> start += 1
+        end := start
+        loop end < bytes.len() && !repl_ascii_whitespace(bytes[end]) -> end += 1
+        if end > start {
+            loop end > start && bytes[end - 1] == U8{59} -> end -= 1
+            import = Val(rest.slice(start, end)) // #4303
+        }
+    }
+    if t.contains("#Unsafe") && !(t.contains("core.crypto.expert") || t.contains("core.crypto.vault") || t.contains("expert.")) -> return Val("`#Unsafe`")
+    if t.contains("extern rust") -> return Val("`extern rust`")
+    if t.contains("#Extern") || t.contains("#Bindgen") -> return Val("C-FFI (`#Extern`/`#Bindgen`)")
+    if t.contains("core.tasks") || t.contains("core.channels") -> return Val("tasks/channels (`core.tasks`)")
+    if t.contains("core.mem") -> return Val("`core.mem` (low-level memory tier)")
+    if t.contains("core.http") -> return Val("the HTTP client/server (`core.http`)")
+    if t.contains("core.db") -> return Val("`core.db` (SQLite)")
+    if import != Val("core.reactive.loadable") && t.contains("core.reactive") -> return Val("`core.reactive`")
+    if import != Val("core.crypto.expert") && t.contains("core.crypto") -> return Val("`core.crypto`")
+    if t.contains("core.auth") -> return Val("`core.auth` token verification")
+    if t.contains("core.log") -> return Val("`core.log`")
+    if t.contains("core.term") || t.contains("live {") || t.contains("live{") -> return Val("`core.term` / `live` blocks (terminal direct-input)")
+    None
+}
+fn repl_ascii_whitespace(byte: U8) -> Bool Never! {
+    byte == U8{9} || byte == U8{10} || byte == U8{12} || byte == U8{13} || byte == U8{32}
+}
+pub fn starts_with_stmt_keyword(t: String) -> Bool Never! {
+    t.contains("::") || t.contains(":=") || t.starts_with("return ") || t.starts_with("return")
+        || t.starts_with("if ") || t.starts_with("loop ") || t.starts_with("break")
+        || t.starts_with("continue") || t.starts_with("print(") || t.starts_with("eprint(")
+}
+
+pub JET_REPL_VERSION :: "0.0.1" // crates/jet-repl/Cargo.toml:3
+
+// #4500: authorizer and tracker retain actual mutable loans, not snapshots.
+pub struct ReplPolicy {
+    flags: ReplFlags
+    root: OSPath
+    root_dir: FileReader IOError!
+    handles_available: Bool
+    session: Set<ReplEffectRequest> // #4499: genuine composite key, no encoding.
+    input: Queue<String>
+    notebook: Bool
+}
+impl ReplPolicy {
+    pub fn new(flags: ReplFlags, root: OSPath) -[FS]> ReplPolicy Never! {
+        ReplPolicy{flags: ^flags, root: ~root,
+            root_dir: repl_files.open_reader(root, OpenOptions{nofollow: false, cloexec: true, open_reparse_point: false, read: None, write: None, share_mode: None, custom_flags: None}),
+            handles_available: repl_target.selected_os() == .Linux, // #4483
+            session: Set<ReplEffectRequest>.new(), input: Queue<String>.new(), notebook: false}
+    }
+    pub fn for_notebook(flags: ReplFlags, root: OSPath) -[FS]> ReplPolicy Never! {
+        policy := ReplPolicy.new(^flags, root)
+        policy.notebook = true
+        policy
+    }
+    pub fn push_input(&self, line: String) Never! { &self.input.push_back(^line) }
+    pub fn pending_input(self) -> Int Never! { self.input.len() }
+    pub fn authorizer(&self, prompt: &EffectPrompt?) -> ReplAuthorization Never! {
+        ReplAuthorization{policy: &self, prompt: prompt}
+    }
+}
+pub struct ReplAuthorization {
+    policy: &ReplPolicy
+    prompt: &EffectPrompt?
+}
+impl ReplAuthorization {
+    pub fn e1803(self, request: ReplEffectRequest, why: String, span: Span) -> Diagnostic Never! {
+        allowed := [String]{}
+        denied := [String]{}
+        loop right in self.policy.flags.allow -> &allowed.push(~right)
+        loop right in self.policy.flags.deny -> &denied.push(~right)
+        &allowed.sort()
+        &denied.sort()
+        authority :: ApplicationAuthority{required_effects: [String]{~request.root},
+            granted_effects: ^allowed, denied_effects: ^denied,
+            authority: if self.policy.session.contains(request) -> "REPL session Authority" else -> "jet repl invocation policy"}
+        Diagnostic{severity: 1, code: "E1803",
+            what: "{request.root}.{request.operation} for `{request.resource}` was denied",
+            why: repl_refusal_why(authority, why),
+            fix: "approve this exact operation interactively, or restart with `jet repl --allow-{authority_ascii_lower(request.root)}`",
+            span: Val(span), detail: Val(authority.policy_facts())}
+    }
+    pub fn validate_file_target(self, request: ReplEffectRequest, span: Span) -[FS]> Diagnostic! {
+        if request.root != "FS" -> return Ok()
+        relative :: repl_paths.from_text(request.resource, self.policy.root.platform)
+        cursor := repl_paths.components(relative)
+        if repl_paths.is_absolute(relative) -> return Err(self.e1803(request, "filesystem authority is confined to the REPL project root and rejects absolute or parent paths", span))
+        loop {
+            component :: repl_paths.next(relative, &cursor) ?? break
+            if component.kind == .ParentDir || component.kind == .RootDir || component.kind == .Prefix -> return Err(self.e1803(request, "filesystem authority is confined to the REPL project root and rejects absolute or parent paths", span))
+        }
+        cursor = repl_paths.components(relative)
+        path := ~self.policy.root
+        loop {
+            component :: repl_paths.next(relative, &cursor) ?? break
+            if component.kind != .Normal -> next
+            repl_paths.push_component(&path, relative, component)
+            if repl_files.symlink_metadata(path) == .Ok(metadata) && metadata.is_symlink -> return Err(self.e1803(request, "filesystem authority rejects symlink traversal", span))
+        }
+    }
+}
+impl ReplAuthorization.ReplAuthorizer {
+    pub fn preflight(&self, request: ReplEffectRequest, span: Span) Diagnostic! {
+        needs_handles :: request.root == "FS" || (request.root == "Exec" && request.operation == "Run")
+        if needs_handles && !self.policy.handles_available -> return Err(self.e1803(request, "this platform cannot enforce descriptor-pinned, no-follow REPL confinement, so no runtime authority was offered", span))
+    }
+    pub fn authorize(&self, request: ReplEffectRequest, span: Span) -[FS, IO]> Diagnostic! {
+        self.validate_file_target(request, span) ?? return Err(err)
+        root :: authority_parse_right(request.root) ?? request.root
+        allowed := [String]{}
+        denied := [String]{}
+        loop right in self.policy.flags.allow -> &allowed.push(~right)
+        loop right in self.policy.flags.deny -> &denied.push(~right)
+        verdict :: authority_answer(allowed, denied, root)
+        if verdict == .Denied -> return Err(self.e1803(request, "an explicit `--deny` policy overrides every prompt and allowance", span))
+        if verdict == .Allowed && (request.operation != "Exit" || self.prompt == None) -> return Ok()
+        reused :: self.policy.session.contains(request)
+        prompt :: self.prompt ?? return Err(self.e1803(request, "non-TTY REPL sessions never prompt and no matching `--allow` flag was supplied", span))
+        choice :: &prompt.choose(request, reused)
+        if choice == {
+            .Once | .Continue -> return Ok()
+            .Session -> { &self.policy.session.insert(~request); return Ok() }
+            .Deny -> return Err(self.e1803(request, "interactive authority was denied", span))
+            .Revoke -> {
+                _ :: &self.policy.session.remove(request)
+                if &prompt.choose(request, false) == {
+                    .Once | .Continue -> return Ok()
+                    .Session -> { &self.policy.session.insert(~request); return Ok() }
+                    else -> return Err(self.e1803(request, "session authority was revoked and the replacement request was denied", span))
+                }
+            }
+        }
+    }
+    pub fn reset_session(&self) Never! { &self.policy.session.clear() }
+    pub fn read_input(&self, prompt: String) -[IO]> String IOError! {
+        if &self.policy.input.pop_front() == .Val(line) -> return Ok(line)
+        if self.prompt == .Val(reader) -> return &reader.read_input(prompt)
+        if self.policy.notebook -> return Err(IOError.WouldBlock(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("notebook input is empty; queue a line before running this cell")}))
+        repl_read_prompt_line(prompt)
+    }
+    pub fn fs_read(&self, path: String) -[FS]> [U8] IOError! {
+        root :: self.policy.root_dir ?? return Err(clone_io_error(err))
+        repl_rooted_read(root, repl_paths.from_text(path, self.policy.root.platform))
+    }
+    pub fn fs_write(&self, path: String, bytes: [U8], append: Bool) -[FS]> IOError! {
+        root :: self.policy.root_dir ?? return Err(clone_io_error(err))
+        repl_rooted_write(root, repl_paths.from_text(path, self.policy.root.platform), bytes, append)
+    }
+    pub fn fs_exists(&self, path: String) -[FS]> Bool IOError! {
+        root :: self.policy.root_dir ?? return Err(clone_io_error(err))
+        repl_rooted_exists(root, repl_paths.from_text(path, self.policy.root.platform))
+    }
+    pub fn fs_is_dir(&self, path: String) -[FS]> Bool IOError! {
+        root :: self.policy.root_dir ?? return Err(clone_io_error(err))
+        repl_rooted_is_dir(root, repl_paths.from_text(path, self.policy.root.platform))
+    }
+    pub fn fs_create_dir(&self, path: String) -[FS]> IOError! {
+        root :: self.policy.root_dir ?? return Err(clone_io_error(err))
+        repl_rooted_create_dir(root, repl_paths.from_text(path, self.policy.root.platform))
+    }
+    pub fn fs_remove(&self, path: String) -[FS]> IOError! {
+        root :: self.policy.root_dir ?? return Err(clone_io_error(err))
+        repl_rooted_remove(root, repl_paths.from_text(path, self.policy.root.platform))
+    }
+    pub fn verified_root(&self) -[FS]> FileReader IOError! {
+        root :: self.policy.root_dir ?? return Err(clone_io_error(err))
+        root.dup()
+    }
+}
+pub fn clone_io_error(error: IOError) -> IOError Never! {
+    // pending canonical IOError owner ABI reconciliation (#4409): original
+    // std::io::Error::new(error.kind(),error.to_string()) preserves EVERY kind,
+    // intentionally loses raw_os_error, retains exact display message.
+    IOError.new(error.kind(), error.display())
+}
+pub struct TrackingAuthorizer { pub inner: &ReplAuthorizer pub observed: Bool }
+impl TrackingAuthorizer.ReplAuthorizer {
+    pub fn preflight(&self, request: ReplEffectRequest, span: Span) Diagnostic! { &self.inner.preflight(request, span) }
+    pub fn authorize(&self, request: ReplEffectRequest, span: Span) Diagnostic! {
+        &self.inner.authorize(request, span) ?? return Err(err)
+        self.observed = true
+    }
+    pub fn fs_read(&self, path: String) -> [U8] IOError! { &self.inner.fs_read(path) }
+    pub fn fs_write(&self, path: String, bytes: [U8], append: Bool) IOError! { &self.inner.fs_write(path, bytes, append) }
+    pub fn fs_exists(&self, path: String) -> Bool IOError! { &self.inner.fs_exists(path) }
+    pub fn fs_is_dir(&self, path: String) -> Bool IOError! { &self.inner.fs_is_dir(path) }
+    pub fn fs_create_dir(&self, path: String) IOError! { &self.inner.fs_create_dir(path) }
+    pub fn fs_remove(&self, path: String) IOError! { &self.inner.fs_remove(path) }
+    pub fn verified_root(&self) -> FileReader IOError! { &self.inner.verified_root() }
+    pub fn read_input(&self, prompt: String) -> String IOError! { &self.inner.read_input(prompt) }
+    pub fn reset_session(&self) Never! { &self.inner.reset_session() }
+}
+fn repl_read_prompt_line(prompt: String) -[IO]> String IOError! {
+    if !prompt.is_empty() {
+        print(prompt)
+        repl_stdio.stdout_flush() ?? return Err(err)
+    }
+    line := ""
+    _ :: repl_stdio.read_line(&line) ?? return Err(err)
+    if line.ends_with("\n") {
+        line = line.slice(0, line.bytes().len() - 1) // #4303
+        if line.ends_with("\r") -> line = line.slice(0, line.bytes().len() - 1) // #4303
+    }
+    Ok(line)
+}
+pub fn read_input(color: Bool, prompt: String) -[IO]> String? Never! {
+    shift :: if color -> String.from_bytes([U8]{15}) ?? panic("ASCII") else -> ""
+    print("{shift}{bold(prompt, color)}")
+    _ :: repl_stdio.stdout_flush()
+    first := ""
+    count :: repl_stdio.read_line(&first) ?? return None
+    if count == 0 -> return None
+    normalized :: normalize_repl_input(first)
+    balance := bracket_balance(normalized)
+    full := normalized.bytes()
+    loop balance > I32{0} {
+        print("{shift}{dim("...  ", color)}")
+        _ :: repl_stdio.stdout_flush()
+        continuation := ""
+        count :: repl_stdio.read_line(&continuation) ?? return None
+        if count == 0 -> break
+        line :: normalize_repl_input(continuation)
+        balance += bracket_balance(line)
+        &full.push(U8{10})
+        loop byte in line.bytes() -> &full.push(byte)
+    }
+    Val(String.from_bytes(full) ?? panic("normalized lines remain UTF8"))
+}
+
+fn repl_io_context(message: String) -> IOContext Never! {
+    IOContext{operation: .Resolve, resource: None, os_code: None, cause: Val(message)}
+}
+fn repl_rooted_unsupported() -> IOError Never! {
+    // This is the ORIGINAL cfg(not(linux)) refusal, not a missing-provider stub.
+    IOError.Unsupported(repl_io_context("this platform cannot enforce descriptor-relative no-follow REPL filesystem access"))
+}
+pub fn repl_rooted_components(path: OSPath) -> [PathComponent] IOError! {
+    if repl_paths.is_absolute(path) -> return Err(IOError.PermissionDenied(repl_io_context("absolute paths are outside the REPL root")))
+    names := [PathComponent]{}
+    cursor := repl_paths.components(path)
+    loop {
+        component :: repl_paths.next(path, &cursor) ?? break
+        if component.kind == {
+            .Normal -> &names.push(component)
+            .CurDir -> {}
+            else -> return Err(IOError.PermissionDenied(repl_io_context("path traversal is outside the REPL root")))
+        }
+    }
+    if names.is_empty() -> return Err(IOError.InvalidInput(repl_io_context("empty filesystem path")))
+    Ok(names)
+}
+fn repl_c_name(path: OSPath, name: PathComponent) -> [U8] IOError! {
+    bytes := [U8]{}
+    loop index in name.span.start..<name.span.end {
+        byte :: path.encoded[index]
+        if byte == U8{0} -> return Err(IOError.InvalidInput(repl_io_context("path contains NUL")))
+        &bytes.push(byte)
+    }
+    &bytes.push(U8{0})
+    Ok(bytes)
+}
+struct ReplFd { fd: I32 }
+impl ReplFd.Close {
+    fn close(^self) -[FS]> Never! {
+        #Unsafe("owned descriptor closes exactly once on every unwind/error rail; std File drop ignores close errors and does not retry") {
+            _ :: repl_libc.close(self.fd)
+        }
+    }
+}
+struct ReplRootParent {
+    fd: I32
+    parents: [ReplFd]
+    name: [U8]
+}
+impl ReplRootParent.Close {
+    fn close(^self) -[FS]> Never! {
+        parent := ^self
+        loop parent.parents.len() > 0 {
+            file :: &parent.parents.pop() ?? break
+            close(^file)
+        }
+    }
+}
+fn repl_with_parent(root: FileReader, path: OSPath) -[FS]> ReplRootParent IOError! {
+    names :: repl_rooted_components(path) ?? return Err(err)
+    // pending retained_descriptor owner ABI reconciliation: std AsRawFd
+    // borrows the SAME open root; no path reopen or descriptor duplication.
+    parent := ReplRootParent{fd: root.as_raw_fd(), parents: [], name: []}
+    loop index in 0..<names.len() - 1 {
+        name :: repl_c_name(path, names[index]) ?? return Err(err)
+        #Unsafe("each openat borrows terminated component bytes and retains every parent owner through the final operation; #4494/#4500") {
+            p :: repl_mem.Ptr<I8>.from_addr(repl_mem.address_of(repl_buffers.bytes_ptr(name, 0).*))
+            fd :: repl_libc.openat(parent.fd, p, I32{65536 | 131072 | 524288}, U32{0})
+            if fd < I32{0} -> return Err(repl_unix.last_error(.Resolve, Val(path)))
+            &parent.parents.push(ReplFd{fd: fd})
+            parent.fd = fd
+        }
+    }
+    parent.name = repl_c_name(path, names[names.len() - 1]) ?? return Err(err)
+    Ok(parent)
+}
+fn repl_rooted_open(root: FileReader, path: OSPath, flags: I32, mode: U32) -[FS]> ReplFd IOError! {
+    parent :: repl_with_parent(root, path) ?? return Err(err)
+    defer close(^parent)
+    #Unsafe("final openat is NOFOLLOW+CLOEXEC and descriptor-relative; capture errno before parent cleanup") {
+        p :: repl_mem.Ptr<I8>.from_addr(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
+        fd :: repl_libc.openat(parent.fd, p, flags | I32{131072 | 524288}, mode)
+        if fd < I32{0} -> return Err(repl_unix.last_error(.Resolve, Val(path)))
+        Ok(ReplFd{fd: fd})
+    }
+}
+fn repl_errno_is(error: IOError, number: Int) -> Bool Never! {
+    if error == {
+        .NotFound(c) | .PermissionDenied(c) | .InvalidInput(c) | .InvalidData(c)
+            | .WouldBlock(c) | .BrokenPipe(c) | .Unsupported(c) | .TimedOut(c)
+            | .Cancelled(c) | .Closed(c) | .Protocol(c) | .Other(c) -> c.os_code == Val(number)
+        .ResourceLimit(_) -> false
+    }
+}
+pub fn repl_rooted_read(root: FileReader, path: OSPath) -[FS]> [U8] IOError! {
+    if repl_target.selected_os() != .Linux -> return Err(repl_rooted_unsupported())
+    file :: repl_rooted_open(root, path, I32{0}, U32{0}) ?? return Err(err)
+    defer close(^file)
+    bytes := [U8]{}
+    loop {
+        start :: bytes.len()
+        loop _ in 0..<8192 -> &bytes.push(U8{0})
+        amount := I64{0}
+        loop {
+            #Unsafe("read fills initialized output storage in place, retries only EINTR, and retains payload loan through native call") {
+                amount = repl_libc.read(file.fd, repl_buffers.bytes_mut_ptr(&bytes, start), U64{8192})
+                if amount < I64{0} {
+                    error :: repl_unix.last_error(.Read, Val(path))
+                    if repl_errno_is(error, 4) -> next
+                    return Err(error)
+                }
+            }
+            break
+        }
+        end :: start + Int.from_i64(amount)
+        loop bytes.len() > end -> _ :: &bytes.pop()
+        if amount == I64{0} -> return Ok(bytes)
+    }
+}
+pub fn repl_rooted_write(root: FileReader, path: OSPath, bytes: [U8], append: Bool) -[FS]> IOError! {
+    if repl_target.selected_os() != .Linux -> return Err(repl_rooted_unsupported())
+    flags :: I32{1 | 64 | if append -> 1024 else -> 512}
+    file :: repl_rooted_open(root, path, flags, U32{438}) ?? return Err(err)
+    defer close(^file)
+    at := 0
+    limit :: Int{repl_target.usize_max() / U64{2}}
+    loop at < bytes.len() {
+        remaining :: bytes.len() - at
+        count :: if remaining > limit -> limit else -> remaining
+        #Unsafe("write borrows original remaining bytes, handles short writes/EINTR, and captures errno before close") {
+            amount :: repl_libc.write(file.fd, repl_buffers.bytes_ptr(bytes, at), U64{count})
+            if amount < I64{0} {
+                error :: repl_unix.last_error(.Write, Val(path))
+                if repl_errno_is(error, 4) -> next
+                return Err(error)
+            }
+            if amount == I64{0} -> return Err(IOError.WriteZero(IOContext{operation: .Write, resource: None, os_code: None, cause: Val("failed to write whole buffer")}))
+            at += Int.from_i64(amount)
+        }
+    }
+}
+pub fn repl_rooted_exists(root: FileReader, path: OSPath) -[FS]> Bool IOError! {
+    if repl_target.selected_os() != .Linux -> return Err(repl_rooted_unsupported())
+    if repl_rooted_open(root, path, I32{2048}, U32{0}) == {
+        .Ok(file) -> { close(^file); Ok(true) }
+        .Err(.NotFound(_)) -> Ok(false)
+        .Err(error) -> Err(error)
+    }
+}
+pub fn repl_rooted_is_dir(root: FileReader, path: OSPath) -[FS]> Bool IOError! {
+    if repl_target.selected_os() != .Linux -> return Err(repl_rooted_unsupported())
+    if repl_rooted_open(root, path, I32{65536}, U32{0}) == {
+        .Ok(file) -> { close(^file); Ok(true) }
+        .Err(error) -> {
+            if repl_errno_is(error, 20) || error == .NotFound(_) -> Ok(false)
+            else -> Err(error)
+        }
+    }
+}
+pub fn repl_rooted_create_dir(root: FileReader, path: OSPath) -[FS]> IOError! {
+    if repl_target.selected_os() != .Linux -> return Err(repl_rooted_unsupported())
+    parent :: repl_with_parent(root, path) ?? return Err(err)
+    defer close(^parent)
+    #Unsafe("mkdirat creates mode0777 subject to native umask relative to held parent; errno survives cleanup") {
+        p :: repl_mem.Ptr<I8>.from_addr(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
+        if repl_libc.mkdirat(parent.fd, p, U32{511}) < I32{0} -> return Err(repl_unix.last_error(.Write, Val(path)))
+    }
+}
+pub fn repl_rooted_remove(root: FileReader, path: OSPath) -[FS]> IOError! {
+    if repl_target.selected_os() != .Linux -> return Err(repl_rooted_unsupported())
+    parent :: repl_with_parent(root, path) ?? return Err(err)
+    defer close(^parent)
+    #Unsafe("unlinkat retries AT_REMOVEDIR ONLY after original EISDIR, never after other errors; retains same parent/name") {
+        p :: repl_mem.Ptr<I8>.from_addr(repl_mem.address_of(repl_buffers.bytes_ptr(parent.name, 0).*))
+        if repl_libc.unlinkat(parent.fd, p, I32{0}) == I32{0} -> return Ok()
+        first :: repl_unix.last_error(.Write, Val(path))
+        if !repl_errno_is(first, 21) -> return Err(first)
+        if repl_libc.unlinkat(parent.fd, p, I32{512}) < I32{0} -> return Err(repl_unix.last_error(.Write, Val(path)))
+    }
+}
+
+pub fn unique_temp_name(tag: String) -[Exec]> String Never! {
+    // #4494: SAME runtime process-static old-value Relaxed U64, wraps exactly.
+    "__jet_repl_{tag}_{repl_process.id()}_{repl_counter.temp_counter_next()}.jet"
+}
+pub fn write_unique_temp_file(tag: String, source: String) -[FS, Env, Exec]> OSPath IOError! {
+    path := repl_files.temp_dir()
+    repl_paths.push(&path, repl_paths.from_text(unique_temp_name(tag), path.platform))
+    write_temp_file_at(path, source) ?? return Err(err)
+    Ok(path)
+}
+pub fn write_temp_file_at(path: OSPath, source: String) -[FS]> IOError! {
+    flags := None as U32?
+    if repl_target.selected_family() == .Unix {
+        if repl_target.selected_os() == {
+            .Linux | .Android -> flags = Val(U32{131072})
+            .MacOS | .IOS -> flags = Val(U32{256})
+            else -> return Err(IOError.Unsupported(repl_io_context("this Unix target cannot enforce no-follow temporary-file creation")))
+        }
+    }
+    file :: repl_files.create_new(path, repl_files.CreateOptions{read: false, write: true, access_mode: None, share_mode: None, mode: None, delete_on_close: false, open_reparse_point: false, custom_flags: flags}) ?? return Err(err)
+    defer close(^file)
+    bytes :: source.bytes()
+    if file.write_all(bytes[0..<bytes.len()]) == .Err(error) {
+        // Preserve first write error even if best-effort unlink fails.
+        _ :: repl_files.remove(path)
+        return Err(error)
+    }
+}
+pub fn run_native_source_child(jet_bin: OSPath, source: String) -[Exec, IO, FS]> repl_process.NativeOutput IOError! {
+    command := repl_process.command(jet_bin)
+    &command.args([OSPath]{repl_paths.from_text("__jet_repl_run_stdin", jet_bin.platform)})
+    &command.stdin(.Pipe)
+    &command.stdout(.Pipe)
+    &command.stderr(.Pipe)
+    child := &command.spawn() ?? return Err(err)
+    stdin :: &child.take_stdin() ?? return Err(IOError.BrokenPipe(repl_io_context("REPL child did not expose its source pipe")))
+    bytes :: source.bytes()
+    if stdin.write_all(bytes[0..<bytes.len()]) == .Err(error) {
+        close(^stdin)
+        _ :: &child.kill()
+        _ :: &child.wait()
+        return Err(error)
+    }
+    close(^stdin)
+    child.wait_with_output(^child)
+}
+pub REPL_RUN_EFFECT_REFUSAL :: "Error [E1803]: `:run` will not replay effectful turns\n Why: Replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: Run each effectful turn in the REPL, or put the program in a file and use `jet run`\nMore: jet-lang.dev/e/E1803\n"
+fn repl_run_is_effectful(session: Session) -> Bool Never! {
+    loop turn in session.turns { if turn.input.contains("#FX") -> return true }
+    false
+}
+fn repl_materialize_run(session: Session) -> String Never! {
+    imports :: session.import_src()
+    items :: session.item_srcs.join("\n")
+    if session.func_defs.contains_key("run") -> return "{imports}{items}\n"
+    body :: session.stmt_srcs.join("\n")
+    trimmed := body.trim() // #4303
+    if trimmed.is_empty() -> "{imports}{items}\nfn run() {{}}\n"
+    else -> "{imports}{items}\nfn run() {{\n{body}\n}}\n"
+}
+pub fn cmd_run_native(session: Session, color: Bool, out_sink: &Write) -[Exec, IO, FS, Env]> Never! {
+    if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
+        _ :: &out_sink.write("note: session is empty — nothing to run\n")
+        return
+    }
+    if repl_run_is_effectful(session) { _ :: &out_sink.write(REPL_RUN_EFFECT_REFUSAL); return }
+    source :: repl_materialize_run(session)
+    _ :: &out_sink.write("{dim("compiling session…", color)} {dim("running…", color)}\n")
+    executable :: repl_ingress.current_exe() ?? repl_paths.from_text("jet", repl_native_path_platform())
+    if run_native_source_child(executable, source) == {
+        .Ok(output) -> {
+            _ :: &out_sink.write(from_utf8_lossy(output.stdout))
+            if !output.status.success && !output.stderr.is_empty() -> _ :: &out_sink.write(from_utf8_lossy(output.stderr))
+        }
+        .Err(error) -> _ :: &out_sink.write("error: couldn't invoke jet run: {error}\n")
+    }
+}
+fn repl_native_path_platform() -> repl_paths.PathPlatform Never! {
+    if repl_target.selected_family() == .Windows -> .Windows else -> .Unix
+}
+pub fn cmd_run_transcript(session: Session) -> String Never! {
+    if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() -> return "note: session is empty — nothing to run\n"
+    if repl_run_is_effectful(session) -> return REPL_RUN_EFFECT_REFUSAL
+    source :: repl_materialize_run(session)
+    lexed :: lex(source.bytes())
+    if !lexed.diagnostics.is_empty() -> return "error: materialization parse failed: Some({lexed.diagnostics[0].what:Debug})\n"
+    parsed :: parse_with_source(lexed.tokens, source.bytes())
+    if parsed.program == None {
+        what :: if parsed.diagnostics.is_empty() -> "?" else -> parsed.diagnostics[0].what
+        return "error: could not build this value: {what}\n"
+    }
+    main :: session.func_defs.get("run") ?? return "note: no run in materialized session\n"
+    // Canonical interpreter borrows maps and functions. The Rust maps of
+    // references are not whole-AST deep copies. Tuple methods remain #4499.
+    methods := [(String, String):View<Func>]{}
+    loop (owner, definition) in session.struct_defs {
+        loop index in 0..<definition.methods.len() {
+            method :: definition.methods[index]
+            &methods.insert((~owner, ~method.name), definition.methods[index..<index + 1])
+        }
+    }
+    base_dir :: repl_paths.from_text(".", repl_native_path_platform())
+    sink := DevSink.new()
+    if run_repl_main_with_fuel(main, session.func_defs, base_dir, &sink, U64{1000000000}, session.core_imports, methods, session.struct_defs) == {
+        .Ok(_) -> ^sink.stdout
+        .Err(diagnostic) -> "error [{diagnostic.code}]: {diagnostic.what}\n"
+    }
+}
+pub fn load_project_items(project_dir: OSPath, session: &Session, out_sink: &Write) -[FS, IO]> Never! {
+    src := ~project_dir
+    repl_paths.push(&src, repl_paths.from_text("src", project_dir.platform))
+    loaded := 0
+    loop dir in [OSPath]{^src, ~project_dir} {
+        entries := repl_files.read_dir(dir) ?? next
+        defer close(^entries)
+        loop {
+            next_entry :: &entries.next()
+            entry :: next_entry ?? next
+            item :: entry ?? break
+            path :: item.path()
+            extension :: repl_paths.extension_span(path) ?? next
+            name :: repl_paths.file_name_span(path) ?? next
+            if !repl_path_span_equal_text(path, extension, "jet") -> next
+            if repl_path_span_equal_text(path, name, "pkg.jet") -> next
+            source :: repl_files.read_text(path) ?? next
+            lexed :: lex(source.bytes())
+            if !lexed.diagnostics.is_empty() -> next
+            parsed :: parse_with_source(lexed.tokens, source.bytes())
+            if parsed.program == .Val(program) && !program.items.is_empty() {
+                &session.item_srcs.push(^source)
+                loaded += 1
+            }
+        }
+        if loaded > 0 -> break
+    }
+    rebuild_funcs(&session)
+    if loaded > 0 -> _ :: &out_sink.write("project: loaded {loaded} source file(s)\n")
+}
+pub fn update_core_imports_from_ledger(bundle: ProgramBundle, map: &[String:String]) Never! {
+    &map.clear()
+    module_index :: bundle.entry
+    module :: bundle.modules[module_index]
+    loop import in module.imports {
+        if import.kind == .Unqualified(_, _, _, _, _) {
+            loop binding in import_walk_bindings(import) {
+                alias :: name_ledger_effective_alias(bundle.name_ledger, module_index, binding.local) ?? next
+                target :: repl_core_import_module(alias.target) ?? next
+                &map.insert(~binding.local, ^target)
+            }
+            next
+        }
+        local :: import_alias(import)
+        alias :: name_ledger_effective_alias(bundle.name_ledger, module_index, local) ?? next
+        target :: repl_core_import_module(alias.target) ?? next
+        &map.insert(~local, ^target)
+    }
+}
+fn repl_core_import_module(target: String) -> String? Never! {
+    if target == "core" || is_known_core_module(target) -> return Val(~target)
+    bytes :: target.bytes()
+    at := bytes.len()
+    loop at > 0 {
+        at -= 1
+        if bytes[at] != U8{46} -> next
+        parent := target.slice(0, at) // #4303
+        if is_known_core_module(parent) -> return Val(~parent)
+        return None
+    }
+    None
+}
+
+fn repl_path_span_equal_text(path: OSPath, span: repl_paths.PathSpan, text: String) -> Bool Never! {
+    bytes :: text.bytes()
+    if span.end - span.start != bytes.len() -> return false
+    loop index in 0..<bytes.len() {
+        if path.encoded[span.start + index] != bytes[index] -> return false
+    }
+    true
+}

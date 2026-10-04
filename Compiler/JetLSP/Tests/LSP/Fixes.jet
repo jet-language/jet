@@ -1,0 +1,71 @@
+// Check.rs has no inline originals. Controls target LSP action policy/projection,
+// not Wave-0611's separately-owned original FixEngine tests.
+use jet_foundation.[Span, DiagnosticStructured]
+fn lsp_fix_test(start: Int, end: Int, replacement: String, applicability: FixApplicability, safety: FixSafety) -> Fix Never! {
+    Fix{title: replacement, edit: TextEdit{span: Span{start: start, end: end}, new_text: replacement}, applicability: applicability, safety: safety}
+}
+
+#Test("LSP safe actions require BOTH the applicability promise and closed safety class") {
+    actions := [Fix]{}
+    grades :: [FixApplicability]{FixApplicability.Safe, FixApplicability.Suggested}
+    safeties :: [FixSafety]{FixSafety.Formatting, FixSafety.BehaviorPreserving, FixSafety.APIChanging, FixSafety.TargetChanging, FixSafety.NeedsReview}
+    loop grade in grades {
+        loop safety in safeties -> &actions.push(lsp_fix_test(0, 1, "x", grade, safety))
+    }
+    safe :: lsp_safe_fixes(actions)
+    assert_eq(safe.len(), 2)
+    assert_eq(safe[0].safety, FixSafety.Formatting)
+    assert_eq(safe[1].safety, FixSafety.BehaviorPreserving)
+    assert_eq(actions.len(), 10)
+}
+
+#Test("LSP fix projection preserves diagnostic primary then alternative edit order and missing grades") {
+    first :: lsp_fix_test(0, 1, "first", FixApplicability.Safe, FixSafety.BehaviorPreserving)
+    alternative :: lsp_fix_test(2, 3, "alternate", FixApplicability.Safe, FixSafety.BehaviorPreserving)
+    report :: Diagnostic{severity: 0, code: "E0003", what: "control", why: "control", fix: "same title", edit: Val(first.edit), applicability: Val(first.applicability), safety: Val(first.safety), structured: Val(DiagnosticStructured.SuggestedEdits([TextEdit]{alternative.edit}))}
+    ungraded :: Diagnostic{severity: 0, code: "E0003", what: "control", why: "control", fix: "missing safety", edit: Val(first.edit), applicability: Val(FixApplicability.Safe)}
+    projected :: lsp_fixes_from_diagnostics([Diagnostic]{ungraded, report})
+    assert_eq(projected.len(), 2)
+    assert_eq(projected[0].edit.new_text, "first")
+    assert_eq(projected[1].edit.new_text, "alternate")
+    assert_eq(projected[0].title, "same title")
+    assert_eq(projected[1].title, "same title")
+}
+
+#Test("LSP wider edit wins exact duplicates do not count deferred and abutting edits remain") {
+    wide :: lsp_fix_test(0, 4, "W", FixApplicability.Safe, FixSafety.Formatting)
+    nested :: lsp_fix_test(1, 2, "N", FixApplicability.Safe, FixSafety.Formatting)
+    adjacent :: lsp_fix_test(4, 6, "A", FixApplicability.Safe, FixSafety.Formatting)
+    result :: lsp_apply_non_overlapping("abcdef", [Fix]{nested, wide, wide, adjacent})
+    assert_eq(result, ("WA", 2, 1))
+    assert_eq(lsp_apply_all("abcdef", [Fix]{nested, wide, wide, adjacent}), "WA")
+    assert_eq(lsp_apply_non_overlapping("abcdef", [Fix]{}), ("abcdef", 0, 0))
+    // Same span but different text is not deduplicated; stable earlier wins.
+    other :: lsp_fix_test(0, 4, "other", FixApplicability.Safe, FixSafety.Formatting)
+    assert_eq(lsp_apply_non_overlapping("abcdef", [Fix]{wide, other}), ("Wef", 1, 1))
+}
+
+#Test("LSP zero-width actions coexist and UTF8 offsets stay bytes") {
+    first :: lsp_fix_test(2, 2, "X", FixApplicability.Safe, FixSafety.Formatting)
+    second :: lsp_fix_test(2, 2, "Y", FixApplicability.Safe, FixSafety.Formatting)
+    applied :: lsp_apply_non_overlapping("λz", [Fix]{first, second})
+    assert_eq(applied.1, 2)
+    assert_eq(applied.2, 0)
+    assert_eq(applied.0.bytes().len(), 5)
+    assert(applied.0.starts_with("λ"))
+    assert(applied.0.ends_with("z"))
+    replacement :: TextEdit{span: Span{start: 2, end: 3}, new_text: "tail"}
+    assert_eq(lsp_apply_fix_edit("λz", replacement), "λtail")
+}
+
+#Test("LSP formatter action tail keeps retirement family ordering and exact titles") {
+    source :: "fn run() {{ a :: \"{{x#Debug}}\"; b :: Deque.new() }}\n"
+    actions :: lsp_collect_fixes_from_diagnostics([Diagnostic]{}, source)
+    assert(actions.len() >= 2)
+    assert_eq(actions[0].title, "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)")
+    assert_eq(actions[actions.len() - 1].title, "rewrite retired Core container name (D-COLLNAME1=A)")
+    loop action in actions {
+        assert_eq(action.applicability, FixApplicability.Safe)
+        assert_eq(action.safety, FixSafety.Formatting)
+    }
+}

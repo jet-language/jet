@@ -1,0 +1,616 @@
+// PORT-PENDING 0772 crates-jet-devserver-src-canvas-source-model-module-group: crates/jet-devserver/src/Canvas/validation_json.rs:1-612
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(super) use jet_driver::Diagnostics::json_str;
+//RS use jet_semindex::SourceSpan;
+//RS 
+//RS use super::graph_helpers::{edit_error, project_edit_error, query_error};
+//RS use super::graph_json::{canvas_collapse_hints, canvas_comment_hints, CommentHint};
+//RS 
+//RS pub(super) fn validate_ident(name: &str) -> Result<(), String> {
+//RS     let mut chars = name.chars();
+//RS     let Some(first) = chars.next() else {
+//RS         return Err(edit_error("bad_request", "empty identifier"));
+//RS     };
+//RS     if (!first.is_ascii_alphabetic() && first != '_')
+//RS         || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+//RS     {
+//RS         return Err(edit_error("bad_request", "identifier is not a Jet name"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn validate_query_ident(name: &str) -> Result<(), String> {
+//RS     let mut chars = name.chars();
+//RS     let Some(first) = chars.next() else {
+//RS         return Err(query_error("bad_request", "empty identifier"));
+//RS     };
+//RS     if (!first.is_ascii_alphabetic() && first != '_')
+//RS         || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+//RS     {
+//RS         return Err(query_error("bad_request", "identifier is not a Jet name"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn validate_ident_for_project(name: &str) -> Result<(), String> {
+//RS     let mut chars = name.chars();
+//RS     let Some(first) = chars.next() else {
+//RS         return Err(project_edit_error("bad_request", "empty identifier"));
+//RS     };
+//RS     if (!first.is_ascii_alphabetic() && first != '_')
+//RS         || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+//RS     {
+//RS         return Err(project_edit_error(
+//RS             "bad_request",
+//RS             "identifier is not a Jet package name",
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn validate_qualified_name(name: &str) -> Result<(), String> {
+//RS     for part in name.split('.') {
+//RS         validate_ident(part)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn validate_signature_fragment(fragment: &str) -> Result<(), String> {
+//RS     if fragment.contains('{') || fragment.contains('}') || fragment.contains('\n') {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "function parameter text must stay inside the signature",
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn validate_type_fragment(fragment: &str) -> Result<(), String> {
+//RS     if fragment.trim().is_empty()
+//RS         || fragment.contains('{')
+//RS         || fragment.contains('}')
+//RS         || fragment.contains('\n')
+//RS     {
+//RS         return Err(edit_error("bad_request", "return type is not a Jet type"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn validate_function_signature(signature: &str) -> Result<(), String> {
+//RS     if signature.contains('{') || signature.contains('}') || signature.contains('\n') {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "function signature must not include a body",
+//RS         ));
+//RS     }
+//RS     if !signature.split_whitespace().any(|part| part == "fn") {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "function signature must include fn",
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn validate_single_line_fragment(fragment: &str, label: &str) -> Result<(), String> {
+//RS     if fragment.trim().is_empty() || fragment.contains('\n') || fragment.contains('\r') {
+//RS         return Err(edit_error("bad_request", label));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn validate_comment_color(color: &str) -> Result<(), String> {
+//RS     let ok = color.len() == 7
+//RS         && color.starts_with('#')
+//RS         && color[1..].chars().all(|c| c.is_ascii_hexdigit());
+//RS     if ok {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas comment color must be #RRGGBB",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn validate_comment_alpha(alpha: &str) -> Result<(), String> {
+//RS     let Ok(value) = alpha.parse::<f32>() else {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas comment alpha must be a number",
+//RS         ));
+//RS     };
+//RS     if (0.0..=1.0).contains(&value) {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas comment alpha must be between 0 and 1",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn normalize_bounds(bounds: &str) -> Result<String, String> {
+//RS     let nums = bounds
+//RS         .trim()
+//RS         .trim_start_matches('(')
+//RS         .trim_end_matches(')')
+//RS         .split(',')
+//RS         .map(|part| part.trim().parse::<i32>())
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS         .map_err(|_| edit_error("bad_request", "Canvas comment bounds must be x,y,w,h"))?;
+//RS     if nums.len() != 4 || nums[2] <= 0 || nums[3] <= 0 {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas comment bounds must be x,y,w,h with positive size",
+//RS         ));
+//RS     }
+//RS     Ok(format!("{},{},{},{}", nums[0], nums[1], nums[2], nums[3]))
+//RS }
+//RS 
+//RS pub(super) fn quoted_attr(value: &str) -> String {
+//RS     json_str(value)
+//RS }
+//RS 
+//RS pub(super) fn find_comment_hint(
+//RS     src: &str,
+//RS     graph_json: &str,
+//RS     region_id: &str,
+//RS ) -> Option<CommentHint> {
+//RS     for chunk in graph_json.split("\"region_id\":").skip(1) {
+//RS         let (id, _) = parse_json_string(chunk.trim_start())?;
+//RS         if id != region_id {
+//RS             continue;
+//RS         }
+//RS         let start = json_usize_field(chunk, "start")?;
+//RS         let end = json_usize_field(chunk, "end")?;
+//RS         return canvas_comment_hints(src)
+//RS             .into_iter()
+//RS             .find(|hint| hint.anchor.start == start && hint.anchor.end == end);
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS pub(super) fn find_hint_region(
+//RS     src: &str,
+//RS     graph_json: &str,
+//RS     region_id: &str,
+//RS     kind: &str,
+//RS ) -> Option<CommentHint> {
+//RS     for chunk in graph_json.split("\"region_id\":").skip(1) {
+//RS         let (id, _) = parse_json_string(chunk.trim_start())?;
+//RS         if id != region_id {
+//RS             continue;
+//RS         }
+//RS         if json_string_field(chunk, "kind").as_deref() != Some(kind) {
+//RS             continue;
+//RS         }
+//RS         let start = json_usize_field(chunk, "start")?;
+//RS         let end = json_usize_field(chunk, "end")?;
+//RS         let hints = match kind {
+//RS             "comment" => canvas_comment_hints(src),
+//RS             "collapse" => canvas_collapse_hints(src),
+//RS             _ => return None,
+//RS         };
+//RS         return hints
+//RS             .into_iter()
+//RS             .find(|hint| hint.anchor.start == start && hint.anchor.end == end);
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS pub(super) fn extract_params(graph_json: &str, expr: &str) -> Vec<(String, String)> {
+//RS     let mut out = Vec::new();
+//RS     for ident in identifiers(expr) {
+//RS         if let Some(ty) = graph_type_for_name(graph_json, &ident) {
+//RS             if !out.iter().any(|(name, _)| name == &ident) {
+//RS                 out.push((ident, ty));
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn graph_type_for_name(graph_json: &str, name: &str) -> Option<String> {
+//RS     for chunk in graph_json.split("\"name\":").skip(1) {
+//RS         let (found, _) = parse_json_string(chunk.trim_start())?;
+//RS         if found != name || !chunk.contains("\"direction\":\"output\"") {
+//RS             continue;
+//RS         }
+//RS         let pos = chunk.find("\"type\"")?;
+//RS         let rest = &chunk[pos + "\"type\"".len()..];
+//RS         let colon = rest.find(':')?;
+//RS         return parse_json_string(rest[colon + 1..].trim_start()).map(|(s, _)| s);
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn identifiers(expr: &str) -> Vec<String> {
+//RS     let mut out = Vec::new();
+//RS     let mut current = String::new();
+//RS     for c in expr.chars().chain(std::iter::once(' ')) {
+//RS         if c.is_ascii_alphanumeric() || c == '_' {
+//RS             current.push(c);
+//RS         } else if !current.is_empty() {
+//RS             if current
+//RS                 .chars()
+//RS                 .next()
+//RS                 .map(|c| c.is_ascii_alphabetic() || c == '_')
+//RS                 .unwrap_or(false)
+//RS                 && !matches!(current.as_str(), "true" | "false" | "ok" | "err")
+//RS             {
+//RS                 out.push(current.clone());
+//RS             }
+//RS             current.clear();
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(super) fn parse_simple_call(call: &str) -> Option<(String, Vec<String>)> {
+//RS     let open = call.find('(')?;
+//RS     let close = call.rfind(')')?;
+//RS     let name = call[..open].trim();
+//RS     validate_ident(name).ok()?;
+//RS     let args = if call[open + 1..close].trim().is_empty() {
+//RS         Vec::new()
+//RS     } else {
+//RS         call[open + 1..close]
+//RS             .split(',')
+//RS             .map(|arg| arg.trim().to_string())
+//RS             .collect()
+//RS     };
+//RS     Some((name.to_string(), args))
+//RS }
+//RS 
+//RS pub(super) fn find_simple_helper(src: &str, name: &str) -> Option<(Vec<String>, String)> {
+//RS     let needle = format!("fn {name}(");
+//RS     let start = src.find(&needle)?;
+//RS     let params_start = start + needle.len();
+//RS     let params_end = src[params_start..].find(')')? + params_start;
+//RS     let params = src[params_start..params_end]
+//RS         .split(',')
+//RS         .filter_map(|param| {
+//RS             param
+//RS                 .trim()
+//RS                 .split_once(':')
+//RS                 .map(|(name, _)| name.trim().to_string())
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let body_start = src[params_end..].find('{')? + params_end + 1;
+//RS     let body_end = src[body_start..].find('}')? + body_start;
+//RS     let body = src[body_start..body_end].trim();
+//RS     let returned = body.strip_prefix("return ")?;
+//RS     Some((params, returned.trim().to_string()))
+//RS }
+//RS 
+//RS pub(super) fn replace_ident(expr: &str, ident: &str, replacement: &str) -> String {
+//RS     let mut out = String::new();
+//RS     let mut current = String::new();
+//RS     for c in expr.chars().chain(std::iter::once(' ')) {
+//RS         if c.is_ascii_alphanumeric() || c == '_' {
+//RS             current.push(c);
+//RS         } else {
+//RS             if !current.is_empty() {
+//RS                 if current == ident {
+//RS                     out.push_str(replacement);
+//RS                 } else {
+//RS                     out.push_str(&current);
+//RS                 }
+//RS                 current.clear();
+//RS             }
+//RS             out.push(c);
+//RS         }
+//RS     }
+//RS     out.trim_end().to_string()
+//RS }
+//RS 
+//RS pub(super) fn attr_string(text: &str, key: &str) -> Option<String> {
+//RS     let needle = format!("{key}=");
+//RS     let pos = text.find(&needle)?;
+//RS     let rest = text[pos + needle.len()..].trim_start();
+//RS     if rest.starts_with('"') {
+//RS         return parse_json_string(rest).map(|(s, _)| s);
+//RS     }
+//RS     Some(
+//RS         rest.chars()
+//RS             .take_while(|c| !c.is_whitespace())
+//RS             .collect::<String>(),
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn attr_span(text: &str, key: &str) -> Option<SourceSpan> {
+//RS     let raw = attr_string(text, key)?;
+//RS     let (start, end) = raw.split_once("..")?;
+//RS     Some(SourceSpan {
+//RS         start: start.parse().ok()?,
+//RS         end: end.parse().ok()?,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn attr_bounds(text: &str, key: &str) -> Option<(i32, i32, i32, i32)> {
+//RS     let needle = format!("{key}=");
+//RS     let pos = text.find(&needle)?;
+//RS     let rest = text[pos + needle.len()..].trim_start();
+//RS     let rest = rest.strip_prefix('(')?;
+//RS     let close = rest.find(')')?;
+//RS     let nums = rest[..close]
+//RS         .split(',')
+//RS         .map(|part| part.trim().parse::<i32>())
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS         .ok()?;
+//RS     if nums.len() == 4 {
+//RS         Some((nums[0], nums[1], nums[2], nums[3]))
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn required_string(text: &str, key: &str) -> Result<String, String> {
+//RS     json_string_field(text, key)
+//RS         .ok_or_else(|| edit_error("bad_request", &format!("missing `{key}`")))
+//RS }
+//RS 
+//RS pub(super) fn required_query_string(text: &str, key: &str) -> Result<String, String> {
+//RS     json_string_field(text, key)
+//RS         .ok_or_else(|| query_error("bad_request", &format!("missing `{key}`")))
+//RS }
+//RS 
+//RS pub(super) fn required_project_string(text: &str, key: &str) -> Result<String, String> {
+//RS     json_string_field(text, key)
+//RS         .ok_or_else(|| project_edit_error("bad_request", &format!("missing `{key}`")))
+//RS }
+//RS 
+//RS pub(super) fn json_string_field(text: &str, key: &str) -> Option<String> {
+//RS     let needle = format!("\"{key}\"");
+//RS     let pos = text.find(&needle)?;
+//RS     let rest = &text[pos + needle.len()..];
+//RS     let colon = rest.find(':')?;
+//RS     let rest = &rest[colon + 1..];
+//RS     parse_json_string(rest.trim_start()).map(|(s, _)| s)
+//RS }
+//RS 
+//RS pub(super) fn json_bool_field(text: &str, key: &str) -> Option<bool> {
+//RS     let needle = format!("\"{key}\"");
+//RS     let pos = text.find(&needle)?;
+//RS     let rest = &text[pos + needle.len()..];
+//RS     let colon = rest.find(':')?;
+//RS     let rest = rest[colon + 1..].trim_start();
+//RS     if rest.starts_with("true") {
+//RS         Some(true)
+//RS     } else if rest.starts_with("false") {
+//RS         Some(false)
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn json_usize_field(text: &str, key: &str) -> Option<usize> {
+//RS     let needle = format!("\"{key}\"");
+//RS     let pos = text.find(&needle)?;
+//RS     let rest = &text[pos + needle.len()..];
+//RS     let colon = rest.find(':')?;
+//RS     rest[colon + 1..]
+//RS         .trim_start()
+//RS         .chars()
+//RS         .take_while(|c| c.is_ascii_digit())
+//RS         .collect::<String>()
+//RS         .parse()
+//RS         .ok()
+//RS }
+//RS 
+//RS pub(super) fn json_usize_array(text: &str, key: &str) -> Vec<usize> {
+//RS     let needle = format!("\"{key}\"");
+//RS     let Some(pos) = text.find(&needle) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let rest = &text[pos + needle.len()..];
+//RS     let Some(colon) = rest.find(':') else {
+//RS         return Vec::new();
+//RS     };
+//RS     let rest = rest[colon + 1..].trim_start();
+//RS     let Some(mut rest) = rest.strip_prefix('[') else {
+//RS         return Vec::new();
+//RS     };
+//RS     let mut out = Vec::new();
+//RS     loop {
+//RS         rest = rest.trim_start();
+//RS         if rest.starts_with(']') {
+//RS             break;
+//RS         }
+//RS         let digits = rest
+//RS             .chars()
+//RS             .take_while(|c| c.is_ascii_digit())
+//RS             .collect::<String>();
+//RS         if digits.is_empty() {
+//RS             break;
+//RS         }
+//RS         if let Ok(n) = digits.parse::<usize>() {
+//RS             out.push(n);
+//RS         }
+//RS         rest = &rest[digits.len()..];
+//RS         rest = rest.trim_start();
+//RS         if rest.starts_with(',') {
+//RS             rest = &rest[1..];
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(super) fn json_array_body<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+//RS     let needle = format!("\"{key}\"");
+//RS     let pos = text.find(&needle)?;
+//RS     let rest = &text[pos + needle.len()..];
+//RS     let colon = rest.find(':')?;
+//RS     let rest = rest[colon + 1..].trim_start();
+//RS     let bytes = rest.as_bytes();
+//RS     if bytes.first().copied()? != b'[' {
+//RS         return None;
+//RS     }
+//RS     let mut depth = 0i32;
+//RS     let mut in_string = false;
+//RS     let mut escaped = false;
+//RS     for (i, b) in bytes.iter().copied().enumerate() {
+//RS         if in_string {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if b == b'\\' {
+//RS                 escaped = true;
+//RS             } else if b == b'"' {
+//RS                 in_string = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match b {
+//RS             b'"' => in_string = true,
+//RS             b'[' => depth += 1,
+//RS             b']' => {
+//RS                 depth -= 1;
+//RS                 if depth == 0 {
+//RS                     return rest.get(1..i);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS pub(super) fn json_object_bodies(text: &str) -> Vec<&str> {
+//RS     let bytes = text.as_bytes();
+//RS     let mut out = Vec::new();
+//RS     let mut start = None;
+//RS     let mut depth = 0i32;
+//RS     let mut in_string = false;
+//RS     let mut escaped = false;
+//RS     for (i, b) in bytes.iter().copied().enumerate() {
+//RS         if in_string {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if b == b'\\' {
+//RS                 escaped = true;
+//RS             } else if b == b'"' {
+//RS                 in_string = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match b {
+//RS             b'"' => in_string = true,
+//RS             b'{' => {
+//RS                 if depth == 0 {
+//RS                     start = Some(i + 1);
+//RS                 }
+//RS                 depth += 1;
+//RS             }
+//RS             b'}' => {
+//RS                 depth -= 1;
+//RS                 if depth == 0 {
+//RS                     if let Some(s) = start.take() {
+//RS                         if let Some(body) = text.get(s..i) {
+//RS                             out.push(body);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(super) fn wire_span_from_json_chunk(chunk: &str, wire_id: &str) -> Option<SourceSpan> {
+//RS     let (id, _) = parse_json_string(chunk.trim_start())?;
+//RS     if id != wire_id {
+//RS         return None;
+//RS     }
+//RS     let pos = chunk.find("\"source_span\"")?;
+//RS     let rest = &chunk[pos + "\"source_span\"".len()..];
+//RS     let colon = rest.find(':')?;
+//RS     let value = rest[colon + 1..].trim_start();
+//RS     if value.starts_with("null") {
+//RS         return None;
+//RS     }
+//RS     Some(SourceSpan {
+//RS         start: json_usize_field(value, "start")?,
+//RS         end: json_usize_field(value, "end")?,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn json_string_array(text: &str, key: &str) -> Vec<String> {
+//RS     let needle = format!("\"{key}\"");
+//RS     let Some(pos) = text.find(&needle) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let rest = &text[pos + needle.len()..];
+//RS     let Some(colon) = rest.find(':') else {
+//RS         return Vec::new();
+//RS     };
+//RS     let rest = rest[colon + 1..].trim_start();
+//RS     let Some(mut rest) = rest.strip_prefix('[') else {
+//RS         return Vec::new();
+//RS     };
+//RS     let mut out = Vec::new();
+//RS     loop {
+//RS         rest = rest.trim_start();
+//RS         if rest.starts_with(']') {
+//RS             break;
+//RS         }
+//RS         let Some((value, consumed)) = parse_json_string(rest) else {
+//RS             break;
+//RS         };
+//RS         out.push(value);
+//RS         rest = &rest[consumed..];
+//RS         rest = rest.trim_start();
+//RS         if rest.starts_with(',') {
+//RS             rest = &rest[1..];
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(super) fn parse_json_string(text: &str) -> Option<(String, usize)> {
+//RS     let mut chars = text.char_indices();
+//RS     if chars.next()?.1 != '"' {
+//RS         return None;
+//RS     }
+//RS     let mut out = String::new();
+//RS     let mut escaped = false;
+//RS     for (i, c) in chars {
+//RS         if escaped {
+//RS             out.push(match c {
+//RS                 'n' => '\n',
+//RS                 'r' => '\r',
+//RS                 't' => '\t',
+//RS                 '"' => '"',
+//RS                 '\\' => '\\',
+//RS                 other => other,
+//RS             });
+//RS             escaped = false;
+//RS         } else if c == '\\' {
+//RS             escaped = true;
+//RS         } else if c == '"' {
+//RS             return Some((out, i + 1));
+//RS         } else {
+//RS             out.push(c);
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS pub(super) fn span_json(span: SourceSpan) -> String {
+//RS     format!("{{\"start\":{},\"end\":{}}}", span.start, span.end)
+//RS }
+//RS 
+//RS pub(super) fn json_strs(values: &[String]) -> String {
+//RS     values
+//RS         .iter()
+//RS         .map(|s| json_str(s))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",")
+//RS }
+//RS 
+//RS pub(super) fn json_optional_str(value: Option<&str>) -> String {
+//RS     value.map(json_str).unwrap_or_else(|| "null".to_string())
+//RS }
+// END-PORT-PENDING 0772 crates/jet-devserver/src/Canvas/validation_json.rs:1-612
+

@@ -1,0 +1,84 @@
+use core.text as repl_completion_text
+use jet_foundation.[diagnostic_theme_accent, diagnostic_theme_invert]
+use jet_semindex.[SemanticSymbol]
+
+// Rust Interactive.rs:1145–1173 name_at_cursor. Editor buffers and cursor
+// offsets count Unicode scalars, as in Geometry.jet; the editor supplies a
+// cursor in 0..=buf.len(). A separator selects only the immediately prior name.
+pub fn repl_name_at_cursor(buf: [String], cursor: Int) -> String? Never! {
+    if buf.len() == 0 -> return None
+    index := if cursor < buf.len() -> cursor else -> cursor - 1
+    if !repl_completion_name_char(buf[index]) {
+        if index > 0 && repl_completion_name_char(buf[index - 1]) -> index -= 1
+        else -> return None
+    }
+    start := index
+    loop start > 0 && repl_completion_name_char(buf[start - 1]) -> start -= 1
+    end := index + 1
+    loop end < buf.len() && repl_completion_name_char(buf[end]) -> end += 1
+    // Rust trim_matches('.') removes leading/trailing dots, not internal dots.
+    loop start < end && buf[start] == "." -> start += 1
+    loop end > start && buf[end - 1] == "." -> end -= 1
+    if start == end -> return None
+    name := [U8]{}
+    loop at in start..<end {
+        loop byte in buf[at].bytes() -> &name.push(byte)
+    }
+    Val(String.from_bytes(name) ?? panic("cursor name is not a UTF-8 scalar range"))
+}
+
+fn repl_completion_name_char(scalar: String) -> Bool Never! {
+    scalar == "_" || scalar == "." || repl_completion_text.is_alphabetic(scalar) || repl_completion_text.is_numeric(scalar)
+}
+
+// Rust Interactive.rs:1233–1257 completion_menu. Candidates are the canonical
+// S13 records, read without cloning their metadata or maintaining a catalog.
+pub fn repl_completion_menu(candidates: [SemanticSymbol], selected: Int, color: Bool) -> String Never! {
+    rows := [String]{}
+    &rows.push(diagnostic_theme_accent(color, "Completion — ↑↓ Move · Tab Next · Enter Insert · Esc Close"))
+    loop index in 0..<candidates.len() {
+        symbol :: candidates[index]
+        marker :: if index == selected -> ">" else -> " "
+        // Rust format width counts scalars, not display cells or UTF-8 bytes.
+        padded :: repl_completion_text.pad_end(symbol.qualified_name, 20, " ")
+        line :: "{marker} {padded} {symbol.signature}"
+        if index == selected && color -> &rows.push(diagnostic_theme_invert(true, line))
+        else -> &rows.push(^line)
+    }
+    &rows.push("")
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF is UTF-8")
+    rows.join(crlf)
+}
+
+// Rust Interactive.rs:1281–1290 insert_completion. Intentionally discard the
+// whole old suffix, including text after the cursor; this is not range splice.
+pub fn repl_insert_completion(buf: &[String], cursor: &Int, replace_start: Int, completion: String) Never! {
+    loop buf.len() > replace_start {
+        _ :: &buf.pop()
+    }
+    scalars :: repl_completion_text.scalars(completion)
+    loop scalar in scalars -> &buf.push(^scalar)
+    cursor = buf.len()
+}
+
+// Rust Interactive.rs:1292–1307 longest_common_prefix. Compare UTF-8 bytes
+// without allocating every candidate's scalar vector, then retreat to a scalar
+// boundary so two differing scalars cannot leave an incomplete UTF-8 prefix.
+pub fn repl_longest_common_prefix(items: [String]) -> String Never! {
+    if items.len() == 0 -> return ""
+    first :: items[0].bytes()
+    length := first.len()
+    loop at in 1..<items.len() {
+        bytes :: items[at].bytes()
+        index := 0
+        loop index < length && index < bytes.len() && first[index] == bytes[index] -> index += 1
+        length = index
+        if length == 0 -> return ""
+    }
+    loop length < first.len() && length > 0 {
+        byte :: Int.from_u8(first[length])
+        if byte < 128 || byte >= 192 -> break
+        length -= 1
+    }
+    String.from_bytes(first.slice(0, length)) ?? panic("completion prefix is not a UTF-8 scalar range")
+}

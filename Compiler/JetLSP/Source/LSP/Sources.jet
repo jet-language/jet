@@ -1,0 +1,356 @@
+// Source/LSP/Server.rs:5272–5465,5577–5697,5744–5775,5933–5952.
+// Position/URI own the UTF-16 and file URI kernels. No second document state.
+use jet_foundation.[Span, ProgramBundle, diagnostic_utf8_width]
+use jet_lexer.[Token, TOKEN_IDENT]
+use core.text.runtime.kernel_unicode_string as lsp_source_text
+use core.files.runtime.kernel_path_components as lsp_source_path
+use core.sys.target.[selected_family, NativeTargetFamily]
+
+use core.files.runtime.kernel_path_components.[OSPath, PathPlatform]
+use core.files.host.retained_descriptor as lsp_source_io
+use jet_driver.[JetDriverCompilerCheckResult, jet_driver_compiler_check_loaded_module_rows, jet_driver_find_package_root_checked]
+use jet_sema.[SemaCompilerModuleSource]
+use jetpack.[PackageIndex, env_discovery_load]
+
+// Native gates #4494/#4392/#4483/#4500: retained_descriptor.canonicalize and
+// exists over OSPath must be the real Core OS owners. No textual fallback
+// provider and no fabricated existence/canonicalization implementation.
+// One native normalization policy, reused by workspace ingress and links:
+// canonicalize on success; retain EXACT input on every failure, no cwd join.
+pub fn lsp_normalize_os_path(path: OSPath) -[FS, Env]> OSPath Never! {
+    if lsp_source_io.canonicalize(path) == {
+        .Ok(canonical) -> canonical
+        .Err(_) -> path
+    }
+}
+pub fn lsp_normalize_path_buf(path: OSPath) -[FS, Env]> String Never! {
+    lsp_source_path.display(lsp_normalize_os_path(path))
+}
+pub fn lsp_canonical_source_uri(value: String, project_root: OSPath?, platform: PathPlatform) -[FS, Env]> String? Never! {
+    if value.bytes().len() == 0 -> return None
+    // #4483: selected target family, never path encoding or ambient host OS.
+    raw :: if value.starts_with("file://") -> lsp_uri_to_path(value, selected_family() == NativeTargetFamily.Windows) else -> value
+    if raw.bytes().len() == 0 -> return None
+    path := lsp_source_path.from_text(raw, platform)
+    if !lsp_source_path.is_absolute(path) && project_root == .Val(root) {
+        joined := ~root
+        lsp_source_path.push(&joined, path)
+        path = joined
+    }
+    canonical :: lsp_normalize_path_buf(path)
+    if canonical.bytes().len() == 0 -> return None
+    Val(lsp_path_to_uri(canonical))
+}
+pub fn lsp_checked_module_path_identity(result: JetDriverCompilerCheckResult, module: SemaCompilerModuleSource, platform: PathPlatform) -[FS, Env]> String? Never! {
+    // Rust intentionally applies to_string_lossy before canonical_source_uri.
+    value :: if module.physical_path == .Val(path) -> lsp_source_path.display(path) else -> module.path
+    lsp_canonical_source_uri(value, result.project_root, platform)
+}
+pub fn lsp_checked_module_display_identity(result: JetDriverCompilerCheckResult, module: SemaCompilerModuleSource, platform: PathPlatform) -[FS, Env]> String? Never! {
+    if module.display.bytes().len() == 0 -> return None
+    lsp_canonical_source_uri(module.display, result.project_root, platform)
+}
+pub fn lsp_checked_document_identity(uri: String, document: LSPDocument, project_root: OSPath?, platform: PathPlatform) -[FS, Env]> String? Never! {
+    identity :: lsp_canonical_source_uri(uri, project_root, platform) ?? return None
+    path :: lsp_canonical_source_uri(lsp_source_path.display(document.path), project_root, platform) ?? return None
+    if identity != path -> return None
+    Val(identity)
+}
+pub fn lsp_checked_document_versions(state: LSPDiagnosticState, result: JetDriverCompilerCheckResult, platform: PathPlatform) -[FS, Env]> [String:Int] Never! {
+    counts := [String:Int]{}
+    loop row in jet_driver_compiler_check_loaded_module_rows(result) {
+        if lsp_checked_module_path_identity(result, result.module_sources[row], platform) == .Val(identity) -> counts[identity] = (counts.get(identity) ?? 0) + 1
+    }
+    versions := [String:Int]{}
+    loop row in jet_driver_compiler_check_loaded_module_rows(result) {
+        identity :: lsp_checked_module_path_identity(result, result.module_sources[row], platform) ?? next
+        if counts.get(identity) != Val(1) -> next
+        first := Int?{None}
+        ambiguous := false
+        loop (uri, document) in state.docs {
+            if lsp_checked_document_identity(uri, document, result.project_root, platform) != Val(identity) -> next
+            if first != None { ambiguous = true; break }
+            first = Val(document.version)
+        }
+        if !ambiguous && first == .Val(version) -> versions[identity] = version
+    }
+    versions
+}
+// Return the index of the retained original row, never a copied module/AST.
+pub fn lsp_checked_module(result: JetDriverCompilerCheckResult, path: String, platform: PathPlatform) -[FS, Env]> Int? Never! {
+    target :: lsp_canonical_source_uri(path, result.project_root, platform) ?? return None
+    path_count := 0
+    loop row in jet_driver_compiler_check_loaded_module_rows(result) {
+        if lsp_checked_module_path_identity(result, result.module_sources[row], platform) == Val(target) -> path_count += 1
+        if path_count > 1 -> return None
+    }
+    found := Int?{None}
+    loop row in jet_driver_compiler_check_loaded_module_rows(result) {
+        module :: result.module_sources[row]
+        matches :: lsp_checked_module_path_identity(result, module, platform) == Val(target) || lsp_checked_module_display_identity(result, module, platform) == Val(target)
+        if !matches -> next
+        if found != None -> return None
+        found = Val(row)
+    }
+    found
+}
+// W38 owns the check witness: SAME Shared<JetDriverCheckedQuery> + versions
+// captured immediately at check time. Call with its guard's result and map.
+// A returned index always names that checked loaded_source, never disk/overlay.
+pub fn lsp_checked_source_snapshot(state: LSPDiagnosticState, result: JetDriverCompilerCheckResult, checked_versions: [String:Int], path: String, platform: PathPlatform) -[FS, Env]> (module_index: Int, version: Int?)? Never! {
+    if result.bundle == None -> return None
+    row :: lsp_checked_module(result, path, platform) ?? return None
+    identity :: lsp_checked_module_path_identity(result, result.module_sources[row], platform) ?? return None
+    current := Int?{None}
+    loop (uri, document) in state.docs {
+        if lsp_checked_document_identity(uri, document, result.project_root, platform) != Val(identity) -> next
+        if current != None -> return None
+        current = Val(document.version)
+    }
+    if current == {
+        .Val(version) -> {
+            if checked_versions.get(identity) != Val(version) -> return None
+            return Val((module_index: row, version: Val(version)))
+        }
+        None -> {
+            if checked_versions.has_key(identity) -> return None
+            return Val((module_index: row, version: None))
+        }
+    }
+}
+pub fn lsp_module_source(result: JetDriverCompilerCheckResult, path: String) -> String? Never! {
+    loop row in jet_driver_compiler_check_loaded_module_rows(result) {
+        module :: result.module_sources[row]
+        if module.display == path -> return Val(module.loaded_source)
+    }
+    None
+}
+pub fn lsp_resolve_use_target(base: OSPath, import: String, repository_root: OSPath) -[FS, Env]> String? Never! {
+    path := if import.starts_with("core.") -> ~repository_root else -> ~base
+    relative :: if import.starts_with("core.") -> "Docs/spec/reference/core-library.md" else -> "{import.replace(".", "/")}.jet"
+    lsp_source_path.push(&path, lsp_source_path.from_text(relative, path.platform))
+    // Canonical exists follows metadata; dangling symlinks and every native
+    // error yield false. Runtime's real body is gated, never substituted.
+    if !lsp_source_io.exists(path) -> return None
+    Val(lsp_path_to_uri(lsp_source_path.display(path)))
+}
+pub fn lsp_workspace_root_for_path(workspace_roots: [OSPath], path: OSPath) -[FS, Env]> OSPath? Never! {
+    native :: lsp_normalize_os_path(path)
+    best := OSPath?{None}
+    loop root in workspace_roots {
+        if !lsp_source_path.starts_with(native, root) -> next
+        if best == {
+            None -> best = Val(root)
+            .Val(previous) -> if root.encoded.len() >= previous.encoded.len() -> best = Val(root)
+        }
+    }
+    if best != None -> return best
+    parent :: lsp_source_path.parent_span(native) ?? return None
+    dir := lsp_source_path.owned_span(native, parent)
+    package :: if jet_driver_find_package_root_checked(dir) == { .Ok(root) -> root; .Err(_) -> None }
+    if package == .Val(root) -> return Val(lsp_normalize_os_path(root))
+    loop {
+        marker := ~dir
+        lsp_source_path.push(&marker, lsp_source_path.from_text(".git", path.platform))
+        if lsp_source_io.exists(marker) -> return Val(lsp_normalize_os_path(dir))
+        extent :: lsp_source_path.parent_span(dir) ?? break
+        dir = lsp_source_path.owned_span(dir, extent)
+    }
+    None
+}
+pub fn lsp_load_discovery_index(path: String, platform: PathPlatform) -[FS]> PackageIndex? Never! {
+    native :: lsp_source_path.from_text(path, platform)
+    parent :: lsp_source_path.parent_span(native) ?? return None
+    dir := lsp_source_path.owned_span(native, parent)
+    loop {
+        // dir originates solely from the UTF-8 input, never native display.
+        text :: lsp_source_path.to_str(dir) ?? panic("UTF-8 parent must remain UTF-8")
+        if env_discovery_load(text) == .Ok(.Val(index)) -> return Val(index)
+        extent :: lsp_source_path.parent_span(dir) ?? break
+        dir = lsp_source_path.owned_span(dir, extent)
+    }
+    None
+}
+// The caller holds result.bundle's Shared read guard for these borrowed calls.
+// Use original LoadedModule.items, never Sema's expanded registration programs.
+pub fn lsp_type_hierarchy_trait_impls(bundle: ProgramBundle, type_name: String) -> [String] Never! {
+    out := [String]{}
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item == {
+                .Struct(value) -> if value.name == type_name -> loop implementation in value.trait_impls -> &out.push(~implementation.trait_name)
+                .Enum(value) -> if value.name == type_name -> loop implementation in value.trait_impls -> &out.push(~implementation.trait_name)
+                else -> {}
+            }
+        }
+    }
+    lsp_sorted_unique_names(^out)
+}
+pub fn lsp_type_hierarchy_subtype_names(bundle: ProgramBundle, trait_name: String) -> [String] Never! {
+    out := [String]{}
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item == {
+                .Struct(value) -> loop implementation in value.trait_impls {
+                    if implementation.trait_name == trait_name { &out.push(~value.name); break }
+                }
+                .Enum(value) -> loop implementation in value.trait_impls {
+                    if implementation.trait_name == trait_name { &out.push(~value.name); break }
+                }
+                else -> {}
+            }
+        }
+    }
+    lsp_sorted_unique_names(^out)
+}
+fn lsp_sorted_unique_names(names: ^[String]) -> [String] Never! {
+    &names.sort()
+    write := 0
+    loop read in 0..<names.len() {
+        if write > 0 && names[write - 1] == names[read] -> next
+        if write != read {
+            saved := ^names[write]
+            names[write] = ^names[read]
+            names[read] = ^saved
+        }
+        write += 1
+    }
+    loop names.len() > write -> _ :: &names.pop()
+    ^names
+}
+pub struct LSPBlockSpan { pub start: Int pub end: Int }
+
+// Rust str::lines: LF and CRLF, not a lone CR; no final empty line.
+// Retain byte spans into src rather than allocating owned line strings.
+pub fn lsp_source_lines(src: String) -> [Span] Never! {
+    bytes :: src.bytes()
+    lines := [Span]{}
+    start := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{10}) {
+            end :: if index > start && bytes[index - 1] == (U8{13}) -> index - 1 else -> index
+            &lines.push(Span{start: start, end: end})
+            start = index + 1
+        }
+    }
+    if start < bytes.len() -> &lines.push(Span{start: start, end: bytes.len()})
+    lines
+}
+
+pub fn lsp_is_comment_line(line: String) -> Bool Never! {
+    trimmed := lsp_source_text.trim_start(line) // #4303
+    trimmed.starts_with("//")
+}
+pub fn lsp_is_import_line(line: String) -> Bool Never! {
+    trimmed := lsp_source_text.trim_start(line) // #4303
+    trimmed.starts_with("import ")
+}
+pub fn lsp_first_non_ws(line: String) -> Int Never! {
+    bytes :: line.bytes()
+    offset := 0
+    scalar := 0
+    loop offset < bytes.len() {
+        width :: diagnostic_utf8_width(bytes, offset)
+        ch := line.slice(offset, offset + width) // #4303
+        if !lsp_source_text.is_whitespace(ch) -> return scalar
+        scalar += 1
+        offset += width
+    }
+    0
+}
+pub fn lsp_ident_at(tokens: [Token], offset: Int) -> String? Never! {
+    loop token in tokens {
+        if token.span.start <= offset && offset <= token.span.end && token.kind == TOKEN_IDENT -> return Val(token.payload.text)
+    }
+    None
+}
+pub fn lsp_short_symbol_name(name: String) -> String Never! {
+    bytes :: name.bytes()
+    start := 0
+    index := 0
+    loop index + 1 < bytes.len() {
+        if bytes[index] == (U8{58}) && bytes[index + 1] == (U8{58}) {
+            start = index + 2
+            index += 2
+        } else -> index += 1
+    }
+    out := name.slice(start, bytes.len()) // #4303
+    out
+}
+pub fn lsp_checked_byte_span_to_range(src: String, span: Span) -> LSPRange? Never! {
+    bytes :: src.bytes()
+    if span.start < 0 || span.start > span.end || span.end > bytes.len() -> return None
+    if span.start < bytes.len() && (Int.from_u8(bytes[span.start]) & 192) == 128 -> return None
+    if span.end < bytes.len() && (Int.from_u8(bytes[span.end]) & 192) == 128 -> return None
+    Val(lsp_byte_span_to_range(src, span))
+}
+pub fn lsp_brace_block_spans(src: String) -> [LSPBlockSpan] Never! {
+    stack := [Int]{}
+    blocks := [LSPBlockSpan]{}
+    loop (offset, byte) in src.bytes() {
+        if byte == (U8{123}) -> &stack.push(offset)
+        else if byte == (U8{125}) {
+            if &stack.pop() == .Val(start) -> &blocks.push(LSPBlockSpan{start: start, end: offset + 1})
+        }
+    }
+    blocks
+}
+pub fn lsp_token_span_at(tokens: [Token], offset: Int) -> Span? Never! {
+    loop token in tokens {
+        if token.span.start <= offset && offset <= token.span.end && token.span.start < token.span.end -> return Val(token.span)
+    }
+    None
+}
+pub fn lsp_line_span_at(src: String, offset: Int) -> Span? Never! {
+    bytes :: src.bytes()
+    if bytes.len() == 0 -> return None
+    bounded :: if offset > bytes.len() -> bytes.len() else -> offset
+    if bounded < 0 || (bounded < bytes.len() && (Int.from_u8(bytes[bounded]) & 192) == 128) -> panic("byte offset is not a UTF-8 boundary")
+    start := bounded
+    loop start > 0 && bytes[start - 1] != (U8{10}) -> start -= 1
+    end := bounded
+    loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+    Val(Span{start: start, end: end})
+}
+pub fn lsp_same_range(a: LSPRange, b: LSPRange) -> Bool Never! {
+    a.start.line == b.start.line && a.start.character == b.start.character && a.end.line == b.end.line && a.end.character == b.end.character
+}
+pub fn lsp_dedup_ranges(ranges: [LSPRange]) -> [LSPRange] Never! {
+    out := [LSPRange]{}
+    loop range in ranges {
+        found := false
+        loop existing in out {
+            if lsp_same_range(existing, range) { found = true; break }
+        }
+        if !found -> &out.push(range)
+    }
+    out
+}
+pub fn lsp_selection_ranges_for(src: String, tokens: [Token], blocks: [LSPBlockSpan], offset: Int) -> [LSPRange] Never! {
+    ranges := [LSPRange]{}
+    if lsp_token_span_at(tokens, offset) == .Val(span) -> &ranges.push(lsp_byte_span_to_range(src, span))
+    if lsp_line_span_at(src, offset) == .Val(span) -> &ranges.push(lsp_byte_span_to_range(src, span))
+    smallest := LSPBlockSpan?{None}
+    loop block in blocks {
+        if block.start <= offset && offset <= block.end {
+            if smallest == {
+                None -> smallest = Val(block)
+                .Val(previous) -> if block.end - block.start < previous.end - previous.start -> smallest = Val(block)
+            }
+        }
+    }
+    if smallest == .Val(block) -> &ranges.push(lsp_byte_span_to_range(src, Span{start: block.start, end: block.end}))
+    &ranges.push(lsp_full_document_range(src))
+    lsp_dedup_ranges(ranges)
+}
+pub fn lsp_selection_range_json(ranges: [LSPRange]) -> String Never! {
+    if ranges.len() == 0 -> return "{{\"range\":{lsp_range_json(LSPRange{start: LSPPos{line: 0, character: 0}, end: LSPPos{line: 0, character: 0}})}}}"
+    // Emit once instead of repeatedly copying the nested parent JSON.
+    pieces := [String]{}
+    loop index in 0..<ranges.len() {
+        &pieces.push("{{\"range\":{lsp_range_json(ranges[index])}")
+        if index + 1 < ranges.len() -> &pieces.push(",\"parent\":")
+    }
+    loop _ in ranges -> &pieces.push("}}")
+    pieces.join("")
+}

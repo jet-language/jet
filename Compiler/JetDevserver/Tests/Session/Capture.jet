@@ -1,0 +1,236 @@
+// Pure C1 boundaries against actual policy/planner, no compiler/runtime mock.
+// CLI perf_run_records_capture_allowlist_and_source_maps,
+// perf_capture_rejects_unknown_allowlist_field, perf_*_captures_wall_and_alloc
+// require the real host/trace engine, and are intentionally not pure substitutes.
+struct CaptureTestRecord {
+    id: String
+    seq: U64
+    bytes: U64
+    protected: Bool
+}
+impl CaptureTestRecord.RecordIndexRetention {
+    fn artifact_id(self) -> String Never! { ~self.id }
+    fn recorded_sequence(self) -> U64 Never! { self.seq }
+    fn size_bytes(self) -> U64 Never! { self.bytes }
+    fn saved(self) -> Bool Never! { self.protected }
+}
+struct CaptureProtectedRecord {
+    id: String
+    bytes: U64
+}
+impl CaptureProtectedRecord.RecordIndexRetention {
+    fn artifact_id(self) -> String Never! { ~self.id }
+    fn recorded_sequence(self) -> U64 Never! { U64{0} }
+    fn size_bytes(self) -> U64 Never! { self.bytes }
+    fn saved(self) -> Bool Never! { false }
+    fn evictable(self) -> Bool Never! { false }
+}
+fn capture_test_record(id: String, seq: U64, bytes: U64, protected: Bool) -> CaptureTestRecord Never! {
+    CaptureTestRecord{id: ~id, seq, bytes, protected}
+}
+fn capture_test_error(budget: CaptureBudget, records: [CaptureTestRecord], incoming: CaptureTestRecord?) -> CaptureBudgetError Never! {
+    if plan_eviction_inner<CaptureTestRecord>(budget, records, incoming) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("expected retention refusal")
+    }
+}
+
+// #4393: contextual None below mislowers as optional Int in the native backend.
+// Preserve this original boundary; planner-only proof excludes this fixture.
+#Test("capture_sources_preserve_safe_clock_split_and_location_reasons") {
+    assert(CaptureSource.clock().is_safe_clock())
+    assert(!CaptureSource.clock().requires_sensitive_consent())
+    unsafe_sources :: [CaptureSource]{CaptureSource.randomness(), CaptureSource.raw_input(), CaptureSource.network()}
+    reasons :: [String]{"Rand", "Input", "Net"}
+    loop index in 0..<unsafe_sources.len() {
+        assert(unsafe_sources[index].requires_sensitive_consent())
+        assert(!unsafe_sources[index].is_safe_clock())
+        assert_eq(CaptureSourceFact.new(unsafe_sources[index], None).reason_text(), reasons[index])
+    }
+    fact :: CaptureSourceFact.at(CaptureSource.Randomness, "run.jet", U32{9})
+    assert_eq(fact.reason_text(), "Rand at run.jet:9")
+    source_id :: "λ.jet"
+    located :: CaptureLocation.new(~source_id, U32{0}).with_column(U32.MAX)
+    assert_eq(located.render(), "λ.jet:0:4294967295")
+    assert_eq(source_id, "λ.jet")
+    assert_eq(CaptureSourceFact.new(CaptureSource.Network, Val(^located)).reason_text(), "Net at λ.jet:0:4294967295")
+}
+
+#Test("capture_package_settings_and_per_invocation_override_are_independent") {
+    default :: PackageCapturePolicy.default()
+    assert_eq(default.budget.max_bytes, U64{268435456})
+    assert(default.allows_development_capture())
+    assert(default.with_capture(PackageCaptureSetting.On).allows_development_capture())
+    assert(!PackageCapturePolicy.off().allows_development_capture())
+    assert(!default.with_capture(PackageCaptureSetting.Off).allows_development_capture())
+    small :: CaptureBudget.new(U64{1}) ?? panic("budget")
+    changed :: default.with_budget(small)
+    assert_eq(changed.capture, PackageCaptureSetting.Default)
+    assert_eq(changed.budget.max_bytes, U64{1})
+    assert(NoCaptureOverrideFact.explicit().is_active())
+    assert(!NoCaptureOverrideFact.none().is_active())
+    assert_eq(NoCaptureOverrideFact.explicit().flag(), "--no-capture")
+    assert(CaptureMode.release().is_release())
+    assert(!CaptureMode.development().is_release())
+    assert_eq(CaptureMode.development().as_str(), "dev")
+    assert_eq(CaptureMode.release().as_str(), "release")
+    owned_id :: "move.jet"
+    location :: CaptureLocation.new(^owned_id, U32{4}).with_column(U32{6})
+    fact :: CaptureSourceFact.new(CaptureSource.RawInput, Val(^location))
+    assert_eq(fact.reason_text(), "Input at move.jet:4:6")
+    at_id :: "at.jet"
+    assert_eq(CaptureSourceFact.at(CaptureSource.Network, ^at_id, U32{5}).reason_text(), "Net at at.jet:5")
+    assert(!(CaptureKind.SafeClock).is_sensitive())
+    assert((CaptureKind.Sensitive).is_sensitive())
+}
+
+#Test("capture_budget_rejects_zero_before_record_validation") {
+    if CaptureBudget.new(U64{0}) == {
+        .Err(error) -> assert_eq(error, CaptureBudgetError.ZeroByteLimit)
+        .Ok(_) -> panic("zero admitted")
+    }
+    bad :: [CaptureTestRecord]{capture_test_record("", U64{0}, U64.MAX, false)}
+    error :: capture_test_error(CaptureBudget.new_unchecked(U64{0}), bad, None)
+    assert_eq(error, CaptureBudgetError.ZeroByteLimit)
+    assert_eq(error.as_str(), "capture budget byte limit must be greater than zero")
+}
+
+#Test("capture_eviction_is_oldest_first_by_sequence_then_id_and_never_incoming") {
+    records :: [CaptureTestRecord]{
+        capture_test_record("z", U64{8}, U64{3}, false),
+        capture_test_record("b", U64{1}, U64{3}, false),
+        capture_test_record("a", U64{1}, U64{3}, false),
+        capture_test_record("c", U64{2}, U64{3}, false),
+        capture_test_record("saved", U64{0}, U64.MAX, true),
+    }
+    original :: ~records
+    // Incoming sequence zero would sort first if mistakenly made a candidate.
+    incoming :: capture_test_record("incoming", U64{0}, U64{4}, false)
+    plan :: CaptureBudget.new_unchecked(U64{7}).plan_eviction(records, incoming) ?? panic("plan")
+    assert_eq(plan.retained_bytes, U64{7})
+    assert(plan.fits())
+    assert_eq(plan.evicted, [CaptureEviction]{
+        CaptureEviction{artifact_id: "a", recorded_sequence: U64{1}, size_bytes: U64{3}},
+        CaptureEviction{artifact_id: "b", recorded_sequence: U64{1}, size_bytes: U64{3}},
+        CaptureEviction{artifact_id: "c", recorded_sequence: U64{2}, size_bytes: U64{3}},
+    })
+    assert_eq(records, original)
+}
+
+#Test("capture_current_eviction_and_exact_fit_keep_saved_bytes_outside_budget") {
+    records :: [CaptureTestRecord]{
+        capture_test_record("new", U64.MAX, U64{6}, false),
+        capture_test_record("old", U64{0}, U64{4}, false),
+        capture_test_record("saved", U64{0}, U64.MAX, true),
+    }
+    fit :: plan_current_eviction(CaptureBudget.new_unchecked(U64{10}), records) ?? panic("exact fit")
+    assert_eq(fit.evicted.len(), 0)
+    assert_eq(fit.retained_bytes, U64{10})
+    plan :: CaptureBudget.new_unchecked(U64{6}).plan_current(records) ?? panic("current")
+    assert_eq(plan.evicted.len(), 1)
+    assert_eq(plan.evicted[0].artifact_id, "old")
+    assert_eq(plan.retained_bytes, U64{6})
+    empty :: [CaptureTestRecord]{}
+    no_rows :: plan_current_eviction(CaptureBudget.new_unchecked(U64{1}), empty) ?? panic("empty")
+    assert_eq(no_rows.retained_bytes, U64{0})
+    assert_eq(no_rows.evicted.len(), 0)
+}
+
+#Test("capture_retention_respects_index_owned_non_saved_protection") {
+    records :: [CaptureProtectedRecord]{CaptureProtectedRecord{id: "protected", bytes: U64.MAX}}
+    incoming :: CaptureProtectedRecord{id: "incoming", bytes: U64.MAX}
+    plan :: plan_eviction(CaptureBudget.new_unchecked(U64{1}), records, incoming) ?? panic("protected bytes")
+    assert_eq(plan.retained_bytes, U64{0})
+    assert_eq(plan.evicted.len(), 0)
+}
+
+#Test("capture_saved_incoming_can_exceed_budget_but_is_not_counted") {
+    records :: [CaptureTestRecord]{capture_test_record("old", U64{1}, U64{9}, false)}
+    incoming :: capture_test_record("saved incoming", U64{0}, U64.MAX, true)
+    plan :: plan_eviction(CaptureBudget.new_unchecked(U64{5}), records, incoming) ?? panic("saved incoming")
+    assert_eq(plan.evicted.len(), 1)
+    assert_eq(plan.evicted[0].artifact_id, "old")
+    assert_eq(plan.retained_bytes, U64{0})
+}
+
+#Test("capture_incoming_oversize_refuses_without_eviction") {
+    records :: [CaptureTestRecord]{capture_test_record("old", U64{0}, U64{5}, false)}
+    incoming :: capture_test_record("incoming", U64{1}, U64{6}, false)
+    error :: capture_test_error(CaptureBudget.new_unchecked(U64{5}), records, Val(incoming))
+    assert_eq(error, CaptureBudgetError.IncomingArtifactTooLarge{bytes: U64{6}, limit: U64{5}})
+    assert_eq(error.as_str(), "incoming record is 6 bytes, over capture budget 5")
+}
+
+#Test("capture_duplicate_ids_include_saved_rows_and_incoming") {
+    budget :: CaptureBudget.new_unchecked(U64{1})
+    records :: [CaptureTestRecord]{
+        capture_test_record("same", U64{1}, U64.MAX, true),
+        capture_test_record("same", U64{2}, U64{0}, false),
+    }
+    assert_eq(capture_test_error(budget, records, None), CaptureBudgetError.DuplicateArtifactID{id: "same"})
+    existing :: [CaptureTestRecord]{capture_test_record("same", U64{1}, U64{0}, true)}
+    incoming :: capture_test_record("same", U64{2}, U64.MAX, false)
+    // Duplicate validation precedes incoming-size refusal.
+    error :: capture_test_error(budget, existing, Val(incoming))
+    assert_eq(error, CaptureBudgetError.DuplicateArtifactID{id: "same"})
+    assert_eq(error.as_str(), "record artifact id `same` is duplicated")
+}
+
+#Test("capture_empty_artifact_ids_reject_saved_and_incoming_rows") {
+    budget :: CaptureBudget.default()
+    bad :: [CaptureTestRecord]{capture_test_record("", U64{1}, U64{0}, true)}
+    error :: capture_test_error(budget, bad, None)
+    assert_eq(error, CaptureBudgetError.EmptyArtifactID)
+    assert_eq(error.as_str(), "record artifact id cannot be empty")
+    empty :: [CaptureTestRecord]{}
+    incoming :: capture_test_record("", U64{0}, U64.MAX, true)
+    assert_eq(capture_test_error(budget, empty, Val(incoming)), CaptureBudgetError.EmptyArtifactID)
+}
+
+#Test("capture_u64_total_overflow_refuses_before_a_possible_eviction") {
+    budget :: CaptureBudget.new_unchecked(U64.MAX)
+    records :: [CaptureTestRecord]{
+        capture_test_record("max", U64{0}, U64.MAX, false),
+        capture_test_record("one", U64{1}, U64{1}, false),
+    }
+    error :: capture_test_error(budget, records, None)
+    assert_eq(error, CaptureBudgetError.ArithmeticOverflow)
+    assert_eq(error.as_str(), "capture budget arithmetic overflowed")
+    existing :: [CaptureTestRecord]{capture_test_record("max", U64{0}, U64.MAX, false)}
+    incoming :: capture_test_record("one", U64{1}, U64{1}, false)
+    assert_eq(capture_test_error(budget, existing, Val(incoming)), CaptureBudgetError.ArithmeticOverflow)
+    exact :: plan_current_eviction(budget, existing) ?? panic("u64 max exact")
+    assert_eq(exact.retained_bytes, U64.MAX)
+    assert_eq(exact.evicted.len(), 0)
+}
+
+#Test("capture_zero_size_and_unsorted_odd_candidate_count_preserve_order") {
+    records :: [CaptureTestRecord]{
+        capture_test_record("e", U64{5}, U64{1}, false),
+        capture_test_record("c", U64{3}, U64{1}, false),
+        capture_test_record("a", U64{1}, U64{0}, false),
+        capture_test_record("d", U64{4}, U64{1}, false),
+        capture_test_record("b", U64{2}, U64{1}, false),
+    }
+    plan :: plan_current_eviction(CaptureBudget.new_unchecked(U64{1}), records) ?? panic("odd order")
+    assert_eq(plan.evicted.len(), 4)
+    assert_eq(plan.evicted[0].artifact_id, "a")
+    assert_eq(plan.evicted[1].artifact_id, "b")
+    assert_eq(plan.evicted[2].artifact_id, "c")
+    assert_eq(plan.evicted[3].artifact_id, "d")
+    assert_eq(plan.retained_bytes, U64{1})
+}
+
+#Test("capture_incoming_exact_budget_evicts_all_existing_disposable_rows") {
+    records :: [CaptureTestRecord]{
+        capture_test_record("new", U64.MAX, U64{1}, false),
+        capture_test_record("old", U64{0}, U64{1}, false),
+    }
+    incoming :: capture_test_record("incoming", U64{0}, U64{5}, false)
+    plan :: plan_eviction(CaptureBudget.new_unchecked(U64{5}), records, incoming) ?? panic("incoming exact fit")
+    assert_eq(plan.retained_bytes, U64{5})
+    assert_eq(plan.evicted.len(), 2)
+    assert_eq(plan.evicted[0].artifact_id, "old")
+    assert_eq(plan.evicted[1].artifact_id, "new")
+    assert(plan.fits())
+}

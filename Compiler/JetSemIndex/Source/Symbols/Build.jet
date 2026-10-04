@@ -1,0 +1,287 @@
+// Rust Symbols.rs:413–823. This is the sole checked semantic-symbol builder.
+// Registration supplies checked items/import edges; the explicit loaded row list
+// supplies original-bundle membership, source bytes, display and alias.
+use jet_foundation.[
+    CodeModule, ImportDecl, Item, MIRNameFacts, Span,
+    import_alias, import_walk_bindings,
+    name_facts_alias_identity, name_facts_display_path, name_facts_effective_alias,
+]
+use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
+
+// Rust's display_type closure, shared with S15's signature projection.
+pub fn semantic_display_type(names: MIRNameFacts, module_index: Int, name: String) -> String Never! {
+    name_facts_display_path(names, module_index, name, Val(module_index)) ?? name
+}
+
+// Source rows retain Rust's original bundle order; name projections retain the
+// checked registration index obtained by identity. They are different spaces.
+pub fn semindex_build_semantic_symbol_index(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> SemanticSymbolIndex Never! {
+    symbols := semantic_language_symbols()
+    loop source_index in loaded_module_rows {
+        source :: module_sources[source_index]
+        module :: registration.modules[semindex_loaded_registration_index(registration, source)]
+        semantic_collect_distinct_conversion_symbols(db, module.program.items, source.display, "module:{source.display}", None, &symbols)
+    }
+    // Rust collect() overwrites members' owners, but or_insert() keeps the
+    // FIRST member fact and FIRST definition. Store row positions, not facts.
+    owners := [String:Int]{}
+    member_facts := [String:Int]{}
+    loop index in 0..<db.members.len() {
+        member :: db.members[index]
+        owners[member.identity] = index
+        if member_facts.get(member.identity) == None -> member_facts[member.identity] = index
+    }
+    definitions := db.index.definitions()
+    definition_rows := [String:Int]{}
+    definition_index := 0
+    loop definition in definitions {
+        if definition_rows.get(definition.identity) == None -> definition_rows[definition.identity] = definition_index
+        definition_index += 1
+    }
+    // Source maps retain Rust's LAST module-display match without copying text.
+    sources := [String:Int]{}
+    marker_modules :: semindex_loaded_source_rows_by_path(module_sources, loaded_module_rows)
+    source_rows := [Int:Int]{}
+    loop source_index in loaded_module_rows {
+        source :: module_sources[source_index]
+        sources[source.display] = source_index
+        source_rows[semindex_loaded_registration_index(registration, source)] = source_index
+    }
+    entry_index :: registration.module_rows.get(registration.entry_module_identity) ?? panic("checked semantic-symbol graph has no entry module")
+    scopes :: LexicalScopeIndex.new(db)
+    loop def in db.defs {
+        // Anchors remain in db.defs for rename/reference alignment. Imports
+        // below retain their richer target signature/docs and must appear once.
+        if def.identity.starts_with("import:") -> next
+        owner := String?{None}
+        if owners.get(def.identity) == {
+            .Val(index) -> owner = Val(~db.members[index].owner)
+            None -> {
+                if def.kind == {
+                    .Field(_, parent) -> owner = Val(parent)
+                    .EnumVariant(parent) -> owner = Val(parent)
+                    else -> {}
+                }
+            }
+        }
+        source_row :: marker_modules.get(def.module_path)
+        projection_index := Int?{None}
+        if source_row == .Val(index) -> projection_index = Val(semindex_loaded_registration_index(registration, module_sources[index]))
+        qualified_name :: semantic_canonical_symbol_name(names, projection_index, def.name, owner, Val(semindex_source_span(def.def_span)))
+        module_index :: projection_index ?? entry_index
+        display_name :: semantic_display_type(names, module_index, def.name)
+        display_owner := String?{None}
+        if owner == .Val(path) -> display_owner = Val(semantic_display_type(names, module_index, path))
+        shape := semantic_shape(display_name, def.kind, display_owner, names, module_index)
+        source_index := sources.get(def.module_path)
+        if source_row == .Val(index) {
+            registered :: registration.modules[semindex_loaded_registration_index(registration, module_sources[index])]
+            if semantic_marker_declaration_signature(registered.program.items, def, module_sources[index].loaded_source) == .Val(signature) -> shape.signature = signature
+        }
+        if definition_rows.get(def.identity) == .Val(index) {
+            metadata :: definitions[index]
+            if metadata.nominal_base == .Val(base) -> shape.signature = "type {display_name} :: distinct {semantic_display_type(names, module_index, base)}"
+            if !metadata.trait_contracts.is_empty() {
+                shape.signature += "\n"
+                shape.signature += semantic_render_trait_contracts(metadata.trait_contracts, def.kind == SymKind.Trait, names, module_index)
+            }
+        }
+        if member_facts.get(def.identity) == .Val(index) {
+            if db.members[index].origin == {
+                .TraitImpl(trait_name) -> shape.signature += "\ntrait: {trait_name}"
+                .TraitRequirement(trait_name) -> shape.signature += "\ntrait: {trait_name}"
+                else -> {}
+            }
+        }
+        docs := SemanticSourceDocs{summary: "", examples: [String]{}}
+        if source_index == .Val(index) -> docs = semantic_source_docs(module_sources[index].loaded_source, def.def_span.start)
+        if docs.summary.is_empty() {
+            if def.kind == .Local(mutable, _) -> docs.summary = if mutable -> "mutable binding" else -> "immutable binding"
+        }
+        lexical_scope := SemanticLexicalScope?{None}
+        if def.kind == {
+            .Local(_, _) -> lexical_scope = scopes.scope(db, def.module_path, semindex_source_span(def.def_span), false)
+            .Param(_) -> lexical_scope = scopes.scope(db, def.module_path, semindex_source_span(def.def_span), true)
+            else -> {}
+        }
+        identity := ~def.identity
+        if lexical_scope != None -> identity = "{def.identity}@{def.def_span.start}"
+        &symbols.push(SemanticSymbol{
+            identity: ^identity, name: ~def.name, qualified_name: qualified_name,
+            owner: ^owner, module_path: ~def.module_path, kind: shape.kind,
+            signature: ^shape.signature, summary: ^docs.summary, examples: ^docs.examples,
+            provenance: .Source{module_path: ~def.module_path},
+            span: Val(semindex_source_span(def.def_span)), lexical_scope: ^lexical_scope,
+        })
+    }
+    loop source_index in loaded_module_rows {
+        source :: module_sources[source_index]
+        module_index :: semindex_loaded_registration_index(registration, source)
+        module :: registration.modules[module_index]
+        semantic_collect_import_symbols(&symbols, registration, names, module_sources, source_rows, module_index, source.display, module.program.imports, None)
+        semantic_collect_inline_import_symbols(db, registration, names, module_sources, source_rows, module_index, source.display, module.program.items, None, &symbols)
+    }
+    SemanticSymbolIndex.new(^symbols)
+}
+
+// Rust render_trait_contracts: preserve authored contract/type/method order,
+// display only type names through the canonical checked name projections.
+pub fn semantic_render_trait_contracts(contracts: [TraitContractFact], declaration: Bool, names: MIRNameFacts, module_index: Int) -> String Never! {
+    blocks := [String]{}
+    loop contract in contracts {
+        prefix :: if declaration -> "contract" else -> "implements"
+        lines := [String]{"{prefix} {semantic_display_type(names, module_index, contract.trait_name)}"}
+        loop associated in contract.associated_types {
+            if associated.implementation == {
+                .Val(ty) -> &lines.push("  type {associated.name} = {semantic_display_type(names, module_index, ty)}")
+                None -> &lines.push("  type {associated.name}")
+            }
+        }
+        loop method in contract.methods -> &lines.push("  {method}")
+        &blocks.push(lines.join("\n"))
+    }
+    blocks.join("\n")
+}
+
+// Consume the existing checked import graph rather than resolve a path or run
+// a second checker. The edge is the loader's exact target for this declaration,
+// including file, module and inline-module imports. Missing edges stay absent.
+fn semantic_imported_module_index(registration: SemaRegistrationGraph, module_index: Int, declaration_span: Span) -> Int? Never! {
+    module :: registration.modules[module_index]
+    loop edge in registration.edges {
+        if edge.source_module_identity == module.module_identity && edge.declaration.span == declaration_span -> return registration.module_rows.get(edge.target_module_identity)
+    }
+    None
+}
+
+// Search inline imports before file imports, preserving Rust's chain().find().
+fn semantic_source_import_span(imports: [ImportDecl], file_imports: [ImportDecl], module_alias: String) -> Span? Never! {
+    loop candidate in imports {
+        if candidate.kind == .Unqualified(_, _, _, _, _) -> next
+        if import_alias(candidate) == module_alias -> return Val(candidate.span)
+    }
+    loop candidate in file_imports {
+        if candidate.kind == .Unqualified(_, _, _, _, _) -> next
+        if import_alias(candidate) == module_alias -> return Val(candidate.span)
+    }
+    None
+}
+
+pub fn semantic_collect_import_symbols(symbols: &[SemanticSymbol], registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], source_rows: [Int:Int], module_index: Int, module_path: String, imports: [ImportDecl], lexical_scope: SemanticLexicalScope?) Never! {
+    module :: registration.modules[module_index]
+    loop import in imports {
+        if import.kind == {
+            .Unqualified(module_alias, _, _, _, _) -> {
+                imported_module := Int?{None}
+                if semantic_source_import_span(imports, module.program.imports, module_alias) == .Val(source_import_span) -> imported_module = semantic_imported_module_index(registration, module_index, source_import_span)
+                bindings :: import_walk_bindings(import)
+                items_span := import.span
+                if !bindings.is_empty() {
+                    if bindings[0].items_span == .Val(span) -> items_span = span
+                }
+                loop binding in bindings {
+                    original :: binding.original ?? panic("member walker returned a binding without a member")
+                    target := Int?{None}
+                    if imported_module == .Val(index) {
+                        if source_rows.get(index) == .Val(source_index) {
+                            imported_path :: module_sources[source_index].display
+                            loop symbol_index in 0..<symbols.len() {
+                                if symbols[symbol_index].module_path == imported_path && symbols[symbol_index].name == original {
+                                    target = Val(symbol_index)
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    // Only retained target metadata is copied for the owned
+                    // alias; its replaced identity/owner/module are not cloned.
+                    kind := SemanticSymbolKind.Local
+                    signature := ""
+                    summary := ""
+                    examples := [String]{}
+                    if target == {
+                        .Val(index) -> {
+                            kind = symbols[index].kind
+                            signature = ~symbols[index].signature
+                            summary = ~symbols[index].summary
+                            examples = ~symbols[index].examples
+                        }
+                        None -> {
+                            signature = ~binding.local
+                            summary = "Imported from {module_alias}."
+                        }
+                    }
+                    identity :: name_facts_alias_identity(names, module_index, binding.local_span) ?? semantic_import_identity(module_path, lexical_scope, "{module_alias}.{original}::{binding.local}")
+                    &symbols.push(SemanticSymbol{
+                        identity: identity, name: ~binding.local, qualified_name: ~binding.local,
+                        owner: None, module_path: module_path, kind: kind,
+                        signature: ^signature, summary: ^summary, examples: ^examples,
+                        provenance: .Source{module_path: module_path},
+                        span: Val(semindex_source_span(items_span)), lexical_scope: ~lexical_scope,
+                    })
+                }
+            }
+            else -> {
+                alias :: import_alias(import)
+                alias_name :: if name_facts_effective_alias(names, module_index, alias) == {
+                    .Val(effective) -> effective.name
+                    None -> alias
+                }
+                identity :: name_facts_alias_identity(names, module_index, import.alias_span) ?? semantic_import_identity(module_path, lexical_scope, alias_name)
+                &symbols.push(SemanticSymbol{
+                    identity: identity, name: ~alias_name, qualified_name: ~alias_name,
+                    owner: None, module_path: module_path, kind: .Module,
+                    signature: "use {alias_name}", summary: "Imported module.",
+                    examples: [String]{}, provenance: .Source{module_path: module_path},
+                    span: Val(semindex_source_span(import.alias_span)), lexical_scope: ~lexical_scope,
+                })
+            }
+        }
+    }
+}
+
+pub fn semantic_import_identity(module_path: String, lexical_scope: SemanticLexicalScope?, suffix: String) -> String Never! {
+    if lexical_scope == .Val(scope) -> return "import:{module_path}::{scope.identity}::{suffix}"
+    "import:{module_path}::{suffix}"
+}
+
+pub fn semantic_collect_inline_import_symbols(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], source_rows: [Int:Int], module_index: Int, module_path: String, items: [Item], parent_scope: SemanticLexicalScope?, symbols: &[SemanticSymbol]) Never! {
+    loop item in items {
+        if item == .CodeModule(module) {
+            scope :: semantic_inline_module_scope(db, module_path, module, parent_scope)
+            semantic_collect_import_symbols(&symbols, registration, names, module_sources, source_rows, module_index, module_path, module.imports, Val(scope))
+            if module.body == .Val(body) -> semantic_collect_inline_import_symbols(db, registration, names, module_sources, source_rows, module_index, module_path, body, Val(scope), &symbols)
+        }
+    }
+}
+
+// Shared by inline imports and S15 distinct-conversion recursion. Checked
+// definition identity wins; the Rust lexical fallback is only for no definition.
+pub fn semantic_inline_module_scope(db: SymbolDB, module_path: String, module: CodeModule, parent_scope: SemanticLexicalScope?) -> SemanticLexicalScope Never! {
+    identity := String?{None}
+    loop def in db.defs {
+        if def.module_path == module_path && def.def_span == module.name_span && def.kind == SymKind.Module {
+            identity = Val(~def.identity)
+            break
+        }
+    }
+    if identity == None {
+        parent_identity := "module:{module_path}"
+        if parent_scope == .Val(scope) -> parent_identity = ~scope.identity
+        identity = Val("module:{parent_identity}::{module.name}")
+    }
+    structural_parent := 0
+    loop node in db.nodes {
+        if node.module_path == module_path && node.span == semindex_source_span(module.span) && node.class == "item" {
+            structural_parent = node.id
+            break
+        }
+    }
+    depth := 1
+    if parent_scope == .Val(scope) -> depth = scope.depth + 1
+    SemanticLexicalScope{
+        identity: identity ?? panic("inline module identity"), structural_parent: structural_parent,
+        structural_slot: "items", span: semindex_source_span(module.span), depth: depth,
+        declaration_offset: module.name_span.start,
+    }
+}

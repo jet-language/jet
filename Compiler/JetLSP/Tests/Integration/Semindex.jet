@@ -1,0 +1,2008 @@
+// PORT-PENDING 1152 tests-semindex-module-group: tests/semindex.rs:1-1669
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-SEMINDEX1 integration tests for the stable semantic-index API.
+//RS 
+//RS mod common;
+//RS 
+//RS use jet_semindex::{
+//RS     build_symbol_db, open, open_symbols, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
+//RS     SemanticSymbolKind, SymbolKind, ViewProjectionFact, ViewSourceFact, SCHEMA_VERSION,
+//RS };
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS 
+//RS fn fixture(name: &str) -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("Examples/features")
+//RS         .join(name)
+//RS }
+//RS 
+//RS fn temp_fixture(name: &str, src: &str) -> PathBuf {
+//RS     let dir = std::env::temp_dir().join(format!("jet_semindex_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).expect("semindex temp dir");
+//RS     let path = dir.join(name);
+//RS     fs::write(&path, src).expect("write semindex fixture");
+//RS     path
+//RS }
+//RS 
+//RS fn fact(
+//RS     identity: &str,
+//RS     name: &str,
+//RS     qualified_name: &str,
+//RS     kind: SemanticSymbolKind,
+//RS     provenance: SemanticProvenance,
+//RS ) -> SemanticSymbol {
+//RS     SemanticSymbol {
+//RS         identity: identity.to_string(),
+//RS         name: name.to_string(),
+//RS         qualified_name: qualified_name.to_string(),
+//RS         owner: qualified_name
+//RS             .split_once('.')
+//RS             .map(|(owner, _)| owner.to_string()),
+//RS         module_path: "test".to_string(),
+//RS         kind,
+//RS         signature: identity.to_string(),
+//RS         summary: String::new(),
+//RS         examples: Vec::new(),
+//RS         provenance,
+//RS         span: None,
+//RS         lexical_scope: None,
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_visibility_prefers_live_and_local_bindings() {
+//RS     let index = SemanticSymbolIndex::new(vec![
+//RS         fact(
+//RS             "builtin:keyword:answer",
+//RS             "answer",
+//RS             "answer",
+//RS             SemanticSymbolKind::Keyword,
+//RS             SemanticProvenance::Builtin {
+//RS                 module: "syntax".to_string(),
+//RS             },
+//RS         ),
+//RS         fact(
+//RS             "import:test::api.answer::answer",
+//RS             "answer",
+//RS             "answer",
+//RS             SemanticSymbolKind::Function,
+//RS             SemanticProvenance::Session,
+//RS         ),
+//RS         fact(
+//RS             "fn:session::answer",
+//RS             "answer",
+//RS             "answer",
+//RS             SemanticSymbolKind::Function,
+//RS             SemanticProvenance::Session,
+//RS         ),
+//RS         fact(
+//RS             "session:binding:answer",
+//RS             "answer",
+//RS             "answer",
+//RS             SemanticSymbolKind::Local,
+//RS             SemanticProvenance::Session,
+//RS         ),
+//RS     ]);
+//RS     assert_eq!(
+//RS         index
+//RS             .resolve_visible("answer")
+//RS             .expect("visible answer")
+//RS             .identity,
+//RS         "session:binding:answer"
+//RS     );
+//RS     let completions = index.complete_visible("ans", None);
+//RS     assert_eq!(completions.len(), 1);
+//RS     assert_eq!(completions[0].identity, "session:binding:answer");
+//RS }
+//RS 
+//RS #[test]
+//RS fn contextual_result_names_are_not_advertised_as_keywords() {
+//RS     let path = temp_fixture("contextual_result_names.jet", "fn run() {}\n");
+//RS     let symbols = open_symbols(&path).expect("semantic symbols");
+//RS     for name in ["Ok", "Err"] {
+//RS         assert!(
+//RS             symbols.symbols().iter().all(|symbol| {
+//RS                 symbol.identity != format!("builtin:keyword:{name}")
+//RS                     && !(symbol.name == name && symbol.kind == SemanticSymbolKind::Keyword)
+//RS             }),
+//RS             "{name} must stay a contextual identifier, not a keyword"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn numeric_destination_conversions_and_parse_are_cataloged() {
+//RS     let symbols = SemanticSymbolIndex::language();
+//RS     assert!(symbols.lookup_qualified("Int.parse").is_some());
+//RS     assert!(symbols.lookup_qualified("Float.parse").is_some());
+//RS     let narrow = symbols
+//RS         .lookup_qualified("F32.from_float")
+//RS         .expect("F32 narrowing catalog entry");
+//RS     assert!(
+//RS         narrow.signature.ends_with("-> F32 !String"),
+//RS         "{}",
+//RS         narrow.signature
+//RS     );
+//RS     assert!(symbols.lookup_qualified("U8.from_u64").is_some());
+//RS     assert!(symbols.lookup_qualified("Float.from_i8").is_some());
+//RS     assert!(symbols.lookup_qualified("I64.from_f32").is_some());
+//RS     assert!(symbols.lookup_qualified("F64.from_u32").is_some());
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_distinct_and_unit_conversion_members_are_cataloged() {
+//RS     let src = r#"
+//RS #Numeric UserID :: distinct Int
+//RS #UnitFamily(Currency) { usd }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let path = temp_fixture("source_numeric_members.jet", src);
+//RS     let symbols = open_symbols(&path).expect("source semantic symbols");
+//RS 
+//RS     let user = symbols
+//RS         .lookup_qualified("UserID.from_u8")
+//RS         .expect("source distinct conversion member");
+//RS     assert_eq!(user.owner.as_deref(), Some("UserID"));
+//RS     assert_eq!(user.signature, "UserID.from_u8(value: U8) -> UserID");
+//RS 
+//RS     let unit = symbols
+//RS         .lookup_qualified("Usd.from_int")
+//RS         .expect("unit-family conversion member");
+//RS     assert_eq!(unit.owner.as_deref(), Some("Usd"));
+//RS 
+//RS     let user_offset = src.find("#Numeric UserID").unwrap();
+//RS     assert!(symbols
+//RS         .complete_visible_at(
+//RS             "from_u",
+//RS             Some("UserID"),
+//RS             jet_semindex::SemanticVisibilityAnchor {
+//RS                 module_path: path.to_string_lossy().as_ref(),
+//RS                 offset: Some(user_offset),
+//RS                 session_top_level: false,
+//RS             },
+//RS         )
+//RS         .iter()
+//RS         .any(|symbol| symbol.qualified_name == "UserID.from_u8"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn checked_text_contract_is_one_tooling_fact() {
+//RS     let src = r#"
+//RS #Error
+//RS enum PatternError { Bad }
+//RS 
+//RS Pattern :: distinct String
+//RS 
+//RS impl Pattern.CheckedText {
+//RS     type Error = PatternError
+//RS 
+//RS     fn check(text: String) PatternError! -[]> {
+//RS         return
+//RS     }
+//RS 
+//RS     fn encode_hole<T: Printable>(value: T) -[]> String {
+//RS         return ""
+//RS     }
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let path = temp_fixture("checked_text_contract.jet", src);
+//RS     let index = open(&path).expect("checked text semantic index");
+//RS     let definition = index
+//RS         .definitions()
+//RS         .iter()
+//RS         .find(|definition| definition.name == "Pattern")
+//RS         .expect("Pattern definition");
+//RS     assert_eq!(definition.nominal_base.as_deref(), Some("String"));
+//RS     let contract = definition
+//RS         .trait_contracts
+//RS         .iter()
+//RS         .find(|contract| contract.trait_name == "CheckedText")
+//RS         .expect("CheckedText contract");
+//RS     assert_eq!(contract.associated_types, vec![(
+//RS         "Error".to_string(),
+//RS         Some("PatternError".to_string()),
+//RS     )]);
+//RS     assert!(contract.methods.iter().any(|method| method.contains("check")));
+//RS     assert!(contract
+//RS         .methods
+//RS         .iter()
+//RS         .any(|method| method.contains("encode_hole")));
+//RS 
+//RS     let symbols = open_symbols(&path).expect("checked text semantic symbols");
+//RS     let symbol = symbols
+//RS         .lookup_qualified("Pattern")
+//RS         .expect("Pattern semantic symbol");
+//RS     assert!(symbol.signature.contains("type Pattern :: distinct String"));
+//RS     assert!(symbol.signature.contains("implements CheckedText"));
+//RS     assert!(symbol.signature.contains("type Error = PatternError"));
+//RS     assert!(symbol.signature.contains("encode_hole"));
+//RS 
+//RS     let json = index.to_json();
+//RS     assert!(json.contains("\"nominal_base\":\"String\""));
+//RS     assert!(json.contains("\"trait\":\"CheckedText\""));
+//RS     assert!(json.contains("\"associated_types\":[{\"name\":\"Error\""));
+//RS     assert!(index.dossier("Pattern").render_text().contains("trait contracts"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn affine_unit_point_and_delta_members_are_cataloged() {
+//RS     let src = r#"
+//RS #UnitFamily(Temperature, base: kelvin) {
+//RS     kelvin
+//RS     celsius(scale: 1, offset: 27315/100)
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let path = temp_fixture("source_affine_unit_members.jet", src);
+//RS     let symbols = open_symbols(&path).expect("source semantic symbols");
+//RS 
+//RS     assert!(symbols
+//RS         .lookup_qualified("CelsiusPoint.from_float")
+//RS         .is_some());
+//RS     assert!(symbols
+//RS         .lookup_qualified("CelsiusDelta.from_float")
+//RS         .is_some());
+//RS     assert!(symbols.lookup_qualified("Celsius.from_float").is_none());
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_visibility_orders_items_imports_and_builtins() {
+//RS     let builtin = fact(
+//RS         "builtin:keyword:answer",
+//RS         "answer",
+//RS         "answer",
+//RS         SemanticSymbolKind::Keyword,
+//RS         SemanticProvenance::Builtin {
+//RS             module: "syntax".to_string(),
+//RS         },
+//RS     );
+//RS     let import = fact(
+//RS         "import:test::api.answer::answer",
+//RS         "answer",
+//RS         "answer",
+//RS         SemanticSymbolKind::Function,
+//RS         SemanticProvenance::Session,
+//RS     );
+//RS     let item = fact(
+//RS         "fn:session::answer",
+//RS         "answer",
+//RS         "answer",
+//RS         SemanticSymbolKind::Function,
+//RS         SemanticProvenance::Session,
+//RS     );
+//RS     assert_eq!(
+//RS         SemanticSymbolIndex::new(vec![builtin.clone(), import.clone()])
+//RS             .resolve_visible("answer")
+//RS             .unwrap()
+//RS             .identity,
+//RS         import.identity
+//RS     );
+//RS     assert_eq!(
+//RS         SemanticSymbolIndex::new(vec![builtin, import, item.clone()])
+//RS             .resolve_visible("answer")
+//RS             .unwrap()
+//RS             .identity,
+//RS         item.identity
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_visibility_uses_current_module_context() {
+//RS     let mut current = fact(
+//RS         "fn:current::answer",
+//RS         "answer",
+//RS         "answer",
+//RS         SemanticSymbolKind::Function,
+//RS         SemanticProvenance::Source {
+//RS             module_path: "current.jet".to_string(),
+//RS         },
+//RS     );
+//RS     current.module_path = "current.jet".to_string();
+//RS     let mut foreign_local = fact(
+//RS         "local:other::answer",
+//RS         "answer",
+//RS         "answer",
+//RS         SemanticSymbolKind::Local,
+//RS         SemanticProvenance::Source {
+//RS             module_path: "other.jet".to_string(),
+//RS         },
+//RS     );
+//RS     foreign_local.module_path = "other.jet".to_string();
+//RS     let index = SemanticSymbolIndex::new(vec![current.clone(), foreign_local]);
+//RS     assert_eq!(
+//RS         index
+//RS             .resolve_visible_in("answer", Some("current.jet"))
+//RS             .unwrap()
+//RS             .identity,
+//RS         current.identity
+//RS     );
+//RS     assert_eq!(
+//RS         index
+//RS             .complete_visible_in("ans", None, Some("current.jet"))
+//RS             .len(),
+//RS         1
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_visibility_retains_explicit_qualified_alternatives() {
+//RS     let index = SemanticSymbolIndex::new(vec![
+//RS         fact(
+//RS             "method:List.answer",
+//RS             "answer",
+//RS             "List.answer",
+//RS             SemanticSymbolKind::Member,
+//RS             SemanticProvenance::Builtin {
+//RS                 module: "core".to_string(),
+//RS             },
+//RS         ),
+//RS         fact(
+//RS             "method:Map.answer",
+//RS             "answer",
+//RS             "Map.answer",
+//RS             SemanticSymbolKind::Member,
+//RS             SemanticProvenance::Builtin {
+//RS                 module: "core".to_string(),
+//RS             },
+//RS         ),
+//RS     ]);
+//RS     assert_eq!(
+//RS         index.resolve_visible("List.answer").unwrap().identity,
+//RS         "method:List.answer"
+//RS     );
+//RS     let qualified = index.complete_visible("", Some("List"));
+//RS     assert_eq!(qualified.len(), 1);
+//RS     assert_eq!(qualified[0].identity, "method:List.answer");
+//RS     assert!(index.lookup_identity("method:Map.answer").is_some());
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_schema_version() {
+//RS     // D-META-REFLECT2 adds availability states to callable facts.
+//RS     assert_eq!(SCHEMA_VERSION, 20);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_projects_arithmetic_policy_and_exact_scope() {
+//RS     let path = temp_fixture(
+//RS         "arithmetic_policy.jet",
+//RS         r#"fn run() {
+//RS     #Arithmetic(.Wrapping) {
+//RS         value :: U8{250} + U8{10}
+//RS     }
+//RS }
+//RS "#,
+//RS     );
+//RS     let index = open(&path).expect("arithmetic policy indexes");
+//RS     let operation = index
+//RS         .arithmetic()
+//RS         .first()
+//RS         .expect("arithmetic operation fact");
+//RS     assert_eq!(operation.operation, "add");
+//RS     assert_eq!(operation.policy, "Wrapping");
+//RS     assert!(operation.scope_span.start < operation.operation_span.start);
+//RS     let json = index.to_json();
+//RS     assert!(json.contains("\"arithmetic\":[{"));
+//RS     assert!(json.contains("\"policy\":\"Wrapping\""));
+//RS 
+//RS     let (diagnostics, bundle, facts) =
+//RS         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS     let db = build_symbol_db(&bundle.expect("checked bundle"), &facts);
+//RS     let hover = db
+//RS         .hover_at(path.to_str().unwrap(), operation.operation_span.start)
+//RS         .expect("arithmetic hover");
+//RS     assert!(hover.contains("fixed-width add: .Wrapping"), "{hover}");
+//RS     assert!(hover.contains("scope = "), "{hover}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_projects_terminal_and_reachability_graph() {
+//RS     let path = temp_fixture(
+//RS         "terminal_state_graph.jet",
+//RS         r#"
+//RS struct Door {
+//RS     state { Closed, Open, Orphan }
+//RS }
+//RS impl Door {
+//RS     #Transition(_, Closed) fn close() -> Door -> Door{}
+//RS     #Transition(Closed, Open) fn open(self: ^Door) -> Door -> self
+//RS     #Transition(Closed, Closed) fn hold(self: ^Door) -> Door -> self
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let index = open(&path).expect("state graph indexes");
+//RS     let graph = index
+//RS         .state_graphs()
+//RS         .iter()
+//RS         .find(|graph| graph.owner == "Door")
+//RS         .expect("Door graph");
+//RS     let closed = graph
+//RS         .states
+//RS         .iter()
+//RS         .find(|state| state.name == "Closed")
+//RS         .unwrap();
+//RS     let open_state = graph
+//RS         .states
+//RS         .iter()
+//RS         .find(|state| state.name == "Open")
+//RS         .unwrap();
+//RS     let orphan = graph
+//RS         .states
+//RS         .iter()
+//RS         .find(|state| state.name == "Orphan")
+//RS         .unwrap();
+//RS     assert!(!closed.terminal);
+//RS     assert!(open_state.terminal);
+//RS     assert_eq!(closed.reachable, Some(true));
+//RS     assert_eq!(open_state.reachable, Some(true));
+//RS     assert_eq!(orphan.reachable, Some(false));
+//RS     assert!(index.to_json().contains("\"state_graphs\":[{"));
+//RS 
+//RS     let dossier = index.dossier("Door");
+//RS     assert_eq!(dossier.state_graphs.len(), 1);
+//RS     assert!(dossier.render_text().contains("Open (terminal; reachable)"));
+//RS     assert!(dossier.to_json().contains("\"terminal\":true"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_hover_projects_terminal_and_reachability_facts() {
+//RS     let path = temp_fixture(
+//RS         "terminal_state_hover.jet",
+//RS         r#"struct Door {
+//RS     state { Closed, Open, Orphan }
+//RS }
+//RS impl Door {
+//RS     #Transition(_, Closed) fn new() -[]> Door { return Door{} }
+//RS     #Transition(Closed, Open) fn open(self: ^Door) -[]> Door { return self }
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let (diagnostics, bundle, facts) =
+//RS         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+//RS     assert!(diagnostics.is_empty(), "{diagnostics:?}");
+//RS     let bundle = bundle.expect("checked bundle");
+//RS     let db = build_symbol_db(&bundle, &facts);
+//RS     let closed = db
+//RS         .hover
+//RS         .iter()
+//RS         .find(|hover| hover.text.contains("Door.State.Closed"))
+//RS         .expect("Closed hover");
+//RS     assert!(closed.text.contains("nonterminal; reachable"), "{closed:?}");
+//RS     let orphan = db
+//RS         .hover
+//RS         .iter()
+//RS         .find(|hover| hover.text.contains("Door.State.Orphan"))
+//RS         .expect("Orphan hover");
+//RS     assert!(orphan.text.contains("terminal; unreachable"), "{orphan:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_state_symbols_keep_their_struct_owner() {
+//RS     let path = temp_fixture(
+//RS         "state_owner_symbols.jet",
+//RS         r#"
+//RS struct Door {
+//RS     state { Closed, Open }
+//RS }
+//RS impl Door {
+//RS     #Transition(_, Door.State.Closed) fn new() -[]> Door { return Door{} }
+//RS     #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door { return self }
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let index = open(&path).expect("state symbols index");
+//RS     let closed = index
+//RS         .definitions()
+//RS         .iter()
+//RS         .find(|definition| definition.qualified_name.ends_with("Door.State.Closed"))
+//RS         .expect("owning struct state definition");
+//RS     assert!(matches!(
+//RS         &closed.kind,
+//RS         SymbolKind::EnumVariant { parent } if parent == "Door.State"
+//RS     ));
+//RS     let closed_span = closed.def_span;
+//RS     let closed_qualified_name = closed.qualified_name.clone();
+//RS     let marker_reference = index
+//RS         .references_to("Closed")
+//RS         .into_iter()
+//RS         .find(|reference| {
+//RS             reference
+//RS                 .target
+//RS                 .as_ref()
+//RS                 .is_some_and(|target| target.def_span == closed_span)
+//RS         })
+//RS         .expect("qualified marker reference resolves to the state section");
+//RS     assert_eq!(
+//RS         marker_reference.target.as_ref().unwrap().def_span,
+//RS         closed_span
+//RS     );
+//RS     let source = fs::read_to_string(&path).expect("read state symbols fixture");
+//RS     assert_eq!(
+//RS         &source[marker_reference.span.start..marker_reference.span.end],
+//RS         "Closed"
+//RS     );
+//RS     assert!(index.to_json().contains(&format!(
+//RS         "\"name\":\"{closed_qualified_name}\""
+//RS     )));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_reconstructs_checked_output_callable() {
+//RS     let path = fixture("tooling/output_callable.jet");
+//RS     let index = open(&path).expect("Output example indexes");
+//RS     let output = index.outputs().first().expect("resolved Output fact");
+//RS     assert_eq!(output.binding, "app");
+//RS     assert_eq!(output.kind, "Executable");
+//RS     assert_eq!(output.name, "checked-output");
+//RS     assert_eq!(output.entry.name, "launch");
+//RS     assert!(output.entry.identity.ends_with("::launch"));
+//RS     assert_eq!(output.entry.failure_contract, "!Err");
+//RS     assert_eq!(output.entry.failure_source, "implicit default !Err");
+//RS     assert_eq!(output.entry.authority, "safe-jet");
+//RS     assert_ne!(output.entry.definition_span, output.entry.reference_span);
+//RS     let json = index.to_json();
+//RS     for field in [
+//RS         "\"outputs\":[{",
+//RS         "\"entry\":{\"identity\"",
+//RS         "\"failure_contract\":\"!Err\"",
+//RS         "\"failure_source\":\"implicit default !Err\"",
+//RS         "\"authority\":\"safe-jet\"",
+//RS         "\"effects\":[\"IO\"]",
+//RS     ] {
+//RS         assert!(
+//RS             json.contains(field),
+//RS             "semindex JSON missing {field}: {json}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_inspect_semindex_reports_checked_output() {
+//RS     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args([
+//RS             "inspect",
+//RS             "semindex",
+//RS             fixture("tooling/output_callable.jet").to_str().unwrap(),
+//RS             "--json",
+//RS         ])
+//RS         .output()
+//RS         .expect("jet inspect semindex");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let json = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(json.contains("\"outputs\":[{\"binding\":\"app\""), "{json}");
+//RS     assert!(
+//RS         json.contains("\"identity\":\"output_callable::launch\""),
+//RS         "{json}"
+//RS     );
+//RS     assert!(json.contains("\"failure_source\":\"implicit default !Err\""), "{json}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_inspect_semindex_reports_explicit_failure_contract() {
+//RS     let path = temp_fixture(
+//RS         "inspect_explicit_failure.jet",
+//RS         "#Error\nenum Problem { Bad }\nfn helper() -> Int Problem! { return Ok(1) }\nfn run() {}\n",
+//RS     );
+//RS     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["inspect", "semindex", path.to_str().unwrap(), "--json"])
+//RS         .output()
+//RS         .expect("jet inspect semindex");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let json = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(json.contains("\"failure_contract\":\"Int !Problem\""), "{json}");
+//RS     assert!(json.contains("\"failure_source\":\"explicit !Problem\""), "{json}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_symbols_carry_shared_docs_and_provenance() {
+//RS     let src = r#"
+//RS /// Scores one name.
+//RS /// Example: score("Ada")
+//RS fn score(name: String) -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     local_total :: score("Ada")
+//RS     print(local_total)
+//RS }
+//RS "#;
+//RS     let path = temp_fixture("semantic_docs.jet", src);
+//RS     let symbols = open_symbols(&path).expect("semantic symbols");
+//RS     // #1801 (one name ledger): a root scope identity is the module alias — the
+//RS     // sanitized file stem — never the on-disk path.
+//RS     let score = symbols
+//RS         .lookup_identity("fn:module:semantic_docs::score")
+//RS         .expect("score identity");
+//RS     assert_eq!(
+//RS         score.signature,
+//RS         "fn score(name: String) -> Int\nfailure: Int (implicit default Err!)"
+//RS     );
+//RS     assert_eq!(score.summary, "Scores one name.");
+//RS     assert_eq!(score.examples, vec!["score(\"Ada\")"]);
+//RS     assert!(matches!(
+//RS         score.provenance,
+//RS         SemanticProvenance::Source { .. }
+//RS     ));
+//RS 
+//RS     let local = symbols.lookup("local_total");
+//RS     assert_eq!(local.len(), 1);
+//RS     assert_eq!(local[0].kind, SemanticSymbolKind::Local);
+//RS }
+//RS 
+//RS #[test]
+//RS fn tracked_float_symbol_exposes_its_binding_site() {
+//RS     let src = "fn run() {\n    #Track speed :: 3.5\n    origin :: prep { speed.$origin }\n    print(origin?.source ?? \"missing\")\n}\n";
+//RS     let path = temp_fixture("tracked_float_binding.jet", src);
+//RS     let symbols = open_symbols(&path).expect("tracked-value semantic symbols");
+//RS     let speed = symbols
+//RS         .lookup("speed")
+//RS         .into_iter()
+//RS         .find(|symbol| symbol.kind == SemanticSymbolKind::Local)
+//RS         .expect("tracked local");
+//RS     let span = speed.span.expect("tracked binding span");
+//RS     let binding_start = src.find("speed ::").expect("binding name");
+//RS 
+//RS     assert_eq!(speed.signature, "speed: Float");
+//RS     assert_eq!(span.start, binding_start);
+//RS     assert_eq!(&src[span.start..span.end], "speed");
+//RS 
+//RS     let origin = symbols
+//RS         .lookup("origin")
+//RS         .into_iter()
+//RS         .find(|symbol| symbol.kind == SemanticSymbolKind::Local)
+//RS         .expect("origin fact binding");
+//RS     assert_eq!(origin.signature, "origin: OriginInfo?");
+//RS 
+//RS     let index = open(&path).expect("tracked-value semindex");
+//RS     let origin_read = index
+//RS         .references_to("origin")
+//RS         .into_iter()
+//RS         .find_map(|reference| reference.fact.as_ref())
+//RS         .expect("typed origin semindex reference");
+//RS     assert_eq!(origin_read.name, "origin");
+//RS     assert_eq!(origin_read.kind, "Origin");
+//RS     assert_eq!(origin_read.type_name, "OriginInfo?");
+//RS     assert!(index.to_json().contains(
+//RS         "\"fact\":{\"name\":\"origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}"
+//RS     ));
+//RS     let fact_symbol = symbols
+//RS         .lookup("origin")
+//RS         .into_iter()
+//RS         .find(|symbol| symbol.signature == "@origin: OriginInfo?")
+//RS         .expect("typed origin semantic symbol");
+//RS     assert_eq!(fact_symbol.kind, SemanticSymbolKind::Member);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_symbols_keep_module_and_member_collisions_distinct() {
+//RS     let src = r#"
+//RS module first {
+//RS     struct Item {
+//RS         value: Int
+//RS     }
+//RS }
+//RS 
+//RS module second {
+//RS     struct Item {
+//RS         value: String
+//RS     }
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let path = temp_fixture("semantic_collisions.jet", src);
+//RS     let symbols = open_symbols(&path).expect("semantic symbols");
+//RS     let items = symbols.lookup("Item");
+//RS     assert_eq!(items.len(), 2, "same spelling must retain module identity");
+//RS     assert_ne!(items[0].identity, items[1].identity);
+//RS     let values = symbols.lookup_member("Item", "value");
+//RS     assert_eq!(
+//RS         values.len(),
+//RS         2,
+//RS         "same member spelling must retain owner identity"
+//RS     );
+//RS     assert_ne!(values[0].identity, values[1].identity);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_symbols_include_language_builtins() {
+//RS     let path = temp_fixture("semantic_builtins.jet", "fn run() {}\n");
+//RS     let symbols = open_symbols(&path).expect("semantic symbols");
+//RS     let filter = symbols
+//RS         .lookup_qualified("List.filter")
+//RS         .expect("List.filter");
+//RS     assert_eq!(filter.signature, "List.filter(f: fn(T) -> Bool) List<T>");
+//RS     assert_eq!(filter.summary, "Keeps items where f(item) is true.");
+//RS     assert!(matches!(
+//RS         filter.provenance,
+//RS         SemanticProvenance::Builtin { .. }
+//RS     ));
+//RS     assert!(symbols
+//RS         .complete("fil", Some("List"))
+//RS         .iter()
+//RS         .any(|s| s.name == "filter"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_symbols_index_value_tail_callable() {
+//RS     let path = temp_fixture(
+//RS         "value_tail_callable.jet",
+//RS         r#"
+//RS fn label(value: Int) -> String {
+//RS     if value == {
+//RS         1 -> { "one" }
+//RS         else -> { "other" }
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(label(1))
+//RS }
+//RS "#,
+//RS     );
+//RS     let symbols = open_symbols(&path).expect("value-tail callable should index");
+//RS     let label = symbols
+//RS         .lookup("label")
+//RS         .into_iter()
+//RS         .find(|symbol| symbol.kind == SemanticSymbolKind::Function)
+//RS         .expect("label function fact");
+//RS     assert!(
+//RS         label.signature.contains("value: Int"),
+//RS         "{}",
+//RS         label.signature
+//RS     );
+//RS     assert!(label.signature.contains("String"), "{}", label.signature);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semantic_symbols_include_module_and_selected_imports() {
+//RS     let root = std::env::temp_dir().join(format!("jet_semantic_imports_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&root);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(
+//RS         root.join("library.jet"),
+//RS         "pub fn score(name: String) -> Int { return 1 }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let main = root.join("main.jet");
+//RS     fs::write(
+//RS         &main,
+//RS         "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() { print(imported_score(\"Ada\")) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let symbols = open_symbols(&main).expect("import symbols");
+//RS     assert_eq!(symbols.lookup("api").len(), 1);
+//RS     let imported = symbols.lookup("imported_score");
+//RS     assert_eq!(imported.len(), 1);
+//RS     assert!(imported[0].identity.starts_with("import:"));
+//RS     assert!(imported[0].signature.contains("score(name: String) Int"));
+//RS     fs::remove_dir_all(root).ok();
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_hello_json_shape() {
+//RS     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
+//RS     let json = idx.to_json();
+//RS     assert!(json.starts_with('{'));
+//RS     assert!(json.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
+//RS     assert!(json.contains("\"definition_facts\""));
+//RS     assert!(json.contains("\"definitions\""));
+//RS     assert!(json.contains("\"instances\""));
+//RS     assert!(json.contains("\"identity\""));
+//RS     assert!(json.contains("\"scope_identity\""));
+//RS     assert!(json.contains("\"members\""));
+//RS     assert!(json.contains("\"run\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_identity_stable_across_reorder() {
+//RS     let a = r#"
+//RS module math {
+//RS     pub fn double(n: Int) -> Int {
+//RS         return n * 2
+//RS     }
+//RS }
+//RS 
+//RS struct Point {
+//RS     x: Int
+//RS     y: Int
+//RS 
+//RS     fn sum(self) -> Int {
+//RS         return self.x + self.y
+//RS     }
+//RS }
+//RS 
+//RS impl Point {
+//RS     fn origin() -> Point {
+//RS         return Point.{x: 0, y: 0}
+//RS     }
+//RS }
+//RS 
+//RS enum Light {
+//RS     Red
+//RS     Green
+//RS }
+//RS 
+//RS fn helper(p: Point) -> Int {
+//RS     return p.sum()
+//RS }
+//RS 
+//RS fn run() {
+//RS     p :: Point.origin()
+//RS     print(helper(p))
+//RS }
+//RS "#;
+//RS     let b = r#"
+//RS enum Light {
+//RS     Red
+//RS     Green
+//RS }
+//RS 
+//RS fn helper(p: Point) -> Int {
+//RS     return p.sum()
+//RS }
+//RS 
+//RS struct Point {
+//RS     x: Int
+//RS     y: Int
+//RS 
+//RS     fn sum(self) -> Int {
+//RS         return self.x + self.y
+//RS     }
+//RS }
+//RS 
+//RS module math {
+//RS     pub fn double(n: Int) -> Int {
+//RS         return n * 2
+//RS     }
+//RS }
+//RS 
+//RS impl Point {
+//RS     fn origin() -> Point {
+//RS         return Point.{x: 0, y: 0}
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     p :: Point.origin()
+//RS     print(helper(p))
+//RS }
+//RS "#;
+//RS     let path = temp_fixture("identity_reorder.jet", a);
+//RS     let before = open(&path).expect("first fixture indexes");
+//RS     fs::write(&path, b).expect("rewrite semindex fixture");
+//RS     let after = open(&path).expect("reordered fixture indexes");
+//RS 
+//RS     let mut before_ids: Vec<String> = before
+//RS         .definitions()
+//RS         .iter()
+//RS         .map(|d| d.identity.clone())
+//RS         .collect();
+//RS     let mut after_ids: Vec<String> = after
+//RS         .definitions()
+//RS         .iter()
+//RS         .map(|d| d.identity.clone())
+//RS         .collect();
+//RS     before_ids.sort();
+//RS     after_ids.sort();
+//RS     assert_eq!(before_ids, after_ids);
+//RS 
+//RS     assert!(before_ids.iter().any(|id| id.contains("module:")));
+//RS     assert!(before_ids.iter().any(|id| id.contains("fn:")));
+//RS     assert!(before_ids
+//RS         .iter()
+//RS         .any(|id| id.contains("type:") && id.contains("Point")));
+//RS     assert!(before_ids
+//RS         .iter()
+//RS         .any(|id| id.contains("field:") && id.contains("Point.x")));
+//RS     assert!(before_ids
+//RS         .iter()
+//RS         .any(|id| id.contains("variant:") && id.contains("Light.Red")));
+//RS     assert!(before_ids
+//RS         .iter()
+//RS         .any(|id| id.contains("method:") && id.contains("Point.sum")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn returned_view_provenance_is_structured_and_changes_signature_id() {
+//RS     let path = temp_fixture(
+//RS         "view_provenance.jet",
+//RS         "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {\n    if first { return left[0..1] }\n    return right[0..1]\n}\nfn run() {}\n",
+//RS     );
+//RS     let union = open(&path).expect("multi-source view provenance indexes");
+//RS     let pick = union.lookup("pick").expect("pick definition");
+//RS     assert!(matches!(pick.kind, SymbolKind::Function { .. }));
+//RS     assert_eq!(pick.view_provenance.len(), 1);
+//RS     let provenance = &pick.view_provenance[0];
+//RS     assert!(provenance.output_path.is_empty());
+//RS     assert_eq!(provenance.sources.len(), 2);
+//RS     assert_eq!(provenance.sources[0].source, ViewSourceFact::Parameter(0));
+//RS     assert_eq!(
+//RS         provenance.sources[0].projections,
+//RS         vec![ViewProjectionFact::Range]
+//RS     );
+//RS     assert_eq!(provenance.sources[1].source, ViewSourceFact::Parameter(1));
+//RS     assert_eq!(
+//RS         provenance.sources[1].projections,
+//RS         vec![ViewProjectionFact::Range]
+//RS     );
+//RS     assert!(!provenance.mutable);
+//RS     let union_signature = union
+//RS         .definition_facts()
+//RS         .iter()
+//RS         .find(|fact| fact.name == "pick")
+//RS         .unwrap()
+//RS         .signature_id
+//RS         .clone();
+//RS     let json = union.to_json();
+//RS     assert!(json.contains("\"view_provenance\":[{\"output_path\":[],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}"));
+//RS     assert!(json.contains("\"source\":{\"kind\":\"parameter\",\"index\":1}"));
+//RS     assert!(json.contains("\"projections\":[{\"kind\":\"range\"}]"));
+//RS 
+//RS     fs::write(
+//RS         &path,
+//RS         "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> { return right[0..1] }\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let right = open(&path).expect("parameter-1 view provenance indexes");
+//RS     let right_pick = right.lookup("pick").expect("pick definition");
+//RS     assert_eq!(
+//RS         right_pick.view_provenance[0].canonical(),
+//RS         "slot:$;parameter:1;access:read;path:range"
+//RS     );
+//RS     let right_signature = &right
+//RS         .definition_facts()
+//RS         .iter()
+//RS         .find(|fact| fact.name == "pick")
+//RS         .unwrap()
+//RS         .signature_id;
+//RS     assert_ne!(&union_signature, right_signature);
+//RS }
+//RS 
+//RS #[test]
+//RS fn aggregate_view_provenance_preserves_slots_and_changes_signature_id() {
+//RS     let source = |right_owner: &str| {
+//RS         format!(
+//RS             r#"
+//RS struct Pair {{ left: View<Int>, right: View<Int> }}
+//RS 
+//RS fn pair(left: [Int], right: [Int]) -> Pair {{
+//RS     left_view :: left[0..1]
+//RS     right_view :: {right_owner}[0..1]
+//RS     return Pair.{{ left: left_view, right: right_view }}
+//RS }}
+//RS 
+//RS fn run() {{}}
+//RS "#
+//RS         )
+//RS     };
+//RS     let path = temp_fixture("aggregate_view_provenance.jet", &source("right"));
+//RS     let distinct = open(&path).expect("aggregate view provenance indexes");
+//RS     let pair = distinct.lookup("pair").expect("pair definition");
+//RS     assert_eq!(pair.view_provenance.len(), 2);
+//RS     assert_eq!(pair.view_provenance[0].output_path, vec!["left"]);
+//RS     assert_eq!(
+//RS         pair.view_provenance[0].sources[0].source,
+//RS         ViewSourceFact::Parameter(0)
+//RS     );
+//RS     assert_eq!(pair.view_provenance[1].output_path, vec!["right"]);
+//RS     assert_eq!(
+//RS         pair.view_provenance[1].sources[0].source,
+//RS         ViewSourceFact::Parameter(1)
+//RS     );
+//RS     let distinct_signature = distinct
+//RS         .definition_facts()
+//RS         .iter()
+//RS         .find(|fact| fact.name == "pair")
+//RS         .unwrap()
+//RS         .signature_id
+//RS         .clone();
+//RS     let json = distinct.to_json();
+//RS     assert!(json.contains(
+//RS         "\"output_path\":[\"left\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}"
+//RS     ));
+//RS     assert!(json.contains(
+//RS         "\"output_path\":[\"right\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":1}"
+//RS     ));
+//RS 
+//RS     fs::write(&path, source("left")).unwrap();
+//RS     let changed = open(&path).expect("changed aggregate view provenance indexes");
+//RS     let changed_signature = &changed
+//RS         .definition_facts()
+//RS         .iter()
+//RS         .find(|fact| fact.name == "pair")
+//RS         .unwrap()
+//RS         .signature_id;
+//RS     assert_ne!(&distinct_signature, changed_signature);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_structural_audit_reports_signature_change() {
+//RS     let a = r#"
+//RS struct Point {
+//RS     x: Int
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let b = r#"
+//RS struct Point {
+//RS     x: Float
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let path = temp_fixture("audit_change.jet", a);
+//RS     let before = open(&path).expect("first fixture indexes");
+//RS     fs::write(&path, b).expect("rewrite semindex fixture");
+//RS     let after = open(&path).expect("changed fixture indexes");
+//RS 
+//RS     let audit = before.structural_audit(&after);
+//RS     assert!(audit.added.is_empty());
+//RS     assert!(audit.removed.is_empty());
+//RS     assert!(audit.changed.iter().any(|id| id.contains("Point")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_structural_audit_tracks_callable_signature_changes() {
+//RS     let a = r#"
+//RS fn score(name: String) -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let b = r#"
+//RS fn score(name: String, bonus: Int) -> Float {
+//RS     return 1.0
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let path = temp_fixture("audit_callable_change.jet", a);
+//RS     let before = open(&path).expect("first fixture indexes");
+//RS     fs::write(&path, b).expect("rewrite semindex fixture");
+//RS     let after = open(&path).expect("changed fixture indexes");
+//RS 
+//RS     let audit = before.structural_audit(&after);
+//RS     assert!(
+//RS         !audit
+//RS             .added
+//RS             .iter()
+//RS             .any(|id| id.starts_with("fn:") && id.ends_with("::score")),
+//RS         "added: {:?}",
+//RS         audit.added
+//RS     );
+//RS     assert!(
+//RS         !audit
+//RS             .removed
+//RS             .iter()
+//RS             .any(|id| id.starts_with("fn:") && id.ends_with("::score")),
+//RS         "removed: {:?}",
+//RS         audit.removed
+//RS     );
+//RS     assert!(audit
+//RS         .changed
+//RS         .iter()
+//RS         .any(|id| id.starts_with("fn:") && id.ends_with("::score")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_unified_loop_slots_and_state_scope_are_structural() {
+//RS     let src = r#"fn run() {
+//RS     loop item in [1, 2, 3], 2 {
+//RS         print(item)
+//RS     }
+//RS     loop cursor in 0..<1 {
+//RS         print(cursor)
+//RS     }
+//RS }
+//RS "#;
+//RS     let path = temp_fixture("unified_loop_slots.jet", src);
+//RS     let index = open(&path).expect("unified loops index");
+//RS     let slots = index
+//RS         .structural_nodes()
+//RS         .iter()
+//RS         .map(|node| node.slot.as_str())
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     for slot in [
+//RS         "source",
+//RS         "stride",
+//RS         "init",
+//RS         "condition",
+//RS         "afterthought",
+//RS         "body",
+//RS     ] {
+//RS         assert!(
+//RS             slots.contains(slot),
+//RS             "missing loop structural slot `{slot}`: {slots:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     let inner_def = index
+//RS         .definitions()
+//RS         .iter()
+//RS         .filter(|def| def.name == "cursor")
+//RS         .max_by_key(|def| def.def_span.start)
+//RS         .expect("inner state definition");
+//RS     for reference in index.references_to("cursor") {
+//RS         assert_eq!(
+//RS             reference.target.as_ref().unwrap().def_span,
+//RS             inner_def.def_span
+//RS         );
+//RS     }
+//RS 
+//RS     let out_of_scope = jet::check_document(
+//RS         "state_scope.jet",
+//RS         "fn run() {\n    loop cursor in 0..<1 {}\n    print(cursor)\n}\n",
+//RS     );
+//RS     assert!(
+//RS         out_of_scope
+//RS             .iter()
+//RS             .any(|diagnostic| { diagnostic.code == "E0107" && diagnostic.what.contains("cursor") }),
+//RS         "state binding must end with the loop: {out_of_scope:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn definition_ancestry_identity_ignores_signature_and_body_shape() {
+//RS     let path = temp_fixture(
+//RS         "ancestry_identity.jet",
+//RS         "fn score(n: Int) -> Int { return n + 1 }\nfn run() { print(score(1)) }\n",
+//RS     );
+//RS     let before = open(&path).expect("first fixture indexes");
+//RS     fs::write(
+//RS         &path,
+//RS         "fn score(n: Float, bonus: Float) -> Float { return n * bonus }\nfn run() { print(score(1.0, 2.0)) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let after = open(&path).expect("changed fixture indexes");
+//RS     let before_score = before
+//RS         .definition_facts()
+//RS         .iter()
+//RS         .find(|f| f.name == "score")
+//RS         .unwrap();
+//RS     let after_score = after
+//RS         .definition_facts()
+//RS         .iter()
+//RS         .find(|f| f.name == "score")
+//RS         .unwrap();
+//RS     assert_eq!(before_score.stable_id, after_score.stable_id);
+//RS     assert_ne!(before_score.signature_id, after_score.signature_id);
+//RS     assert_ne!(before_score.content_id, after_score.content_id);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_effects_and_calls() {
+//RS     let idx = open(&fixture("effects/effects.jet")).expect("effects indexes");
+//RS     assert!(idx.lookup("report").is_some());
+//RS     assert!(!idx.call_edges().is_empty());
+//RS     let report_effects = idx.effect_of("report").expect("report has effects");
+//RS     assert!(!report_effects.inferred.is_empty() || !report_effects.direct.is_empty());
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_projects_omitted_inferred_effects() {
+//RS     let path = temp_fixture(
+//RS         "inferred_effect_signature.jet",
+//RS         "fn announce() { print(\"hello\") }\nfn run() { announce() }\n",
+//RS     );
+//RS     let index = open(&path).expect("inferred effects index");
+//RS     let announce = index.effect_of("announce").expect("announce effects");
+//RS     assert_eq!(announce.inferred, vec!["IO"]);
+//RS     assert!(
+//RS         announce.callees.is_empty(),
+//RS         "direct effect has no call edge"
+//RS     );
+//RS     assert_eq!(announce.provenance.len(), 1);
+//RS     assert_eq!(announce.provenance[0].effect, "IO");
+//RS     assert_eq!(announce.provenance[0].call_path, vec!["announce"]);
+//RS     assert_eq!(announce.provenance[0].spans.len(), 1);
+//RS     let run = index.effect_of("run").expect("run effects");
+//RS     assert_eq!(
+//RS         run.provenance[0].call_path,
+//RS         vec!["run", "inferred_effect_signature::announce"]
+//RS     );
+//RS     assert_eq!(run.provenance[0].spans.len(), 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_projects_inline_module_inferred_effects() {
+//RS     let path = temp_fixture(
+//RS         "inline_inferred_effect_signature.jet",
+//RS         "module inner { pub fn announce() { print(\"hello\") } }\nfn run() { inner.announce() }\n",
+//RS     );
+//RS     let symbols = open_symbols(&path).expect("inline inferred effects index");
+//RS     let announce = symbols.lookup("announce");
+//RS     assert_eq!(announce.len(), 1);
+//RS     assert!(
+//RS         announce[0].signature.contains("-[IO]>"),
+//RS         "{}",
+//RS         announce[0].signature
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
+//RS     let path = temp_fixture(
+//RS         "effect_provenance_origins.jet",
+//RS         "trait Shape { fn area(self) -[IO]> Int }\nfn dynamic(shape: Shape) -> Int { return shape.area() }\nfn apply(f: fn() -> Int) -> Int { return f() }\nfn stored(f: ^fn() -> Int) -> Int {\n    g :: f\n    return g()\n}\nfn run() {}\n",
+//RS     );
+//RS     let index = open(&path).expect("effect provenance index");
+//RS 
+//RS     let apply = index.effect_of("apply").expect("open callback effects");
+//RS     assert!(!apply.maximal);
+//RS     assert!(apply.inferred.is_empty());
+//RS     assert!(apply.provenance.is_empty());
+//RS 
+//RS     let stored = index.effect_of("stored").expect("stored callback effects");
+//RS     assert!(stored.maximal);
+//RS     assert_eq!(stored.provenance.len(), stored.inferred.len());
+//RS     assert!(stored
+//RS         .provenance
+//RS         .iter()
+//RS         .all(|origin| !origin.spans.is_empty()));
+//RS 
+//RS     let dynamic = index.effect_of("dynamic").expect("trait dispatch effects");
+//RS     let io = dynamic
+//RS         .provenance
+//RS         .iter()
+//RS         .find(|origin| origin.effect == "IO")
+//RS         .expect("IO provenance");
+//RS     assert_eq!(io.call_path.len(), 2);
+//RS     assert_eq!(io.spans.len(), 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_via_contracts_have_provenance_without_invocation() {
+//RS     let path = temp_fixture(
+//RS         "effect_via_provenance.jet",
+//RS         "fn bounded(act: fn() -[IO]>) -[via act]> {}\nfn open(act: fn()) -[via act]> {}\nfn run() {}\n",
+//RS     );
+//RS     let index = open(&path).expect("via provenance index");
+//RS 
+//RS     let bounded = index.effect_of("bounded").expect("bounded via effects");
+//RS     assert_eq!(bounded.inferred, vec!["IO"]);
+//RS     assert_eq!(bounded.provenance.len(), 1);
+//RS     assert_eq!(bounded.provenance[0].spans.len(), 1);
+//RS 
+//RS     let open = index.effect_of("open").expect("unbounded via effects");
+//RS     assert!(open.maximal);
+//RS     assert_eq!(open.provenance.len(), open.inferred.len());
+//RS     assert!(open
+//RS         .provenance
+//RS         .iter()
+//RS         .all(|origin| !origin.spans.is_empty()));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_preserves_via_effect_row_in_signatures() {
+//RS     let path = temp_fixture(
+//RS         "effect_via.jet",
+//RS         "fn invoke(act: fn() -[IO]>) -[via act]> { act() }\nfn run() {}\n",
+//RS     );
+//RS     let symbols = open_symbols(&path).expect("via function indexes");
+//RS     let invoke = symbols
+//RS         .lookup("invoke")
+//RS         .into_iter()
+//RS         .next()
+//RS         .expect("invoke symbol");
+//RS     assert_eq!(invoke.signature, "fn invoke(act: fn() -[IO]>) -[via act]>");
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_references() {
+//RS     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
+//RS     assert!(!idx.references_to("print").is_empty());
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_rename_sites_keep_definition_identity_in_json() {
+//RS     let path = temp_fixture(
+//RS         "rename_anchor_identity.jet",
+//RS         "fn helper() -> Int { return 1 }\nfn run() { print(helper()) }\n",
+//RS     );
+//RS     let index = open(&path).expect("rename anchor index");
+//RS     let definition = index
+//RS         .definitions()
+//RS         .iter()
+//RS         .find(|definition| definition.name == "helper")
+//RS         .expect("helper definition");
+//RS     let reference = index
+//RS         .references()
+//RS         .iter()
+//RS         .find(|reference| reference.name == "helper")
+//RS         .expect("helper reference");
+//RS     let target = reference.target.as_ref().expect("resolved helper target");
+//RS     assert_eq!(target.def_span, definition.def_span);
+//RS     assert_eq!(
+//RS         target.semantic_identity.as_deref(),
+//RS         Some(definition.identity.as_str())
+//RS     );
+//RS     assert!(index.to_json().contains("\"semantic_identity\":"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_indexes_generated_fenced_range_names() {
+//RS     let path = temp_fixture(
+//RS         "fenced_range_names.jet",
+//RS         "fn run() {\n    <: t1..t4 :> :: 1\n    print(<: t1, t2, t3, t4 :>)\n}\n",
+//RS     );
+//RS     let idx = open(&path).expect("fenced range fixture indexes");
+//RS     let generated = idx.lookup("t4").expect("generated t4 definition");
+//RS     assert!(matches!(
+//RS         generated.kind,
+//RS         SymbolKind::Local {
+//RS             mutable: false,
+//RS             ty: Some(_)
+//RS         }
+//RS     ));
+//RS     assert_eq!(idx.references_to("t4").len(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_indexes_loop_label_definition_and_dot_exit_references() {
+//RS     let path = temp_fixture(
+//RS         "loop_label_refs.jet",
+//RS         "fn run() {\n    outer :: loop {\n        if true { next(outer) }\n        break(outer)\n    }\n}\n",
+//RS     );
+//RS     let idx = open(&path).expect("loop label fixture indexes");
+//RS     let outer = idx.lookup("outer").expect("loop label definition");
+//RS     assert!(matches!(
+//RS         outer.kind,
+//RS         SymbolKind::Local {
+//RS             mutable: false,
+//RS             ty: None
+//RS         }
+//RS     ));
+//RS     assert_eq!(idx.references_to("outer").len(), 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_dossier_stitches_scattered_members() {
+//RS     let src = r#"
+//RS trait DrawThing {
+//RS     fn render(self) -> String ->
+//RS }
+//RS 
+//RS struct Widget {
+//RS     title: String
+//RS 
+//RS     fn label(self) -> String {
+//RS         return ~self.title
+//RS     }
+//RS }
+//RS 
+//RS impl Widget {
+//RS     fn size(self) -> Int {
+//RS         return 1
+//RS     }
+//RS }
+//RS 
+//RS impl Widget.DrawThing {
+//RS     fn render(self) -> String {
+//RS         return self.label()
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     w :: Widget.{title: "ok"}
+//RS     print(w.render())
+//RS }
+//RS "#;
+//RS     let path = temp_fixture("dossier_scattered.jet", src);
+//RS     let idx = open(&path).expect("dossier fixture indexes");
+//RS     let dossier = idx.dossier("Widget");
+//RS     let signatures: Vec<String> = dossier
+//RS         .members
+//RS         .iter()
+//RS         .map(|m| format!("{}:{}", m.name, m.signature))
+//RS         .collect();
+//RS     assert!(signatures.iter().any(|s| s == "title:title: String"));
+//RS     assert!(
+//RS         signatures
+//RS             .iter()
+//RS             .any(|s| s.contains("label:fn label() -> String")),
+//RS         "{signatures:?}"
+//RS     );
+//RS     assert!(signatures.iter().any(|s| s.contains("size:fn size() -> Int")));
+//RS     assert!(signatures
+//RS         .iter()
+//RS         .any(|s| s.contains("render:fn render() -> String")));
+//RS     let json = dossier.to_json();
+//RS     assert!(json.contains("\"target\":\"Widget\""));
+//RS     assert!(json.contains("\"trait_impl\""));
+//RS     assert!(json.contains("\"inherent_impl\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_dossier_preserves_method_call_contract() {
+//RS     let src = r#"
+//RS struct Client {
+//RS     host: String
+//RS }
+//RS 
+//RS impl Client {
+//RS     fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -> String {
+//RS         return host
+//RS     }
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     let path = temp_fixture("dossier_method_contract.jet", src);
+//RS     let dossier = open(&path)
+//RS         .expect("method contract fixture indexes")
+//RS         .dossier("Client");
+//RS     let connect = dossier
+//RS         .members
+//RS         .iter()
+//RS         .find(|member| member.name == "connect")
+//RS         .expect("connect method fact");
+//RS     assert!(
+//RS         connect.signature.contains("timeout seconds: Int"),
+//RS         "{}",
+//RS         connect.signature
+//RS     );
+//RS     assert!(
+//RS         connect.signature.contains("*, tls enabled: Bool"),
+//RS         "{}",
+//RS         connect.signature
+//RS     );
+//RS     assert!(
+//RS         connect.signature.contains("rest: ...String"),
+//RS         "{}",
+//RS         connect.signature
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn semindex_dossier_bypass_facts() {
+//RS     // D-LINTPOLICY1=A (the override law, card #505): every spelled bypass
+//RS     // — `#Unsafe(reason)` region, `#Unsafe(reason) fn`, `.drop(reason)`, and
+//RS     // `#[allow(lint)]` — surfaces as a fact in the dossier, program-wide.
+//RS     let src = r#"
+//RS struct Invoice {
+//RS     #allow(float_money)
+//RS     price: Float,
+//RS }
+//RS 
+//RS #Unsafe("caller must ensure the pointer is valid") fn risky_fn() {
+//RS     print("danger")
+//RS }
+//RS 
+//RS fn run() {
+//RS     #Unsafe("index checked against len") {
+//RS         print("audited")
+//RS     }
+//RS     #Unsafe("risky_fn's contract is upheld here") {
+//RS         risky_fn()
+//RS     }
+//RS     fetch_it().drop("telemetry only")
+//RS }
+//RS 
+//RS fn fetch_it() -> Int {
+//RS     return 1
+//RS }
+//RS "#;
+//RS     let path = temp_fixture("dossier_bypass_facts.jet", src);
+//RS     let idx = open(&path).expect("bypass-fact fixture indexes");
+//RS     let dossier = idx.dossier("run");
+//RS 
+//RS     let kinds: Vec<&str> = dossier
+//RS         .bypass_facts
+//RS         .iter()
+//RS         .map(|b| b.kind.as_str())
+//RS         .collect();
+//RS     assert!(
+//RS         kinds.contains(&"lint_allow"),
+//RS         "expected a lint_allow bypass fact, got: {kinds:?}"
+//RS     );
+//RS     assert!(
+//RS         kinds.contains(&"unsafe_region"),
+//RS         "expected an unsafe_region bypass fact, got: {kinds:?}"
+//RS     );
+//RS     assert!(
+//RS         kinds.contains(&"unsafe_fn"),
+//RS         "expected an unsafe_fn bypass fact, got: {kinds:?}"
+//RS     );
+//RS     assert!(
+//RS         kinds.contains(&"explicit_drop"),
+//RS         "expected an explicit_drop bypass fact, got: {kinds:?}"
+//RS     );
+//RS 
+//RS     let allow = dossier
+//RS         .bypass_facts
+//RS         .iter()
+//RS         .find(|b| b.kind.as_str() == "lint_allow")
+//RS         .expect("lint_allow fact present");
+//RS     assert_eq!(allow.site, "price");
+//RS     assert_eq!(allow.detail, "float_money");
+//RS 
+//RS     let drop = dossier
+//RS         .bypass_facts
+//RS         .iter()
+//RS         .find(|b| b.kind.as_str() == "explicit_drop")
+//RS         .expect("explicit_drop fact present");
+//RS     assert_eq!(drop.detail, "telemetry only");
+//RS 
+//RS     let json = dossier.to_json();
+//RS     assert!(json.contains("\"bypass_facts\""));
+//RS     assert!(json.contains("\"lint_allow\""));
+//RS 
+//RS     let text = dossier.render_text();
+//RS     assert!(text.contains("bypass facts"));
+//RS     assert!(text.contains("float_money"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_semindex_cli_json_smoke() {
+//RS     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+//RS     let path = fixture("basics/hello.jet");
+//RS     let out = std::process::Command::new(bin)
+//RS         .args(["inspect", "semindex", path.to_str().unwrap(), "--json"])
+//RS         .output()
+//RS         .expect("jet inspect semindex");
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let text = String::from_utf8_lossy(&out.stdout);
+//RS     assert_eq!(
+//RS         jet_foundation::MachineOutput::read_machine_output(&text).unwrap(),
+//RS         vec![jet_foundation::MachineOutput::MachineRecord::Status]
+//RS     );
+//RS     assert!(text.starts_with("{\"schema\":\"jet.status/v1\""));
+//RS     assert_eq!(
+//RS         text.matches("\"schema\":\"jet.status/v1\"").count(),
+//RS         1,
+//RS         "semindex must emit one status envelope, not nest a second one: {text}"
+//RS     );
+//RS     assert!(text.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn shape6_inspect_routes_and_bare_snapshots() {
+//RS     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+//RS     let help = std::process::Command::new(&bin)
+//RS         .arg("help")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(help.status.success());
+//RS     let help = String::from_utf8(help.stdout).unwrap();
+//RS     for group_name in ["inspect", "registry"] {
+//RS         let group = jet::CLI::command_group(group_name).unwrap();
+//RS         let group_label = jet::CLI::command_group_label(group_name);
+//RS         let expected_usage = group
+//RS             .actions
+//RS             .iter()
+//RS             .flat_map(|action| {
+//RS                 action
+//RS                     .usage
+//RS                     .lines()
+//RS                     .map(|usage| format!("  jet {} {:<48} {}\n", group.name, usage, action.summary))
+//RS             })
+//RS             .collect::<String>();
+//RS         assert!(
+//RS             help.contains(&format!("{group_label} Commands:\n{expected_usage}")),
+//RS             "jet help did not render exact {group_name} usage"
+//RS         );
+//RS 
+//RS         let group_help = std::process::Command::new(&bin)
+//RS             .args([group_name, "help"])
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(group_help.status.success());
+//RS         assert_eq!(
+//RS             String::from_utf8(group_help.stdout).unwrap(),
+//RS             format!("jet {group_name} — {}\n{expected_usage}", group.summary)
+//RS         );
+//RS         for action in group.actions {
+//RS             for usage in action.usage.lines() {
+//RS                 let command = format!("jet {} {usage}", group.name);
+//RS                 assert!(help.contains(&command), "jet help omitted {command}");
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     for verb in ["build", "run", "test", "fmt", "search"] {
+//RS         assert!(
+//RS             jet::CLI::is_canonical_top_level(verb),
+//RS             "jet {verb} must stay flat"
+//RS         );
+//RS         assert!(
+//RS             jet::CLI::moved_command(verb).is_none(),
+//RS             "jet {verb} must not redirect"
+//RS         );
+//RS     }
+//RS 
+//RS     for (verb, handler_text) in [
+//RS         ("schema", "`jet inspect schema` needs a verb"),
+//RS         ("expand", "`jet inspect expand` needs an entry file"),
+//RS         ("live", "jet inspect live needs a process id"),
+//RS         ("semindex", "`jet inspect semindex` needs an entry file"),
+//RS     ] {
+//RS         let grouped = std::process::Command::new(&bin)
+//RS             .args(["inspect", verb])
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             !grouped.status.success(),
+//RS             "jet inspect {verb} needs test input"
+//RS         );
+//RS         let stderr = String::from_utf8(grouped.stderr).unwrap();
+//RS         assert!(
+//RS             stderr.contains(handler_text),
+//RS             "jet inspect {verb}: {stderr}"
+//RS         );
+//RS 
+//RS         let bare = std::process::Command::new(&bin)
+//RS             .args([verb, "sentinel"])
+//RS             .output()
+//RS             .unwrap();
+//RS         assert_eq!(bare.status.code(), Some(2), "bare jet {verb}");
+//RS         assert_eq!(
+//RS             String::from_utf8(bare.stderr).unwrap(),
+//RS             format!(
+//RS                 "Error [E2101]: `{verb}` moved under `jet inspect`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet inspect {verb} sentinel`.\n"
+//RS             )
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 1152 tests/semindex.rs:1-1669
+
+// PORT-PENDING 1152 tests-semindex-module-group: tests/zed_extension_security.rs:1-331
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Structural security checks for the Zed extension.
+//RS //!
+//RS //! Zed owns worktree trust and executes the compiled extension outside the
+//RS //! Rust integration-test harness. Keep this check beside the other extension
+//RS //! configuration checks so a future edit cannot restore worktree PATH lookup.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS #[cfg(unix)]
+//RS use std::os::unix::fs::PermissionsExt;
+//RS #[cfg(unix)]
+//RS use std::process::Command;
+//RS 
+//RS 
+//RS fn repo_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn artifact_contains(artifact: &[u8], needle: &[u8]) -> bool {
+//RS     artifact.windows(needle.len()).any(|window| window == needle)
+//RS }
+//RS 
+//RS #[test]
+//RS fn zed_extension_keeps_hostile_worktree_path_out_of_the_server_command() {
+//RS     let root = repo_root().join("Tools/editors/zed");
+//RS     let source = fs::read_to_string(root.join("wasm-src/src/lib.rs"))
+//RS         .expect("Zed extension source must be present");
+//RS     let manifest = fs::read_to_string(root.join("extension.toml.in"))
+//RS         .expect("Zed extension manifest template must be present");
+//RS     let readme = fs::read_to_string(root.join("README.md")).expect("Zed README must be present");
+//RS     let artifact = fs::read(root.join("extension.wasm"))
+//RS         .expect("tracked Zed extension artifact must be present");
+//RS 
+//RS     // A hostile worktree may put `jet` earlier on the worktree PATH. The
+//RS     // extension must return the literal command identity that the manifest
+//RS     // approves; it must never ask Zed for an executable path from Worktree.
+//RS     assert!(
+//RS         source.contains(
+//RS             "command: \"jet\".to_string(),\n            args: vec![\"self\".to_string(), \"lsp\".to_string()]"
+//RS         ),
+//RS         "{source}"
+//RS     );
+//RS     assert!(!source.contains("worktree.which"), "worktree PATH lookup returned: {source}");
+//RS     assert!(!source.contains("shell_env"), "worktree environment lookup returned: {source}");
+//RS     assert!(!source.contains("root_path"), "worktree path lookup returned: {source}");
+//RS     assert!(manifest.contains("kind = \"process:exec\""), "{manifest}");
+//RS     assert!(manifest.contains("command = \"jet\""), "{manifest}");
+//RS     assert!(manifest.contains("args = [\"self\", \"lsp\"]"), "{manifest}");
+//RS     assert!(
+//RS         !artifact_contains(&artifact, b"worktree.which"),
+//RS         "tracked artifact still embeds worktree PATH lookup"
+//RS     );
+//RS     assert!(
+//RS         !artifact_contains(&artifact, b"/target/debug/jet"),
+//RS         "tracked artifact still embeds a worktree debug-binary fallback"
+//RS     );
+//RS 
+//RS     // The trust decision is made by Zed. Keep the operational contract
+//RS     // visible to users rather than implying that source-tree files are trust.
+//RS     assert!(readme.contains("worktree-trust gate"), "{readme}");
+//RS     assert!(readme.contains("does not call\n`Worktree::which`"), "{readme}");
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn vscode_untrusted_workspace_rejects_hostile_binary_and_shell_launches() {
+//RS     let scratch = common::Scratch::new("vscode-hostile-workspace");
+//RS     let workspace = scratch.join("untrusted workspace;$(touch vscode-injected)");
+//RS     let debug_dir = workspace.join("target/debug");
+//RS     fs::create_dir_all(&debug_dir).expect("create hostile workspace target");
+//RS     let binary = debug_dir.join("jet");
+//RS     fs::write(
+//RS         &binary,
+//RS         r#"#!/bin/sh
+//RS printf 'executed\n' > "$VSCODE_BINARY_MARKER"
+//RS "#,
+//RS     )
+//RS     .expect("write hostile workspace binary");
+//RS     let mut permissions = fs::metadata(&binary)
+//RS         .expect("stat hostile workspace binary")
+//RS         .permissions();
+//RS     permissions.set_mode(0o755);
+//RS     fs::set_permissions(&binary, permissions).expect("make hostile workspace binary executable");
+//RS 
+//RS     let run_file = workspace.join("src/hostile file.jet");
+//RS     fs::create_dir_all(run_file.parent().expect("run file parent"))
+//RS         .expect("create hostile workspace source directory");
+//RS     fs::write(&run_file, "fn run() {}\n").expect("write hostile workspace source");
+//RS     let binary_marker = scratch.join("vscode-binary-executed");
+//RS     let injection_marker = scratch.join("vscode-injected");
+//RS     let node_harness = r#"
+//RS     const fs = require("fs");
+//RS     const path = require("path");
+//RS     const Module = require("module");
+//RS 
+//RS     const workspace = process.env.WORKSPACE;
+//RS     const workspaceBinary = process.env.WORKSPACE_BINARY;
+//RS     const runFile = process.env.RUN_FILE;
+//RS     const clients = [];
+//RS     const terminals = [];
+//RS     const commands = new Map();
+//RS     let debugProvider;
+//RS     let debugFactory;
+//RS     let debugStarts = 0;
+//RS     let debugDescriptors = 0;
+//RS 
+//RS     function resolveCommand(command) {
+//RS       if (path.isAbsolute(command) || command.includes(path.sep)) {
+//RS         return command;
+//RS       }
+//RS       for (const directory of (process.env.PATH || "").split(path.delimiter)) {
+//RS         if (!directory) {
+//RS           continue;
+//RS         }
+//RS         const candidate = path.join(directory, command);
+//RS         try {
+//RS           fs.accessSync(candidate, fs.constants.X_OK);
+//RS           return candidate;
+//RS         } catch (_) {
+//RS           // Match the OS lookup: keep searching when this PATH entry is absent
+//RS           // or not executable.
+//RS         }
+//RS       }
+//RS       return command;
+//RS     }
+//RS const vscode = {
+//RS   workspace: {
+//RS     isTrusted: false,
+//RS     workspaceFolders: [{ uri: { fsPath: workspace } }],
+//RS     getConfiguration() {
+//RS       return {
+//RS         get(key) {
+//RS           if (key === "executablePath" || key === "languageServerPath") {
+//RS             return workspaceBinary;
+//RS           }
+//RS           return "";
+//RS         },
+//RS       };
+//RS     },
+//RS     createFileSystemWatcher() {
+//RS       return { dispose() {} };
+//RS     },
+//RS   },
+//RS   window: {
+//RS     createTerminal(options) {
+//RS       terminals.push(options);
+//RS       if (resolveCommand(options.shellPath) === workspaceBinary) {
+//RS         require("child_process").execFileSync(resolveCommand(options.shellPath), {
+//RS           env: process.env,
+//RS         });
+//RS       }
+//RS       return { show() {} };
+//RS     },
+//RS     showWarningMessage() {},
+//RS     showErrorMessage() {},
+//RS   },
+//RS   commands: {
+//RS     registerCommand(name, handler) {
+//RS       commands.set(name, handler);
+//RS       return { dispose() {} };
+//RS     },
+//RS   },
+//RS   debug: {
+//RS     registerDebugConfigurationProvider(_id, provider) {
+//RS       debugProvider = provider;
+//RS       return { dispose() {} };
+//RS     },
+//RS     registerDebugAdapterDescriptorFactory(_id, factory) {
+//RS       debugFactory = factory;
+//RS       return { dispose() {} };
+//RS     },
+//RS     startDebugging() {
+//RS       debugStarts += 1;
+//RS     },
+//RS   },
+//RS   Uri: {
+//RS     parse() {
+//RS       return { fsPath: runFile };
+//RS     },
+//RS     file(value) {
+//RS       return { fsPath: value };
+//RS     },
+//RS   },
+//RS   DebugAdapterExecutable: class {
+//RS     constructor(command, args, options) {
+//RS       debugDescriptors += 1;
+//RS       this.command = command;
+//RS       this.args = args;
+//RS       this.options = options;
+//RS     }
+//RS   },
+//RS };
+//RS 
+//RS const originalLoad = Module._load;
+//RS Module._load = function(request, parent, isMain) {
+//RS   if (request === "vscode") {
+//RS     return vscode;
+//RS   }
+//RS   if (request === "vscode-languageclient/node") {
+//RS     return {
+//RS       TransportKind: { stdio: "stdio" },
+//RS       LanguageClient: class {
+//RS         constructor(id, name, server, clientOptions) {
+//RS           this.id = id;
+//RS           this.name = name;
+//RS           this.server = server;
+//RS           this.clientOptions = clientOptions;
+//RS           clients.push(this);
+//RS         }
+//RS         start() {
+//RS           const command = resolveCommand(this.server.command);
+//RS           if (command === workspaceBinary) {
+//RS             require("child_process").execFileSync(command, {
+//RS               env: process.env,
+//RS             });
+//RS           }
+//RS           return Promise.resolve();
+//RS         }
+//RS         stop() {
+//RS           return Promise.resolve();
+//RS         }
+//RS       },
+//RS     };
+//RS   }
+//RS   return originalLoad.call(this, request, parent, isMain);
+//RS };
+//RS 
+//RS const manifest = JSON.parse(fs.readFileSync(process.env.PACKAGE, "utf8"));
+//RS const supported = manifest.capabilities?.untrustedWorkspaces?.supported;
+//RS if (supported !== false) {
+//RS   throw new Error("VS Code must disable activation for untrusted workspaces");
+//RS }
+//RS 
+//RS const extension = require(process.env.EXTENSION);
+//RS extension.activate({
+//RS   subscriptions: {
+//RS     push() {},
+//RS   },
+//RS });
+//RS const runFileCommand = commands.get("jet.runFile");
+//RS const testFileCommand = commands.get("jet.testFile");
+//RS if (typeof runFileCommand !== "function" || typeof testFileCommand !== "function") {
+//RS   throw new Error("Jet run/test commands were not registered");
+//RS }
+//RS runFileCommand("file:hostile");
+//RS testFileCommand("file:hostile");
+//RS const debugFileCommand = commands.get("jet.debugFile");
+//RS if (typeof debugFileCommand !== "function" || !debugProvider || !debugFactory) {
+//RS   throw new Error("Jet debug command/provider/factory were not registered");
+//RS }
+//RS debugFileCommand("file:hostile");
+//RS if (debugProvider.resolveDebugConfiguration(undefined, { program: runFile }) !== undefined) {
+//RS   throw new Error("untrusted activation resolved a debug configuration");
+//RS }
+//RS try {
+//RS   debugFactory.createDebugAdapterDescriptor({
+//RS     configuration: { request: "launch", program: runFile },
+//RS     workspaceFolder: { uri: { fsPath: workspace } },
+//RS   });
+//RS   throw new Error("untrusted activation created a debug descriptor");
+//RS } catch (error) {
+//RS   if (!String((error && error.message) || error).includes("trusted workspace")) {
+//RS     throw error;
+//RS   }
+//RS }
+//RS 
+//RS if (
+//RS   clients.length !== 0 ||
+//RS   terminals.length !== 0 ||
+//RS   debugStarts !== 0 ||
+//RS   debugDescriptors !== 0
+//RS ) {
+//RS   throw new Error("untrusted activation launched or described a process");
+//RS }
+//RS 
+//RS process.stdout.write([
+//RS   `manifest-untrusted-supported=${String(supported)}`,
+//RS   `lsp-launches=${clients.length}`,
+//RS   `terminal-launches=${terminals.length}`,
+//RS   `debug-starts=${debugStarts}`,
+//RS   `debug-descriptors=${debugDescriptors}`,
+//RS ].join("\n") + "\n");
+//RS "#;
+//RS     let path_env = format!(
+//RS         "{}:{}",
+//RS         debug_dir.display(),
+//RS         std::env::var_os("PATH")
+//RS             .map(|path| path.to_string_lossy().into_owned())
+//RS             .unwrap_or_default()
+//RS     );
+//RS     let output = Command::new("node")
+//RS         .current_dir(&scratch.path)
+//RS         .arg("-e")
+//RS         .arg(node_harness)
+//RS         .env("WORKSPACE", &workspace)
+//RS         .env("WORKSPACE_BINARY", &binary)
+//RS         .env("RUN_FILE", &run_file)
+//RS         .env("VSCODE_BINARY_MARKER", &binary_marker)
+//RS         .env("EXTENSION", repo_root().join("Tools/editors/vscode/extension.js"))
+//RS         .env("PACKAGE", repo_root().join("Tools/editors/vscode/package.json"))
+//RS         .env("PATH", path_env)
+//RS         .output()
+//RS         .expect("run VS Code extension with deterministic mocks");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "VS Code hostile-workspace harness failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS 
+//RS     let expected =
+//RS         "manifest-untrusted-supported=false\n\
+//RS lsp-launches=0\n\
+//RS terminal-launches=0\n\
+//RS debug-starts=0\n\
+//RS debug-descriptors=0\n";
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         expected,
+//RS         "untrusted workspace must refuse LSP and terminal process launches"
+//RS     );
+//RS     assert!(
+//RS         !binary_marker.exists(),
+//RS         "workspace-controlled jet binary was executed"
+//RS     );
+//RS     assert!(
+//RS         !injection_marker.exists(),
+//RS         "workspace path was reparsed as shell syntax"
+//RS     );
+//RS }
+// END-PORT-PENDING 1152 tests/zed_extension_security.rs:1-331
+

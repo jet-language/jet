@@ -1,0 +1,284 @@
+use core.encoding.hex as repl_history_hex
+use core.sys as repl_history_sys
+use core.files.runtime.kernel_path_components as repl_history_path
+
+// History.rs:1–259. Storage is the sole H1/H2 ReplHistoryHost, never a
+// pathname lock or a host callback. Native activation remains #4494 plus the
+// canonical runtime path/env/usize bindings; these are not passing facades.
+pub REPL_HISTORY_DEFAULT_LIMIT :: 2000
+
+pub struct ReplHistory {
+    rows: [String]
+    backend: ReplHistoryHost?
+    limit: Int
+}
+
+pub struct ReplHistoryOpen {
+    pub history: ReplHistory
+    pub warning: String?
+}
+
+pub struct ReplHistoryLoaded {
+    pub entries: [String]
+    pub corrupt: Bool
+}
+
+impl ReplHistory {
+    pub fn session_only() -> ReplHistory Never! { ReplHistory.fallback(REPL_HISTORY_DEFAULT_LIMIT) }
+
+    pub fn fallback(limit: Int) -> ReplHistory Never! {
+        ReplHistory{rows: [String]{}, backend: None, limit: limit}
+    }
+
+    pub fn open_from_env() -[Env, FS, Time, Time.Wait]> ReplHistoryOpen Never! {
+        // Exact ASCII-insensitive off; no trim, Unicode fold, or truthy parser.
+        if repl_history_sys.get("JET_REPL_HISTORY") == .Val(value) {
+            if repl_history_disabled(value) -> return ReplHistoryOpen{history: ReplHistory.session_only(), warning: None}
+        }
+        limit := REPL_HISTORY_DEFAULT_LIMIT
+        warnings := [String]{}
+        if repl_history_sys.get("JET_REPL_HISTORY_LIMIT") == .Val(raw) {
+            if repl_history_parse_limit(raw, repl_history_sys.usize_max()) == {
+                .Val(parsed) -> limit = parsed
+                .None -> &warnings.push("warning: JET_REPL_HISTORY_LIMIT={raw:Debug} is not a number; using {REPL_HISTORY_DEFAULT_LIMIT}")
+            }
+        }
+        root :: repl_history_state_root() ?? return repl_history_open_fallback(limit, "no platform state directory")
+        backend :: ReplHistoryHost.open(root) ?? return repl_history_open_fallback(limit, "{err}")
+        guard :: backend.lock() ?? {
+            close(^backend)
+            return repl_history_open_fallback(limit, "{err}")
+        }
+        loaded := repl_history_load_entries(backend) ?? {
+            close(^guard)
+            close(^backend)
+            return repl_history_open_fallback(limit, "{err}")
+        }
+        before :: loaded.entries.len()
+        repl_history_trim(&loaded.entries, limit)
+        if loaded.corrupt || loaded.entries.len() != before {
+            bytes :: repl_history_render(loaded.entries)
+            backend.rewrite(bytes) ?? {
+                close(^guard)
+                close(^backend)
+                // Rust69–85: failed opening rewrite is EMPTY fallback, unlike
+                // record failure which retains local entries and new input.
+                return repl_history_open_fallback(limit, "{err}")
+            }
+        }
+        close(^guard)
+        if loaded.corrupt -> &warnings.push("warning: corrupt history tail discarded; earlier REPL history was recovered")
+        warning :: if warnings.is_empty() -> None else -> Val(warnings.join("\n"))
+        ReplHistoryOpen{history: ReplHistory{rows: ^loaded.entries, backend: Val(^backend), limit: limit}, warning: ^warning}
+    }
+
+    // Borrow the owner, as Rust &[String]. No entry/vector clones.
+    pub fn entries(self) -> View<String> Never! { self.rows[0..<self.rows.len()] }
+    fn entry_window(self, index: Int) -> View<String> Never! { self.rows[index..index] }
+
+    pub fn record(&self, input: String) -[FS, Time, Time.Wait]> String? Never! {
+        if self.limit == 0 -> return None
+        if self.backend == .Val(backend) {
+            if repl_history_record_transaction(backend, input, self.limit) == {
+                .Ok(loaded) -> {
+                    self.rows = ^loaded.entries
+                    if loaded.corrupt -> return Val("warning: corrupt history tail discarded while saving; earlier REPL history was recovered")
+                    return None
+                }
+                .Err(error) -> {
+                    // Failed storage never replaces local state with a failed
+                    // disk snapshot. Retain local + this new successful turn.
+                    &self.rows.push(~input)
+                    repl_history_trim(&self.rows, self.limit)
+                    &self.disable_storage()
+                    return Val(repl_history_storage_fallback("{error}"))
+                }
+            }
+        }
+        &self.rows.push(~input)
+        repl_history_trim(&self.rows, self.limit)
+        None
+    }
+
+    pub fn search(self, needle: String) -> [View<String>] Never! {
+        matches := [View<String>]{}
+        index := self.rows.len()
+        loop index > 0 {
+            index -= 1
+            if self.rows[index].contains(needle) -> &matches.push(self.entry_window(index))
+        }
+        matches
+    }
+
+    pub fn clear(&self) -[FS, Time, Time.Wait]> IOError! {
+        if self.backend == .Val(backend) {
+            guard :: backend.lock() ?? return Err(err)
+            defer close(^guard)
+            // One ACTUAL native lock covers reread, unlink and directory fsync.
+            _ :: repl_history_load_entries(backend) ?? return Err(err)
+            backend.clear() ?? return Err(err)
+        }
+        // Every error above leaves the local owner unchanged.
+        &self.rows.clear()
+        Ok()
+    }
+
+    fn disable_storage(&self) -[FS]> Never! {
+        backend :: ^self.backend
+        self.backend = None
+        if backend == .Val(owned) -> close(^owned)
+    }
+}
+
+impl ReplHistory.Close {
+    pub fn close(^self) -[FS]> Never! {
+        history := ^self
+        &history.disable_storage()
+    }
+}
+
+fn repl_history_open_fallback(limit: Int, detail: String) -> ReplHistoryOpen Never! {
+    ReplHistoryOpen{history: ReplHistory.fallback(limit), warning: Val(repl_history_storage_fallback(detail))}
+}
+
+pub fn repl_history_storage_fallback(detail: String) -> String Never! {
+    "warning: REPL history storage is unavailable ({detail}); continuing with session-only history"
+}
+
+fn repl_history_record_transaction(backend: ReplHistoryHost, input: String, limit: Int) -[FS, Time, Time.Wait]> ReplHistoryLoaded IOError! {
+    guard :: backend.lock() ?? return Err(err)
+    defer close(^guard)
+    loaded := repl_history_load_entries(backend) ?? return Err(err)
+    &loaded.entries.push(~input)
+    repl_history_trim(&loaded.entries, limit)
+    bytes :: repl_history_render(loaded.entries)
+    backend.rewrite(bytes) ?? return Err(err)
+    Ok(^loaded)
+}
+
+pub fn repl_history_load_entries(backend: ReplHistoryHost) -[FS]> ReplHistoryLoaded IOError! {
+    bytes :: backend.read() ?? return Err(err)
+    if bytes == .Val(raw) -> return Ok(repl_history_load_bytes(raw))
+    Ok(ReplHistoryLoaded{entries: [String]{}, corrupt: false})
+}
+
+// First malformed, odd-hex, non-UTF8 or non-LF record terminates recovery.
+// Complete earlier records remain the visible prefix, including empty records.
+pub fn repl_history_load_bytes(bytes: [U8]) -> ReplHistoryLoaded Never! {
+    entries := [String]{}
+    start := 0
+    end := 0
+    loop end < bytes.len() {
+        if bytes[end] == (U8{10}) {
+            record := bytes[start..<end] // #4303: borrowed bytes, no record copy.
+            if repl_history_decode(record) == {
+                .Val(entry) -> &entries.push(^entry)
+                .None -> return ReplHistoryLoaded{entries: ^entries, corrupt: true}
+            }
+            start = end + 1
+        }
+        end += 1
+    }
+    ReplHistoryLoaded{entries: ^entries, corrupt: start != bytes.len()}
+}
+
+pub fn repl_history_trim(entries: &[String], limit: Int) Never! {
+    excess :: entries.len() - limit
+    if excess <= 0 -> return
+    // Jet's List has no bulk drain. Reverse/pop/reverse is linear, moves the
+    // retained String owners, and never clones entries or shifts per deletion.
+    &entries.reverse()
+    loop _ in 0..<excess -> _ :: &entries.pop()
+    &entries.reverse()
+}
+
+pub fn repl_history_render(entries: [String]) -> [U8] Never! {
+    bytes := [U8]{}
+    loop entry in entries {
+        encoded :: repl_history_encode(entry)
+        loop byte in encoded.bytes() -> &bytes.push(byte)
+        &bytes.push(U8{10})
+    }
+    bytes
+}
+
+pub fn repl_history_encode(text: String) -> String Never! { repl_history_hex.encode(text.bytes()) }
+
+pub fn repl_history_decode(bytes: [U8]) -> String? Never! {
+    // Core hex accepts either case but no whitespace/odd hex. Both conversions
+    // are exact UTF8, not replacement/lossy decoding.
+    text :: String.from_bytes(bytes) ?? return None
+    decoded :: repl_history_hex.decode(text) ?? return None
+    Val(String.from_bytes(decoded) ?? return None)
+}
+
+pub fn repl_history_disabled(value: String) -> Bool Never! {
+    // The eight ASCII case spellings avoid allocating a lowered copy merely
+    // to compare a three-byte flag. No whitespace or Unicode is accepted.
+    value == "off" || value == "ofF" || value == "oFf" || value == "oFF" ||
+        value == "Off" || value == "OfF" || value == "OFf" || value == "OFF"
+}
+
+// Rust usize decimal grammar (+ allowed, no sign -, no whitespace) with a
+// guarded fixed-width accumulator: even a huge hostile decimal never becomes
+// an unbounded Int. Maximum comes from the canonical native target, not an
+// architecture-name guess. Convert only the bounded final result to Int.
+pub fn repl_history_parse_limit(raw: String, maximum: U64) -> Int? Never! {
+    bytes :: raw.bytes()
+    if bytes.is_empty() -> return None
+    at := if bytes[0] == (U8{43}) -> 1 else -> 0
+    if at == bytes.len() -> return None
+    value := U64{0}
+    ten :: U64{10}
+    loop at < bytes.len() {
+        code :: Int.from_u8(bytes[at])
+        if code < 48 || code > 57 -> return None
+        digit :: U64{code - 48}
+        if digit > maximum || value > (maximum - digit) /% ten -> return None
+        value = value * ten + digit
+        at += 1
+    }
+    Val(Int.from_u64(value))
+}
+
+// Native var_os -> OsPath ingress and target usize_max are runtime binding
+// prerequisites, not implemented by this product. Do not activate this wrapper
+// until #4494 publishes them: text sys.get loses OS spelling and is NOT a
+// fallback. The path algorithm below consumes the actual canonical OsPath.
+pub fn repl_history_state_root() -[Env]> repl_history_path.OsPath? Never! {
+    repl_history_state_root_for(
+        repl_history_sys.name(),
+        repl_history_sys.var_os("XDG_STATE_HOME"),
+        repl_history_sys.var_os("LOCALAPPDATA"),
+        repl_history_sys.var_os("HOME"),
+    )
+}
+
+pub fn repl_history_state_root_for(os: String, xdg: ^repl_history_path.OsPath?, local: ^repl_history_path.OsPath?, home: ^repl_history_path.OsPath?) -> repl_history_path.OsPath? Never! {
+    if xdg == .Val(dir) {
+        if !dir.encoded.is_empty() {
+            if repl_history_path.is_absolute(dir) -> return Val(^dir)
+            // A relative nonempty XDG value fails authority immediately. HOME
+            // and LOCALAPPDATA must not rescue it.
+            return None
+        }
+    }
+    if os == "windows" {
+        if local == .Val(dir) -> return Val(^dir)
+    }
+    if home == .Val(dir) {
+        if os == "macos" {
+            joined := ^dir
+            suffix :: repl_history_path.from_text("Library/Application Support", joined.platform)
+            repl_history_path.push(&joined, suffix)
+            return Val(^joined)
+        }
+        if repl_history_path.is_absolute(dir) {
+            joined := ^dir
+            suffix :: repl_history_path.from_text(".local/state", joined.platform)
+            repl_history_path.push(&joined, suffix)
+            return Val(^joined)
+        }
+    }
+    None
+}

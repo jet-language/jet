@@ -1,0 +1,174 @@
+// TOOLS-S19 JSON.rs1171–1356. Typed retained-fact inputs below exercise text
+// and wire semantics, not C4 checking or an imitation checked producer.
+#Test("semindex_bypass_codec_keeps_audit_categories_empty_reason_and_byte_span") {
+    kinds :: [BypassKind]{BypassKind.UnsafeRegion, BypassKind.UnsafeFn, BypassKind.ExplicitDrop, BypassKind.LintAllow}
+    human :: loop kind in kinds -> semindex_bypass_kind_text(kind)
+    assert_eq(human, [String]{"#Unsafe region", "#Unsafe fn", ".drop(reason)", "#[allow(lint)]"})
+    empty :: BypassFact{kind: BypassKind.ExplicitDrop, site: "other", detail: "", module_path: "mód.jet", span: SourceSpan{start: 3, end: 7}}
+    assert_eq(semindex_json_bypass(empty), `{"kind":"explicit_drop","site":"other","detail":"","module_path":"mód.jet","span":{"start":3,"end":7}}`)
+    quoted :: BypassFact{kind: BypassKind.LintAllow, site: "q\"", detail: "reason\n\\", module_path: "", span: SourceSpan{start: 4294967296, end: 4294967297}}
+    assert_eq(semindex_json_bypass(quoted), `{"kind":"lint_allow","site":"q\"","detail":"reason\n\\","module_path":"","span":{"start":4294967296,"end":4294967297}}`)
+}
+#Test("semindex_member_origin_text_keeps_requirement_and_impl_distinct") {
+    origins :: [MemberOrigin]{MemberOrigin.TypeBody, MemberOrigin.InherentImpl, MemberOrigin.TraitImpl{trait_name: "Draw"}, MemberOrigin.TraitRequirement{trait_name: "Draw"}}
+    rendered :: loop origin in origins -> semindex_origin_text(origin)
+    assert_eq(rendered, [String]{"type body", "impl", "impl Draw", "trait Draw"})
+}
+
+fn semindex_dossier_edge_projection() -> EffectProjection Never! {
+    EffectProjection{required_effects: [String]{"Net", "Net", "IO"}, granted_effects: [String]{}, denied_effects: [String]{"Net"}, authority: "package"}
+}
+fn semindex_dossier_edge_empty() -> TypeDossier Never! {
+    TypeDossier{schema_version: SEMINDEX_SCHEMA_VERSION, target: "missing", definition: None, members: [MemberFact]{}, references: [SymbolRef]{}, bypass_facts: [BypassFact]{}, state_graphs: [StateGraphFact]{}, effect_projection: semindex_dossier_edge_projection()}
+}
+#Test("semindex_dossier_missing_definition_keeps_boundary_effect_roles_and_empty_sections") {
+    dossier :: semindex_dossier_edge_empty()
+    assert_eq(dossier.render_text(), "dossier `missing` (schema v20)\nsummary\n  defined: not found\neffect roles\n  required effects: Net, Net, IO; granted effects: none; denied effects: Net; authority: package\nmembers\n  none\nstate graphs\n  none\nreferences\n  count: 0\nbypass facts\n  count: 0\n")
+    // Required/granted/denied vectors are distinct roles, not flattened facts.
+    assert_eq(dossier.to_json(), `{"schema":"jet.status/v1","action":"inspect.dossier","ok":true,"reports":[],"dossier":{"schema_version":20,"target":"missing","definition":null,"members":[],"references":[],"bypass_facts":[],"state_graphs":[],"effect_projection":{"required_effects":["Net","Net","IO"],"granted_effects":[],"denied_effects":["Net"],"authority":"package"}}}`)
+}
+#Test("semindex_dossier_text_retains_contracts_states_order_and_programwide_bypasses") {
+    dossier := semindex_dossier_edge_empty()
+    dossier.target = "Token"
+    dossier.definition = Val(SymbolDef{
+        identity: "type:Token", declaration_identity_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "no declaration handle"},
+        name: "Token", qualified_name: "Token", module_path: "main.jet", def_span: SourceSpan{start: 2, end: 9}, kind: SemIndexSymbolKind.Type,
+        view_provenance: [ViewProvenanceFact]{}, callable_signature: None, derives: [String]{}, nominal_base: Val("Int"),
+        trait_contracts: [TraitContractFact]{TraitContractFact{trait_name: "Iter", associated_types: [SemIndexAssociatedTypeFact]{
+            SemIndexAssociatedTypeFact{name: "Item", implementation: None}, SemIndexAssociatedTypeFact{name: "Item", implementation: Val("Int")},
+        }, methods: [String]{"fn next() -> Int?", "fn next() -> Int?"}}},
+    })
+    dossier.members = [MemberFact]{MemberFact{owner: "Token", name: "next", identity: "method:next", kind: MemberKind.Method, origin: MemberOrigin.TraitImpl{trait_name: "Iter"}, signature: "fn next() -> Int?", module_path: "z.jet", span: SourceSpan{start: 30, end: 40}}}
+    dossier.state_graphs = [StateGraphFact]{StateGraphFact{owner: "Token", module_path: "states.jet", states: [StateNodeFact]{
+        StateNodeFact{name: "Closed", terminal: false, reachable: None, span: SourceSpan{start: 1, end: 2}},
+        StateNodeFact{name: "Open", terminal: true, reachable: Val(true), span: SourceSpan{start: 3, end: 4}},
+        StateNodeFact{name: "Lost", terminal: false, reachable: Val(false), span: SourceSpan{start: 5, end: 6}},
+    }, transitions: [StateTransitionFact]{StateTransitionFact{operation: "new", from: None, to: "Closed"}, StateTransitionFact{operation: "close", from: Val(""), to: "Closed"}}}}
+    dossier.references = [SymbolRef]{SymbolRef{name: "Token", module_path: "z.jet", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 10, end: 15}}}
+    dossier.bypass_facts = [BypassFact]{
+        BypassFact{kind: BypassKind.UnsafeFn, site: "unrelated", detail: "", module_path: "other.jet", span: SourceSpan{start: 7, end: 11}},
+        BypassFact{kind: BypassKind.LintAllow, site: "price", detail: "float_money", module_path: "other.jet", span: SourceSpan{start: 12, end: 19}},
+    }
+    expected :: "dossier `Token` (schema v20)\nsummary\n  defined: main.jet:2..9\nnominal type\n  distinct Int\ntrait contracts\n  implements Iter\n    type Item\n    type Item = Int\n    fn next() -> Int?\n    fn next() -> Int?\neffect roles\n  required effects: Net, Net, IO; granted effects: none; denied effects: Net; authority: package\nmembers\n  method fn next() -> Int? (impl Iter) @ z.jet:30..40\nstate graphs\n  Token @ states.jet\n    state Closed (nonterminal; reachability unknown) @ states.jet:1..2\n    state Open (terminal; reachable) @ states.jet:3..4\n    state Lost (nonterminal; unreachable) @ states.jet:5..6\n    transition new: _ -> Closed\n    transition close:  -> Closed\nreferences\n  count: 1\n  z.jet:10..15\nbypass facts\n  count: 2\n  #Unsafe fn at `unrelated` ((no reason given)) @ other.jet:7..11\n  #[allow(lint)] at `price` (float_money) @ other.jet:12..19\n"
+    assert_eq(dossier.render_text(), expected)
+    wire :: dossier.to_json()
+    assert(wire.contains(`"metadata_declaration_identity":{"status":"unavailable","required_stage":"Resolved","reason":"no declaration handle"}`))
+    assert(wire.contains(`"associated_types":[{"name":"Item","type":null},{"name":"Item","type":"Int"}]`))
+    assert(wire.contains(`"reachable":null`))
+    assert(wire.contains(`"from":null`))
+    assert(wire.contains(`"from":""`))
+    assert(wire.contains(`"site":"unrelated","detail":""`))
+}
+
+// Full actual CallableSignatureFact inputs; UNRUN #4459/full canonical closure.
+#Test("semindex_dossier_failure_text_distinguishes_checked_contract_from_unavailable") {
+    dossier := semindex_dossier_edge_empty()
+    definition := SymbolDef{
+        identity: "fn:pick", declaration_identity_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "no handle"},
+        name: "pick", qualified_name: "pick", module_path: "main", def_span: SourceSpan{start: 0, end: 4},
+        kind: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("Bool")},
+        view_provenance: [ViewProvenanceFact]{}, callable_signature: None, derives: [String]{}, nominal_base: None, trait_contracts: [TraitContractFact]{},
+    }
+    checked :: CallableSignatureFact{
+        parameters: [CallableParameterFact]{}, return_type: Val(Type.Bool),
+        effects: CallableEffectsFact.Checked{effects: [CallableEffectFact]{}},
+        failure_contract: CallableFactAvailability<FailureContract>.Checked{value: FailureContract.ProvenUnreachable{success: Type.Bool}},
+        returned_views: [ViewProvenanceFact]{}, policies: [CallablePolicy]{},
+        generic_parameters: CallableFactAvailability<[TypeParam]>.Checked{value: [TypeParam]{}},
+        metadata_producer_status: MetadataProducerStatus.ExistingCallableProducerNeedsExtension,
+    }
+    definition.callable_signature = Val(checked)
+    dossier.definition = Val(definition)
+    assert(dossier.render_text().contains("failure contract\n  Bool Never! (explicit !Never (proven unreachable))\n"))
+    unavailable :: CallableFactUnavailable{required_stage: CompilerStage.Typed, reason: "external callable"}
+    external :: CallableSignatureFact{
+        parameters: [CallableParameterFact]{}, return_type: Val(Type.Bool),
+        effects: CallableEffectsFact.Unavailable{reason: unavailable},
+        failure_contract: CallableFactAvailability<FailureContract>.Unavailable{reason: unavailable},
+        returned_views: [ViewProvenanceFact]{}, policies: [CallablePolicy]{},
+        generic_parameters: CallableFactAvailability<[TypeParam]>.Unavailable{reason: unavailable},
+        metadata_producer_status: MetadataProducerStatus.ContractOnly,
+    }
+    definition.callable_signature = Val(external)
+    dossier.definition = Val(definition)
+    assert(dossier.render_text().contains("failure contract\n  unavailable\n"))
+    wire :: dossier.to_json()
+    assert(wire.contains(`"failure_contract":null,"failure_source":null`))
+    assert(wire.contains(`"metadata_producer_status":"contract_only"`))
+}
+
+fn semindex_dossier_scattered_source() -> String Never! {
+    "\ntrait DrawThing {\n    fn render(self) -> String ->\n}\n\nstruct Widget {\n    title: String\n\n    fn label(self) -> String {\n        return ~self.title\n    }\n}\n\nimpl Widget {\n    fn size(self) -> Int {\n        return 1\n    }\n}\n\nimpl Widget.DrawThing {\n    fn render(self) -> String {\n        return self.label()\n    }\n}\n\nfn run() {\n    w :: Widget.{title: \"ok\"}\n    print(w.render())\n}\n"
+}
+fn semindex_dossier_method_source() -> String Never! {
+    "\nstruct Client {\n    host: String\n}\n\nimpl Client {\n    fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -> String {\n        return host\n    }\n}\n\nfn run() {}\n"
+}
+
+// Original tests/semindex.rs1378–1432,1435–1473,1476–1552. Unregistered
+// actual S4/C4 fixture consumers; S3/S6/S9 retain producer fixtures/assertions.
+fn semindex_dossier_stitches_scattered_members(index: SemIndex) {
+    dossier :: index.dossier("Widget")
+    field_seen := false
+    label_seen := false
+    size_seen := false
+    render_seen := false
+    loop member in dossier.members {
+        joined :: "{member.name}:{member.signature}"
+        if joined == "title:title: String" -> field_seen = true
+        if joined.contains("label:fn label() -> String") -> label_seen = true
+        if joined.contains("size:fn size() -> Int") -> size_seen = true
+        if joined.contains("render:fn render() -> String") -> render_seen = true
+    }
+    assert(field_seen)
+    assert(label_seen)
+    assert(size_seen)
+    assert(render_seen)
+    wire :: dossier.to_json()
+    assert(wire.contains(`"target":"Widget"`))
+    assert(wire.contains(`"trait_impl"`))
+    assert(wire.contains(`"inherent_impl"`))
+}
+fn semindex_dossier_preserves_method_call_contract(index: SemIndex) {
+    dossier :: index.dossier("Client")
+    seen := false
+    loop member in dossier.members {
+        if member.name == "connect" {
+            assert(member.signature.contains("timeout seconds: Int"))
+            assert(member.signature.contains("*, tls enabled: Bool"))
+            assert(member.signature.contains("rest: ...String"))
+            seen = true
+            break
+        }
+    }
+    assert(seen)
+}
+fn semindex_dossier_bypass_facts(index: SemIndex) {
+    dossier :: index.dossier("run")
+    kinds := [String]{}
+    allow_seen := false
+    drop_seen := false
+    loop bypass in dossier.bypass_facts {
+        &kinds.push(bypass.kind.as_str())
+        if bypass.kind == BypassKind.LintAllow && !allow_seen {
+            assert_eq(bypass.site, "price")
+            assert_eq(bypass.detail, "float_money")
+            allow_seen = true
+        }
+        if bypass.kind == BypassKind.ExplicitDrop && !drop_seen {
+            assert_eq(bypass.detail, "telemetry only")
+            drop_seen = true
+        }
+    }
+    assert(kinds.contains("lint_allow"))
+    assert(kinds.contains("unsafe_region"))
+    assert(kinds.contains("unsafe_fn"))
+    assert(kinds.contains("explicit_drop"))
+    assert(allow_seen)
+    assert(drop_seen)
+    wire :: dossier.to_json()
+    assert(wire.contains(`"bypass_facts"`))
+    assert(wire.contains(`"lint_allow"`))
+    text :: dossier.render_text()
+    assert(text.contains("bypass facts"))
+    assert(text.contains("float_money"))
+}

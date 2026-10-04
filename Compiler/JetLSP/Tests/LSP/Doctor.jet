@@ -1,0 +1,29 @@
+// Check.rs has no inline original doctor tests. These controls exercise the
+// exact doctor source through actual language providers. The native transcript
+// directory/grammar branches remain #4494 until native OSPath per-entry read_dir
+// is published; do not substitute a fake directory or report full doctor proof.
+#Test("LSP doctor source reaches actual lexer parser check and formatter with restored control") {
+    source :: "fn run() {{ print(\"hello\") }}\n"
+    lexed :: lex(source.bytes())
+    assert_eq(lexed.diagnostics.len(), 0)
+    parsed :: parse_with_source(lexed.tokens, source.bytes())
+    assert(parsed.program != None)
+    assert(jet_format_source(source).source != None)
+    snapshot :: lsp_diag_test_snapshot("test.jet", source, [JetDriverAuthorizedSourceFile]{})
+    queries := JetDriverCompilerQueries.new()
+    path :: lsp_doctor_path.from_text("test.jet", snapshot.cwd.platform)
+    diagnostics :: lsp_check_document(&queries, snapshot, path, source)
+    // Doctor prints a semantic failure instead of hiding it. The assertion is
+    // on provider agreement, not an assumption that its IO authority is granted.
+    checked :: &queries.check_text_lsp(snapshot, path, source)
+    permit :: checked.guard_read()
+    assert_eq(diagnostics, jet_driver_present_checked_diagnostics(permit.value.result))
+    broken :: "fn run() {{ print( }}\n"
+    bad_lex :: lex(broken.bytes())
+    bad_parse :: parse_with_source(bad_lex.tokens, broken.bytes())
+    assert(bad_parse.program == None || bad_parse.diagnostics.len() > 0)
+    assert(jet_format_source(broken).source == None)
+    restored :: lex(source.bytes())
+    assert(parse_with_source(restored.tokens, source.bytes()).program != None)
+    assert(jet_format_source(source).source != None)
+}

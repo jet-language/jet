@@ -1,0 +1,27 @@
+// Source/LSP/Server.rs:5881–5927: uri_to_path/path_to_uri/percent_decode.
+// Core owns percent encoding/decoding; do not parse a URL or normalize its
+// path here. normalize_path (5929–5932) is the effectful L24 canonical seam.
+use core.net.url as lsp_url
+
+// `windows` is the host target's cfg!(windows), supplied by the host caller;
+// keeping it explicit lets this byte/URI kernel remain pure on every target.
+pub fn lsp_uri_to_path(uri: String, windows: Bool) -> String Never! {
+    if !uri.starts_with("file://") -> return ~uri
+    rest :: uri.slice(7, uri.len())
+    decoded :: lsp_url.percent_decode(rest) ?? return ""
+    if !windows -> return decoded
+    // trim_start_matches('/'): count leading ASCII slashes over the byte view,
+    // which equals their scalar count, then slice once.
+    bytes :: decoded.bytes()
+    start := 0
+    loop start < bytes.len() && bytes[start] == (U8{47}) -> start += 1
+    decoded.slice(start, decoded.len()).replace("/", "\\")
+}
+
+pub fn lsp_path_to_uri(path: String) -> String Never! {
+    // Core quote has exactly the reference's unreserved ASCII set plus `/`.
+    // Restore only encoded colons, not user percent escapes (which quote has
+    // already encoded as %25), matching the reference's additional safe `:`.
+    encoded :: lsp_url.quote(path).replace("%3A", ":")
+    "file://{encoded}"
+}

@@ -1,0 +1,107 @@
+// Original Server4560–4572 precedence plus native identity/folder transitions.
+#Test("workspace_root_initialization_uses_protocol_precedence") {
+    cwd :: lsp_request_path.from_text("/tmp", lsp_request_path.PathPlatform.Unix)
+    roots := [OSPath]{}
+    folders := false
+    params :: foundation_parse_protocol_json("{{\"workspaceFolders\":[{{\"uri\":\"file:///tmp/folder\",\"name\":\"folder\"}}],\"rootUri\":\"file:///tmp/uri\",\"rootPath\":\"/tmp/path\"}}") ?? panic("params")
+    lsp_configure_workspace_roots(&roots, &folders, Val(params), cwd)
+    assert_eq(roots.len(), 1)
+    assert(lsp_request_path.equals(roots[0], lsp_request_path.from_text("/tmp/folder", cwd.platform)))
+    assert(folders)
+    fallback :: foundation_parse_protocol_json("{{\"rootUri\":\"file:///tmp/uri\",\"rootPath\":\"/tmp/path\"}}") ?? panic("params")
+    lsp_configure_workspace_roots(&roots, &folders, Val(fallback), cwd)
+    assert_eq(roots.len(), 1)
+    assert(lsp_request_path.equals(roots[0], lsp_request_path.from_text("/tmp/uri", cwd.platform)))
+    assert(!folders)
+}
+
+#Test("present null workspace fields suppress fallback and absent params retains folder mode") {
+    cwd :: lsp_request_path.from_text("/tmp", lsp_request_path.PathPlatform.Unix)
+    roots := [OSPath]{}
+    folders := false
+    null_folders :: foundation_parse_protocol_json("{{\"workspaceFolders\":null,\"rootUri\":\"file:///tmp/root\"}}") ?? panic("params")
+    lsp_configure_workspace_roots(&roots, &folders, Val(null_folders), cwd)
+    assert_eq(roots.len(), 0)
+    assert(folders)
+    lsp_configure_workspace_roots(&roots, &folders, None, cwd)
+    assert(folders)
+    null_uri :: foundation_parse_protocol_json("{{\"rootUri\":null,\"rootPath\":\"/tmp/root\"}}") ?? panic("params")
+    lsp_configure_workspace_roots(&roots, &folders, Val(null_uri), cwd)
+    assert_eq(roots.len(), 0)
+    assert(!folders)
+}
+
+#Test("workspace folder removal precedes unique additions and uses caller cwd") {
+    cwd :: lsp_request_path.from_text("/workspace", lsp_request_path.PathPlatform.Unix)
+    roots := [OSPath]{}
+    folders := false
+    params :: foundation_parse_protocol_json("{{\"rootPath\":\"relative\"}}") ?? panic("params")
+    lsp_configure_workspace_roots(&roots, &folders, Val(params), cwd)
+    assert(lsp_request_path.equals(roots[0], lsp_request_path.from_text("/workspace/relative", cwd.platform)))
+    event :: foundation_parse_protocol_json("{{\"event\":{{\"removed\":[{{\"uri\":\"file:///workspace/relative\"}}],\"added\":[{{\"uri\":\"file:///workspace/relative\"}},{{\"uri\":\"file:///workspace/new\"}},{{\"uri\":\"file:///workspace/new\"}},{{\"uri\":42}}]}}}}") ?? panic("event")
+    lsp_update_workspace_roots(&roots, &folders, Val(event), cwd)
+    assert(folders)
+    assert_eq(roots.len(), 2)
+    assert(lsp_request_path.equals(roots[0], lsp_request_path.from_text("/workspace/relative", cwd.platform)))
+    assert(lsp_request_path.equals(roots[1], lsp_request_path.from_text("/workspace/new", cwd.platform)))
+}
+
+#Test("initialize advertises incremental edits range delta tokens and workspace folder changes") {
+    response :: foundation_parse_protocol_json(lsp_initialize_response(DataTree.Int(1))) ?? panic("initialize response")
+    result :: response.field("result") ?? panic("result")
+    assert_eq(result.field("protocolVersion"), Val(DataTree.Text("2025-11-25")))
+    caps :: result.field("capabilities") ?? panic("capabilities")
+    assert_eq(caps.field("textDocumentSync"), Val(DataTree.Int(2)))
+    tokens :: caps.field("semanticTokensProvider") ?? panic("semantic tokens")
+    assert_eq(tokens.field("range"), Val(DataTree.Bool(true)))
+    full :: tokens.field("full") ?? panic("full")
+    assert_eq(full.field("delta"), Val(DataTree.Bool(true)))
+    workspace :: caps.field("workspace") ?? panic("workspace")
+    folders :: workspace.field("workspaceFolders") ?? panic("folders")
+    assert_eq(folders.field("supported"), Val(DataTree.Bool(true)))
+    assert_eq(folders.field("changeNotifications"), Val(DataTree.Bool(true)))
+    on_type :: caps.field("documentOnTypeFormattingProvider") ?? panic("on type")
+    assert_eq(on_type.field("firstTriggerCharacter"), Val(DataTree.Text("\n")))
+    assert_eq(on_type.field("moreTriggerCharacter"), Val(DataTree.Array([DataTree]{DataTree.Text("}}") })))
+}
+
+#Test("request dispatch initializes the sole server and handles ping shutdown and unknown methods") {
+    server := LSPServer.new(lsp_diag_test_snapshot("dispatch.jet", "fn run() {{}}\n", [JetDriverAuthorizedSourceFile]{}), lsp_diag_test_path("/fixture/build-source"))
+    assert_eq(server.diagnostic_state.docs.len(), 0)
+    assert_eq(server.diagnostic_state.dirty.len(), 0)
+    assert(!server.shutdown)
+    params :: foundation_parse_protocol_json("{{\"rootUri\":\"file:///workspace/root\",\"workspaceFolders\":[{{\"uri\":\"file:///workspace/folder\"}}]}}") ?? panic("initialize params")
+    initialized :: lsp_handle_request(&server, "initialize", Val(params), DataTree.Text("initialize")) ?? panic("initialize response")
+    result :: foundation_parse_protocol_json(initialized) ?? panic("response JSON")
+    assert_eq(result.field("id"), Val(DataTree.Text("initialize")))
+    assert(server.workspace_folders)
+    assert_eq(server.workspace_roots.len(), 1)
+    assert(lsp_request_path.equals(server.workspace_roots[0], lsp_request_path.from_text("/workspace/folder", server.snapshot.cwd.platform)))
+    ping :: lsp_handle_request(&server, "ping", None, DataTree.Int(7)) ?? panic("ping response")
+    assert_eq(ping, lsp_response(DataTree.Int(7), "{}"))
+    unknown :: lsp_handle_request(&server, "not/a/known/method", None, DataTree.Int(8)) ?? panic("unknown response")
+    assert_eq(unknown, lsp_response(DataTree.Int(8), "null"))
+    assert(!server.shutdown)
+    shutdown :: lsp_handle_request(&server, "shutdown", None, DataTree.Null) ?? panic("shutdown response")
+    assert_eq(shutdown, lsp_response(DataTree.Null, "null"))
+    assert(server.shutdown)
+}
+
+#Test("notification dispatch changes the resident document and exit without a parallel server state") {
+    server := LSPServer.new(lsp_diag_test_snapshot("notifications.jet", "fn run() {{}}\n", [JetDriverAuthorizedSourceFile]{}), lsp_diag_test_path("/fixture/build-source"))
+    uri :: "file:///lsp/notifications.jet"
+    lsp_loop_test_open(&server.diagnostic_state, uri, 1, "old")
+    stdout := lsp_request_term.stdout()
+    params :: lsp_loop_test_change(uri, "2", "{{\"text\":\"new\"}}")
+    lsp_handle_notification(&server, "textDocument/didChange", Val(params), &stdout) ?? panic("change notification")
+    assert_eq(server.diagnostic_state.docs[uri].text, "new")
+    assert_eq(server.diagnostic_state.docs[uri].version, 2)
+    assert_eq(server.diagnostic_state.dirty.get(uri), Val(true))
+    loop method in [String]{"initialized", "notifications/initialized", "$/cancelRequest", "notifications/cancelled", "unknown/notification"} {
+        lsp_handle_notification(&server, method, None, &stdout) ?? panic("notification")
+        assert(!server.shutdown)
+        assert_eq(server.diagnostic_state.docs[uri].version, 2)
+    }
+    lsp_handle_notification(&server, "exit", None, &stdout) ?? panic("exit notification")
+    assert(server.shutdown)
+}

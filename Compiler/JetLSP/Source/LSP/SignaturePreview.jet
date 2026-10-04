@@ -1,0 +1,197 @@
+// Rust: Source/LSP/Features.rs:664–973. Explicit-value checked migration.
+use jet_foundation.[Span]
+use jet_lexer.[Token, lex, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_LBRACE, TOKEN_RBRACE]
+use jet_semindex.[SymbolDB, SourceSpan]
+
+// Rust: Source/LSP/Features.rs:665
+pub struct SignatureChangeEdit {
+    pub path: String
+    pub span: Span
+    pub new_text: String
+}
+// Rust: Source/LSP/Features.rs:672
+pub struct SignatureChangeCaller {
+    pub identity: String
+    pub path: String
+    pub span: Span
+    pub value: String?
+    pub status: String
+}
+// Rust: Source/LSP/Features.rs:680
+pub struct SignatureChangePreview {
+    pub identity: String
+    pub qualified_name: String
+    pub declaration_path: String
+    pub declaration_span: Span
+    pub parameter_name: String
+    pub parameter_type: String
+    pub callers: [SignatureChangeCaller]
+    pub unknown: [String]
+    pub edits: [SignatureChangeEdit]
+
+    // Rust: Source/LSP/Features.rs:693
+    pub fn can_apply(self) -> Bool Never! {
+        if !self.unknown.is_empty() || self.edits.is_empty() -> return false
+        loop caller in self.callers { if caller.value == None -> return false }
+        true
+    }
+}
+
+// Rust tuple set key (797,885). Gate #4499: real composite Eq/Hash, not encoded
+// path authority, concatenated surrogate keys, or a linear-array set.
+struct LSPSignatureCallSpan {
+    path: String
+    start: Int
+    end: Int
+}
+
+// Rust: Source/LSP/Features.rs:708
+pub fn lsp_compute_signature_change_preview(db: SymbolDB, sources: [String:String], identity: String, parameter_name: String, parameter_type: String, caller_values: [String:String]) -> SignatureChangePreview Err! {
+    if !is_valid_ident(parameter_name) -> return Err("`{parameter_name}` is not a valid parameter identifier") // 0737 Rust name pending.
+    type_text := parameter_type.trim() // #4303
+    if type_text.is_empty() || parameter_type.contains("\r") || parameter_type.contains("\n") || parameter_type.contains("{{") || parameter_type.contains("}}") -> return Err("parameter type must be one explicit, single-line type")
+    window :: db.index.lookup_identity(identity) ?? return Err("no checked callable identity `{identity}`")
+    definition :: window[0]
+    signature :: definition.callable_signature ?? return Err("`{identity}` is not a checked callable")
+    // Validation precedence matches Rust: duplicate name before any variadic.
+    loop parameter in signature.parameters {
+        if parameter.name == parameter_name -> return Err("callable `{identity}` already has parameter `{parameter_name}`")
+    }
+    loop parameter in signature.parameters {
+        if parameter.variadic -> return Err("callable `{identity}` has a variadic parameter; its insertion order is unavailable")
+    }
+    declaration_source :: sources.get(definition.module_path) ?? return Err("checked declaration source `{definition.module_path}` is unavailable")
+    declaration_lexed :: lex(declaration_source.bytes())
+    declaration_tokens :: declaration_lexed.tokens
+    declaration_name := Int?{None}
+    loop (index, token) in declaration_tokens {
+        if token.span.start == definition.def_span.start && token.span.end == definition.def_span.end && token.kind == TOKEN_IDENT && token.payload.text == definition.name { declaration_name = Val(index); break }
+    }
+    if declaration_name == None {
+        loop (index, token) in declaration_tokens {
+            if token.span.start == definition.def_span.start && token.kind == TOKEN_IDENT && token.payload.text == definition.name { declaration_name = Val(index); break }
+        }
+    }
+    name :: declaration_name ?? return Err("checked declaration span for `{identity}` is unavailable")
+    declaration_open :: lsp_next_paren(declaration_tokens, name) ?? return Err("checked parameter list for `{identity}` is unavailable")
+    declaration_close :: lsp_matching_paren(declaration_tokens, declaration_open) ?? return Err("checked parameter list for `{identity}` is incomplete")
+    declaration_insert :: declaration_tokens[declaration_close].span.start
+    declaration_text :: if declaration_open + 1 < declaration_close -> ", {parameter_name}: {type_text}" else -> "{parameter_name}: {type_text}"
+    preview := SignatureChangePreview{
+        identity: ~definition.identity, qualified_name: ~definition.qualified_name,
+        declaration_path: ~definition.module_path,
+        declaration_span: Span{start: definition.def_span.start, end: definition.def_span.end},
+        parameter_name: ~parameter_name, parameter_type: ~type_text,
+        callers: [SignatureChangeCaller]{}, unknown: [String]{},
+        edits: [SignatureChangeEdit]{SignatureChangeEdit{path: ~definition.module_path, span: Span{start: declaration_insert, end: declaration_insert}, new_text: declaration_text}},
+    }
+    known_call_spans := [LSPSignatureCallSpan:Bool]{}
+    seen_callers := [String:Bool]{}
+    loop edge in db.calls {
+        if edge.callee != definition.name && edge.callee != definition.qualified_name && edge.callee != definition.identity -> next
+        call_matches_identity := false
+        loop reference in db.refs {
+            if reference.module_path != edge.module_path || reference.span.start != edge.call_span.start || reference.span.end != edge.call_span.end -> next
+            if reference.target == .Val(target) {
+                if target.semantic_identity == Val(definition.identity) || (target.module_path == definition.module_path && target.def_span == definition.def_span) { call_matches_identity = true; break }
+            }
+        }
+        if !call_matches_identity {
+            &preview.unknown.push("unresolved_call:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
+            next
+        }
+        source :: sources.get(edge.module_path) ?? {
+            &preview.unknown.push("unavailable_source:{edge.module_path}")
+            next
+        }
+        lexed :: lex(source.bytes())
+        tokens :: lexed.tokens
+        open :: lsp_call_open(tokens, edge.call_span) ?? {
+            &preview.unknown.push("unavailable_call_arguments:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
+            next
+        }
+        close :: lsp_matching_paren(tokens, open) ?? {
+            &preview.unknown.push("incomplete_call_arguments:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
+            next
+        }
+        // Rust's caller-key string is retained exactly; it is not a replacement
+        // for the separate real composite known-call-span equality above.
+        key :: "{edge.caller}:{edge.module_path}:{edge.call_span.start}:{edge.call_span.end}"
+        if seen_callers.has_key(key) -> next
+        seen_callers[key] = true
+        supplied := caller_values.get(edge.caller)
+        if supplied == None -> supplied = caller_values.get("{edge.module_path}:{edge.call_span.start}:{edge.call_span.end}")
+        value := String?{None}
+        if supplied == .Val(text) {
+            trimmed := text.trim() // #4303: validation only, preserve user text.
+            if !trimmed.is_empty() -> value = Val(~text)
+        }
+        status := "explicit_value"
+        if value == None {
+            &preview.unknown.push("missing_explicit_value:{edge.caller}")
+            status = "missing_explicit_value"
+        }
+        insert :: tokens[close].span.start
+        if value == .Val(text) {
+            new_text :: if open + 1 < close -> ", {text}" else -> ~text
+            &preview.edits.push(SignatureChangeEdit{path: ~edge.module_path, span: Span{start: insert, end: insert}, new_text: new_text})
+        }
+        known_call_spans[LSPSignatureCallSpan{path: ~edge.module_path, start: edge.call_span.start, end: edge.call_span.end}] = true
+        &preview.callers.push(SignatureChangeCaller{identity: ~edge.caller, path: ~edge.module_path, span: Span{start: edge.call_span.start, end: edge.call_span.end}, value: value, status: status})
+    }
+    loop reference in db.refs {
+        target :: reference.target ?? next
+        if target.semantic_identity != Val(identity) && !(target.module_path == definition.module_path && target.def_span == definition.def_span) -> next
+        key :: LSPSignatureCallSpan{path: ~reference.module_path, start: reference.span.start, end: reference.span.end}
+        if !known_call_spans.has_key(key) -> &preview.unknown.push("unresolved_or_higher_order_reference:{reference.module_path}:{reference.span.start}-{reference.span.end}")
+    }
+    before := declaration_source.slice(0, definition.def_span.start.min(declaration_source.bytes().len())) // #4303
+    last_line := String?{None}
+    loop line in before.lines() -> last_line = Val(~line)
+    if last_line == .Val(line) {
+        loop word in line.split_whitespace() {
+            if word == "pub" { &preview.unknown.push("external_callers_outside_checked_workspace"); break }
+        }
+    }
+    &preview.unknown.sort()
+    &preview.unknown.dedup()
+    Ok(preview)
+}
+
+// Rust: Source/LSP/Features.rs:935
+pub fn lsp_next_paren(tokens: [Token], from: Int) -> Int? Never! {
+    loop index in from.saturating_add(1)..<tokens.len() {
+        if tokens[index].kind == TOKEN_LPAREN -> return Val(index)
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:943
+pub fn lsp_matching_paren(tokens: [Token], open: Int) -> Int? Never! {
+    depth := 0
+    loop index in open..<tokens.len() {
+        kind :: tokens[index].kind
+        if kind == TOKEN_LPAREN -> depth = depth.saturating_add(1)
+        if kind == TOKEN_RPAREN {
+            if depth == 0 -> return None
+            depth -= 1
+            if depth == 0 -> return Val(index)
+        }
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:960
+pub fn lsp_call_open(tokens: [Token], call_span: SourceSpan) -> Int? Never! {
+    callee := Int?{None}
+    loop (index, token) in tokens {
+        if token.span.start <= call_span.start && call_span.end <= token.span.end { callee = Val(index); break }
+    }
+    start :: callee ?? return None
+    loop index in start.saturating_add(1)..<tokens.len() {
+        kind :: tokens[index].kind
+        if kind == TOKEN_LPAREN -> return Val(index)
+        if kind == TOKEN_SEMI || kind == TOKEN_LBRACE || kind == TOKEN_RBRACE -> return None
+    }
+    None
+}

@@ -1,0 +1,99 @@
+// Source/LSP/Server.rs:2353–2535. Sole W38 server/request witness.
+// BudgetView.read_compatible is a required canonical Driver publication: this
+// consumer never measures, manufactures a report, or replaces failed reads.
+use core.encoding.[DataTree]
+use jet_foundation.[foundation_json_quote, mir_sha256_hex_bytes]
+use jet_impact.[ImpactReport]
+use core.files.runtime.kernel_path_components as lsp_command_path
+use core.files.host.retained_descriptor as lsp_command_fs
+
+pub fn lsp_execute_command_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    command_value :: value.field("command") ?? return None
+    if command_value != .Text(_) -> return None
+    if command_value == .Text(command) {
+        if command == "jet.reasoning" {
+            arguments :: value.field("arguments") ?? return Val(lsp_error_response(id, -32602, "jet.reasoning expects arguments [uri, selection?, expanded?]"))
+            if arguments == .Array(args) {
+                if args.len() == 0 -> return Val(lsp_error_response(id, -32602, "jet.reasoning expects arguments [uri, selection?, expanded?]"))
+                if args[0] == .Text(uri) {
+                    selection := String?{None}
+                    if args.len() > 1 {
+                        if args[1] == .Text(text) { if !text.is_empty() -> selection = Val(text) }
+                    }
+                    expanded := false
+                    if args.len() > 2 {
+                        if args[2] == {
+                            .Bool(flag) -> expanded = flag
+                            .Text(flag) -> expanded = flag == "true"
+                            else -> {}
+                        }
+                    }
+                    doc :: server.diagnostic_state.docs.get(uri) ?? return Val(lsp_error_response(id, -32602, "document not open in LSP session"))
+                    checked :: server.check_with_bundle(doc)
+                    permit :: checked.checked.guard_read()
+                    if permit.value.result.graph == None -> return Val(lsp_error_response(id, -32603, "document did not check cleanly"))
+                    db :: lsp_build_symbol_db(permit.value.result)
+                    return Val(lsp_response(id, lsp_reasoning_view_json(db, lsp_command_path.display(doc.path), selection, expanded)))
+                }
+            }
+            return Val(lsp_error_response(id, -32602, "jet.reasoning expects arguments [uri, selection?, expanded?]"))
+        }
+        if command == "jet.changeSignature" -> return Val(lsp_signature_change_response(server, value, id))
+        if command == "jet.budgetReports" {
+            arguments :: value.field("arguments") ?? return Val(lsp_error_response(id, -32602, "jet.budgetReports expects arguments [uri]"))
+            if arguments == .Array(args) {
+                if args.len() == 0 -> return Val(lsp_error_response(id, -32602, "jet.budgetReports expects arguments [uri]"))
+                if args[0] == .Text(uri) {
+                    doc :: server.diagnostic_state.docs.get(uri) ?? return Val(lsp_error_response(id, -32602, "document not open in LSP session"))
+                    root := lsp_workspace_root_for_path(server.workspace_roots, doc.path)
+                    if root == None {
+                        parent :: if lsp_command_path.parent_span(doc.path) == {
+                            .Val(extent) -> lsp_command_path.owned_span(doc.path, extent)
+                            None -> lsp_command_path.from_text(".", doc.path.platform)
+                        }
+                        root = Val(if lsp_command_fs.canonicalize(parent) == { .Ok(path) -> path .Err(_) -> parent })
+                    }
+                    native_root :: root ?? panic("budget root resolved")
+                    sources := [(String, String)]{}
+                    loop (path, text) in lsp_workspace_sources(server, Val(doc.path)) {
+                        extent :: lsp_command_path.strip_prefix_span(path, native_root) ?? lsp_command_path.PathSpan{start: 0, end: path.encoded.len()}
+                        relative :: lsp_command_path.display_span(path, extent).replace("\\", "/")
+                        &sources.push((relative, mir_sha256_hex_bytes(text.bytes())))
+                    }
+                    projection :: budget_view_read_compatible(native_root, sources)
+                    return Val(lsp_response(id, projection.to_json()))
+                }
+            }
+            return Val(lsp_error_response(id, -32602, "jet.budgetReports expects arguments [uri]"))
+        }
+        if command != "jet.impact" -> return Val(lsp_error_response(id, -32601, "unknown executeCommand"))
+        arguments :: value.field("arguments") ?? return Val(lsp_error_response(id, -32602, "jet.impact expects arguments [uri, symbol, depth?]"))
+        if arguments == .Array(args) {
+            if args.len() < 2 -> return Val(lsp_error_response(id, -32602, "jet.impact expects arguments [uri, symbol, depth?]"))
+            if args[0] == .Text(uri) && args[1] == .Text(symbol) {
+                depth := 3
+                if args.len() > 2 {
+                    if lsp_uinteger(args[2]) == .Val(number) -> depth = max(1, min(64, number))
+                }
+                doc :: server.diagnostic_state.docs.get(uri) ?? return Val(lsp_error_response(id, -32602, "document not open in LSP session"))
+                checked :: server.check_with_bundle(doc)
+                permit :: checked.checked.guard_read()
+                if permit.value.result.graph == None -> return Val(lsp_error_response(id, -32603, "document did not check cleanly"))
+                db :: lsp_build_symbol_db(permit.value.result)
+                count := 0
+                loop definition in db.index.definitions() {
+                    if definition.name == symbol -> count += 1
+                }
+                if !symbol.contains("::") && count > 1 {
+                    ambiguous :: "{{\"symbol\":{foundation_json_quote(symbol)},\"found\":false,\"scope\":\"ambiguous\",\"unknown\":true,\"reason\":\"multiple checked definitions share this spelling\",\"evidence\":\"checked_static\",\"runtime_observation\":\"not_run\"}}"
+                    return Val(lsp_response(id, ambiguous))
+                }
+                report :: ImpactReport.analyze(db.index, symbol, depth)
+                return Val(lsp_response(id, lsp_impact_report_json_with_provenance(report.to_json())))
+            }
+        }
+        return Val(lsp_error_response(id, -32602, "jet.impact expects arguments [uri, symbol, depth?]"))
+    }
+    None
+}

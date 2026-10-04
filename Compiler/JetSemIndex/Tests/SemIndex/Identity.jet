@@ -1,0 +1,31 @@
+#Test("semindex_declaration_identity_ignores_signature_edits") {
+    assert_eq(semindex_root_identity("main"), "module:main")
+    assert_eq(semindex_module_identity("main", "nested"), "module:main::nested")
+    assert_eq(semindex_type_identity("main", "Client"), "type:main::Client")
+    assert_eq(semindex_member_identity("main", "Client", "field", "host"), "field:main::Client.host")
+    assert_eq(semindex_callable_identity("main", None, "score"), "fn:main::score")
+    assert_eq(semindex_callable_identity("main", Val("Client"), "connect"), "method:main::Client.connect")
+    assert_eq(semindex_local_identity("fn:main::score", "local", "value"), "local:fn:main::score::value")
+}
+#Test("semindex_generated_presentation_preserves_replacement_order") {
+    text := "__long __lon __long.member"
+    semindex_project_text([SemIndexPresentationReplacement]{
+        SemIndexPresentationReplacement{internal: "__long", display: "Public"},
+        SemIndexPresentationReplacement{internal: "__lon", display: "Short"},
+    }, &text)
+    assert_eq(text, "Public Short Public.member")
+    semindex_project_text([SemIndexPresentationReplacement]{}, &text)
+    assert_eq(text, "Public Short Public.member")
+    chained := "internal"
+    semindex_project_text([SemIndexPresentationReplacement]{
+        SemIndexPresentationReplacement{internal: "internal", display: "middle"},
+        SemIndexPresentationReplacement{internal: "middle", display: "readable"},
+    }, &chained)
+    assert_eq(chained, "readable")
+}
+#Test("semindex_member_origin_labels") {
+    assert_eq(semindex_origin_label(.TypeBody), "type")
+    assert_eq(semindex_origin_label(.InherentImpl), "impl")
+    assert_eq(semindex_origin_label(.TraitImpl{trait_name: "Draw"}), "impl Draw")
+    assert_eq(semindex_origin_label(.TraitRequirement{trait_name: "Draw"}), "trait Draw")
+}

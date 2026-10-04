@@ -1,0 +1,63 @@
+// New behavioral controls for Server1141–1499. Original inline formatting
+// assertions are owned by 0740; tests/lsp native transcripts have their own queue.
+use jet_lexer.[lex]
+use jet_driver.[JetDriverAuthorizedSourceFile]
+
+fn lsp_handler_test_server(source: String) -> LSPServer Never! {
+    server := LSPServer.new(lsp_diag_test_snapshot("handler.jet", source, [JetDriverAuthorizedSourceFile]{}), lsp_diag_test_path("/fixture/build-source"))
+    lsp_loop_test_open(&server.diagnostic_state, "file:///lsp/handler.jet", 7, source)
+    server
+}
+
+fn lsp_handler_test_params(json: String) -> DataTree Never! {
+    foundation_parse_protocol_json(json) ?? panic("handler control JSON")
+}
+
+#Test("line boundaries distinguish CR LF CRLF and trailing empty lines") {
+    source :: "a\r\nb\rc\n"
+    assert_eq(lsp_line_boundary(source, 0), Val(0))
+    assert_eq(lsp_line_boundary(source, 1), Val(3))
+    assert_eq(lsp_line_boundary(source, 2), Val(5))
+    assert_eq(lsp_line_boundary(source, 3), Val(7))
+    assert_eq(lsp_line_boundary(source, 4), None)
+    assert_eq(lsp_line_content_end(source, 0), 1)
+    assert_eq(lsp_line_ending_before(source, 3), "\r\n")
+    assert_eq(lsp_line_ending_before(source, 5), "\n")
+}
+
+#Test("fragment indentation leaves blank lines unchanged and preserves inclusive newline bytes") {
+    assert_eq(lsp_indent_formatted_fragment("x\n\n  \ny", "\t"), "\tx\n\n  \n\ty")
+    assert_eq(lsp_indent_formatted_fragment("x\r\n\r\ny\r\n", "  "), "  x\r\n\r\n  y\r\n")
+    assert_eq(lsp_indent_formatted_fragment("", "  "), "")
+    assert_eq(lsp_indent_formatted_fragment("x\n", ""), "x\n")
+}
+
+#Test("brace pairing ignores strings and unmatched closes while retaining nesting order") {
+    source :: "}\nfn run() {{\n    text :: \"}}\"\n    if true {{}}\n}}\n"
+    tokens :: lex(source.bytes()).tokens
+    pairs :: lsp_token_brace_pairs(tokens)
+    assert_eq(pairs.len(), 2)
+    assert(pairs[0].open.start > pairs[1].open.start)
+    assert(!pairs[0].opaque)
+    assert(!pairs[1].opaque)
+    assert_eq(lsp_on_type_format_edits(source, tokens, LSPPos{line: 0, character: 0}, "}"), [TextEdit]{})
+}
+
+#Test("newline split inserts four spaces and retains the opening line indentation") {
+    source :: "    fn run() {{\n}}\n"
+    tokens :: lex(source.bytes()).tokens
+    edits :: lsp_on_type_format_edits(source, tokens, LSPPos{line: 1, character: 0}, "\n")
+    assert_eq(edits.len(), 1)
+    assert_eq(edits[0].new_text, "    ")
+    assert_eq(edits[0].span.start, 15)
+    assert_eq(edits[0].span.end, 15)
+}
+
+#Test("range formatter rejects malformed positions instead of widening to the document") {
+    source :: "fn run() {{}}\n"
+    bad :: LSPRange{start: LSPPos{line: 3, character: 0}, end: LSPPos{line: 3, character: 0}}
+    assert_eq(lsp_format_requested_lines(source, bad), None)
+    server :: lsp_handler_test_server(source)
+    params :: lsp_handler_test_params("{{\"textDocument\":{{\"uri\":\"file:///lsp/handler.jet\"}},\"range\":{{\"start\":{{\"line\":3,\"character\":0}},\"end\":{{\"line\":3,\"character\":0}}}}}}")
+    assert_eq(lsp_range_format_response(server, Val(params), DataTree.Int(1)), Val(lsp_response(DataTree.Int(1), "[]")))
+}

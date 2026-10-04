@@ -686,6 +686,190 @@ request execution and replaces a cancelled in-flight result with JSON-RPC
 `-32800`. D-LSP2 requires every advertised LSP feature to have named coverage
 in `tests/lsp.rs`; the server must not advertise speculative features.
 
+Editor positions count UTF-16 code units while source spans count UTF-8
+bytes. CR, LF and CRLF terminate lines; positions past a line's content clamp
+to its end, but an edit cannot split a surrogate pair or address an absent
+line. An optional `rangeLength` counts the replaced text's UTF-16 units,
+including line terminators. The shared
+[`position kernel`](../../Compiler/JetLSP/Source/LSP/Position.jet) owns these
+conversions and edit checks.
+
+File-URI conversion uses Core percent codecs and rejects malformed escapes
+or invalid decoded UTF-8. It does not interpret URL hosts, queries or fragments,
+or canonicalize paths; filesystem identity belongs to the separate authorized
+path-normalization boundary. The
+[`URI kernel`](../../Compiler/JetLSP/Source/LSP/URI.jet) preserves that separation.
+
+Diagnostic publication consumes the canonical retained Driver check, including
+the original loaded-module membership and checked overlay origins. It groups
+reports by target URI, retains matching open-document versions, and clears
+previous targets without discarding another root's reports. Publication state
+commits only after every real framed write and flush succeeds; close removes
+the document's state before emitting its clears. Visible messages use
+Foundation's owned bidi-escaping helper, while original report data and source
+bytes remain unchanged. Report data uses the current v3 wire and registry edits,
+not legacy editor-specific goldens or a second report codec.
+
+Core-module completion and member lookup consume caller-provided applied-rule
+menus, projected by Foundation from the canonical embedded Core declarations,
+effect roots and builtin tags. The entrypoint initializes this vocabulary once
+and passes the same menus through the symbol index to the language projection;
+neither the editor nor hybrid help maintains a second compiler vocabulary.
+Ordinary language-symbol lookup does not require these Core-module menus.
+
+Tooling shares Foundation's fact-availability stages (`Parsed`, `Resolved`,
+`Typed`, `Prepared`, `Emitted`) and explicit metadata-producer obligations.
+An unavailable producer is not a default fact. Source visibility follows the
+same identifier classification for every consumer: bare `_` is ordinary,
+one leading underscore plus a suffix is soft-public, and two leading
+underscores are reserved. Fact-read source, reflection, detail and public-value
+projections come from one registry rather than editor-specific tables.
+
+Checked effect provenance remains a compiler-solver fact. Its wire field is
+`effect`; the native editor model calls the corresponding field `effect_name`
+because `effect` is a language keyword. This boundary rename does not change
+the wire schema or recompute transitive effect witnesses.
+
+Semantic-index consumers read retained package policy and effect-projection
+fields through the index owner's canonical read borrow. These scalar facts
+are not copied into owning getter results or wrapped in singleton lists to
+imitate list-window views. State-graph presentation likewise reads the checked
+fact registry; it does not run state or reachability checking again.
+
+Typed status envelopes use Foundation's ordered `StatusValue`/`StatusFields`
+codec and canonical duplicate-field refusal. Raw semantic-index presentation
+helpers retain their own reference wire contract: authored duplicate expand
+entries and raw numeric spelling remain visible, and their quoting can differ
+from status-envelope quoting. Consumers project typed fields directly rather
+than serialize and parse an entire payload to cross that boundary.
+Ordered status builders consume their accumulated fields or envelope; a named
+receiver transfers ownership explicitly rather than copying its growing tree.
+At the typed envelope boundary, Foundation normalizes a JSON numeric atom as a
+finite Float64 or a bounded signed 64-bit integer; raw lexical payload spelling
+does not bypass that conversion or its range refusal.
+The PackageModel owns the typed effect-role projection used by documentation
+status envelopes as well as semantic-index consumers. Documentation passes
+the retained projection to that owner; it does not assemble a second
+required/granted/denied/authority object.
+
+Semantic review uses composite fact keys for kind, identity value, and optional
+module path. A human identity containing a colon cannot collide with a
+signature/module key. Ambiguity counts preserve that separation as well as the
+distinction between a matched fact and a receipt-authorized refactor.
+The full semantic index's fifteen-field inspection payload and the compiler's
+twelve-field `CompilerSemanticIndex` projection are distinct consumers of the
+same retained checked index. The compiler additionally carries source digest,
+structural nodes and fact registry; its diagnostic-side absence stays null.
+Neither view reconstructs checked facts from another serialized payload.
+
+REPL history owns one hexadecimal LF-record codec and retains only the
+complete prefix preceding a malformed or unterminated record. Its record
+scanner borrows byte windows rather than copying every encoded record.
+Persistence uses the canonical retained-descriptor backend and native OS-path
+environment ingress, not UTF-8 path reconstruction or pathname locks. A failed
+rewrite during open selects empty session-only fallback; a failed save during
+record retains the local entries and new input before disabling storage.
+
+Compiler member facts use the canonical fact-read registry's source spelling,
+reflection kind and public read type together. A member is unavailable when
+any of those projections is absent; a known reflection kind alone is not
+enough to publish a stable receiver-independent read type.
+
+Canvas HTML retains one immutable authored shell with a bootstrap insertion
+marker. The path and query entry modes publish their transport routes before
+loading the versioned application script. The existing base-path contract uses
+Foundation JSON escaping in both bootstrap positions and treats the base as
+opaque rather than URL-normalizing it. Asset rendering does not authenticate
+requests or inject session secrets; those belong to the serving host.
+
+The Canvas application retains twelve independently lintable JavaScript
+assets as one canonical data set. Native preparation embeds those files and
+joins them in the ratified order inside one IIFE, without runtime filesystem
+reads or a second literal bundle. Syntax and byte-order proofs do not claim
+browser execution, authentication, or session lifecycle behavior.
+
+Capture consent owns the complete seven-field receipt identity and its
+canonical disclosure scope. Constructors and attempt builders move caller-owned
+identity, scope and source facts; borrowing an attempt to derive a consent
+scope copies only the retained scope fields and rebuilds source kinds from the
+observed sources, rather than retaining stale kinds. Fault receipts borrow the
+start facts and own the fault code and optional location. These pure facts do
+not capture payloads, authorize a terminal interaction, or provide a resident
+recording sink; those remain separate host and session responsibilities.
+
+Debugger snapshot evaluation is a bounded, read-only projection of retained
+paused facts, not execution of a Jet expression. It accepts a readable local
+root and refuses nested places until child facts are available. Stable pause
+and frame identities hash the exact stack and raw local material; published
+values retain exact finite-float bits, byte hashes and aggregate shape facts.
+Snapshot-model proofs do not establish a live native pause or runtime event
+feed, which remain responsibilities of the native debugger and runtime.
+
+Debugger history owns bounded recorded-stop evidence, not reversal of target
+memory or time. Appending at the event cap refuses the new event without
+overwriting older evidence; receipt conversion retains every recorded act.
+Causal writes compare adjacent acts of the same function, retain the last
+local with a duplicate name, and group the sorted place differences by sequence.
+The decision ledger remains opaque and associated with its receipt: storing
+or navigating it does not validate evidence or grant repair authority.
+
+Console request and response facts are transport-neutral. They use the one
+canonical Foundation authority, preserve authored project-root spelling in
+identity hashes, and validate public fields again at the dispatch/publication
+boundary. A loopback origin is not an authority grant. These records and their
+pure validators do not provide an application router, database connection or
+transaction; those resources remain owned by the attached host.
+
+The REPL's
+[`geometry kernel`](../../Compiler/JetRepl/Source/Repl/Geometry.jet) keeps
+cursor indices in Unicode scalars, separately from terminal display cells.
+Display widths come from Core for each scalar; combining marks, wide scalars,
+soft-wrap pending state and prompt escape sequences retain their editor
+semantics. Rendered collection rows close only at an unquoted top-level
+`] : List` marker, so a quoted or nested marker cannot clip a displayed value.
+Raw terminal reads, repainting and pager effects remain separate host work.
+
+Completion's name boundaries use Core's pinned Unicode Alphabetic and Numeric
+properties, together with underscore and dot. Only outer dots are trimmed.
+Insertion and longest-common-prefix operations use scalar cursor indices, not
+grapheme or display-cell indices. Candidate menus preserve caller order and
+use textual selection without color; their minimum padding remains scalar
+based, separately from terminal geometry.
+
+Replay planning uses the recorded turn order, selecting turns by numeric ID
+rather than sorting or indexing by ledger position. An edit applies to every
+selected occurrence of its ID without mutating the recorded ledger. Each
+turn's recorded effect flag determines whether confirmation is required;
+status and staleness do not substitute for that flag. Planning and rendering
+do not execute turns or authorize their effects.
+
+The notebook
+[`trust model`](../../Compiler/JetRepl/Source/Notebook/Trust.jet) retains local
+grant records and quarantine/passive/active decisions. Payload identity uses
+Foundation CanonicalJSON with its final LF: ordered MIME pairs and nullable
+widget ID, preserving duplicate rows. Policy `notebook-trust-2` revokes former
+payload identities at the internal greenfield cutover; no old reader remains.
+Grant keys still bind source, payload, renderer, environment and policy with
+NUL separators. Requested origin/message capabilities retain their existing
+grant semantics; the browser host must enforce the sandbox and capability
+boundary, separately from this source-model decision.
+
+Notebook source-name facts come from the shared lexer. A binding declares
+the left operand of `::` or `:=`, not the value operand; these lexical facts
+do not substitute for checked compiler identities. Internal `closure-v2`
+cache identity uses Foundation CanonicalJSON of dependencies-first visited
+cells (ID, source and each declared dependency vector), environment identity
+and trust policy. Authored edge order and duplicates remain visible to the
+hash even when two graphs flatten to the same visited source sequence.
+Canonical bytes include the final LF; the former cache policy has no reader.
+
+Notebook interchange is a stated-loss projection. Same-ID divergent source
+keeps the local edit, records a durable merge conflict, and discards its output
+rather than choosing a last writer. Jupyter imports quarantine all output
+regardless of imported trust metadata. Exports distinguish current, stale and
+quarantined output; `.jet` export omits Markdown and notebook-only identity,
+trust and output facts with an explicit loss report.
+
 ### Compiler-speed evidence boundary (#666)
 
 Compiler-speed evidence stays on the production compiler path. The differential

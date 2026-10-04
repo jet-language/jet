@@ -1,0 +1,419 @@
+// crates/jet-debug/src/lib.rs:65-395,1870-1912: paused-snapshot facts, their
+// exact identities, and the bounded read-only local-path evaluator. Every
+// function here consumes published paused facts only; it never runs program
+// code, an interpreter, a native debugger, a process or a host callback.
+use core.math as debug_snapshot_math
+use jet_foundation.[mir_sha256_hex]
+
+// Rust split_debug_expression's 16 KiB UTF-8 byte bound.
+DEBUG_EXPRESSION_MAX_BYTES :: 16384
+
+// Rust ValueSnapshot: one value captured at a real paused source statement.
+pub struct ValueSnapshot {
+    pub name: String
+    pub type_name: String
+    pub value: String
+}
+
+// Rust FrameSnapshot: one Jet frame captured at a real paused statement.
+pub struct FrameSnapshot {
+    pub function: String
+    pub line: Int
+}
+
+// Rust DebugSnapshot plus pause_id/frame_id/identity_digest. Identities hash
+// the exact `function:line|frame:line...|name:type=value...` material and keep
+// the first 24 SHA-256 hex characters.
+pub struct DebugSnapshot {
+    pub function: String
+    pub line: Int
+    pub locals: [ValueSnapshot]
+    pub call_stack: [FrameSnapshot]
+
+    // Stable identity for this actual paused fact set.
+    pub fn pause_id(self) -> String Never! {
+        digest :: self.identity_digest()
+        "pause-{digest.slice(0, 24)}"
+    }
+
+    // Stable identity for the current frame in this paused fact set.
+    pub fn frame_id(self) -> String Never! {
+        digest :: mir_sha256_hex(debug_snapshot_frame_key(self).join(""))
+        "frame-{digest.slice(0, 24)}"
+    }
+
+    fn identity_digest(self) -> String Never! {
+        key := debug_snapshot_frame_key(self)
+        loop local in self.locals {
+            &key.push("|")
+            &key.push(local.name)
+            &key.push(":")
+            &key.push(local.type_name)
+            &key.push("=")
+            &key.push(local.value)
+        }
+        mir_sha256_hex(key.join(""))
+    }
+}
+
+// Rust's shared `function:line` + `|function:line` stack prefix, collected as
+// pieces and joined once like Rust's single push_str buffer.
+fn debug_snapshot_frame_key(snapshot: DebugSnapshot) -> [String] Never! {
+    key := [String]{snapshot.function, ":", "{snapshot.line}"}
+    loop frame in snapshot.call_stack {
+        &key.push("|")
+        &key.push(frame.function)
+        &key.push(":")
+        &key.push("{frame.line}")
+    }
+    key
+}
+
+// Rust DebugAggregateKind: aggregate shape retained by the safe evaluator.
+pub enum DebugAggregateKind {
+    Record
+    List
+    Map
+    Set
+    Tuple
+    Variant
+}
+
+// Rust DebugValue: a value after the backend removed unsafe runtime layout.
+// FloatBits is the exact IEEE-754 u64 bit pattern; Bytes are length+SHA-256;
+// aggregates publish shape and length only.
+pub enum DebugValue {
+    Unit
+    Bool(value: Bool)
+    Int(value: Int)
+    FloatBits(bits: Int)
+    Text(text: String)
+    Bytes(length: Int, sha256: String)
+    Aggregate(kind: DebugAggregateKind, length: Int)
+}
+
+// Rust DebugEvaluationUsage: bounded accounting for one safe evaluation.
+pub struct DebugEvaluationUsage {
+    pub depth: Int
+    pub nodes: Int
+    pub bytes: Int
+    pub steps: Int
+}
+
+// Rust DebugEvaluation: a read-only Jet local path resolved from a real pause.
+pub struct DebugEvaluation {
+    pub expression: String
+    pub name: String
+    pub type_name: String
+    pub value: DebugValue
+    pub usage: DebugEvaluationUsage
+}
+
+// Rust evaluate_snapshot's `Err(String)`.
+#Error
+pub struct DebugEvaluationError { pub message: String }
+
+fn debug_evaluation_error(message: String) -> DebugEvaluationError Never! {
+    DebugEvaluationError{message: message}
+}
+
+// Rust evaluate_snapshot: resolve one bounded read-only Jet local path.
+// Only a readable root is published; nested suffixes wait for child facts.
+pub fn evaluate_snapshot(snapshot: DebugSnapshot, expression: String) -> DebugEvaluation DebugEvaluationError! {
+    trimmed := expression.trim()
+    split :: debug_split_expression(trimmed) ?? return Err(debug_evaluation_error("only bounded read-only Jet local paths can be evaluated"))
+    if split.suffix != "" {
+        return Err(debug_evaluation_error("nested debugger evaluation is unavailable until the paused backend publishes child facts"))
+    }
+    loop local in snapshot.locals {
+        if local.name == split.root {
+            typed :: debug_value(local) ?? return Err(err)
+            bytes :: if typed == {
+                .Text(text) -> text.bytes().len()
+                else -> 8
+            }
+            return Ok(DebugEvaluation{
+                expression: trimmed,
+                name: local.name,
+                type_name: local.type_name,
+                value: typed,
+                usage: DebugEvaluationUsage{depth: 1, nodes: 1, bytes: bytes, steps: 1},
+            })
+        }
+    }
+    Err(debug_evaluation_error("no readable local named `{split.root}` at this stop"))
+}
+
+// Rust split_debug_expression's `(root, suffix)` pair as a named carrier
+// (#4357: tuples lack JetDebug/JetShow in the Rust emitter).
+struct DebugExpressionSplit {
+    root: String
+    suffix: String
+}
+
+// Rust split_debug_expression: a nonempty <=16 KiB `root(.field|[digits])*`
+// path. Rust also rejects any `char::is_control` scalar up front; that check
+// is subsumed here because this grammar accepts only ASCII letters, digits,
+// `_`, `.`, `[` and `]` and must consume every scalar, so each Cc (and every
+// other scalar) is already rejected with the same `None`.
+fn debug_split_expression(value: String) -> DebugExpressionSplit? Never! {
+    bytes :: value.bytes()
+    if bytes.len() == 0 || bytes.len() > DEBUG_EXPRESSION_MAX_BYTES -> return None
+    root_end :: debug_ident_end(bytes, 0)
+    // Root must start with an ASCII letter: rejects empty, `_` and digit starts.
+    if root_end == 0 || !debug_is_ascii_alpha(Int.from_u8(bytes[0])) -> return None
+    index := root_end
+    loop index < bytes.len() {
+        lead :: Int.from_u8(bytes[index])
+        if {
+            lead == 46 -> {
+                start :: index + 1
+                end :: debug_ident_end(bytes, start)
+                if end == start -> return None
+                first :: Int.from_u8(bytes[start])
+                if !debug_is_ascii_alpha(first) && first != 95 -> return None
+                index = end
+            }
+            lead == 91 -> {
+                start :: index + 1
+                close :: debug_index_close(bytes, start) ?? return None
+                if close == start -> return None
+                loop digit in start..<close {
+                    if !debug_is_ascii_digit(Int.from_u8(bytes[digit])) -> return None
+                }
+                index = close + 1
+            }
+            else -> return None
+        }
+    }
+    root :: String.from_bytes(bytes[0..<root_end]) ?? return None
+    suffix :: String.from_bytes(bytes[root_end..<bytes.len()]) ?? return None
+    Val(DebugExpressionSplit{root: root, suffix: suffix})
+}
+
+// Rust debug_path_segments: the validated path as `root`, `field` and
+// `[digits]` segments. Does not trim; callers pass the place as written.
+fn debug_path_segments(value: String) -> [String]? Never! {
+    split :: debug_split_expression(value) ?? return None
+    segments := [String]{split.root}
+    bytes :: split.suffix.bytes()
+    index := 0
+    loop index < bytes.len() {
+        lead :: Int.from_u8(bytes[index])
+        if {
+            lead == 46 -> {
+                end :: debug_ident_end(bytes, index + 1)
+                if end == index + 1 -> return None
+                &segments.push(String.from_bytes(bytes[(index + 1)..<end]) ?? return None)
+                index = end
+            }
+            lead == 91 -> {
+                close :: debug_index_close(bytes, index + 1) ?? return None
+                if close == index + 1 -> return None
+                loop digit in (index + 1)..<close {
+                    if !debug_is_ascii_digit(Int.from_u8(bytes[digit])) -> return None
+                }
+                &segments.push(String.from_bytes(bytes[index..<(close + 1)]) ?? return None)
+                index = close + 1
+            }
+            else -> return None
+        }
+    }
+    Val(segments)
+}
+
+// Rust render_snapshot_locals: stable name-ordered `name = value` dump.
+fn debug_render_snapshot_locals(values: [ValueSnapshot]) -> String Never! {
+    if values.len() == 0 -> return "locals:  (none)"
+    order := [Int]{}
+    loop index in 0..<values.len() -> &order.push(index)
+    // Rust's stable sort_by on name: equal names keep their published order.
+    &order.sort_by((left: Int, right: Int) -> {
+        if values[left].name != values[right].name -> values[left].name <=> values[right].name else -> left <=> right
+    })
+    parts := [String]{}
+    loop index in order -> &parts.push("{values[index].name} = {values[index].value}")
+    body :: parts.join("   ")
+    "locals:  {body}"
+}
+
+// Rust debug_value: typed safe projection of one published local value.
+fn debug_value(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
+    raw := value.value.trim()
+    if raw == "<optimized out>" || raw == "<unavailable>" {
+        return Err(debug_evaluation_error("local `{value.name}` has no readable value at this stop"))
+    }
+    type_name := value.type_name.trim()
+    if debug_scalar_class(type_name) == {
+        .Bool -> {
+            if raw == "true" -> return Ok(DebugValue.Bool{value: true})
+            if raw == "false" -> return Ok(DebugValue.Bool{value: false})
+            return Err(debug_evaluation_error("local `{value.name}` has an invalid Bool value"))
+        }
+        .Int -> {
+            unavailable :: "local `{value.name}` has an unavailable Int value"
+            if Int.parse(raw) == {
+                .Ok(number) -> {
+                    // Rust parses into i64; Core Int is exact, so bound it here.
+                    if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(debug_evaluation_error(unavailable))
+                    return Ok(DebugValue.Int{value: number})
+                }
+                else -> return Err(debug_evaluation_error(unavailable))
+            }
+        }
+        .Float -> {
+            unavailable :: "local `{value.name}` has an unavailable Float value"
+            if Float.parse(raw) == {
+                .Ok(number) -> {
+                    if !debug_snapshot_math.is_finite(number) -> return Err(debug_evaluation_error(unavailable))
+                    // Core to_bits reinterprets the u64 pattern as i64; publish u64.
+                    bits := debug_snapshot_math.to_bits(number)
+                    if bits < 0 -> bits = bits + 18446744073709551616
+                    return Ok(DebugValue.FloatBits{bits: bits})
+                }
+                else -> return Err(debug_evaluation_error(unavailable))
+            }
+        }
+        .Unit -> {
+            // Rust guard: a Unit type with any other text falls through to shapes.
+            if raw == "" || raw == "()" -> return Ok(DebugValue.Unit)
+        }
+        .Text -> return Ok(DebugValue.Text{text: debug_unquote_text(raw)})
+        .Other -> {}
+    }
+    raw_bytes :: raw.bytes()
+    if debug_delimited(raw_bytes, 91, 93) {
+        return Ok(DebugValue.Aggregate{kind: DebugAggregateKind.List, length: debug_aggregate_length(raw)})
+    }
+    if debug_delimited(raw_bytes, 123, 125) {
+        return Ok(DebugValue.Aggregate{kind: DebugAggregateKind.Record, length: debug_aggregate_length(raw)})
+    }
+    if raw.contains("Map") || value.type_name.contains("Map") {
+        return Ok(DebugValue.Aggregate{kind: DebugAggregateKind.Map, length: debug_aggregate_length(raw)})
+    }
+    if raw.contains("(") && raw.ends_with(")") {
+        return Ok(DebugValue.Aggregate{kind: DebugAggregateKind.Variant, length: debug_aggregate_length(raw)})
+    }
+    Err(debug_evaluation_error("local `{value.name}` has a value shape the safe debugger cannot publish"))
+}
+
+// Rust debug_value's type-name arms, in the same exact spellings.
+enum DebugScalarClass {
+    Bool
+    Int
+    Float
+    Unit
+    Text
+    Other
+}
+
+fn debug_scalar_class(type_name: String) -> DebugScalarClass Never! {
+    if type_name == {
+        "Bool" | "bool" -> DebugScalarClass.Bool
+        "Int" | "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "u8" | "u16" | "u32" | "u64" | "usize" | "u128" | "unsigned" | "unsigned long" | "unsigned long long" | "long" | "long long" -> DebugScalarClass.Int
+        "Float" | "f32" | "f64" -> DebugScalarClass.Float
+        "Unit" | "()" -> DebugScalarClass.Unit
+        "String" | "str" | "&str" | "Char" | "char" -> DebugScalarClass.Text
+        else -> DebugScalarClass.Other
+    }
+}
+
+// Rust `starts_with(open) && ends_with(close)` for distinct ASCII delimiters.
+fn debug_delimited(bytes: [U8], open: Int, close: Int) -> Bool Never! {
+    bytes.len() > 0 && Int.from_u8(bytes[0]) == open && Int.from_u8(bytes[bytes.len() - 1]) == close
+}
+
+// Rust aggregate_length: strip one matching `[]`, `{}` or `()` pair (the whole
+// raw text when the opener has no closer), trim, then count depth-zero commas.
+fn debug_aggregate_length(raw: String) -> Int Never! {
+    bytes :: raw.bytes()
+    start := 0
+    end := bytes.len()
+    if bytes.len() > 0 {
+        first :: Int.from_u8(bytes[0])
+        closer :: if {
+            first == 91 -> 93
+            first == 123 -> 125
+            first == 40 -> 41
+            else -> -1
+        }
+        if closer >= 0 && bytes.len() >= 2 && Int.from_u8(bytes[bytes.len() - 1]) == closer {
+            start = 1
+            end = bytes.len() - 1
+        }
+    }
+    inner_text :: String.from_bytes(bytes[start..<end]) ?? return 0
+    inner := inner_text.trim()
+    if inner == "" -> return 0
+    depth := 0
+    count := 1
+    loop byte in inner.bytes() {
+        code :: Int.from_u8(byte)
+        if {
+            code == 91 || code == 123 || code == 40 -> {
+                // Rust u32 saturating_add.
+                if depth < 4294967295 -> depth += 1
+            }
+            code == 93 || code == 125 || code == 41 -> {
+                if depth > 0 -> depth -= 1
+            }
+            code == 44 && depth == 0 -> count += 1
+            else -> {}
+        }
+    }
+    count
+}
+
+// Rust unquote_debug_text: strip one `"…"` pair and decode \n \r \t \\ \";
+// any other escaped scalar is kept without its backslash, and a dangling
+// final backslash is preserved. Unquoted text is returned unchanged.
+fn debug_unquote_text(raw: String) -> String Never! {
+    bytes :: raw.bytes()
+    if bytes.len() < 2 || Int.from_u8(bytes[0]) != 34 || Int.from_u8(bytes[bytes.len() - 1]) != 34 -> return ~raw
+    out := [U8]{}
+    escaped := false
+    loop index in 1..<(bytes.len() - 1) {
+        code :: Int.from_u8(bytes[index])
+        if {
+            escaped -> {
+                if {
+                    code == 110 -> &out.push(U8{10})
+                    code == 114 -> &out.push(U8{13})
+                    code == 116 -> &out.push(U8{9})
+                    else -> &out.push(bytes[index])
+                }
+                escaped = false
+            }
+            code == 92 -> escaped = true
+            else -> &out.push(bytes[index])
+        }
+    }
+    if escaped -> &out.push(U8{92})
+    String.from_bytes(out) ?? panic("debugger text unquoting preserves UTF-8")
+}
+
+// ASCII classifiers for the Rust `is_ascii_*` predicates on the path grammar.
+fn debug_is_ascii_alpha(code: Int) -> Bool Never! { (code >= 65 && code <= 90) || (code >= 97 && code <= 122) }
+fn debug_is_ascii_digit(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
+
+// First index at or after `start` that is not ASCII alphanumeric or `_`.
+fn debug_ident_end(bytes: [U8], start: Int) -> Int Never! {
+    index := start
+    loop index < bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if !debug_is_ascii_alpha(code) && !debug_is_ascii_digit(code) && code != 95 -> return index
+        index += 1
+    }
+    index
+}
+
+// Rust `index.find(']')`: first `]` byte at or after `start` (ASCII `]` never
+// occurs inside a multibyte UTF-8 scalar).
+fn debug_index_close(bytes: [U8], start: Int) -> Int? Never! {
+    index := start
+    loop index < bytes.len() {
+        if Int.from_u8(bytes[index]) == 93 -> return Val(index)
+        index += 1
+    }
+    None
+}

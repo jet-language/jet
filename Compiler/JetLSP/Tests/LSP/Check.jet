@@ -1,0 +1,48 @@
+// Check.rs has no inline originals. Reuse W36's real authorized source fixture
+// constructor; no duplicate incremental/publication tests or checked-fact mocks.
+#Test("LSP check path uses Names normalization not QueryService path identity") {
+    cwd :: lsp_check_path.from_text("/lsp/work", lsp_check_path.PathPlatform.Unix)
+    relative :: lsp_check_path.from_text("../main.jet", cwd.platform)
+    assert(lsp_check_path.equals(lsp_canonical_path(cwd, relative), lsp_check_path.from_text("/lsp/main.jet", cwd.platform)))
+    absolute :: lsp_check_path.from_text("/lsp/a/../main.jet", cwd.platform)
+    assert(lsp_check_path.equals(lsp_canonical_path(cwd, absolute), lsp_check_path.from_text("/lsp/main.jet", cwd.platform)))
+    windows :: lsp_check_path.PathPlatform.Windows
+    win_cwd :: lsp_check_path.from_text("C:\\work\\dir", windows)
+    win_path :: lsp_check_path.from_text("..\\main.jet", windows)
+    assert(lsp_check_path.equals(lsp_canonical_path(win_cwd, win_path), lsp_check_path.from_text("C:\\work\\main.jet", windows)))
+}
+
+#Test("single-document check exposes actual Driver diagnostics positive control restored") {
+    source :: "fn run() {{}}\n"
+    snapshot :: lsp_diag_test_snapshot("check-controls.jet", source, [JetDriverAuthorizedSourceFile]{})
+    path :: lsp_check_path.from_text("check-controls.jet", snapshot.cwd.platform)
+    queries := JetDriverCompilerQueries.new()
+    assert_eq(lsp_check_document(&queries, snapshot, path, source).len(), 0)
+    broken :: "fn run() {{ x :: ; }}\n"
+    assert(lsp_check_document(&queries, snapshot, path, broken).len() > 0)
+    assert_eq(lsp_check_document(&queries, snapshot, path, source).len(), 0)
+    checked :: lsp_check_document_with_bundle(&queries, snapshot, path, source)
+    permit :: checked.guard_read()
+    assert(permit.value.result.complete)
+    assert_eq(permit.value.result.internal_problem, None)
+}
+
+#Test("LSP authority repair requires actual default guarantee and absent inline package") {
+    source :: "fn run() {{}}\n"
+    snapshot :: lsp_diag_test_snapshot("authority-control.jet", source, [JetDriverAuthorizedSourceFile]{})
+    path :: lsp_check_path.from_text("authority-control.jet", snapshot.cwd.platform)
+    queries := JetDriverCompilerQueries.new()
+    checked :: lsp_check_document_with_bundle(&queries, snapshot, path, source)
+    permit :: checked.guard_read()
+    // Real constructors of the canonical policy, never invented bundle flags.
+    package_authority :: ApplicationAuthority.package_default()
+    assert_eq(lsp_script_authority_repair(path, source, permit.value.result, package_authority), None)
+    default_authority :: ApplicationAuthority.ambient_basics()
+    assert_eq(lsp_script_authority_repair(path, "package {{ broken", permit.value.result, default_authority), None)
+    assert_eq(lsp_script_authority_repair(path, source, permit.value.result, default_authority), None)
+    broken_source :: "fn run() {{ x :: ; }}\n"
+    failed :: lsp_check_document_with_bundle(&queries, snapshot, path, broken_source)
+    failed_permit :: failed.guard_read()
+    assert(failed_permit.value.result.graph == None)
+    assert_eq(lsp_script_authority_repair(path, broken_source, failed_permit.value.result, default_authority), None)
+}

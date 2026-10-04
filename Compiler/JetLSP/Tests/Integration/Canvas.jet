@@ -1,0 +1,1779 @@
+// PORT-PENDING 0982 tests-canvas-slice-1: tests/canvas.rs:1-1775
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-BPE-* Canvas prototype tests: source-backed graph, formatter round-trip,
+//RS //! and initial write transactions.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::HashSet;
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS fn temp_dir(tag: &str) -> PathBuf {
+//RS     let dir = std::env::temp_dir().join(format!("jet_canvas_{tag}_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS fn write_fixture(tag: &str, src: &str) -> PathBuf {
+//RS     let dir = temp_dir(tag);
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     path
+//RS }
+//RS 
+//RS fn ast_enum_variants(path: &str, enum_name: &str) -> Vec<String> {
+//RS     let src = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+//RS     let marker = format!("enum {enum_name}");
+//RS     let mut variants = Vec::new();
+//RS     let mut in_enum = false;
+//RS     let mut depth = 0i32;
+//RS     for line in src.lines() {
+//RS         let code = line.split("//").next().unwrap_or("");
+//RS         if !in_enum {
+//RS             if let Some(pos) = code.find(&marker) {
+//RS                 in_enum = true;
+//RS                 for ch in code[pos..].chars() {
+//RS                     if ch == '{' {
+//RS                         depth += 1;
+//RS                     } else if ch == '}' {
+//RS                         depth -= 1;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if depth == 1 {
+//RS             if let Some(name) = variant_name(code) {
+//RS                 variants.push(name.to_string());
+//RS             }
+//RS         }
+//RS         for ch in code.chars() {
+//RS             match ch {
+//RS                 '{' | '(' | '[' => depth += 1,
+//RS                 '}' | ')' | ']' => depth -= 1,
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         if depth == 0 {
+//RS             break;
+//RS         }
+//RS     }
+//RS     assert!(!variants.is_empty(), "missing {marker} variants in {path}");
+//RS     variants
+//RS }
+//RS 
+//RS fn variant_name(chunk: &str) -> Option<&str> {
+//RS     let line = chunk
+//RS         .lines()
+//RS         .map(str::trim)
+//RS         .filter(|line| {
+//RS             !line.is_empty()
+//RS                 && !line.starts_with("///")
+//RS                 && !line.starts_with("//")
+//RS                 && !line.starts_with("#[")
+//RS         })
+//RS         .find(|line| {
+//RS             line.chars()
+//RS                 .next()
+//RS                 .map(|c| c.is_uppercase())
+//RS                 .unwrap_or(false)
+//RS         })?;
+//RS     let end = line
+//RS         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+//RS         .unwrap_or(line.len());
+//RS     Some(&line[..end])
+//RS }
+//RS 
+//RS const CANVAS_FIXTURE: &str = r#"fn square(n: Int) -> Int {
+//RS     return n * n
+//RS }
+//RS 
+//RS fn summarize(limit: Int) -> Int {
+//RS     total := square(limit)
+//RS     if total > 10 { return total } else { return total + 1 }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(summarize(4))
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_COVERAGE_FIXTURE: &str = r#"fn coverage(limit: Int) -> Int {
+//RS     total := 0
+//RS     loop i in 0..<limit {
+//RS         if i == 2 {
+//RS             next
+//RS         }
+//RS         total += i
+//RS     }
+//RS     if total == {
+//RS         0 -> { return 1 }
+//RS         else -> { return total }
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(coverage(4))
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_DATA_FIXTURE: &str = r#"struct Point {
+//RS     x: Int
+//RS     y: Int
+//RS }
+//RS 
+//RS enum Choice {
+//RS     Pick(Int)
+//RS     Skip
+//RS }
+//RS 
+//RS fn make(n: Int) -> Int {
+//RS     p :: Point{x: n, y: n + 1}
+//RS     c :: Choice.Pick(p.x)
+//RS     return p.y
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(make(3))
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_PIN_AUTHORING_FIXTURE: &str = r#"fn to_int(n: Int) -> Int {
+//RS     return n
+//RS }
+//RS 
+//RS fn choose(limit: Int) -> Int {
+//RS     if limit > 1 {
+//RS         return limit
+//RS     } else {
+//RS         return 0
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(choose(3))
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_WIRE_FIXTURE: &str = r#"fn pick(a: Int, b: Int) -> Int {
+//RS     return a
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(pick(1, 2))
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_REORDER_FIXTURE: &str = r#"fn order() {
+//RS     a :: 1
+//RS     b :: 2
+//RS     c :: 3
+//RS     print(a + b + c)
+//RS }
+//RS 
+//RS fn run() {
+//RS     order()
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_REORDER_BINDING_FIXTURE: &str = r#"fn order() {
+//RS     a :: 1
+//RS     b :: 2
+//RS     c :: a + b
+//RS     print(c)
+//RS }
+//RS 
+//RS fn run() {
+//RS     order()
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_REORDER_CROSS_BLOCK_FIXTURE: &str = r#"fn order() {
+//RS     a :: 1
+//RS     if true {
+//RS         c :: 3
+//RS     } else {
+//RS         print(a)
+//RS     }
+//RS     b :: 2
+//RS     print(a + b)
+//RS }
+//RS 
+//RS fn run() {
+//RS     order()
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) -> Int {
+//RS     if x == Val(n) {
+//RS         return n
+//RS     } else {
+//RS         return 0
+//RS     }
+//RS }
+//RS 
+//RS fn list_total() -> Int {
+//RS     xs :: [1, 2, 3]
+//RS     ys :: [to_int(1), to_int(2)]
+//RS     return xs[0] + ys[0]
+//RS }
+//RS 
+//RS fn to_int(n: Int) -> Int {
+//RS     return n
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(first_or_zero(Val(4)))
+//RS     print(list_total())
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_FUNCTION_EVENT_FIXTURE: &str = r#"/// Starts the scene.
+//RS pub fn on_start(limit: Int{1}) -> Int {
+//RS     total := limit + 1
+//RS     return total
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(on_start())
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_COMMENT_FIXTURE: &str = r#"fn run() {
+//RS     print("damage")
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn canvas_parity_matrix_tracks_ast_language_forms() {
+//RS     let matrix = fs::read_to_string("Docs/spec/reference/canvas-parity.md")
+//RS         .expect("Canvas parity matrix must exist");
+//RS     for (enum_name, path) in [
+//RS         ("Item", "crates/jet-foundation/src/AST/items.rs"),
+//RS         ("Stmt", "crates/jet-foundation/src/AST/statements.rs"),
+//RS         ("Expr", "crates/jet-foundation/src/AST/expressions.rs"),
+//RS         ("Type", "crates/jet-foundation/src/AST/types.rs"),
+//RS         ("Pattern", "crates/jet-foundation/src/AST/patterns.rs"),
+//RS         ("BindPattern", "crates/jet-foundation/src/AST/patterns.rs"),
+//RS         ("LValue", "crates/jet-foundation/src/AST/lvalues.rs"),
+//RS     ] {
+//RS         for variant in ast_enum_variants(path, enum_name) {
+//RS             let token = format!("[{enum_name}::{variant}]");
+//RS             assert!(
+//RS                 matrix.contains(&token),
+//RS                 "Canvas parity matrix missing {token} from {path}"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS const CANVAS_COLLAPSE_FIXTURE: &str = r#"fn compute(limit: Int) -> Int {
+//RS     return limit + 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(compute(4))
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() {
+//RS     print("start")
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_RAILS_FIXTURE: &str = r#"use core.mem as mem
+//RS 
+//RS fn maybe() -> Int String! {
+//RS     return Ok(1)
+//RS }
+//RS 
+//RS fn checked() -> Int String! {
+//RS     n :: maybe()
+//RS     return Ok(n)
+//RS }
+//RS 
+//RS fn run() {
+//RS     #Unsafe("Canvas proof rail fixture") {
+//RS         marker := 1
+//RS     }
+//RS     print(checked())
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_SHIELD_FIXTURE: &str = r#"fn run() {
+//RS     #Shield {
+//RS         print("before")
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_POLICY_FIXTURE: &str = r#"fn run() {
+//RS     #Policy(copies: .Explicit) {
+//RS         print("bounded")
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_TASK_RAIL_FIXTURE: &str = r#"fn worker() -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     task.group g {
+//RS         t :: task {
+//RS             worker()
+//RS         }
+//RS         result :: (task.all { worker() }) ?? panic("task.all failed")
+//RS         print(result[0])
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_EVENT_DISPATCHER_FIXTURE: &str = r#"use core.event as event
+//RS 
+//RS struct Resource {
+//RS     id: Int
+//RS 
+//RS     fn on(&self) {}
+//RS     fn close(&self) {}
+//RS     fn cancel(&self) {}
+//RS }
+//RS 
+//RS fn run() {
+//RS     resource := Resource{ id: 1 }
+//RS     resource.on()
+//RS     resource.close()
+//RS     resource.cancel()
+//RS     scope :: event.scope()
+//RS     clicked :: event.new<Int>()
+//RS     clicked.on(scope, (n) -> { print("clicked {n}") })
+//RS     clicked.once(scope, (n) -> { print("once {n}") })
+//RS     clicked.on_priority(scope, 10, (n) -> { print("priority {n}") })
+//RS     print(&clicked.emit(1).summary())
+//RS     before_save :: event.hook<Int, String>("allow")
+//RS     before_save.on(scope, n -> "seen {n}")
+//RS     print(before_save.run(5, "fallback"))
+//RS     before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+//RS     before_publish.on(scope, n -> HookDecision.Continue)
+//RS     show_publish(before_publish.run(7))
+//RS     jobs :: event.async_result<Int, String>(AsyncPolicy{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
+//RS     jobs.on(scope, (n) -> { print("job {n}") })
+//RS     report :: jobs.emit_async(2).join() ?? panic("report")
+//RS     print(jobs.queued_count())
+//RS     jobs.close()
+//RS     scope.cancel()
+//RS }
+//RS 
+//RS fn show_publish(outcome: HookOutcome<Int, String>) {
+//RS     if outcome == {
+//RS         .Continue(value) -> print("continue {value}")
+//RS         .Cancel -> print("cancel")
+//RS         .Fail(error) -> print("fail {error}")
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_TRAIT_INTERFACE_FIXTURE: &str = r#"trait Drawable {
+//RS     fn render(self) -[IO]> String
+//RS     fn label(self) -> String {
+//RS         return "drawable"
+//RS     }
+//RS }
+//RS 
+//RS struct Badge {
+//RS     text: String
+//RS }
+//RS 
+//RS fn run() {
+//RS     print("ready")
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE: &str = r#"module ui {
+//RS     trait Drawable {
+//RS         fn render(self) -[IO]> String
+//RS         fn label(self) -> String {
+//RS             return "drawable"
+//RS         }
+//RS     }
+//RS 
+//RS     struct Badge {
+//RS         text: String
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print("ready")
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_TRAIT_ASSOC_TYPE_FIXTURE: &str = r#"trait Indexed {
+//RS     type Elem
+//RS     fn at(self, i: Int) -> Elem
+//RS }
+//RS 
+//RS struct Nums {
+//RS     values: [Int]
+//RS }
+//RS 
+//RS fn run() {
+//RS     print("ready")
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_TASK_FLOW_FIXTURE: &str = r#"use core.tasks as tasks
+//RS 
+//RS fn work() -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     (sender, ch) :: channel<Int>()
+//RS     task.group g {
+//RS         t :: task {
+//RS             sender.send(work())
+//RS         }
+//RS         print(ch.receive() ?? panic("channel closed"))
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS const CANVAS_DEBUG_FIXTURE: &str = r#"fn run() {
+//RS     total := 1
+//RS     print(total)
+//RS     print("program finished")
+//RS }
+//RS "#;
+//RS 
+//RS fn field_before(haystack: &str, marker: &str, field: &str) -> String {
+//RS     let end = haystack
+//RS         .find(marker)
+//RS         .unwrap_or_else(|| panic!("marker in graph JSON: {marker}"));
+//RS     let prefix = &haystack[..end];
+//RS     let key = format!("\"{field}\":\"");
+//RS     let start = prefix.rfind(&key).expect("field before marker") + key.len();
+//RS     let rest = &prefix[start..];
+//RS     rest[..rest.find('"').expect("field terminator")].to_string()
+//RS }
+//RS 
+//RS fn first_source_wire_id(graph: &str) -> String {
+//RS     for chunk in graph.split("\"wire_id\":\"").skip(1) {
+//RS         if chunk.contains("\"source_span\":{\"") {
+//RS             return chunk[..chunk.find('"').expect("wire id terminator")].to_string();
+//RS         }
+//RS     }
+//RS     panic!("source-backed wire in graph JSON");
+//RS }
+//RS 
+//RS fn first_node_id_containing(graph: &str, needle: &str) -> String {
+//RS     for chunk in graph.split("\"node_id\":\"").skip(1) {
+//RS         let id = &chunk[..chunk.find('"').expect("node id terminator")];
+//RS         if id.contains(needle) {
+//RS             return id.to_string();
+//RS         }
+//RS     }
+//RS     panic!("node id containing {needle}");
+//RS }
+//RS 
+//RS fn count_occurrences(haystack: &str, needle: &str) -> usize {
+//RS     haystack.match_indices(needle).count()
+//RS }
+//RS 
+//RS fn json_quote(value: &str) -> String {
+//RS     let mut out = String::from("\"");
+//RS     for ch in value.chars() {
+//RS         match ch {
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '"' => out.push_str("\\\""),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+//RS             ch => out.push(ch),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS fn json_field(haystack: &str, field: &str) -> String {
+//RS     let key = format!("\"{field}\":\"");
+//RS     let start = haystack.find(&key).expect("json field") + key.len();
+//RS     let rest = &haystack[start..];
+//RS     rest[..rest.find('"').expect("json field terminator")].to_string()
+//RS }
+//RS 
+//RS fn json_array_field<'a>(haystack: &'a str, field: &str) -> &'a str {
+//RS     let marker = format!("\"{field}\":[");
+//RS     let start = haystack
+//RS         .find(&marker)
+//RS         .map(|offset| offset + marker.len())
+//RS         .unwrap_or_else(|| panic!("missing JSON array `{field}`"));
+//RS     let mut depth = 1usize;
+//RS     let mut in_string = false;
+//RS     let mut escaped = false;
+//RS     for (offset, byte) in haystack.as_bytes()[start..].iter().enumerate() {
+//RS         if in_string {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if *byte == b'\\' {
+//RS                 escaped = true;
+//RS             } else if *byte == b'"' {
+//RS                 in_string = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match *byte {
+//RS             b'"' => in_string = true,
+//RS             b'[' => depth += 1,
+//RS             b']' => {
+//RS                 depth -= 1;
+//RS                 if depth == 0 {
+//RS                     return &haystack[start..start + offset];
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     panic!("unterminated JSON array `{field}`")
+//RS }
+//RS 
+//RS fn json_top_level_objects(array: &str) -> Vec<&str> {
+//RS     let mut objects = Vec::new();
+//RS     let mut start = None;
+//RS     let mut depth = 0usize;
+//RS     let mut in_string = false;
+//RS     let mut escaped = false;
+//RS     for (offset, byte) in array.as_bytes().iter().enumerate() {
+//RS         if in_string {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if *byte == b'\\' {
+//RS                 escaped = true;
+//RS             } else if *byte == b'"' {
+//RS                 in_string = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match *byte {
+//RS             b'"' => in_string = true,
+//RS             b'{' => {
+//RS                 if depth == 0 {
+//RS                     start = Some(offset);
+//RS                 }
+//RS                 depth += 1;
+//RS             }
+//RS             b'}' => {
+//RS                 depth -= 1;
+//RS                 if depth == 0 {
+//RS                     let object_start = start.take().expect("top-level JSON object start");
+//RS                     objects.push(&array[object_start..=offset]);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     assert_eq!(depth, 0, "unterminated top-level JSON object: {array}");
+//RS     objects
+//RS }
+//RS 
+//RS fn source_span_near(haystack: &str, marker: &str) -> (usize, usize) {
+//RS     let pos = haystack.find(marker).expect("marker near source span");
+//RS     let rest = &haystack[pos..];
+//RS     let key = "\"source_span\":{\"start\":";
+//RS     let start_pos = rest.find(key).expect("source span after marker") + key.len();
+//RS     let rest = &rest[start_pos..];
+//RS     let start = rest[..rest.find(',').expect("span comma")]
+//RS         .parse::<usize>()
+//RS         .expect("span start");
+//RS     let end_key = "\"end\":";
+//RS     let end_pos = rest.find(end_key).expect("span end") + end_key.len();
+//RS     let rest = &rest[end_pos..];
+//RS     let end_text = rest
+//RS         .chars()
+//RS         .take_while(|c| c.is_ascii_digit())
+//RS         .collect::<String>();
+//RS     let end = end_text.parse::<usize>().expect("span end number");
+//RS     (start, end)
+//RS }
+//RS 
+//RS fn source_span_at_or_after(haystack: &str, marker: &str, minimum_start: usize) -> (usize, usize) {
+//RS     let mut search_from = 0usize;
+//RS     while let Some(found) = haystack[search_from..].find(marker) {
+//RS         let pos = search_from + found;
+//RS         let (start, end) = source_span_near(&haystack[pos..], marker);
+//RS         if start >= minimum_start {
+//RS             return (start, end);
+//RS         }
+//RS         search_from = pos + marker.len();
+//RS     }
+//RS     panic!("marker has no source span at or after {minimum_start}: {marker}");
+//RS }
+//RS 
+//RS fn graph_id_for_title(graph: &str, title: &str) -> String {
+//RS     field_before(graph, &format!("\"title\":\"{title}\""), "graph_id")
+//RS }
+//RS 
+//RS fn graph_object_for_title<'a>(graph: &'a str, title: &str) -> &'a str {
+//RS     json_top_level_objects(json_array_field(graph, "graphs"))
+//RS         .into_iter()
+//RS         .find(|candidate| candidate.contains(&format!("\"title\":\"{title}\"")))
+//RS         .unwrap_or_else(|| panic!("graph object for {title}"))
+//RS }
+//RS 
+//RS fn name_span(src: &str, name: &str) -> (usize, usize) {
+//RS     let start = src.find(&format!("{name} ::")).expect("binding name span");
+//RS     (start, start + name.len())
+//RS }
+//RS 
+//RS fn source_order(src: &str, names: &[&str]) -> Vec<usize> {
+//RS     names
+//RS         .iter()
+//RS         .map(|name| src.find(&format!("{name} ::")).expect("source name"))
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_graph_json_is_stable_and_typed() {
+//RS     let path = write_fixture("graph", CANVAS_FIXTURE);
+//RS     let json = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+//RS 
+//RS     assert!(json.starts_with("{\"schema\":\"jet.status/v1\""), "{json}");
+//RS     assert_eq!(
+//RS         jet_foundation::MachineOutput::read_machine_line(&json),
+//RS         Ok(jet_foundation::MachineOutput::MachineRecord::Status)
+//RS     );
+//RS     assert!(json.contains("\"protocol\":\"jet.canvas.graph\""));
+//RS     assert!(json.contains("\"schema_version\":1"));
+//RS     assert!(json.contains("\"node_descriptors\":["));
+//RS     assert!(json.contains("\"node_descriptor_id\":\"branch\""));
+//RS     assert!(json.contains("\"source_id\""));
+//RS     assert!(json.contains("\"fmt_fingerprint\":\"sha256-"));
+//RS     assert!(json.contains("\"graph_id\":\"fn:"));
+//RS     assert!(json.contains("\"title\":\"summarize\""));
+//RS     assert!(json.contains("\"kind\":\"branch\""));
+//RS     assert!(json.contains("\"kind\":\"function\""));
+//RS     assert!(json.contains("\"archetype\":\"entry\""));
+//RS     assert!(json.contains("\"archetype\":\"control\""));
+//RS     assert!(json.contains("\"archetype\":\"function_exec\""));
+//RS     assert!(json.contains("\"archetype\":\"function_pure\""));
+//RS     assert!(json.contains("\"archetype\":\"value\""));
+//RS     assert!(json.contains("\"kind\":\"variable_get\""));
+//RS     assert!(json.contains("\"kind\":\"constant\""));
+//RS     assert!(json.contains("\"type\":\"Int\""));
+//RS     assert!(json.contains("\"wire_kind\":\"data\""));
+//RS     assert!(json.contains("\"wire_kind\":\"control\""));
+//RS     assert!(json.contains("\"from_source_span\":"));
+//RS     assert!(json.contains("\"to_source_span\":"));
+//RS     assert!(json.contains("\"type\":\"exec\""));
+//RS     assert!(json.contains("\"ability\":\"control\""));
+//RS     assert!(json.contains("\"inline_exprs\""));
+//RS     assert!(json.contains("total > 10"));
+//RS     let square_call = first_node_id_containing(&json, ":call:square");
+//RS     let binding = first_node_id_containing(&json, ":stmt:1:binding");
+//RS     assert!(
+//RS         json.contains(&format!(
+//RS             "\"from_pin\":\"{square_call}:output:result\",\"to_pin\":\"{binding}:input:value\",\"wire_kind\":\"data\""
+//RS         )),
+//RS         "pure function calls should feed data pins: {json}"
+//RS     );
+//RS     assert!(
+//RS         !json.contains(&format!("\"pin_id\":\"{square_call}:input:exec\"")),
+//RS         "pure expression call must not carry exec pin: {json}"
+//RS     );
+//RS 
+//RS     let again = jet::Canvas::graph_json_for_file(&path).expect("canvas graph again");
+//RS     assert_eq!(
+//RS         json, again,
+//RS         "Canvas layout/projection must be deterministic"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_projects_labeled_execution_outputs_for_loops_and_early_returns() {
+//RS     let path = write_fixture(
+//RS         "multi_exec_outputs",
+//RS         r#"fn paths(limit: Int) -> Int {
+//RS     loop i in 0..<limit {
+//RS         if i == 1 {
+//RS             return i
+//RS         } else {
+//RS             print(i)
+//RS         }
+//RS     }
+//RS     return 0
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(paths(3))
+//RS }
+//RS "#,
+//RS     );
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("multi-exec graph");
+//RS     let paths = graph_object_for_title(&graph, "paths");
+//RS     for field in [
+//RS         "\"name\":\"body\",\"direction\":\"output\",\"type\":\"exec\",\"role\":\"loop_body\"",
+//RS         "\"name\":\"done\",\"direction\":\"output\",\"type\":\"exec\",\"role\":\"loop_done\"",
+//RS         "\"name\":\"return\",\"direction\":\"output\",\"type\":\"exec\",\"role\":\"early_return\"",
+//RS     ] {
+//RS         assert!(
+//RS             paths.contains(field),
+//RS             "paths graph missing {field}: {paths}"
+//RS         );
+//RS     }
+//RS     let pins = json_top_level_objects(json_array_field(paths, "pins"));
+//RS     for (name, role) in [
+//RS         ("body", "loop_body"),
+//RS         ("done", "loop_done"),
+//RS         ("return", "early_return"),
+//RS     ] {
+//RS         let pin = pins
+//RS             .iter()
+//RS             .find(|pin| pin.contains(&format!("\"name\":\"{name}\"")))
+//RS             .unwrap_or_else(|| panic!("missing {name} pin: {paths}"));
+//RS         assert!(
+//RS             pin.contains(&format!("\"role\":\"{role}\"")),
+//RS             "pin role drift: {pin}"
+//RS         );
+//RS         assert!(
+//RS             pin.contains("\"source_span\":{\"start\":"),
+//RS             "pin provenance missing: {pin}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         paths.contains("\"name\":\"then\""),
+//RS         "branch then output missing: {paths}"
+//RS     );
+//RS     assert!(
+//RS         paths.contains("\"name\":\"else\""),
+//RS         "branch else output missing: {paths}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_projects_switch_arm_outputs_with_source_provenance() {
+//RS     let path = write_fixture(
+//RS         "multi_exec_switch_outputs",
+//RS         r#"fn choose(value: Int) -> Int {
+//RS     if value == {
+//RS         0 -> { return 0 }
+//RS         1 -> { return 1 }
+//RS         else -> { return 2 }
+//RS     }
+//RS }
+//RS 
+//RS fn run() { print(choose(1)) }
+//RS "#,
+//RS     );
+//RS     let source = fs::read_to_string(&path).unwrap();
+//RS     assert_eq!(jet::format_source(&source).unwrap(), source);
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("switch multi-exec graph");
+//RS     let choose = graph_object_for_title(&graph, "choose");
+//RS     let pins = json_top_level_objects(json_array_field(choose, "pins"));
+//RS 
+//RS     for (name, pattern) in [("arm1", "0"), ("arm2", "1")] {
+//RS         let pin = pins
+//RS             .iter()
+//RS             .find(|pin| pin.contains(&format!("\"name\":\"{name}\"")))
+//RS             .unwrap_or_else(|| panic!("missing {name} pin: {choose}"));
+//RS         assert!(pin.contains("\"direction\":\"output\""), "{pin}");
+//RS         assert!(pin.contains("\"type\":\"exec\""), "{pin}");
+//RS         assert!(pin.contains("\"role\":\"arm\""), "{pin}");
+//RS         assert!(
+//RS             pin.contains(&format!("\"pattern_source\":\"{pattern}\"")),
+//RS             "pattern provenance missing: {pin}"
+//RS         );
+//RS         let offset = source
+//RS             .find(&format!("{pattern} ->"))
+//RS             .expect("arm source span");
+//RS         assert!(
+//RS             pin.contains(&format!("\"source_span\":{{\"start\":{offset},\"end\":")),
+//RS             "source span does not identify {pattern} arm: {pin}"
+//RS         );
+//RS     }
+//RS 
+//RS     let else_pin = pins
+//RS         .iter()
+//RS         .find(|pin| pin.contains("\"name\":\"else\""))
+//RS         .expect("missing else pin");
+//RS     assert!(else_pin.contains("\"direction\":\"output\""), "{else_pin}");
+//RS     assert!(else_pin.contains("\"type\":\"exec\""), "{else_pin}");
+//RS     assert!(else_pin.contains("\"role\":\"else\""), "{else_pin}");
+//RS     assert!(
+//RS         else_pin.contains("\"source_span\":{\"start\":"),
+//RS         "{else_pin}"
+//RS     );
+//RS     assert!(
+//RS         !source.contains("=>"),
+//RS         "retired arrow spelling leaked: {source}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_projects_switch_arm_labels_with_exact_source_spans() {
+//RS     let path = write_fixture(
+//RS         "multi_exec_switch_pin_provenance",
+//RS         r#"fn choose(value: Int) -> Int {
+//RS     if value == {
+//RS         0 -> { return 0 }
+//RS         1 -> { return 1 }
+//RS         else -> { return 2 }
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(choose(1))
+//RS }
+//RS "#,
+//RS     );
+//RS     let source = fs::read_to_string(&path).unwrap();
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("switch multi-exec graph");
+//RS     let choose = graph_object_for_title(&graph, "choose");
+//RS     let pins = json_top_level_objects(json_array_field(choose, "pins"));
+//RS 
+//RS     for (name, pattern) in [("arm1", "0"), ("arm2", "1")] {
+//RS         let pin = pins
+//RS             .iter()
+//RS             .find(|pin| pin.contains(&format!("\"name\":\"{name}\"")))
+//RS             .unwrap_or_else(|| panic!("missing {name} pin: {choose}"));
+//RS         assert!(
+//RS             pin.contains(&format!("\"pattern_source\":\"{pattern}\"")),
+//RS             "{pin}"
+//RS         );
+//RS         let offset = source
+//RS             .find(&format!("{pattern} ->"))
+//RS             .expect("arm source span");
+//RS         assert!(
+//RS             pin.contains(&format!("\"source_span\":{{\"start\":{offset},\"end\":")),
+//RS             "source span does not identify {pattern} arm: {pin}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rejects_ambiguous_package_facts_before_projection() {
+//RS     let dir = temp_dir("graph_ambiguous_package");
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"canonical\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join(jet::Syntax::PAYLOAD_FILE),
+//RS         "name: \"legacy\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     let entry = dir.join("main.jet");
+//RS     fs::write(&entry, "fn run() {}\n").unwrap();
+//RS 
+//RS     let diagnostics = jet::Canvas::graph_json_for_file(&entry)
+//RS         .expect_err("Canvas must reject ambiguous package facts");
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .find(|diagnostic| diagnostic.code == "E1206")
+//RS             .is_some(),
+//RS         "{diagnostics:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_project_uses_shared_package_diagnostic() {
+//RS     let dir = temp_dir("project_ambiguous_package");
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"canonical\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         dir.join(jet::Syntax::PAYLOAD_FILE),
+//RS         "name: \"legacy\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     let entry = dir.join("main.jet");
+//RS     fs::write(&entry, "fn run() {}\n").unwrap();
+//RS 
+//RS     let diagnostics = jet::Canvas::graph_json_for_file(&entry)
+//RS         .expect_err("Canvas must reject ambiguous package facts");
+//RS     let diagnostic = diagnostics
+//RS         .iter()
+//RS         .find(|diagnostic| diagnostic.code == "E1206")
+//RS         .expect("ambiguous package facts must use the shared E1206 diagnostic");
+//RS     let project = jet::Canvas::project_json_for_entry(&entry);
+//RS     assert!(project.contains("\"code\":\"E1206\""), "{project}");
+//RS     assert!(!project.contains("\"code\":\"package\""), "{project}");
+//RS     assert!(
+//RS         project.contains("one typed Package fact graph must own this projection"),
+//RS         "{project}"
+//RS     );
+//RS     for field in [
+//RS         diagnostic.code.as_str(),
+//RS         diagnostic.what.as_str(),
+//RS         diagnostic.why.as_str(),
+//RS         diagnostic.fix.as_str(),
+//RS     ] {
+//RS         assert!(
+//RS             project.contains(field),
+//RS             "project omitted diagnostic field: {field}\n{project}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
+//RS     let projection_fixtures = [
+//RS         ("node_descriptor_coverage", CANVAS_COVERAGE_FIXTURE),
+//RS         ("node_descriptor_data", CANVAS_DATA_FIXTURE),
+//RS         ("node_descriptor_patterns", CANVAS_PATTERN_MULTI_FIXTURE),
+//RS         ("node_descriptor_fallible", CANVAS_RAILS_FIXTURE),
+//RS         (
+//RS             "node_descriptor_yield",
+//RS             include_str!("../Examples/features/streams/generators.jet"),
+//RS         ),
+//RS         (
+//RS             "node_descriptor_scope",
+//RS             include_str!("../Examples/features/tooling/test_members.jet"),
+//RS         ),
+//RS     ];
+//RS     let path = write_fixture(projection_fixtures[0].0, projection_fixtures[0].1);
+//RS     let json = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+//RS     let catalog = json_array_field(&json, "node_descriptors");
+//RS     let descriptors = json_top_level_objects(catalog);
+//RS     assert!(
+//RS         !descriptors.is_empty(),
+//RS         "descriptor catalog is empty: {catalog}"
+//RS     );
+//RS     let mut catalog_ids = HashSet::new();
+//RS     let mut catalog_projected_ids = HashSet::new();
+//RS     let mut catalog_insertable_ids = HashSet::new();
+//RS     for descriptor in &descriptors {
+//RS         let id = json_field(descriptor, "id");
+//RS         assert!(
+//RS             catalog_ids.insert(id.clone()),
+//RS             "duplicate descriptor id `{id}`: {catalog}"
+//RS         );
+//RS         assert!(
+//RS             descriptor.contains("\"kind\":\"")
+//RS                 && descriptor.contains("\"archetype\":\"")
+//RS                 && descriptor.contains("\"presentation\":{")
+//RS                 && descriptor.contains("\"palette\":{")
+//RS                 && descriptor.contains("\"default_editor\":"),
+//RS             "descriptor facts incomplete for {id}: {descriptor}"
+//RS         );
+//RS         let projected = descriptor.contains("\"projected\":true");
+//RS         let insertable = descriptor.contains("\"insertable\":true");
+//RS         assert!(
+//RS             projected || insertable,
+//RS             "orphaned descriptor `{id}`: {descriptor}"
+//RS         );
+//RS         if projected {
+//RS             catalog_projected_ids.insert(id.clone());
+//RS         }
+//RS         if insertable {
+//RS             catalog_insertable_ids.insert(id.clone());
+//RS         }
+//RS         assert_eq!(
+//RS             insertable,
+//RS             !descriptor.contains("\"transaction\":null"),
+//RS             "insertable/transaction mismatch for `{id}`: {descriptor}"
+//RS         );
+//RS     }
+//RS 
+//RS     let mut projected_ids = HashSet::new();
+//RS     for (fixture_name, fixture_src) in projection_fixtures {
+//RS         let fixture_path = write_fixture(fixture_name, fixture_src);
+//RS         let projection =
+//RS             jet::Canvas::graph_json_for_file(&fixture_path).expect("descriptor coverage graph");
+//RS         for graph in json_top_level_objects(json_array_field(&projection, "graphs")) {
+//RS             for node in json_top_level_objects(json_array_field(graph, "nodes")) {
+//RS                 assert_eq!(
+//RS                     count_occurrences(node, "\"node_descriptor_id\":"),
+//RS                     1,
+//RS                     "projected node must carry exactly one descriptor id: {node}"
+//RS                 );
+//RS                 let id = json_field(node, "node_descriptor_id");
+//RS                 assert!(
+//RS                     catalog_ids.contains(&id),
+//RS                     "projected node references missing descriptor `{id}`: {node}"
+//RS                 );
+//RS                 projected_ids.insert(id);
+//RS             }
+//RS         }
+//RS     }
+//RS     assert_eq!(
+//RS         projected_ids, catalog_projected_ids,
+//RS         "catalog/projector coverage must be exactly bidirectional"
+//RS     );
+//RS 
+//RS     let src = fs::read_to_string(&path).unwrap();
+//RS     let actions_request = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
+//RS         jet::Canvas::source_revision(&src)
+//RS     );
+//RS     let actions =
+//RS         jet::Canvas::query_json_for_file(&path, &actions_request).expect("Canvas actions");
+//RS     let mut action_objects =
+//RS         json_top_level_objects(json_array_field(&actions, "project_functions"));
+//RS     action_objects.extend(
+//RS         json_top_level_objects(json_array_field(&actions, "actions"))
+//RS             .into_iter()
+//RS             .filter(|action| !action.contains("\"kind\":\"canvas.command\"")),
+//RS     );
+//RS     assert!(
+//RS         !action_objects.is_empty(),
+//RS         "insertable actions need descriptors: {actions}"
+//RS     );
+//RS 
+//RS     let mut exported_insertable_ids = HashSet::new();
+//RS     for action in &action_objects {
+//RS         assert_eq!(
+//RS             count_occurrences(action, "\"node_descriptor_id\":"),
+//RS             1,
+//RS             "served insertable action must carry exactly one descriptor id: {action}"
+//RS         );
+//RS         let id = json_field(action, "node_descriptor_id");
+//RS         let descriptor = descriptors
+//RS             .iter()
+//RS             .find(|descriptor| json_field(descriptor, "id") == id)
+//RS             .unwrap_or_else(|| panic!("action references missing descriptor `{id}`: {action}"));
+//RS         assert!(
+//RS             descriptor.contains("\"insertable\":true"),
+//RS             "action exports non-insertable descriptor `{id}`: {action}"
+//RS         );
+//RS         exported_insertable_ids.insert(id.clone());
+//RS         let transaction = json_field(descriptor, "transaction");
+//RS         let action_transaction = if action.contains("\"insert_op\":\"") {
+//RS             json_field(action, "insert_op")
+//RS         } else {
+//RS             json_field(action, "op")
+//RS         };
+//RS         assert_eq!(
+//RS             action_transaction, transaction,
+//RS             "action/descriptor transaction mismatch for `{id}`: {action}"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         exported_insertable_ids, catalog_insertable_ids,
+//RS         "catalog/action export coverage must be exactly bidirectional"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_noop_round_trip_is_formatter_stable() {
+//RS     let path = write_fixture("noop", CANVAS_FIXTURE);
+//RS     let before = fs::read_to_string(&path).unwrap();
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+//RS     let revision = jet::Canvas::source_revision(&before);
+//RS     let edit = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"noop\",\"revision\":\"{}\"}}",
+//RS         revision
+//RS     );
+//RS 
+//RS     let out = jet::Canvas::apply_transaction_json(&path, &edit).expect("noop transaction");
+//RS     assert!(out.contains("\"changed\":false"), "{out}");
+//RS     assert!(out.contains("\"schema_version\":1"), "{out}");
+//RS     assert_eq!(fs::read_to_string(&path).unwrap(), before);
+//RS 
+//RS     let after_graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph after noop");
+//RS     assert_eq!(
+//RS         graph, after_graph,
+//RS         "no-op write must reproject without drift"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_edit_transactions_write_source_and_reproject() {
+//RS     let path = write_fixture("edit", CANVAS_FIXTURE);
+//RS     let revision = jet::Canvas::source_revision(&fs::read_to_string(&path).unwrap());
+//RS     let rename = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{}\",\"from\":\"total\",\"to\":\"score\"}}",
+//RS         revision
+//RS     );
+//RS     let rename_out =
+//RS         jet::Canvas::apply_transaction_json(&path, &rename).expect("rename transaction");
+//RS     assert!(rename_out.contains("\"changed\":true"), "{rename_out}");
+//RS     let renamed = fs::read_to_string(&path).unwrap();
+//RS     assert!(renamed.contains("score := square(limit)"));
+//RS     assert!(renamed.contains("if score > 10"));
+//RS     assert!(!renamed.contains("total"));
+//RS     let receipts = path.parent().unwrap().join(".jet/codemods");
+//RS     let receipt = fs::read_dir(receipts)
+//RS         .unwrap()
+//RS         .filter_map(Result::ok)
+//RS         .map(|entry| entry.path())
+//RS         .find(|candidate| candidate.extension().and_then(|value| value.to_str()) == Some("json"))
+//RS         .expect("Canvas rename receipt");
+//RS     let receipt = fs::read_to_string(receipt).unwrap();
+//RS     assert!(receipt.contains("\"kind\":\"rename\""), "{receipt}");
+//RS     assert!(receipt.contains("\"from\":\"total\""), "{receipt}");
+//RS     assert!(receipt.contains("\"to\":\"score\""), "{receipt}");
+//RS     let scm = jet::Canvas::source_control_json_for_file(&path);
+//RS     assert!(
+//RS         scm.contains("\"semantic_ops\":[{\"kind\":\"rename\""),
+//RS         "{scm}"
+//RS     );
+//RS 
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph after rename");
+//RS     assert!(graph.contains("\"title\":\"score\""));
+//RS 
+//RS     let revision = jet::Canvas::source_revision(&renamed);
+//RS     let inline_id = field_before(&graph, "\"source\":\"score > 10\"", "inline_expr_id");
+//RS     let edit_inline = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"score >= 16\"}}",
+//RS         revision, inline_id
+//RS     );
+//RS     let inline_out =
+//RS         jet::Canvas::apply_transaction_json(&path, &edit_inline).expect("inline transaction");
+//RS     assert!(inline_out.contains("\"changed\":true"), "{inline_out}");
+//RS     let changed = fs::read_to_string(&path).unwrap();
+//RS     assert!(changed.contains("if score >= 16"));
+//RS 
+//RS     let revision = jet::Canvas::source_revision(&changed);
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph before insert");
+//RS     let run_graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
+//RS     let insert = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"print\",\"args\":[\"\\\"canvas\\\"\"]}}",
+//RS         revision, run_graph_id
+//RS     );
+//RS     let insert_out =
+//RS         jet::Canvas::apply_transaction_json(&path, &insert).expect("insert transaction");
+//RS     assert!(insert_out.contains("\"changed\":true"), "{insert_out}");
+//RS     let inserted = fs::read_to_string(&path).unwrap();
+//RS     assert!(inserted.contains("print(\"canvas\")"));
+//RS     let final_graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph final");
+//RS     assert!(final_graph.contains("\"title\":\"print\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_source_paste_is_renamed_checked_and_stale_atomic() {
+//RS     let path = write_fixture("paste_clone", CANVAS_FIXTURE);
+//RS     let before = fs::read_to_string(&path).unwrap();
+//RS     let stale_revision = jet::Canvas::source_revision(&before);
+//RS     let clone = before.replace(
+//RS         "    total := square(limit)\n",
+//RS         "    total := square(limit)\n    total_copy := square(limit)\n",
+//RS     );
+//RS     let escaped_clone = clone
+//RS         .replace('\\', "\\\\")
+//RS         .replace('"', "\\\"")
+//RS         .replace('\n', "\\n");
+//RS     let paste = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source_edit\":\"paste_clone\",\"source\":\"{}\"}}",
+//RS         stale_revision, escaped_clone
+//RS     );
+//RS     let paste_out =
+//RS         jet::Canvas::apply_transaction_json(&path, &paste).expect("paste clone transaction");
+//RS     assert!(paste_out.contains("\"changed\":true"), "{paste_out}");
+//RS     let pasted = fs::read_to_string(&path).unwrap();
+//RS     let original_offset = pasted
+//RS         .find("total := square(limit)")
+//RS         .expect("original binding");
+//RS     let clone_offset = pasted
+//RS         .find("total_copy := square(limit)")
+//RS         .expect("renamed clone");
+//RS     assert!(
+//RS         clone_offset > original_offset,
+//RS         "paste must insert after the selected source line"
+//RS     );
+//RS     assert!(jet::Canvas::graph_json_for_file(&path)
+//RS         .expect("reproject pasted graph")
+//RS         .contains("\"title\":\"total_copy\""));
+//RS 
+//RS     let invalid_revision = jet::Canvas::source_revision(&pasted);
+//RS     let invalid = pasted.replace(
+//RS         "total_copy := square(limit)",
+//RS         "total_copy := missing(limit)",
+//RS     );
+//RS     let escaped_invalid = invalid
+//RS         .replace('\\', "\\\\")
+//RS         .replace('"', "\\\"")
+//RS         .replace('\n', "\\n");
+//RS     let invalid_request = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\"}}",
+//RS         invalid_revision, escaped_invalid
+//RS     );
+//RS     let error = jet::Canvas::apply_transaction_json(&path, &invalid_request).unwrap_err();
+//RS     assert!(
+//RS         error.contains("Error [") || error.contains("diagnostic"),
+//RS         "{error}"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(&path).unwrap(),
+//RS         pasted,
+//RS         "invalid paste must not write source"
+//RS     );
+//RS 
+//RS     let stale_request = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\"}}",
+//RS         stale_revision, escaped_clone
+//RS     );
+//RS     let stale_error = jet::Canvas::apply_transaction_json(&path, &stale_request).unwrap_err();
+//RS     assert!(
+//RS         stale_error.contains("source changed since this Canvas graph was drawn"),
+//RS         "{stale_error}"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(&path).unwrap(),
+//RS         pasted,
+//RS         "stale paste must not write source"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_pin_authoring_transactions_write_visible_source() {
+//RS     let path = write_fixture("pin_authoring", CANVAS_PIN_AUTHORING_FIXTURE);
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+//RS     let cond_id = field_before(&graph, "\"source\":\"limit > 1\"", "inline_expr_id");
+//RS     let revision = jet::Canvas::source_revision(&fs::read_to_string(&path).unwrap());
+//RS     let promote = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"promote_to_binding\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"name\":\"is_large\"}}",
+//RS         revision, cond_id
+//RS     );
+//RS     let promote_out =
+//RS         jet::Canvas::apply_transaction_json(&path, &promote).expect("promote transaction");
+//RS     assert!(promote_out.contains("\"changed\":true"), "{promote_out}");
+//RS     let promoted = fs::read_to_string(&path).unwrap();
+//RS     assert!(promoted.contains("is_large :: limit > 1"));
+//RS     assert!(promoted.contains("if is_large"));
+//RS 
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph after promote");
+//RS     let literal_id = field_before(&graph, "\"source\":\"0\"", "inline_expr_id");
+//RS     let revision = jet::Canvas::source_revision(&promoted);
+//RS     let convert = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"insert_visible_conversion\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"callee\":\"to_int\"}}",
+//RS         revision, literal_id
+//RS     );
+//RS     let convert_out =
+//RS         jet::Canvas::apply_transaction_json(&path, &convert).expect("conversion transaction");
+//RS     assert!(convert_out.contains("\"changed\":true"), "{convert_out}");
+//RS     let converted = fs::read_to_string(&path).unwrap();
+//RS     assert!(
+//RS         converted.contains("return to_int(0)"),
+//RS         "visible conversion must be ordinary source: {converted}"
+//RS     );
+//RS     let final_graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph final");
+//RS     assert!(final_graph.contains("\"title\":\"to_int\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_link_transactions_break_and_move_source_wires() {
+//RS     let break_path = write_fixture("break_link", CANVAS_WIRE_FIXTURE);
+//RS     let graph = jet::Canvas::graph_json_for_file(&break_path).expect("canvas graph");
+//RS     let wire_id = first_source_wire_id(&graph);
+//RS     let revision = jet::Canvas::source_revision(&fs::read_to_string(&break_path).unwrap());
+//RS     let break_req = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"break_link\",\"revision\":\"{}\",\"wire_id\":\"{}\"}}",
+//RS         revision, wire_id
+//RS     );
+//RS     let break_out =
+//RS         jet::Canvas::apply_transaction_json(&break_path, &break_req).expect("break link");
+//RS     assert!(break_out.contains("\"changed\":true"), "{break_out}");
+//RS     let broken = fs::read_to_string(&break_path).unwrap();
+//RS     assert!(broken.contains("return #Todo"), "{broken}");
+//RS 
+//RS     let move_path = write_fixture("move_link", CANVAS_WIRE_FIXTURE);
+//RS     let graph = jet::Canvas::graph_json_for_file(&move_path).expect("canvas graph");
+//RS     let wire_id = first_source_wire_id(&graph);
+//RS     let revision = jet::Canvas::source_revision(&fs::read_to_string(&move_path).unwrap());
+//RS     let move_req = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"move_link\",\"revision\":\"{}\",\"wire_id\":\"{}\",\"replacement\":\"b\"}}",
+//RS         revision, wire_id
+//RS     );
+//RS     let move_out = jet::Canvas::apply_transaction_json(&move_path, &move_req).expect("move link");
+//RS     assert!(move_out.contains("\"changed\":true"), "{move_out}");
+//RS     let moved = fs::read_to_string(&move_path).unwrap();
+//RS     assert!(moved.contains("return b"), "{moved}");
+//RS 
+//RS     let wrong_path = write_fixture("wrong_link", CANVAS_WIRE_FIXTURE);
+//RS     let graph = jet::Canvas::graph_json_for_file(&wrong_path).expect("canvas graph");
+//RS     let wire_id = first_source_wire_id(&graph);
+//RS     let before = fs::read_to_string(&wrong_path).unwrap();
+//RS     let revision = jet::Canvas::source_revision(&before);
+//RS     let wrong_req = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"move_link\",\"revision\":\"{}\",\"wire_id\":\"{}\",\"replacement\":\"missing\"}}",
+//RS         revision, wire_id
+//RS     );
+//RS     let err = jet::Canvas::apply_transaction_json(&wrong_path, &wrong_req).unwrap_err();
+//RS     assert!(err.contains("\"kind\":\"diagnostic\""), "{err}");
+//RS     assert!(err.contains("Error [E0107]"), "{err}");
+//RS     assert_eq!(fs::read_to_string(&wrong_path).unwrap(), before);
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_exec_rewire_reorders_statements_and_guards_scope_and_dataflow() {
+//RS     let path = write_fixture("reorder_exec", CANVAS_REORDER_FIXTURE);
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+//RS     let graph_id = graph_id_for_title(&graph, "order");
+//RS     assert!(
+//RS         graph.contains("\"wire_kind\":\"control\"")
+//RS             && graph.contains("\"from_source_span\":{\"start\":")
+//RS             && graph.contains("\"to_source_span\":{\"start\":"),
+//RS         "control wires must carry endpoint statement spans: {graph}"
+//RS     );
+//RS     let src = fs::read_to_string(&path).unwrap();
+//RS     let (moved_start, moved_end) = name_span(&src, "c");
+//RS     let (anchor_start, anchor_end) = name_span(&src, "a");
+//RS     let req = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"moved_start\":{},\"moved_end\":{},\"anchor_start\":{},\"anchor_end\":{},\"position\":\"after\"}}",
+//RS         jet::Canvas::source_revision(&src),
+//RS         graph_id,
+//RS         moved_start,
+//RS         moved_end,
+//RS         anchor_start,
+//RS         anchor_end
+//RS     );
+//RS     jet::Canvas::apply_transaction_json(&path, &req).expect("reorder statements");
+//RS     let after = fs::read_to_string(&path).unwrap();
+//RS     let order = source_order(&after, &["a", "c", "b"]);
+//RS     assert!(order[0] < order[1] && order[1] < order[2], "{after}");
+//RS     let formatted = jet::format_source(&after).expect("format reordered source");
+//RS     assert_eq!(after, formatted, "reorder must be formatter-stable");
+//RS 
+//RS     let cross = write_fixture("reorder_cross_block", CANVAS_REORDER_CROSS_BLOCK_FIXTURE);
+//RS     let graph = jet::Canvas::graph_json_for_file(&cross).expect("cross graph");
+//RS     let graph_id = graph_id_for_title(&graph, "order");
+//RS     let src = fs::read_to_string(&cross).unwrap();
+//RS     let (moved_start, moved_end) = name_span(&src, "c");
+//RS     let (anchor_start, anchor_end) = name_span(&src, "a");
+//RS     let req = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"moved_start\":{},\"moved_end\":{},\"anchor_start\":{},\"anchor_end\":{},\"position\":\"after\"}}",
+//RS         jet::Canvas::source_revision(&src),
+//RS         graph_id,
+//RS         moved_start,
+//RS         moved_end,
+//RS         anchor_start,
+//RS         anchor_end
+//RS     );
+//RS     let err = jet::Canvas::apply_transaction_json(&cross, &req).unwrap_err();
+//RS     assert!(
+//RS         err.contains("can't move a step into a different branch yet"),
+//RS         "{err}"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&cross).unwrap(), src);
+//RS 
+//RS     let binding = write_fixture("reorder_binding_order", CANVAS_REORDER_BINDING_FIXTURE);
+//RS     let graph = jet::Canvas::graph_json_for_file(&binding).expect("binding graph");
+//RS     let graph_id = graph_id_for_title(&graph, "order");
+//RS     let src = fs::read_to_string(&binding).unwrap();
+//RS     let (moved_start, moved_end) = name_span(&src, "c");
+//RS     let (anchor_start, anchor_end) = name_span(&src, "a");
+//RS     let req = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"moved_start\":{},\"moved_end\":{},\"anchor_start\":{},\"anchor_end\":{},\"position\":\"after\"}}",
+//RS         jet::Canvas::source_revision(&src),
+//RS         graph_id,
+//RS         moved_start,
+//RS         moved_end,
+//RS         anchor_start,
+//RS         anchor_end
+//RS     );
+//RS     let err = jet::Canvas::apply_transaction_json(&binding, &req).unwrap_err();
+//RS     assert!(err.contains("\"kind\":\"diagnostic\""), "{err}");
+//RS     assert!(err.contains("E0107"), "{err}");
+//RS     assert!(err.contains("`b`"), "{err}");
+//RS     assert_eq!(fs::read_to_string(&binding).unwrap(), src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_exec_convergence_is_checked_source_and_refuses_scope_drift() {
+//RS     let path = write_fixture(
+//RS         "convergence_checked",
+//RS         r#"fn converge(flag: Bool) {
+//RS     value :: 1
+//RS     done :: value
+//RS     if flag {
+//RS         print(value)
+//RS         finish(done)
+//RS     } else {
+//RS         print(value)
+//RS     }
+//RS }
+//RS 
+//RS fn finish(value: Int) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     converge(true)
+//RS }
+//RS "#,
+//RS     );
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("convergence graph");
+//RS     let graph_id = graph_id_for_title(&graph, "converge");
+//RS     let (from_start, from_end) = source_span_near(&graph, "\"title\":\"if\"");
+//RS     let (target_start, target_end) = source_span_near(&graph, "\"title\":\"finish\"");
+//RS     let source = fs::read_to_string(&path).unwrap();
+//RS     let request = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"from_pin_name\":\"else\",\"from_start\":{},\"from_end\":{},\"target_start\":{},\"target_end\":{},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}",
+//RS         jet::Canvas::source_revision(&source),
+//RS         graph_id,
+//RS         from_start,
+//RS         from_end,
+//RS         target_start,
+//RS         target_end
+//RS     );
+//RS     let result = jet::Canvas::apply_transaction_json(&path, &request).expect("checked convergence");
+//RS     assert!(result.contains("\"changed\":true"), "{result}");
+//RS     let after = fs::read_to_string(&path).unwrap();
+//RS     assert!(after.contains("fn shared_finish(done: Int)"), "{after}");
+//RS     assert_eq!(after.matches("shared_finish(done)").count(), 2, "{after}");
+//RS     assert_eq!(
+//RS         after,
+//RS         jet::format_source(&after).expect("formatted convergence")
+//RS     );
+//RS 
+//RS     let refused = write_fixture(
+//RS         "convergence_scope_refusal",
+//RS         r#"fn converge(flag: Bool) {
+//RS     value :: 1
+//RS     if flag {
+//RS         branch_value :: value
+//RS         finish(branch_value)
+//RS     } else {
+//RS         print(value)
+//RS     }
+//RS }
+//RS 
+//RS fn finish(value: Int) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     converge(true)
+//RS }
+//RS "#,
+//RS     );
+//RS     let graph = jet::Canvas::graph_json_for_file(&refused).expect("refusal graph");
+//RS     let graph_id = graph_id_for_title(&graph, "converge");
+//RS     let (from_start, from_end) = source_span_near(&graph, "\"title\":\"if\"");
+//RS     let (target_start, target_end) = source_span_near(&graph, "\"title\":\"finish\"");
+//RS     let before = fs::read_to_string(&refused).unwrap();
+//RS     let request = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"from_pin_name\":\"else\",\"from_start\":{},\"from_end\":{},\"target_start\":{},\"target_end\":{},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}",
+//RS         jet::Canvas::source_revision(&before),
+//RS         graph_id,
+//RS         from_start,
+//RS         from_end,
+//RS         target_start,
+//RS         target_end
+//RS     );
+//RS     let error = jet::Canvas::apply_transaction_json(&refused, &request).unwrap_err();
+//RS     assert!(
+//RS         error.contains("E0107") || error.contains("diagnostic"),
+//RS         "{error}"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&refused).unwrap(), before);
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_exec_convergence_preserves_selected_statement_span_and_helper_formatting() {
+//RS     let path = write_fixture(
+//RS         "convergence_selected_span",
+//RS         r#"fn shared_work(value: Int) {
+//RS     notify ( value )
+//RS     bump_metric ( )
+//RS }
+//RS 
+//RS fn converge(flag: Bool) {
+//RS     value :: 1
+//RS     if flag {
+//RS         notify(value)
+//RS         bump_metric()
+//RS         print(value)
+//RS     } else {
+//RS         print(value)
+//RS     }
+//RS }
+//RS 
+//RS fn notify(value: Int) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn bump_metric() {
+//RS     print("metric")
+//RS }
+//RS 
+//RS fn run() {
+//RS     converge(true)
+//RS }
+//RS "#,
+//RS     );
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("selected convergence graph");
+//RS     let graph_id = graph_id_for_title(&graph, "converge");
+//RS     let (from_start, from_end) = source_span_near(&graph, "\"title\":\"if\"");
+//RS     let source = fs::read_to_string(&path).unwrap();
+//RS     let target_start = source.find("notify(value)").expect("selected span start");
+//RS     let target_end = source
+//RS         .find("bump_metric()\n        print(value)")
+//RS         .map(|offset| offset + "bump_metric()".len())
+//RS         .expect("selected span end");
+//RS     let request = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"from_pin_name\":\"else\",\"from_start\":{},\"from_end\":{},\"target_start\":{},\"target_end\":{},\"strategy\":\"helper\",\"function\":\"shared_work\",\"helper_name\":\"shared_work\"}}",
+//RS         jet::Canvas::source_revision(&source),
+//RS         graph_id,
+//RS         from_start,
+//RS         from_end,
+//RS         target_start,
+//RS         target_end
+//RS     );
+//RS     let result =
+//RS         jet::Canvas::apply_transaction_json(&path, &request).expect("selected convergence helper");
+//RS     assert!(result.contains("\"changed\":true"), "{result}");
+//RS     let after = fs::read_to_string(&path).unwrap();
+//RS     assert_eq!(after.matches("shared_work(value)").count(), 2, "{after}");
+//RS     assert!(after.contains("fn shared_work(value: Int)"), "{after}");
+//RS     assert!(
+//RS         !after.contains("notify(value)\n    bump_metric()\n        print(value)"),
+//RS         "{after}"
+//RS     );
+//RS     assert_eq!(
+//RS         after,
+//RS         jet::format_source(&after).expect("formatted selected convergence")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_exec_convergence_accepts_formatter_collapsed_inline_branch_body() {
+//RS     let path = write_fixture(
+//RS         "convergence_inline_branch",
+//RS         r#"fn converge(flag: Bool) {
+//RS     value :: 1
+//RS     done :: value
+//RS     if flag {
+//RS         print(value)
+//RS         finish(done)
+//RS     } else {
+//RS         print(value)
+//RS     }
+//RS }
+//RS 
+//RS fn finish(value: Int) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     converge(true)
+//RS }
+//RS "#,
+//RS     );
+//RS     let formatted =
+//RS         jet::format_source(&fs::read_to_string(&path).unwrap()).expect("format fixture");
+//RS     fs::write(&path, formatted).unwrap();
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("inline convergence graph");
+//RS     let graph_id = graph_id_for_title(&graph, "converge");
+//RS     let (from_start, from_end) = source_span_near(&graph, "\"title\":\"if\"");
+//RS     let (target_start, target_end) = source_span_near(&graph, "\"title\":\"finish\"");
+//RS     let source = fs::read_to_string(&path).unwrap();
+//RS     let request = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"from_pin_name\":\"else\",\"from_start\":{},\"from_end\":{},\"target_start\":{},\"target_end\":{},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}",
+//RS         jet::Canvas::source_revision(&source),
+//RS         graph_id,
+//RS         from_start,
+//RS         from_end,
+//RS         target_start,
+//RS         target_end
+//RS     );
+//RS     jet::Canvas::apply_transaction_json(&path, &request).expect("inline convergence");
+//RS     let after = fs::read_to_string(&path).unwrap();
+//RS     assert_eq!(after.matches("shared_finish(done)").count(), 2, "{after}");
+//RS     assert_eq!(
+//RS         after,
+//RS         jet::format_source(&after).expect("formatted inline convergence")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_projection_dedupes_variable_getters_with_fanout() {
+//RS     let path = write_fixture(
+//RS         "getter_fanout",
+//RS         r#"fn run() {
+//RS     x :: 1
+//RS     print(x)
+//RS     print(x)
+//RS     print(x)
+//RS }
+//RS "#,
+//RS     );
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+//RS     assert_eq!(
+//RS         count_occurrences(&graph, "\"node_descriptor_id\":\"variable_get\""),
+//RS         1,
+//RS         "{graph}"
+//RS     );
+//RS     let getter_pin_chunk = graph
+//RS         .split("\"pin_id\":\"")
+//RS         .skip(1)
+//RS         .find(|chunk| chunk.contains(":value:get:x:output:x"))
+//RS         .expect("getter output pin");
+//RS     let getter_pin = getter_pin_chunk[..getter_pin_chunk.find('"').unwrap()].to_string();
+//RS     assert_eq!(
+//RS         count_occurrences(&graph, &format!("\"from_pin\":\"{getter_pin}\"")),
+//RS         3,
+//RS         "{graph}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_projects_pattern_arm_and_multi_input_pin_metadata() {
+//RS     let path = write_fixture("pattern_multi", CANVAS_PATTERN_MULTI_FIXTURE);
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+//RS 
+//RS     for field in [
+//RS         "\"role\":\"arm\"",
+//RS         "\"pattern_source\":\"== Val(n)\"",
+//RS         "\"pattern_source_span\":",
+//RS         "\"name\":\"arm1\"",
+//RS         "\"name\":\"else\"",
+//RS         "\"add_pattern_arm\"",
+//RS         "\"title\":\"list\"",
+//RS         "\"append_multi_input\"",
+//RS         "\"append_op\":\"remove_multi_input_element\"",
+//RS         "\"name\":\"item1\"",
+//RS         "\"name\":\"item2\"",
+//RS         "\"name\":\"item3\"",
+//RS     ] {
+//RS         assert!(
+//RS             graph.contains(field),
+//RS             "pattern/multi-input graph missing {field}: {graph}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_pattern_arm_and_multi_input_transactions_write_source() {
+//RS     let path = write_fixture(
+//RS         "pattern_arm_tx",
+//RS         r#"enum Choice {
+//RS     A(Int)
+//RS     B(Int)
+//RS     C(Int)
+//RS }
+//RS 
+//RS fn choose(x: Choice) -> Int {
+//RS     if x == {
+//RS         .A(n) -> { return n }
+//RS         else -> { return 0 }
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(choose(Choice.A(1)))
+//RS }
+//RS "#,
+//RS     );
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+//RS     let graph_id = graph_id_for_title(&graph, "choose");
+//RS     let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if ==\"");
+//RS     let revision = jet::Canvas::source_revision(&fs::read_to_string(&path).unwrap());
+//RS     let add = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{},\"pattern\":\"== .B(n)\"}}",
+//RS         revision, graph_id, node_start, node_end
+//RS     );
+//RS     let out = jet::Canvas::apply_transaction_json(&path, &add).expect("add arm");
+//RS     assert!(out.contains("\"changed\":true"), "{out}");
+//RS     let added = fs::read_to_string(&path).unwrap();
+//RS     assert!(added.contains(".B(n) ->"), "{added}");
+//RS     assert!(
+//RS         added.contains("return 1"),
+//RS         "fresh arm uses sema-safe default return body: {added}"
+//RS     );
+//RS 
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after add");
+//RS     let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"B(n)\"");
+//RS     let revision = jet::Canvas::source_revision(&added);
+//RS     let edit = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"edit_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{},\"pattern\":\"== .C(n)\"}}",
+//RS         revision, graph_id, pat_start, pat_end
+//RS     );
+//RS     jet::Canvas::apply_transaction_json(&path, &edit).expect("edit arm");
+//RS     let edited = fs::read_to_string(&path).unwrap();
+//RS     assert!(edited.contains(".C(n) ->"), "{edited}");
+//RS     assert!(!edited.contains(".B(n) ->"), "{edited}");
+//RS 
+//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after edit");
+//RS     let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"C(n)\"");
+//RS     let revision = jet::Canvas::source_revision(&edited);
+//RS     let remove = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{}}}",
+//RS         revision, graph_id, pat_start, pat_end
+//RS     );
+//RS     jet::Canvas::apply_transaction_json(&path, &remove).expect("remove arm");
+//RS     let removed = fs::read_to_string(&path).unwrap();
+//RS     assert!(!removed.contains(".C(n) ->"), "{removed}");
+//RS 
+//RS     let invalid_path = write_fixture(
+//RS         "pattern_arm_invalid_tx",
+//RS         r#"enum Choice {
+//RS     A(Int)
+//RS }
+//RS 
+//RS fn choose(x: Choice) -> Int {
+//RS     if x == {
+//RS         .A(n) -> { return n }
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(choose(Choice.A(1)))
+//RS }
+//RS "#,
+//RS     );
+//RS     let graph = jet::Canvas::graph_json_for_file(&invalid_path).expect("invalid graph");
+//RS     let graph_id = graph_id_for_title(&graph, "choose");
+//RS     let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"A(n)\"");
+//RS     let before = fs::read_to_string(&invalid_path).unwrap();
+//RS     let revision = jet::Canvas::source_revision(&before);
+//RS     let remove_last = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{}}}",
+//RS         revision, graph_id, pat_start, pat_end
+//RS     );
+//RS     let err = jet::Canvas::apply_transaction_json(&invalid_path, &remove_last).unwrap_err();
+//RS     assert!(err.contains("can't remove the last pattern arm"), "{err}");
+//RS     assert_eq!(fs::read_to_string(&invalid_path).unwrap(), before);
+//RS 
+//RS     let multi_path = write_fixture(
+//RS         "multi_input_tx",
+//RS         r#"fn to_int(n: Int) -> Int {
+//RS     return n
+//RS }
+//RS 
+//RS fn demo() -> Int {
+//RS     xs :: [1, 2, 3,]
+//RS     return xs[0] + to_int(1)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(demo())
+//RS }
+//RS "#,
+//RS     );
+//RS     let graph = jet::Canvas::graph_json_for_file(&multi_path).expect("multi graph");
+//RS     let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
+//RS     let revision = jet::Canvas::source_revision(&fs::read_to_string(&multi_path).unwrap());
+//RS     let append = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"4\"}}",
+//RS         revision, list_start, list_end
+//RS     );
+//RS     jet::Canvas::apply_transaction_json(&multi_path, &append).expect("append list");
+//RS     let appended = fs::read_to_string(&multi_path).unwrap();
+//RS     assert!(appended.contains("[1, 2, 3, 4]"), "{appended}");
+//RS 
+//RS     let graph = jet::Canvas::graph_json_for_file(&multi_path).expect("multi graph after append");
+//RS     let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
+//RS     let (item_start, item_end) = source_span_near(&graph, "\"name\":\"item4\"");
+//RS     let revision = jet::Canvas::source_revision(&appended);
+//RS     let remove = format!(
+//RS         "{{\"schema_version\":1,\"op\":\"remove_multi_input_element\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element_start\":{},\"element_end\":{}}}",
+//RS         revision, list_start, list_end, item_start, item_end
+//RS     );
+//RS     jet::Canvas::apply_transaction_json(&multi_path, &remove).expect("remove list item");
+//RS     let removed = fs::read_to_string(&multi_path).unwrap();
+//RS     assert!(removed.contains("[1, 2, 3]"), "{removed}");
+//RS     assert!(!removed.contains("[1, 2, 3, 4]"), "{removed}");
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 0982 tests/canvas.rs:1-1775
+

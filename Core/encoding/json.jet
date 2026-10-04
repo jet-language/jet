@@ -23,9 +23,11 @@
 // `pointer` is RFC 6901 selection (D-CORE-JSON-POINTER1=A) and `patch` is RFC
 // 6902 application (D-CORE-JSON-PATCH1=A). Both leave their inputs unchanged.
 //
-// Allocates one output tree plus the decoded strings. Depth is bounded by
-// `EncodingLimits.safe().max_depth` (256) so hostile nesting cannot run the
-// process out of stack.
+// Allocates one output tree plus the decoded strings. Depth defaults to
+// `EncodingLimits.safe().max_depth` (256); `parse_with_limits` and
+// `parse_allow_duplicates_with_limits` accept an explicit container bound.
+// Error reasons and failure lines follow Rust EncodingJson.rs. Whole integer
+// tokens stay exact Int even outside i64 (D-JSON, #4306).
 
 
 use core.encoding.[DataEvent, DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
@@ -44,18 +46,6 @@ fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, pat
     }
 }
 
-fn truncated_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String) -> EncodingError Never! {
-    {
-        format: format,
-        kind: EncodingErrorKind.Truncated,
-        byte_offset: offset,
-        line: Val(line),
-        column: Val(column),
-        path: path,
-        reason: "input ended before the value was complete",
-        cause: None,
-    }
-}
 fn limit_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError Never! {
     {
         format: format,
@@ -80,14 +70,28 @@ fn safe_limits() -> EncodingLimits Never! {
     }
 }
 /// Strict JSON → `DataTree`.
-pub fn parse(text: String) -> DataTree EncodingError! { parse_json(text, false) }
+pub fn parse(text: String) -> DataTree EncodingError! { parse_with_limits(text, safe_limits()) }
 
 /// Strict JSON → `DataTree`, except that a repeated object name keeps the later
 /// value at the first name's position.
-pub fn parse_allow_duplicates(text: String) -> DataTree EncodingError! { parse_json(text, true) }
+pub fn parse_allow_duplicates(text: String) -> DataTree EncodingError! { parse_allow_duplicates_with_limits(text, safe_limits()) }
+
+/// Strict JSON under caller-selected limits. A container opens only when the
+/// number of enclosing containers is below `max_depth` (root depth is zero).
+/// `max_item_bytes` bounds the UTF-8 input; other fields govern streaming and
+/// expansion APIs, not this whole-value parser.
+pub fn parse_with_limits(text: String, limits: EncodingLimits) -> DataTree EncodingError! {
+    parse_json(text, false, limits)
+}
+
+/// Same limits as `parse_with_limits`, keeping the later duplicate value at
+/// the first key's insertion position.
+pub fn parse_allow_duplicates_with_limits(text: String, limits: EncodingLimits) -> DataTree EncodingError! {
+    parse_json(text, true, limits)
+}
 
 /// Same as `parse`. Kept as the documented sibling verb for typed lowering.
-pub fn decode(text: String) -> DataTree EncodingError! { parse_json(text, false) }
+pub fn decode(text: String) -> DataTree EncodingError! { parse(text) }
 /// Python-compatible spelling for JSON parsing.
 pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
 
@@ -117,11 +121,11 @@ pub fn canonical(value: DataTree) -> String EncodingError! {
 
 /// Streaming pull parser over `text`.  The first call validates and
 /// materializes the value, then subsequent calls walk its event sequence.
-pub fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
+pub fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false, safe_limits())} }
 
 /// Pull reader that reports every occurrence of a repeated object name as its
 /// own `Key` event instead of rejecting the document.
-pub fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
+pub fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true, safe_limits())} }
 
 /// RFC 6901 JSON Pointer selection (D-CORE-JSON-POINTER1=A). `""` is the whole
 /// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
@@ -220,6 +224,7 @@ struct Parser {
     line: Int
     column: Int
     depth: Int
+    limits: EncodingLimits
     path: [String]
     pending: [DataEvent]
     pending_index: Int
@@ -231,13 +236,14 @@ struct Parser {
 }
 
 impl Parser {
-    fn new(bytes: [U8], allow_duplicates: Bool, recording: Bool) -> Parser Never! {
+    fn new(bytes: [U8], allow_duplicates: Bool, recording: Bool, limits: EncodingLimits) -> Parser Never! {
         Parser{
             bytes: bytes,
             index: 0,
             line: 1,
             column: 1,
             depth: 0,
+            limits: limits,
             path: [String]{},
             pending: [DataEvent]{},
             pending_index: 0,
@@ -302,21 +308,17 @@ impl Parser {
     }
 
     fn expect(&self, want: U8) -> Bool Never! {
-        got :: &self.bump()
-        b :: got ?? return false
-        b == want
+        b :: self.peek() ?? return false
+        if b != want -> return false
+        _ :: &self.bump()
+        true
     }
 
 
+    // Rust `Parser::value` (EncodingJson.rs:139-158).
     fn parse_value(&self) -> DataTree EncodingError! {
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-        b :: self.peek() ?? return Err(truncated_error(
-            EncodingFormat.JSON,
-            self.index,
-            self.line,
-            self.column,
-            "/{self.path.join("/")}",
-        ))
+        b :: self.peek() ?? return Err(self.err("expected a JSON value"))
         n :: b
         if n == {
             91 -> return &self.parse_array()
@@ -337,7 +339,7 @@ impl Parser {
                         s :: &self.parse_string()
                         value = DataTree.Text(s)
                     } else {
-                        if n != 45 && (n < 48 || n > 57) -> return Err(self.err("expected a JSON value (object, array, string, number, true, false, or null)"))
+                        if n != 45 && (n < 48 || n > 57) -> return Err(self.err("expected a JSON value"))
                         value = &self.parse_number()
                     }
                 }
@@ -349,30 +351,33 @@ impl Parser {
         Ok(value)
     }
 
+    // Rust `Parser::word` (EncodingJson.rs:160-168).
     fn parse_literal(&self, spelling: String, value: DataTree) -> DataTree EncodingError! {
         loop b in spelling.bytes() {
-            got :: &self.bump() ?? return Err(self.err("input ended inside `{spelling}`"))
-            if got != b -> return Err(self.err("expected `{spelling}`"))
+            got :: self.peek() ?? return Err(self.err("expected a JSON word"))
+            if got != b -> return Err(self.err("expected a JSON word"))
+            _ :: &self.bump()
         }
         Ok(value)
     }
 
+    // Rust `Parser::string` / `unicode_escape` (EncodingJson.rs:170-240).
     fn parse_string(&self) -> String EncodingError! {
-        if !&self.expect(U8{34}) -> return Err(self.err("expected a string opening quote"))
+        if !&self.expect(U8{34}) -> return Err(self.err("expected quoted text"))
         out := [U8]{}
         loop {
-            b :: &self.bump() ?? return Err(self.err("unterminated string"))
+            b :: &self.bump() ?? return Err(self.err("missing closing quote"))
             n :: b
             if n == 34 {
                 s :: String.from_bytes(out) ?? return Err(self.err("invalid UTF-8 in string"))
                 return Ok(s)
             }
-            if n < 32 -> return Err(self.err("unescaped control character in string; use a JSON escape"))
+            if n < 32 -> return Err(self.err("control character in string"))
             if n != 92 {
                 &out.push(b)
                 next
             }
-            esc :: &self.bump() ?? return Err(self.err("unterminated string escape"))
+            esc :: &self.bump() ?? return Err(self.err("unfinished escape"))
             e :: esc
             if e == 34 || e == 92 || e == 47 {
                 &out.push(esc)
@@ -401,44 +406,43 @@ impl Parser {
             if e == 117 {
                 cp := &self.parse_hex4()
                 if cp >= 55296 && cp <= 57343 {
-                    if cp > 56319 -> return Err(self.err("lone low surrogate in JSON string"))
-                    slash :: &self.bump() ?? return Err(self.err("high surrogate must be followed by a low surrogate"))
-                    if slash != (U8{92}) -> return Err(self.err("high surrogate must be followed by a low surrogate"))
-                    u :: &self.bump() ?? return Err(self.err("high surrogate must be followed by a low surrogate"))
-                    if u != (U8{117}) -> return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    if cp > 56319 -> return Err(self.err("unpaired surrogate in string"))
+                    if !&self.expect(U8{92}) -> return Err(self.err("unpaired surrogate in string"))
+                    if !&self.expect(U8{117}) -> return Err(self.err("unpaired surrogate in string"))
                     low :: &self.parse_hex4()
-                    if low < 56320 || low > 57343 -> return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    if low < 56320 || low > 57343 -> return Err(self.err("unpaired surrogate in string"))
                     cp = 65536 + ((cp - 55296) << 10) + (low - 56320)
                 }
                 utf8 := utf8_bytes(cp)
                 loop byte in utf8 -> &out.push(byte)
                 next
             }
-            return Err(self.err("unknown string escape; JSON allows \\\", \\\\, \\/, \\b, \\f, \\n, \\r, \\t, \\uXXXX"))
+            return Err(self.err("invalid escape in string"))
         }
     }
 
+    // Rust `Parser::hex4` (EncodingJson.rs:242-255).
     fn parse_hex4(&self) -> Int EncodingError! {
         n := 0
         loop _ in 0..<4 {
-            b :: &self.bump() ?? return Err(self.err("truncated \\u escape"))
-            d :: hex_digit(b) ?? return Err(self.err("\\u escape needs four hexadecimal digits"))
+            b :: self.peek() ?? return Err(self.err("truncated unicode escape"))
+            d :: hex_digit(b) ?? return Err(self.err("invalid unicode escape"))
+            _ :: &self.bump()
             n = n * 16 + d
         }
         Ok(n)
     }
 
+    // Rust `Parser::number` (EncodingJson.rs:257-315), with exact Int rather
+    // than the retired Number carrier for integers outside i64 (#4306).
     fn parse_number(&self) -> DataTree EncodingError! {
         start :: self.index
         if (self.peek() ?? (U8{0})) == (U8{45}) -> _ :: &self.bump()
-        first :: self.peek() ?? return Err(self.err("input ended inside a number"))
+        first :: self.peek() ?? return Err(self.err("bad number"))
         first_digit :: first
-        if first_digit < 48 || first_digit > 57 -> return Err(self.err("expected a digit"))
+        if first_digit < 48 || first_digit > 57 -> return Err(self.err("bad number"))
         if first_digit == 48 {
             _ :: &self.bump()
-            nextc :: self.peek() ?? (U8{0})
-            nn :: nextc
-            if nn >= 48 && nn <= 57 -> return Err(self.err("leading zeros are not allowed in JSON numbers"))
         } else {
             loop {
                 n :: self.peek() ?? break
@@ -454,9 +458,9 @@ impl Parser {
         if (self.peek() ?? (U8{0})) == (U8{46}) {
             fractional = true
             _ :: &self.bump()
-            digit :: self.peek() ?? return Err(self.err("decimal point must be followed by a digit"))
+            digit :: self.peek() ?? return Err(self.err("bad number"))
             dn :: digit
-            if dn < 48 || dn > 57 -> return Err(self.err("decimal point must be followed by a digit"))
+            if dn < 48 || dn > 57 -> return Err(self.err("bad number"))
             loop {
                 n :: self.peek() ?? break
                 d :: n
@@ -476,9 +480,9 @@ impl Parser {
             sign :: self.peek() ?? (U8{0})
             sn :: sign
             if sn == 43 || sn == 45 -> _ :: &self.bump()
-            digit :: self.peek() ?? return Err(self.err("exponent must contain a digit"))
+            digit :: self.peek() ?? return Err(self.err("bad number"))
             dn :: digit
-            if dn < 48 || dn > 57 -> return Err(self.err("exponent must contain a digit"))
+            if dn < 48 || dn > 57 -> return Err(self.err("bad number"))
             loop {
                 n :: self.peek() ?? break
                 d :: n
@@ -489,19 +493,27 @@ impl Parser {
                 }
             }
         }
-        token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? return Err(self.err("invalid number token"))
+        // Rust validates the digit limit only for integers outside i64 in
+        // parse_json mode. Any integer this long is necessarily outside i64.
+        // Check before constructing the arbitrary-precision Int.
+        if !fractional && !exp {
+            digits :: self.index - start - (if self.bytes[start] == (U8{45}) -> 1 else -> 0)
+            if digits > 1000000 -> return Err(self.err("JSON number exceeds the 1000000-digit limit"))
+        }
+        token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? return Err(self.err("bad number"))
         if fractional || exp {
-            f :: Float.parse(token) ?? return Err(self.err("number does not fit in Float"))
-            if !math.is_finite(f) -> return Err(self.err("non-finite JSON numbers are not allowed"))
+            f :: Float.parse(token) ?? return Err(self.err("bad number"))
+            if !math.is_finite(f) -> return Err(self.err("bad number"))
             return Ok(DataTree.Float(f))
         }
-        n :: Int.parse(token) ?? return Err(self.err("number does not fit in Int"))
+        n :: Int.parse(token) ?? return Err(self.err("bad number"))
         Ok(DataTree.Int(n))
     }
 
+    // Rust `Parser::array` (EncodingJson.rs:317-345).
     fn parse_array(&self) -> DataTree EncodingError! {
-        if !&self.expect(U8{91}) -> return Err(self.err("expected '['"))
-        if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+        if !&self.enter() -> return Err(self.err("JSON value is nested too deeply"))
+        _ :: &self.bump()
         if self.recording -> &self.pending.push(DataEvent.ArrayStart)
         items := [DataTree]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -518,24 +530,25 @@ impl Parser {
             _ :: &self.path.pop()
             &items.push(value)
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            b :: self.peek() ?? return Err(self.err("unterminated array"))
+            b :: self.peek() ?? return Err(self.err("expected `,` or `]`"))
             if b == (U8{93}) {
                 _ :: &self.bump()
                 self.depth -= 1
                 if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
                 return Ok(DataTree.Array(items))
             }
-            if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
+            if b != (U8{44}) -> return Err(self.err("expected `,` or `]`"))
             _ :: &self.bump()
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if (self.peek() ?? (U8{0})) == (U8{93}) -> return Err(self.err("trailing commas are not allowed in JSON"))
+            if (self.peek() ?? (U8{0})) == (U8{93}) -> return Err(self.err("expected `,` or `]`"))
             index += 1
         }
     }
 
+    // Rust `Parser::object` (EncodingJson.rs:347-394).
     fn parse_object(&self) -> DataTree EncodingError! {
-        if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
-        if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+        if !&self.enter() -> return Err(self.err("JSON value is nested too deeply"))
+        _ :: &self.bump()
         if self.recording -> &self.pending.push(DataEvent.ObjectStart)
         entries := [String: DataTree]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -547,10 +560,9 @@ impl Parser {
         }
         loop {
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if (self.peek() ?? (U8{0})) != (U8{34}) -> return Err(self.err("object keys must be strings"))
             key :: &self.parse_string()
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if !&self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
+            if !&self.expect(U8{58}) -> return Err(self.err("expected `:` after object key"))
             &self.path.push(key)
             if self.recording -> &self.pending.push(DataEvent.Key(key))
             if entries.has_key(key) {
@@ -567,42 +579,34 @@ impl Parser {
             }
             _ :: &self.path.pop()
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            b :: self.peek() ?? return Err(self.err("unterminated object"))
+            b :: self.peek() ?? return Err(self.err("expected `,` or `}}`"))
             if b == (U8{125}) {
                 _ :: &self.bump()
                 self.depth -= 1
                 if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
                 return Ok(DataTree.Object(entries))
             }
-            if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
+            if b != (U8{44}) -> return Err(self.err("expected `,` or `}}`"))
             _ :: &self.bump()
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if (self.peek() ?? (U8{0})) == (U8{125}) -> return Err(self.err("trailing commas are not allowed in JSON"))
+            if (self.peek() ?? (U8{0})) == (U8{125}) -> return Err(self.err("expected `,` or `}}`"))
         }
     }
 
     fn enter(&self) -> Bool Never! {
+        if self.depth >= self.limits.max_depth -> return false
         self.depth += 1
-        self.depth <= safe_limits().max_depth
+        true
     }
     fn next_event(&self) -> DataEvent EncodingError! {
         if !self.parsed {
-            if self.bytes.len() > safe_limits().max_item_bytes {
+            if self.bytes.len() > self.limits.max_item_bytes {
                 return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
             }
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if self.eof() {
-                return Err(truncated_error(
-                    EncodingFormat.JSON,
-                    self.index,
-                    self.line,
-                    self.column,
-                    "",
-                ))
-            }
             value :: &self.parse_value()
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if !self.eof() -> return Err(self.err("unexpected trailing data after the JSON value"))
+            if !self.eof() -> return Err(self.err("extra text after JSON value"))
             if !self.recording -> self.pending = append_events(value)
             self.parsed = true
         }
@@ -615,15 +619,16 @@ impl Parser {
     }
 }
 
-fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
+// Rust `parse_json_with_modes` (EncodingJson.rs:83-102), one limits-parameterized parser.
+fn parse_json(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> DataTree EncodingError! {
     raw :: text.bytes()
-    if raw.len() > safe_limits().max_item_bytes {
+    if raw.len() > limits.max_item_bytes {
         return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
     }
-    p := Parser.new(raw, allow_duplicates, false)
+    p := Parser.new(raw, allow_duplicates, false, limits)
     value :: &p.parse_value()
     &p.skip_ws() ?? return Err(p.err("failed while scanning JSON whitespace"))
-    if !p.eof() -> return Err(p.err("unexpected trailing data after the JSON value"))
+    if !p.eof() -> return Err(p.err("extra text after JSON value"))
     Ok(value)
 }
 

@@ -1,0 +1,222 @@
+// crates/jet-semindex/src/Build.rs:1889–1894,1922–2549,2816–2819.
+// Sole collect_item root: S10 receives an already-pushed structural context for
+// every explicitly dispatched remaining variant. S11/S12 own body/expression
+// producers; S6 owns checked identities/signatures; S7 owns slots/caller scopes.
+// Program/source are read-only parser facts, shared by parsed and checked walks.
+// Full composition is externally gated (CP-NAMES/CP-AST/CP-POLICY/S8/S10–S12,
+// S20/C4 and native composite-key #4397); this is not compiled-complete evidence.
+use jet_foundation.[
+    Item, Program, MIRNameFacts, Func, Param, Span, TraitMethodSig,
+    AccessConvention, CallablePolicy, FailureContract, TypeParam,
+    PolicyDeclaration, PolicyScope,
+    RuleSite, rule_allows, POLICY_RULES, policy_resolve, policy_explain,
+    trait_method_failure_contract, trait_method_effective_return_type, type_name,
+]
+
+// Rust's policy-declaration filter1955–1968. No policy resolution here: the
+// canonical Foundation resolver owns precedence, invalid values and explanation.
+fn semindex_policy_applies_to_function(declaration: PolicyDeclaration, span: Span) -> Bool Never! {
+    if declaration.scope == {
+        .Organization | .Package | .Module -> true
+        .Function -> declaration.target == (Val(span))
+        .Block -> false
+    }
+}
+
+fn semindex_collect_parameter_defs(db: &SymbolDB, params: [Param], identity: String, mp: String) Never! {
+    loop parameter in params {
+        if parameter.name == "self" -> next
+        &db.defs.push(SymDef{identity: semindex_local_identity(identity, "param", parameter.name), name: parameter.name, def_span: parameter.name_span, module_path: mp, kind: .Param{ty: parameter.ty}})
+    }
+}
+
+// The repeated method arms share one traversal, but preserve Rust's intentional
+// differences: only struct-body and standalone impl methods emit param defs;
+// only struct-body methods emit method-name hover rows. Trait-body requirements
+// have their own typed signature path below, not a manufactured Func.
+fn semindex_collect_item_method(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, method: Func, owner: String, origin: MemberOrigin, define_params: Bool, hover: Bool, mp: String) {
+    semindex_record_func_type_nodes(&db, &ctx, method, mp)
+    identity :: semindex_callable_identity(ctx.scope_identity, Val(owner), method.name)
+    &db.members.push(semindex_method_fact(ctx.scope_identity, owner, method, origin, mp, source))
+    &db.defs.push(SymDef{identity: identity, name: method.name, def_span: method.name_span, module_path: mp, kind: semindex_callable_kind(method, source)})
+    if hover -> &db.hover.push(HoverEntry{span: method.name_span, module_path: mp, text: semindex_hover_for_fn(method)})
+    if define_params -> semindex_collect_parameter_defs(&db, method.params, identity, mp)
+    semindex_with_caller(&db, &ctx, CallerFrame{name: method.name, owner: Val(owner), identity: identity}, method.params, mp, (db: &SymbolDB, ctx: &WalkCtx) -> {
+        semindex_structural_slot(&db, &ctx, "method_bodies", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            semindex_collect_stmts(&db, &ctx, names, program, source, method.body, mp)
+        })
+    })
+}
+
+// Trait requirement facts retain the declared return type in SymKind and use
+// the effective return type only in rendered signatures, as Rust2397/2430/2454.
+fn semindex_collect_trait_requirement(db: &SymbolDB, ctx: WalkCtx, source: String, owner: String, signature: TraitMethodSig, mp: String) Never! {
+    params := [SymNameType]{}
+    sources := [SourceSpan]{}
+    access := [AccessConvention]{}
+    loop parameter in signature.params {
+        if parameter.name == "self" -> next
+        &params.push(SymNameType{name: parameter.name, ty: parameter.ty})
+        &sources.push(semindex_source_span(parameter.name_span))
+        &access.push(parameter.convention)
+    }
+    contract :: semindex_parameter_contract(signature.params)
+    variadic :: semindex_parameter_variadic(signature.params)
+    defaults :: semindex_parameter_defaults(signature.params, source, true)
+    failure :: CallableFactAvailability<FailureContract>.Checked{value: trait_method_failure_contract(signature)}
+    identity :: semindex_trait_method_identity(ctx.scope_identity, owner, signature)
+    &db.defs.push(SymDef{identity: identity, name: signature.name, def_span: signature.name_span, module_path: mp, kind: SymKind.Function{
+        params: params, param_sources: sources, signature_facts_available: true,
+        param_contract: contract, param_variadic: variadic, return_type: signature.return_type,
+        failure_contract: failure, foreign_boundary: false, effects: signature.declared_effects,
+        effect_via: None, param_access: access, param_defaults: defaults,
+        policies: [CallablePolicy]{}, generic_parameters: .Checked{value: [TypeParam]{}},
+    }})
+    &db.members.push(MemberFact{owner: owner, name: signature.name, identity: identity, kind: .Method, origin: .TraitRequirement{trait_name: owner},
+        signature: semindex_fn_signature(signature.name, params, contract, variadic, Val(trait_method_effective_return_type(signature)), failure, signature.declared_effects, None, None, access, defaults, [CallablePolicy]{}),
+        module_path: mp, span: semindex_source_span(signature.name_span),
+    })
+}
+
+pub fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, item: Item, mp: String) {
+    structural_id :: semindex_record_node(&db, ctx, "item", semindex_item_shape(item), mp, semindex_item_span(item))
+    if structural_id == .Val(id) -> &ctx.structural_parents.push(id)
+    semindex_collect_state_marker_references(&db, ctx, names, item, mp)
+    if item == {
+        .Func(function) -> {
+            semindex_record_func_type_nodes(&db, &ctx, function, mp)
+            identity :: semindex_callable_identity(ctx.scope_identity, None, function.name)
+            if function.return_view_provenance == .Val(provenance) -> db.view_provenance[identity] = provenance
+            hover := semindex_hover_for_fn(function)
+            if function.is_unsafe && rule_allows("Unsafe", RuleSite.Function) -> hover += "\nrule: #Unsafe (function, site-bound)"
+            if function.is_pure && rule_allows("Pure", RuleSite.Function) -> hover += "\nrule: #Pure (function, site-bound)"
+            if function.is_replayable && rule_allows("Replayable", RuleSite.Function) -> hover += "\nrule: #Replayable (function, site-bound)"
+            if function.scrub_tag == .Val(tag) -> hover += "\nrule: #Scrub({tag}) (function, site-bound)"
+            declarations := [PolicyDeclaration]{}
+            loop declaration in program.policy_declarations {
+                if semindex_policy_applies_to_function(declaration, function.span) -> &declarations.push(declaration)
+            }
+            loop rule in POLICY_RULES {
+                if policy_resolve(rule.key, declarations) == .Ok(effective) {
+                    if effective == .Val(value) -> hover += "\npolicy: {policy_explain(value)}"
+                }
+            }
+            &db.hover.push(HoverEntry{span: function.name_span, module_path: mp, text: ^hover})
+            &db.defs.push(SymDef{identity: identity, name: function.name, def_span: function.name_span, module_path: mp, kind: semindex_callable_kind(function, source)})
+            if function.is_unsafe -> &db.bypasses.push(BypassFact{kind: .UnsafeFn, site: function.name, detail: function.unsafe_reason ?? "", module_path: mp, span: semindex_source_span(function.unsafe_span ?? function.name_span)})
+            semindex_collect_parameter_defs(&db, function.params, identity, mp)
+            loop parameter in function.params {
+                if parameter.name == "self" -> next
+                text :: if parameter.public_label == {
+                    .Val(label) -> "`{parameter.name}`: {type_name(parameter.ty)} — callers write `{label.name}:`"
+                    None -> "`{parameter.name}`: {type_name(parameter.ty)}"
+                }
+                &db.hover.push(HoverEntry{span: parameter.name_span, module_path: mp, text: text})
+            }
+            semindex_with_caller(&db, &ctx, CallerFrame{name: function.name, owner: None, identity: identity}, function.params, mp, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                    semindex_collect_stmts(&db, &ctx, names, program, source, function.body, mp)
+                })
+            })
+        }
+        .Struct(definition) -> {
+            semindex_structural_slot(&db, &ctx, "field_types", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop field in definition.fields -> _ := semindex_record_node(&db, ctx, "type", "type", mp, field.ty_span)
+            })
+            semindex_collect_allow_markers(&db, definition.serde_markers, definition.name, mp)
+            loop field in definition.fields -> semindex_collect_allow_markers(&db, field.serde_markers, field.name, mp)
+            loop field in definition.fields {
+                if field.computed == .Val(computed) {
+                    semindex_structural_slot(&db, &ctx, "computed_fields", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                        semindex_collect_expr(&db, &ctx, names, program, source, computed, mp)
+                    })
+                }
+            }
+            fields := [SymNameType]{}
+            loop field in definition.fields -> &fields.push(SymNameType{name: field.name, ty: field.ty})
+            derives := [String]{}
+            loop derive in definition.derives -> &derives.push(derive.name)
+            &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Struct{fields: ^fields, derives: ^derives}})
+            &db.hover.push(HoverEntry{span: definition.name_span, module_path: mp, text: "struct `{definition.name}`"})
+            if definition.state == .Val(state) {
+                loop entry in state.states {
+                    owner :: "{definition.name}.State"
+                    identity :: "state:{ctx.scope_identity}::{owner}.{entry.name}"
+                    &db.defs.push(SymDef{identity: identity, name: entry.name, def_span: entry.span, module_path: mp, kind: .EnumVariant{parent: owner}})
+                    &db.hover.push(HoverEntry{span: entry.span, module_path: mp, text: "state `{entry.name}` of `{definition.name}`"})
+                    &db.members.push(MemberFact{owner: owner, name: entry.name, identity: identity, kind: .Variant, origin: .TypeBody, signature: "{owner}.{entry.name}", module_path: mp, span: semindex_source_span(entry.span)})
+                }
+            }
+            loop field in definition.fields {
+                identity :: semindex_member_identity(ctx.scope_identity, definition.name, "field", field.name)
+                &db.defs.push(SymDef{identity: identity, name: field.name, def_span: field.name_span, module_path: mp, kind: .Field{ty: field.ty, parent: definition.name}})
+                &db.members.push(MemberFact{owner: definition.name, name: field.name, identity: identity, kind: .Field, origin: .TypeBody, signature: "{field.name}: {type_name(field.ty)}", module_path: mp, span: semindex_source_span(field.name_span)})
+                &db.hover.push(HoverEntry{span: field.name_span, module_path: mp, text: "`{field.name}`: {type_name(field.ty)} (field of `{definition.name}`)"})
+            }
+            loop method in definition.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, definition.name, .TypeBody, true, true, mp)
+            loop implementation in definition.trait_impls {
+                reference :: semindex_declaration_ref(&db, ctx, names, implementation.trait_name, implementation.trait_span, mp)
+                &db.refs.push(reference)
+                loop method in implementation.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, definition.name, .TraitImpl{trait_name: implementation.trait_name}, false, false, mp)
+            }
+        }
+        .Enum(definition) -> {
+            loop variant in definition.variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(_, span) -> semindex_structural_slot(&db, &ctx, "variant_types", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                        _ := semindex_record_node(&db, ctx, "type", "type", mp, span)
+                    })
+                    .Named(fields) -> semindex_structural_slot(&db, &ctx, "variant_types", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                        loop field in fields -> _ := semindex_record_node(&db, ctx, "type", "type", mp, field.ty_span)
+                    })
+                }
+            }
+            variants := [String]{}
+            loop variant in definition.variants -> &variants.push(variant.name)
+            derives := [String]{}
+            loop derive in definition.derives -> &derives.push(derive.name)
+            &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Enum{variants: variants, derives: ^derives}})
+            &db.hover.push(HoverEntry{span: definition.name_span, module_path: mp, text: "enum `{definition.name}` — variants: {variants.join(", ")}"})
+            loop variant in definition.variants {
+                identity :: semindex_member_identity(ctx.scope_identity, definition.name, "variant", variant.name)
+                &db.defs.push(SymDef{identity: identity, name: variant.name, def_span: variant.name_span, module_path: mp, kind: .EnumVariant{parent: definition.name}})
+                &db.members.push(MemberFact{owner: definition.name, name: variant.name, identity: identity, kind: .Variant, origin: .TypeBody, signature: variant.name, module_path: mp, span: semindex_source_span(variant.name_span)})
+                &db.hover.push(HoverEntry{span: variant.name_span, module_path: mp, text: "`{variant.name}` — variant of `{definition.name}`"})
+            }
+            loop method in definition.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, definition.name, .TypeBody, false, false, mp)
+            loop implementation in definition.trait_impls {
+                reference :: semindex_declaration_ref(&db, ctx, names, implementation.trait_name, implementation.trait_span, mp)
+                &db.refs.push(reference)
+                loop method in implementation.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, definition.name, .TraitImpl{trait_name: implementation.trait_name}, false, false, mp)
+            }
+        }
+        .Trait(definition) -> {
+            &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Trait})
+            &db.hover.push(HoverEntry{span: definition.name_span, module_path: mp, text: "trait `{definition.name}`"})
+            loop signature in definition.methods -> semindex_collect_trait_requirement(&db, ctx, source, definition.name, signature, mp)
+        }
+        .Tag(definition) -> {
+            &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Tag})
+            &db.hover.push(HoverEntry{span: definition.name_span, module_path: mp, text: "tag `{definition.name}`"})
+        }
+        .Impl(implementation) -> {
+            reference :: semindex_declaration_ref(&db, ctx, names, implementation.type_name, implementation.type_span, mp)
+            &db.refs.push(reference)
+            if implementation.trait_name == .Val(trait_name) {
+                if implementation.trait_span == .Val(trait_span) {
+                    reference :: semindex_declaration_ref(&db, ctx, names, trait_name, trait_span, mp)
+                    &db.refs.push(reference)
+                }
+            }
+            origin :: if implementation.trait_name == { .Val(name) -> MemberOrigin.TraitImpl{trait_name: name}, None -> MemberOrigin.InherentImpl }
+            loop method in implementation.methods -> semindex_collect_item_method(&db, &ctx, names, program, source, method, implementation.type_name, origin, true, false, mp)
+        }
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) |
+        .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) |
+        .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) |
+        .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) |
+        .MarkerDecl(_) | .FactDecl(_) -> semindex_collect_item_facts(&db, &ctx, names, program, source, item, mp)
+    }
+    if structural_id != None -> _ := &ctx.structural_parents.pop()
+}

@@ -1,0 +1,293 @@
+// TOOLS-S7: independent real algorithms; original checked fixtures below stay
+// unregistered until C4/CP-NAMES/S8–S12/S20 produce the actual checked graph.
+use jet_foundation.[Call, CallArg, EffectDecl, Diagnostic, AccessConvention, Type, CallLabel, MarkerCallArg, ast_empty_call_arg_flags]
+use jet_parser.[parse_source]
+
+#Test("semindex_normalize_definition_drops_line_comments_and_unicode_space") {
+    spaces :: String.from_bytes([U8]{194, 133, 194, 160, 225, 154, 128, 226, 128, 128, 226, 128, 175, 226, 129, 159, 227, 128, 128}) ?? panic("valid whitespace scalars")
+    cr :: String.from_bytes([U8]{13}) ?? panic("valid CR")
+    assert_eq(semindex_normalize_definition(" fn {spaces}score ( n : Int ) // notes{cr}\n -> Int {{ return n + 1 }}"), "fnscore(n:Int)->Int{{returnn+1}}")
+    assert_eq(semindex_normalize_definition("x//comment without final newline"), "x")
+    assert_eq(semindex_normalize_definition("// first\n// second\n x"), "x")
+    assert_eq(semindex_normalize_definition("\t{cr}\n"), "")
+    assert_eq(semindex_normalize_definition(""), "")
+}
+#Test("semindex_normalize_definition_preserves_strings_and_escaped_scalars") {
+    source :: " x :: \" // not a comment \\\" still string \\é\" // outside\n y"
+    assert_eq(semindex_normalize_definition(source), "x::\" // not a comment \\\" still string \\é\"y")
+    assert_eq(semindex_normalize_definition("\"unterminated \\"), "\"unterminated \\")
+    assert_eq(semindex_normalize_definition("\"\\\"\" // comment\n z"), "\"\\\"\"z")
+}
+#Test("semindex_normalize_definition_does_not_parse_block_comments_or_char_literals") {
+    assert_eq(semindex_normalize_definition("a /* kept comment */ b"), "a/*keptcomment*/b")
+    assert_eq(semindex_normalize_definition("' ' + '\t'"), "''+''")
+    assert_eq(semindex_normalize_definition("'//not a string\n x"), "'x")
+    // Rust char::is_whitespace does not include zero-width space or BOM.
+    nonspace :: String.from_bytes([U8]{226, 128, 139, 239, 187, 191}) ?? panic("valid nonspace scalars")
+    assert_eq(semindex_normalize_definition("a{nonspace} b"), "a{nonspace}b")
+}
+#Test("semindex_lexical_slot_names_are_exact") {
+    lexical :: [String]{"body", "then_body", "else_body", "method_bodies", "_body", "_bodies"}
+    other :: [String]{"", "root", "params", "body_extra", "somebody", "bodies", "return_type", "condition"}
+    loop slot in lexical -> assert(semindex_is_lexical_structural_slot(slot))
+    loop slot in other -> assert(!semindex_is_lexical_structural_slot(slot))
+}
+fn semindex_structure_test_parent(class: String, start: Int, end: Int) -> StructuralNode Never! {
+    StructuralNode{id: 4, parent: None, slot: "root", slot_kind: StructuralSlotKind.List, ordinal: 0, class: class, shape: "Discriminant(6)", module_path: "main.jet", span: SourceSpan{start: start, end: end}}
+}
+#Test("semindex_block_candidates_keep_arm_head_bounds_and_claim_exclusion") {
+    arm :: semindex_structure_test_parent("arm", 10, 20)
+    assert(!semindex_block_span_candidate(arm, Span{start: 9, end: 15}, false))
+    assert(semindex_block_span_candidate(arm, Span{start: 10, end: 20}, false))
+    assert(!semindex_block_span_candidate(arm, Span{start: 15, end: 25}, false))
+    assert(semindex_block_span_candidate(arm, Span{start: 20, end: 25}, false))
+    assert(semindex_block_span_candidate(arm, Span{start: 25, end: 35}, false))
+    assert(!semindex_block_span_candidate(arm, Span{start: 10, end: 20}, true))
+    item :: semindex_structure_test_parent("item", 10, 20)
+    assert(semindex_block_span_candidate(item, Span{start: 15, end: 25}, false))
+    assert(!semindex_block_span_candidate(item, Span{start: 15, end: 25}, true))
+}
+#Test("semindex_call_rows_use_current_caller_only_and_preserve_exact_callee") {
+    calls := [CallEdge]{}
+    span :: Span{start: 7, end: 11}
+    semindex_record_call_rows(&calls, None, "main.jet", "ignored", span)
+    assert_eq(calls.len(), 0)
+    frame :: CallerFrame{name: "run", owner: None, identity: "fn:module:main.jet::run"}
+    semindex_record_call_rows(&calls, Val(frame), "main.jet", "checked::alias", span)
+    method :: CallerFrame{name: "open", owner: Val("Door"), identity: "method:module:main.jet::Door.open"}
+    semindex_record_call_rows(&calls, Val(method), "other.jet", "Door::close", Span{start: 20, end: 20})
+    assert_eq(calls.len(), 2)
+    assert_eq(calls[0].caller, "run")
+    assert_eq(calls[0].callee, "checked::alias")
+    assert_eq(calls[0].module_path, "main.jet")
+    assert_eq(calls[0].call_span, SourceSpan{start: 7, end: 11})
+    assert_eq(calls[1].caller, "Door::open")
+    assert_eq(calls[1].call_span, SourceSpan{start: 20, end: 20})
+}
+fn semindex_structure_test_member(owner: String, name: String, origin: MemberOrigin, path: String, start: Int, signature: String) -> MemberFact Never! {
+    MemberFact{owner: owner, name: name, identity: "method:{owner}.{name}", kind: MemberKind.Method, origin: origin, signature: signature, module_path: path, span: SourceSpan{start: start, end: start + 2}}
+}
+#Test("semindex_breadcrumbs_filter_and_sort_origin_name_path_offset") {
+    members :: [MemberFact]{
+        semindex_structure_test_member("Door", "z", MemberOrigin.TraitImpl{trait_name: "Paint"}, "a.jet", 1, "trait z"),
+        semindex_structure_test_member("Door", "b", MemberOrigin.InherentImpl, "b.jet", 8, "b late"),
+        semindex_structure_test_member("Door", "b", MemberOrigin.InherentImpl, "b.jet", 2, "b early"),
+        semindex_structure_test_member("Door", "b", MemberOrigin.InherentImpl, "a.jet", 9, "b a"),
+        semindex_structure_test_member("Door", "a", MemberOrigin.InherentImpl, "z.jet", 6, "a"),
+        semindex_structure_test_member("Door", "inline", MemberOrigin.TypeBody, "a.jet", 0, "skip inline"),
+        semindex_structure_test_member("Door", "requirement", MemberOrigin.TraitRequirement{trait_name: "Paint"}, "a.jet", 0, "skip requirement"),
+        semindex_structure_test_member("Other", "a", MemberOrigin.InherentImpl, "a.jet", 0, "skip other"),
+        MemberFact{owner: "Door", name: "field", identity: "field:Door.field", kind: MemberKind.Field, origin: MemberOrigin.InherentImpl, signature: "skip field", module_path: "a.jet", span: SourceSpan{start: 0, end: 1}},
+    }
+    assert_eq(semindex_breadcrumb_label("Door", members), Val("+ a [z.jet:6..8] | + b a [a.jet:9..11] | + b early [b.jet:2..4] | + b late [b.jet:8..10] | + trait z [a.jet:1..3]"))
+    assert_eq(semindex_breadcrumb_label("Missing", members), None)
+    assert_eq(semindex_breadcrumb_label("Door", [MemberFact]{}), None)
+}
+#Test("semindex_breadcrumbs_keep_stable_equal_key_duplicates") {
+    rows :: [MemberFact]{semindex_structure_test_member("T", "m", MemberOrigin.InherentImpl, "m.jet", 3, "first"), semindex_structure_test_member("T", "m", MemberOrigin.InherentImpl, "m.jet", 3, "second")}
+    assert_eq(semindex_breadcrumb_label("T", rows), Val("+ first [m.jet:3..5] | + second [m.jet:3..5]"))
+}
+
+// #4397 gates execution, not composite-key semantics. Uses the actual S5 DB.
+fn semindex_structure_test_parent_slot_ordinals_and_restoration() {
+    db := SymbolDB.new()
+    ctx := WalkCtx.new(0, "module:main.jet", [Span]{Span{start: 12, end: 30}, Span{start: 32, end: 50}})
+    assert_eq(semindex_record_node(&db, ctx, "item", "Discriminant(0)", "main.jet", Span{start: 10, end: 60}), Val(0))
+    &ctx.structural_parents.push(0)
+    semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+        assert_eq(semindex_record_node(&db, ctx, "stmt", "Discriminant(3)", "main.jet", Span{start: 15, end: 18}), Val(1))
+        semindex_structural_slot(&db, &ctx, "condition", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            assert_eq(semindex_record_node(&db, ctx, "expr", "Discriminant(5)", "main.jet", Span{start: 20, end: 21}), Val(2))
+        })
+        assert_eq(ctx.structural_slot, "body")
+        assert_eq(ctx.structural_slot_kind, StructuralSlotKind.List)
+        assert_eq(semindex_record_node(&db, ctx, "stmt", "Discriminant(7)", "main.jet", Span{start: 22, end: 23}), Val(3))
+    })
+    assert_eq(ctx.structural_slot, "root")
+    assert_eq(ctx.structural_slot_kind, StructuralSlotKind.List)
+    assert_eq(db.nodes[1].ordinal, 0)
+    assert_eq(db.nodes[2].ordinal, 0)
+    assert_eq(db.nodes[3].ordinal, 1)
+    assert_eq(db.slot_boundaries.len(), 1)
+    semindex_structural_slot(&db, &ctx, "else_body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {})
+    assert_eq(db.slot_boundaries.len(), 2)
+    assert_eq(db.slot_boundaries[1].span, SourceSpan{start: 32, end: 50})
+    semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {})
+    assert_eq(db.slot_boundaries.len(), 2)
+    assert_eq(semindex_record_node(&db, ctx, "item", "bad span", "main.jet", Span{start: 8, end: 7}), None)
+    assert_eq(db.nodes.len(), 4)
+}
+fn semindex_structure_test_nested_caller_restores() {
+    db := SymbolDB.new()
+    ctx := WalkCtx.new(0, "module:main.jet", [Span]{})
+    outer :: CallerFrame{name: "outer", owner: None, identity: "fn:outer"}
+    inner :: CallerFrame{name: "inner", owner: Val("T"), identity: "method:T.inner"}
+    semindex_with_caller(&db, &ctx, outer, [Param]{}, "main.jet", (db: &SymbolDB, ctx: &WalkCtx) -> {
+        semindex_record_call(&db, ctx, "main.jet", "one", Span{start: 1, end: 2})
+        semindex_with_caller(&db, &ctx, inner, [Param]{}, "main.jet", (db: &SymbolDB, ctx: &WalkCtx) -> { semindex_record_call(&db, ctx, "main.jet", "two", Span{start: 3, end: 4}) })
+        semindex_record_call(&db, ctx, "main.jet", "three", Span{start: 5, end: 6})
+    })
+    assert_eq(ctx.caller, None)
+    assert_eq(db.calls[0].caller, "outer")
+    assert_eq(db.calls[1].caller, "T::inner")
+    assert_eq(db.calls[2].caller, "outer")
+}
+
+// Original lib.rs819 fixture; Driver must load this exact source path checked.
+fn semindex_structure_original_explicit_slots_fixture() -> String Never! { "Examples/features/basics/default_refs.jet" }
+fn semindex_structure_original_explicit_slots_assertions(index: SemIndex) Never! {
+    loop node in index.structural_nodes() -> assert(node.parent == None || node.slot != "root")
+}
+// Original tests/semindex.rs1107–1161, including the negative checked source.
+fn semindex_structure_original_unified_loops_source() -> String Never! {
+    "fn run() {{\n    loop item in [1, 2, 3], 2 {{\n        print(item)\n    }}\n    loop cursor in 0..<1 {{\n        print(cursor)\n    }}\n}}\n"
+}
+fn semindex_structure_original_out_of_scope_source() -> String Never! { "fn run() {{\n    loop cursor in 0..<1 {{}}\n    print(cursor)\n}}\n" }
+fn semindex_structure_original_unified_loops_assertions(index: SemIndex, diagnostics: [Diagnostic]) Never! {
+    slots :: [String]{"source", "stride", "init", "condition", "afterthought", "body"}
+    loop slot in slots {
+        found := false
+        loop node in index.structural_nodes() { if node.slot == slot -> found = true }
+        assert(found, "missing loop structural slot `{slot}`")
+    }
+    inner := SourceSpan?{None}
+    loop definition in index.definitions() {
+        if definition.name != "cursor" -> next
+        if inner == {
+            .Val(old) -> { if definition.def_span.start > old.start -> inner = Val(definition.def_span) }
+            None -> inner = Val(definition.def_span)
+        }
+    }
+    expected :: inner ?? panic("inner state definition")
+    loop reference in index.references_to("cursor") {
+        if reference[0].target == {
+            .Val(target) -> assert_eq(target.def_span, expected)
+            None -> panic("checked cursor target missing")
+        }
+    }
+    failed := false
+    loop diagnostic in diagnostics { if diagnostic.code == "E0107" && diagnostic.what.contains("cursor") -> failed = true }
+    assert(failed, "state binding must end with the loop")
+}
+// Original tests/semindex.rs1164–1189. Same path for both checked versions.
+fn semindex_structure_original_ancestry_before() -> String Never! { "fn score(n: Int) -> Int {{ return n + 1 }}\nfn run() {{ print(score(1)) }}\n" }
+fn semindex_structure_original_ancestry_after() -> String Never! { "fn score(n: Float, bonus: Float) -> Float {{ return n * bonus }}\nfn run() {{ print(score(1.0, 2.0)) }}\n" }
+fn semindex_structure_original_ancestry_assertions(before: SemIndex, after: SemIndex) Never! {
+    left := DefinitionFact?{None}
+    right := DefinitionFact?{None}
+    loop fact in before.definition_facts() { if fact.name == "score" -> left = Val(fact) }
+    loop fact in after.definition_facts() { if fact.name == "score" -> right = Val(fact) }
+    l :: left ?? panic("original score definition")
+    r :: right ?? panic("changed score definition")
+    assert_eq(l.stable_id, r.stable_id)
+    assert(l.signature_id != r.signature_id)
+    assert(l.content_id != r.content_id)
+}
+// Published Parser/Foundation projection; provider copy/native proof still gated.
+// Rust's outer CallValue uses the paren span; OptField ends at the method token.
+fn semindex_structure_optional_call_source() -> String Never! { "fn run() {{ receiver?.method(1) }}" }
+
+// Full AST closure awaits provider copy/native proof. These assertions consume
+// canonical Foundation values, never a second AST schema.
+fn semindex_structure_test_rust_discriminants() Never! {
+    span :: Span{start: 2, end: 5}
+    assert_eq(semindex_expr_shape(Expr.Int{value: 1, span: span, width: None, raw: None}), "Discriminant(3)")
+    assert_eq(semindex_expr_shape(Expr.Ident{name: "x", span: span}), "Discriminant(15)")
+    assert_eq(semindex_expr_shape(Expr.Absent{span: span}), "Discriminant(33)")
+    assert_eq(semindex_expr_shape(Expr.Paren{value: Expr.Unit{span: span}, span: span}), "Discriminant(48)")
+    assert_eq(semindex_stmt_shape(Stmt.Break{span: span}), "Discriminant(7)")
+    assert_eq(semindex_stmt_shape(Stmt.DeferClose{close: Expr.Unit{span: span}, span: span}), "Discriminant(34)")
+    item :: Item.EffectDecl{value: EffectDecl{name: "FS.Read", name_span: span, irreversible: false, span: span}}
+    assert_eq(semindex_item_shape(item), "Discriminant(8)")
+    assert_eq(semindex_item_span(item), span)
+}
+fn semindex_structure_test_exact_call_spans() Never! {
+    empty :: Expr.Call{call: Call{name: "f", name_span: Span{start: 4, end: 5}, type_args: [Type]{}, args: [CallArg]{}, resolved_ret: None, range_checked: false, widen_approx: false}}
+    assert_eq(semindex_structural_expr_span(empty), Span{start: 4, end: 7})
+    // A nested no-argument call contributes its closing extent, not name_span.
+    last :: CallArg{convention: AccessConvention.Read, expr: empty, span: Span{start: 4, end: 7}, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    outer :: Expr.Call{call: Call{name: "g", name_span: Span{start: 1, end: 2}, type_args: [Type]{}, args: [CallArg]{last}, resolved_ret: None, range_checked: false, widen_approx: false}}
+    assert_eq(semindex_structural_expr_span(outer), Span{start: 1, end: 8})
+}
+fn semindex_structure_test_state_marker_paths() Never! {
+    root :: Expr.Ident{name: "Door", span: Span{start: 1, end: 5}}
+    state :: Expr.Field{base: root, member: "State", span: Span{start: 1, end: 11}}
+    closed :: Expr.Field{base: state, member: "Closed", span: Span{start: 1, end: 18}}
+    path :: semindex_state_marker_path(closed) ?? panic("qualified marker path")
+    assert_eq(path.name, "Door.State.Closed")
+    assert_eq(path.span, Span{start: 1, end: 18})
+    assert(semindex_state_marker_path(Expr.Unit{span: Span{start: 1, end: 3}}) == None)
+}
+// The harness passes the actual parsed function (including authored type spans).
+fn semindex_structure_test_function_types(function: Func, mp: String) {
+    db := SymbolDB.new()
+    ctx := WalkCtx.new(0, semindex_root_identity(mp), [Span]{})
+    root :: semindex_record_node(&db, ctx, "item", "Discriminant(0)", mp, function.span) ?? panic("valid function span")
+    &ctx.structural_parents.push(root)
+    semindex_record_func_type_nodes(&db, &ctx, function, mp)
+    loop index in 0..<function.params.len() {
+        node :: db.nodes[index + 1]
+        assert_eq(node.span, semindex_source_span(function.params[index].ty_span))
+        assert_eq(node.slot, "params")
+        assert_eq(node.slot_kind, StructuralSlotKind.List)
+        assert_eq(node.ordinal, index)
+    }
+    if function.return_type_span == .Val(span) {
+        node :: db.nodes[db.nodes.len() - 1]
+        assert_eq(node.span, semindex_source_span(span))
+        assert_eq(node.slot, "return_type")
+        assert_eq(node.slot_kind, StructuralSlotKind.Scalar)
+    }
+    assert_eq(ctx.structural_slot, "root")
+}
+
+fn semindex_structure_test_allow_marker_projection() Never! {
+    db := SymbolDB.new()
+    span :: Span{start: 4, end: 30}
+    markers :: [Marker]{
+        Marker{name: "allow", negated: false, name_span: span, args: [MarkerCallArg]{
+            MarkerCallArg.Expr{value: Expr.Ident{name: "decimal", span: span}},
+            MarkerCallArg.Expr{value: Expr.Unit{span: span}},
+            MarkerCallArg.EffectRow{effects: [EffectRowEntry]{}, span: span},
+            MarkerCallArg.Expr{value: Expr.Ident{name: "copies", span: span}},
+        }, arg_labels: [CallLabel?]{}, span: span, ct: None},
+        Marker{name: "Allow", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: Expr.Ident{name: "ignored", span: span}}}, arg_labels: [CallLabel?]{}, span: span, ct: None},
+    }
+    semindex_collect_allow_markers(&db, markers, "field", "main.jet")
+    assert_eq(db.bypasses.len(), 2)
+    assert_eq(db.bypasses[0].kind, BypassKind.LintAllow)
+    assert_eq(db.bypasses[0].site, "field")
+    assert_eq(db.bypasses[0].detail, "decimal")
+    assert_eq(db.bypasses[0].span, semindex_source_span(span))
+    assert_eq(db.bypasses[1].detail, "copies")
+    assert_eq(db.bypasses[1].module_path, "main.jet")
+}
+
+// Unregistered until the current canonical eight-field AST/parser is copied
+// and Main proves that provider. Parse the original fixture, never fabricate AST.
+fn semindex_structure_test_parsed_optional_call_projection() {
+    parsed :: parse_source(semindex_structure_optional_call_source().bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    found := false
+    loop item in parsed.program.items {
+        if item == .Func(function) {
+            loop stmt in function.body {
+                if stmt == .Expr(expression) {
+                    assert_eq(semindex_expr_shape(expression), "Discriminant(45)")
+                    assert_eq(semindex_structural_expr_span(expression), Span{start: 27, end: 30})
+                    if expression == .OptMethodCall(receiver, method, method_span, _, args, _, receiver_span, call_span) {
+                        assert_eq(receiver_span, Span{start: 11, end: 19})
+                        assert_eq(expr_span(receiver), receiver_span)
+                        assert_eq(method, "method")
+                        assert_eq(method_span, Span{start: 21, end: 27})
+                        assert_eq(call_span, Span{start: 27, end: 30})
+                        assert_eq(args.len(), 1)
+                        assert_eq(expr_span(args[0].expr), Span{start: 28, end: 29})
+                        found = true
+                    }
+                }
+            }
+        }
+    }
+    assert(found, "actual parsed optional method call")
+}

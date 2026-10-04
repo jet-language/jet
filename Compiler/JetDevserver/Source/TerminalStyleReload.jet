@@ -1,0 +1,1967 @@
+// PORT-PENDING 0786 crates-jet-devserver-src-terminalstylereload: crates/jet-devserver/src/TerminalStyleReload.rs:1-1963
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Typed terminal-style live reload state for resident `jet dev` sessions.
+//RS //!
+//RS //! This module owns only style facts.  Widget trees, focus, cursor, and the
+//RS //! application model stay with their host, so replacing a style snapshot can
+//RS //! never replace application state.  The reload boundary is deliberately
+//RS //! independent of `WatchService`: a later host adapter can feed coalesced
+//RS //! edits here without teaching the watcher or renderer about style semantics.
+//RS 
+//RS use jet_foundation::DataTree::DataTree;
+//RS use jet_foundation::JSON::{json_escape, parse_json_with_limit};
+//RS use jet_foundation::SHA256;
+//RS use std::collections::{BTreeMap, VecDeque};
+//RS use std::fmt;
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS /// The protocol boundary used by a future devtools host publication.
+//RS pub const TERMINAL_STYLE_PROTOCOL: &str = "jet.devtools.v1";
+//RS /// Maximum source bytes retained by one style candidate.
+//RS pub const MAX_TERMINAL_STYLE_SOURCE_BYTES: usize = 64 * 1024;
+//RS /// Maximum bytes retained by the human-readable part of one error fact.
+//RS pub const MAX_TERMINAL_STYLE_ERROR_BYTES: usize = 512;
+//RS /// Maximum dependency facts carried by one style snapshot.
+//RS pub const MAX_TERMINAL_STYLE_DEPENDENCIES: usize = 256;
+//RS /// Maximum semantic role entries in one style document.
+//RS pub const MAX_TERMINAL_STYLE_ROLES: usize = 32;
+//RS /// Maximum stable identity bytes accepted for a style source or dependency.
+//RS pub const MAX_TERMINAL_STYLE_ID_BYTES: usize = 256;
+//RS /// Maximum pending style subscribers.
+//RS pub const MAX_TERMINAL_STYLE_SUBSCRIBERS: usize = 256;
+//RS /// Maximum queued notifications retained for one subscriber.
+//RS pub const MAX_TERMINAL_STYLE_NOTIFICATIONS: usize = 256;
+//RS /// Maximum bytes accepted for one host `/style` request envelope: the
+//RS /// bounded style source plus dependency facts and JSON structure.
+//RS pub const MAX_TERMINAL_STYLE_REQUEST_BYTES: usize = 256 * 1024;
+//RS 
+//RS /// Stable error categories emitted by the style reload boundary.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum TerminalStyleErrorCode {
+//RS     SourceTooLarge,
+//RS     InvalidSourceIdentity,
+//RS     InvalidDependency,
+//RS     InvalidFingerprint,
+//RS     InvalidStyle,
+//RS     TooManyDependencies,
+//RS     TooManyRoles,
+//RS     RevisionOverflow,
+//RS }
+//RS 
+//RS impl TerminalStyleErrorCode {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::SourceTooLarge => "style_source_too_large",
+//RS             Self::InvalidSourceIdentity => "style_source_identity",
+//RS             Self::InvalidDependency => "style_dependency",
+//RS             Self::InvalidFingerprint => "style_fingerprint",
+//RS             Self::InvalidStyle => "style_parse",
+//RS             Self::TooManyDependencies => "style_dependency_limit",
+//RS             Self::TooManyRoles => "style_role_limit",
+//RS             Self::RevisionOverflow => "style_revision_overflow",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for TerminalStyleErrorCode {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         output.write_str(self.as_str())
+//RS     }
+//RS }
+//RS 
+//RS /// A bounded construction failure for typed style facts.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleFactError {
+//RS     pub code: TerminalStyleErrorCode,
+//RS     pub message: String,
+//RS }
+//RS 
+//RS impl TerminalStyleFactError {
+//RS     fn new(code: TerminalStyleErrorCode, message: impl Into<String>) -> Self {
+//RS         Self {
+//RS             code,
+//RS             message: bounded_text(&message.into(), MAX_TERMINAL_STYLE_ERROR_BYTES),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for TerminalStyleFactError {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         write!(output, "{}: {}", self.code, self.message)
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for TerminalStyleFactError {}
+//RS 
+//RS /// Terminal color capability selected by the host environment.
+//RS #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum TerminalColorProfile {
+//RS     #[default]
+//RS     Monochrome,
+//RS     Ansi16,
+//RS     Ansi256,
+//RS     TrueColor,
+//RS }
+//RS 
+//RS impl TerminalColorProfile {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Monochrome => "monochrome",
+//RS             Self::Ansi16 => "ansi16",
+//RS             Self::Ansi256 => "ansi256",
+//RS             Self::TrueColor => "truecolor",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(value: &str) -> Option<Self> {
+//RS         match value.trim().to_ascii_lowercase().as_str() {
+//RS             "monochrome" => Some(Self::Monochrome),
+//RS             "ansi16" => Some(Self::Ansi16),
+//RS             "ansi256" => Some(Self::Ansi256),
+//RS             "truecolor" => Some(Self::TrueColor),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Explicit color policy, matching the CLI `--color` control.
+//RS #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum TerminalColorMode {
+//RS     #[default]
+//RS     Auto,
+//RS     Always,
+//RS     Never,
+//RS }
+//RS 
+//RS impl TerminalColorMode {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Auto => "auto",
+//RS             Self::Always => "always",
+//RS             Self::Never => "never",
+//RS         }
+//RS     }
+//RS 
+//RS     /// Unknown values use the documented safe default rather than inventing a
+//RS     /// second policy ladder.
+//RS     pub fn parse(value: &str) -> Self {
+//RS         match value.trim().to_ascii_lowercase().as_str() {
+//RS             "always" => Self::Always,
+//RS             "never" => Self::Never,
+//RS             _ => Self::Auto,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Explicit terminal facts used both for rendering and dependency identity.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct TerminalCapabilityFacts {
+//RS     pub profile: TerminalColorProfile,
+//RS     pub mode: TerminalColorMode,
+//RS     pub is_tty: bool,
+//RS     pub term_is_dumb: bool,
+//RS     pub no_color: bool,
+//RS }
+//RS 
+//RS impl Default for TerminalCapabilityFacts {
+//RS     fn default() -> Self {
+//RS         Self::new(
+//RS             TerminalColorProfile::Monochrome,
+//RS             TerminalColorMode::Auto,
+//RS             false,
+//RS             true,
+//RS             false,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl TerminalCapabilityFacts {
+//RS     pub const fn new(
+//RS         profile: TerminalColorProfile,
+//RS         mode: TerminalColorMode,
+//RS         is_tty: bool,
+//RS         term_is_dumb: bool,
+//RS         no_color: bool,
+//RS     ) -> Self {
+//RS         Self {
+//RS             profile,
+//RS             mode,
+//RS             is_tty,
+//RS             term_is_dumb,
+//RS             no_color,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Derive a deterministic capability profile from explicit environment
+//RS     /// facts.  No process environment is read here, keeping reload tests and
+//RS     /// host adapters deterministic.
+//RS     pub fn from_environment(
+//RS         term: Option<&str>,
+//RS         colorterm: Option<&str>,
+//RS         is_tty: bool,
+//RS         no_color: bool,
+//RS         mode: TerminalColorMode,
+//RS     ) -> Self {
+//RS         let term = term.unwrap_or("").trim().to_ascii_lowercase();
+//RS         let colorterm = colorterm.unwrap_or("").trim().to_ascii_lowercase();
+//RS         let term_is_dumb = term == "dumb";
+//RS         let enabled = match mode {
+//RS             TerminalColorMode::Always => true,
+//RS             TerminalColorMode::Never => false,
+//RS             TerminalColorMode::Auto => is_tty && !term_is_dumb && !no_color,
+//RS         };
+//RS         let profile = if !enabled {
+//RS             TerminalColorProfile::Monochrome
+//RS         } else if matches!(colorterm.as_str(), "truecolor" | "24bit") {
+//RS             TerminalColorProfile::TrueColor
+//RS         } else if term.contains("256color") {
+//RS             TerminalColorProfile::Ansi256
+//RS         } else {
+//RS             TerminalColorProfile::Ansi16
+//RS         };
+//RS         Self::new(profile, mode, is_tty, term_is_dumb, no_color)
+//RS     }
+//RS 
+//RS     pub const fn color_enabled(self) -> bool {
+//RS         match self.mode {
+//RS             TerminalColorMode::Always => true,
+//RS             TerminalColorMode::Never => false,
+//RS             TerminalColorMode::Auto => {
+//RS                 self.is_tty && !self.term_is_dumb && !self.no_color
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Stable identity for capability-dependent style selection.
+//RS     pub fn fingerprint(self) -> String {
+//RS         let canonical = format!(
+//RS             "terminal-capabilities-v1\0profile={};mode={};tty={};dumb={};no_color={};",
+//RS             self.profile.as_str(),
+//RS             self.mode.as_str(),
+//RS             self.is_tty as u8,
+//RS             self.term_is_dumb as u8,
+//RS             self.no_color as u8,
+//RS         );
+//RS         SHA256::sha256_hex(canonical.as_bytes())
+//RS     }
+//RS }
+//RS 
+//RS /// The typed kinds of inputs that can affect style replacement.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum TerminalStyleDependencyKind {
+//RS     Source,
+//RS     Capability,
+//RS     Layout,
+//RS     ValueType,
+//RS }
+//RS 
+//RS impl TerminalStyleDependencyKind {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Source => "source",
+//RS             Self::Capability => "capability",
+//RS             Self::Layout => "layout",
+//RS             Self::ValueType => "value_type",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One stable, content-addressed style dependency fact.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub struct TerminalStyleDependency {
+//RS     pub kind: TerminalStyleDependencyKind,
+//RS     pub id: String,
+//RS     pub fingerprint: String,
+//RS }
+//RS 
+//RS impl TerminalStyleDependency {
+//RS     /// Construct a dependency from an already computed lowercase SHA-256.
+//RS     pub fn new(
+//RS         kind: TerminalStyleDependencyKind,
+//RS         id: impl Into<String>,
+//RS         fingerprint: impl Into<String>,
+//RS     ) -> Result<Self, TerminalStyleFactError> {
+//RS         let id = id.into();
+//RS         let fingerprint = fingerprint.into();
+//RS         validate_identity(&id).map_err(|message| {
+//RS             TerminalStyleFactError::new(TerminalStyleErrorCode::InvalidDependency, message)
+//RS         })?;
+//RS         validate_sha256(&fingerprint).map_err(|message| {
+//RS             TerminalStyleFactError::new(TerminalStyleErrorCode::InvalidFingerprint, message)
+//RS         })?;
+//RS         Ok(Self {
+//RS             kind,
+//RS             id,
+//RS             fingerprint,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Compute the dependency identity from bytes at the host boundary.
+//RS     pub fn from_bytes(
+//RS         kind: TerminalStyleDependencyKind,
+//RS         id: impl Into<String>,
+//RS         bytes: &[u8],
+//RS     ) -> Result<Self, TerminalStyleFactError> {
+//RS         Self::new(kind, id, SHA256::sha256_hex(bytes))
+//RS     }
+//RS }
+//RS 
+//RS /// All typed inputs that contribute to one style snapshot identity.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleFingerprintFacts {
+//RS     pub source_id: String,
+//RS     pub source_fingerprint: String,
+//RS     pub dependencies: Vec<TerminalStyleDependency>,
+//RS     pub capabilities: TerminalCapabilityFacts,
+//RS     pub layout_fingerprint: String,
+//RS     pub type_fingerprint: String,
+//RS     pub fingerprint: String,
+//RS }
+//RS 
+//RS impl TerminalStyleFingerprintFacts {
+//RS     pub fn new(
+//RS         source_id: impl Into<String>,
+//RS         source: &str,
+//RS         mut dependencies: Vec<TerminalStyleDependency>,
+//RS         capabilities: TerminalCapabilityFacts,
+//RS         layout_fingerprint: impl Into<String>,
+//RS         type_fingerprint: impl Into<String>,
+//RS     ) -> Result<Self, TerminalStyleFactError> {
+//RS         let source_id = source_id.into();
+//RS         if let Err(message) = validate_identity(&source_id) {
+//RS             return Err(TerminalStyleFactError::new(
+//RS                 TerminalStyleErrorCode::InvalidSourceIdentity,
+//RS                 message,
+//RS             ));
+//RS         }
+//RS         if source.len() > MAX_TERMINAL_STYLE_SOURCE_BYTES {
+//RS             return Err(TerminalStyleFactError::new(
+//RS                 TerminalStyleErrorCode::SourceTooLarge,
+//RS                 format!(
+//RS                     "style source exceeds {} bytes",
+//RS                     MAX_TERMINAL_STYLE_SOURCE_BYTES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         if dependencies.len() > MAX_TERMINAL_STYLE_DEPENDENCIES {
+//RS             return Err(TerminalStyleFactError::new(
+//RS                 TerminalStyleErrorCode::TooManyDependencies,
+//RS                 format!(
+//RS                     "style has {} dependencies; limit is {}",
+//RS                     dependencies.len(),
+//RS                     MAX_TERMINAL_STYLE_DEPENDENCIES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         dependencies.sort();
+//RS         for pair in dependencies.windows(2) {
+//RS             if pair[0].kind == pair[1].kind && pair[0].id == pair[1].id {
+//RS                 return Err(TerminalStyleFactError::new(
+//RS                     TerminalStyleErrorCode::InvalidDependency,
+//RS                     format!("duplicate {} dependency identity", pair[0].id),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         for dependency in &dependencies {
+//RS             validate_identity(&dependency.id).map_err(|message| {
+//RS                 TerminalStyleFactError::new(TerminalStyleErrorCode::InvalidDependency, message)
+//RS             })?;
+//RS             validate_sha256(&dependency.fingerprint).map_err(|message| {
+//RS                 TerminalStyleFactError::new(TerminalStyleErrorCode::InvalidFingerprint, message)
+//RS             })?;
+//RS         }
+//RS         let layout_fingerprint = validate_optional_fingerprint(
+//RS             layout_fingerprint.into(),
+//RS             "layout fingerprint",
+//RS         )?;
+//RS         let type_fingerprint = validate_optional_fingerprint(
+//RS             type_fingerprint.into(),
+//RS             "value-type fingerprint",
+//RS         )?;
+//RS         let source_fingerprint = SHA256::sha256_hex(source.as_bytes());
+//RS         let fingerprint = facts_fingerprint(
+//RS             &source_id,
+//RS             &source_fingerprint,
+//RS             &dependencies,
+//RS             capabilities,
+//RS             &layout_fingerprint,
+//RS             &type_fingerprint,
+//RS         );
+//RS         Ok(Self {
+//RS             source_id,
+//RS             source_fingerprint,
+//RS             dependencies,
+//RS             capabilities,
+//RS             layout_fingerprint,
+//RS             type_fingerprint,
+//RS             fingerprint,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn dependency(
+//RS         &self,
+//RS         kind: TerminalStyleDependencyKind,
+//RS         id: &str,
+//RS     ) -> Option<&TerminalStyleDependency> {
+//RS         self.dependencies
+//RS             .iter()
+//RS             .find(|dependency| dependency.kind == kind && dependency.id == id)
+//RS     }
+//RS }
+//RS 
+//RS fn facts_fingerprint(
+//RS     source_id: &str,
+//RS     source_fingerprint: &str,
+//RS     dependencies: &[TerminalStyleDependency],
+//RS     capabilities: TerminalCapabilityFacts,
+//RS     layout_fingerprint: &str,
+//RS     type_fingerprint: &str,
+//RS ) -> String {
+//RS     let mut canonical = String::from("terminal-style-facts-v1\0");
+//RS     frame(&mut canonical, source_id);
+//RS     frame(&mut canonical, source_fingerprint);
+//RS     frame(&mut canonical, &capabilities.fingerprint());
+//RS     frame(&mut canonical, layout_fingerprint);
+//RS     frame(&mut canonical, type_fingerprint);
+//RS     for dependency in dependencies {
+//RS         frame(&mut canonical, dependency.kind.as_str());
+//RS         frame(&mut canonical, &dependency.id);
+//RS         frame(&mut canonical, &dependency.fingerprint);
+//RS     }
+//RS     SHA256::sha256_hex(canonical.as_bytes())
+//RS }
+//RS 
+//RS /// One candidate supplied by a watcher or host adapter.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleEdit {
+//RS     pub source_id: String,
+//RS     pub source: String,
+//RS     pub dependencies: Vec<TerminalStyleDependency>,
+//RS     pub capabilities: TerminalCapabilityFacts,
+//RS     pub layout_fingerprint: String,
+//RS     pub type_fingerprint: String,
+//RS }
+//RS 
+//RS impl TerminalStyleEdit {
+//RS     pub fn new(source_id: impl Into<String>, source: impl Into<String>) -> Self {
+//RS         Self {
+//RS             source_id: source_id.into(),
+//RS             source: source.into(),
+//RS             dependencies: Vec::new(),
+//RS             capabilities: TerminalCapabilityFacts::default(),
+//RS             layout_fingerprint: String::new(),
+//RS             type_fingerprint: String::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_capabilities(mut self, capabilities: TerminalCapabilityFacts) -> Self {
+//RS         self.capabilities = capabilities;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_dependencies(mut self, dependencies: Vec<TerminalStyleDependency>) -> Self {
+//RS         self.dependencies = dependencies;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_layout_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+//RS         self.layout_fingerprint = fingerprint.into();
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_type_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+//RS         self.type_fingerprint = fingerprint.into();
+//RS         self
+//RS     }
+//RS 
+//RS     fn bound_source(mut self) -> Self {
+//RS         if self.source.len() > MAX_TERMINAL_STYLE_SOURCE_BYTES {
+//RS             let mut end = 0;
+//RS             for character in self.source.chars() {
+//RS                 end += character.len_utf8();
+//RS                 if end > MAX_TERMINAL_STYLE_SOURCE_BYTES {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             self.source.truncate(end);
+//RS         }
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS /// Semantic style roles shared by terminal renderers.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum TerminalStyleRole {
+//RS     Accent,
+//RS     Dim,
+//RS     Success,
+//RS     Warn,
+//RS     Error,
+//RS     Invert,
+//RS     Border,
+//RS     Bold,
+//RS }
+//RS 
+//RS impl TerminalStyleRole {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Accent => "accent",
+//RS             Self::Dim => "dim",
+//RS             Self::Success => "success",
+//RS             Self::Warn => "warn",
+//RS             Self::Error => "error",
+//RS             Self::Invert => "invert",
+//RS             Self::Border => "border",
+//RS             Self::Bold => "bold",
+//RS         }
+//RS     }
+//RS 
+//RS     fn parse(value: &str) -> Option<Self> {
+//RS         match value {
+//RS             "accent" => Some(Self::Accent),
+//RS             "dim" => Some(Self::Dim),
+//RS             "success" => Some(Self::Success),
+//RS             "warn" => Some(Self::Warn),
+//RS             "error" => Some(Self::Error),
+//RS             "invert" => Some(Self::Invert),
+//RS             "border" => Some(Self::Border),
+//RS             "bold" => Some(Self::Bold),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A validated terminal style value.  Raw source text is not retained.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum TerminalStyleValue {
+//RS     Plain,
+//RS     Sgr(String),
+//RS }
+//RS 
+//RS impl TerminalStyleValue {
+//RS     pub fn sgr(&self) -> Option<&str> {
+//RS         match self {
+//RS             Self::Plain => None,
+//RS             Self::Sgr(value) => Some(value),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn paint(&self, text: &str) -> String {
+//RS         match self {
+//RS             Self::Plain => text.to_string(),
+//RS             Self::Sgr(sgr) => format!("\x1b[{sgr}m{text}\x1b[0m"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Parsed semantic style roles.  This is an internal line-oriented transport
+//RS /// representation, not a new user-facing language syntax.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleDocument {
+//RS     roles: BTreeMap<TerminalStyleRole, TerminalStyleValue>,
+//RS }
+//RS 
+//RS impl TerminalStyleDocument {
+//RS     pub fn parse(source: &str) -> Result<Self, TerminalStyleParseError> {
+//RS         if source.len() > MAX_TERMINAL_STYLE_SOURCE_BYTES {
+//RS             return Err(TerminalStyleParseError::new(
+//RS                 0,
+//RS                 TerminalStyleErrorCode::SourceTooLarge,
+//RS                 format!(
+//RS                     "style source exceeds {} bytes",
+//RS                     MAX_TERMINAL_STYLE_SOURCE_BYTES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         if source.bytes().any(|byte| {
+//RS             byte.is_ascii_control() && !matches!(byte, b'\n' | b'\r' | b'\t')
+//RS         }) {
+//RS             return Err(TerminalStyleParseError::new(
+//RS                 0,
+//RS                 TerminalStyleErrorCode::InvalidStyle,
+//RS                 "style source contains a control byte",
+//RS             ));
+//RS         }
+//RS         let mut roles = BTreeMap::new();
+//RS         for (index, line) in source.lines().enumerate() {
+//RS             let line_number = index + 1;
+//RS             let line = line.trim();
+//RS             if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+//RS                 continue;
+//RS             }
+//RS             let Some((raw_role, raw_value)) = line.split_once('=') else {
+//RS                 return Err(TerminalStyleParseError::new(
+//RS                     line_number,
+//RS                     TerminalStyleErrorCode::InvalidStyle,
+//RS                     "expected role=value",
+//RS                 ));
+//RS             };
+//RS             let role_name = raw_role.trim();
+//RS             let Some(role) = TerminalStyleRole::parse(role_name) else {
+//RS                 return Err(TerminalStyleParseError::new(
+//RS                     line_number,
+//RS                     TerminalStyleErrorCode::InvalidStyle,
+//RS                     "unknown semantic style role",
+//RS                 ));
+//RS             };
+//RS             if roles.contains_key(&role) {
+//RS                 return Err(TerminalStyleParseError::new(
+//RS                     line_number,
+//RS                     TerminalStyleErrorCode::InvalidStyle,
+//RS                     "style role is declared more than once",
+//RS                 ));
+//RS             }
+//RS             if roles.len() >= MAX_TERMINAL_STYLE_ROLES {
+//RS                 return Err(TerminalStyleParseError::new(
+//RS                     line_number,
+//RS                     TerminalStyleErrorCode::TooManyRoles,
+//RS                     format!("style exceeds {} roles", MAX_TERMINAL_STYLE_ROLES),
+//RS                 ));
+//RS             }
+//RS             let value = parse_style_value(raw_value.trim()).map_err(|message| {
+//RS                 TerminalStyleParseError::new(line_number, TerminalStyleErrorCode::InvalidStyle, message)
+//RS             })?;
+//RS             roles.insert(role, value);
+//RS         }
+//RS         if roles.is_empty() {
+//RS             return Err(TerminalStyleParseError::new(
+//RS                 0,
+//RS                 TerminalStyleErrorCode::InvalidStyle,
+//RS                 "style source declares no semantic roles",
+//RS             ));
+//RS         }
+//RS         Ok(Self { roles })
+//RS     }
+//RS 
+//RS     pub fn roles(&self) -> &BTreeMap<TerminalStyleRole, TerminalStyleValue> {
+//RS         &self.roles
+//RS     }
+//RS 
+//RS     pub fn value(&self, role: TerminalStyleRole) -> Option<&TerminalStyleValue> {
+//RS         self.roles.get(&role)
+//RS     }
+//RS }
+//RS 
+//RS /// A parse failure that can be projected into one bounded error fact.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleParseError {
+//RS     pub line: usize,
+//RS     pub code: TerminalStyleErrorCode,
+//RS     pub message: String,
+//RS }
+//RS 
+//RS impl TerminalStyleParseError {
+//RS     fn new(line: usize, code: TerminalStyleErrorCode, message: impl Into<String>) -> Self {
+//RS         Self {
+//RS             line,
+//RS             code,
+//RS             message: bounded_text(&message.into(), MAX_TERMINAL_STYLE_ERROR_BYTES),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for TerminalStyleParseError {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         if self.line == 0 {
+//RS             write!(output, "{}: {}", self.code, self.message)
+//RS         } else {
+//RS             write!(output, "{} at line {}: {}", self.code, self.line, self.message)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for TerminalStyleParseError {}
+//RS 
+//RS fn parse_style_value(value: &str) -> Result<TerminalStyleValue, String> {
+//RS     if value == "plain" {
+//RS         return Ok(TerminalStyleValue::Plain);
+//RS     }
+//RS     let named = match value {
+//RS         "black" => Some("30"),
+//RS         "red" => Some("31"),
+//RS         "green" => Some("32"),
+//RS         "yellow" => Some("33"),
+//RS         "blue" => Some("34"),
+//RS         "magenta" => Some("35"),
+//RS         "cyan" => Some("36"),
+//RS         "white" => Some("37"),
+//RS         "bold" => Some("1"),
+//RS         "dim" => Some("2"),
+//RS         _ => None,
+//RS     };
+//RS     let value = named.unwrap_or(value);
+//RS     if value.is_empty() || value.len() > 128 {
+//RS         return Err("style SGR value is empty or too long".to_string());
+//RS     }
+//RS     let mut normalized = String::new();
+//RS     for (index, part) in value.split(';').enumerate() {
+//RS         if part.is_empty() {
+//RS             return Err("style SGR value has an empty code".to_string());
+//RS         }
+//RS         let code = part
+//RS             .parse::<u16>()
+//RS             .map_err(|_| "style SGR value has a non-numeric code".to_string())?;
+//RS         if code > 255 {
+//RS             return Err("style SGR code exceeds 255".to_string());
+//RS         }
+//RS         if index > 0 {
+//RS             normalized.push(';');
+//RS         }
+//RS         normalized.push_str(&code.to_string());
+//RS     }
+//RS     Ok(TerminalStyleValue::Sgr(normalized))
+//RS }
+//RS 
+//RS /// One immutable, atomically replaceable style snapshot.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleSnapshot {
+//RS     pub revision: u64,
+//RS     pub source_id: String,
+//RS     pub roles: BTreeMap<TerminalStyleRole, TerminalStyleValue>,
+//RS     pub facts: TerminalStyleFingerprintFacts,
+//RS }
+//RS 
+//RS impl TerminalStyleSnapshot {
+//RS     pub fn fingerprint(&self) -> &str {
+//RS         &self.facts.fingerprint
+//RS     }
+//RS 
+//RS     pub fn capabilities(&self) -> TerminalCapabilityFacts {
+//RS         self.facts.capabilities
+//RS     }
+//RS 
+//RS     pub fn value(&self, role: TerminalStyleRole) -> Option<&TerminalStyleValue> {
+//RS         self.roles.get(&role)
+//RS     }
+//RS 
+//RS     pub fn paint(&self, role: TerminalStyleRole, text: &str) -> String {
+//RS         match self.roles.get(&role) {
+//RS             Some(value) if self.facts.capabilities.color_enabled() => value.paint(text),
+//RS             _ => text.to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Why a valid candidate cannot be applied by a style-only replacement.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum TerminalStyleRestartReason {
+//RS     SourceIdentityChanged,
+//RS     LayoutFingerprintChanged,
+//RS     TypeFingerprintChanged,
+//RS }
+//RS 
+//RS impl TerminalStyleRestartReason {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::SourceIdentityChanged => "source_identity_changed",
+//RS             Self::LayoutFingerprintChanged => "layout_fingerprint_changed",
+//RS             Self::TypeFingerprintChanged => "type_fingerprint_changed",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Classification of one valid candidate relative to the last valid snapshot.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum TerminalStyleChangeKind {
+//RS     Initial,
+//RS     Unchanged,
+//RS     StyleOnly,
+//RS     CapabilityOnly,
+//RS     RestartRequired(TerminalStyleRestartReason),
+//RS     Invalid,
+//RS }
+//RS 
+//RS impl TerminalStyleChangeKind {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Initial => "initial",
+//RS             Self::Unchanged => "unchanged",
+//RS             Self::StyleOnly => "style_only",
+//RS             Self::CapabilityOnly => "capability_only",
+//RS             Self::RestartRequired(_) => "restart_required",
+//RS             Self::Invalid => "invalid",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Compare only typed style facts.  Application/widget state is intentionally
+//RS /// not an input, so a style-only result cannot accidentally reset it.
+//RS pub fn classify_change(
+//RS     previous: Option<&TerminalStyleSnapshot>,
+//RS     next: &TerminalStyleSnapshot,
+//RS ) -> TerminalStyleChangeKind {
+//RS     let Some(previous) = previous else {
+//RS         return TerminalStyleChangeKind::Initial;
+//RS     };
+//RS     if previous.source_id != next.source_id || previous.facts.source_id != next.facts.source_id {
+//RS         return TerminalStyleChangeKind::RestartRequired(
+//RS             TerminalStyleRestartReason::SourceIdentityChanged,
+//RS         );
+//RS     }
+//RS     if previous.facts.layout_fingerprint != next.facts.layout_fingerprint
+//RS         || !dependencies_equal(
+//RS             previous,
+//RS             next,
+//RS             TerminalStyleDependencyKind::Layout,
+//RS         )
+//RS     {
+//RS         return TerminalStyleChangeKind::RestartRequired(
+//RS             TerminalStyleRestartReason::LayoutFingerprintChanged,
+//RS         );
+//RS     }
+//RS     if previous.facts.type_fingerprint != next.facts.type_fingerprint
+//RS         || !dependencies_equal(
+//RS             previous,
+//RS             next,
+//RS             TerminalStyleDependencyKind::ValueType,
+//RS         )
+//RS     {
+//RS         return TerminalStyleChangeKind::RestartRequired(
+//RS             TerminalStyleRestartReason::TypeFingerprintChanged,
+//RS         );
+//RS     }
+//RS     if previous.facts.fingerprint == next.facts.fingerprint {
+//RS         return TerminalStyleChangeKind::Unchanged;
+//RS     }
+//RS     let style_inputs_changed = previous.facts.source_fingerprint != next.facts.source_fingerprint
+//RS         || previous.facts.dependencies != next.facts.dependencies;
+//RS     if !style_inputs_changed && previous.facts.capabilities != next.facts.capabilities {
+//RS         return TerminalStyleChangeKind::CapabilityOnly;
+//RS     }
+//RS     TerminalStyleChangeKind::StyleOnly
+//RS }
+//RS 
+//RS fn dependencies_equal(
+//RS     previous: &TerminalStyleSnapshot,
+//RS     next: &TerminalStyleSnapshot,
+//RS     kind: TerminalStyleDependencyKind,
+//RS ) -> bool {
+//RS     previous
+//RS         .facts
+//RS         .dependencies
+//RS         .iter()
+//RS         .filter(|dependency| dependency.kind == kind)
+//RS         .map(|dependency| (&dependency.id, &dependency.fingerprint))
+//RS         .eq(
+//RS             next
+//RS                 .facts
+//RS                 .dependencies
+//RS                 .iter()
+//RS                 .filter(|dependency| dependency.kind == kind)
+//RS                 .map(|dependency| (&dependency.id, &dependency.fingerprint)),
+//RS         )
+//RS }
+//RS 
+//RS /// One bounded parse error retained by the reload state.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleErrorFact {
+//RS     pub code: TerminalStyleErrorCode,
+//RS     pub source_id: String,
+//RS     pub attempted_fingerprint: Option<String>,
+//RS     pub revision: u64,
+//RS     pub message: String,
+//RS }
+//RS 
+//RS impl TerminalStyleErrorFact {
+//RS     pub fn is_bounded(&self) -> bool {
+//RS         self.message.len() <= MAX_TERMINAL_STYLE_ERROR_BYTES
+//RS             && self.source_id.len() <= MAX_TERMINAL_STYLE_ID_BYTES
+//RS             && self
+//RS                 .attempted_fingerprint
+//RS                 .as_ref()
+//RS                 .is_none_or(|value| value.len() == 64)
+//RS     }
+//RS 
+//RS     pub fn render(&self) -> String {
+//RS         let fingerprint = self.attempted_fingerprint.as_deref().unwrap_or("none");
+//RS         format!(
+//RS             "{} source={} revision={} fingerprint={} detail={}",
+//RS             self.code, self.source_id, self.revision, fingerprint, self.message
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// Result of one immediate or coalesced candidate application.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleReloadReceipt {
+//RS     pub revision: u64,
+//RS     pub change: TerminalStyleChangeKind,
+//RS     /// The last valid snapshot, including when the candidate was rejected or
+//RS     /// requires a full application restart.
+//RS     pub snapshot: Option<Arc<TerminalStyleSnapshot>>,
+//RS     pub error: Option<TerminalStyleErrorFact>,
+//RS }
+//RS 
+//RS impl TerminalStyleReloadReceipt {
+//RS     pub const fn applied(&self) -> bool {
+//RS         matches!(
+//RS             self.change,
+//RS             TerminalStyleChangeKind::Initial
+//RS                 | TerminalStyleChangeKind::StyleOnly
+//RS                 | TerminalStyleChangeKind::CapabilityOnly
+//RS         )
+//RS     }
+//RS 
+//RS     pub const fn restart_required(&self) -> bool {
+//RS         matches!(self.change, TerminalStyleChangeKind::RestartRequired(_))
+//RS     }
+//RS 
+//RS     pub const fn rejected(&self) -> bool {
+//RS         matches!(self.change, TerminalStyleChangeKind::Invalid)
+//RS     }
+//RS }
+//RS 
+//RS /// One subscriber event.  It carries identities and outcomes, never raw style
+//RS /// source or application payloads.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleReloadNotification {
+//RS     pub revision: u64,
+//RS     pub change: TerminalStyleChangeKind,
+//RS     pub prior_fingerprint: Option<String>,
+//RS     pub candidate_fingerprint: Option<String>,
+//RS     pub error: Option<TerminalStyleErrorFact>,
+//RS }
+//RS 
+//RS /// Stable handle for one mailbox subscriber.
+//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub struct TerminalStyleSubscriberId(u64);
+//RS 
+//RS /// Failure to allocate a bounded subscriber mailbox.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum TerminalStyleSubscribeError {
+//RS     LimitReached,
+//RS }
+//RS 
+//RS impl fmt::Display for TerminalStyleSubscribeError {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::LimitReached => output.write_str("terminal style subscriber limit reached"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for TerminalStyleSubscribeError {}
+//RS 
+//RS struct SubscriberMailbox {
+//RS     notifications: VecDeque<TerminalStyleReloadNotification>,
+//RS }
+//RS 
+//RS struct ReloadState {
+//RS     current: Option<Arc<TerminalStyleSnapshot>>,
+//RS     pending: Option<TerminalStyleEdit>,
+//RS     last_error: Option<TerminalStyleErrorFact>,
+//RS     next_subscriber: u64,
+//RS     subscribers: BTreeMap<TerminalStyleSubscriberId, SubscriberMailbox>,
+//RS }
+//RS 
+//RS /// Atomic style snapshot owner with deterministic last-write-wins coalescing.
+//RS ///
+//RS /// The mutex covers candidate parsing, classification, snapshot replacement,
+//RS /// error retention, and notification enqueueing as one transaction.  No
+//RS /// widget, focus, cursor, or application model field exists here.
+//RS pub struct TerminalStyleReload {
+//RS     state: Mutex<ReloadState>,
+//RS }
+//RS 
+//RS impl Default for TerminalStyleReload {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS impl TerminalStyleReload {
+//RS     pub fn new() -> Self {
+//RS         Self {
+//RS             state: Mutex::new(ReloadState {
+//RS                 current: None,
+//RS                 pending: None,
+//RS                 last_error: None,
+//RS                 next_subscriber: 1,
+//RS                 subscribers: BTreeMap::new(),
+//RS             }),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Apply one candidate immediately.
+//RS     pub fn reload(&self, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
+//RS         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         apply_locked(&mut state, edit.bound_source())
+//RS     }
+//RS 
+//RS     /// Queue one candidate.  Replacing the pending candidate is the complete
+//RS     /// coalescing operation: a burst flushes only its last deterministic edit.
+//RS     pub fn enqueue(&self, edit: TerminalStyleEdit) {
+//RS         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         state.pending = Some(edit.bound_source());
+//RS     }
+//RS 
+//RS     pub fn has_pending(&self) -> bool {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .pending
+//RS             .is_some()
+//RS     }
+//RS 
+//RS     /// Apply the last candidate in the current burst, if any.
+//RS     pub fn flush(&self) -> Option<TerminalStyleReloadReceipt> {
+//RS         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let edit = state.pending.take()?;
+//RS         Some(apply_locked(&mut state, edit))
+//RS     }
+//RS 
+//RS     pub fn revision(&self) -> u64 {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .current
+//RS             .as_ref()
+//RS             .map_or(0, |snapshot| snapshot.revision)
+//RS     }
+//RS 
+//RS     /// Return the current last-valid style.  The returned `Arc` keeps the
+//RS     /// snapshot alive while a renderer paints a frame.
+//RS     pub fn last_valid(&self) -> Option<Arc<TerminalStyleSnapshot>> {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .current
+//RS             .clone()
+//RS     }
+//RS 
+//RS     pub fn error_fact(&self) -> Option<TerminalStyleErrorFact> {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .last_error
+//RS             .clone()
+//RS     }
+//RS 
+//RS     pub fn subscribe(&self) -> Result<TerminalStyleSubscriberId, TerminalStyleSubscribeError> {
+//RS         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         if state.subscribers.len() >= MAX_TERMINAL_STYLE_SUBSCRIBERS {
+//RS             return Err(TerminalStyleSubscribeError::LimitReached);
+//RS         }
+//RS         let id = TerminalStyleSubscriberId(state.next_subscriber);
+//RS         state.next_subscriber = state.next_subscriber.saturating_add(1);
+//RS         state.subscribers.insert(
+//RS             id,
+//RS             SubscriberMailbox {
+//RS                 notifications: VecDeque::new(),
+//RS             },
+//RS         );
+//RS         Ok(id)
+//RS     }
+//RS 
+//RS     pub fn unsubscribe(&self, id: TerminalStyleSubscriberId) -> bool {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .subscribers
+//RS             .remove(&id)
+//RS             .is_some()
+//RS     }
+//RS 
+//RS     /// Drain one mailbox in revision/arrival order.
+//RS     pub fn drain_notifications(
+//RS         &self,
+//RS         id: TerminalStyleSubscriberId,
+//RS     ) -> Vec<TerminalStyleReloadNotification> {
+//RS         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let Some(mailbox) = state.subscribers.get_mut(&id) else {
+//RS             return Vec::new();
+//RS         };
+//RS         std::mem::take(&mut mailbox.notifications)
+//RS             .into_iter()
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// Reset the resident kernel to a fresh, unopened state.  Used when
+//RS     /// the bound source identity itself changes -- a different style
+//RS     /// source entirely, not a live edit of the current one -- so the next
+//RS     /// candidate is classified `Initial` instead of being permanently
+//RS     /// stuck behind `RestartRequired(SourceIdentityChanged)`.
+//RS     pub fn reset(&self) {
+//RS         let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         state.current = None;
+//RS         state.pending = None;
+//RS         state.last_error = None;
+//RS     }
+//RS }
+//RS 
+//RS fn apply_locked(state: &mut ReloadState, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
+//RS     let current = state.current.clone();
+//RS     let revision = current.as_ref().map_or(0, |snapshot| snapshot.revision);
+//RS     let attempted_fingerprint = (edit.source.len() <= MAX_TERMINAL_STYLE_SOURCE_BYTES)
+//RS         .then(|| SHA256::sha256_hex(edit.source.as_bytes()));
+//RS     let candidate = match build_snapshot(&edit) {
+//RS         Ok(candidate) => candidate,
+//RS         Err(error) => {
+//RS             let fact = TerminalStyleErrorFact {
+//RS                 code: error.code(),
+//RS                 source_id: bounded_identity(&edit.source_id),
+//RS                 attempted_fingerprint: attempted_fingerprint.clone(),
+//RS                 revision,
+//RS                 message: bounded_text(&error.message(), MAX_TERMINAL_STYLE_ERROR_BYTES),
+//RS             };
+//RS             state.last_error = Some(fact.clone());
+//RS             let receipt = TerminalStyleReloadReceipt {
+//RS                 revision,
+//RS                 change: TerminalStyleChangeKind::Invalid,
+//RS                 snapshot: current.clone(),
+//RS                 error: Some(fact.clone()),
+//RS             };
+//RS             notify(
+//RS                 state,
+//RS                 TerminalStyleReloadNotification {
+//RS                     revision,
+//RS                     change: TerminalStyleChangeKind::Invalid,
+//RS                     prior_fingerprint: current
+//RS                         .as_ref()
+//RS                         .map(|snapshot| snapshot.fingerprint().to_string()),
+//RS                     candidate_fingerprint: attempted_fingerprint,
+//RS                     error: Some(fact),
+//RS                 },
+//RS             );
+//RS             return receipt;
+//RS         }
+//RS     };
+//RS     let change = classify_change(current.as_deref(), &candidate);
+//RS     let candidate_fingerprint = Some(candidate.fingerprint().to_string());
+//RS     match change {
+//RS         TerminalStyleChangeKind::Unchanged => {
+//RS             state.last_error = None;
+//RS             TerminalStyleReloadReceipt {
+//RS                 revision,
+//RS                 change,
+//RS                 snapshot: current,
+//RS                 error: None,
+//RS             }
+//RS         }
+//RS         TerminalStyleChangeKind::RestartRequired(reason) => {
+//RS             state.last_error = None;
+//RS             let receipt = TerminalStyleReloadReceipt {
+//RS                 revision,
+//RS                 change: TerminalStyleChangeKind::RestartRequired(reason),
+//RS                 snapshot: current.clone(),
+//RS                 error: None,
+//RS             };
+//RS             notify(
+//RS                 state,
+//RS                 TerminalStyleReloadNotification {
+//RS                     revision,
+//RS                     change: TerminalStyleChangeKind::RestartRequired(reason),
+//RS                     prior_fingerprint: current
+//RS                         .as_ref()
+//RS                         .map(|snapshot| snapshot.fingerprint().to_string()),
+//RS                     candidate_fingerprint,
+//RS                     error: None,
+//RS                 },
+//RS             );
+//RS             receipt
+//RS         }
+//RS         TerminalStyleChangeKind::Initial
+//RS         | TerminalStyleChangeKind::StyleOnly
+//RS         | TerminalStyleChangeKind::CapabilityOnly => {
+//RS             let Some(next_revision) = revision.checked_add(1) else {
+//RS                 let fact = TerminalStyleErrorFact {
+//RS                     code: TerminalStyleErrorCode::RevisionOverflow,
+//RS                     source_id: bounded_identity(&edit.source_id),
+//RS                     attempted_fingerprint: attempted_fingerprint.clone(),
+//RS                     revision,
+//RS                     message: "style revision counter exhausted".to_string(),
+//RS                 };
+//RS                 state.last_error = Some(fact.clone());
+//RS                 let receipt = TerminalStyleReloadReceipt {
+//RS                     revision,
+//RS                     change: TerminalStyleChangeKind::Invalid,
+//RS                     snapshot: current.clone(),
+//RS                     error: Some(fact.clone()),
+//RS                 };
+//RS                 notify(
+//RS                     state,
+//RS                     TerminalStyleReloadNotification {
+//RS                         revision,
+//RS                         change: TerminalStyleChangeKind::Invalid,
+//RS                         prior_fingerprint: current
+//RS                             .as_ref()
+//RS                             .map(|snapshot| snapshot.fingerprint().to_string()),
+//RS                         candidate_fingerprint: attempted_fingerprint,
+//RS                         error: Some(fact),
+//RS                     },
+//RS                 );
+//RS                 return receipt;
+//RS             };
+//RS             let mut candidate = candidate;
+//RS             candidate.revision = next_revision;
+//RS             let snapshot = Arc::new(candidate);
+//RS             state.current = Some(snapshot.clone());
+//RS             state.last_error = None;
+//RS             notify(
+//RS                 state,
+//RS                 TerminalStyleReloadNotification {
+//RS                     revision: next_revision,
+//RS                     change,
+//RS                     prior_fingerprint: current
+//RS                         .as_ref()
+//RS                         .map(|snapshot| snapshot.fingerprint().to_string()),
+//RS                     candidate_fingerprint: Some(snapshot.fingerprint().to_string()),
+//RS                     error: None,
+//RS                 },
+//RS             );
+//RS             TerminalStyleReloadReceipt {
+//RS                 revision: next_revision,
+//RS                 change,
+//RS                 snapshot: Some(snapshot),
+//RS                 error: None,
+//RS             }
+//RS         }
+//RS         TerminalStyleChangeKind::Invalid => unreachable!("candidate parsing produced invalid change"),
+//RS     }
+//RS }
+//RS 
+//RS fn build_snapshot(edit: &TerminalStyleEdit) -> Result<TerminalStyleSnapshot, BuildError> {
+//RS     let document = TerminalStyleDocument::parse(&edit.source).map_err(BuildError::Parse)?;
+//RS     let facts = TerminalStyleFingerprintFacts::new(
+//RS         edit.source_id.clone(),
+//RS         &edit.source,
+//RS         edit.dependencies.clone(),
+//RS         edit.capabilities,
+//RS         edit.layout_fingerprint.clone(),
+//RS         edit.type_fingerprint.clone(),
+//RS     )
+//RS     .map_err(BuildError::Facts)?;
+//RS     Ok(TerminalStyleSnapshot {
+//RS         revision: 0,
+//RS         source_id: edit.source_id.clone(),
+//RS         roles: document.roles,
+//RS         facts,
+//RS     })
+//RS }
+//RS 
+//RS enum BuildError {
+//RS     Parse(TerminalStyleParseError),
+//RS     Facts(TerminalStyleFactError),
+//RS }
+//RS 
+//RS impl BuildError {
+//RS     fn code(&self) -> TerminalStyleErrorCode {
+//RS         match self {
+//RS             Self::Parse(error) => error.code,
+//RS             Self::Facts(error) => error.code,
+//RS         }
+//RS     }
+//RS 
+//RS     fn message(&self) -> String {
+//RS         match self {
+//RS             Self::Parse(error) => error.to_string(),
+//RS             Self::Facts(error) => error.to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn notify(state: &mut ReloadState, notification: TerminalStyleReloadNotification) {
+//RS     for mailbox in state.subscribers.values_mut() {
+//RS         if mailbox.notifications.len() >= MAX_TERMINAL_STYLE_NOTIFICATIONS {
+//RS             mailbox.notifications.pop_front();
+//RS         }
+//RS         mailbox.notifications.push_back(notification.clone());
+//RS     }
+//RS }
+//RS 
+//RS fn validate_identity(value: &str) -> Result<(), String> {
+//RS     if value.is_empty() {
+//RS         return Err("style identity must not be empty".to_string());
+//RS     }
+//RS     if value.len() > MAX_TERMINAL_STYLE_ID_BYTES {
+//RS         return Err(format!(
+//RS             "style identity exceeds {} bytes",
+//RS             MAX_TERMINAL_STYLE_ID_BYTES
+//RS         ));
+//RS     }
+//RS     if value.chars().any(char::is_control) {
+//RS         return Err("style identity contains a control character".to_string());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_sha256(value: &str) -> Result<(), String> {
+//RS     if value.len() != 64
+//RS         || !value
+//RS             .bytes()
+//RS             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+//RS     {
+//RS         return Err("style dependency fingerprint must be lowercase SHA-256".to_string());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_optional_fingerprint(value: String, label: &str) -> Result<String, TerminalStyleFactError> {
+//RS     if value.len() > MAX_TERMINAL_STYLE_ID_BYTES || value.chars().any(char::is_control) {
+//RS         return Err(TerminalStyleFactError::new(
+//RS             TerminalStyleErrorCode::InvalidFingerprint,
+//RS             format!("{label} is not a bounded stable string"),
+//RS         ));
+//RS     }
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn frame(output: &mut String, value: &str) {
+//RS     output.push_str(&value.len().to_string());
+//RS     output.push(':');
+//RS     output.push_str(value);
+//RS     output.push(';');
+//RS }
+//RS 
+//RS fn bounded_text(value: &str, max_bytes: usize) -> String {
+//RS     let mut output = String::new();
+//RS     for character in value.chars() {
+//RS         if character.is_control() {
+//RS             continue;
+//RS         }
+//RS         if output.len() + character.len_utf8() > max_bytes {
+//RS             break;
+//RS         }
+//RS         output.push(character);
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn bounded_identity(value: &str) -> String {
+//RS     bounded_text(value, MAX_TERMINAL_STYLE_ID_BYTES)
+//RS }
+//RS 
+//RS /// ---------------------------------------------------------------------
+//RS /// Host-facing adapter
+//RS /// ---------------------------------------------------------------------
+//RS ///
+//RS /// The kernel above owns style facts only.  `TerminalStyleHostAdapter` is
+//RS /// the boring, typed seam a resident host (for example `WebHost`) stores
+//RS /// once and delegates its `/style` surface to.  It injects the two facts
+//RS /// only a real host producer can supply -- source identity and terminal
+//RS /// capability -- accepts one bounded style-update JSON body per call, and
+//RS /// returns a typed outcome plus one event JSON string.  It never derives a
+//RS /// capability from a client request, never performs a full application
+//RS /// reload, and never reimplements parsing, fingerprinting, or change
+//RS /// classification: every decision is delegated to `TerminalStyleReload`.
+//RS 
+//RS /// A real host's typed source identity and terminal capability facts.
+//RS /// Capability facts are trusted as supplied: this type never derives them
+//RS /// from a request or from the process environment, so a caller cannot make
+//RS /// the adapter report a terminal capability the host did not observe.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStyleHostSource {
+//RS     pub source_id: String,
+//RS     pub capabilities: TerminalCapabilityFacts,
+//RS }
+//RS 
+//RS impl TerminalStyleHostSource {
+//RS     pub fn new(
+//RS         source_id: impl Into<String>,
+//RS         capabilities: TerminalCapabilityFacts,
+//RS     ) -> Result<Self, TerminalStyleFactError> {
+//RS         let source_id = source_id.into();
+//RS         validate_identity(&source_id).map_err(|message| {
+//RS             TerminalStyleFactError::new(TerminalStyleErrorCode::InvalidSourceIdentity, message)
+//RS         })?;
+//RS         Ok(Self {
+//RS             source_id,
+//RS             capabilities,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// Why one `/style` request could not be evaluated at all.  Distinct from
+//RS /// `TerminalStyleHostRejection`, which reports a candidate that was
+//RS /// evaluated by the kernel and found invalid or restart-requiring.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum TerminalStyleHostUnavailableReason {
+//RS     /// No real producer has injected a source identity/capability yet.
+//RS     SourceNotInjected,
+//RS     /// A style has never been applied, so there is no current snapshot.
+//RS     NoStyleApplied,
+//RS     /// The request body is not valid JSON, or exceeds the bounded envelope.
+//RS     MalformedRequest,
+//RS     /// The request JSON does not declare a `source` string field.
+//RS     MissingSource,
+//RS }
+//RS 
+//RS impl TerminalStyleHostUnavailableReason {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::SourceNotInjected => "source_not_injected",
+//RS             Self::NoStyleApplied => "no_style_applied",
+//RS             Self::MalformedRequest => "malformed_request",
+//RS             Self::MissingSource => "missing_source",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Why one evaluated style candidate could not be applied by this
+//RS /// style-only delegate.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum TerminalStyleHostRejection {
+//RS     /// The candidate failed bounded parsing or fact construction.
+//RS     Invalid(TerminalStyleErrorFact),
+//RS     /// The candidate is valid but would require a full application
+//RS     /// restart; this style-only delegate never performs one.
+//RS     RestartRequired(TerminalStyleRestartReason),
+//RS }
+//RS 
+//RS impl TerminalStyleHostRejection {
+//RS     pub fn code(&self) -> &'static str {
+//RS         match self {
+//RS             Self::Invalid(fact) => fact.code.as_str(),
+//RS             Self::RestartRequired(reason) => reason.as_str(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Typed result of one host `/style` delegate call.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum TerminalStyleHostOutcome {
+//RS     /// The candidate replaced (or matched) the resident style snapshot.
+//RS     Applied {
+//RS         revision: u64,
+//RS         change: TerminalStyleChangeKind,
+//RS     },
+//RS     /// The request could not be evaluated; see
+//RS     /// `TerminalStyleHostUnavailableReason`.
+//RS     Unavailable(TerminalStyleHostUnavailableReason),
+//RS     /// The request was evaluated and rejected; see
+//RS     /// `TerminalStyleHostRejection`.
+//RS     Rejected(TerminalStyleHostRejection),
+//RS }
+//RS 
+//RS /// Persistent host-facing wrapper.  A resident host owns exactly one
+//RS /// instance and delegates its `/style` surface to it instead of
+//RS /// reimplementing style parsing, fingerprinting, or change classification.
+//RS pub struct TerminalStyleHostAdapter {
+//RS     reload: TerminalStyleReload,
+//RS     source: Mutex<Option<TerminalStyleHostSource>>,
+//RS }
+//RS 
+//RS impl Default for TerminalStyleHostAdapter {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS impl TerminalStyleHostAdapter {
+//RS     pub fn new() -> Self {
+//RS         Self {
+//RS             reload: TerminalStyleReload::new(),
+//RS             source: Mutex::new(None),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Inject (or replace) the real host's typed source identity and
+//RS     /// terminal capability facts.  Before this is ever called, every
+//RS     /// `apply_json` call reports `Unavailable(SourceNotInjected)` rather
+//RS     /// than applying against a fabricated default.  Injecting a source
+//RS     /// identity that differs from the previously injected one resets the
+//RS     /// resident kernel, since that is a bind to a different style source
+//RS     /// entirely, not a live edit of the current one; without the reset,
+//RS     /// the kernel would classify every future candidate against the old
+//RS     /// source's snapshot and stay stuck behind
+//RS     /// `RestartRequired(SourceIdentityChanged)` forever.
+//RS     pub fn inject(&self, source: TerminalStyleHostSource) {
+//RS         let mut guard = self
+//RS             .source
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let identity_changed = guard
+//RS             .as_ref()
+//RS             .is_some_and(|previous| previous.source_id != source.source_id);
+//RS         *guard = Some(source);
+//RS         drop(guard);
+//RS         if identity_changed {
+//RS             self.reload.reset();
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn is_injected(&self) -> bool {
+//RS         self.source
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .is_some()
+//RS     }
+//RS 
+//RS     /// Apply one bounded `/style` request body.  The JSON must declare a
+//RS     /// `source` string; `dependencies`, `layout_fingerprint`, and
+//RS     /// `type_fingerprint` are optional.  Source identity and terminal
+//RS     /// capability always come from the last injected
+//RS     /// `TerminalStyleHostSource`, never from the request body, so a
+//RS     /// request cannot fabricate a terminal capability the host did not
+//RS     /// report.
+//RS     pub fn apply_json(&self, body: &str) -> (TerminalStyleHostOutcome, String) {
+//RS         let source = self
+//RS             .source
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .clone();
+//RS         let Some(source) = source else {
+//RS             let outcome = TerminalStyleHostOutcome::Unavailable(
+//RS                 TerminalStyleHostUnavailableReason::SourceNotInjected,
+//RS             );
+//RS             let event = outcome_json(&outcome, None);
+//RS             return (outcome, event);
+//RS         };
+//RS         let revision = self.reload.revision();
+//RS         let edit = match parse_style_request(body, &source, revision) {
+//RS             Ok(edit) => edit,
+//RS             Err(outcome) => {
+//RS                 let event = outcome_json(&outcome, None);
+//RS                 return (outcome, event);
+//RS             }
+//RS         };
+//RS         let receipt = self.reload.reload(edit);
+//RS         let outcome = host_outcome_from_receipt(&receipt);
+//RS         let event = outcome_json(&outcome, receipt.snapshot.as_deref());
+//RS         (outcome, event)
+//RS     }
+//RS 
+//RS     /// Return the current last-valid style as one applied outcome and event
+//RS     /// JSON, or `Unavailable(NoStyleApplied)` when nothing has ever
+//RS     /// applied.
+//RS     pub fn current_json(&self) -> (TerminalStyleHostOutcome, String) {
+//RS         match self.reload.last_valid() {
+//RS             Some(snapshot) => {
+//RS                 let outcome = TerminalStyleHostOutcome::Applied {
+//RS                     revision: snapshot.revision,
+//RS                     change: TerminalStyleChangeKind::Unchanged,
+//RS                 };
+//RS                 let event = outcome_json(&outcome, Some(&*snapshot));
+//RS                 (outcome, event)
+//RS             }
+//RS             None => {
+//RS                 let outcome = TerminalStyleHostOutcome::Unavailable(
+//RS                     TerminalStyleHostUnavailableReason::NoStyleApplied,
+//RS                 );
+//RS                 let event = outcome_json(&outcome, None);
+//RS                 (outcome, event)
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn malformed_request() -> TerminalStyleHostOutcome {
+//RS     TerminalStyleHostOutcome::Unavailable(TerminalStyleHostUnavailableReason::MalformedRequest)
+//RS }
+//RS 
+//RS fn parse_style_request(
+//RS     body: &str,
+//RS     source: &TerminalStyleHostSource,
+//RS     revision: u64,
+//RS ) -> Result<TerminalStyleEdit, TerminalStyleHostOutcome> {
+//RS     let value =
+//RS         parse_json_with_limit(body, MAX_TERMINAL_STYLE_REQUEST_BYTES).map_err(|_| malformed_request())?;
+//RS     let object = object_map(&value).map_err(|_| malformed_request())?;
+//RS     let style_source = match object.get("source") {
+//RS         Some(DataTree::Text(text)) => text.clone(),
+//RS         _ => {
+//RS             return Err(TerminalStyleHostOutcome::Unavailable(
+//RS                 TerminalStyleHostUnavailableReason::MissingSource,
+//RS             ))
+//RS         }
+//RS     };
+//RS     let mut edit = TerminalStyleEdit::new(source.source_id.clone(), style_source)
+//RS         .with_capabilities(source.capabilities);
+//RS     if let Some(DataTree::Text(layout)) = object.get("layout_fingerprint") {
+//RS         edit = edit.with_layout_fingerprint(layout.clone());
+//RS     }
+//RS     if let Some(DataTree::Text(type_fingerprint)) = object.get("type_fingerprint") {
+//RS         edit = edit.with_type_fingerprint(type_fingerprint.clone());
+//RS     }
+//RS     if let Some(entries) = object.get("dependencies") {
+//RS         let DataTree::Array(entries) = entries else {
+//RS             return Err(malformed_request());
+//RS         };
+//RS         let mut dependencies = Vec::with_capacity(entries.len());
+//RS         for entry in entries {
+//RS             let fields = object_map(entry).map_err(|_| malformed_request())?;
+//RS             let kind = match fields.get("kind") {
+//RS                 Some(DataTree::Text(kind)) => {
+//RS                     parse_dependency_kind(kind).ok_or_else(malformed_request)?
+//RS                 }
+//RS                 _ => return Err(malformed_request()),
+//RS             };
+//RS             let id = match fields.get("id") {
+//RS                 Some(DataTree::Text(id)) => id.clone(),
+//RS                 _ => return Err(malformed_request()),
+//RS             };
+//RS             let fingerprint = match fields.get("fingerprint") {
+//RS                 Some(DataTree::Text(fingerprint)) => fingerprint.clone(),
+//RS                 _ => return Err(malformed_request()),
+//RS             };
+//RS             let dependency = TerminalStyleDependency::new(kind, id, fingerprint).map_err(|error| {
+//RS                 TerminalStyleHostOutcome::Rejected(TerminalStyleHostRejection::Invalid(
+//RS                     TerminalStyleErrorFact {
+//RS                         code: error.code,
+//RS                         source_id: bounded_identity(&source.source_id),
+//RS                         attempted_fingerprint: None,
+//RS                         revision,
+//RS                         message: error.message,
+//RS                     },
+//RS                 ))
+//RS             })?;
+//RS             dependencies.push(dependency);
+//RS         }
+//RS         edit = edit.with_dependencies(dependencies);
+//RS     }
+//RS     Ok(edit)
+//RS }
+//RS fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
+//RS     let DataTree::Object(fields) = value else {
+//RS         return Err("terminal style request must be an object".to_string());
+//RS     };
+//RS     Ok(fields.iter().cloned().collect())
+//RS }
+//RS 
+//RS fn parse_dependency_kind(value: &str) -> Option<TerminalStyleDependencyKind> {
+//RS     match value {
+//RS         "source" => Some(TerminalStyleDependencyKind::Source),
+//RS         "capability" => Some(TerminalStyleDependencyKind::Capability),
+//RS         "layout" => Some(TerminalStyleDependencyKind::Layout),
+//RS         "value_type" => Some(TerminalStyleDependencyKind::ValueType),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn host_outcome_from_receipt(receipt: &TerminalStyleReloadReceipt) -> TerminalStyleHostOutcome {
+//RS     match receipt.change {
+//RS         TerminalStyleChangeKind::Initial
+//RS         | TerminalStyleChangeKind::StyleOnly
+//RS         | TerminalStyleChangeKind::CapabilityOnly
+//RS         | TerminalStyleChangeKind::Unchanged => TerminalStyleHostOutcome::Applied {
+//RS             revision: receipt.revision,
+//RS             change: receipt.change,
+//RS         },
+//RS         TerminalStyleChangeKind::RestartRequired(reason) => TerminalStyleHostOutcome::Rejected(
+//RS             TerminalStyleHostRejection::RestartRequired(reason),
+//RS         ),
+//RS         TerminalStyleChangeKind::Invalid => {
+//RS             let fact = receipt.error.clone().unwrap_or_else(|| TerminalStyleErrorFact {
+//RS                 code: TerminalStyleErrorCode::InvalidStyle,
+//RS                 source_id: String::new(),
+//RS                 attempted_fingerprint: None,
+//RS                 revision: receipt.revision,
+//RS                 message: "style candidate was rejected".to_string(),
+//RS             });
+//RS             TerminalStyleHostOutcome::Rejected(TerminalStyleHostRejection::Invalid(fact))
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn outcome_json(outcome: &TerminalStyleHostOutcome, snapshot: Option<&TerminalStyleSnapshot>) -> String {
+//RS     let mut output = String::with_capacity(256);
+//RS     output.push_str("{\"protocol\":\"");
+//RS     output.push_str(TERMINAL_STYLE_PROTOCOL);
+//RS     output.push('"');
+//RS     match outcome {
+//RS         TerminalStyleHostOutcome::Applied { revision, change } => {
+//RS             output.push_str(",\"outcome\":\"applied\",\"revision\":");
+//RS             output.push_str(&revision.to_string());
+//RS             output.push_str(",\"change\":\"");
+//RS             output.push_str(change.as_str());
+//RS             output.push('"');
+//RS             if let Some(snapshot) = snapshot {
+//RS                 output.push_str(",\"fingerprint\":\"");
+//RS                 output.push_str(&json_escape(snapshot.fingerprint()));
+//RS                 output.push('"');
+//RS             }
+//RS         }
+//RS         TerminalStyleHostOutcome::Rejected(rejection) => {
+//RS             output.push_str(",\"outcome\":\"rejected\",\"code\":\"");
+//RS             output.push_str(rejection.code());
+//RS             output.push('"');
+//RS             if let TerminalStyleHostRejection::Invalid(fact) = rejection {
+//RS                 output.push_str(",\"message\":\"");
+//RS                 output.push_str(&json_escape(&fact.message));
+//RS                 output.push('"');
+//RS             }
+//RS         }
+//RS         TerminalStyleHostOutcome::Unavailable(reason) => {
+//RS             output.push_str(",\"outcome\":\"unavailable\",\"reason\":\"");
+//RS             output.push_str(reason.as_str());
+//RS             output.push('"');
+//RS         }
+//RS     }
+//RS     output.push('}');
+//RS     output
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn edit(source: &str) -> TerminalStyleEdit {
+//RS         TerminalStyleEdit::new("app/style", source)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn capability_facts_are_deterministic_and_follow_explicit_policy() {
+//RS         let ansi256 = TerminalCapabilityFacts::from_environment(
+//RS             Some("xterm-256color"),
+//RS             None,
+//RS             true,
+//RS             false,
+//RS             TerminalColorMode::Auto,
+//RS         );
+//RS         assert_eq!(ansi256.profile, TerminalColorProfile::Ansi256);
+//RS         assert!(ansi256.color_enabled());
+//RS         let dumb = TerminalCapabilityFacts::from_environment(
+//RS             Some("dumb"),
+//RS             Some("truecolor"),
+//RS             true,
+//RS             false,
+//RS             TerminalColorMode::Auto,
+//RS         );
+//RS         assert_eq!(dumb.profile, TerminalColorProfile::Monochrome);
+//RS         assert!(!dumb.color_enabled());
+//RS         let forced = TerminalCapabilityFacts::from_environment(
+//RS             Some("dumb"),
+//RS             None,
+//RS             false,
+//RS             true,
+//RS             TerminalColorMode::Always,
+//RS         );
+//RS         assert_eq!(forced.profile, TerminalColorProfile::Ansi16);
+//RS         assert!(forced.color_enabled());
+//RS         assert_eq!(ansi256.fingerprint(), ansi256.fingerprint());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn parser_produces_typed_roles_without_retaining_source() {
+//RS         let document = TerminalStyleDocument::parse(
+//RS             "# semantic roles\naccent=1;96\nsuccess=green\nerror=plain\n",
+//RS         )
+//RS         .expect("style parses");
+//RS         assert_eq!(document.value(TerminalStyleRole::Accent).unwrap().sgr(), Some("1;96"));
+//RS         assert_eq!(document.value(TerminalStyleRole::Success).unwrap().sgr(), Some("32"));
+//RS         assert_eq!(document.value(TerminalStyleRole::Error), Some(&TerminalStyleValue::Plain));
+//RS         assert!(TerminalStyleDocument::parse("accent=1;;96").is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn style_reload_is_atomic_and_keeps_last_valid_snapshot_on_failure() {
+//RS         let reload = TerminalStyleReload::new();
+//RS         let subscriber = reload.subscribe().expect("subscriber");
+//RS         let first = reload.reload(edit("accent=red\nsuccess=green"));
+//RS         assert!(first.applied());
+//RS         assert_eq!(first.revision, 1);
+//RS         let prior = reload.last_valid().expect("initial style");
+//RS         let state_outside_snapshot = String::from("focused:search cursor:3");
+//RS         let rejected = reload.reload(edit("accent=1;;31"));
+//RS         assert!(rejected.rejected());
+//RS         assert_eq!(rejected.revision, 1);
+//RS         assert_eq!(reload.last_valid().unwrap().fingerprint(), prior.fingerprint());
+//RS         assert_eq!(reload.revision(), 1);
+//RS         assert_eq!(state_outside_snapshot, "focused:search cursor:3");
+//RS         let error = reload.error_fact().expect("one error fact");
+//RS         assert_eq!(error.code, TerminalStyleErrorCode::InvalidStyle);
+//RS         assert!(error.is_bounded());
+//RS         let notifications = reload.drain_notifications(subscriber);
+//RS         assert_eq!(notifications.len(), 2);
+//RS         assert_eq!(notifications[0].revision, 1);
+//RS         assert_eq!(notifications[1].change, TerminalStyleChangeKind::Invalid);
+//RS         assert_eq!(notifications[1].revision, 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn burst_coalescing_notifies_once_for_last_edit() {
+//RS         let reload = TerminalStyleReload::new();
+//RS         let subscriber = reload.subscribe().expect("subscriber");
+//RS         reload.reload(edit("accent=red"));
+//RS         let _ = reload.drain_notifications(subscriber);
+//RS         reload.enqueue(edit("accent=green"));
+//RS         reload.enqueue(edit("accent=blue"));
+//RS         reload.enqueue(edit("accent=yellow"));
+//RS         assert!(reload.has_pending());
+//RS         let receipt = reload.flush().expect("coalesced edit");
+//RS         assert_eq!(receipt.change, TerminalStyleChangeKind::StyleOnly);
+//RS         assert_eq!(receipt.revision, 2);
+//RS         assert_eq!(reload.drain_notifications(subscriber).len(), 1);
+//RS         assert_eq!(reload.last_valid().unwrap().value(TerminalStyleRole::Accent).unwrap().sgr(), Some("33"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn capability_change_applies_but_layout_or_type_change_requires_restart() {
+//RS         let reload = TerminalStyleReload::new();
+//RS         let base = TerminalCapabilityFacts::from_environment(
+//RS             Some("xterm-256color"),
+//RS             None,
+//RS             true,
+//RS             false,
+//RS             TerminalColorMode::Auto,
+//RS         );
+//RS         let plain = TerminalCapabilityFacts::from_environment(
+//RS             Some("dumb"),
+//RS             None,
+//RS             true,
+//RS             false,
+//RS             TerminalColorMode::Auto,
+//RS         );
+//RS         let first = reload.reload(edit("accent=red").with_capabilities(base));
+//RS         assert_eq!(first.revision, 1);
+//RS         let capability = reload.reload(edit("accent=red").with_capabilities(plain));
+//RS         assert_eq!(capability.change, TerminalStyleChangeKind::CapabilityOnly);
+//RS         assert_eq!(capability.revision, 2);
+//RS         let layout = reload.reload(
+//RS             edit("accent=green")
+//RS                 .with_capabilities(plain)
+//RS                 .with_layout_fingerprint("layout-v2"),
+//RS         );
+//RS         assert_eq!(
+//RS             layout.change,
+//RS             TerminalStyleChangeKind::RestartRequired(
+//RS                 TerminalStyleRestartReason::LayoutFingerprintChanged
+//RS             )
+//RS         );
+//RS         assert_eq!(layout.revision, 2);
+//RS         let type_change = reload.reload(
+//RS             edit("accent=green")
+//RS                 .with_capabilities(plain)
+//RS                 .with_type_fingerprint("type-v2"),
+//RS         );
+//RS         assert_eq!(
+//RS             type_change.change,
+//RS             TerminalStyleChangeKind::RestartRequired(
+//RS                 TerminalStyleRestartReason::TypeFingerprintChanged
+//RS             )
+//RS         );
+//RS         assert_eq!(type_change.revision, 2);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dependency_order_is_canonical() {
+//RS         let first = TerminalStyleDependency::from_bytes(
+//RS             TerminalStyleDependencyKind::Source,
+//RS             "z",
+//RS             b"z",
+//RS         )
+//RS         .unwrap();
+//RS         let second = TerminalStyleDependency::from_bytes(
+//RS             TerminalStyleDependencyKind::Source,
+//RS             "a",
+//RS             b"a",
+//RS         )
+//RS         .unwrap();
+//RS         let a = TerminalStyleFingerprintFacts::new(
+//RS             "style",
+//RS             "accent=red",
+//RS             vec![first.clone(), second.clone()],
+//RS             TerminalCapabilityFacts::default(),
+//RS             "",
+//RS             "",
+//RS         )
+//RS         .unwrap();
+//RS         let b = TerminalStyleFingerprintFacts::new(
+//RS             "style",
+//RS             "accent=red",
+//RS             vec![second, first],
+//RS             TerminalCapabilityFacts::default(),
+//RS             "",
+//RS             "",
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(a.dependencies, b.dependencies);
+//RS         assert_eq!(a.fingerprint, b.fingerprint);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn host_adapter_reports_unavailable_before_source_is_injected() {
+//RS         let adapter = TerminalStyleHostAdapter::new();
+//RS         assert!(!adapter.is_injected());
+//RS         let (outcome, event) = adapter.apply_json("{\"source\":\"accent=red\"}");
+//RS         assert_eq!(
+//RS             outcome,
+//RS             TerminalStyleHostOutcome::Unavailable(
+//RS                 TerminalStyleHostUnavailableReason::SourceNotInjected
+//RS             )
+//RS         );
+//RS         assert!(event.contains("\"outcome\":\"unavailable\""));
+//RS         assert!(event.contains("\"reason\":\"source_not_injected\""));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn host_adapter_applies_bounded_json_after_injection() {
+//RS         let adapter = TerminalStyleHostAdapter::new();
+//RS         adapter.inject(
+//RS             TerminalStyleHostSource::new("app/style", TerminalCapabilityFacts::default()).unwrap(),
+//RS         );
+//RS         assert!(adapter.is_injected());
+//RS         let (outcome, event) =
+//RS             adapter.apply_json("{\"source\":\"accent=red\\nsuccess=green\"}");
+//RS         assert_eq!(
+//RS             outcome,
+//RS             TerminalStyleHostOutcome::Applied {
+//RS                 revision: 1,
+//RS                 change: TerminalStyleChangeKind::Initial,
+//RS             }
+//RS         );
+//RS         assert!(event.contains("\"outcome\":\"applied\""));
+//RS         assert!(event.contains("\"fingerprint\""));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn host_adapter_rejects_invalid_style_json() {
+//RS         let adapter = TerminalStyleHostAdapter::new();
+//RS         adapter.inject(
+//RS             TerminalStyleHostSource::new("app/style", TerminalCapabilityFacts::default()).unwrap(),
+//RS         );
+//RS         let (outcome, event) = adapter.apply_json("{\"source\":\"accent=1;;96\"}");
+//RS         match outcome {
+//RS             TerminalStyleHostOutcome::Rejected(TerminalStyleHostRejection::Invalid(fact)) => {
+//RS                 assert_eq!(fact.code, TerminalStyleErrorCode::InvalidStyle);
+//RS             }
+//RS             other => panic!("expected a rejected invalid style, got {other:?}"),
+//RS         }
+//RS         assert!(event.contains("\"outcome\":\"rejected\""));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn host_adapter_rejects_restart_required_layout_change_without_reloading() {
+//RS         let adapter = TerminalStyleHostAdapter::new();
+//RS         adapter.inject(
+//RS             TerminalStyleHostSource::new("app/style", TerminalCapabilityFacts::default()).unwrap(),
+//RS         );
+//RS         let (first, _) = adapter.apply_json("{\"source\":\"accent=red\"}");
+//RS         assert!(matches!(first, TerminalStyleHostOutcome::Applied { .. }));
+//RS         let (outcome, event) = adapter.apply_json(
+//RS             "{\"source\":\"accent=green\",\"layout_fingerprint\":\"layout-v2\"}",
+//RS         );
+//RS         assert_eq!(
+//RS             outcome,
+//RS             TerminalStyleHostOutcome::Rejected(TerminalStyleHostRejection::RestartRequired(
+//RS                 TerminalStyleRestartReason::LayoutFingerprintChanged
+//RS             ))
+//RS         );
+//RS         assert!(event.contains("\"code\":\"layout_fingerprint_changed\""));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn host_adapter_current_json_reports_unavailable_then_applied() {
+//RS         let adapter = TerminalStyleHostAdapter::new();
+//RS         let (before, _) = adapter.current_json();
+//RS         assert_eq!(
+//RS             before,
+//RS             TerminalStyleHostOutcome::Unavailable(TerminalStyleHostUnavailableReason::NoStyleApplied)
+//RS         );
+//RS         adapter.inject(
+//RS             TerminalStyleHostSource::new("app/style", TerminalCapabilityFacts::default()).unwrap(),
+//RS         );
+//RS         adapter.apply_json("{\"source\":\"accent=red\"}");
+//RS         let (after, event) = adapter.current_json();
+//RS         assert_eq!(
+//RS             after,
+//RS             TerminalStyleHostOutcome::Applied {
+//RS                 revision: 1,
+//RS                 change: TerminalStyleChangeKind::Unchanged,
+//RS             }
+//RS         );
+//RS         assert!(event.contains("\"fingerprint\""));
+//RS     }
+//RS }
+// END-PORT-PENDING 0786 crates/jet-devserver/src/TerminalStyleReload.rs:1-1963
+

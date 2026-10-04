@@ -1,0 +1,251 @@
+// C2 pure identity/consent boundaries. The reference module has no inline
+// tests; perf browser/capture_attach and live CLI/record tests require the real
+// host and different JetTrace policy and are not replaced by these assertions.
+fn capture_consent_test_identity() -> CaptureIdentity Never! {
+    CaptureIdentity.exact("inputs", "0.1.0", "native", "session", "source", "build", "rev")
+}
+fn capture_consent_test_scope() -> CaptureConsentScope Never! {
+    CaptureConsentScope.new([String]{"Net", "Rand"}, [String]{"example.test"}, [String]{"out"}, [String]{"raw input"}, "record", U64{123})
+}
+
+#Test("capture_identity_binds_every_canonical_receipt_fact") {
+    identity :: capture_consent_test_identity()
+    scope :: capture_consent_test_scope()
+    grant :: SensitiveCaptureConsent.new(~identity, ~scope)
+    assert(identity.is_exact())
+    assert(grant.matches(identity, scope))
+    assert(identity.matches(capture_consent_test_identity()))
+    loop field in 0..<7 {
+        changed := ~identity
+        if field == 0 -> changed.target_inputs_sha256 = "other inputs"
+        if field == 1 -> changed.tool_version = "other version"
+        if field == 2 -> changed.engine = "other engine"
+        if field == 3 -> changed.session_id = "other session"
+        if field == 4 -> changed.source_id = "other source"
+        if field == 5 -> changed.build_id = "other build"
+        if field == 6 -> changed.revision = "other revision"
+        assert(!identity.matches(changed))
+        assert(!grant.matches(changed, scope))
+        assert(grant.digest() != SensitiveCaptureConsent.new(^changed, ~scope).digest())
+    }
+}
+
+#Test("capture_live_consent_matches_incomplete_supplied_lineage_without_substitution") {
+    identity := capture_consent_test_identity()
+    // The live caller supplied these facts explicitly; no constructor defaults.
+    identity.revision = ""
+    scope :: CaptureConsentScope.default()
+    grant :: SensitiveCaptureConsent.new(~identity, ~scope)
+    assert(grant.matches(identity, scope))
+    assert(!grant.matches(capture_consent_test_identity(), scope))
+    attempt :: CaptureAttempt.new(~identity)
+    assert(grant.matches(attempt.identity, attempt.base_consent_scope()))
+    changed := ~scope
+    changed.destination = "record"
+    assert(!grant.matches(identity, changed))
+}
+
+// #4437: preserved full receipt validation; public Core Cc provider pending.
+#Test("capture_identity_exact_validation_is_not_live_consent_validation") {
+    identity :: capture_consent_test_identity()
+    scope :: CaptureConsentScope.default()
+    loop field in 0..<7 {
+        incomplete := ~identity
+        if field == 0 -> incomplete.target_inputs_sha256 = ""
+        if field == 1 -> incomplete.tool_version = ""
+        if field == 2 -> incomplete.engine = ""
+        if field == 3 -> incomplete.session_id = ""
+        if field == 4 -> incomplete.source_id = ""
+        if field == 5 -> incomplete.build_id = ""
+        if field == 6 -> incomplete.revision = ""
+        assert(!incomplete.is_exact())
+        grant :: SensitiveCaptureConsent.new(~incomplete, ~scope)
+        // Legitimately incomplete live lineage still matches its supplied facts.
+        assert(grant.matches(incomplete, scope))
+        assert(!grant.matches(identity, scope))
+    }
+    invalid :: [String]{"\n", "\r", "\t", String.from_bytes([U8]{0}) ?? panic("NUL"), String.from_bytes([U8]{127}) ?? panic("DEL"), String.from_bytes([U8]{194, 133}) ?? panic("C1")}
+    loop text in invalid {
+        changed := ~identity
+        changed.revision = "rev{text}"
+        assert(!changed.is_exact())
+    }
+    unicode :: CaptureIdentity.exact("λ", "版本", "native", " session ", "é", "build", "rev\u{2028}\u{2029}")
+    assert(unicode.is_exact())
+}
+
+#Test("capture_scope_canonicalizes_order_duplicates_and_source_declaration_order") {
+    left := CaptureConsentScope.new([String]{"z", "a", "a"}, [String]{"b", "a", "b"}, [String]{"s", "s"}, [String]{"y", "x", "x"}, "record", U64{123})
+    right := CaptureConsentScope.new([String]{"a", "z"}, [String]{"a", "b"}, [String]{"s"}, [String]{"x", "y"}, "record", U64{123})
+    left.source_kinds = [CaptureSource]{CaptureSource.Network, CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Clock}
+    right.source_kinds = [CaptureSource]{CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}
+    canonical := ~left
+    &canonical.canonicalize()
+    assert_eq(canonical, right)
+    identity :: capture_consent_test_identity()
+    grant :: SensitiveCaptureConsent.new(~identity, ~left)
+    assert(grant.matches(identity, right))
+    assert_eq(grant.digest(), SensitiveCaptureConsent.new(~identity, ~right).digest())
+    // matches is exact equality: do not normalize the caller's supplied scope.
+    assert(!grant.matches(identity, left))
+    &left.canonicalize()
+    assert_eq(left, right)
+    assert_eq(left.digest(), right.digest())
+    &left.canonicalize()
+    assert_eq(left, right)
+}
+
+#Test("capture_scope_changes_revoke_consent_in_every_dimension") {
+    identity :: capture_consent_test_identity()
+    scope :: capture_consent_test_scope()
+    grant :: SensitiveCaptureConsent.new(~identity, ~scope)
+    loop dimension in 0..<8 {
+        changed := ~scope
+        if dimension == 0 -> &changed.authorities.push("Time")
+        if dimension == 1 -> &changed.hosts.push("other.test")
+        if dimension == 2 -> &changed.streams.push("error")
+        if dimension == 3 -> &changed.disclosures.push("values")
+        if dimension == 4 -> changed.destination = "other record"
+        if dimension == 5 -> changed.byte_limit = U64{124}
+        if dimension == 6 -> changed.mode = CaptureMode.Release
+        if dimension == 7 -> &changed.source_kinds.push(CaptureSource.Clock)
+        assert(!grant.matches(identity, changed))
+        assert(grant.digest() != SensitiveCaptureConsent.new(~identity, ~changed).digest())
+        assert(scope.digest() != changed.digest())
+    }
+}
+
+#Test("capture_consent_utf8_framing_and_sha_bind_exact_protocol_bytes") {
+    // Independent Node crypto SHA-256 oracle over the Rust frame protocol.
+    scope :: CaptureConsentScope.default()
+    assert_eq(scope.digest(), "7f19d8a53794744b810c33c098b6202be816b82696e34be9860346f41e103b49")
+    assert_eq(SensitiveCaptureConsent.new(capture_consent_test_identity(), ^scope).digest(), "ab54e300cb64045b5e1ab5431319e3bb9bad1fcaab9fda03842f2219dac2bc8b")
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL")
+    unicode := CaptureConsentScope.new([String]{"λ", "a"}, [String]{"host"}, [String]{"s"}, [String]{"raw{nul}text"}, "é;:sink", U64.MAX)
+    unicode.source_kinds = [CaptureSource]{CaptureSource.Clock, CaptureSource.Randomness, CaptureSource.RawInput, CaptureSource.Network}
+    assert_eq(unicode.digest(), "0376bc9355f4fb6f96bbbb00632854eede6fdcb0b7a138c2cf54162bb4f2a93f")
+    a :: CaptureConsentScope.new([String]{"ab", "c"}, [String]{}, [String]{}, [String]{}, "", U64{1})
+    b :: CaptureConsentScope.new([String]{"a", "bc"}, [String]{}, [String]{}, [String]{}, "", U64{1})
+    assert(a.digest() != b.digest())
+    // Same bytes placed in different scope vectors cannot collide by joining.
+    c :: CaptureConsentScope.new([String]{"a"}, [String]{"bc"}, [String]{}, [String]{}, "", U64{1})
+    assert(b.digest() != c.digest())
+}
+
+#Test("capture_attempt_scope_uses_observed_sources_not_stale_scope_kinds") {
+    identity :: capture_consent_test_identity()
+    clock :: CaptureAttempt.safe_clock(~identity)
+    assert_eq(clock.base_consent_scope().source_kinds, [CaptureSource]{CaptureSource.Clock})
+    attempt := CaptureAttempt.new(^identity)
+    attempt.scope = capture_consent_test_scope()
+    attempt.scope.source_kinds = [CaptureSource]{CaptureSource.Randomness}
+    facts :: [CaptureSourceFact]{CaptureSourceFact.at(CaptureSource.Network, "source.jet", U32{8}), CaptureSourceFact.at(CaptureSource.Clock, "source.jet", U32{3}), CaptureSourceFact.at(CaptureSource.Network, "source.jet", U32{9})}
+    observed :: (~attempt).with_sources(~facts)
+    base :: observed.base_consent_scope()
+    assert_eq(base.source_kinds, [CaptureSource]{CaptureSource.Clock, CaptureSource.Network})
+    assert_eq(base.authorities, attempt.scope.authorities)
+    assert_eq(base.destination, "record")
+    assert_eq(base.byte_limit, U64{123})
+    assert_eq(observed.sources, facts)
+    assert_eq(attempt.sources.len(), 0)
+    appended :: (~observed).with_source(CaptureSourceFact.at(CaptureSource.RawInput, "input.jet", U32{2}))
+    assert_eq(appended.sources.len(), 4)
+    assert_eq(observed.sources.len(), 3)
+    assert_eq(appended.base_consent_scope().source_kinds, [CaptureSource]{CaptureSource.Clock, CaptureSource.RawInput, CaptureSource.Network})
+    empty :: ^appended.with_sources([CaptureSourceFact]{})
+    assert_eq(empty.base_consent_scope().source_kinds, [CaptureSource]{})
+    assert_eq(empty.scope.source_kinds, [CaptureSource]{CaptureSource.Randomness})
+    assert_eq(CaptureConsentScope.for_budget(CaptureBudget.new_unchecked(U64{0})).byte_limit, U64{0})
+    assert_eq(CaptureConsentScope.for_budget(CaptureBudget.new_unchecked(U64.MAX)).byte_limit, U64.MAX)
+}
+
+#Test("capture_skip_status_retains_source_and_terminal_consent_distinction") {
+    fact :: CaptureSourceFact.at(CaptureSource.RawInput, "input.jet", U32{7})
+    unsafe_reason :: CaptureSkipReason.UnsafeSource{source: fact}
+    assert_eq(unsafe_reason.code(), "Input")
+    assert_eq(unsafe_reason.reason_text(), "Input at input.jet:7")
+    tty :: CaptureSkip{reason: unsafe_reason, terminal_available: true}
+    no_tty :: CaptureSkip{reason: unsafe_reason, terminal_available: false}
+    assert(tty.requires_sensitive_consent())
+    assert_eq(tty.status_line(), "capture: skipped (Input at input.jet:7); use --capture-sensitive")
+    assert_eq(no_tty.status_line(), "capture: skipped (Input at input.jet:7); no terminal to consent")
+    changed :: CaptureSkip{reason: CaptureSkipReason.SensitiveConsentScopeChanged{source: fact}, terminal_available: false}
+    assert(changed.requires_sensitive_consent())
+    assert_eq(changed.reason.code(), "consent_scope_changed")
+    assert_eq(changed.status_line(), "capture: skipped (Input at input.jet:7); consent scope changed; use --capture-sensitive")
+    plain :: [CaptureSkipReason]{CaptureSkipReason.ReleaseMode, CaptureSkipReason.PackagePolicy, CaptureSkipReason.NoCaptureOverride, CaptureSkipReason.Unavailable{reason: "sink closed"}}
+    texts :: [String]{"release mode", "package policy", "no-capture override", "unavailable: sink closed"}
+    codes :: [String]{"release", "package_policy", "no_capture", "unavailable"}
+    loop (index, reason) in plain {
+        skip :: CaptureSkip{reason, terminal_available: false}
+        assert(!skip.requires_sensitive_consent())
+        assert_eq(reason.reason_text(), texts[index])
+        assert_eq(reason.code(), codes[index])
+        wanted :: "capture: skipped ({texts[index]})"
+        assert_eq(skip.status_line(), wanted)
+        // #4444: borrowed enum-payload getter closure is compiler-gated.
+        assert(reason.source() == None)
+    }
+}
+
+#Test("capture_eligibility_exposes_only_allowed_budget_and_kind") {
+    budget :: CaptureBudget.new_unchecked(U64{17})
+    safe :: CaptureEligibility.SafeClock{budget}
+    sensitive :: CaptureEligibility.Sensitive{budget}
+    skip :: CaptureSkip{reason: CaptureSkipReason.ReleaseMode, terminal_available: true}
+    denied :: CaptureEligibility.Skipped{skip}
+    assert(safe.is_allowed())
+    assert(!safe.is_sensitive())
+    assert_eq(safe.kind(), Val(CaptureKind.SafeClock))
+    assert_eq(safe.budget(), Val(budget))
+    // #4444: getter assertions are excluded only from the independent proof.
+    assert(safe.skip() == None)
+    assert(sensitive.is_allowed())
+    assert(sensitive.is_sensitive())
+    assert_eq(sensitive.kind(), Val(CaptureKind.Sensitive))
+    assert_eq(sensitive.budget(), Val(budget))
+    assert(sensitive.skip() == None)
+    assert(!denied.is_allowed())
+    assert(!denied.is_sensitive())
+    assert_eq(denied.kind(), None)
+    assert_eq(denied.budget(), None)
+}
+
+// #4446: original receiver-backed scalar View acceptance retained unchanged.
+#Test("capture_consent_accessors_borrow_private_binding_without_mutation") {
+    identity :: capture_consent_test_identity()
+    scope :: capture_consent_test_scope()
+    grant :: SensitiveCaptureConsent.new(^identity, ^scope)
+    id_view :: grant.identity()
+    scope_view :: grant.scope()
+    assert_eq(id_view[0].revision, "rev")
+    assert_eq(scope_view[0].byte_limit, U64{123})
+}
+
+// #4444: full no-copy enum-payload getter acceptance, not an owned substitute.
+#Test("capture_skip_accessors_borrow_source_and_skip_payload") {
+    fact :: CaptureSourceFact.at(CaptureSource.Randomness, "rand.jet", U32{11})
+    reason :: CaptureSkipReason.UnsafeSource{source: fact}
+    if reason.source() == {
+        .Val(source) -> assert_eq(source[0].reason_text(), "Rand at rand.jet:11")
+        .None -> panic("source lost")
+    }
+    skip :: CaptureSkip{reason, terminal_available: false}
+    eligibility :: CaptureEligibility.Skipped{skip}
+    if eligibility.skip() == {
+        .Val(view) -> assert_eq(view[0].status_line(), "capture: skipped (Rand at rand.jet:11); no terminal to consent")
+        .None -> panic("skip lost")
+    }
+}
+
+#Test("capture_sensitive_debug_exposes_digest_not_private_disclosures") {
+    scope := capture_consent_test_scope()
+    scope.disclosures = [String]{"secret raw input"}
+    scope.hosts = [String]{"secret-host.test"}
+    grant :: SensitiveCaptureConsent.new(capture_consent_test_identity(), ^scope)
+    text :: "{grant:Debug}"
+    assert(text.contains("session"))
+    assert(text.contains(grant.digest()))
+    assert(!text.contains("secret raw input"))
+    assert(!text.contains("secret-host.test"))
+}

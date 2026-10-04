@@ -1,0 +1,248 @@
+// TOOLS-S14 original checked producer acceptance. Intentionally UNREGISTERED:
+// C4 must load/check each exact fixture, then S8 must build db from that actual
+// registration/Checks result and the SAME canonical module_sources before
+// invoking these helpers. No prefilled facts, fake Session, alternate parser,
+// or source-only catalog counts as this integration proof.
+// Original consumer-only tests52–95,252–360 remain solely in Index.jet (S13);
+// numeric destination113–129 remains solely in Language.jet (S16), with the
+// approved current-contract golden migration. Full checked_text169–226 source
+// and assertions remain solely in SemIndex/Convert.jet (S20), called below.
+use jet_foundation.[MIRNameFacts, name_facts_alias_identity]
+use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
+
+fn semantic_s14_from_checked(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> SemanticSymbolIndex Never! {
+    assert(registration.complete, "fixture must come from the real complete C4 checked graph")
+    semindex_build_semantic_symbol_index(db, registration, names, module_sources, loaded_module_rows)
+}
+
+// tests/semindex.rs98–109.
+pub fn semantic_s14_contextual_result_source() -> String Never! { "fn run() {}\n" }
+fn semantic_s14_contextual_result_names_are_not_advertised_as_keywords(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    loop name in [String]{"Ok", "Err"} {
+        keyword_identity :: "builtin:keyword:{name}"
+        loop symbol in symbols.symbols() {
+            assert(symbol.identity != keyword_identity && !(symbol.name == name && symbol.kind == SemanticSymbolKind.Keyword))
+        }
+    }
+}
+
+// tests/semindex.rs132–165. Exact initial and final LF are part of the fixture.
+pub fn semantic_s14_distinct_unit_source() -> String Never! {
+    "\n#Numeric UserID :: distinct Int\n#UnitFamily(Currency) { usd }\n\nfn run() {}\n"
+}
+fn semantic_s14_source_distinct_and_unit_conversion_members_are_cataloged(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], module_path: String) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    user :: (symbols.lookup_qualified("UserID.from_u8") ?? panic("source distinct conversion member"))[0]
+    assert_eq(user.owner, Val("UserID"))
+    assert_eq(user.signature, "UserID.from_u8(value: U8) -> UserID")
+    unit :: (symbols.lookup_qualified("Usd.from_int") ?? panic("unit-family conversion member"))[0]
+    assert_eq(unit.owner, Val("Usd"))
+    found := false
+    distinct_start :: "\n".bytes().len()
+    loop candidate in symbols.complete_visible_at("from_u", Val("UserID"), SemanticVisibilityAnchor{module_path: module_path, offset: Val(distinct_start), session_top_level: false}) {
+        if candidate[0].qualified_name == "UserID.from_u8" -> found = true
+    }
+    assert(found)
+}
+
+// tests/semindex.rs169–226. C4 must use semindex_s20_checked_text_source().
+// json and dossier_text must be the real S19 codec/dossier outputs over db.index.
+fn semantic_s14_checked_text_contract_is_one_tooling_fact(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], json: String, dossier_text: String) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    semindex_s20_checked_text_assertions(db.index, symbols, json, dossier_text)
+}
+
+// tests/semindex.rs230–248.
+pub fn semantic_s14_affine_unit_source() -> String Never! {
+    "\n#UnitFamily(Temperature, base: kelvin) {\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}\n\nfn run() {}\n"
+}
+fn semantic_s14_affine_unit_point_and_delta_members_are_cataloged(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    assert(symbols.lookup_qualified("CelsiusPoint.from_float") != None)
+    assert(symbols.lookup_qualified("CelsiusDelta.from_float") != None)
+    assert(symbols.lookup_qualified("Celsius.from_float") == None)
+}
+
+// tests/semindex.rs612–645, exact original docs and checked local producer.
+pub fn semantic_s14_shared_docs_source() -> String Never! {
+    "\n/// Scores one name.\n/// Example: score(\"Ada\")\nfn score(name: String) -> Int {\n    return 1\n}\n\nfn run() {\n    local_total :: score(\"Ada\")\n    print(local_total)\n}\n"
+}
+fn semantic_s14_semantic_symbols_carry_shared_docs_and_provenance(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    score :: (symbols.lookup_identity("fn:module:semantic_docs::score") ?? panic("score identity"))[0]
+    assert_eq(score.signature, "fn score(name: String) -> Int\nfailure: Int (implicit default Err!)")
+    assert_eq(score.summary, "Scores one name.")
+    assert_eq(score.examples, [String]{"score(\"Ada\")"})
+    if score.provenance == { .Source(_) -> {}, else -> panic("source provenance") }
+    local :: symbols.lookup("local_total")
+    assert_eq(local.len(), 1)
+    assert_eq(local[0][0].kind, SemanticSymbolKind.Local)
+}
+
+// tests/semindex.rs649–689: exact source and UTF8 BYTE binding start, including
+// typed origin read facts and full index JSON from the real codec producer.
+pub fn semantic_s14_tracked_float_source() -> String Never! {
+    "fn run() {\n    #Track speed :: 3.5\n    origin :: prep { speed.$origin }\n    print(origin?.source ?? \"missing\")\n}\n"
+}
+fn semantic_s14_tracked_float_symbol_exposes_its_binding_site(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], json: String) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    speed_found := false
+    source :: semantic_s14_tracked_float_source()
+    loop speed_view in symbols.lookup("speed") {
+        speed :: speed_view[0]
+        if speed.kind != SemanticSymbolKind.Local -> next
+        span :: speed.span ?? panic("tracked binding span")
+        assert_eq(speed.signature, "speed: Float")
+        binding_prefix :: "fn run() {\n    #Track "
+        assert_eq(span.start, binding_prefix.bytes().len())
+        bytes :: source.bytes().to_list()
+        name_bytes := bytes[span.start..<span.end] // #4303
+        name := String.from_bytes(name_bytes) ?? panic("tracked binding UTF8")
+        assert_eq(name, "speed")
+        speed_found = true
+        break
+    }
+    assert(speed_found)
+    origin_found := false
+    fact_found := false
+    loop origin_view in symbols.lookup("origin") {
+        origin :: origin_view[0]
+        if origin.kind == SemanticSymbolKind.Local {
+            assert_eq(origin.signature, "origin: OriginInfo?")
+            origin_found = true
+        }
+        if origin.signature == "@origin: OriginInfo?" {
+            assert_eq(origin.kind, SemanticSymbolKind.Member)
+            fact_found = true
+        }
+    }
+    assert(origin_found)
+    typed_read := false
+    loop reference_view in db.index.references_to("origin") {
+        if reference_view[0].fact == .Val(fact) {
+            assert_eq(fact.name, "origin")
+            assert_eq(fact.kind, "Origin")
+            assert_eq(fact.type_name, "OriginInfo?")
+            typed_read = true
+            break
+        }
+    }
+    assert(typed_read)
+    assert(json.contains("\"fact\":{\"name\":\"origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}"))
+    assert(fact_found)
+}
+
+// tests/semindex.rs693–720: same names in two actual inline modules.
+pub fn semantic_s14_collisions_source() -> String Never! {
+    "\nmodule first {\n    struct Item {\n        value: Int\n    }\n}\n\nmodule second {\n    struct Item {\n        value: String\n    }\n}\n\nfn run() {}\n"
+}
+fn semantic_s14_semantic_symbols_keep_module_and_member_collisions_distinct(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    items :: symbols.lookup("Item")
+    assert_eq(items.len(), 2)
+    assert(items[0][0].identity != items[1][0].identity)
+    values :: symbols.lookup_member("Item", "value")
+    assert_eq(values.len(), 2)
+    assert(values[0][0].identity != values[1][0].identity)
+}
+
+// tests/semindex.rs724–739. S16 owns checked builtin contracts and the approved
+// no-arrow catalog golden cutover; compare to its SAME shared doc symbol,
+// retain exact substantive summary/provenance/completion assertions.
+pub fn semantic_s14_builtins_source() -> String Never! { "fn run() {}\n" }
+fn semantic_s14_semantic_symbols_include_language_builtins(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    filter :: (symbols.lookup_qualified("List.filter") ?? panic("List.filter"))[0]
+    shared_found := false
+    loop shared in semantic_builtin_doc_symbols() {
+        if shared.qualified_name == "List.filter" {
+            assert_eq(filter.signature, shared.signature)
+            shared_found = true
+            break
+        }
+    }
+    assert(shared_found)
+    assert_eq(filter.summary, "Keeps items where f(item) is true.")
+    if filter.provenance == { .Builtin(_) -> {}, else -> panic("builtin provenance") }
+    found := false
+    loop candidate in symbols.complete("fil", Val("List")) {
+        if candidate[0].name == "filter" -> found = true
+    }
+    assert(found)
+}
+
+// tests/semindex.rs743–770.
+pub fn semantic_s14_value_tail_source() -> String Never! {
+    "\nfn label(value: Int) -> String {\n    if value == {\n        1 -> { \"one\" }\n        else -> { \"other\" }\n    }\n}\n\nfn run() {\n    print(label(1))\n}\n"
+}
+fn semantic_s14_semantic_symbols_index_value_tail_callable(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    found := false
+    loop symbol_view in symbols.lookup("label") {
+        symbol :: symbol_view[0]
+        if symbol.kind != SemanticSymbolKind.Function -> next
+        assert(symbol.signature.contains("value: Int"))
+        assert(symbol.signature.contains("String"))
+        found = true
+        break
+    }
+    assert(found)
+}
+
+// tests/semindex.rs774–795: the canonical loader must persist both files under
+// one actual fixture root, load/check main, then pass its real graph/DB here.
+pub fn semantic_s14_import_library_source() -> String Never! { "pub fn score(name: String) -> Int { return 1 }\n" }
+pub fn semantic_s14_import_main_source() -> String Never! {
+    "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() { print(imported_score(\"Ada\")) }\n"
+}
+fn semantic_s14_semantic_symbols_include_module_and_selected_imports(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    assert_eq(symbols.lookup("api").len(), 1)
+    imported :: symbols.lookup("imported_score")
+    assert_eq(imported.len(), 1)
+    assert(imported[0][0].identity.starts_with("import:"))
+    // Main's current-arrow golden cutover; all other original assertions stay.
+    assert(imported[0][0].signature.contains("score(name: String) -> Int"))
+}
+
+// Additional actual checked import-anchor consumer acceptance: CP-NAMES alias
+// identity must be the same in the sole checked definition and symbol products.
+// C4 supplies both file and nested inline imports, selected/member aliases,
+// alias-shadow names and Unicode source offsets; no constructed DB is accepted.
+fn semantic_s14_checked_import_identity_matches_definition_anchors(db: SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
+    sources := [Int:Int]{}
+    loop source_index in loaded_module_rows -> sources[semindex_loaded_registration_index(registration, module_sources[source_index])] = source_index
+    loop alias in names.aliases {
+        source_index :: sources.get(alias.module_index) ?? next
+        identity :: name_facts_alias_identity(names, alias.module_index, alias.span) ?? panic("checked alias identity")
+        symbol :: (symbols.lookup_identity(identity) ?? panic("checked import semantic symbol"))[0]
+        assert_eq(symbol.module_path, module_sources[source_index].display)
+        count := 0
+        loop def in db.defs {
+            if def.identity == identity && def.def_span == alias.span -> count += 1
+        }
+        assert_eq(count, 1)
+    }
+}
+
+// Real REPL Docs.rs170–181/197–217 assertion helpers, UNREGISTERED until
+// R2/R15B's NativeSession producer is available. The canonical session MUST
+// evaluate the live answer::42 binding over item fn answer()->Int{return1},
+// and the live items=[1,2] binding over Core math alias items, respectively.
+// These inputs are actual REPL completion results, never constructed symbols.
+fn semantic_s14_completion_dedups_shadowed_session_item(candidates: [SemanticSymbol]) Never! {
+    assert_eq(candidates.len(), 1)
+    assert_eq(candidates[0].identity, "session:binding:answer")
+}
+fn semantic_s14_runtime_receiver_beats_core_import_alias(candidates: [SemanticSymbol]) Never! {
+    filter := false
+    floor := false
+    loop candidate in candidates {
+        if candidate.name == "filter" -> filter = true
+        if candidate.name == "floor" -> floor = true
+    }
+    assert(filter)
+    assert(!floor)
+}

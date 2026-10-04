@@ -1,0 +1,338 @@
+// Rust Notebook/document.rs:587-1036 save/load and canonical document, cell,
+// output and MIME codecs. Foundation A-canonical bytes include one final LF;
+// persisted output authority is reconstructed, never inferred from text.
+use core.files as notebook_codec_files
+use core.text.parse as notebook_codec_text
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_integer, canonical_json_bytes]
+
+fn notebook_codec_error(message: String) -> NotebookError Never! { NotebookError{message: message} }
+fn notebook_codec_object(fields: [CanonicalJSONField]) -> CanonicalJSON NotebookError! {
+    canonical_json_object(fields) ?? return Err(notebook_codec_error(err.message))
+}
+fn notebook_codec_integer(value: Int) -> CanonicalJSON NotebookError! {
+    canonical_json_integer("{value}") ?? return Err(notebook_codec_error(err.message))
+}
+fn notebook_codec_field(key: String, value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: value} }
+fn notebook_codec_strings(values: [String]) -> CanonicalJSON Never! {
+    rows := [CanonicalJSON]{}
+    loop value in values -> &rows.push(CanonicalJSON.String(~value))
+    CanonicalJSON.Array(rows)
+}
+// #4392: native emitters must preserve these registered return sources.
+fn notebook_codec_window(fields: [CanonicalJSONField], index: Int) -> View<CanonicalJSONField> Never! from fields {
+    fields[index..index]
+}
+fn notebook_codec_get(fields: [CanonicalJSONField], key: String) -> View<CanonicalJSONField>? Never! from fields {
+    loop (index, field) in fields {
+        if field.key == key -> return Val(notebook_codec_window(fields, index))
+    }
+    None
+}
+// #4423: even a plain View return with `from fields` rejects the Err path
+// under E2305. Return only the index; callers borrow the same owner below.
+fn notebook_codec_required_index(fields: [CanonicalJSONField], key: String, error: String) -> Int NotebookError! {
+    loop (index, field) in fields {
+        if field.key == key -> return Ok(index)
+    }
+    Err(notebook_codec_error(error))
+}
+// Rust text_field/string_array_field, including omitted-array defaults.
+pub fn notebook_text_field(fields: [CanonicalJSONField], key: String) -> String NotebookError! {
+    if notebook_codec_get(fields, key) == .Val(field) {
+        if field[0].value == .String(text) -> return Ok(~text)
+    }
+    Err(notebook_codec_error("missing string field `{key}`"))
+}
+fn notebook_string_array_field(fields: [CanonicalJSONField], key: String) -> [String] NotebookError! {
+    value :: if notebook_codec_get(fields, key) == {
+        .Val(field) -> field
+        .None -> { return Ok([String]{}) }
+    }
+    if value[0].value == {
+        .Array(values) -> {
+            result := [String]{}
+            loop item in values {
+                if item == {
+                    .String(text) -> &result.push(~text)
+                    else -> { return Err(notebook_codec_error("`{key}` entries must be strings")) }
+                }
+            }
+            Ok(result)
+        }
+        else -> Err(notebook_codec_error("`{key}` must be an array"))
+    }
+}
+// Rust u32 and usize parsing domains are preserved, despite Core's exact Int.
+fn notebook_codec_unsigned(text: String, maximum: Int, error: String) -> Int NotebookError! {
+    value :: notebook_codec_text.parse_int(text) ?? return Err(notebook_codec_error(error))
+    if value < 0 || value > maximum -> return Err(notebook_codec_error(error))
+    Ok(value)
+}
+// Rust save_jetnb/load_jetnb: canonical bytes, parent creation, native IO errors.
+pub fn notebook_save_jetnb(nb: JetNotebook, path: String) NotebookError! -[FS]> {
+    json :: notebook_to_json(nb)
+    parent :: notebook_codec_files.dirname(path)
+    notebook_codec_files.create_dir_all(parent) ?? return Err(notebook_codec_error("{err}"))
+    notebook_codec_files.write_bytes(path, canonical_json_bytes(json)) ?? return Err(notebook_codec_error("{err}"))
+}
+pub fn notebook_load_jetnb(path: String) -[FS]> JetNotebook NotebookError! {
+    bytes :: notebook_codec_files.read_bytes(path) ?? return Err(notebook_codec_error("{err}"))
+    JetNotebook.from_canonical_bytes(bytes)
+}
+// Rust plain_bundle.
+pub fn notebook_plain_bundle(text: String) -> NotebookMIMEBundle Never! {
+    NotebookMIMEBundle{text_plain: text, mime: [NotebookMIMEEntry]{}, quarantined: false, widget_id: None, requested_origins: [String]{}, requested_messages: [String]{}}
+}
+// Rust notebook_to_json/cell_output_to_json/bundle_to_json.
+pub fn notebook_to_json(nb: JetNotebook) -> CanonicalJSON NotebookError! {
+    cells := [CanonicalJSON]{}
+    loop cell in nb.cells {
+        kind :: if cell.kind == .Jet -> "jet" else -> "markdown"
+        fields := [CanonicalJSONField]{
+            notebook_codec_field("id", .String(~cell.id)),
+            notebook_codec_field("kind", .String(kind)),
+            notebook_codec_field("source", .String(~cell.source)),
+            notebook_codec_field("depends_on", notebook_codec_strings(cell.depends_on)),
+        }
+        if cell.output == .Val(output) -> &fields.push(notebook_codec_field("output", notebook_cell_output_to_json(output)))
+        &cells.push(notebook_codec_object(fields))
+    }
+    cache := [CanonicalJSONField]{}
+    loop key in nb.output_cache.keys() {
+        entry :: nb.output_cache[key]
+        value :: notebook_codec_object([CanonicalJSONField]{
+            notebook_codec_field("key", .String(~entry.key)),
+            notebook_codec_field("execution_count", notebook_codec_integer(entry.execution_count)),
+            notebook_codec_field("bundle", notebook_bundle_to_json(entry.bundle)),
+        })
+        &cache.push(notebook_codec_field(~key, value))
+    }
+    conflicts := [CanonicalJSON]{}
+    loop conflict in nb.merge_conflicts {
+        &conflicts.push(notebook_codec_object([CanonicalJSONField]{
+            notebook_codec_field("cell_id", .String(~conflict.cell_id)),
+            notebook_codec_field("ours_source", .String(~conflict.ours_source)),
+            notebook_codec_field("theirs_source", .String(~conflict.theirs_source)),
+        }))
+    }
+    notebook_codec_object([CanonicalJSONField]{
+        notebook_codec_field("schema", notebook_codec_integer(nb.schema)),
+        notebook_codec_field("format", .String("jetnb")),
+        notebook_codec_field("environment_hash", .String(~nb.environment_hash)),
+        notebook_codec_field("cache_policy", .String(NOTEBOOK_OUTPUT_CACHE_POLICY)),
+        notebook_codec_field("cells", .Array(cells)),
+        notebook_codec_field("output_cache", notebook_codec_object(cache)),
+        notebook_codec_field("merge_conflicts", .Array(conflicts)),
+    })
+}
+pub fn notebook_cell_output_to_json(output: NotebookCellOutput) -> CanonicalJSON NotebookError! {
+    fields := [CanonicalJSONField]{
+        notebook_codec_field("bundle", notebook_bundle_to_json(output.bundle)),
+        notebook_codec_field("quarantined", .Bool(output.bundle.quarantined)),
+    }
+    if output.execution_count == .Val(count) -> &fields.push(notebook_codec_field("execution_count", notebook_codec_integer(count)))
+    if output.cache_key == .Val(key) -> &fields.push(notebook_codec_field("cache_key", .String(~key)))
+    if output.turn_id == .Val(id) -> &fields.push(notebook_codec_field("turn_id", notebook_codec_integer(id)))
+    notebook_codec_object(fields)
+}
+pub fn notebook_bundle_to_json(bundle: NotebookMIMEBundle) -> CanonicalJSON NotebookError! {
+    mime := [CanonicalJSON]{}
+    loop part in bundle.mime {
+        &mime.push(notebook_codec_object([CanonicalJSONField]{
+            notebook_codec_field("mime", .String(~part.media_type)),
+            notebook_codec_field("data", .String(~part.payload)),
+        }))
+    }
+    widget :: if bundle.widget_id == {
+        .Val(id) -> CanonicalJSON.String(~id)
+        .None -> CanonicalJSON.Null
+    }
+    notebook_codec_object([CanonicalJSONField]{
+        notebook_codec_field("text_plain", .String(~bundle.text_plain)),
+        notebook_codec_field("mime", .Array(mime)),
+        notebook_codec_field("quarantined", .Bool(bundle.quarantined)),
+        notebook_codec_field("widget_id", widget),
+        notebook_codec_field("requested_origins", notebook_codec_strings(bundle.requested_origins)),
+        notebook_codec_field("requested_messages", notebook_codec_strings(bundle.requested_messages)),
+    })
+}
+// Rust notebook_from_json: IDs, graph validity, cache and conflict validation.
+pub fn notebook_from_json(json: CanonicalJSON) -> JetNotebook NotebookError! {
+    root :: if json == {
+        .Object(fields) -> fields
+        else -> { return Err(notebook_codec_error("jetnb root must be an object")) }
+    }
+    format :: notebook_text_field(root, "format")
+    if format != "jetnb" -> return Err(notebook_codec_error("unsupported notebook format `{format}`"))
+    schema_index :: notebook_codec_required_index(root, "schema", "jetnb is missing integer `schema`")
+    schema :: if root[schema_index].value == {
+        .Integer(text) -> notebook_codec_unsigned(text, 4294967295, "jetnb schema is not an integer")
+        else -> { return Err(notebook_codec_error("jetnb is missing integer `schema`")) }
+    }
+    if schema != 1 -> return Err(notebook_codec_error("unsupported jetnb schema {schema}"))
+    if notebook_codec_get(root, "cache_policy") == .Val(policy) {
+        expected :: CanonicalJSON.String(NOTEBOOK_OUTPUT_CACHE_POLICY)
+        if policy[0].value != expected -> return Err(notebook_codec_error("jetnb uses an unsupported output cache policy"))
+    }
+    nb := JetNotebook.new(notebook_text_field(root, "environment_hash"))
+    nb.schema = schema
+    cells_index :: notebook_codec_required_index(root, "cells", "jetnb is missing `cells`")
+    cells :: if root[cells_index].value == {
+        .Array(values) -> values
+        else -> { return Err(notebook_codec_error("jetnb `cells` must be an array")) }
+    }
+    ids := [String:Bool]{}
+    loop json_cell in cells {
+        cell :: notebook_cell_from_json(json_cell)
+        if cell.id.len() == 0 || ids.has_key(cell.id) -> return Err(notebook_codec_error("jetnb has duplicate or empty cell id `{cell.id}`"))
+        ids[cell.id] = true
+        &nb.cells.push(cell)
+    }
+    loop cell in nb.cells {
+        loop dependency in cell.depends_on {
+            if !ids.has_key(dependency) -> return Err(notebook_codec_error("cell `{cell.id}` depends on unknown cell `{dependency}`"))
+        }
+    }
+    loop cell in nb.cells -> _ :: nb.dependency_order(cell.id)
+    if notebook_codec_get(root, "output_cache") == .Val(cache_value) {
+        cache :: if cache_value[0].value == {
+            .Object(fields) -> fields
+            else -> { return Err(notebook_codec_error("jetnb `output_cache` must be an object")) }
+        }
+        loop row in cache {
+            key_name :: row.key
+            entry :: if row.value == {
+                .Object(fields) -> fields
+                else -> { return Err(notebook_codec_error("output cache entry `{key_name}` must be an object")) }
+            }
+            key :: notebook_text_field(entry, "key")
+            if key != key_name -> return Err(notebook_codec_error("output cache key `{key_name}` does not match its entry"))
+            count_index :: notebook_codec_required_index(entry, "execution_count", "output cache entry `{key_name}` is missing execution count")
+            count :: if entry[count_index].value == {
+                .Integer(text) -> notebook_codec_unsigned(text, 4294967295, "output cache entry `{key_name}` has an invalid execution count")
+                else -> { return Err(notebook_codec_error("output cache entry `{key_name}` is missing execution count")) }
+            }
+            bundle_index :: notebook_codec_required_index(entry, "bundle", "output cache entry `{key_name}` is missing bundle")
+            nb.output_cache[key_name] = NotebookOutputCacheEntry{key: key, bundle: notebook_bundle_from_json(entry[bundle_index].value), execution_count: count}
+        }
+    }
+    if notebook_codec_get(root, "merge_conflicts") == .Val(conflicts_value) {
+        conflicts :: if conflicts_value[0].value == {
+            .Array(values) -> values
+            else -> { return Err(notebook_codec_error("jetnb `merge_conflicts` must be an array")) }
+        }
+        conflict_ids := [String:Bool]{}
+        loop conflict in conflicts {
+            fields :: if conflict == {
+                .Object(fields) -> fields
+                else -> { return Err(notebook_codec_error("jetnb merge conflict must be an object")) }
+            }
+            cell_id :: notebook_text_field(fields, "cell_id")
+            if !ids.has_key(cell_id) -> return Err(notebook_codec_error("merge conflict names unknown cell `{cell_id}`"))
+            if conflict_ids.has_key(cell_id) -> return Err(notebook_codec_error("jetnb repeats merge conflict for `{cell_id}`"))
+            conflict_ids[cell_id] = true
+            &nb.merge_conflicts.push(NotebookMergeConflict{cell_id: cell_id, ours_source: notebook_text_field(fields, "ours_source"), theirs_source: notebook_text_field(fields, "theirs_source")})
+        }
+    }
+    Ok(nb)
+}
+// Rust cell_from_json/output_from_json/bundle_from_json.
+pub fn notebook_cell_from_json(json: CanonicalJSON) -> NotebookCell NotebookError! {
+    fields :: if json == {
+        .Object(fields) -> fields
+        else -> { return Err(notebook_codec_error("cell must be an object")) }
+    }
+    id :: notebook_text_field(fields, "id")
+    kind_text :: notebook_text_field(fields, "kind")
+    kind :: if {
+        kind_text == "markdown" -> NotebookCellKind.Markdown
+        kind_text == "jet" -> NotebookCellKind.Jet
+        else -> { return Err(notebook_codec_error("unknown jetnb cell kind `{kind_text}`")) }
+    }
+    source :: notebook_text_field(fields, "source")
+    depends_on := [String]{}
+    if notebook_codec_get(fields, "depends_on") == .Val(dependencies) {
+        values :: if dependencies[0].value == {
+            .Array(values) -> values
+            else -> { return Err(notebook_codec_error("cell `depends_on` must be an array")) }
+        }
+        loop value in values {
+            if value == {
+                .String(text) -> &depends_on.push(~text)
+                else -> { return Err(notebook_codec_error("cell dependency must be a string")) }
+            }
+        }
+    }
+    output := NotebookCellOutput?{None}
+    if notebook_codec_get(fields, "output") == .Val(value) -> output = Val(notebook_output_from_json(value[0].value))
+    Ok(NotebookCell{id: id, kind: kind, source: source, output: output, depends_on: depends_on})
+}
+pub fn notebook_output_from_json(json: CanonicalJSON) -> NotebookCellOutput NotebookError! {
+    fields :: if json == {
+        .Object(fields) -> fields
+        else -> { return Err(notebook_codec_error("output must be an object")) }
+    }
+    bundle_index :: notebook_codec_required_index(fields, "bundle", "output is missing bundle")
+    bundle := notebook_bundle_from_json(fields[bundle_index].value)
+    if notebook_codec_get(fields, "quarantined") == .Val(field) {
+        if field[0].value == .Bool(value) {
+            if value -> notebook_quarantine_outputs(&bundle)
+        }
+    }
+    execution_count :: notebook_codec_optional_unsigned(fields, "execution_count", 4294967295, "output execution count is not an integer", "output execution count must be an integer or null")
+    cache_key :: notebook_codec_optional_text(fields, "cache_key", "output cache key must be a string or null")
+    turn_id :: notebook_codec_optional_unsigned(fields, "turn_id", 18446744073709551615, "output turn id is not an integer", "output turn id must be an integer or null")
+    Ok(NotebookCellOutput{bundle: bundle, execution_count: execution_count, cache_key: cache_key, turn_id: turn_id})
+}
+fn notebook_codec_optional_unsigned(fields: [CanonicalJSONField], key: String, maximum: Int, integer_error: String, shape_error: String) -> Int? NotebookError! {
+    field :: if notebook_codec_get(fields, key) == {
+        .Val(field) -> field
+        .None -> { return Ok(None) }
+    }
+    if field[0].value == {
+        .Integer(text) -> Ok(Val(notebook_codec_unsigned(text, maximum, integer_error)))
+        .Null -> Ok(None)
+        else -> Err(notebook_codec_error(shape_error))
+    }
+}
+fn notebook_codec_optional_text(fields: [CanonicalJSONField], key: String, error: String) -> String? NotebookError! {
+    field :: if notebook_codec_get(fields, key) == {
+        .Val(field) -> field
+        .None -> { return Ok(None) }
+    }
+    if field[0].value == {
+        .String(text) -> Ok(Val(~text))
+        .Null -> Ok(None)
+        else -> Err(notebook_codec_error(error))
+    }
+}
+pub fn notebook_bundle_from_json(json: CanonicalJSON) -> NotebookMIMEBundle NotebookError! {
+    fields :: if json == {
+        .Object(fields) -> fields
+        else -> { return Err(notebook_codec_error("bundle must be an object")) }
+    }
+    text_plain :: notebook_text_field(fields, "text_plain")
+    mime := [NotebookMIMEEntry]{}
+    if notebook_codec_get(fields, "mime") == .Val(mime_json) {
+        values :: if mime_json[0].value == {
+            .Array(values) -> values
+            else -> { return Err(notebook_codec_error("bundle `mime` must be an array")) }
+        }
+        loop value in values {
+            part :: if value == {
+                .Object(part_fields) -> part_fields
+                else -> { return Err(notebook_codec_error("bundle MIME entry must be an object")) }
+            }
+            &mime.push(NotebookMIMEEntry{media_type: notebook_text_field(part, "mime"), payload: notebook_text_field(part, "data")})
+        }
+    }
+    widget_id :: notebook_codec_optional_text(fields, "widget_id", "bundle `widget_id` must be a string or null")
+    quarantined := false
+    if notebook_codec_get(fields, "quarantined") == .Val(field) {
+        if field[0].value == {
+            .Bool(value) -> quarantined = value
+            else -> { return Err(notebook_codec_error("bundle `quarantined` must be boolean")) }
+        }
+    }
+    Ok(NotebookMIMEBundle{text_plain: text_plain, mime: mime, quarantined: quarantined, widget_id: widget_id, requested_origins: notebook_string_array_field(fields, "requested_origins"), requested_messages: notebook_string_array_field(fields, "requested_messages")})
+}

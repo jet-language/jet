@@ -1,0 +1,1883 @@
+// PORT-PENDING 0810 crates-jet-semindex-src-build-slice-1776: crates/jet-semindex/src/Build.rs:1776-3654
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn normalize_definition(source: &str) -> String {
+//RS     let mut out = String::new();
+//RS     let mut chars = source.chars().peekable();
+//RS     let mut string = false;
+//RS     while let Some(ch) = chars.next() {
+//RS         if string {
+//RS             out.push(ch);
+//RS             if ch == '\\' {
+//RS                 if let Some(next) = chars.next() {
+//RS                     out.push(next);
+//RS                 }
+//RS             } else if ch == '"' {
+//RS                 string = false;
+//RS             }
+//RS         } else if ch == '"' {
+//RS             string = true;
+//RS             out.push(ch);
+//RS         } else if ch == '/' && chars.peek() == Some(&'/') {
+//RS             chars.next();
+//RS             for next in chars.by_ref() {
+//RS                 if next == '\n' {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS         } else if !ch.is_whitespace() {
+//RS             out.push(ch);
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// Compiler-owned typed AST boundaries for an already parsed module. Codemod
+//RS /// patterns use this same walker as checked semantic indexes, so fragment
+//RS /// parsing and candidate matching cannot invent a parallel syntax tree.
+//RS pub fn structural_nodes_from_parsed(module: &LoadedModule) -> Vec<StructuralNode> {
+//RS     let mp = module.display.clone();
+//RS     let mut block_spans = module.block_spans.clone();
+//RS     block_spans.sort_by_key(|span| span.start);
+//RS     let mut db = SymbolDB::new();
+//RS     let name_ledger = jet_foundation::Names::NameLedger::default();
+//RS     let mut ctx = WalkCtx {
+//RS         db: &mut db,
+//RS         module,
+//RS         module_idx: 0,
+//RS         caller: None,
+//RS         scope_identity: root_identity(&mp),
+//RS         name_ledger: &name_ledger,
+//RS         structural_parents: Vec::new(),
+//RS         structural_slot: "root".to_string(),
+//RS         structural_slot_kind: StructuralSlotKind::List,
+//RS         block_spans: &block_spans,
+//RS         claimed_block_spans: std::collections::HashSet::new(),
+//RS     };
+//RS     for item in &module.items {
+//RS         collect_item(item, &mp, module, &mut ctx);
+//RS     }
+//RS     db.nodes
+//RS }
+//RS 
+//RS fn add_breadcrumb_hints(db: &mut SymbolDB) {
+//RS     let type_defs: Vec<SymDef> = db
+//RS         .defs
+//RS         .iter()
+//RS         .filter(|d| matches!(d.kind, SymKind::Struct { .. } | SymKind::Enum { .. }))
+//RS         .cloned()
+//RS         .collect();
+//RS     for def in type_defs {
+//RS         let mut remote: Vec<MemberFact> = db
+//RS             .members
+//RS             .iter()
+//RS             .filter(|m| {
+//RS                 m.owner == def.name
+//RS                     && m.kind == MemberKind::Method
+//RS                     && matches!(
+//RS                         m.origin,
+//RS                         MemberOrigin::InherentImpl | MemberOrigin::TraitImpl { .. }
+//RS                     )
+//RS             })
+//RS             .cloned()
+//RS             .collect();
+//RS         remote.sort_by(|a, b| {
+//RS             origin_label(&a.origin)
+//RS                 .cmp(&origin_label(&b.origin))
+//RS                 .then(a.name.cmp(&b.name))
+//RS                 .then(a.module_path.cmp(&b.module_path))
+//RS                 .then(a.span.start.cmp(&b.span.start))
+//RS         });
+//RS         if remote.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let label = remote
+//RS             .iter()
+//RS             .map(|m| {
+//RS                 format!(
+//RS                     "+ {} [{}:{}..{}]",
+//RS                     m.signature, m.module_path, m.span.start, m.span.end
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(" | ");
+//RS         db.inlay.push(InlayHint {
+//RS             span: def.def_span,
+//RS             module_path: def.module_path,
+//RS             label,
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS /// Public query surface over the same facts (no LSP hover/inlay extras).
+//RS pub fn build_index(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemIndex {
+//RS     build_symbol_db(bundle, facts).index
+//RS }
+//RS 
+//RS fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
+//RS     let structural_id = record_node(ctx, "item", &item_shape(item), mp, item_span(item));
+//RS     if let Some(id) = structural_id {
+//RS         ctx.structural_parents.push(id);
+//RS     }
+//RS     collect_state_marker_references(item, mp, ctx);
+//RS     match item {
+//RS         Item::EffectDecl(_) => {}
+//RS         // D-META-USER1=A: marker and fact declarations are first-class
+//RS         // registry entries. Keep them in the shared inspection index so
+//RS         // `jet inspect` exposes the same names sema checked for legality.
+//RS         Item::MarkerDecl(value) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: format!("rule:{}::{}", ctx.scope_identity, value.name),
+//RS                 name: value.name.clone(),
+//RS                 def_span: value.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Type {
+//RS                     derives: Vec::new(),
+//RS                 },
+//RS             });
+//RS         }
+//RS         Item::FactDecl(value) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: format!("fact:{}::{}", ctx.scope_identity, value.name),
+//RS                 name: value.name.clone(),
+//RS                 def_span: value.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Type {
+//RS                     derives: Vec::new(),
+//RS                 },
+//RS             });
+//RS         }
+//RS         Item::Func(f) => {
+//RS             record_func_type_nodes(f, mp, ctx);
+//RS             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
+//RS             if let Some(provenance) = &f.return_view_provenance {
+//RS                 ctx.db
+//RS                     .view_provenance
+//RS                     .insert(fn_identity.clone(), provenance.clone());
+//RS             }
+//RS             let sym = SymDef {
+//RS                 identity: fn_identity.clone(),
+//RS                 name: f.name.clone(),
+//RS                 def_span: f.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: callable_kind(f, &module.source),
+//RS             };
+//RS             let mut hover_text = hover_for_fn(f);
+//RS             for (active, name) in [
+//RS                 (f.is_unsafe, Syntax::KW_UNSAFE),
+//RS                 (f.is_pure, Syntax::KW_PURE),
+//RS                 (f.is_replayable, Syntax::MARKER_REPLAYABLE),
+//RS             ] {
+//RS                 if active
+//RS                     && jet_foundation::Policy::rule_allows(
+//RS                         name,
+//RS                         jet_foundation::Policy::RuleSite::Function,
+//RS                     )
+//RS                 {
+//RS                     hover_text.push_str(&format!("\nrule: #{name} (function, site-bound)"));
+//RS                 }
+//RS             }
+//RS             if let Some(tag) = &f.scrub_tag {
+//RS                 hover_text.push_str(&format!("\nrule: #Scrub({tag}) (function, site-bound)"));
+//RS             }
+//RS             let declarations = module
+//RS                 .policy_declarations
+//RS                 .iter()
+//RS                 .filter(|d| {
+//RS                     matches!(
+//RS                         d.scope,
+//RS                         jet_foundation::Policy::PolicyScope::Organization
+//RS                             | jet_foundation::Policy::PolicyScope::Package
+//RS                             | jet_foundation::Policy::PolicyScope::Module
+//RS                     ) || (d.scope == jet_foundation::Policy::PolicyScope::Function
+//RS                         && d.target == Some(f.span))
+//RS                 })
+//RS                 .cloned()
+//RS                 .collect::<Vec<_>>();
+//RS             for key in jet_foundation::Policy::POLICY_RULES
+//RS                 .iter()
+//RS                 .map(|rule| rule.key)
+//RS             {
+//RS                 if let Ok(Some(effective)) =
+//RS                     jet_foundation::Policy::resolve(key, declarations.clone())
+//RS                 {
+//RS                     hover_text.push_str("\npolicy: ");
+//RS                     hover_text.push_str(&jet_foundation::Policy::explain(&effective));
+//RS                 }
+//RS             }
+//RS             ctx.db.hover.push(HoverEntry {
+//RS                 span: f.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 text: hover_text,
+//RS             });
+//RS             ctx.db.defs.push(sym);
+//RS             // D-LINTPOLICY1=A: `#Unsafe("reason") fn …` is a spelled
+//RS             // whole-function bypass, distinct from an in-body `#Unsafe`
+//RS             // region.
+//RS             if f.is_unsafe {
+//RS                 ctx.db.bypasses.push(BypassFact {
+//RS                     kind: BypassKind::UnsafeFn,
+//RS                     site: f.name.clone(),
+//RS                     detail: f.unsafe_reason.clone().unwrap_or_default(),
+//RS                     module_path: mp.to_string(),
+//RS                     span: f.unsafe_span.unwrap_or(f.name_span).into(),
+//RS                 });
+//RS             }
+//RS             // param defs
+//RS             for p in &f.params {
+//RS                 if p.name == Syntax::KW_SELF {
+//RS                     continue;
+//RS                 }
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: local_identity(&fn_identity, "param", &p.name),
+//RS                     name: p.name.clone(),
+//RS                     def_span: p.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::Param { ty: p.ty.clone() },
+//RS                 });
+//RS                 ctx.db.hover.push(HoverEntry {
+//RS                     span: p.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     // D-APILABEL1=A: name the public label when it differs, so
+//RS                     // hovering the local name still tells you what to type.
+//RS                     text: match &p.public_label {
+//RS                         Some((label, _)) => {
+//RS                             format!("`{}`: {} — callers write `{label}:`", p.name, p.ty.name())
+//RS                         }
+//RS                         None => format!("`{}`: {}", p.name, p.ty.name()),
+//RS                     },
+//RS                 });
+//RS             }
+//RS             with_caller(
+//RS                 ctx,
+//RS                 CallerFrame {
+//RS                     name: f.name.clone(),
+//RS                     owner: None,
+//RS                     identity: fn_identity,
+//RS                 },
+//RS                 &f.params,
+//RS                 mp,
+//RS                 |ctx| {
+//RS                     structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+//RS                         collect_stmts(&f.body, mp, module, ctx)
+//RS                     });
+//RS                 },
+//RS             );
+//RS         }
+//RS         Item::Struct(s) => {
+//RS             structural_slot(ctx, "field_types", StructuralSlotKind::List, |ctx| {
+//RS                 for field in &s.fields {
+//RS                     record_node(ctx, "type", "type", mp, field.ty_span);
+//RS                 }
+//RS             });
+//RS             // D-LINTPOLICY1=A: `#[allow(lint)]` (D-DECIMAL1 and kin) is a
+//RS             // spelled source-level lint suppression — the struct itself, and
+//RS             // each field, may carry one.
+//RS             collect_allow_markers(&s.serde_markers, &s.name, mp, ctx);
+//RS             for field in &s.fields {
+//RS                 collect_allow_markers(&field.serde_markers, &field.name, mp, ctx);
+//RS             }
+//RS             for field in &s.fields {
+//RS                 if let Some(computed) = &field.computed {
+//RS                     structural_slot(ctx, "computed_fields", StructuralSlotKind::List, |ctx| {
+//RS                         collect_expr(computed, mp, ctx)
+//RS                     });
+//RS                 }
+//RS             }
+//RS             let fields: Vec<(String, AST::Type)> = s
+//RS                 .fields
+//RS                 .iter()
+//RS                 .map(|f| (f.name.clone(), f.ty.clone()))
+//RS                 .collect();
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: type_identity(&ctx.scope_identity, &s.name),
+//RS                 name: s.name.clone(),
+//RS                 def_span: s.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Struct {
+//RS                     fields: fields.clone(),
+//RS                     derives: s.derives.iter().map(|(name, _)| name.clone()).collect(),
+//RS                 },
+//RS             });
+//RS             ctx.db.hover.push(HoverEntry {
+//RS                 span: s.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 text: format!("struct `{}`", s.name),
+//RS             });
+//RS             if let Some(state) = &s.state {
+//RS                 for (name, span) in &state.states {
+//RS                     ctx.db.defs.push(SymDef {
+//RS                         identity: format!(
+//RS                             "state:{}::{}.State.{}",
+//RS                             ctx.scope_identity, s.name, name
+//RS                         ),
+//RS                         name: name.clone(),
+//RS                         def_span: *span,
+//RS                         module_path: mp.to_string(),
+//RS                         kind: SymKind::EnumVariant {
+//RS                             parent: format!("{}.State", s.name),
+//RS                         },
+//RS                     });
+//RS                     ctx.db.hover.push(HoverEntry {
+//RS                         span: *span,
+//RS                         module_path: mp.to_string(),
+//RS                         text: format!("state `{}` of `{}`", name, s.name),
+//RS                     });
+//RS                     ctx.db.members.push(MemberFact {
+//RS                         owner: format!("{}.State", s.name),
+//RS                         name: name.clone(),
+//RS                         identity: format!(
+//RS                             "state:{}::{}.State.{}",
+//RS                             ctx.scope_identity, s.name, name
+//RS                         ),
+//RS                         kind: MemberKind::Variant,
+//RS                         origin: MemberOrigin::TypeBody,
+//RS                         signature: format!("{}.State.{}", s.name, name),
+//RS                         module_path: mp.to_string(),
+//RS                         span: (*span).into(),
+//RS                     });
+//RS                 }
+//RS             }
+//RS             for f in &s.fields {
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: member_identity(&ctx.scope_identity, &s.name, "field", &f.name),
+//RS                     name: f.name.clone(),
+//RS                     def_span: f.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::Field {
+//RS                         ty: f.ty.clone(),
+//RS                         parent: s.name.clone(),
+//RS                     },
+//RS                 });
+//RS                 ctx.db.members.push(MemberFact {
+//RS                     owner: s.name.clone(),
+//RS                     name: f.name.clone(),
+//RS                     identity: member_identity(&ctx.scope_identity, &s.name, "field", &f.name),
+//RS                     kind: MemberKind::Field,
+//RS                     origin: MemberOrigin::TypeBody,
+//RS                     signature: format!("{}: {}", f.name, f.ty.name()),
+//RS                     module_path: mp.to_string(),
+//RS                     span: f.name_span.into(),
+//RS                 });
+//RS                 ctx.db.hover.push(HoverEntry {
+//RS                     span: f.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     text: format!("`{}`: {} (field of `{}`)", f.name, f.ty.name(), s.name),
+//RS                 });
+//RS             }
+//RS             for meth in &s.methods {
+//RS                 record_func_type_nodes(meth, mp, ctx);
+//RS                 let method_identity =
+//RS                     callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
+//RS                 let hover_text = hover_for_fn(meth);
+//RS                 ctx.db.members.push(method_fact(
+//RS                     &ctx.scope_identity,
+//RS                     &s.name,
+//RS                     meth,
+//RS                     MemberOrigin::TypeBody,
+//RS                     mp,
+//RS                     &module.source,
+//RS                 ));
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: method_identity.clone(),
+//RS                     name: meth.name.clone(),
+//RS                     def_span: meth.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: callable_kind(meth, &module.source),
+//RS                 });
+//RS                 ctx.db.hover.push(HoverEntry {
+//RS                     span: meth.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     text: hover_text,
+//RS                 });
+//RS                 for p in &meth.params {
+//RS                     if p.name != Syntax::KW_SELF {
+//RS                         ctx.db.defs.push(SymDef {
+//RS                             identity: local_identity(&method_identity, "param", &p.name),
+//RS                             name: p.name.clone(),
+//RS                             def_span: p.name_span,
+//RS                             module_path: mp.to_string(),
+//RS                             kind: SymKind::Param { ty: p.ty.clone() },
+//RS                         });
+//RS                     }
+//RS                 }
+//RS                 let owner = s.name.clone();
+//RS                 let meth_name = meth.name.clone();
+//RS                 let body = &meth.body;
+//RS                 with_caller(
+//RS                     ctx,
+//RS                     CallerFrame {
+//RS                         name: meth_name,
+//RS                         owner: Some(owner.clone()),
+//RS                         identity: method_identity,
+//RS                     },
+//RS                     &meth.params,
+//RS                     mp,
+//RS                     |ctx| {
+//RS                         structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+//RS                             collect_stmts(body, mp, module, ctx)
+//RS                         })
+//RS                     },
+//RS                 );
+//RS             }
+//RS             for tb in &s.trait_impls {
+//RS                 ctx.db.refs.push(declaration_ref(
+//RS                     tb.trait_name.clone(),
+//RS                     tb.trait_span,
+//RS                     mp,
+//RS                     ctx,
+//RS                 ));
+//RS                 for meth in &tb.methods {
+//RS                     record_func_type_nodes(meth, mp, ctx);
+//RS                     let method_identity =
+//RS                         callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
+//RS                     ctx.db.members.push(method_fact(
+//RS                         &ctx.scope_identity,
+//RS                         &s.name,
+//RS                         meth,
+//RS                         MemberOrigin::TraitImpl {
+//RS                             trait_name: tb.trait_name.clone(),
+//RS                         },
+//RS                         mp,
+//RS                         &module.source,
+//RS                     ));
+//RS                     ctx.db.defs.push(SymDef {
+//RS                         identity: method_identity.clone(),
+//RS                         name: meth.name.clone(),
+//RS                         def_span: meth.name_span,
+//RS                         module_path: mp.to_string(),
+//RS                             kind: callable_kind(meth, &module.source),
+//RS                     });
+//RS                     with_caller(
+//RS                         ctx,
+//RS                         CallerFrame {
+//RS                             name: meth.name.clone(),
+//RS                             owner: Some(s.name.clone()),
+//RS                             identity: method_identity,
+//RS                         },
+//RS                         &meth.params,
+//RS                         mp,
+//RS                         |ctx| {
+//RS                             structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+//RS                                 collect_stmts(&meth.body, mp, module, ctx)
+//RS                             })
+//RS                         },
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         Item::Enum(e) => {
+//RS             for variant in &e.variants {
+//RS                 match &variant.payload {
+//RS                     AST::VariantPayload::Unit => {}
+//RS                     AST::VariantPayload::Single(_, span) => {
+//RS                         structural_slot(ctx, "variant_types", StructuralSlotKind::List, |ctx| {
+//RS                             record_node(ctx, "type", "type", mp, *span);
+//RS                         });
+//RS                     }
+//RS                     AST::VariantPayload::Named(fields) => {
+//RS                         structural_slot(ctx, "variant_types", StructuralSlotKind::List, |ctx| {
+//RS                             for field in fields {
+//RS                                 record_node(ctx, "type", "type", mp, field.ty_span);
+//RS                             }
+//RS                         });
+//RS                     }
+//RS                 }
+//RS             }
+//RS             let variants: Vec<String> = e.variants.iter().map(|v| v.name.clone()).collect();
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: type_identity(&ctx.scope_identity, &e.name),
+//RS                 name: e.name.clone(),
+//RS                 def_span: e.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Enum {
+//RS                     variants: variants.clone(),
+//RS                     derives: e.derives.iter().map(|(name, _)| name.clone()).collect(),
+//RS                 },
+//RS             });
+//RS             ctx.db.hover.push(HoverEntry {
+//RS                 span: e.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 text: format!("enum `{}` — variants: {}", e.name, variants.join(", ")),
+//RS             });
+//RS             for v in &e.variants {
+//RS                 let identity = member_identity(&ctx.scope_identity, &e.name, "variant", &v.name);
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: identity.clone(),
+//RS                     name: v.name.clone(),
+//RS                     def_span: v.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::EnumVariant {
+//RS                         parent: e.name.clone(),
+//RS                     },
+//RS                 });
+//RS                 ctx.db.members.push(MemberFact {
+//RS                     owner: e.name.clone(),
+//RS                     name: v.name.clone(),
+//RS                     identity,
+//RS                     kind: MemberKind::Variant,
+//RS                     origin: MemberOrigin::TypeBody,
+//RS                     signature: v.name.clone(),
+//RS                     module_path: mp.to_string(),
+//RS                     span: v.name_span.into(),
+//RS                 });
+//RS                 ctx.db.hover.push(HoverEntry {
+//RS                     span: v.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     text: format!("`{}` — variant of `{}`", v.name, e.name),
+//RS                 });
+//RS             }
+//RS             for meth in &e.methods {
+//RS                 record_func_type_nodes(meth, mp, ctx);
+//RS                 let method_identity =
+//RS                     callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
+//RS                 ctx.db.members.push(method_fact(
+//RS                     &ctx.scope_identity,
+//RS                     &e.name,
+//RS                     meth,
+//RS                     MemberOrigin::TypeBody,
+//RS                     mp,
+//RS                     &module.source,
+//RS                 ));
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: method_identity.clone(),
+//RS                     name: meth.name.clone(),
+//RS                     def_span: meth.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: callable_kind(meth, &module.source),
+//RS                 });
+//RS                 with_caller(
+//RS                     ctx,
+//RS                     CallerFrame {
+//RS                         name: meth.name.clone(),
+//RS                         owner: Some(e.name.clone()),
+//RS                         identity: method_identity,
+//RS                     },
+//RS                     &meth.params,
+//RS                     mp,
+//RS                     |ctx| {
+//RS                         structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+//RS                             collect_stmts(&meth.body, mp, module, ctx)
+//RS                         })
+//RS                     },
+//RS                 );
+//RS             }
+//RS             for tb in &e.trait_impls {
+//RS                 ctx.db.refs.push(declaration_ref(
+//RS                     tb.trait_name.clone(),
+//RS                     tb.trait_span,
+//RS                     mp,
+//RS                     ctx,
+//RS                 ));
+//RS                 for meth in &tb.methods {
+//RS                     record_func_type_nodes(meth, mp, ctx);
+//RS                     let method_identity =
+//RS                         callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
+//RS                     ctx.db.members.push(method_fact(
+//RS                         &ctx.scope_identity,
+//RS                         &e.name,
+//RS                         meth,
+//RS                         MemberOrigin::TraitImpl {
+//RS                             trait_name: tb.trait_name.clone(),
+//RS                         },
+//RS                         mp,
+//RS                         &module.source,
+//RS                     ));
+//RS                     ctx.db.defs.push(SymDef {
+//RS                         identity: method_identity.clone(),
+//RS                         name: meth.name.clone(),
+//RS                         def_span: meth.name_span,
+//RS                         module_path: mp.to_string(),
+//RS                             kind: callable_kind(meth, &module.source),
+//RS                     });
+//RS                     with_caller(
+//RS                         ctx,
+//RS                         CallerFrame {
+//RS                             name: meth.name.clone(),
+//RS                             owner: Some(e.name.clone()),
+//RS                             identity: method_identity,
+//RS                         },
+//RS                         &meth.params,
+//RS                         mp,
+//RS                         |ctx| {
+//RS                             structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+//RS                                 collect_stmts(&meth.body, mp, module, ctx)
+//RS                             })
+//RS                         },
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         Item::Trait(t) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: type_identity(&ctx.scope_identity, &t.name),
+//RS                 name: t.name.clone(),
+//RS                 def_span: t.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Trait,
+//RS             });
+//RS             ctx.db.hover.push(HoverEntry {
+//RS                 span: t.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 text: format!("trait `{}`", t.name),
+//RS             });
+//RS             for sig in &t.methods {
+//RS                 let return_type = Some(sig.effective_return_type());
+//RS                 let failure =
+//RS                     CallableFactAvailability::Checked(sig.failure_contract());
+//RS                 let params: Vec<(String, AST::Type)> = sig
+//RS                     .params
+//RS                     .iter()
+//RS                     .filter(|p| p.name != Syntax::KW_SELF)
+//RS                     .map(|p| (p.name.clone(), p.ty.clone()))
+//RS                     .collect();
+//RS                 let param_access = sig
+//RS                     .params
+//RS                     .iter()
+//RS                     .filter(|p| p.name != Syntax::KW_SELF)
+//RS                     .map(|p| p.convention)
+//RS                     .collect::<Vec<_>>();
+//RS                 let param_defaults =
+//RS                     parameter_defaults(&sig.params, &module.source, true);
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: trait_method_identity(&ctx.scope_identity, &t.name, sig),
+//RS                     name: sig.name.clone(),
+//RS                     def_span: sig.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::Function {
+//RS                         params: params.clone(),
+//RS                         param_sources: sig
+//RS                             .params
+//RS                             .iter()
+//RS                             .filter(|p| p.name != Syntax::KW_SELF)
+//RS                             .map(|p| p.name_span.into())
+//RS                             .collect(),
+//RS                         signature_facts_available: true,
+//RS                         param_contract: parameter_contract(&sig.params),
+//RS                         param_variadic: parameter_variadic(&sig.params),
+//RS                         return_type: sig.return_type.clone(),
+//RS                         failure_contract: failure.clone(),
+//RS                         foreign_boundary: false,
+//RS                         effects: sig.declared_effects.clone(),
+//RS                         effect_via: None,
+//RS                         param_access: param_access.clone(),
+//RS                         param_defaults: param_defaults.clone(),
+//RS                         policies: Vec::new(),
+//RS                         generic_parameters: CallableFactAvailability::Checked(Vec::new()),
+//RS                     },
+//RS                 });
+//RS                 ctx.db.members.push(MemberFact {
+//RS                     owner: t.name.clone(),
+//RS                     name: sig.name.clone(),
+//RS                     identity: trait_method_identity(&ctx.scope_identity, &t.name, sig),
+//RS                     kind: MemberKind::Method,
+//RS                     origin: MemberOrigin::TraitRequirement {
+//RS                         trait_name: t.name.clone(),
+//RS                     },
+//RS                     signature: fn_signature(
+//RS                         &sig.name,
+//RS                         &params,
+//RS                         &parameter_contract(&sig.params),
+//RS                         &parameter_variadic(&sig.params),
+//RS                         &return_type,
+//RS                         &failure,
+//RS                         sig.declared_effects.as_ref(),
+//RS                         None,
+//RS                         None,
+//RS                         &param_access,
+//RS                         &param_defaults,
+//RS                         &[],
+//RS                     ),
+//RS                     module_path: mp.to_string(),
+//RS                     span: sig.name_span.into(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         Item::Tag(t) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: type_identity(&ctx.scope_identity, &t.name),
+//RS                 name: t.name.clone(),
+//RS                 def_span: t.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Tag,
+//RS             });
+//RS             ctx.db.hover.push(HoverEntry {
+//RS                 span: t.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 text: format!("tag `{}`", t.name),
+//RS             });
+//RS         }
+//RS         Item::Impl(i) => {
+//RS             ctx.db.refs.push(declaration_ref(
+//RS                 i.type_name.clone(),
+//RS                 i.type_span,
+//RS                 mp,
+//RS                 ctx,
+//RS             ));
+//RS             if let (Some(trait_name), Some(trait_span)) = (&i.trait_name, i.trait_span) {
+//RS                 ctx.db.refs.push(declaration_ref(
+//RS                     trait_name.clone(),
+//RS                     trait_span,
+//RS                     mp,
+//RS                     ctx,
+//RS                 ));
+//RS             }
+//RS             for meth in &i.methods {
+//RS                 record_func_type_nodes(meth, mp, ctx);
+//RS                 let method_identity =
+//RS                     callable_identity(&ctx.scope_identity, Some(&i.type_name), &meth.name, meth);
+//RS                 let origin = match &i.trait_name {
+//RS                     Some(trait_name) => MemberOrigin::TraitImpl {
+//RS                         trait_name: trait_name.clone(),
+//RS                     },
+//RS                     None => MemberOrigin::InherentImpl,
+//RS                 };
+//RS                 ctx.db.members.push(method_fact(
+//RS                     &ctx.scope_identity,
+//RS                     &i.type_name,
+//RS                     meth,
+//RS                     origin,
+//RS                     mp,
+//RS                     &module.source,
+//RS                 ));
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: method_identity.clone(),
+//RS                     name: meth.name.clone(),
+//RS                     def_span: meth.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: callable_kind(meth, &module.source),
+//RS                 });
+//RS                 for p in &meth.params {
+//RS                     if p.name != Syntax::KW_SELF {
+//RS                         ctx.db.defs.push(SymDef {
+//RS                             identity: local_identity(&method_identity, "param", &p.name),
+//RS                             name: p.name.clone(),
+//RS                             def_span: p.name_span,
+//RS                             module_path: mp.to_string(),
+//RS                             kind: SymKind::Param { ty: p.ty.clone() },
+//RS                         });
+//RS                     }
+//RS                 }
+//RS                 with_caller(
+//RS                     ctx,
+//RS                     CallerFrame {
+//RS                         name: meth.name.clone(),
+//RS                         owner: Some(i.type_name.clone()),
+//RS                         identity: method_identity,
+//RS                     },
+//RS                     &meth.params,
+//RS                     mp,
+//RS                     |ctx| {
+//RS                         structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+//RS                             collect_stmts(&meth.body, mp, module, ctx)
+//RS                         })
+//RS                     },
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::Const(c) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: format!("const:{}::{}", ctx.scope_identity, c.name),
+//RS                 name: c.name.clone(),
+//RS                 def_span: c.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Const,
+//RS             });
+//RS             ctx.db.hover.push(HoverEntry {
+//RS                 span: c.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 text: format!("const `{}`", c.name),
+//RS             });
+//RS             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| {
+//RS                 collect_expr(&c.value, mp, ctx)
+//RS             });
+//RS         }
+//RS         Item::Test(t) => {
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+//RS                 collect_stmts(&t.body, mp, module, ctx)
+//RS             });
+//RS         }
+//RS         Item::ExternRust(block) => {
+//RS             // Foreign bodies are outside the checked Jet source graph. Keep the
+//RS             // declaration itself as the only navigation target: its signature
+//RS             // is the checked wrapper/boundary contract, while `rust_path`
+//RS             // remains compiler bridge metadata and never becomes a location.
+//RS             for function in &block.functions {
+//RS                 let params = function
+//RS                     .params
+//RS                     .iter()
+//RS                     .map(|param| (param.name.clone(), param.ty.clone()))
+//RS                     .collect();
+//RS                 let param_contract = parameter_contract(&function.params);
+//RS                 let param_variadic = parameter_variadic(&function.params);
+//RS                 let param_access = function
+//RS                     .params
+//RS                     .iter()
+//RS                     .map(|param| param.convention)
+//RS                     .collect();
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: format!("fn:{}::{}", ctx.scope_identity, function.name),
+//RS                     name: function.name.clone(),
+//RS                     def_span: function.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::Function {
+//RS                         params,
+//RS                         param_sources: function
+//RS                             .params
+//RS                             .iter()
+//RS                             .map(|parameter| parameter.name_span.into())
+//RS                             .collect(),
+//RS                         signature_facts_available: true,
+//RS                         param_contract,
+//RS                         param_variadic,
+//RS                         return_type: function.return_type.clone(),
+//RS                         failure_contract: CallableFactAvailability::Unavailable(
+//RS                             CallableFactUnavailable {
+//RS                                 required_stage: AST::CompilerStage::Typed,
+//RS                                 reason: "extern Jet boundary has no checked failure contract",
+//RS                             },
+//RS                         ),
+//RS                         foreign_boundary: true,
+//RS                         effects: None,
+//RS                         effect_via: None,
+//RS                         param_access,
+//RS                         param_defaults: parameter_defaults(
+//RS                             &function.params,
+//RS                             &module.source,
+//RS                             false,
+//RS                         ),
+//RS                         policies: Vec::new(),
+//RS                         generic_parameters: CallableFactAvailability::Unavailable(
+//RS                             CallableFactUnavailable {
+//RS                                 required_stage: AST::CompilerStage::Typed,
+//RS                                 reason: "extern declarations expose no generic parameter facts",
+//RS                             },
+//RS                         ),
+//RS                     },
+//RS                 });
+//RS             }
+//RS         }
+//RS         Item::Module(m) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: module_identity(&ctx.scope_identity, &m.name),
+//RS                 name: m.name.clone(),
+//RS                 def_span: m.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Module,
+//RS             });
+//RS         }
+//RS         // S59: C FFI boundary modules aren't yet indexed for symbols/hover.
+//RS         Item::CModule(_) => {}
+//RS         Item::CodeModule(m) => {
+//RS             let identity = m
+//RS                 .instance_identity
+//RS                 .as_ref()
+//RS                 .map(|instance| format!("instance:{}", instance.fingerprint))
+//RS                 .unwrap_or_else(|| module_identity(&ctx.scope_identity, &m.name));
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: identity.clone(),
+//RS                 name: m.name.clone(),
+//RS                 def_span: m.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Module,
+//RS             });
+//RS             if let Some(body) = &m.body {
+//RS                 let prev = std::mem::replace(&mut ctx.scope_identity, identity);
+//RS                 structural_slot(ctx, "items", StructuralSlotKind::List, |ctx| {
+//RS                     for item in body {
+//RS                         collect_item(item, mp, module, ctx);
+//RS                     }
+//RS                 });
+//RS                 ctx.scope_identity = prev;
+//RS             }
+//RS         }
+//RS         Item::Distinct(value) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: format!("type:{}::{}", ctx.scope_identity, value.name),
+//RS                 name: value.name.clone(),
+//RS                 def_span: value.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Type {
+//RS                     derives: value.derives.iter().map(|(name, _)| name.clone()).collect(),
+//RS                 },
+//RS             });
+//RS             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| {
+//RS                 record_node(ctx, "type", "type", mp, value.base_span);
+//RS             });
+//RS         }
+//RS         Item::TypeAlias(value) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: format!("type:{}::{}", ctx.scope_identity, value.name),
+//RS                 name: value.name.clone(),
+//RS                 def_span: value.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Type {
+//RS                     derives: Vec::new(),
+//RS                 },
+//RS             });
+//RS             structural_slot(ctx, "target", StructuralSlotKind::Scalar, |ctx| {
+//RS                 record_node(ctx, "type", "type", mp, value.target_span);
+//RS             });
+//RS         }
+//RS         Item::UnitFamily(value) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: format!("type:{}::{}", ctx.scope_identity, value.family),
+//RS                 name: value.family.clone(),
+//RS                 def_span: value.family_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Type {
+//RS                     derives: Vec::new(),
+//RS                 },
+//RS             });
+//RS             for def in value.distinct_defs() {
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: format!("type:{}::{}", ctx.scope_identity, def.name),
+//RS                     name: def.name,
+//RS                     def_span: def.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::Type {
+//RS                         derives: def.derives.iter().map(|(name, _)| name.clone()).collect(),
+//RS                     },
+//RS                 });
+//RS             }
+//RS             for member in &value.members {
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: format!("unit:{}::{}", ctx.scope_identity, member.name),
+//RS                     name: member.name.clone(),
+//RS                     def_span: member.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::Const,
+//RS                 });
+//RS             }
+//RS         }
+//RS         // D-ERR-CONV: error conversions aren't yet indexed for symbols/hover.
+//RS         Item::ErrorConv(_) => {}
+//RS         // D-MIGRATE1: migration blocks aren't yet indexed for symbols/hover.
+//RS         Item::Migration(_) => {}
+//RS         Item::ProtocolDecl(value) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: format!("type:{}::{}", ctx.scope_identity, value.name),
+//RS                 name: value.name.clone(),
+//RS                 def_span: value.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Type {
+//RS                     derives: Vec::new(),
+//RS                 },
+//RS             });
+//RS             for message in &value.messages {
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: format!("protocol:{}::{}", ctx.scope_identity, message.name),
+//RS                     name: message.name.clone(),
+//RS                     def_span: message.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::EnumVariant {
+//RS                         parent: value.name.clone(),
+//RS                     },
+//RS                 });
+//RS             }
+//RS         }
+//RS         Item::UserDerive(value) => {
+//RS             ctx.db.refs.push(scoped_ref(
+//RS                 value.trait_name.clone(),
+//RS                 value.trait_span,
+//RS                 mp,
+//RS                 ctx,
+//RS             ));
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+//RS                 for body_item in &value.body {
+//RS                     match body_item {
+//RS                         AST::DeriveBodyItem::Item(item) => collect_item(item, mp, module, ctx),
+//RS                         AST::DeriveBodyItem::Stmt(stmt) => collect_stmt(stmt, mp, module, ctx),
+//RS                         AST::DeriveBodyItem::Loop { source, body, .. } => {
+//RS                             collect_expr(source, mp, ctx);
+//RS                             for nested in body {
+//RS                                 match nested {
+//RS                                     AST::DeriveBodyItem::Item(item) => {
+//RS                                         collect_item(item, mp, module, ctx)
+//RS                                     }
+//RS                                     AST::DeriveBodyItem::Stmt(stmt) => {
+//RS                                         collect_stmt(stmt, mp, module, ctx)
+//RS                                     }
+//RS                                     AST::DeriveBodyItem::Loop { source, .. } => {
+//RS                                         collect_expr(source, mp, ctx)
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             });
+//RS         }
+//RS         Item::TemplateLoop(value) => {
+//RS             structural_slot(ctx, "source", StructuralSlotKind::Scalar, |ctx| {
+//RS                 collect_expr(&value.source, mp, ctx);
+//RS             });
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+//RS                 for body_item in &value.body {
+//RS                     match body_item {
+//RS                         AST::DeriveBodyItem::Item(item) => collect_item(item, mp, module, ctx),
+//RS                         AST::DeriveBodyItem::Stmt(stmt) => collect_stmt(stmt, mp, module, ctx),
+//RS                         AST::DeriveBodyItem::Loop { source, .. } => collect_expr(source, mp, ctx),
+//RS                     }
+//RS                 }
+//RS             });
+//RS         }
+//RS         Item::GenericModule(value) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: module_identity(&ctx.scope_identity, &value.name),
+//RS                 name: value.name.clone(),
+//RS                 def_span: value.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Module,
+//RS             });
+//RS         }
+//RS         Item::ModuleAlias(value) => {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: module_identity(&ctx.scope_identity, &value.name),
+//RS                 name: value.name.clone(),
+//RS                 def_span: value.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Module,
+//RS             });
+//RS         }
+//RS     }
+//RS     if structural_id.is_some() {
+//RS         ctx.structural_parents.pop();
+//RS     }
+//RS }
+//RS 
+//RS fn hover_for_fn(f: &AST::Func) -> String {
+//RS     // D-APILABEL1=A: hover and completion show the CALL contract, because that
+//RS     // is what the reader has to type: the public label, and the `/` and `*`
+//RS     // zone separators that decide whether a label is forbidden or required.
+//RS     let mut params: Vec<String> = Vec::new();
+//RS     let mut star_done = false;
+//RS     let callable: Vec<&AST::Param> = f
+//RS         .params
+//RS         .iter()
+//RS         .filter(|p| p.name != Syntax::KW_SELF)
+//RS         .collect();
+//RS     for (index, p) in callable.iter().enumerate() {
+//RS         if p.zone == AST::ParamZone::LabelOnly && !star_done {
+//RS             star_done = true;
+//RS             params.push(Syntax::PARAM_ZONE_LABEL_ONLY.to_string());
+//RS         }
+//RS         let head = if p.zone == AST::ParamZone::PositionalOnly {
+//RS             p.name.clone()
+//RS         } else {
+//RS             match &p.public_label {
+//RS                 Some((label, _)) => format!("{label} {}", p.name),
+//RS                 None => p.name.clone(),
+//RS             }
+//RS         };
+//RS         let default = match &p.default {
+//RS             Some(_) => "{…}",
+//RS             None => "",
+//RS         };
+//RS         let rest = if p.variadic { "..." } else { "" };
+//RS         params.push(format!(
+//RS             "{}{head}: {rest}{}{default}",
+//RS             p.convention.sigil(),
+//RS             p.ty.name()
+//RS         ));
+//RS         let last_positional_only = p.zone == AST::ParamZone::PositionalOnly
+//RS             && callable
+//RS                 .get(index + 1)
+//RS                 .is_none_or(|next| next.zone != AST::ParamZone::PositionalOnly);
+//RS         if last_positional_only {
+//RS             params.push(Syntax::PARAM_ZONE_POSITIONAL_ONLY.to_string());
+//RS         }
+//RS     }
+//RS     let arrow = if let Some((param, _)) = &f.effect_via {
+//RS         format!(" -[via {param}]>")
+//RS     } else {
+//RS         f.declared_effects.as_ref().map_or_else(
+//RS             || String::new(),
+//RS             |row| {
+//RS                 format!(
+//RS                     " -[{}]>",
+//RS                     row.iter()
+//RS                         .map(|(name, _)| name.as_str())
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ")
+//RS                 )
+//RS             },
+//RS         )
+//RS     };
+//RS     let ret = format!(" {}", f.effective_return_type().name());
+//RS     let policies = f
+//RS         .markers
+//RS         .iter()
+//RS         .find(|marker| marker.name == Syntax::MARKER_POLICY)
+//RS         .and_then(|marker| AST::CallablePolicyChain::parse(&marker.expr_args_owned()).ok())
+//RS         .map(|chain| chain.display())
+//RS         .filter(|chain| !chain.is_empty())
+//RS         .map_or_else(String::new, |chain| format!(" ; policies=[{chain}]"));
+//RS     let failure = f.failure_contract();
+//RS     format!(
+//RS         "fn {}({}){}{}{}\nfailure: {} ({})",
+//RS         f.name,
+//RS         params.join(", "),
+//RS         ret,
+//RS         arrow,
+//RS         policies,
+//RS         failure.effective_type().name(),
+//RS         failure.source(),
+//RS     )
+//RS }
+//RS 
+//RS fn collect_stmts(stmts: &[AST::Stmt], mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
+//RS     for stmt in stmts {
+//RS         collect_stmt(stmt, mp, module, ctx);
+//RS     }
+//RS }
+//RS 
+//RS fn collect_loop_label_def(label: &Option<(String, Span)>, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     if let Some((name, span)) = label {
+//RS         ctx.db.defs.push(SymDef {
+//RS             identity: scoped_local_identity(ctx, "loop_label", name),
+//RS             name: name.clone(),
+//RS             def_span: *span,
+//RS             module_path: mp.to_string(),
+//RS             // Loop labels share the ordinary namespace but carry no runtime type.
+//RS             kind: SymKind::Local {
+//RS                 mutable: false,
+//RS                 ty: None,
+//RS             },
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn collect_loop_label_ref(name: &str, span: Span, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     let name_span = Span::new(span.start, span.start.saturating_add(name.len()));
+//RS     ctx.db
+//RS         .refs
+//RS         .push(scoped_ref(name.to_string(), name_span, mp, ctx));
+//RS }
+//RS 
+//RS fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
+//RS     let span = stmt.span();
+//RS     let structural_id = record_node(ctx, "stmt", &stmt_shape(stmt), mp, span);
+//RS     if let Some(id) = structural_id {
+//RS         ctx.structural_parents.push(id);
+//RS     }
+//RS     match stmt {
+//RS         AST::Stmt::Val(b) => {
+//RS             collect_binding(b, mp, ctx);
+//RS         }
+//RS         AST::Stmt::Expr(e) | AST::Stmt::Yield(e, _) => {
+//RS             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(e, mp, ctx));
+//RS         }
+//RS         AST::Stmt::DeferClose { close, .. } => {
+//RS             structural_slot(ctx, "close", StructuralSlotKind::Scalar, |ctx| {
+//RS                 collect_expr(close, mp, ctx)
+//RS             });
+//RS         }
+//RS         AST::Stmt::Assign { target, value, .. } => {
+//RS             collect_lvalue(target, mp, ctx);
+//RS             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(value, mp, ctx));
+//RS         }
+//RS         AST::Stmt::Return(e, _) => {
+//RS             if let Some(e) = e {
+//RS                 structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(e, mp, ctx));
+//RS             }
+//RS         }
+//RS         AST::Stmt::BreakValue(value, _) => {
+//RS             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| {
+//RS                 collect_expr(value, mp, ctx)
+//RS             });
+//RS         }
+//RS         AST::Stmt::BreakLabelValue(name, name_span, value, _) => {
+//RS             collect_loop_label_ref(name, *name_span, mp, ctx);
+//RS             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| {
+//RS                 collect_expr(value, mp, ctx)
+//RS             });
+//RS         }
+//RS         AST::Stmt::While {
+//RS             cond, body, label, ..
+//RS         } => {
+//RS             collect_loop_label_def(label, mp, ctx);
+//RS             structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS         AST::Stmt::For {
+//RS             var,
+//RS             var_span,
+//RS             var2,
+//RS             kind,
+//RS             body,
+//RS             label,
+//RS             ..
+//RS         } => {
+//RS             collect_loop_label_def(label, mp, ctx);
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: scoped_local_identity(ctx, "local", var),
+//RS                 name: var.clone(),
+//RS                 def_span: *var_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Local {
+//RS                     mutable: false,
+//RS                     ty: None,
+//RS                 },
+//RS             });
+//RS             if let Some((v2, s2)) = var2 {
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: scoped_local_identity(ctx, "local", v2),
+//RS                     name: v2.clone(),
+//RS                     def_span: *s2,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::Local {
+//RS                         mutable: false,
+//RS                         ty: None,
+//RS                     },
+//RS                 });
+//RS             }
+//RS             match kind {
+//RS                 AST::ForKind::Range { start, end, step, exclusive: _ } => {
+//RS                     structural_slot(ctx, "range_start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
+//RS                     structural_slot(ctx, "range_end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
+//RS                     if let Some(step) = step {
+//RS                         structural_slot(ctx, "range_step", StructuralSlotKind::Scalar, |ctx| collect_expr(step, mp, ctx));
+//RS                     }
+//RS                 }
+//RS                 AST::ForKind::In { collection, step } => {
+//RS                     structural_slot(ctx, "source", StructuralSlotKind::Scalar, |ctx| collect_expr(collection, mp, ctx));
+//RS                     if let Some(step) = step {
+//RS                         structural_slot(ctx, "stride", StructuralSlotKind::Scalar, |ctx| collect_expr(step, mp, ctx));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS         AST::Stmt::Switch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         }
+//RS         // D-OSTARGET2=B: `prep if $build.os == { … }` — index arm bodies
+//RS         // the same as a runtime dispatch (sema desugars it away later).
+//RS         | AST::Stmt::ComptimeSwitch {
+//RS             subject,
+//RS             arms,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             structural_slot(ctx, "subject", StructuralSlotKind::Scalar, |ctx| collect_expr(subject, mp, ctx));
+//RS             structural_slot(ctx, "arms", StructuralSlotKind::List, |ctx| {
+//RS                 for arm in arms {
+//RS                     let arm_id = record_node(ctx, "arm", "switch_arm", mp, arm.span);
+//RS                     if let Some(id) = arm_id { ctx.structural_parents.push(id); }
+//RS                     structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(&arm.cond, mp, ctx));
+//RS                     structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&arm.body, mp, module, ctx));
+//RS                     if let Some(id) = arm_id {
+//RS                         let has_boundary = ctx.db.slot_boundaries.iter().any(|boundary| {
+//RS                             boundary.parent == id && boundary.slot == "body"
+//RS                         });
+//RS                         if !has_boundary && arm.body.len() == 1 {
+//RS                             ctx.db.slot_boundaries.push(StructuralSlotBoundary {
+//RS                                 parent: id,
+//RS                                 slot: "body".to_string(),
+//RS                                 module_path: mp.to_string(),
+//RS                                 span: arm.body[0].span().into(),
+//RS                             });
+//RS                         }
+//RS                         ctx.structural_parents.pop();
+//RS                     }
+//RS                 }
+//RS             });
+//RS             if let Some(eb) = else_body {
+//RS                 structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| collect_stmts(eb, mp, module, ctx));
+//RS             }
+//RS         }
+//RS         AST::Stmt::CountedLoop {
+//RS             cond, body, init, step, label, ..
+//RS         } => {
+//RS             collect_loop_label_def(label, mp, ctx);
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: scoped_local_identity(ctx, "local", &init.name),
+//RS                 name: init.name.clone(),
+//RS                 def_span: init.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Local {
+//RS                     mutable: true,
+//RS                     ty: None,
+//RS                 },
+//RS             });
+//RS             structural_slot(ctx, "init", StructuralSlotKind::Scalar, |ctx| collect_expr(&init.init, mp, ctx));
+//RS             structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+//RS             if let Some(step) = step {
+//RS                 structural_slot(ctx, "afterthought", StructuralSlotKind::Scalar, |ctx| collect_stmt(step, mp, module, ctx));
+//RS             }
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS         // D-LINTPOLICY1=A: an `#Unsafe("reason") { … }` audited region is a
+//RS         // spelled bypass — record it before recursing into its body.
+//RS         AST::Stmt::Unsafe {
+//RS             audit, body, span, ..
+//RS         } => {
+//RS             ctx.db.bypasses.push(BypassFact {
+//RS                 kind: BypassKind::UnsafeRegion,
+//RS                 site: active_scope(ctx).to_string(),
+//RS                 detail: audit.clone().unwrap_or_default(),
+//RS                 module_path: mp.to_string(),
+//RS                 span: (*span).into(),
+//RS             });
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS         AST::Stmt::Loop { body, label, .. } => {
+//RS             collect_loop_label_def(label, mp, ctx);
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS         AST::Stmt::Impure { body, .. }
+//RS         | AST::Stmt::Reactive { body, .. }
+//RS         | AST::Stmt::Shield { body, .. }
+//RS         | AST::Stmt::Switched { body, .. }
+//RS         | AST::Stmt::Region { body, .. }
+//RS         | AST::Stmt::Policy { body, .. }
+//RS         | AST::Stmt::TaskGroup { body, .. }
+//RS         | AST::Stmt::Layout { body, .. }
+//RS         | AST::Stmt::AuthorityScope { body, .. }
+//RS         | AST::Stmt::Transact { body, .. }
+//RS         | AST::Stmt::AssumeDet { body, .. } => {
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS         AST::Stmt::Break(_) | AST::Stmt::Continue(_) => {}
+//RS         AST::Stmt::BreakLabel(name, span) | AST::Stmt::ContinueLabel(name, span) => {
+//RS             collect_loop_label_ref(name, *span, mp, ctx);
+//RS         }
+//RS         // D-META-STAGE1=B (formerly D-CTMARKER1): collect symbols from comptime block body.
+//RS         AST::Stmt::ComptimeBlock { body, .. } => structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
+//RS         AST::Stmt::ComptimeIf {
+//RS             cond,
+//RS             then_body,
+//RS             else_body,
+//RS             ..
+//RS         } => {
+//RS             structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+//RS             structural_slot(ctx, "then_body", StructuralSlotKind::List, |ctx| collect_stmts(then_body, mp, module, ctx));
+//RS             if let Some(eb) = else_body {
+//RS                 structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| collect_stmts(eb, mp, module, ctx));
+//RS             }
+//RS         }
+//RS         AST::Stmt::ContextBlock { fields, body, .. } => {
+//RS             structural_slot(ctx, "fields", StructuralSlotKind::List, |ctx| {
+//RS                 for (_, e, _) in fields { collect_expr(e, mp, ctx); }
+//RS             });
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS         // D-TERM1 (ratified 2026-06-22): collect symbols from live block body.
+//RS         AST::Stmt::Live { body, .. } => {
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS         // D-DOTSCOPE1: collect symbols from a scope-member region body.
+//RS         AST::Stmt::ScopeMember { body, .. } => {
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+//RS         }
+//RS     }
+//RS     if structural_id.is_some() {
+//RS         ctx.structural_parents.pop();
+//RS     }
+//RS }
+//RS 
+//RS fn collect_lvalue(lv: &AST::LValue, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     match lv {
+//RS         AST::LValue::Local { name, name_span } => {
+//RS             ctx.db
+//RS                 .refs
+//RS                 .push(scoped_ref(name.clone(), *name_span, mp, ctx));
+//RS         }
+//RS         AST::LValue::Index { base, index, .. } => {
+//RS             structural_slot(ctx, "target_base", StructuralSlotKind::Scalar, |ctx| {
+//RS                 collect_expr(base, mp, ctx)
+//RS             });
+//RS             structural_slot(ctx, "target_index", StructuralSlotKind::Scalar, |ctx| {
+//RS                 collect_expr(index, mp, ctx)
+//RS             });
+//RS         }
+//RS         // D-MUTSELF1: `place.field = v` — record references in the base place.
+//RS         AST::LValue::Field { base, .. } => {
+//RS             structural_slot(ctx, "target_base", StructuralSlotKind::Scalar, |ctx| {
+//RS                 collect_expr(base, mp, ctx)
+//RS             })
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     if let Some(span) = b.ty_span {
+//RS         structural_slot(ctx, "type", StructuralSlotKind::Scalar, |ctx| {
+//RS             record_node(ctx, "type", "type", mp, span);
+//RS         });
+//RS     }
+//RS     // S74: a destructuring binding brings each named field/element into scope.
+//RS     if let Some(pat) = &b.pattern {
+//RS         structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| {
+//RS             collect_expr(&b.init, mp, ctx)
+//RS         });
+//RS         for n in pat.names() {
+//RS             ctx.db.defs.push(SymDef {
+//RS                 identity: scoped_local_identity(ctx, "local", &n.name),
+//RS                 name: n.name.clone(),
+//RS                 def_span: n.span,
+//RS                 module_path: mp.to_string(),
+//RS                 kind: SymKind::Local {
+//RS                     mutable: b.mutable,
+//RS                     ty: None,
+//RS                 },
+//RS             });
+//RS         }
+//RS         return;
+//RS     }
+//RS     let ty = b.ty.clone();
+//RS     // has_explicit_annotation: user wrote `: Type` — ty_span is Some iff the annotation is in source
+//RS     let has_explicit = b.ty_span.is_some();
+//RS     ctx.db.defs.push(SymDef {
+//RS         identity: scoped_local_identity(ctx, "local", &b.name),
+//RS         name: b.name.clone(),
+//RS         def_span: b.name_span,
+//RS         module_path: mp.to_string(),
+//RS         kind: SymKind::Local {
+//RS             mutable: b.mutable,
+//RS             ty: ty.clone(),
+//RS         },
+//RS     });
+//RS     if let Some(t) = &ty {
+//RS         let text = if b.mutable {
+//RS             format!("`{}`: {} (mutable)", b.name, t.name())
+//RS         } else {
+//RS             format!("`{}`: {} (immutable)", b.name, t.name())
+//RS         };
+//RS         ctx.db.hover.push(HoverEntry {
+//RS             span: b.name_span,
+//RS             module_path: mp.to_string(),
+//RS             text,
+//RS         });
+//RS         // Inlay hint: only when user omitted the annotation (sema filled it in)
+//RS         if !has_explicit {
+//RS             let label = format!(": {}", t.name());
+//RS             ctx.db.inlay.push(InlayHint {
+//RS                 span: b.name_span,
+//RS                 module_path: mp.to_string(),
+//RS                 label,
+//RS             });
+//RS         }
+//RS     }
+//RS     structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| {
+//RS         collect_expr(&b.init, mp, ctx)
+//RS     });
+//RS }
+//RS 
+//RS /// D-CALLPOS1=A / D-REF3: the binder records the public label on each supplied
+//RS /// argument. Show it before the expression, including for function values and
+//RS /// Core calls where the index cannot resolve a source declaration. A repeated
+//RS /// binder slot is the variadic tail; only its first member gets a hint.
+//RS fn collect_call_inlay_hints(args: &[AST::CallArg], mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     let mut seen_slots = HashSet::new();
+//RS     for arg in args {
+//RS         if arg.label.is_some() {
+//RS             continue;
+//RS         }
+//RS         let Some(label) = arg.flags.binder_label.as_deref() else {
+//RS             continue;
+//RS         };
+//RS         if label.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let Some(slot) = arg.flags.binder_slot else {
+//RS             continue;
+//RS         };
+//RS         if !seen_slots.insert(slot) {
+//RS             continue;
+//RS         }
+//RS         let start = arg.expr.span().start;
+//RS         ctx.db.inlay.push(InlayHint {
+//RS             span: Span::new(start, start),
+//RS             module_path: mp.to_string(),
+//RS             label: format!("{label}: "),
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     // D-MEM-COPYSEM1=A: sema-inserted owning copies remain visible as a ghost
+//RS     // hint. An authored `~` has a span beginning at its sigil; an implicit
+//RS     // materializer reuses the operand span, which is the one distinction the
+//RS     // semantic index needs to expose.
+//RS     if let AST::Expr::Copy(inner, copy_span) = e {
+//RS         if *copy_span == inner.span() {
+//RS             ctx.db.inlay.push(InlayHint {
+//RS                 span: *copy_span,
+//RS                 module_path: mp.to_string(),
+//RS                 label: " ~ copy".to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS     let structural_id = record_node(ctx, "expr", &expr_shape(e), mp, structural_expr_span(e));
+//RS     if let Some(id) = structural_id {
+//RS         ctx.structural_parents.push(id);
+//RS     }
+//RS     match e {
+//RS         AST::Expr::PtrFromAddr { addr, .. } => {
+//RS             structural_slot(ctx, "address", StructuralSlotKind::Scalar, |ctx| collect_expr(addr, mp, ctx));
+//RS         }
+//RS         AST::Expr::Ident(name, span) => {
+//RS             ctx.db.refs.push(scoped_ref(name.clone(), *span, mp, ctx));
+//RS         }
+//RS         AST::Expr::Call(call) => {
+//RS             for arg in &call.args {
+//RS                 let Some(fact) = arg.flags.arithmetic_policy else {
+//RS                     continue;
+//RS                 };
+//RS                 let Some(operation) = fact.operation else {
+//RS                     continue;
+//RS                 };
+//RS                 ctx.db.arithmetic.push(ArithmeticOperationFact {
+//RS                     operation: operation.as_str().to_string(),
+//RS                     policy: fact.mode.as_str().to_string(),
+//RS                     module_path: mp.to_string(),
+//RS                     operation_span: fact.operation_span.into(),
+//RS                     scope_span: fact.scope_span.into(),
+//RS                 });
+//RS                 ctx.db.hover.push(HoverEntry {
+//RS                     span: fact.operation_span,
+//RS                     module_path: mp.to_string(),
+//RS                     text: format_arithmetic_hover(&fact, mp),
+//RS                 });
+//RS             }
+//RS             record_call(ctx, mp, &call.name, call.name_span);
+//RS             ctx.db
+//RS                 .refs
+//RS                 .push(scoped_ref(call.name.clone(), call.name_span, mp, ctx));
+//RS             collect_call_inlay_hints(&call.args, mp, ctx);
+//RS             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
+//RS                 for arg in &call.args { collect_expr(&arg.expr, mp, ctx); }
+//RS             });
+//RS         }
+//RS         AST::Expr::MethodCall {
+//RS             receiver,
+//RS             method,
+//RS             method_span,
+//RS             args,
+//RS             ..
+//RS         } => {
+//RS             structural_slot(ctx, "receiver", StructuralSlotKind::Scalar, |ctx| collect_expr(receiver, mp, ctx));
+//RS             record_call(ctx, mp, method, *method_span);
+//RS             ctx.db
+//RS                 .refs
+//RS                 .push(scoped_ref(method.clone(), *method_span, mp, ctx));
+//RS             // D-LINTPOLICY1=A: `.drop("reason")` is the sole intentional
+//RS             // discard spelling (D-IGNORERET2) — a spelled bypass of the
+//RS             // must-use return-value check. Record it before the args walk.
+//RS             if method == Syntax::METHOD_DROP {
+//RS                 let reason = args.first().and_then(|a| match &a.expr {
+//RS                     AST::Expr::Str(parts, _) => match parts.as_slice() {
+//RS                         [AST::StrPart::Lit(s)] => Some(s.clone()),
+//RS                         _ => None,
+//RS                     },
+//RS                     _ => None,
+//RS                 });
+//RS                 ctx.db.bypasses.push(BypassFact {
+//RS                     kind: BypassKind::ExplicitDrop,
+//RS                     site: active_scope(ctx).to_string(),
+//RS                     detail: reason.unwrap_or_default(),
+//RS                     module_path: mp.to_string(),
+//RS                     span: (*method_span).into(),
+//RS                 });
+//RS             }
+//RS             collect_call_inlay_hints(args, mp, ctx);
+//RS             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
+//RS                 for arg in args { collect_expr(&arg.expr, mp, ctx); }
+//RS             });
+//RS         }
+//RS         AST::Expr::Field(base, field, span) => {
+//RS             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+//RS             ctx.db.refs.push(scoped_ref(field.clone(), *span, mp, ctx));
+//RS         }
+//RS         AST::Expr::OptField {
+//RS             base,
+//RS             member,
+//RS             member_span,
+//RS             ..
+//RS         } => {
+//RS             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+//RS             ctx.db
+//RS                 .refs
+//RS                 .push(scoped_ref(member.clone(), *member_span, mp, ctx));
+//RS         }
+//RS         AST::Expr::Binary(_, l, r, _) => {
+//RS             structural_slot(ctx, "lhs", StructuralSlotKind::Scalar, |ctx| collect_expr(l, mp, ctx));
+//RS             structural_slot(ctx, "rhs", StructuralSlotKind::Scalar, |ctx| collect_expr(r, mp, ctx));
+//RS         }
+//RS         AST::Expr::CompareChain { operands, .. } => {
+//RS             structural_slot(ctx, "operands", StructuralSlotKind::List, |ctx| {
+//RS                 for e in operands { collect_expr(e, mp, ctx); }
+//RS             });
+//RS         }
+//RS         AST::Expr::Unary(_, inner, _) => {
+//RS             structural_slot(ctx, "operand", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
+//RS         }
+//RS         AST::Expr::Deref(inner, _)
+//RS         | AST::Expr::RawOf(inner, _)
+//RS         | AST::Expr::Copy(inner, _)
+//RS         | AST::Expr::Place(inner, _, _) => {
+//RS             structural_slot(ctx, "operand", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
+//RS         }
+//RS         AST::Expr::Index { base, index, .. } => {
+//RS             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+//RS             structural_slot(ctx, "index", StructuralSlotKind::Scalar, |ctx| collect_expr(index, mp, ctx));
+//RS         }
+//RS         AST::Expr::Slice {
+//RS             base, start, end, range, ..
+//RS         } => {
+//RS             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+//RS             if let Some(range) = range {
+//RS                 structural_slot(ctx, "range", StructuralSlotKind::Scalar, |ctx| collect_expr(range, mp, ctx));
+//RS             } else {
+//RS                 structural_slot(ctx, "start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
+//RS                 structural_slot(ctx, "end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
+//RS             }
+//RS         }
+//RS         AST::Expr::Range { start, end, .. } => {
+//RS             structural_slot(ctx, "start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
+//RS             structural_slot(ctx, "end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
+//RS         }
+//RS         AST::Expr::Str(parts, _) => {
+//RS             structural_slot(ctx, "interpolations", StructuralSlotKind::List, |ctx| {
+//RS                 for part in parts {
+//RS                     if let AST::StrPart::Interp(inner, _) = part { collect_expr(inner, mp, ctx); }
+//RS                 }
+//RS             });
+//RS         }
+//RS         AST::Expr::ListLit(items, _) => {
+//RS             structural_slot(ctx, "items", StructuralSlotKind::List, |ctx| {
+//RS                 for i in items { collect_expr(i, mp, ctx); }
+//RS             });
+//RS         }
+//RS         AST::Expr::MemberSpread { base, .. } => {
+//RS             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+//RS         }
+//RS         AST::Expr::Spread(inner, _) => structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
+//RS         AST::Expr::MapLit(pairs, _) => {
+//RS             structural_slot(ctx, "keys", StructuralSlotKind::List, |ctx| {
+//RS                 for (k, _) in pairs { collect_expr(k, mp, ctx); }
+//RS             });
+//RS             structural_slot(ctx, "values", StructuralSlotKind::List, |ctx| {
+//RS                 for (_, v) in pairs { collect_expr(v, mp, ctx); }
+//RS             });
+//RS         }
+//RS         AST::Expr::TupleLit(fields, _, _) => {
+//RS             structural_slot(ctx, "fields", StructuralSlotKind::List, |ctx| {
+//RS                 for (_, expr) in fields { collect_expr(expr, mp, ctx); }
+//RS             });
+//RS         }
+//RS         AST::Expr::StructLit {
+//RS             type_name,
+//RS             type_args,
+//RS             fields,
+//RS             inferred,
+//RS             span,
+//RS             ..
+//RS         } => {
+//RS             // After sema fills `type_name` on inferred `.{…}`, surface it in IDE.
+//RS             if *inferred && !type_name.is_empty() {
+//RS                 let ty_label = if type_args.is_empty() {
+//RS                     type_name.clone()
+//RS                 } else {
+//RS                     AST::Type::Apply {
+//RS                         name: type_name.clone(),
+//RS                         args: type_args.clone(),
+//RS                     }
+//RS                     .show()
+//RS                 };
+//RS                 ctx.db.hover.push(HoverEntry {
+//RS                     span: *span,
+//RS                     module_path: mp.to_string(),
+//RS                     text: format!("`{}`", ty_label),
+//RS                 });
+//RS                 ctx.db.inlay.push(InlayHint {
+//RS                     span: *span,
+//RS                     module_path: mp.to_string(),
+//RS                     label: format!(": {}", ty_label),
+//RS                 });
+//RS             }
+//RS             structural_slot(ctx, "fields", StructuralSlotKind::List, |ctx| {
+//RS                 for (_, _, expr) in fields {
+//RS                     collect_expr(expr, mp, ctx);
+//RS                 }
+//RS             });
+//RS         }
+//RS         AST::Expr::TypedLit { body, .. } => {
+//RS             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+//RS                 body.for_each_expr(|expr| collect_expr(expr, mp, ctx));
+//RS             });
+//RS         }
+//RS         AST::Expr::EnumLit { args, .. } => {
+//RS             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
+//RS                 for arg in args {
+//RS                     match arg {
+//RS                         AST::EnumLitArg::Positional(e) => collect_expr(e, mp, ctx),
+//RS                         AST::EnumLitArg::Named { expr, .. } => collect_expr(expr, mp, ctx),
+//RS                     }
+//RS                 }
+//RS             });
+//RS         }
+//RS         AST::Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
+//RS         | AST::Expr::Present(inner, _)
+//RS         | AST::Expr::Ok(inner, _)
+//RS         | AST::Expr::Err(inner, _) => structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
+//RS         AST::Expr::Try(inner, _, _, note) => {
+//RS             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
+//RS             if let Some(note) = note {
+//RS                 structural_slot(ctx, "note", StructuralSlotKind::Scalar, |ctx| collect_expr(note, mp, ctx));
+//RS             }
+//RS         }
+//RS         AST::Expr::OrFallback {
+//RS             value, fallback, ..
+//RS         } => {
+//RS             structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(value, mp, ctx));
+//RS             match fallback {
+//RS                 AST::OrFallback::Value(v) => structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| collect_expr(v, mp, ctx)),
+//RS                 AST::OrFallback::Block { body, value, .. } => {
+//RS                     structural_slot(ctx, "fallback_body", StructuralSlotKind::List, |ctx| {
+//RS                         let module = ctx.module;
+//RS                         collect_stmts(body, mp, module, ctx);
+//RS                     });
+//RS                     if let Some(value) = value {
+//RS                         structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| {
+//RS                             collect_expr(value, mp, ctx)
+//RS                         });
+//RS                     }
+//RS                 }
+//RS                 AST::OrFallback::Panic { args, .. } => {
+//RS                     structural_slot(ctx, "fallback_args", StructuralSlotKind::List, |ctx| {
+//RS                         for a in args { collect_expr(&a.expr, mp, ctx); }
+//RS                     });
+//RS                 }
+//RS                 AST::OrFallback::Return(v, _) => {
+//RS                     if let Some(v) = v {
+//RS                         structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| collect_expr(v, mp, ctx));
+//RS                     }
+//RS                 }
+//RS                 AST::OrFallback::Break(_) | AST::OrFallback::Continue(_) => {}
+//RS                 AST::OrFallback::BreakLabel(name, span)
+//RS                 | AST::OrFallback::ContinueLabel(name, span) => {
+//RS                     collect_loop_label_ref(name, *span, mp, ctx);
+//RS                 }
+//RS             }
+//RS         }
+//RS         AST::Expr::PatternTest { subject, .. } => structural_slot(ctx, "subject", StructuralSlotKind::Scalar, |ctx| collect_expr(subject, mp, ctx)),
+//RS         AST::Expr::Lambda(l) => {
+//RS             for p in &l.params {
+//RS                 ctx.db.defs.push(SymDef {
+//RS                     identity: scoped_local_identity(ctx, "param", &p.name),
+//RS                     name: p.name.clone(),
+//RS                     def_span: p.name_span,
+//RS                     module_path: mp.to_string(),
+//RS                     kind: SymKind::Param {
+//RS                         ty: p.ty.clone().unwrap_or(AST::Type::Int),
+//RS                     },
+//RS                 });
+//RS             }
+//RS             match &l.body {
+//RS                 AST::LambdaBody::Expr(e) => structural_slot(ctx, "body", StructuralSlotKind::Scalar, |ctx| collect_expr(e, mp, ctx)),
+//RS                 AST::LambdaBody::Block(stmts) => {
+//RS                     structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+//RS                         for s in stmts {
+//RS                             if let AST::Stmt::Val(b) = s { collect_binding(b, mp, ctx); }
+//RS                             else { collect_expr_stmt(s, mp, ctx); }
+//RS                         }
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         AST::Expr::CallValue { callee, args, .. } => {
+//RS             structural_slot(ctx, "callee", StructuralSlotKind::Scalar, |ctx| collect_expr(callee, mp, ctx));
+//RS             collect_call_inlay_hints(args, mp, ctx);
+//RS             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
+//RS                 for a in args { collect_expr(&a.expr, mp, ctx); }
+//RS             });
+//RS         }
+//RS         AST::Expr::If {
+//RS             cond,
+//RS             then_body,
+//RS             then_value,
+//RS             else_body,
+//RS             else_value,
+//RS             ..
+//RS         } => {
+//RS             structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+//RS             structural_slot(ctx, "then_body", StructuralSlotKind::List, |ctx| {
+//RS                 for s in then_body {
+//RS                     if let AST::Stmt::Val(b) = s { collect_binding(b, mp, ctx); }
+//RS                     else { collect_expr_stmt(s, mp, ctx); }
+//RS                 }
+//RS             });
+//RS             structural_slot(ctx, "then_value", StructuralSlotKind::Scalar, |ctx| collect_expr(then_value, mp, ctx));
+//RS             structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| {
+//RS                 for s in else_body {
+//RS                     if let AST::Stmt::Val(b) = s { collect_binding(b, mp, ctx); }
+//RS                     else { collect_expr_stmt(s, mp, ctx); }
+//RS                 }
+//RS             });
+//RS             structural_slot(ctx, "else_value", StructuralSlotKind::Scalar, |ctx| collect_expr(else_value, mp, ctx));
+//RS         }
+//RS         AST::Expr::ComptimeName { name, span, .. } => {
+//RS             // Sema folds a checked fact read to an internal comptime literal.
+//RS             // Preserve the source fact reference for tooling from that
+//RS             // compiler-owned sentinel; an ordinary `@origin` binding is not a
+//RS             // fact read and therefore must not be classified here.
+//RS             if name.starts_with("\0jet.fact.")
+//RS                 && ctx
+//RS                     .module
+//RS                     .source
+//RS                     .get(span.start..span.end)
+//RS                     .is_some_and(|member| member == Syntax::COMPILER_FACT_ORIGIN)
+//RS             {
+//RS                 ctx.db.refs.push(scoped_ref(
+//RS                     Syntax::COMPILER_FACT_ORIGIN.to_string(),
+//RS                     *span,
+//RS                     mp,
+//RS                     ctx,
+//RS                 ));
+//RS             }
+//RS         }
+//RS         AST::Expr::Int(_, _, _, _)
+//RS         | AST::Expr::Float(_, _, _, _)
+//RS         | AST::Expr::Bool(_, _)
+//RS         | AST::Expr::Unit(_)
+//RS         | AST::Expr::Char(_, _)
+//RS         | AST::Expr::Absent(_)
+//RS         | AST::Expr::ReduceMarker(_, _)
+//RS         | AST::Expr::Todo { .. }
+//RS         | AST::Expr::NoElse(_)
+//RS         | AST::Expr::UnitLit { .. }
+//RS         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
+//RS         // literal, no nested `Expr` to recurse into.
+//RS         | AST::Expr::StrMatchLit(_, _)
+//RS         | AST::Expr::BinMatchLit(_, _) => {}
+//RS         AST::Expr::Paren(inner, _) => structural_slot(ctx, "inner", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
+//RS     }
+//RS     if structural_id.is_some() {
+//RS         ctx.structural_parents.pop();
+//RS     }
+//RS }
+//RS 
+//RS fn format_arithmetic_hover(fact: &AST::ArithmeticPolicyFact, module_path: &str) -> String {
+//RS     let operation = fact
+//RS         .operation
+//RS         .map_or("operation", AST::ArithmeticOperation::as_str);
+//RS     format!(
+//RS         "fixed-width {operation}: .{}; scope = {module_path}:{}..{}",
+//RS         fact.mode.as_str(),
+//RS         fact.scope_span.start,
+//RS         fact.scope_span.end,
+//RS     )
+//RS }
+//RS 
+//RS fn collect_expr_stmt(stmt: &AST::Stmt, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     if let AST::Stmt::Expr(e) | AST::Stmt::DeferClose { close: e, .. } = stmt {
+//RS         collect_expr(e, mp, ctx);
+//RS     }
+//RS }
+// END-PORT-PENDING 0810 crates/jet-semindex/src/Build.rs:1776-3654
+

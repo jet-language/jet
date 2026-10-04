@@ -1,0 +1,89 @@
+// Source/LSP/EnvironmentResources.rs:1–73 and Server.rs:634–665.
+// This read-only resource projects `jet env info --json`, never evaluates a
+// second environment model. OSPath preserves native workspace/executable/cwd
+// identities. Core owns filesystem/process/error/cleanup laws (#4494/#4483).
+use core.encoding.[DataTree]
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.files.runtime.kernel_path_components as lsp_env_path
+use core.files.host.retained_descriptor as lsp_env_files
+use core.sys.host.os_path_ingress as lsp_env_sys
+use core.process.host.native_process as lsp_env_process
+use jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
+use jetpack.[ENV_FILE, env_hook_find_env_root]
+
+@LSP_ENVIRONMENT_RESOURCE_URI :: "jet://environment"
+@LSP_ENVIRONMENT_RESOURCE_MIME_TYPE :: "application/json"
+// Foundation's strict protocol JSON limit is 1 MiB (JSON.rs); the original
+// resource caps raw stdout BEFORE UTF8 decoding, trimming, or JSON parsing.
+@LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES :: 1048576 / 4
+
+#Error
+pub enum LSPEnvironmentResourceReadError {
+    NotFound
+    Unavailable
+}
+
+pub fn lsp_environment_root(roots: [OSPath]) -[FS, Env]> OSPath? Never! {
+    if roots.len() != 0 -> return env_hook_find_env_root(roots[0])
+    start :: lsp_env_sys.current_dir() ?? return None
+    env_hook_find_env_root(start)
+}
+
+fn lsp_environment_resource_file(root: OSPath) -> OSPath Never! {
+    path := ~root
+    lsp_env_path.push(&path, lsp_env_path.from_text(@ENV_FILE, root.platform))
+    path
+}
+
+pub fn lsp_environment_resource_list_json(roots: [OSPath]) -[FS, Env]> String Never! {
+    root :: lsp_environment_root(roots) ?? return "{{\"resources\":[]}}"
+    if !lsp_env_files.is_file(lsp_environment_resource_file(root)) -> return "{{\"resources\":[]}}"
+    "{{\"resources\":[{{\"uri\":\"{@LSP_ENVIRONMENT_RESOURCE_URI}\",\"name\":\"Jet environment\",\"description\":\"Read-only typed environment facts\",\"mimeType\":\"{@LSP_ENVIRONMENT_RESOURCE_MIME_TYPE}\"}}]}}"
+}
+
+pub fn lsp_environment_resource_read_json(roots: [OSPath], uri: String) -[FS, Env, Exec, IO, Time.Wait]> String LSPEnvironmentResourceReadError! {
+    // URI refusal precedes even current-directory/root lookup.
+    if uri != @LSP_ENVIRONMENT_RESOURCE_URI -> return Err(LSPEnvironmentResourceReadError.NotFound)
+    root :: lsp_environment_root(roots) ?? return Err(LSPEnvironmentResourceReadError.NotFound)
+    if !lsp_env_files.is_file(lsp_environment_resource_file(root)) -> return Err(LSPEnvironmentResourceReadError.NotFound)
+    executable :: lsp_env_sys.current_exe() ?? return Err(LSPEnvironmentResourceReadError.Unavailable)
+    command := lsp_env_process.command(executable)
+    // Fresh textual ASCII arguments inherit the actual executable platform;
+    // no existing native path is recovered from its lossy display.
+    &command.args([OSPath]{
+        lsp_env_path.from_text("env", executable.platform),
+        lsp_env_path.from_text("info", executable.platform),
+        lsp_env_path.from_text("--json", executable.platform),
+        lsp_env_path.from_text("--no-color", executable.platform),
+    })
+    &command.current_dir(root)
+    output := &command.output() ?? return Err(LSPEnvironmentResourceReadError.Unavailable)
+    lsp_environment_resource_text(output.status.success, ^output.stdout)
+}
+
+// Shared by the actual subprocess path and byte-policy controls. Consumes
+// stdout once; never copies the captured byte buffer to validate its size.
+fn lsp_environment_resource_text(success: Bool, stdout: ^[U8]) -> String LSPEnvironmentResourceReadError! {
+    if !success || stdout.len() > @LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES -> return Err(LSPEnvironmentResourceReadError.Unavailable)
+    decoded :: String.from_bytes(^stdout) ?? return Err(LSPEnvironmentResourceReadError.Unavailable)
+    text :: decoded.trim()
+    if text.is_empty() || foundation_parse_protocol_json(text) == None -> return Err(LSPEnvironmentResourceReadError.Unavailable)
+    Ok(text)
+}
+
+fn lsp_environment_resource_contents_json(uri: String, text: String) -> String Never! {
+    "{{\"contents\":[{{\"uri\":{foundation_json_quote(uri)},\"mimeType\":\"{@LSP_ENVIRONMENT_RESOURCE_MIME_TYPE}\",\"text\":{foundation_json_quote(text)}}}]}}"
+}
+
+pub fn lsp_environment_resource_read_response(server: LSPServer, params: DataTree?, id: DataTree) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
+    value :: params ?? return Val(lsp_error_response(id, -32602, "resources/read requires a URI"))
+    uri_value :: value.field("uri") ?? return Val(lsp_error_response(id, -32602, "resources/read requires a URI"))
+    if uri_value == .Text(uri) {
+        if lsp_environment_resource_read_json(server.workspace_roots, uri) == {
+            .Ok(text) -> return Val(lsp_response(id, lsp_environment_resource_contents_json(uri, text)))
+            .Err(.NotFound) -> return Val(lsp_error_response(id, -32002, "environment resource not found"))
+            .Err(.Unavailable) -> return Val(lsp_error_response(id, -32002, "environment resource unavailable"))
+        }
+    }
+    Val(lsp_error_response(id, -32602, "resources/read requires a URI"))
+}

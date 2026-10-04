@@ -1,0 +1,49 @@
+// Original Server4532–4546 envelope oracle. Framing/cancellation thread and
+// unwind/log IO oracles require the canonical Runtime concurrency/stdin ABI.
+#Test("json_rpc_envelope_rejects_malformed_or_ambiguous_requests") {
+    valid :: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{}}}}"
+    if lsp_parse_rpc_message(valid) == { .Ok(_) -> {} .Err(_) -> assert(false) }
+    invalid :: [String]{
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"x\",\"method\":\"y\"}}",
+        "{{\"jsonrpc\":\"1.0\",\"method\":\"x\"}}",
+        "{{\"jsonrpc\":\"2.0\",\"id\":1.5,\"method\":\"x\"}}",
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"x\",\"params\":1}}",
+        "[\"not\",\"a\",\"request\"]",
+    }
+    loop (index, raw) in invalid {
+        if lsp_parse_rpc_message(raw) == {
+            .Ok(_) -> assert(false)
+            .Err(error) -> assert_eq(error.code, if index == 0 -> -32700 else -> -32600)
+        }
+    }
+}
+
+#Test("RPC IDs and error messages preserve JSON escaping and null identity") {
+    value :: foundation_parse_protocol_json(lsp_response(DataTree.Text("a\"b\\c\n"), "true")) ?? panic("response JSON")
+    assert(value.field("id") == (Val(DataTree.Text("a\"b\\c\n"))))
+    assert(value.field("result") == (Val(DataTree.Bool(true))))
+    failure :: foundation_parse_protocol_json(lsp_error_response(DataTree.Int(7), -32800, "Request cancelled")) ?? panic("error JSON")
+    error :: failure.field("error") ?? panic("error field")
+    assert(error.field("code") == (Val(DataTree.Int(-32800))))
+    assert_eq(failure.field("result"), None)
+    assert_eq(lsp_serialize_id(DataTree.Null), "null")
+    assert_eq(lsp_serialize_id(DataTree.Bool(true)), "null")
+}
+
+#Test("cancellation keys distinguish numeric from text and retain first-field precedence") {
+    integer :: foundation_parse_protocol_json("{{\"id\":7}}") ?? panic("params")
+    text :: foundation_parse_protocol_json("{{\"requestId\":\"7\"}}") ?? panic("params")
+    assert_eq(lsp_cancellation_key(Val(integer)), Val("7"))
+    assert_eq(lsp_cancellation_key(Val(text)), Val("\"7\""))
+    null_id :: foundation_parse_protocol_json("{{\"id\":null,\"requestId\":7}}") ?? panic("params")
+    assert_eq(lsp_cancellation_key(Val(null_id)), None)
+    assert_eq(lsp_cancellation_key(None), None)
+}
+
+#Test("RPC envelope accepts null ID and array params without accepting responses or batches") {
+    valid :: "{{\"jsonrpc\":\"2.0\",\"id\":null,\"method\":\"ping\",\"params\":[]}}"
+    if lsp_parse_rpc_message(valid) == { .Ok(_) -> {} .Err(_) -> assert(false) }
+    loop raw in [String]{"{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":true}}", "[]", "null"} {
+        if lsp_parse_rpc_message(raw) == { .Ok(_) -> assert(false) .Err(error) -> assert_eq(error.code, -32600) }
+    }
+}

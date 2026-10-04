@@ -1,0 +1,148 @@
+// Rust tests/semindex.rs:26–48 fixture for the consumer-only symbol index.
+fn semantic_test_fact(identity: String, name: String, qualified_name: String, kind: SemanticSymbolKind, provenance: SemanticProvenance) -> SemanticSymbol Never! {
+    owner := String?{None}
+    loop index in 0..<qualified_name.len() {
+        if qualified_name.slice(index, index + 1) == "." {
+            owner = Val(qualified_name.slice(0, index))
+            break
+        }
+    }
+    SemanticSymbol{identity: identity, name: name, qualified_name: qualified_name, owner: owner, module_path: "test", kind: kind, signature: identity, summary: "", examples: [String]{}, provenance: provenance, span: None, lexical_scope: None}
+}
+
+// Rust tests/semindex.rs:52–95, identical candidates and assertions.
+#Test("semantic_visibility_prefers_live_and_local_bindings") {
+    index :: SemanticSymbolIndex.new([SemanticSymbol]{
+        semantic_test_fact("builtin:keyword:answer", "answer", "answer", .Keyword, .Builtin{module_name: "syntax"}),
+        semantic_test_fact("import:test::api.answer::answer", "answer", "answer", .Function, .Session),
+        semantic_test_fact("fn:session::answer", "answer", "answer", .Function, .Session),
+        semantic_test_fact("session:binding:answer", "answer", "answer", .Local, .Session),
+    })
+    visible :: index.resolve_visible("answer") ?? panic("visible answer")
+    assert_eq(visible[0].identity, "session:binding:answer")
+    completions :: index.complete_visible("ans", None)
+    assert_eq(completions.len(), 1)
+    assert_eq(completions[0][0].identity, "session:binding:answer")
+}
+
+// Rust tests/semindex.rs:252–290.
+#Test("semantic_visibility_orders_items_imports_and_builtins") {
+    builtin :: semantic_test_fact("builtin:keyword:answer", "answer", "answer", .Keyword, .Builtin{module_name: "syntax"})
+    imported :: semantic_test_fact("import:test::api.answer::answer", "answer", "answer", .Function, .Session)
+    item :: semantic_test_fact("fn:session::answer", "answer", "answer", .Function, .Session)
+    imports :: SemanticSymbolIndex.new([SemanticSymbol]{~builtin, ~imported})
+    import_visible :: imports.resolve_visible("answer") ?? panic("visible import")
+    assert_eq(import_visible[0].identity, imported.identity)
+    items :: SemanticSymbolIndex.new([SemanticSymbol]{builtin, imported, ~item})
+    item_visible :: items.resolve_visible("answer") ?? panic("visible item")
+    assert_eq(item_visible[0].identity, item.identity)
+}
+
+// Rust tests/semindex.rs:293–328.
+#Test("semantic_visibility_uses_current_module_context") {
+    current := semantic_test_fact("fn:current::answer", "answer", "answer", .Function, .Source{module_path: "current.jet"})
+    current.module_path = "current.jet"
+    foreign := semantic_test_fact("local:other::answer", "answer", "answer", .Local, .Source{module_path: "other.jet"})
+    foreign.module_path = "other.jet"
+    wanted :: current.identity
+    index :: SemanticSymbolIndex.new([SemanticSymbol]{current, foreign})
+    visible :: index.resolve_visible_in("answer", Val("current.jet")) ?? panic("current module answer")
+    assert_eq(visible[0].identity, wanted)
+    assert_eq(index.complete_visible_in("ans", None, Val("current.jet")).len(), 1)
+}
+
+// Rust tests/semindex.rs:331–360.
+#Test("semantic_visibility_retains_explicit_qualified_alternatives") {
+    index :: SemanticSymbolIndex.new([SemanticSymbol]{
+        semantic_test_fact("method:List.answer", "answer", "List.answer", .Member, .Builtin{module_name: "core"}),
+        semantic_test_fact("method:Map.answer", "answer", "Map.answer", .Member, .Builtin{module_name: "core"}),
+    })
+    visible :: index.resolve_visible("List.answer") ?? panic("List.answer")
+    assert_eq(visible[0].identity, "method:List.answer")
+    qualified :: index.complete_visible("", Val("List"))
+    assert_eq(qualified.len(), 1)
+    assert_eq(qualified[0][0].identity, "method:List.answer")
+    assert(index.lookup_identity("method:Map.answer") != None)
+}
+
+fn semantic_test_local(identity: String, module_path: String, start: Int, end: Int, depth: Int, declaration_offset: Int) -> SemanticSymbol Never! {
+    symbol := semantic_test_fact(identity, "answer", "answer", .Local, .Source{module_path: module_path})
+    symbol.module_path = module_path
+    symbol.lexical_scope = Val(SemanticLexicalScope{identity: identity, structural_parent: 0, structural_slot: "body", span: SourceSpan{start: start, end: end}, depth: depth, declaration_offset: declaration_offset})
+    symbol
+}
+
+// Consumer boundaries for Symbols.rs visibility_key. These do not claim to
+// extract scopes from a checked program: S15 supplies that integration proof.
+#Test("semantic_visibility_requires_matching_declared_scope") {
+    index :: SemanticSymbolIndex.new([SemanticSymbol]{
+        semantic_test_local("local:outer", "current.jet", 10, 90, 1, 20),
+        semantic_test_local("local:inner", "current.jet", 30, 60, 2, 40),
+        semantic_test_local("local:later", "current.jet", 30, 60, 2, 50),
+        semantic_test_local("local:foreign", "other.jet", 30, 60, 5, 35),
+    })
+    before :: SemanticVisibilityAnchor{module_path: "current.jet", offset: Val(19), session_top_level: false}
+    assert(index.resolve_visible_at("answer", before) == None)
+    outer :: index.resolve_visible_at("answer", SemanticVisibilityAnchor{module_path: "current.jet", offset: Val(39), session_top_level: false}) ?? panic("outer binding")
+    assert_eq(outer[0].identity, "local:outer")
+    inner :: index.resolve_visible_at("answer", SemanticVisibilityAnchor{module_path: "current.jet", offset: Val(49), session_top_level: false}) ?? panic("inner binding")
+    assert_eq(inner[0].identity, "local:inner")
+    anchor :: SemanticVisibilityAnchor{module_path: "current.jet", offset: Val(60), session_top_level: false}
+    later :: index.resolve_visible_at("answer", anchor) ?? panic("latest binding")
+    assert_eq(later[0].identity, "local:later")
+    completed :: index.complete_visible_at("ans", None, anchor)
+    assert_eq(completed.len(), 1)
+    assert_eq(completed[0][0].identity, "local:later")
+    outside :: index.resolve_visible_at("answer", SemanticVisibilityAnchor{module_path: "current.jet", offset: Val(61), session_top_level: false}) ?? panic("outer after block")
+    assert_eq(outside[0].identity, "local:outer")
+    top :: SemanticVisibilityAnchor{module_path: "current.jet", offset: Val(55), session_top_level: true}
+    assert(index.resolve_visible_at("answer", top) == None)
+    assert_eq(index.complete_visible_at("ans", None, top).len(), 0)
+    assert(index.resolve_visible_in("answer", Val("current.jet")) == None)
+}
+
+#Test("semantic_index_mutation_preserves_collisions_and_source_offsets") {
+    first := semantic_test_fact("type:first", "Item", "first.Item", .Type, .Source{module_path: "first.jet"})
+    first.module_path = "first.jet"
+    first.span = Val(SourceSpan{start: 4, end: 8})
+    second := semantic_test_fact("type:second", "Item", "second.Item", .Type, .Source{module_path: "second.jet"})
+    second.module_path = "second.jet"
+    second.span = Val(SourceSpan{start: 4, end: 8})
+    index := SemanticSymbolIndex.new([SemanticSymbol]{second, ~first})
+    assert_eq(index.lookup("Item").len(), 2)
+    assert_eq(index.symbols()[0].identity, "type:first")
+    selected :: index.at("second.jet", 8) ?? panic("correct module at endpoint")
+    assert_eq(selected[0].identity, "type:second")
+    assert(index.at("second.jet", 9) == None)
+    assert(index.at("unknown.jet", 5) == None)
+    first.signature = "replacement"
+    &index.push(^first)
+    assert_eq(index.symbols().len(), 2)
+    replaced :: index.lookup_identity("type:first") ?? panic("replacement")
+    assert_eq(replaced[0].signature, "replacement")
+    &index.extend([SemanticSymbol]{semantic_test_fact("type:third", "Item", "first.Item", .Type, .Session)})
+    assert(index.lookup_qualified("first.Item") == None)
+    assert_eq(index.lookup("first.Item").len(), 2)
+    visible :: index.resolve_visible("first.Item") ?? panic("qualified visibility retains ambiguity rule")
+    assert_eq(visible[0].identity, "type:first")
+}
+
+#Test("semantic_completion_dedups_only_visible_spelling") {
+    index :: SemanticSymbolIndex.new([SemanticSymbol]{
+        semantic_test_fact("member:first", "answer", "First.answer", .Member, .Builtin{module_name: "core"}),
+        semantic_test_fact("member:second", "answer", "Second.answer", .Member, .Builtin{module_name: "core"}),
+        semantic_test_fact("fn:soft", "_answer", "_answer", .Function, .Session),
+        semantic_test_fact("fn:reserved", "__answer", "__answer", .Function, .Session),
+        semantic_test_fact("fn:underscore", "_", "_", .Function, .Session),
+    })
+    assert_eq(index.complete_visible("First.", None).len(), 1)
+    assert_eq(index.complete_visible("", Val("First")).len(), 1)
+    assert_eq(index.complete_visible("", None).len(), 2)
+    assert_eq(index.complete_visible("_a", None).len(), 1)
+    assert_eq(index.complete("", None).len(), 3)
+}
+
+// Checked fixture tests/semindex.rs:612–798 remain producer integration
+// prerequisites (S14/S15/C4): shared docs/provenance, tracked binding spans,
+// module/member collisions, language builtins, value-tail callable and imports.
+// No pre-filled facts masquerade as open_symbols or checked scope extraction.

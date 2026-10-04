@@ -1,0 +1,196 @@
+// Source/LSP/Adapter.rs:1–386. Sole JSON frame/parser belongs to Protocol.
+// Uses Wave-0774's published canonical JetDevserver EditorHost ABI.
+// No local host/request/error/response replicas and no raw-JSON host calls.
+use core.encoding.[DataTree]
+use jet_devserver.[EditorHost, EditorHostError, EditorHostTransport, EditorHostResponse, EditorSessionIdentity, EditorCommand, EditorWorkbenchOpenRequest, EditorReconnectRequest, EditorSourceNavigationRequest, EditorPanelSelectionRequest, EditorCommandRequest, EDITOR_WORKBENCH_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_SELECT_METHOD, EDITOR_COMMAND_METHOD, EDITOR_MAX_HISTORY]
+
+fn lsp_editor_object_get(object: DataTree, key: String) -> DataTree? Never! { object.field(key) }
+
+pub struct EditorHostAdapter {
+    transport: EditorHostTransport?
+
+    pub fn new() -> EditorHostAdapter Never! { EditorHostAdapter{transport: None} }
+
+    pub fn dispatch(&self, method: String, params: DataTree?) -> String EditorHostError! {
+        object :: params ?? return Err(EditorHostError.InvalidRequest("editor host request is missing `params`"))
+        if object != .Object(_) -> return Err(EditorHostError.InvalidRequest("editor host request `params` must be an object"))
+        context :: LSPRequestContext.parse(object) ?? return Err(err)
+        &self.sync_transport(context) ?? return Err(err)
+        if self.transport == .Val(transport) {
+            response :: if method == {
+                EDITOR_WORKBENCH_METHOD -> EditorHostResponse.Workbench(&transport.open(lsp_editor_parse_open(object, context) ?? return Err(err)) ?? return Err(err))
+                EDITOR_RECONNECT_METHOD -> EditorHostResponse.Workbench(transport.reconnect(lsp_editor_parse_reconnect(object, context) ?? return Err(err)) ?? return Err(err))
+                EDITOR_NAVIGATE_METHOD -> EditorHostResponse.Navigation(transport.navigate_source(lsp_editor_parse_navigation(object, context) ?? return Err(err)) ?? return Err(err))
+                EDITOR_SELECT_METHOD -> EditorHostResponse.Selection(&transport.select_panel(lsp_editor_parse_selection(object, context) ?? return Err(err)) ?? return Err(err))
+                EDITOR_COMMAND_METHOD -> EditorHostResponse.Command(transport.command(lsp_editor_parse_command(object, context) ?? return Err(err)) ?? return Err(err))
+                else -> return Err(EditorHostError.UnsupportedMethod(method))
+            }
+            return Ok(response.serialize())
+        }
+        Err(EditorHostError.InvalidRequest("editor host transport was not initialized"))
+    }
+
+    fn sync_transport(&self, context: LSPRequestContext) EditorHostError! {
+        if self.transport == .Val(transport) {
+            actual :: context.identity() ?? return Err(err)
+            expected :: transport.identity()
+            if actual.session_id != expected.session_id -> return Err(EditorHostError.SessionMismatch{expected: ~expected.session_id, actual: ~actual.session_id})
+            if actual.source_id != expected.source_id -> return Err(EditorHostError.SourceMismatch{expected: ~expected.source_id, actual: ~actual.source_id})
+            if actual.source_path != expected.source_path -> return Err(EditorHostError.SourceMismatch{expected: ~expected.source_path, actual: ~actual.source_path})
+            if actual.revision != expected.revision -> return Err(EditorHostError.RevisionMismatch{expected: ~expected.revision, actual: ~actual.revision})
+            if context.workbench_url == .Val(url) {
+                if url != transport.workbench_url() -> return Err(EditorHostError.InvalidRequest("workbench_url cannot change for an active editor session"))
+            }
+            if context.grants == .Val(grants) {
+                order := [Int]{}
+                loop index in 0..<grants.len() -> &order.push(index)
+                &order.sort_by((left: Int, right: Int) -> grants[left] <=> grants[right])
+                expected_grants :: transport.grants()
+                if order.len() != expected_grants.len() -> return Err(EditorHostError.InvalidRequest("command grants cannot change for an active editor session"))
+                loop (index, grant_index) in order {
+                    if grants[grant_index] != expected_grants[index] -> return Err(EditorHostError.InvalidRequest("command grants cannot change for an active editor session"))
+                }
+            }
+            return
+        }
+        url :: context.workbench_url ?? return Err(EditorHostError.InvalidRequest("the first editor host request must provide `workbench_url`"))
+        transport :: EditorHostTransport.new(~url, ~context.session_id, ~context.source_id, ~context.source_path, ~context.revision, ~(context.grants ?? [String]{})) ?? return Err(err)
+        self.transport = Val(transport)
+    }
+}
+
+pub fn editor_host_error_code(error: EditorHostError) -> I64 Never! {
+    if error == {
+        .SessionMismatch{..} | .SourceMismatch{..} | .RevisionMismatch{..} | .CursorExpired{..} -> I64{-32803}
+        .CommandDenied{..} | .LoopbackViolation(_) -> I64{-32090}
+        .InvalidRequest(_) | .InvalidEnvelope(_) | .UnsupportedEditor(_) | .UnsupportedCommand(_) | .UnsupportedMethod(_) | .SourcePathRejected(_) | .PanelNotFound(_) -> I64{-32602}
+    }
+}
+
+struct LSPRequestContext {
+    host: EditorHost
+    session_id: String
+    source_id: String
+    source_path: String
+    revision: String
+    workbench_url: String?
+    grants: [String]?
+
+    fn parse(object: DataTree) -> LSPRequestContext EditorHostError! {
+        host :: EditorHost.parse(lsp_editor_required_string(object, "editor") ?? return Err(err)) ?? return Err(err)
+        session :: lsp_editor_required_string(object, "session_id") ?? return Err(err)
+        source :: lsp_editor_required_string(object, "source_id") ?? return Err(err)
+        path :: lsp_editor_required_string(object, "source_path") ?? return Err(err)
+        revision :: lsp_editor_required_string(object, "revision") ?? return Err(err)
+        url :: lsp_editor_optional_string_alias(object, [String]{"workbench_url", "workbenchUrl"}) ?? return Err(err)
+        grants :: lsp_editor_parse_grants(object) ?? return Err(err)
+        Ok(LSPRequestContext{host: host, session_id: session, source_id: source, source_path: path, revision: revision, workbench_url: url, grants: grants})
+    }
+
+    fn identity(self) -> EditorSessionIdentity EditorHostError! {
+        EditorSessionIdentity.new(~self.session_id, ~self.source_id, ~self.source_path, ~self.revision)
+    }
+}
+
+fn lsp_editor_parse_open(object: DataTree, context: LSPRequestContext) -> EditorWorkbenchOpenRequest EditorHostError! {
+    panel :: lsp_editor_optional_string(object, "panel_id") ?? return Err(err)
+    item :: lsp_editor_optional_string(object, "item_key") ?? return Err(err)
+    cursor :: lsp_editor_optional_u64(object, "cursor") ?? return Err(err)
+    Ok(EditorWorkbenchOpenRequest{host: context.host, session_id: ~context.session_id, source_id: ~context.source_id, source_path: ~context.source_path, revision: ~context.revision, panel_id: panel, item_key: item, cursor: cursor})
+}
+fn lsp_editor_parse_reconnect(object: DataTree, context: LSPRequestContext) -> EditorReconnectRequest EditorHostError! {
+    cursor :: lsp_editor_optional_u64(object, "cursor") ?? return Err(err)
+    Ok(EditorReconnectRequest{host: context.host, session_id: ~context.session_id, source_id: ~context.source_id, source_path: ~context.source_path, revision: ~context.revision, cursor: cursor})
+}
+fn lsp_editor_parse_navigation(object: DataTree, context: LSPRequestContext) -> EditorSourceNavigationRequest EditorHostError! {
+    line :: lsp_editor_required_u64(object, "line") ?? return Err(err)
+    if line > (U64{4294967295}) -> return Err(EditorHostError.InvalidRequest("navigate.line exceeds u32"))
+    column :: lsp_editor_required_u64(object, "column") ?? return Err(err)
+    if column > (U64{4294967295}) -> return Err(EditorHostError.InvalidRequest("navigate.column exceeds u32"))
+    Ok(EditorSourceNavigationRequest{host: context.host, session_id: ~context.session_id, source_id: ~context.source_id, source_path: ~context.source_path, revision: ~context.revision, line: U32.from_u64(line) ?? panic("checked u32 line"), column: U32.from_u64(column) ?? panic("checked u32 column")})
+}
+fn lsp_editor_parse_selection(object: DataTree, context: LSPRequestContext) -> EditorPanelSelectionRequest EditorHostError! {
+    panel :: lsp_editor_required_string(object, "panel_id") ?? return Err(err)
+    item :: lsp_editor_optional_string(object, "item_key") ?? return Err(err)
+    Ok(EditorPanelSelectionRequest{host: context.host, session_id: ~context.session_id, source_id: ~context.source_id, source_path: ~context.source_path, revision: ~context.revision, panel_id: panel, item_key: item})
+}
+fn lsp_editor_parse_command(object: DataTree, context: LSPRequestContext) -> EditorCommandRequest EditorHostError! {
+    arguments := [String]{}
+    if lsp_editor_object_get(object, "arguments") == .Val(value) {
+        if value == {
+            .Null -> {}
+            .Array(values) -> {
+                if values.len() > EDITOR_MAX_HISTORY -> return Err(EditorHostError.InvalidRequest("command arguments exceed the bounded limit"))
+                loop item in values {
+                    if item == .Text(text) -> &arguments.push(~text)
+                    else -> return Err(EditorHostError.InvalidRequest("command arguments must be strings"))
+                }
+            }
+            else -> return Err(EditorHostError.InvalidRequest("command arguments must be an array or null"))
+        }
+    }
+    command :: EditorCommand.parse(lsp_editor_required_string(object, "command") ?? return Err(err)) ?? return Err(err)
+    Ok(EditorCommandRequest{host: context.host, session_id: ~context.session_id, source_id: ~context.source_id, source_path: ~context.source_path, revision: ~context.revision, command: command, arguments: arguments})
+}
+fn lsp_editor_required_string(object: DataTree, key: String) -> String EditorHostError! {
+    if lsp_editor_object_get(object, key) == .Val(value) {
+        if value == .Text(text) -> return Ok(~text)
+    }
+    Err(EditorHostError.InvalidRequest("editor host field `{key}` must be a string"))
+}
+fn lsp_editor_optional_string(object: DataTree, key: String) -> String? EditorHostError! {
+    value :: lsp_editor_object_get(object, key) ?? return Ok(None)
+    if value == {
+        .Null -> Ok(None)
+        .Text(text) -> Ok(Val(~text))
+        else -> Err(EditorHostError.InvalidRequest("editor host field `{key}` must be a string or null"))
+    }
+}
+fn lsp_editor_optional_string_alias(object: DataTree, keys: [String]) -> String? EditorHostError! {
+    loop key in keys {
+        if lsp_editor_object_get(object, key) != None -> return lsp_editor_optional_string(object, key)
+    }
+    Ok(None)
+}
+fn lsp_editor_required_u64(object: DataTree, key: String) -> U64 EditorHostError! {
+    if lsp_editor_object_get(object, key) == .Val(value) {
+        if value == .Int(number) {
+            if number >= 0 -> return Ok(U64.from_int(number) ?? panic("nonnegative DataTree Int fits u64"))
+        }
+    }
+    Err(EditorHostError.InvalidRequest("editor host field `{key}` must be a nonnegative integer"))
+}
+fn lsp_editor_optional_u64(object: DataTree, key: String) -> U64? EditorHostError! {
+    value :: lsp_editor_object_get(object, key) ?? return Ok(None)
+    if value == .Null -> return Ok(None)
+    if value == .Int(number) {
+        if number >= 0 -> return Ok(Val(U64.from_int(number) ?? panic("nonnegative DataTree Int fits u64")))
+    }
+    Err(EditorHostError.InvalidRequest("editor host field `{key}` must be a nonnegative integer or null"))
+}
+fn lsp_editor_parse_grants(object: DataTree) -> [String]? EditorHostError! {
+    value :: lsp_editor_object_get(object, "grants") ?? return Ok(None)
+    if value == .Null -> return Ok(Val([String]{}))
+    if value == .Array(values) {
+        if values.len() > EDITOR_MAX_HISTORY -> return Err(EditorHostError.InvalidRequest("editor host grants exceed the bounded limit"))
+        grants := [String]{}
+        loop item in values {
+            if item == .Text(text) {
+                if text.bytes().len() == 0 -> return Err(EditorHostError.InvalidRequest("editor host grants must be nonempty and free of control characters"))
+                // char::is_control includes C0, DEL, and Unicode C1 controls.
+                raw :: text.bytes()
+                loop index in 0..<raw.len() {
+                    code :: Int.from_u8(raw[index])
+                    if code <= 31 || code == 127 -> return Err(EditorHostError.InvalidRequest("editor host grants must be nonempty and free of control characters"))
+                    if code == 194 && index + 1 < raw.len() {
+                        next_code :: Int.from_u8(raw[index + 1])
+                        if next_code >= 128 && next_code <= 159 -> return Err(EditorHostError.InvalidRequest("editor host grants must be nonempty and free of control characters"))
+                    }
+                }
+                &grants.push(~text)
+            } else -> return Err(EditorHostError.InvalidRequest("editor host grants must be strings"))
+        }
+        return Ok(Val(grants))
+    }
+    Err(EditorHostError.InvalidRequest("editor host field `grants` must be an array or null"))
+}

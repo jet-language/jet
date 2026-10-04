@@ -1,0 +1,67 @@
+// Source/LSP/Server.rs:5467–5487,5495–5575. Position owns UTF-16 conversion.
+pub struct LSPFoldingRange {
+    pub start_line: Int
+    pub start_character: Int
+    pub end_line: Int
+    pub end_character: Int
+    pub kind: String?
+}
+pub fn lsp_folding_range_json(fold: LSPFoldingRange) -> String Never! {
+    kind :: if fold.kind == { .Val(value) -> ",\"kind\":{foundation_json_quote(value)}"; None -> "" }
+    "{{\"startLine\":{fold.start_line},\"startCharacter\":{fold.start_character},\"endLine\":{fold.end_line},\"endCharacter\":{fold.end_character}{kind}}}"
+}
+pub fn lsp_compute_folding_ranges(src: String) -> [LSPFoldingRange] Never! {
+    folds := lsp_brace_folding_ranges(src)
+    loop fold in lsp_line_group_folds(src, lsp_is_comment_line, "comment") -> &folds.push(fold)
+    loop fold in lsp_line_group_folds(src, lsp_is_import_line, "imports") -> &folds.push(fold)
+    &folds.sort_by((left: LSPFoldingRange, right: LSPFoldingRange) -> (left.start_line <=> right.start_line).then(left.start_character <=> right.start_character).then(left.end_line <=> right.end_line))
+    folds
+}
+pub fn lsp_brace_folding_ranges(src: String) -> [LSPFoldingRange] Never! {
+    stack := [LSPPos]{}
+    folds := [LSPFoldingRange]{}
+    // ASCII braces cannot be UTF-8 continuation bytes. Scan bytes without
+    // allocating a char-index vector; preserve Rust's lexical brace matching.
+    loop (offset, byte) in src.bytes() {
+        if byte == (U8{123}) -> &stack.push(lsp_byte_offset_to_lsp(src, offset))
+        else if byte == (U8{125}) {
+            if &stack.pop() == .Val(start) {
+                end :: lsp_byte_offset_to_lsp(src, offset)
+                if end.line > start.line -> &folds.push(LSPFoldingRange{start_line: start.line, start_character: start.character, end_line: end.line, end_character: end.character, kind: Val("region")})
+            }
+        }
+    }
+    folds
+}
+pub fn lsp_line_group_folds(src: String, predicate: fn(String) -> Bool Never!, kind: String) -> [LSPFoldingRange] Never! {
+    lines :: lsp_source_lines(src)
+    folds := [LSPFoldingRange]{}
+    start := Int?{None}
+    loop (index, span) in lines {
+        line := src.slice(span.start, span.end) // #4303
+        if predicate(line) {
+            if start == None -> start = Val(index)
+            next
+        }
+        if start == .Val(first) {
+            lsp_push_line_group_fold(src, lines, first, index - 1, kind, &folds)
+            start = None
+        }
+    }
+    if start == .Val(first) -> lsp_push_line_group_fold(src, lines, first, lines.len() - 1, kind, &folds)
+    folds
+}
+pub fn lsp_push_line_group_fold(src: String, lines: [Span], start: Int, end: Int, kind: String, folds: &[LSPFoldingRange]) Never! {
+    if end <= start -> return
+    first := src.slice(lines[start].start, lines[start].end) // #4303
+    last := src.slice(lines[end].start, lines[end].end) // #4303
+    bytes :: last.bytes()
+    count := 0
+    index := 0
+    loop index < bytes.len() {
+        index += diagnostic_utf8_width(bytes, index)
+        count += 1
+    }
+    // Reference line groups use scalar counts, NOT UTF-16, unlike braces.
+    &folds.push(LSPFoldingRange{start_line: start & 4294967295, start_character: lsp_first_non_ws(first) & 4294967295, end_line: end & 4294967295, end_character: count & 4294967295, kind: Val(kind)})
+}

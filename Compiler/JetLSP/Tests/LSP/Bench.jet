@@ -1,0 +1,95 @@
+// Check.rs has no inline originals. No assertion compares noisy wall time.
+// These controls use real Driver/Sema/cache/receipt providers and W36's sealed
+// source-input fixture; no counters, receipt, or checked bundle are fabricated.
+use core.sys.host.os_path_ingress as lsp_doctor_test_os
+use core.sys.host.retained_counter as lsp_doctor_test_counter
+use core.process.host.native_process as lsp_doctor_test_process
+
+#Test("LSP benchmark zero rounds still performs cold warm hit and one edited query") {
+    source :: "fn run() {{}}\n"
+    snapshot :: lsp_diag_test_snapshot("bench.jet", source, [JetDriverAuthorizedSourceFile]{})
+    report :: lsp_measure_bench(snapshot, source, 0)
+    assert(report.hits >= U64{1})
+    assert(report.recomputes >= U64{2})
+    assert(report.live_inputs > 0)
+    assert(report.live_input_bytes >= source.bytes().len())
+    assert(report.live_memos > 0)
+    assert(report.live_items > 0)
+    assert(report.live_item_bytes > 0)
+    // Only deterministic counters/retained totals own this control.
+    another :: lsp_measure_bench(snapshot, source, 1)
+    assert_eq(report.hits, another.hits)
+    assert_eq(report.recomputes, another.recomputes)
+    assert_eq(report.live_inputs, another.live_inputs)
+    assert_eq(report.live_input_bytes, another.live_input_bytes)
+    assert_eq(report.live_memos, another.live_memos)
+    assert_eq(report.item_hits, another.item_hits)
+    assert_eq(report.item_recomputes, another.item_recomputes)
+    assert_eq(report.live_items, another.live_items)
+    assert_eq(report.live_item_bytes, another.live_item_bytes)
+}
+
+#Test("LSP cone benchmark produces real two-size receipt observations") {
+    source :: "fn run() {{}}\n"
+    snapshot :: lsp_diag_test_snapshot("cone-bench.jet", source, [JetDriverAuthorizedSourceFile]{})
+    receipts :: lsp_measure_cone_bench(snapshot)
+    assert_eq(receipts.len(), 2)
+    assert(receipts[0].source_bytes < receipts[1].source_bytes)
+    loop receipt in receipts {
+        assert_eq(receipt.source_path, "/lsp/cone-bench.jet")
+        assert_eq(receipt.edit_bytes, 2)
+        assert(receipt.query_recomputes > 0)
+        assert(receipt.item_recomputes > 0)
+        assert_eq(receipt.blast_radius(), receipt.reverified_items.len())
+        json :: foundation_parse_protocol_json(receipt.to_json()) ?? panic("actual receipt wire")
+        assert_eq(json.field("schema"), Val(DataTree.Text("jet.reverdict-receipt")))
+        assert_eq(json.field("version"), Val(DataTree.Int(2)))
+    }
+}
+
+// Native controls require the real retained-descriptor, ingress and counter
+// providers (#4494/#4483); these registrations are not native parity evidence.
+struct LSPDoctorTranscriptScratch { root: OSPath }
+impl LSPDoctorTranscriptScratch.Close {
+    fn close(^self) -[FS]> Never! {
+        lsp_doctor_native.remove_dir_all(self.root).drop("doctor transcript scratch cleanup")
+    }
+}
+
+fn lsp_doctor_test_child(root: OSPath, name: String) -> OSPath Never! {
+    child := ~root
+    lsp_doctor_path.push(&child, lsp_doctor_path.from_text(name, root.platform))
+    child
+}
+
+fn lsp_doctor_test_scratch() -[FS, Env, Exec]> LSPDoctorTranscriptScratch Never! {
+    temporary :: lsp_doctor_test_os.temp_dir()
+    serial :: lsp_doctor_test_counter.temp_counter_next()
+    root :: lsp_doctor_test_child(temporary, "jet-lsp-doctor-{lsp_doctor_test_process.id()}-{serial}")
+    lsp_doctor_native.create_dir(root) ?? panic("create doctor transcript scratch: {err}")
+    LSPDoctorTranscriptScratch{root: ^root}
+}
+
+#Test("LSP doctor transcript cursor counts exact json extensions without file type filtering") {
+    scratch :: lsp_doctor_test_scratch()
+    loop name in [String]{"a.json", "multiple.part.json", "UPPER.JSON", "no_extension", ".json", "suffix.json.bak"} {
+        lsp_doctor_native.write(lsp_doctor_test_child(scratch.root, name), [U8]{}) ?? panic("create transcript entry: {err}")
+    }
+    directory :: lsp_doctor_test_child(scratch.root, "dir.json")
+    lsp_doctor_native.create_dir(directory) ?? panic("create json-named directory: {err}")
+    lsp_doctor_native.write(lsp_doctor_test_child(directory, "nested.json"), [U8]{}) ?? panic("create nested transcript: {err}")
+    // Rust uses only entry.path().extension(), not is_file or recursion.
+    assert_eq(lsp_doctor_transcript_count(scratch.root), 3)
+    // A second scan must start at the beginning of an independently owned cursor.
+    assert_eq(lsp_doctor_transcript_count(scratch.root), 3)
+}
+
+#Test("LSP doctor transcript enumeration failure and empty cursor count zero") {
+    scratch :: lsp_doctor_test_scratch()
+    assert_eq(lsp_doctor_transcript_count(scratch.root), 0)
+    absent :: lsp_doctor_test_child(scratch.root, "missing")
+    assert_eq(lsp_doctor_transcript_count(absent), 0)
+    regular :: lsp_doctor_test_child(scratch.root, "not-a-directory.json")
+    lsp_doctor_native.write(regular, [U8]{}) ?? panic("create nondirectory transcript root: {err}")
+    assert_eq(lsp_doctor_transcript_count(regular), 0)
+}

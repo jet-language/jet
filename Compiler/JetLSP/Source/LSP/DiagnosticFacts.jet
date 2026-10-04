@@ -1,0 +1,36 @@
+// Source/LSP/Server.rs:45–49,61–81,86–91: the sole document and publication
+// facts. The request loop owns queries/transport; this is not another Server,
+// checked bundle, semantic index, or private compiler-query cache.
+use core.files.runtime.kernel_path_components as lsp_diag_path
+
+pub struct LSPDocument {
+    pub path: lsp_diag_path.OsPath
+    pub text: String
+    pub version: Int
+
+    pub fn new(path: ^lsp_diag_path.OsPath, text: ^String, version: Int) -> LSPDocument Never! {
+        LSPDocument{path: path, text: text, version: version}
+    }
+
+    pub fn replace_text(&self, text: ^String) Never! { self.text = text }
+
+    pub fn apply_range_edit(&self, range: LSPRange, range_length: Int?, text: String) -> Bool Never! {
+        replacement :: lsp_apply_edit(self.text, range, range_length, text) ?? return false
+        self.text = replacement
+        true
+    }
+}
+
+pub struct LSPDiagnosticState {
+    pub docs: [String:LSPDocument]
+    pub dirty: [String:Bool]
+    pub diagnostic_targets: [String:[String:Bool]]
+    // Only the small paths read by each successful publication are retained.
+    // Native identity comes from Driver's original loaded-module rows, not
+    // registration order, serialized compiler-service values or source text.
+    pub checked_modules: [String:[lsp_diag_path.OsPath]]
+
+    pub fn new() -> LSPDiagnosticState Never! {
+        LSPDiagnosticState{docs: [String:LSPDocument]{}, dirty: [String:Bool]{}, diagnostic_targets: [String:[String:Bool]]{}, checked_modules: [String:[lsp_diag_path.OsPath]]{}}
+    }
+}

@@ -1,0 +1,241 @@
+// crates/jet-debug/src/lib.rs:396-532,1969-2049: the bounded recorded-stop
+// history every frontend (terminal, native, DAP, Canvas) navigates, the legacy
+// RecordedRun receipt projection, and the causal write derivation between
+// adjacent recorded acts. Engines only append events; traversal is recorded
+// stop navigation, never reversing target memory or time. Values are D1's
+// published ValueSnapshot/FrameSnapshot facts; nothing here executes code.
+
+// Rust MAX_DEBUG_HISTORY and MAX_DEBUG_WATCHES: independent bounds.
+pub DEBUG_HISTORY_MAX_EVENTS :: 100000
+pub DEBUG_HISTORY_MAX_WATCHES :: 32
+
+// Rust DebugEvent: one post-statement source event already projected into
+// safe Jet terms; no generated-code addresses or host objects cross here.
+pub struct DebugEvent {
+    pub sequence: Int
+    pub function: String
+    pub line: Int
+    pub depth: Int
+    pub stack: [FrameSnapshot]
+    pub locals: [ValueSnapshot]
+    pub writes: [DebugWrite]
+}
+
+// Rust DebugWrite: one source-level write observed at a statement boundary.
+pub struct DebugWrite {
+    pub line: Int
+    pub place: String
+    pub old_value: String
+    pub new_value: String
+}
+
+// Rust DebugCheckpoint: authority captured before a live session starts; a
+// repair can only rebind while it stays identical.
+pub struct DebugCheckpoint {
+    pub source_identity: String
+    pub shape: String
+    pub sequence: Int
+}
+
+// Rust DebugHistory: bounded, indexed recorded-stop history.
+pub struct DebugHistory {
+    pub events: [DebugEvent]
+    pub checkpoint: DebugCheckpoint?
+    pub cursor: Int?
+    pub capped: Bool
+    // Canonical checked MIR decision ledger carried with the recorded run.
+    // It is opaque receipt-associated evidence here: ProveReplay validates it
+    // before a receipt or inspect view uses it; this model never parses,
+    // synthesizes or rewrites it.
+    pub decision_ledger: String?
+
+    // Rust derived Default.
+    pub fn default() -> DebugHistory Never! {
+        DebugHistory{events: [DebugEvent]{}, checkpoint: None, cursor: None, capped: false, decision_ledger: None}
+    }
+
+    // Rust push: a full history rejects the event and sets the sticky capped
+    // flag; nothing older is overwritten and no later push clears the flag.
+    pub fn push(&self, event: ^DebugEvent) -> Bool Never! {
+        if self.events.len() >= DEBUG_HISTORY_MAX_EVENTS {
+            self.capped = true
+            return false
+        }
+        &self.events.push(^event)
+        true
+    }
+
+    // Rust from_recorded_run: every act becomes a depth-0 event whose stack is
+    // exactly its own single frame (the legacy receipt has no caller frames,
+    // so none are synthesized). All acts are kept, even past the cap; capped
+    // reports acts >= cap. The checkpoint carries the last act's sequence (0
+    // when empty) and the cursor starts unset.
+    pub fn from_recorded_run(run: RecordedRun, source_identity: ^String, shape: ^String) -> DebugHistory Never! {
+        grouped := debug_writes_by_sequence(run)
+        // Acts sharing a sequence each receive that sequence's whole group, as
+        // the reference clones per act; the last such act takes it by move.
+        last_act := [Int:Int]{}
+        loop (index, act) in run.acts -> last_act[act.sequence] = index
+        events := [DebugEvent]{}
+        loop (index, act) in run.acts {
+            writes := [DebugWrite]{}
+            if (last_act.get(act.sequence) ?? -1) == index {
+                if &grouped.remove(act.sequence) == .Val(group) -> writes = ^group
+            } else {
+                if grouped.get(act.sequence) == .Val(group) -> writes = ~group
+            }
+            &events.push(DebugEvent{
+                sequence: act.sequence,
+                function: ~act.function,
+                line: act.line,
+                depth: 0,
+                stack: [FrameSnapshot]{FrameSnapshot{function: ~act.function, line: act.line}},
+                locals: ~act.locals,
+                writes: ^writes,
+            })
+        }
+        last_sequence :: if run.acts.len() > 0 -> run.acts[run.acts.len() - 1].sequence else -> 0
+        DebugHistory{
+            events: ^events,
+            checkpoint: Val(DebugCheckpoint{source_identity: ^source_identity, shape: ^shape, sequence: last_sequence}),
+            cursor: None,
+            capped: run.acts.len() >= DEBUG_HISTORY_MAX_EVENTS,
+            decision_ledger: ~run.decision_ledger,
+        }
+    }
+
+    // Rust to_recorded_run: the legacy receipt keeps sequence, function, line
+    // and locals per event plus the decision ledger; depth, stack and writes
+    // are not part of that artifact.
+    pub fn to_recorded_run(self) -> RecordedRun Never! {
+        acts := [RecordedAct]{}
+        loop event in self.events {
+            &acts.push(RecordedAct{sequence: event.sequence, function: ~event.function, line: event.line, locals: ~event.locals})
+        }
+        RecordedRun{acts: ^acts, decision_ledger: ~self.decision_ledger}
+    }
+}
+
+// Rust RecordedAct: one post-statement state in a recorded run receipt.
+pub struct RecordedAct {
+    pub sequence: Int
+    pub function: String
+    pub line: Int
+    pub locals: [ValueSnapshot]
+}
+
+// Rust RecordedRun: bounded causal evidence attached to a `.jetproof-replay`
+// receipt, with the optional checked MIR decision ledger captured alongside.
+pub struct RecordedRun {
+    pub acts: [RecordedAct]
+    pub decision_ledger: String?
+
+    // Rust derived Default.
+    pub fn default() -> RecordedRun Never! {
+        RecordedRun{acts: [RecordedAct]{}, decision_ledger: None}
+    }
+}
+
+// Rust IndexedWrite: one derived write keyed by its act sequence.
+struct DebugIndexedWrite {
+    sequence: Int
+    line: Int
+    place: String
+    old_value: String
+    new_value: String
+}
+
+// Rust snapshot_map: place name -> snapshot, where a later duplicate name
+// replaces an earlier one (HashMap collect). The map holds the index of the
+// winning snapshot in the caller's list so values are read in place, never
+// cloned into a second map.
+fn debug_snapshot_map(values: [ValueSnapshot]) -> [String:Int] Never! {
+    slots := [String:Int]{}
+    loop (index, value) in values -> slots[value.name] = index
+    slots
+}
+
+// Rust diff_snapshots: the sorted, deduplicated union of both maps' places,
+// emitting a write when a place appears/disappears or its type name or value
+// text changes. A missing side renders `<unbound>`. Writes are appended to the
+// caller's accumulator (Rust extends its result into the same vector).
+fn debug_diff_snapshots(writes: &[DebugIndexedWrite], sequence: Int, line: Int, before: [ValueSnapshot], before_slots: [String:Int], after: [ValueSnapshot], after_slots: [String:Int]) Never! {
+    places := [String]{}
+    loop place in before_slots.keys() -> &places.push(place)
+    loop place in after_slots.keys() -> &places.push(place)
+    &places.sort()
+    loop (index, place) in places {
+        if index > 0 && places[index - 1] == place -> next
+        old_slot :: before_slots.get(place)
+        new_slot :: after_slots.get(place)
+        changed :: if old_slot == {
+            .Val(old) -> if new_slot == {
+                .Val(new) -> before[old].type_name != after[new].type_name || before[old].value != after[new].value
+                else -> true
+            }
+            else -> new_slot != None
+        }
+        if !changed -> next
+        old_value :: if old_slot == {
+            .Val(old) -> ~before[old].value
+            else -> "<unbound>"
+        }
+        new_value :: if new_slot == {
+            .Val(new) -> ~after[new].value
+            else -> "<unbound>"
+        }
+        &writes.push(DebugIndexedWrite{sequence: sequence, line: line, place: ~place, old_value: old_value, new_value: new_value})
+    }
+}
+
+// Rust derive_recorded_writes: each act is diffed against the immediately
+// preceding act only when both ran in the same function; otherwise against
+// nothing, so every local reads as newly bound. Each act's map is built once
+// and moved forward as the next act's `before`. (Rust's unused `_src`
+// parameter is not carried.)
+fn debug_derive_recorded_writes(run: RecordedRun) -> [DebugIndexedWrite] Never! {
+    writes := [DebugIndexedWrite]{}
+    unbound_values :: [ValueSnapshot]{}
+    unbound_slots :: [String:Int]{}
+    previous := [String:Int]{}
+    loop (index, act) in run.acts {
+        after := debug_snapshot_map(act.locals)
+        if index > 0 && run.acts[index - 1].function == act.function {
+            debug_diff_snapshots(&writes, act.sequence, act.line, run.acts[index - 1].locals, previous, act.locals, after)
+        } else {
+            debug_diff_snapshots(&writes, act.sequence, act.line, unbound_values, unbound_slots, act.locals, after)
+        }
+        previous = ^after
+    }
+    writes
+}
+
+// Rust debug_writes_by_sequence: derived writes grouped by act sequence in
+// derivation order; acts sharing a sequence share one group. Writes and
+// groups are popped (moved) out of their owned buffers, never cloned: the
+// derived list is reversed once so popping yields derivation order.
+fn debug_writes_by_sequence(run: RecordedRun) -> [Int:[DebugWrite]] Never! {
+    slots := [Int:Int]{}
+    sequences := [Int]{}
+    groups := [[DebugWrite]]{}
+    derived := debug_derive_recorded_writes(run)
+    &derived.reverse()
+    loop derived.len() > 0 {
+        write :: &derived.pop() ?? break
+        converted :: DebugWrite{line: write.line, place: write.place, old_value: write.old_value, new_value: write.new_value}
+        if slots.get(write.sequence) == .Val(slot) {
+            &groups[slot].push(^converted)
+        } else {
+            slots[write.sequence] = groups.len()
+            &sequences.push(write.sequence)
+            &groups.push([DebugWrite]{^converted})
+        }
+    }
+    grouped := [Int:[DebugWrite]]{}
+    loop groups.len() > 0 {
+        group := &groups.pop() ?? break
+        sequence :: &sequences.pop() ?? break
+        grouped[sequence] = ^group
+    }
+    grouped
+}

@@ -1,0 +1,199 @@
+// Actual combined N1/N2 proof is blocked #4367/#4388/#4392; #4423 private
+// required-field-index adapter borrows without cloning the canonical tree.
+use core.files as notebook_codec_test_files
+use core.testing as notebook_codec_test_testing
+use core.crypto.uuid as notebook_codec_test_uuid
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_bytes, canonical_json_object]
+
+fn notebook_codec_test_cell(id: String, source: String, dependencies: [String]) -> NotebookCell Never! {
+    NotebookCell{id: id, kind: .Jet, source: source, output: None, depends_on: dependencies}
+}
+fn notebook_codec_test_document() -> JetNotebook Never! {
+    nb := JetNotebook.new("env-doc")
+    &nb.cells.push(notebook_codec_test_cell("one", "answer :: 42", [String]{}))
+    nb
+}
+fn notebook_codec_test_replace(json: CanonicalJSON, key: String, value: CanonicalJSON?) -> CanonicalJSON Never! {
+    fields := [CanonicalJSONField]{}
+    if json == .Object(original) {
+        loop field in original {
+            if field.key != key -> &fields.push(~field)
+        }
+    } else { panic("object fixture") }
+    if value == .Val(replacement) -> &fields.push(CanonicalJSONField{key: key, value: replacement})
+    canonical_json_object(fields) ?? panic("unique fixture fields")
+}
+fn notebook_codec_test_error(json: CanonicalJSON) -> String Never! {
+    if notebook_from_json(json) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("invalid notebook accepted")
+    }
+}
+fn notebook_codec_test_output_error(json: CanonicalJSON) -> String Never! {
+    if notebook_output_from_json(json) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("invalid output accepted")
+    }
+}
+fn notebook_codec_test_bundle_error(json: CanonicalJSON) -> String Never! {
+    if notebook_bundle_from_json(json) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("invalid bundle accepted")
+    }
+}
+// tests/notebook.rs:192-258 actual save/load portion of the full mixed
+// cache/merge/ipynb/export oracle. N3 owns its merge and conversion assertions.
+#Test("jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss_codec") {
+    nb := notebook_codec_test_document()
+    &nb.store_output("one", notebook_plain_bundle("answer : Int :: 42"), 1, None) ?? panic("store output")
+    assert(nb.visible_output("one") == .Val(_))
+    nb.cells[0].source = "answer :: 7"
+    assert(nb.visible_output("one") == None)
+    nb.cells[0].source = "answer :: 42"
+    &nb.store_output("one", notebook_plain_bundle("42"), 2, None) ?? panic("restore live output")
+    root :: notebook_codec_test_testing.temp_dir("jetnb-codec")
+    path :: notebook_codec_test_files.join(root, "nested/demo.jetnb")
+    notebook_save_jetnb(nb, path) ?? panic("save jetnb")
+    loaded :: notebook_load_jetnb(path) ?? panic("load jetnb")
+    assert_eq(loaded.cells.len(), 1)
+    assert(loaded.visible_output("one") == .Val(_))
+    assert_eq(canonical_json_bytes(notebook_to_json(loaded) ?? panic("encode loaded")), notebook_codec_test_files.read_bytes(path) ?? panic("read jetnb"))
+    assert(if notebook_load_jetnb(root) == {
+        .Err(_) -> true
+        else -> false
+    })
+    assert(if notebook_save_jetnb(nb, "{path}/child") == {
+        .Err(_) -> true
+        else -> false
+    })
+    notebook_codec_test_files.remove_all(root) ?? panic("remove codec fixture")
+}
+#Test("notebook_codec_preserves_canonical_schema_bytes") {
+    nb :: JetNotebook.new("é")
+    bytes :: canonical_json_bytes(notebook_to_json(nb) ?? panic("encode empty"))
+    expected :: "{{\"cache_policy\":\"closure-v2\",\"cells\":[],\"environment_hash\":\"é\",\"format\":\"jetnb\",\"merge_conflicts\":[],\"output_cache\":{{}},\"schema\":1}}\n"
+    assert_eq(bytes, expected.bytes())
+    assert_eq(canonical_json_bytes(notebook_to_json(JetNotebook.from_canonical_bytes(bytes) ?? panic("decode canonical")) ?? panic("re-encode")), bytes)
+    assert(if JetNotebook.from_canonical_bytes(expected.trim().bytes()) == {
+        .Err(_) -> true
+        else -> false
+    })
+    assert(if JetNotebook.from_canonical_bytes([U8]{255, 10}) == {
+        .Err(_) -> true
+        else -> false
+    })
+}
+#Test("notebook_codec_preserves_mime_order_duplicates_conflicts_and_cache") {
+    nb := notebook_codec_test_document()
+    bundle := notebook_plain_bundle("é\n42")
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/html", payload: "<b>42</b>"}, NotebookMIMEEntry{media_type: "text/html", payload: "second"}}
+    bundle.widget_id = Val("widget")
+    bundle.requested_origins = [String]{"https://data.example", "https://data.example"}
+    bundle.requested_messages = [String]{"click"}
+    &nb.store_output("one", bundle, 4294967295, Val(18446744073709551615)) ?? panic("store rich output")
+    &nb.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# title", output: None, depends_on: [String]{"one", "one"}})
+    &nb.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "answer :: 42", theirs_source: "answer :: 7"})
+    bytes :: canonical_json_bytes(notebook_to_json(nb) ?? panic("encode complete"))
+    loaded :: JetNotebook.from_canonical_bytes(bytes) ?? panic("decode complete")
+    assert_eq(loaded.cells[1].kind, NotebookCellKind.Markdown)
+    assert_eq(loaded.cells[1].depends_on, [String]{"one", "one"})
+    assert_eq(loaded.merge_conflicts[0].theirs_source, "answer :: 7")
+    output :: loaded.cells[0].output ?? panic("output retained")
+    assert_eq(output.bundle, bundle)
+    assert_eq(output.turn_id, Val(18446744073709551615))
+    assert_eq(output.execution_count, Val(4294967295))
+    assert(loaded.visible_output("one") == .Val(_))
+    assert_eq(canonical_json_bytes(notebook_to_json(loaded) ?? panic("encode roundtrip")), bytes)
+}
+#Test("notebook_codec_rejects_bad_schema_ids_dependencies_and_conflicts") {
+    json :: notebook_to_json(notebook_codec_test_document()) ?? panic("root fixture")
+    assert_eq(notebook_codec_test_error(.Null), "jetnb root must be an object")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "format", Val(.String("other")))), "unsupported notebook format `other`")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "schema", None)), "jetnb is missing integer `schema`")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "schema", Val(.Integer("4294967296")))), "jetnb schema is not an integer")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "schema", Val(.Integer("2")))), "unsupported jetnb schema 2")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "cache_policy", Val(.Null))), "jetnb uses an unsupported output cache policy")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "cache_policy", Val(.String("closure-v1")))), "jetnb uses an unsupported output cache policy")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "cells", None)), "jetnb is missing `cells`")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "cells", Val(.Null))), "jetnb `cells` must be an array")
+    invalid := notebook_codec_test_document()
+    &invalid.cells.push(notebook_codec_test_cell("one", "", [String]{}))
+    assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("duplicate fixture")), "jetnb has duplicate or empty cell id `one`")
+    invalid.cells[1].id = ""
+    assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("empty fixture")), "jetnb has duplicate or empty cell id ``")
+    invalid.cells[1].id = "two"
+    invalid.cells[0].depends_on = [String]{"missing"}
+    assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("edge fixture")), "cell `one` depends on unknown cell `missing`")
+    invalid.cells[0].depends_on = [String]{"two"}
+    invalid.cells[1].depends_on = [String]{"one"}
+    assert(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("cycle fixture")).contains("dependency cycle"))
+    invalid.cells[0].depends_on = [String]{}
+    invalid.cells[1].depends_on = [String]{}
+    &invalid.merge_conflicts.push(NotebookMergeConflict{cell_id: "missing", ours_source: "", theirs_source: ""})
+    assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("conflict fixture")), "merge conflict names unknown cell `missing`")
+    invalid.merge_conflicts[0].cell_id = "one"
+    &invalid.merge_conflicts.push(~invalid.merge_conflicts[0])
+    assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("repeat conflict fixture")), "jetnb repeats merge conflict for `one`")
+    omitted :: notebook_codec_test_replace(notebook_codec_test_replace(notebook_codec_test_replace(json, "cache_policy", None), "output_cache", None), "merge_conflicts", None)
+    assert_eq((notebook_from_json(omitted) ?? panic("optional fields omitted")).cells.len(), 1)
+}
+#Test("notebook_codec_rejects_output_cache_tampering") {
+    nb := notebook_codec_test_document()
+    nb.output_cache["outer"] = NotebookOutputCacheEntry{key: "inner", bundle: notebook_plain_bundle("42"), execution_count: 1}
+    assert_eq(notebook_codec_test_error(notebook_to_json(nb) ?? panic("mismatched fixture")), "output cache key `outer` does not match its entry")
+    nb.output_cache["outer"] = NotebookOutputCacheEntry{key: "outer", bundle: notebook_plain_bundle("42"), execution_count: 4294967296}
+    assert_eq(notebook_codec_test_error(notebook_to_json(nb) ?? panic("count fixture")), "output cache entry `outer` has an invalid execution count")
+    json :: notebook_to_json(nb) ?? panic("cache fixture")
+    assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "output_cache", Val(.Null))), "jetnb `output_cache` must be an object")
+}
+#Test("notebook_codec_optional_counts_quarantine_and_bundle_validation") {
+    bundle :: notebook_bundle_to_json(notebook_plain_bundle("x")) ?? panic("bundle fixture")
+    output :: notebook_cell_output_to_json(NotebookCellOutput{bundle: notebook_plain_bundle("x"), execution_count: None, cache_key: None, turn_id: None}) ?? panic("output fixture")
+    decoded :: notebook_output_from_json(output) ?? panic("optional fields")
+    assert_eq(decoded.execution_count, None)
+    assert_eq(decoded.cache_key, None)
+    assert_eq(decoded.turn_id, None)
+    quarantined :: notebook_output_from_json(notebook_codec_test_replace(output, "quarantined", Val(.Bool(true)))) ?? panic("quarantine")
+    assert(quarantined.bundle.quarantined)
+    ignored :: notebook_output_from_json(notebook_codec_test_replace(output, "quarantined", Val(.String("true")))) ?? panic("Rust ignores nontrue outer marker")
+    assert(!ignored.bundle.quarantined)
+    assert_eq(notebook_codec_test_output_error(notebook_codec_test_replace(output, "execution_count", Val(.Integer("-1")))), "output execution count is not an integer")
+    assert_eq(notebook_codec_test_output_error(notebook_codec_test_replace(output, "execution_count", Val(.Bool(false)))), "output execution count must be an integer or null")
+    assert_eq(notebook_codec_test_output_error(notebook_codec_test_replace(output, "turn_id", Val(.Integer("18446744073709551616")))), "output turn id is not an integer")
+    assert_eq(notebook_codec_test_output_error(notebook_codec_test_replace(output, "turn_id", Val(.String("1")))), "output turn id must be an integer or null")
+    assert_eq(notebook_codec_test_output_error(notebook_codec_test_replace(output, "cache_key", Val(.Bool(false)))), "output cache key must be a string or null")
+    assert_eq(notebook_codec_test_bundle_error(notebook_codec_test_replace(bundle, "mime", Val(.Null))), "bundle `mime` must be an array")
+    assert_eq(notebook_codec_test_bundle_error(notebook_codec_test_replace(bundle, "widget_id", Val(.Integer("1")))), "bundle `widget_id` must be a string or null")
+    assert_eq(notebook_codec_test_bundle_error(notebook_codec_test_replace(bundle, "quarantined", Val(.Null))), "bundle `quarantined` must be boolean")
+    assert_eq(notebook_codec_test_bundle_error(notebook_codec_test_replace(bundle, "requested_origins", Val(.Array([CanonicalJSON]{.Bool(true)})))), "`requested_origins` entries must be strings")
+    minimal :: notebook_codec_test_replace(notebook_codec_test_replace(notebook_codec_test_replace(bundle, "widget_id", None), "quarantined", None), "mime", None)
+    assert_eq(notebook_bundle_from_json(minimal) ?? panic("omission defaults"), notebook_plain_bundle("x"))
+}
+#Test("notebook_source_facts_use_lexer_names_not_strings_comments_or_members") {
+    facts :: notebook_source_name_facts("fn reader(arg: Int, other: (Nested)) -> Return {{ arg + external + holder.field }} // ignored_name")
+    assert_eq(facts.declared, [String]{"arg", "other", "reader"})
+    assert_eq(facts.references, [String]{"Return", "external", "holder"})
+    facts2 :: notebook_source_name_facts("struct Thing {{ value: Int }}\nexternal + external + Thing.value + \"not_a_name\"")
+    assert_eq(facts2.declared, [String]{"Thing", "value"})
+    assert_eq(facts2.references, [String]{"Int", "external"})
+    // Owner-ratified Rust tandem: x :: y and x := y declare x, reference y.
+    // This is the same lexer projection, not a second grammar or checker.
+    bindings :: notebook_source_name_facts("name :: upstream\nstate := next_value\nobject.member")
+    assert_eq(bindings.declared, [String]{"name", "state"})
+    assert_eq(bindings.references, [String]{"next_value", "object", "upstream"})
+    binding :: notebook_source_name_facts("x :: y")
+    assert_eq(binding.declared, [String]{"x"})
+    assert_eq(binding.references, [String]{"y"})
+    empty :: notebook_source_name_facts("fn (")
+    assert_eq(empty.declared, [String]{})
+    assert_eq(empty.references, [String]{})
+}
+#Test("notebook_ids_are_real_uuid_v4") {
+    first :: JetNotebook.mint_cell_id() ?? panic("secure UUID")
+    second :: JetNotebook.mint_cell_id() ?? panic("secure UUID")
+    assert(first != second)
+    assert_eq(notebook_codec_test_uuid.parse(first) ?? panic("UUID parse"), first)
+    assert_eq(first.len(), 36)
+    assert_eq(first.slice(14..<15), "4")
+    assert([String]{"8", "9", "a", "b"}.contains(first.slice(19..<20)))
+}

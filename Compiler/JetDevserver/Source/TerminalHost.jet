@@ -1,0 +1,2241 @@
+// PORT-PENDING 0785 crates-jet-devserver-src-terminalhost: crates/jet-devserver/src/TerminalHost.rs:1-2237
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Deterministic terminal projection for the shared `jet.devtools.v1` stream.
+//RS //!
+//RS //! This module owns terminal facts only: bounded nodes, viewport/capability
+//RS //! state, keyboard routing, and frame diffs.  It deliberately does not know
+//RS //! what a Build, Query, Job, or any other domain panel means.  Session and
+//RS //! protocol adapters convert their canonical event into [`TerminalHostEvent`]
+//RS //! before calling [`TerminalHost::sync_projection`] or [`TerminalHost::sync_session`].
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet, VecDeque};
+//RS pub use crate::Devtools::{
+//RS     JetDevtoolsEvent, JetDevtoolsHostKind, JetDevtoolsPanelAvailability,
+//RS     JetDevtoolsPanelAvailabilityState, JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog,
+//RS     JetDevtoolsPanelCatalogError, JetDevtoolsPanelDescriptor, JetDevtoolsPanelFreshnessPolicy,
+//RS     JetDevtoolsPanelId, JetDevtoolsPanelUnavailableReason,
+//RS };
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn first_panel_id() -> &'static str {
+//RS     crate::Devtools::catalog::descriptors()
+//RS         .first()
+//RS         .map(|descriptor| descriptor.id.as_str())
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS /// Project explicit availability rows instead of silently dropping panels.
+//RS pub fn panel_availability(
+//RS     host: JetDevtoolsHostKind,
+//RS     grants: &[JetDevtoolsPanelCapability],
+//RS ) -> Vec<JetDevtoolsPanelAvailability> {
+//RS     JetDevtoolsPanelCatalog::canonical()
+//RS         .map(|catalog| catalog.available_for(host, grants))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS /// Terminal release policy strips local detail capabilities while retaining
+//RS /// the complete catalog and its typed unavailable reasons.
+//RS pub fn terminal_panel_availability(
+//RS     access: TerminalHostAccess,
+//RS ) -> Vec<JetDevtoolsPanelAvailability> {
+//RS     let grants: &[JetDevtoolsPanelCapability] = if access.local_details_enabled() {
+//RS         &JetDevtoolsPanelCapability::ALL
+//RS     } else {
+//RS         &[]
+//RS     };
+//RS     panel_availability(JetDevtoolsHostKind::Terminal, grants)
+//RS }
+//RS 
+//RS 
+//RS use crate::Session::{
+//RS     DevtoolsProjection, DevtoolsSessionState, DevtoolsStatusFact, ResidentDevSession,
+//RS };
+//RS 
+//RS /// Access facts are supplied by the owning command.  The adapter never
+//RS /// infers local/release/read-only policy from environment or process state.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct TerminalHostAccess {
+//RS     pub local: bool,
+//RS     pub release: bool,
+//RS     pub read_only: bool,
+//RS }
+//RS 
+//RS impl TerminalHostAccess {
+//RS     pub const fn new(local: bool, release: bool, read_only: bool) -> Self {
+//RS         Self {
+//RS             local,
+//RS             release,
+//RS             read_only,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn interactive() -> Self {
+//RS         Self::new(true, false, false)
+//RS     }
+//RS 
+//RS     pub const fn local_details_enabled(self) -> bool {
+//RS         self.local && !self.release
+//RS     }
+//RS 
+//RS     pub const fn actions_enabled(self) -> bool {
+//RS         !self.read_only
+//RS     }
+//RS }
+//RS impl Default for TerminalHostAccess {
+//RS     fn default() -> Self {
+//RS         Self::interactive()
+//RS     }
+//RS }
+//RS 
+//RS /// Explicit terminal facts supplied by the process boundary.
+//RS ///
+//RS /// The host never consults process environment or terminal handles.  Callers
+//RS /// resolve TTY, ANSI, `NO_COLOR`, width, verbosity, and access once, then pass
+//RS /// those facts here.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct TerminalHostCapabilities {
+//RS     pub tty: bool,
+//RS     pub ansi: bool,
+//RS     pub no_color: bool,
+//RS     pub width: usize,
+//RS     pub verbose: bool,
+//RS     pub quiet: bool,
+//RS     pub access: TerminalHostAccess,
+//RS }
+//RS 
+//RS impl TerminalHostCapabilities {
+//RS     pub const fn new(
+//RS         tty: bool,
+//RS         ansi: bool,
+//RS         no_color: bool,
+//RS         width: usize,
+//RS         verbose: bool,
+//RS         quiet: bool,
+//RS         access: TerminalHostAccess,
+//RS     ) -> Self {
+//RS         Self {
+//RS             tty,
+//RS             ansi,
+//RS             no_color,
+//RS             width: if width == 0 { 1 } else { width },
+//RS             verbose,
+//RS             quiet,
+//RS             access,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn color() -> Self {
+//RS         Self::new(
+//RS             true,
+//RS             true,
+//RS             false,
+//RS             DEFAULT_TERMINAL_COLUMNS,
+//RS             false,
+//RS             false,
+//RS             TerminalHostAccess::interactive(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub const fn plain() -> Self {
+//RS         Self::new(
+//RS             false,
+//RS             false,
+//RS             true,
+//RS             DEFAULT_TERMINAL_COLUMNS,
+//RS             false,
+//RS             false,
+//RS             TerminalHostAccess::interactive(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub const fn color_enabled(self) -> bool {
+//RS         self.tty && self.ansi && !self.no_color
+//RS     }
+//RS }
+//RS impl Default for TerminalHostCapabilities {
+//RS     fn default() -> Self {
+//RS         Self::plain()
+//RS     }
+//RS }
+//RS 
+//RS /// The only protocol accepted by this host projection.
+//RS pub const JET_DEVTOOLS_PROTOCOL: &str = "jet.devtools.v1";
+//RS 
+//RS /// Shared Prelude bounds retained at the terminal boundary.
+//RS pub const MAX_TERMINAL_EVENTS: usize = 256;
+//RS pub const MAX_TERMINAL_FACTS: usize = 64;
+//RS pub const MAX_TERMINAL_TEXT_BYTES: usize = 16 * 1024;
+//RS pub const MAX_TERMINAL_NODES: usize = 2048;
+//RS pub const DEFAULT_TERMINAL_COLUMNS: usize = 80;
+//RS pub const DEFAULT_TERMINAL_ROWS: usize = 24;
+//RS 
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct TerminalBounds {
+//RS     pub x: usize,
+//RS     pub y: usize,
+//RS     pub width: usize,
+//RS     pub height: usize,
+//RS }
+//RS 
+//RS impl TerminalBounds {
+//RS     pub const fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
+//RS         Self {
+//RS             x,
+//RS             y,
+//RS             width,
+//RS             height,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn right(self) -> usize {
+//RS         self.x.saturating_add(self.width)
+//RS     }
+//RS 
+//RS     pub const fn bottom(self) -> usize {
+//RS         self.y.saturating_add(self.height)
+//RS     }
+//RS 
+//RS     pub const fn contains(self, x: usize, y: usize) -> bool {
+//RS         x >= self.x && y >= self.y && x < self.right() && y < self.bottom()
+//RS     }
+//RS }
+//RS 
+//RS /// A normalized terminal viewport.  Zero-sized terminal reports still get a
+//RS /// one-cell logical viewport, matching the headless terminal contract.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct TerminalViewport {
+//RS     pub width: usize,
+//RS     pub height: usize,
+//RS     pub scroll: usize,
+//RS }
+//RS 
+//RS impl TerminalViewport {
+//RS     pub const fn new(width: usize, height: usize) -> Self {
+//RS         Self {
+//RS             width: if width == 0 { 1 } else { width },
+//RS             height: if height == 0 { 1 } else { height },
+//RS             scroll: 0,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn with_scroll(width: usize, height: usize, scroll: usize) -> Self {
+//RS         Self {
+//RS             width: if width == 0 { 1 } else { width },
+//RS             height: if height == 0 { 1 } else { height },
+//RS             scroll,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn columns(self) -> usize {
+//RS         self.width
+//RS     }
+//RS 
+//RS     pub const fn rows(self) -> usize {
+//RS         self.height
+//RS     }
+//RS 
+//RS     pub const fn bounds(self) -> TerminalBounds {
+//RS         TerminalBounds::new(0, 0, self.width, self.height)
+//RS     }
+//RS 
+//RS     pub const fn resize(self, width: usize, height: usize) -> Self {
+//RS         Self::with_scroll(width, height, self.scroll)
+//RS     }
+//RS }
+//RS 
+//RS impl Default for TerminalViewport {
+//RS     fn default() -> Self {
+//RS         Self::new(DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_ROWS)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalHostConfig {
+//RS     pub viewport: TerminalViewport,
+//RS     pub capabilities: TerminalHostCapabilities,
+//RS     pub max_events: usize,
+//RS     pub max_nodes: usize,
+//RS }
+//RS 
+//RS impl TerminalHostConfig {
+//RS     pub fn new(viewport: TerminalViewport, capabilities: TerminalHostCapabilities) -> Self {
+//RS         Self {
+//RS             viewport,
+//RS             capabilities,
+//RS             max_events: MAX_TERMINAL_EVENTS,
+//RS             max_nodes: MAX_TERMINAL_NODES,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_limits(mut self, max_events: usize, max_nodes: usize) -> Self {
+//RS         self.max_events = max_events.clamp(1, MAX_TERMINAL_EVENTS);
+//RS         self.max_nodes = max_nodes.clamp(1, MAX_TERMINAL_NODES);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_viewport(mut self, viewport: TerminalViewport) -> Self {
+//RS         self.viewport = viewport;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_capabilities(mut self, capabilities: TerminalHostCapabilities) -> Self {
+//RS         self.capabilities = capabilities;
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS impl Default for TerminalHostConfig {
+//RS     fn default() -> Self {
+//RS         Self::new(TerminalViewport::default(), TerminalHostCapabilities::default())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum TerminalFactValue {
+//RS     Text(String),
+//RS     Integer(i64),
+//RS     Boolean(bool),
+//RS     DurationMs(u64),
+//RS }
+//RS 
+//RS impl TerminalFactValue {
+//RS     fn display(&self) -> String {
+//RS         match self {
+//RS             Self::Text(value) => value.clone(),
+//RS             Self::Integer(value) => value.to_string(),
+//RS             Self::Boolean(value) => value.to_string(),
+//RS             Self::DurationMs(value) => format!("{value}ms"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One already-typed, payload-safe fact supplied by the canonical protocol
+//RS /// adapter.  A redacted fact never carries a value.  Published values are
+//RS /// opt-in and remain scalar; this host never accepts a generic JSON escape
+//RS /// hatch.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalHostFact {
+//RS     pub key: String,
+//RS     pub value: Option<TerminalFactValue>,
+//RS     pub published: bool,
+//RS }
+//RS 
+//RS impl TerminalHostFact {
+//RS     pub fn redacted(key: impl Into<String>) -> Self {
+//RS         Self {
+//RS             key: key.into(),
+//RS             value: None,
+//RS             published: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn text(key: impl Into<String>, value: impl Into<String>) -> Self {
+//RS         Self {
+//RS             key: key.into(),
+//RS             value: Some(TerminalFactValue::Text(value.into())),
+//RS             published: true,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn text_bounded(key: impl Into<String>, value: &str) -> Self {
+//RS         Self::text(key, bounded_text(value, MAX_TERMINAL_TEXT_BYTES))
+//RS     }
+//RS 
+//RS     pub const fn integer(key: String, value: i64) -> Self {
+//RS         Self {
+//RS             key,
+//RS             value: Some(TerminalFactValue::Integer(value)),
+//RS             published: true,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn boolean(key: String, value: bool) -> Self {
+//RS         Self {
+//RS             key,
+//RS             value: Some(TerminalFactValue::Boolean(value)),
+//RS             published: true,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn duration_ms(key: String, value: u64) -> Self {
+//RS         Self {
+//RS             key,
+//RS             value: Some(TerminalFactValue::DurationMs(value)),
+//RS             published: true,
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), String> {
+//RS         validate_text(&self.key, "fact key")?;
+//RS         if !self.published && self.value.is_some() {
+//RS             return Err(format!("terminal fact `{}` is redacted but carries a value", self.key));
+//RS         }
+//RS         if let Some(TerminalFactValue::Text(value)) = &self.value {
+//RS             validate_text(value, "fact value")?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn display(&self) -> String {
+//RS         match (&self.published, &self.value) {
+//RS             (true, Some(value)) => format!("{}={}", self.key, value.display()),
+//RS             _ => format!("{}=<redacted>", self.key),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Typed projection of one canonical `jet.devtools.v1` event.
+//RS ///
+//RS /// `protocol`, `session_id`, and `revision` remain on this projection so the
+//RS /// host can reject a record from a different stream or source revision before
+//RS /// it enters the bounded ring.  `panel_id` is the canonical catalog identity,
+//RS /// and `observed_at` is the exact timestamp from the canonical event; no host
+//RS /// clock is consulted.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalHostEvent {
+//RS     pub protocol: String,
+//RS     pub session_id: String,
+//RS     pub revision: String,
+//RS     pub sequence: u64,
+//RS     pub observed_at: u64,
+//RS     pub source: String,
+//RS     pub kind: String,
+//RS     pub entity: String,
+//RS     pub panel_id: JetDevtoolsPanelId,
+//RS     pub facts: Vec<TerminalHostFact>,
+//RS }
+//RS 
+//RS impl TerminalHostEvent {
+//RS     pub fn new(
+//RS         panel_id: JetDevtoolsPanelId,
+//RS         session_id: impl Into<String>,
+//RS         revision: impl Into<String>,
+//RS         sequence: u64,
+//RS         observed_at: u64,
+//RS         source: impl Into<String>,
+//RS         kind: impl Into<String>,
+//RS         entity: impl Into<String>,
+//RS         facts: Vec<TerminalHostFact>,
+//RS     ) -> Self {
+//RS         Self::from_projection(
+//RS             panel_id,
+//RS             JET_DEVTOOLS_PROTOCOL,
+//RS             session_id,
+//RS             revision,
+//RS             sequence,
+//RS             observed_at,
+//RS             source,
+//RS             kind,
+//RS             entity,
+//RS             facts,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn from_projection(
+//RS         panel_id: JetDevtoolsPanelId,
+//RS         protocol: impl Into<String>,
+//RS         session_id: impl Into<String>,
+//RS         revision: impl Into<String>,
+//RS         sequence: u64,
+//RS         observed_at: u64,
+//RS         source: impl Into<String>,
+//RS         kind: impl Into<String>,
+//RS         entity: impl Into<String>,
+//RS         facts: Vec<TerminalHostFact>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             protocol: protocol.into(),
+//RS             session_id: session_id.into(),
+//RS             revision: revision.into(),
+//RS             sequence,
+//RS             observed_at,
+//RS             source: source.into(),
+//RS             kind: kind.into(),
+//RS             entity: entity.into(),
+//RS             panel_id,
+//RS             facts,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn from_devtools_event(
+//RS         event: &JetDevtoolsEvent,
+//RS         protocol: &str,
+//RS         session_id: &str,
+//RS         revision: &str,
+//RS         panel_id: JetDevtoolsPanelId,
+//RS     ) -> Self {
+//RS         let mut facts = vec![TerminalHostFact::text_bounded("fields", event.fields_json())];
+//RS         if let Some(payload) = event.payload_json() {
+//RS             facts.push(TerminalHostFact::text_bounded("payload", payload));
+//RS         }
+//RS         Self::from_projection(
+//RS             panel_id,
+//RS             protocol,
+//RS             session_id,
+//RS             revision,
+//RS             event.sequence(),
+//RS             event.timestamp_ms,
+//RS             event.source().to_string(),
+//RS             event.kind().to_string(),
+//RS             event.entity().to_string(),
+//RS             facts,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn published_fact_count(&self) -> usize {
+//RS         self.facts.iter().filter(|fact| fact.published).count()
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), String> {
+//RS         if self.protocol != JET_DEVTOOLS_PROTOCOL {
+//RS             return Err(format!(
+//RS                 "terminal event protocol must be {JET_DEVTOOLS_PROTOCOL}"
+//RS             ));
+//RS         }
+//RS         validate_text(&self.session_id, "session id")?;
+//RS         validate_optional_text(&self.revision, "revision", true)?;
+//RS         if self.sequence == 0 {
+//RS             return Err("terminal event sequence must be positive".to_string());
+//RS         }
+//RS         validate_text(&self.source, "event source")?;
+//RS         validate_text(&self.kind, "event kind")?;
+//RS         validate_text(&self.entity, "event entity")?;
+//RS         if self.facts.len() > MAX_TERMINAL_FACTS {
+//RS             return Err("terminal event exceeds its fact bound".to_string());
+//RS         }
+//RS         let mut keys = BTreeSet::new();
+//RS         for fact in &self.facts {
+//RS             fact.validate()?;
+//RS             if !keys.insert(fact.key.as_str()) {
+//RS                 return Err(format!("terminal event repeats fact key `{}`", fact.key));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
+//RS pub struct TerminalFocus {
+//RS     pub panel_id: Option<String>,
+//RS     pub item_key: Option<String>,
+//RS }
+//RS 
+//RS impl TerminalFocus {
+//RS     pub fn panel(panel_id: impl Into<String>) -> Self {
+//RS         Self {
+//RS             panel_id: Some(panel_id.into()),
+//RS             item_key: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn item(panel_id: impl Into<String>, item_key: impl Into<String>) -> Self {
+//RS         Self {
+//RS             panel_id: Some(panel_id.into()),
+//RS             item_key: Some(item_key.into()),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn clear_item(&mut self) {
+//RS         self.item_key = None;
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum TerminalKey {
+//RS     Tab,
+//RS     BackTab,
+//RS     Up,
+//RS     Down,
+//RS     Left,
+//RS     Right,
+//RS     Enter,
+//RS     Escape,
+//RS     Character(char),
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum TerminalInput {
+//RS     Key(TerminalKey),
+//RS     Resize(TerminalViewport),
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum TerminalAction {
+//RS     FocusPanel { panel_id: String },
+//RS     Inspect { panel_id: String, item_key: String },
+//RS     ReturnToPanel,
+//RS     MoveCursor { cursor: u64 },
+//RS     Rerun,
+//RS     Restart,
+//RS     FocusJob,
+//RS     Quit,
+//RS     Ignored,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalKeyboardState {
+//RS     pub last_key: Option<TerminalKey>,
+//RS     pub last_action: Option<TerminalAction>,
+//RS }
+//RS 
+//RS impl Default for TerminalKeyboardState {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             last_key: None,
+//RS             last_action: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum TerminalFreshness {
+//RS     Empty,
+//RS     Fresh,
+//RS     Stale,
+//RS }
+//RS 
+//RS impl TerminalFreshness {
+//RS     pub const fn label(self) -> &'static str {
+//RS         match self {
+//RS             Self::Empty => "empty",
+//RS             Self::Fresh => "fresh",
+//RS             Self::Stale => "stale",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum TerminalNodeKind {
+//RS     Root,
+//RS     Panel,
+//RS     Table,
+//RS     Text,
+//RS     Status,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalStatus {
+//RS     pub label: String,
+//RS     pub detail: String,
+//RS     pub freshness: TerminalFreshness,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalTableRow {
+//RS     pub key: String,
+//RS     pub cells: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalTable {
+//RS     pub columns: Vec<String>,
+//RS     pub rows: Vec<TerminalTableRow>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalNode {
+//RS     pub id: String,
+//RS     pub kind: TerminalNodeKind,
+//RS     pub label: String,
+//RS     pub bounds: TerminalBounds,
+//RS     pub freshness: TerminalFreshness,
+//RS     pub focusable: bool,
+//RS     pub text: Option<String>,
+//RS     pub status: Option<TerminalStatus>,
+//RS     pub table: Option<TerminalTable>,
+//RS     pub children: Vec<TerminalNode>,
+//RS }
+//RS 
+//RS impl TerminalNode {
+//RS     fn container(
+//RS         id: impl Into<String>,
+//RS         kind: TerminalNodeKind,
+//RS         label: impl Into<String>,
+//RS         bounds: TerminalBounds,
+//RS         freshness: TerminalFreshness,
+//RS         children: Vec<TerminalNode>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             id: id.into(),
+//RS             kind,
+//RS             label: label.into(),
+//RS             bounds,
+//RS             freshness,
+//RS             focusable: false,
+//RS             text: None,
+//RS             status: None,
+//RS             table: None,
+//RS             children,
+//RS         }
+//RS     }
+//RS 
+//RS     fn text(
+//RS         id: impl Into<String>,
+//RS         label: impl Into<String>,
+//RS         text: impl Into<String>,
+//RS         bounds: TerminalBounds,
+//RS         freshness: TerminalFreshness,
+//RS     ) -> Self {
+//RS         Self {
+//RS             id: id.into(),
+//RS             kind: TerminalNodeKind::Text,
+//RS             label: label.into(),
+//RS             bounds,
+//RS             freshness,
+//RS             focusable: false,
+//RS             text: Some(text.into()),
+//RS             status: None,
+//RS             table: None,
+//RS             children: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn status(
+//RS         id: impl Into<String>,
+//RS         label: impl Into<String>,
+//RS         status: TerminalStatus,
+//RS         bounds: TerminalBounds,
+//RS         focusable: bool,
+//RS     ) -> Self {
+//RS         Self {
+//RS             id: id.into(),
+//RS             kind: TerminalNodeKind::Status,
+//RS             label: label.into(),
+//RS             bounds,
+//RS             freshness: status.freshness,
+//RS             focusable,
+//RS             text: None,
+//RS             status: Some(status),
+//RS             table: None,
+//RS             children: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn table(
+//RS         id: impl Into<String>,
+//RS         label: impl Into<String>,
+//RS         table: TerminalTable,
+//RS         bounds: TerminalBounds,
+//RS         freshness: TerminalFreshness,
+//RS     ) -> Self {
+//RS         Self {
+//RS             id: id.into(),
+//RS             kind: TerminalNodeKind::Table,
+//RS             label: label.into(),
+//RS             bounds,
+//RS             freshness,
+//RS             focusable: false,
+//RS             text: None,
+//RS             status: None,
+//RS             table: Some(table),
+//RS             children: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn is_leaf(&self) -> bool {
+//RS         self.children.is_empty()
+//RS     }
+//RS 
+//RS     pub fn find(&self, id: &str) -> Option<&Self> {
+//RS         if self.id == id {
+//RS             return Some(self);
+//RS         }
+//RS         self.children.iter().find_map(|child| child.find(id))
+//RS     }
+//RS 
+//RS     fn flatten<'a>(&'a self, out: &mut BTreeMap<String, &'a TerminalNode>) {
+//RS         out.insert(self.id.clone(), self);
+//RS         for child in &self.children {
+//RS             child.flatten(out);
+//RS         }
+//RS     }
+//RS 
+//RS     fn count(&self) -> usize {
+//RS         1 + self.children.iter().map(Self::count).sum::<usize>()
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalPanelTree {
+//RS     pub root: TerminalNode,
+//RS     pub bounds: TerminalBounds,
+//RS     pub node_count: usize,
+//RS     pub node_limit: usize,
+//RS     pub panel_count: usize,
+//RS }
+//RS 
+//RS impl TerminalPanelTree {
+//RS     pub fn panel(&self, panel_id: &str) -> Option<&TerminalNode> {
+//RS         self.root
+//RS             .children
+//RS             .iter()
+//RS             .find(|node| node.id == format!("panel:{panel_id}"))
+//RS     }
+//RS 
+//RS     pub fn nodes(&self) -> BTreeMap<String, &TerminalNode> {
+//RS         let mut nodes = BTreeMap::new();
+//RS         self.root.flatten(&mut nodes);
+//RS         nodes
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalFrame {
+//RS     pub protocol: String,
+//RS     pub session_id: String,
+//RS     pub source_id: Option<String>,
+//RS     pub build_id: Option<String>,
+//RS     pub world_id: Option<String>,
+//RS     pub observed_at: Option<u64>,
+//RS     pub status: Option<DevtoolsStatusFact>,
+//RS     pub revision: String,
+//RS     pub cursor: Option<u64>,
+//RS     pub viewport: TerminalViewport,
+//RS     pub capabilities: TerminalHostCapabilities,
+//RS     pub focus: TerminalFocus,
+//RS     pub keyboard: TerminalKeyboardState,
+//RS     pub freshness: TerminalFreshness,
+//RS     pub event_count: usize,
+//RS     pub event_limit: usize,
+//RS     pub tree: TerminalPanelTree,
+//RS     pub lines: Vec<String>,
+//RS }
+//RS 
+//RS impl TerminalFrame {
+//RS     pub fn text(&self) -> String {
+//RS         self.lines.join("\n")
+//RS     }
+//RS 
+//RS     pub fn plain_text(&self) -> String {
+//RS         self.lines
+//RS             .iter()
+//RS             .map(|line| strip_ansi(line))
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n")
+//RS     }
+//RS 
+//RS     pub fn panel(&self, panel_id: &str) -> Option<&TerminalNode> {
+//RS         self.tree.panel(panel_id)
+//RS     }
+//RS 
+//RS     pub fn diff(&self, previous: &Self) -> TerminalDiff {
+//RS         let mut before = BTreeMap::new();
+//RS         let mut after = BTreeMap::new();
+//RS         previous.tree.root.flatten(&mut before);
+//RS         self.tree.root.flatten(&mut after);
+//RS 
+//RS         let ids = before
+//RS             .keys()
+//RS             .chain(after.keys())
+//RS             .cloned()
+//RS             .collect::<BTreeSet<_>>();
+//RS         let mut operations = Vec::new();
+//RS         for id in ids {
+//RS             match (before.get(&id), after.get(&id)) {
+//RS                 (None, Some(node)) => operations.push(TerminalDiffOperation::Insert {
+//RS                     id,
+//RS                     node: (*node).clone(),
+//RS                 }),
+//RS                 (Some(_), None) => operations.push(TerminalDiffOperation::Remove { id }),
+//RS                 (Some(old), Some(new)) if *old != *new => {
+//RS                     operations.push(TerminalDiffOperation::Replace {
+//RS                         id,
+//RS                         node: (*new).clone(),
+//RS                     });
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         TerminalDiff {
+//RS             from_revision: previous.revision.clone(),
+//RS             to_revision: self.revision.clone(),
+//RS             operations,
+//RS             viewport_changed: previous.viewport != self.viewport,
+//RS             focus_changed: previous.focus != self.focus,
+//RS             keyboard_changed: previous.keyboard != self.keyboard,
+//RS             metadata_changed: previous.protocol != self.protocol
+//RS                 || previous.session_id != self.session_id
+//RS                 || previous.source_id != self.source_id
+//RS                 || previous.build_id != self.build_id
+//RS                 || previous.world_id != self.world_id
+//RS                 || previous.observed_at != self.observed_at
+//RS                 || previous.status != self.status
+//RS                 || previous.capabilities != self.capabilities
+//RS                 || previous.cursor != self.cursor
+//RS                 || previous.freshness != self.freshness
+//RS                 || previous.event_count != self.event_count
+//RS                 || previous.event_limit != self.event_limit,
+//RS             lines_changed: previous
+//RS                 .lines
+//RS                 .iter()
+//RS                 .map(|line| strip_ansi(line))
+//RS                 .collect::<Vec<_>>()
+//RS                 != self
+//RS                     .lines
+//RS                     .iter()
+//RS                     .map(|line| strip_ansi(line))
+//RS                     .collect::<Vec<_>>(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum TerminalDiffOperation {
+//RS     Insert { id: String, node: TerminalNode },
+//RS     Remove { id: String },
+//RS     Replace { id: String, node: TerminalNode },
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct TerminalDiff {
+//RS     pub from_revision: String,
+//RS     pub to_revision: String,
+//RS     pub operations: Vec<TerminalDiffOperation>,
+//RS     pub viewport_changed: bool,
+//RS     pub focus_changed: bool,
+//RS     pub keyboard_changed: bool,
+//RS     pub metadata_changed: bool,
+//RS     pub lines_changed: bool,
+//RS }
+//RS 
+//RS impl TerminalDiff {
+//RS     pub fn initial(frame: &TerminalFrame) -> Self {
+//RS         let mut nodes = BTreeMap::new();
+//RS         frame.tree.root.flatten(&mut nodes);
+//RS         Self {
+//RS             from_revision: String::new(),
+//RS             to_revision: frame.revision.clone(),
+//RS             operations: nodes
+//RS                 .into_iter()
+//RS                 .map(|(id, node)| TerminalDiffOperation::Insert {
+//RS                     id,
+//RS                     node: node.clone(),
+//RS                 })
+//RS                 .collect(),
+//RS             viewport_changed: true,
+//RS             focus_changed: true,
+//RS             keyboard_changed: true,
+//RS             metadata_changed: true,
+//RS             lines_changed: true,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.operations.is_empty()
+//RS             && !self.viewport_changed
+//RS             && !self.focus_changed
+//RS             && !self.keyboard_changed
+//RS             && !self.metadata_changed
+//RS             && !self.lines_changed
+//RS     }
+//RS }
+//RS 
+//RS /// Terminal projection host.  It retains only the bounded typed event ring
+//RS /// and derives a fresh tree/frame on demand, so capability changes cannot
+//RS /// mutate semantic nodes or introduce a second panel model.
+//RS pub struct TerminalHost {
+//RS     config: TerminalHostConfig,
+//RS     events: VecDeque<TerminalHostEvent>,
+//RS     session_id: Option<String>,
+//RS     source_id: Option<String>,
+//RS     build_id: Option<String>,
+//RS     world_id: Option<String>,
+//RS     revision: Option<String>,
+//RS     cursor: Option<u64>,
+//RS     time_cursor: Option<u64>,
+//RS     observed_at: Option<u64>,
+//RS     status: Option<DevtoolsStatusFact>,
+//RS     focus: TerminalFocus,
+//RS     keyboard: TerminalKeyboardState,
+//RS }
+//RS 
+//RS impl TerminalHost {
+//RS     pub fn new(mut config: TerminalHostConfig) -> Self {
+//RS         config.max_events = config.max_events.clamp(1, MAX_TERMINAL_EVENTS);
+//RS         config.max_nodes = config.max_nodes.clamp(1, MAX_TERMINAL_NODES);
+//RS         Self {
+//RS             config,
+//RS             events: VecDeque::new(),
+//RS             session_id: None,
+//RS             source_id: None,
+//RS             build_id: None,
+//RS             world_id: None,
+//RS             revision: None,
+//RS             cursor: None,
+//RS             time_cursor: None,
+//RS             observed_at: None,
+//RS             status: None,
+//RS             focus: TerminalFocus::panel(first_panel_id()),
+//RS             keyboard: TerminalKeyboardState::default(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn config(&self) -> &TerminalHostConfig {
+//RS         &self.config
+//RS     }
+//RS 
+//RS     pub fn capabilities(&self) -> TerminalHostCapabilities {
+//RS         self.config.capabilities
+//RS     }
+//RS 
+//RS     /// Return every canonical panel with an explicit capability verdict.
+//RS     pub fn panel_availability(&self) -> Vec<JetDevtoolsPanelAvailability> {
+//RS         terminal_panel_availability(self.config.capabilities.access)
+//RS     }
+//RS 
+//RS 
+//RS     pub fn viewport(&self) -> TerminalViewport {
+//RS         self.effective_viewport()
+//RS     }
+//RS 
+//RS     pub fn event_count(&self) -> usize {
+//RS         self.events.len()
+//RS     }
+//RS 
+//RS     pub fn source_id(&self) -> Option<&str> {
+//RS         self.source_id.as_deref()
+//RS     }
+//RS 
+//RS     pub fn build_id(&self) -> Option<&str> {
+//RS         self.build_id.as_deref()
+//RS     }
+//RS 
+//RS     pub fn world_id(&self) -> Option<&str> {
+//RS         self.world_id.as_deref()
+//RS     }
+//RS 
+//RS     pub fn observed_at(&self) -> Option<u64> {
+//RS         self.observed_at
+//RS     }
+//RS 
+//RS     pub fn status(&self) -> Option<&DevtoolsStatusFact> {
+//RS         self.status.as_ref()
+//RS     }
+//RS 
+//RS     pub fn cursor(&self) -> Option<u64> {
+//RS         self.time_cursor.or(self.cursor)
+//RS     }
+//RS     pub fn events(&self) -> impl Iterator<Item = &TerminalHostEvent> {
+//RS         self.events.iter()
+//RS     }
+//RS 
+//RS     pub fn session_id(&self) -> Option<&str> {
+//RS         self.session_id.as_deref()
+//RS     }
+//RS 
+//RS     pub fn revision(&self) -> Option<&str> {
+//RS         self.revision.as_deref()
+//RS     }
+//RS 
+//RS     pub fn focus(&self) -> &TerminalFocus {
+//RS         &self.focus
+//RS     }
+//RS 
+//RS     pub fn keyboard(&self) -> &TerminalKeyboardState {
+//RS         &self.keyboard
+//RS     }
+//RS 
+//RS     /// Append one event after its canonical panel identity has been supplied by
+//RS     /// the Session projection.  There is no standalone raw event path.
+//RS     fn append_event(&mut self, event: TerminalHostEvent) -> Result<(), String> {
+//RS         event.validate()?;
+//RS         if let Some(session_id) = self.session_id.as_deref() {
+//RS             if session_id != event.session_id {
+//RS                 return Err("terminal event session id does not match the host".to_string());
+//RS             }
+//RS         } else {
+//RS             self.session_id = Some(event.session_id.clone());
+//RS         }
+//RS         if let Some(revision) = self.revision.as_deref() {
+//RS             if revision != event.revision {
+//RS                 return Err("terminal event revision does not match the host".to_string());
+//RS             }
+//RS         } else {
+//RS             self.revision = Some(event.revision.clone());
+//RS         }
+//RS         if self.cursor.is_some_and(|cursor| event.sequence <= cursor) {
+//RS             return Err("terminal event sequence is not newer than the host cursor".to_string());
+//RS         }
+//RS 
+//RS         self.observed_at = Some(event.observed_at);
+//RS         self.cursor = Some(event.sequence);
+//RS         if self.time_cursor.is_none() {
+//RS             self.time_cursor = Some(event.sequence);
+//RS         }
+//RS         let first_event = self.events.is_empty();
+//RS         let panel_id = event.panel_id.as_str().to_string();
+//RS         let item_key = event_key(&event);
+//RS         if self.events.len() == self.config.max_events {
+//RS             self.events.pop_front();
+//RS         }
+//RS         self.events.push_back(event);
+//RS         if first_event {
+//RS             self.focus = TerminalFocus::item(panel_id.clone(), item_key);
+//RS         } else if self.focus.panel_id.is_none() {
+//RS             self.focus.panel_id = Some(panel_id.clone());
+//RS         }
+//RS         self.keyboard.last_action = Some(TerminalAction::FocusPanel {
+//RS             panel_id: self
+//RS                 .focus
+//RS                 .panel_id
+//RS                 .clone()
+//RS                 .unwrap_or(panel_id),
+//RS         });
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Replace the terminal projection from canonical typed Session data.
+//RS     /// `panel_ids` is produced by the canonical catalog projection; events
+//RS     /// without a first-party panel are advanced past but not rendered.
+//RS     pub fn sync_projection(
+//RS         &mut self,
+//RS         projection: &DevtoolsProjection,
+//RS         panel_ids: &BTreeMap<u64, JetDevtoolsPanelId>,
+//RS     ) -> Result<TerminalFrame, String> {
+//RS         validate_projection(projection)?;
+//RS         let session_changed = self
+//RS             .session_id
+//RS             .as_deref()
+//RS             .is_some_and(|session_id| session_id != projection.session_id);
+//RS         let revision_changed = self
+//RS             .revision
+//RS             .as_deref()
+//RS             .is_some_and(|revision| revision != projection.revision);
+//RS         if session_changed || revision_changed || projection.reset || projection.truncation {
+//RS             self.time_cursor = None;
+//RS             self.events.clear();
+//RS             self.cursor = None;
+//RS             self.focus = TerminalFocus::panel(first_panel_id());
+//RS             self.keyboard.last_action = None;
+//RS         }
+//RS 
+//RS         self.session_id = Some(projection.session_id.clone());
+//RS         self.source_id = projection.source_id.clone();
+//RS         self.build_id = projection.build_id.clone();
+//RS         self.world_id = projection.world_id.clone();
+//RS         self.revision = Some(projection.revision.clone());
+//RS         self.observed_at = Some(projection.observed_at);
+//RS         self.status = Some(bounded_status(&projection.status)?);
+//RS 
+//RS         let previous_time_cursor = self.time_cursor;
+//RS         let previous_cursor = self.cursor;
+//RS         for event in &projection.panels {
+//RS             let sequence = event.sequence();
+//RS             if previous_cursor.is_some_and(|cursor| sequence <= cursor) {
+//RS                 continue;
+//RS             }
+//RS             let Some(panel_id) = panel_ids.get(&sequence).copied() else {
+//RS                 continue;
+//RS             };
+//RS             self.append_event(TerminalHostEvent::from_devtools_event(
+//RS                 event,
+//RS                 &projection.protocol,
+//RS                 &projection.session_id,
+//RS                 &projection.revision,
+//RS                 panel_id,
+//RS             ))?;
+//RS         }
+//RS         self.cursor = Some(projection.sequence);
+//RS         if previous_time_cursor.is_none() {
+//RS             self.time_cursor = (projection.sequence != 0).then_some(projection.sequence);
+//RS         }
+//RS         self.apply_selection(projection.selection.as_ref());
+//RS         Ok(self.render())
+//RS     }
+//RS 
+//RS     /// Pull the next canonical projection from a resident Session.
+//RS     pub fn sync_session(
+//RS         &mut self,
+//RS         session: &ResidentDevSession,
+//RS     ) -> Result<TerminalFrame, String> {
+//RS         let projection = session.devtools_events_since(self.cursor);
+//RS         let grants: &[JetDevtoolsPanelCapability] =
+//RS             if self.config.capabilities.access.local_details_enabled() {
+//RS                 &JetDevtoolsPanelCapability::ALL
+//RS             } else {
+//RS                 &[]
+//RS             };
+//RS         let panels = session
+//RS             .devtools_panels(JetDevtoolsHostKind::Terminal, grants)
+//RS             .map_err(|error| error.to_string())?;
+//RS         let mut panel_ids = BTreeMap::new();
+//RS         for panel in panels {
+//RS             let panel_id = panel.availability.descriptor.id;
+//RS             for event in panel.events {
+//RS                 panel_ids.entry(event.sequence()).or_insert(panel_id);
+//RS             }
+//RS         }
+//RS         self.sync_projection(&projection, &panel_ids)
+//RS     }
+//RS 
+//RS     fn apply_selection(&mut self, selection: Option<&crate::Session::DevtoolsSelectionFact>) {
+//RS         let Some(selection) = selection else {
+//RS             self.focus = TerminalFocus::panel(first_panel_id());
+//RS             return;
+//RS         };
+//RS         let Some(descriptor) = crate::Devtools::catalog::descriptors()
+//RS             .iter()
+//RS             .find(|descriptor| descriptor.id.as_str() == selection.panel_id)
+//RS         else {
+//RS             self.focus = TerminalFocus::panel(first_panel_id());
+//RS             return;
+//RS         };
+//RS         let panel_id = descriptor.id.as_str();
+//RS         if selection.item_key.is_empty() {
+//RS             self.focus_panel(panel_id);
+//RS         } else {
+//RS             self.focus_item(panel_id, &selection.item_key);
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn set_viewport(&mut self, viewport: TerminalViewport) {
+//RS         self.config.viewport = viewport;
+//RS     }
+//RS 
+//RS     pub fn set_capabilities(&mut self, capabilities: TerminalHostCapabilities) {
+//RS         self.config.capabilities = capabilities;
+//RS     }
+//RS 
+//RS     pub fn set_cursor(&mut self, cursor: Option<u64>) {
+//RS         self.cursor = cursor;
+//RS         self.time_cursor = cursor;
+//RS     }
+//RS 
+//RS     pub fn focus_panel(&mut self, panel_id: &str) -> bool {
+//RS         let Some(descriptor) = crate::Devtools::catalog::descriptors()
+//RS             .iter()
+//RS             .find(|descriptor| descriptor.id.as_str() == panel_id)
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let panel_id = descriptor.id.as_str().to_string();
+//RS         self.focus = TerminalFocus::panel(panel_id.clone());
+//RS         self.keyboard.last_action = Some(TerminalAction::FocusPanel { panel_id });
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn focus_item(&mut self, panel_id: &str, item_key: &str) -> bool {
+//RS         if !self.focus_panel(panel_id) {
+//RS             return false;
+//RS         }
+//RS         self.focus.item_key = Some(item_key.to_string());
+//RS         self.keyboard.last_action = Some(TerminalAction::Inspect {
+//RS             panel_id: self.focus.panel_id.clone().unwrap_or_default(),
+//RS             item_key: item_key.to_string(),
+//RS         });
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn clear_item_focus(&mut self) {
+//RS         self.focus.clear_item();
+//RS         self.keyboard.last_action = Some(TerminalAction::ReturnToPanel);
+//RS     }
+//RS 
+//RS     pub fn handle(&mut self, input: TerminalInput) -> TerminalAction {
+//RS         match input {
+//RS             TerminalInput::Key(key) => self.handle_key(key),
+//RS             TerminalInput::Resize(viewport) => {
+//RS                 self.set_viewport(viewport);
+//RS                 let action = TerminalAction::Ignored;
+//RS                 self.keyboard.last_action = Some(action.clone());
+//RS                 action
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Keyboard paths are explicit and side-effect free outside host focus and
+//RS     /// cursor state.  Rerun/restart/job/quit actions are returned to the real
+//RS     /// `jet dev` command; this adapter never executes them.
+//RS     pub fn handle_key(&mut self, key: TerminalKey) -> TerminalAction {
+//RS         self.keyboard.last_key = Some(key);
+//RS         let action = match key {
+//RS             TerminalKey::Tab | TerminalKey::Down => self.move_panel(1),
+//RS             TerminalKey::BackTab | TerminalKey::Up => self.move_panel(-1),
+//RS             TerminalKey::Enter | TerminalKey::Right => self.inspect_focused(),
+//RS             TerminalKey::Escape | TerminalKey::Left => {
+//RS                 if self.focus.item_key.is_some() {
+//RS                     self.clear_item_focus();
+//RS                     TerminalAction::ReturnToPanel
+//RS                 } else {
+//RS                     TerminalAction::Ignored
+//RS                 }
+//RS             }
+//RS             TerminalKey::Character('r') if self.config.capabilities.access.actions_enabled() => {
+//RS                 TerminalAction::Rerun
+//RS             }
+//RS             TerminalKey::Character('R') if self.config.capabilities.access.actions_enabled() => {
+//RS                 TerminalAction::Restart
+//RS             }
+//RS             TerminalKey::Character('j') => {
+//RS                 self.focus_panel("jobs");
+//RS                 TerminalAction::FocusJob
+//RS             }
+//RS             TerminalKey::Character('q') => TerminalAction::Quit,
+//RS             TerminalKey::Character('t') => self.move_cursor(),
+//RS             TerminalKey::Character(_) => TerminalAction::Ignored,
+//RS         };
+//RS         self.keyboard.last_action = Some(action.clone());
+//RS         action
+//RS     }
+//RS 
+//RS     pub fn render(&self) -> TerminalFrame {
+//RS         let ordered = ordered_events(&self.events);
+//RS         let viewport = self.effective_viewport();
+//RS         let tree = self.build_tree(&ordered);
+//RS         let freshness = overall_freshness(&ordered, self.display_cursor());
+//RS         let revision = self
+//RS             .revision
+//RS             .clone()
+//RS             .or_else(|| ordered.last().map(|event| event.revision.clone()))
+//RS             .unwrap_or_default();
+//RS         let lines = render_lines(
+//RS             &tree,
+//RS             &viewport,
+//RS             self.config.capabilities,
+//RS             self.session_id.as_deref().unwrap_or(""),
+//RS             self.source_id.as_deref(),
+//RS             self.build_id.as_deref(),
+//RS             self.world_id.as_deref(),
+//RS             &revision,
+//RS             self.display_cursor(),
+//RS             self.observed_at,
+//RS             self.status.as_ref(),
+//RS             &self.focus,
+//RS             &self.keyboard,
+//RS             ordered.len(),
+//RS             self.config.max_events,
+//RS             freshness,
+//RS         );
+//RS         TerminalFrame {
+//RS             protocol: JET_DEVTOOLS_PROTOCOL.to_string(),
+//RS             session_id: self.session_id.clone().unwrap_or_default(),
+//RS             source_id: self.source_id.clone(),
+//RS             build_id: self.build_id.clone(),
+//RS             world_id: self.world_id.clone(),
+//RS             observed_at: self.observed_at,
+//RS             status: self.status.clone(),
+//RS             revision,
+//RS             cursor: self.display_cursor(),
+//RS             viewport,
+//RS             capabilities: self.config.capabilities,
+//RS             focus: self.focus.clone(),
+//RS             keyboard: self.keyboard.clone(),
+//RS             freshness,
+//RS             event_count: ordered.len(),
+//RS             event_limit: self.config.max_events,
+//RS             tree,
+//RS             lines,
+//RS         }
+//RS     }
+//RS 
+//RS     fn move_panel(&mut self, direction: isize) -> TerminalAction {
+//RS         let catalog = crate::Devtools::catalog::descriptors();
+//RS         if catalog.is_empty() {
+//RS             return TerminalAction::Ignored;
+//RS         }
+//RS         let current = self
+//RS             .focus
+//RS             .panel_id
+//RS             .as_deref()
+//RS             .and_then(|panel| {
+//RS                 catalog
+//RS                     .iter()
+//RS                     .position(|descriptor| descriptor.id.as_str() == panel)
+//RS             })
+//RS             .unwrap_or(0);
+//RS         let len = catalog.len() as isize;
+//RS         let next = (current as isize + direction).rem_euclid(len) as usize;
+//RS         let panel_id = catalog[next].id.as_str().to_string();
+//RS         self.focus = TerminalFocus::panel(panel_id.clone());
+//RS         TerminalAction::FocusPanel { panel_id }
+//RS     }
+//RS 
+//RS 
+//RS     fn inspect_focused(&mut self) -> TerminalAction {
+//RS         let panel_id = self
+//RS             .focus
+//RS             .panel_id
+//RS             .clone()
+//RS             .unwrap_or_else(|| first_panel_id().to_string());
+//RS         if let Some(item_key) = self.focus.item_key.clone() {
+//RS             return TerminalAction::Inspect { panel_id, item_key };
+//RS         }
+//RS         let item_key = ordered_events(&self.events)
+//RS             .into_iter()
+//RS             .rev()
+//RS             .find(|event| self.panel_id_for_event(event) == panel_id)
+//RS             .map(|event| event_key(event));
+//RS         if let Some(item_key) = item_key {
+//RS             self.focus.item_key = Some(item_key.clone());
+//RS             return TerminalAction::Inspect { panel_id, item_key };
+//RS         }
+//RS         TerminalAction::FocusPanel { panel_id }
+//RS     }
+//RS 
+//RS     fn move_cursor(&mut self) -> TerminalAction {
+//RS         let mut sequences = ordered_events(&self.events)
+//RS             .into_iter()
+//RS             .map(|event| event.sequence)
+//RS             .collect::<Vec<_>>();
+//RS         sequences.sort_unstable();
+//RS         sequences.dedup();
+//RS         if sequences.is_empty() {
+//RS             return TerminalAction::Ignored;
+//RS         }
+//RS         let current = self.time_cursor.unwrap_or(sequences[0]);
+//RS         let next = sequences
+//RS             .iter()
+//RS             .copied()
+//RS             .find(|sequence| *sequence > current)
+//RS             .unwrap_or(sequences[0]);
+//RS         self.time_cursor = Some(next);
+//RS         TerminalAction::MoveCursor { cursor: next }
+//RS     }
+//RS     fn effective_viewport(&self) -> TerminalViewport {
+//RS         let configured = self.config.viewport;
+//RS         configured.resize(
+//RS             configured.width.min(self.config.capabilities.width.max(1)),
+//RS             configured.height,
+//RS         )
+//RS     }
+//RS     fn panel_id_for_event(&self, event: &TerminalHostEvent) -> &'static str {
+//RS         event.panel_id.as_str()
+//RS     }
+//RS     fn display_cursor(&self) -> Option<u64> {
+//RS         self.time_cursor.or(self.cursor)
+//RS     }
+//RS 
+//RS 
+//RS     fn build_tree(&self, ordered: &[&TerminalHostEvent]) -> TerminalPanelTree {
+//RS         let viewport = self.effective_viewport();
+//RS         let root_bounds = viewport.bounds();
+//RS         let mut children = Vec::new();
+//RS         let availability = self.panel_availability();
+//RS 
+//RS         let mut remaining = self.config.max_nodes.saturating_sub(1);
+//RS         let panel_height = 3usize;
+//RS         for (index, descriptor) in crate::Devtools::catalog::descriptors()
+//RS             .iter()
+//RS             .enumerate()
+//RS         {
+//RS             let panel_id = descriptor.id.as_str();
+//RS             let panel_title = descriptor.title;
+//RS             if remaining == 0 {
+//RS                 break;
+//RS             }
+//RS             remaining -= 1;
+//RS             let panel_events = ordered
+//RS                 .iter()
+//RS                 .copied()
+//RS                 .filter(|event| self.panel_id_for_event(event) == panel_id)
+//RS                 .collect::<Vec<_>>();
+//RS             let freshness = panel_freshness(&panel_events, self.display_cursor());
+//RS             let y = index.saturating_mul(panel_height);
+//RS             let height = viewport.height.saturating_sub(y).min(panel_height);
+//RS             let panel_bounds = TerminalBounds::new(0, y, viewport.width, height);
+//RS             let mut panel_children = Vec::new();
+//RS             if remaining > 0 {
+//RS                 let panel_state = availability
+//RS                     .iter()
+//RS                     .find(|row| row.descriptor.id == descriptor.id);
+//RS                 let available = panel_state.map_or(true, JetDevtoolsPanelAvailability::is_available);
+//RS                 let status = TerminalStatus {
+//RS                     label: if available {
+//RS                         freshness.label().to_string()
+//RS                     } else {
+//RS                         "unavailable".to_string()
+//RS                     },
+//RS                     detail: if available {
+//RS                         format!(
+//RS                             "{} event(s), retained {}/{}",
+//RS                             panel_events.len(),
+//RS                             ordered.len(),
+//RS                             self.config.max_events
+//RS                         )
+//RS                     } else {
+//RS                         panel_state
+//RS                             .map(|row| unavailable_panel_detail(row.unavailable_reasons()))
+//RS                             .unwrap_or_else(|| "unavailable".to_string())
+//RS                     },
+//RS                     freshness,
+//RS                 };
+//RS                 panel_children.push(TerminalNode::status(
+//RS                     format!("panel:{panel_id}:status"),
+//RS                     "freshness",
+//RS                     status,
+//RS                     TerminalBounds::new(0, y, viewport.width, height.min(1)),
+//RS                     self.focus.panel_id.as_deref() == Some(panel_id),
+//RS                 ));
+//RS                 remaining -= 1;
+//RS             }
+//RS             if remaining > 0 {
+//RS                 let summary = panel_events
+//RS                     .last()
+//RS                     .map(|event| event_summary(event, self.config.capabilities))
+//RS                     .unwrap_or_else(|| "No recorded facts".to_string());
+//RS                 panel_children.push(TerminalNode::text(
+//RS                     format!("panel:{panel_id}:summary"),
+//RS                     "summary",
+//RS                     summary,
+//RS                     TerminalBounds::new(0, y.saturating_add(1), viewport.width, height.saturating_sub(1).min(1)),
+//RS                     freshness,
+//RS                 ));
+//RS                 remaining -= 1;
+//RS             }
+//RS             if remaining > 0 {
+//RS                 let rows = panel_events
+//RS                     .iter()
+//RS                     .map(|event| TerminalTableRow {
+//RS                         key: event_key(event),
+//RS                         cells: vec![
+//RS                             event.revision.clone(),
+//RS                             event.sequence.to_string(),
+//RS                             event.observed_at.to_string(),
+//RS                             event.kind.clone(),
+//RS                             event.entity.clone(),
+//RS                             event.source.clone(),
+//RS                             event.published_fact_count().to_string(),
+//RS                         ],
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 panel_children.push(TerminalNode::table(
+//RS                     format!("panel:{panel_id}:events"),
+//RS                     "events",
+//RS                     TerminalTable {
+//RS                         columns: vec![
+//RS                             "revision".to_string(),
+//RS                             "sequence".to_string(),
+//RS                             "observed_at".to_string(),
+//RS                             "kind".to_string(),
+//RS                             "entity".to_string(),
+//RS                             "source".to_string(),
+//RS                             "published_facts".to_string(),
+//RS                         ],
+//RS                         rows,
+//RS                     },
+//RS                     TerminalBounds::new(0, y.saturating_add(2), viewport.width, height.saturating_sub(2)),
+//RS                     freshness,
+//RS                 ));
+//RS                 remaining -= 1;
+//RS             }
+//RS             children.push(TerminalNode::container(
+//RS                 format!("panel:{panel_id}"),
+//RS                 TerminalNodeKind::Panel,
+//RS                 panel_title,
+//RS                 panel_bounds,
+//RS                 freshness,
+//RS                 panel_children,
+//RS             ));
+//RS         }
+//RS         let root = TerminalNode::container(
+//RS             "terminal-root",
+//RS             TerminalNodeKind::Root,
+//RS             "jet devtools",
+//RS             root_bounds,
+//RS             overall_freshness(ordered, self.display_cursor()),
+//RS             children,
+//RS         );
+//RS         let panel_count = root.children.len();
+//RS         let node_count = root.count();
+//RS         TerminalPanelTree {
+//RS             root,
+//RS             bounds: root_bounds,
+//RS             node_count,
+//RS             node_limit: self.config.max_nodes,
+//RS             panel_count,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Default for TerminalHost {
+//RS     fn default() -> Self {
+//RS         Self::new(TerminalHostConfig::default())
+//RS     }
+//RS }
+//RS fn validate_text(value: &str, label: &str) -> Result<(), String> {
+//RS     validate_optional_text(value, label, false)
+//RS }
+//RS 
+//RS fn validate_optional_text(value: &str, label: &str, allow_empty: bool) -> Result<(), String> {
+//RS     if (!allow_empty && value.is_empty())
+//RS         || value.len() > MAX_TERMINAL_TEXT_BYTES
+//RS         || value.chars().any(char::is_control)
+//RS     {
+//RS         return Err(format!("terminal {label} is empty, too long, or contains control text"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_projection(projection: &DevtoolsProjection) -> Result<(), String> {
+//RS     if projection.protocol != JET_DEVTOOLS_PROTOCOL {
+//RS         return Err(format!(
+//RS             "devtools projection protocol must be {JET_DEVTOOLS_PROTOCOL}"
+//RS         ));
+//RS     }
+//RS     validate_text(&projection.session_id, "session id")?;
+//RS     validate_optional_text(&projection.revision, "revision", true)?;
+//RS     for (value, label) in [
+//RS         (projection.source_id.as_deref(), "source id"),
+//RS         (projection.build_id.as_deref(), "build id"),
+//RS         (projection.world_id.as_deref(), "world id"),
+//RS     ] {
+//RS         if let Some(value) = value {
+//RS             validate_text(value, label)?;
+//RS         }
+//RS     }
+//RS     validate_status(&projection.status)?;
+//RS     for event in &projection.panels {
+//RS         if event.sequence() == 0 {
+//RS             return Err("devtools event sequence must be positive".to_string());
+//RS         }
+//RS         if event.sequence() > projection.sequence {
+//RS             return Err("devtools event sequence exceeds the projection cursor".to_string());
+//RS         }
+//RS         validate_text(event.source(), "event source")?;
+//RS         validate_text(event.kind(), "event kind")?;
+//RS         validate_text(event.entity(), "event entity")?;
+//RS         validate_text(event.fields_json(), "event fields")?;
+//RS         if let Some(payload) = event.payload_json() {
+//RS             validate_text(payload, "event payload")?;
+//RS         }
+//RS     }
+//RS     if let Some(selection) = &projection.selection {
+//RS         let valid_panel = crate::Devtools::catalog::descriptors()
+//RS             .iter()
+//RS             .any(|descriptor| descriptor.id.as_str() == selection.panel_id);
+//RS         if !valid_panel {
+//RS             return Err(format!(
+//RS                 "devtools selection panel `{}` is not canonical",
+//RS                 selection.panel_id
+//RS             ));
+//RS         }
+//RS         validate_optional_text(&selection.item_key, "selection item", true)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_status(status: &DevtoolsStatusFact) -> Result<(), String> {
+//RS     for (value, label) in [
+//RS         (status.diagnostic_code.as_deref(), "diagnostic code"),
+//RS         (status.diagnostic.as_deref(), "diagnostic"),
+//RS         (status.accepted_revision.as_deref(), "accepted revision"),
+//RS         (status.last_good_revision.as_deref(), "last good revision"),
+//RS         (status.run_target.as_deref(), "run target"),
+//RS         (status.run_output.as_deref(), "run output"),
+//RS         (status.test_state.as_deref(), "test state"),
+//RS     ] {
+//RS         if let Some(value) = value {
+//RS             if value.is_empty() {
+//RS                 return Err(format!("terminal {label} is empty"));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn bounded_status(status: &DevtoolsStatusFact) -> Result<DevtoolsStatusFact, String> {
+//RS     validate_status(status)?;
+//RS     let mut bounded = status.clone();
+//RS     for value in [
+//RS         &mut bounded.diagnostic_code,
+//RS         &mut bounded.diagnostic,
+//RS         &mut bounded.accepted_revision,
+//RS         &mut bounded.last_good_revision,
+//RS         &mut bounded.run_target,
+//RS         &mut bounded.run_output,
+//RS         &mut bounded.test_state,
+//RS     ] {
+//RS         if let Some(value) = value {
+//RS             *value = bounded_text(value, MAX_TERMINAL_TEXT_BYTES);
+//RS         }
+//RS     }
+//RS     Ok(bounded)
+//RS }
+//RS 
+//RS fn bounded_text(value: &str, limit: usize) -> String {
+//RS     if limit == 0 {
+//RS         return String::new();
+//RS     }
+//RS     let mut output = String::with_capacity(value.len().min(limit));
+//RS     for character in value.chars() {
+//RS         let replacement = match character {
+//RS             '\n' => "\\n",
+//RS             '\r' => "\\r",
+//RS             '\t' => "\\t",
+//RS             character if character.is_control() => "?",
+//RS             _ => {
+//RS                 if output.len().saturating_add(character.len_utf8()) > limit {
+//RS                     break;
+//RS                 }
+//RS                 output.push(character);
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         if output.len().saturating_add(replacement.len()) > limit {
+//RS             break;
+//RS         }
+//RS         output.push_str(replacement);
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn display_optional(value: &str) -> &str {
+//RS     if value.is_empty() {
+//RS         "-"
+//RS     } else {
+//RS         value
+//RS     }
+//RS }
+//RS 
+//RS fn yes_no(value: bool) -> &'static str {
+//RS     if value { "yes" } else { "no" }
+//RS }
+//RS 
+//RS fn access_label(access: TerminalHostAccess) -> &'static str {
+//RS     if access.read_only {
+//RS         "read-only"
+//RS     } else if access.release {
+//RS         "release"
+//RS     } else if access.local {
+//RS         "local"
+//RS     } else {
+//RS         "remote"
+//RS     }
+//RS }
+//RS 
+//RS fn session_state_label(state: &DevtoolsSessionState) -> &'static str {
+//RS     match state {
+//RS         DevtoolsSessionState::Starting => "starting",
+//RS         DevtoolsSessionState::Building => "building",
+//RS         DevtoolsSessionState::Ready => "ready",
+//RS         DevtoolsSessionState::Error => "error",
+//RS         DevtoolsSessionState::Unavailable => "unavailable",
+//RS         DevtoolsSessionState::Stopped => "stopped",
+//RS     }
+//RS }
+//RS 
+//RS fn status_summary(status: &DevtoolsStatusFact, reveal: bool) -> String {
+//RS     let mut fields = vec![format!("state={}", session_state_label(&status.state))];
+//RS     for (key, value) in [
+//RS         ("diagnostic_code", status.diagnostic_code.as_deref()),
+//RS         ("diagnostic", status.diagnostic.as_deref()),
+//RS         ("accepted_revision", status.accepted_revision.as_deref()),
+//RS         ("last_good_revision", status.last_good_revision.as_deref()),
+//RS         ("run_target", status.run_target.as_deref()),
+//RS         ("run_output", status.run_output.as_deref()),
+//RS         ("test_state", status.test_state.as_deref()),
+//RS     ] {
+//RS         let rendered = match (value, reveal) {
+//RS             (Some(value), true) => value,
+//RS             (Some(_), false) => "<redacted>",
+//RS             (None, _) => "-",
+//RS         };
+//RS         fields.push(format!("{key}={rendered}"));
+//RS     }
+//RS     fields.join(" ")
+//RS }
+//RS 
+//RS 
+//RS fn unavailable_panel_detail(
+//RS     reasons: &[JetDevtoolsPanelUnavailableReason],
+//RS ) -> String {
+//RS     let details = reasons
+//RS         .iter()
+//RS         .map(|reason| match reason {
+//RS             JetDevtoolsPanelUnavailableReason::UnsupportedHost(host) => {
+//RS                 format!("unsupported host {}", host.as_str())
+//RS             }
+//RS             JetDevtoolsPanelUnavailableReason::MissingCapability(capability) => {
+//RS                 format!("missing {}", capability.grant())
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     if details.is_empty() {
+//RS         "unavailable".to_string()
+//RS     } else {
+//RS         details.join(", ")
+//RS     }
+//RS }
+//RS 
+//RS fn ordered_events<'a>(events: &'a VecDeque<TerminalHostEvent>) -> Vec<&'a TerminalHostEvent> {
+//RS     let mut ordered = events.iter().collect::<Vec<_>>();
+//RS     ordered.sort_by(|left, right| {
+//RS         left.sequence
+//RS             .cmp(&right.sequence)
+//RS             .then_with(|| left.observed_at.cmp(&right.observed_at))
+//RS             .then_with(|| left.revision.cmp(&right.revision))
+//RS             .then_with(|| left.kind.cmp(&right.kind))
+//RS             .then_with(|| left.entity.cmp(&right.entity))
+//RS             .then_with(|| left.source.cmp(&right.source))
+//RS     });
+//RS     ordered
+//RS }
+//RS 
+//RS fn event_key(event: &TerminalHostEvent) -> String {
+//RS     format!("event:{}:{}:{}:{}", event.revision, event.sequence, event.kind, event.entity)
+//RS }
+//RS 
+//RS fn event_summary(event: &TerminalHostEvent, capabilities: TerminalHostCapabilities) -> String {
+//RS     let details_enabled = capabilities.access.local_details_enabled();
+//RS     let published = if details_enabled {
+//RS         event
+//RS             .facts
+//RS             .iter()
+//RS             .filter(|fact| fact.published)
+//RS             .map(TerminalHostFact::display)
+//RS             .collect::<Vec<_>>()
+//RS             .join(",")
+//RS     } else {
+//RS         "<redacted>".to_string()
+//RS     };
+//RS     let values = if published.is_empty() {
+//RS         "-"
+//RS     } else {
+//RS         &published
+//RS     };
+//RS     let verbose = if capabilities.verbose { " details=on" } else { "" };
+//RS     format!(
+//RS         "{} · {} · {} · {}ms · source={} · published_facts={} · values={}{}",
+//RS         event.kind,
+//RS         event.entity,
+//RS         if event.revision.is_empty() {
+//RS             "-"
+//RS         } else {
+//RS             &event.revision
+//RS         },
+//RS         event.observed_at,
+//RS         event.source,
+//RS         event.published_fact_count(),
+//RS         values,
+//RS         verbose,
+//RS     )
+//RS }
+//RS 
+//RS fn panel_freshness(events: &[&TerminalHostEvent], cursor: Option<u64>) -> TerminalFreshness {
+//RS     let Some(latest) = events.iter().map(|event| event.sequence).max() else {
+//RS         return TerminalFreshness::Empty;
+//RS     };
+//RS     if cursor.is_some_and(|cursor| cursor < latest) {
+//RS         TerminalFreshness::Stale
+//RS     } else {
+//RS         TerminalFreshness::Fresh
+//RS     }
+//RS }
+//RS 
+//RS fn overall_freshness(events: &[&TerminalHostEvent], cursor: Option<u64>) -> TerminalFreshness {
+//RS     if events.is_empty() {
+//RS         return TerminalFreshness::Empty;
+//RS     }
+//RS     if events
+//RS         .iter()
+//RS         .any(|event| cursor.is_some_and(|cursor| cursor < event.sequence))
+//RS     {
+//RS         TerminalFreshness::Stale
+//RS     } else {
+//RS         TerminalFreshness::Fresh
+//RS     }
+//RS }
+//RS 
+//RS fn render_lines(
+//RS     tree: &TerminalPanelTree,
+//RS     viewport: &TerminalViewport,
+//RS     capabilities: TerminalHostCapabilities,
+//RS     session_id: &str,
+//RS     source_id: Option<&str>,
+//RS     build_id: Option<&str>,
+//RS     world_id: Option<&str>,
+//RS     revision: &str,
+//RS     cursor: Option<u64>,
+//RS     observed_at: Option<u64>,
+//RS     status: Option<&DevtoolsStatusFact>,
+//RS     focus: &TerminalFocus,
+//RS     keyboard: &TerminalKeyboardState,
+//RS     event_count: usize,
+//RS     event_limit: usize,
+//RS     freshness: TerminalFreshness,
+//RS ) -> Vec<String> {
+//RS     if capabilities.quiet {
+//RS         return Vec::new();
+//RS     }
+//RS     let mut raw = Vec::new();
+//RS     raw.push(format!(
+//RS         "jet devtools  session={}  source_id={}  build_id={}  world_id={}  revision={}  sequence={}  observed_at={}  state={}  freshness={}",
+//RS         display_optional(session_id),
+//RS         display_optional(source_id.unwrap_or("")),
+//RS         display_optional(build_id.unwrap_or("")),
+//RS         display_optional(world_id.unwrap_or("")),
+//RS         display_optional(revision),
+//RS         cursor.map_or_else(|| "-".to_string(), |value| value.to_string()),
+//RS         observed_at.map_or_else(|| "-".to_string(), |value| value.to_string()),
+//RS         status
+//RS             .map(|status| session_state_label(&status.state))
+//RS             .unwrap_or("-"),
+//RS         freshness.label(),
+//RS     ));
+//RS     raw.push(format!(
+//RS         "terminal={}x{}  tty={}  ansi={}  no_color={}  verbose={}  quiet={}  access={}  local={}  release={}  read_only={}  nodes={}/{}  events={}/{}  focus={}",
+//RS         viewport.width,
+//RS         viewport.height,
+//RS         yes_no(capabilities.tty),
+//RS         yes_no(capabilities.ansi),
+//RS         yes_no(capabilities.no_color),
+//RS         yes_no(capabilities.verbose),
+//RS         yes_no(capabilities.quiet),
+//RS         access_label(capabilities.access),
+//RS         yes_no(capabilities.access.local),
+//RS         yes_no(capabilities.access.release),
+//RS         yes_no(capabilities.access.read_only),
+//RS         tree.node_count,
+//RS         tree.node_limit,
+//RS         event_count,
+//RS         event_limit,
+//RS         focus.panel_id.as_deref().unwrap_or("-"),
+//RS     ));
+//RS     if let Some(status) = status {
+//RS         raw.push(format!(
+//RS             "status: {}",
+//RS             status_summary(status, capabilities.access.local_details_enabled())
+//RS         ));
+//RS     }
+//RS     for panel in &tree.root.children {
+//RS         let selected = focus.panel_id.as_deref().is_some_and(|panel_id| {
+//RS             panel
+//RS                 .id
+//RS                 .strip_prefix("panel:")
+//RS                 .is_some_and(|candidate| candidate == panel_id)
+//RS         });
+//RS         let marker = if selected { ">" } else { " " };
+//RS         let panel_label = if selected {
+//RS             style(&format!("{marker}[{}]", panel.label), "36", capabilities)
+//RS         } else {
+//RS             format!("{marker}[{}]", panel.label)
+//RS         };
+//RS         raw.push(format!("{panel_label} {}", panel.freshness.label()));
+//RS         for child in &panel.children {
+//RS             match child.kind {
+//RS                 TerminalNodeKind::Status => {
+//RS                     if let Some(status) = &child.status {
+//RS                         raw.push(format!(
+//RS                             "  status={}  {}",
+//RS                             style(&status.label, "33", capabilities),
+//RS                             status.detail
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 TerminalNodeKind::Text => {
+//RS                     raw.push(format!("  {}", child.text.as_deref().unwrap_or("")));
+//RS                 }
+//RS                 TerminalNodeKind::Table => {
+//RS                     if let Some(table) = &child.table {
+//RS                         for row in &table.rows {
+//RS                             raw.push(format!("  {}", row.cells.join(" | ")));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 TerminalNodeKind::Root | TerminalNodeKind::Panel => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     let action_help = if capabilities.access.actions_enabled() {
+//RS         "r rerun  R restart"
+//RS     } else {
+//RS         "r/R disabled(read-only)"
+//RS     };
+//RS     raw.push(format!(
+//RS         "keys: Tab/Down next panel  Shift-Tab/Up previous  Enter inspect  Esc back  {action_help}  j jobs  t time  q quit  last={}",
+//RS         keyboard
+//RS             .last_action
+//RS             .as_ref()
+//RS             .map(action_label)
+//RS             .unwrap_or("none")
+//RS     ));
+//RS     let skip = viewport.scroll.min(raw.len());
+//RS     raw.into_iter()
+//RS         .skip(skip)
+//RS         .take(viewport.height)
+//RS         .map(|line| truncate_columns(&line, viewport.width))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn action_label(action: &TerminalAction) -> &'static str {
+//RS     match action {
+//RS         TerminalAction::FocusPanel { .. } => "focus-panel",
+//RS         TerminalAction::Inspect { .. } => "inspect",
+//RS         TerminalAction::ReturnToPanel => "back",
+//RS         TerminalAction::MoveCursor { .. } => "time",
+//RS         TerminalAction::Rerun => "rerun",
+//RS         TerminalAction::Restart => "restart",
+//RS         TerminalAction::FocusJob => "jobs",
+//RS         TerminalAction::Quit => "quit",
+//RS         TerminalAction::Ignored => "ignored",
+//RS     }
+//RS }
+//RS 
+//RS fn style(text: &str, code: &str, capabilities: TerminalHostCapabilities) -> String {
+//RS     if capabilities.color_enabled() {
+//RS         format!("\x1b[{code}m{text}\x1b[0m")
+//RS     } else {
+//RS         text.to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn strip_ansi(text: &str) -> String {
+//RS     let mut output = String::with_capacity(text.len());
+//RS     let mut chars = text.chars();
+//RS     while let Some(ch) = chars.next() {
+//RS         if ch == '\x1b' && chars.next() == Some('[') {
+//RS             for code in chars.by_ref() {
+//RS                 if ('@'..='~').contains(&code) {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             output.push(ch);
+//RS         }
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn truncate_columns(text: &str, width: usize) -> String {
+//RS     let limit = width.max(1);
+//RS     let mut output = String::with_capacity(text.len().min(limit.saturating_add(16)));
+//RS     let mut chars = text.chars().peekable();
+//RS     let mut visible = 0usize;
+//RS     let mut clipped = false;
+//RS     let has_ansi = text.contains('\x1b');
+//RS     while let Some(character) = chars.next() {
+//RS         if character == '\x1b' && chars.peek() == Some(&'[') {
+//RS             output.push(character);
+//RS             output.push(chars.next().expect("CSI introducer follows escape"));
+//RS             for code in chars.by_ref() {
+//RS                 output.push(code);
+//RS                 if ('@'..='~').contains(&code) {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if visible >= limit {
+//RS             clipped = true;
+//RS             break;
+//RS         }
+//RS         output.push(character);
+//RS         visible += 1;
+//RS     }
+//RS     if clipped && has_ansi {
+//RS         output.push_str("\x1b[0m");
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn event(
+//RS         sequence: u64,
+//RS         panel_id: JetDevtoolsPanelId,
+//RS         kind: &str,
+//RS         entity: &str,
+//RS     ) -> TerminalHostEvent {
+//RS         TerminalHostEvent::new(
+//RS             panel_id,
+//RS             "session",
+//RS             "revision-a",
+//RS             sequence,
+//RS             sequence * 10,
+//RS             "src/main.jet",
+//RS             kind,
+//RS             entity,
+//RS             vec![TerminalHostFact::redacted("value")],
+//RS         )
+//RS     }
+//RS 
+//RS     fn panel_ids() -> BTreeMap<u64, JetDevtoolsPanelId> {
+//RS         [(1, JetDevtoolsPanelId::Build)].into_iter().collect()
+//RS     }
+//RS 
+//RS     fn projection() -> DevtoolsProjection {
+//RS         let mut envelope = crate::Devtools::JetDevtoolsEnvelope::new("session", 0);
+//RS         envelope.push(
+//RS             JetDevtoolsEvent::from_parts_with_payload(
+//RS                 1200,
+//RS                 "devserver",
+//RS                 "Build",
+//RS                 "build",
+//RS                 "{\"accepted\":true}",
+//RS                 Some("{\"output\":\"ok\"}".to_string()),
+//RS             )
+//RS             .unwrap(),
+//RS         );
+//RS         DevtoolsProjection {
+//RS             protocol: JET_DEVTOOLS_PROTOCOL.to_string(),
+//RS             session_id: "session".to_string(),
+//RS             source_id: Some("src/main.jet".to_string()),
+//RS             build_id: Some("build-42".to_string()),
+//RS             revision: "revision-a".to_string(),
+//RS             world_id: Some("world-7".to_string()),
+//RS             sequence: 1,
+//RS             observed_at: 1234,
+//RS             panels: envelope.events().cloned().collect(),
+//RS             selection: Some(crate::Session::DevtoolsSelectionFact {
+//RS                 panel_id: "build".to_string(),
+//RS                 item_key: "event:revision-a:1:Build:build".to_string(),
+//RS             }),
+//RS             status: DevtoolsStatusFact {
+//RS                 state: DevtoolsSessionState::Ready,
+//RS                 diagnostic_code: Some("E0001".to_string()),
+//RS                 diagnostic: Some("diagnostic".to_string()),
+//RS                 accepted_revision: Some("revision-a".to_string()),
+//RS                 last_good_revision: Some("revision-a".to_string()),
+//RS                 run_target: Some("native".to_string()),
+//RS                 run_output: Some("ok".to_string()),
+//RS                 test_state: Some("passed".to_string()),
+//RS             },
+//RS             command_capabilities: crate::Session::DevtoolsCommandCapabilities {
+//RS                 project_rebuild: false,
+//RS                 project_rebuild_reason: Some(
+//RS                     "terminal host test projection has no rebuild executor".to_string(),
+//RS                 ),
+//RS             },
+//RS             command_receipts: Vec::new(),
+//RS             reset: true,
+//RS             truncation: false,
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sync_projection_preserves_canonical_identity_and_status() {
+//RS         let capabilities = TerminalHostCapabilities::new(
+//RS             false,
+//RS             false,
+//RS             true,
+//RS             32,
+//RS             true,
+//RS             false,
+//RS             TerminalHostAccess::new(true, false, true),
+//RS         );
+//RS         let mut host = TerminalHost::new(TerminalHostConfig::new(
+//RS             TerminalViewport::new(80, 24),
+//RS             capabilities,
+//RS         ));
+//RS         let frame = host
+//RS             .sync_projection(&projection(), &panel_ids())
+//RS             .unwrap();
+//RS         assert_eq!(frame.session_id, "session");
+//RS         assert_eq!(frame.source_id.as_deref(), Some("src/main.jet"));
+//RS         assert_eq!(frame.build_id.as_deref(), Some("build-42"));
+//RS         assert_eq!(frame.world_id.as_deref(), Some("world-7"));
+//RS         assert_eq!(frame.revision, "revision-a");
+//RS         assert_eq!(frame.cursor, Some(1));
+//RS         assert_eq!(frame.observed_at, Some(1234));
+//RS         assert_eq!(frame.status.as_ref().map(|status| &status.state), Some(&DevtoolsSessionState::Ready));
+//RS         let event = host.events().next().unwrap();
+//RS         assert_eq!(event.observed_at, 1200);
+//RS         assert_eq!(
+//RS             event.facts[0].value,
+//RS             Some(TerminalFactValue::Text("{\"accepted\":true}".to_string()))
+//RS         );
+//RS         assert_eq!(host.focus().item_key.as_deref(), Some("event:revision-a:1:Build:build"));
+//RS         assert!(host.handle_key(TerminalKey::Character('r')) == TerminalAction::Ignored);
+//RS         assert!(frame.lines.iter().all(|line| strip_ansi(line).chars().count() <= 32));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn quiet_suppresses_text_without_dropping_typed_tree() {
+//RS         let capabilities = TerminalHostCapabilities::new(
+//RS             false,
+//RS             false,
+//RS             true,
+//RS             20,
+//RS             false,
+//RS             true,
+//RS             TerminalHostAccess::interactive(),
+//RS         );
+//RS         let mut host = TerminalHost::new(TerminalHostConfig::new(
+//RS             TerminalViewport::new(80, 24),
+//RS             capabilities,
+//RS         ));
+//RS         let frame = host
+//RS             .sync_projection(&projection(), &panel_ids())
+//RS             .unwrap();
+//RS         assert!(frame.lines.is_empty());
+//RS         assert_eq!(
+//RS             frame.tree.panel_count,
+//RS             crate::Devtools::catalog::descriptors().len()
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn same_facts_keep_nodes_stable_across_capabilities() {
+//RS         let mut plain = TerminalHost::new(TerminalHostConfig::new(
+//RS             TerminalViewport::new(80, 24),
+//RS             TerminalHostCapabilities::plain(),
+//RS         ));
+//RS         let mut color = TerminalHost::new(TerminalHostConfig::new(
+//RS             TerminalViewport::new(80, 24),
+//RS             TerminalHostCapabilities::color(),
+//RS         ));
+//RS         plain
+//RS             .append_event(event(1, JetDevtoolsPanelId::Build, "Build", "build"))
+//RS             .unwrap();
+//RS         color
+//RS             .append_event(event(1, JetDevtoolsPanelId::Build, "Build", "build"))
+//RS             .unwrap();
+//RS         let plain_frame = plain.render();
+//RS         let color_frame = color.render();
+//RS         assert_eq!(plain_frame.tree, color_frame.tree);
+//RS         assert!(!plain_frame.text().contains('\x1b'));
+//RS         assert!(color_frame.text().contains('\x1b'));
+//RS         assert!(color_frame.diff(&plain_frame).metadata_changed);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn keyboard_paths_update_explicit_focus_and_return_actions() {
+//RS         let mut host = TerminalHost::default();
+//RS         host
+//RS             .append_event(event(1, JetDevtoolsPanelId::Tests, "Tests", "fails"))
+//RS             .unwrap();
+//RS         assert_eq!(host.handle_key(TerminalKey::Enter), TerminalAction::Inspect {
+//RS             panel_id: "tests".to_string(),
+//RS             item_key: "event:revision-a:1:Tests:fails".to_string(),
+//RS         });
+//RS         assert_eq!(host.handle_key(TerminalKey::Escape), TerminalAction::ReturnToPanel);
+//RS         assert!(host.focus().item_key.is_none());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn diff_operations_are_ordered_and_bounded() {
+//RS         let mut host = TerminalHost::default();
+//RS         host
+//RS             .append_event(event(1, JetDevtoolsPanelId::Build, "Build", "one"))
+//RS             .unwrap();
+//RS         let first = host.render();
+//RS         host
+//RS             .append_event(event(2, JetDevtoolsPanelId::Jobs, "Jobs", "two"))
+//RS             .unwrap();
+//RS         let second = host.render();
+//RS         let diff = second.diff(&first);
+//RS         assert!(!diff.is_empty());
+//RS         let ids = diff
+//RS             .operations
+//RS             .iter()
+//RS             .map(|operation| match operation {
+//RS                 TerminalDiffOperation::Insert { id, .. }
+//RS                 | TerminalDiffOperation::Remove { id }
+//RS                 | TerminalDiffOperation::Replace { id, .. } => id,
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         assert!(ids.windows(2).all(|pair| pair[0] <= pair[1]));
+//RS         assert!(second.tree.node_count <= second.tree.node_limit);
+//RS     }
+//RS }
+// END-PORT-PENDING 0785 crates/jet-devserver/src/TerminalHost.rs:1-2237
+

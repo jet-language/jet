@@ -1,0 +1,181 @@
+// crates/jet-semindex/src/Docs.rs:295–657,1569–1596.
+// Rendering consumes the sole checked DocGraph, retaining its row order; it
+// neither sorts nor infers public/contract/source facts. Markdown preserves
+// trusted syntax verbatim. HTML escapes every text/attribute insertion.
+// Raw artifact codecs preserve ordered fields; status projections construct
+// the canonical Foundation Report values directly (CP-REPORT-STATUS-API).
+use core.text.html as doc_render_html
+use jet_foundation.[StatusValue, StatusFields, foundation_json_quote]
+use jet_pkg_model.[pkg_render_effect_projection_line]
+
+impl DocGraph {
+    pub fn to_markdown(self) -> String Never! {
+        parts := [String]{"# Jet Documentation\n\n", "Generated from the checked semantic graph.\n\n", "## Effect Roles\n\n", pkg_render_effect_projection_line(self.effect_projection), "\n\n", "## Modules\n\n"}
+        loop row in self.modules {
+            &parts.push("- `{row.name}` — `{row.path}` ([source]({docs_link(row.source.link)}))\n")
+            if row.summary != "" -> &parts.push("  {row.summary}\n")
+        }
+        &parts.push("\n## API\n\n")
+        loop item in self.items {
+            if !item.public -> next
+            summary :: if item.summary == "" -> "Undocumented public item." else -> item.summary
+            &parts.push("### `{item.qualified_name}`\n\n{summary}\n\n")
+            &parts.push("```jet\n{item.signature}\n```\n\n")
+            if item.examples.len() > 0 {
+                &parts.push("Examples:\n\n")
+                loop example in item.examples -> &parts.push("- `{example}`\n")
+                &parts.push("\n")
+            }
+            &parts.push("[Source]({docs_link(item.source.link)})\n\n")
+        }
+        if self.impls.len() > 0 {
+            &parts.push("## Implementations\n\n")
+            loop implementation in self.impls {
+                trait_name :: implementation.trait_name ?? "inherent"
+                &parts.push("- `{trait_name}` for `{implementation.type_name}` in `{implementation.module_path}` ([source]({docs_link(implementation.source.link)}))\n")
+            }
+            &parts.push("\n")
+        }
+        if self.doctests.len() > 0 {
+            &parts.push("## Doctests\n\n")
+            loop doctest in self.doctests {
+                &parts.push("### `{doctest.module_path}` line {doctest.line}\n\n```jet\n")
+                loop line in doctest.setup -> &parts.push("{line}\n")
+                loop expectation in doctest.expectations -> &parts.push("{expectation.expression} // => {expectation.expected}\n")
+                &parts.push("```\n\n[Source]({docs_link(doctest.source.link)})\n\n")
+            }
+        }
+        parts.join("")
+    }
+
+    pub fn to_html(self) -> String Never! {
+        parts := [String]{"<!doctype html><html><head><meta charset=\"utf-8\"><title>Jet Documentation</title></head><body><h1>Jet Documentation</h1>", "<p>Generated from the checked semantic graph.</p><h2>Effect Roles</h2><p>", html_escape(pkg_render_effect_projection_line(self.effect_projection)), "</p><h2>Modules</h2><ul>"}
+        loop row in self.modules {
+            &parts.push("<li><code>{html_escape(row.name)}</code> — <code>{html_escape(row.path)}</code> (<a href=\"{html_escape(docs_link(row.source.link))}\">source</a>)")
+            if row.summary != "" -> &parts.push("<p>{html_escape(row.summary)}</p>")
+            &parts.push("</li>")
+        }
+        &parts.push("</ul><h2>API</h2>")
+        loop item in self.items {
+            if !item.public -> next
+            summary :: if item.summary == "" -> "Undocumented public item." else -> item.summary
+            qualified :: html_escape(item.qualified_name)
+            &parts.push("<article><h3 id=\"{qualified}\"><code>{qualified}</code></h3><p>{html_escape(summary)}</p><pre><code>{html_escape(item.signature)}</code></pre>")
+            if item.examples.len() > 0 {
+                &parts.push("<h4>Examples</h4><ul>")
+                loop example in item.examples -> &parts.push("<li><code>{html_escape(example)}</code></li>")
+                &parts.push("</ul>")
+            }
+            &parts.push("<p><a href=\"{html_escape(docs_link(item.source.link))}\">Source</a></p></article>")
+        }
+        if self.impls.len() > 0 {
+            &parts.push("<h2>Implementations</h2><ul>")
+            loop implementation in self.impls {
+                trait_name :: implementation.trait_name ?? "inherent"
+                &parts.push("<li><code>{html_escape(trait_name)}</code> for <code>{html_escape(implementation.type_name)}</code> (<a href=\"{html_escape(docs_link(implementation.source.link))}\">source</a>)</li>")
+            }
+            &parts.push("</ul>")
+        }
+        if self.doctests.len() > 0 {
+            &parts.push("<h2>Doctests</h2>")
+            loop doctest in self.doctests {
+                &parts.push("<article><h3><code>{html_escape(doctest.module_path)}</code> line {doctest.line}</h3><pre><code>")
+                loop line in doctest.setup -> &parts.push("{html_escape(line)}\n")
+                loop expectation in doctest.expectations -> &parts.push("{html_escape(expectation.expression)} // =&gt; {html_escape(expectation.expected)}\n")
+                &parts.push("</code></pre><a href=\"{html_escape(docs_link(doctest.source.link))}\">Source</a></article>")
+            }
+        }
+        &parts.push("</body></html>\n")
+        parts.join("")
+    }
+}
+
+// Core owns the escape algorithm. Its apostrophe is &#x27;, while this
+// established artifact contract uses &#39;. Literal entities in the input
+// are already &amp;-escaped before this spelling projection, never decoded.
+pub fn html_escape(value: String) -> String Never! {
+    doc_render_html.escape(value).replace("&#x27;", "&#39;")
+}
+pub fn docs_link(link: String) -> String Never! { "../{link}" }
+
+pub fn optional_doc_text(value: String?) -> StatusValue Never! {
+    if value == {
+        .Val(text) -> StatusValue.String{value: ~text}
+        .None -> StatusValue.Null
+    }
+}
+pub fn doc_source_value(source: DocSource) -> StatusValue Never! {
+    StatusValue.Object{fields: StatusFields.new()
+        .with("path", StatusValue.String{value: ~source.path})
+        .with("start", StatusValue.Integer{value: source.start})
+        .with("end", StatusValue.Integer{value: source.end})
+        .with("line", StatusValue.Integer{value: source.line})
+        .with("column", StatusValue.Integer{value: source.column})
+        .with("link", StatusValue.String{value: ~source.link})}
+}
+pub fn doc_module_value(row: DocModule) -> StatusValue Never! {
+    StatusValue.Object{fields: StatusFields.new()
+        .with("name", StatusValue.String{value: ~row.name})
+        .with("path", StatusValue.String{value: ~row.path})
+        .with("public", StatusValue.Bool{value: row.public})
+        .with("summary", StatusValue.String{value: ~row.summary})
+        .with("source", doc_source_value(row.source))}
+}
+pub fn doc_item_value(item: DocItem) -> StatusValue Never! {
+    StatusValue.Object{fields: StatusFields.new()
+        .with("kind", StatusValue.String{value: ~item.kind})
+        .with("name", StatusValue.String{value: ~item.name})
+        .with("qualified_name", StatusValue.String{value: ~item.qualified_name})
+        .with("module", StatusValue.String{value: ~item.module_path})
+        .with("public", StatusValue.Bool{value: item.public})
+        .with("package_public", StatusValue.Bool{value: item.package_public})
+        .with("signature", StatusValue.String{value: ~item.signature})
+        .with("failure_contract", optional_doc_text(item.failure_contract))
+        .with("failure_source", optional_doc_text(item.failure_source))
+        .with("summary", StatusValue.String{value: ~item.summary})
+        .with("examples", doc_status_strings(item.examples))
+        .with("markers", doc_status_strings(item.markers))
+        .with("source", doc_source_value(item.source))}
+}
+pub fn doc_impl_value(implementation: DocImpl) -> StatusValue Never! {
+    StatusValue.Object{fields: StatusFields.new()
+        .with("kind", StatusValue.String{value: ~implementation.kind})
+        .with("type_name", StatusValue.String{value: ~implementation.type_name})
+        .with("trait_name", optional_doc_text(implementation.trait_name))
+        .with("module", StatusValue.String{value: ~implementation.module_path})
+        .with("public", StatusValue.Bool{value: implementation.public})
+        .with("methods", doc_status_strings(implementation.methods))
+        .with("source", doc_source_value(implementation.source))}
+}
+pub fn doc_test_value(test: DocTest) -> StatusValue Never! {
+    expectations := [StatusValue]{}
+    loop expectation in test.expectations {
+        fields :: StatusFields.new()
+            .with("expression", StatusValue.String{value: ~expectation.expression})
+            .with("expected", StatusValue.String{value: ~expectation.expected})
+        &expectations.push(StatusValue.Object{fields: fields})
+    }
+    StatusValue.Object{fields: StatusFields.new()
+        .with("module", StatusValue.String{value: ~test.module_path})
+        .with("line", StatusValue.Integer{value: test.line})
+        .with("setup", doc_status_strings(test.setup))
+        .with("expectations", StatusValue.Array{values: ^expectations})
+        .with("source", doc_source_value(test.source))}
+}
+
+pub fn doc_source_json(source: DocSource) -> String Never! {
+    "{{\"path\":{foundation_json_quote(source.path)},\"start\":{source.start},\"end\":{source.end},\"line\":{source.line},\"column\":{source.column},\"link\":{foundation_json_quote(source.link)}}}"
+}
+pub fn doc_module_json(row: DocModule) -> String Never! {
+    "{{\"name\":{foundation_json_quote(row.name)},\"path\":{foundation_json_quote(row.path)},\"public\":{row.public},\"summary\":{foundation_json_quote(row.summary)},\"source\":{doc_source_json(row.source)}}}"
+}
+pub fn doc_item_json(item: DocItem) -> String Never! {
+    "{{\"kind\":{foundation_json_quote(item.kind)},\"name\":{foundation_json_quote(item.name)},\"qualified_name\":{foundation_json_quote(item.qualified_name)},\"module\":{foundation_json_quote(item.module_path)},\"public\":{item.public},\"package_public\":{item.package_public},\"signature\":{foundation_json_quote(item.signature)},\"failure_contract\":{semindex_json_optional_str(item.failure_contract)},\"failure_source\":{semindex_json_optional_str(item.failure_source)},\"summary\":{foundation_json_quote(item.summary)},\"examples\":{semindex_json_string_array(item.examples)},\"markers\":{semindex_json_string_array(item.markers)},\"source\":{doc_source_json(item.source)}}}"
+}
+pub fn doc_impl_json(implementation: DocImpl) -> String Never! {
+    "{{\"kind\":{foundation_json_quote(implementation.kind)},\"type_name\":{foundation_json_quote(implementation.type_name)},\"trait_name\":{semindex_json_optional_str(implementation.trait_name)},\"module\":{foundation_json_quote(implementation.module_path)},\"public\":{implementation.public},\"methods\":{semindex_json_string_array(implementation.methods)},\"source\":{doc_source_json(implementation.source)}}}"
+}
+pub fn doc_test_json(test: DocTest) -> String Never! {
+    expectations :: loop row in test.expectations -> "{{\"expression\":{foundation_json_quote(row.expression)},\"expected\":{foundation_json_quote(row.expected)}}}"
+    "{{\"module\":{foundation_json_quote(test.module_path)},\"line\":{test.line},\"setup\":{semindex_json_string_array(test.setup)},\"expectations\":[{expectations.join(",")}],\"source\":{doc_source_json(test.source)}}}"
+}

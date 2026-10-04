@@ -1,0 +1,20 @@
+use core.net as devserver_net
+use core.net.[TCPStream]
+
+pub MAX_RESPONSE_BODY_BYTES :: 67108864
+
+// Rust lib.rs:226–240. Check the actual byte count before rendering headers,
+// allocating a combined response, or writing any bytes. Body remains borrowed.
+// TCP write_all is unbuffered: its successful return is the socket equivalent
+// of Write::write_all + flush. No successful response masks a native IO error.
+pub fn devserver_write_response(out: TCPStream, status: String, content_type: String, body: [U8]) DevserverTransportError! -[Net, Time.Wait]> {
+    head :: devserver_response_head(status, content_type, body.len())
+    devserver_net.tcp_write_all_bytes(out, head.bytes()) ?? return Err(.Net{error: err})
+    devserver_net.tcp_write_all_bytes(out, body) ?? return Err(.Net{error: err})
+}
+
+fn devserver_response_head(status: String, content_type: String, body_length: Int) -> String DevserverTransportError! {
+    if body_length > MAX_RESPONSE_BODY_BYTES -> return Err(.InvalidData{message: "devserver response exceeds the response budget"})
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR")
+    Ok("HTTP/1.1 {status}{cr}\nContent-Type: {content_type}{cr}\nContent-Length: {body_length}{cr}\nCache-Control: no-store{cr}\nConnection: close{cr}\n{cr}\n")
+}

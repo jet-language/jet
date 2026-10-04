@@ -1,0 +1,299 @@
+// Offline repack policy for the kept Rust-byte artifact contract.
+// This owns only the fixed-layout selection and filesystem policy of main.rs,
+// not a MIR codec, SHA implementation, emitter, or Bootstrap packager.
+// The executable entry is gated on the canonical Bootstrap lease/Runner,
+// MIR wire decoder and Codegen AOT metadata owners; no Rust fallback is used.
+use core.files as repack_files
+use core.sys as repack_sys
+use core.term as repack_term
+use core.time as repack_time
+use jet_foundation.[MIRArtifactID, TEXT_NUL]
+
+REPACK_COMPILER_ENTRY_RELATIVE :: "src/compiler.jet"
+REPACK_TASK_BEGIN :: "// bootstrap:task-roots-begin"
+REPACK_TASK_END :: "// bootstrap:task-roots-end"
+
+#Error
+pub struct RepackError { pub message: String }
+fn repack_error(^message: String) -> RepackError Never! { RepackError{message: message} }
+
+// Raw FFI facts for the canonical FfiLink constructor. Only the first LF is
+// structural; directory trimming removes LF alone, not CR or other whitespace.
+pub fn repack_ffi_record(record: String) -> (crate_name: String, directory: String)? Never! {
+    bytes :: record.bytes()
+    newline :: repack_find(bytes, [U8]{U8{10}}, 0) ?? return None
+    end := bytes.len()
+    loop end > newline + 1 && bytes[end - 1] == 10 -> end -= 1
+    name :: String.from_bytes(bytes[0..<newline]) ?? panic("FFI crate name is UTF-8")
+    directory :: String.from_bytes(bytes[(newline + 1)..<end]) ?? panic("FFI directory is UTF-8")
+    Val((crate_name: name, directory: directory))
+}
+
+pub fn repack_read(path: String) -[FS]> [U8] RepackError! {
+    Ok(repack_files.read_bytes(path) ?? return Err(repack_error("cannot read `{path}`: {err}")))
+}
+
+pub fn repack_read_text(path: String) -[FS]> String RepackError! {
+    Ok(repack_files.read(path) ?? return Err(repack_error("cannot read `{path}`: {err}")))
+}
+
+pub fn repack_write(path: String, bytes: [U8]) -[FS]> RepackError! {
+    repack_files.write_bytes(path, bytes) ?? return Err(repack_error("cannot write `{path}`: {err}"))
+    Ok()
+}
+
+pub struct RepackInvocation { pub keep: String, pub compiler_project: String }
+
+// Extra arguments are ignored, as args_os().next() was in the Rust tool.
+pub fn repack_invocation(args: [String]) -[FS, Env]> RepackInvocation RepackError! {
+    if args.len() == 0 -> return Err(repack_error("usage: stage0-repack <keep-dir> [<compiler-project>]"))
+    keep :: args[0]
+    project := ""
+    if args.len() > 1 -> project = ~args[1]
+    else if repack_files.is_dir(repack_files.join(keep, "compiler-project")) -> project = repack_files.join(keep, "compiler-project")
+    else {
+        home :: repack_sys.get("HOME") ?? return Err(repack_error("HOME is unset"))
+        project = repack_files.join(home, ".cache/jet-luna/compiler-bootstrap/project")
+    }
+    Ok(RepackInvocation{keep: keep, compiler_project: project})
+}
+
+pub struct RepackKeptImage {
+    pub artifact: MIRArtifactID
+    pub source_authority_digest: View<U8>
+    pub payload: View<U8>
+}
+
+// The pointer-width fact is supplied by the canonical host layout owner. The
+// transport carries unsigned u64 lengths even when Jet's exact Int is wider.
+pub fn repack_host_length(value: U64, host_pointer_bytes: Int, label: String) -> Int RepackError! {
+    max :: (1 << (host_pointer_bytes * 8)) - 1
+    wide :: Int.from_u64(value)
+    if wide > max -> return Err(repack_error("{label} length overflows"))
+    Ok(wide)
+}
+
+fn repack_take_end(bytes: [U8], at: Int, length: Int) -> Int RepackError! {
+    // Subtraction checks the addition without overflowing a host index.
+    if at > bytes.len() || length > bytes.len() - at -> return Err(repack_error("truncated compiler image"))
+    Ok(at + length)
+}
+
+fn repack_u64(bytes: [U8], at: Int) -> U64 RepackError! {
+    _ :: repack_take_end(bytes, at, 8)
+    value := U64{0}
+    loop index in 0..<8 -> value |= U64.from_u8(bytes[at + index]) << (8 * index)
+    Ok(value)
+}
+
+// Deliberately does not validate the schema, factory entry, identity or archive
+// checksum, nor reject trailing bytes: the original selection parser did not.
+// The sole MIR/image owner, not this selector, validates its decoded program.
+pub fn repack_parse_image(bytes: [U8], host_pointer_bytes: Int) -> RepackKeptImage RepackError! {
+    _ :: repack_take_end(bytes, 0, 8)
+    magic :: "JETCIMG{TEXT_NUL}".bytes()
+    loop index in 0..<8 {
+        if bytes[index] != magic[index] -> return Err(repack_error("not a compiler image (bad magic)"))
+    }
+    _ :: repack_take_end(bytes, 8, 2)
+    format :: Int.from_u8(bytes[8]) | (Int.from_u8(bytes[9]) << 8)
+    if format != 3 -> return Err(repack_error("compiler image format {format} is not the supported format 3"))
+    _ :: repack_take_end(bytes, 10, 2)
+    artifact :: MIRArtifactID{value: repack_u64(bytes, 12)}
+    _ :: repack_take_end(bytes, 20, 8)
+    _ :: repack_take_end(bytes, 28, 32)
+    identity_length :: repack_host_length(repack_u64(bytes, 60), host_pointer_bytes, "identity")
+    identity_end :: repack_take_end(bytes, 68, identity_length)
+    payload_length :: repack_host_length(repack_u64(bytes, identity_end), host_pointer_bytes, "payload")
+    payload_at :: identity_end + 8
+    payload_end :: repack_take_end(bytes, payload_at, payload_length)
+    Ok(RepackKeptImage{artifact: artifact, source_authority_digest: bytes[28..<60], payload: bytes[payload_at..<payload_end]})
+}
+
+pub fn repack_hex(bytes: [U8]) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    output := [U8]{}
+    loop byte in bytes {
+        value :: Int.from_u8(byte)
+        &output.push(digits[value >> 4])
+        &output.push(digits[value & 15])
+    }
+    String.from_bytes(output) ?? panic("hexadecimal is UTF-8")
+}
+
+pub fn repack_first_difference(left: [U8], right: [U8]) -> Int Never! {
+    length :: if left.len() < right.len() -> left.len() else -> right.len()
+    loop index in 0..<length {
+        if left[index] != right[index] -> return index
+    }
+    length
+}
+
+pub fn repack_line_of(text: [U8], offset: Int) -> Int Never! {
+    end :: if offset < text.len() -> offset else -> text.len()
+    line := 1
+    loop index in 0..<end {
+        if text[index] == 10 -> line += 1
+    }
+    line
+}
+
+// Fixed needles keep both scans linear and preserve Rust's byte offsets.
+fn repack_find(bytes: [U8], needle: [U8], start: Int) -> Int? Never! {
+    at := start
+    loop at <= bytes.len() - needle.len() {
+        matched := true
+        loop index in 0..<needle.len() {
+            if bytes[at + index] != needle[index] { matched = false; break }
+        }
+        if matched -> return Val(at)
+        at += 1
+    }
+    None
+}
+
+fn repack_append_range(out: &[U8], bytes: [U8], start: Int, end: Int) Never! {
+    loop index in start..<end -> &out.push(bytes[index])
+}
+
+pub fn repack_extract_artifact_main(tests: String, tests_path: String, task_roots: Bool) -> String RepackError! {
+    bytes :: tests.bytes()
+    delimiter :: "const GENERATED_ARTIFACT_MAIN: &str = r#\"".bytes()
+    start :: (repack_find(bytes, delimiter, 0) ?? return Err(repack_error("`{tests_path}` has no `GENERATED_ARTIFACT_MAIN` raw string"))) + delimiter.len()
+    end :: repack_find(bytes, "\"#".bytes(), start) ?? return Err(repack_error("`{tests_path}` has no `GENERATED_ARTIFACT_MAIN` raw string"))
+    if task_roots -> return Ok(String.from_bytes(bytes[start..<end]) ?? panic("raw main is UTF-8"))
+    begin_marker :: REPACK_TASK_BEGIN.bytes()
+    end_marker :: REPACK_TASK_END.bytes()
+    output := [U8]{}
+    rest := start
+    loop {
+        begin :: repack_find(bytes, begin_marker, rest) ?? break
+        if begin >= end -> break
+        repack_append_range(&output, bytes, rest, begin)
+        finish :: repack_find(bytes, end_marker, begin) ?? return Err(repack_error("`GENERATED_ARTIFACT_MAIN` has an unterminated task-root region"))
+        if finish + end_marker.len() > end -> return Err(repack_error("`GENERATED_ARTIFACT_MAIN` has an unterminated task-root region"))
+        rest = finish + end_marker.len()
+    }
+    repack_append_range(&output, bytes, rest, end)
+    Ok(String.from_bytes(output) ?? panic("task-root markers delimit UTF-8 text"))
+}
+
+pub fn repack_generated_artifact_main(source_root: String, task_roots: Bool) -[FS]> String RepackError! {
+    path :: repack_files.join(source_root, "Compiler/Bootstrap/Tests.rs")
+    repack_extract_artifact_main(repack_read_text(path), path, task_roots)
+}
+
+// lines() recognizes CRLF, not arbitrary trailing whitespace. The first matching
+// line wins, including an invalid value preceding a later valid value.
+pub fn repack_task_roots(stamp: String, stamp_path: String) -> Bool RepackError! {
+    bytes :: stamp.bytes()
+    start := 0
+    loop raw in stamp.split("\n") {
+        newline :: start + raw.bytes().len() < bytes.len()
+        start += raw.bytes().len() + 1
+        line :: raw
+        if !line.starts_with("task_roots=") -> next
+        value :: line.after("task_roots=")
+        if value == "true" || (newline && value == "true\r") -> return Ok(true)
+        if value == "false" || (newline && value == "false\r") -> return Ok(false)
+        break
+    }
+    Err(repack_error("`{stamp_path}` has no `task_roots=true|false` line"))
+}
+
+pub fn repack_check_source_authority(project: String, digest: [U8], expected: [U8]) RepackError! {
+    if digest != expected -> return Err(repack_error("the compiler sources in `{project}` (authority {repack_hex(digest)}) are not the ones the kept image was built from ({repack_hex(expected)}); reassemble them at the kept run's revision"))
+    Ok()
+}
+
+pub fn repack_check_prefix_base(base: String, packaged: String, base_path: String) RepackError! {
+    if !base.starts_with(packaged) {
+        at :: repack_first_difference(base.bytes(), packaged.bytes())
+        line :: repack_line_of(base.bytes(), at)
+        return Err(repack_error("first run: the packaged source differs from `{base_path}` at line {line}, so `stage-zero/main.prefix.rs` cannot be derived; run once with JET_REPACK_SOURCE_ROOT set to the generator sources of the kept run"))
+    }
+    Ok()
+}
+
+pub fn repack_derive_prefix(base: String, packaged: String, reference_length: Int, base_path: String, base_main: String, base_main_path: String) -> String RepackError! {
+    repack_check_prefix_base(base, packaged, base_path)
+    base_bytes :: base.bytes()
+    main_bytes :: base_main.bytes()
+    old_tail :: base_bytes[reference_length..<base_bytes.len()]
+    matches := main_bytes.len() >= old_tail.len()
+    if matches {
+        loop index in 0..<old_tail.len() {
+            if main_bytes[main_bytes.len() - old_tail.len() + index] != old_tail[index] { matches = false; break }
+        }
+    }
+    if !matches -> return Err(repack_error("`{base_main_path}` does not end with the packaged suffix of the base source; restore the main crate the kept run wrote"))
+    Ok(String.from_bytes(main_bytes[0..<(main_bytes.len() - old_tail.len())]) ?? panic("main prefix is UTF-8"))
+}
+
+pub fn repack_base_main_path(project: String) -[FS]> String RepackError! {
+    original :: repack_files.join(project, "main.rs.orig")
+    if repack_files.is_file(original) -> return Ok(original)
+    current :: repack_files.join(project, "src/main.rs")
+    if repack_files.is_file(current) -> return Ok(current)
+    Err(repack_error("the kept backend project has no main crate source"))
+}
+
+pub fn repack_lap(started: Instant, what: String) -[Time, IO]> Never! {
+    elapsed :: repack_time.instant() - started
+    seconds :: Float{elapsed.ns} / Float{1000000000}
+    repack_term.eprint("stage0-repack: {what} ({seconds:Fixed(1)}s)")
+}
+
+// Actual post-packaging policy. It consumes real owner-produced bytes; tests
+// exercise this same path without pretending to supply a compiler backend.
+// The caller retains the single image read and the single authorized snapshot
+// until the canonical packager finishes; neither is reopened by this policy.
+pub fn repack_finish(keep: String, source_root: String, reference_length: Int, packaged: ^String, image: [U8]?, kept_image: [U8], started: Instant) -[FS, Time, IO]> RepackError! {
+    fresh_image :: image ?? return Err(repack_error("stage-zero Host/Runner packaging embedded no compiler image"))
+    project :: repack_files.join(keep, "stage-zero")
+    base_path :: repack_files.join(keep, "stage-zero.base.rs")
+    if !repack_files.is_file(base_path) {
+        repack_files.copyfile(repack_files.join(keep, "stage-zero.rs"), base_path) ?? return Err(repack_error("cannot keep the base `stage-zero.rs`: {err}"))
+    }
+    prefix_path :: repack_files.join(project, "main.prefix.rs")
+    if !repack_files.is_file(prefix_path) {
+        base :: repack_read_text(base_path)
+        // Reject before inspecting the main crate, matching Rust error priority.
+        repack_check_prefix_base(base, packaged, base_path)
+        main_path :: repack_base_main_path(project)
+        prefix :: repack_derive_prefix(base, packaged, reference_length, base_path, repack_read_text(main_path), main_path)
+        repack_write(prefix_path, prefix.bytes())
+        repack_lap(started, "derived stage-zero/main.prefix.rs")
+    }
+    stamp_path :: repack_files.join(keep, "stage-zero.stamp")
+    task_roots :: repack_task_roots(repack_read_text(stamp_path), stamp_path)
+    artifact_main :: repack_generated_artifact_main(source_root, task_roots)
+    repack_write(repack_files.join(keep, "artifact-main.rs"), artifact_main.bytes())
+    source := ^packaged
+    &source.try_push(artifact_main) ?? panic("cannot allocate packaged source")
+    base :: repack_read(base_path)
+    if source.bytes() == base {
+        repack_term.eprint("stage0-repack: stage-zero.rs is byte-identical to the base ({source.bytes().len()} bytes)")
+    } else {
+        at :: repack_first_difference(source.bytes(), base)
+        line :: repack_line_of(source.bytes(), at)
+        repack_term.eprint("stage0-repack: stage-zero.rs differs from the base from line {line} ({source.bytes().len()} bytes, base {base.len()})")
+    }
+    if fresh_image == kept_image {
+        repack_term.eprint("stage0-repack: compiler image is byte-identical to stage-zero.image")
+    } else {
+        repack_term.eprint("stage0-repack: compiler image changed; rewriting stage-zero.image")
+        repack_write(repack_files.join(keep, "stage-zero.image"), fresh_image)
+        repack_write(repack_files.join(project, "src/compiler.image"), fresh_image)
+    }
+    // Image publication intentionally precedes even this final extent check.
+    if reference_length > source.bytes().len() -> return Err(repack_error("the packaged source does not extend reference.rs"))
+    tail :: String.from_bytes(source.bytes()[reference_length..<source.bytes().len()]) ?? return Err(repack_error("the packaged source does not extend reference.rs"))
+    main_source := repack_read_text(prefix_path)
+    &main_source.try_push(tail) ?? panic("cannot allocate main crate source")
+    repack_write(repack_files.join(keep, "stage-zero.rs"), source.bytes())
+    repack_write(repack_files.join(project, "generated.rs"), source.bytes())
+    repack_write(repack_files.join(project, "src/main.rs"), main_source.bytes())
+    repack_lap(started, "wrote stage-zero.rs, stage-zero/generated.rs and stage-zero/src/main.rs")
+    Ok()
+}

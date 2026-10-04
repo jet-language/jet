@@ -1,0 +1,167 @@
+use jet_semindex.[build_symbol_db]
+use jet_foundation.[Loader, Sema, Lexer]
+use jet_lsp.Completion.[compute_completions]
+// Native fixture directories use real IO, not provider mocks. GATE #4494.
+// Rust: Source/LSP/Features.rs:2398
+#Test("references_join_applicative_generic_module_aliases") {
+    root :: std.env.temp_dir().join("jet_lsp_genmod_identity_${std.process.id()}")
+    _ :: std.fs.remove_dir_all(root)
+    std.fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    source :: "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule a :: value(3)\nmodule b :: value(3)\nfn run() { print(a.get())\nprint(b.get()) }\n"
+    std.fs.write(path, source).unwrap()
+    shown :: path.to_string_lossy()
+    bundle := Loader.load_entry(shown).unwrap()
+    (diagnostics, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != .Error }))
+    db :: build_symbol_db(bundle, facts)
+    (tokens, lex_diagnostics) :: Lexer.lex(source)
+    assert(lex_diagnostics.is_empty())
+    references :: compute_references(db, tokens, shown, source.find("a.get").unwrap(), true)
+    spellings :: references.iter().map(fn(pair) { source[pair.1.start..<pair.1.end] }).collect()
+    assert(spellings.iter().any(fn(spelling) { spelling == "a" }))
+    assert(spellings.iter().any(fn(spelling) { spelling == "b" }))
+    _ :: std.fs.remove_dir_all(root)
+}
+// Rust: Source/LSP/Features.rs:2439
+#Test("references_never_join_same_alias_spelling_across_distinct_instances") {
+    root :: std.env.temp_dir().join("jet_lsp_genmod_hostile_${std.process.id()}")
+    _ :: std.fs.remove_dir_all(root)
+    std.fs.create_dir_all(root).unwrap()
+    main :: root.join("main.jet")
+    left :: root.join("left.jet")
+    right :: root.join("right.jet")
+    left_source :: "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule same :: value(3)\nfn left_value() -> Int { return same.get() }\n"
+    right_source :: "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule same :: value(4)\nfn right_value() -> Int { return same.get() }\n"
+    std.fs.write(main, "module left\nmodule right\nfn run() {}\n").unwrap()
+    std.fs.write(left, left_source).unwrap()
+    std.fs.write(right, right_source).unwrap()
+    shown_main :: main.to_string_lossy()
+    shown_left :: "left.jet"
+    shown_right :: "right.jet"
+    bundle := Loader.load_entry(shown_main).unwrap()
+    (diagnostics, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != .Error }))
+    db :: build_symbol_db(bundle, facts)
+    (tokens, lex_diagnostics) :: Lexer.lex(left_source)
+    assert(lex_diagnostics.is_empty())
+    references :: compute_references(db, tokens, shown_left, left_source.find("same ::").unwrap(), true)
+    assert(references.iter().any(fn(pair) { pair.0 == shown_left && left_source[pair.1.start..<pair.1.end] == "same" }))
+    assert(!references.iter().any(fn(pair) { pair.0 == shown_right }))
+    _ :: std.fs.remove_dir_all(root)
+}
+// Rust: Source/LSP/Features.rs:2488
+#Test("import_alias_references_and_rename_use_the_exact_definition_anchor") {
+    root :: std.env.temp_dir().join("jet_lsp_import_alias_identity_${std.process.id()}")
+    _ :: std.fs.remove_dir_all(root)
+    std.fs.create_dir_all(root).unwrap()
+    library :: root.join("library.jet")
+    main :: root.join("main.jet")
+    source :: "use \"./library\" as api\nfn run() { api.report() }\n"
+    std.fs.write(library, "pub fn report() { print(\"library\") }\n").unwrap()
+    std.fs.write(main, source).unwrap()
+    shown :: main.to_string_lossy()
+    bundle := Loader.load_entry(shown).unwrap()
+    (diagnostics, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != .Error }))
+    db :: build_symbol_db(bundle, facts)
+    (tokens, lex_diagnostics) :: Lexer.lex(source)
+    assert(lex_diagnostics.is_empty())
+    use_offset :: source.find("api.report").unwrap()
+    alias_offset :: source.find("as api").unwrap() + 3
+    references :: compute_references(db, tokens, shown, use_offset, true)
+    assert(references.iter().any(fn(pair) { pair.0 == shown && source[pair.1.start..<pair.1.end] == "api" }))
+    renamed_from_use :: compute_rename(db, tokens, shown, use_offset, "backend").expect("alias use should be renameable")
+    renamed_from_definition :: compute_rename(db, tokens, shown, alias_offset, "backend").expect("alias definition should be renameable")
+    loop spans in [renamed_from_use, renamed_from_definition] {
+        assert(spans.iter().any(fn(pair) { pair.0 == shown && source[pair.1.start..<pair.1.end] == "api" }))
+        assert(spans.len() >= 2)
+    }
+    _ :: std.fs.remove_dir_all(root)
+}
+// Rust: Source/LSP/Features.rs:2544
+#Test("typestate_navigation_and_completion_keep_the_struct_owner") {
+    root :: std.env.temp_dir().join("jet_lsp_typestate_owner_${std.process.id()}")
+    _ :: std.fs.remove_dir_all(root)
+    std.fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    source :: "struct Door {\n    state { Closed, Open }\n}\nimpl Door {\n    #Transition(_, Door.State.Closed) fn new() -[]> Door { return Door{} }\n    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door { return self }\n}\nfn run() {}\n"
+    std.fs.write(path, source).unwrap()
+    shown :: path.to_string_lossy()
+    bundle := Loader.load_entry(shown).unwrap()
+    (diagnostics, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != .Error }))
+    db :: build_symbol_db(bundle, facts)
+    (tokens, lex_diagnostics) :: Lexer.lex(source)
+    assert(lex_diagnostics.is_empty())
+    marker :: source.find("Door.State.Closed").unwrap()
+    closed :: marker + "Door.State.".len()
+    (definition_path, definition_span) :: compute_definition(db, tokens, source, shown, closed).expect("state definition")
+    assert_eq(definition_path, shown)
+    assert_eq(source[definition_span.start..<definition_span.end], "Closed")
+    references :: compute_references(db, tokens, shown, closed, true)
+    assert(references.iter().any(fn(pair) { pair.0 == shown && source[pair.1.start..<pair.1.end] == "Closed" }))
+    assert(references.iter().any(fn(pair) { pair.0 == shown && source[pair.1.start..<pair.1.end] == "Door.State.Closed" }))
+    renamed :: compute_rename(db, tokens, shown, closed, "Sealed").expect("state rename")
+    assert(renamed.iter().all(fn(pair) { pair.0 == shown && source[pair.1.start..<pair.1.end] == "Closed" }))
+    completion_source :: source + "fn editor() {\n    Door.State.\n}\n"
+    completion_offset :: completion_source.find("Door.State.\n").unwrap() + "Door.State.".len()
+    labels :: compute_completions(db, completion_source, completion_offset, shown, None, None).iter().map(fn(item) { item.label }).collect()
+    assert(labels.iter().any(fn(label) { label == "Closed" }))
+    assert(labels.iter().any(fn(label) { label == "Open" }))
+    _ :: std.fs.remove_dir_all(root)
+}
+// Rust: Source/LSP/Features.rs:3624
+#Test("code_actions_reject_non_scalar_return_at_type_gate") {
+    root :: std.env.temp_dir().join("jet-lsp-string-result-gate-${std.process.id()}")
+    _ :: std.fs.remove_dir_all(root)
+    std.fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    source :: "fn run() {\n    print(\"result\")\n}\n"
+    std.fs.write(path, source).unwrap()
+    shown :: path.to_string_lossy()
+    bundle := Loader.load_entry(shown).unwrap()
+    (diagnostics, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != .Error }))
+    db :: build_symbol_db(bundle, facts)
+    (tokens, lex_diagnostics) :: Lexer.lex(source)
+    assert(lex_diagnostics.is_empty())
+    start :: source.find("\"result\"").unwrap()
+    selected :: Span.new(start, start + "\"result\"".len())
+    assert(is_total_pure_expr(db, tokens, shown, selected))
+    assert_eq(infer_total_pure_return_type(db, tokens, shown, selected), None)
+    assert(extract_function_action(db, tokens, source, shown, selected, "\"result\"").is_none())
+    _ :: std.fs.remove_dir_all(root)
+}
+// Rust: Source/LSP/Features.rs:3661
+#Test("signature_preview_requires_explicit_values_for_checked_callers") {
+    root :: std.env.temp_dir().join("jet-lsp-signature-preview-${std.process.id()}")
+    _ :: std.fs.remove_dir_all(root)
+    std.fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    source :: "fn target(value: Int) -> Int {\n    return value\n}\nfn run() {\n    print(target(1))\n}\n"
+    std.fs.write(path, source).unwrap()
+    shown :: path.to_string_lossy()
+    bundle := Loader.load_entry(shown).unwrap()
+    (diagnostics, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != .Error }))
+    db :: build_symbol_db(bundle, facts)
+    definition :: db.index.definitions().iter().find(fn(definition) { definition.name == "target" }).expect("checked target definition")
+    identity :: definition.identity
+    module_path :: definition.module_path
+    sources := [String: String]{}
+    loop module in bundle.modules {
+        sources.insert(module.display, module.source)
+        sources.insert(module.path.to_string_lossy(), module.source)
+    }
+    missing :: compute_signature_change_preview(db, sources, identity, "offset", "Int", [:]).expect("checked signature preview")
+    assert(missing.unknown.iter().any(fn(unknown) { unknown.starts_with("missing_explicit_value:") }))
+    caller :: db.calls.iter().find(fn(edge) { edge.callee == "target" }).expect("checked direct caller")
+    values := [String: String]{}
+    values.insert(caller.caller, "0")
+    ready :: compute_signature_change_preview(db, sources, identity, "offset", "Int", values).expect("explicit signature preview")
+    assert(ready.unknown.is_empty())
+    assert(ready.edits.iter().any(fn(edit) { edit.new_text.contains('0') }))
+    assert_eq(ready.declaration_path, module_path)
+    _ :: std.fs.remove_dir_all(root)
+}

@@ -1,0 +1,271 @@
+use core.sys as repl_history_host_test_sys
+use core.files as repl_history_host_test_files
+use core.process as repl_history_host_test_process
+use core.sys.host.retained_clock as repl_history_host_test_clock
+use core.files.runtime.kernel_path_components as repl_history_host_test_paths
+use jet_foundation.[TEXT_NUL]
+
+// Original HistoryPlatform.rs:122–257. ABI checks are NOT filesystem proof.
+fn repl_history_test_flags(os: String, arch: String) -> ReplHistoryUnixFlags Never! {
+    repl_history_flags_for_target(os, arch) ?? panic("missing ABI table for {os}/{arch}")
+}
+
+#Test("linux_and_android_open_flag_tables_cover_supported_arches") {
+    base :: ReplHistoryUnixFlags{read_only: 0, write_only: 1, directory: 65536, nofollow: 131072, cloexec: 524288, create: 64, excl: 128}
+    base_arches :: [String]{"x86", "x86_64", "s390x", "riscv32", "riscv64", "loongarch64", "csky", "hexagon"}
+    loop arch in base_arches -> assert_eq(repl_history_test_flags("linux", arch), base)
+    generic := ~base
+    generic.directory = 16384
+    generic.nofollow = 32768
+    generic_arches :: [String]{"arm", "aarch64", "powerpc", "powerpc64", "m68k"}
+    loop arch in generic_arches -> assert_eq(repl_history_test_flags("linux", arch), generic)
+    mips := ~base
+    mips.create = 256
+    mips.excl = 1024
+    mips_arches :: [String]{"mips", "mips64"}
+    loop arch in mips_arches -> assert_eq(repl_history_test_flags("linux", arch), mips)
+    sparc := ~base
+    sparc.cloexec = 4194304
+    sparc.create = 512
+    sparc.excl = 2048
+    sparc_arches :: [String]{"sparc", "sparc64"}
+    loop arch in sparc_arches -> assert_eq(repl_history_test_flags("linux", arch), sparc)
+    android_base_arches :: [String]{"x86", "x86_64"}
+    loop arch in android_base_arches -> assert_eq(repl_history_test_flags("android", arch), base)
+    android_generic_arches :: [String]{"arm", "aarch64"}
+    loop arch in android_generic_arches -> assert_eq(repl_history_test_flags("android", arch), generic)
+    riscv := ~base
+    riscv.directory = 2097152
+    riscv.nofollow = 4194304
+    assert_eq(repl_history_test_flags("android", "riscv64"), riscv)
+}
+
+#Test("darwin_and_bsd_open_flag_tables_cover_supported_targets") {
+    apple :: ReplHistoryUnixFlags{read_only: 0, write_only: 1, directory: 1048576, nofollow: 256, cloexec: 16777216, create: 512, excl: 2048}
+    apple_targets :: [String]{"macos", "ios", "tvos", "watchos", "visionos"}
+    loop os in apple_targets {
+        assert_eq(repl_history_test_flags(os, "aarch64"), apple)
+        assert_eq(repl_history_test_flags(os, "x86_64"), apple)
+    }
+    assert_eq(repl_history_test_flags("freebsd", "x86_64"), ReplHistoryUnixFlags{read_only: 0, write_only: 1, directory: 131072, nofollow: 256, cloexec: 1048576, create: 512, excl: 2048})
+    assert_eq(repl_history_test_flags("dragonfly", "x86_64"), ReplHistoryUnixFlags{read_only: 0, write_only: 1, directory: 134217728, nofollow: 256, cloexec: 131072, create: 512, excl: 2048})
+    assert_eq(repl_history_test_flags("netbsd", "x86_64"), ReplHistoryUnixFlags{read_only: 0, write_only: 1, directory: 2097152, nofollow: 256, cloexec: 4194304, create: 512, excl: 2048})
+    assert_eq(repl_history_test_flags("openbsd", "x86_64"), ReplHistoryUnixFlags{read_only: 0, write_only: 1, directory: 131072, nofollow: 256, cloexec: 65536, create: 512, excl: 2048})
+    assert_eq(repl_history_flags_for_target("solaris", "x86_64"), None)
+    assert_eq(repl_history_flags_for_target("linux", "unsupported-cpu"), None)
+}
+
+// Unregistered until Main activates the native target/OS packet. This is the
+// original selected-table assertion, not a guessed host ABI.
+fn selected_unix_open_flags_match_current_target_table() -[Env]> Never! {
+    assert_eq(repl_history_unix_open_flags() ?? panic("native flags"), repl_history_test_flags(repl_history_host_test_sys.name(), repl_history_host_test_sys.arch()))
+}
+
+// The real filesystem originals below are intentionally UNREGISTERED until
+// Main admits canonical #4494 bindings, R10 render/load and native activation.
+// The two real process originals additionally require the actual Jet REPL
+// executable + ProcessChild provider. No mocked storage or source-string test.
+fn repl_history_host_test_root(tag: String) -[Env]> String Never! {
+    "{repl_history_host_test_sys.temp_dir()}/jet_repl_history_unit_{tag}_{repl_history_host_test_process.current_pid()}"
+}
+fn repl_history_host_test_native_path(root: String) -[Env]> repl_history_host_test_paths.OsPath Never! {
+    platform :: if repl_history_host_test_sys.name() == "windows" -> repl_history_host_test_paths.PathPlatform.Windows else -> repl_history_host_test_paths.PathPlatform.Unix
+    repl_history_host_test_paths.from_text(root, platform)
+}
+fn repl_history_host_test_remove(root: String) -[FS]> Never! {
+    repl_history_host_test_files.remove_all(root).drop("original best-effort remove_dir_all of this test's unique root")
+}
+
+// History.rs:273–286, same actual two replacements, codec read and corruption
+// assertions. R10 is the sole codec; native test never invents rendered rows.
+fn atomic_replacement_supports_repeated_writes() -[FS, Env, Time, Time.Wait]> Never! {
+    root :: repl_history_host_test_root("replace")
+    repl_history_host_test_remove(root)
+    {
+        backend :: ReplHistoryHost.open(repl_history_host_test_native_path(root)) ?? panic("open native history")
+        guard :: backend.lock() ?? panic("history transaction")
+        backend.rewrite(repl_history_render([String]{"first"})) ?? panic("first rewrite")
+        backend.rewrite(repl_history_render([String]{"second"})) ?? panic("second rewrite")
+        raw :: backend.read() ?? panic("native read")
+        loaded :: repl_history_load_bytes(raw ?? panic("missing replacement"))
+        assert_eq(loaded.entries, [String]{"second"})
+        assert(!loaded.corrupt)
+        close(^guard)
+        close(^backend)
+    }
+    repl_history_host_test_remove(root)
+}
+
+// History.rs:290–309, Unix-only original. Two independent opens are essential:
+// dup of the same directory is the SAME flock open-file description.
+fn transaction_lock_times_out_then_recovers_after_release() -[FS, Env, Time, Time.Wait]> Never! {
+    root :: repl_history_host_test_root("lock")
+    repl_history_host_test_remove(root)
+    {
+        first :: ReplHistoryHost.open(repl_history_host_test_native_path(root)) ?? panic("first open")
+        second :: ReplHistoryHost.open(repl_history_host_test_native_path(root)) ?? panic("second independent open")
+        held :: first.lock() ?? panic("first lock")
+        started :: repl_history_host_test_clock.monotonic_ns() ?? panic("real monotonic clock")
+        error :: second.lock() ?? {
+            assert(err == .TimedOut(_))
+            assert((repl_history_host_test_clock.monotonic_ns() ?? panic("real monotonic clock")) - started < 3000000000)
+            close(^held)
+            recovered :: second.lock() ?? panic("lock recovery")
+            close(^recovered)
+            close(^first)
+            close(^second)
+            repl_history_host_test_remove(root)
+            return
+        }
+        close(^error)
+        panic("second store acquired held history lock")
+    }
+}
+
+// tests/repl.rs:171–199. Original linked/state fixture, visible fallback,
+// outside noncreation and no chmod of attacker's 0755 directory.
+fn repl_history_rejects_symlinked_state_parent_without_chmod_or_escape() -[FS, Env, Exec, Time.Wait]> Never! {
+    root :: repl_history_host_test_root("link")
+    outside :: repl_history_host_test_root("outside")
+    repl_history_host_test_remove(root)
+    repl_history_host_test_remove(outside)
+    repl_history_host_test_files.mkdir(root, true) ?? panic("root directory")
+    repl_history_host_test_files.mkdir(outside, true) ?? panic("outside directory")
+    repl_history_host_test_files.set_mode(outside, 493) ?? panic("outside mode 0755")
+    repl_history_host_test_files.symlink(outside, "{root}/linked") ?? panic("real symlink")
+    output :: repl_history_test_run_process("{root}/linked/state", "5 + 5\n:quit\n", None) ?? panic("actual REPL process")
+    assert(output.errors.contains("session-only history"), "fallback invisible")
+    assert(!repl_history_host_test_files.exists("{outside}/state"), "history escaped through state symlink")
+    metadata :: repl_history_host_test_files.stat(outside) ?? panic("outside metadata")
+    assert_eq(metadata.mode & 511, 493)
+    repl_history_host_test_remove(root)
+    repl_history_host_test_remove(outside)
+}
+
+// tests/repl.rs:203–239. The actual child opens its root before the directory is
+// renamed and replaced with a symlink. Submit only AFTER that live swap.
+fn repl_history_parent_swap_stays_on_held_directory() -[FS, Env, Exec, Time, Time.Wait]> Never! {
+    state :: repl_history_host_test_root("swap")
+    outside :: repl_history_host_test_root("swap_out")
+    repl_history_host_test_remove(state)
+    repl_history_host_test_remove(outside)
+    repl_history_host_test_files.mkdir(outside, true) ?? panic("outside directory")
+    child :: repl_history_test_spawn_process(state) ?? panic("actual REPL process")
+    repl_history_test_wait_for_dir(state) ?? panic("history root opened")
+    held :: "{state}/held-jet"
+    repl_history_host_test_files.rename("{state}/jet", held) ?? panic("rename held root")
+    repl_history_host_test_files.symlink(outside, "{state}/jet") ?? panic("swap to symlink")
+    child.stdin.write("4 + 4\n:quit\n") ?? panic("submit after swap")
+    child.stdin.close() ?? panic("close original piped input")
+    output :: child.wait() ?? panic("finish actual process")
+    assert(output.success)
+    assert(!repl_history_host_test_files.exists("{outside}/repl-history"), "swap redirected history write")
+    stored :: repl_history_host_test_files.read("{held}/repl-history") ?? panic("held history")
+    assert_eq(stored.lines().len(), 1)
+    repl_history_host_test_files.remove("{state}/jet").drop("original best-effort symlink cleanup")
+    repl_history_host_test_remove(state)
+    repl_history_host_test_remove(outside)
+}
+
+// Additional real Unix filesystem boundary controls, also unregistered. These
+// exercise the security decisions, not private helper/registry echoes.
+fn history_native_unix_modes_and_clear_are_private_and_file_absence_is_not_empty() -[FS, Env, Time, Time.Wait]> Never! {
+    root :: repl_history_host_test_root("modes")
+    repl_history_host_test_remove(root)
+    {
+        backend :: ReplHistoryHost.open(repl_history_host_test_native_path(root)) ?? panic("native open")
+        guard :: backend.lock() ?? panic("native lock")
+        assert_eq(backend.read() ?? panic("absent read"), None)
+        directory :: repl_history_host_test_files.stat("{root}/jet") ?? panic("directory metadata")
+        assert_eq(directory.mode & 511, 448)
+        backend.rewrite([U8]{}) ?? panic("empty native payload")
+        assert_eq(backend.read() ?? panic("empty-file read"), Val([U8]{}))
+        file :: repl_history_host_test_files.stat("{root}/jet/repl-history") ?? panic("file metadata")
+        assert_eq(file.mode & 511, 384)
+        backend.clear() ?? panic("clear under same lock")
+        assert_eq(backend.read() ?? panic("read after clear"), None)
+        backend.clear() ?? panic("missing clear must still succeed and sync directory")
+        close(^guard)
+        close(^backend)
+    }
+    repl_history_host_test_remove(root)
+}
+fn history_native_unix_rejects_hardlinked_or_symlink_history_before_chmod() -[FS, Env, Time, Time.Wait]> Never! {
+    root :: repl_history_host_test_root("file_links")
+    outside :: repl_history_host_test_root("file_links_outside")
+    repl_history_host_test_remove(root)
+    repl_history_host_test_remove(outside)
+    repl_history_host_test_files.mkdir(outside, true) ?? panic("outside directory")
+    target :: "{outside}/original"
+    repl_history_host_test_files.write(target, "outside bytes") ?? panic("outside original")
+    repl_history_host_test_files.set_mode(target, 420) ?? panic("outside mode 0644")
+    {
+        backend :: ReplHistoryHost.open(repl_history_host_test_native_path(root)) ?? panic("native open")
+        guard :: backend.lock() ?? panic("native lock")
+        repl_history_host_test_files.hard_link(target, "{root}/jet/repl-history") ?? panic("real hardlink")
+        unexpected :: backend.read() ?? {
+            assert(err == .PermissionDenied(_))
+            assert_eq((repl_history_host_test_files.stat(target) ?? panic("outside metadata")).mode & 511, 420)
+            repl_history_host_test_files.remove("{root}/jet/repl-history") ?? panic("unlink hardlink")
+            repl_history_host_test_files.symlink(target, "{root}/jet/repl-history") ?? panic("real symlink")
+            linked :: backend.read() ?? {
+                assert_eq(repl_history_host_test_files.read(target) ?? panic("outside read"), "outside bytes")
+                assert_eq((repl_history_host_test_files.stat(target) ?? panic("outside metadata")).mode & 511, 420)
+                close(^guard)
+                close(^backend)
+                repl_history_host_test_remove(root)
+                repl_history_host_test_remove(outside)
+                return
+            }
+            panic("symlink history unexpectedly readable: {linked}")
+        }
+        panic("multiply linked history unexpectedly readable: {unexpected}")
+    }
+}
+
+// Owner-ratified regression for the latent Windows final-path-only bug. An
+// ordinary replacement directory at the SAME pathname has the same final-path
+// string but a different volume/file index. Actual held identity must refuse it.
+fn history_native_windows_same_path_directory_substitution_is_refused() -[FS, Env, Time, Time.Wait]> Never! {
+    root :: repl_history_host_test_root("windows_identity")
+    repl_history_host_test_remove(root)
+    {
+        backend :: ReplHistoryHost.open(repl_history_host_test_native_path(root)) ?? panic("native Windows open")
+        guard :: backend.lock() ?? panic("native Windows lock")
+        backend.rewrite(repl_history_render([String]{"held marker"})) ?? panic("initial payload")
+        repl_history_host_test_files.rename("{root}/jet", "{root}/held-jet") ?? panic("rename held Windows directory")
+        repl_history_host_test_files.mkdir("{root}/jet", false) ?? panic("same-name ordinary replacement")
+        unexpected :: backend.rewrite(repl_history_render([String]{"attacker marker"})) ?? {
+            assert(err == .PermissionDenied(_))
+            assert(!repl_history_host_test_files.exists("{root}/jet/repl-history"), "same path string redirected write")
+            stored :: repl_history_host_test_files.read("{root}/held-jet/repl-history") ?? panic("held bytes")
+            loaded :: repl_history_load_bytes(stored.bytes())
+            assert_eq(loaded.entries, [String]{"held marker"})
+            close(^guard)
+            close(^backend)
+            repl_history_host_test_remove(root)
+            return
+        }
+        panic("same-name replacement was accepted")
+    }
+}
+
+// A native absolute path with an interior NUL must not truncate to an existing
+// prefix and chmod/create history there. This is real filesystem denial, not a
+// mocked path or a test of the source string.
+fn history_native_unix_nul_state_path_does_not_truncate_to_existing_prefix() -[FS, Env]> Never! {
+    root :: repl_history_host_test_root("nul")
+    repl_history_host_test_remove(root)
+    repl_history_host_test_files.mkdir(root, true) ?? panic("real prefix")
+    repl_history_host_test_files.set_mode(root, 493) ?? panic("prefix 0755")
+    path :: repl_history_host_test_native_path("{root}{TEXT_NUL}/unreachable")
+    unexpected :: ReplHistoryHost.open(path) ?? {
+        assert(err == .InvalidInput(_))
+        assert(!repl_history_host_test_files.exists("{root}/jet"))
+        assert_eq((repl_history_host_test_files.stat(root) ?? panic("prefix metadata")).mode & 511, 493)
+        repl_history_host_test_remove(root)
+        return
+    }
+    close(^unexpected)
+    panic("NUL state path was accepted")
+}

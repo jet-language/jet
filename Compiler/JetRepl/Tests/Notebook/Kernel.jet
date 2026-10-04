@@ -1,0 +1,393 @@
+// kernel.rs has no inline tests. These controls cover its pure projections and
+// shared-kernel state transitions; original tests/notebook.rs remains packet0986.
+// Native journeys below use the actual Kernel/evaluator/UUID providers; they
+// remain #4494/#4483/#4409/#4500 gated until Main publishes those producers.
+use jet_ast.[CtValue, NamedCtValue]
+use jet_foundation.[Type, TypeTupleField, TEXT_NUL, mir_sha256_hex]
+// Test source assembled into the same canonical jet_repl owner by Main.
+use core.files.runtime.kernel_path_components as notebook_kernel_test_paths
+
+fn notebook_kernel_test_eval(text: String, value: CtValue?) -> EvalResult Never! {
+    EvalResult{text: text, status: ReplTurnStatus.Ok, had_effect: false, quit: false, value: value}
+}
+fn notebook_kernel_test_bundle() -> NotebookMIMEBundle Never! {
+    NotebookMIMEBundle{text_plain: "safe text", mime: [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "application/javascript", payload: "1"}}, quarantined: false, widget_id: Val("chart"), requested_origins: [String]{"https://data.example"}, requested_messages: [String]{"SelectionChanged"}}
+}
+fn notebook_kernel_test_turn(id: Int, stale: Bool) -> ReplTurn Never! {
+    ReplTurn{id: id, input: "1", summary: "1", status: ReplTurnStatus.Ok, folded: false, pinned: false, stale: stale, had_effect: false, bound_name: None, pending_unfold: None}
+}
+fn notebook_kernel_test_cell(id: String, source: String, kind: NotebookCellKind) -> NotebookCell Never! {
+    NotebookCell{id: id, kind: kind, source: source, output: None, depends_on: [String]{}}
+}
+fn notebook_kernel_test_add(kernel: &Kernel, id: String, source: String) Never! {
+    &kernel.notebook.cells.push(notebook_kernel_test_cell(id, source, NotebookCellKind.Jet))
+}
+fn notebook_kernel_test_grant(kernel: &Kernel, bundle: NotebookMIMEBundle, source: String, renderer: String) Never! {
+    // In-memory trust store mutation is the real canonical policy operation,
+    // not a replacement native persistence provider or mock authorizer.
+    request :: NotebookActiveRequest{notebook_source_hash: mir_sha256_hex(source), payload_hash: notebook_trust_payload_hash(bundle), renderer_hash: renderer, environment_hash: ~kernel.notebook.environment_hash, policy_version: NOTEBOOK_TRUST_POLICY_VERSION, widget_id: bundle.widget_id ?? "", origins: ~bundle.requested_origins, messages: ~bundle.requested_messages}
+    _ :: notebook_trust_grant_active(&kernel.trust, request)
+}
+
+#Test("kernel client renderer names have one owner") {
+    assert_eq(ClientKind.FirstParty.renderer(), "jet-notebook")
+    assert_eq(ClientKind.CanvasLens.renderer(), "canvas-lens")
+    assert_eq(ClientKind.JupyterAdapter.renderer(), "jupyter-adapter")
+}
+#Test("kernel environment identity preserves path display and marker") {
+    unix :: notebook_kernel_test_paths.from_text("./project", notebook_kernel_test_paths.PathPlatform.Unix)
+    windows :: notebook_kernel_test_paths.from_text("C:\\project", notebook_kernel_test_paths.PathPlatform.Windows)
+    assert_eq(Kernel.environment_hash(unix), mir_sha256_hex("./project|notebook-env-1"))
+    assert_eq(Kernel.environment_hash(windows), mir_sha256_hex("C:\\project|notebook-env-1"))
+    assert(Kernel.environment_hash(unix) != Kernel.environment_hash(notebook_kernel_test_paths.from_text("project", notebook_kernel_test_paths.PathPlatform.Unix)))
+}
+#Test("kernel controls use exactly one NUL between function and parameter") {
+    assert_eq(notebook_kernel_control_key("f", "x"), "f{TEXT_NUL}x")
+    assert(notebook_kernel_control_key("ab", "c") != notebook_kernel_control_key("a", "bc"))
+}
+#Test("kernel app control type support recursively rejects unsafe carriers") {
+    assert(notebook_kernel_app_control_type_supported(Type.Int))
+    assert(notebook_kernel_app_control_type_supported(Type.Float32))
+    assert(notebook_kernel_app_control_type_supported(Type.IntN(true, 128)))
+    assert(notebook_kernel_app_control_type_supported(Type.Option(Type.List(Type.Bool))))
+    assert(notebook_kernel_app_control_type_supported(Type.Map(Type.String, None, Type.List(Type.Int))))
+    assert(notebook_kernel_app_control_type_supported(Type.Tuple([TypeTupleField]{TypeTupleField{name: "x", ty: Type.Char}, TypeTupleField{name: "y", ty: Type.Bool}})))
+    assert(!notebook_kernel_app_control_type_supported(Type.Named("Unknown")))
+    assert(!notebook_kernel_app_control_type_supported(Type.Shared(Type.Int)))
+    assert(!notebook_kernel_app_control_type_supported(Type.Result(Type.Int, Type.String)))
+    assert(!notebook_kernel_app_control_type_supported(Type.List(Type.Named("Unknown"))))
+    assert(!notebook_kernel_app_control_type_supported(Type.Tuple([TypeTupleField]{TypeTupleField{name: "bad", ty: Type.Shared(Type.Int)}})))
+}
+#Test("kernel app effects strip one bang and split at first dot") {
+    assert(notebook_kernel_app_effect_supported("IO"))
+    assert(notebook_kernel_app_effect_supported("!FS.Read"))
+    assert(notebook_kernel_app_effect_supported("IO.Print"))
+    assert(!notebook_kernel_app_effect_supported("!!IO"))
+    assert(!notebook_kernel_app_effect_supported("Net.Listen"))
+    assert(!notebook_kernel_app_effect_supported(""))
+}
+#Test("kernel control validation is lexer first-token law not full parsing") {
+    assert(notebook_kernel_control_value_matches("true", "Bool"))
+    assert(notebook_kernel_control_value_matches(" false ", "Bool"))
+    assert(notebook_kernel_control_value_matches("true + 1", "Bool"))
+    assert(notebook_kernel_control_value_matches("// comment\n42", "Int"))
+    assert(notebook_kernel_control_value_matches("42", "U128"))
+    assert(notebook_kernel_control_value_matches("42", "Float"))
+    assert(notebook_kernel_control_value_matches("1.5", "F32"))
+    assert(notebook_kernel_control_value_matches("\"text\"", "String"))
+    assert(notebook_kernel_control_value_matches("'a'", "Char"))
+    assert(!notebook_kernel_control_value_matches("-1", "Int"))
+    assert(!notebook_kernel_control_value_matches("42", "String"))
+    assert(!notebook_kernel_control_value_matches("true", "Int"))
+    assert(!notebook_kernel_control_value_matches("", "Unknown"))
+    assert(!notebook_kernel_control_value_matches("// only comment", "Unknown"))
+    assert(!notebook_kernel_control_value_matches("\"unterminated", "String"))
+}
+#Test("kernel optional and compound control token rules preserve suffixes") {
+    assert(notebook_kernel_control_value_matches("null", "Int?"))
+    assert(notebook_kernel_control_value_matches("1", "Int??"))
+    assert(!notebook_kernel_control_value_matches("-1", "Int?"))
+    assert(notebook_kernel_control_value_matches("[1,2]", "[Int]"))
+    assert(notebook_kernel_control_value_matches("[\"a\":1]", "[String:Int]"))
+    assert(notebook_kernel_control_value_matches("(x:1)", "(x: Int)"))
+    assert(!notebook_kernel_control_value_matches("(1)", "[Int]"))
+    assert(!notebook_kernel_control_value_matches("[1]", "(Int)"))
+}
+#Test("kernel effect heuristic retains original lexical false positives") {
+    assert(notebook_kernel_source_may_have_effect("print(1)"))
+    assert(notebook_kernel_source_may_have_effect("// random( in a comment"))
+    assert(notebook_kernel_source_may_have_effect("\"stdin\""))
+    assert(notebook_kernel_source_may_have_effect("fs.read(path)"))
+    assert(!notebook_kernel_source_may_have_effect("x :: 42"))
+    assert(!notebook_kernel_source_may_have_effect("Print(1)"))
+}
+#Test("kernel bounded text uses bytes without splitting multibyte scalar") {
+    ascii := [U8]{}
+    loop _ in 0..<65535 -> &ascii.push(U8{97})
+    prefix :: String.from_bytes(ascii) ?? panic("ASCII")
+    exact :: "{prefix}a"
+    assert_eq(notebook_kernel_bounded_text(exact), exact)
+    assert_eq(notebook_kernel_bounded_text("{prefix}é"), "{prefix}\n… output truncated at 64 KiB; save/export retains the full value")
+    assert_eq(notebook_kernel_bounded_text("{prefix}😀more"), "{prefix}\n… output truncated at 64 KiB; save/export retains the full value")
+}
+#Test("kernel MIME and string JSON preserve duplicate order and quoting") {
+    entries :: [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/plain", payload: "a\n"}, NotebookMIMEEntry{media_type: "text/plain", payload: "b"}}
+    assert_eq(notebook_kernel_json_mime(entries), "[{\"type\":\"text/plain\",\"data\":\"a\\n\"},{\"type\":\"text/plain\",\"data\":\"b\"}]")
+    assert_eq(notebook_kernel_json_strings([String]{"a", "a", "b\""}), "[\"a\",\"a\",\"b\\\"\"]")
+    assert_eq(notebook_kernel_diagnostic_error("E2104", "what", "why", "fix"), "{\"code\":\"E2104\",\"what\":\"what\",\"why\":\"why\",\"fix\":\"fix\"}")
+}
+#Test("kernel bundle keeps event stream before optional value echo") {
+    bundle :: notebook_kernel_bundle_for_eval(notebook_kernel_test_eval("printed\n42\n", Val(CtValue.Int(99))))
+    assert_eq(bundle.text_plain, "printed\n42")
+    assert_eq(bundle.mime.len(), 1)
+    assert_eq(bundle.mime[0].media_type, "text/plain")
+    assert(!bundle.quarantined)
+    unit :: notebook_kernel_bundle_for_eval(notebook_kernel_test_eval(" \n", Val(CtValue.Unit)))
+    assert_eq(unit.text_plain, "")
+    value :: notebook_kernel_bundle_for_eval(notebook_kernel_test_eval("\n", Val(CtValue.Int(42))))
+    assert_eq(value.text_plain, "42")
+}
+#Test("kernel rich MIME recognizes original SVG and HTML delimiters") {
+    svg :: notebook_kernel_bundle_for_eval(notebook_kernel_test_eval("  <svg/>", None))
+    assert_eq(svg.mime.len(), 2)
+    assert_eq(svg.mime[1].media_type, "image/svg+xml")
+    html :: notebook_kernel_bundle_for_eval(notebook_kernel_test_eval("<div class='x'>hello</div>", None))
+    assert_eq(html.mime.len(), 2)
+    assert_eq(html.mime[1].media_type, "text/html")
+    assert_eq(notebook_kernel_bundle_for_eval(notebook_kernel_test_eval("<div", None)).mime.len(), 1)
+    assert_eq(notebook_kernel_bundle_for_eval(notebook_kernel_test_eval("<DIV>x</DIV>", None)).mime.len(), 1)
+    assert_eq(notebook_kernel_bundle_for_eval(notebook_kernel_test_eval("<div\tx>", None)).mime.len(), 1)
+}
+#Test("kernel tables keep field order escape values and skip nonstruct rows") {
+    rows :: CtValue.List([CtValue]{
+        CtValue.Struct("Row", [NamedCtValue]{NamedCtValue{name: "a&b", value: CtValue.Int(1)}}),
+        CtValue.Int(9),
+        CtValue.Struct("Row", [NamedCtValue]{NamedCtValue{name: "other", value: CtValue.Int(2)}}),
+    })
+    assert_eq(notebook_kernel_table_mime(rows), Val("<table><thead><tr><th>a&amp;b</th></tr></thead><tbody><tr><td>1</td></tr><tr><td>2</td></tr></tbody></table>"))
+    assert_eq(notebook_kernel_table_mime(CtValue.List([CtValue]{})), None)
+    assert_eq(notebook_kernel_table_mime(CtValue.List([CtValue]{CtValue.Int(1)})), None)
+    bundle :: notebook_kernel_bundle_for_eval(notebook_kernel_test_eval("list echo", Val(rows)))
+    assert_eq(bundle.mime.len(), 2)
+    assert_eq(bundle.text_plain, "list echo")
+}
+#Test("kernel display fallback removes every active capability projection") {
+    source :: notebook_kernel_test_bundle()
+    fallback :: notebook_kernel_display_bundle(NotebookRenderDecision.FallbackPlain("blocked", "reason"), source)
+    assert_eq(fallback.text_plain, "blocked")
+    assert(fallback.quarantined)
+    assert(fallback.mime.is_empty())
+    assert_eq(fallback.widget_id, None)
+    assert(fallback.requested_origins.is_empty())
+    assert(fallback.requested_messages.is_empty())
+    allowed :: notebook_kernel_display_bundle(NotebookRenderDecision.AllowActive("allowed", source.mime), source)
+    assert_eq(allowed.text_plain, "allowed")
+    assert_eq(allowed.mime, source.mime)
+    assert_eq(allowed.widget_id, source.widget_id)
+    assert_eq(allowed.requested_origins, source.requested_origins)
+    assert(!allowed.quarantined)
+}
+
+#Test("kernel unchanged edit preserves runtime while changed edit detaches turn IDs") {
+    kernel := Kernel.blank(None, "env")
+    notebook_kernel_test_add(&kernel, "cell", "1")
+    &kernel.notebook.store_output("cell", notebook_kernel_test_bundle(), 7, Val(99)) ?? panic(err.message)
+    kernel.execution_count = U32{7}
+    &kernel.attach_debug()
+    &kernel.attach_perf()
+    &kernel.push_stdin("Ada")
+    &kernel.edit_cell("cell", "1") ?? panic(err.message)
+    assert_eq(kernel.execution_count, U32{7})
+    assert(kernel.debug_attached())
+    &kernel.edit_cell("cell", "2") ?? panic(err.message)
+    assert_eq(kernel.execution_count, U32{0})
+    assert(!kernel.debug_attached())
+    assert(!kernel.perf_attached())
+    assert(kernel.stdin_queue.is_empty())
+    assert_eq(kernel.reactive_root, Val("cell"))
+    if kernel.notebook.cells[0].output == .Val(output) -> assert_eq(output.turn_id, None) else -> panic("stale output retained")
+}
+#Test("kernel reset keeps lazy effect and controls but clear_document clears them") {
+    kernel := Kernel.blank(None, "env")
+    notebook_kernel_test_add(&kernel, "cell", "1")
+    kernel.cell_effects["cell"] = true
+    kernel.cell_lazy["cell"] = true
+    kernel.control_values["key"] = "value"
+    kernel.control_errors["key"] = "wrong"
+    kernel.pending_effects["cell"] = true
+    kernel.executed_cells["cell"] = true
+    &kernel.reset_runtime()
+    assert(kernel.cell_effects.has_key("cell"))
+    assert(kernel.cell_lazy.has_key("cell"))
+    assert(kernel.control_values.has_key("key"))
+    assert(kernel.control_errors.has_key("key"))
+    assert(kernel.pending_effects.is_empty())
+    assert(kernel.executed_cells.is_empty())
+    &kernel.clear_document_runtime()
+    assert(kernel.cell_effects.is_empty())
+    assert(kernel.cell_lazy.is_empty())
+    assert(kernel.control_values.is_empty())
+    assert(kernel.control_errors.is_empty())
+}
+#Test("kernel lazy status and failure precedence are exact") {
+    kernel := Kernel.blank(None, "env")
+    cell :: notebook_kernel_test_cell("cell", "1", NotebookCellKind.Jet)
+    &kernel.notebook.cells.push(~cell)
+    assert_eq(kernel.cell_status(cell), "idle")
+    &kernel.set_cell_lazy("cell", true) ?? panic(err.message)
+    assert_eq(kernel.cell_status(cell), "stale_lazy")
+    kernel.cell_errors["cell"] = "error"
+    assert_eq(kernel.cell_status(cell), "error")
+    kernel.pending_effects["cell"] = true
+    assert_eq(kernel.cell_status(cell), "awaiting_confirmation")
+    &kernel.set_cell_lazy("cell", false) ?? panic(err.message)
+    assert(!kernel.pending_effects.has_key("cell"))
+    assert_eq(kernel.cell_status(cell), "error")
+    error :: &kernel.set_cell_lazy("missing", true)
+    assert(if error == { .Err(value) -> value.message.contains("notebook cell does not exist"), else -> false })
+}
+#Test("kernel all clients refuse stale historical turn even when cache is valid") {
+    kernel := Kernel.blank(None, "env")
+    notebook_kernel_test_add(&kernel, "cell", "1")
+    &kernel.notebook.store_output("cell", notebook_kernel_test_bundle(), 1, Val(7)) ?? panic(err.message)
+    &kernel.session.turns.push(notebook_kernel_test_turn(7, true))
+    assert_eq(kernel.first_party_visible_output("cell"), None)
+    assert_eq(kernel.canvas_visible_output("cell"), None)
+    assert_eq(kernel.jupyter_visible_output("cell"), None)
+    state :: kernel.state_json()
+    assert(state.contains("\"status\":\"stale\""))
+    assert(state.contains("\"live\":false"))
+    assert(state.contains("\"mime\":[]"))
+    assert(state.contains("https://data.example"))
+    &kernel.reset_runtime()
+    // Reset clears session-local turn IDs without revoking unchanged cache.
+    assert(kernel.cell_output_live(kernel.notebook.cells[0]))
+}
+#Test("kernel client renderer grant cannot bypass first party refusal") {
+    kernel := Kernel.blank(None, "env")
+    notebook_kernel_test_add(&kernel, "cell", "1")
+    bundle :: notebook_kernel_test_bundle()
+    &kernel.notebook.store_output("cell", ~bundle, 1, None) ?? panic(err.message)
+    notebook_kernel_test_grant(&kernel, bundle, "1", ClientKind.JupyterAdapter.renderer())
+    projected :: kernel.jupyter_visible_output("cell") ?? panic("safe plain output exists")
+    assert(projected.quarantined)
+    assert(projected.mime.is_empty())
+    notebook_kernel_test_grant(&kernel, bundle, "1", ClientKind.FirstParty.renderer())
+    allowed :: kernel.jupyter_visible_output("cell") ?? panic("live output")
+    assert(!allowed.quarantined)
+    assert_eq(allowed.mime, bundle.mime)
+    canvas :: kernel.canvas_visible_output("cell") ?? panic("safe fallback")
+    assert(canvas.quarantined)
+    assert(canvas.mime.is_empty())
+}
+#Test("kernel reconnect identifies all mismatches in canonical order") {
+    kernel := Kernel.blank(None, "env")
+    identity :: kernel.identity()
+    kernel.reconnect(identity) ?? panic(err.message)
+    wrong :: KernelIdentity{source: "wrong", build: "wrong", session: "wrong", authority: "wrong"}
+    result :: kernel.reconnect(wrong)
+    assert(if result == { .Err(error) -> error.message.contains("source, build, session, authority"), else -> false })
+    &kernel.set_authority("new authority")
+    assert_eq(kernel.identity().authority, mir_sha256_hex("new authority"))
+    assert_eq(kernel.identity().session, identity.session)
+    assert(kernel.identity().authority != identity.authority)
+}
+#Test("kernel stdin queue and policy count share one input source") {
+    kernel := Kernel.blank(None, "env")
+    &kernel.push_stdin("first")
+    &kernel.push_stdin("second")
+    assert_eq(kernel.stdin_queue, [String]{"first", "second"})
+    assert_eq(kernel.policy.pending_input(), 2)
+    assert(kernel.state_json().contains("\"pending_stdin\":2"))
+    &kernel.attach_debug()
+    &kernel.attach_perf()
+    assert(kernel.state_json().contains("\"debug\":true,\"perf\":true"))
+}
+#Test("kernel interrupt refusal precedes unknown cell and is consumed once") {
+    kernel := Kernel.blank(None, "env")
+    &kernel.request_interrupt()
+    result :: &kernel.execute_cell(ClientKind.FirstParty, "missing")
+    assert(if result == { .Err(error) -> error.message == "interrupted before execute", else -> false })
+    assert(!kernel.interrupt_requested)
+    second :: &kernel.execute_cell(ClientKind.FirstParty, "missing")
+    assert(if second == { .Err(error) -> error.message == "unknown cell `missing`", else -> false })
+}
+#Test("kernel markdown and conflict execution refusal preserve error text") {
+    kernel := Kernel.blank(None, "env")
+    &kernel.notebook.cells.push(notebook_kernel_test_cell("markdown", "text", NotebookCellKind.Markdown))
+    result :: &kernel.execute_cell_once(ClientKind.FirstParty, "markdown")
+    assert(if result == { .Err(error) -> error.message == "markdown cells are not executed", else -> false })
+    notebook_kernel_test_add(&kernel, "cell", "1")
+    &kernel.notebook.merge_conflicts.push(NotebookMergeConflict{cell_id: "cell", ours_source: "ours\n", theirs_source: "theirs\""})
+    conflict :: &kernel.execute_cell_once(ClientKind.FirstParty, "cell")
+    assert(if conflict == { .Err(error) -> error.message == "cell `cell` has an unresolved merge conflict; edit it before execution (ours: \"ours\\n\", theirs: \"theirs\\\"\")", else -> false })
+}
+#Test("kernel document refusal and imported notice keep exact contracts") {
+    kernel := Kernel.blank(None, "env")
+    assert(if &kernel.reopen_document() == { .Err(error) -> error.message == "no notebook path is open", else -> false })
+    assert(if &kernel.save_document(None) == { .Err(error) -> error.message == "save needs a `.jetnb` path", else -> false })
+    imported := JetNotebook.new("foreign")
+    &imported.cells.push(notebook_kernel_test_cell("cell", "1", NotebookCellKind.Jet))
+    &kernel.replace_notebook(^imported)
+    assert_eq(kernel.document_path, None)
+    assert_eq(kernel.document_notice, Val("imported notebook output is quarantined; run cells locally to create trusted cache"))
+    assert(kernel.executed_cells.is_empty())
+    assert(kernel.control_values.is_empty())
+}
+#Test("kernel checked function schema and controls share checked AST") {
+    kernel := Kernel.blank(None, "env")
+    notebook_kernel_test_add(&kernel, "function", "fn add(x: Int, y: Int) -> Int { x + y }")
+    schema :: kernel.app_schema("add") ?? panic(err.message)
+    assert_eq(schema.function, "add")
+    assert_eq(schema.inputs.len(), 2)
+    assert_eq(schema.inputs[0].name, "x")
+    assert_eq(schema.inputs[0].label, "x")
+    assert_eq(schema.inputs[0].type_name, "Int")
+    assert(schema.inputs[0].required)
+    assert(!schema.inputs[0].variadic)
+    assert_eq(schema.source_identity, kernel.notebook.source_hash())
+    &kernel.set_control("add", "x", "3") ?? panic(err.message)
+    assert(kernel.controls_json().contains("\"value\":\"3\""))
+    wrong :: &kernel.set_control("add", "x", "true")
+    assert(if wrong == { .Err(error) -> error.message.contains("notebook control value has the wrong type"), else -> false })
+    assert_eq(kernel.control_values[notebook_kernel_control_key("add", "x")], "3")
+    assert(kernel.controls_json().contains("value for `x` must be a Int"))
+    &kernel.set_control("add", "x", "4") ?? panic(err.message)
+    assert(kernel.control_errors.is_empty())
+    missing :: &kernel.set_control("add", "z", "0")
+    assert(if missing == { .Err(error) -> error.message.contains("notebook function argument does not exist"), else -> false })
+    assert_eq(kernel.state_json(), kernel.state_value_for(ClientKind.FirstParty).json())
+}
+#Test("kernel app schema reports empty and missing checked functions") {
+    kernel := Kernel.blank(None, "env")
+    assert(if kernel.app_schema("missing") == { .Err(error) -> error.message.contains("notebook app has no checked functions"), else -> false })
+    notebook_kernel_test_add(&kernel, "function", "fn present(x: Int) -> Int { x }")
+    assert(if kernel.app_schema("missing") == { .Err(error) -> error.message.contains("notebook app function does not exist"), else -> false })
+}
+#Test("kernel execute uses the actual shared evaluator and dependency session") {
+    kernel := Kernel.open(None, "env") ?? panic(err.message)
+    notebook_kernel_test_add(&kernel, "binding", "answer :: 7")
+    notebook_kernel_test_add(&kernel, "read", "answer + 1")
+    result :: &kernel.execute_cell(ClientKind.FirstParty, "read") ?? panic(err.message)
+    assert(result.ok())
+    assert_eq(kernel.execution_count, U32{2})
+    assert_eq(result.bundle.text_plain, "8")
+    assert(kernel.session.scope.has_key("answer"))
+    assert(kernel.first_party_visible_output("read") != None)
+    assert(kernel.canvas_visible_output("read") != None)
+    assert(kernel.jupyter_visible_output("read") != None)
+    &kernel.edit_cell("binding", "answer :: 9") ?? panic(err.message)
+    updated :: &kernel.execute_cell(ClientKind.FirstParty, "binding") ?? panic(err.message)
+    assert(updated.ok())
+    visible :: kernel.first_party_visible_output("read") ?? panic("reactive output")
+    assert_eq(visible.text_plain, "10")
+}
+#Test("kernel reactive effect and lazy confirmations retain pending state") {
+    kernel := Kernel.open(None, "env") ?? panic(err.message)
+    notebook_kernel_test_add(&kernel, "binding", "answer :: 1")
+    notebook_kernel_test_add(&kernel, "effect", "print(answer)")
+    _ :: &kernel.execute_cell(ClientKind.FirstParty, "effect") ?? panic(err.message)
+    &kernel.set_cell_lazy("effect", true) ?? panic(err.message)
+    &kernel.edit_cell("binding", "answer :: 2") ?? panic(err.message)
+    _ :: &kernel.execute_cell(ClientKind.FirstParty, "binding") ?? panic(err.message)
+    assert(kernel.pending_effects.has_key("effect"))
+    skipped :: &kernel.confirm_reactive(ClientKind.FirstParty, "binding") ?? panic(err.message)
+    assert(skipped.is_empty())
+    assert(kernel.pending_effects.has_key("effect"))
+    &kernel.set_cell_lazy("effect", false) ?? panic(err.message)
+    ran :: &kernel.confirm_reactive(ClientKind.FirstParty, "binding") ?? panic(err.message)
+    assert_eq(ran, [String]{"effect"})
+    assert_eq(kernel.reactive_root, None)
+    assert(kernel.pending_effects.is_empty())
+}
+#Test("kernel rerun invalidates cache before rebuilding newly numbered turns") {
+    kernel := Kernel.open(None, "env") ?? panic(err.message)
+    notebook_kernel_test_add(&kernel, "binding", "answer :: 1")
+    _ :: &kernel.execute_cell(ClientKind.FirstParty, "binding") ?? panic(err.message)
+    plan :: kernel.replay_plan(1, None) ?? panic(err.message)
+    _ :: &kernel.apply_rerun(ClientKind.FirstParty, plan, [RerunDecision]{}) ?? panic(err.message)
+    assert(kernel.notebook.output_cache.is_empty())
+    assert_eq(kernel.execution_count, U32{0})
+    assert(kernel.executed_cells.is_empty())
+    assert_eq(kernel.first_party_visible_output("binding"), None)
+}

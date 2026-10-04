@@ -1,0 +1,18 @@
+// Rust: crates/jet-repl/src/Notebook/mod.rs:1-36.
+// Public owners publish directly through their package manifests: Document,
+// Codec, Interop, Trust, Eval and Protocol in jet_repl; Kernel in jet_cli.
+// No facade/reexports or second carrier declarations are needed.
+use core.files.runtime.kernel_path_components as notebook_entry_paths
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.sys.target as notebook_entry_target
+
+// The original browser asset is shared with the HTTP host, not a string copied
+// into a test. Main publishes its final Rust-retirement asset location.
+pub NOTEBOOK_CLIENT_HTML :: prep { embed_file("../../../../crates/jet-repl/src/Notebook/client.html") }
+
+// #4483: native text ingress selects the compilation target, not the host.
+// No OSPath.platform dispatch is used to infer target facts.
+fn notebook_native_path(text: String) -> OSPath Never! {
+    platform :: if notebook_entry_target.selected_family() == notebook_entry_target.NativeTargetFamily.Windows -> notebook_entry_paths.PathPlatform.Windows else -> notebook_entry_paths.PathPlatform.Unix
+    notebook_entry_paths.from_text(text, platform)
+}

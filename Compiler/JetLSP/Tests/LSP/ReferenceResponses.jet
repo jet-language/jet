@@ -1,0 +1,247 @@
+// Original Server.rs3532–4036,4149–4150,4752–4841. Native fixture tests
+// require #4494 retained-descriptor/OS ingress, real checked Driver, W38 Server,
+// canonical Features/Completion and ProjectParts. They are not mock providers.
+// Reuse W36's authorized Driver-input fixture constructor; never duplicate its
+// diagnostic/query/URI tests. Files below are written/read with native OSPath.
+use core.files.host.retained_descriptor as lsp_action_fs
+use core.sys.host.os_path_ingress as lsp_action_os
+use core.process.host.native_process as lsp_action_process
+
+fn lsp_action_child(root: lsp_workspace_path.OSPath, name: String) -> lsp_workspace_path.OSPath Never! {
+    path := ~root
+    lsp_workspace_path.push(&path, lsp_workspace_path.from_text(name, root.platform))
+    path
+}
+
+fn lsp_action_root(prefix: String) -[FS, Env, Exec]> lsp_workspace_path.OSPath Never! {
+    root :: lsp_action_child(lsp_action_os.temp_dir(), "{prefix}-{lsp_action_process.id()}")
+    _ :: lsp_action_fs.remove_dir_all(root)
+    lsp_action_fs.create_dir_all(root) ?? panic("create original LSP fixture root")
+    root
+}
+
+fn lsp_action_fixture(root: lsp_workspace_path.OSPath, src: String, version: Int, extra_files: [(name: String, text: String)]) -[FS, Env]> LSPServer Never! {
+    main :: lsp_action_child(root, "main.jet")
+    lsp_action_fs.write(main, src.bytes()) ?? panic("write original main fixture")
+    snapshot := lsp_diag_test_snapshot("main.jet", src, [JetDriverAuthorizedSourceFile]{})
+    files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: ~main, relative_path: lsp_workspace_path.from_text("main.jet", root.platform), identity: "lsp-fixture:main.jet", source: ~src}}
+    loop extra in extra_files {
+        path :: lsp_action_child(root, extra.name)
+        lsp_action_fs.write(path, extra.text.bytes()) ?? panic("write original dependency fixture")
+        &files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: lsp_workspace_path.from_text(extra.name, root.platform), identity: "lsp-fixture:{extra.name}", source: ~extra.text})
+    }
+    snapshot.cwd = ~root
+    snapshot.request.authorized_sources.roots = [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: ~root, identity: "lsp-fixture-root", allow_hardlinks: false, files: ^files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}
+    snapshot.request.authorized_sources.entry_path = ~main
+    server := LSPServer.new(^snapshot, ~root)
+    &server.workspace_roots.push(~root)
+    uri :: lsp_path_to_uri(lsp_workspace_path.display(main))
+    server.diagnostic_state.docs[uri] = LSPDocument.new(^main, ~src, version)
+    server
+}
+
+// Rust3516: every caller passes byte offsets through the sole UTF16 mapper.
+fn lsp_code_actions_for(server: LSPServer, uri: String, src: String, start: Int, end: Int) -[FS, Env]> String {
+    range :: LSPRange{start: lsp_byte_offset_to_lsp(src, start), end: lsp_byte_offset_to_lsp(src, end)}
+    params :: foundation_parse_protocol_json("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)}}},\"range\":{lsp_range_json(range)},\"context\":{{\"diagnostics\":[]}}}}") ?? panic("original action params")
+    lsp_code_action_response(server, Val(params), DataTree.Int(1)) ?? panic("original code action response")
+}
+fn lsp_action_uri(root: lsp_workspace_path.OSPath) -> String Never! { lsp_path_to_uri(lsp_workspace_path.display(lsp_action_child(root, "main.jet"))) }
+fn lsp_action_version(uri: String, version: Int) -> String Never! { "\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version}}}" }
+fn lsp_action_extract(server: LSPServer, uri: String, src: String, expression: String) -[FS, Env]> String {
+    start :: src.find(expression) ?? panic("original selected expression")
+    lsp_code_actions_for(server, uri, src, start, start + expression.bytes().len())
+}
+fn lsp_action_inline(server: LSPServer, uri: String, src: String, name: String) -[FS, Env]> String {
+    // Last source occurrence, preserving Rust rfind's byte index.
+    bytes :: src.bytes()
+    needle :: name.bytes()
+    at := bytes.len() - needle.len()
+    loop at >= 0 {
+        same := true
+        loop index in 0..<needle.len() { if bytes[at + index] != needle[index] { same = false; break } }
+        if same -> return lsp_code_actions_for(server, uri, src, at, at + needle.len())
+        at -= 1
+    }
+    panic("original selected name")
+}
+
+#Test("code_actions_extract_binding_function_and_inline_with_versioned_edits") {
+    src :: "fn run(left: Bool, right: Bool) {{\n    total :: left && right\n    print(total)\n}}\n"
+    root :: lsp_action_root("jet-lsp-refactor-actions")
+    server :: lsp_action_fixture(root, src, 7, [(name: String, text: String)]{})
+    uri :: lsp_action_uri(root)
+    extracted :: lsp_action_extract(server, uri, src, "left && right")
+    assert(extracted.contains("\"title\":\"Extract binding\""))
+    assert(extracted.contains("\"title\":\"Extract function\""))
+    assert(extracted.contains("\"kind\":\"refactor.extract\""))
+    assert(extracted.contains(lsp_action_version(uri, 7)))
+    inlined :: lsp_action_inline(server, uri, src, "total")
+    assert(inlined.contains("\"title\":\"Inline `total`\""))
+    assert(inlined.contains("\"kind\":\"refactor.inline\""))
+    _ :: lsp_action_fs.remove_dir_all(root)
+}
+
+#Test("code_actions_reject_effects_reordering_and_possible_traps") {
+    effectful :: "fn next() -> Int {{ print(\"effect\")\nreturn 1 }}\nfn run() {{\n    value :: next()\n    print(\"between\")\n    print(value)\n}}\n"
+    effect_root :: lsp_action_root("jet-lsp-effect-refactor")
+    effect_server :: lsp_action_fixture(effect_root, effectful, 1, [(name: String, text: String)]{})
+    uri :: lsp_action_uri(effect_root)
+    call :: effectful.find("next()\n") ?? panic("call fixture")
+    extraction :: lsp_code_actions_for(effect_server, uri, effectful, call, call + 6)
+    assert(!extraction.contains("Extract binding"))
+    assert(!extraction.contains("Extract function"))
+    assert(!lsp_action_inline(effect_server, uri, effectful, "value").contains("Inline `value`"))
+    _ :: lsp_action_fs.remove_dir_all(effect_root)
+    partial :: "fn run(left: Int, right: Int) {{\n    value :: left / right\n    print(value)\n}}\n"
+    partial_root :: lsp_action_root("jet-lsp-partial-refactor")
+    partial_server :: lsp_action_fixture(partial_root, partial, 1, [(name: String, text: String)]{})
+    partial_uri :: lsp_action_uri(partial_root)
+    extraction :: lsp_action_extract(partial_server, partial_uri, partial, "left / right")
+    assert(!extraction.contains("Extract binding"))
+    assert(!extraction.contains("Extract function"))
+    assert(!lsp_action_inline(partial_server, partial_uri, partial, "value").contains("Inline `value`"))
+    _ :: lsp_action_fs.remove_dir_all(partial_root)
+}
+
+#Test("code_actions_reject_non_scalar_extract_without_ownership_proof") {
+    src :: "fn run(left: Clock, right: Clock) {{\n    same :: left == right\n    print(same)\n}}\n"
+    root :: lsp_action_root("jet-lsp-clock-refactor")
+    server :: lsp_action_fixture(root, src, 1, [(name: String, text: String)]{})
+    uri :: lsp_action_uri(root)
+    extraction :: lsp_action_extract(server, uri, src, "left == right")
+    assert(!extraction.contains("Extract binding"))
+    assert(!extraction.contains("Extract function"))
+    assert(!lsp_action_inline(server, uri, src, "same").contains("Inline `same`"))
+    _ :: lsp_action_fs.remove_dir_all(root)
+}
+
+#Test("code_actions_extract_from_call_arg_and_scalar_equality") {
+    call_src :: "fn run(left: Bool, right: Bool) {{\n    print(left && right)\n}}\n"
+    call_root :: lsp_action_root("jet-lsp-call-extract")
+    call_server :: lsp_action_fixture(call_root, call_src, 4, [(name: String, text: String)]{})
+    call_uri :: lsp_action_uri(call_root)
+    extracted :: lsp_action_extract(call_server, call_uri, call_src, "left && right")
+    assert(extracted.contains("\"title\":\"Extract binding\""))
+    assert(extracted.contains("\"title\":\"Extract function\""))
+    assert(extracted.contains(lsp_action_version(call_uri, 4)))
+    _ :: lsp_action_fs.remove_dir_all(call_root)
+    bool_src :: "fn run(left: Bool, right: Bool) {{\n    same :: left == right\n    print(same)\n}}\n"
+    bool_root :: lsp_action_root("jet-lsp-bool-eq-refactor")
+    bool_server :: lsp_action_fixture(bool_root, bool_src, 5, [(name: String, text: String)]{})
+    bool_uri :: lsp_action_uri(bool_root)
+    extracted :: lsp_action_extract(bool_server, bool_uri, bool_src, "left == right")
+    assert(extracted.contains("\"title\":\"Extract binding\""))
+    assert(extracted.contains("\"title\":\"Extract function\""))
+    assert(lsp_action_inline(bool_server, bool_uri, bool_src, "same").contains("\"title\":\"Inline `same`\""))
+    _ :: lsp_action_fs.remove_dir_all(bool_root)
+    int_src :: "fn run(left: Int, right: Int) {{\n    same :: left == right\n    print(same)\n}}\n"
+    int_root :: lsp_action_root("jet-lsp-int-eq-refactor")
+    int_server :: lsp_action_fixture(int_root, int_src, 9, [(name: String, text: String)]{})
+    int_uri :: lsp_action_uri(int_root)
+    extracted :: lsp_action_extract(int_server, int_uri, int_src, "left == right")
+    assert(extracted.contains("\"title\":\"Extract binding\""))
+    assert(extracted.contains("\"title\":\"Extract function\""))
+    assert(extracted.contains("=> Bool"))
+    assert(lsp_action_inline(int_server, int_uri, int_src, "same").contains("\"title\":\"Inline `same`\""))
+    _ :: lsp_action_fs.remove_dir_all(int_root)
+    add_src :: "fn run(left: Int, right: Int) {{\n    total :: left + right\n    print(total)\n}}\n"
+    add_root :: lsp_action_root("jet-lsp-int-add-refactor")
+    add_server :: lsp_action_fixture(add_root, add_src, 1, [(name: String, text: String)]{})
+    add_uri :: lsp_action_uri(add_root)
+    extracted :: lsp_action_extract(add_server, add_uri, add_src, "left + right")
+    assert(!extracted.contains("Extract binding"))
+    assert(!extracted.contains("Extract function"))
+    assert(!lsp_action_inline(add_server, add_uri, add_src, "total").contains("Inline `total`"))
+    _ :: lsp_action_fs.remove_dir_all(add_root)
+}
+
+#Test("code_actions_multi_use_pure_inline_and_paren_extract") {
+    src :: "fn run(left: Bool, right: Bool) {{\n    flag :: left && right\n    print(flag)\n    print(flag)\n}}\n"
+    root :: lsp_action_root("jet-lsp-multi-inline")
+    server :: lsp_action_fixture(root, src, 6, [(name: String, text: String)]{})
+    uri :: lsp_action_uri(root)
+    start :: (src.find("print(flag)") ?? panic("use fixture")) + 6
+    inlined :: lsp_code_actions_for(server, uri, src, start, start + 4)
+    assert(inlined.contains("\"title\":\"Inline `flag`\""))
+    assert(inlined.split("\"newText\":\"(left && right)\"").len() >= 3)
+    assert(inlined.contains("{{\"range\":{{\"start\":{{\"line\":1,\"character\":0}},\"end\":{{\"line\":2,\"character\":0}}}},\"newText\":\"\"}}"))
+    assert(inlined.contains(lsp_action_version(uri, 6)))
+    _ :: lsp_action_fs.remove_dir_all(root)
+    paren :: "fn run(left: Bool, right: Bool) {{\n    print((left && right))\n}}\n"
+    paren_root :: lsp_action_root("jet-lsp-paren-extract")
+    paren_server :: lsp_action_fixture(paren_root, paren, 8, [(name: String, text: String)]{})
+    extracted :: lsp_action_extract(paren_server, lsp_action_uri(paren_root), paren, "(left && right)")
+    assert(extracted.contains("\"title\":\"Extract binding\""))
+    assert(extracted.contains("\"title\":\"Extract function\""))
+    _ :: lsp_action_fs.remove_dir_all(paren_root)
+}
+
+#Test("code_action_imports_one_unique_workspace_symbol") {
+    src :: "fn run() {{ print(answer()) }}\n"
+    root :: lsp_action_root("jet-lsp-import-action")
+    server :: lsp_action_fixture(root, src, 3, [(name: String, text: String)]{(name: "helper.jet", text: "pub fn answer() -> Int {{ return 42 }}\n")})
+    actions :: lsp_action_extract(server, lsp_action_uri(root), src, "answer")
+    assert(actions.contains("\"title\":\"Import `helper`\""))
+    assert(actions.contains("\"newText\":\"use helper\\n\""))
+    assert(actions.contains("\"kind\":\"quickfix\""))
+    _ :: lsp_action_fs.remove_dir_all(root)
+}
+
+#Test("code_action_import_excludes_a_dirty_dependency_overlay") {
+    src :: "fn run() {{ print(answer()) }}\n"
+    root :: lsp_action_root("jet-lsp-dirty-import-action")
+    server := lsp_action_fixture(root, src, 1, [(name: String, text: String)]{(name: "helper.jet", text: "pub fn answer() -> Int {{ return 42 }}\n")})
+    helper_path :: lsp_action_child(root, "helper.jet")
+    helper_uri :: lsp_path_to_uri(lsp_workspace_path.display(helper_path))
+    server.diagnostic_state.docs[helper_uri] = LSPDocument.new(helper_path, "fn answer() -> Int {{ return 42 }}\n", 2)
+    assert(!lsp_action_extract(server, lsp_action_uri(root), src, "answer").contains("Import `helper`"))
+    _ :: lsp_action_fs.remove_dir_all(root)
+}
+
+#Test("card_3200_import_edit_uses_checked_document_version_and_respects_existing_import_boundary") {
+    src :: "fn run() {{ print(answer()) }}\n"
+    root :: lsp_action_root("jet-lsp-card-3200-import-version")
+    server := lsp_action_fixture(root, src, 12, [(name: String, text: String)]{(name: "helper.jet", text: "pub fn answer() -> Int {{ return 42 }}\n")})
+    uri :: lsp_action_uri(root)
+    actions :: lsp_action_extract(server, uri, src, "answer")
+    assert(actions.contains("\"title\":\"Import `helper`\""))
+    assert(actions.contains("\"newText\":\"use helper\\n\""))
+    assert(actions.contains(lsp_action_version(uri, 12)))
+    imported :: "use helper\n{src}"
+    &server.diagnostic_state.docs[uri].replace_text(~imported)
+    actions :: lsp_action_extract(server, uri, imported, "answer")
+    assert(!actions.contains("Import `helper`"))
+    assert(!actions.contains("\"newText\":\"use helper\\n\""))
+    _ :: lsp_action_fs.remove_dir_all(root)
+}
+
+#Test("card_3200_import_edit_declines_ambiguous_workspace_symbols") {
+    src :: "fn run() {{ print(answer()) }}\n"
+    root :: lsp_action_root("jet-lsp-card-3200-import-ambiguous")
+    server :: lsp_action_fixture(root, src, 4, [(name: String, text: String)]{(name: "left.jet", text: "pub fn answer() -> Int {{ return 1 }}\n"), (name: "right.jet", text: "pub fn answer() -> Int {{ return 2 }}\n")})
+    actions :: lsp_action_extract(server, lsp_action_uri(root), src, "answer")
+    assert(!actions.contains("\"title\":\"Import `"))
+    assert(!actions.contains("\"newText\":\"use "))
+    _ :: lsp_action_fs.remove_dir_all(root)
+}
+
+// Original4122 test's unclaimed4142–4150 action half only. W36 retains report
+// assertions4123–4140; Main's current E0373 newline oracle applies to both.
+#Test("lsp_uses_registry_fix_for_action") {
+    src :: "fn run() {{\n    loop item; [1, 2, 3] {{ print(item) }}\n}}\n"
+    parsed :: parse_source(src.bytes())
+    selected := Diagnostic?{None}
+    loop candidate in parsed.diagnostics {
+        if candidate.code == "E0373" { selected = Val(candidate); break }
+    }
+    reworded := selected ?? panic("original registry diagnostic")
+    edit :: reworded.edit ?? panic("row owns SourceEdit")
+    reworded.fix = "use the canonical loop separator"
+    fixes :: lsp_collect_fixes_from_diagnostics([Diagnostic]{^reworded}, src)
+    assert_eq(fixes.len(), 1)
+    assert_eq(fixes[0].edit, edit)
+    assert_eq(fixes[0].title, "use the canonical loop separator")
+    action :: lsp_code_action_json("file:///workspace/main.jet", 1, src, fixes[0])
+    assert(action.contains("\"newText\":\"\\n\""))
+}

@@ -1,0 +1,297 @@
+// Original lib.rs:296–896 open/package/workspace oracles. Checked fixture
+// assertions already owned by CallableFacts/Facts/Build/Codec are reused below,
+// not replaced with hand-built checked records. These tests are source-only;
+// no registration into the package list or proof is implied by this file.
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, diagnostic_from_registry, mir_sha256_hex]
+use jet_pkg_model.[WorkspaceDeclarationCache]
+use core.files as semindex_open_files
+use core.process as semindex_open_process
+use core.sys as semindex_open_sys
+
+fn semindex_open_test_root(label: String) -[FS, Env]> String Never! {
+    root :: semindex_open_files.join(semindex_open_sys.temp_dir(), "jet-semindex-{label}-{semindex_open_process.current_pid()}")
+    semindex_open_files.remove_all(root).drop("a stale test fixture may be absent")
+    semindex_open_files.create_dir_all(root) ?? panic("create semantic-index fixture")
+    root
+}
+fn semindex_open_test_write(root: String, path: String, source: String) -[FS]> {
+    semindex_open_files.write(semindex_open_files.join(root, path), source) ?? panic("write semantic-index fixture")
+}
+fn semindex_open_test_lock_dir(root: String) -[FS]> {
+    semindex_open_files.create_dir_all(semindex_open_files.join(root, ".jet")) ?? panic("create lock directory")
+}
+fn semindex_open_test_clean(root: String) -[FS]> {
+    semindex_open_files.remove_all(root) ?? panic("remove semantic-index fixture")
+}
+
+#Test("schema_version_constant") {
+    assert_eq(SEMINDEX_SCHEMA_VERSION, 20)
+}
+
+#Test("semindex_load_error_preserves_diagnostics_and_exact_display") {
+    assert_eq(SemIndexError.Load{diagnostics: [Diagnostic]{}}.message(), "0 load/check diagnostic(s)")
+    first :: semindex_package_facts_diagnostic("./é/main.jet", "broken")
+    second :: semindex_package_facts_diagnostic("other.jet", "ambiguous")
+    failure :: SemIndexError.Load{diagnostics: [Diagnostic]{first, second}}
+    assert_eq(failure.message(), "2 load/check diagnostic(s)")
+    if failure == .Load(diagnostics) -> assert_eq(diagnostics, [Diagnostic]{first, second})
+    assert_eq(semindex_package_facts_error_text([Diagnostic]{}), "")
+    expected :: "E1206: package facts for `./é/main.jet` have a shape error — one typed Package fact graph must own this projection; broken; E1206: package facts for `other.jet` have a shape error — one typed Package fact graph must own this projection; ambiguous"
+    assert_eq(semindex_package_facts_error_text([Diagnostic]{first, second}), expected)
+    assert_eq(first.severity, DIAGNOSTIC_ERROR)
+    assert_eq(first.code, "E1206")
+    assert_eq(first.span, None)
+    assert_eq(first.fix, "fix package.jet, the inline Package carrier, or its declared Config files before tooling uses package facts")
+}
+
+#Test("malformed_package_facts_are_not_dropped_from_projection") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: semindex_open_test_root("ambiguous-package")
+    semindex_open_test_write(root, "package.jet", "name: \"canonical\"\nversion: \"0.1.0\"\n")
+    semindex_open_test_write(root, "pkg.jet", "name: \"legacy\"\nversion: \"0.1.0\"\n")
+    semindex_open_test_write(root, "run.jet", "fn run() {{}}\n")
+    entry :: semindex_open_files.join(root, "run.jet")
+    if semindex_package_facts_for_entry(&cache, entry) == {
+        .Ok(_) -> panic("ambiguous package roots must remain an error")
+        .Err(error) -> {
+            // Main's oracle ruling: the migration-era substring was stale;
+            // the registered Authority diagnostic text remains canonical.
+            assert_eq(error.message, "E1206: the package has two manifest roots — `package.jet` and `pkg.jet` both exist; choosing one would make package identity ambiguous")
+            assert_eq(semindex_package_facts_diagnostic(entry, error.message).code, "E1206")
+        }
+    }
+    semindex_open_test_clean(root)
+}
+
+#Test("stale_workspace_lock_returns_e1202_instead_of_empty_policy") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: semindex_open_test_root("stale-workspace")
+    semindex_open_test_lock_dir(root)
+    semindex_open_test_write(root, "workspace.jet", "module workspace {{ members: [] }}\n")
+    semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"sha256-stale\"\n")
+    semindex_open_test_write(root, "run.jet", "fn run() {{}}\n")
+    if semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(root, "run.jet")) == {
+        .Ok(_) -> panic("stale workspace authority must remain visible")
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1202")
+    }
+    semindex_open_test_clean(root)
+}
+
+#Test("outer_stale_workspace_lock_does_not_cross_inner_workspace_boundary") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: semindex_open_test_root("nested-stale-workspace")
+    child :: semindex_open_files.join(root, "child")
+    semindex_open_files.create_dir_all(child) ?? panic("create child")
+    semindex_open_test_lock_dir(root)
+    semindex_open_test_write(root, "workspace.jet", "module workspace {{ members: [] }}\n")
+    semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"sha256-stale\"\n")
+    semindex_open_test_write(child, "inner-authority.jet", "module workspace {{ members: [] }}\n")
+    semindex_open_test_write(child, "run.jet", "fn run() {{}}\n")
+    policy :: semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(child, "run.jet")) ?? panic("nearest workspace boundary must stop lookup")
+    assert(policy == None)
+    semindex_open_test_clean(root)
+}
+
+#Test("ancestor_lock_scan_uses_an_arbitrary_workspace_source") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: semindex_open_test_root("ancestor-workspace")
+    child :: semindex_open_files.join(root, "packages/app")
+    semindex_open_files.create_dir_all(child) ?? panic("create child")
+    semindex_open_test_lock_dir(root)
+    source :: "module workspace {{ members: [] }}\n"
+    semindex_open_test_write(root, "authority.jet", source)
+    digest :: mir_sha256_hex(source)
+    semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"{digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n")
+    semindex_open_test_write(child, "run.jet", "fn run() {{}}\n")
+    policy :: (semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(child, "run.jet")) ?? panic("ancestor workspace lock should load")) ?? panic("persisted policy should be attached")
+    assert_eq(policy.allow_unfree, [String]{"discord"})
+    semindex_open_test_clean(root)
+}
+
+#Test("malformed_workspace_boundary_is_not_hidden_by_an_outer_lock") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: semindex_open_test_root("ambiguous-workspace-boundary")
+    child :: semindex_open_files.join(root, "packages/app")
+    semindex_open_files.create_dir_all(child) ?? panic("create child")
+    semindex_open_test_lock_dir(root)
+    source :: "module workspace {{ members: [] }}\n"
+    semindex_open_test_write(root, "authority.jet", source)
+    digest :: mir_sha256_hex(source)
+    semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"{digest}\"\n")
+    semindex_open_test_write(child, "a.jet", source)
+    semindex_open_test_write(child, "b.jet", source)
+    semindex_open_test_write(child, "run.jet", "fn run() {{}}\n")
+    if semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(child, "run.jet")) == {
+        .Ok(_) -> panic("ambiguous boundary must remain visible")
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1239")
+    }
+    semindex_open_test_clean(root)
+}
+
+#Test("missing_empty_and_nonworkspace_inner_locks_are_boundaries") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: semindex_open_test_root("empty-inner-boundary")
+    child :: semindex_open_files.join(root, "child")
+    semindex_open_files.create_dir_all(child) ?? panic("create child")
+    semindex_open_test_lock_dir(root)
+    semindex_open_test_lock_dir(child)
+    source :: "module workspace {{ members: [] }}\n"
+    semindex_open_test_write(root, "workspace.jet", source)
+    semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"sha256-stale\"\n")
+    semindex_open_test_write(child, "workspace.jet", source)
+    semindex_open_test_write(child, "run.jet", "fn run() {{}}\n")
+    entry :: semindex_open_files.join(child, "run.jet")
+    assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("missing lock is a boundary")) == None)
+    semindex_open_test_write(child, ".jet/lock", "version = 1\n")
+    assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("nonworkspace lock is a boundary")) == None)
+    digest :: mir_sha256_hex(source)
+    semindex_open_test_write(child, ".jet/lock", "version = 1\nworkspace_source_digest = \"{digest}\"\n")
+    assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("empty policy is a boundary")) == None)
+    // A recognized workspace lock that cannot decode is an error, not absence.
+    semindex_open_test_write(child, ".jet/lock", "version = nope\nworkspace_source_digest = \"{digest}\"\n")
+    if semindex_workspace_overlay_policy_for_entry(&cache, entry) == {
+        .Ok(_) -> panic("malformed inner workspace lock cannot fall outward")
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1202")
+    }
+    semindex_open_test_clean(root)
+}
+
+// lib.rs469–508: these assertions are deliberately unregistered until the
+// Driver-owned host snapshot fixture harness can call the real opens below.
+// They consume real checked indices from Examples/features, never synthetic
+// graph rows. Filesystem capture belongs to Driver, not to a Tools test parser.
+fn semindex_open_test_effects_index(index: SemIndex) Never! {
+    assert_eq(index.schema_version(), SEMINDEX_SCHEMA_VERSION)
+    assert(index.lookup("run") != None)
+    assert(index.lookup("report") != None)
+    assert(index.call_edges().len() > 0, "expected call graph edges in effects example")
+    assert(index.effect_of("report") != None, "expected effect facts for report()")
+}
+fn semindex_open_test_hello_index(index: SemIndex) Never! {
+    assert(index.references_to("print").len() > 0)
+    json :: index.to_json()
+    assert(json.contains("\"schema_version\":{SEMINDEX_SCHEMA_VERSION}"))
+    loop field in [String]{"outputs", "definitions", "identity", "references", "calls", "effects", "members", "instances", "run"} -> assert(json.contains("\"{field}\""))
+}
+
+// lib.rs511–561 and597–639: use the sole existing exact Config/lock fixture
+// builders and codec assertions after the actual open attaches the authority.
+fn semindex_open_test_package_fixture(root: String) -[FS]> {
+    sources :: semindex_package_codec_test_package_fixture()
+    semindex_open_test_write(root, "package.jet", sources[0])
+    semindex_open_test_write(root, "release.jet", sources[1])
+    semindex_open_test_write(root, "run.jet", sources[2])
+}
+fn semindex_open_test_shared_package_index(index: SemIndex) {
+    package :: index.package_facts ?? panic("package facts attached")
+    semindex_package_codec_test_shared_package(package, index.to_json())
+}
+fn semindex_open_test_workspace_fixture(root: String) -[FS]> {
+    semindex_open_test_lock_dir(root)
+    source :: "module workspace {{ members: [] }}\n"
+    semindex_open_test_write(root, "workspace.jet", source)
+    semindex_open_test_write(root, ".jet/lock", semindex_package_codec_test_workspace_fixture(mir_sha256_hex(source)))
+    semindex_open_test_write(root, "run.jet", "fn run() {{}}\n")
+}
+fn semindex_open_test_persisted_workspace_index(index: SemIndex) {
+    policy :: index.workspace_overlay_policy ?? panic("overlay facts must come from the lock")
+    semindex_package_codec_test_persisted_overlay(policy, index.to_json())
+}
+
+// lib.rs313–465: invoke the already ported COMPLETE typed/default/generic/
+// foreign/metadata/stable repeated identity and JSON assertions.
+fn semindex_open_test_typed_callable_indices(index: SemIndex, repeated: SemIndex) {
+    semindex_test_callable_signature_facts_keep_typed_and_unavailable_states(index.defs, index._definition_facts, repeated._definition_facts, index.to_json())
+}
+// lib.rs762–895: preserve real generic application and import/receiver target
+// tests at their sole S5/Facts oracle owners.
+fn semindex_open_test_generic_index(index: SemIndex, path: String) {
+    semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database(index, path, index.to_json())
+}
+fn semindex_open_test_default_refs_index(index: SemIndex) {
+    semindex_test_every_structural_child_has_explicit_slot(index.nodes)
+}
+fn semindex_open_test_checked_reference_index(index: SemIndex) {
+    semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(index)
+}
+
+// Checked open-variant fixtures. CP-DRIVER-ENTRY-CHECK must capture real
+// authorized sources/overlays once and call the public opening seam before
+// registering these assertions. They are not fake preconstructed snapshots.
+fn semindex_open_test_symbol_free_input_fixture(root: String) -[FS]> {
+    semindex_open_test_write(root, "main.jet", "use \"./empty_a\" as a\nuse \"./empty_b\" as b\nfn run() {{}}\n")
+    semindex_open_test_write(root, "empty_a.jet", "// intentionally no definitions\n")
+    semindex_open_test_write(root, "empty_b.jet", "// another read-only symbol-free input\n")
+}
+fn semindex_open_test_symbol_free_inputs(inputs: [String], entry: String, a: String, b: String) Never! {
+    // Rust Loader4595 schedules the current module before walking authored
+    // imports4614. Preserve both symbol-free imports in that exact order.
+    assert_eq(inputs, [String]{entry, a, b})
+}
+fn semindex_open_test_diagnostic_source() -> String Never! {
+    "fn run() {{ missing_name() }}\n"
+}
+fn semindex_open_test_diagnostic_index(index: SemIndex, diagnostics: [Diagnostic]) Never! {
+    assert(index.lookup("run") != None)
+    assert(semindex_open_has_errors(diagnostics))
+}
+
+// Structural open's candidate directory is DIFFERENT from the output
+// directory, and the output need not exist. Only Driver may apply import_root
+// to the real authorized snapshot. Retain this fixture until the checked
+// budget adapter lands; using the output directory is not a valid control.
+fn semindex_open_test_structural_fixture(root: String) -[FS]> {
+    candidate :: semindex_open_files.join(root, "candidate")
+    semindex_open_files.create_dir_all(candidate) ?? panic("create candidate directory")
+    semindex_open_test_write(candidate, "library.jet", "pub fn value() -> Int {{ return 7 }}\n")
+}
+fn semindex_open_test_structural_candidate_source() -> String Never! {
+    "use \"./library\" as api\nfn run() {{ value :: api.value() }}\n"
+}
+fn semindex_open_test_structural_import(index: SemIndex, library_path: String) Never! {
+    found := false
+    loop reference in index.references() {
+        if reference.name != "value" -> next
+        if reference.target == .Val(target) {
+            if target.module_path == library_path && target.kind == "function" -> found = true
+        }
+    }
+    assert(found, "structural candidate import must target the adjacent real library")
+}
+
+// tests/semindex.rs923–1032,1036–1104,1164–1189: the existing exact before/after
+// checked source builders/oracles stay with CallableFacts/Signatures/Build.
+// The open harness invokes each using actual indices/revisions; no local
+// reconstruction of ViewProvenance, derivation identity or signature digests.
+fn semindex_open_test_checked_revision_oracles(union: SemIndex, right: SemIndex, distinct_pair: SemIndex, changed_pair: SemIndex, field_before: SemIndex, field_after: SemIndex, callable_before: SemIndex, callable_after: SemIndex, ancestry_before: SemIndex, ancestry_after: SemIndex) {
+    union_pick :: (union.lookup("pick") ?? panic("union pick"))[0]
+    right_pick :: (right.lookup("pick") ?? panic("right pick"))[0]
+    union_fact :: semindex_test_checked_identity(union._definition_facts, union_pick.identity)
+    right_fact :: semindex_test_checked_identity(right._definition_facts, right_pick.identity)
+    semindex_test_returned_view_provenance_is_structured_and_changes_signature_id(union_pick, right_pick, union_fact, right_fact, union.to_json())
+    pair :: (distinct_pair.lookup("pair") ?? panic("pair"))[0]
+    changed :: (changed_pair.lookup("pair") ?? panic("changed pair"))[0]
+    distinct_fact :: semindex_test_checked_identity(distinct_pair._definition_facts, pair.identity)
+    changed_fact :: semindex_test_checked_identity(changed_pair._definition_facts, changed.identity)
+    semindex_test_aggregate_view_provenance_preserves_slots_and_changes_signature_id(pair, distinct_fact, changed_fact, distinct_pair.to_json())
+    semindex_test_structural_audit_reports_signature_change(field_before, field_after)
+    semindex_test_structural_audit_tracks_callable_signature_changes(callable_before, callable_after)
+    semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_shape(ancestry_before, ancestry_after)
+}
+
+// tests/semindex.rs369–564 and1378–1552: original arithmetic/state/output and
+// dossier/contract/bypass assertions, with the real DB where hover is required.
+fn semindex_open_test_checked_dossier_oracles(widget: SemIndex, contract: SemIndex, bypasses: SemIndex) {
+    widget_dossier :: widget.dossier("Widget")
+    semindex_s9_scattered_members_assertions(widget, widget_dossier.to_json())
+    semindex_s6_method_contract_assertions(contract)
+    invoice :: bypasses.dossier("Invoice")
+    semindex_s9_bypasses_assertions(bypasses, invoice.to_json(), invoice.render_text())
+}
+fn semindex_open_test_checked_state_output_oracles(arithmetic: SymbolDB, arithmetic_path: String, terminal: SemIndex, terminal_hover: SymbolDB, output: SemIndex) {
+    semindex_build_test_semindex_projects_arithmetic_policy_and_exact_scope(arithmetic, arithmetic_path, arithmetic.index.to_json())
+    door :: terminal.dossier("Door")
+    semindex_build_test_semindex_projects_terminal_and_reachability_graph(terminal, terminal.to_json(), door.render_text(), door.to_json())
+    semindex_build_test_semindex_hover_projects_terminal_and_reachability_facts(terminal_hover)
+    semindex_build_test_semindex_reconstructs_checked_output_callable(output, output.to_json())
+}

@@ -1,0 +1,482 @@
+// Rust Build.rs:1–513 row queries and target alignment. The leaf tests use
+// retained rows, not a fabricated checked graph. The checked fixture/oracle
+// pairs below are unregistered until C4/S6–S8/S20/CP-NAMES provide the real walk.
+
+fn semindex_build_test_hover(path: String, start: Int, end: Int, text: String) -> HoverEntry Never! {
+    HoverEntry{span: Span{start: start, end: end}, module_path: path, text: text}
+}
+fn semindex_build_test_operation(path: String, start: Int, end: Int) -> ArithmeticOperationFact Never! {
+    ArithmeticOperationFact{operation: "add", policy: "Wrapping", module_path: path, operation_span: SourceSpan{start: start, end: end}, scope_span: SourceSpan{start: 0, end: 100}}
+}
+
+#Test("symbol_db_hover_keeps_inclusive_endpoints_module_and_first_match") {
+    rows :: [HoverEntry]{
+        semindex_build_test_hover("other.jet", 2, 8, "unrelated"),
+        semindex_build_test_hover("main.jet", 2, 8, "first"),
+        semindex_build_test_hover("main.jet", 2, 4, "shorter"),
+        semindex_build_test_hover("main.jet", 10, 10, "empty"),
+    }
+    assert_eq(semindex_hover_index(rows, "main.jet", 2), Val(1))
+    assert_eq(semindex_hover_index(rows, "main.jet", 8), Val(1))
+    assert_eq(semindex_hover_index(rows, "main.jet", 3), Val(1))
+    assert_eq(semindex_hover_index(rows, "main.jet", 10), Val(3))
+    assert_eq(semindex_hover_index(rows, "main.jet", 1), None)
+    assert_eq(semindex_hover_index(rows, "main.jet", 9), None)
+    assert_eq(semindex_hover_index(rows, "absent.jet", 3), None)
+    assert_eq(semindex_hover_index([HoverEntry]{}, "main.jet", 0), None)
+}
+
+#Test("symbol_db_arithmetic_hover_selects_innermost_exact_fixed_width_row") {
+    operations :: [ArithmeticOperationFact]{
+        semindex_build_test_operation("other.jet", 6, 6),
+        semindex_build_test_operation("main.jet", 0, 20),
+        semindex_build_test_operation("main.jet", 4, 8),
+    }
+    rows :: [HoverEntry]{
+        semindex_build_test_hover("main.jet", 4, 8, "symbol name"),
+        semindex_build_test_hover("other.jet", 4, 8, "fixed-width unrelated"),
+        semindex_build_test_hover("main.jet", 0, 20, "fixed-width outer"),
+        semindex_build_test_hover("main.jet", 4, 8, "fixed-width add: .Wrapping"),
+        semindex_build_test_hover("main.jet", 4, 8, "fixed-width second"),
+    }
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 6), Val(3))
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 4), Val(3))
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 8), Val(3))
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 20), Val(2))
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 21), None)
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "absent.jet", 6), None)
+}
+
+#Test("symbol_db_arithmetic_hover_keeps_first_equal_width_fact") {
+    operations :: [ArithmeticOperationFact]{
+        semindex_build_test_operation("main.jet", 2, 6),
+        semindex_build_test_operation("main.jet", 4, 8),
+    }
+    rows :: [HoverEntry]{
+        semindex_build_test_hover("main.jet", 4, 8, "fixed-width second fact"),
+        semindex_build_test_hover("main.jet", 2, 6, "fixed-width first fact"),
+    }
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 5), Val(1))
+}
+
+#Test("symbol_db_arithmetic_hover_does_not_fall_back_to_outer_or_symbol_hover") {
+    operations :: [ArithmeticOperationFact]{
+        semindex_build_test_operation("main.jet", 0, 20),
+        semindex_build_test_operation("main.jet", 4, 8),
+    }
+    rows :: [HoverEntry]{
+        semindex_build_test_hover("main.jet", 0, 20, "fixed-width outer"),
+        semindex_build_test_hover("main.jet", 4, 8, "fn operand()"),
+        semindex_build_test_hover("main.jet", 4, 9, "fixed-width different end"),
+    }
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 6), None)
+    assert_eq(semindex_arithmetic_hover_index([ArithmeticOperationFact]{}, rows, "main.jet", 6), None)
+    assert_eq(semindex_arithmetic_hover_index(operations, [HoverEntry]{}, "main.jet", 6), None)
+}
+
+#Test("symbol_db_arithmetic_hover_zero_width_and_reversed_spans") {
+    operations :: [ArithmeticOperationFact]{
+        semindex_build_test_operation("main.jet", 8, 4),
+        semindex_build_test_operation("main.jet", 6, 6),
+    }
+    rows :: [HoverEntry]{semindex_build_test_hover("main.jet", 6, 6, "fixed-width point")}
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 6), Val(0))
+    assert_eq(semindex_arithmetic_hover_index(operations, rows, "main.jet", 5), None)
+}
+
+#Test("symbol_db_inlay_hints_keep_module_walk_order_and_borrowed_rows") {
+    db := SymbolDB.new()
+    db.inlay = [InlayHint]{
+        InlayHint{span: Span{start: 8, end: 9}, module_path: "main.jet", label: ": Int"},
+        InlayHint{span: Span{start: 1, end: 2}, module_path: "other.jet", label: ": Float"},
+        InlayHint{span: Span{start: 3, end: 4}, module_path: "main.jet", label: ": Bool"},
+    }
+    hints :: db.inlay_hints_for("main.jet")
+    assert_eq(hints.len(), 2)
+    assert_eq(hints[0][0].label, ": Int")
+    assert_eq(hints[0][0].span.start, 8)
+    assert_eq(hints[1][0].label, ": Bool")
+    assert_eq(hints[1][0].span.start, 3)
+    assert_eq(db.inlay_hints_for("absent.jet").len(), 0)
+    empty :: SymbolDB.new()
+    assert_eq(empty.inlay_hints_for("main.jet").len(), 0)
+}
+
+// Only the retained-text transformation: `line` is an explicit function input,
+// not a fabricated sema/package fact or a substitute effect renderer.
+#Test("symbol_db_refresh_retained_text_keeps_prefix_and_first_marker") {
+    line :: "replacement"
+    rows := [HoverEntry]{
+        semindex_build_test_hover("main.jet", 0, 2, "fn café()\nrequired effects: stale\nrequired effects: stale again"),
+        semindex_build_test_hover("main.jet", 3, 4, "fn fresh()\nreturn = Int"),
+        semindex_build_test_hover("main.jet", 5, 6, "struct Café\nrequired effects: preserved"),
+        semindex_build_test_hover("main.jet", 7, 8, "fn marker() required effects: not a newline marker"),
+    }
+    semindex_refresh_effect_hover_rows(&rows, line)
+    assert_eq(rows[0].text, "fn café()\nreplacement")
+    assert_eq(rows[1].text, "fn fresh()\nreturn = Int\nreplacement")
+    assert_eq(rows[2].text, "struct Café\nrequired effects: preserved")
+    assert_eq(rows[3].text, "fn marker() required effects: not a newline marker\nreplacement")
+}
+
+#Test("symbol_db_refresh_retained_text_is_idempotent_with_projection_marker") {
+    line :: "required effects: replacement"
+    rows := [HoverEntry]{semindex_build_test_hover("main.jet", 0, 2, "fn fresh()")}
+    semindex_refresh_effect_hover_rows(&rows, line)
+    assert_eq(rows[0].text, "fn fresh()\nrequired effects: replacement")
+    semindex_refresh_effect_hover_rows(&rows, line)
+    assert_eq(rows[0].text, "fn fresh()\nrequired effects: replacement")
+    semindex_refresh_effect_hover_rows(&rows, line)
+    assert_eq(rows[0].text, "fn fresh()\nrequired effects: replacement")
+}
+
+// Real PackageModel projection, not a local provider. This test needs the
+// canonical Jetpack PackageModel aggregate; excluded from the row-only proof.
+#Test("symbol_db_refresh_replaces_only_function_effect_projection_once") {
+    projection :: pkg_project_application_effects([String]{"IO"}, None)
+    line :: pkg_render_effect_projection_line(projection)
+    rows := [HoverEntry]{
+        semindex_build_test_hover("main.jet", 0, 2, "fn café()\nrequired effects: stale\nextra stale detail"),
+        semindex_build_test_hover("main.jet", 3, 4, "fn fresh()\nreturn = Int"),
+        semindex_build_test_hover("main.jet", 5, 6, "struct Café\nrequired effects: preserved"),
+    }
+    semindex_refresh_effect_hover_rows(&rows, line)
+    assert_eq(rows[0].text, "fn café()\n{line}")
+    assert_eq(rows[1].text, "fn fresh()\nreturn = Int\n{line}")
+    assert_eq(rows[2].text, "struct Café\nrequired effects: preserved")
+    semindex_refresh_effect_hover_rows(&rows, line)
+    assert_eq(rows[0].text, "fn café()\n{line}")
+    assert_eq(rows[1].text, "fn fresh()\nreturn = Int\n{line}")
+}
+
+// Package attachment exercises the actual PackageFacts/EffectProjection owners
+// and SymbolDB method, not a replacement package schema. Full DB/#4397 gated.
+#Test("symbol_db_attach_package_policy_refreshes_hovers_without_rebuilding_symbols") {
+    db := SymbolDB.new()
+    &db.index.set_effect_projection(pkg_project_application_effects([String]{"IO"}, None))
+    db.defs = [SymDef]{semindex_build_test_definition("instance:retained", .Module, "main.jet", 0, 2)}
+    db.hover = [HoverEntry]{
+        semindex_build_test_hover("main.jet", 3, 5, "fn café()\nrequired effects: stale"),
+        semindex_build_test_hover("main.jet", 6, 8, "struct Café"),
+    }
+    facts := PackageFacts.default()
+    facts.authority.holds.allow = Val([String]{"Net"})
+    facts.authority.holds.deny = Val([String]{"IO"})
+    &db.attach_package_facts(^facts)
+    projection :: db.index.effect_projection
+    assert_eq(projection.required_effects, [String]{"IO"})
+    assert_eq(projection.granted_effects, [String]{"Net"})
+    assert_eq(projection.denied_effects, [String]{"IO"})
+    assert_eq(projection.authority, "package.jet authority.holds")
+    assert(db.index.package_facts != None)
+    assert_eq(db.defs.len(), 1)
+    assert_eq(db.defs[0].identity, "instance:retained")
+    assert_eq(db.hover[0].text, "fn café()\n{pkg_render_effect_projection_line(projection)}")
+    assert_eq(db.hover[1].text, "struct Café")
+}
+
+#Test("symbol_db_new_has_no_program_facts_and_language_symbols") {
+    db :: SymbolDB.new()
+    assert_eq(db.defs.len(), 0)
+    assert_eq(db.refs.len(), 0)
+    assert_eq(db.calls.len(), 0)
+    assert_eq(db.members.len(), 0)
+    assert_eq(db.hover.len(), 0)
+    assert_eq(db.inlay.len(), 0)
+    assert_eq(db.arithmetic.len(), 0)
+    assert_eq(db.nodes.len(), 0)
+    assert_eq(db.bypasses.len(), 0)
+    assert_eq(db.slot_boundaries.len(), 0)
+    assert_eq(db.index.schema_version(), SEMINDEX_SCHEMA_VERSION)
+    assert(db.symbols.lookup_qualified("Int") != None)
+}
+
+fn semindex_build_test_definition(identity: String, kind: SymKind, path: String, start: Int, end: Int) -> SymDef Never! {
+    SymDef{identity: identity, name: "same-spelling", def_span: Span{start: start, end: end}, module_path: path, kind: kind}
+}
+fn semindex_build_test_reference(kind: String, path: String, start: Int, end: Int, identity: String?) -> SymRef Never! {
+    SymRef{name: "different-spelling", span: Span{start: 40, end: 44}, module_path: "use.jet", scope_identity: None, target: Val(DefinitionAnchor{module_path: path, kind: kind, def_span: SourceSpan{start: start, end: end}, semantic_identity: identity}), fact: None}
+}
+#Test("symbol_db_align_targets_requires_unique_exact_kind_module_and_span") {
+    db := SymbolDB.new()
+    db.defs = [SymDef]{
+        semindex_build_test_definition("instance:a", .Module, "main.jet", 2, 8),
+        semindex_build_test_definition("const:a", .Const, "main.jet", 2, 8),
+        semindex_build_test_definition("instance:b", .Module, "other.jet", 2, 8),
+        semindex_build_test_definition("instance:c", .Module, "main.jet", 2, 9),
+        semindex_build_test_definition("instance:d", .Module, "main.jet", 10, 12),
+        semindex_build_test_definition("instance:e", .Module, "main.jet", 10, 12),
+    }
+    db.refs = [SymRef]{
+        semindex_build_test_reference("import_alias", "main.jet", 2, 8, None),
+        semindex_build_test_reference("const", "main.jet", 2, 8, None),
+        semindex_build_test_reference("module", "main.jet", 10, 12, Val("retained")),
+        semindex_build_test_reference("module", "absent.jet", 2, 8, Val("unmatched")),
+        SymRef{name: "unresolved", span: Span{start: 0, end: 0}, module_path: "main.jet", scope_identity: None, target: None, fact: None},
+    }
+    &db.align_reference_targets()
+    if db.refs[0].target == {.Val(target) -> assert_eq(target.semantic_identity, Val("instance:a")) else -> panic("import anchor lost")}
+    if db.refs[1].target == {.Val(target) -> assert_eq(target.semantic_identity, Val("const:a")) else -> panic("const anchor lost")}
+    if db.refs[2].target == {.Val(target) -> assert_eq(target.semantic_identity, Val("retained")) else -> panic("ambiguous anchor lost")}
+    if db.refs[3].target == {.Val(target) -> assert_eq(target.semantic_identity, Val("unmatched")) else -> panic("unmatched anchor lost")}
+    assert_eq(db.refs[4].target, None)
+}
+
+// Complete original checked fixture bytes and assertions. These are functions
+// accepting actual checked products, deliberately not passing #Tests around
+// prefilled facts. C4 must load/check the fixture before invoking each oracle.
+
+// tests/semindex.rs:369–400 (arithmetic_policy.jet).
+fn semindex_build_test_arithmetic_source() -> String Never! {
+    "fn run() {\n    #Arithmetic(.Wrapping) {\n        value :: U8{250} + U8{10}\n    }\n}\n"
+}
+fn semindex_build_test_semindex_projects_arithmetic_policy_and_exact_scope(db: SymbolDB, path: String, json: String) {
+    assert(db.arithmetic.len() > 0)
+    operation :: db.arithmetic[0]
+    assert_eq(operation.operation, "add")
+    assert_eq(operation.policy, "Wrapping")
+    assert(operation.scope_span.start < operation.operation_span.start)
+    assert(json.contains("\"arithmetic\":[{"))
+    assert(json.contains("\"policy\":\"Wrapping\""))
+    if db.hover_at(path, operation.operation_span.start) == {
+        .Val(hover) -> {
+            assert(hover[0].text.contains("fixed-width add: .Wrapping"))
+            assert(hover[0].text.contains("scope = "))
+        }
+        else -> panic("arithmetic hover absent")
+    }
+}
+
+// tests/semindex.rs:403–450 (terminal_state_graph.jet), including dossier wires.
+fn semindex_build_test_terminal_source() -> String Never! {
+    "\nstruct Door {\n    state { Closed, Open, Orphan }\n}\nimpl Door {\n    #Transition(_, Closed) fn close() -> Door -> Door{}\n    #Transition(Closed, Open) fn open(self: ^Door) -> Door -> self\n    #Transition(Closed, Closed) fn hold(self: ^Door) -> Door -> self\n}\nfn run() {}\n"
+}
+fn semindex_build_test_semindex_projects_terminal_and_reachability_graph(index: SemIndex, json: String, dossier_text: String, dossier_json: String) {
+    found := false
+    loop graph in index.state_graphs() {
+        if graph.owner != "Door" -> next
+        closed := false
+        open := false
+        orphan := false
+        loop state in graph.states {
+            if state.name == "Closed" { assert(!state.terminal); assert_eq(state.reachable, Val(true)); closed = true }
+            if state.name == "Open" { assert(state.terminal); assert_eq(state.reachable, Val(true)); open = true }
+            if state.name == "Orphan" { assert_eq(state.reachable, Val(false)); orphan = true }
+        }
+        assert(closed && open && orphan)
+        found = true
+    }
+    assert(found)
+    assert(json.contains("\"state_graphs\":[{"))
+    assert_eq(index.dossier("Door").state_graphs.len(), 1)
+    assert(dossier_text.contains("Open (terminal; reachable)"))
+    assert(dossier_json.contains("\"terminal\":true"))
+}
+
+// tests/semindex.rs:453–483 (terminal_state_hover.jet).
+fn semindex_build_test_terminal_hover_source() -> String Never! {
+    "struct Door {\n    state { Closed, Open, Orphan }\n}\nimpl Door {\n    #Transition(_, Closed) fn new() -[]> Door { return Door{} }\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door { return self }\n}\nfn run() {}\n"
+}
+fn semindex_build_test_semindex_hover_projects_terminal_and_reachability_facts(db: SymbolDB) {
+    closed := false
+    orphan := false
+    loop hover in db.hover {
+        if hover.text.contains("Door.State.Closed") && !closed { assert(hover.text.contains("nonterminal; reachable")); closed = true }
+        if hover.text.contains("Door.State.Orphan") && !orphan { assert(hover.text.contains("terminal; unreachable")); orphan = true }
+    }
+    assert(closed && orphan)
+}
+
+// tests/semindex.rs:537–564 uses Examples/features/tooling/output_callable.jet
+// as checked by the Driver (including its Output-binding lowering, not a local
+// rewrite of APP into app).
+fn semindex_build_test_semindex_reconstructs_checked_output_callable(index: SemIndex, json: String) {
+    found := false
+    loop output in index.outputs() {
+        if found -> break
+        assert_eq(output.binding, "app")
+        assert_eq(output.kind, "Executable")
+        assert_eq(output.name, "checked-output")
+        assert_eq(output.entry.name, "launch")
+        assert(output.entry.identity.ends_with("::launch"))
+        assert_eq(output.entry.failure_contract, "!Err")
+        assert_eq(output.entry.failure_source, "implicit default !Err")
+        assert_eq(output.entry.authority, "safe-jet")
+        assert(output.entry.definition_span != output.entry.reference_span)
+        found = true
+    }
+    assert(found)
+    loop field in [String]{"\"outputs\":[{", "\"entry\":{\"identity\"", "\"failure_contract\":\"!Err\"", "\"failure_source\":\"implicit default !Err\"", "\"authority\":\"safe-jet\"", "\"effects\":[\"IO\"]"} -> assert(json.contains(field))
+}
+
+// lib.rs:762–816 (main.jet), exact equivalent generic applications.
+fn semindex_build_test_generic_source() -> String Never! {
+    "module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {}\n"
+}
+fn semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database(index: SemIndex, path: String, json: String) {
+    count := 0
+    loop instance in index.instances() {
+        count += 1
+        assert_eq(instance.fingerprint.len(), 64)
+        assert(instance.full_key_hex != "")
+        assert_eq(instance.applications.len(), 2)
+        assert_eq(instance.applications[0].name, "a")
+        assert_eq(instance.applications[1].name, "b")
+        identity :: "instance:{instance.fingerprint}"
+        loop application in instance.applications {
+            assert_eq(application.module_path, path)
+            assert_eq(application.semantic_identity, identity)
+        }
+        assert_eq(instance.arguments.len(), 2)
+        assert_eq(instance.exported_members, [String]{"value"})
+        assert_eq(instance.template_definition_id.len(), 64)
+        names := [String]{}
+        loop definition in index.definitions() {
+            if definition.identity == identity -> &names.push(definition.name)
+        }
+        assert_eq(names, [String]{"a", "b"})
+        assert(json.contains(instance.fingerprint))
+        assert(json.contains(instance.full_key_hex))
+        assert(json.contains("\"applications\":[{\"name\":\"a\""))
+    }
+    assert_eq(count, 1)
+}
+
+// lib.rs:829–895, actual two-module import/receiver fixtures.
+fn semindex_build_test_reference_library_source() -> String Never! { "pub fn report() { print(\"library\") }\n" }
+fn semindex_build_test_reference_main_source() -> String Never! {
+    "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"worker\") }\n}\nstruct Other { value: Int }\nimpl Other {\n    fn step(self) { print(\"other\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker{value: 1}\n    worker.step()\n    other :: Other{value: 2}\n    other.step()\n}\n"
+}
+fn semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(index: SemIndex) {
+    loop expected in [String]{"api", "report", "alias_report", "step"} {
+        found := false
+        loop reference in index.references() {
+            if reference.name != expected -> next
+            if reference.target == .Val(target) {
+                kind :: if expected == "api" -> "import_alias" else -> "function"
+                if target.kind == kind -> found = true
+            }
+        }
+        assert(found)
+    }
+    alias_found := false
+    loop definition in index.definitions() {
+        if definition.name != "api" -> next
+        loop reference in index.references() {
+            if reference.name != "api" -> next
+            if reference.target == {
+                .Val(target) -> {
+                    assert_eq(target.def_span, definition.def_span)
+                    assert_eq(target.semantic_identity, Val(definition.identity))
+                    alias_found = true
+                }
+                else -> panic("module alias reference target absent")
+            }
+            break
+        }
+        break
+    }
+    assert(alias_found)
+    targets := [DefinitionAnchor]{}
+    loop reference in index.references() {
+        if reference.name != "step" -> next
+        if reference.target == .Val(target) {
+            seen := false
+            loop prior in targets {
+                if prior.module_path == target.module_path && prior.def_span == target.def_span -> seen = true
+            }
+            if !seen -> &targets.push(target)
+        }
+    }
+    assert_eq(targets.len(), 2)
+}
+
+// tests/semindex.rs:1164–1189: the same file is checked before and after.
+fn semindex_build_test_ancestry_before_source() -> String Never! { "fn score(n: Int) -> Int { return n + 1 }\nfn run() { print(score(1)) }\n" }
+fn semindex_build_test_ancestry_after_source() -> String Never! { "fn score(n: Float, bonus: Float) -> Float { return n * bonus }\nfn run() { print(score(1.0, 2.0)) }\n" }
+fn semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_shape(before: SemIndex, after: SemIndex) {
+    found := false
+    loop old in before.definition_facts() {
+        if old.name != "score" -> next
+        loop current in after.definition_facts() {
+            if current.name != "score" -> next
+            assert_eq(old.stable_id, current.stable_id)
+            assert(old.signature_id != current.signature_id)
+            assert(old.content_id != current.content_id)
+            found = true
+            break
+        }
+        break
+    }
+    assert(found)
+}
+
+// tests/semindex.rs:1201–1223 (inferred_effect_signature.jet).
+fn semindex_build_test_inferred_effects_source() -> String Never! { "fn announce() { print(\"hello\") }\nfn run() { announce() }\n" }
+fn semindex_build_test_semindex_projects_omitted_inferred_effects(index: SemIndex) {
+    if index.effect_of("announce") == {
+        .Val(rows) -> {
+            announce :: rows[0]
+            assert_eq(announce.inferred, [String]{"IO"})
+            assert_eq(announce.callees.len(), 0)
+            assert_eq(announce.provenance.len(), 1)
+            assert_eq(announce.provenance[0].effect_name, "IO")
+            assert_eq(announce.provenance[0].call_path, [String]{"announce"})
+            assert_eq(announce.provenance[0].spans.len(), 1)
+        }
+        else -> panic("announce effects absent")
+    }
+    if index.effect_of("run") == {
+        .Val(rows) -> {
+            assert_eq(rows[0].provenance[0].call_path, [String]{"run", "inferred_effect_signature::announce"})
+            assert_eq(rows[0].provenance[0].spans.len(), 2)
+        }
+        else -> panic("run effects absent")
+    }
+}
+
+// tests/semindex.rs:1316–1339 (rename_anchor_identity.jet).
+fn semindex_build_test_rename_source() -> String Never! { "fn helper() -> Int { return 1 }\nfn run() { print(helper()) }\n" }
+fn semindex_build_test_semindex_rename_sites_keep_definition_identity_in_json(index: SemIndex, json: String) {
+    found := false
+    loop definition in index.definitions() {
+        if definition.name != "helper" -> next
+        loop reference in index.references() {
+            if reference.name != "helper" -> next
+            if reference.target == .Val(target) {
+                assert_eq(target.def_span, definition.def_span)
+                assert_eq(target.semantic_identity, Val(definition.identity))
+                found = true
+            }
+            break
+        }
+        break
+    }
+    assert(found)
+    assert(json.contains("\"semantic_identity\":"))
+}
+
+// Additional finalization oracle: every checked definition retains derivation
+// evidence with its stable subject and the original content/signature inputs.
+fn semindex_build_test_checked_definition_derivations(index: SemIndex) {
+    count := 0
+    loop fact in index.definition_facts() {
+        found := false
+        loop record in index.derivations() {
+            if record.subject != fact.stable_id -> next
+            assert_eq(record.claim, fact.human_identity)
+            assert_eq(record.producer, "jet-sema")
+            assert_eq(record.method, MIRDerivationMethod.StaticDerivation)
+            assert_eq(record.rule, "checked-definition")
+            expected :: derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+            assert_eq(record.premises, expected.premises)
+            assert_eq(record.id, expected.id)
+            assert_eq(record.identity, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+            found = true
+            break
+        }
+        assert(found)
+        count += 1
+    }
+    assert(count > 0)
+}

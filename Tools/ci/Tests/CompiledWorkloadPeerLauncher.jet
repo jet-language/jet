@@ -1,0 +1,213 @@
+// Original Tools/ci/test-compiled-workload-peer-launcher.mjs native assertions.
+// Supply JET_COMPILED_WORKLOAD_PEER_LAUNCHER with the real built Jet executable
+// and JET_COMPILED_WORKLOAD_PEER_TEST_ORACLE with the absolute neighboring .mjs
+// path. Absence/refusal is a failure, never a skipped isolation assertion.
+// POSIX signal assertions require Linux/macOS; Windows runs the other native
+// claims against the canonical AppContainer owner. Main owns native acceptance.
+use jet_foundation.[TEXT_NUL]
+
+fn peer_test_native(scenario: String) -[FS, Env, Exec, Time.Wait]> Never! {
+    launcher :: peer_sys.get("JET_COMPILED_WORKLOAD_PEER_LAUNCHER") ?? panic("missing real Jet launcher; #4494 native acceptance remains pending")
+    oracle :: peer_sys.get("JET_COMPILED_WORKLOAD_PEER_TEST_ORACLE") ?? panic("missing absolute permanent peer-launcher behavior oracle path")
+    node :: peer_resolve_program("node", peer_sys.name() == "windows") ?? panic("Node oracle prerequisite: {err.message}")
+    result :: peer_process.cmd([String]{node, oracle, "test", ~scenario, launcher}).run() ?? panic("native behavior oracle failed to start: {err}")
+    assert_eq(result.code, 0)
+    assert_eq(result.signal, None)
+    assert_eq(result.errors, "")
+    expected :: "peer-launcher {scenario}: passed\n"
+    assert_eq(result.output, expected)
+}
+
+#Test("peer_launcher_exact_contract_and_native_capability") { peer_test_native("contract") }
+#Test("peer_launcher_missing_primitive_fails_closed") { peer_test_native("missing-primitive") }
+#Test("peer_launcher_confines_writable_tree") { peer_test_native("write") }
+#Test("peer_launcher_disabled_network_blocks_loopback_and_external") { peer_test_native("disabled") }
+#Test("peer_launcher_loopback_only_allows_private_loopback_not_external") { peer_test_native("loopback-only") }
+#Test("peer_launcher_rejects_canonical_cwd_escape") { peer_test_native("escape") }
+#Test("peer_launcher_rejects_unsupported_network_authority") { peer_test_native("authority") }
+#Test("peer_launcher_exact_stdout_stderr_and_exit_status") { peer_test_native("result") }
+#Test("peer_launcher_closes_background_descendants") { peer_test_native("descendant") }
+#Test("peer_launcher_posix_preserves_child_signal") { peer_test_native("signal") }
+#Test("peer_launcher_keeps_argv_environment_and_cwd") { peer_test_native("argv-env") }
+// Main ratified the Rust961–970 latent wait hang fix: while the first signal's
+// child is still live, continue polling and forwarding EVERY subsequent signal.
+#Test("peer_launcher_posix_second_signal_reaches_waiting_child_and_cleans_tree") { peer_test_native("two-signals") }
+
+fn peer_test_parse_error(args: [String]) -[FS, Env]> String Never! {
+    if peer_parse_invocation(args) == {
+        .Ok(_) -> panic("expected parser rejection")
+        .Err(error) -> error.message
+    }
+}
+
+#Test("peer_launcher_parser_preserves_option_error_precedence") {
+    assert_eq(peer_test_parse_error([String]{}), "missing execution arguments; use --contract for the capability probe")
+    assert_eq(peer_test_parse_error([String]{"command"}), "expected launcher option, found `command`")
+    assert_eq(peer_test_parse_error([String]{"--unknown=value"}), "expected `--` before command, found `unknown`")
+    assert_eq(peer_test_parse_error([String]{"----unknown=value"}), "unsupported launcher option `--unknown`")
+    assert_eq(peer_test_parse_error([String]{"--task-id"}), "missing value for --task-id")
+    assert_eq(peer_test_parse_error([String]{"--task-id="}), "invalid task id ``")
+    assert_eq(peer_test_parse_error([String]{"--task-id=λ"}), "invalid task id `λ`")
+    assert_eq(peer_test_parse_error([String]{"--network=internet"}), "unsupported network authority `internet`")
+    assert_eq(peer_test_parse_error([String]{"--external-write=ambient"}), "unsupported external-write authority `ambient`")
+    assert_eq(peer_test_parse_error([String]{"--host=disabled"}), "unsupported host authority `disabled`")
+    assert_eq(peer_test_parse_error([String]{"--contract=old"}), "unsupported contract `old`")
+    assert_eq(peer_test_parse_error([String]{"--task-id=valid"}), "missing `--` command separator")
+    assert_eq(peer_test_parse_error([String]{"--", "command"}), "missing --task-id")
+}
+
+#Test("peer_launcher_containment_is_component_bounded_on_each_platform") {
+    assert(peer_contained("/root", "/root", false))
+    assert(peer_contained("/root", "/root/child", false))
+    assert(!peer_contained("/root", "/root-sibling/child", false))
+    assert(!peer_contained("/root", "root/child", false))
+    assert(peer_contained("C:\\ROOT", "c:/root/child", true))
+    assert(!peer_contained("C:\\ROOT", "c:/root-sibling/child", true))
+    assert(!peer_contained("C:\\ROOT", "d:/root/child", true))
+}
+
+#Test("peer_launcher_sbpl_quotes_paths_without_broadening_authority") {
+    assert_eq(peer_sbpl_quote("/a/\"b\\c"), "/a/\\\"b\\\\c")
+    disabled :: peer_macos_profile("/a/\"b\\c", .Disabled)
+    assert(disabled.contains("(allow file-write* (subpath \"/a/\\\"b\\\\c\"))"))
+    assert(disabled.ends_with("(deny network*)\n"))
+    loopback :: peer_macos_profile("/root", .LoopbackOnly)
+    assert(loopback.contains("(allow network-outbound (remote tcp \"localhost:*\"))"))
+    assert(loopback.contains("(allow network-outbound (remote udp \"localhost:*\"))"))
+    assert(loopback.contains("(allow network-inbound (local tcp \"localhost:*\"))"))
+    assert(loopback.contains("(allow network-inbound (local udp \"localhost:*\"))"))
+    assert(!loopback.contains("(allow network*)"))
+}
+
+#Test("peer_launcher_bwrap_policy_does_not_share_host_network_or_writable_root") {
+    disabled :: peer_linux_base_args("/root", "/root/sub", .Disabled)
+    assert_eq(disabled, [String]{"--die-with-parent", "--unshare-all", "--ro-bind", "/", "/", "--remount-ro", "/", "--bind", "/root", "/root", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--chdir", "/root/sub"})
+    loopback := ~disabled
+    extra_args :: [String]{"--uid", "0", "--gid", "0", "--cap-add", "CAP_NET_ADMIN"}
+    loop arg in extra_args -> &loopback.push(arg)
+    assert_eq(peer_linux_base_args("/root", "/root/sub", .LoopbackOnly), loopback)
+    invocation :: PeerInvocation{task_id: "t", root: "/root", cwd: "/root/sub", network: .LoopbackOnly, command: "tool", args: [String]{"", "--", "space word"}}
+    argv :: peer_linux_command_args(invocation, "/launcher", "/ip", "/tool", Val("/root/status"))
+    assert_eq(argv.slice(loopback.len()..<argv.len()).to_list(), [String]{"--", "/launcher", "--internal-loopback", "--status-file", "/root/status", "/ip", "/tool", "", "--", "space word"})
+}
+
+#Test("peer_launcher_signal_status_is_exact_single_byte_or_empty") {
+    assert_eq(peer_decode_linux_signal([U8]{}) ?? panic("empty status rejected"), None)
+    assert_eq(peer_decode_linux_signal([U8]{1}) ?? panic("signal rejected"), Val(1))
+    assert_eq(peer_decode_linux_signal([U8]{64}) ?? panic("signal rejected"), Val(64))
+    invalid_statuses :: [[U8]]{[U8]{0}, [U8]{65}, [U8]{15, 15}}
+    loop bytes in invalid_statuses {
+        if peer_decode_linux_signal(bytes) == {
+            .Ok(_) -> panic("invalid signal accepted")
+            .Err(reason) -> assert_eq(reason.message, "Linux peer isolation signal status returned invalid data")
+        }
+    }
+    assert_eq(peer_socket_syscall("x86_64") ?? panic("x86_64 rejected"), U32{41})
+    assert_eq(peer_socket_syscall("aarch64") ?? panic("aarch64 rejected"), U32{198})
+    if peer_socket_syscall("riscv64") == {
+        .Ok(_) -> panic("unsupported syscall table accepted")
+        .Err(reason) -> assert_eq(reason.message, "Linux peer isolation unavailable: seccomp socket policy has no syscall table for `riscv64`")
+    }
+}
+
+#Test("peer_launcher_seccomp_rows_deny_socket_without_denying_socketpair") {
+    rows :: peer_disabled_network_filter(U32{41})
+    assert_eq(rows[0].code, U16{0x20})
+    assert_eq(rows[0].k, U32{0})
+    assert_eq(rows[1].code, U16{0x15})
+    assert_eq(rows[1].jt, U8{0})
+    assert_eq(rows[1].jf, U8{1})
+    assert_eq(rows[1].k, U32{41})
+    assert_eq(rows[2].code, U16{0x06})
+    assert_eq(rows[2].k, U32{0x00050001})
+    assert_eq(rows[3].code, U16{0x06})
+    assert_eq(rows[3].k, U32{0x7fff0000})
+}
+
+#Test("peer_launcher_firewall_blocks_exact_nonloopback_ipv4_ipv6_both_directions") {
+    rules :: peer_firewall_rules("run")
+    assert_eq(rules.len(), 4)
+    assert_eq(rules[0].direction, "out")
+    assert_eq(rules[1].direction, "in")
+    assert_eq(rules[2].direction, "out")
+    assert_eq(rules[3].direction, "in")
+    assert_eq(rules[0].remote, "0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255")
+    assert_eq(rules[1].remote, rules[0].remote)
+    assert_eq(rules[2].remote, "::0-::0,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+    assert_eq(rules[3].remote, rules[2].remote)
+    assert_eq(peer_firewall_add_args("run", "in", "program=C:\\tool.exe", Val(rules[2].remote)), [String]{"advfirewall", "firewall", "add", "rule", "name=run", "dir=in", "action=block", "program=C:\\tool.exe", "enable=yes", "profile=any", "protocol=any", "remoteip=::0-::0,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"})
+}
+
+#Test("peer_launcher_internal_status_file_keeps_command_index_and_refuses_bad_paths") {
+    plain :: peer_internal_status_file([String]{"/tool", "arg"}) ?? panic("plain internal argv rejected")
+    assert_eq(plain.status_file, None)
+    assert_eq(plain.command_index, 0)
+    status :: peer_internal_status_file([String]{"--status-file", "/root/status", "/tool", "arg"}) ?? panic("status path rejected")
+    assert_eq(status.status_file, Val("/root/status"))
+    assert_eq(status.command_index, 2)
+    bad_args :: [[String]]{[String]{"--status-file"}, [String]{"--status-file", ""}, [String]{"--status-file", "path{TEXT_NUL}suffix"}}
+    loop args in bad_args {
+        if peer_internal_status_file(args) == {
+            .Ok(_) -> panic("invalid status file accepted")
+            .Err(error) -> assert(error.message.starts_with("internal runner status file is "))
+        }
+    }
+}
+
+#Test("peer_launcher_parser_keeps_last_options_empty_args_unicode_and_separator_tail") {
+    root :: peer_probe_root() ?? panic("disk fixture root unavailable: {err.message}")
+    args :: [String]{
+        "--contract=compiled-workload-peer-isolation-v1",
+        "--task-id=old", "--task-id", "final.id_-09",
+        "--root", ~root, "--cwd", ~root,
+        "--network=disabled", "--network", "loopback-only",
+        "--external-write=disabled", "--host=ambient",
+        "--", "tool", "", "space word", "λ", "--network=internet", "--",
+    }
+    result :: peer_parse_invocation(args)
+    canonical :: peer_files.canonicalize(root)
+    peer_files.remove_all(root) ?? panic("disk fixture cleanup failed: {err}")
+    invocation :: result ?? panic("valid invocation rejected: {err.message}")
+    expected_root :: canonical ?? panic("fixture canonicalization failed: {err}")
+    assert_eq(invocation.task_id, "final.id_-09")
+    assert_eq(invocation.root, expected_root)
+    assert_eq(invocation.cwd, expected_root)
+    assert_eq(invocation.network, .LoopbackOnly)
+    assert_eq(invocation.command, "tool")
+    assert_eq(invocation.args, [String]{"", "space word", "λ", "--network=internet", "--"})
+}
+
+#Test("peer_launcher_parser_rejects_symlink_root_before_canonicalization") {
+    root :: peer_probe_root() ?? panic("disk fixture root unavailable: {err.message}")
+    link :: peer_files.join(root, "link")
+    peer_files.symlink(root, link) ?? panic("real symlink fixture prerequisite unavailable: {err}")
+    result :: peer_canonical_directory("root", link)
+    peer_files.remove(link) ?? panic("symlink cleanup failed: {err}")
+    peer_files.remove_dir(root) ?? panic("disk fixture cleanup failed: {err}")
+    if result == {
+        .Ok(_) -> panic("symlink root accepted")
+        .Err(error) -> {
+            expected :: "root `{link}` is not a directory"
+            assert_eq(error.message, expected)
+        }
+    }
+}
+
+#Test("peer_launcher_uses_canonical_windows_drive_verbatim_and_unc_root_law") {
+    roots :: [String]{"C:\\", "\\\\?\\C:\\", "\\\\host\\share", "\\\\?\\UNC\\host\\share\\"}
+    loop root in roots {
+        encoded :: peer_paths.from_text(root, peer_paths.PathPlatform.Windows)
+        assert_eq(peer_paths.parent_span(encoded), None)
+    }
+    child :: peer_paths.from_text("\\\\?\\UNC\\host\\share\\child", peer_paths.PathPlatform.Windows)
+    assert(peer_paths.parent_span(child) != .None)
+}
+
+#Test("peer_launcher_windows_errors_keep_unsigned_exception_status") {
+    assert_eq(peer_windows_exit_text(0), "exit code: 0")
+    assert_eq(peer_windows_exit_text(23), "exit code: 23")
+    assert_eq(peer_windows_exit_text(2147483647), "exit code: 2147483647")
+    assert_eq(peer_windows_exit_text(-2147483648), "exit code: 0x80000000")
+    assert_eq(peer_windows_exit_text(-1073741819), "exit code: 0xc0000005")
+    assert_eq(peer_windows_exit_text(-1), "exit code: 0xffffffff")
+}

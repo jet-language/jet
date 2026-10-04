@@ -1,0 +1,1546 @@
+// PORT-PENDING 0793 crates-jet-devserver-src-webmoduleswap: crates/jet-devserver/src/WebModuleSwap.rs:1-1542
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Backend-neutral web module swap facts and transaction state.
+//RS //!
+//RS //! This module deliberately stops at typed state. It does not know about a
+//RS //! browser, JavaScript, DOM rendering, or a network. A later `Session` or
+//RS //! `WebHost` adapter can turn a committed receipt into those effects without
+//RS //! re-deciding compatibility or retention.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::error::Error;
+//RS use std::fmt;
+//RS 
+//RS use jet_foundation::HotSwap::{HotSwapDecision, StateRetentionDecision};
+//RS 
+//RS /// Stable identity for the page/module that owns one web swap stream.
+//RS ///
+//RS /// Source and build revisions do not belong to this identity: changing either
+//RS /// revision is the normal input to a swap. They live on
+//RS /// [`WebModuleSwapSnapshot`] and are checked as transaction revisions.
+//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub struct WebModuleSwapIdentity {
+//RS     pub module: String,
+//RS     pub page: String,
+//RS }
+//RS 
+//RS impl WebModuleSwapIdentity {
+//RS     pub fn new(module: impl Into<String>, page: impl Into<String>) -> Self {
+//RS         Self {
+//RS             module: module.into(),
+//RS             page: page.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn is_valid(&self) -> bool {
+//RS         !self.module.is_empty() && !self.page.is_empty()
+//RS     }
+//RS }
+//RS 
+//RS /// The non-rendering page artifact retained by a swap state.
+//RS ///
+//RS /// `artifact` is an opaque compiler/publication identity, not HTML. Keeping it
+//RS /// opaque makes rollback auditable without making this module a renderer.
+//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub struct WebPageFact {
+//RS     pub identity: String,
+//RS     pub artifact: String,
+//RS }
+//RS 
+//RS impl WebPageFact {
+//RS     pub fn new(identity: impl Into<String>, artifact: impl Into<String>) -> Self {
+//RS         Self {
+//RS             identity: identity.into(),
+//RS             artifact: artifact.into(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One module in a web artifact.
+//RS ///
+//RS /// A body fingerprint may change during a compatible module swap. An interface
+//RS /// fingerprint change is not safe for an in-place replacement.
+//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub struct WebModuleFact {
+//RS     pub identity: String,
+//RS     pub interface_fingerprint: String,
+//RS     pub body_fingerprint: String,
+//RS }
+//RS 
+//RS impl WebModuleFact {
+//RS     pub fn new(
+//RS         identity: impl Into<String>,
+//RS         interface_fingerprint: impl Into<String>,
+//RS         body_fingerprint: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             identity: identity.into(),
+//RS             interface_fingerprint: interface_fingerprint.into(),
+//RS             body_fingerprint: body_fingerprint.into(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Backend-neutral values that may cross a web swap boundary.
+//RS ///
+//RS /// There is intentionally no JSON/object/map escape hatch. A producer supplies
+//RS /// a type fingerprint on each state fact, while this small carrier keeps the
+//RS /// value representation explicit and cloneable for a transactional apply.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum WebStateValue {
+//RS     Text(String),
+//RS     Integer(i64),
+//RS     Unsigned(u64),
+//RS     Boolean(bool),
+//RS     Bytes(Vec<u8>),
+//RS }
+//RS 
+//RS impl WebStateValue {
+//RS     pub fn kind(&self) -> &'static str {
+//RS         match self {
+//RS             Self::Text(_) => "text",
+//RS             Self::Integer(_) => "integer",
+//RS             Self::Unsigned(_) => "unsigned",
+//RS             Self::Boolean(_) => "boolean",
+//RS             Self::Bytes(_) => "bytes",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl From<&str> for WebStateValue {
+//RS     fn from(value: &str) -> Self {
+//RS         Self::Text(value.to_string())
+//RS     }
+//RS }
+//RS 
+//RS impl From<String> for WebStateValue {
+//RS     fn from(value: String) -> Self {
+//RS         Self::Text(value)
+//RS     }
+//RS }
+//RS 
+//RS impl From<bool> for WebStateValue {
+//RS     fn from(value: bool) -> Self {
+//RS         Self::Boolean(value)
+//RS     }
+//RS }
+//RS 
+//RS impl From<i64> for WebStateValue {
+//RS     fn from(value: i64) -> Self {
+//RS         Self::Integer(value)
+//RS     }
+//RS }
+//RS 
+//RS impl From<i32> for WebStateValue {
+//RS     fn from(value: i32) -> Self {
+//RS         Self::Integer(i64::from(value))
+//RS     }
+//RS }
+//RS 
+//RS impl From<u64> for WebStateValue {
+//RS     fn from(value: u64) -> Self {
+//RS         Self::Unsigned(value)
+//RS     }
+//RS }
+//RS 
+//RS impl From<u32> for WebStateValue {
+//RS     fn from(value: u32) -> Self {
+//RS         Self::Unsigned(u64::from(value))
+//RS     }
+//RS }
+//RS 
+//RS impl From<Vec<u8>> for WebStateValue {
+//RS     fn from(value: Vec<u8>) -> Self {
+//RS         Self::Bytes(value)
+//RS     }
+//RS }
+//RS 
+//RS /// The seven state families whose values can be audited across a web swap.
+//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub enum WebStateKind {
+//RS     Signal,
+//RS     Store,
+//RS     QueryCache,
+//RS     FormDraft,
+//RS     Scroll,
+//RS     Focus,
+//RS     Island,
+//RS }
+//RS 
+//RS impl WebStateKind {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Signal => "signal",
+//RS             Self::Store => "store",
+//RS             Self::QueryCache => "query_cache",
+//RS             Self::FormDraft => "form_draft",
+//RS             Self::Scroll => "scroll",
+//RS             Self::Focus => "focus",
+//RS             Self::Island => "island",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS macro_rules! keyed_web_fact {
+//RS     ($name:ident) => {
+//RS         #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS         pub struct $name {
+//RS             pub key: String,
+//RS             pub type_fingerprint: String,
+//RS             pub value: WebStateValue,
+//RS         }
+//RS 
+//RS         impl $name {
+//RS             pub fn new(
+//RS                 key: impl Into<String>,
+//RS                 type_fingerprint: impl Into<String>,
+//RS                 value: impl Into<WebStateValue>,
+//RS             ) -> Self {
+//RS                 Self {
+//RS                     key: key.into(),
+//RS                     type_fingerprint: type_fingerprint.into(),
+//RS                     value: value.into(),
+//RS                 }
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS // Compiler-derived signal retention input.
+//RS keyed_web_fact!(WebSignalFact);
+//RS // Compiler-derived store retention input.
+//RS keyed_web_fact!(WebStoreFact);
+//RS // Compiler-derived query-cache retention input.
+//RS keyed_web_fact!(WebQueryCacheFact);
+//RS // Compiler-derived form-draft retention input.
+//RS keyed_web_fact!(WebFormDraftFact);
+//RS // Compiler-derived scroll retention input, keyed by stable scroll target.
+//RS keyed_web_fact!(WebScrollFact);
+//RS // Compiler-derived focus retention input, keyed by stable focus target.
+//RS keyed_web_fact!(WebFocusFact);
+//RS 
+//RS /// Compiler-derived island retention input.
+//RS ///
+//RS /// `key` identifies the route/slot. `identity` identifies the resumable island
+//RS /// instance. A slot can remain present while its island identity changes; that
+//RS /// change is therefore visible as a reset reason instead of being hidden as a
+//RS /// removed-and-added key pair.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub struct WebIslandFact {
+//RS     pub key: String,
+//RS     pub identity: String,
+//RS     pub type_fingerprint: String,
+//RS     pub value: WebStateValue,
+//RS }
+//RS 
+//RS impl WebIslandFact {
+//RS     pub fn new(
+//RS         key: impl Into<String>,
+//RS         identity: impl Into<String>,
+//RS         type_fingerprint: impl Into<String>,
+//RS         value: impl Into<WebStateValue>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             key: key.into(),
+//RS             identity: identity.into(),
+//RS             type_fingerprint: type_fingerprint.into(),
+//RS             value: value.into(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One typed state fact in a snapshot or receipt.
+//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum WebModuleSwapStateFact {
+//RS     Signal(WebSignalFact),
+//RS     Store(WebStoreFact),
+//RS     QueryCache(WebQueryCacheFact),
+//RS     FormDraft(WebFormDraftFact),
+//RS     Scroll(WebScrollFact),
+//RS     Focus(WebFocusFact),
+//RS     Island(WebIslandFact),
+//RS }
+//RS 
+//RS impl WebModuleSwapStateFact {
+//RS     pub fn kind(&self) -> WebStateKind {
+//RS         match self {
+//RS             Self::Signal(_) => WebStateKind::Signal,
+//RS             Self::Store(_) => WebStateKind::Store,
+//RS             Self::QueryCache(_) => WebStateKind::QueryCache,
+//RS             Self::FormDraft(_) => WebStateKind::FormDraft,
+//RS             Self::Scroll(_) => WebStateKind::Scroll,
+//RS             Self::Focus(_) => WebStateKind::Focus,
+//RS             Self::Island(_) => WebStateKind::Island,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn key(&self) -> &str {
+//RS         match self {
+//RS             Self::Signal(fact) => &fact.key,
+//RS             Self::Store(fact) => &fact.key,
+//RS             Self::QueryCache(fact) => &fact.key,
+//RS             Self::FormDraft(fact) => &fact.key,
+//RS             Self::Scroll(fact) => &fact.key,
+//RS             Self::Focus(fact) => &fact.key,
+//RS             Self::Island(fact) => &fact.key,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn identity(&self) -> &str {
+//RS         match self {
+//RS             Self::Island(fact) => &fact.identity,
+//RS             _ => self.key(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn type_fingerprint(&self) -> &str {
+//RS         match self {
+//RS             Self::Signal(fact) => &fact.type_fingerprint,
+//RS             Self::Store(fact) => &fact.type_fingerprint,
+//RS             Self::QueryCache(fact) => &fact.type_fingerprint,
+//RS             Self::FormDraft(fact) => &fact.type_fingerprint,
+//RS             Self::Scroll(fact) => &fact.type_fingerprint,
+//RS             Self::Focus(fact) => &fact.type_fingerprint,
+//RS             Self::Island(fact) => &fact.type_fingerprint,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn value(&self) -> &WebStateValue {
+//RS         match self {
+//RS             Self::Signal(fact) => &fact.value,
+//RS             Self::Store(fact) => &fact.value,
+//RS             Self::QueryCache(fact) => &fact.value,
+//RS             Self::FormDraft(fact) => &fact.value,
+//RS             Self::Scroll(fact) => &fact.value,
+//RS             Self::Focus(fact) => &fact.value,
+//RS             Self::Island(fact) => &fact.value,
+//RS         }
+//RS     }
+//RS 
+//RS     fn with_value(&self, value: WebStateValue) -> Self {
+//RS         match self {
+//RS             Self::Signal(fact) => Self::Signal(WebSignalFact {
+//RS                 key: fact.key.clone(),
+//RS                 type_fingerprint: fact.type_fingerprint.clone(),
+//RS                 value,
+//RS             }),
+//RS             Self::Store(fact) => Self::Store(WebStoreFact {
+//RS                 key: fact.key.clone(),
+//RS                 type_fingerprint: fact.type_fingerprint.clone(),
+//RS                 value,
+//RS             }),
+//RS             Self::QueryCache(fact) => Self::QueryCache(WebQueryCacheFact {
+//RS                 key: fact.key.clone(),
+//RS                 type_fingerprint: fact.type_fingerprint.clone(),
+//RS                 value,
+//RS             }),
+//RS             Self::FormDraft(fact) => Self::FormDraft(WebFormDraftFact {
+//RS                 key: fact.key.clone(),
+//RS                 type_fingerprint: fact.type_fingerprint.clone(),
+//RS                 value,
+//RS             }),
+//RS             Self::Scroll(fact) => Self::Scroll(WebScrollFact {
+//RS                 key: fact.key.clone(),
+//RS                 type_fingerprint: fact.type_fingerprint.clone(),
+//RS                 value,
+//RS             }),
+//RS             Self::Focus(fact) => Self::Focus(WebFocusFact {
+//RS                 key: fact.key.clone(),
+//RS                 type_fingerprint: fact.type_fingerprint.clone(),
+//RS                 value,
+//RS             }),
+//RS             Self::Island(fact) => Self::Island(WebIslandFact {
+//RS                 key: fact.key.clone(),
+//RS                 identity: fact.identity.clone(),
+//RS                 type_fingerprint: fact.type_fingerprint.clone(),
+//RS                 value,
+//RS             }),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Source/build/page/module/state facts for one committed or candidate app.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct WebModuleSwapSnapshot {
+//RS     pub identity: WebModuleSwapIdentity,
+//RS     pub source_revision: String,
+//RS     pub build_revision: String,
+//RS     pub page: WebPageFact,
+//RS     pub modules: Vec<WebModuleFact>,
+//RS     pub state: Vec<WebModuleSwapStateFact>,
+//RS }
+//RS 
+//RS impl WebModuleSwapSnapshot {
+//RS     pub fn new(
+//RS         identity: WebModuleSwapIdentity,
+//RS         source_revision: impl Into<String>,
+//RS         build_revision: impl Into<String>,
+//RS         page: WebPageFact,
+//RS         modules: Vec<WebModuleFact>,
+//RS         state: Vec<WebModuleSwapStateFact>,
+//RS     ) -> Result<Self, WebModuleSwapError> {
+//RS         let mut snapshot = Self {
+//RS             identity,
+//RS             source_revision: source_revision.into(),
+//RS             build_revision: build_revision.into(),
+//RS             page,
+//RS             modules,
+//RS             state,
+//RS         };
+//RS         snapshot.normalize()?;
+//RS         Ok(snapshot)
+//RS     }
+//RS 
+//RS     pub fn normalize(&mut self) -> Result<(), WebModuleSwapError> {
+//RS         if !self.identity.is_valid() {
+//RS             return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                 detail: "module and page identity must be non-empty".to_string(),
+//RS             });
+//RS         }
+//RS         if self.source_revision.is_empty() || self.build_revision.is_empty() {
+//RS             return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                 detail: "source and build revisions must be non-empty".to_string(),
+//RS             });
+//RS         }
+//RS         if self.page.identity.is_empty() {
+//RS             return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                 detail: "page identity must be non-empty".to_string(),
+//RS             });
+//RS         }
+//RS         if self.page.identity != self.identity.page {
+//RS             return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                 detail: "page fact identity does not match swap identity".to_string(),
+//RS             });
+//RS         }
+//RS 
+//RS         self.modules.sort_by(|left, right| left.identity.cmp(&right.identity));
+//RS         for module in &self.modules {
+//RS             if module.identity.is_empty()
+//RS                 || module.interface_fingerprint.is_empty()
+//RS                 || module.body_fingerprint.is_empty()
+//RS             {
+//RS                 return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                     detail: "module identity and fingerprints must be non-empty".to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         if self
+//RS             .modules
+//RS             .windows(2)
+//RS             .any(|pair| pair[0].identity == pair[1].identity)
+//RS         {
+//RS             return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                 detail: "module identities must be unique".to_string(),
+//RS             });
+//RS         }
+//RS 
+//RS         self.state.sort_by(|left, right| {
+//RS             (left.kind(), left.key()).cmp(&(right.kind(), right.key()))
+//RS         });
+//RS         for fact in &self.state {
+//RS             if fact.key().is_empty() || fact.type_fingerprint().is_empty() {
+//RS                 return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                     detail: "state keys and type fingerprints must be non-empty".to_string(),
+//RS                 });
+//RS             }
+//RS             if matches!(fact, WebModuleSwapStateFact::Island(_)) && fact.identity().is_empty() {
+//RS                 return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                     detail: "island identities must be non-empty".to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         if self.state.windows(2).any(|pair| {
+//RS             pair[0].kind() == pair[1].kind() && pair[0].key() == pair[1].key()
+//RS         }) {
+//RS             return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                 detail: "state keys must be unique within a state family".to_string(),
+//RS             });
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn module(&self, identity: &str) -> Option<&WebModuleFact> {
+//RS         self.modules
+//RS             .binary_search_by(|module| module.identity.as_str().cmp(identity))
+//RS             .ok()
+//RS             .map(|index| &self.modules[index])
+//RS     }
+//RS 
+//RS     pub fn state_fact(&self, kind: WebStateKind, key: &str) -> Option<&WebModuleSwapStateFact> {
+//RS         self.state
+//RS             .binary_search_by(|fact| (fact.kind(), fact.key()).cmp(&(kind, key)))
+//RS             .ok()
+//RS             .map(|index| &self.state[index])
+//RS     }
+//RS }
+//RS 
+//RS /// Why a module swap or state retention decision has a particular outcome.
+//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub enum WebModuleSwapReasonCode {
+//RS     NoChange,
+//RS     SourceRevisionChanged,
+//RS     BuildRevisionChanged,
+//RS     ModuleBodyChanged,
+//RS     ModuleAdded,
+//RS     ModuleRemoved,
+//RS     ModuleIdentityChanged,
+//RS     ModuleInterfaceChanged,
+//RS     PageIdentityChanged,
+//RS     StateAdded,
+//RS     StateRemoved,
+//RS     StateRetentionFresh,
+//RS     SignalTypeChanged,
+//RS     StoreTypeChanged,
+//RS     QueryCacheTypeChanged,
+//RS     FormDraftTypeChanged,
+//RS     ScrollTypeChanged,
+//RS     FocusTypeChanged,
+//RS     IslandTypeChanged,
+//RS     IslandIdentityChanged,
+//RS     IdentityMismatch,
+//RS     SemanticIncompatible,
+//RS     StalePlan,
+//RS     NothingToRollback,
+//RS }
+//RS 
+//RS impl WebModuleSwapReasonCode {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::NoChange => "no_change",
+//RS             Self::SourceRevisionChanged => "source_revision_changed",
+//RS             Self::BuildRevisionChanged => "build_revision_changed",
+//RS             Self::ModuleBodyChanged => "module_body_changed",
+//RS             Self::ModuleAdded => "module_added",
+//RS             Self::ModuleRemoved => "module_removed",
+//RS             Self::ModuleIdentityChanged => "module_identity_changed",
+//RS             Self::ModuleInterfaceChanged => "module_interface_changed",
+//RS             Self::PageIdentityChanged => "page_identity_changed",
+//RS             Self::StateAdded => "state_added",
+//RS             Self::StateRemoved => "state_removed",
+//RS             Self::StateRetentionFresh => "state_retention_fresh",
+//RS             Self::SignalTypeChanged => "signal_type_changed",
+//RS             Self::StoreTypeChanged => "store_type_changed",
+//RS             Self::QueryCacheTypeChanged => "query_cache_type_changed",
+//RS             Self::FormDraftTypeChanged => "form_draft_type_changed",
+//RS             Self::ScrollTypeChanged => "scroll_type_changed",
+//RS             Self::FocusTypeChanged => "focus_type_changed",
+//RS             Self::IslandTypeChanged => "island_type_changed",
+//RS             Self::IslandIdentityChanged => "island_identity_changed",
+//RS             Self::IdentityMismatch => "identity_mismatch",
+//RS             Self::SemanticIncompatible => "semantic_incompatible",
+//RS             Self::StalePlan => "stale_plan",
+//RS             Self::NothingToRollback => "nothing_to_rollback",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for WebModuleSwapReasonCode {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         output.write_str(self.as_str())
+//RS     }
+//RS }
+//RS 
+//RS /// Whether a candidate is safe for an in-place web module replacement.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum WebModuleSwapCompatibility {
+//RS     Compatible,
+//RS     Incompatible {
+//RS         reason_codes: Vec<WebModuleSwapReasonCode>,
+//RS     },
+//RS }
+//RS 
+//RS impl WebModuleSwapCompatibility {
+//RS     pub fn is_compatible(&self) -> bool {
+//RS         matches!(self, Self::Compatible)
+//RS     }
+//RS 
+//RS     pub fn reason_codes(&self) -> &[WebModuleSwapReasonCode] {
+//RS         match self {
+//RS             Self::Compatible => &[],
+//RS             Self::Incompatible { reason_codes } => reason_codes,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One state fact that will not be reused by the candidate.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct WebModuleSwapResetFact {
+//RS     pub state: WebModuleSwapStateFact,
+//RS     pub prior_identity: Option<String>,
+//RS     pub prior_type_fingerprint: Option<String>,
+//RS     pub reason: WebModuleSwapReasonCode,
+//RS }
+//RS 
+//RS /// Immutable semantic transaction prepared from two snapshots.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct WebModuleSwapPlan {
+//RS     pub base: WebModuleSwapSnapshot,
+//RS     pub candidate: WebModuleSwapSnapshot,
+//RS     /// The sema-owned compatibility and retention verdict consumed by this
+//RS     /// adapter. This plan never re-derives either decision from snapshots.
+//RS     pub decision: HotSwapDecision,
+//RS     pub compatibility: WebModuleSwapCompatibility,
+//RS     pub changed_modules: Vec<String>,
+//RS     pub preserved: Vec<WebModuleSwapStateFact>,
+//RS     pub reset: Vec<WebModuleSwapResetFact>,
+//RS     pub reason_codes: Vec<WebModuleSwapReasonCode>,
+//RS }
+//RS 
+//RS impl WebModuleSwapPlan {
+//RS     /// Project one sema-owned verdict and its canonical state facts into the
+//RS     /// typed web transaction. Snapshot facts are marshalled here; they never
+//RS     /// decide whether a value is retained.
+//RS     pub fn from_hot_swap_decision(
+//RS         base: &WebModuleSwapSnapshot,
+//RS         candidate: &WebModuleSwapSnapshot,
+//RS         decision: &HotSwapDecision,
+//RS     ) -> Result<Self, WebModuleSwapError> {
+//RS         let mut base = base.clone();
+//RS         let mut candidate = candidate.clone();
+//RS         base.normalize()?;
+//RS         candidate.normalize()?;
+//RS 
+//RS         if decision.module.is_empty() || decision.module != base.identity.module {
+//RS             return Err(WebModuleSwapError::DecisionModuleMismatch {
+//RS                 expected: base.identity.module.clone(),
+//RS                 found: decision.module.clone(),
+//RS             });
+//RS         }
+//RS 
+//RS         let mut retention = BTreeMap::new();
+//RS         for fact in decision.state_facts() {
+//RS             if fact.key.is_empty() {
+//RS                 return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                     detail: "hot-swap retention keys must be non-empty".to_string(),
+//RS                 });
+//RS             }
+//RS             if retention.insert(fact.key.as_str(), fact).is_some() {
+//RS                 return Err(WebModuleSwapError::DuplicateRetentionKey {
+//RS                     key: fact.key.clone(),
+//RS                 });
+//RS             }
+//RS         }
+//RS 
+//RS         let mut old_state = BTreeMap::new();
+//RS         for fact in &base.state {
+//RS             if old_state.insert(fact.key(), fact).is_some() {
+//RS                 return Err(WebModuleSwapError::DuplicateRetentionKey {
+//RS                     key: fact.key().to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         let mut new_state = BTreeMap::new();
+//RS         for fact in &candidate.state {
+//RS             if new_state.insert(fact.key(), fact).is_some() {
+//RS                 return Err(WebModuleSwapError::DuplicateRetentionKey {
+//RS                     key: fact.key().to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         for key in old_state.keys().chain(new_state.keys()) {
+//RS             if !retention.contains_key(key) {
+//RS                 let fact = new_state.get(key).or_else(|| old_state.get(key)).expect("state key exists");
+//RS                 return Err(WebModuleSwapError::MissingRetentionFact {
+//RS                     kind: fact.kind(),
+//RS                     key: (*key).to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         for key in retention.keys() {
+//RS             if !old_state.contains_key(key) && !new_state.contains_key(key) {
+//RS                 return Err(WebModuleSwapError::UnusedRetentionFact {
+//RS                     key: (*key).to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS 
+//RS         let mut reasons = BTreeSet::new();
+//RS         if base.source_revision != candidate.source_revision {
+//RS             reasons.insert(WebModuleSwapReasonCode::SourceRevisionChanged);
+//RS         }
+//RS         if base.build_revision != candidate.build_revision {
+//RS             reasons.insert(WebModuleSwapReasonCode::BuildRevisionChanged);
+//RS         }
+//RS         let changed = !decision.changed.is_empty() || !decision.changed_functions.is_empty();
+//RS         let changed_modules = if changed || !decision.is_compatible() {
+//RS             vec![decision.module.clone()]
+//RS         } else {
+//RS             Vec::new()
+//RS         };
+//RS         if !decision.changed_functions.is_empty() && decision.is_compatible() {
+//RS             reasons.insert(WebModuleSwapReasonCode::ModuleBodyChanged);
+//RS         }
+//RS         if !decision.is_compatible() {
+//RS             reasons.insert(WebModuleSwapReasonCode::SemanticIncompatible);
+//RS         }
+//RS 
+//RS         let mut preserved = Vec::new();
+//RS         let mut reset = Vec::new();
+//RS         for (key, new_fact) in &new_state {
+//RS             let retention_fact = retention.get(key).expect("checked web retention fact");
+//RS             match &retention_fact.decision {
+//RS                 StateRetentionDecision::Preserve => {
+//RS                     let old_fact = old_state.get(key).ok_or_else(|| {
+//RS                         WebModuleSwapError::InvalidSnapshot {
+//RS                             detail: format!(
+//RS                                 "retention fact `{key}` preserves state with no resident value"
+//RS                             ),
+//RS                         }
+//RS                     })?;
+//RS                     preserved.push(new_fact.with_value(old_fact.value().clone()));
+//RS                 }
+//RS                 StateRetentionDecision::Fresh { .. } => {
+//RS                     reasons.insert(WebModuleSwapReasonCode::StateRetentionFresh);
+//RS                     let (prior_identity, prior_type_fingerprint) = old_state
+//RS                         .get(key)
+//RS                         .map(|old_fact| {
+//RS                             (
+//RS                                 Some(old_fact.identity().to_string()),
+//RS                                 Some(old_fact.type_fingerprint().to_string()),
+//RS                             )
+//RS                         })
+//RS                         .unwrap_or((None, None));
+//RS                     reset.push(WebModuleSwapResetFact {
+//RS                         state: (*new_fact).clone(),
+//RS                         prior_identity,
+//RS                         prior_type_fingerprint,
+//RS                         reason: if old_state.contains_key(key) {
+//RS                             WebModuleSwapReasonCode::StateRetentionFresh
+//RS                         } else {
+//RS                             WebModuleSwapReasonCode::StateAdded
+//RS                         },
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         for (key, old_fact) in &old_state {
+//RS             if new_state.contains_key(key) {
+//RS                 continue;
+//RS             }
+//RS             let retention_fact = retention.get(key).expect("checked web retention fact");
+//RS             if matches!(&retention_fact.decision, StateRetentionDecision::Preserve) {
+//RS                 return Err(WebModuleSwapError::InvalidSnapshot {
+//RS                     detail: format!("retention fact `{key}` preserves removed state"),
+//RS                 });
+//RS             }
+//RS             reasons.insert(WebModuleSwapReasonCode::StateRemoved);
+//RS             reset.push(WebModuleSwapResetFact {
+//RS                 state: (*old_fact).clone(),
+//RS                 prior_identity: Some(old_fact.identity().to_string()),
+//RS                 prior_type_fingerprint: Some(old_fact.type_fingerprint().to_string()),
+//RS                 reason: WebModuleSwapReasonCode::StateRemoved,
+//RS             });
+//RS         }
+//RS 
+//RS         if reasons.is_empty() {
+//RS             reasons.insert(WebModuleSwapReasonCode::NoChange);
+//RS         }
+//RS         preserved.sort_by(|left, right| {
+//RS             (left.kind(), left.key()).cmp(&(right.kind(), right.key()))
+//RS         });
+//RS         reset.sort_by(|left, right| {
+//RS             (left.state.kind(), left.state.key()).cmp(&(right.state.kind(), right.state.key()))
+//RS         });
+//RS         let reason_codes = reasons.into_iter().collect::<Vec<_>>();
+//RS         let compatibility = if decision.is_compatible() {
+//RS             WebModuleSwapCompatibility::Compatible
+//RS         } else {
+//RS             WebModuleSwapCompatibility::Incompatible {
+//RS                 reason_codes: vec![WebModuleSwapReasonCode::SemanticIncompatible],
+//RS             }
+//RS         };
+//RS         Ok(Self {
+//RS             base,
+//RS             candidate,
+//RS             decision: decision.clone(),
+//RS             compatibility,
+//RS             changed_modules,
+//RS             preserved,
+//RS             reset,
+//RS             reason_codes,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn decision(&self) -> &HotSwapDecision {
+//RS         &self.decision
+//RS     }
+//RS 
+//RS     pub fn is_compatible(&self) -> bool {
+//RS         self.decision.is_compatible()
+//RS     }
+//RS 
+//RS     pub fn changed_module_set(&self) -> &[String] {
+//RS         &self.changed_modules
+//RS     }
+//RS 
+//RS     pub fn applied_snapshot(&self) -> WebModuleSwapSnapshot {
+//RS         let mut snapshot = self.candidate.clone();
+//RS         for preserved in &self.preserved {
+//RS             if let Some(slot) = snapshot.state.iter_mut().find(|fact| {
+//RS                 fact.kind() == preserved.kind() && fact.key() == preserved.key()
+//RS             }) {
+//RS                 *slot = preserved.clone();
+//RS             }
+//RS         }
+//RS         snapshot
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Transaction operation carried by every successful receipt.
+//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub enum WebModuleSwapOperation {
+//RS     Pause,
+//RS     Apply,
+//RS     Commit,
+//RS     Rollback,
+//RS     Restart,
+//RS }
+//RS 
+//RS impl WebModuleSwapOperation {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Pause => "pause",
+//RS             Self::Apply => "apply",
+//RS             Self::Commit => "commit",
+//RS             Self::Rollback => "rollback",
+//RS             Self::Restart => "restart",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for WebModuleSwapOperation {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         output.write_str(self.as_str())
+//RS     }
+//RS }
+//RS 
+//RS /// Transaction phase after a successful operation.
+//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub enum WebModuleSwapPhase {
+//RS     Committed,
+//RS     Paused,
+//RS     Applied,
+//RS }
+//RS 
+//RS impl WebModuleSwapPhase {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Committed => "committed",
+//RS             Self::Paused => "paused",
+//RS             Self::Applied => "applied",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for WebModuleSwapPhase {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         output.write_str(self.as_str())
+//RS     }
+//RS }
+//RS 
+//RS /// Receipt status for a completed transaction step.
+//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+//RS pub enum WebModuleSwapReceiptStatus {
+//RS     Paused,
+//RS     Applied,
+//RS     Committed,
+//RS     RolledBack,
+//RS     Restarted,
+//RS }
+//RS 
+//RS impl WebModuleSwapReceiptStatus {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Paused => "paused",
+//RS             Self::Applied => "applied",
+//RS             Self::Committed => "committed",
+//RS             Self::RolledBack => "rolled_back",
+//RS             Self::Restarted => "restarted",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Auditable outcome of one swap transaction step.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct WebModuleSwapReceipt {
+//RS     pub operation: WebModuleSwapOperation,
+//RS     pub status: WebModuleSwapReceiptStatus,
+//RS     pub phase: WebModuleSwapPhase,
+//RS     pub identity: WebModuleSwapIdentity,
+//RS     pub candidate_identity: WebModuleSwapIdentity,
+//RS     pub source_revision: String,
+//RS     pub build_revision: String,
+//RS     pub changed_modules: Vec<String>,
+//RS     pub reason_codes: Vec<WebModuleSwapReasonCode>,
+//RS     pub preserved: Vec<WebModuleSwapStateFact>,
+//RS     pub reset: Vec<WebModuleSwapResetFact>,
+//RS     pub committed_page: WebPageFact,
+//RS     pub active_page: WebPageFact,
+//RS }
+//RS 
+//RS impl WebModuleSwapReceipt {
+//RS     pub fn changed_module_set(&self) -> &[String] {
+//RS         &self.changed_modules
+//RS     }
+//RS 
+//RS     pub fn preserved_facts(&self) -> &[WebModuleSwapStateFact] {
+//RS         &self.preserved
+//RS     }
+//RS 
+//RS     /// Stable, line-oriented audit text. It is deliberately not a wire format.
+//RS     pub fn audit(&self) -> String {
+//RS         let changed = self.changed_modules.join(",");
+//RS         let reasons = self
+//RS             .reason_codes
+//RS             .iter()
+//RS             .map(|reason| reason.as_str())
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let preserved = self
+//RS             .preserved
+//RS             .iter()
+//RS             .map(|fact| format!("{}:{}", fact.kind().as_str(), fact.key()))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let reset = self
+//RS             .reset
+//RS             .iter()
+//RS             .map(|fact| {
+//RS                 format!(
+//RS                     "{}:{}({})",
+//RS                     fact.state.kind().as_str(),
+//RS                     fact.state.key(),
+//RS                     fact.reason.as_str()
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "operation={} status={} phase={} identity={}/{} candidate={}/{} source_revision={} build_revision={} changed_modules=[{}] reasons=[{}] preserved=[{}] reset=[{}] committed_page={} active_page={}",
+//RS             self.operation,
+//RS             self.status.as_str(),
+//RS             self.phase,
+//RS             self.identity.module,
+//RS             self.identity.page,
+//RS             self.candidate_identity.module,
+//RS             self.candidate_identity.page,
+//RS             self.source_revision,
+//RS             self.build_revision,
+//RS             changed,
+//RS             reasons,
+//RS             preserved,
+//RS             reset,
+//RS             self.committed_page.artifact,
+//RS             self.active_page.artifact,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// Typed errors for planning and transaction transitions.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum WebModuleSwapError {
+//RS     InvalidSnapshot { detail: String },
+//RS     IdentityMismatch {
+//RS         expected: WebModuleSwapIdentity,
+//RS         found: WebModuleSwapIdentity,
+//RS     },
+//RS     DecisionModuleMismatch {
+//RS         expected: String,
+//RS         found: String,
+//RS     },
+//RS     MissingRetentionFact {
+//RS         kind: WebStateKind,
+//RS         key: String,
+//RS     },
+//RS     DuplicateRetentionKey {
+//RS         key: String,
+//RS     },
+//RS     UnusedRetentionFact {
+//RS         key: String,
+//RS     },
+//RS     StalePlan {
+//RS         expected_source_revision: String,
+//RS         found_source_revision: String,
+//RS         expected_build_revision: String,
+//RS         found_build_revision: String,
+//RS     },
+//RS     Incompatible {
+//RS         reason_codes: Vec<WebModuleSwapReasonCode>,
+//RS     },
+//RS     InvalidTransition {
+//RS         operation: WebModuleSwapOperation,
+//RS         phase: WebModuleSwapPhase,
+//RS     },
+//RS     NoPendingPlan,
+//RS     NoAppliedPlan,
+//RS     NoCommittedPage,
+//RS }
+//RS 
+//RS impl fmt::Display for WebModuleSwapError {
+//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::InvalidSnapshot { detail } => write!(output, "invalid web swap snapshot: {detail}"),
+//RS             Self::IdentityMismatch { expected, found } => write!(
+//RS                 output,
+//RS                 "web swap identity mismatch: expected {}/{} but found {}/{}",
+//RS                 expected.module, expected.page, found.module, found.page
+//RS             ),
+//RS             Self::DecisionModuleMismatch { expected, found } => write!(
+//RS                 output,
+//RS                 "web swap decision module mismatch: expected `{expected}` but found `{found}`"
+//RS             ),
+//RS             Self::MissingRetentionFact { kind, key } => write!(
+//RS                 output,
+//RS                 "web swap has no canonical retention fact for {} `{key}`",
+//RS                 kind.as_str()
+//RS             ),
+//RS             Self::DuplicateRetentionKey { key } => {
+//RS                 write!(output, "web swap retention key `{key}` is not unique")
+//RS             }
+//RS             Self::UnusedRetentionFact { key } => {
+//RS                 write!(output, "web swap retention fact `{key}` has no typed state")
+//RS             }
+//RS             Self::StalePlan {
+//RS                 expected_source_revision,
+//RS                 found_source_revision,
+//RS                 expected_build_revision,
+//RS                 found_build_revision,
+//RS             } => write!(
+//RS                 output,
+//RS                 "stale web swap plan: expected source/build {expected_source_revision}/{expected_build_revision} but state is {found_source_revision}/{found_build_revision}"
+//RS             ),
+//RS             Self::Incompatible { reason_codes } => write!(
+//RS                 output,
+//RS                 "web module swap is incompatible: {}",
+//RS                 reason_codes
+//RS                     .iter()
+//RS                     .map(|reason| reason.as_str())
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             ),
+//RS             Self::InvalidTransition { operation, phase } => write!(
+//RS                 output,
+//RS                 "web swap cannot {} while phase is {}",
+//RS                 operation, phase
+//RS             ),
+//RS             Self::NoPendingPlan => output.write_str("web swap has no pending plan"),
+//RS             Self::NoAppliedPlan => output.write_str("web swap has no applied plan"),
+//RS             Self::NoCommittedPage => output.write_str("web swap has no committed page"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Error for WebModuleSwapError {}
+//RS 
+//RS /// Mutable owner of the last committed page and one in-flight transaction.
+//RS ///
+//RS /// The committed snapshot is never replaced by `pause` or `apply`. A failed
+//RS /// candidate therefore leaves the last committed page available for rollback;
+//RS /// `commit` is the only operation that advances it.
+//RS #[derive(Debug)]
+//RS pub struct WebModuleSwapState {
+//RS     committed: WebModuleSwapSnapshot,
+//RS     pending: Option<WebModuleSwapPlan>,
+//RS     active: WebModuleSwapSnapshot,
+//RS     phase: WebModuleSwapPhase,
+//RS }
+//RS 
+//RS impl WebModuleSwapState {
+//RS     pub fn new(snapshot: WebModuleSwapSnapshot) -> Result<Self, WebModuleSwapError> {
+//RS         let mut snapshot = snapshot;
+//RS         snapshot.normalize()?;
+//RS         Ok(Self {
+//RS             active: snapshot.clone(),
+//RS             committed: snapshot,
+//RS             pending: None,
+//RS             phase: WebModuleSwapPhase::Committed,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn committed(&self) -> &WebModuleSwapSnapshot {
+//RS         &self.committed
+//RS     }
+//RS 
+//RS     pub fn active(&self) -> &WebModuleSwapSnapshot {
+//RS         &self.active
+//RS     }
+//RS 
+//RS     pub fn pending(&self) -> Option<&WebModuleSwapPlan> {
+//RS         self.pending.as_ref()
+//RS     }
+//RS 
+//RS     pub fn phase(&self) -> WebModuleSwapPhase {
+//RS         self.phase
+//RS     }
+//RS 
+//RS     /// Stage a compatible plan without changing the active or committed page.
+//RS     pub fn pause(
+//RS         &mut self,
+//RS         plan: WebModuleSwapPlan,
+//RS     ) -> Result<WebModuleSwapReceipt, WebModuleSwapError> {
+//RS         if self.phase != WebModuleSwapPhase::Committed || self.pending.is_some() {
+//RS             return Err(WebModuleSwapError::InvalidTransition {
+//RS                 operation: WebModuleSwapOperation::Pause,
+//RS                 phase: self.phase,
+//RS             });
+//RS         }
+//RS         self.validate_base(&plan)?;
+//RS         if plan.base.identity != plan.candidate.identity {
+//RS             return Err(WebModuleSwapError::IdentityMismatch {
+//RS                 expected: plan.base.identity.clone(),
+//RS                 found: plan.candidate.identity.clone(),
+//RS             });
+//RS         }
+//RS         if !plan.is_compatible() {
+//RS             return Err(WebModuleSwapError::Incompatible {
+//RS                 reason_codes: plan.compatibility.reason_codes().to_vec(),
+//RS             });
+//RS         }
+//RS         self.pending = Some(plan);
+//RS         self.phase = WebModuleSwapPhase::Paused;
+//RS         Ok(self.receipt(
+//RS             WebModuleSwapOperation::Pause,
+//RS             WebModuleSwapReceiptStatus::Paused,
+//RS         ))
+//RS     }
+//RS 
+//RS     /// Apply the candidate to the active snapshot while keeping commit undoable.
+//RS     pub fn apply(&mut self) -> Result<WebModuleSwapReceipt, WebModuleSwapError> {
+//RS         if self.phase != WebModuleSwapPhase::Paused {
+//RS             return Err(WebModuleSwapError::InvalidTransition {
+//RS                 operation: WebModuleSwapOperation::Apply,
+//RS                 phase: self.phase,
+//RS             });
+//RS         }
+//RS         let plan = self.pending.as_ref().ok_or(WebModuleSwapError::NoPendingPlan)?;
+//RS         self.validate_base(plan)?;
+//RS         if !plan.is_compatible() {
+//RS             return Err(WebModuleSwapError::Incompatible {
+//RS                 reason_codes: plan.compatibility.reason_codes().to_vec(),
+//RS             });
+//RS         }
+//RS         let applied = plan.applied_snapshot();
+//RS         self.active = applied;
+//RS         self.phase = WebModuleSwapPhase::Applied;
+//RS         Ok(self.receipt(
+//RS             WebModuleSwapOperation::Apply,
+//RS             WebModuleSwapReceiptStatus::Applied,
+//RS         ))
+//RS     }
+//RS 
+//RS     /// Make the applied candidate the new last-good snapshot.
+//RS     pub fn commit(&mut self) -> Result<WebModuleSwapReceipt, WebModuleSwapError> {
+//RS         if self.phase != WebModuleSwapPhase::Applied {
+//RS             return Err(WebModuleSwapError::InvalidTransition {
+//RS                 operation: WebModuleSwapOperation::Commit,
+//RS                 phase: self.phase,
+//RS             });
+//RS         }
+//RS         let plan = self.pending.as_ref().ok_or(WebModuleSwapError::NoAppliedPlan)?;
+//RS         self.validate_base(plan)?;
+//RS         if self.active.identity != plan.candidate.identity {
+//RS             return Err(WebModuleSwapError::IdentityMismatch {
+//RS                 expected: plan.candidate.identity.clone(),
+//RS                 found: self.active.identity.clone(),
+//RS             });
+//RS         }
+//RS         let plan = self.pending.take().expect("applied swap has a pending plan");
+//RS         self.committed = self.active.clone();
+//RS         self.phase = WebModuleSwapPhase::Committed;
+//RS         Ok(self.receipt_for_plan(
+//RS             &plan,
+//RS             WebModuleSwapOperation::Commit,
+//RS             WebModuleSwapReceiptStatus::Committed,
+//RS         ))
+//RS     }
+//RS 
+//RS     /// Drop an in-flight candidate and restore the last committed page.
+//RS     pub fn rollback(&mut self) -> Result<WebModuleSwapReceipt, WebModuleSwapError> {
+//RS         let had_pending = self.pending.is_some();
+//RS         let receipt_data = self.pending.as_ref().map(|plan| {
+//RS             (
+//RS                 plan.candidate.identity.clone(),
+//RS                 plan.candidate.source_revision.clone(),
+//RS                 plan.candidate.build_revision.clone(),
+//RS                 plan.changed_modules.clone(),
+//RS                 plan.reason_codes.clone(),
+//RS                 plan.preserved.clone(),
+//RS                 plan.reset.clone(),
+//RS             )
+//RS         });
+//RS         self.pending = None;
+//RS         self.active = self.committed.clone();
+//RS         self.phase = WebModuleSwapPhase::Committed;
+//RS         if had_pending {
+//RS             let (candidate_identity, source_revision, build_revision, changed_modules, reason_codes, preserved, reset) =
+//RS                 receipt_data.expect("pending plan was present");
+//RS             return Ok(WebModuleSwapReceipt {
+//RS                 operation: WebModuleSwapOperation::Rollback,
+//RS                 status: WebModuleSwapReceiptStatus::RolledBack,
+//RS                 phase: self.phase,
+//RS                 identity: self.committed.identity.clone(),
+//RS                 candidate_identity,
+//RS                 source_revision,
+//RS                 build_revision,
+//RS                 changed_modules,
+//RS                 reason_codes,
+//RS                 preserved,
+//RS                 reset,
+//RS                 committed_page: self.committed.page.clone(),
+//RS                 active_page: self.active.page.clone(),
+//RS             });
+//RS         }
+//RS         Ok(WebModuleSwapReceipt {
+//RS             operation: WebModuleSwapOperation::Rollback,
+//RS             status: WebModuleSwapReceiptStatus::RolledBack,
+//RS             phase: self.phase,
+//RS             identity: self.committed.identity.clone(),
+//RS             candidate_identity: self.committed.identity.clone(),
+//RS             source_revision: self.committed.source_revision.clone(),
+//RS             build_revision: self.committed.build_revision.clone(),
+//RS             changed_modules: Vec::new(),
+//RS             reason_codes: vec![WebModuleSwapReasonCode::NothingToRollback],
+//RS             preserved: Vec::new(),
+//RS             reset: Vec::new(),
+//RS             committed_page: self.committed.page.clone(),
+//RS             active_page: self.active.page.clone(),
+//RS         })
+//RS     }
+//RS     /// Apply the canonical verdict without letting a host choose between
+//RS     /// in-place activation and a clean restart.
+//RS     pub fn apply_decision(
+//RS         &mut self,
+//RS         plan: WebModuleSwapPlan,
+//RS     ) -> Result<WebModuleSwapReceipt, WebModuleSwapError> {
+//RS         if !plan.is_compatible() {
+//RS             return self.restart(plan);
+//RS         }
+//RS         self.pause(plan)?;
+//RS         if let Err(error) = self.apply() {
+//RS             let _ = self.rollback();
+//RS             return Err(error);
+//RS         }
+//RS         match self.commit() {
+//RS             Ok(receipt) => Ok(receipt),
+//RS             Err(error) => {
+//RS                 let _ = self.rollback();
+//RS                 Err(error)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Publish an incompatible candidate as an explicit clean-restart
+//RS     /// transaction. The candidate becomes last-good with every canonical
+//RS     /// fresh-state fact visible in the receipt; this is not an in-place swap.
+//RS     pub fn restart(
+//RS         &mut self,
+//RS         plan: WebModuleSwapPlan,
+//RS     ) -> Result<WebModuleSwapReceipt, WebModuleSwapError> {
+//RS         if self.phase != WebModuleSwapPhase::Committed || self.pending.is_some() {
+//RS             return Err(WebModuleSwapError::InvalidTransition {
+//RS                 operation: WebModuleSwapOperation::Restart,
+//RS                 phase: self.phase,
+//RS             });
+//RS         }
+//RS         self.validate_base(&plan)?;
+//RS         if plan.base.identity != plan.candidate.identity {
+//RS             return Err(WebModuleSwapError::IdentityMismatch {
+//RS                 expected: plan.base.identity.clone(),
+//RS                 found: plan.candidate.identity.clone(),
+//RS             });
+//RS         }
+//RS         if plan.is_compatible() {
+//RS             return Err(WebModuleSwapError::Incompatible {
+//RS                 reason_codes: vec![WebModuleSwapReasonCode::SemanticIncompatible],
+//RS             });
+//RS         }
+//RS         self.active = plan.candidate.clone();
+//RS         self.committed = self.active.clone();
+//RS         self.phase = WebModuleSwapPhase::Committed;
+//RS         Ok(self.receipt_for_plan(
+//RS             &plan,
+//RS             WebModuleSwapOperation::Restart,
+//RS             WebModuleSwapReceiptStatus::Restarted,
+//RS         ))
+//RS     }
+//RS 
+//RS 
+//RS     fn validate_base(&self, plan: &WebModuleSwapPlan) -> Result<(), WebModuleSwapError> {
+//RS         if self.committed.identity != plan.base.identity {
+//RS             return Err(WebModuleSwapError::IdentityMismatch {
+//RS                 expected: self.committed.identity.clone(),
+//RS                 found: plan.base.identity.clone(),
+//RS             });
+//RS         }
+//RS         if self.committed.source_revision != plan.base.source_revision
+//RS             || self.committed.build_revision != plan.base.build_revision
+//RS         {
+//RS             return Err(WebModuleSwapError::StalePlan {
+//RS                 expected_source_revision: plan.base.source_revision.clone(),
+//RS                 found_source_revision: self.committed.source_revision.clone(),
+//RS                 expected_build_revision: plan.base.build_revision.clone(),
+//RS                 found_build_revision: self.committed.build_revision.clone(),
+//RS             });
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn receipt(
+//RS         &self,
+//RS         operation: WebModuleSwapOperation,
+//RS         status: WebModuleSwapReceiptStatus,
+//RS     ) -> WebModuleSwapReceipt {
+//RS         let plan = self
+//RS             .pending
+//RS             .as_ref()
+//RS             .expect("successful swap operation has a pending plan");
+//RS         self.receipt_for_plan(plan, operation, status)
+//RS     }
+//RS 
+//RS     fn receipt_for_plan(
+//RS         &self,
+//RS         plan: &WebModuleSwapPlan,
+//RS         operation: WebModuleSwapOperation,
+//RS         status: WebModuleSwapReceiptStatus,
+//RS     ) -> WebModuleSwapReceipt {
+//RS         WebModuleSwapReceipt {
+//RS             operation,
+//RS             status,
+//RS             phase: self.phase,
+//RS             identity: self.committed.identity.clone(),
+//RS             candidate_identity: plan.candidate.identity.clone(),
+//RS             source_revision: plan.candidate.source_revision.clone(),
+//RS             build_revision: plan.candidate.build_revision.clone(),
+//RS             changed_modules: plan.changed_modules.clone(),
+//RS             reason_codes: plan.reason_codes.clone(),
+//RS             preserved: plan.preserved.clone(),
+//RS             reset: plan.reset.clone(),
+//RS             committed_page: self.committed.page.clone(),
+//RS             active_page: self.active.page.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use jet_foundation::HotSwap::{HotSwapCompatibility, StateRetentionFact};
+//RS 
+//RS     fn snapshot(
+//RS         source_revision: &str,
+//RS         build_revision: &str,
+//RS         body: &str,
+//RS         signal_value: &str,
+//RS         island_identity: &str,
+//RS     ) -> WebModuleSwapSnapshot {
+//RS         WebModuleSwapSnapshot::new(
+//RS             WebModuleSwapIdentity::new("app", "/"),
+//RS             source_revision,
+//RS             build_revision,
+//RS             WebPageFact::new("/", format!("page-{build_revision}")),
+//RS             vec![WebModuleFact::new("app", "iface-1", body)],
+//RS             vec![
+//RS                 WebModuleSwapStateFact::Signal(WebSignalFact::new(
+//RS                     "count",
+//RS                     "Int",
+//RS                     signal_value,
+//RS                 )),
+//RS                 WebModuleSwapStateFact::Store(WebStoreFact::new(
+//RS                     "session",
+//RS                     "Session-v1",
+//RS                     "store-value",
+//RS                 )),
+//RS                 WebModuleSwapStateFact::QueryCache(WebQueryCacheFact::new(
+//RS                     "todos",
+//RS                     "TodoList-v1",
+//RS                     "cached",
+//RS                 )),
+//RS                 WebModuleSwapStateFact::FormDraft(WebFormDraftFact::new(
+//RS                     "profile",
+//RS                     "ProfileForm-v1",
+//RS                     "dirty-draft",
+//RS                 )),
+//RS                 WebModuleSwapStateFact::Scroll(WebScrollFact::new(
+//RS                     "main",
+//RS                     "Scroll-v1",
+//RS                     42i64,
+//RS                 )),
+//RS                 WebModuleSwapStateFact::Focus(WebFocusFact::new(
+//RS                     "email",
+//RS                     "Focus-v1",
+//RS                     true,
+//RS                 )),
+//RS                 WebModuleSwapStateFact::Island(WebIslandFact::new(
+//RS                     "home",
+//RS                     island_identity,
+//RS                     "Island-v1",
+//RS                     "island-state",
+//RS                 )),
+//RS             ],
+//RS         )
+//RS         .unwrap()
+//RS     }
+//RS 
+//RS     fn decision_for(
+//RS         before: &WebModuleSwapSnapshot,
+//RS         candidate: &WebModuleSwapSnapshot,
+//RS         compatible: bool,
+//RS         changed_functions: Vec<String>,
+//RS     ) -> HotSwapDecision {
+//RS         let mut keys = BTreeSet::new();
+//RS         keys.extend(before.state.iter().map(|fact| fact.key().to_string()));
+//RS         keys.extend(candidate.state.iter().map(|fact| fact.key().to_string()));
+//RS         HotSwapDecision {
+//RS             module: "app".to_string(),
+//RS             compatibility: if compatible {
+//RS                 HotSwapCompatibility::Compatible
+//RS             } else {
+//RS                 HotSwapCompatibility::Incompatible {
+//RS                     reason: "checked semantic surface changed".to_string(),
+//RS                 }
+//RS             },
+//RS             changed: if compatible {
+//RS                 Vec::new()
+//RS             } else {
+//RS                 vec!["checked semantic surface changed".to_string()]
+//RS             },
+//RS             changed_functions,
+//RS             state: keys
+//RS                 .into_iter()
+//RS                 .map(|key| {
+//RS                     if compatible {
+//RS                         StateRetentionFact::preserve(key)
+//RS                     } else {
+//RS                         StateRetentionFact::fresh(key, "checked state shape changed")
+//RS                     }
+//RS                 })
+//RS                 .collect(),
+//RS             schema_migrations: Vec::new(),
+//RS             rechecked_items: Vec::new(),
+//RS             change_facts: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn compatible_body_swap_preserves_every_supported_state_family() {
+//RS         let before = snapshot("source-1", "build-1", "body-1", "7", "island-a");
+//RS         let after = snapshot("source-2", "build-2", "body-2", "0", "island-a");
+//RS         let decision = decision_for(&before, &after, true, vec!["app::fn:main".to_string()]);
+//RS         let plan = WebModuleSwapPlan::from_hot_swap_decision(&before, &after, &decision).unwrap();
+//RS 
+//RS         assert!(plan.is_compatible());
+//RS         assert_eq!(plan.changed_module_set(), &["app".to_string()]);
+//RS         assert_eq!(plan.preserved.len(), 7);
+//RS         assert!(plan.reset.is_empty());
+//RS         assert!(plan
+//RS             .reason_codes
+//RS             .contains(&WebModuleSwapReasonCode::SourceRevisionChanged));
+//RS         assert!(plan
+//RS             .reason_codes
+//RS             .contains(&WebModuleSwapReasonCode::BuildRevisionChanged));
+//RS 
+//RS         let applied = plan.applied_snapshot();
+//RS         assert_eq!(applied.state[0].value(), &WebStateValue::Text("7".to_string()));
+//RS         assert_eq!(applied.state[1].value(), &WebStateValue::Text("store-value".to_string()));
+//RS         assert_eq!(applied.state[2].value(), &WebStateValue::Text("cached".to_string()));
+//RS         assert_eq!(applied.state[3].value(), &WebStateValue::Text("dirty-draft".to_string()));
+//RS         assert_eq!(applied.state[4].value(), &WebStateValue::Integer(42));
+//RS         assert_eq!(applied.state[5].value(), &WebStateValue::Boolean(true));
+//RS         assert_eq!(applied.state[6].value(), &WebStateValue::Text("island-state".to_string()));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn identity_mismatch_is_rejected_before_state_mutation() {
+//RS         let before = snapshot("source-1", "build-1", "body-1", "7", "island-a");
+//RS         let candidate = WebModuleSwapSnapshot::new(
+//RS             WebModuleSwapIdentity::new("other-app", "/"),
+//RS             "source-2",
+//RS             "build-2",
+//RS             WebPageFact::new("/", "page-build-2"),
+//RS             vec![WebModuleFact::new("other-app", "iface-1", "body-2")],
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         let decision = decision_for(&before, &candidate, true, Vec::new());
+//RS         let plan =
+//RS             WebModuleSwapPlan::from_hot_swap_decision(&before, &candidate, &decision).unwrap();
+//RS         let mut state = WebModuleSwapState::new(before.clone()).unwrap();
+//RS 
+//RS         let error = state.pause(plan).unwrap_err();
+//RS         assert_eq!(state.phase(), WebModuleSwapPhase::Committed);
+//RS         assert_eq!(state.committed(), &before);
+//RS         assert!(matches!(error, WebModuleSwapError::IdentityMismatch { .. }));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn rollback_keeps_last_committed_page_after_apply() {
+//RS         let before = snapshot("source-1", "build-1", "body-1", "7", "island-a");
+//RS         let after = snapshot("source-2", "build-2", "body-2", "0", "island-a");
+//RS         let decision = decision_for(&before, &after, true, vec!["app::fn:main".to_string()]);
+//RS         let plan = WebModuleSwapPlan::from_hot_swap_decision(&before, &after, &decision).unwrap();
+//RS         let mut state = WebModuleSwapState::new(before.clone()).unwrap();
+//RS 
+//RS         let paused = state.pause(plan).unwrap();
+//RS         assert_eq!(paused.status, WebModuleSwapReceiptStatus::Paused);
+//RS         let applied = state.apply().unwrap();
+//RS         assert_eq!(applied.active_page.artifact, "page-build-2");
+//RS         assert_eq!(applied.committed_page.artifact, "page-build-1");
+//RS         let rolled_back = state.rollback().unwrap();
+//RS         assert_eq!(rolled_back.status, WebModuleSwapReceiptStatus::RolledBack);
+//RS         assert_eq!(rolled_back.committed_page.artifact, "page-build-1");
+//RS         assert_eq!(rolled_back.active_page.artifact, "page-build-1");
+//RS         assert_eq!(state.active(), &before);
+//RS         assert_eq!(state.committed(), &before);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn incompatible_interface_reports_changed_modules_and_resets() {
+//RS         let before = snapshot("source-1", "build-1", "body-1", "7", "island-a");
+//RS         let mut after = snapshot("source-2", "build-2", "body-2", "0", "island-b");
+//RS         after.modules[0].interface_fingerprint = "iface-2".to_string();
+//RS         after.state[0] = WebModuleSwapStateFact::Signal(WebSignalFact::new(
+//RS             "count",
+//RS             "Int-v2",
+//RS             "0",
+//RS         ));
+//RS         let decision = decision_for(&before, &after, false, vec!["app::fn:main".to_string()]);
+//RS         let plan = WebModuleSwapPlan::from_hot_swap_decision(&before, &after, &decision).unwrap();
+//RS 
+//RS         assert!(!plan.is_compatible());
+//RS         assert_eq!(plan.changed_module_set(), &["app".to_string()]);
+//RS         assert!(plan
+//RS             .compatibility
+//RS             .reason_codes()
+//RS             .contains(&WebModuleSwapReasonCode::SemanticIncompatible));
+//RS         assert!(plan
+//RS             .reason_codes
+//RS             .contains(&WebModuleSwapReasonCode::StateRetentionFresh));
+//RS         assert!(plan.reset.iter().any(|fact| {
+//RS             fact.state.kind() == WebStateKind::Signal
+//RS                 && fact.reason == WebModuleSwapReasonCode::StateRetentionFresh
+//RS         }));
+//RS 
+//RS         let mut state = WebModuleSwapState::new(before.clone()).unwrap();
+//RS         assert!(state.pause(plan).is_err());
+//RS         assert_eq!(state.committed(), &before);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn receipt_audit_has_stable_order_and_all_preserved_facts() {
+//RS         let before = snapshot("source-1", "build-1", "body-1", "7", "island-a");
+//RS         let after = snapshot("source-2", "build-2", "body-2", "0", "island-a");
+//RS         let decision = decision_for(&before, &after, true, vec!["app::fn:main".to_string()]);
+//RS         let plan = WebModuleSwapPlan::from_hot_swap_decision(&before, &after, &decision).unwrap();
+//RS         let mut state = WebModuleSwapState::new(before).unwrap();
+//RS         let receipt = state.pause(plan).unwrap();
+//RS         let audit = receipt.audit();
+//RS 
+//RS         assert!(audit.contains("preserved=[signal:count,store:session,query_cache:todos,form_draft:profile,scroll:main,focus:email,island:home]"));
+//RS         assert!(audit.contains("changed_modules=[app]"));
+//RS         assert!(audit.contains("source_revision_changed"));
+//RS         assert!(audit.contains("build_revision_changed"));
+//RS     }
+//RS }
+// END-PORT-PENDING 0793 crates/jet-devserver/src/WebModuleSwap.rs:1-1542
+

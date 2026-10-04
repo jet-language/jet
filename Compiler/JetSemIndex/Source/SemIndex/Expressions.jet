@@ -1,0 +1,329 @@
+// crates/jet-semindex/src/Build.rs:3274–3654: collect_expr,
+// format_arithmetic_hover and collect_expr_stmt. S5 owns DB/context/caller;
+// S6 owns checked use-site references; S7 owns nodes/slots/spans/call rows;
+// S11 owns binding, statement, loop-label and binder-inlay traversal.
+// The published Foundation borrowed visitor projects optional calls into
+// Rust's OptField + CallValue without allocating another Expr or owning an
+// environment. Provider copy/native #4397/C4/CP-NAMES proof remains gated.
+use jet_foundation.[
+    Expr, Stmt, Program, MIRNameFacts, Span, Type, CallArg,
+    ArithmeticPolicyFact, ArithmeticMode, ArithmeticOperation, expr_span,
+    type_name, CanonicalASTOptionalCallVisitor, canonical_ast_visit_optional_method_call,
+]
+
+// Rust Arithmetic{Mode,Operation}::as_str presentation, not policy inference.
+fn semindex_arithmetic_mode_label(mode: ArithmeticMode) -> String Never! {
+    if mode == {
+        .Checked -> "Checked"
+        .Wrapping -> "Wrapping"
+        .Saturating -> "Saturating"
+    }
+}
+fn semindex_arithmetic_operation_label(operation: ArithmeticOperation) -> String Never! {
+    if operation == {
+        .Add -> "add"
+        .Sub -> "sub"
+        .Mul -> "mul"
+        .Neg -> "neg"
+        .Pow -> "pow"
+    }
+}
+pub fn semindex_format_arithmetic_hover(fact: ArithmeticPolicyFact, module_path: String) -> String Never! {
+    operation :: if fact.operation == {
+        .Val(operation) -> semindex_arithmetic_operation_label(operation)
+        None -> "operation"
+    }
+    policy :: semindex_arithmetic_mode_label(fact.mode)
+    "fixed-width {operation}: .{policy}; scope = {module_path}:{fact.scope_span.start}..{fact.scope_span.end}"
+}
+
+// Checked fact sentinel AND exact original UTF-8 source bytes are required.
+// A user-authored @origin binding alone must never become a compiler fact read.
+fn semindex_comptime_origin_reference(name: String, span: Span, source: String) -> Bool Never! {
+    sentinel :: name.bytes()
+    prefix :: "jet.fact.".bytes()
+    if sentinel.len() < prefix.len() + 1 || sentinel[0] != 0 -> return false
+    loop index in 0..<prefix.len() {
+        if sentinel[index + 1] != prefix[index] -> return false
+    }
+    bytes :: source.bytes()
+    if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return false
+    expected :: "origin".bytes()
+    if span.end - span.start != expected.len() -> return false
+    loop index in 0..<expected.len() {
+        if bytes[span.start + index] != expected[index] -> return false
+    }
+    true
+}
+
+// This is the existing structural_slot callback, not a second AST visitor.
+fn semindex_expr_child(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, expr: Expr, mp: String, slot: String) {
+    semindex_structural_slot(&db, &ctx, slot, StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> {
+        semindex_collect_expr(&db, &ctx, names, program, source, expr, mp)
+    })
+}
+
+// The same stateless provider-impl convention as CanonicalASTDefaultProvider.
+// Complete synchronous CallValue/OptField projection before generic node insertion.
+enum SemIndexOptionalCallVisitor { Borrowed }
+impl SemIndexOptionalCallVisitor.CanonicalASTOptionalCallVisitor<SymbolDB, WalkCtx, MIRNameFacts, Program, String, String> {
+    fn visit_optional_method_call(self, db: &SymbolDB, context: &WalkCtx, names: MIRNameFacts, program: Program, source: String, module_path: String, receiver: Expr, receiver_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg], call_span: Span) Never! {
+        call_id :: semindex_record_node(&db, context, "expr", "Discriminant(45)", module_path, call_span)
+        if call_id == .Val(id) -> &context.structural_parents.push(id)
+        semindex_structural_slot(&db, &context, "callee", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            field_span :: Span{start: receiver_span.start, end: method_span.end}
+            field_id :: semindex_record_node(&db, ctx, "expr", "Discriminant(26)", module_path, field_span)
+            if field_id == .Val(id) -> &ctx.structural_parents.push(id)
+            semindex_expr_child(&db, &ctx, names, program, source, receiver, module_path, "base")
+            &db.refs.push(semindex_scoped_ref(&db, ctx, names, method, method_span, module_path))
+            if field_id != None -> _ := &ctx.structural_parents.pop()
+        })
+        semindex_collect_call_inlay_hints(&db, args, module_path)
+        semindex_structural_slot(&db, &context, "args", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            loop arg in args -> semindex_collect_expr(&db, &ctx, names, program, source, arg.expr, module_path)
+        })
+        if call_id != None -> _ := &context.structural_parents.pop()
+    }
+}
+
+pub fn semindex_collect_expr(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, expr: Expr, mp: String) {
+    if canonical_ast_visit_optional_method_call<SemIndexOptionalCallVisitor, SymbolDB, WalkCtx, MIRNameFacts, Program, String, String>(expr, SemIndexOptionalCallVisitor.Borrowed, &db, &ctx, names, program, source, mp) -> return
+    // Implicit owning copies reuse the operand span; authored ~ includes its sigil.
+    if expr == .Copy(inner, span) {
+        if span == expr_span(inner) -> &db.inlay.push(InlayHint{span: span, module_path: mp, label: " ~ copy"})
+    }
+    structural_id :: semindex_record_node(&db, ctx, "expr", semindex_expr_shape(expr), mp, semindex_structural_expr_span(expr))
+    if structural_id == .Val(id) -> &ctx.structural_parents.push(id)
+    if expr == {
+        .PtrFromAddr(_, _, _, addr, _) -> semindex_expr_child(&db, &ctx, names, program, source, addr, mp, "address")
+        .Ident(name, span) -> &db.refs.push(semindex_scoped_ref(&db, ctx, names, name, span, mp))
+        .Call(call) -> {
+            loop arg in call.args {
+                if arg.flags.arithmetic_policy == .Val(fact) {
+                    if fact.operation == .Val(operation) {
+                        &db.arithmetic.push(ArithmeticOperationFact{operation: semindex_arithmetic_operation_label(operation), policy: semindex_arithmetic_mode_label(fact.mode), module_path: mp, operation_span: semindex_source_span(fact.operation_span), scope_span: semindex_source_span(fact.scope_span)})
+                        &db.hover.push(HoverEntry{span: fact.operation_span, module_path: mp, text: semindex_format_arithmetic_hover(fact, mp)})
+                    }
+                }
+            }
+            semindex_record_call(&db, ctx, mp, call.name, call.name_span)
+            &db.refs.push(semindex_scoped_ref(&db, ctx, names, call.name, call.name_span, mp))
+            semindex_collect_call_inlay_hints(&db, call.args, mp)
+            semindex_structural_slot(&db, &ctx, "args", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop arg in call.args -> semindex_collect_expr(&db, &ctx, names, program, source, arg.expr, mp)
+            })
+        }
+        .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, receiver, mp, "receiver")
+            semindex_record_call(&db, ctx, mp, method, method_span)
+            &db.refs.push(semindex_scoped_ref(&db, ctx, names, method, method_span, mp))
+            // Rust Syntax::METHOD_DROP: the sole intentional discard spelling.
+            if method == "drop" {
+                detail := ""
+                if args.len() > 0 {
+                    if args[0].expr == .Str(parts, _) {
+                        if parts.len() == 1 {
+                            if parts[0] == .Lit(text) -> detail = text
+                        }
+                    }
+                }
+                &db.bypasses.push(BypassFact{kind: BypassKind.ExplicitDrop, site: semindex_active_scope(ctx), detail: detail, module_path: mp, span: semindex_source_span(method_span)})
+            }
+            semindex_collect_call_inlay_hints(&db, args, mp)
+            semindex_structural_slot(&db, &ctx, "args", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop arg in args -> semindex_collect_expr(&db, &ctx, names, program, source, arg.expr, mp)
+            })
+        }
+        .Field(base, member, span) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, base, mp, "base")
+            &db.refs.push(semindex_scoped_ref(&db, ctx, names, member, span, mp))
+        }
+        .OptField(base, member, member_span, _, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, base, mp, "base")
+            &db.refs.push(semindex_scoped_ref(&db, ctx, names, member, member_span, mp))
+        }
+        .Binary(_, left, right, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, left, mp, "lhs")
+            semindex_expr_child(&db, &ctx, names, program, source, right, mp, "rhs")
+        }
+        .CompareChain(operands, _, _, _) -> semindex_structural_slot(&db, &ctx, "operands", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            loop operand in operands -> semindex_collect_expr(&db, &ctx, names, program, source, operand, mp)
+        })
+        .Unary(_, inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "operand")
+        .Deref(inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "operand")
+        .RawOf(inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "operand")
+        .Copy(inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "operand")
+        .Place(inner, _, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "operand")
+        .Index(base, index, _, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, base, mp, "base")
+            semindex_expr_child(&db, &ctx, names, program, source, index, mp, "index")
+        }
+        .Slice(base, start, end, range, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, base, mp, "base")
+            if range == {
+                .Val(range) -> semindex_expr_child(&db, &ctx, names, program, source, range, mp, "range")
+                None -> {
+                    semindex_expr_child(&db, &ctx, names, program, source, start, mp, "start")
+                    semindex_expr_child(&db, &ctx, names, program, source, end, mp, "end")
+                }
+            }
+        }
+        .Range(start, end, _, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, start, mp, "start")
+            semindex_expr_child(&db, &ctx, names, program, source, end, mp, "end")
+        }
+        .Str(parts, _) -> semindex_structural_slot(&db, &ctx, "interpolations", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            loop part in parts {
+                if part == .Interp(inner, _) -> semindex_collect_expr(&db, &ctx, names, program, source, inner, mp)
+            }
+        })
+        .ListLit(items, _) -> semindex_structural_slot(&db, &ctx, "items", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            loop item in items -> semindex_collect_expr(&db, &ctx, names, program, source, item, mp)
+        })
+        .MemberSpread(base, _, _) -> semindex_expr_child(&db, &ctx, names, program, source, base, mp, "base")
+        .Spread(inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "value")
+        .MapLit(pairs, _) -> {
+            semindex_structural_slot(&db, &ctx, "keys", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop pair in pairs -> semindex_collect_expr(&db, &ctx, names, program, source, pair.key, mp)
+            })
+            semindex_structural_slot(&db, &ctx, "values", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop pair in pairs -> semindex_collect_expr(&db, &ctx, names, program, source, pair.value, mp)
+            })
+        }
+        .TupleLit(fields, _, _) -> semindex_structural_slot(&db, &ctx, "fields", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            loop field in fields -> semindex_collect_expr(&db, &ctx, names, program, source, field.value, mp)
+        })
+        .StructLit(type_name_value, type_args, _, _, fields, inferred, span) -> {
+            if inferred && type_name_value != "" {
+                label :: if type_args.len() == 0 -> type_name_value else -> type_name(Type.Apply{name: type_name_value, args: type_args})
+                &db.hover.push(HoverEntry{span: span, module_path: mp, text: "`{label}`"})
+                &db.inlay.push(InlayHint{span: span, module_path: mp, label: ": {label}"})
+            }
+            semindex_structural_slot(&db, &ctx, "fields", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop field in fields -> semindex_collect_expr(&db, &ctx, names, program, source, field.value, mp)
+            })
+        }
+        .TypedLit(_, body, _) -> semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            // TypedLitBody::for_each_expr order, without another AST walk.
+            if body == {
+                .Fields(fields) -> { loop field in fields -> semindex_collect_expr(&db, &ctx, names, program, source, field.value, mp) }
+                .Elements(elements) -> { loop element in elements -> semindex_collect_expr(&db, &ctx, names, program, source, element, mp) }
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        semindex_collect_expr(&db, &ctx, names, program, source, entry.key, mp)
+                        semindex_collect_expr(&db, &ctx, names, program, source, entry.value, mp)
+                    }
+                }
+                .Value(value) -> semindex_collect_expr(&db, &ctx, names, program, source, value, mp)
+                .ByteText(_) -> {}
+                .Empty -> {}
+            }
+        })
+        .EnumLit(_, _, _, args, _, _) -> semindex_structural_slot(&db, &ctx, "args", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            loop arg in args {
+                if arg == {
+                    .Positional(value) -> semindex_collect_expr(&db, &ctx, names, program, source, value, mp)
+                    .Named(_, value) -> semindex_collect_expr(&db, &ctx, names, program, source, value, mp)
+                }
+            }
+        })
+        .Tainted(inner, _, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "value")
+        .Present(inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "value")
+        .Ok(inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "value")
+        .Err(inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "value")
+        .Try(inner, _, _, note) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "value")
+            if note == .Val(note) -> semindex_expr_child(&db, &ctx, names, program, source, note, mp, "note")
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, value, mp, "value")
+            if fallback == {
+                .Value(value) -> semindex_expr_child(&db, &ctx, names, program, source, value, mp, "fallback")
+                .Block(body, value, _) -> {
+                    semindex_structural_slot(&db, &ctx, "fallback_body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                        semindex_collect_stmts(&db, &ctx, names, program, source, body, mp)
+                    })
+                    if value == .Val(value) -> semindex_expr_child(&db, &ctx, names, program, source, value, mp, "fallback")
+                }
+                .Panic(_, args) -> semindex_structural_slot(&db, &ctx, "fallback_args", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                    loop arg in args -> semindex_collect_expr(&db, &ctx, names, program, source, arg.expr, mp)
+                })
+                .Return(value, _) -> { if value == .Val(value) -> semindex_expr_child(&db, &ctx, names, program, source, value, mp, "fallback") }
+                .Break(_) -> {}
+                .Continue(_) -> {}
+                .BreakLabel(name, span) -> semindex_collect_loop_label_ref(&db, ctx, names, name, span, mp)
+                .ContinueLabel(name, span) -> semindex_collect_loop_label_ref(&db, ctx, names, name, span, mp)
+            }
+        }
+        .PatternTest(subject, _, _) -> semindex_expr_child(&db, &ctx, names, program, source, subject, mp, "subject")
+        .Lambda(lambda) -> {
+            loop param in lambda.params -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "param", param.name), name: param.name, def_span: param.name_span, module_path: mp, kind: SymKind.Param{ty: param.ty ?? Type.Int}})
+            if lambda.body == {
+                .Expr(value) -> semindex_expr_child(&db, &ctx, names, program, source, value, mp, "body")
+                .Block(body) -> semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                    loop stmt in body {
+                        if stmt == {
+                            .Val(binding) -> semindex_collect_binding(&db, &ctx, names, program, source, binding, mp)
+                            else -> semindex_collect_expr_stmt(&db, &ctx, names, program, source, stmt, mp)
+                        }
+                    }
+                })
+            }
+        }
+        .CallValue(callee, args, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, callee, mp, "callee")
+            semindex_collect_call_inlay_hints(&db, args, mp)
+            semindex_structural_slot(&db, &ctx, "args", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop arg in args -> semindex_collect_expr(&db, &ctx, names, program, source, arg.expr, mp)
+            })
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            semindex_expr_child(&db, &ctx, names, program, source, cond, mp, "condition")
+            semindex_structural_slot(&db, &ctx, "then_body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop stmt in then_body {
+                    if stmt == {
+                        .Val(binding) -> semindex_collect_binding(&db, &ctx, names, program, source, binding, mp)
+                        else -> semindex_collect_expr_stmt(&db, &ctx, names, program, source, stmt, mp)
+                    }
+                }
+            })
+            semindex_expr_child(&db, &ctx, names, program, source, then_value, mp, "then_value")
+            semindex_structural_slot(&db, &ctx, "else_body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop stmt in else_body {
+                    if stmt == {
+                        .Val(binding) -> semindex_collect_binding(&db, &ctx, names, program, source, binding, mp)
+                        else -> semindex_collect_expr_stmt(&db, &ctx, names, program, source, stmt, mp)
+                    }
+                }
+            })
+            semindex_expr_child(&db, &ctx, names, program, source, else_value, mp, "else_value")
+        }
+        .ComptimeName(name, span, _) -> {
+            if semindex_comptime_origin_reference(name, span, source) -> &db.refs.push(semindex_scoped_ref(&db, ctx, names, "origin", span, mp))
+        }
+        .Int(_, _, _, _) -> {}
+        .Float(_, _, _, _) -> {}
+        .Bool(_, _) -> {}
+        .Unit(_) -> {}
+        .Char(_, _) -> {}
+        .Absent(_) -> {}
+        .ReduceMarker(_, _) -> {}
+        .Todo(_, _) -> {}
+        .NoElse(_) -> {}
+        .UnitLit(_, _, _, _, _, _) -> {}
+        .StrMatchLit(_, _) -> {}
+        .BinMatchLit(_, _) -> {}
+        .Paren(inner, _) -> semindex_expr_child(&db, &ctx, names, program, source, inner, mp, "inner")
+    }
+    if structural_id != None -> _ := &ctx.structural_parents.pop()
+}
+
+// Lambda/if expression bodies intentionally visit only Val, Expr and DeferClose,
+// exactly Rust collect_expr_stmt, not the full statement walker.
+pub fn semindex_collect_expr_stmt(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
+    if stmt == {
+        .Expr(expr) -> semindex_collect_expr(&db, &ctx, names, program, source, expr, mp)
+        .DeferClose(close, _) -> semindex_collect_expr(&db, &ctx, names, program, source, close, mp)
+        else -> {}
+    }
+}

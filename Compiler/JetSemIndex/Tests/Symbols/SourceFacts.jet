@@ -1,0 +1,92 @@
+// S15 independent algorithm claims, not checked-index/source-scope production.
+// S14 Tests/Symbols/Build.jet retains the COMPLETE original semindex52–362 /
+// 612–798 + REPL receiver-alias/binding-shadow fixtures unregistered until C4.
+
+#Test("semantic_source_docs_select_adjacent_summary_and_ordered_examples") {
+    source :: "/// ignored earlier\nconst old\n///\n/// Example: first()\n/// Résumé 世界.\n/// later paragraph\n/// Example: second(\"é\")\n    fn score()\n"
+    offset :: "/// ignored earlier\nconst old\n///\n/// Example: first()\n/// Résumé 世界.\n/// later paragraph\n/// Example: second(\"é\")\n    ".bytes().len()
+    docs :: semantic_source_docs(source, offset)
+    assert_eq(docs.summary, "Résumé 世界.")
+    assert_eq(docs.examples, [String]{"first()", "second(\"é\")"})
+}
+#Test("semantic_source_docs_stop_at_blank_and_non_doc_lines") {
+    separated :: "/// unrelated\n\n\nfn run()"
+    assert_eq(semantic_source_docs(separated, separated.bytes().len() - 8).summary, "")
+    single_blank :: "/// attached by Rust lines\n\nfn run()"
+    assert_eq(semantic_source_docs(single_blank, single_blank.bytes().len() - 8).summary, "attached by Rust lines")
+    ordinary :: "/// unrelated\n// ordinary\nfn run()"
+    assert_eq(semantic_source_docs(ordinary, ordinary.bytes().len() - 8).examples.len(), 0)
+    same_line :: "/// not a leading doc fn run()"
+    assert_eq(semantic_source_docs(same_line, same_line.bytes().len()).summary, "")
+    assert_eq(semantic_source_docs("", 0).summary, "")
+}
+#Test("semantic_source_docs_preserve_crlf_unicode_and_empty_examples") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("valid CR")
+    source :: "  /// α{cr}\n\t/// Example: {cr}\n /// Example: 界(){cr}\nfn x()"
+    docs :: semantic_source_docs(source, source.bytes().len() - 6)
+    assert_eq(docs.summary, "α")
+    assert_eq(docs.examples, [String]{"", "界()"})
+    examples_only :: "/// Example: only()\nfn x()"
+    assert_eq(semantic_source_docs(examples_only, examples_only.bytes().len() - 6).summary, "")
+    assert_eq(semantic_source_docs(examples_only, examples_only.bytes().len() + 30).examples, [String]{"only()"})
+}
+#Test("semantic_marker_spelling_uses_utf8_byte_spans_and_trim") {
+    source :: "é😀 \t世界 \nrest"
+    assert_eq(semantic_marker_span_source(source, Span{start: 6, end: 16}), "世界")
+    assert_eq(semantic_marker_span_source(source, Span{start: 8, end: 14}), "世界")
+    assert_eq(semantic_marker_span_source(source, Span{start: 7, end: 8}), "…")
+    assert_eq(semantic_marker_span_source(source, Span{start: 6, end: 6}), "…")
+    assert_eq(semantic_marker_span_source(source, Span{start: 9, end: 14}), "…")
+    assert_eq(semantic_marker_span_source(source, Span{start: 14, end: 8}), "…")
+    assert_eq(semantic_marker_span_source(source, Span{start: 0, end: 100}), "…")
+}
+#Test("semantic_checked_text_owner_leaf_preserves_qualified_and_empty_names") {
+    assert_eq(semantic_type_leaf("api.Pattern"), "Pattern")
+    assert_eq(semantic_type_leaf("a.b.Pattern"), "Pattern")
+    assert_eq(semantic_type_leaf("Pattern"), "Pattern")
+    assert_eq(semantic_type_leaf("a."), "")
+    assert_eq(semantic_type_leaf(""), "")
+}
+fn semantic_source_test_node(id: Int, class: String, start: Int, end: Int) -> StructuralNode Never! {
+    StructuralNode{id: id, parent: None, slot: "root", slot_kind: .List, ordinal: 0, class: class, shape: "", module_path: "authored/../main.jet", span: SourceSpan{start: start, end: end}}
+}
+#Test("semantic_smallest_enclosing_prefers_size_then_structural_id") {
+    nodes :: [StructuralNode]{semantic_source_test_node(4, "item", 0, 100), semantic_source_test_node(8, "expr", 10, 30), semantic_source_test_node(3, "stmt", 10, 30), semantic_source_test_node(1, "item", 5, 60)}
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{0, 1, 2, 3}, 15, 20, false), Val(3))
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{0, 1, 2, 3}, 15, 20, true), Val(1))
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{1}, 10, 30, false), Val(8))
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{1}, 9, 30, false), None)
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{1}, 10, 31, false), None)
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{}, 15, 20, false), None)
+}
+#Test("semantic_smallest_enclosing_retains_reversed_query_and_saturating_size") {
+    nodes :: [StructuralNode]{semantic_source_test_node(9, "item", 0, 10), semantic_source_test_node(7, "expr", 8, 5)}
+    // A reversed definition start can follow the enclosing node's end.
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{0, 1}, 12, 4, false), Val(7))
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{0, 1}, 12, 4, true), Val(9))
+    assert_eq(semantic_smallest_enclosing(nodes, [Int]{0}, 10, 10, false), Val(9))
+}
+
+// Independent real canonical conversion consumer, UNREGISTERED/UNRUN until
+// CP-AST numeric law/CP-LANGUAGE-CATALOG and numeric checker publish. These
+// are NOT the original checked UnitFamily/affine fixtures retained by S14.
+pub fn semantic_s15_canonical_conversion_claims() Never! {
+    symbols := [SemanticSymbol]{}
+    semantic_distinct_conversion_symbols("UserID", Type.Int, false, None, "authored/../main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, &symbols)
+    found := false
+    loop symbol in symbols {
+        if symbol.name == "from_u8" {
+            assert_eq(symbol.signature, "UserID.from_u8(value: U8) -> UserID")
+            assert_eq(symbol.module_path, "authored/../main.jet")
+            found = true
+        }
+    }
+    assert(found)
+    ranged := [SemanticSymbol]{}
+    semantic_distinct_conversion_symbols("Byte", Type.Int, true, None, "main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, &ranged)
+    loop symbol in ranged -> assert(symbol.signature.ends_with(" !String"))
+    text_symbols := [SemanticSymbol]{}
+    semantic_distinct_conversion_symbols("Pattern", Type.String, false, Val("PatternError"), "main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, &text_symbols)
+    assert_eq(text_symbols.len(), 1)
+    assert_eq(text_symbols[0].signature, "Pattern.from_string(value: String) -> Pattern\nfailure: PatternError (CheckedText)")
+}

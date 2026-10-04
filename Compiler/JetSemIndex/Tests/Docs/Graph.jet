@@ -1,0 +1,300 @@
+// Independent source-byte/identity/record-order claims. These do not fabricate
+// a DocGraph or a checked compiler product. Complete original jetdoc consumer
+// oracles below stay UNREGISTERED until C4/S8 and S22/S23/S24 are composed.
+
+// Text-to-native conversion is fixture ingress only.
+fn doc_test_os_path(text: String) -> doc_os_path.OsPath? Never! {
+    Val(doc_os_path.from_text(text, doc_os_path.PathPlatform.Unix))
+}
+
+#Test("doc_source_identity_preserves_utf8_bytes_and_byte_columns") {
+    carriage_return :: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return")
+    source :: "é\n  λ{carriage_return}\nlast"
+    location :: doc_source_for(doc_test_os_path("/work/project"), doc_test_os_path("/work/project/src/main.jet"), "display", source, Span{start: 5, end: 7})
+    assert_eq(location.path, "src/main.jet")
+    assert_eq(location.start, 5)
+    assert_eq(location.end, 7)
+    assert_eq(location.line, 2)
+    assert_eq(location.column, 3)
+    assert_eq(location.link, "src/main.jet#L2")
+    // EOF and a reversed end clamp to the selected start, not scalar len.
+    clipped :: doc_source_for(doc_test_os_path("/work/project"), doc_test_os_path("/work/project/src/main.jet"), "display", source, Span{start: 200, end: 0})
+    assert_eq(clipped.start, 13)
+    assert_eq(clipped.end, 13)
+    assert_eq(clipped.line, 3)
+    assert_eq(clipped.column, 5)
+    line := 0
+    column := 0
+    doc_line_column(source, 2, &line, &column)
+    assert_eq(line, 1)
+    assert_eq(column, 3)
+    assert_eq(doc_line_offset(source, 1), 0)
+    assert_eq(doc_line_offset(source, 2), 3)
+    assert_eq(doc_line_offset(source, 3), 9)
+    assert_eq(doc_line_offset(source, 99), 13)
+    empty :: doc_source_for(doc_test_os_path("/work"), doc_test_os_path("/work/empty.jet"), "empty", "", Span{start: 0, end: 0})
+    assert_eq(empty.line, 1)
+    assert_eq(empty.column, 1)
+}
+
+#Test("doc_stable_identity_uses_component_prefix_and_alias_not_checkout") {
+    assert_eq(doc_stable_root(doc_test_os_path("/checkout/one")), ".")
+    assert_eq(doc_stable_root(doc_test_os_path("/other/checkout")), ".")
+    assert_eq(doc_stable_module_path(doc_test_os_path("/project"), doc_test_os_path("/project/src/main.jet"), "ignored"), "src/main.jet")
+    assert_eq(doc_stable_module_path(doc_test_os_path("/project/"), doc_test_os_path("/project/src/main.jet"), "ignored"), "src/main.jet")
+    assert_eq(doc_stable_module_path(doc_test_os_path("/project"), doc_test_os_path("/project-other/main.jet"), "foreign\\main.jet"), "foreign/main.jet")
+    assert_eq(doc_stable_module_path(doc_test_os_path("/project"), doc_test_os_path("/project"), "logical.jet"), "logical.jet")
+    assert_eq(doc_stable_module_path(doc_test_os_path("/"), doc_test_os_path("/main.jet"), "ignored"), "main.jet")
+    assert_eq(doc_module_name("src/main.jet", "canonical-alias", doc_os_path.PathPlatform.Unix), "canonical-alias")
+    assert_eq(doc_module_name("src/main.jet", "", doc_os_path.PathPlatform.Unix), "main")
+    assert_eq(doc_module_name("src/a.b.jet", "", doc_os_path.PathPlatform.Unix), "a.b")
+    assert_eq(doc_module_name("src/.hidden", "", doc_os_path.PathPlatform.Unix), ".hidden")
+    assert_eq(doc_module_name("src/main.jet/.", "", doc_os_path.PathPlatform.Unix), "main")
+    assert_eq(doc_module_name("src/..", "", doc_os_path.PathPlatform.Unix), "src/..")
+    assert_eq(doc_module_name(".", "", doc_os_path.PathPlatform.Unix), ".")
+    assert_eq(doc_qualified("", "Thing"), "Thing")
+    assert_eq(doc_qualified("Outer", "Thing"), "Outer::Thing")
+    first :: doc_source_for(doc_test_os_path("/checkout/one"), doc_test_os_path("/checkout/one/src/main.jet"), "unused", "α\nfn run() {{}}", Span{start: 3, end: 14})
+    second :: doc_source_for(doc_test_os_path("/other/checkout"), doc_test_os_path("/other/checkout/src/main.jet"), "unused", "α\nfn run() {{}}", Span{start: 3, end: 14})
+    assert_eq(first, second)
+}
+
+#Test("doc_native_prefix_is_checked_before_lossy_display_and_slash_output") {
+    windows_root :: Val(doc_os_path.from_text("C:\\project", doc_os_path.PathPlatform.Windows))
+    windows_file :: Val(doc_os_path.from_text("c:/project/src\\main.jet", doc_os_path.PathPlatform.Windows))
+    assert_eq(doc_stable_module_path(windows_root, windows_file, "ignored"), "src/main.jet")
+    assert_eq(doc_stable_module_path(windows_root, Val(doc_os_path.from_text("C:\\project-other\\main.jet", doc_os_path.PathPlatform.Windows)), "foreign\\main.jet"), "foreign/main.jet")
+    assert_eq(doc_stable_module_path(windows_root, doc_test_os_path("C:/project/main.jet"), "platform-mismatch"), "platform-mismatch")
+    // Distinct invalid native bytes have identical lossy displays. Comparing
+    // those displays before strip_prefix would incorrectly accept the outsider.
+    root :: Val(doc_os_path.from_encoded([U8]{U8{47}, U8{112}, U8{47}, U8{255}}, doc_os_path.PathPlatform.Unix))
+    within :: Val(doc_os_path.from_encoded([U8]{U8{47}, U8{112}, U8{47}, U8{255}, U8{47}, U8{97}, U8{46}, U8{106}, U8{101}, U8{116}}, doc_os_path.PathPlatform.Unix))
+    outside :: Val(doc_os_path.from_encoded([U8]{U8{47}, U8{112}, U8{47}, U8{254}, U8{47}, U8{97}, U8{46}, U8{106}, U8{101}, U8{116}}, doc_os_path.PathPlatform.Unix))
+    assert_eq(doc_stable_module_path(root, within, "ignored"), "a.jet")
+    assert_eq(doc_stable_module_path(root, outside, "native-byte-mismatch"), "native-byte-mismatch")
+    assert_eq(doc_stable_module_path(doc_test_os_path("/project"), doc_test_os_path("/project/dir\\name.jet"), "ignored"), "dir/name.jet")
+    stable :: doc_stable_module_path(doc_test_os_path("/project"), doc_test_os_path("/project/dir\\name.jet"), "ignored")
+    assert_eq(doc_module_name(stable, "", doc_os_path.PathPlatform.Unix), "name")
+    assert_eq(doc_module_name("C:/project/main.jet/.", "", doc_os_path.PathPlatform.Windows), "main")
+    assert_eq(doc_module_name("C:", "", doc_os_path.PathPlatform.Windows), "C:")
+}
+
+#Test("doc_virtual_sources_and_missing_root_preserve_loaded_display_without_cwd") {
+    assert_eq(doc_stable_root(None), ".")
+    assert_eq(doc_stable_module_path(doc_test_os_path("/project"), None, "Core/math"), "Core/math")
+    assert_eq(doc_stable_module_path(None, doc_test_os_path("/project/main.jet"), "loaded/main.jet"), "loaded/main.jet")
+    assert_eq(doc_stable_module_path(None, None, "Core\\math"), "Core/math")
+    location :: doc_source_for(None, None, "Core/math", "/// Core module.\n", Span{start: 0, end: 0})
+    assert_eq(location.path, "Core/math")
+    assert_eq(location.link, "Core/math#L1")
+    assert_eq(doc_module_name("Core/math", "math", doc_os_path.PathPlatform.Unix), "math")
+    assert_eq(doc_module_name("Core/math", "", doc_os_path.PathPlatform.Unix), "math")
+    assert_eq(doc_module_name("Core/math/.", "", doc_os_path.PathPlatform.Unix), "math")
+}
+
+#Test("doc_declaration_spans_use_utf8_bytes_and_original_brace_whitespace_rules") {
+    source :: "é\n  pub\tfn λ() 　-> Int {{ 42 }}"
+    assert_eq(doc_declaration_text(source, Span{start: 3, end: 200}), "pub fn λ() -> Int")
+    assert_eq(doc_declaration_text("fn run()\n  -> 7", Span{start: 0, end: 200}), "fn run() -> 7")
+    assert_eq(doc_declaration_text("abc", Span{start: 200, end: 0}), "")
+    // Rust split('{') is intentionally not a string-aware parser.
+    assert_eq(doc_declaration_text("value :: \"{{\"", Span{start: 0, end: 200}), "value :: \"")
+}
+
+fn doc_test_retained_item(module_path: String, name: String, kind: String, start: Int, summary: String) -> DocItem Never! {
+    DocItem{kind: kind, name: name, qualified_name: name, module_path: module_path,
+        public: true, package_public: false, signature: "", failure_contract: None,
+        failure_source: None, summary: summary, examples: [String]{}, markers: [String]{},
+        source: doc_source_for(doc_test_os_path("/project"), doc_test_os_path("/project/main.jet"), "main", "123456789", Span{start: start, end: start}),
+    }
+}
+#Test("doc_rendering_order_keeps_all_tiebreaks_and_authored_equal_keys") {
+    items := [DocItem]{
+        doc_test_retained_item("z.jet", "A", "module", 0, "other module"),
+        doc_test_retained_item("a.jet", "B", "module", 0, "other name"),
+        doc_test_retained_item("a.jet", "A", "function", 0, "function"),
+        doc_test_retained_item("a.jet", "A", "field", 8, "later field"),
+        doc_test_retained_item("a.jet", "A", "field", 2, "first tie"),
+        doc_test_retained_item("a.jet", "A", "field", 2, "second tie"),
+        doc_test_retained_item("a.jet", "A", "struct", 9, "type"),
+    }
+    doc_sort_items(&items)
+    assert_eq(items[0].summary, "type")
+    assert_eq(items[1].summary, "first tie")
+    assert_eq(items[2].summary, "second tie")
+    assert_eq(items[3].summary, "later field")
+    assert_eq(items[4].summary, "function")
+    assert_eq(items[5].summary, "other name")
+    assert_eq(items[6].summary, "other module")
+    location :: doc_source_for(doc_test_os_path("/project"), doc_test_os_path("/project/main.jet"), "main", "", Span{start: 0, end: 0})
+    modules := [DocModule]{
+        DocModule{name: "z", path: "a.jet", public: false, summary: "", source: location},
+        DocModule{name: "a", path: "z.jet", public: true, summary: "", source: location},
+        DocModule{name: "a", path: "a.jet", public: true, summary: "", source: location},
+    }
+    doc_sort_modules(&modules)
+    assert_eq(modules[0].name, "a")
+    assert_eq(modules[1].name, "z")
+    assert_eq(modules[2].path, "z.jet")
+    impls := [DocImpl]{
+        DocImpl{kind: "trait_impl", type_name: "A", trait_name: Val("Z"), module_path: "a.jet", public: true, methods: [String]{}, source: location},
+        DocImpl{kind: "inherent_impl", type_name: "A", trait_name: None, module_path: "a.jet", public: true, methods: [String]{}, source: location},
+        DocImpl{kind: "trait_impl", type_name: "A", trait_name: Val("B"), module_path: "a.jet", public: true, methods: [String]{}, source: location},
+    }
+    doc_sort_impls(&impls)
+    assert_eq(impls[0].trait_name, None)
+    assert_eq(impls[1].trait_name, Val("B"))
+    assert_eq(impls[2].trait_name, Val("Z"))
+    tests := [DocTest]{
+        DocTest{module_path: "z.jet", line: 1, setup: [String]{"other"}, expectations: [DocExpectation]{}, source: location},
+        DocTest{module_path: "a.jet", line: 8, setup: [String]{"later"}, expectations: [DocExpectation]{}, source: location},
+        DocTest{module_path: "a.jet", line: 2, setup: [String]{"first"}, expectations: [DocExpectation]{}, source: location},
+    }
+    doc_sort_tests(&tests)
+    assert_eq(tests[0].setup[0], "first")
+    assert_eq(tests[1].setup[0], "later")
+    assert_eq(tests[2].setup[0], "other")
+}
+
+// Original tests/jetdoc.rs:56–301. Inputs here MUST be actual checked fixture
+// outputs from the owning CLI command/DocGraph, not hand-filled graph literals.
+// The C4 runner loads the existing tests/fixtures/jetdoc/{run,undocumented,
+// ordered,package}.jet and compares actual CLI bytes to the existing six
+// goldens; no duplicate golden/model files or replacement literal snapshots.
+// CLI Doctest owns execution, CLI Doc owns filesystem/status/diagnostic runs.
+
+fn doc_test_json_and_local_outputs_are_stable_and_complete(first_ok: Bool, second_ok: Bool, first: String, second: String, local_ok: Bool, html: String, markdown: String) Never! {
+    assert(first_ok)
+    assert(second_ok)
+    assert_eq(first, second)
+    loop needle in [String]{
+        "\"schema_version\":1", "\"modules\"", "\"kind\":\"struct\"", "\"kind\":\"function\"",
+        "\"kind\":\"marker\"", "\"kind\":\"protocol\"", "\"impls\"", "\"kind\":\"trait_impl\"",
+        "\"doctests\"", "answer()", "\"failure_contract\":\"Int\"", "\"failure_source\":\"implicit default !Err\"",
+        "\"examples\":[\"`answer()`\"]", "\"expression\":\"1 + 1\",\"expected\":\"2\"", "\"link\":\"run.jet#L35\"", "run.jet#L",
+    } -> assert(first.contains(needle))
+    doc_test_assert_item_order(first, [String]{"Checked", "Choice", "Displayable", "Displayable::display", "Payment", "Widget", "answer"})
+    assert(local_ok)
+    assert(html.contains("Jet Documentation"))
+    assert(html.contains("<h4>Examples</h4>"))
+    assert(html.contains("<li><code>`answer()`</code></li>"))
+    assert(html.contains("1 + 1 // =&gt; 2"))
+    assert(html.contains("../run.jet#L35"))
+    assert(html.contains("run.jet#L"))
+    assert(markdown.contains("Examples:\n\n- `answer()`"))
+    assert(markdown.contains("failure: Int (implicit default Err!)"))
+    assert(markdown.contains("## Doctests"))
+    assert(markdown.contains("1 + 1 // => 2"))
+    assert(markdown.contains("[Source](../run.jet#L35)"))
+    assert(markdown.contains("run.jet#L"))
+}
+fn doc_test_assert_item_order(json_text: String, names: [String]) Never! {
+    previous := -1
+    loop name in names {
+        needle :: "\"qualified_name\":\"{name}\""
+        assert(json_text.contains(needle))
+        pieces :: json_text.split(needle)
+        position :: pieces[0].len()
+        assert(previous < position)
+        previous = position
+    }
+}
+fn doc_test_undocumented_public_api_has_a_command_snapshot(ok: Bool, stdout: String, stderr: String, entry: String, snapshot: String) Never! {
+    assert(!ok)
+    rendered :: "{stdout}{stderr}".replace(entry, "tests/fixtures/jetdoc/undocumented.jet")
+    // snapshot is actual tests/ui_lint/undocumented_public_api.warn bytes.
+    assert_eq(rendered, snapshot)
+}
+fn doc_test_fixture_outputs_match_stable_goldens(json_ok: Bool, json_text: String, local_ok: Bool, markdown: String, html: String, golden_json: String, golden_markdown: String, golden_html: String) Never! {
+    assert(json_ok)
+    assert_eq(json_text, golden_json)
+    assert(local_ok)
+    assert_eq(markdown, golden_markdown)
+    assert_eq(html, golden_html)
+}
+fn doc_test_package_outputs_match_stable_goldens(json_ok: Bool, json_text: String, local_ok: Bool, markdown: String, html: String, golden_json: String, golden_markdown: String, golden_html: String) Never! {
+    assert(json_ok)
+    assert_eq(json_text, golden_json)
+    assert(local_ok)
+    assert_eq(markdown, golden_markdown)
+    assert_eq(html, golden_html)
+}
+fn doc_test_package_fixture_rejects_order_and_content_drift(first_ok: Bool, second_ok: Bool, first: String, second: String) Never! {
+    assert(first_ok)
+    assert(second_ok)
+    assert_eq(first, second)
+    loop needle in [String]{
+        "\"summary\":\"Alpha API.\"", "\"signature\":\"pub fn alpha() -> Int -> 6\\nfailure: Int (implicit default !Err)\"",
+        "\"summary\":\"Zulu API.\"", "\"signature\":\"pub fn zulu() -> Int -> 7\\nfailure: Int (implicit default !Err)\"",
+        "\"link\":\"ordered.jet#L7\"", "\"link\":\"ordered.jet#L4\"",
+    } -> assert(first.contains(needle))
+    doc_test_assert_item_order(first, [String]{"alpha", "run", "zulu"})
+}
+fn doc_test_nested_state_source() -> String Never! {
+    "pub struct Door {{ state {{ Closed, Open }} }}\nfn run() {{}}\n"
+}
+fn doc_test_nested_state_docs_stay_on_the_struct_item(ok: Bool, json_text: String) Never! {
+    assert(ok)
+    assert(json_text.contains("\"kind\":\"struct\""))
+    assert(json_text.contains("\"signature\":\"struct Door {{ state {{ Closed, Open }} }}\""))
+    assert(!json_text.contains("\"kind\":\"state\""))
+}
+fn doc_test_checked_text_source() -> String Never! {
+    "#PubFile\n#Error\nenum PatternError {{ Bad }}\n\n/// A checked pattern.\nPattern :: distinct String\n\nimpl Pattern.CheckedText {{\n    type Error = PatternError\n\n    fn check(text: String) PatternError! -[]> {{\n        return\n    }}\n\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"\"\n    }}\n}}\n\nfn run() {{}}\n"
+}
+fn doc_test_checked_text_contract_is_rendered_in_generated_docs(json_ok: Bool, json_text: String, local_ok: Bool, markdown: String, html: String) Never! {
+    assert(json_ok)
+    assert(json_text.contains("Pattern :: distinct String"))
+    assert(json_text.contains("implements CheckedText"))
+    assert(json_text.contains("type Error = PatternError"))
+    assert(json_text.contains("encode_hole"))
+    assert(local_ok)
+    loop output in [String]{markdown, html} {
+        assert(output.contains("Pattern :: distinct String"))
+        assert(output.contains("implements CheckedText"))
+        assert(output.contains("type Error = PatternError"))
+        assert(output.contains("encode_hole"))
+    }
+}
+// Direct undocumented_public acceptance on the real undocumented.jet graph.
+// It must select only the public summary-empty function, preserving its source.
+fn doc_test_undocumented_public_checked_graph(graph: DocGraph) Never! {
+    count := 0
+    loop window in graph.undocumented_public() {
+        assert_eq(window[0].name, "undocumented")
+        assert_eq(window[0].source.line, 3)
+        assert_eq(window[0].source.path, "undocumented.jet")
+        count += 1
+    }
+    assert_eq(count, 1)
+}
+
+// Integration assertion consumes the real retained checked product. It is
+// intentionally unregistered until the canonical C4/S8 fixture runner composes
+// it; never substitute an empty index or hand-built registration/name tables.
+// This also exercises generated Core rows without physical files and source
+// table / registration order differences through the public builder.
+fn doc_test_checked_graph_uses_only_original_loaded_membership(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?, platform: doc_os_path.PathPlatform, index: SemIndex) Never! {
+    graph :: build_doc_graph(registration, module_sources, loaded_module_rows, root, platform, index)
+    assert_eq(graph.modules.len(), loaded_module_rows.len())
+    expected := [String:Int]{}
+    loop source_index in loaded_module_rows {
+        loaded :: module_sources[source_index]
+        path :: doc_stable_module_path(root, loaded.physical_path, loaded.display)
+        if !expected.has_key(path) -> expected[path] = 0
+        expected[path] += 1
+        found := false
+        loop module in graph.modules {
+            if module.path != path || module.name != doc_module_name(path, loaded.alias, platform) -> next
+            if module.public != loaded.pub_file || module.summary != doc_leading_summary(loaded.loaded_source) -> next
+            assert_eq(module.source.link, "{path}#L1")
+            found = true
+        }
+        assert(found)
+    }
+    loop module in graph.modules {
+        assert(expected.has_key(module.path))
+        assert(expected[module.path] > 0)
+        expected[module.path] -= 1
+    }
+}

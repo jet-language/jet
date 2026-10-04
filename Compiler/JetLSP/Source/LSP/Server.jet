@@ -1,0 +1,146 @@
+// Source/LSP/Server.rs:82–141,693–807. DiagnosticState is the sole
+// document/publication owner. Driver supplies the authorized query snapshot;
+// constructing a server never acquires ambient source or workspace authority.
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.files.runtime.kernel_path_components as lsp_loop_path
+use core.term as lsp_loop_term
+use core.encoding.[DataTree]
+use jet_driver.[JetDriverCompilerQueries, JetDriverQuerySnapshot, JetDriverCheckedQuery]
+use jet_lexer.[Token, lex]
+use jet_pkg_model.[pkg_mask_inline_package_source]
+
+// A request-local version witness, not a second checked bundle/cache.
+pub struct LSPCheckedRequest {
+    pub checked: Shared<JetDriverCheckedQuery>
+    pub checked_versions: [String:Int]
+}
+
+pub struct LSPServer {
+    pub diagnostic_state: LSPDiagnosticState
+    pub queries: JetDriverCompilerQueries
+    pub snapshot: JetDriverQuerySnapshot
+    // Captured build-source metadata for core-library.md links, NOT cwd.
+    pub repository_root: OSPath
+    pub workspace_roots: [OSPath]
+    pub workspace_folders: Bool
+    pub editor_host: EditorHostAdapter
+    pub shutdown: Bool
+
+    pub fn new(snapshot: ^JetDriverQuerySnapshot, repository_root: ^OSPath) -> LSPServer Never! {
+        LSPServer{
+            diagnostic_state: LSPDiagnosticState.new(),
+            queries: JetDriverCompilerQueries.new(),
+            snapshot: snapshot,
+            repository_root: repository_root,
+            workspace_roots: [OSPath]{},
+            workspace_folders: false,
+            editor_host: EditorHostAdapter.new(),
+            shutdown: false,
+        }
+    }
+
+    pub fn check_with_bundle(self, doc: LSPDocument) -[FS, Env]> LSPCheckedRequest Never! {
+        checked :: lsp_check_with_bundle(self.diagnostic_state, &self.queries, self.snapshot, doc)
+        versions :: {
+            permit :: checked.guard_read()
+            lsp_checked_document_versions(self.diagnostic_state, permit.value.result, self.snapshot.cwd.platform)
+        }
+        LSPCheckedRequest{checked: checked, checked_versions: versions}
+    }
+
+    pub fn lex(self, doc: LSPDocument) -> Shared<[Token]> {
+        lsp_lex_document(&self.queries, self.snapshot.cwd, doc)
+    }
+}
+
+// Rust136–141: only a successfully identified inline package bypasses Q1's
+// resident token query. Package owns masking and Lexer owns actual tokenization.
+pub fn lsp_lex_document(queries: &JetDriverCompilerQueries, cwd: OSPath, doc: LSPDocument) -> Shared<[Token]> {
+    if pkg_mask_inline_package_source(doc.text) == .Ok(masked) {
+        if masked.block != None -> return shared lex(masked.source.bytes()).tokens
+    }
+    &queries.lex_text(cwd, doc.path, doc.text)
+}
+
+pub fn lsp_apply_content_change(doc: &LSPDocument, change: DataTree) -> Bool Never! {
+    if change != .Object(_) -> return false
+    text :: change.field("text") ?? return false
+    if text == {
+        .Text(replacement) -> {
+            length := Int?{None}
+            if change.field("rangeLength") == .Val(value) {
+                length = Val(lsp_uinteger(value) ?? return false)
+            }
+            if change.field("range") == {
+                .Val(value) -> {
+                    range :: lsp_range_from_json(value) ?? return false
+                    return &doc.apply_range_edit(range, length, replacement)
+                }
+                None -> {
+                    if length != None -> return false
+                    &doc.replace_text(~replacement)
+                    return true
+                }
+            }
+        }
+        else -> return false
+    }
+}
+
+// The transaction owns only the edited text. Rejecting any edit keeps the
+// resident document/version intact; sequential edits see earlier edits.
+// A successful empty change list still advances the version and marks dirty.
+pub fn lsp_update_document(state: &LSPDiagnosticState, params: DataTree?, is_open: Bool, platform: core.files.runtime.kernel_path_components.PathPlatform) -> String? Never! {
+    value :: params ?? return None
+    document :: value.field("textDocument") ?? return None
+    uri_value :: document.field("uri") ?? return None
+    if uri_value == {
+        .Text(uri) -> {
+            version_value :: document.field("version") ?? return None
+            if version_value == {
+                .Int(version) -> {
+                    if version < -2147483648 || version > 2147483647 -> return None
+                    if is_open {
+                        text_value :: document.field("text") ?? return None
+                        if text_value == {
+                            .Text(text) -> {
+                                path :: core.files.runtime.kernel_path_components.from_text(lsp_uri_to_path(uri, platform == core.files.runtime.kernel_path_components.PathPlatform.Windows), platform)
+                                state.docs[uri] = LSPDocument.new(path, ~text, version)
+                            }
+                            else -> return None
+                        }
+                    } else {
+                        changes :: value.field("contentChanges") ?? return None
+                        if changes == {
+                            .Array(rows) -> {
+                                current :: state.docs.get(uri) ?? return None
+                                if version <= current.version -> return None
+                                updated := LSPDocument.new(~current.path, ~current.text, version)
+                                loop change in rows {
+                                    if !lsp_apply_content_change(&updated, change) -> return None
+                                }
+                                state.docs[uri] = updated
+                                state.dirty[uri] = true
+                            }
+                            else -> return None
+                        }
+                    }
+                    return Val(~uri)
+                }
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+}
+
+pub fn lsp_publish_after_open(state: &LSPDiagnosticState, queries: &JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, params: DataTree?, stdout: &lsp_loop_term.Stdout) -[IO, Time.Wait, FS, Env]> IOError! {
+    uri :: lsp_update_document(&state, params, true, snapshot.cwd.platform) ?? return
+    lsp_publish_document_diagnostics(&state, &queries, snapshot, uri, &stdout) ?? return Err(err)
+    // A failed actual write leaves existing dirtiness intact, exactly Rust767.
+    _ := &state.dirty.remove(uri)
+}
+
+pub fn lsp_publish_after_change(state: &LSPDiagnosticState, params: DataTree?, platform: core.files.runtime.kernel_path_components.PathPlatform) Never! {
+    _ := lsp_update_document(&state, params, false, platform)
+}

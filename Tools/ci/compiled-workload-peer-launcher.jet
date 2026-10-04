@@ -1,0 +1,468 @@
+// compiled-workload-peer-isolation-v1 policy, ported from the neighboring Rust
+// launcher. There is deliberately no ambient execution path.
+//
+// Native completion is gated by #4494: borrowed C SockFprog/pointer layouts,
+// variadic prctl, nullable no-runtime-entry signal callbacks, static raw
+// AtomicI32 release-store/acqrel-swap, and a pre-exec grouped child owner.
+// Core's canonical AppContainer owner is also required. No Rust include,
+// speculative native API, signal-unsafe callback, or path-only sandbox lives here.
+use core.files as peer_files
+use core.process as peer_process
+use core.sys as peer_sys
+use core.time as peer_time
+use core.sys.host.process_control as peer_posix
+use core.sys.host.linux_seccomp_imports as peer_seccomp
+use core.files.runtime.kernel_path_components as peer_paths
+use c.c as peer_os
+use core.term as peer_term
+use jet_foundation.[TEXT_NUL]
+
+PEER_ISOLATION_CONTRACT :: "compiled-workload-peer-isolation-v1"
+PEER_EXIT_UNSUPPORTED :: 78
+
+pub enum PeerNetworkPolicy { Disabled, LoopbackOnly }
+
+pub struct PeerInvocation {
+    pub task_id: String
+    pub root: String
+    pub cwd: String
+    pub network: PeerNetworkPolicy
+    pub command: String
+    pub args: [String]
+}
+
+#Error
+pub struct PeerLauncherError { pub message: String }
+fn peer_error(^message: String) -> PeerLauncherError Never! { PeerLauncherError{message: message} }
+
+// The canonical native IOError carrier retains io::Error::to_string in cause;
+// do not add Core's operation/resource presentation to Rust's exact messages.
+fn peer_io_cause(error: IOError) -> String Never! {
+    if error == {
+        .InvalidInput(context) -> context.cause ?? "{error}"
+        .NotFound(context) -> context.cause ?? "{error}"
+        .PermissionDenied(context) -> context.cause ?? "{error}"
+        .TimedOut(context) -> context.cause ?? "{error}"
+        .Cancelled(context) -> context.cause ?? "{error}"
+        .Closed(context) -> context.cause ?? "{error}"
+        .Protocol(context) -> context.cause ?? "{error}"
+        .Other(context) -> context.cause ?? "{error}"
+        .ResourceLimit(_) -> "{error}"
+    }
+}
+
+pub fn peer_fail(reason: String) -[IO, Exec]> Never Never! {
+    peer_term.eprint("compiled-workload-peer-launcher: {reason}")
+    peer_process.exit(PEER_EXIT_UNSUPPORTED)
+}
+
+pub fn peer_network_name(policy: PeerNetworkPolicy) -> String Never! {
+    if policy == .Disabled -> return "disabled"
+    "loopback-only"
+}
+
+fn peer_task_id_valid(value: String) -> Bool Never! {
+    if value.len() == 0 -> return false
+    loop b in value.bytes() {
+        if (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 46 || b == 95 || b == 45 -> next
+        return false
+    }
+    true
+}
+
+pub fn peer_parse_invocation(args: [String]) -[FS, Env]> PeerInvocation PeerLauncherError! {
+    if args.len() == 0 -> return Err(peer_error("missing execution arguments; use --contract for the capability probe"))
+    task_id := String?{None}
+    root := String?{None}
+    cwd := String?{None}
+    network := PeerNetworkPolicy?{None}
+    external_write := false
+    host := false
+    command := String?{None}
+    command_args := [String]{}
+    index := 0
+    separator := false
+    loop index < args.len() {
+        arg :: args[index]
+        if separator {
+            if command == .None -> command = Val(~arg) else -> &command_args.push(~arg)
+            index += 1
+            next
+        }
+        if arg == "--" {
+            separator = true
+            index += 1
+            next
+        }
+        if !arg.starts_with("--") -> return Err(peer_error("expected launcher option, found `{arg}`"))
+        option :: arg.slice(2..<arg.len())
+        name := ~option
+        inline := String?{None}
+        loop (at, scalar) in option {
+            if scalar == "=" {
+                name = option.slice(0..<at)
+                inline = Val(option.slice((at + 1)..<option.len()))
+                break
+            }
+        }
+        value := ""
+        // Unknown options do not consume a value, exactly as Rust's match.
+        if name == "contract" || name == "task-id" || name == "root" || name == "cwd" || name == "network" || name == "external-write" || name == "host" {
+            if inline == .Val(text) {
+                value = ~text
+            } else {
+                index += 1
+                if index >= args.len() -> return Err(peer_error("missing value for --{name}"))
+                value = ~args[index]
+            }
+        } else {
+            if name.starts_with("--") -> return Err(peer_error("unsupported launcher option `{name}`"))
+            return Err(peer_error("expected `--` before command, found `{name}`"))
+        }
+        if name == {
+            "contract" -> {
+                if value != PEER_ISOLATION_CONTRACT -> return Err(peer_error("unsupported contract `{value}`"))
+            }
+            "task-id" -> {
+                if !peer_task_id_valid(value) -> return Err(peer_error("invalid task id `{value}`"))
+                task_id = Val(^value)
+            }
+            "root" -> root = Val(^value)
+            "cwd" -> cwd = Val(^value)
+            "network" -> {
+                if value == "disabled" -> network = Val(.Disabled)
+                else if value == "loopback-only" -> network = Val(.LoopbackOnly)
+                else -> return Err(peer_error("unsupported network authority `{value}`"))
+            }
+            "external-write" -> {
+                if value != "disabled" -> return Err(peer_error("unsupported external-write authority `{value}`"))
+                external_write = true
+            }
+            "host" -> {
+                if value != "ambient" -> return Err(peer_error("unsupported host authority `{value}`"))
+                host = true
+            }
+        }
+        index += 1
+    }
+    if !separator -> return Err(peer_error("missing `--` command separator"))
+    task :: task_id ?? return Err(peer_error("missing --task-id"))
+    canonical_root :: peer_canonical_directory("root", root ?? return Err(peer_error("missing --root"))) ?? return Err(err)
+    canonical_cwd :: peer_canonical_directory("cwd", cwd ?? return Err(peer_error("missing --cwd"))) ?? return Err(err)
+    windows :: peer_sys.name() == "windows"
+    root_path :: peer_paths.from_text(canonical_root, peer_path_platform(windows))
+    if peer_paths.parent_span(root_path) == .None || canonical_root == "/" -> return Err(peer_error("root must not be a filesystem root"))
+    if !peer_contained(canonical_root, canonical_cwd, windows) -> return Err(peer_error("cwd `{canonical_cwd}` escapes root `{canonical_root}` after canonicalization"))
+    if !external_write -> return Err(peer_error("missing --external-write=disabled"))
+    if !host -> return Err(peer_error("missing --host=ambient"))
+    policy :: network ?? return Err(peer_error("missing --network authority"))
+    executable :: command ?? return Err(peer_error("missing command after `--`"))
+    if executable.len() == 0 || executable.contains(TEXT_NUL) -> return Err(peer_error("command is empty or contains NUL"))
+    loop argument in command_args {
+        if argument.contains(TEXT_NUL) -> return Err(peer_error("command argument contains NUL"))
+    }
+    Ok(PeerInvocation{task_id: task, root: canonical_root, cwd: canonical_cwd, network: policy, command: executable, args: command_args})
+}
+
+pub fn peer_canonical_directory(label: String, value: String) -[FS, Env]> String PeerLauncherError! {
+    if value.len() == 0 || value.contains(TEXT_NUL) -> return Err(peer_error("{label} is empty or contains NUL"))
+    // Core.stat is symlink_metadata, not metadata (FSRuntimeOps.rs:267).
+    metadata :: peer_files.stat(value) ?? return Err(peer_error("{label} `{value}` is unavailable: {peer_io_cause(err)}"))
+    if !metadata.is_dir -> return Err(peer_error("{label} `{value}` is not a directory"))
+    path :: peer_files.canonicalize(value) ?? return Err(peer_error("{label} `{value}` cannot be canonicalized: {peer_io_cause(err)}"))
+    Ok(path)
+}
+
+fn peer_ascii_lower(text: String) -> String Never! {
+    bytes := text.bytes()
+    loop at in 0..<bytes.len() {
+        b :: bytes[at]
+        if b >= 65 && b <= 90 -> bytes[at] = U8.from_int(Int.from_u8(b) + 32) ?? b
+    }
+    String.from_bytes(bytes) ?? text
+}
+
+fn peer_path_platform(windows: Bool) -> peer_paths.PathPlatform Never! {
+    if windows -> return peer_paths.PathPlatform.Windows
+    peer_paths.PathPlatform.Unix
+}
+
+fn peer_path_join(base: String, child: String, windows: Bool) -> String Never! {
+    platform :: peer_path_platform(windows)
+    path := peer_paths.from_text(base, platform)
+    peer_paths.push(&path, peer_paths.from_text(child, platform))
+    peer_paths.to_str(path) ?? panic("joining authored UTF8 path components must retain UTF8")
+}
+
+pub fn peer_contained(root: String, child: String, windows: Bool) -> Bool Never! {
+    if windows {
+        anchor :: peer_ascii_lower(root.replace("/", "\\"))
+        candidate :: peer_ascii_lower(child.replace("/", "\\"))
+        return candidate == anchor || candidate.starts_with("{anchor}\\")
+    }
+    root_path :: peer_paths.from_text(root, peer_paths.PathPlatform.Unix)
+    child_path :: peer_paths.from_text(child, peer_paths.PathPlatform.Unix)
+    peer_paths.strip_prefix_span(child_path, root_path) != .None
+}
+
+fn peer_is_file_follow(path: String) -[FS, Env]> Bool Never! {
+    target :: peer_files.canonicalize(path) ?? return false
+    metadata :: peer_files.stat(target) ?? return false
+    metadata.is_file
+}
+
+pub fn peer_find_on_path(program: String, windows: Bool) -[FS, Env]> String? Never! {
+    path :: peer_sys.get("PATH") ?? return None
+    delimiter :: if windows -> ";" else -> ":"
+    loop directory in path.split(delimiter) {
+        candidate :: peer_path_join(directory, program, windows)
+        if peer_is_file_follow(candidate) -> return Val(candidate)
+    }
+    None
+}
+
+pub fn peer_resolve_program(program: String, windows: Bool) -[FS, Env]> String PeerLauncherError! {
+    separator :: if windows -> "\\" else -> "/"
+    path_value :: peer_paths.from_text(program, peer_path_platform(windows))
+    if peer_paths.is_absolute(path_value) || program.contains(separator) {
+        resolved :: peer_files.canonicalize(program) ?? return Err(peer_error("command `{program}` is unavailable: {peer_io_cause(err)}"))
+        return Ok(resolved)
+    }
+    path :: peer_sys.get("PATH") ?? return Err(peer_error("PATH is unavailable"))
+    delimiter :: if windows -> ";" else -> ":"
+    loop directory in path.split(delimiter) {
+        direct :: peer_path_join(directory, program, windows)
+        if peer_is_file_follow(direct) {
+            resolved :: peer_files.canonicalize(direct) ?? return Err(peer_error("command `{program}` cannot be canonicalized: {peer_io_cause(err)}"))
+            return Ok(resolved)
+        }
+        if windows {
+            suffixes :: [String]{".exe", ".cmd", ".bat", ".com"}
+            loop suffix in suffixes {
+                candidate :: peer_path_join(directory, "{program}{suffix}", true)
+                if peer_is_file_follow(candidate) {
+                    resolved :: peer_files.canonicalize(candidate) ?? return Err(peer_error("command `{program}` cannot be canonicalized: {peer_io_cause(err)}"))
+                    return Ok(resolved)
+                }
+            }
+        }
+    }
+    Err(peer_error("command `{program}` is unavailable on PATH"))
+}
+
+pub fn peer_probe_root() -[FS, Env, Time]> String PeerLauncherError! {
+    base := peer_sys.get("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT")
+    if base == .None {
+        home :: peer_sys.get("HOME") ?? return Err(peer_error("cannot locate a disk-backed capability probe directory"))
+        base = Val(peer_path_join(home, ".cache/jet-test-scratch", false))
+    }
+    directory :: base ?? return Err(peer_error("cannot locate a disk-backed capability probe directory"))
+    peer_files.create_dir_all(directory) ?? return Err(peer_error("capability probe root `{directory}` cannot be created: {peer_io_cause(err)}"))
+    stamp :: peer_unix_stamp("capability probe clock failed") ?? return Err(err)
+    pid :: peer_sys.getpid()
+    root :: peer_path_join(directory, "compiled-workload-peer-probe-{pid}-{stamp}", false)
+    peer_files.create_dir(root) ?? return Err(peer_error("capability probe root `{root}` cannot be created: {peer_io_cause(err)}"))
+    Ok(root)
+}
+
+fn peer_unix_stamp(label: String) -[Time]> Int PeerLauncherError! {
+    stamp :: peer_time.now_utc().to_unix_ns() ?? return Err(peer_error("{label}: the wall clock is outside the Unix nanosecond range"))
+    if stamp < 0 -> return Err(peer_error("{label}: second time provided was later than self"))
+    Ok(stamp)
+}
+
+pub fn peer_clean_probe_stderr(text: String) -> String Never! {
+    cleaned := text.replace("\r", " ").replace("\n", " ").replace("\t", " ").trim() // #4303
+    if cleaned.len() == 0 -> return ""
+    ": {cleaned}"
+}
+
+pub fn peer_linux_base_args(root: String, cwd: String, network: PeerNetworkPolicy) -> [String] Never! {
+    args := [String]{"--die-with-parent", "--unshare-all", "--ro-bind", "/", "/", "--remount-ro", "/", "--bind", ~root, ~root, "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--chdir", ~cwd}
+    if network == .LoopbackOnly {
+        capabilities :: [String]{"--uid", "0", "--gid", "0", "--cap-add", "CAP_NET_ADMIN"}
+        loop arg in capabilities -> &args.push(arg)
+    }
+    args
+}
+
+pub fn peer_linux_command_args(invocation: PeerInvocation, launcher: String, ip: String, command: String, status_file: String?) -> [String] Never! {
+    args := peer_linux_base_args(invocation.root, invocation.cwd, invocation.network)
+    &args.push("--")
+    &args.push(~launcher)
+    if invocation.network == .LoopbackOnly -> &args.push("--internal-loopback") else -> &args.push("--internal-disabled")
+    if status_file == .Val(path) {
+        &args.push("--status-file")
+        &args.push(~path)
+    }
+    if invocation.network == .LoopbackOnly -> &args.push(~ip)
+    &args.push(~command)
+    loop argument in invocation.args -> &args.push(~argument)
+    args
+}
+
+pub struct PeerInternalArguments { pub status_file: String?, pub command_index: Int }
+pub fn peer_internal_status_file(args: [String]) -> PeerInternalArguments PeerLauncherError! {
+    if args.len() == 0 || args[0] != "--status-file" -> return Ok(PeerInternalArguments{status_file: None, command_index: 0})
+    if args.len() < 2 -> return Err(peer_error("internal runner status file is missing"))
+    value :: args[1]
+    if value.len() == 0 || value.contains(TEXT_NUL) -> return Err(peer_error("internal runner status file is invalid"))
+    Ok(PeerInternalArguments{status_file: Val(~value), command_index: 2})
+}
+
+pub fn peer_read_linux_signal(path: String) -[FS]> Int? PeerLauncherError! {
+    bytes :: peer_files.read_bytes(path) ?? return Err(peer_error("Linux peer isolation signal status cannot be read from `{path}`: {peer_io_cause(err)}"))
+    peer_decode_linux_signal(bytes)
+}
+pub fn peer_decode_linux_signal(bytes: [U8]) -> Int? PeerLauncherError! {
+    if bytes.len() == 0 -> return Ok(None)
+    if bytes.len() == 1 {
+        signal :: Int.from_u8(bytes[0])
+        if signal >= 1 && signal <= 64 -> return Ok(Val(signal))
+    }
+    Err(peer_error("Linux peer isolation signal status returned invalid data"))
+}
+
+pub fn peer_socket_syscall(arch: String) -> U32 PeerLauncherError! {
+    if arch == "x86_64" -> return Ok(U32{41})
+    if arch == "aarch64" -> return Ok(U32{198})
+    Err(peer_error("Linux peer isolation unavailable: seccomp socket policy has no syscall table for `{arch}`"))
+}
+
+// Exact stack-backed rows, not a growable array widened/copied at prctl.
+// SockFprog and the borrowed-pointer prctl call remain #4494-gated; this
+// function does not pretend to install a filter or invoke an ambient child.
+pub fn peer_disabled_network_filter(socket: U32) -> [peer_seccomp.SockFilter#4] Never! {
+    [peer_seccomp.SockFilter#4]{
+        {code: U16{0x20}, jt: U8{0}, jf: U8{0}, k: U32{0}},
+        {code: U16{0x15}, jt: U8{0}, jf: U8{1}, k: socket},
+        {code: U16{0x06}, jt: U8{0}, jf: U8{0}, k: U32{0x00050001}},
+        {code: U16{0x06}, jt: U8{0}, jf: U8{0}, k: U32{0x7fff0000}},
+    }
+}
+
+pub fn peer_sbpl_quote(path: String) -> String Never! { path.replace("\\", "\\\\").replace("\"", "\\\"") }
+pub fn peer_macos_profile(root: String, policy: PeerNetworkPolicy) -> String Never! {
+    quoted :: peer_sbpl_quote(root)
+    network := "(deny network*)"
+    if policy == .LoopbackOnly -> network = "(allow network-outbound (remote tcp \"localhost:*\")) (allow network-outbound (remote udp \"localhost:*\")) (allow network-inbound (local tcp \"localhost:*\")) (allow network-inbound (local udp \"localhost:*\"))"
+    "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-exec)\n(allow process-fork)\n(allow process-signal)\n(allow file-read*)\n(allow file-write* (subpath \"{quoted}\"))\n{network}\n"
+}
+
+pub struct PeerFirewallRule { pub name: String, pub direction: String, pub remote: String }
+pub fn peer_firewall_rules(prefix: String) -> [PeerFirewallRule] Never! {
+    v4 :: "0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255"
+    v6 :: "::0-::0,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
+    [PeerFirewallRule]{
+        {name: "{prefix}-out-{v4}", direction: "out", remote: ~v4},
+        {name: "{prefix}-in-{v4}", direction: "in", remote: ~v4},
+        {name: "{prefix}-out-{v6}", direction: "out", remote: ~v6},
+        {name: "{prefix}-in-{v6}", direction: "in", remote: ~v6},
+    }
+}
+
+pub fn peer_firewall_add_args(name: String, direction: String, program: String, remote: String?) -> [String] Never! {
+    args := [String]{"advfirewall", "firewall", "add", "rule", "name={name}", "dir={direction}", "action=block", ~program, "enable=yes", "profile=any", "protocol=any"}
+    if remote == .Val(address) -> &args.push("remoteip={address}")
+    args
+}
+
+pub struct PeerFirewallGuard { pub netsh: String, pub names: [String] }
+impl PeerFirewallGuard {
+    // Disabled networking is AppContainer's default deny; no firewall rule.
+    pub fn install(executable: String, network: PeerNetworkPolicy) -[FS, Env, Exec, Time, Time.Wait]> PeerFirewallGuard? PeerLauncherError! {
+        if network == .Disabled -> return Ok(None)
+        netsh :: peer_resolve_program("netsh", true) ?? return Err(err)
+        stamp :: peer_unix_stamp("Firewall rule clock failed") ?? return Err(err)
+        pid :: peer_sys.getpid()
+        prefix :: "JetCompiledPeer-{stamp}-{pid}"
+        guard := PeerFirewallGuard{netsh: netsh, names: [String]{}}
+        loop rule in peer_firewall_rules(prefix) {
+            added :: &guard.add_rule(rule.name, rule.direction, "program={executable}", Val(rule.remote))
+            if added == .Err(reason) {
+                // Rust's Drop rail runs on partial install failure, too.
+                _ :: &guard.cleanup()
+                return Err(~reason)
+            }
+        }
+        Ok(Val(guard))
+    }
+
+    pub fn add_rule(&self, name: String, direction: String, program: String, remote: String?) -[Exec, Time.Wait]> PeerLauncherError! {
+        argv := [String]{~self.netsh}
+        loop argument in peer_firewall_add_args(name, direction, program, remote) -> &argv.push(argument)
+        result :: peer_process.cmd(argv).run() ?? return Err(peer_error("Firewall rule `{name}` could not be installed: {peer_io_cause(err)}"))
+        if !result.success -> return Err(peer_error("Firewall rule `{name}` could not be installed: {peer_windows_exit_text(result.code)}"))
+        &self.names.push(~name)
+        Ok()
+    }
+
+    pub fn cleanup(&self) -[Exec, Time.Wait]> PeerLauncherError! {
+        failed := [String]{}
+        index := self.names.len()
+        loop index > 0 {
+            index -= 1
+            name :: self.names[index]
+            result :: peer_process.cmd([String]{~self.netsh, "advfirewall", "firewall", "delete", "rule", "name={name}"}).run()
+            if result == {
+                .Err(_) -> &failed.push(~name)
+                .Ok(status) -> { if !status.success -> &failed.push(~name) }
+            }
+        }
+        self.names = ^failed
+        if self.names.len() > 0 -> return Err(peer_error("Firewall rule `{self.names[0]}` could not be removed"))
+        Ok()
+    }
+}
+
+impl PeerFirewallGuard.Close {
+    fn close(^self) -[Exec, Time.Wait]> Never! {
+        guard := ^self
+        _ :: &guard.cleanup()
+    }
+}
+
+// std sys/process/windows.rs805–816: Windows status Display preserves the
+// unsigned DWORD and renders exception/warning codes with the high bit in hex.
+pub fn peer_windows_exit_text(code: Int) -> String Never! {
+    unsigned := code
+    if unsigned < 0 -> unsigned += 4294967296
+    if unsigned >= 2147483648 -> return "exit code: 0x{unsigned.to_radix(16)}"
+    "exit code: {unsigned}"
+}
+
+pub fn peer_unsupported_host(host: String) -> PeerLauncherError Never! {
+    peer_error("unsupported host `{host}`: native peer isolation is implemented only on Linux, macOS, and Windows")
+}
+pub fn peer_task_error(task: String, reason: PeerLauncherError) -> PeerLauncherError Never! {
+    peer_error("task `{task}`: {reason.message}")
+}
+
+// Actual native leaves from the canonical c.c packet. Their raw I32 inputs
+// cannot allocate tagged Int owners, and no Tools-local syscall kernel exists.
+pub fn peer_kill_group(process_group: I32, signal_number: I32) -[Exec]> Never! {
+    #Unsafe("the supervisor owns the pre-exec-created private process group; negative pid addresses only that group") {
+        _ :: peer_os.kill(-process_group, signal_number)
+    }
+}
+
+pub fn peer_raise_signal(signal_number: I32) -[Exec]> Never! {
+    #Unsafe("the caller has restored this signal's actual null SIG_DFL handler before propagating the child status") {
+        _ :: peer_os.raise(signal_number)
+    }
+}
+
+// Linux x86_64/aarch64 LP64 only, after peer_socket_syscall has admitted the
+// target. These are the real variadic libc calls, not a fixed-prototype shim.
+// #4494 still gates the declaration/borrow lowering and immediate errno owner.
+pub fn peer_prctl_no_new_privileges() -[Exec]> I32 Never! {
+    #Unsafe("PR_SET_NO_NEW_PRIVS is permanent for this child; four trailing native unsigned-long words match libc's variadic ABI") {
+        return peer_os.prctl(I32{38}, U64{1}, U64{0}, U64{0}, U64{0})
+    }
+}
+
+pub fn peer_prctl_socket_filter(program: *peer_seccomp.SockFprog) -[Exec]> I32 Never! {
+    #Unsafe("program borrows the caller's live C SockFprog and the SAME four contiguous stack SockFilter rows; prctl copies synchronously and no pointer escapes") {
+        return peer_os.prctl_program(I32{22}, U64{2}, program, U64{0}, U64{0})
+    }
+}

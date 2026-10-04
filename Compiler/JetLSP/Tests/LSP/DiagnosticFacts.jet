@@ -1,0 +1,44 @@
+// Consumer tests for the sole document/publication facts. They do not claim
+// that a constructed checked_modules row is a compiler-produced module graph.
+use core.files.runtime.kernel_path_components as lsp_fact_test_path
+
+#Test("document edits retain UTF16 validation and the caller's version") {
+    doc := LSPDocument.new(lsp_fact_test_path.from_text("/tmp/main.jet", lsp_fact_test_path.PathPlatform.Unix), "a😀b", 7)
+    range :: LSPRange{start: LSPPos{line: 0, character: 1}, end: LSPPos{line: 0, character: 3}}
+    assert(!(&doc.apply_range_edit(range, Val(1), "x")))
+    assert_eq(doc.text, "a😀b")
+    assert_eq(doc.version, 7)
+    assert(&doc.apply_range_edit(range, Val(2), "x"))
+    assert_eq(doc.text, "axb")
+    assert_eq(doc.version, 7)
+    &doc.replace_text("new")
+    assert_eq(doc.text, "new")
+}
+
+#Test("source path equality preserves component and leading dot slash semantics") {
+    unix :: lsp_fact_test_path.PathPlatform.Unix
+    assert(lsp_source_paths_equal(lsp_fact_test_path.from_text("././a.jet", unix), lsp_fact_test_path.from_text("a.jet", unix)))
+    assert(lsp_source_paths_equal(lsp_fact_test_path.from_text("a//./b.jet", unix), lsp_fact_test_path.from_text("a/b.jet", unix)))
+    assert(!lsp_source_paths_equal(lsp_fact_test_path.from_text("a/../b.jet", unix), lsp_fact_test_path.from_text("b.jet", unix)))
+    assert(!lsp_source_paths_equal(lsp_fact_test_path.from_text("a.jet", unix), lsp_fact_test_path.from_text("/a.jet", unix)))
+}
+
+#Test("dirty roots drain before sorted dependents and each importer appears once") {
+    state := LSPDiagnosticState.new()
+    unix :: lsp_fact_test_path.PathPlatform.Unix
+    names :: [String]{"a", "b", "importer", "unrelated"}
+    loop name in names {
+        state.docs[name] = LSPDocument.new(lsp_fact_test_path.from_text("/tmp/{name}.jet", unix), "", 1)
+    }
+    state.checked_modules["importer"] = [lsp_fact_test_path.OsPath]{lsp_fact_test_path.from_text("/tmp/a.jet", unix), lsp_fact_test_path.from_text("/tmp/b.jet", unix)}
+    state.checked_modules["closed"] = [lsp_fact_test_path.OsPath]{lsp_fact_test_path.from_text("/tmp/a.jet", unix)}
+    state.checked_modules["unrelated"] = [lsp_fact_test_path.OsPath]{lsp_fact_test_path.from_text("/tmp/unrelated.jet", unix)}
+    state.dirty["b"] = true
+    state.dirty["a"] = true
+    assert_eq(lsp_dirty_documents(&state), [String]{"a", "b", "importer"})
+    assert_eq(lsp_dirty_documents(&state), [String]{})
+    // An importer that is already dirty stays in the first, sorted batch.
+    state.dirty["importer"] = true
+    state.dirty["b"] = true
+    assert_eq(lsp_dirty_documents(&state), [String]{"b", "importer"})
+}

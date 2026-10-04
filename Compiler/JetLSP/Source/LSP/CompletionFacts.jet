@@ -1,0 +1,218 @@
+// Rust: Source/LSP/Completion.rs:21-109,196-389,410-505.
+use jet_foundation.[Type, KW_SELF, foundation_json_quote]
+use jet_lexer.[Token, TOKEN_SELF, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_EQ_EQ, TOKEN_NOT_EQ, TOKEN_LT, TOKEN_GT, TOKEN_LE, TOKEN_GE, TOKEN_KW_IF]
+use jet_semindex.[SymbolDB, SymKind, DefinitionAnchor, SemanticSymbol, SemanticSymbolKind, SemanticVisibilityAnchor]
+
+pub LSP_COMPLETION_METHOD :: 2
+pub LSP_COMPLETION_FUNCTION :: 3
+pub LSP_COMPLETION_FIELD :: 5
+pub LSP_COMPLETION_VARIABLE :: 6
+pub LSP_COMPLETION_CLASS :: 7
+pub LSP_COMPLETION_MODULE :: 9
+pub LSP_COMPLETION_PROPERTY :: 10
+pub LSP_COMPLETION_VALUE :: 12
+pub LSP_COMPLETION_KEYWORD :: 14
+pub LSP_COMPLETION_SNIPPET :: 15
+pub LSP_COMPLETION_ENUM_MEMBER :: 20
+pub LSP_COMPLETION_CONSTANT :: 21
+
+// Rust: Source/LSP/Completion.rs:37. Sole original completion carrier.
+pub struct CompletionItem {
+    pub label: String
+    pub kind: Int
+    pub detail: String?
+    pub documentation: String?
+    pub insert_text: String?
+    pub insert_text_format: Int
+    pub auto_import: String?
+
+    // Rust: Source/LSP/Completion.rs:49.
+    pub fn to_json(self) -> String Never! { lsp_to_json(self) }
+}
+pub fn lsp_to_json(item: CompletionItem) -> String Never! {
+    fields := [String]{"\"label\":{foundation_json_quote(item.label)}", "\"kind\":{item.kind}"}
+    if item.detail == .Val(value) -> &fields.push("\"detail\":{foundation_json_quote(value)}")
+    if item.documentation == .Val(value) -> &fields.push("\"documentation\":{foundation_json_quote(value)}")
+    if item.insert_text == .Val(value) {
+        &fields.push("\"insertText\":{foundation_json_quote(value)}")
+        &fields.push("\"insertTextFormat\":{item.insert_text_format}")
+    }
+    if item.auto_import == .Val(statement) -> &fields.push("\"additionalTextEdits\":[{{\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":0,\"character\":0}}}},\"newText\":{foundation_json_quote(statement)}}}]")
+    "{{{fields.join(",")}}}"
+}
+// Rust: Source/LSP/Completion.rs:85.
+pub fn lsp_semantic_documentation(symbol: SemanticSymbol) -> String Never! {
+    provenance :: if symbol.provenance == {
+        .Source(path) -> path
+        .Builtin(module_name) -> module_name
+        .CommandRegistry -> "command registry"
+        .Session -> "session"
+    }
+    "{symbol.summary}\n\n{provenance}"
+}
+// Rust keyword/type aliases102/108 map directly to Foundation jet_keyword_names /
+// jet_type_names; no second completion language catalog is defined here.
+
+// Rust: Source/LSP/Completion.rs:196.
+pub fn lsp_completion_type_name_from_kind(kind: SymKind) -> String? Never! {
+    if kind == {
+        .Local(_, .Val(ty)) -> lsp_completion_nominal_type_name(ty)
+        .Param(ty) -> lsp_completion_nominal_type_name(ty)
+        .Field(ty, _) -> lsp_completion_nominal_type_name(ty)
+        else -> None
+    }
+}
+fn lsp_completion_nominal_type_name(ty: Type) -> String? Never! {
+    if ty == { .Named(name) -> Val(~name), .Apply(name, _) -> Val(~name), else -> None }
+}
+// Rust: Source/LSP/Completion.rs:219.
+pub fn lsp_completion_method_owner_from_scope(scope: String) -> String? Never! {
+    if !scope.starts_with("method:") -> return None
+    bytes :: scope.bytes()
+    separator := -1
+    dot := -1
+    loop i in 7..<bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == (U8{58}) && bytes[i + 1] == (U8{58}) -> separator = i
+    }
+    if separator < 0 -> return None
+    loop i in separator + 2..<bytes.len() { if bytes[i] == (U8{46}) -> dot = i }
+    if dot < 0 -> return None
+    Val(lsp_completion_slice(scope, separator + 2, dot))
+}
+// Rust: Source/LSP/Completion.rs:226.
+pub fn lsp_completion_checked_anchor_identity(db: SymbolDB, target: DefinitionAnchor) -> String? Never! {
+    if target.semantic_identity == .Val(identity) { if !identity.is_empty() -> return Val(~identity) }
+    identity := String?{None}
+    loop definition in db.defs {
+        if definition.module_path != target.module_path || definition.def_span.start != target.def_span.start || definition.def_span.end != target.def_span.end -> next
+        if identity == .Val(existing) { if existing != definition.identity -> return None }
+        identity = Val(~definition.identity)
+    }
+    identity
+}
+// Rust: Source/LSP/Completion.rs:255.
+pub fn lsp_completion_subject_type_name(db: SymbolDB, tokens: [Token], path: String, subject_index: Int) -> String? Never! {
+    if subject_index < 0 || subject_index >= tokens.len() -> return None
+    span :: tokens[subject_index].span
+    selected := -1
+    width := 0
+    loop (index, reference) in db.refs {
+        if reference.module_path != path || reference.span.start > span.start || span.end > reference.span.end -> next
+        size :: if reference.span.end >= reference.span.start -> reference.span.end - reference.span.start else -> 0
+        if selected < 0 || size < width { selected = index; width = size }
+    }
+    if selected < 0 -> return None
+    reference :: db.refs[selected]
+    if reference.target == .Val(target) {
+        if lsp_completion_checked_anchor_identity(db, target) == .Val(identity) {
+            loop definition in db.defs {
+                if definition.identity != identity -> next
+                if lsp_completion_type_name_from_kind(definition.kind) == .Val(name) -> return Val(name)
+                break
+            }
+        }
+    }
+    if tokens[subject_index].kind == TOKEN_SELF || reference.name == KW_SELF -> return lsp_completion_method_owner_from_scope(reference.scope_identity ?? return None)
+    None
+}
+// Rust: Source/LSP/Completion.rs:295. Return retained db.defs row index.
+pub fn lsp_completion_enum_definition_for_type(db: SymbolDB, type_name: String, current_path: String, offset: Int) -> Int? Never! {
+    anchor :: SemanticVisibilityAnchor{module_path: current_path, offset: Val(offset), session_top_level: false}
+    if db.symbols.resolve_visible_at(type_name, anchor) == .Val(symbol) {
+        loop (index, definition) in db.defs {
+            if definition.identity == symbol[0].identity && definition.kind == .Enum(_, _) -> return Val(index)
+        }
+    }
+    leaf :: type_name.rsplit(".")[0]
+    identity := String?{None}
+    selected := -1
+    loop (index, definition) in db.defs {
+        if definition.kind != .Enum(_, _) || (definition.name != type_name && definition.name != leaf) -> next
+        if identity == .Val(existing) { if existing != definition.identity -> return None }
+        if selected < 0 { selected = index; identity = Val(~definition.identity) }
+    }
+    if selected >= 0 -> Val(selected) else -> None
+}
+// Rust: Source/LSP/Completion.rs:340. A single prefix pass records the active
+// brace stack + previous code tokens; no repeated brace-suffix depth scans.
+pub fn lsp_detect_switch_enum_type(tokens: [Token], offset: Int, current_path: String, db: SymbolDB) -> Int? Never! {
+    active := [Int]{}
+    previous := [Int]{}
+    last := -1
+    loop (index, token) in tokens {
+        &previous.push(last)
+        if token.span.start >= offset -> break
+        if token.kind == TOKEN_LBRACE -> &active.push(index)
+        if token.kind == TOKEN_RBRACE && !active.is_empty() -> _ :: &active.pop()
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> last = index
+    }
+    at := active.len()
+    loop at > 0 {
+        at -= 1
+        brace :: active[at]
+        eq :: previous[brace]
+        if eq < 0 -> next
+        kind :: tokens[eq].kind
+        if kind != TOKEN_EQ_EQ && kind != TOKEN_NOT_EQ && kind != TOKEN_LT && kind != TOKEN_GT && kind != TOKEN_LE && kind != TOKEN_GE -> next
+        subject :: previous[eq]
+        if subject < 0 -> next
+        condition :: previous[subject]
+        if condition < 0 || tokens[condition].kind != TOKEN_KW_IF -> next
+        // Rust commits to the first canonical active dispatch, even if its
+        // subject is unresolved; outer scopes must not invent an enum.
+        name :: lsp_completion_subject_type_name(db, tokens, current_path, subject) ?? return None
+        return lsp_completion_enum_definition_for_type(db, name, current_path, offset)
+    }
+    None
+}
+// Rust: Source/LSP/Completion.rs:410.
+pub fn lsp_semantic_owner(ty: Type) -> String? Never! {
+    if ty == { .Named(name) -> Val(~name), .List(_) | .FixedList(_, _) -> Val("List"), .Map(_, _, _) -> Val("Map"), .String -> Val("String"), else -> None }
+}
+// Rust: Source/LSP/Completion.rs:425.
+pub fn lsp_state_plane_owner(db: SymbolDB, type_name: String) -> String? Never! {
+    owner :: "{type_name}.State"
+    loop member in db.members { if member.owner == owner -> return Val(owner) }
+    prefix :: "{type_name}.State."
+    loop symbol in db.symbols.symbols() {
+        if symbol.qualified_name.starts_with(prefix) -> return ~symbol.owner
+    }
+    None
+}
+// Rust: Source/LSP/Completion.rs:442.
+pub fn lsp_has_state_plane(db: SymbolDB, type_name: String) -> Bool Never! { lsp_state_plane_owner(db, type_name) != None }
+// Rust: Source/LSP/Completion.rs:446.
+pub fn lsp_semantic_member_owner(db: SymbolDB, receiver: String) -> String? Never! {
+    loop definition in db.defs {
+        if definition.name != receiver -> next
+        if definition.kind == {
+            .Struct(_, _) | .Type(_) -> return Val(~definition.name)
+            .Local(_, .Val(ty)) | .Param(ty) -> return lsp_semantic_owner(ty)
+            else -> {}
+        }
+        break
+    }
+    if lsp_state_plane_owner(db, receiver) == .Val(owner) -> return Val(owner.removesuffix(".State"))
+    prefix :: "{receiver}."
+    loop symbol in db.symbols.symbols() { if symbol.qualified_name.starts_with(prefix) -> return ~symbol.owner }
+    None
+}
+// Rust: Source/LSP/Completion.rs:474.
+pub fn lsp_semantic_completion_kind(symbol: SemanticSymbol) -> Int Never! {
+    if symbol.kind == {
+        .Module -> LSP_COMPLETION_MODULE
+        .Function -> if symbol.owner != None -> LSP_COMPLETION_METHOD else -> LSP_COMPLETION_FUNCTION
+        .Type -> LSP_COMPLETION_CLASS
+        .Member -> LSP_COMPLETION_FIELD
+        .Constant -> LSP_COMPLETION_CONSTANT
+        .Local | .Parameter -> LSP_COMPLETION_VARIABLE
+        .Keyword -> LSP_COMPLETION_KEYWORD
+        .Command -> LSP_COMPLETION_VALUE
+    }
+}
+// Rust: Source/LSP/Completion.rs:492. METHOD_CALL is the canonical builtin
+// declaration name; call is not a local language catalog.
+pub fn lsp_function_value_call_completion(prefix: String) -> CompletionItem? Never! {
+    if !"call".starts_with(prefix) -> return None
+    Val(CompletionItem{label: "call", kind: LSP_COMPLETION_METHOD, detail: Val("call(...)"), documentation: Val("Invoke this function value."), insert_text: None, insert_text_format: 1, auto_import: None})
+}

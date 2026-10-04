@@ -1,0 +1,317 @@
+// CapturePolicy.rs:1–524: backend-neutral capture facts and disposable-byte
+// retention plans. No filesystem, CLI parser, consent identity or runtime sink.
+// #4403: Display's currently checked ^self contract mislowers to owned self;
+// retain the real implementations until the canonical read-receiver fix lands.
+pub DEFAULT_CAPTURE_BUDGET_BYTES :: U64{268435456}
+pub SENSITIVE_CAPTURE_CONSENT_PHRASE :: "capture sensitive"
+pub NO_CAPTURE_FLAG :: "--no-capture"
+
+// Rust CaptureMode and its constructors/string/display projection.
+pub enum CaptureMode {
+    Development
+    Release
+    pub fn default() -> CaptureMode Never! { CaptureMode.Development }
+    pub fn development() -> CaptureMode Never! { CaptureMode.Development }
+    pub fn release() -> CaptureMode Never! { CaptureMode.Release }
+    pub fn is_release(self) -> Bool Never! { self == CaptureMode.Release }
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Development -> "dev"
+            .Release -> "release"
+        }
+    }
+}
+impl CaptureMode.Display { fn display(^self) -> String { self.as_str() } }
+
+// Rust CaptureSource: only Clock is safe without sensitive consent.
+pub enum CaptureSource {
+    Clock
+    Randomness
+    RawInput
+    Network
+    pub fn clock() -> CaptureSource Never! { CaptureSource.Clock }
+    pub fn randomness() -> CaptureSource Never! { CaptureSource.Randomness }
+    pub fn raw_input() -> CaptureSource Never! { CaptureSource.RawInput }
+    pub fn network() -> CaptureSource Never! { CaptureSource.Network }
+    pub fn reason_code(self) -> String Never! {
+        if self == {
+            .Clock -> "Time"
+            .Randomness -> "Rand"
+            .RawInput -> "Input"
+            .Network -> "Net"
+        }
+    }
+    pub fn is_safe_clock(self) -> Bool Never! { self == CaptureSource.Clock }
+    pub fn requires_sensitive_consent(self) -> Bool Never! { !self.is_safe_clock() }
+    pub fn as_str(self) -> String Never! { self.reason_code() }
+}
+impl CaptureSource.Display { fn display(^self) -> String { self.reason_code() } }
+
+// Rust CaptureLocation and CaptureSourceFact: source-relative status reasons.
+pub struct CaptureLocation {
+    pub source_id: String
+    pub line: U32
+    pub column: U32?
+    pub fn new(source_id: ^String, line: U32) -> CaptureLocation Never! {
+        CaptureLocation{source_id: ^source_id, line, column: None}
+    }
+    pub fn with_column(^self, column: U32) -> CaptureLocation Never! {
+        updated := ^self
+        updated.column = Val(column)
+        ^updated
+    }
+    pub fn render(self) -> String Never! {
+        if self.column == {
+            .Val(column) -> "{self.source_id}:{self.line}:{column}"
+            .None -> "{self.source_id}:{self.line}"
+        }
+    }
+}
+impl CaptureLocation.Display { fn display(^self) -> String { self.render() } }
+
+pub struct CaptureSourceFact {
+    pub source: CaptureSource
+    pub location: CaptureLocation?
+    pub fn new(source: CaptureSource, location: ^CaptureLocation?) -> CaptureSourceFact Never! {
+        CaptureSourceFact{source, location: ^location}
+    }
+    pub fn at(source: CaptureSource, source_id: ^String, line: U32) -> CaptureSourceFact Never! {
+        CaptureSourceFact.new(source, Val(CaptureLocation.new(^source_id, line)))
+    }
+    pub fn reason_text(self) -> String Never! {
+        reason :: self.source.reason_code()
+        if self.location == {
+            .Val(location) -> "{reason} at {location.render()}"
+            .None -> reason
+        }
+    }
+}
+
+// Rust CaptureKind; distinct from the trace-format capture policy.
+pub enum CaptureKind {
+    SafeClock
+    Sensitive
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .SafeClock -> "safe"
+            .Sensitive -> "sensitive"
+        }
+    }
+    pub fn is_sensitive(self) -> Bool Never! { self == CaptureKind.Sensitive }
+}
+impl CaptureKind.Display { fn display(^self) -> String { self.as_str() } }
+
+// Rust PackageCaptureSetting/Policy. Release eligibility belongs to C3.
+pub enum PackageCaptureSetting {
+    Default
+    On
+    Off
+    pub fn default() -> PackageCaptureSetting Never! { PackageCaptureSetting.Default }
+    pub fn allows_development_capture(self) -> Bool Never! { self != PackageCaptureSetting.Off }
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Default -> "default"
+            .On -> "on"
+            .Off -> "off"
+        }
+    }
+}
+pub struct PackageCapturePolicy {
+    pub capture: PackageCaptureSetting
+    pub budget: CaptureBudget
+    pub fn default() -> PackageCapturePolicy Never! {
+        PackageCapturePolicy.new(PackageCaptureSetting.Default, CaptureBudget.default())
+    }
+    pub fn new(capture: PackageCaptureSetting, budget: CaptureBudget) -> PackageCapturePolicy Never! {
+        PackageCapturePolicy{capture, budget}
+    }
+    pub fn off() -> PackageCapturePolicy Never! {
+        PackageCapturePolicy.new(PackageCaptureSetting.Off, CaptureBudget.default())
+    }
+    pub fn allows_development_capture(self) -> Bool Never! { self.capture.allows_development_capture() }
+    pub fn with_capture(self, capture: PackageCaptureSetting) -> PackageCapturePolicy Never! {
+        PackageCapturePolicy.new(capture, self.budget)
+    }
+    pub fn with_budget(self, budget: CaptureBudget) -> PackageCapturePolicy Never! {
+        PackageCapturePolicy.new(self.capture, budget)
+    }
+}
+
+// Rust NoCaptureOverrideFact: one invocation's typed CLI fact, never global.
+pub struct NoCaptureOverrideFact {
+    pub active: Bool
+    pub fn default() -> NoCaptureOverrideFact Never! { NoCaptureOverrideFact.none() }
+    pub fn none() -> NoCaptureOverrideFact Never! { NoCaptureOverrideFact{active: false} }
+    pub fn explicit() -> NoCaptureOverrideFact Never! { NoCaptureOverrideFact{active: true} }
+    pub fn is_active(self) -> Bool Never! { self.active }
+    pub fn flag(self) -> String Never! { NO_CAPTURE_FLAG }
+}
+
+// Rust CaptureBudget: bytes of evictable artifacts, not saved bytes/index size.
+pub struct CaptureBudget {
+    pub max_bytes: U64
+    pub fn default() -> CaptureBudget Never! { CaptureBudget{max_bytes: DEFAULT_CAPTURE_BUDGET_BYTES} }
+    pub fn new_unchecked(max_bytes: U64) -> CaptureBudget Never! { CaptureBudget{max_bytes} }
+    pub fn new(max_bytes: U64) -> CaptureBudget CaptureBudgetError! {
+        budget :: CaptureBudget{max_bytes}
+        budget.validate() ?? return Err(err)
+        Ok(budget)
+    }
+    pub fn validate(self) CaptureBudgetError! {
+        if self.max_bytes == (U64{0}) -> return Err(CaptureBudgetError.ZeroByteLimit)
+    }
+    // #4433: native compiler loses method type parameters; keep the public
+    // Rust seams intact. Free planner proof does not certify these methods.
+    pub fn plan_eviction<I: RecordIndexRetention>(self, records: [I], incoming: I) -> CaptureEvictionPlan CaptureBudgetError! {
+        plan_eviction<I>(self, records, incoming)
+    }
+    pub fn plan_current<I: RecordIndexRetention>(self, records: [I]) -> CaptureEvictionPlan CaptureBudgetError! {
+        plan_current_eviction<I>(self, records)
+    }
+}
+
+// Rust CaptureBudgetError and exact Display strings; failed plans are atomic.
+#Error
+pub enum CaptureBudgetError {
+    ZeroByteLimit
+    ArithmeticOverflow
+    EmptyArtifactID
+    DuplicateArtifactID(id: String)
+    IncomingArtifactTooLarge(bytes: U64, limit: U64)
+    NoEvictableRecords(retained_bytes: U64, budget: CaptureBudget)
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .ZeroByteLimit -> "capture budget byte limit must be greater than zero"
+            .ArithmeticOverflow -> "capture budget arithmetic overflowed"
+            .EmptyArtifactID -> "record artifact id cannot be empty"
+            .DuplicateArtifactID(id) -> "record artifact id `{id}` is duplicated"
+            .IncomingArtifactTooLarge(bytes, limit) -> "incoming record is {bytes} bytes, over capture budget {limit}"
+            .NoEvictableRecords(retained_bytes, budget) -> "capture budget cannot retain {retained_bytes} disposable bytes within {budget.max_bytes}"
+        }
+    }
+}
+impl CaptureBudgetError.Display { fn display(^self) -> String { self.as_str() } }
+
+// Rust RecordIndexRetention. The canonical RecordIndex adapter owns disposable
+// policy; saved rows MUST return false from evictable, even when overriding it.
+// Generic callers dispatch statically; no trait-object boxing or copied rows.
+// #4446: night12 rejects returning the scalar self.id as View<String> (E0113);
+// View<String> materializes [String], not a borrowed scalar String. Retain the
+// owned return until the canonical scalar-borrow representation is available.
+pub trait RecordIndexRetention {
+    fn artifact_id(self) -> String Never!
+    fn recorded_sequence(self) -> U64 Never!
+    fn size_bytes(self) -> U64 Never!
+    fn saved(self) -> Bool Never!
+    fn evictable(self) -> Bool Never! { !self.saved() }
+}
+
+// Rust CaptureEviction/Plan and fits: facts only, never index mutation.
+pub struct CaptureEviction {
+    pub artifact_id: String
+    pub recorded_sequence: U64
+    pub size_bytes: U64
+}
+pub struct CaptureEvictionPlan {
+    pub budget: CaptureBudget
+    pub evicted: [CaptureEviction]
+    pub retained_bytes: U64
+    pub fn fits(self) -> Bool Never! { self.retained_bytes <= self.budget.max_bytes }
+}
+
+// Rust plan_eviction/plan_current_eviction/plan_eviction_inner. Candidate order
+// stores indices rather than copying record payloads. Incoming is not a candidate.
+pub fn plan_eviction<I: RecordIndexRetention>(budget: CaptureBudget, records: [I], incoming: I) -> CaptureEvictionPlan CaptureBudgetError! {
+    // Wrapping read incoming in Val currently materializes I. A borrowed scalar
+    // option needs the same missing canonical representation (#4446); do not
+    // consume the caller's incoming record or introduce a boxed stand-in.
+    plan_eviction_inner<I>(budget, records, Val(incoming))
+}
+pub fn plan_current_eviction<I: RecordIndexRetention>(budget: CaptureBudget, records: [I]) -> CaptureEvictionPlan CaptureBudgetError! {
+    plan_eviction_inner<I>(budget, records, None)
+}
+fn plan_eviction_inner<I: RecordIndexRetention>(budget: CaptureBudget, records: [I], incoming: I?) -> CaptureEvictionPlan CaptureBudgetError! {
+    budget.validate() ?? return Err(err)
+    seen := [String:Bool]{}
+    retained_bytes := U64{0}
+    loop record in records {
+        id :: record.artifact_id()
+        if id.len() == 0 -> return Err(CaptureBudgetError.EmptyArtifactID)
+        if seen.has_key(id) -> return Err(CaptureBudgetError.DuplicateArtifactID{id: ^id})
+        seen[id] = true
+        if record.evictable() {
+            retained_bytes = retained_bytes.checked_add(record.size_bytes()) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
+        }
+    }
+    if incoming == .Val(record) {
+        id :: record.artifact_id()
+        if id.len() == 0 -> return Err(CaptureBudgetError.EmptyArtifactID)
+        if seen.has_key(id) -> return Err(CaptureBudgetError.DuplicateArtifactID{id: ^id})
+        seen[id] = true
+        size_bytes :: record.size_bytes()
+        if record.evictable() {
+            if size_bytes > budget.max_bytes -> return Err(CaptureBudgetError.IncomingArtifactTooLarge{bytes: size_bytes, limit: budget.max_bytes})
+            retained_bytes = retained_bytes.checked_add(size_bytes) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
+        }
+    }
+    order := [Int]{}
+    loop index in 0..<records.len() {
+        if records[index].evictable() -> &order.push(index)
+    }
+    // Stable bottom-up mergesort of indices by (sequence, id), O(n log n).
+    scratch := ~order
+    width := 1
+    in_scratch := false
+    loop width < order.len() {
+        // Swap the two buffers' roles, not their contents. Moving and then
+        // reinitializing loop locals currently hits night12 E0121.
+        if in_scratch {
+            capture_merge_indices<I>(records, scratch, &order, width)
+        } else {
+            capture_merge_indices<I>(records, order, &scratch, width)
+        }
+        in_scratch = !in_scratch
+        width *= 2
+    }
+    if in_scratch -> order = ^scratch
+    evicted := [CaptureEviction]{}
+    loop index in order {
+        if retained_bytes <= budget.max_bytes -> break
+        size :: records[index].size_bytes()
+        retained_bytes = retained_bytes.checked_sub(size) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
+        &evicted.push(CaptureEviction{artifact_id: records[index].artifact_id(), recorded_sequence: records[index].recorded_sequence(), size_bytes: size})
+    }
+    if retained_bytes > budget.max_bytes -> return Err(CaptureBudgetError.NoEvictableRecords{retained_bytes, budget})
+    Ok(CaptureEvictionPlan{budget, evicted: ^evicted, retained_bytes})
+}
+
+// One pass of the same stable bottom-up index mergesort. Both caller-owned
+// buffers stay allocated; the caller alternates read/write roles each pass.
+fn capture_merge_indices<I: RecordIndexRetention>(records: [I], order: [Int], scratch: &[Int], width: Int) Never! {
+    start := 0
+    loop start < order.len() {
+        middle :: if start + width < order.len() -> start + width else -> order.len()
+        end :: if middle + width < order.len() -> middle + width else -> order.len()
+        left := start
+        right := middle
+        out := start
+        loop out < end {
+            take_left := right >= end
+            if left < middle && right < end {
+                left_seq :: records[order[left]].recorded_sequence()
+                right_seq :: records[order[right]].recorded_sequence()
+                take_left = left_seq < right_seq || (left_seq == right_seq && records[order[left]].artifact_id() <= records[order[right]].artifact_id())
+            }
+            if left >= middle -> take_left = false
+            if take_left {
+                scratch[out] = order[left]
+                left += 1
+            } else {
+                scratch[out] = order[right]
+                right += 1
+            }
+            out += 1
+        }
+        start = end
+    }
+}

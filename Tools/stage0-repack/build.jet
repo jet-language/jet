@@ -1,0 +1,54 @@
+// build.rs source-root validation and exact Bootstrap module/bridge inventory.
+// This is data for the canonical Bootstrap compilation organization, not a Rust
+// include facade. Compiling/mounting these owners is blocked until that owner
+// has a Jet module organization; this file emits no cargo directives or Rust.
+
+pub struct RepackBootstrapModule {
+    pub relative_path: String
+    pub module_name: String
+}
+
+pub struct RepackBootstrapBridge {
+    pub module_name: String
+    pub exports: [String]
+}
+
+pub fn repack_bootstrap_modules() -> [RepackBootstrapModule] Never! {
+    [RepackBootstrapModule]{
+        RepackBootstrapModule{relative_path: "Compiler/Bootstrap/BuildIdentity.rs", module_name: "BootstrapBuildIdentity"},
+        RepackBootstrapModule{relative_path: "Compiler/Bootstrap/Host/RuntimeMirCodec.rs", module_name: "compiler_bootstrap_runtime_mir_codec"},
+        RepackBootstrapModule{relative_path: "Compiler/Bootstrap/Host/RuntimeMir.rs", module_name: "compiler_bootstrap_runtime_mir"},
+        RepackBootstrapModule{relative_path: "Compiler/Bootstrap/Host/DiagnosticCodec.rs", module_name: "compiler_bootstrap_diagnostic_codec"},
+        RepackBootstrapModule{relative_path: "Compiler/Bootstrap/Host/EntryCodec.rs", module_name: "compiler_bootstrap_entry_codec"},
+        RepackBootstrapModule{relative_path: "Compiler/Bootstrap/Host/CompilerImage.rs", module_name: "compiler_bootstrap_compiler_image"},
+        RepackBootstrapModule{relative_path: "Compiler/Bootstrap/Host/Native.rs", module_name: "compiler_bootstrap_host"},
+        RepackBootstrapModule{relative_path: "Compiler/Bootstrap/Runner.rs", module_name: "compiler_bootstrap_runner"},
+    }
+}
+
+pub fn repack_bootstrap_bridges() -> [RepackBootstrapBridge] Never! {
+    [RepackBootstrapBridge]{
+        RepackBootstrapBridge{module_name: "compiler_bootstrap_entry_codec", exports: [String]{"BootstrapEntryCodec", "BootstrapEntryPhysicalBindings", "BootstrapEntryValue"}},
+        RepackBootstrapBridge{module_name: "compiler_bootstrap_compiler_image", exports: [String]{"archive_compiler_image", "restore_compiler_image", "CompilerImageError", "CompilerImageHeader", "RestoredCompilerImage"}},
+        RepackBootstrapBridge{module_name: "compiler_bootstrap_runtime_mir", exports: [String]{"execute_source_mir", "SourceMirExecution", "SourceMirExecutionError"}},
+        RepackBootstrapBridge{module_name: "compiler_bootstrap_host", exports: [String]{"append_bootstrap_host_glue", "open_authorized_sources", "AuthorizedSourceLease", "AuthorizedSourceSnapshot", "BootstrapBindingDescriptor", "BootstrapHostCodecError"}},
+        RepackBootstrapBridge{module_name: "compiler_bootstrap_runner", exports: [String]{"bootstrap_artifact_build_id", "invoke_bootstrap_entry", "prepare_bootstrap_artifact", "prepare_bootstrap_artifact_from_aot", "BootstrapArtifact", "BootstrapBackendArtifact", "BootstrapFactoryTier", "BootstrapJetCompileResult", "BootstrapRunError", "BootstrapRunOutput", "BootstrapSourceResume", "BootstrapSourceResumeFactory", "BootstrapWebArtifacts"}},
+    }
+}
+
+// Canonicalize before checking the module set, matching build.rs's first-failure
+// ordering. Rust bytes remain the kept artifact's contract; the .rs inventory
+// does not authorize compiling Rust to run this Jet tool.
+pub fn repack_validate_build_root(root: String) -[FS, Env]> String RepackError! {
+    canonical :: repack_files.canonicalize(root) ?? return Err(repack_error("JET_REPACK_SOURCE_ROOT `{root}`: {err}"))
+    loop module in repack_bootstrap_modules() {
+        path :: repack_files.join(canonical, module.relative_path)
+        if !repack_files.is_file(path) -> return Err(repack_error("bootstrap source `{path}` is missing"))
+    }
+    Ok(canonical)
+}
+
+pub fn repack_build_root() -[FS, Env]> String RepackError! {
+    root :: repack_sys.get("JET_REPACK_SOURCE_ROOT") ?? return Err(repack_error("JET_REPACK_SOURCE_ROOT (set by repack.sh)"))
+    repack_validate_build_root(root)
+}

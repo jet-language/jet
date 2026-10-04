@@ -1,0 +1,160 @@
+// No inline Rust tests in either assigned window. These controls call the
+// actual byte-policy/response bodies and native FS/CLI providers; no mocks.
+fn lsp_env_test_json(text: String) -> DataTree Never! {
+    foundation_parse_protocol_json(text) ?? panic("environment resource JSON fixture")
+}
+
+fn lsp_env_test_server() -> LSPServer Never! {
+    snapshot :: lsp_diag_test_snapshot("environment-resource.jet", "fn run() {{}}\n", [JetDriverAuthorizedSourceFile]{})
+    LSPServer.new(^snapshot)
+}
+
+fn lsp_env_test_child(root: OSPath, name: String) -> OSPath Never! {
+    child := ~root
+    lsp_env_path.push(&child, lsp_env_path.from_text(name, root.platform))
+    child
+}
+
+fn lsp_env_test_scratch(label: String) -[Env, FS, Exec]> OSPath Never! {
+    temporary :: lsp_env_sys.temp_dir()
+    root :: lsp_env_test_child(temporary, "jet-lsp-environment-{lsp_env_process.id()}-{label}")
+    lsp_env_files.create_dir_all(root) ?? panic("create environment resource scratch")
+    // The absence assertions below must not accidentally find a host fixture.
+    assert_eq(env_hook_find_env_root(root), None)
+    root
+}
+
+#Test("environment output accepts strict JSON scalars and preserves trimmed text") {
+    loop text in [String]{"{{\"packages\":[]}}", "null", "true", "42", "[1,2]", "\"é\""} {
+        stdout := " \t\r\n{text}\n".bytes()
+        assert_eq(lsp_environment_resource_text(true, ^stdout), Ok(text))
+    }
+    unicode_space := "\u{0085}{{\"x\":1}}\u{2003}".bytes()
+    assert_eq(lsp_environment_resource_text(true, ^unicode_space), Ok("{{\"x\":1}}"))
+}
+
+#Test("environment output rejects failed status invalid UTF8 empty and invalid protocol JSON") {
+    valid := "{{}}".bytes()
+    assert_eq(lsp_environment_resource_text(false, ^valid), Err(LSPEnvironmentResourceReadError.Unavailable))
+    invalid_utf8 := [U8]{U8{255}}
+    assert_eq(lsp_environment_resource_text(true, ^invalid_utf8), Err(LSPEnvironmentResourceReadError.Unavailable))
+    loop text in [String]{"", " \r\n\t", "not JSON", "{{\"x\":1,\"x\":2}}", "9223372036854775808", "\"\\ud800\""} {
+        stdout := text.bytes()
+        assert_eq(lsp_environment_resource_text(true, ^stdout), Err(LSPEnvironmentResourceReadError.Unavailable))
+    }
+}
+
+#Test("environment resource raw byte limit accepts exact ceiling and rejects excess before trim") {
+    at_limit := [U8]{U8{34}}
+    loop _ in 0..<(@LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES - 2) -> &at_limit.push(U8{97})
+    &at_limit.push(U8{34})
+    above_limit := ~at_limit
+    &above_limit.push(U8{32})
+    assert_eq(lsp_environment_resource_text(true, ^above_limit), Err(LSPEnvironmentResourceReadError.Unavailable))
+    accepted :: lsp_environment_resource_text(true, ^at_limit) ?? panic("exact raw byte ceiling")
+    assert_eq(accepted.bytes().len(), @LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES)
+    // Scalar count is well below the limit, but UTF8 bytes exceed it by two.
+    unicode := [U8]{U8{34}}
+    loop _ in 0..<(@LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES / 2) {
+        &unicode.push(U8{195})
+        &unicode.push(U8{169})
+    }
+    &unicode.push(U8{34})
+    assert_eq(lsp_environment_resource_text(true, ^unicode), Err(LSPEnvironmentResourceReadError.Unavailable))
+}
+
+#Test("resources read returns exact invalid-params response for every missing or nonstring URI") {
+    server :: lsp_env_test_server()
+    id :: DataTree.Text("request-\"a\"")
+    expected :: Val(lsp_error_response(id, -32602, "resources/read requires a URI"))
+    assert_eq(lsp_environment_resource_read_response(server, None, id), expected)
+    loop raw in [String]{"null", "[]", "1", "{{}}", "{{\"uri\":null}}", "{{\"uri\":1}}", "{{\"uri\":[]}}"} {
+        assert_eq(lsp_environment_resource_read_response(server, Val(lsp_env_test_json(raw)), id), expected)
+    }
+    // Wrong URI wins before root/current_dir/executable lookup.
+    assert_eq(lsp_environment_resource_read_json([OSPath]{}, "jet://unknown"), Err(LSPEnvironmentResourceReadError.NotFound))
+    assert_eq(lsp_environment_resource_read_response(server, Val(lsp_env_test_json("{{\"uri\":\"jet://unknown\"}}")), id), Val(lsp_error_response(id, -32002, "environment resource not found")))
+}
+
+#Test("environment resource contents quote URI and text exactly once") {
+    uri :: "jet://environment\"\\\n"
+    text :: "{{\"message\":\"é\"}}\n"
+    actual :: lsp_env_test_json(lsp_environment_resource_contents_json(uri, text))
+    expected :: DataTree.Object([String:DataTree]{"contents": DataTree.Array([DataTree]{DataTree.Object([String:DataTree]{"uri": DataTree.Text(uri), "mimeType": DataTree.Text("application/json"), "text": DataTree.Text(text)})})})
+    assert_eq(actual, expected)
+}
+
+#Test("native environment listing walks nearest root and only considers first workspace") {
+    scratch :: lsp_env_test_scratch("list")
+    project :: lsp_env_test_child(scratch, "project")
+    deep :: lsp_env_test_child(project, "src/inner")
+    nested :: lsp_env_test_child(project, "src")
+    orphan :: lsp_env_test_child(scratch, "orphan")
+    lsp_env_files.create_dir_all(deep) ?? panic("create deep workspace")
+    lsp_env_files.create_dir_all(orphan) ?? panic("create orphan workspace")
+    assert_eq(lsp_environment_resource_list_json([OSPath]{deep}), "{{\"resources\":[]}}")
+    assert_eq(lsp_environment_resource_read_json([OSPath]{orphan}, @LSP_ENVIRONMENT_RESOURCE_URI), Err(LSPEnvironmentResourceReadError.NotFound))
+    lsp_env_files.write(lsp_environment_resource_file(project), "module env.dev {{ packages: [] }}\n".bytes()) ?? panic("write real env.jet")
+    nearest :: lsp_environment_root([OSPath]{deep}) ?? panic("nearest environment root")
+    assert(lsp_env_path.equals(nearest, project))
+    expected :: "{{\"resources\":[{{\"uri\":\"jet://environment\",\"name\":\"Jet environment\",\"description\":\"Read-only typed environment facts\",\"mimeType\":\"application/json\"}}]}}"
+    assert_eq(lsp_environment_resource_list_json([OSPath]{deep}), expected)
+    assert_eq(lsp_environment_resource_list_json([OSPath]{orphan, project}), "{{\"resources\":[]}}")
+    // A directory with the reserved filename is not an environment resource.
+    lsp_env_files.create_dir(lsp_environment_resource_file(nested)) ?? panic("create env.jet directory")
+    directory_root :: lsp_environment_root([OSPath]{deep}) ?? panic("skip nonfile")
+    assert(lsp_env_path.equals(directory_root, project))
+    lsp_env_files.remove_dir_all(lsp_environment_resource_file(nested)) ?? panic("remove env.jet directory")
+    lsp_env_files.write(lsp_environment_resource_file(nested), "module env.dev {{ packages: [] }}\n".bytes()) ?? panic("write nearest env.jet")
+    nested_root :: lsp_environment_root([OSPath]{deep}) ?? panic("nested environment")
+    assert(lsp_env_path.equals(nested_root, nested))
+    lsp_env_files.remove_dir_all(scratch) ?? panic("clean native environment listing scratch")
+}
+
+#Test("native environment read projects actual current executable env info JSON") {
+    // Main runs this journey with the real integrated Jet CLI executable;
+    // native output is never replaced by a test callback or shell command.
+    scratch :: lsp_env_test_scratch("read")
+    lsp_env_files.write(lsp_environment_resource_file(scratch), "module env.dev {{ packages: [] }}\n".bytes()) ?? panic("write real typed environment")
+    text :: lsp_environment_resource_read_json([OSPath]{scratch}, @LSP_ENVIRONMENT_RESOURCE_URI) ?? panic("real jet env info --json must be available")
+    assert(foundation_parse_protocol_json(text) != None)
+    server := lsp_env_test_server()
+    server.workspace_roots = [OSPath]{scratch}
+    params :: Val(lsp_env_test_json("{{\"uri\":\"jet://environment\"}}"))
+    response :: lsp_environment_resource_read_response(server, params, DataTree.Int(7)) ?? panic("resource response")
+    frame :: lsp_env_test_json(response)
+    result :: frame.field("result") ?? panic("resource result")
+    assert_eq(frame.field("id"), Val(DataTree.Int(7)))
+    contents :: result.field("contents") ?? panic("resource contents")
+    if contents == .Array(rows) {
+        assert_eq(rows.len(), 1)
+        assert_eq(rows[0].field("uri"), Val(DataTree.Text(@LSP_ENVIRONMENT_RESOURCE_URI)))
+        assert_eq(rows[0].field("mimeType"), Val(DataTree.Text("application/json")))
+        value :: rows[0].field("text") ?? panic("resource text")
+        if value == .Text(report) {
+            assert(foundation_parse_protocol_json(report) != None)
+        } else -> panic("resource text must be a JSON string")
+    } else -> panic("resource contents must be an array")
+    // A real invalid environment makes the actual CLI unavailable; this is
+    // not a substituted process status or provider failure callback.
+    lsp_env_files.write(lsp_environment_resource_file(scratch), "module env.dev {{ packages: [ }}\n".bytes()) ?? panic("write malformed native environment")
+    assert_eq(lsp_environment_resource_read_json([OSPath]{scratch}, @LSP_ENVIRONMENT_RESOURCE_URI), Err(LSPEnvironmentResourceReadError.Unavailable))
+    assert_eq(lsp_environment_resource_read_response(server, params, DataTree.Int(7)), Val(lsp_error_response(DataTree.Int(7), -32002, "environment resource unavailable")))
+    lsp_env_files.write(lsp_environment_resource_file(scratch), "module env.dev {{ packages: [] }}\n".bytes()) ?? panic("restore valid native environment")
+    restored :: lsp_environment_resource_read_json([OSPath]{scratch}, @LSP_ENVIRONMENT_RESOURCE_URI) ?? panic("restored real environment")
+    assert(foundation_parse_protocol_json(restored) != None)
+    lsp_env_files.remove_dir_all(scratch) ?? panic("clean native environment read scratch")
+}
+
+#Test("empty workspace roots use actual native current directory") {
+    cwd :: lsp_env_sys.current_dir() ?? panic("native current directory")
+    expected :: env_hook_find_env_root(cwd)
+    actual :: lsp_environment_root([OSPath]{})
+    if expected == {
+        .Val(path) -> {
+            root :: actual ?? panic("current directory environment root")
+            assert(lsp_env_path.equals(root, path))
+        }
+        None -> assert_eq(actual, None)
+    }
+}

@@ -1,0 +1,112 @@
+// Source/LSP/Server.rs:3402–3510. Sole W38 Server and shared Driver queries.
+// Required provider gates: Runtime CanonicalREQUIREDABI8159 retained_descriptor
+// has zero native bodies (#4494/#4409); ProjectParts.scan_with_overlays and
+// should_index are the sole original project indexing policy, unpublished.
+// No String filesystem facade: discovery and membership retain native OSPath.
+use core.files.runtime.kernel_path_components as lsp_workspace_path
+use core.files.host.retained_descriptor as lsp_workspace_fs
+use jet_semindex.[SymbolDB]
+
+pub fn lsp_merge_workspace_defs(server: LSPServer, current: LSPDocument, db: &SymbolDB) -[FS, Env]> Never! {
+    _ :: lsp_merge_workspace_defs_with_sources(server, current, &db)
+}
+
+pub fn lsp_merge_workspace_defs_with_sources(server: LSPServer, current: LSPDocument, db: &SymbolDB) -[FS, Env]> [String:String] {
+    sources := [String:String]{}
+    loop row in lsp_workspace_sources(server, Val(current.path)) {
+        if lsp_workspace_path.equals(row.path, current.path) -> next
+        sources[lsp_workspace_path.display(row.path)] = ~row.text
+        shared_checked :: &server.queries.check_text_lsp(server.snapshot, row.path, row.text)
+        permit :: shared_checked.guard_read()
+        result :: permit.value.result
+        if result.graph == None -> next
+        loop index in result.loaded_module_rows {
+            module :: result.module_sources[index]
+            if !sources.has_key(module.display) -> sources[module.display] = ~module.loaded_source
+        }
+        other := lsp_build_symbol_db(result)
+        loop symbol in other.symbols.symbols() -> &db.symbols.push(~symbol)
+        loop definition in other.defs -> &db.defs.push(^definition)
+        loop reference in other.refs -> &db.refs.push(^reference)
+        loop call in other.calls -> &db.calls.push(^call)
+        loop hover in other.hover -> &db.hover.push(^hover)
+        loop hint in other.inlay -> &db.inlay.push(^hint)
+    }
+    sources
+}
+
+pub fn lsp_workspace_sources(server: LSPServer, root_hint: lsp_workspace_path.OSPath?) -[FS, Env]> [(path: lsp_workspace_path.OSPath, text: String)] {
+    out := [(path: lsp_workspace_path.OSPath, text: String)]{}
+    seen := [lsp_workspace_path.OSPath:Bool]{} // #4499 exact native equality/hash
+    roots := ~server.workspace_roots
+    if roots.len() == 0 {
+        if root_hint == .Val(path) {
+            root := lsp_workspace_root_for_path(server.workspace_roots, path)
+            if root == None {
+                parent :: lsp_workspace_path.parent_span(path)
+                fallback :: if parent == { .Val(extent) -> lsp_workspace_path.owned_span(path, extent) None -> lsp_workspace_path.from_text(".", path.platform) }
+                root = Val(lsp_normalize_os_path(fallback))
+            }
+            resolved :: root ?? panic("root hint fallback is present")
+            &roots.push(resolved)
+        }
+    }
+    loop (_, doc) in server.diagnostic_state.docs {
+        in_workspace := false
+        loop root in roots {
+            if lsp_workspace_path.starts_with(doc.path, root) { in_workspace = true; break }
+        }
+        if (root_hint != None || (!server.workspace_folders && roots.len() == 0) || in_workspace) && !seen.has_key(doc.path) {
+            seen[doc.path] = true
+            &out.push((path: ~doc.path, text: ~doc.text))
+        }
+    }
+    overlays := [(path: lsp_workspace_path.OSPath, text: String)]{}
+    loop (_, doc) in server.diagnostic_state.docs -> &overlays.push((path: ~doc.path, text: ~doc.text))
+    loop root in roots {
+        project_parts :: ProjectParts.scan_with_overlays(root, overlays)
+        files := [lsp_workspace_path.OSPath]{}
+        lsp_collect_jet_files(root, &files)
+        &files.sort()
+        taken := 0
+        loop path in files {
+            if !project_parts.should_index(path) -> next
+            // Rust filter().take(256) counts indexed files before seen/read,
+            // not 256 successful reads or 256 newly-added paths.
+            if taken == 256 -> break
+            taken += 1
+            if seen.has_key(path) -> next
+            if lsp_workspace_fs.read_text(path) == .Ok(text) {
+                seen[path] = true
+                &out.push((path: ^path, text: ^text))
+            }
+        }
+    }
+    out
+}
+
+pub fn lsp_collect_jet_files(dir: lsp_workspace_path.OSPath, out: &[lsp_workspace_path.OSPath]) -[FS]> Never! {
+    entries :: lsp_workspace_fs.read_dir(dir) ?? return
+    loop {
+        // Rust entries.flatten(): an entry error is skipped, not EOF. The
+        // native owner must advance after yielding each per-entry error.
+        row := entries.next()
+        if row == {
+            .Err(_) -> next
+            .Ok(None) -> break
+            .Ok(.Val(entry)) -> {
+                path :: entry.path()
+                name :: entry.file_name()
+                displayed :: lsp_workspace_path.display(name)
+                if displayed.starts_with(".") || displayed == "target" || displayed == "node_modules" -> next
+                kind :: entry.file_type() ?? next
+                if kind.is_dir -> lsp_collect_jet_files(path, &out)
+                else if kind.is_file {
+                    extent :: lsp_workspace_path.extension_span(path) ?? next
+                    extension :: String.from_bytes(path.encoded[extent.start..<extent.end]) ?? next
+                    if extension == "jet" -> &out.push(^path)
+                }
+            }
+        }
+    }
+}

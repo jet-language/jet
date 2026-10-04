@@ -1,0 +1,159 @@
+// Source/LSP/Position.rs: LspPos, LspRange, LineTable and position/edit helpers.
+// Source/LSP/Server.rs:809–827: bounded protocol uinteger/position/range decoding.
+// All offsets and Span endpoints are UTF-8 bytes; character is UTF-16 units.
+use jet_foundation.[Span, diagnostic_utf8_width]
+use core.encoding.[DataTree]
+
+pub struct LSPPos {
+    pub line: Int
+    pub character: Int
+}
+
+pub struct LSPRange {
+    pub start: LSPPos
+    pub end: LSPPos
+}
+
+pub struct LineTable {
+    // Content endpoints exclude CR, LF and both bytes of CRLF.
+    lines: [Span]
+
+    pub fn new(src: String) -> LineTable Never! {
+        lsp_line_table_bytes(src.bytes())
+    }
+
+    pub fn offset(self, src: String, pos: LSPPos) -> Int Never! {
+        bytes :: src.bytes()
+        lsp_checked_offset_bytes(self, bytes, pos) ?? bytes.len()
+    }
+
+    pub fn checked_offset(self, src: String, pos: LSPPos) -> Int? Never! {
+        lsp_checked_offset_bytes(self, src.bytes(), pos)
+    }
+}
+
+fn lsp_line_table_bytes(bytes: [U8]) -> LineTable Never! {
+    lines := [Span]{}
+    start := 0
+    index := 0
+    loop index < bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if byte == 13 || byte == 10 {
+            &lines.push(Span{start: start, end: index})
+            if byte == 13 && index + 1 < bytes.len() && bytes[index + 1] == (U8{10}) -> index += 1
+            start = index + 1
+        }
+        index += 1
+    }
+    &lines.push(Span{start: start, end: bytes.len()})
+    LineTable{lines: lines}
+}
+
+fn lsp_checked_offset_bytes(table: LineTable, bytes: [U8], pos: LSPPos) -> Int? Never! {
+    if pos.line < 0 || pos.line >= table.lines.len() -> return None
+    line :: table.lines[pos.line]
+    utf16_count := 0
+    byte_offset := line.start
+    loop byte_offset < line.end {
+        if utf16_count == pos.character -> return Val(byte_offset)
+        width :: diagnostic_utf8_width(bytes, byte_offset)
+        next_count :: utf16_count + if width == 4 -> 2 else -> 1
+        if pos.character < next_count -> return None
+        utf16_count = next_count
+        byte_offset += width
+    }
+    // LSP characters beyond a line's content clamp to its endpoint.
+    Val(byte_offset)
+}
+
+fn lsp_utf16_length(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    count := 0
+    index := start
+    loop index < end {
+        width :: diagnostic_utf8_width(bytes, index)
+        count += if width == 4 -> 2 else -> 1
+        index += width
+    }
+    count
+}
+
+pub fn lsp_byte_span_to_range(src: String, span: Span) -> LSPRange Never! {
+    bytes :: src.bytes()
+    table :: lsp_line_table_bytes(bytes)
+    LSPRange{
+        start: lsp_byte_offset_in_table(bytes, table, span.start),
+        end: lsp_byte_offset_in_table(bytes, table, span.end),
+    }
+}
+
+pub fn lsp_byte_offset_to_lsp(src: String, offset: Int) -> LSPPos Never! {
+    bytes :: src.bytes()
+    lsp_byte_offset_in_table(bytes, lsp_line_table_bytes(bytes), offset)
+}
+
+fn lsp_byte_offset_in_table(bytes: [U8], table: LineTable, offset: Int) -> LSPPos Never! {
+    bounded :: if offset > bytes.len() -> bytes.len() else -> offset
+    loop (line_index, line) in table.lines {
+        next_start :: if line_index + 1 < table.lines.len() -> table.lines[line_index + 1].start else -> bytes.len() + 1
+        if bounded < next_start {
+            end :: if bounded < line.end -> bounded else -> line.end
+            // Rust source slicing requires a scalar boundary too: do not count
+            // an interior UTF-8 byte as a complete character.
+            if end < bytes.len() && (Int.from_u8(bytes[end]) & 192) == 128 -> panic("byte offset is not a UTF-8 boundary")
+            return LSPPos{line: line_index, character: lsp_utf16_length(bytes, line.start, end)}
+        }
+    }
+    panic("line table must contain the final line")
+}
+
+pub fn lsp_pos_to_offset(src: String, pos: LSPPos) -> Int Never! {
+    bytes :: src.bytes()
+    lsp_checked_offset_bytes(lsp_line_table_bytes(bytes), bytes, pos) ?? bytes.len()
+}
+
+pub fn lsp_apply_edit(src: String, range: LSPRange, expected_utf16_len: Int?, new_text: String) -> String? Never! {
+    bytes :: src.bytes()
+    table :: lsp_line_table_bytes(bytes)
+    start :: lsp_checked_offset_bytes(table, bytes, range.start) ?? return None
+    end :: lsp_checked_offset_bytes(table, bytes, range.end) ?? return None
+    if end < start -> return None
+    if expected_utf16_len == .Val(expected) {
+        if lsp_utf16_length(bytes, start, end) != expected -> return None
+    }
+    out := [U8]{}
+    loop index in 0..<start -> &out.push(bytes[index])
+    loop byte in new_text.bytes() -> &out.push(byte)
+    loop index in end..<bytes.len() -> &out.push(bytes[index])
+    Val(String.from_bytes(out) ?? panic("validated LSP edit must preserve UTF-8"))
+}
+
+pub fn lsp_full_document_range(src: String) -> LSPRange Never! {
+    bytes :: src.bytes()
+    LSPRange{
+        start: LSPPos{line: 0, character: 0},
+        end: lsp_byte_offset_in_table(bytes, lsp_line_table_bytes(bytes), bytes.len()),
+    }
+}
+
+pub fn lsp_range_json(range: LSPRange) -> String Never! {
+    "{{\"start\":{{\"line\":{range.start.line},\"character\":{range.start.character}}},\"end\":{{\"line\":{range.end.line},\"character\":{range.end.character}}}}}"
+}
+
+pub fn lsp_uinteger(value: DataTree) -> Int? Never! {
+    if value == .Int(number) {
+        if number >= 0 && number <= 2147483647 -> return Val(number)
+    }
+    None
+}
+
+pub fn lsp_pos_from_json(value: DataTree) -> LSPPos? Never! {
+    line :: lsp_uinteger(value.field("line") ?? return None) ?? return None
+    character :: lsp_uinteger(value.field("character") ?? return None) ?? return None
+    Val(LSPPos{line: line, character: character})
+}
+
+pub fn lsp_range_from_json(value: DataTree) -> LSPRange? Never! {
+    start :: lsp_pos_from_json(value.field("start") ?? return None) ?? return None
+    end :: lsp_pos_from_json(value.field("end") ?? return None) ?? return None
+    Val(LSPRange{start: start, end: end})
+}

@@ -1,0 +1,1604 @@
+// PORT-PENDING 0987 tests-canvas-scenarios: tests/canvas_scenarios.rs:1-1600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-CANVASTEST1=A: stdlib-only browser scenarios for Canvas.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::HashMap;
+//RS use std::fmt::Write as _;
+//RS use std::fs;
+//RS use std::io::{Read, Write};
+//RS use std::net::{TcpListener, TcpStream};
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Child, Command, Stdio};
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS use std::sync::{Condvar, Mutex, Once, OnceLock};
+//RS use std::thread;
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS static BUILD_JET: Once = Once::new();
+//RS static NEXT_CANVAS_CASE: AtomicU64 = AtomicU64::new(0);
+//RS const MAX_CANVAS_BROWSERS: usize = 4;
+//RS const BIG_PROJECT_SCENARIO: &str = "big-project-perf";
+//RS const DEVSERVER_REAL_CLIENT_SCENARIO: &str = "devserver-real-client-survival";
+//RS const SESSION_SURFACE_MATRIX_SCENARIO: &str = "session-surface-matrix";
+//RS const WORKBENCH_E2E_SCENARIO: &str = "canvas-workbench-e2e";
+//RS const EXPLICIT_WEB_TARGET: &str = "web";
+//RS const BIG_FUNCTION_COUNT: usize = 300;
+//RS const BIG_MODULE_COUNT: usize = 12;
+//RS const BIG_FUNCTIONS_PER_MODULE: usize = BIG_FUNCTION_COUNT / BIG_MODULE_COUNT;
+//RS const BIG_FILE_COUNT: usize = BIG_MODULE_COUNT + 1;
+//RS static CANVAS_BROWSER_POOL: OnceLock<(Mutex<usize>, Condvar)> = OnceLock::new();
+//RS static CANVAS_SESSIONS: OnceLock<Mutex<HashMap<u16, String>>> = OnceLock::new();
+//RS 
+//RS struct CanvasTools {
+//RS     chromium: PathBuf,
+//RS     node: PathBuf,
+//RS }
+//RS 
+//RS struct GeckoTools {
+//RS     firefox: PathBuf,
+//RS     geckodriver: PathBuf,
+//RS     node: PathBuf,
+//RS }
+//RS 
+//RS static CANVAS_TOOLS: OnceLock<Option<CanvasTools>> = OnceLock::new();
+//RS static GECKO_TOOLS: OnceLock<Result<GeckoTools, String>> = OnceLock::new();
+//RS 
+//RS #[test]
+//RS fn full_verification_uses_clean_short_external_tmpdir() {
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let probe = |mode: &str, parent: Option<&Path>| {
+//RS         let mut command = Command::new("bash");
+//RS         command
+//RS             .current_dir(&repo)
+//RS             .arg("Tools/agent/verify-full.sh")
+//RS             .arg(mode)
+//RS             .env("JET_NIX_TMP_CLEANED", "1")
+//RS             .env_remove("JET_VERIFY_TMPDIR");
+//RS         if let Some(parent) = parent {
+//RS             command.env("JET_VERIFY_TMPDIR", parent);
+//RS         }
+//RS         let output = command.output().expect("probe full-verification temp root");
+//RS         let roots = String::from_utf8(output.stdout)
+//RS             .unwrap()
+//RS             .lines()
+//RS             .map(PathBuf::from)
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(
+//RS             roots.len(),
+//RS             4,
+//RS             "temp probe must report every exported temp root"
+//RS         );
+//RS         assert!(roots.iter().all(|path| path == &roots[0]));
+//RS         assert!(roots[0]
+//RS             .file_name()
+//RS             .is_some_and(|name| name.to_string_lossy().starts_with("jet-verify.")));
+//RS         assert!(
+//RS             !roots[0].exists(),
+//RS             "verification temp root must be removed on exit"
+//RS         );
+//RS         (output.status, roots[0].clone())
+//RS     };
+//RS 
+//RS     let (status, root) = probe("--probe-temp-root", None);
+//RS     assert!(status.success());
+//RS     assert_eq!(root.parent(), Some(Path::new("/tmp")));
+//RS 
+//RS     let override_parent = std::env::temp_dir().join(format!(
+//RS         "jet-verify-parent-{}-{:?}",
+//RS         std::process::id(),
+//RS         std::thread::current().id()
+//RS     ));
+//RS     fs::create_dir_all(&override_parent).unwrap();
+//RS     let (status, root) = probe("--probe-temp-root", Some(&override_parent));
+//RS     assert!(status.success());
+//RS     assert_eq!(root.parent(), Some(override_parent.as_path()));
+//RS     let (status, root) = probe("--probe-temp-root-signal", Some(&override_parent));
+//RS     assert_eq!(status.code(), Some(143));
+//RS     assert_eq!(root.parent(), Some(override_parent.as_path()));
+//RS     fs::remove_dir(override_parent).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS #[cfg(unix)]
+//RS fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
+//RS     use std::os::unix::fs::PermissionsExt as _;
+//RS 
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let tools = std::env::temp_dir().join(format!(
+//RS         "jet-canvas-preflight-tools-{}-{:?}",
+//RS         std::process::id(),
+//RS         std::thread::current().id()
+//RS     ));
+//RS     fs::create_dir_all(&tools).unwrap();
+//RS     let chromium = tools.join("chromium");
+//RS     let firefox = tools.join("firefox");
+//RS     let geckodriver = tools.join("geckodriver");
+//RS     let node = tools.join("node");
+//RS     fs::write(&chromium, "#!/bin/sh\necho 'Chromium 1'\n").unwrap();
+//RS     fs::write(&firefox, "#!/bin/sh\necho 'Mozilla Firefox 1'\n").unwrap();
+//RS     fs::write(&geckodriver, "#!/bin/sh\necho 'geckodriver 1'\n").unwrap();
+//RS     fs::write(&node, "#!/bin/sh\necho 'v1.0.0'\n").unwrap();
+//RS     fs::set_permissions(&chromium, fs::Permissions::from_mode(0o755)).unwrap();
+//RS     fs::set_permissions(&firefox, fs::Permissions::from_mode(0o755)).unwrap();
+//RS     fs::set_permissions(&geckodriver, fs::Permissions::from_mode(0o755)).unwrap();
+//RS     fs::set_permissions(&node, fs::Permissions::from_mode(0o755)).unwrap();
+//RS     for (missing, chromium, firefox, geckodriver, node) in [
+//RS         (
+//RS             "chromium",
+//RS             tools.join("missing-chromium"),
+//RS             firefox.clone(),
+//RS             geckodriver.clone(),
+//RS             node.clone(),
+//RS         ),
+//RS         (
+//RS             "firefox",
+//RS             chromium.clone(),
+//RS             tools.join("missing-firefox"),
+//RS             geckodriver.clone(),
+//RS             node.clone(),
+//RS         ),
+//RS         (
+//RS             "geckodriver",
+//RS             chromium.clone(),
+//RS             firefox.clone(),
+//RS             tools.join("missing-geckodriver"),
+//RS             node.clone(),
+//RS         ),
+//RS         (
+//RS             "node",
+//RS             chromium,
+//RS             firefox,
+//RS             geckodriver,
+//RS             tools.join("missing-node"),
+//RS         ),
+//RS     ] {
+//RS         let output = Command::new("bash")
+//RS             .current_dir(&repo)
+//RS             .arg("Tools/agent/verify-full.sh")
+//RS             .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
+//RS             .env("JET_VERIFY_TEMP_PROBE_ONLY", "1")
+//RS             .env("JET_NIX_TMP_CLEANED", "1")
+//RS             .env("JET_CANVAS_CHROMIUM", &chromium)
+//RS             .env("JET_CANVAS_FIREFOX", &firefox)
+//RS             .env("JET_CANVAS_GECKODRIVER", &geckodriver)
+//RS             .env("JET_CANVAS_NODE", &node)
+//RS             .output()
+//RS             .expect("run strict Canvas prerequisite preflight");
+//RS         assert!(!output.status.success(), "missing {missing} must fail");
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         let expected = format!(
+//RS             "error: Canvas interaction tests require Chromium, Firefox/geckodriver, and Node; missing: {missing}. Run Tools/agent/jet-env full Tools/agent/verify-full.sh."
+//RS         );
+//RS         assert_eq!(stderr.matches(&expected).count(), 1, "{stderr}");
+//RS         assert!(!stderr.contains("ignored:"), "{stderr}");
+//RS     }
+//RS     fs::remove_dir_all(tools).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn strict_full_verification_rejects_executable_impostors() {
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let output = Command::new("bash")
+//RS         .current_dir(&repo)
+//RS         .arg("Tools/agent/verify-full.sh")
+//RS         .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
+//RS         .env("JET_NIX_TMP_CLEANED", "1")
+//RS         .env("JET_CANVAS_CHROMIUM", "true")
+//RS         .env("JET_CANVAS_FIREFOX", "true")
+//RS         .env("JET_CANVAS_GECKODRIVER", "true")
+//RS         .env("JET_CANVAS_NODE", "true")
+//RS         .output()
+//RS         .expect("run strict Canvas prerequisite preflight");
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "arbitrary executables must fail identity checks"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert_eq!(
+//RS         stderr.matches("Canvas interaction tests require").count(),
+//RS         1,
+//RS         "{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("missing: chromium,firefox,geckodriver,node"),
+//RS         "{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn strict_full_verification_accepts_canvas_tools_in_dev_shell() {
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let chromium = resolve_executable("chromium").expect("dev-shell chromium path");
+//RS     let firefox = resolve_executable("firefox").expect("dev-shell firefox path");
+//RS     let geckodriver = resolve_executable("geckodriver").expect("dev-shell geckodriver path");
+//RS     let node = resolve_executable("node").expect("dev-shell node path");
+//RS     let output = Command::new("bash")
+//RS         .current_dir(&repo)
+//RS         .arg("Tools/agent/verify-full.sh")
+//RS         .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
+//RS         .env("JET_NIX_TMP_CLEANED", "1")
+//RS         .env("JET_CANVAS_CHROMIUM", &chromium)
+//RS         .env("JET_CANVAS_FIREFOX", &firefox)
+//RS         .env("JET_CANVAS_GECKODRIVER", &geckodriver)
+//RS         .env("JET_CANVAS_NODE", &node)
+//RS         .output()
+//RS         .expect("run strict Canvas prerequisite preflight");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "dev-shell Canvas prerequisite preflight failed: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn cdp_driver_owns_parallel_browsers_under_long_tmpdir() {
+//RS     let Some(tools) = canvas_tools() else {
+//RS         eprintln!("ignored: CDP lifecycle regression needs dev-shell Chromium and Node");
+//RS         return;
+//RS     };
+//RS     let _permits = (0..MAX_CANVAS_BROWSERS)
+//RS         .map(|_| CanvasBrowserPermit::acquire())
+//RS         .collect::<Vec<_>>();
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let long_tmp = std::env::temp_dir().join(format!(
+//RS         "canvas-driver-lifecycle-{}-{}",
+//RS         "x".repeat(120),
+//RS         std::process::id()
+//RS     ));
+//RS     fs::create_dir_all(&long_tmp).expect("create long Canvas driver temp root");
+//RS     let output = Command::new(&tools.node)
+//RS         .current_dir(&repo)
+//RS         .env("CHROMIUM", &tools.chromium)
+//RS         .env("TMPDIR", &long_tmp)
+//RS         .arg("Tools/canvas-test/driver-lifecycle.mjs")
+//RS         .arg(MAX_CANVAS_BROWSERS.to_string())
+//RS         .output()
+//RS         .expect("run Canvas CDP lifecycle regression");
+//RS     fs::remove_dir_all(&long_tmp).expect("remove long Canvas driver temp root");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "parallel CDP lifecycle failed\n--- stdout ---\n{}\n--- stderr ---\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&output.stdout).contains("PASS 4 isolated Chromium lifecycles"));
+//RS }
+//RS 
+//RS struct CanvasBrowserPermit;
+//RS 
+//RS impl CanvasBrowserPermit {
+//RS     fn acquire() -> Self {
+//RS         let (available, wake) =
+//RS             CANVAS_BROWSER_POOL.get_or_init(|| (Mutex::new(MAX_CANVAS_BROWSERS), Condvar::new()));
+//RS         let mut available = available
+//RS             .lock()
+//RS             .expect("Canvas browser permit lock poisoned");
+//RS         while *available == 0 {
+//RS             available = wake
+//RS                 .wait(available)
+//RS                 .expect("Canvas browser permit lock poisoned");
+//RS         }
+//RS         *available -= 1;
+//RS         Self
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for CanvasBrowserPermit {
+//RS     fn drop(&mut self) {
+//RS         let (available, wake) =
+//RS             CANVAS_BROWSER_POOL.get_or_init(|| (Mutex::new(MAX_CANVAS_BROWSERS), Condvar::new()));
+//RS         *available
+//RS             .lock()
+//RS             .expect("Canvas browser permit lock poisoned") += 1;
+//RS         wake.notify_one();
+//RS     }
+//RS }
+//RS 
+//RS const DEMO: &str = r#"fn helper() -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS /// Squares an integer input for this Canvas example.
+//RS fn square(n: Int) -> Int {
+//RS     return n * n
+//RS }
+//RS 
+//RS /// Summarizes a checked value for Canvas hover guidance.
+//RS fn summarize(limit: Int) -> Int {
+//RS     total := square(limit)
+//RS     if total > 10 {
+//RS         return total
+//RS     } else {
+//RS         return total + 1
+//RS     }
+//RS }
+//RS 
+//RS fn scratch(limit: Int, text: String, flag: Bool, ratio: Float) {
+//RS     print(limit)
+//RS }
+//RS 
+//RS fn run() {
+//RS     print(summarize(4))
+//RS }
+//RS "#;
+//RS 
+//RS const CALLBACK_DEMO: &str = r#"fn on_start() {
+//RS     print("start")
+//RS }
+//RS 
+//RS fn helper() -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     on_start()
+//RS }
+//RS "#;
+//RS 
+//RS const DEBUG_DEMO: &str = r#"fn helper() -> Int {
+//RS     return 1
+//RS }
+//RS 
+//RS fn square(n: Int) -> Int {
+//RS     return n * n
+//RS }
+//RS 
+//RS fn summarize(limit: Int) -> Int {
+//RS     total := square(limit)
+//RS     if total > 10 {
+//RS         return total
+//RS     } else {
+//RS         return total + 1
+//RS     }
+//RS }
+//RS 
+//RS fn scratch(limit: Int, text: String, flag: Bool, ratio: Float) {
+//RS     print(limit)
+//RS }
+//RS 
+//RS fn run() {
+//RS     value := summarize(4)
+//RS     print(value)
+//RS     print(value)
+//RS }
+//RS "#;
+//RS 
+//RS const EVENTS_PANEL_SOURCE: &str = r#"use core.event as event
+//RS 
+//RS fn dev() {
+//RS     scope :: event.scope()
+//RS     clicked :: event.new<Int>()
+//RS     clicked.on(scope, n -> print("clicked {n}"))
+//RS     clicked.once(scope, n -> print("once {n}"))
+//RS     print(&clicked.emit(1).summary())
+//RS     scope.cancel()
+//RS }
+//RS 
+//RS fn run() {
+//RS     dev()
+//RS }
+//RS "#;
+//RS 
+//RS struct BigFixtureFacts {
+//RS     file_count: usize,
+//RS     function_count: usize,
+//RS     source_bytes: usize,
+//RS     source_sha256: String,
+//RS }
+//RS 
+//RS fn write_big_fixture(dir: &Path) -> BigFixtureFacts {
+//RS     let mut main = String::new();
+//RS     for module in 0..BIG_MODULE_COUNT {
+//RS         writeln!(&mut main, "use \"./part_{module:02}\" as p{module:02}").unwrap();
+//RS     }
+//RS     main.push('\n');
+//RS     main.push_str("fn run() {\n");
+//RS     for function in 0..BIG_FUNCTION_COUNT {
+//RS         let module = function / BIG_FUNCTIONS_PER_MODULE;
+//RS         writeln!(
+//RS             &mut main,
+//RS             "    value_{function:03} :: p{module:02}.function_{function:03}()"
+//RS         )
+//RS         .unwrap();
+//RS     }
+//RS     main.push_str("    print(value_299)\n}\n");
+//RS 
+//RS     let mut canonical = String::new();
+//RS     fs::write(dir.join("main.jet"), &main).expect("write generated Canvas entry source");
+//RS     canonical.push_str("main.jet\n");
+//RS     canonical.push_str(&main);
+//RS     for module in 0..BIG_MODULE_COUNT {
+//RS         let first = module * BIG_FUNCTIONS_PER_MODULE;
+//RS         let mut source = String::new();
+//RS         for function in first..first + BIG_FUNCTIONS_PER_MODULE {
+//RS             writeln!(
+//RS                 &mut source,
+//RS                 "pub fn function_{function:03}() Int -[]> {{ return 1 }}\n"
+//RS             )
+//RS             .unwrap();
+//RS         }
+//RS         let name = format!("part_{module:02}.jet");
+//RS         fs::write(dir.join(&name), &source).expect("write generated Canvas module source");
+//RS         canonical.push_str(&name);
+//RS         canonical.push('\n');
+//RS         canonical.push_str(&source);
+//RS     }
+//RS 
+//RS     BigFixtureFacts {
+//RS         file_count: BIG_FILE_COUNT,
+//RS         function_count: BIG_FUNCTION_COUNT,
+//RS         source_bytes: canonical.len(),
+//RS         source_sha256: jet::SHA256::sha256_hex(canonical.as_bytes()),
+//RS     }
+//RS }
+//RS 
+//RS fn read_big_fixture_facts(dir: &Path) -> BigFixtureFacts {
+//RS     let mut canonical = String::new();
+//RS     for name in std::iter::once("main.jet".to_owned())
+//RS         .chain((0..BIG_MODULE_COUNT).map(|module| format!("part_{module:02}.jet")))
+//RS     {
+//RS         let source = fs::read_to_string(dir.join(&name)).expect("read generated Canvas source");
+//RS         canonical.push_str(&name);
+//RS         canonical.push('\n');
+//RS         canonical.push_str(&source);
+//RS     }
+//RS     BigFixtureFacts {
+//RS         file_count: BIG_FILE_COUNT,
+//RS         function_count: BIG_FUNCTION_COUNT,
+//RS         source_bytes: canonical.len(),
+//RS         source_sha256: jet::SHA256::sha256_hex(canonical.as_bytes()),
+//RS     }
+//RS }
+//RS 
+//RS fn assert_big_fixture_preflight(repo: &Path, case: &CanvasCase, port: u16) {
+//RS     let expected = case
+//RS         .big_fixture
+//RS         .as_ref()
+//RS         .expect("big fixture facts for big-project-perf");
+//RS     let actual = read_big_fixture_facts(&case.dir);
+//RS     assert_eq!(
+//RS         actual.file_count, expected.file_count,
+//RS         "generated file count changed"
+//RS     );
+//RS     assert_eq!(
+//RS         actual.function_count, expected.function_count,
+//RS         "generated function count changed"
+//RS     );
+//RS     assert_eq!(
+//RS         actual.source_bytes, expected.source_bytes,
+//RS         "generated source bytes changed"
+//RS     );
+//RS     assert_eq!(
+//RS         actual.source_sha256, expected.source_sha256,
+//RS         "generated source changed"
+//RS     );
+//RS 
+//RS     let jet = cargo_target_dir(repo).join("debug/jet");
+//RS     let check = Command::new(jet)
+//RS         .current_dir(&case.dir)
+//RS         .args(["check", "main.jet", "--target=web"])
+//RS         .output()
+//RS         .expect("check generated Canvas fixture with Jet");
+//RS     assert!(
+//RS         check.status.success(),
+//RS         "generated Canvas fixture failed Jet check\n--- stdout ---\n{}\n--- stderr ---\n{}",
+//RS         String::from_utf8_lossy(&check.stdout),
+//RS         String::from_utf8_lossy(&check.stderr)
+//RS     );
+//RS 
+//RS     let graph = http_body(port, "/canvas/graph");
+//RS     let graph_count = graph.matches("\"graph_id\":").count();
+//RS     assert_eq!(
+//RS         graph_count,
+//RS         BIG_FUNCTION_COUNT + 1,
+//RS         "Jet served an unexpected generated graph count"
+//RS     );
+//RS     assert!(
+//RS         graph.contains("\"title\":\"run\""),
+//RS         "generated entry graph is missing"
+//RS     );
+//RS     eprintln!(
+//RS         "BIG_PROJECT_PREFLIGHT files={} functions={} source_bytes={} source_sha256={} graphs={} jet_check=passed",
+//RS         actual.file_count,
+//RS         actual.function_count,
+//RS         actual.source_bytes,
+//RS         actual.source_sha256,
+//RS         graph_count
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_onboarding_tour() {
+//RS     run_canvas_scenario("canvas-onboarding-tour");
+//RS }
+//RS 
+//RS #[test]
+//RS fn keyboard_cheat_sheet_accessibility_states() {
+//RS     run_canvas_scenario("keyboard-cheat-sheet-accessibility-states");
+//RS }
+//RS 
+//RS #[test]
+//RS fn open_and_render() {
+//RS     run_canvas_scenario("open-and-render");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_real_client_loads_projection_and_keeps_devserver_alive() {
+//RS     run_canvas_scenario(DEVSERVER_REAL_CLIENT_SCENARIO);
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_session_ide_state_matrix() {
+//RS     run_canvas_scenario("resident-session-ide-state-matrix");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_workbench_e2e() {
+//RS     assert!(
+//RS         canvas_tools().is_some(),
+//RS         "Canvas workbench E2E needs dev-shell Chromium and Node; run Tools/agent/jet-env full"
+//RS     );
+//RS     run_canvas_scenario(WORKBENCH_E2E_SCENARIO);
+//RS }
+//RS 
+//RS #[test]
+//RS fn session_surface_matrix() {
+//RS     run_target_independent_scenario(SESSION_SURFACE_MATRIX_SCENARIO);
+//RS     run_target_independent_scenario_for_target(
+//RS         SESSION_SURFACE_MATRIX_SCENARIO,
+//RS         EXPLICIT_WEB_TARGET,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn review_diff_overlays() {
+//RS     run_canvas_scenario("review-diff-overlays");
+//RS }
+//RS 
+//RS #[test]
+//RS fn pan_zoom_fit() {
+//RS     run_canvas_scenario("pan-zoom-fit");
+//RS }
+//RS 
+//RS #[test]
+//RS fn click_select_details() {
+//RS     run_canvas_scenario("click-select-details");
+//RS }
+//RS 
+//RS #[test]
+//RS fn node_drag_persists_without_source_change() {
+//RS     run_canvas_scenario("node-drag-persists-without-source-change");
+//RS }
+//RS 
+//RS #[test]
+//RS fn selection_marquee_modifiers_local_move() {
+//RS     assert!(
+//RS         canvas_tools().is_some(),
+//RS         "selection/marquee/local-move proof requires Chromium and Node; run Tools/agent/jet-env full"
+//RS     );
+//RS     run_canvas_scenario("selection-marquee-modifiers-local-move");
+//RS }
+//RS 
+//RS #[test]
+//RS fn clipboard_copy_paste() {
+//RS     run_canvas_scenario("clipboard-copy-paste");
+//RS }
+//RS 
+//RS #[test]
+//RS fn clipboard_paste_as_staged() {
+//RS     run_canvas_scenario("clipboard-paste-as-staged");
+//RS }
+//RS 
+//RS #[test]
+//RS fn clipboard_mixed_selection_staged_fallback() {
+//RS     run_canvas_scenario("clipboard-mixed-selection-staged-fallback");
+//RS }
+//RS 
+//RS #[test]
+//RS fn clipboard_duplicate_undo_redo() {
+//RS     run_canvas_scenario("clipboard-duplicate-undo-redo");
+//RS }
+//RS 
+//RS #[test]
+//RS fn clipboard_stale_selection_refusal() {
+//RS     run_canvas_scenario("clipboard-stale-selection-refusal");
+//RS }
+//RS 
+//RS #[test]
+//RS fn clipboard_refuses_entry_selection() {
+//RS     run_canvas_scenario("clipboard-refuses-entry-selection");
+//RS }
+//RS 
+//RS #[test]
+//RS fn read_graph_overview() {
+//RS     run_canvas_scenario("read-graph-overview");
+//RS }
+//RS 
+//RS #[test]
+//RS fn component_tree_and_palette() {
+//RS     run_canvas_scenario("component-tree-and-palette");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_callback_creation() {
+//RS     run_canvas_scenario("canvas-rad-callback-creation");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_callback_undo() {
+//RS     run_canvas_scenario("canvas-rad-callback-undo");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_callback_redo() {
+//RS     run_canvas_scenario("canvas-rad-callback-redo");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_callback_escape() {
+//RS     run_canvas_scenario("canvas-rad-callback-escape");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_callback_focus() {
+//RS     run_canvas_scenario("canvas-rad-callback-focus");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_callback_fresh_projection() {
+//RS     run_canvas_scenario("canvas-rad-callback-fresh-projection");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_callback_failure() {
+//RS     run_canvas_scenario("canvas-rad-callback-failure");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_handler_navigation() {
+//RS     run_canvas_scenario("canvas-rad-handler-navigation");
+//RS }
+//RS 
+//RS #[test]
+//RS fn palette_insert_core_fn() {
+//RS     run_canvas_scenario("palette-insert-core-fn");
+//RS }
+//RS 
+//RS #[test]
+//RS fn palette_insert_imported_alias_function() {
+//RS     run_canvas_scenario("palette-insert-imported-alias-function");
+//RS }
+//RS 
+//RS #[test]
+//RS fn library_panel() {
+//RS     run_canvas_scenario("library-panel");
+//RS }
+//RS 
+//RS #[test]
+//RS fn library_panel_events_example() {
+//RS     run_canvas_scenario("library-panel-events");
+//RS }
+//RS 
+//RS #[test]
+//RS fn palette_insert_catalog_sweep() {
+//RS     run_canvas_scenario("palette-insert-catalog-sweep");
+//RS }
+//RS 
+//RS #[test]
+//RS fn palette_insert_flow_variable_project_core() {
+//RS     run_canvas_scenario("palette-insert-flow-variable-project-core");
+//RS }
+//RS 
+//RS #[test]
+//RS fn wire_data_and_exec() {
+//RS     run_canvas_scenario("wire-data-and-exec");
+//RS }
+//RS 
+//RS #[test]
+//RS fn data_pin_drag_to_wire() {
+//RS     run_canvas_scenario("data-pin-drag-to-wire");
+//RS }
+//RS 
+//RS #[test]
+//RS fn data_pin_type_gate() {
+//RS     run_canvas_scenario("data-pin-type-gate");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_rewire_reorders_statements() {
+//RS     run_canvas_scenario("exec-rewire-reorders-statements");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_rewire_refuses_cross_block() {
+//RS     run_canvas_scenario("exec-rewire-refuses-cross-block");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_rewire_binding_order_diagnostic() {
+//RS     run_canvas_scenario("exec-rewire-binding-order-diagnostic");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_convergence_preview() {
+//RS     run_canvas_scenario("exec-convergence-preview");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_convergence_structured_join() {
+//RS     run_canvas_scenario("exec-convergence-structured-join");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_convergence_apply() {
+//RS     run_canvas_scenario("exec-convergence-apply");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_convergence_selected_span() {
+//RS     run_canvas_scenario("exec-convergence-selected-span");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_convergence_refuses_out_of_scope() {
+//RS     run_canvas_scenario("exec-convergence-refuses-out-of-scope");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_convergence_explicit_strategies() {
+//RS     run_canvas_scenario("exec-convergence-explicit-strategies");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_convergence_escape() {
+//RS     run_canvas_scenario("exec-convergence-escape");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exec_convergence_stale() {
+//RS     run_canvas_scenario("exec-convergence-stale");
+//RS }
+//RS 
+//RS #[test]
+//RS fn branch_insertion_targets() {
+//RS     run_canvas_scenario("branch-insertion-targets");
+//RS }
+//RS 
+//RS #[test]
+//RS fn pattern_arm_add_edit_remove() {
+//RS     run_canvas_scenario("pattern-arm-add-edit-remove");
+//RS }
+//RS 
+//RS #[test]
+//RS fn pattern_arm_invalid_refused() {
+//RS     run_canvas_scenario("pattern-arm-invalid-refused");
+//RS }
+//RS 
+//RS #[test]
+//RS fn node_state_off_toggle() {
+//RS     run_canvas_scenario("node-state-off-toggle");
+//RS }
+//RS 
+//RS #[test]
+//RS fn node_state_debug_only_toggle() {
+//RS     run_canvas_scenario("node-state-debug-only-toggle");
+//RS }
+//RS 
+//RS #[test]
+//RS fn multi_input_append_remove() {
+//RS     run_canvas_scenario("multi-input-append-remove");
+//RS }
+//RS 
+//RS #[test]
+//RS fn inline_edit_values() {
+//RS     run_canvas_scenario("inline-edit-values");
+//RS }
+//RS 
+//RS #[test]
+//RS fn promote_pin_keyboard_gesture() {
+//RS     run_canvas_scenario("promote-pin-keyboard-gesture");
+//RS }
+//RS 
+//RS #[test]
+//RS fn conversion_keyboard_gesture() {
+//RS     run_canvas_scenario("conversion-keyboard-gesture");
+//RS }
+//RS 
+//RS #[test]
+//RS fn math_expression_keyboard_edit() {
+//RS     run_canvas_scenario("math-expression-keyboard-edit");
+//RS }
+//RS 
+//RS #[test]
+//RS fn collapse_expand_keyboard_gesture() {
+//RS     run_canvas_scenario("collapse-expand-keyboard-gesture");
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_comment_keyboard_reload() {
+//RS     run_canvas_scenario("source-comment-keyboard-reload");
+//RS }
+//RS 
+//RS #[test]
+//RS fn workspace_keyboard_view_state() {
+//RS     run_canvas_scenario("workspace-keyboard-view-state");
+//RS }
+//RS 
+//RS #[test]
+//RS fn node_docs_pointer_hover() {
+//RS     run_canvas_scenario("node-docs-pointer-hover");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_teaching_empty_states() {
+//RS     run_canvas_scenario("canvas-teaching-empty-states");
+//RS }
+//RS 
+//RS #[test]
+//RS fn harness_checked_doc_empty_noop_selftest() {
+//RS     run_canvas_scenario("harness-checked-doc-empty-noop-selftest");
+//RS }
+//RS 
+//RS #[test]
+//RS fn rename_variable_sidebar() {
+//RS     run_canvas_scenario("rename-variable-sidebar");
+//RS }
+//RS 
+//RS #[test]
+//RS fn project_rename_preview_commit() {
+//RS     assert!(
+//RS         canvas_tools().is_some(),
+//RS         "checked cross-file edit proof requires Chromium and Node; run Tools/agent/jet-env full"
+//RS     );
+//RS     run_canvas_scenario("project-rename-preview-commit");
+//RS }
+//RS 
+//RS #[test]
+//RS fn details_scalar_enum_reference_editors() {
+//RS     run_canvas_scenario("details-scalar-enum-reference-editors");
+//RS }
+//RS 
+//RS #[test]
+//RS fn details_collection_nested_editors() {
+//RS     run_canvas_scenario("details-collection-nested-editors");
+//RS }
+//RS 
+//RS #[test]
+//RS fn traits_panel_authoring() {
+//RS     run_canvas_scenario("traits-panel-authoring");
+//RS }
+//RS 
+//RS #[test]
+//RS fn events_panel_authoring() {
+//RS     run_canvas_scenario("events-panel-authoring");
+//RS }
+//RS 
+//RS #[test]
+//RS fn fallible_context() {
+//RS     run_canvas_scenario("fallible-context");
+//RS }
+//RS 
+//RS #[test]
+//RS fn excluded_entry_rendering() {
+//RS     run_canvas_scenario("excluded-entry-rendering");
+//RS }
+//RS 
+//RS #[test]
+//RS fn no_dead_end_ad_hoc_insert() {
+//RS     run_canvas_scenario("no-dead-end-ad-hoc-insert");
+//RS }
+//RS 
+//RS #[test]
+//RS fn failed_insert_shows_panel() {
+//RS     run_canvas_scenario("failed-insert-shows-panel");
+//RS }
+//RS 
+//RS #[test]
+//RS fn check_button_populates_panel() {
+//RS     run_canvas_scenario("check-button-populates-panel");
+//RS }
+//RS 
+//RS #[test]
+//RS fn bubble_appears_and_clears() {
+//RS     run_canvas_scenario("bubble-appears-and-clears");
+//RS }
+//RS 
+//RS #[test]
+//RS fn undo_restores_source() {
+//RS     run_canvas_scenario("undo-restores-source");
+//RS }
+//RS 
+//RS #[test]
+//RS fn undo_failure_preserves_history() {
+//RS     run_canvas_scenario("undo-failure-preserves-history");
+//RS }
+//RS 
+//RS #[test]
+//RS fn undo_depth_20_mixed_run() {
+//RS     run_canvas_scenario("undo-depth-20-mixed-run");
+//RS }
+//RS 
+//RS #[test]
+//RS fn run_button_output_visible() {
+//RS     run_canvas_scenario("run-button-output-visible");
+//RS }
+//RS 
+//RS #[test]
+//RS fn debug_live_session() {
+//RS     assert!(
+//RS         canvas_tools().is_some(),
+//RS         "debug live-session proof requires Chromium and Node; run Tools/agent/jet-env full"
+//RS     );
+//RS     run_canvas_scenario("debug-live-session");
+//RS }
+//RS 
+//RS #[test]
+//RS fn debug_runtime_values_staleness_liveness() {
+//RS     assert!(
+//RS         canvas_tools().is_some(),
+//RS         "debug staleness/liveness proof requires Chromium and Node; run Tools/agent/jet-env full"
+//RS     );
+//RS     run_canvas_scenario("debug-runtime-values-staleness-liveness");
+//RS }
+//RS 
+//RS #[test]
+//RS fn debug_breakpoints_run_control_gestures() {
+//RS     run_canvas_scenario("debug-breakpoints-run-control-gestures");
+//RS }
+//RS 
+//RS #[test]
+//RS fn graph_source_toggle_preserves_selection() {
+//RS     run_canvas_scenario("graph-source-toggle-preserves-selection");
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_rad_two_way_round_trip() {
+//RS     assert!(
+//RS         canvas_tools().is_some(),
+//RS         "Canvas RAD round-trip proof requires Chromium and Node; run Tools/agent/jet-env full"
+//RS     );
+//RS     run_canvas_scenario("canvas-rad-two-way-round-trip");
+//RS }
+//RS 
+//RS #[test]
+//RS fn random_ops_source_sync() {
+//RS     run_canvas_scenario("random-ops-source-sync");
+//RS }
+//RS 
+//RS #[test]
+//RS fn harness_click_noop_selftest() {
+//RS     run_canvas_scenario("harness-click-noop-selftest");
+//RS }
+//RS 
+//RS #[test]
+//RS fn big_project_perf_budget() {
+//RS     let tools = canvas_tools().unwrap_or_else(|| {
+//RS         panic!("big-project-perf needs dev-shell Chromium and Node; no skipped sample path")
+//RS     });
+//RS     for clean_run in 1..=2 {
+//RS         eprintln!("BIG_PROJECT_PERF clean_run={clean_run}/2");
+//RS         run_browser_scenario(
+//RS             BIG_PROJECT_SCENARIO,
+//RS             "chromium",
+//RS             &tools.node,
+//RS             &[("CHROMIUM", tools.chromium.as_path())],
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn gecko_smoke() {
+//RS     if std::env::var_os("JET_CANVAS_GECKO_SMOKE").as_deref() != Some(std::ffi::OsStr::new("1")) {
+//RS         eprintln!("ignored: Gecko smoke lane not selected");
+//RS         return;
+//RS     }
+//RS     let tools = gecko_tools().unwrap_or_else(|error| panic!("{error}"));
+//RS     run_gecko_cleanup_probe(tools);
+//RS     for name in [
+//RS         "open-and-render",
+//RS         "pan-zoom-fit",
+//RS         "click-select-details",
+//RS         "palette-insert-core-fn",
+//RS         "wire-data-and-exec",
+//RS         "undo-restores-source",
+//RS         "check-button-populates-panel",
+//RS         "random-ops-source-sync",
+//RS     ] {
+//RS         run_browser_scenario(
+//RS             name,
+//RS             "firefox",
+//RS             &tools.node,
+//RS             &[
+//RS                 ("FIREFOX", tools.firefox.as_path()),
+//RS                 ("GECKODRIVER", tools.geckodriver.as_path()),
+//RS             ],
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn run_gecko_cleanup_probe(tools: &GeckoTools) {
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let output = Command::new(&tools.node)
+//RS         .current_dir(&repo)
+//RS         .env("FIREFOX", &tools.firefox)
+//RS         .env("GECKODRIVER", &tools.geckodriver)
+//RS         .arg("Tools/canvas-test/gecko-lifecycle.mjs")
+//RS         .output()
+//RS         .expect("run Gecko cleanup lifecycle probe");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "Gecko cleanup lifecycle probe failed\n--- stdout ---\n{}\n--- stderr ---\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+//RS }
+//RS 
+//RS fn run_canvas_scenario(name: &str) {
+//RS     let Some(tools) = canvas_tools() else {
+//RS         eprintln!("ignored: Canvas scenario `{name}` needs dev-shell Chromium and Node");
+//RS         return;
+//RS     };
+//RS 
+//RS     run_browser_scenario(
+//RS         name,
+//RS         "chromium",
+//RS         &tools.node,
+//RS         &[("CHROMIUM", tools.chromium.as_path())],
+//RS     );
+//RS }
+//RS 
+//RS fn run_target_independent_scenario(name: &str) {
+//RS     let Some(tools) = canvas_tools() else {
+//RS         panic!("Canvas scenario `{name}` needs dev-shell Chromium and Node");
+//RS     };
+//RS 
+//RS     run_browser_scenario_with_server(
+//RS         name,
+//RS         "chromium",
+//RS         &tools.node,
+//RS         &[("CHROMIUM", tools.chromium.as_path())],
+//RS         true,
+//RS         None,
+//RS     );
+//RS }
+//RS 
+//RS fn run_target_independent_scenario_for_target(name: &str, target: &str) {
+//RS     let Some(tools) = canvas_tools() else {
+//RS         panic!("Canvas scenario `{name}` needs dev-shell Chromium and Node");
+//RS     };
+//RS 
+//RS     run_browser_scenario_with_server(
+//RS         name,
+//RS         "chromium",
+//RS         &tools.node,
+//RS         &[("CHROMIUM", tools.chromium.as_path())],
+//RS         true,
+//RS         Some(target),
+//RS     );
+//RS }
+//RS 
+//RS fn run_browser_scenario(name: &str, browser: &str, node: &Path, environment: &[(&str, &Path)]) {
+//RS     run_browser_scenario_with_server(name, browser, node, environment, false, None);
+//RS }
+//RS 
+//RS fn run_browser_scenario_with_server(
+//RS     name: &str,
+//RS     browser: &str,
+//RS     node: &Path,
+//RS     environment: &[(&str, &Path)],
+//RS     target_independent: bool,
+//RS     program_target: Option<&str>,
+//RS ) {
+//RS     let browser_count = if name == SESSION_SURFACE_MATRIX_SCENARIO { 2 } else { 1 };
+//RS     let _browser_permits = (0..browser_count)
+//RS         .map(|_| CanvasBrowserPermit::acquire())
+//RS         .collect::<Vec<_>>();
+//RS     ensure_jet_built();
+//RS 
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let case = CanvasCase::new(&repo, name);
+//RS     let port = free_port();
+//RS     let mut server = DevServer::start(
+//RS         &repo,
+//RS         &case.dir,
+//RS         &case.entry,
+//RS         port,
+//RS         target_independent,
+//RS         program_target,
+//RS     );
+//RS     if case.big_fixture.is_some() {
+//RS         assert_big_fixture_preflight(&repo, &case, port);
+//RS     }
+//RS     let session = CANVAS_SESSIONS
+//RS         .get_or_init(|| Mutex::new(HashMap::new()))
+//RS         .lock()
+//RS         .unwrap()
+//RS         .get(&port)
+//RS         .cloned()
+//RS         .expect("Canvas server session secret");
+//RS     let mut command = Command::new(node);
+//RS     command
+//RS         .current_dir(&repo)
+//RS         .envs(environment.iter().copied())
+//RS         .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
+//RS         .env("JET_BIN", cargo_target_dir(&repo).join("debug/jet"))
+//RS         .env("JETPACK_BIN", cargo_target_dir(&repo).join("debug/jetpack"))
+//RS         .arg("Tools/canvas-test/run.mjs")
+//RS         .arg("--scenario")
+//RS         .arg(name)
+//RS         .arg("--browser")
+//RS         .arg(browser)
+//RS         .arg("--port")
+//RS         .arg(port.to_string())
+//RS         .arg("--session")
+//RS         .arg(session)
+//RS         .arg("--out-dir")
+//RS         .arg(&case.screenshots)
+//RS         .arg("--seed")
+//RS         .arg("373");
+//RS     if let Some(program_target) = program_target {
+//RS         command.arg("--program-target").arg(program_target);
+//RS     }
+//RS     let output = command.output().expect("run Canvas scenario driver");
+//RS     let server_exit = server
+//RS         .child
+//RS         .try_wait()
+//RS         .expect("poll Canvas devserver after browser load");
+//RS     let server_log = server.stop();
+//RS     if !output.status.success() {
+//RS         panic!(
+//RS             "Canvas scenario `{name}` failed\n\n--- driver stdout ---\n{}\n--- driver stderr ---\n{}\n--- jet dev ---\n{}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr),
+//RS             server_log
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         server_exit.is_none(),
+//RS         "Canvas devserver exited after the real browser loaded its projection: {server_exit:?}\n\n--- jet dev ---\n{server_log}"
+//RS     );
+//RS     eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+//RS }
+//RS 
+//RS fn ensure_jet_built() {
+//RS     BUILD_JET.call_once(|| {
+//RS         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS         // card 1640: build into the checkout's own cache. The old hash-keyed
+//RS         // canvas namespace duplicated the whole dep tree (19G per checkout)
+//RS         // to defend a shared CARGO_TARGET_DIR — a layout the repo has since
+//RS         // banned in favor of per-worktree caches.
+//RS         let target = cargo_target_dir(&repo);
+//RS         let status = Command::new("cargo")
+//RS             .current_dir(&repo)
+//RS             .arg("build")
+//RS             .status()
+//RS             .expect("cargo build for Canvas scenarios");
+//RS         assert!(
+//RS             status.success(),
+//RS             "cargo build failed before Canvas scenarios"
+//RS         );
+//RS         assert!(
+//RS             target.join("debug/jet").is_file(),
+//RS             "cargo build did not produce the Canvas scenario jet binary"
+//RS         );
+//RS     });
+//RS }
+//RS 
+//RS fn cargo_target_dir(repo: &Path) -> PathBuf {
+//RS     match std::env::var_os("CARGO_TARGET_DIR") {
+//RS         Some(dir) if Path::new(&dir).is_absolute() => PathBuf::from(dir),
+//RS         Some(dir) => repo.join(dir),
+//RS         None => repo.join("target"),
+//RS     }
+//RS }
+//RS 
+//RS fn canvas_tools() -> Option<&'static CanvasTools> {
+//RS     CANVAS_TOOLS
+//RS         .get_or_init(|| {
+//RS             let strict = std::env::var_os("JET_CANVAS_PREREQUISITES").as_deref()
+//RS                 == Some(std::ffi::OsStr::new("strict"));
+//RS             let chromium = resolve_canvas_tool("chromium", strict)?;
+//RS             let node = resolve_canvas_tool("node", strict)?;
+//RS             Some(CanvasTools { chromium, node })
+//RS         })
+//RS         .as_ref()
+//RS }
+//RS 
+//RS fn gecko_tools() -> Result<&'static GeckoTools, &'static str> {
+//RS     GECKO_TOOLS
+//RS         .get_or_init(|| {
+//RS             let strict = std::env::var_os("JET_CANVAS_PREREQUISITES").as_deref()
+//RS                 == Some(std::ffi::OsStr::new("strict"));
+//RS             let firefox = resolve_canvas_tool("firefox", strict)
+//RS                 .ok_or_else(|| "Gecko smoke needs a valid Firefox executable".to_owned())?;
+//RS             let geckodriver = resolve_canvas_tool("geckodriver", strict)
+//RS                 .ok_or_else(|| "Gecko smoke needs a valid geckodriver executable".to_owned())?;
+//RS             let node = resolve_canvas_tool("node", strict)
+//RS                 .ok_or_else(|| "Gecko smoke needs a valid Node executable".to_owned())?;
+//RS             Ok(GeckoTools {
+//RS                 firefox,
+//RS                 geckodriver,
+//RS                 node,
+//RS             })
+//RS         })
+//RS         .as_ref()
+//RS         .map_err(String::as_str)
+//RS }
+//RS 
+//RS fn resolve_canvas_tool(name: &str, strict: bool) -> Option<PathBuf> {
+//RS     let resolved_key = format!("JET_CANVAS_{}_RESOLVED", name.to_ascii_uppercase());
+//RS     let override_key = format!("JET_CANVAS_{}", name.to_ascii_uppercase());
+//RS     let candidate = if strict {
+//RS         std::env::var_os(&resolved_key)
+//RS     } else {
+//RS         std::env::var_os(&override_key).or_else(|| Some(name.into()))
+//RS     }?;
+//RS     let path = resolve_executable(Path::new(&candidate))?;
+//RS     let output = Command::new(&path).arg("--version").output().ok()?;
+//RS     let version = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let valid = match name {
+//RS         "chromium" => version.contains("Chromium") || version.contains("Chrome"),
+//RS         "firefox" => version.contains("Firefox"),
+//RS         "geckodriver" => version.starts_with("geckodriver"),
+//RS         "node" => {
+//RS             version.starts_with('v') && version.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
+//RS         }
+//RS         _ => false,
+//RS     };
+//RS     valid.then_some(path)
+//RS }
+//RS 
+//RS fn resolve_executable(candidate: impl AsRef<Path>) -> Option<PathBuf> {
+//RS     let candidate = candidate.as_ref();
+//RS     if candidate.components().count() > 1 {
+//RS         return candidate.is_file().then(|| candidate.to_path_buf());
+//RS     }
+//RS     std::env::split_paths(&std::env::var_os("PATH")?)
+//RS         .map(|dir| dir.join(candidate))
+//RS         .find(|path| path.is_file())
+//RS }
+//RS 
+//RS struct CanvasCase {
+//RS     dir: PathBuf,
+//RS     entry: PathBuf,
+//RS     screenshots: PathBuf,
+//RS     big_fixture: Option<BigFixtureFacts>,
+//RS }
+//RS 
+//RS impl CanvasCase {
+//RS     fn new(repo: &Path, name: &str) -> CanvasCase {
+//RS         let root = std::env::var("JET_VERIFY_TMPDIR")
+//RS             .map(PathBuf::from)
+//RS             .unwrap_or_else(|_| std::env::temp_dir().join("jet-test-tmp"));
+//RS         let serial = NEXT_CANVAS_CASE.fetch_add(1, Ordering::Relaxed);
+//RS         let dir = root.join(format!(
+//RS             "canvas_scenario_{}_{}_{}",
+//RS             name.replace('-', "_"),
+//RS             std::process::id(),
+//RS             serial
+//RS         ));
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS         fs::create_dir_all(&dir).expect("create Canvas scenario dir");
+//RS         let entry = if matches!(name, SESSION_SURFACE_MATRIX_SCENARIO | WORKBENCH_E2E_SCENARIO) {
+//RS             dir.join("run.jet")
+//RS         } else {
+//RS             dir.join("main.jet")
+//RS         };
+//RS         let big_fixture = if name == BIG_PROJECT_SCENARIO {
+//RS             Some(write_big_fixture(&dir))
+//RS         } else if name == "canvas-onboarding-tour" {
+//RS             fs::copy(
+//RS                 repo.join("Examples/features/tooling/canvas_blueprint_demo.jet"),
+//RS                 &entry,
+//RS             )
+//RS             .expect("copy Canvas onboarding example source");
+//RS             None
+//RS         } else if name == DEVSERVER_REAL_CLIENT_SCENARIO {
+//RS             fs::copy(repo.join("Examples/features/web/ui_showcase.jet"), &entry)
+//RS                 .expect("copy Canvas devserver regression source");
+//RS             None
+//RS         } else if matches!(name, SESSION_SURFACE_MATRIX_SCENARIO | WORKBENCH_E2E_SCENARIO) {
+//RS             fs::write(
+//RS                 dir.join("package.jet"),
+//RS                 "name: \"canvas_session_matrix\"\nversion: \"0.1.0\"\noutputs: {\n    cli: .Executable{ name: \"cli\", entry: run }\n    service: .Service{ name: \"service\", entry: serve }\n    web: .Executable{ name: \"web\", entry: web }\n    ui: .Executable{ name: \"ui\", entry: ui }\n    game: .Executable{ name: \"game\", entry: game }\n    library: .Library{ name: \"library\", entry: run }\n    build: .Check{ name: \"build\", entry: build }\n}\ndefaults: { run: cli }\n",
+//RS             )
+//RS             .expect("write Canvas session matrix package fixture");
+//RS             fs::write(
+//RS                 dir.join("env.jet"),
+//RS                 "module env.dev {\n    prompt: \"canvas-session-matrix\",\n    services: { custom_server: { enable: false, ports: [43817], run: [\"node\", \"custom-server.mjs\"], ready: \"custom-server-ready\" }, canvas_service: { enable: true, run: [\"node\", \"--eval\", \"console.log('canvas-service-ready'); setInterval(() => {{}}, 1000);\"] } },\n}\n",
+//RS             )
+//RS             .expect("write Canvas session matrix environment fixture");
+//RS             fs::write(
+//RS                 dir.join("custom-server.mjs"),
+//RS                 "import http from \"node:http\";\nconst server = http.createServer((request, response) => {\n    response.setHeader(\"content-type\", \"text/plain\");\n    response.end(request.url === \"/health\" ? \"custom-server-ready\" : \"custom-server\");\n});\nserver.listen(43817, \"127.0.0.1\", () => console.log(\"custom-server-ready\"));\nprocess.on(\"SIGTERM\", () => server.close(() => process.exit(0)));\n",
+//RS             )
+//RS             .expect("write Canvas custom server fixture");
+//RS             fs::write(
+//RS                 &entry,
+//RS                 "use core.term as io\n\nfn run() { io.print(\"cli\") }\nfn serve() { io.print(\"service\") }\nfn web() { io.print(\"web\") }\nfn ui() { io.print(\"ui\") }\nfn game() { io.print(\"game\") }\n\nfn build(b: BuildContext) -> BuildPlan {\n    return b.plan()\n}\n",
+//RS             )
+//RS             .expect("write Canvas session matrix source fixture");
+//RS             None
+//RS         } else {
+//RS             if matches!(name, "library-panel" | "library-panel-events") {
+//RS                 fs::write(
+//RS                     dir.join("package.jet"),
+//RS                     "name: \"canvas_library\"\nversion: \"0.1.0\"\n",
+//RS                 )
+//RS                 .expect("write Canvas library package fixture");
+//RS             }
+//RS             if name == "library-panel-events" {
+//RS                 fs::copy(repo.join("Examples/features/ui/events.jet"), &entry)
+//RS                     .expect("copy Canvas library events source");
+//RS             } else {
+//RS                 let source = if matches!(
+//RS                     name,
+//RS                     "debug-breakpoints-run-control-gestures"
+//RS                         | "debug-runtime-values-staleness-liveness"
+//RS                 ) {
+//RS                     DEBUG_DEMO
+//RS                 } else if name.starts_with("canvas-rad-callback-")
+//RS                     || name == "canvas-rad-handler-navigation"
+//RS                 {
+//RS                     CALLBACK_DEMO
+//RS                 } else {
+//RS                     DEMO
+//RS                 };
+//RS                 fs::write(&entry, source).expect("write Canvas scenario source");
+//RS                 if name == "events-panel-authoring" {
+//RS                     fs::write(dir.join("events.jet"), EVENTS_PANEL_SOURCE)
+//RS                         .expect("write Canvas events source fixture");
+//RS                 }
+//RS             }
+//RS             None
+//RS         };
+//RS         let screenshots = dir.join("screenshots");
+//RS         fs::create_dir_all(&screenshots).expect("create Canvas screenshot dir");
+//RS         CanvasCase {
+//RS             dir,
+//RS             entry,
+//RS             screenshots,
+//RS             big_fixture,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for CanvasCase {
+//RS     fn drop(&mut self) {
+//RS         if let Err(err) = fs::remove_dir_all(&self.dir) {
+//RS             if err.kind() != std::io::ErrorKind::NotFound {
+//RS                 eprintln!(
+//RS                     "warning: could not remove Canvas scenario artifacts at {}: {err}",
+//RS                     self.dir.display()
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn canvas_cases_same_name_get_distinct_directories() {
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let first = CanvasCase::new(&repo, "undo-restores-source");
+//RS     let second = CanvasCase::new(&repo, "undo-restores-source");
+//RS     assert_ne!(first.dir, second.dir);
+//RS }
+//RS 
+//RS struct DevServer {
+//RS     child: Child,
+//RS }
+//RS 
+//RS impl DevServer {
+//RS     fn start(
+//RS         repo: &Path,
+//RS         cwd: &Path,
+//RS         entry: &Path,
+//RS         port: u16,
+//RS         target_independent: bool,
+//RS         program_target: Option<&str>,
+//RS     ) -> DevServer {
+//RS         let jet = cargo_target_dir(repo).join("debug/jet");
+//RS         let mut command = if cwd.join("env.jet").is_file() {
+//RS             let mut command = Command::new(cargo_target_dir(repo).join("debug/jetpack"));
+//RS             command
+//RS                 .current_dir(cwd)
+//RS                 .env("JET_ROOT", cwd)
+//RS                 .args(["env", "-y", "--"])
+//RS                 .arg(&jet);
+//RS             command
+//RS         } else {
+//RS             Command::new(&jet)
+//RS         };
+//RS         command.current_dir(cwd).arg("dev").arg(entry);
+//RS         if target_independent {
+//RS             command.arg("--canvas").arg(format!("--canvas-port={port}"));
+//RS             if let Some(program_target) = program_target {
+//RS                 command.arg(format!("--target={program_target}"));
+//RS             }
+//RS         } else {
+//RS             command
+//RS                 .arg("--canvas")
+//RS                 .arg("--target=web")
+//RS                 .arg(format!("--canvas-port={port}"));
+//RS         }
+//RS         let mut child = command
+//RS             .stdout(Stdio::piped())
+//RS             .stderr(Stdio::piped())
+//RS             .spawn()
+//RS             .expect("start jet dev Canvas server");
+//RS         if let Some(stdout) = child.stdout.take() {
+//RS             thread::spawn(move || {
+//RS                 use std::io::{BufRead, BufReader};
+//RS                 for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+//RS                     let Some(url) = line.split("Canvas: ").nth(1) else {
+//RS                         continue;
+//RS                     };
+//RS                     let Some(port) = url
+//RS                         .split("http://127.0.0.1:")
+//RS                         .nth(1)
+//RS                         .or_else(|| url.split("http://localhost:").nth(1))
+//RS                         .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+//RS                         .and_then(|value| value.parse::<u16>().ok())
+//RS                     else {
+//RS                         continue;
+//RS                     };
+//RS                     let Some(token) = url.split("session=").nth(1).map(|value| {
+//RS                         value
+//RS                             .split(|c: char| !c.is_ascii_hexdigit())
+//RS                             .next()
+//RS                             .unwrap_or_default()
+//RS                             .to_string()
+//RS                     }) else {
+//RS                         continue;
+//RS                     };
+//RS                     if token.len() >= 32 {
+//RS                         CANVAS_SESSIONS
+//RS                             .get_or_init(|| Mutex::new(HashMap::new()))
+//RS                             .lock()
+//RS                             .unwrap()
+//RS                             .insert(port, token);
+//RS                     }
+//RS                 }
+//RS             });
+//RS         }
+//RS         wait_for_server(&mut child, port);
+//RS         DevServer { child }
+//RS     }
+//RS 
+//RS     fn stop(&mut self) -> String {
+//RS         stop_process_tree(&mut self.child);
+//RS         let mut out = String::new();
+//RS         if let Some(mut stdout) = self.child.stdout.take() {
+//RS             let _ = stdout.read_to_string(&mut out);
+//RS         }
+//RS         if let Some(mut stderr) = self.child.stderr.take() {
+//RS             let mut err = String::new();
+//RS             let _ = stderr.read_to_string(&mut err);
+//RS             out.push_str(&err);
+//RS         }
+//RS         out
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for DevServer {
+//RS     fn drop(&mut self) {
+//RS         stop_process_tree(&mut self.child);
+//RS     }
+//RS }
+//RS 
+//RS fn stop_process_tree(child: &mut Child) {
+//RS     #[cfg(unix)]
+//RS     stop_process_tree_unix(child.id());
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = child.kill();
+//RS     }
+//RS     let _ = child.wait();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn stop_process_tree_unix(pid: u32) {
+//RS     let children_path = format!("/proc/{pid}/task/{pid}/children");
+//RS     if let Ok(children) = fs::read_to_string(children_path) {
+//RS         for child in children
+//RS             .split_whitespace()
+//RS             .filter_map(|value| value.parse::<u32>().ok())
+//RS         {
+//RS             stop_process_tree_unix(child);
+//RS         }
+//RS     }
+//RS     let _ = Command::new("kill")
+//RS         .args(["-KILL", &pid.to_string()])
+//RS         .status();
+//RS }
+//RS 
+//RS fn wait_for_server(child: &mut Child, port: u16) {
+//RS     let start = Instant::now();
+//RS     while start.elapsed() < Duration::from_secs(30) {
+//RS         if let Some(status) = child.try_wait().expect("poll jet dev") {
+//RS             panic!("jet dev exited before serving Canvas: {status}");
+//RS         }
+//RS         if http_ok(port, "/__jet_dev_status") {
+//RS             if CANVAS_SESSIONS
+//RS                 .get_or_init(|| Mutex::new(HashMap::new()))
+//RS                 .lock()
+//RS                 .unwrap()
+//RS                 .contains_key(&port)
+//RS             {
+//RS                 return;
+//RS             }
+//RS         }
+//RS         thread::sleep(Duration::from_millis(80));
+//RS     }
+//RS     panic!("timed out waiting for jet dev on port {port}");
+//RS }
+//RS 
+//RS fn http_ok(port: u16, path: &str) -> bool {
+//RS     let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
+//RS         return false;
+//RS     };
+//RS     let authorization = CANVAS_SESSIONS
+//RS         .get_or_init(|| Mutex::new(HashMap::new()))
+//RS         .lock()
+//RS         .unwrap()
+//RS         .get(&port)
+//RS         .map(|token| format!("Authorization: Bearer {token}\r\n"))
+//RS         .unwrap_or_default();
+//RS     let request = format!(
+//RS         "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n{authorization}Connection: close\r\n\r\n"
+//RS     );
+//RS     if stream.write_all(request.as_bytes()).is_err() {
+//RS         return false;
+//RS     }
+//RS     let mut response = String::new();
+//RS     if stream.read_to_string(&mut response).is_err() {
+//RS         return false;
+//RS     }
+//RS     response.starts_with("HTTP/1.1 200")
+//RS }
+//RS 
+//RS fn http_body(port: u16, path: &str) -> String {
+//RS     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to Jet Canvas server");
+//RS     let authorization = CANVAS_SESSIONS
+//RS         .get_or_init(|| Mutex::new(HashMap::new()))
+//RS         .lock()
+//RS         .unwrap()
+//RS         .get(&port)
+//RS         .map(|token| format!("Authorization: Bearer {token}\r\n"))
+//RS         .unwrap_or_default();
+//RS     let request = format!(
+//RS         "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n{authorization}Connection: close\r\n\r\n"
+//RS     );
+//RS     stream
+//RS         .write_all(request.as_bytes())
+//RS         .expect("request Jet Canvas preflight body");
+//RS     let mut response = String::new();
+//RS     stream
+//RS         .read_to_string(&mut response)
+//RS         .expect("read Jet Canvas preflight body");
+//RS     assert!(
+//RS         response.starts_with("HTTP/1.1 200"),
+//RS         "Jet Canvas preflight failed: {response}"
+//RS     );
+//RS     response
+//RS         .split_once("\r\n\r\n")
+//RS         .map(|(_, body)| body.to_owned())
+//RS         .expect("Jet Canvas response missing body separator")
+//RS }
+//RS 
+//RS fn free_port() -> u16 {
+//RS     TcpListener::bind(("127.0.0.1", 0))
+//RS         .expect("bind free local port")
+//RS         .local_addr()
+//RS         .expect("local addr")
+//RS         .port()
+//RS }
+// END-PORT-PENDING 0987 tests/canvas_scenarios.rs:1-1600
+

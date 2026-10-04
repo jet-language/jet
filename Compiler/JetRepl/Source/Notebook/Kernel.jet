@@ -1,0 +1,842 @@
+// crates/jet-repl/src/Notebook/kernel.rs:1-1477. Shared notebook execution owner,
+// package jet_repl, matching the Rust crate graph. CmdNotebook is a consumer.
+// Pending0807/0808 Session/ReplPolicy/checked_program/Comptime ABI
+// reconciliation: keep Rust producer names, never supply a substitute evaluator.
+// Pending0801 load/save native OSPath ABI reconciliation. Retained filesystem,
+// monotonic clock, UUID and interrupt/TLS bodies remain #4494/#4483/#4409 gates.
+use core.files.runtime.kernel_path_components as notebook_kernel_paths
+use core.files.runtime.kernel_path_components.[OSPath, PathPlatform]
+use core.files.host.retained_descriptor as notebook_kernel_files
+use core.sys.host.retained_clock as notebook_kernel_clock
+use core.sys.target as notebook_kernel_target
+use core.text.runtime.kernel_escape_debug as notebook_kernel_debug
+use jet_foundation.[Type, StatusValue, StatusFields, TEXT_NUL, DIAGNOSTIC_ERROR, param_call_label, func_effective_return_type, type_name, mir_sha256_hex, mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_ast.[Func, CtValue]
+use jet_lexer.[lex, TOKEN_SEMI, TOKEN_EOF, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_FALSE, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_CHAR, TOKEN_FLOAT, TOKEN_INT, TOKEN_LBRACKET, TOKEN_LPAREN]
+use jet_driver.[boot_mir_eval]
+use jet_comptime as Comptime
+use jet_semindex.[html_escape]
+
+pub struct KernelIdentity {
+    pub source: String
+    pub build: String
+    pub session: String
+    pub authority: String
+}
+pub struct NotebookAppInput {
+    pub name: String
+    pub label: String
+    pub type_name: String
+    pub required: Bool
+    pub variadic: Bool
+}
+pub struct NotebookAppSchema {
+    pub function: String
+    pub inputs: [NotebookAppInput]
+    pub return_projection: String
+    pub effects: [String]
+    pub authority: String
+    pub source_identity: String
+    pub compatibility_digest: String
+}
+struct NotebookKernelControlSpec {
+    function: String
+    name: String
+    label: String
+    type_name: String
+    required: Bool
+    variadic: Bool
+}
+// Rust kernel.rs:56-69; sole ClientKind owner (Main crate-graph ruling).
+pub enum ClientKind { FirstParty CanvasLens JupyterAdapter }
+impl ClientKind {
+    pub fn renderer(self) -> String Never! {
+        if self == {
+            .FirstParty -> "jet-notebook"
+            .CanvasLens -> "canvas-lens"
+            .JupyterAdapter -> "jupyter-adapter"
+        }
+    }
+}
+pub enum RerunDecision { Confirm SkipStale }
+pub struct KernelView {
+    pub client: ClientKind
+    pub turns: [ReplTurn]
+    pub stale_ids: [Int]
+    pub environment_hash: String
+}
+pub struct CellExecResult {
+    pub client: ClientKind
+    pub eval: EvalResult
+    pub bundle: NotebookMIMEBundle
+    pub render: NotebookRenderDecision
+    pub execution_count: U32
+    pub turn_id: Int?
+    pub elapsed_ms: U128
+    pub fn ok(self) -> Bool Never! { self.eval.status == ReplTurnStatus.Ok }
+}
+pub struct Kernel {
+    pub session: Session
+    policy: ReplPolicy
+    base_dir: OSPath
+    pub notebook: JetNotebook
+    pub trust: NotebookTrustStore
+    pub document_path: OSPath?
+    pub execution_count: U32
+    pub stdin_queue: [String]
+    document_notice: String?
+    interrupt_requested: Bool
+    debug_is_attached: Bool
+    perf_is_attached: Bool
+    cell_effects: [String:Bool]
+    cell_lazy: [String:Bool]
+    pending_effects: [String:Bool]
+    cell_errors: [String:String]
+    executed_cells: [String:Bool]
+    reactive_root: String?
+    session_id: String
+    control_values: [String:String]
+    control_errors: [String:String]
+    authority_id: String
+
+    // Rust :112-172. Boot BEFORE mint/load; a missing path makes a new document.
+    pub fn open(path: OSPath?, environment_hash: String) -> Kernel Err! {
+        boot_mir_eval()
+        kernel := Kernel.blank(path, environment_hash)
+        if path == .Val(target) {
+            if notebook_kernel_files.exists(target) {
+                notebook := load_jetnb(target)
+                if notebook.environment_hash != kernel.notebook.environment_hash {
+                    kernel.document_notice = Val("notebook environment changed; cached output is stale until local re-run")
+                    notebook.environment_hash = ~kernel.notebook.environment_hash
+                }
+                kernel.notebook = ^notebook
+                &kernel.notebook.refresh_dependencies() ?? return Err(err.message)
+                &kernel.clear_document_runtime()
+            } else {
+                &kernel.notebook.refresh_dependencies() ?? return Err(err.message)
+            }
+        } else {
+            &kernel.notebook.refresh_dependencies() ?? return Err(err.message)
+        }
+        kernel.trust = NotebookTrustStore.load(notebook_trust_store_path())
+        Ok(^kernel)
+    }
+    fn blank(path: OSPath?, environment_hash: String) -> Kernel Never! {
+        base_dir :: notebook_kernel_base_dir(path)
+        // Original UUID::new_v4 is infallible at this boundary; native entropy
+        // failure is not recast as a new notebook error. Core UUID is #4494.
+        session_id :: JetNotebook.mint_cell_id() ?? panic(err.message)
+        Kernel{
+            session: Session.new(), policy: ReplPolicy.for_notebook(notebook_kernel_flags(), base_dir), base_dir: ^base_dir,
+            notebook: JetNotebook.new(environment_hash), trust: NotebookTrustStore.default(), document_path: ~path,
+            execution_count: U32{0}, stdin_queue: [String]{}, document_notice: None,
+            interrupt_requested: false, debug_is_attached: false, perf_is_attached: false,
+            cell_effects: [String:Bool]{}, cell_lazy: [String:Bool]{}, pending_effects: [String:Bool]{},
+            cell_errors: [String:String]{}, executed_cells: [String:Bool]{}, reactive_root: None,
+            session_id: session_id, control_values: [String:String]{}, control_errors: [String:String]{}, authority_id: mir_sha256_hex("headless"),
+        }
+    }
+    fn clear_document_runtime(&self) Never! {
+        &self.cell_effects.clear()
+        &self.cell_lazy.clear()
+        &self.pending_effects.clear()
+        &self.cell_errors.clear()
+        &self.executed_cells.clear()
+        &self.control_values.clear()
+        &self.control_errors.clear()
+        self.reactive_root = None
+    }
+    fn reset_runtime(&self) Never! {
+        &self.session.reset()
+        self.policy = ReplPolicy.for_notebook(notebook_kernel_flags(), self.base_dir)
+        self.execution_count = U32{0}
+        &self.stdin_queue.clear()
+        loop index in 0..<self.notebook.cells.len() {
+            if &self.notebook.cells[index].output == .Val(output) {
+                output.turn_id = None
+            }
+        }
+        self.debug_is_attached = false
+        self.perf_is_attached = false
+        self.interrupt_requested = false
+        &self.executed_cells.clear()
+        &self.pending_effects.clear()
+        &self.cell_errors.clear()
+        self.reactive_root = None
+    }
+    pub fn open_document(&self, path: OSPath) Err! {
+        notebook := load_jetnb(path)
+        base_dir :: notebook_kernel_base_dir(Val(path))
+        environment_hash :: Kernel.environment_hash(base_dir)
+        self.document_notice = if notebook.environment_hash != environment_hash -> Val("notebook environment changed; cached output is stale until local re-run") else -> None
+        notebook.environment_hash = environment_hash
+        &notebook.refresh_dependencies() ?? return Err(err.message)
+        self.notebook = ^notebook
+        self.document_path = Val(~path)
+        self.base_dir = ^base_dir
+        &self.clear_document_runtime()
+        &self.reset_runtime()
+    }
+    pub fn reopen_document(&self) Err! {
+        path :: self.document_path ?? return Err("no notebook path is open")
+        &self.open_document(path)
+    }
+    pub fn save_document(&self, path: OSPath?) -> OSPath Err! {
+        target :: path ?? self.document_path ?? return Err("save needs a `.jetnb` path")
+        target_base_dir :: notebook_kernel_base_dir(Val(target))
+        self.notebook.environment_hash = Kernel.environment_hash(target_base_dir)
+        &self.notebook.refresh_dependencies() ?? return Err(err.message)
+        save_jetnb(self.notebook, target)
+        self.document_notice = None
+        self.document_path = Val(~target)
+        self.base_dir = ^target_base_dir
+        self.policy = ReplPolicy.for_notebook(notebook_kernel_flags(), self.base_dir)
+        Ok(~target)
+    }
+    pub fn replace_notebook(&self, notebook: ^JetNotebook) Never! {
+        notebook.environment_hash = Kernel.environment_hash(self.base_dir)
+        _ :: &notebook.refresh_dependencies().drop("Rust ignores dependency refresh errors on import")
+        self.notebook = ^notebook
+        self.document_path = None
+        self.document_notice = Val("imported notebook output is quarantined; run cells locally to create trusted cache")
+        &self.clear_document_runtime()
+        &self.reset_runtime()
+    }
+    pub fn merge_notebook(&self, theirs: JetNotebook) Never! {
+        self.notebook = merge_by_id(self.notebook, theirs)
+        _ :: &self.notebook.refresh_dependencies().drop("Rust ignores dependency refresh errors after stable-ID merge")
+        self.document_notice = if self.notebook.merge_conflicts.is_empty() -> None else -> Val("merge conflicts are present; edit the marked cells before execution")
+        &self.clear_document_runtime()
+        &self.reset_runtime()
+    }
+    pub fn edit_cell(&self, cell_id: String, source: String) Err! {
+        index :: self.notebook.cell_index(cell_id) ?? return Err("unknown cell `{cell_id}`")
+        changed :: self.notebook.cells[index].source != source
+        &self.notebook.edit_cell(cell_id, source) ?? return Err(err.message)
+        if changed {
+            &self.reset_runtime()
+            self.reactive_root = Val(~cell_id)
+            descendants :: self.notebook.descendants_in_order(cell_id) ?? return Err(err.message)
+            loop id in descendants {
+                if self.cell_effects.get(id) ?? false -> self.pending_effects[id] = true
+            }
+        }
+        if self.notebook.merge_conflicts.is_empty() -> self.document_notice = None
+    }
+    pub fn add_cell(&self, kind: NotebookCellKind, source: String) -> String Err! {
+        cell :: &self.notebook.add_cell(kind, source) ?? return Err(err.message)
+        id :: ~cell[0].id
+        &self.notebook.refresh_dependencies() ?? return Err(err.message)
+        Ok(id)
+    }
+    pub fn delete_cell(&self, cell_id: String) -> [String] Err! {
+        removed :: &self.notebook.remove_cell(cell_id) ?? return Err(err.message)
+        loop id in removed {
+            _ :: &self.cell_effects.remove(id)
+            _ :: &self.cell_lazy.remove(id)
+            _ :: &self.pending_effects.remove(id)
+            _ :: &self.cell_errors.remove(id)
+            _ :: &self.executed_cells.remove(id)
+        }
+        &self.reset_runtime()
+        self.reactive_root = None
+        Ok(^removed)
+    }
+    pub fn set_cell_lazy(&self, cell_id: String, lazy: Bool) Err! {
+        if self.notebook.cell_index(cell_id) == None {
+            return Err(notebook_kernel_diagnostic_error("E2104", "notebook cell does not exist", "the requested lazy-cell control named `{cell_id}`", "refresh notebook state and choose an existing cell"))
+        }
+        if lazy {
+            self.cell_lazy[cell_id] = true
+        } else {
+            _ :: &self.cell_lazy.remove(cell_id)
+            _ :: &self.pending_effects.remove(cell_id)
+        }
+    }
+    pub fn set_authority(&self, authority: String) Never! { self.authority_id = mir_sha256_hex(authority) }
+    pub fn identity(self) -> KernelIdentity Never! {
+        KernelIdentity{source: self.notebook.source_hash(), build: notebook_kernel_build_identity(self.notebook.environment_hash), session: ~self.session_id, authority: ~self.authority_id}
+    }
+    pub fn reconnect(self, identity: KernelIdentity) Err! {
+        expected :: self.identity()
+        mismatches := [String]{}
+        if expected.source != identity.source -> &mismatches.push("source")
+        if expected.build != identity.build -> &mismatches.push("build")
+        if expected.session != identity.session -> &mismatches.push("session")
+        if expected.authority != identity.authority -> &mismatches.push("authority")
+        if mismatches.is_empty() -> return
+        Err(notebook_kernel_diagnostic_error("E2104", "notebook reconnect identity does not match", "the existing bounded kernel rejected {mismatches.join(", ")} identity fields", "refresh the notebook state and reconnect to the reported source, build, session, and authority"))
+    }
+    pub fn app_schema(self, function_name: String) -> NotebookAppSchema Err! {
+        source :: self.checked_source()
+        if source.trim().is_empty() {
+            return Err(notebook_kernel_diagnostic_error("E2104", "notebook app has no checked functions", "the notebook contains no parser-plane function declarations", "add one checked function cell and refresh the notebook"))
+        }
+        bundle :: checked_program(source) ?? return Err(notebook_kernel_diagnostic_error("E2104", "notebook app function is not checked", "the selected function `{function_name}` could not be checked", "fix the notebook diagnostics before publishing a local app"))
+        loop item in bundle.modules[bundle.entry].items {
+            if item == .Func(function) {
+                if function.name != function_name -> next
+                return self.app_schema_for_function(function)
+            }
+        }
+        Err(notebook_kernel_diagnostic_error("E2104", "notebook app function does not exist", "no checked function named `{function_name}` is available", "select one of the checked top-level functions in the notebook"))
+    }
+    fn app_schema_for_function(self, function: Func) -> NotebookAppSchema Err! {
+        function_name :: function.name
+        if function.is_unsafe {
+            return Err(notebook_kernel_diagnostic_error("E2104", "notebook app function is unsafe", "checked function `{function_name}` carries an unsafe contract", "select a memory-safe function for local-app publication"))
+        }
+        if function.effect_via == .Val(parameter) {
+            return Err(notebook_kernel_diagnostic_error("E2104", "notebook app function has dynamic effects", "checked function `{function_name}` forwards effects through `{parameter.name}`", "publish a function with a static IO or FS effect row"))
+        }
+        if function.declared_effects == .Val(declared) {
+            loop effect in declared {
+                if !notebook_kernel_app_effect_supported(effect.name) {
+                    return Err(notebook_kernel_diagnostic_error("E2104", "notebook app effect is unsupported", "checked function `{function_name}` declares `{effect.name}`, which the notebook app authority cannot grant", "use only project-confined IO or FS effects for local-app publication"))
+                }
+            }
+        }
+        loop parameter in function.params {
+            if !notebook_kernel_app_control_type_supported(parameter.ty) {
+                return Err(notebook_kernel_diagnostic_error("E2104", "notebook app control type is unsupported", "checked function `{function_name}` cannot expose `{type_name(parameter.ty)}` as a browser control", "use a scalar, optional, list, map, or tuple control type"))
+            }
+        }
+        inputs := [NotebookAppInput]{}
+        loop parameter in function.params {
+            &inputs.push(NotebookAppInput{name: ~parameter.name, label: param_call_label(parameter), type_name: type_name(parameter.ty), required: parameter.default == None && !parameter.variadic, variadic: parameter.variadic})
+        }
+        return_projection :: type_name(func_effective_return_type(function))
+        effects := [String]{}
+        if function.declared_effects == .Val(declared) -> loop effect in declared -> &effects.push(~effect.name)
+        material := [U8]{}
+        notebook_kernel_append_nul(&material, "jet-notebook-app-compat-v1")
+        notebook_kernel_append_nul(&material, function.name)
+        loop input in inputs {
+            notebook_kernel_append_nul(&material, input.name)
+            notebook_kernel_append_nul(&material, input.label)
+            notebook_kernel_append_nul(&material, input.type_name)
+            notebook_kernel_append_nul(&material, if input.required -> "required" else -> "optional")
+            notebook_kernel_append_nul(&material, if input.variadic -> "variadic" else -> "single")
+        }
+        notebook_kernel_append_nul(&material, return_projection)
+        loop effect in effects -> notebook_kernel_append_nul(&material, effect)
+        notebook_kernel_append(&material, if function.is_unsafe -> "authority-required" else -> "authority-free")
+        digest :: mir_sha256_hex_bytes(mir_sha256_bytes(material))
+        Ok(NotebookAppSchema{function: ~function.name, inputs: ^inputs, return_projection: return_projection, effects: ^effects, authority: ~self.authority_id, source_identity: self.notebook.source_hash(), compatibility_digest: digest})
+    }
+    pub fn controls_json(self) -> String Never! {
+        // Rust returns the array INTERIOR, not a complete JSON array.
+        rows := [String]{}
+        loop control in self.function_controls() -> &rows.push(self.control_value(control).json())
+        rows.join(",")
+    }
+    fn control_value(self, control: NotebookKernelControlSpec) -> StatusValue Never! {
+        key :: notebook_kernel_control_key(control.function, control.name)
+        StatusValue.Object(StatusFields.new()
+            .with("function", .String(control.function)).with("name", .String(control.name))
+            .with("label", .String(control.label)).with("type", .String(control.type_name))
+            .with("required", .Bool(control.required)).with("variadic", .Bool(control.variadic))
+            .with("value", .String(self.control_values.get(key) ?? ""))
+            .with("error", notebook_kernel_optional_text(self.control_errors.get(key))))
+    }
+    pub fn set_control(&self, function: String, name: String, value: String) Err! {
+        loop control in self.function_controls() {
+            if control.function != function || control.name != name -> next
+            key :: notebook_kernel_control_key(function, name)
+            if !notebook_kernel_control_value_matches(value, control.type_name) {
+                message :: "value for `{control.label}` must be a {control.type_name}"
+                self.control_errors[key] = ~message
+                return Err(notebook_kernel_diagnostic_error("E2104", "notebook control value has the wrong type", message, "enter a value accepted by the checked `{control.type_name}` type"))
+            }
+            _ :: &self.control_errors.remove(key)
+            self.control_values[key] = value
+            return
+        }
+        Err(notebook_kernel_diagnostic_error("E2104", "notebook function argument does not exist", "no checked function argument `{function}.{name}` is available", "refresh state and choose one of the typed controls reported by the notebook"))
+    }
+    fn checked_source(self) -> String Never! {
+        out := [U8]{}
+        first := true
+        loop cell in self.notebook.cells {
+            if cell.kind != NotebookCellKind.Jet || !is_item_input(cell.source) -> next
+            if !first -> &out.push(U8{10})
+            first = false
+            notebook_kernel_append(&out, cell.source)
+        }
+        String.from_bytes(out) ?? panic("checked source preserves UTF-8")
+    }
+    fn function_controls(self) -> [NotebookKernelControlSpec] Never! {
+        source :: self.checked_source()
+        if source.trim().is_empty() -> return [NotebookKernelControlSpec]{}
+        bundle :: checked_program(source) ?? return [NotebookKernelControlSpec]{}
+        controls := [NotebookKernelControlSpec]{}
+        loop item in bundle.modules[bundle.entry].items {
+            if item == .Func(function) {
+                loop parameter in function.params {
+                    &controls.push(NotebookKernelControlSpec{function: ~function.name, name: ~parameter.name, label: param_call_label(parameter), type_name: type_name(parameter.ty), required: parameter.default == None && !parameter.variadic, variadic: parameter.variadic})
+                }
+            }
+        }
+        controls
+    }
+    pub fn environment_hash(project_root: OSPath) -> String Never! { mir_sha256_hex("{notebook_kernel_paths.display(project_root)}|notebook-env-1") }
+    pub fn view(self, client: ClientKind) -> KernelView Never! {
+        KernelView{client: client, turns: ~self.session.turns, stale_ids: self.stale_ids(), environment_hash: ~self.notebook.environment_hash}
+    }
+    fn stale_ids(self) -> [Int] Never! {
+        ids := [Int]{}
+        loop turn in self.session.turns -> if turn.stale -> &ids.push(turn.id)
+        ids
+    }
+    pub fn replay_plan(self, from_id: Int, edited: String?) -> ReplayPlan Err! {
+        build_replay_plan(self.session.turns, from_id, edited) ?? return Err(err.message)
+    }
+    pub fn request_interrupt(&self) Never! {
+        self.interrupt_requested = true
+        Comptime.note_repl_interrupt()
+    }
+    pub fn push_stdin(&self, line: String) Never! {
+        &self.stdin_queue.push(~line)
+        &self.policy.push_input(line)
+    }
+    pub fn attach_debug(&self) Never! { self.debug_is_attached = true }
+    pub fn attach_perf(&self) Never! { self.perf_is_attached = true }
+    pub fn debug_attached(self) -> Bool Never! { self.debug_is_attached }
+    pub fn perf_attached(self) -> Bool Never! { self.perf_is_attached }
+    pub fn execute_cell(&self, client: ClientKind, cell_id: String) -> CellExecResult Err! {
+        if self.interrupt_requested {
+            self.interrupt_requested = false
+            return Err("interrupted before execute")
+        }
+        &self.notebook.refresh_dependencies() ?? return Err(err.message)
+        order :: self.notebook.dependency_order(cell_id) ?? return Err(err.message)
+        reactive :: self.reactive_root == Val(cell_id)
+        target := CellExecResult?{None}
+        loop id in order {
+            is_target :: id == cell_id
+            if !is_target && self.executed_cells.has_key(id) -> next
+            result :: &self.execute_cell_once(client, id)
+            if is_target -> target = Val(^result)
+        }
+        result :: target ?? return Err("unknown cell `{cell_id}`")
+        if reactive && result.ok() {
+            _ :: &self.run_reactive_descendants(client, cell_id, false)
+            if self.pending_effects.is_empty() -> self.reactive_root = None
+        }
+        Ok(^result)
+    }
+    fn execute_cell_once(&self, client: ClientKind, cell_id: String) -> CellExecResult Err! {
+        index :: self.notebook.cell_index(cell_id) ?? return Err("unknown cell `{cell_id}`")
+        if self.notebook.cells[index].kind != NotebookCellKind.Jet -> return Err("markdown cells are not executed")
+        loop conflict in self.notebook.merge_conflicts {
+            if conflict.cell_id == cell_id {
+                return Err("cell `{cell_id}` has an unresolved merge conflict; edit it before execution (ours: {notebook_kernel_debug_text(conflict.ours_source)}, theirs: {notebook_kernel_debug_text(conflict.theirs_source)})")
+            }
+        }
+        source :: ~self.notebook.cells[index].source
+        item_srcs := [String]{}
+        loop cell in self.notebook.cells {
+            if cell.kind == NotebookCellKind.Jet && is_item_input(cell.source) -> &item_srcs.push(~cell.source)
+        }
+        &self.session.replace_notebook_items(^item_srcs)
+        queued_input :: self.policy.pending_input()
+        // #4494: actual retained native clock, not a host fixture or wall clock.
+        started :: notebook_kernel_clock.monotonic_ns() ?? panic("native monotonic clock: {err}")
+        eval :: {
+            authorizer := &self.policy.authorizer(None)
+            Comptime.begin_repl_interruptible_turn()
+            evaluated :: evaluate_step_with_items(&self.session, source, self.base_dir, &authorizer, true)
+            Comptime.end_repl_interruptible_turn()
+            ^evaluated
+        }
+        if self.policy.pending_input() < queued_input -> _ :: &self.stdin_queue.remove(0, .Slot)
+        if self.execution_count < (U32{4294967295}) -> self.execution_count += U32{1}
+        self.cell_effects[cell_id] = eval.had_effect
+        _ :: &self.pending_effects.remove(cell_id)
+        if eval.status == ReplTurnStatus.Ok {
+            _ :: &self.cell_errors.remove(cell_id)
+        } else {
+            self.cell_errors[cell_id] = ~eval.text
+        }
+        bundle :: notebook_kernel_bundle_for_eval(eval)
+        turn_id :: if self.session.turns.is_empty() -> Int?{None} else -> Val(self.session.turns[self.session.turns.len() - 1].id)
+        &self.notebook.store_output(cell_id, ~bundle, Int.from_u32(self.execution_count), turn_id) ?? return Err(err.message)
+        self.executed_cells[cell_id] = true
+        render :: notebook_decide_render(self.trust, mir_sha256_hex(source), self.notebook.environment_hash, client.renderer(), bundle)
+        display :: notebook_kernel_display_bundle(render, bundle)
+        ended :: notebook_kernel_clock.monotonic_ns() ?? panic("native monotonic clock: {err}")
+        // Instant::elapsed saturates negative differences; millis keeps u128.
+        elapsed :: U128{max(ended - started, 0) / 1000000}
+        Ok(CellExecResult{client: client, eval: ^eval, bundle: ^display, render: ^render, execution_count: self.execution_count, turn_id: turn_id, elapsed_ms: elapsed})
+    }
+    fn run_reactive_descendants(&self, client: ClientKind, root_id: String, confirm_effects: Bool) -> [String] Err! {
+        descendants :: self.notebook.descendants_in_order(root_id) ?? return Err(err.message)
+        ran := [String]{}
+        // One ID index for this wave; execution does not change cell layout.
+        indices := [String:Int]{}
+        loop (index, cell) in self.notebook.cells -> if !indices.has_key(cell.id) -> indices[cell.id] = index
+        loop cell_id in descendants {
+            index :: indices.get(cell_id) ?? next
+            cell :: self.notebook.cells[index]
+            if cell.kind != NotebookCellKind.Jet -> next
+            known_effect :: self.cell_effects.get(cell_id) ?? false
+            needs_confirmation :: self.cell_lazy.has_key(cell_id) || (!confirm_effects && (known_effect || notebook_kernel_source_may_have_effect(cell.source)))
+            if needs_confirmation {
+                self.pending_effects[cell_id] = true
+                next
+            }
+            if &self.execute_cell_once(client, cell_id) == {
+                .Ok(_) -> &ran.push(~cell_id)
+                .Err(error) -> self.cell_errors[cell_id] = error.message
+            }
+        }
+        Ok(^ran)
+    }
+    pub fn confirm_reactive(&self, client: ClientKind, cell_id: String) -> [String] Err! {
+        &self.notebook.refresh_dependencies() ?? return Err(err.message)
+        root :: self.reactive_root ?? cell_id
+        if self.pending_effects.is_empty() && self.reactive_root == None {
+            return Err(notebook_kernel_diagnostic_error("E2104", "notebook has no effectful descendants awaiting confirmation", "cell `{cell_id}` has no pending reactive rerun", "edit and run a source cell before confirming its effectful descendants"))
+        }
+        ran :: &self.run_reactive_descendants(client, root, true)
+        if self.pending_effects.is_empty() -> self.reactive_root = None
+        Ok(^ran)
+    }
+    pub fn apply_rerun(&self, client: ClientKind, plan: ReplayPlan, decisions: [RerunDecision]) -> [Int] Err! {
+        _ :: client
+        &self.notebook.invalidate_all_outputs()
+        self.execution_count = U32{0}
+        &self.executed_cells.clear()
+        &self.pending_effects.clear()
+        self.reactive_root = None
+        stale_from := Int?{None}
+        decision_index := 0
+        loop step in plan.steps {
+            if step.kind != StepKind.ConfirmEffect -> next
+            decision :: if decision_index < decisions.len() -> decisions[decision_index] else -> RerunDecision.SkipStale
+            decision_index += 1
+            if decision == RerunDecision.SkipStale {
+                stale_from = Val(step.turn_id)
+                break
+            }
+        }
+        {
+            auth := &self.policy.authorizer(None)
+            apply_replay_plan_with_stale_quiet(&self.session, plan, stale_from, self.base_dir, false, &auth)
+        }
+        Ok(self.stale_ids())
+    }
+    pub fn grant_capability(&self, cell_id: String, renderer: String) Err! {
+        index :: self.notebook.cell_index(cell_id) ?? return Err("unknown cell `{cell_id}`")
+        window :: self.notebook.visible_output(cell_id) ?? return Err("cell has no live output to grant")
+        output :: window[0].output ?? panic("visible output must carry its cache")
+        // Ratified trust-2 owner, not the retired Rust Debug hash material.
+        request :: NotebookActiveRequest{
+            notebook_source_hash: mir_sha256_hex(self.notebook.cells[index].source), payload_hash: notebook_trust_payload_hash(output.bundle), renderer_hash: renderer,
+            environment_hash: ~self.notebook.environment_hash, policy_version: NOTEBOOK_TRUST_POLICY_VERSION, widget_id: output.bundle.widget_id ?? "",
+            origins: ~output.bundle.requested_origins, messages: ~output.bundle.requested_messages,
+        }
+        _ :: notebook_trust_grant_active(&self.trust, request)
+        self.trust.save(notebook_trust_store_path()) ?? return Err("trust grant was not saved: {err.message}")
+    }
+    pub fn jupyter_visible_output(self, cell_id: String) -> NotebookMIMEBundle? Never! { self.visible_for(cell_id, ClientKind.JupyterAdapter) }
+    pub fn canvas_visible_output(self, cell_id: String) -> NotebookMIMEBundle? Never! { self.visible_for(cell_id, ClientKind.CanvasLens) }
+    pub fn first_party_visible_output(self, cell_id: String) -> NotebookMIMEBundle? Never! { self.visible_for(cell_id, ClientKind.FirstParty) }
+    fn visible_for(self, cell_id: String, client: ClientKind) -> NotebookMIMEBundle? Never! {
+        index :: self.notebook.cell_index(cell_id) ?? return None
+        cell :: self.notebook.cells[index]
+        if cell.output == .Val(output) {
+            if output.turn_id == .Val(turn_id) {
+                loop turn in self.session.turns {
+                    if turn.id == turn_id {
+                        if turn.stale -> return None
+                        break
+                    }
+                }
+            }
+        }
+        window :: self.notebook.visible_output(cell_id) ?? return None
+        output :: window[0].output ?? panic("visible output must carry its cache")
+        Val(notebook_kernel_display_bundle(self.render_for(cell, output, client), output.bundle))
+    }
+    fn render_for(self, cell: NotebookCell, output: NotebookCellOutput, client: ClientKind) -> NotebookRenderDecision Never! {
+        source_hash :: mir_sha256_hex(cell.source)
+        first_party :: notebook_decide_render(self.trust, source_hash, self.notebook.environment_hash, ClientKind.FirstParty.renderer(), output.bundle)
+        if client == ClientKind.FirstParty -> return ^first_party
+        if first_party == .FallbackPlain(_, _) -> return ^first_party
+        notebook_decide_render(self.trust, source_hash, self.notebook.environment_hash, client.renderer(), output.bundle)
+    }
+    pub fn state_json(self) -> String Never! { self.state_json_for(ClientKind.FirstParty) }
+    pub fn state_json_for(self, client: ClientKind) -> String Never! { self.state_value_for(client).json() }
+    // CmdNotebook consumes this typed projection directly (no parse/serialize loop).
+    pub fn state_value_for(self, client: ClientKind) -> StatusValue Never! {
+        conflicts := [String:Bool]{}
+        loop entry in self.notebook.merge_conflicts -> conflicts[entry.cell_id] = true
+        turn_stale := [Int:Bool]{}
+        turns := [StatusValue]{}
+        loop turn in self.session.turns {
+            // First matching ID preserves Rust iter().find on unvalidated turns.
+            if !turn_stale.has_key(turn.id) -> turn_stale[turn.id] = turn.stale
+            &turns.push(StatusValue.Object(StatusFields.new()
+                .with("id", .Integer(turn.id)).with("input", .String(turn.input))
+                .with("summary", .String(notebook_kernel_bounded_text(turn.summary)))
+                .with("status", .String(notebook_kernel_turn_status(turn.status)))
+                .with("stale", .Bool(turn.stale)).with("had_effect", .Bool(turn.had_effect))))
+        }
+        cells := [StatusValue]{}
+        loop cell in self.notebook.cells {
+            live :: self.cell_output_live_with_turns(cell, turn_stale)
+            status :: self.cell_status_with_live(cell, live)
+            error :: if self.cell_errors.get(cell.id) == {
+                .Val(message) -> StatusValue.String(notebook_kernel_bounded_text(message))
+                .None -> StatusValue.Null
+            }
+            output := StatusValue.Null
+            if cell.output == .Val(out) {
+                projected :: if live -> notebook_kernel_display_bundle(self.render_for(cell, out, client), out.bundle) else -> NotebookMIMEBundle{text_plain: ~out.bundle.text_plain, mime: [NotebookMIMEEntry]{}, quarantined: out.bundle.quarantined, widget_id: None, requested_origins: [String]{}, requested_messages: [String]{}}
+                output = StatusValue.Object(StatusFields.new()
+                    .with("text", .String(notebook_kernel_bounded_text(projected.text_plain)))
+                    .with("quarantined", .Bool(projected.quarantined)).with("live", .Bool(live))
+                    .with("cache_key", notebook_kernel_optional_text(out.cache_key))
+                    // State retains ORIGINAL requested capability fields, even
+                    // when rendering is stale/fallback; they are not authority.
+                    .with("origins", notebook_kernel_strings_value(out.bundle.requested_origins))
+                    .with("messages", notebook_kernel_strings_value(out.bundle.requested_messages))
+                    .with("mime", notebook_kernel_mime_value(projected.mime)))
+            }
+            &cells.push(StatusValue.Object(StatusFields.new()
+                .with("id", .String(cell.id)).with("kind", .String(if cell.kind == NotebookCellKind.Jet -> "jet" else -> "markdown"))
+                .with("source", .String(cell.source)).with("depends_on", notebook_kernel_strings_value(cell.depends_on))
+                .with("status", .String(status)).with("effectful", .Bool(self.cell_effects.get(cell.id) ?? false))
+                .with("lazy", .Bool(self.cell_lazy.has_key(cell.id))).with("pending_confirmation", .Bool(self.pending_effects.has_key(cell.id)))
+                .with("error", ^error).with("conflict", .Bool(conflicts.has_key(cell.id))).with("output", ^output)))
+        }
+        controls := [StatusValue]{}
+        loop control in self.function_controls() -> &controls.push(self.control_value(control))
+        identity :: self.identity()
+        path :: if self.document_path == { .Val(value) -> StatusValue.String(notebook_kernel_paths.display(value)), .None -> StatusValue.Null }
+        StatusValue.Object(StatusFields.new()
+            .with("environment_hash", .String(self.notebook.environment_hash)).with("path", path)
+            .with("notice", notebook_kernel_optional_text(self.document_notice))
+            .with("cache_entries", .Integer(self.notebook.output_cache.len())).with("merge_conflicts", .Integer(self.notebook.merge_conflicts.len()))
+            .with("execution_count", .Integer(Int.from_u32(self.execution_count)))
+            .with("debug", .Bool(self.debug_is_attached)).with("perf", .Bool(self.perf_is_attached))
+            .with("pending_stdin", .Integer(self.policy.pending_input()))
+            .with("identity", .Object(StatusFields.new().with("source", .String(identity.source)).with("build", .String(identity.build)).with("session", .String(identity.session)).with("authority", .String(identity.authority))))
+            .with("controls", .Array(^controls)).with("cells", .Array(^cells)).with("turns", .Array(^turns)))
+    }
+    fn cell_status(self, cell: NotebookCell) -> String Never! { self.cell_status_with_live(cell, self.cell_output_live(cell)) }
+    fn cell_status_with_live(self, cell: NotebookCell, live: Bool) -> String Never! {
+        if self.pending_effects.has_key(cell.id) -> return "awaiting_confirmation"
+        if self.cell_errors.get(cell.id) == .Val(error) -> if !error.is_empty() -> return "error"
+        if live -> return "live"
+        if self.cell_lazy.has_key(cell.id) -> return "stale_lazy"
+        if cell.output != None -> "stale" else -> "idle"
+    }
+    fn cell_output_live(self, cell: NotebookCell) -> Bool Never! {
+        if self.notebook.visible_output(cell.id) == None -> return false
+        if cell.output == .Val(output) {
+            if output.turn_id == .Val(turn_id) {
+                loop turn in self.session.turns {
+                    if turn.id == turn_id -> return !turn.stale
+                }
+            }
+        }
+        true
+    }
+    fn cell_output_live_with_turns(self, cell: NotebookCell, turn_stale: [Int:Bool]) -> Bool Never! {
+        if self.notebook.visible_output(cell.id) == None -> return false
+        if cell.output == .Val(output) {
+            if output.turn_id == .Val(turn_id) -> return !(turn_stale.get(turn_id) ?? false)
+        }
+        true
+    }
+}
+
+// Native path parent semantics: retain raw encoded spelling, never display text
+// as filesystem ingress. #4483 selected_family is the sole platform producer.
+fn notebook_kernel_base_dir(path: OSPath?) -> OSPath Never! {
+    if path == .Val(value) {
+        if notebook_kernel_paths.parent_span(value) == .Val(parent) {
+            if parent.start != parent.end -> return notebook_kernel_paths.owned_span(value, parent)
+        }
+    }
+    platform :: if notebook_kernel_target.selected_family() == notebook_kernel_target.NativeTargetFamily.Windows -> PathPlatform.Windows else -> PathPlatform.Unix
+    notebook_kernel_paths.from_text(".", platform)
+}
+fn notebook_kernel_app_control_type_supported(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> notebook_kernel_app_control_type_supported(inner)
+        .Map(key, _, value) -> notebook_kernel_app_control_type_supported(key) && notebook_kernel_app_control_type_supported(value)
+        .Tuple(fields) -> {
+            loop field in fields -> if !notebook_kernel_app_control_type_supported(field.ty) -> return false
+            true
+        }
+        .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+fn notebook_kernel_app_effect_supported(effect: String) -> Bool Never! {
+    text := if effect.starts_with("!") -> effect.after("!") else -> effect // #4303
+    // Rust strips exactly ONE leading '!'; after operates on that first match.
+    loop part in text.split(".") {
+        root := part // #4303
+        return notebook_kernel_flags().allow.contains(root)
+    }
+    notebook_kernel_flags().allow.contains("")
+}
+fn notebook_kernel_build_identity(environment_hash: String) -> String Never! {
+    // Canonical0807 package-version publication; this is jet-repl's Rust
+    // CARGO_PKG_VERSION, NOT jet-cli or Foundation's independently owned version.
+    mir_sha256_hex("jet-notebook-build-v1|{JET_REPL_VERSION}|{environment_hash}")
+}
+fn notebook_kernel_control_key(function: String, name: String) -> String Never! { "{function}{TEXT_NUL}{name}" }
+fn notebook_kernel_control_value_matches(value: String, type_name: String) -> Bool Never! {
+    text := value.trim() // #4303
+    lexed :: lex(text.bytes())
+    loop diagnostic in lexed.diagnostics -> if diagnostic.severity == DIAGNOSTIC_ERROR -> return false
+    first := -1
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_SEMI || token.kind == TOKEN_EOF || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
+        first = token.kind
+        break
+    }
+    if type_name == {
+        "Bool" -> first == TOKEN_TRUE || first == TOKEN_FALSE
+        "String" -> first == TOKEN_STRING || first == TOKEN_RAW_STRING
+        "Char" -> first == TOKEN_CHAR
+        "Float" | "F32" -> first == TOKEN_FLOAT || first == TOKEN_INT
+        "Int" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32" | "U64" | "U128" -> first == TOKEN_INT
+        else -> {
+            if type_name.ends_with("?") {
+                if text == "null" -> return true
+                type_bytes :: type_name.bytes()
+                end := type_bytes.len()
+                loop end > 0 && type_bytes[end - 1] == (U8{63}) -> end -= 1
+                inner :: String.from_bytes(type_bytes[0..<end]) ?? panic("ASCII '?' suffix boundary")
+                return notebook_kernel_control_value_matches(text, inner)
+            }
+            if type_name.starts_with("[") -> return first == TOKEN_LBRACKET
+            if type_name.starts_with("(") -> return first == TOKEN_LPAREN
+            first >= 0
+        }
+    }
+}
+fn notebook_kernel_source_may_have_effect(source: String) -> Bool Never! {
+    loop marker in [String]{"print(", "println(", "eprint(", "io.", "fs.", "net.", "exec.", "write(", "save(", "stdin", "stdout", "stderr", "sleep(", "random(", "clock("} {
+        if source.contains(marker) -> return true
+    }
+    false
+}
+fn notebook_kernel_diagnostic_error(code: String, what: String, why: String, fix: String) -> String Never! {
+    StatusValue.Object(StatusFields.new().with("code", .String(code)).with("what", .String(what)).with("why", .String(why)).with("fix", .String(fix))).json()
+}
+fn notebook_kernel_bundle_for_eval(eval: EvalResult) -> NotebookMIMEBundle Never! {
+    // Keep the canonical event stream, including print output plus value echo.
+    trimmed := eval.text.trim_end() // #4303
+    text := ~trimmed
+    if text.is_empty() {
+        if eval.value == .Val(value) {
+            if value != CtValue.Unit -> text = display_value(value)
+        }
+    }
+    mime := [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/plain", payload: ~text}}
+    leading := text.trim_start() // #4303
+    if leading.starts_with("<svg") -> &mime.push(NotebookMIMEEntry{media_type: "image/svg+xml", payload: ~text})
+    if leading.starts_with("<") {
+        // Rust split_once([' ', '>']) requires a delimiter; '<div' alone is not
+        // HTML. Use byte offsets, ASCII delimiters and one prefix scan.
+        tag_end := -1
+        loop at in 1..<leading.bytes().len() {
+            byte :: leading.bytes()[at]
+            if byte == (U8{32}) || byte == (U8{62}) {
+                tag_end = at
+                break
+            }
+        }
+        if tag_end >= 0 {
+            tag :: String.from_bytes(leading.bytes()[1..<tag_end]) ?? panic("HTML tag UTF-8 boundary")
+            if tag == "html" || tag == "table" || tag == "div" || tag == "span" || tag == "pre" || tag == "section" -> &mime.push(NotebookMIMEEntry{media_type: "text/html", payload: ~text})
+        }
+    }
+    if eval.value == .Val(value) {
+        if notebook_kernel_table_mime(value) == .Val(table) -> &mime.push(NotebookMIMEEntry{media_type: "text/html", payload: table})
+    }
+    NotebookMIMEBundle{text_plain: ^text, mime: ^mime, quarantined: false, widget_id: None, requested_origins: [String]{}, requested_messages: [String]{}}
+}
+fn notebook_kernel_table_mime(value: CtValue) -> String? Never! {
+    if value == .List(rows) {
+        if rows.is_empty() -> return None
+        if rows[0] == .Struct(_, fields) {
+            html := [U8]{}
+            notebook_kernel_append(&html, "<table><thead><tr>")
+            loop field in fields {
+                notebook_kernel_append(&html, "<th>")
+                notebook_kernel_append(&html, html_escape(field.name))
+                notebook_kernel_append(&html, "</th>")
+            }
+            notebook_kernel_append(&html, "</tr></thead><tbody>")
+            loop row in rows {
+                if row == .Struct(_, values) {
+                    notebook_kernel_append(&html, "<tr>")
+                    loop field in values {
+                        notebook_kernel_append(&html, "<td>")
+                        notebook_kernel_append(&html, html_escape(display_value(field.value)))
+                        notebook_kernel_append(&html, "</td>")
+                    }
+                    notebook_kernel_append(&html, "</tr>")
+                }
+            }
+            notebook_kernel_append(&html, "</tbody></table>")
+            return Val(String.from_bytes(html) ?? panic("table HTML preserves UTF-8"))
+        }
+    }
+    None
+}
+fn notebook_kernel_flags() -> ReplFlags Never! { ReplFlags.new([String]{"IO", "FS"}, [String]{}) }
+fn notebook_kernel_display_bundle(render: NotebookRenderDecision, source: NotebookMIMEBundle) -> NotebookMIMEBundle Never! {
+    if render == {
+        .AllowPassive(text_plain, mime) | .AllowActive(text_plain, mime) -> NotebookMIMEBundle{text_plain: ~text_plain, mime: ~mime, quarantined: false, widget_id: ~source.widget_id, requested_origins: ~source.requested_origins, requested_messages: ~source.requested_messages}
+        .FallbackPlain(text_plain, _) -> NotebookMIMEBundle{text_plain: ~text_plain, mime: [NotebookMIMEEntry]{}, quarantined: true, widget_id: None, requested_origins: [String]{}, requested_messages: [String]{}}
+    }
+}
+fn notebook_kernel_bounded_text(text: String) -> String Never! {
+    limit :: 65536
+    bytes :: text.bytes()
+    if bytes.len() <= limit -> return ~text
+    end := limit
+    loop end > 0 && (bytes[end] & U8{192}) == (U8{128}) -> end -= 1
+    prefix :: String.from_bytes(bytes[0..<end]) ?? panic("bounded text ends at a UTF-8 boundary")
+    "{prefix}\n… output truncated at 64 KiB; save/export retains the full value"
+}
+fn notebook_kernel_json_mime(mime: [NotebookMIMEEntry]) -> String Never! { notebook_kernel_mime_value(mime).json() }
+fn notebook_kernel_json_strings(values: [String]) -> String Never! { notebook_kernel_strings_value(values).json() }
+fn notebook_kernel_mime_value(mime: [NotebookMIMEEntry]) -> StatusValue Never! {
+    values := [StatusValue]{}
+    loop entry in mime {
+        &values.push(StatusValue.Object(StatusFields.new().with("type", .String(entry.media_type)).with("data", .String(notebook_kernel_bounded_text(entry.payload)))))
+    }
+    StatusValue.Array(^values)
+}
+fn notebook_kernel_strings_value(values: [String]) -> StatusValue Never! {
+    items := [StatusValue]{}
+    loop value in values -> &items.push(StatusValue.String(value))
+    StatusValue.Array(^items)
+}
+fn notebook_kernel_optional_text(text: String?) -> StatusValue Never! {
+    if text == { .Val(value) -> StatusValue.String(value), .None -> StatusValue.Null }
+}
+fn notebook_kernel_turn_status(status: ReplTurnStatus) -> String Never! {
+    if status == { .Ok -> "ok", .Error -> "error", .Interrupted -> "interrupted" }
+}
+fn notebook_kernel_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+fn notebook_kernel_append_nul(out: &[U8], text: String) Never! {
+    notebook_kernel_append(&out, text)
+    notebook_kernel_append(&out, TEXT_NUL)
+}
+fn notebook_kernel_debug_text(text: String) -> String Never! {
+    out := [U8]{}
+    notebook_kernel_debug.debug_str_into(&out, text)
+    String.from_bytes(out) ?? panic("Rust Debug preserves UTF-8")
+}

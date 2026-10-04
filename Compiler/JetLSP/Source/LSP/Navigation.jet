@@ -1,0 +1,935 @@
+use jet_semindex.[SymbolDB, SymDef, SymRef, SymKind, DefinitionAnchor, CallableFactAvailability, CallableFactUnavailable]
+use jet_foundation.[Span, Token, TokKind, Syntax]
+use Compiler.Comptime.Build.[BuildPlan]
+use Compiler.Lexer.[lex_generated, without_comments]
+use jet_foundation.Diagnostics.[Diagnostic, TextEdit]
+use jet_foundation.Syntax.[JET_KEYWORDS, JET_TYPES]
+
+// Rust: Source/LSP/Features.rs:1814
+fn enum_variant_definition_at(db: SymbolDB, tokens: [Token], path: String, index: USize) -> SymDef? {
+    token :: tokens.get(index) ?? return None
+    if token.kind != .Ident(_) -> return None
+    variant :: if token.kind == { .Ident(name) -> name _ -> unreachable() }
+    previous :: previous_code_token(tokens, index) ?? return None
+    offset :: tokens[index].span.start
+    enum_name := ""
+    if tokens[previous].kind == .Dot {
+        receiver_index :: previous_code_token(tokens, previous)
+        receiver_type := None
+        if receiver_index == .Val(i) {
+            receiver_type = checked_subject_type_name(db, tokens, path, i)
+            if receiver_type == None -> receiver_type = dotted_receiver(tokens, i)
+        }
+        if receiver_type == .Val(name) {
+            enum_name = name
+        } else {
+            _ :: pattern_head_start(tokens, previous) ?? return None
+            subject :: active_pattern_subject(tokens, previous) ?? return None
+            enum_name = checked_subject_type_name(db, tokens, path, subject) ?? return None
+        }
+    } else {
+        head :: pattern_head_start(tokens, index) ?? return None
+        if active_pattern_subject(tokens, index) == .Val(subject) {
+            enum_name = checked_subject_type_name(db, tokens, path, subject) ?? return None
+        } else if bare_function_head_start(tokens, index) == Val(head) {
+            enum_name = function_head_type_name(db, tokens, path, head) ?? return None
+        } else { return None }
+    }
+    owner :: enum_definition_for_type(db, enum_name, path, offset) ?? return None
+    identity := None
+    loop definition in db.defs {
+        if definition.module_path != owner.module_path || definition.name != variant -> next
+        if definition.kind == .EnumVariant(parent) {
+            if parent != owner.name -> next
+            if identity == .Val(existing) && existing != definition.identity -> return None
+            if identity == None -> identity = Val(definition.identity)
+        }
+    }
+    key :: identity ?? return None
+    db.defs.iter().find(fn(definition) {
+        definition.identity == key && definition.module_path == owner.module_path
+            && definition.kind.is_enum_variant()
+    })
+}
+
+// Rust: Source/LSP/Features.rs:1874
+fn enum_variant_identity_at(db: SymbolDB, tokens: [Token], path: String, offset: USize) -> String? {
+    index :: tokens.iter().position(fn(token) {
+        token.kind.is_ident() && token.span.start <= offset && offset <= token.span.end
+    }) ?? return None
+    definition :: enum_variant_definition_at(db, tokens, path, index) ?? return None
+    Val(~definition.identity)
+}
+
+// Rust: Source/LSP/Features.rs:1888
+fn enum_variant_spans(db: SymbolDB, tokens: [Token], path: String, identity: String) -> [Span] {
+    spans := [Span]{}
+    loop (index, token) in tokens.iter().enumerate() {
+        if !token.kind.is_ident() -> next
+        if enum_variant_definition_at(db, tokens, path, index) == .Val(definition) {
+            if definition.identity == identity -> &spans.push(token.span)
+        }
+    }
+    spans
+}
+
+// Rust: Source/LSP/Features.rs:1908
+const MAX_ENUM_VARIANT_LEXICAL_TOKENS: USize = 64 * 1024
+
+// Rust: Source/LSP/Features.rs:1915
+// Only the checked/open snapshot supplies lexical leaves; never reopen siblings.
+fn enum_variant_spans_across_checked_modules(db: SymbolDB, current_tokens: [Token], current_path: String, identity: String) -> [(String, Span)] {
+    if current_tokens.len() > MAX_ENUM_VARIANT_LEXICAL_TOKENS -> return []
+    spans := enum_variant_spans(db, current_tokens, current_path, identity)
+        .iter().map(fn(span) { (~current_path, span) }).collect()
+    &spans.sort_by(fn(left, right) {
+        left.0.cmp(right.0).then(left.1.start.cmp(right.1.start)).then(left.1.end.cmp(right.1.end))
+    })
+    &spans.dedup()
+    spans
+}
+
+// Rust: Source/LSP/Features.rs:1938
+fn is_enum_variant_identity(db: SymbolDB, identity: String) -> Bool {
+    variant :: db.defs.iter().find(fn(definition) { definition.identity == identity }) ?? return false
+    parent :: if variant.kind == { .EnumVariant(parent) -> parent _ -> return false }
+    db.defs.iter().any(fn(definition) {
+        definition.module_path == variant.module_path && definition.name == parent && definition.kind.is_enum()
+    })
+}
+
+// Rust: Source/LSP/Features.rs:1956
+fn enum_variant_leaf_span(db: SymbolDB, reference: SymRef, identity: String) -> Span? {
+    if !is_enum_variant_identity(db, identity) -> return None
+    definition :: db.defs.iter().find(fn(definition) { definition.identity == identity }) ?? return None
+    leaf_len :: definition.def_span.end.saturating_sub(definition.def_span.start)
+    start :: reference.span.end.checked_sub(leaf_len) ?? return None
+    if reference.span.start <= start -> Val(Span.new(start, reference.span.end)) else None
+}
+
+// Rust: Source/LSP/Features.rs:1975
+pub fn checked_semantic_identity_at(db: SymbolDB, tokens: [Token], path: String, offset: USize) -> String? {
+    if checked_identity_in_span(db, path, offset, offset) == .Ok(.Val(identity)) -> return Val(identity)
+    if enum_variant_identity_at(db, tokens, path, offset) == .Val(identity) -> return Val(identity)
+    receiver :: compiler_fact_receiver_span(tokens, offset) ?? return None
+    checked_identity_in_span(db, path, receiver.start, receiver.end).ok().flatten()
+}
+
+// Rust: Source/LSP/Features.rs:1993
+pub fn checked_rename_span_at(db: SymbolDB, tokens: [Token], path: String, offset: USize) -> (String, Span)? {
+    identity :: checked_semantic_identity_at(db, tokens, path, offset) ?? return None
+    span := None
+    if checked_reference_in_span(db, path, offset, offset) == .Ok(.Val(reference)) {
+        if reference.target == .Val(target) && target.kind == "state" {
+            span = state_leaf_span(reference)
+        } else if is_enum_variant_identity(db, identity) {
+            span = enum_variant_leaf_span(db, reference, identity)
+            if span == None -> span = token_span_at(tokens, offset)
+        } else { span = token_span_at(tokens, offset) }
+    } else { span = token_span_at(tokens, offset) }
+    Val((identity, span ?? return None))
+}
+
+// Rust: Source/LSP/Features.rs:2018
+fn token_span_at(tokens: [Token], offset: USize) -> Span? {
+    token := tokens.iter().find(fn(token) { token.span.start == offset })
+    if token == None {
+        token = tokens.iter().find(fn(token) { token.span.start <= offset && offset <= token.span.end })
+    }
+    token.map(fn(token) { token.span })
+}
+
+// Rust: Source/LSP/Features.rs:2037
+// A request-local projection of the canonical BuildPlan, not another symbol DB.
+pub struct GeneratedDeclarationFact {
+    identity: String,
+    name: String,
+    module_name: String,
+    module_path: String,
+    source: String,
+    span: Span,
+    plugin: String?,
+}
+
+// Rust: Source/LSP/Features.rs:2047
+fn generated_declarations(plan: BuildPlan) -> [GeneratedDeclarationFact] {
+    modules :: plan.selected_generated_modules().ok() ?? return []
+    declarations := [GeneratedDeclarationFact]{}
+    loop module in modules {
+        (tokens, errors) :: lex_generated(module.source)
+        if !errors.is_empty() -> next
+        code :: without_comments(tokens)
+        loop pair in code.windows(2) {
+            name :: if pair[1].kind == { .Ident(name) -> name _ -> next }
+            if pair[0].kind != .KwFn -> next
+            plugin := None
+            if module.plugin == .Val(handle) {
+                plugin = plan.plugins().iter().find(fn(plugin) { plugin.id == handle.id() })
+                    .map(fn(plugin) { ~plugin.name })
+            }
+            &declarations.push(GeneratedDeclarationFact(
+                identity: "fn:module:{module.name}::{name}", name: ~name,
+                module_name: ~module.name, module_path: module.path.as_str().to_string(),
+                source: ~module.source, span: pair[1].span, plugin: plugin))
+        }
+    }
+    &declarations.sort_by(fn(left, right) {
+        left.identity.cmp(right.identity).then(left.module_path.cmp(right.module_path))
+            .then(left.span.start.cmp(right.span.start))
+    })
+    declarations
+}
+
+// Rust: Source/LSP/Features.rs:2092
+fn generated_qualifier(tokens: [Token], index: USize) -> String? {
+    previous :: tokens.get(index.checked_sub(1) ?? return None) ?? return None
+    if previous.kind != .Dot && previous.kind != .QuestionDot -> return None
+    receiver :: tokens.get(index.checked_sub(2) ?? return None) ?? return None
+    if receiver.kind == { .Ident(name) -> Val(name) _ -> None }
+}
+
+// Rust: Source/LSP/Features.rs:2103
+fn generated_module_matches(declaration: GeneratedDeclarationFact, qualifier: String) -> Bool {
+    declaration.module_name == qualifier
+}
+
+// Rust: Source/LSP/Features.rs:2112
+pub fn register_generated_declarations(db: &SymbolDB, plan: BuildPlan, source_path: String, tokens: [Token]) -> [GeneratedDeclarationFact] {
+    declarations :: generated_declarations(plan)
+    loop declaration in declarations {
+        if db.defs.iter().any(fn(definition) {
+            definition.identity == declaration.identity && definition.module_path == declaration.module_path
+                && definition.def_span == declaration.span
+        }) -> next
+        &db.defs.push(SymDef(
+            identity: ~declaration.identity, name: ~declaration.name,
+            def_span: declaration.span, module_path: ~declaration.module_path,
+            kind: .Function(params: [], param_sources: [], signature_facts_available: false,
+                param_contract: [], param_variadic: [], return_type: None,
+                failure_contract: .Unavailable(CallableFactUnavailable(
+                    required_stage: .Typed, reason: "generated declaration has no checked failure contract")),
+                foreign_boundary: false, effects: None, effect_via: None, param_access: [],
+                param_defaults: [], policies: [],
+                generic_parameters: .Unavailable(CallableFactUnavailable(
+                    required_stage: .Typed, reason: "generated declaration has no parsed generic parameter facts")))))
+    }
+    code :: without_comments(tokens)
+    loop (index, token) in code.iter().enumerate() {
+        name :: if token.kind == { .Ident(name) -> name _ -> next }
+        next_token :: code.get(index + 1) ?? next
+        if next_token.kind != .LParen -> next
+        qualifier :: generated_qualifier(code, index)
+        matches :: declarations.iter().filter(fn(declaration) {
+            declaration.name == name && (qualifier == None || generated_module_matches(declaration, qualifier.unwrap()))
+        }).collect()
+        if matches.len() != 1 -> next
+        declaration :: matches[0]
+        anchor :: DefinitionAnchor(module_path: ~declaration.module_path, kind: "function",
+            def_span: declaration.span.into(), semantic_identity: Val(~declaration.identity))
+        existing := [(USize, Bool, Bool)]{}
+        loop (i, reference) in db.refs.iter().enumerate() {
+            if reference.module_path != source_path || reference.span != token.span -> next
+            if reference.target == None {
+                &existing.push((i, true, false))
+                next
+            }
+            target :: reference.target.unwrap()
+            generated_target :: declarations.iter().any(fn(candidate) {
+                target.module_path == candidate.module_path && target.def_span == candidate.span.into()
+            })
+            known_target :: target.kind != "module" && target.kind != "import_alias"
+                && db.defs.iter().any(fn(definition) {
+                    definition.module_path == target.module_path && definition.def_span == target.def_span.into()
+                })
+            &existing.push((i, generated_target, known_target))
+        }
+        if existing.iter().any(fn(row) { row.2 && !row.1 }) -> next
+        if existing.is_empty() {
+            &db.refs.push(SymRef(name: ~name, span: token.span, module_path: ~source_path,
+                scope_identity: None, target: Val(anchor), fact: None))
+        } else {
+            loop row in existing -> db.refs[row.0].target = Val(~anchor)
+        }
+    }
+    declarations
+}
+
+// Rust: Source/LSP/Features.rs:2244
+pub fn generated_declaration_at(declarations: [GeneratedDeclarationFact], module_path: String, span: Span) -> GeneratedDeclarationFact? {
+    declarations.iter().find(fn(declaration) { declaration.module_path == module_path && declaration.span == span })
+}
+
+// Rust: Source/LSP/Features.rs:2258
+pub fn generated_definition_for_reference(db: SymbolDB, declarations: [GeneratedDeclarationFact], tokens: [Token], source_path: String, offset: USize) -> (String, Span)? {
+    token :: tokens.iter().find(fn(token) { token.span.start <= offset && offset <= token.span.end }) ?? return None
+    name :: if token.kind == { .Ident(name) -> name _ -> return None }
+    selected := None
+    saw_reference := false
+    loop reference in db.refs {
+        if reference.module_path != source_path || reference.span != token.span || reference.name != name -> next
+        saw_reference = true
+        target :: reference.target ?? return None
+        declaration :: declarations.iter().find(fn(declaration) {
+            declaration.name == name && declaration.module_path == target.module_path
+                && declaration.span == target.def_span.into()
+                && (target.semantic_identity == None || target.semantic_identity == Val(declaration.identity))
+        }) ?? return None
+        if selected == .Val(existing) && existing.identity != declaration.identity -> return None
+        selected = Val(declaration)
+    }
+    if !saw_reference -> return None
+    selected.map(fn(declaration) { (~declaration.module_path, declaration.span) })
+}
+
+// Rust: Source/LSP/Features.rs:2303
+pub fn compute_definition(db: SymbolDB, tokens: [Token], _src: String, path: String, offset: USize) -> (String, Span)? {
+    identity :: checked_semantic_identity_at(db, tokens, path, offset) ?? return None
+    if checked_reference_in_span(db, path, offset, offset) == .Ok(.Val(reference)) {
+        if reference.target == .Val(target) {
+            if checked_anchor_identity(db, target) == Val(identity) -> return Val((~target.module_path, target.def_span.into()))
+        }
+    }
+    definition := None
+    loop candidate in db.defs {
+        if candidate.identity != identity -> next
+        if definition == .Val(existing) {
+            if existing.module_path != candidate.module_path || existing.def_span != candidate.def_span -> return None
+        }
+        definition = Val(candidate)
+    }
+    definition.map(fn(definition) { (~definition.module_path, definition.def_span) })
+}
+
+// Rust: Source/LSP/Features.rs:2336
+fn checked_reference_spans(db: SymbolDB, identity: String, enum_variant: Bool) -> [(String, Span)] {
+    out := [(String, Span)]{}
+    loop reference in db.refs {
+        target :: reference.target ?? next
+        if checked_anchor_identity(db, target) != Val(identity) -> next
+        span :: if enum_variant -> enum_variant_leaf_span(db, reference, identity) ?? reference.span else reference.span
+        &out.push((~reference.module_path, span))
+    }
+    out
+}
+
+// Rust: Source/LSP/Features.rs:2358
+pub fn compute_references(db: SymbolDB, tokens: [Token], path: String, offset: USize, include_declaration: Bool) -> [(String, Span)] {
+    identity :: checked_semantic_identity_at(db, tokens, path, offset) ?? return []
+    enum_variant :: is_enum_variant_identity(db, identity)
+    result := checked_reference_spans(db, identity, enum_variant)
+    if enum_variant -> &result.extend(enum_variant_spans_across_checked_modules(db, tokens, path, identity))
+    if include_declaration {
+        loop definition in db.defs {
+            if definition.identity == identity -> &result.push((~definition.module_path, definition.def_span))
+        }
+    }
+    &result.sort_by(fn(a, b) { a.0.cmp(b.0).then(a.1.start.cmp(b.1.start)).then(a.1.end.cmp(b.1.end)) })
+    &result.dedup()
+    result
+}
+
+// Rust: Source/LSP/Features.rs:2614
+fn is_keyword(name: String) -> Bool {
+    JET_KEYWORDS.contains(name) || JET_TYPES.contains(name)
+}
+// Rust: Source/LSP/Features.rs:2618
+fn is_valid_ident(name: String) -> Bool {
+    if name.is_empty() -> return false
+    chars := name.chars()
+    first :: chars.next().unwrap()
+    if !first.is_alphabetic() && first != '_' -> return false
+    chars.all(fn(c) { c.is_alphanumeric() || c == '_' })
+}
+// Rust: Source/LSP/Features.rs:2630
+fn state_anchor_at(db: SymbolDB, path: String, offset: USize) -> DefinitionAnchor? {
+    reference :: if checked_reference_in_span(db, path, offset, offset) == {
+        .Err(_) -> return None,
+        .Ok(reference) -> reference
+    }
+    target :: reference.and_then(fn(reference) { reference.target.filter(fn(target) { target.kind == "state" }) })
+    if target == .Val(anchor) {
+        result := anchor
+        result.semantic_identity = Val(checked_anchor_identity(db, result) ?? return None)
+        return Val(^result)
+    }
+    definition :: checked_definition_in_span(db, path, offset, offset).ok().flatten().filter(fn(definition) {
+        if definition.kind == { .EnumVariant(parent) -> parent.ends_with(".State"), else -> false }
+    }) ?? return None
+    Val(DefinitionAnchor{module_path: definition.module_path, kind: "state", def_span: definition.def_span.into(), semantic_identity: Val(definition.identity)})
+}
+// Rust: Source/LSP/Features.rs:2668
+fn state_leaf_span(reference: SymRef) -> Span? {
+    target :: reference.target.filter(fn(target) { target.kind == "state" }) ?? return None
+    leaf_len :: target.def_span.end.saturating_sub(target.def_span.start)
+    start :: reference.span.end.checked_sub(leaf_len) ?? return None
+    if reference.span.start <= start { Val(Span.new(start, reference.span.end)) } else { None }
+}
+// Rust: Source/LSP/Features.rs:2680
+pub fn compute_rename(db: SymbolDB, tokens: [Token], path: String, offset: USize, new_name: String) -> [(String, Span)] Err! {
+    if !is_valid_ident(new_name) -> return Err("`${new_name}` is not a valid identifier")
+    if Syntax.classify_identifier(new_name) == .Reserved -> return Err("`${new_name}` is reserved for Jet and cannot be used as a name")
+    if is_keyword(new_name) -> return Err("`${new_name}` is a keyword and cannot be used as a name")
+    if compiler_fact_at(tokens, offset) == .Val(fact) -> return Err("compiler-owned ${fact} is fixed; rename the reflected type or field instead")
+    name :: find_ident_at(tokens, offset) ?? return Err("no identifier at cursor")
+    if is_keyword(name) -> return Err("`${name}` is a keyword and cannot be renamed")
+    identity :: checked_semantic_identity_at(db, tokens, path, offset).ok_or_else(fn() { "identifier has no checked semantic target" })
+    alias_target :: if checked_reference_in_span(db, path, offset, offset) == {
+        .Ok(.Val(reference)) -> reference.target.filter(fn(target) { target.kind == "import_alias" }).and_then(fn(target) {
+            result := target
+            result.semantic_identity = Val(checked_anchor_identity(db, result) ?? return None)
+            Val(^result)
+        }),
+        .Ok(.None) -> checked_definition_in_span(db, path, offset, offset).ok().flatten().filter(fn(definition) { definition.identity.starts_with("import:") }).map(fn(definition) {
+            DefinitionAnchor{module_path: definition.module_path, kind: "import_alias", def_span: definition.def_span.into(), semantic_identity: Val(definition.identity)}
+        }),
+        .Err(_) -> None
+    }
+    indexed_case :: db.defs.iter().find(fn(def) { def.identity == identity }).map(fn(def) {
+        if def.kind == {
+            .Struct(_) | .Enum(_) | .Trait | .Tag | .Type(_) | .EnumVariant(_) -> ("type-like name", Syntax.NameCase.Pascal),
+            .Module | .Function(_) | .Const | .Field(_) | .Local(_) | .Param(_) -> ("value-like name", Syntax.NameCase.Snake)
+        }
+    })
+    source_case :: if (Syntax.name_has_case(name, .Pascal), Syntax.name_has_case(name, .Snake)) == {
+        (true, false) -> Val(("type-like name", Syntax.NameCase.Pascal)),
+        (false, true) -> Val(("value-like name", Syntax.NameCase.Snake)),
+        else -> None
+    }
+    if source_case.or(indexed_case) == .Val((category, case)) {
+        if !Syntax.name_has_case(new_name, case) -> return Err("`${new_name}` is not a valid ${category}; use `${Syntax.canonical_name_case(new_name, case)}`")
+    }
+    if alias_target == .Val(target) {
+        spans := [(target.module_path, Span.new(target.def_span.start, target.def_span.end))]
+        loop reference in db.refs {
+            candidate :: reference.target ?? continue
+            if candidate.kind == "import_alias" && checked_anchor_identity(db, candidate) == Val(identity) -> &spans.push((reference.module_path, reference.span))
+        }
+        spans.sort_by(fn(left, right) { left.0.cmp(right.0).then(left.1.start.cmp(right.1.start)).then(left.1.end.cmp(right.1.end)) })
+        spans.dedup()
+        return Ok(^spans)
+    }
+    if state_anchor_at(db, path, offset) == .Val(target) {
+        spans := compute_references(db, tokens, path, offset, true)
+        loop pair in &spans {
+            reference :: db.refs.iter().find(fn(reference) {
+                reference.module_path == pair.0 && reference.span == pair.1 && reference.target.is_some_and(fn(candidate) {
+                    candidate.kind == "state" && checked_anchor_identity(db, candidate) == target.semantic_identity
+                })
+            }) ?? continue
+            if state_leaf_span(reference) == .Val(leaf_span) -> pair.1 = leaf_span
+        }
+        spans.sort_by(fn(left, right) { left.0.cmp(right.0).then(left.1.start.cmp(right.1.start)).then(left.1.end.cmp(right.1.end)) })
+        spans.dedup()
+        if !spans.is_empty() -> return Ok(^spans)
+    }
+    enum_variant :: is_enum_variant_identity(db, identity)
+    spans := checked_reference_spans(db, identity, enum_variant)
+    if enum_variant -> &spans.extend(enum_variant_spans_across_checked_modules(db, tokens, path, identity))
+    &spans.extend(db.defs.iter().filter(fn(definition) { definition.identity == identity }).map(fn(definition) { (definition.module_path, definition.def_span) }))
+    if spans.is_empty() -> return Err("no checked occurrences of `${name}` found")
+    spans.sort_by(fn(left, right) { left.0.cmp(right.0).then(left.1.start.cmp(right.1.start)).then(left.1.end.cmp(right.1.end)) })
+    spans.dedup()
+    Ok(^spans)
+}
+// Rust: Source/LSP/Features.rs:2853
+pub struct RefactorAction { title: String, kind: String, edits: [TextEdit] }
+// Rust: Source/LSP/Features.rs:2859
+pub fn compute_refactor_actions(db: SymbolDB, tokens: [Token], diagnostics: [Diagnostic], src: String, path: String, workspace_root: String?, import_sources: [String: String], excluded_import_paths: Set[String], requested: Span) -> [RefactorAction] {
+    actions := adjacent_subject_dispatch_actions(diagnostics, requested)
+    &actions.extend(import_actions(db, diagnostics, src, path, workspace_root, import_sources, excluded_import_paths, requested))
+    selected :: trim_span(src, requested) ?? {
+        &actions.extend(inline_actions(db, tokens, src, path, requested))
+        return ^actions
+    }
+    extracted := false
+    candidate :: extractable_expr(db, src, path, selected).filter(fn(span) { !is_trivial_extract(tokens, span) }).filter(fn(span) { is_total_pure_expr(db, tokens, path, span) })
+    if candidate == .Val(expression_span) {
+        if extract_insert_point(db, src, path, expression_span) == .Val(insert_at) {
+            if src.get(expression_span.start..<expression_span.end) == .Val(expression) {
+                indent_len :: src[insert_at..].chars().take_while(fn(c) { c == ' ' || c == '\t' }).map(fn(c) { c.len_utf8() }).sum()
+                indent :: src[insert_at..<insert_at + indent_len]
+                name :: fresh_name(db, "extracted_value")
+                &actions.push(RefactorAction{title: "Extract binding", kind: "refactor.extract", edits: [
+                    TextEdit{span: Span.new(insert_at, insert_at), new_text: "${indent}${name} :: ${expression}\n"},
+                    TextEdit{span: expression_span, new_text: name}
+                ]})
+                if extract_function_action(db, tokens, src, path, expression_span, expression) == .Val(action) -> &actions.push(action)
+                extracted = true
+            }
+        }
+    }
+    if !extracted -> &actions.extend(inline_actions(db, tokens, src, path, selected))
+    ^actions
+}
+// Rust: Source/LSP/Features.rs:2928
+fn adjacent_subject_dispatch_actions(diagnostics: [Diagnostic], requested: Span) -> [RefactorAction] {
+    diagnostics.iter().filter(fn(diagnostic) { diagnostic.code == "L0514" }).filter(fn(diagnostic) {
+        diagnostic.edit.map(fn(edit) { spans_touch(edit.span, requested) }).or_else(fn() { diagnostic.span.map(fn(span) { spans_touch(span, requested) }) }) ?? false
+    }).filter_map(fn(diagnostic) {
+        diagnostic.edit.map(fn(edit) { RefactorAction{title: "Rewrite adjacent guards as an ordered subject table", kind: "refactor.rewrite", edits: [edit]} })
+    }).collect()
+}
+// Rust: Source/LSP/Features.rs:2953
+fn import_actions(db: SymbolDB, diagnostics: [Diagnostic], src: String, path: String, workspace_root: String?, import_sources: [String: String], excluded_import_paths: Set[String], requested: Span) -> [RefactorAction] {
+    out := [RefactorAction]{}
+    seen := Set[String]{}
+    loop diagnostic in diagnostics.iter().filter(fn(diagnostic) { diagnostic.code == "E0102" || diagnostic.code == "E0107" }) {
+        span :: diagnostic.span.filter(fn(span) { spans_touch(span, requested) }) ?? continue
+        name :: src.get(span.start..<span.end) ?? continue
+        modules := db.symbols.lookup(name).iter().filter(fn(symbol) {
+            source_path :: module_file_path(path, workspace_root, symbol.module_path).map(fn(path) { path.to_string_lossy() })
+            source_path != Val(path) && !source_path.is_some_and(fn(candidate) { excluded_import_paths.contains(candidate) }) &&
+                !excluded_import_paths.contains(symbol.module_path) && symbol.provenance.is_source() &&
+                source_symbol_is_exported(symbol, import_sources) &&
+                !(symbol.kind == .Local || symbol.kind == .Parameter || symbol.kind == .Member)
+        }).filter_map(fn(symbol) { use_statement_for_module(path, workspace_root, symbol.module_path) }).collect()
+        modules.sort()
+        modules.dedup()
+        if modules.len() != 1 -> continue
+        statement :: modules[0]
+        if src.lines().any(fn(line) { line.trim() == statement.trim() }) || !seen.insert(statement) -> continue
+        trimmed := statement.trim() // #4303
+        module := trimmed.strip_prefix("use ") ?? trimmed // #4303
+        &out.push(RefactorAction{title: "Import `${module}`", kind: "quickfix", edits: [TextEdit{span: Span.new(0, 0), new_text: statement}]})
+    }
+    ^out
+}
+// Rust: Source/LSP/Features.rs:3029
+fn extract_function_action(db: SymbolDB, tokens: [Token], src: String, path: String, selected: Span, expression: String) -> RefactorAction? {
+    if !is_total_pure_expr(db, tokens, path, selected) -> return None
+    return_type :: infer_total_pure_return_type(db, tokens, path, selected) ?? return None
+    if !is_scalar_name(return_type) -> return None
+    function :: db.index.definition_facts().iter().filter(fn(definition) {
+        definition.module_path == path && definition.kind == "function" && definition.span.start <= selected.start && selected.end <= definition.span.end
+    }).min_by_key(fn(definition) { definition.span.end - definition.span.start }) ?? return None
+    inputs := [(SymDef, USize)]{}
+    loop reference in db.refs.iter().filter(fn(reference) { reference.module_path == path && selected.start <= reference.span.start && reference.span.end <= selected.end }) {
+        target :: reference.target ?? return None
+        definition :: definition_for_anchor(db, target) ?? return None
+        if selected.start <= definition.def_span.start && definition.def_span.end <= selected.end -> continue
+        if definition.kind == {
+            .Param(ty) -> { if !is_scalar_type(ty) -> return None }
+            .Local(mutable, ty) -> { if mutable || !ty.is_some_and(is_scalar_type) -> return None }
+            else -> continue
+        }
+        existing :: inputs.iter().position(fn(pair) { pair.0.identity == definition.identity })
+        if existing == .Val(index) {
+            inputs[index].1 = inputs[index].1.min(reference.span.start)
+        } else { &inputs.push((definition, reference.span.start)) }
+    }
+    inputs.sort_by_key(fn(pair) { pair.1 })
+    function_name :: fresh_name(db, "extracted_fn")
+    params :: inputs.iter().map(fn(pair) {
+        ty :: if pair.0.kind == { .Param(ty) -> ty, .Local(_, .Val(ty)) -> ty, else -> unreachable() }
+        "${pair.0.name}: ${ty.name()}"
+    }).collect().join(", ")
+    args :: inputs.iter().map(fn(pair) { pair.0.name }).collect().join(", ")
+    insert :: line_start(src, function.span.start)
+    Val(RefactorAction{title: "Extract function", kind: "refactor.extract", edits: [
+        TextEdit{span: Span.new(insert, insert), new_text: "fn ${function_name}(${params}) -> ${return_type} { return ${expression} }\n\n"},
+        TextEdit{span: selected, new_text: "${function_name}(${args})"}
+    ]})
+}
+// Rust: Source/LSP/Features.rs:3126
+fn inline_actions(db: SymbolDB, tokens: [Token], src: String, path: String, requested: Span) -> [RefactorAction] {
+    reference :: db.refs.iter().find(fn(reference) { reference.module_path == path && spans_touch(reference.span, requested) }) ?? return []
+    target :: reference.target ?? return []
+    binding :: definition_for_anchor(db, target) ?? return []
+    if !(if binding.kind == { .Local(false, _) -> true, else -> false }) -> return []
+    uses :: db.refs.iter().filter(fn(candidate) { candidate.module_path == path && candidate.target.is_some_and(fn(anchor) { same_anchor(anchor, target) }) }).collect()
+    if uses.is_empty() -> return []
+    initializer :: initializer_for_binding(db, src, path, binding) ?? return []
+    initializer_span :: Span.new(initializer.span.start, initializer.span.end)
+    if !is_total_pure_expr(db, tokens, path, initializer_span) || !initializer_refs_are_stable(db, path, initializer_span) -> return []
+    start :: line_start(src, binding.def_span.start)
+    end :: line_end_including_newline(src, initializer_span.end)
+    prefix :: src[start..<binding.def_span.start]
+    suffix := (src.get(initializer_span.end..<end) ?? "").trim_end_matches(['\r', '\n']).trim() // #4303
+    if !prefix.chars().all(fn(c) { c.is_whitespace() }) || !suffix.trim_end_matches(';').trim().is_empty() || uses.iter().any(fn(use_site) { end > use_site.span.start }) -> return []
+    expression :: src.get(initializer_span.start..<initializer_span.end) ?? return []
+    edits := uses.iter().map(fn(use_site) { TextEdit{span: use_site.span, new_text: "(${expression})"} }).collect()
+    &edits.push(TextEdit{span: Span.new(start, end), new_text: ""})
+    [RefactorAction{title: "Inline `${binding.name}`", kind: "refactor.inline", edits: ^edits}]
+}
+// Rust: Source/LSP/Features.rs:3207
+fn initializer_refs_are_stable(db: SymbolDB, path: String, span: Span) -> Bool {
+    db.refs.iter().filter(fn(reference) { reference.module_path == path && span.start <= reference.span.start && reference.span.end <= span.end }).all(fn(reference) {
+        reference.target.and_then(fn(target) { definition_for_anchor(db, target) }).is_some_and(fn(definition) {
+            if definition.kind == { .Local(true, _) -> false, else -> true }
+        })
+    })
+}
+// Rust: Source/LSP/Features.rs:3226
+fn source_symbol_is_exported(symbol: jet_semindex.SemanticSymbol, sources: [String: String]) -> Bool {
+    span :: symbol.span ?? return false
+    source :: sources.get(symbol.module_path) ?? return false
+    start :: line_start(source, span.start)
+    source.get(start..<span.start).is_some_and(fn(prefix) { prefix.split_whitespace().any(fn(word) { word == "pub" || word.starts_with("pub(") }) })
+}
+// Rust: Source/LSP/Features.rs:3244
+fn exact_expr(db: SymbolDB, path: String, selected: Span) -> jet_semindex.StructuralNode? {
+    db.nodes.iter().find(fn(node) { node.module_path == path && node.class == "expr" && node.span.start == selected.start && node.span.end == selected.end })
+}
+// Rust: Source/LSP/Features.rs:3258
+fn extractable_expr(db: SymbolDB, src: String, path: String, selected: Span) -> Span? {
+    if exact_expr(db, path, selected).is_some() -> return Val(selected)
+    text :: src.get(selected.start..<selected.end) ?? return None
+    start_ws :: text.len() - text.trim_start().len()
+    end_ws :: text.len() - text.trim_end().len()
+    core := text.trim() // #4303
+    if core.len() < 2 || !core.starts_with("(") || !core.ends_with(")") -> return None
+    inner :: trim_span(src, Span.new(selected.start + start_ws + 1, selected.end - end_ws - 1)) ?? return None
+    exact_expr(db, path, inner).map(fn(node) { selected })
+}
+// Rust: Source/LSP/Features.rs:3274
+fn extract_insert_point(db: SymbolDB, src: String, path: String, selected: Span) -> USize? {
+    if db.nodes.iter().find(fn(node) { node.module_path == path && node.class == "expr" && node.slot == "initializer" && node.span.start == selected.start && node.span.end == selected.end }) == .Val(initializer) {
+        if binding_for_initializer(db, src, path, initializer) == .Val(binding) -> return Val(line_start(src, binding.def_span.start))
+    }
+    Val(line_start(src, selected.start))
+}
+// Rust: Source/LSP/Features.rs:3292
+fn binding_for_initializer(db: SymbolDB, src: String, path: String, initializer: jet_semindex.StructuralNode) -> SymDef? {
+    start :: line_start(src, initializer.span.start)
+    db.defs.iter().filter(fn(definition) {
+        definition.module_path == path && definition.kind.is_local() && start <= definition.def_span.start && definition.def_span.end <= initializer.span.start
+    }).max_by_key(fn(definition) { definition.def_span.start })
+}
+// Rust: Source/LSP/Features.rs:3310
+fn initializer_for_binding(db: SymbolDB, src: String, path: String, binding: SymDef) -> jet_semindex.StructuralNode? {
+    end :: src[binding.def_span.start..].find(['\r', '\n']).map_or(src.len(), fn(offset) { binding.def_span.start + offset })
+    db.nodes.iter().filter(fn(node) {
+        node.module_path == path && node.class == "expr" && node.slot == "initializer" && binding.def_span.end <= node.span.start && node.span.end <= end
+    }).min_by_key(fn(node) { node.span.start })
+}
+// Rust: Source/LSP/Features.rs:3331
+fn definition_for_anchor(db: SymbolDB, anchor: DefinitionAnchor) -> SymDef? {
+    db.defs.iter().find(fn(definition) {
+        anchor.semantic_identity.is_some_and(fn(identity) { identity == definition.identity }) ||
+            (definition.module_path == anchor.module_path && definition.def_span.start == anchor.def_span.start && definition.def_span.end == anchor.def_span.end)
+    })
+}
+// Rust: Source/LSP/Features.rs:3346
+fn same_anchor(left: DefinitionAnchor, right: DefinitionAnchor) -> Bool {
+    if (left.semantic_identity, right.semantic_identity) == {
+        (.Val(left_id), .Val(right_id)) -> left_id == right_id,
+        else -> left.module_path == right.module_path && left.def_span.start == right.def_span.start && left.def_span.end == right.def_span.end
+    }
+}
+// Rust: Source/LSP/Features.rs:3360
+fn is_scalar_type(ty: jet_foundation.AST.Type) -> Bool { is_scalar_name(ty.name()) }
+// Rust: Source/LSP/Features.rs:3364
+fn is_scalar_name(name: String) -> Bool { name == "Bool" || name == "Char" || name == "Int" || name == "Float" }
+// Rust: Source/LSP/Features.rs:3368
+fn is_trivial_extract(tokens: [Token], span: Span) -> Bool {
+    significant :: tokens.iter().filter(fn(token) {
+        span.start <= token.span.start && token.span.end <= span.end && token.span.start < token.span.end &&
+            !(if token.kind == { .Eof | .LParen | .RParen -> true, else -> false })
+    }).collect()
+    significant.len() == 1 && (if significant[0].kind == {
+        .Ident(_) | .Int(_, _) | .Float(_) | .Char(_) | .KwTrue | .KwFalse | .Str(_) -> true,
+        else -> false
+    })
+}
+// Rust: Source/LSP/Features.rs:3394
+fn is_total_pure_expr(db: SymbolDB, tokens: [Token], path: String, span: Span) -> Bool {
+    enclosed :: tokens.iter().filter(fn(token) { span.start <= token.span.start && token.span.end <= span.end && token.span.start < token.span.end && token.kind != .Eof }).collect()
+    if enclosed.is_empty() -> return false
+    loop pair in enclosed.windows(2) {
+        if pair[0].kind.is_ident() && pair[1].kind == .LParen -> return false
+    }
+    has_comparison := false
+    loop token in enclosed {
+        safe :: if token.kind == {
+            .Ident(_) | .Int(_, _) | .Float(_) | .Char(_) | .KwTrue | .KwFalse | .AndAnd | .OrOr | .Bang | .LParen | .RParen -> true,
+            .EqEq | .NotEq -> { has_comparison = true; true },
+            .Str(parts) -> parts.iter().all(fn(part) { if part == { .Lit(_) -> true, else -> false } }),
+            else -> false
+        }
+        if !safe -> return false
+    }
+    if has_comparison { expr_comparison_operands_are_scalar(db, tokens, path, span) } else { true }
+}
+// Rust: Source/LSP/Features.rs:3450
+fn expr_comparison_operands_are_scalar(db: SymbolDB, tokens: [Token], path: String, span: Span) -> Bool {
+    enclosed :: tokens.iter().filter(fn(token) { span.start <= token.span.start && token.span.end <= span.end && token.span.start < token.span.end }).collect()
+    has_bool_op :: enclosed.iter().any(fn(token) { if token.kind == { .AndAnd | .OrOr | .Bang -> true, else -> false } })
+    leaf := String?{None}
+    loop token in enclosed {
+        if token.kind == {
+            .KwTrue | .KwFalse -> { if !agree_scalar_leaf(&leaf, "Bool") -> return false }
+            .Int(_, _) -> { if has_bool_op || !agree_scalar_leaf(&leaf, "Int") -> return false }
+            .Float(_) -> { if has_bool_op || !agree_scalar_leaf(&leaf, "Float") -> return false }
+            .Char(_) -> { if has_bool_op || !agree_scalar_leaf(&leaf, "Char") -> return false }
+            .Ident(_) -> {
+                name :: resolved_type_name(db, path, token.span) ?? return false
+                if !is_scalar_name(name) || (has_bool_op && name != "Bool") || !agree_scalar_leaf(&leaf, name) -> return false
+            }
+            .AndAnd | .OrOr | .Bang | .EqEq | .NotEq | .LParen | .RParen -> {}
+            else -> return false
+        }
+    }
+    leaf.is_some_and(is_scalar_name)
+}
+// Rust: Source/LSP/Features.rs:3517
+fn agree_scalar_leaf(leaf: &String?, name: String) -> Bool {
+    if leaf == {
+        .Val(existing) -> existing == name,
+        .None -> { leaf = Val(name); true }
+    }
+}
+// Rust: Source/LSP/Features.rs:3527
+fn resolved_type_name(db: SymbolDB, path: String, span: Span) -> String? {
+    reference :: db.refs.iter().find(fn(reference) { reference.module_path == path && reference.span.start == span.start && reference.span.end == span.end }) ?? return None
+    target :: reference.target ?? return None
+    definition :: definition_for_anchor(db, target) ?? return None
+    if definition.kind == { .Param(ty) -> Val(ty.name()), .Local(_, .Val(ty)) -> Val(ty.name()), else -> None }
+}
+// Rust: Source/LSP/Features.rs:3542
+fn infer_total_pure_return_type(db: SymbolDB, tokens: [Token], path: String, span: Span) -> String? {
+    saw_bool_op := false
+    saw_comparison := false
+    literal := String?{None}
+    from_ident := String?{None}
+    loop token in tokens.iter().filter(fn(token) { span.start <= token.span.start && token.span.end <= span.end && token.span.start < token.span.end && token.kind != .Eof }) {
+        if token.kind == {
+            .AndAnd | .OrOr | .Bang | .KwTrue | .KwFalse -> { saw_bool_op = true }
+            .EqEq | .NotEq -> { saw_comparison = true }
+            .Int(_, _) -> {
+                if literal.is_some_and(fn(existing) { existing != "Int" }) -> return None
+                literal = Val("Int")
+            }
+            .Float(_) -> {
+                if literal.is_some_and(fn(existing) { existing != "Float" }) -> return None
+                literal = Val("Float")
+            }
+            .Char(_) -> {
+                if literal.is_some_and(fn(existing) { existing != "Char" }) -> return None
+                literal = Val("Char")
+            }
+            .Ident(_) -> {
+                name :: resolved_type_name(db, path, token.span) ?? return None
+                if !is_scalar_name(name) -> return None
+                if from_ident == {
+                    .Val(existing) -> { if existing != name && !saw_bool_op && !saw_comparison -> return None }
+                    .None -> { from_ident = Val(name) }
+                }
+            }
+            .LParen | .RParen -> {}
+            else -> return None
+        }
+    }
+    if saw_bool_op || saw_comparison -> return Val("Bool")
+    if literal == .Val(name) -> return Val(name)
+    from_ident.filter(is_scalar_name)
+}
+// Rust: Source/LSP/Features.rs:3741
+fn trim_span(src: String, span: Span) -> Span? {
+    text :: src.get(span.start..<span.end) ?? return None
+    start :: text.len() - text.trim_start().len()
+    end :: text.trim_end().len()
+    if start < end { Val(Span.new(span.start + start, span.start + end)) } else { None }
+}
+// Rust: Source/LSP/Features.rs:3748
+fn spans_touch(left: Span, right: Span) -> Bool { left.start <= right.end && right.start <= left.end }
+// Rust: Source/LSP/Features.rs:3752
+fn line_start(src: String, offset: USize) -> USize {
+    src[..offset.min(src.len())].rfind('\n').map_or(0, fn(index) { index + 1 })
+}
+// Rust: Source/LSP/Features.rs:3758
+fn line_end_including_newline(src: String, offset: USize) -> USize {
+    src[offset.min(src.len())..].find('\n').map_or(src.len(), fn(index) { offset.min(src.len()) + index + 1 })
+}
+// Rust: Source/LSP/Features.rs:3764
+fn fresh_name(db: SymbolDB, base: String) -> String {
+    if !db.defs.iter().any(fn(definition) { definition.name == base }) -> return base
+    suffix := 2
+    loop {
+        candidate :: "${base}_${suffix}"
+        if !db.defs.iter().any(fn(definition) { definition.name == candidate }) -> return candidate
+        suffix += 1
+    }
+}
+// Rust: Source/LSP/Features.rs:3784
+module st {
+    // Rust: Source/LSP/Features.rs:3785
+    pub KEYWORD :: U32{0}
+    // Rust: Source/LSP/Features.rs:3786
+    pub TYPE :: U32{1}
+    // Rust: Source/LSP/Features.rs:3787
+    pub VARIABLE :: U32{3}
+    // Rust: Source/LSP/Features.rs:3788
+    pub STRING :: U32{7}
+    // Rust: Source/LSP/Features.rs:3789
+    pub NUMBER :: U32{8}
+    // Rust: Source/LSP/Features.rs:3790
+    pub COMMENT :: U32{9}
+    // Rust: Source/LSP/Features.rs:3791
+    pub OPERATOR :: U32{10}
+    // Rust: Source/LSP/Features.rs:3792
+    pub OWNERSHIP :: U32{12}
+    // Rust: Source/LSP/Features.rs:3793
+    pub DECORATOR :: U32{13}
+}
+// Rust: Source/LSP/Features.rs:3797
+module sm {
+    // Rust: Source/LSP/Features.rs:3798
+    pub READONLY :: U32{1 << 1}
+    // Rust: Source/LSP/Features.rs:3799
+    pub MOVE :: U32{1 << 2}
+    // Rust: Source/LSP/Features.rs:3800
+    pub WRITE_BORROW :: U32{1 << 3}
+    // Rust: Source/LSP/Features.rs:3801
+    pub COPY :: U32{1 << 4}
+    // Rust: Source/LSP/Features.rs:3802
+    pub RULE :: U32{1 << 5}
+    // Rust: Source/LSP/Features.rs:3803
+    pub ARITHMETIC_CHECKED :: U32{1 << 6}
+    // Rust: Source/LSP/Features.rs:3804
+    pub ARITHMETIC_WRAPPING :: U32{1 << 7}
+    // Rust: Source/LSP/Features.rs:3805
+    pub ARITHMETIC_SATURATING :: U32{1 << 8}
+}
+// Rust: Source/LSP/Features.rs:3808
+fn semantic_token_type_for(tokens: [Token], idx: USize, src: String) -> (U32, U32)? {
+    tok :: tokens[idx]
+    if marker_modifier(tokens, idx) == .Val(marker_mod) -> return Val((st.DECORATOR, marker_mod))
+    if tok.kind == {
+        .KwFn | .KwPub | .KwIf | .KwElse | .KwBreak | .KwReturn | .KwStruct | .KwEnum |
+        .KwImpl | .KwTrait | .KwTag | .KwDerive | .KwConst | .KwComptime | .KwUse |
+        .KwExtern | .KwLoop | .KwSelf | .KwNull | .KwIt | .KwModule -> Val((st.KEYWORD, 0)),
+        .KwTrue | .KwFalse -> Val((st.KEYWORD, sm.READONLY)),
+        .KwCopy -> Val((st.OWNERSHIP, sm.COPY)),
+        .KwMutate | .KwMove -> None,
+        .Ident(name) -> {
+            if name == Syntax.KW_NEXT && is_contextual_next(tokens, idx) -> return Val((st.KEYWORD, 0))
+            if is_live_teaching_semantic_word(name) -> return None
+            if name.chars().next().is_some_and(fn(c) { c.is_uppercase() }) { Val((st.TYPE, 0)) } else { Val((st.VARIABLE, 0)) }
+        }
+        .Str(_) -> Val((st.STRING, 0)),
+        .Int(_, _) | .Float(_) | .Char(_) -> Val((st.NUMBER, 0)),
+        .LineComment(_) | .BlockComment(_) -> Val((st.COMMENT, 0)),
+        .Plus | .Minus | .Star | .Slash | .Percent | .Pipe | .Shl | .Shr | .AndAnd | .OrOr |
+        .Bang | .EqEq | .NotEq | .Lt | .Gt | .Le | .Ge | .Compare | .UnifiedArrow |
+        .LambdaArrow | .Question | .DotDot | .DotDotLt -> Val((st.OPERATOR, 0)),
+        .Amp -> { if token_text(src, tok) == Syntax.SIGIL_WRITE { Val((st.OWNERSHIP, sm.WRITE_BORROW)) } else { None } },
+        .Caret -> { if token_text(src, tok) == Syntax.SIGIL_MOVE { Val((st.OWNERSHIP, sm.MOVE)) } else { None } },
+        else -> None
+    }
+}
+// Rust: Source/LSP/Features.rs:3901
+fn marker_modifier(tokens: [Token], idx: USize) -> U32? {
+    tok :: tokens[idx]
+    if tok.kind == .Hash -> return marker_kind_after(tokens, idx).map(fn(kind) { kind.modifier() })
+    prev :: previous_significant(tokens, idx) ?? return None
+    if tokens[prev].kind == .Hash && marker_name(tokens, idx).is_some() {
+        marker_kind_for(tokens[prev], tokens, idx).map(fn(kind) { kind.modifier() })
+    } else { None }
+}
+// Rust: Source/LSP/Features.rs:3918
+enum MarkerKind { Rule }
+// Rust: Source/LSP/Features.rs:3923
+fn MarkerKind.modifier(self: MarkerKind) -> U32 {
+    if self == { .Rule -> sm.RULE }
+}
+// Rust: Source/LSP/Features.rs:3930
+fn marker_kind_after(tokens: [Token], idx: USize) -> MarkerKind? {
+    next :: next_significant(tokens, idx) ?? return None
+    marker_kind_for(tokens[idx], tokens, next)
+}
+// Rust: Source/LSP/Features.rs:3935
+fn marker_kind_for(prefix: Token, tokens: [Token], name_idx: USize) -> MarkerKind? {
+    name :: marker_name(tokens, name_idx) ?? return None
+    if prefix.kind == .Hash && Syntax.is_applied_rule(name) { Val(.Rule) } else { None }
+}
+// Rust: Source/LSP/Features.rs:3943
+fn marker_name(tokens: [Token], idx: USize) -> String? {
+    if tokens[idx].kind == { .Ident(name) -> Val(name), else -> None }
+}
+// Rust: Source/LSP/Features.rs:3950
+fn previous_significant(tokens: [Token], idx: USize) -> USize? {
+    tokens[..idx].iter().enumerate().rev().find_map(fn(pair) { if !is_trivia(pair.1) { Val(pair.0) } else { None } })
+}
+// Rust: Source/LSP/Features.rs:3958
+fn next_significant(tokens: [Token], idx: USize) -> USize? {
+    tokens.iter().enumerate().skip(idx + 1).find_map(fn(pair) { if !is_trivia(pair.1) { Val(pair.0) } else { None } })
+}
+// Rust: Source/LSP/Features.rs:3966
+fn is_contextual_next(tokens: [Token], idx: USize) -> Bool {
+    previous :: previous_significant(tokens, idx).map(fn(idx) { tokens[idx].kind })
+    next :: next_significant(tokens, idx).map(fn(idx) { tokens[idx].kind })
+    if previous == Val(.QuestionQuestion) -> return true
+    if previous != Val(.LBrace) && previous != Val(.Semi) -> return false
+    next == Val(.Semi) || next == Val(.RBrace)
+}
+// Rust: Source/LSP/Features.rs:3979
+fn is_trivia(tok: Token) -> Bool {
+    if tok.kind == { .LineComment(_) | .BlockComment(_) -> true, else -> false }
+}
+// Rust: Source/LSP/Features.rs:3983
+fn token_text(src: String, tok: Token) -> String {
+    src.get(tok.span.start..<tok.span.end.min(src.len())) ?? ""
+}
+// Rust: Source/LSP/Features.rs:3988
+pub fn is_live_teaching_semantic_word(name: String) -> Bool {
+    [Syntax.METHOD_VIEW, Syntax.FOREIGN_PRIVATE, Syntax.FOREIGN_UNSAFE, Syntax.FOREIGN_NAMESPACE,
+     Syntax.FOREIGN_OWNED, Syntax.FOREIGN_SANITIZER, Syntax.FOREIGN_VEC, Syntax.FOREIGN_DICT,
+     Syntax.FOREIGN_EPRINTLN, Syntax.FOREIGN_OPEN, Syntax.FOREIGN_GETENV, Syntax.FOREIGN_OS,
+     Syntax.FOREIGN_ASYNC, Syntax.FOREIGN_AWAIT, Syntax.FOREIGN_MUTEX, Syntax.FOREIGN_LOCK].contains(name)
+}
+// Rust: Source/LSP/Features.rs:4010
+pub fn encode_semantic_tokens_with_arithmetic(tokens: [Token], src: String, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> [U32] {
+    encode_semantic_tokens_where(tokens, src, fn(tok) { true }, arithmetic)
+}
+// Rust: Source/LSP/Features.rs:4018
+pub fn encode_semantic_tokens_in_span_with_arithmetic(tokens: [Token], src: String, span: Span, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> [U32] {
+    encode_semantic_tokens_where(tokens, src, fn(tok) { tok.span.start >= span.start && tok.span.start < span.end }, arithmetic)
+}
+// Rust: Source/LSP/Features.rs:4032
+fn encode_semantic_tokens_where(tokens: [Token], src: String, include: fn(Token) -> Bool, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> [U32] {
+    data := [U32]{}
+    prev_line := U32{0}
+    prev_start := U32{0}
+    loop (idx, tok) in tokens.iter().enumerate() {
+        if tok.kind == .Eof -> break
+        if !include(tok) -> continue
+        (tok_type, base_mods) :: semantic_token_type_for(tokens, idx, src) ?? continue
+        tok_mods :: base_mods | arithmetic_modifier(tok.span, arithmetic)
+        lsp_start :: byte_offset_to_lsp(src, tok.span.start)
+        line :: lsp_start.line
+        start :: lsp_start.character
+        text :: src.get(tok.span.start..<tok.span.end.min(src.len())) ?? ""
+        first_line_text :: text.split('\n').next() ?? text
+        length :: first_line_text.encode_utf16().count() as U32
+        if length == 0 -> continue
+        delta_line :: line - prev_line
+        delta_start :: if delta_line == 0 { start - prev_start } else { start }
+        &data.push(delta_line)
+        &data.push(delta_start)
+        &data.push(length)
+        &data.push(tok_type)
+        &data.push(tok_mods)
+        prev_line = line
+        prev_start = start
+    }
+    ^data
+}
+// Rust: Source/LSP/Features.rs:4088
+fn arithmetic_modifier(token: Span, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> U32 {
+    arithmetic.iter().filter(fn(fact) { token.start < fact.operation_span.end && fact.operation_span.start < token.end }).min_by_key(fn(fact) {
+        fact.operation_span.end.saturating_sub(fact.operation_span.start)
+    }).map_or(0, fn(fact) {
+        if fact.policy == { "Checked" -> sm.ARITHMETIC_CHECKED, "Wrapping" -> sm.ARITHMETIC_WRAPPING, "Saturating" -> sm.ARITHMETIC_SATURATING, else -> 0 }
+    })
+}
+// Rust: Source/LSP/Features.rs:4109
+pub fn format_inlay_hints(hints: [jet_semindex.InlayHint], src: String) -> String {
+    items := ""
+    loop (i, h) in hints.iter().enumerate() {
+        if i > 0 -> &items.push(',')
+        pos :: byte_offset_to_lsp(src, h.span.end)
+        &items.push_str("{\"position\":{\"line\":${pos.line},\"character\":${pos.character}},\"label\":\"${json_escape(h.label)}\",\"kind\":1}")
+    }
+    "[${items}]"
+}
+

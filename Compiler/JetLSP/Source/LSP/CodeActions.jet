@@ -1,0 +1,61 @@
+// Source/LSP/Server.rs:1033–1139. Pending W38 Server ABI reconciliation.
+// Fix is the sole Check/Fixes owner; RefactorAction and its checked computation
+// belong to Features (0736/0737), never a second action engine here.
+use core.encoding.[DataTree]
+use jet_foundation.[Span, TextEdit, foundation_json_quote]
+use jet_semindex.[SymbolDB]
+use core.files.runtime.kernel_path_components as lsp_action_path
+use core.files.host.retained_descriptor as lsp_action_fs
+
+pub fn lsp_code_action_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        range :: lsp_range_from_json(value.field("range") ?? return None) ?? return None
+        requested :: Span{start: lsp_pos_to_offset(doc.text, range.start), end: lsp_pos_to_offset(doc.text, range.end)}
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        result :: permit.value.result
+        diagnostics := ~result.diagnostics
+        lsp_retain_document_diagnostics(&diagnostics, doc.path, doc.text)
+        fixes :: lsp_collect_fixes_from_diagnostics(~diagnostics, doc.text)
+        db := lsp_build_symbol_db(result)
+        sources :: lsp_merge_workspace_defs_with_sources(server, doc, &db)
+        token_owner :: server.lex(doc)
+        token_permit :: token_owner.guard_read()
+        tokens :: token_permit.value
+        root :: lsp_workspace_root_for_path(server.workspace_roots, doc.path)
+        excluded := [lsp_action_path.OSPath]{}
+        loop (_, open) in server.diagnostic_state.docs {
+            // Native read must preserve OSPath identity; canonical runtime read
+            // contract is a publication gate, not a lossy text-path conversion.
+            saved :: lsp_action_fs.read_text(open.path)
+            if saved == {
+                .Ok(text) -> { if text != open.text -> &excluded.push(~open.path) }
+                .Err(_) -> &excluded.push(~open.path)
+            }
+        }
+        refactors :: lsp_compute_refactor_actions(db, tokens, diagnostics, doc.text, doc.path, root, sources, excluded, requested)
+        actions := [String]{}
+        loop fix in fixes -> &actions.push(lsp_code_action_json(uri, doc.version, doc.text, fix))
+        loop action in refactors -> &actions.push(lsp_refactor_action_json(uri, doc.version, doc.text, action))
+        return Val(lsp_response(id, "[{actions.join(",")}]"))
+    }
+    None
+}
+
+pub fn lsp_code_action_json(uri: String, version: Int, src: String, fix: Fix) -> String Never! {
+    lsp_action_json(uri, version, src, fix.title, "quickfix", [TextEdit]{fix.edit})
+}
+
+pub fn lsp_refactor_action_json(uri: String, version: Int, src: String, action: RefactorAction) -> String Never! {
+    lsp_action_json(uri, version, src, action.title, action.kind, action.edits)
+}
+
+pub fn lsp_action_json(uri: String, version: Int, src: String, title: String, kind: String, edits: [TextEdit]) -> String Never! {
+    rows := [String]{}
+    loop edit in edits -> &rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
+    "{{\"title\":{foundation_json_quote(title)},\"kind\":\"{kind}\",\"edit\":{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version}}},\"edits\":[{rows.join(",")}]}}]}}}}"
+}

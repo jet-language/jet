@@ -1,0 +1,138 @@
+use jet_foundation.[StatusEnvelope, StatusFields, StatusValue, foundation_json_quote]
+use jet_pkg_model.[pkg_effect_projection_status_value, pkg_render_effect_projection_line]
+
+// Rust JSON.rs:1203–1325 TypeDossier::render_text: retained contracts and
+// program-wide bypass audit, not a new checked-fact or docs-graph producer.
+impl TypeDossier {
+    // Rust JSON.rs:1171–1201: typed dossier boundary, exact eight-field order.
+    // All retained vectors are read in place; Foundation Report is the only
+    // envelope encoder and S18 owns nested semantic-fact codecs.
+    pub fn to_status_envelope(self) -> StatusEnvelope Never! {
+        definition :: if self.definition == {
+            .Val(row) -> semindex_status_def(row)
+            .None -> StatusValue.Null
+        }
+        members := [StatusValue]{}
+        loop row in self.members -> &members.push(semindex_status_member(row))
+        references := [StatusValue]{}
+        loop row in self.references -> &references.push(semindex_status_ref(row))
+        bypasses := [StatusValue]{}
+        loop row in self.bypass_facts -> &bypasses.push(semindex_status_bypass(row))
+        state_graphs := [StatusValue]{}
+        loop row in self.state_graphs -> &state_graphs.push(semindex_status_state_graph(row))
+        fields :: StatusFields.new()
+            .with("schema_version", StatusValue.Integer{value: self.schema_version})
+            .with("target", StatusValue.String{value: self.target})
+            .with("definition", definition)
+            .with("members", StatusValue.Array{values: members})
+            .with("references", StatusValue.Array{values: references})
+            .with("bypass_facts", StatusValue.Array{values: bypasses})
+            .with("state_graphs", StatusValue.Array{values: state_graphs})
+            .with("effect_projection", pkg_effect_projection_status_value(self.effect_projection))
+        StatusEnvelope.new("inspect.dossier", true).with_field("dossier", StatusValue.Object{fields: fields})
+    }
+
+    pub fn to_json(self) -> String Never! { self.to_status_envelope().json() }
+
+    pub fn render_text(self) -> String Never! {
+        out := "dossier `{self.target}` (schema v{self.schema_version})\n"
+        if self.definition == {
+            .Val(definition) -> {
+                out += "summary\n  defined: {definition.module_path}:{definition.def_span.start}..{definition.def_span.end}\n"
+                if definition.nominal_base == .Val(base) -> out += "nominal type\n  distinct {base}\n"
+                if definition.trait_contracts.len() != 0 {
+                    out += "trait contracts\n"
+                    loop contract in definition.trait_contracts {
+                        out += "  implements {contract.trait_name}\n"
+                        loop associated in contract.associated_types {
+                            if associated.implementation == {
+                                .Val(ty) -> out += "    type {associated.name} = {ty}\n"
+                                .None -> out += "    type {associated.name}\n"
+                            }
+                        }
+                        loop method in contract.methods -> out += "    {method}\n"
+                    }
+                }
+                if definition.callable_signature == .Val(signature) {
+                    failure :: signature.failure_contract_name()
+                    source :: signature.failure_source_name()
+                    if failure == {
+                        .Val(name) -> {
+                            if source == {
+                                .Val(origin) -> out += "failure contract\n  {name} ({origin})\n"
+                                .None -> out += "failure contract\n  unavailable\n"
+                            }
+                        }
+                        .None -> out += "failure contract\n  unavailable\n"
+                    }
+                }
+            }
+            .None -> out += "summary\n  defined: not found\n"
+        }
+        out += "effect roles\n  {pkg_render_effect_projection_line(self.effect_projection)}\n"
+        out += "members\n"
+        if self.members.len() == 0 -> out += "  none\n"
+        loop member in self.members {
+            out += "  {semindex_json_member_kind(member.kind)} {member.signature} ({semindex_origin_text(member.origin)}) @ {member.module_path}:{member.span.start}..{member.span.end}\n"
+        }
+        out += "state graphs\n"
+        if self.state_graphs.len() == 0 -> out += "  none\n"
+        loop graph in self.state_graphs {
+            out += "  {graph.owner} @ {graph.module_path}\n"
+            loop state in graph.states {
+                reachability :: if state.reachable == {
+                    .Val(value) -> if value -> "reachable" else -> "unreachable"
+                    .None -> "reachability unknown"
+                }
+                terminality :: if state.terminal -> "terminal" else -> "nonterminal"
+                out += "    state {state.name} ({terminality}; {reachability}) @ {graph.module_path}:{state.span.start}..{state.span.end}\n"
+            }
+            loop transition in graph.transitions {
+                from :: transition.from ?? "_"
+                out += "    transition {transition.operation}: {from} -> {transition.to}\n"
+            }
+        }
+        out += "references\n  count: {self.references.len()}\n"
+        loop reference in self.references -> out += "  {reference.module_path}:{reference.span.start}..{reference.span.end}\n"
+        // D-LINTPOLICY1=A: every spelled bypass, including unrelated sites.
+        out += "bypass facts\n  count: {self.bypass_facts.len()}\n"
+        loop bypass in self.bypass_facts {
+            detail :: if bypass.detail == "" -> "(no reason given)" else -> bypass.detail
+            out += "  {semindex_bypass_kind_text(bypass.kind)} at `{bypass.site}` ({detail}) @ {bypass.module_path}:{bypass.span.start}..{bypass.span.end}\n"
+        }
+        out
+    }
+}
+
+// Rust JSON.rs:1328–1346 bypass_kind_text/json_bypass: distinct human and
+// machine labels; empty reasons remain empty in JSON, but visible in text.
+pub fn semindex_bypass_kind_text(kind: BypassKind) -> String Never! {
+    if kind == {
+        .UnsafeRegion -> "#Unsafe region"
+        .UnsafeFn -> "#Unsafe fn"
+        .ExplicitDrop -> ".drop(reason)"
+        .LintAllow -> "#[allow(lint)]"
+    }
+}
+pub fn semindex_json_bypass(bypass: BypassFact) -> String Never! {
+    "{{\"kind\":{foundation_json_quote(bypass.kind.as_str())},\"site\":{foundation_json_quote(bypass.site)},\"detail\":{foundation_json_quote(bypass.detail)},\"module_path\":{foundation_json_quote(bypass.module_path)},\"span\":{semindex_json_span(bypass.span)}}}"
+}
+
+pub fn semindex_status_bypass(bypass: BypassFact) -> StatusValue Never! {
+    StatusValue.Object{fields: StatusFields.new()
+        .with("kind", StatusValue.String{value: bypass.kind.as_str()})
+        .with("site", StatusValue.String{value: bypass.site})
+        .with("detail", StatusValue.String{value: bypass.detail})
+        .with("module_path", StatusValue.String{value: bypass.module_path})
+        .with("span", semindex_status_span(bypass.span))}
+}
+
+// Rust JSON.rs:1348–1355 origin_text (JSON origin stays S18's sole codec).
+pub fn semindex_origin_text(origin: MemberOrigin) -> String Never! {
+    if origin == {
+        .TypeBody -> "type body"
+        .InherentImpl -> "impl"
+        .TraitImpl(trait_name) -> "impl {trait_name}"
+        .TraitRequirement(trait_name) -> "trait {trait_name}"
+    }
+}

@@ -1,0 +1,90 @@
+// CapturePolicy.rs:941–1153: pure preflight policy and typed receipt anchors.
+// Uses the sole Capture/Consent facts; resident Session/index adapters are C3B.
+// Full composition inherits #4433/#4403/#4393 and #4437/#4444/#4446/#4449;
+// keep the real APIs, never replace consent or Attempt with reduced carriers.
+pub struct CapturePolicy {
+    pub mode: CaptureMode
+    pub package: PackageCapturePolicy
+    pub no_capture: NoCaptureOverrideFact
+    pub explicit_capture: Bool
+    pub fn default() -> CapturePolicy Never! { CapturePolicy.development() }
+    pub fn new(mode: CaptureMode, package: PackageCapturePolicy, no_capture: NoCaptureOverrideFact) -> CapturePolicy Never! {
+        CapturePolicy{mode, package, no_capture, explicit_capture: false}
+    }
+    pub fn development() -> CapturePolicy Never! {
+        CapturePolicy.new(CaptureMode.Development, PackageCapturePolicy.new(PackageCaptureSetting.Default, CaptureBudget.new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES)), NoCaptureOverrideFact.none())
+    }
+    pub fn release() -> CapturePolicy Never! {
+        CapturePolicy.new(CaptureMode.Release, PackageCapturePolicy.new(PackageCaptureSetting.Default, CaptureBudget.new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES)), NoCaptureOverrideFact.none())
+    }
+    pub fn budget(self) -> CaptureBudget Never! { self.package.budget }
+    pub fn consent_scope(self, attempt: CaptureAttempt) -> CaptureConsentScope Never! {
+        scope := attempt.base_consent_scope()
+        scope.mode = self.mode
+        scope.byte_limit = self.budget().max_bytes
+        &scope.canonicalize()
+        scope
+    }
+    pub fn eligibility(self, attempt: CaptureAttempt) -> CaptureEligibility Never! {
+        if self.no_capture.active -> return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.NoCaptureOverride, terminal_available: attempt.terminal_available})
+        if self.package.capture == PackageCaptureSetting.Off -> return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.PackagePolicy, terminal_available: attempt.terminal_available})
+        if self.mode.is_release() && !self.explicit_capture -> return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.ReleaseMode, terminal_available: attempt.terminal_available})
+        // Preserve input order: only the first unsafe source determines the
+        // denial anchor. Borrow until denial, then clone only that owned row.
+        loop source in attempt.sources {
+            if !source.source.requires_sensitive_consent() -> continue
+            if !attempt.terminal_available -> return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.UnsafeSource(~source), terminal_available: false})
+            expected_scope :: self.consent_scope(attempt)
+            if attempt.consent == {
+                .Val(consent) -> {
+                    if consent.matches(attempt.identity, expected_scope) -> return CaptureEligibility.Sensitive(self.budget())
+                    return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.SensitiveConsentScopeChanged(~source), terminal_available: true})
+                }
+                .None -> return CaptureEligibility.Skipped(CaptureSkip{reason: CaptureSkipReason.UnsafeSource(~source), terminal_available: true})
+            }
+        }
+        // Includes an empty source list; no terminal or grant is needed.
+        CaptureEligibility.SafeClock(self.budget())
+    }
+    pub fn start_fact(self, attempt: CaptureAttempt) -> CaptureStartFact Never! {
+        CaptureStartFact.new(self, attempt)
+    }
+}
+
+// Receipts contain identity and capture outcome, never captured source values.
+pub struct CaptureStartFact {
+    pub identity: CaptureIdentity
+    pub mode: CaptureMode
+    pub package: PackageCapturePolicy
+    pub no_capture: NoCaptureOverrideFact
+    pub explicit_capture: Bool
+    pub budget: CaptureBudget
+    pub eligibility: CaptureEligibility
+    pub fn new(policy: CapturePolicy, attempt: CaptureAttempt) -> CaptureStartFact Never! {
+        CaptureStartFact{identity: ~attempt.identity, mode: policy.mode, package: policy.package, no_capture: policy.no_capture, explicit_capture: policy.explicit_capture, budget: policy.budget(), eligibility: policy.eligibility(attempt)}
+    }
+    pub fn capture_kind(self) -> CaptureKind? Never! { self.eligibility.kind() }
+    pub fn fault(self, fault_code: ^String, location: ^CaptureLocation?) -> CaptureFaultFact Never! {
+        CaptureFaultFact.new(self, ^fault_code, ^location)
+    }
+}
+pub struct CaptureFaultFact {
+    pub identity: CaptureIdentity
+    pub mode: CaptureMode
+    pub fault_code: String
+    pub location: CaptureLocation?
+    pub eligibility: CaptureEligibility
+    pub fn new(start: CaptureStartFact, fault_code: ^String, location: ^CaptureLocation?) -> CaptureFaultFact Never! {
+        CaptureFaultFact{identity: ~start.identity, mode: start.mode, fault_code: ^fault_code, location: ^location, eligibility: ~start.eligibility}
+    }
+    pub fn captured(self) -> Bool Never! { self.eligibility.is_allowed() }
+    pub fn capture_kind(self) -> CaptureKind? Never! { self.eligibility.kind() }
+}
+
+// Actual native associated-error contract: implementations mutate their index
+// owner and read receipt facts. No filesystem implementation or fake adapter.
+pub trait RecordIndexCaptureSink {
+    type Error
+    fn record_capture_start(&self, fact: CaptureStartFact) Error!
+    fn record_capture_fault(&self, fact: CaptureFaultFact) Error!
+}

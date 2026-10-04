@@ -1,0 +1,233 @@
+// Source-only collector tests use the sole real Foundation AST produced by
+// JetParser, never a reduced node model or a fabricated checked index. Original
+// CLI fixture/golden/status oracles remain in Docs/Graph.jet and tests/jetdoc.rs;
+// these parsed-source claims do not establish C4/S8 or CLI execution parity.
+use jet_parser.[parse_source]
+
+fn doc_collect_test_source(source: String, rows: &[DocItem], impls: &[DocImpl]) Never! {
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    names := [String:Bool]{}
+    doc_collect_protocol_names(parsed.program.items, &names)
+    doc_collect_items(parsed.program.items, "main.jet", "", parsed.program.pub_file, doc_test_os_path("/project/main.jet"), "logical", source, doc_test_os_path("/project"), names, &rows, &impls)
+}
+fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) -> Int Never! {
+    loop index in 0..<rows.len() {
+        if rows[index].qualified_name == qualified_name && rows[index].kind == kind -> return index
+    }
+    panic("missing collected {kind} {qualified_name}")
+}
+
+// Original tests/jetdoc.rs:226–245 input and collector-side assertions, with
+// no enrichment/serialization shortcut standing in for the CLI JSON test.
+#Test("nested_state_docs_stay_on_the_struct_item") {
+    source :: "pub struct Door {{ state {{ Closed, Open }} }}\nfn run() {{}}\n"
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_test_source(source, &rows, &impls)
+    door :: doc_collect_test_item(rows, "Door", "struct")
+    assert_eq(rows[door].signature, "struct Door {{ state {{ Closed, Open }} }}")
+    loop row in rows -> assert(row.kind != "state")
+    run :: doc_collect_test_item(rows, "run", "function")
+    assert(!rows[run].signature.contains("state"))
+}
+
+#Test("doc_collect_comments_attach_to_each_declaration_not_global_or_state") {
+    source :: "/// Module overview.\n\n/// Door summary é.\npub struct Door {{\n    state {{ Closed, Open }}\n    /// Field summary λ.\n    pub value: Int\n    /// Method summary.\n    /// Example: `door.read()`\n    fn read(self) -> Int {{ 1 }}\n}}\n\nfn run() {{}}\n"
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_test_source(source, &rows, &impls)
+    door :: doc_collect_test_item(rows, "Door", "struct")
+    field :: doc_collect_test_item(rows, "Door::value", "field")
+    method :: doc_collect_test_item(rows, "Door::read", "function")
+    run :: doc_collect_test_item(rows, "run", "function")
+    assert_eq(rows[door].summary, "Door summary é.")
+    assert_eq(rows[field].summary, "Field summary λ.")
+    assert_eq(rows[method].summary, "Method summary.")
+    assert_eq(rows[method].examples, [String]{"`door.read()`"})
+    assert_eq(rows[run].summary, "")
+    assert_eq(rows[field].source.line, 7)
+    assert_eq(rows[field].source.column, 9)
+    assert_eq(rows[field].source.path, "main.jet")
+    assert_eq(rows[field].source.link, "main.jet#L7")
+    // Retain actual name bytes and the exclusive byte end for the field row.
+    bytes :: source.bytes()
+    selected := [U8]{}
+    loop offset in rows[field].source.start..<rows[field].source.end -> &selected.push(bytes[offset])
+    assert_eq(String.from_bytes(selected) ?? panic("field name UTF8"), "value")
+    assert_eq(rows[method].failure_contract, None)
+    assert_eq(rows[method].failure_source, None)
+    assert(!rows[door].signature.contains("read"))
+}
+
+#Test("doc_collect_inherited_visibility_keeps_fields_and_package_bits_independent") {
+    source :: "pub module Outer {{\n    pub(package) struct Box {{\n        hidden: Int\n        pub visible: Int\n        pub(package) sibling: Int\n        fn method(self) {{}}\n    }}\n    enum Choice {{ First, Second }}\n    trait Service {{ fn call(self) }}\n    fn work() {{}}\n}}\n"
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_test_source(source, &rows, &impls)
+    box :: doc_collect_test_item(rows, "Outer::Box", "struct")
+    hidden :: doc_collect_test_item(rows, "Outer::Box::hidden", "field")
+    visible :: doc_collect_test_item(rows, "Outer::Box::visible", "field")
+    sibling :: doc_collect_test_item(rows, "Outer::Box::sibling", "field")
+    assert(rows[box].public)
+    assert(rows[box].package_public)
+    assert(!rows[hidden].public)
+    assert(!rows[hidden].package_public)
+    assert(rows[visible].public)
+    assert(!rows[sibling].public)
+    assert(rows[sibling].package_public)
+    loop name in [String]{"Outer::Box::method", "Outer::Service::call", "Outer::work"} -> assert(rows[doc_collect_test_item(rows, name, "function")].public)
+    loop name in [String]{"Outer::Choice::First", "Outer::Choice::Second"} {
+        variant :: doc_collect_test_item(rows, name, "variant")
+        assert(rows[variant].public)
+        assert(!rows[variant].package_public)
+    }
+    loop row in rows -> assert_eq(row.module_path, "main.jet")
+}
+
+#Test("doc_collect_nested_impls_retain_authored_rows_sorted_method_names_and_rust_owner") {
+    source :: "pub module Outer {{\n    struct Box {{\n        fn own(self) {{}}\n        impl Zed {{ fn z(self) {{}} fn a(self) {{}} }}\n        impl Alpha {{ fn alpha(self) {{}} }}\n    }}\n    enum Choice {{\n        First\n        impl Zed {{ fn choose(self) {{}} }}\n    }}\n}}\n"
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_test_source(source, &rows, &impls)
+    assert_eq(impls.len(), 3)
+    assert_eq(impls[0].type_name, "Box")
+    assert_eq(impls[0].trait_name, Val("Zed"))
+    assert_eq(impls[0].kind, "trait_impl")
+    assert_eq(impls[0].methods, [String]{"a", "z"})
+    assert_eq(impls[1].trait_name, Val("Alpha"))
+    assert_eq(impls[2].type_name, "Choice")
+    assert_eq(impls[2].methods, [String]{"choose"})
+    box :: doc_collect_test_item(rows, "Outer::Box", "struct")
+    assert_eq(impls[0].source, rows[box].source)
+    assert_eq(impls[1].source, rows[box].source)
+    assert(rows[doc_collect_test_item(rows, "Outer::Box::own", "function")].public)
+    // Nested impl methods intentionally use the leaf type, not Outer::Box.
+    loop name in [String]{"Box::z", "Box::a", "Box::alpha", "Choice::choose"} -> assert(rows[doc_collect_test_item(rows, name, "function")].public)
+    assert_eq(rows[doc_collect_test_item(rows, "Box::z", "function")].source.line, 4)
+    loop row in impls -> assert(row.public)
+}
+
+#Test("doc_collect_protocol_prepass_visits_generic_and_private_modules_before_impls") {
+    first :: parse_source("impl Box.Exchange {{ fn z(self) {{}} fn a(self) {{}} }}\n".bytes())
+    second :: parse_source("module Hidden {{ module Generic<T> {{ protocol Exchange {{ client: Hello() }} }} }}\n".bytes())
+    assert_eq(first.diagnostics.len(), 0)
+    assert_eq(second.diagnostics.len(), 0)
+    names := [String:Bool]{}
+    doc_collect_protocol_names(first.program.items, &names)
+    assert(!names.has_key("Exchange"))
+    doc_collect_protocol_names(second.program.items, &names)
+    assert(names.has_key("Exchange"))
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    source :: "impl Box.Exchange {{ fn z(self) {{}} fn a(self) {{}} }}\n"
+    doc_collect_items(first.program.items, "first.jet", "", false, doc_test_os_path("/project/first.jet"), "first", source, doc_test_os_path("/project"), names, &rows, &impls)
+    assert_eq(impls[0].kind, "protocol_impl")
+    assert_eq(impls[0].methods, [String]{"a", "z"})
+    assert(impls[0].public)
+    assert(!rows[doc_collect_test_item(rows, "Box::z", "function")].public)
+    doc_collect_items(second.program.items, "second.jet", "", false, doc_test_os_path("/project/second.jet"), "second", "module Hidden {{ module Generic<T> {{ protocol Exchange {{ client: Hello() }} }} }}\n", doc_test_os_path("/project"), names, &rows, &impls)
+    protocol :: doc_collect_test_item(rows, "Hidden::Generic::Exchange", "protocol")
+    assert(!rows[protocol].public)
+    assert_eq(rows[protocol].module_path, "second.jet")
+    generic :: doc_collect_test_item(rows, "Hidden::Generic", "module")
+    assert(!rows[generic].public)
+}
+
+#Test("doc_collect_endpoint_impl_classification_is_terminal_and_dot_sensitive") {
+    source :: "impl Exchange.Client {{ fn c(self) {{}} }}\nimpl Exchange.Server {{ fn s(self) {{}} }}\nimpl Client {{ fn bare(self) {{}} }}\nimpl Exchange.Clientish {{ fn other(self) {{}} }}\nimpl Box.Displayable {{ fn display(self) {{}} }}\n"
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_test_source(source, &rows, &impls)
+    assert_eq(impls.len(), 5)
+    assert_eq(impls[0].kind, "protocol_impl")
+    assert_eq(impls[1].kind, "protocol_impl")
+    assert_eq(impls[2].kind, "inherent_impl")
+    assert_eq(impls[3].kind, "trait_impl")
+    assert_eq(impls[4].kind, "trait_impl")
+    loop row in impls -> assert(row.public)
+    loop row in rows -> assert(!row.public)
+}
+
+#Test("doc_collect_pubfile_leaf_declarations_keep_exact_special_visibility") {
+    source :: "#PubFile\n#MustUse\nToken :: distinct Int\nalias Count :: Int\n#UnitFamily(Currency) {{ usd, eur }}\ntag Safe {{ deny: [console] }}\neffect Clock\nmarker Checked($sites: [.Block]) {{}}\nfact Known()\nANSWER :: 42\nfn run() {{}}\n#Test(\"ignored test\") {{ assert(true) }}\n"
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_test_source(source, &rows, &impls)
+    token :: doc_collect_test_item(rows, "Token", "distinct")
+    assert(rows[token].public)
+    assert_eq(rows[token].markers, [String]{"MustUse"})
+    assert(rows[doc_collect_test_item(rows, "Count", "type_alias")].public)
+    currency :: doc_collect_test_item(rows, "Currency", "unit_family")
+    assert(rows[currency].public)
+    assert(rows[currency].signature.contains("Currency"))
+    assert(rows[doc_collect_test_item(rows, "Safe", "tag")].public)
+    assert(!rows[doc_collect_test_item(rows, "Clock", "effect")].public)
+    assert(rows[doc_collect_test_item(rows, "Checked", "marker")].public)
+    assert(rows[doc_collect_test_item(rows, "Known", "fact")].public)
+    assert(!rows[doc_collect_test_item(rows, "ANSWER", "const")].public)
+    assert_eq(rows.len(), 9)
+    assert_eq(impls.len(), 0)
+}
+
+#Test("doc_collect_module_alias_and_external_module_preserve_declaration_context") {
+    source :: "/// External module docs.\npub(package) module External;\n/// Alias docs.\npub module Alias :: External;\n"
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_test_source(source, &rows, &impls)
+    assert_eq(rows.len(), 2)
+    external :: doc_collect_test_item(rows, "External", "module")
+    alias :: doc_collect_test_item(rows, "Alias", "module_alias")
+    assert(!rows[external].public)
+    assert(rows[external].package_public)
+    assert_eq(rows[external].summary, "External module docs.")
+    assert_eq(rows[external].source.line, 2)
+    assert(rows[alias].public)
+    assert(!rows[alias].package_public)
+    assert_eq(rows[alias].summary, "Alias docs.")
+    assert_eq(rows[alias].source.line, 4)
+    assert_eq(impls.len(), 0)
+}
+
+#Test("doc_collect_marker_rows_preserve_order_duplicates_and_exact_owner_visibility") {
+    source :: "struct Box {{\n    #First #Second #First\n    value: Int\n    #First #Second\n    fn own(self) {{}}\n}}\nenum Choice {{\n    #First #Second #First\n    One\n}}\n"
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_test_source(source, &rows, &impls)
+    field :: doc_collect_test_item(rows, "Box::value", "field")
+    method :: doc_collect_test_item(rows, "Box::own", "function")
+    variant :: doc_collect_test_item(rows, "Choice::One", "variant")
+    assert_eq(rows[field].markers, [String]{"First", "Second", "First"})
+    assert_eq(rows[method].markers, [String]{"First", "Second"})
+    assert_eq(rows[variant].markers, [String]{"First", "Second", "First"})
+    assert(!rows[field].public)
+    assert(!rows[method].public)
+    assert(!rows[variant].public)
+    assert_eq(rows[field].signature, "value")
+    assert_eq(rows[variant].signature, "One")
+}
+
+// Existing run.jet remains the fixture owner: the eventual checked runner
+// passes its actual AST and source, not a copied fixture or fabricated rows.
+fn doc_collect_test_original_run_fixture(items: [Item], source: String, inherited_public: Bool) Never! {
+    names := [String:Bool]{}
+    doc_collect_protocol_names(items, &names)
+    rows := [DocItem]{}
+    impls := [DocImpl]{}
+    doc_collect_items(items, "run.jet", "", inherited_public, doc_test_os_path("/project/run.jet"), "run", source, doc_test_os_path("/project"), names, &rows, &impls)
+    loop name in [String]{"Checked", "Payment", "Widget", "Choice", "Displayable", "answer"} {
+        found := false
+        loop row in rows -> if row.qualified_name == name -> found = true
+        assert(found)
+    }
+    assert(rows[doc_collect_test_item(rows, "Widget::value", "field")].public)
+    display :: doc_collect_test_item(rows, "Displayable::display", "function")
+    assert(rows[display].public)
+    answer :: doc_collect_test_item(rows, "answer", "function")
+    assert_eq(rows[answer].summary, "Return the fixture answer.")
+    assert_eq(rows[answer].examples, [String]{"`answer()`"})
+    assert_eq(impls.len(), 1)
+    assert_eq(impls[0].kind, "trait_impl")
+    assert_eq(impls[0].trait_name, Val("Displayable"))
+    assert_eq(impls[0].methods, [String]{"display"})
+}

@@ -1,0 +1,98 @@
+// Rust Registry.rs FactRead/TYPED_FACT_READS and Prelude/Facts.jet planes.
+// One registry supplies source lookup, reflection, detail slots and tools menus.
+pub enum FactRead {
+    Layout Name Fields Range Dimension Measure Exactness Classification Obligation
+    States Effects Sendability Movedness Attribution Origin ViewProvenance UnitScaleProvenance Maturity
+    RegisteredPlane(name: String)
+    BuildPackageName BuildPackageVersion BuildOS BuildProfile BuildStampGit BuildStampDirty BuildStampToolchain BuildStampAt
+}
+
+struct FoundationFactReadRow {
+    read: FactRead
+    member: String?
+    reflection: String?
+    detail: String?
+    planes: [String]
+}
+
+fn foundation_fact_read_row(read: ^FactRead, member: ^String, reflection: ^String, detail: ^String?, planes: ^[String]) -> FoundationFactReadRow Never! {
+    FoundationFactReadRow{read: ^read, member: Val(^member), reflection: Val(^reflection), detail: ^detail, planes: ^planes}
+}
+
+FOUNDATION_FACT_READ_ROWS :: prep { [FoundationFactReadRow]{
+    foundation_fact_read_row(FactRead.Layout, "$layout", "Layout", None, [String]{"Type.Layout"}),
+    foundation_fact_read_row(FactRead.Name, "$name", "Nominal", None, [String]{"Type.Nominal"}),
+    foundation_fact_read_row(FactRead.Fields, "$fields", "Layout", None, [String]{"Type.Layout"}),
+    foundation_fact_read_row(FactRead.Range, "$range", "Range", Val("range"), [String]{"Type.Interval"}),
+    foundation_fact_read_row(FactRead.Dimension, "$dimension", "Dimension", Val("dimension"), [String]{"Type.Dimension"}),
+    foundation_fact_read_row(FactRead.Measure, "$measure", "Measure", Val("measure"), [String]{"Type.Measure"}),
+    foundation_fact_read_row(FactRead.Exactness, "$exactness", "Exactness", Val("exactness"), [String]{"Type.Exactness", "Exactness"}),
+    foundation_fact_read_row(FactRead.Classification, "$classification", "Classification", Val("classification"), [String]{"Type.Classification"}),
+    foundation_fact_read_row(FactRead.Obligation, "$obligation", "Obligation", Val("obligation"), [String]{"Type.Obligation"}),
+    foundation_fact_read_row(FactRead.States, "$states", "States", Val("state"), [String]{"States"}),
+    foundation_fact_read_row(FactRead.Effects, "$effects", "Effects", None, [String]{"Effects"}),
+    foundation_fact_read_row(FactRead.Sendability, "$sendability", "Sendability", Val("sendability"), [String]{"Sendability"}),
+    foundation_fact_read_row(FactRead.Movedness, "$movedness", "Movedness", Val("movedness"), [String]{"Movedness"}),
+    foundation_fact_read_row(FactRead.Attribution, "$attribution", "Attribution", Val("attribution"), [String]{"Attribution"}),
+    foundation_fact_read_row(FactRead.Origin, "$origin", "Origin", Val("origin"), [String]{"Origin"}),
+    foundation_fact_read_row(FactRead.ViewProvenance, "$view_provenance", "ViewProvenance", Val("view_provenance"), [String]{"ViewProvenance"}),
+    foundation_fact_read_row(FactRead.UnitScaleProvenance, "$unit_scale_provenance", "UnitScaleProvenance", Val("unit_scale_provenance"), [String]{"UnitScaleProvenance"}),
+    foundation_fact_read_row(FactRead.Maturity, "$maturity", "Maturity", Val("maturity"), [String]{"Maturity"}),
+    FoundationFactReadRow{read: FactRead.BuildProfile, member: Val("$profile"), reflection: None, detail: None, planes: [String]{}},
+    foundation_fact_read_row(FactRead.RegisteredPlane{name: "Flow"}, "$flow", "Flow", None, [String]{"Flow"}),
+    foundation_fact_read_row(FactRead.RegisteredPlane{name: "Taint"}, "$taint", "Taint", None, [String]{"Taint"}),
+    foundation_fact_read_row(FactRead.RegisteredPlane{name: "Duty"}, "$duty", "Duty", None, [String]{"Duty"})
+} }
+
+// Rust Registry::fact_read_members: typed order, BuildProfile, then the
+// registered planes without a dedicated carrier, in Prelude declaration order.
+pub fn fact_read_members() -> [String] Never! {
+    members := [String]{}
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.member == .Val(member) -> &members.push(~member)
+    }
+    ^members
+}
+
+pub fn fact_read_kind(member: String) -> FactRead? {
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.member == .Val(source) {
+            if source == member -> return Val(~row.read)
+        }
+    }
+    None
+}
+
+pub fn fact_read_source_member(read: FactRead) -> String? {
+    if read == .RegisteredPlane(_) -> return None
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.read == read -> return ~row.member
+    }
+    None
+}
+
+pub fn fact_read_reflection_kind(read: FactRead) -> String? {
+    if read == .RegisteredPlane(name) {
+        loop row in FOUNDATION_FACT_READ_ROWS {
+            if row.planes.contains(name) -> return ~row.reflection
+        }
+        return None
+    }
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.read == read -> return ~row.reflection
+    }
+    None
+}
+
+pub fn fact_read_detail_field(read: FactRead) -> String? {
+    if read == .RegisteredPlane(_) -> return None
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.read == read -> return ~row.detail
+    }
+    None
+}
+
+pub fn fact_read_public_read_type(read: FactRead) -> String? {
+    if read == FactRead.Origin -> return Val("OriginInfo?")
+    None
+}

@@ -1,0 +1,15 @@
+// New controls for malformed selections; preserve Rust1892–1908 index-based
+// comma behavior. The original successful symbols corpus belongs to 0740.
+#Test("selection response preserves original invalid-position comma placement") {
+    server :: lsp_handler_test_server("fn run() {{}}\n")
+    params :: lsp_handler_test_params("{{\"textDocument\":{{\"uri\":\"file:///lsp/handler.jet\"}},\"positions\":[{{\"line\":\"bad\"}},{{\"line\":\"bad\"}}]}}")
+    assert_eq(lsp_selection_range_response(server, Val(params), DataTree.Int(1)), Val(lsp_response(DataTree.Int(1), "[,]")))
+}
+
+#Test("selection response distinguishes absent document from malformed position array") {
+    server :: lsp_handler_test_server("fn run() {{}}\n")
+    bad :: lsp_handler_test_params("{{\"textDocument\":{{\"uri\":\"file:///lsp/handler.jet\"}},\"positions\":null}}")
+    missing :: lsp_handler_test_params("{{\"textDocument\":{{\"uri\":\"file:///lsp/missing.jet\"}},\"positions\":null}}")
+    assert_eq(lsp_selection_range_response(server, Val(bad), DataTree.Int(2)), Val(lsp_response(DataTree.Int(2), "[]")))
+    assert_eq(lsp_selection_range_response(server, Val(missing), DataTree.Int(2)), None)
+}

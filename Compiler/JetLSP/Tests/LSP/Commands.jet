@@ -1,0 +1,24 @@
+// New command admission/precedence controls. Original impact/budget provider
+// transcript assertions remain their separate tests/lsp packet, never mocks.
+#Test("known commands preserve exact argument errors while unknown commands use method error") {
+    server :: lsp_handler_test_server("fn run() {{}}\n")
+    commands :: [String]{"jet.reasoning", "jet.budgetReports", "jet.impact"}
+    errors :: [String]{
+        "jet.reasoning expects arguments [uri, selection?, expanded?]",
+        "jet.budgetReports expects arguments [uri]",
+        "jet.impact expects arguments [uri, symbol, depth?]",
+    }
+    loop index in 0..<commands.len() {
+        params :: lsp_handler_test_params("{{\"command\":{foundation_json_quote(commands[index])},\"arguments\":null}}")
+        assert_eq(lsp_execute_command_response(server, Val(params), DataTree.Int(3)), Val(lsp_error_response(DataTree.Int(3), -32602, errors[index])))
+    }
+    unknown :: lsp_handler_test_params("{{\"command\":\"no such command\",\"arguments\":null}}")
+    assert_eq(lsp_execute_command_response(server, Val(unknown), DataTree.Int(3)), Val(lsp_error_response(DataTree.Int(3), -32601, "unknown executeCommand")))
+    assert_eq(server.queries.stats().recomputes, 0)
+}
+
+#Test("impact distinguishes bad arguments from a valid request for a closed document") {
+    server :: lsp_handler_test_server("fn run() {{}}\n")
+    params :: lsp_handler_test_params("{{\"command\":\"jet.impact\",\"arguments\":[\"file:///closed.jet\",\"run\",0]}}")
+    assert_eq(lsp_execute_command_response(server, Val(params), DataTree.Int(1)), Val(lsp_error_response(DataTree.Int(1), -32602, "document not open in LSP session")))
+}

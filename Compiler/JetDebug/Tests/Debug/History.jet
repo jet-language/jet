@@ -1,0 +1,243 @@
+// TOOLS-D2 History behavior: lib.rs:396-532,1969-2049 has no Rust unit tests;
+// these pin the reference algorithm over recorded acts built from D1's
+// ValueSnapshot/FrameSnapshot facts. Pure causal conversion only: live
+// native event recording, Debugger/DAP navigation and ProveReplay receipt
+// validation of the decision ledger need the real producers and are not
+// claimed here.
+
+fn debug_history_test_value(name: String, type_name: String, value: String) -> ValueSnapshot Never! {
+    ValueSnapshot{name: name, type_name: type_name, value: value}
+}
+
+fn debug_history_test_int(name: String, value: String) -> ValueSnapshot Never! {
+    debug_history_test_value(name, "Int", value)
+}
+
+fn debug_history_test_act(sequence: Int, function: String, line: Int, locals: [ValueSnapshot]) -> RecordedAct Never! {
+    RecordedAct{sequence: sequence, function: function, line: line, locals: locals}
+}
+
+fn debug_history_test_run(acts: [RecordedAct]) -> RecordedRun Never! {
+    RecordedRun{acts: acts, decision_ledger: None}
+}
+
+fn debug_history_test_write(line: Int, place: String, old_value: String, new_value: String) -> DebugWrite Never! {
+    DebugWrite{line: line, place: place, old_value: old_value, new_value: new_value}
+}
+
+fn debug_history_test_event(sequence: Int) -> DebugEvent Never! {
+    DebugEvent{sequence: sequence, function: "main", line: 1, depth: 0, stack: [FrameSnapshot]{}, locals: [ValueSnapshot]{}, writes: [DebugWrite]{}}
+}
+
+fn debug_history_test_writes(run: RecordedRun) -> [[DebugWrite]] Never! {
+    history :: DebugHistory.from_recorded_run(run, "source", "shape")
+    rows := [[DebugWrite]]{}
+    loop event in history.events -> &rows.push(~event.writes)
+    rows
+}
+
+#Test("history_push_caps_at_100000_events_with_sticky_flag") {
+    history := DebugHistory.default()
+    checkpoint :: DebugCheckpoint{source_identity: "retained-source", shape: "retained-shape", sequence: 17}
+    ledger :: "opaque\n{{\"decision_ledger\":[\"α\",{{\"cursor\":9}}]}}\n"
+    history.checkpoint = Val(checkpoint)
+    history.cursor = Val(23)
+    history.decision_ledger = Val(ledger)
+    loop index in 0..<DEBUG_HISTORY_MAX_EVENTS {
+        accepted :: &history.push(debug_history_test_event(index + 1))
+        assert(accepted)
+    }
+    assert(!history.capped)
+    rejected :: &history.push(debug_history_test_event(DEBUG_HISTORY_MAX_EVENTS + 1))
+    assert(!rejected)
+    assert(history.capped)
+    // Refusal, not a rolling overwrite: the oldest and newest events remain.
+    assert_eq(history.events.len(), 100000)
+    assert_eq(history.events[0].sequence, 1)
+    assert_eq(history.events[99999].sequence, 100000)
+    assert_eq(history.checkpoint, Val(checkpoint))
+    assert_eq(history.cursor, Val(23))
+    assert_eq(history.decision_ledger, Val(ledger))
+    // The flag is sticky: once room exists again push succeeds, but capped
+    // stays reported.
+    removed :: &history.events.pop()
+    removed.drop("free one retained slot")
+    reaccepted :: &history.push(debug_history_test_event(100002))
+    assert(reaccepted)
+    assert(history.capped)
+    assert_eq(history.events[99999].sequence, 100002)
+    assert_eq(history.checkpoint, Val(checkpoint))
+    assert_eq(history.cursor, Val(23))
+    assert_eq(history.decision_ledger, Val(ledger))
+}
+
+#Test("from_recorded_run_keeps_every_act_and_reports_cap_at_or_past_bound") {
+    run := RecordedRun.default()
+    loop index in 0..<99999 {
+        &run.acts.push(debug_history_test_act(index + 1, "main", 1, [ValueSnapshot]{}))
+    }
+    below :: DebugHistory.from_recorded_run(run, "source", "shape")
+    assert_eq(below.events.len(), 99999)
+    assert(!below.capped)
+    &run.acts.push(debug_history_test_act(100000, "main", 1, [ValueSnapshot]{}))
+    at :: DebugHistory.from_recorded_run(run, "source", "shape")
+    assert_eq(at.events.len(), 100000)
+    assert(at.capped)
+    &run.acts.push(debug_history_test_act(100001, "main", 2, [ValueSnapshot]{}))
+    past := DebugHistory.from_recorded_run(run, "source", "shape")
+    // No silent truncation: every receipt act survives, and the checkpoint
+    // still names the true last act.
+    assert_eq(past.events.len(), 100001)
+    assert(past.capped)
+    assert_eq(past.events[100000].sequence, 100001)
+    assert_eq(past.events[100000].line, 2)
+    assert_eq((past.checkpoint ?? panic("checkpoint")).sequence, 100001)
+    // A history already past the bound refuses further pushes.
+    refused :: &past.push(debug_history_test_event(100002))
+    assert(!refused)
+    assert_eq(past.events.len(), 100001)
+}
+
+#Test("from_recorded_run_projects_depth_zero_single_frame_events") {
+    run :: debug_history_test_run([RecordedAct]{
+        debug_history_test_act(1, "main", 2, [ValueSnapshot]{debug_history_test_int("x", "1")}),
+        debug_history_test_act(2, "helper", 7, [ValueSnapshot]{debug_history_test_int("y", "5")}),
+    })
+    history :: DebugHistory.from_recorded_run(run, "identity-material", "checkpoint-shape")
+    assert_eq(history.events.len(), 2)
+    // A nested act keeps depth 0 and exactly its own frame; no caller frame
+    // is synthesized from the legacy receipt.
+    helper :: history.events[1]
+    assert_eq(helper.sequence, 2)
+    assert_eq(helper.function, "helper")
+    assert_eq(helper.line, 7)
+    assert_eq(helper.depth, 0)
+    assert_eq(helper.stack, [FrameSnapshot]{FrameSnapshot{function: "helper", line: 7}})
+    assert_eq(helper.locals, [ValueSnapshot]{debug_history_test_int("y", "5")})
+    assert_eq(history.events[0].stack, [FrameSnapshot]{FrameSnapshot{function: "main", line: 2}})
+    assert_eq(history.checkpoint, Val(DebugCheckpoint{source_identity: "identity-material", shape: "checkpoint-shape", sequence: 2}))
+    assert(history.cursor == None)
+    assert(!history.capped)
+    assert(history.decision_ledger == None)
+}
+
+#Test("from_recorded_run_checkpoints_last_act_sequence_not_the_largest") {
+    run :: debug_history_test_run([RecordedAct]{
+        debug_history_test_act(3, "main", 1, [ValueSnapshot]{}),
+        debug_history_test_act(9, "main", 2, [ValueSnapshot]{}),
+        debug_history_test_act(4, "main", 3, [ValueSnapshot]{}),
+    })
+    history :: DebugHistory.from_recorded_run(run, "source", "shape")
+    assert_eq((history.checkpoint ?? panic("checkpoint")).sequence, 4)
+    assert(history.cursor == None)
+    empty :: DebugHistory.from_recorded_run(RecordedRun.default(), "source", "shape")
+    assert_eq(empty.events.len(), 0)
+    assert_eq(empty.checkpoint, Val(DebugCheckpoint{source_identity: "source", shape: "shape", sequence: 0}))
+    assert(empty.cursor == None)
+    assert(!empty.capped)
+}
+
+#Test("recorded_writes_use_sorted_unique_places_and_unbound_deletions") {
+    rows :: debug_history_test_writes(debug_history_test_run([RecordedAct]{
+        debug_history_test_act(1, "main", 4, [ValueSnapshot]{
+            debug_history_test_int("b", "1"),
+            debug_history_test_int("a", "1"),
+            debug_history_test_int("c", "1"),
+        }),
+        debug_history_test_act(2, "main", 5, [ValueSnapshot]{
+            debug_history_test_int("c", "1"),
+            debug_history_test_int("a", "2"),
+            debug_history_test_int("Z", "0"),
+        }),
+    }))
+    assert_eq(rows[0], [DebugWrite]{
+        debug_history_test_write(4, "a", "<unbound>", "1"),
+        debug_history_test_write(4, "b", "<unbound>", "1"),
+        debug_history_test_write(4, "c", "<unbound>", "1"),
+    })
+    // Byte-ordered union (`Z` before `a`), each place once; unchanged `c`
+    // is omitted and the removed `b` becomes `<unbound>`.
+    assert_eq(rows[1], [DebugWrite]{
+        debug_history_test_write(5, "Z", "<unbound>", "0"),
+        debug_history_test_write(5, "a", "1", "2"),
+        debug_history_test_write(5, "b", "1", "<unbound>"),
+    })
+}
+
+#Test("recorded_writes_let_the_last_duplicate_local_win") {
+    rows :: debug_history_test_writes(debug_history_test_run([RecordedAct]{
+        debug_history_test_act(1, "main", 1, [ValueSnapshot]{debug_history_test_int("x", "1"), debug_history_test_int("x", "2")}),
+        debug_history_test_act(2, "main", 2, [ValueSnapshot]{debug_history_test_int("x", "2"), debug_history_test_int("x", "3")}),
+        debug_history_test_act(3, "main", 3, [ValueSnapshot]{debug_history_test_int("x", "9"), debug_history_test_int("x", "3")}),
+    }))
+    assert_eq(rows[0], [DebugWrite]{debug_history_test_write(1, "x", "<unbound>", "2")})
+    assert_eq(rows[1], [DebugWrite]{debug_history_test_write(2, "x", "2", "3")})
+    assert_eq(rows[2], [DebugWrite]{})
+}
+
+#Test("recorded_writes_count_type_only_changes") {
+    rows :: debug_history_test_writes(debug_history_test_run([RecordedAct]{
+        debug_history_test_act(1, "main", 1, [ValueSnapshot]{debug_history_test_value("n", "Int", "1")}),
+        debug_history_test_act(2, "main", 2, [ValueSnapshot]{debug_history_test_value("n", "Float", "1")}),
+        debug_history_test_act(3, "main", 3, [ValueSnapshot]{debug_history_test_value("n", "Float", "1")}),
+    }))
+    assert_eq(rows[1], [DebugWrite]{debug_history_test_write(2, "n", "1", "1")})
+    assert_eq(rows[2], [DebugWrite]{})
+}
+
+#Test("recorded_writes_compare_only_adjacent_same_function_acts") {
+    rows :: debug_history_test_writes(debug_history_test_run([RecordedAct]{
+        debug_history_test_act(1, "main", 1, [ValueSnapshot]{debug_history_test_int("x", "1")}),
+        debug_history_test_act(2, "helper", 8, [ValueSnapshot]{debug_history_test_int("x", "1")}),
+        debug_history_test_act(3, "main", 2, [ValueSnapshot]{debug_history_test_int("x", "1")}),
+        debug_history_test_act(4, "main", 3, [ValueSnapshot]{debug_history_test_int("x", "1")}),
+    }))
+    assert_eq(rows[0], [DebugWrite]{debug_history_test_write(1, "x", "<unbound>", "1")})
+    // A function switch diffs against nothing, even when an earlier act of
+    // the same function had identical locals.
+    assert_eq(rows[1], [DebugWrite]{debug_history_test_write(8, "x", "<unbound>", "1")})
+    assert_eq(rows[2], [DebugWrite]{debug_history_test_write(2, "x", "<unbound>", "1")})
+    assert_eq(rows[3], [DebugWrite]{})
+}
+
+#Test("recorded_writes_group_every_act_sharing_a_sequence") {
+    rows :: debug_history_test_writes(debug_history_test_run([RecordedAct]{
+        debug_history_test_act(5, "main", 2, [ValueSnapshot]{debug_history_test_int("x", "1")}),
+        debug_history_test_act(5, "main", 3, [ValueSnapshot]{debug_history_test_int("x", "2")}),
+        debug_history_test_act(6, "main", 4, [ValueSnapshot]{debug_history_test_int("x", "2")}),
+        debug_history_test_act(5, "main", 5, [ValueSnapshot]{debug_history_test_int("x", "3")}),
+    }))
+    group :: [DebugWrite]{
+        debug_history_test_write(2, "x", "<unbound>", "1"),
+        debug_history_test_write(3, "x", "1", "2"),
+        debug_history_test_write(5, "x", "2", "3"),
+    }
+    assert_eq(rows[0], group)
+    assert_eq(rows[1], group)
+    assert_eq(rows[2], [DebugWrite]{})
+    assert_eq(rows[3], group)
+}
+
+#Test("to_recorded_run_keeps_receipt_fields_and_ledger_association") {
+    ledger :: "opaque\n{{\"decision_ledger\":[\"α\",{{\"cursor\":9}}]}}\n"
+    history := DebugHistory.default()
+    history.decision_ledger = Val(ledger)
+    pushed :: &history.push(DebugEvent{
+        sequence: 7,
+        function: "helper",
+        line: 12,
+        depth: 2,
+        stack: [FrameSnapshot]{FrameSnapshot{function: "helper", line: 12}, FrameSnapshot{function: "main", line: 3}},
+        locals: [ValueSnapshot]{debug_history_test_value("s", "String", "\"hi\"")},
+        writes: [DebugWrite]{debug_history_test_write(12, "s", "<unbound>", "\"hi\"")},
+    })
+    assert(pushed)
+    run :: history.to_recorded_run()
+    assert_eq(run.acts, [RecordedAct]{debug_history_test_act(7, "helper", 12, [ValueSnapshot]{debug_history_test_value("s", "String", "\"hi\"")})})
+    assert_eq(run.decision_ledger, Val(ledger))
+    // The ledger stays attached across the receipt round trip, unparsed.
+    restored :: DebugHistory.from_recorded_run(run, "source", "shape")
+    assert_eq(restored.decision_ledger, Val(ledger))
+    assert_eq(restored.to_recorded_run(), run)
+    assert(DebugHistory.default().to_recorded_run() == RecordedRun.default())
+}

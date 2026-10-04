@@ -1,0 +1,195 @@
+// crates/jet-repl/src/Console.rs:3294–3337 ConsoleError/Display and the
+// private validation family 3343–3462,3539–3549: validate_token/text/method/
+// local_path/origin/safe_request, is_loopback_host and is_secret_header. This
+// file is the sole Console validation home; Types.jet and the later Console
+// files call these helpers, never a second validator. Rust `quote` is the
+// canonical Foundation foundation_json_quote at each caller. Data validators
+// (3464–3536) belong with their R18 data carriers.
+use core.text as console_validation_text
+use core.text.parse as console_validation_parse
+
+// Rust ConsoleError and its exact Display strings.
+#Error
+pub enum ConsoleError {
+    ReleaseUnavailable
+    ProjectUnavailable(reason: String)
+    InvalidInput(reason: String)
+    InvalidRequest(reason: String)
+    UnknownCommand(command: String)
+    Closed
+    Cancelled
+    Expired
+    NonLoopbackDenied
+    RouterUnavailable
+    DataBackendUnavailable
+    TransactionActive
+    NoTransaction
+    ConfirmationRequired(expected: String)
+    Denied(required: String, reason: String)
+    LimitExceeded(what: String)
+    Backend(reason: String)
+    pub fn message(self) -> String Never! {
+        if self == {
+            .ReleaseUnavailable -> "project console is unavailable in release builds"
+            .ProjectUnavailable(reason) -> "project console unavailable: {reason}"
+            .InvalidInput(reason) -> "invalid console input: {reason}"
+            .InvalidRequest(reason) -> "invalid console input: {reason}"
+            .UnknownCommand(command) -> "unknown console command `:{command}`"
+            .Closed -> "console session is closed"
+            .Cancelled -> "console session is cancelled"
+            .Expired -> "console authority has expired; restart the console"
+            .NonLoopbackDenied -> "non-loopback console request rejected before dispatch"
+            .RouterUnavailable -> "in-process application router is not attached"
+            .DataBackendUnavailable -> "project data backend is not attached"
+            .TransactionActive -> "sandbox transaction is already active"
+            .NoTransaction -> "no sandbox transaction is active"
+            .ConfirmationRequired(expected) -> "explicit confirmation required: `{expected}`"
+            .Denied(required, reason) -> "console capability `{required}` denied: {reason}"
+            .LimitExceeded(what) -> "console {what} exceeds its bounded limit"
+            .Backend(reason) -> "console backend error: {reason}"
+        }
+    }
+}
+// #4403: sema currently requires ^self while the native Display ABI borrows.
+impl ConsoleError.Display { fn display(^self) -> String { self.message() } }
+
+// Rust `char::is_control` (general category Cc) for one scalar. #4437: the
+// public Core.text Cc predicate is an unratified owner ballot; this is the one
+// gated call site, never replaced by a local range or terminal-control law.
+fn console_scalar_is_control(scalar: String) -> Bool Never! {
+    console_validation_text.is_control(scalar)
+}
+
+// Rust validate_token: non-empty, at most 256 UTF-8 bytes, and no Cc or
+// Unicode White_Space scalar.
+fn validate_token(label: String, value: String) ConsoleError! {
+    if value.is_empty() || value.bytes().len() > CONSOLE_MAX_TOKEN_BYTES -> return Err(ConsoleError.InvalidInput{reason: "{label} must be a bounded non-empty token"})
+    loop scalar in console_validation_text.scalars(value) {
+        if console_scalar_is_control(scalar) || console_validation_text.is_whitespace(scalar) -> return Err(ConsoleError.InvalidInput{reason: "{label} must be a bounded non-empty token"})
+    }
+}
+
+// Rust validate_text: at most 64 KiB of UTF-8 and no Cc scalar; whitespace
+// other than Cc is permitted.
+fn validate_text(label: String, value: String) ConsoleError! {
+    if value.bytes().len() > CONSOLE_MAX_TEXT_BYTES -> return Err(ConsoleError.InvalidInput{reason: "{label} contains a control character or exceeds its limit"})
+    loop scalar in console_validation_text.scalars(value) {
+        if console_scalar_is_control(scalar) -> return Err(ConsoleError.InvalidInput{reason: "{label} contains a control character or exceeds its limit"})
+    }
+}
+
+// Rust validate_method: a non-empty uppercase token of ASCII letters, digits
+// and `-`. Any non-ASCII byte fails, as a non-ASCII char does in Rust.
+fn validate_method(method: String) ConsoleError! {
+    invalid := method.is_empty() || method != method.to_ascii_upper()
+    loop byte in method.bytes() {
+        code :: Int.from_u8(byte)
+        digit :: code >= 48 && code <= 57
+        upper :: code >= 65 && code <= 90
+        lower :: code >= 97 && code <= 122
+        if !digit && !upper && !lower && code != 45 {
+            invalid = true
+            break
+        }
+    }
+    if invalid -> return Err(ConsoleError.InvalidRequest{reason: "request method must be an uppercase HTTP token"})
+}
+
+// Rust validate_local_path: an origin-relative path. Absolute URLs, network
+// paths, NUL, backslashes and exact `..` segments are refused as non-loopback
+// before the control check; there is no percent normalization.
+fn validate_local_path(path: String) ConsoleError! {
+    raw :: path.bytes()
+    escapes := raw.len() > CONSOLE_MAX_TEXT_BYTES || !path.starts_with("/") || path.starts_with("//") || raw.contains(U8{0}) || path.contains("\\") || path.contains("://")
+    if !escapes {
+        loop segment in path.split("/") {
+            if segment == ".." {
+                escapes = true
+                break
+            }
+        }
+    }
+    if escapes -> return Err(ConsoleError.NonLoopbackDenied)
+    loop scalar in console_validation_text.scalars(path) {
+        if console_scalar_is_control(scalar) -> return Err(ConsoleError.InvalidRequest{reason: "request path contains a control character"})
+    }
+}
+
+// Rust validate_origin: a bounded token naming a host, never a URL or userinfo.
+fn validate_origin(origin: String) ConsoleError! {
+    validate_token("request origin", origin) ?? return Err(err)
+    if origin.contains("/") || origin.contains("\\") || origin.contains("://") || origin.contains("@") || origin.contains("?") || origin.contains("#") -> return Err(ConsoleError.NonLoopbackDenied)
+}
+
+// Rust validate_safe_request: only bodiless GET, HEAD and OPTIONS cross the
+// console boundary; every other method is a Net.Connect denial.
+fn validate_safe_request(method: String, body: [U8]) ConsoleError! {
+    safe :: method == "GET" || method == "HEAD" || method == "OPTIONS"
+    capability :: ConsoleCapability.HTTPRequest
+    if !safe -> return Err(ConsoleError.Denied{required: capability.required_right(), reason: "only GET, HEAD, and OPTIONS requests are allowed at the console boundary"})
+    if body.len() != 0 -> return Err(ConsoleError.InvalidRequest{reason: "safe console requests cannot carry a body"})
+}
+
+// Rust `str::parse::<u16>().is_ok()`: an optional `+`, then one or more ASCII
+// digits whose value is at most 65535. Leading zeros never overflow.
+fn console_parses_u16(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    start :: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+    if start >= raw.len() -> return false
+    significant := 0
+    loop index in start..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code < 48 || code > 57 -> return false
+        if significant > 0 || code != 48 -> significant += 1
+    }
+    if significant > 5 -> return false
+    value :: console_validation_parse.parse_int(text) ?? return false
+    value <= 65535
+}
+
+// Rust is_loopback_host: Unicode-trimmed, ASCII-lowercased host with an
+// optional valid u16 port. `[addr]` takes the first `]`; a malformed bracket
+// suffix yields no host. A bare host with exactly one `:` drops a valid port;
+// otherwise the whole host (including bare `::1`) is compared.
+fn is_loopback_host(host: String) -> Bool Never! {
+    // #4303: trimmed view flows into a String-typed normalization call.
+    trimmed := console_validation_text.trim(host)
+    lowered := trimmed.to_ascii_lower()
+    raw :: lowered.bytes()
+    address := ~lowered
+    if raw.len() > 0 && Int.from_u8(raw[0]) == 91 {
+        close := -1
+        loop index in 1..<raw.len() {
+            if Int.from_u8(raw[index]) == 93 {
+                close = index
+                break
+            }
+        }
+        address = ""
+        if close >= 0 {
+            suffix_start :: close + 1
+            suffix_empty :: suffix_start == raw.len()
+            valid_port :: !suffix_empty && Int.from_u8(raw[suffix_start]) == 58 && console_parses_u16(String.from_bytes(raw[suffix_start + 1..<raw.len()]) ?? "")
+            if suffix_empty || valid_port -> address = String.from_bytes(raw[1..<close]) ?? ""
+        }
+    } else {
+        colons := 0
+        colon := -1
+        loop index in 0..<raw.len() {
+            if Int.from_u8(raw[index]) == 58 {
+                colons += 1
+                colon = index
+            }
+        }
+        if colons == 1 && console_parses_u16(String.from_bytes(raw[colon + 1..<raw.len()]) ?? "") {
+            address = String.from_bytes(raw[0..<colon]) ?? ""
+        }
+    }
+    address == "127.0.0.1" || address == "localhost" || address == "::1" || address == "loopback"
+}
+
+// Rust is_secret_header: credential-bearing names, ASCII case-insensitive.
+fn is_secret_header(name: String) -> Bool Never! {
+    lowered :: name.to_ascii_lower()
+    lowered == "authorization" || lowered == "proxy-authorization" || lowered == "cookie" || lowered == "set-cookie" || lowered == "x-api-key" || lowered == "x-auth-token"
+}

@@ -1,0 +1,242 @@
+use jet_foundation.[
+    DerivationIdentity,
+    DerivationRecord,
+    MIRDerivationRef,
+    derivation_record_reference,
+    derivation_record_invalidate_if_identity_changed,
+]
+use jet_pkg_model.[
+    PackageFacts,
+    OverlayPolicy,
+    EffectProjection,
+    pkg_project_application_effects,
+]
+
+// Rust Types.rs:716–907: construction, attachment, retained checked facts and
+// first-match queries. Views borrow the index; a single-result view has one row.
+impl SemIndex {
+    pub fn new(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge], effects: ^[EffectFact], members: ^[MemberFact], nodes: ^[StructuralNode], definition_facts: ^[DefinitionFact]) -> SemIndex Never! {
+        SemIndex{
+            schema_version: SEMINDEX_SCHEMA_VERSION,
+            defs: ^defs,
+            refs: ^refs,
+            calls: ^calls,
+            effects: ^effects,
+            arithmetic: [ArithmeticOperationFact]{},
+            members: ^members,
+            nodes: ^nodes,
+            _definition_facts: ^definition_facts,
+            bypasses: [BypassFact]{},
+            instances: [InstanceFact]{},
+            outputs: [SemIndexOutputFact]{},
+            state_graphs: [StateGraphFact]{},
+            package_facts: None,
+            workspace_overlay_policy: None,
+            effect_projection: EffectProjection.default(),
+            derivations: [DerivationRecord]{},
+        }
+    }
+
+    pub fn set_bypasses(&self, facts: ^[BypassFact]) Never! { self.bypasses = ^facts }
+    pub fn set_instances(&self, facts: ^[InstanceFact]) Never! { self.instances = ^facts }
+    pub fn set_outputs(&self, facts: ^[SemIndexOutputFact]) Never! { self.outputs = ^facts }
+    pub fn set_state_graphs(&self, facts: ^[StateGraphFact]) Never! { self.state_graphs = ^facts }
+    pub fn set_arithmetic(&self, facts: ^[ArithmeticOperationFact]) Never! { self.arithmetic = ^facts }
+    pub fn set_effect_projection(&self, projection: ^EffectProjection) Never! { self.effect_projection = ^projection }
+
+    pub fn set_derivations(&self, facts: ^[DerivationRecord]) Never! {
+        self.derivations = ^facts
+        // #4343: inline comparator, not a named-function comparator.
+        &self.derivations.sort_by((left: DerivationRecord, right: DerivationRecord) -> left.id <=> right.id)
+    }
+    pub fn derivations(self) -> View<DerivationRecord> Never! { self.derivations[0..<self.derivations.len()] }
+    fn derivation_window(self, index: Int) -> View<DerivationRecord> Never! { self.derivations[index..index] }
+    pub fn derivation(self, id: String) -> View<DerivationRecord>? Never! {
+        loop index in 0..<self.derivations.len() {
+            if self.derivations[index].id == id -> return Val(self.derivation_window(index))
+        }
+        None
+    }
+    pub fn derivation_ref(self, subject: String) -> MIRDerivationRef? Never! {
+        loop record in self.derivations {
+            if record.subject == subject -> return Val(derivation_record_reference(record))
+        }
+        None
+    }
+    pub fn invalidate_derivations(&self, current: DerivationIdentity) -> Int Never! {
+        count := 0
+        loop index in 0..<self.derivations.len() {
+            if derivation_record_invalidate_if_identity_changed(&self.derivations[index], current) -> count += 1
+        }
+        count
+    }
+
+    pub fn attach_package_facts(&self, facts: ^PackageFacts) Never! {
+        self.effect_projection = pkg_project_application_effects(self.effect_projection.required_effects, Val(facts))
+        self.package_facts = Val(^facts)
+        // Scalar facts stay in their canonical owner. Read consumers take the
+        // SemIndex as a READ parameter and project its fields synchronously;
+        // #4446 has no scalar View representation, and lists would allocate.
+    }
+    pub fn attach_workspace_overlay_policy(&self, policy: ^OverlayPolicy) Never! { self.workspace_overlay_policy = Val(^policy) }
+
+    pub fn schema_version(self) -> Int Never! { self.schema_version }
+    pub fn definitions(self) -> View<SymbolDef> Never! { self.defs[0..<self.defs.len()] }
+    pub fn references(self) -> View<SymbolRef> Never! { self.refs[0..<self.refs.len()] }
+    pub fn call_edges(self) -> View<CallEdge> Never! { self.calls[0..<self.calls.len()] }
+    pub fn effects(self) -> View<EffectFact> Never! { self.effects[0..<self.effects.len()] }
+    pub fn arithmetic(self) -> View<ArithmeticOperationFact> Never! { self.arithmetic[0..<self.arithmetic.len()] }
+    pub fn members(self) -> View<MemberFact> Never! { self.members[0..<self.members.len()] }
+    pub fn structural_nodes(self) -> View<StructuralNode> Never! { self.nodes[0..<self.nodes.len()] }
+    pub fn definition_facts(self) -> View<DefinitionFact> Never! { self._definition_facts[0..<self._definition_facts.len()] }
+    pub fn bypasses(self) -> View<BypassFact> Never! { self.bypasses[0..<self.bypasses.len()] }
+    pub fn instances(self) -> View<InstanceFact> Never! { self.instances[0..<self.instances.len()] }
+    pub fn outputs(self) -> View<SemIndexOutputFact> Never! { self.outputs[0..<self.outputs.len()] }
+    pub fn state_graphs(self) -> View<StateGraphFact> Never! { self.state_graphs[0..<self.state_graphs.len()] }
+
+    fn definition_window(self, index: Int) -> View<SymbolDef> Never! { self.defs[index..index] }
+    fn reference_window(self, index: Int) -> View<SymbolRef> Never! { self.refs[index..index] }
+    fn call_window(self, index: Int) -> View<CallEdge> Never! { self.calls[index..index] }
+    fn effect_window(self, index: Int) -> View<EffectFact> Never! { self.effects[index..index] }
+    pub fn references_to(self, name: String) -> [View<SymbolRef>] Never! {
+        matches := [View<SymbolRef>]{}
+        loop index in 0..<self.refs.len() {
+            if self.refs[index].name == name -> &matches.push(self.reference_window(index))
+        }
+        matches
+    }
+    pub fn call_sites(self, callee: String) -> [View<CallEdge>] Never! {
+        matches := [View<CallEdge>]{}
+        loop index in 0..<self.calls.len() {
+            if self.calls[index].callee == callee -> &matches.push(self.call_window(index))
+        }
+        matches
+    }
+    pub fn effect_of(self, function: String) -> View<EffectFact>? Never! {
+        loop index in 0..<self.effects.len() {
+            if self.effects[index].function == function -> return Val(self.effect_window(index))
+        }
+        None
+    }
+    pub fn lookup(self, name: String) -> View<SymbolDef>? Never! {
+        loop index in 0..<self.defs.len() {
+            if self.defs[index].name == name -> return Val(self.definition_window(index))
+        }
+        None
+    }
+    pub fn lookup_identity(self, identity: String) -> View<SymbolDef>? Never! {
+        loop index in 0..<self.defs.len() {
+            if self.defs[index].identity == identity -> return Val(self.definition_window(index))
+        }
+        None
+    }
+
+    // Rust Types.rs:909–963: dossier joins retained facts, never checks again.
+    // Bypass facts are program-wide; state graphs and references are owner-only.
+    pub fn dossier(self, target: String) -> TypeDossier Never! {
+        definition := SymbolDef?{None}
+        owner := ~target
+        loop row in self.defs {
+            if row.name == target || row.identity == target {
+                definition = Val(~row)
+                owner = ~row.name
+                break
+            }
+        }
+        members := [MemberFact]{}
+        loop row in self.members { if row.owner == owner -> &members.push(~row) }
+        semindex_sort_members(&members)
+        references := [SymbolRef]{}
+        loop row in self.refs { if row.name == owner -> &references.push(~row) }
+        &references.sort_by((left: SymbolRef, right: SymbolRef) -> (left.module_path <=> right.module_path).then(left.span.start <=> right.span.start).then(left.span.end <=> right.span.end))
+        bypass_facts := ~self.bypasses
+        &bypass_facts.sort_by((left: BypassFact, right: BypassFact) -> (left.module_path <=> right.module_path).then(left.span.start <=> right.span.start))
+        state_graphs := [StateGraphFact]{}
+        loop graph in self.state_graphs { if graph.owner == owner -> &state_graphs.push(~graph) }
+        TypeDossier{
+            schema_version: SEMINDEX_SCHEMA_VERSION,
+            target: owner,
+            definition: definition,
+            members: members,
+            references: references,
+            bypass_facts: bypass_facts,
+            state_graphs: state_graphs,
+            effect_projection: ~self.effect_projection,
+        }
+    }
+
+    // Rust Types.rs:965–991: identity joins; location/body/name alone never change
+    // the structural signature. Repeated IDs are retained, not deduplicated.
+    pub fn structural_audit(self, next: SemIndex) -> StructuralAudit Never! {
+        added := [String]{}
+        removed := [String]{}
+        changed := [String]{}
+        loop definition in next.defs {
+            if self.lookup_identity(definition.identity) == {
+                .Val(previous) -> {
+                    if semindex_structural_signature(previous[0].kind, previous[0].view_provenance) != semindex_structural_signature(definition.kind, definition.view_provenance) -> &changed.push(~definition.identity)
+                }
+                None -> &added.push(~definition.identity)
+            }
+        }
+        loop definition in self.defs {
+            if next.lookup_identity(definition.identity) == None -> &removed.push(~definition.identity)
+        }
+        &added.sort()
+        &removed.sort()
+        &changed.sort()
+        StructuralAudit{added: added, removed: removed, changed: changed}
+    }
+}
+
+// Rust Types.rs:994–1020: stable member order by kind, origin, spelling, module,
+// then byte start; end and trait spelling are intentionally not tie breakers.
+fn semindex_sort_members(members: &[MemberFact]) Never! {
+    &members.sort_by((left: MemberFact, right: MemberFact) -> (semindex_member_rank(left.kind) <=> semindex_member_rank(right.kind)).then(semindex_origin_rank(left.origin) <=> semindex_origin_rank(right.origin)).then(left.name <=> right.name).then(left.module_path <=> right.module_path).then(left.span.start <=> right.span.start))
+}
+fn semindex_member_rank(kind: MemberKind) -> Int Never! {
+    if kind == {
+        .Field -> 0
+        .Variant -> 1
+        .Method -> 2
+    }
+}
+fn semindex_origin_rank(origin: MemberOrigin) -> Int Never! {
+    if origin == {
+        .TypeBody -> 0
+        .InherentImpl -> 1
+        .TraitImpl(_) -> 2
+        .TraitRequirement(_) -> 3
+    }
+}
+
+// Rust Types.rs:1022–1070: exact callable/field/variant identity material,
+// including structured returned-view provenance. Parameter names are excluded.
+pub fn semindex_structural_signature(kind: SemIndexSymbolKind, view_provenance: [ViewProvenanceFact]) -> String Never! {
+    if kind == {
+        .Module -> "module"
+        .Function(params, call_contract, ret) -> {
+            types := [String]{}
+            contracts := [String]{}
+            views := [String]{}
+            loop param in params -> &types.push(~param.ty)
+            loop entry in call_contract -> &contracts.push("{entry.label}:{entry.zone}:{entry.variadic}")
+            loop view in view_provenance -> &views.push(view.canonical())
+            "fn({types.join(",")});call_contract=[{contracts.join(",")}]=>{ret ?? "()"};view_source={views.join("|")}"
+        }
+        .Struct(fields) -> {
+            rows := [String]{}
+            loop field in fields -> &rows.push("{field.name}:{field.ty}")
+            "struct{{{rows.join(",")}}}"
+        }
+        .Enum(variants) -> "enum{{{variants.join(",")}}}"
+        .Trait -> "trait"
+        .Tag -> "tag"
+        .Type -> "type"
+        .Const -> "const"
+        .EnumVariant(parent) -> "variant:{parent}"
+        .Field(ty, parent) -> "field:{parent}:{ty}"
+        .Local(mutable, ty) -> "local:{mutable}:{ty ?? "?"}"
+        .Param(ty) -> "param:{ty}"
+    }
+}

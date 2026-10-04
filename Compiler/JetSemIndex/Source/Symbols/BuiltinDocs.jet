@@ -1,0 +1,176 @@
+use jet_foundation.[
+    Type,
+    builtin_method_row,
+    builtin_static_rows,
+    sema_collection_method_contract,
+    sema_collection_method_argument_type,
+    sema_collection_method_result_type,
+    type_name,
+]
+
+// Rust Symbols.rs:1573–1938 and jet-repl/SemanticSymbols.rs:7–399.
+// One owned semantic catalog replaces the REPL's leaking static-string facade.
+// Summaries/examples live here; signatures come from the canonical checked
+// contracts, not the obsolete List<T>, ?T, or renamed Map operation spellings.
+fn semantic_builtin_member(owner: String, name: String, module_path: String, signature: String, summary: String, examples: [String]) -> SemanticSymbol Never! {
+    qualified_name :: "{owner}.{name}"
+    SemanticSymbol{
+        identity: "builtin:method:{qualified_name}",
+        name: name,
+        qualified_name: qualified_name,
+        owner: Val(owner),
+        module_path: module_path,
+        kind: SemanticSymbolKind.Member,
+        signature: signature,
+        summary: summary,
+        examples: examples,
+        provenance: SemanticProvenance.Builtin{module_name: module_path},
+        span: None,
+        lexical_scope: None,
+    }
+}
+
+fn semantic_builtin_signature(owner: String, name: String, labels: [String], parameters: [Type], result: Type) -> String Never! {
+    assert_eq(labels.len(), parameters.len())
+    args := [String]{}
+    loop index in 0..<parameters.len() -> &args.push("{labels[index]}: {type_name(parameters[index])}")
+    head :: "{owner}.{name}({args.join(", ")})"
+    if result == (Type.Named{name: "Unit"}) -> return head
+    "{head} -> {type_name(result)}"
+}
+
+fn semantic_builtin_examples(owner: String, name: String, example: String?) -> [String] Never! {
+    if example == {
+        .Val(text) -> [String]{text}
+        None -> [String]{"{owner}.{name}(...)"}
+    }
+}
+
+fn semantic_builtin_collection_doc(owner: String, name: String, labels: [String], callback_return: Type?, summary: String, example: String?) -> SemanticSymbol Never! {
+    element :: Type.Named{name: if owner == "Map" -> "V" else -> "T"}
+    receiver :: if owner == "Map" -> Type.Map{key: Type.Named{name: "K"}, key_span: None, value: element} else -> Type.List{element: element}
+    contract :: sema_collection_method_contract(receiver, name) ?? panic("builtin docs have no checked collection contract: {owner}.{name}")
+    seed :: Val(Type.Named{name: "R"})
+    parameters := [Type]{}
+    loop index in 0..<contract.row.args.len() {
+        parameter := sema_collection_method_argument_type(contract, index, seed, true) ?? panic("builtin docs have no checked argument: {owner}.{name}")
+        if parameter == .Fn(params, _, effects, access, metadata, views) {
+            // Open callback return slots are instantiated only for presentation;
+            // their parameter/effect/access facts remain the canonical row's.
+            if callback_return == .Val(result) {
+                parameter = Type.Fn{params: params, ret: Val(result), effect_bound: effects, param_contract: access, call_metadata: metadata, return_view_provenance: views}
+            }
+        }
+        &parameters.push(parameter)
+    }
+    result :: sema_collection_method_result_type(contract, callback_return, seed) ?? panic("builtin docs have no checked result: {owner}.{name}")
+    semantic_builtin_member(owner, name, "core.collections", semantic_builtin_signature(owner, name, labels, parameters, result), summary, semantic_builtin_examples(owner, name, example))
+}
+
+fn semantic_builtin_string_doc(name: String, labels: [String], summary: String) -> SemanticSymbol Never! {
+    contract :: builtin_method_row(Type.String, name, labels.len()) ?? panic("builtin docs have no checked String contract: {name}")
+    semantic_builtin_member("String", name, "core.collections", semantic_builtin_signature("String", name, labels, contract.parameters, contract.result), summary, semantic_builtin_examples("String", name, None))
+}
+
+fn semantic_builtin_static_doc(owner: String, name: String, module_path: String, labels: [String], summary: String, example: String?) -> SemanticSymbol Never! {
+    rows :: builtin_static_rows(owner, name)
+    assert_eq(rows.len(), 1)
+    row :: rows[0]
+    semantic_builtin_member(owner, name, module_path, semantic_builtin_signature(owner, name, labels, row.parameters, row.return_type), summary, semantic_builtin_examples(owner, name, example))
+}
+
+// The time/zip helper family publishes contracts owned by the dedicated
+// checkers, rather than collection rows. Clock.system's Time effect is the
+// checked TimeHandles contract; Duration.in retains the published Rust seam
+// pending its canonical checked-provider integration.
+fn semantic_builtin_special_docs() -> [SemanticSymbol] Never! {
+    [SemanticSymbol]{
+        semantic_builtin_member("Clock", "system", "core.collections", "Clock.system() -[Time]> Clock", "Explicit monotonic production clock.", [String]{"Clock.system()"}),
+        semantic_builtin_member("Duration", "in", "core.collections", "Duration.in(unit: DurationUnit) -> Int RangeError!", "Reads a checked whole duration unit.", [String]{"duration.in(.Milliseconds)"}),
+        semantic_builtin_member("List", "zip", "core.collections", "List.zip(other: [U]) -> [(a: T, b: U)]", "Pairs items from two lists positionally.", [String]{"List.zip(...)"}),
+    }
+}
+
+pub fn semantic_builtin_doc_symbols() -> [SemanticSymbol] Never! {
+    symbols := [SemanticSymbol]{}
+    // Rust Symbols.rs:1574–1609: duration constructors and explicit clock.
+    &symbols.push(semantic_builtin_static_doc("Duration", "milliseconds", "core.collections", [String]{"value"}, "Checked runtime duration in milliseconds.", None))
+    &symbols.push(semantic_builtin_static_doc("Duration", "seconds", "core.collections", [String]{"value"}, "Checked runtime duration in seconds.", None))
+    &symbols.push(semantic_builtin_static_doc("Duration", "minutes", "core.collections", [String]{"value"}, "Checked runtime duration in minutes.", None))
+    &symbols.push(semantic_builtin_static_doc("Duration", "hours", "core.collections", [String]{"value"}, "Checked runtime duration in hours.", None))
+    loop symbol in semantic_builtin_special_docs() -> &symbols.push(symbol)
+    semantic_append_builtin_collection_docs(&symbols)
+    semantic_append_builtin_string_docs(&symbols)
+    // Rust Symbols.rs:1501–1532; numeric symbols share this same owned catalog.
+    &symbols.push(semantic_builtin_static_doc("Int", "parse", "core.numeric", [String]{"text"}, "Parses text as an Int.", Val("Int.parse(text)")))
+    &symbols.push(semantic_builtin_static_doc("Float", "parse", "core.numeric", [String]{"text"}, "Parses text as a Float.", Val("Float.parse(text)")))
+    symbols
+}
+
+fn semantic_append_builtin_collection_docs(symbols: &[SemanticSymbol]) Never! {
+    // Rust Symbols.rs:1610–1810 and SemanticSymbols.rs:34–224: List docs.
+    &symbols.push(semantic_builtin_collection_doc("List", "len", [String]{}, None, "Number of items.", Val("items.len()")))
+    &symbols.push(semantic_builtin_collection_doc("List", "is_empty", [String]{}, None, "True when there are no items.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "push", [String]{"item"}, None, "Appends an item to the end.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "pop", [String]{}, None, "Removes and returns the last item, if any.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "get", [String]{"i"}, None, "The item at index i, if in bounds.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "first", [String]{}, None, "The first item, if any.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "last", [String]{}, None, "The last item, if any.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "contains", [String]{"item"}, None, "True when item appears in the list.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "index_of", [String]{"item"}, None, "Index of the first matching item, if any.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "join", [String]{"sep"}, None, "Joins string items with sep.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "sum", [String]{}, None, "Sum of all items.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "product", [String]{}, None, "Product of all items.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "min", [String]{}, None, "The smallest item, if any.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "max", [String]{}, None, "The largest item, if any.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "map", [String]{"f"}, Val(Type.Named{name: "R"}), "Transforms each item with f.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "filter", [String]{"f"}, Val(Type.Bool), "Keeps items where f(item) is true.", Val(`items.filter(fn (item: T) -> Bool { return true })`)))
+    &symbols.push(semantic_builtin_collection_doc("List", "filter_map", [String]{"f"}, Val(Type.Result{ok: Type.Named{name: "V"}, err: Type.Named{name: "E"}}), "Maps then drops failures — keeps only successes.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "each", [String]{"f"}, Val(Type.Named{name: "Unit"}), "Runs f once per item, for its side effects.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "find", [String]{"f"}, Val(Type.Bool), "The first item where f(item) is true, if any.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "any", [String]{"f"}, Val(Type.Bool), "True if f is true for at least one item.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "all", [String]{"f"}, Val(Type.Bool), "True if f is true for every item.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "sort_by", [String]{"f"}, Val(Type.Named{name: "Ordering"}), "Sorts in place by the comparator f.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "sort_by_desc", [String]{"key"}, Val(Type.Named{name: "K"}), "Sorts in place by the key f extracts, descending.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "reduce", [String]{"init", "f"}, Val(Type.Named{name: "R"}), "Folds items into one value, starting from init.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "fold", [String]{"init", "f"}, Val(Type.Named{name: "R"}), "Folds items into one value, starting from init.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "reverse", [String]{}, None, "Reverses the list in place.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "sort", [String]{}, None, "Sorts the list in place.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "sort_desc", [String]{}, None, "Sorts the list in place, descending.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "clear", [String]{}, None, "Removes every item.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "insert", [String]{"i", "item"}, None, "Inserts item at index i.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "remove", [String]{"value", "by"}, None, "Removes the first equal value; `.Slot` selects positional removal.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "count", [String]{"value"}, None, "Counts items equal to value.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "extend", [String]{"other"}, None, "Appends every item from other in order.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "concat", [String]{"other"}, None, "Returns this list followed by other.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "indexed", [String]{}, None, "Pairs each item with its index.", None))
+    &symbols.push(semantic_builtin_collection_doc("List", "indexes", [String]{}, None, "Yields every valid Int index.", None))
+    // Rust Symbols.rs:1811–1859 and SemanticSymbols.rs:225–279: Map docs.
+    &symbols.push(semantic_builtin_collection_doc("Map", "len", [String]{}, None, "Number of entries.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "is_empty", [String]{}, None, "True when there are no entries.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "get", [String]{"key"}, None, "Value for key, if present.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "add", [String]{"key", "value"}, None, "Upserts and returns the displaced value.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "add_new", [String]{"key", "value"}, None, "Adds only when the key is absent.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "remove", [String]{"key"}, None, "Removes and returns the value for key, if present.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "has_key", [String]{"key"}, None, "True when key has an entry.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "keys", [String]{}, None, "Lazily yields every key in map order.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "values", [String]{}, None, "Lazily yields every value in map order.", None))
+    &symbols.push(semantic_builtin_collection_doc("Map", "each", [String]{"f"}, Val(Type.Named{name: "Unit"}), "Runs f once per entry.", None))
+}
+
+fn semantic_append_builtin_string_docs(symbols: &[SemanticSymbol]) Never! {
+    // Rust Symbols.rs:1860–1938 and SemanticSymbols.rs:280–358: String docs.
+    &symbols.push(semantic_builtin_string_doc("len", [String]{}, "Number of characters."))
+    &symbols.push(semantic_builtin_string_doc("is_empty", [String]{}, "True when the string is empty."))
+    &symbols.push(semantic_builtin_string_doc("contains", [String]{"s"}, "True when s appears in the string."))
+    &symbols.push(semantic_builtin_string_doc("starts_with", [String]{"s"}, "True when the string starts with s."))
+    &symbols.push(semantic_builtin_string_doc("ends_with", [String]{"s"}, "True when the string ends with s."))
+    &symbols.push(semantic_builtin_string_doc("trim", [String]{}, "Removes leading/trailing whitespace."))
+    &symbols.push(semantic_builtin_string_doc("to_upper", [String]{}, "Uppercased copy."))
+    &symbols.push(semantic_builtin_string_doc("to_lower", [String]{}, "Lowercased copy."))
+    &symbols.push(semantic_builtin_string_doc("split", [String]{"sep"}, "Splits on every occurrence of sep."))
+    &symbols.push(semantic_builtin_string_doc("lines", [String]{}, "Splits into lines."))
+    &symbols.push(semantic_builtin_string_doc("chars", [String]{}, "Every character, in order."))
+    &symbols.push(semantic_builtin_string_doc("replace", [String]{"from", "to"}, "Replaces every occurrence of from with to."))
+    &symbols.push(semantic_builtin_string_doc("repeat", [String]{"n"}, "Concatenates n copies of the string."))
+}

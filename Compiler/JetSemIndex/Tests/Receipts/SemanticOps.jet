@@ -1,0 +1,260 @@
+use jet_foundation.[mir_sha256_hex]
+use core.testing as semops_testing
+
+// Rust SemanticOps.rs:244–288 and tests/semantic_ops.rs:16–76 checked oracles.
+// The checked producer/file-open seam (S4/C4) must supply these real indices;
+// these are not registered tests with fabricated checked facts.
+fn semops_test_inline_before_source() -> String Never! { "fn report() -[]> Int { return 1 }\nfn run() {}\n" }
+fn semops_test_inline_after_source() -> String Never! { "fn summarize() -[]> Int { return 1 }\nfn run() {}\n" }
+fn semops_test_pair_before_source() -> String Never! { "fn report() -[]> Int { return 1 }\nfn run() { print(report()) }\n" }
+fn semops_test_pair_after_source() -> String Never! { "fn summarize() -[]> Int { return 1 }\nfn run() { print(summarize()) }\n" }
+
+fn semops_test_semantic_op_producer_and_blame_consumer_use_checked_facts(root: String, path: String, before: SemIndex, after: SemIndex) -[FS, Env]> {
+    operations :: semantic_rename_ops(before, after)
+    assert_eq(operations.len(), 1)
+    assert_eq(operations[0].from, Val("report"))
+    assert_eq(operations[0].to, Val("summarize"))
+    rows :: semantic_blame(after, operations)
+    found := false
+    loop row in rows {
+        if row.identity.ends_with("summarize") {
+            if row.operation == .Val(operation) {
+                if operation.kind == "rename" -> found = true
+            }
+        }
+    }
+    assert(found)
+    receipt_dir :: semops_files.join(root, ".jet/codemods")
+    semops_files.create_dir_all(receipt_dir) ?? panic("create receipt directory")
+    before_hash :: mir_sha256_hex(semops_test_inline_before_source())
+    after_hash :: mir_sha256_hex(semops_test_inline_after_source())
+    raw :: `{"semantic_ops":[{"kind":"rename","from":"report","to":"summarize"}],"files":[{"path":"run.jet","before_hash":"BEFORE","after_hash":"AFTER"}]}`.replace("BEFORE", before_hash).replace("AFTER", after_hash)
+    semops_files.write(semops_files.join(receipt_dir, "rename.log.json"), raw) ?? panic("write receipt")
+    found_receipt := false
+    loop row in semantic_blame_for_file(path, after_hash, after) {
+        if row.operation != None -> found_receipt = true
+    }
+    assert(found_receipt)
+    loop row in semantic_blame(after, [SemanticOp]{}) -> assert(row.operation == None)
+}
+fn semops_test_tool_fix_pairing_records_rename_and_blame_reads_the_receipt(before_index: SemIndex, after_index: SemIndex) {
+    produced :: semantic_rename_ops(before_index, after_index)
+    assert_eq(produced.len(), 1)
+    assert_eq(produced[0].kind, "rename")
+    assert_eq(produced[0].from, Val("report"))
+    assert_eq(produced[0].to, Val("summarize"))
+    assert(produced[0].targets[0].stable_id != "")
+    found := false
+    loop row in semantic_blame(after_index, produced) {
+        if row.identity.ends_with("summarize") {
+            operation :: row.operation ?? panic("renamed definition operation")
+            assert_eq(operation.from, Val("report"))
+            found = true
+            break
+        }
+    }
+    assert(found)
+    loop row in semantic_blame(after_index, [SemanticOp]{}) -> assert(row.operation == None)
+}
+fn semops_test_blame_matches_recorded_targets_without_text_inference(index: SemIndex) {
+    op :: SemanticOp{
+        kind: "rename", rule_id: Val("test"), from: Val("report"), to: Val("summarize"),
+        node: None, match_template: None, replace_template: None,
+        targets: [SemanticOpTarget]{SemanticOpTarget{
+            stable_id: "def:before", before: "report", after: "summarize", kind: "function", module_path: "run",
+        }}, files: [SemanticOpFile]{},
+    }
+    found := false
+    loop row in semantic_blame(index, [SemanticOp]{op}) {
+        if row.identity.ends_with("summarize") {
+            operation :: row.operation ?? panic("recorded rename target")
+            assert_eq(operation.kind, "rename")
+            found = true
+            break
+        }
+    }
+    assert(found)
+}
+
+// Genuine input records for independent pairing/matching algorithms; these
+// do not stand in for the three checked-source integration oracles above.
+fn semops_test_definition(name: String, stable_id: String, signature_id: String, module_path: String) -> DefinitionFact Never! {
+    DefinitionFact{stable_id, signature_id, content_id: "body", human_identity: "{module_path}::{name}", name, kind: "function", module_path, span: SourceSpan{start: 0, end: 1}}
+}
+fn semops_test_index(facts: [DefinitionFact]) -> SemIndex Never! {
+    SemIndex.new(^[SymbolDef]{}, ^[SymbolRef]{}, ^[CallEdge]{}, ^[EffectFact]{}, ^[MemberFact]{}, ^[StructuralNode]{}, ^facts)
+}
+fn semops_test_operation(kind: String, to: String?) -> SemanticOp Never! {
+    SemanticOp{kind, rule_id: None, from: None, to, node: None, match_template: None, replace_template: None, targets: [SemanticOpTarget]{}, files: [SemanticOpFile]{}}
+}
+
+#Test("semantic_rename_requires_unique_forward_and_reverse_checked_shapes") {
+    old :: semops_test_definition("report", "old", "signature", "run")
+    renamed :: semops_test_definition("summarize", "new", "signature", "run")
+    before :: semops_test_index([DefinitionFact]{old})
+    after :: semops_test_index([DefinitionFact]{renamed})
+    ops :: semantic_rename_ops(before, after)
+    assert_eq(ops.len(), 1)
+    assert_eq(ops[0].rule_id, Val("jet-fix"))
+    assert_eq(ops[0].targets[0].stable_id, "old")
+    assert_eq(ops[0].targets[0].before, "run::report")
+    assert_eq(ops[0].targets[0].after, "run::summarize")
+    assert_eq(ops[0].files.len(), 0)
+    assert_eq(semantic_rename_ops(before, before).len(), 0)
+    ambiguous_after :: semops_test_index([DefinitionFact]{renamed, semops_test_definition("other", "other", "signature", "run")})
+    assert_eq(semantic_rename_ops(before, ambiguous_after).len(), 0)
+    ambiguous_before :: semops_test_index([DefinitionFact]{old, semops_test_definition("other", "other", "signature", "run")})
+    assert_eq(semantic_rename_ops(ambiguous_before, after).len(), 0)
+    different_signature :: semops_test_index([DefinitionFact]{semops_test_definition("summarize", "new", "changed", "run")})
+    assert_eq(semantic_rename_ops(before, different_signature).len(), 0)
+    different_module :: semops_test_index([DefinitionFact]{semops_test_definition("summarize", "new", "signature", "elsewhere")})
+    assert_eq(semantic_rename_ops(before, different_module).len(), 0)
+}
+#Test("semantic_blame_uses_recorded_targets_and_first_applicable_operation") {
+    fact :: semops_test_definition("summarize", "retained", "signature", "run")
+    index :: semops_test_index([DefinitionFact]{fact, semops_test_definition("run", "run", "other", "run")})
+    first := semops_test_operation("structural", None)
+    first.targets = [SemanticOpTarget]{SemanticOpTarget{stable_id: "retained", before: "unrelated", after: "unrelated", kind: "unrelated", module_path: "unrelated"}}
+    second :: semops_test_operation("rename", Val("summarize"))
+    rows :: semantic_blame(index, [SemanticOp]{first, second})
+    assert_eq(rows[0].stable_id, "retained")
+    assert_eq(rows[0].identity, "run::summarize")
+    assert_eq(rows[0].kind, "function")
+    recorded :: rows[0].operation ?? panic("first recorded target")
+    assert_eq(recorded.kind, "structural")
+    assert(rows[1].operation == None)
+    loop row in semantic_blame(index, [SemanticOp]{}) -> assert(row.operation == None)
+    loop after in [String]{"run::summarize", "summarize", "unrelated::summarize"} {
+        operation := semops_test_operation("structural", None)
+        operation.targets = [SemanticOpTarget]{SemanticOpTarget{stable_id: "unrelated", before: "report", after, kind: "unrelated", module_path: "unrelated"}}
+        assert(semops_operation_applies_to_fact(operation, fact))
+    }
+    assert(semops_operation_applies_to_fact(semops_test_operation("rename", Val("summarize")), fact))
+    assert(semops_operation_applies_to_fact(semops_test_operation("rename", Val("run::summarize")), fact))
+    assert(!semops_operation_applies_to_fact(semops_test_operation("structural", Val("summarize")), fact))
+    assert(!semops_operation_applies_to_fact(semops_test_operation("rename", Val("report")), fact))
+}
+#Test("semantic_receipt_hash_prefix_matches_only_one_prefix") {
+    assert(semops_same_hash("abc", "abc"))
+    assert(semops_same_hash("sha256-abc", "abc"))
+    assert(semops_same_hash("abc", "sha256-abc"))
+    assert(semops_same_hash("sha256-abc", "sha256-abc"))
+    assert(!semops_same_hash("sha256-sha256-abc", "abc"))
+    assert(!semops_same_hash("sha256-abc", "def"))
+}
+#Test("semantic_receipt_transition_requires_file_and_both_hashes") {
+    operation := semops_test_operation("rename", Val("new"))
+    operation.files = [SemanticOpFile]{SemanticOpFile{path: "/semantic-receipt-test/run.jet", before_hash: "sha256-before", after_hash: "after"}}
+    assert(operation.matches_file_transition([String]{"/semantic-receipt-test/run.jet"}, "before", "sha256-after"))
+    assert(!operation.matches_file_transition([String]{"/semantic-receipt-test/other.jet"}, "before", "after"))
+    assert(!operation.matches_file_transition([String]{"/semantic-receipt-test/run.jet"}, "wrong", "after"))
+    assert(!operation.matches_file_transition([String]{"/semantic-receipt-test/run.jet"}, "before", "wrong"))
+    assert(operation.matches_file_transition([String]{"/semantic-receipt-test/other.jet", "/semantic-receipt-test/run.jet"}, "before", "after"))
+}
+#Test("semantic_receipt_decoder_skips_invalid_rows_and_preserves_optional_fields") {
+    raw :: `{"files":[null,{"path":"missing"},{"path":"run.jet","before_hash":"before","after_hash":"after"}],"semantic_ops":[null,{"to":"new"},{"kind":"rename","rule_id":null,"from":"old","to":"new","node":"function","match":"a","replace":"b","targets":[null,{"stable_id":"bad"},{"stable_id":"def:old","before":"old","after":"new","kind":"function","module_path":"run"}]}]}`
+    value :: semops_parse_receipt(raw) ?? panic("valid receipt")
+    if value == .Object(object) {
+        files :: semops_parse_files(semops_field(object, "files") ?? panic("files")) ?? panic("array files")
+        assert_eq(files.len(), 1)
+        assert_eq(files[0].path, "run.jet")
+        ops :: semops_ops(semops_field(object, "semantic_ops") ?? panic("ops")) ?? panic("array ops")
+        assert_eq(ops.len(), 1)
+        assert_eq(ops[0].kind, "rename")
+        assert(ops[0].rule_id == None)
+        assert_eq(ops[0].from, Val("old"))
+        assert_eq(ops[0].to, Val("new"))
+        assert_eq(ops[0].node, Val("function"))
+        assert_eq(ops[0].match_template, Val("a"))
+        assert_eq(ops[0].replace_template, Val("b"))
+        assert_eq(ops[0].targets.len(), 1)
+        assert_eq(ops[0].targets[0].stable_id, "def:old")
+        assert_eq(ops[0].files.len(), 0)
+    } else { panic("object receipt") }
+    assert(semops_parse_files(DataTree.Null) == None)
+    assert(semops_ops(DataTree.Null) == None)
+    assert(semops_parse_receipt(`{"files":[],"files":[]}`) == None)
+    assert(semops_parse_receipt("{malformed") == None)
+}
+
+#Test("semantic_receipts_scan_sorted_ancestors_and_require_path_checkpoint") {
+    root :: semops_testing.temp_dir("semantic-op-receipts")
+    child :: semops_files.join(root, "child")
+    path :: semops_files.join(child, "run.jet")
+    other :: semops_files.join(child, "other.jet")
+    source :: "fn summarize() -[]> Int { return 1 }\n"
+    before_hash :: mir_sha256_hex("fn report() -[]> Int { return 1 }\n")
+    after_hash :: mir_sha256_hex(source)
+    semops_files.create_dir_all(child) ?? panic("create source directory")
+    semops_files.write(path, source) ?? panic("write source")
+    semops_files.write(other, source) ?? panic("write other source")
+    local_dir :: semops_files.join(child, ".jet/codemods")
+    parent_dir :: semops_files.join(root, ".jet/codemods")
+    semops_files.create_dir_all(local_dir) ?? panic("create local receipts")
+    semops_files.create_dir_all(parent_dir) ?? panic("create parent receipts")
+    local_template :: `{"files":[{"path":"run.jet","before_hash":"BEFORE","after_hash":"sha256-AFTER"}],"semantic_ops":[{"kind":"KIND","to":"summarize"}]}`.replace("BEFORE", before_hash).replace("AFTER", after_hash)
+    semops_files.write(semops_files.join(local_dir, "z.log.json"), local_template.replace("KIND", "last-local")) ?? panic("write z receipt")
+    semops_files.write(semops_files.join(local_dir, "a.log.json"), local_template.replace("KIND", "first-local")) ?? panic("write a receipt")
+    parent_template :: `{"files":[{"path":"child/run.jet","before_hash":"BEFORE","after_hash":"AFTER"}],"semantic_ops":[{"kind":"parent"}]}`.replace("BEFORE", before_hash).replace("AFTER", after_hash)
+    semops_files.write(semops_files.join(parent_dir, "rename.log.json"), parent_template) ?? panic("write parent receipt")
+    // Ignore malformed JSON, invalid UTF-8/read failures, nonfiles, nonreceipts,
+    // wrong checkpoints, and missing arrays without disturbing valid rows.
+    semops_files.write(semops_files.join(local_dir, "bad.log.json"), "{bad") ?? panic("write malformed receipt")
+    semops_files.write_bytes(semops_files.join(local_dir, "utf8.log.json"), [U8]{U8{255}}) ?? panic("write invalid UTF-8")
+    semops_files.create_dir_all(semops_files.join(local_dir, "directory.log.json")) ?? panic("create nonfile receipt")
+    semops_files.write(semops_files.join(local_dir, "not-a-receipt.json"), local_template.replace("KIND", "ignored")) ?? panic("write ignored suffix")
+    semops_files.write(semops_files.join(local_dir, "wrong.log.json"), local_template.replace(after_hash, "wrong").replace(before_hash, "wrong").replace("KIND", "ignored")) ?? panic("write wrong checkpoint")
+    semops_files.write(semops_files.join(local_dir, "missing.log.json"), `{"files":[],"semantic_ops":[]}`) ?? panic("write empty receipt")
+    operations :: semantic_ops_for_file(path, after_hash)
+    assert_eq(operations.len(), 3)
+    assert_eq(operations[0].kind, "first-local")
+    assert_eq(operations[1].kind, "last-local")
+    assert_eq(operations[2].kind, "parent")
+    loop operation in operations {
+        assert_eq(operation.files.len(), 1)
+        assert_eq(operation.files[0].path, semops_normalize(path))
+        assert(operation.matches_file_transition([String]{path}, before_hash, after_hash))
+    }
+    // Matching bytes in another file are not authority.
+    assert_eq(semantic_ops_for_file(other, after_hash).len(), 0)
+    assert_eq(semantic_ops_for_file(path, before_hash).len(), 3)
+    semops_files.write(path, "fn hand_edit() {}\n") ?? panic("write hand edit")
+    assert_eq(semantic_ops_for_file(path, mir_sha256_hex("fn hand_edit() {}\n")).len(), 0)
+    semops_files.remove_all(root) ?? panic("remove receipt fixture")
+}
+#Test("semantic_receipt_protocol_limits_count_bytes_and_container_depth") {
+    at_limit := "null"
+    loop index in 0..<64 -> at_limit = "[{at_limit}]"
+    assert(semops_parse_receipt(at_limit) != None)
+    deeper :: "[{at_limit}]"
+    assert(semops_parse_receipt(deeper) == None)
+    // Unknown receipt fields still have to obey the protocol's numeric grammar.
+    // Core Int is exact; the shared protocol wrapper retains the reference i64
+    // boundary even for ignored metadata. Receipt code does not fork parsing.
+    assert(semops_parse_receipt(`{"unknown":9223372036854775808}`) == None)
+    assert(semops_parse_receipt(`{"unknown":-9223372036854775809}`) == None)
+    assert(semops_parse_receipt(`{"unknown":[9223372036854775808]}`) == None)
+    assert(semops_parse_receipt(`{"unknown":1e999}`) == None)
+    assert(semops_parse_receipt(`{"unknown":01}`) == None)
+    assert(semops_parse_receipt(`{"unknown":1.25}`) != None)
+    assert(semops_parse_receipt(`{"unknown":"\uD83D\uDE00"}`) != None)
+    assert(semops_parse_receipt(`{"unknown":"\uD83D"}`) == None)
+    // Multibyte text stresses the raw-byte ceiling, not String scalar length.
+    text := ""
+    loop index in 0..<19 -> text = "{text}{text}é"
+    boundary :: "\"{text}\""
+    assert_eq(boundary.bytes().len(), 1048576)
+    assert(semops_parse_receipt(boundary) != None)
+    over :: "{boundary} "
+    assert(semops_parse_receipt(over) == None)
+}
+
+// #4378: canonical Core native-path provider prerequisite. Preserve the
+// native Rust Path assertions without registering a known-divergent provider
+// as a passing receipt test or introducing a tools-specific path normalizer.
+fn semops_test_posix_native_path_semantics_4378() {
+    if semops_sys.name() == "windows" -> return
+    assert_eq(semops_files.is_absolute("C:\\foo"), false)
+    assert_eq(semops_files.join("/tmp/name\\", "receipt"), "/tmp/name\\/receipt")
+    assert_eq(semops_files.dirname("/tmp/name\\receipt"), "/tmp")
+}

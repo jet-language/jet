@@ -40,6 +40,36 @@ Rust is the only noise-parity exception, with a `1.05` ratio.
 Public task references and revision notes live in
 `docs/research/card-1414-compiled-peer-task-definitions.md`.
 
+## Isolation launcher port and native acceptance
+
+`Tools/ci/compiled-workload-peer-launcher.jet` is the full Jet port target for
+the workload isolation launcher, including its native supervision and
+platform isolation policies. The measured Rust workload sources in the peer
+ledgers remain Rust comparator inputs; replacing or deleting a comparator is
+not part of porting the launcher.
+
+The launch contract remains `compiled-workload-peer-isolation-v1`. Missing
+required isolation primitives fail closed with exit 78; a workload is never
+restarted with ambient authority after an isolation refusal. The canonical
+native providers and their #4494 gates are prerequisites, not permission to
+retain a Rust policy wrapper or mark unsupported execution as a pass.
+
+Permanent native assertions live in
+`Tools/ci/Tests/CompiledWorkloadPeerLauncher.jet` and its neighboring
+`compiled-workload-peer-launcher-behavior.mjs`. They require the actual built
+Jet launcher in `JET_COMPILED_WORKLOAD_PEER_LAUNCHER`, the absolute oracle path
+in `JET_COMPILED_WORKLOAD_PEER_TEST_ORACLE`, and Node for the real workload.
+The assertions cover confinement, network authority, exact streams/status,
+descendant cleanup and signal forwarding; missing providers fail the tests.
+Their presence does not claim that native acceptance has been exercised.
+
+The grouped supervisor must continue polling for child wait status and forward
+every subsequent pending signal. The real POSIX two-signal regression keeps a
+child alive after SIGINT, then requires SIGTERM to reach it, the launcher's
+original SIGINT disposition to survive, and no delayed descendant write.
+The Rust single-forward-then-blocking-wait hang is a ratified latent-bug fix,
+not behavior to preserve in Jet; its tandem Rust change remains required.
+
 ## Comparison law
 
 Each outcome row must use the same task input, expected outcome, run identity,

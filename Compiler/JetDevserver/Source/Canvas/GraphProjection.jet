@@ -1,0 +1,1795 @@
+// PORT-PENDING 0764 crates-jet-devserver-src-canvas-graph-projection-slice-1: crates/jet-devserver/src/Canvas/graph_projection.rs:1-1791
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::collections::{BTreeMap, HashMap};
+//RS use std::path::Path;
+//RS 
+//RS use jet_driver::Diagnostics::Span;
+//RS use jet_driver::AST::{self, Expr, Item, Stmt};
+//RS use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, StateGraphFact, SymbolKind};
+//RS 
+//RS use super::graph_helpers::{
+//RS     assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title,
+//RS     expr_type, graph_id, insert_offset, lvalue_type, pure_leaf, snippet,
+//RS     span_through_closing_parens, starts_uppercase, text_matches, wire_ident_refs,
+//RS };
+//RS use super::graph_json::{
+//RS     add_arm_pin, add_authority_region, add_execution_overlay, add_inline, add_node, add_pin,
+//RS     add_region,
+//RS     add_source_comment_regions, add_wire, add_wire_with_span, graph_to_json, meta_attr_json,
+//RS     node_catalog, set_pin_append, set_pin_source_span,
+//RS };
+//RS use super::schema_api::GRAPH_SCHEMA_VERSION;
+//RS use super::source_model::source_revision;
+//RS use super::validation_json::{json_str, span_json};
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub(super) struct InlineExpr {
+//RS     pub(super) id: String,
+//RS     pub(super) span: SourceSpan,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub(super) struct GraphEditAnchor {
+//RS     pub(super) graph_id: String,
+//RS     pub(super) insert_offset: usize,
+//RS     pub(super) fallible: bool,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub(super) struct NodeQueryRef {
+//RS     pub(super) graph_id: String,
+//RS     pub(super) node_id: String,
+//RS     pub(super) kind: String,
+//RS     pub(super) title: String,
+//RS     pub(super) span: SourceSpan,
+//RS }
+//RS 
+//RS /// One source-backed callable that the entry module can actually name.
+//RS ///
+//RS /// The semantic ledger owns visibility. Canvas keeps only the source anchor so
+//RS /// the action query cannot mistake every SemIndex function-shaped row for a
+//RS /// palette export (for example a foreign or generated helper).
+//RS #[derive(Debug, Clone)]
+//RS pub(super) struct CanvasCallableExport {
+//RS     pub(super) module_path: String,
+//RS     pub(super) span: SourceSpan,
+//RS     pub(super) callee: String,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone)]
+//RS pub(super) struct Projection {
+//RS     pub(super) json: String,
+//RS     pub(super) inline_exprs: Vec<InlineExpr>,
+//RS     pub(super) graph_anchors: Vec<GraphEditAnchor>,
+//RS     pub(super) node_refs: Vec<NodeQueryRef>,
+//RS     pub(super) callable_exports: Vec<CanvasCallableExport>,
+//RS     pub(super) game_facts: Vec<CanvasGameFact>,
+//RS }
+//RS 
+//RS /// One source-backed `core.game` asset or component instance. Canvas keeps the
+//RS /// exact source anchor and authored identity so actions never need a binary
+//RS /// graph or importer-side semantic record.
+//RS #[derive(Debug, Clone)]
+//RS pub(super) struct CanvasGameFact {
+//RS     pub(super) source_id: String,
+//RS     pub(super) kind: String,
+//RS     pub(super) operation: String,
+//RS     pub(super) field: String,
+//RS     pub(super) value_source: String,
+//RS     pub(super) source_span: SourceSpan,
+//RS     pub(super) field_span: Option<SourceSpan>,
+//RS     pub(super) authored_instance_id: String,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS pub(super) struct GraphBuilder {
+//RS     pub(super) graph_id: String,
+//RS     pub(super) nodes: Vec<NodeRec>,
+//RS     pub(super) pins: Vec<PinRec>,
+//RS     pub(super) wires: Vec<WireRec>,
+//RS     pub(super) regions: Vec<String>,
+//RS     pub(super) inline_exprs: Vec<InlineRec>,
+//RS     pub(super) local_pins: HashMap<String, String>,
+//RS     pub(super) local_types: HashMap<String, String>,
+//RS     pub(super) getter_pins: HashMap<String, String>,
+//RS     pub(super) next_wire: usize,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(super) struct NodeRec {
+//RS     pub(super) id: String,
+//RS     pub(super) kind: String,
+//RS     pub(super) archetype: String,
+//RS     pub(super) title: String,
+//RS     pub(super) span: SourceSpan,
+//RS     pub(super) x: i32,
+//RS     pub(super) y: i32,
+//RS     pub(super) badges: Vec<String>,
+//RS     pub(super) affordances: Vec<String>,
+//RS     pub(super) meta_json: Option<String>,
+//RS }
+//RS 
+//RS pub(super) struct PinRec {
+//RS     pub(super) id: String,
+//RS     pub(super) node_id: String,
+//RS     pub(super) name: String,
+//RS     pub(super) direction: String,
+//RS     pub(super) ty: String,
+//RS     pub(super) role: Option<String>,
+//RS     pub(super) pattern_source: Option<String>,
+//RS     pub(super) ability: String,
+//RS     pub(super) fallible: bool,
+//RS     pub(super) effect_grant_need: Option<String>,
+//RS     pub(super) span: SourceSpan,
+//RS     pub(super) pattern_source_span: Option<SourceSpan>,
+//RS     pub(super) append_op: Option<String>,
+//RS     pub(super) element_index: Option<usize>,
+//RS }
+//RS 
+//RS pub(super) struct WireRec {
+//RS     pub(super) id: String,
+//RS     pub(super) from_pin: String,
+//RS     pub(super) to_pin: String,
+//RS     pub(super) kind: String,
+//RS     pub(super) span: Option<SourceSpan>,
+//RS     pub(super) from_span: Option<SourceSpan>,
+//RS     pub(super) to_span: Option<SourceSpan>,
+//RS }
+//RS 
+//RS pub(super) struct InlineRec {
+//RS     pub(super) id: String,
+//RS     pub(super) node_id: String,
+//RS     pub(super) role: String,
+//RS     pub(super) source: String,
+//RS     pub(super) span: SourceSpan,
+//RS }
+//RS 
+//RS fn canvas_reasoning_family(record: &jet_foundation::Facts::DerivationRecord) -> &'static str {
+//RS     let text = format!(
+//RS         "{} {} {} {}",
+//RS         record.subject, record.claim, record.rule, record.producer
+//RS     )
+//RS     .to_ascii_lowercase();
+//RS     let families: [(&str, &[&str]); 8] = [
+//RS         ("value", &["value", "observed"][..]),
+//RS         ("ownership", &["owner", "ownership", "lifetime", "borrow"][..]),
+//RS         ("state", &["state", "transition"][..]),
+//RS         ("effects", &["effect", "event", "callback", "task"][..]),
+//RS         ("dependencies", &["depend", "premise", "input"][..]),
+//RS         ("impact", &["impact", "changed", "change"][..]),
+//RS         ("optimization", &["optim", "copy", "cost", "vector"][..]),
+//RS         ("counterexamples", &["counterexample", "witness"][..]),
+//RS     ];
+//RS     families
+//RS         .iter()
+//RS         .find_map(|(family, needles)| {
+//RS             needles
+//RS                 .iter()
+//RS                 .any(|needle| text.contains(needle))
+//RS                 .then_some(*family)
+//RS         })
+//RS         .unwrap_or("relationships")
+//RS }
+//RS 
+//RS fn canvas_reasoning_json(path: &Path, index: &SemIndex) -> String {
+//RS     let source_path = path.to_string_lossy().replace('\\', "/");
+//RS     let mut records = Vec::new();
+//RS     let mut lens_rows = BTreeMap::<&str, Vec<String>>::new();
+//RS     for record in index.derivations() {
+//RS         let source_span = index
+//RS             .definition_facts()
+//RS             .iter()
+//RS             .find(|fact| fact.stable_id == record.subject)
+//RS             .map(|fact| span_json(fact.span))
+//RS             .unwrap_or_else(|| "null".to_string());
+//RS         records.push(format!(
+//RS             "{{\"derivation\":{},\"source_span\":{}}}",
+//RS             record.to_json(),
+//RS             source_span
+//RS         ));
+//RS         lens_rows
+//RS             .entry(canvas_reasoning_family(record))
+//RS             .or_default()
+//RS             .push(json_str(&record.id));
+//RS     }
+//RS     let lenses = [
+//RS         "value",
+//RS         "ownership",
+//RS         "state",
+//RS         "effects",
+//RS         "dependencies",
+//RS         "impact",
+//RS         "optimization",
+//RS         "counterexamples",
+//RS         "relationships",
+//RS     ]
+//RS     .iter()
+//RS     .map(|name| {
+//RS         let rows = lens_rows
+//RS             .get(name)
+//RS             .map(|rows| rows.join(","))
+//RS             .unwrap_or_default();
+//RS         format!("{{\"name\":{},\"records\":[{}]}}", json_str(name), rows)
+//RS     })
+//RS     .collect::<Vec<_>>()
+//RS     .join(",");
+//RS     format!(
+//RS         "{{\"kind\":\"jet.reasoning/v1\",\"source\":{},\"selection\":\"all\",\"records\":[{}],\"lenses\":[{}],\"limits\":{{\"records\":{},\"records_truncated\":false,\"expanded\":true}}}}",
+//RS         json_str(&source_path),
+//RS         records.join(","),
+//RS         lenses,
+//RS         index.derivations().len(),
+//RS     )
+//RS }
+//RS 
+//RS  
+//RS pub(super) fn project_checked(
+//RS     path: &Path,
+//RS     source_id: &str,
+//RS     src: &str,
+//RS     bundle: &AST::ProgramBundle,
+//RS     facts: &SemIndexEffectFacts,
+//RS     package_facts: Option<jet_driver::Package::PackageFacts>,
+//RS     workspace_overlay_policy: Option<jet_env_model::Overlay::OverlayPolicy>,
+//RS     runtime_events: Option<&str>,
+//RS ) -> Projection {
+//RS     let mut index = jet_semindex::from_checked(bundle, facts);
+//RS     if let Some(package) = package_facts {
+//RS         index.attach_package_facts(package);
+//RS     }
+//RS     if let Some(policy) = workspace_overlay_policy {
+//RS         index.attach_workspace_overlay_policy(policy);
+//RS     }
+//RS     let mut graph_json = Vec::new();
+//RS     let mut inline_spans = Vec::new();
+//RS     let mut anchors = Vec::new();
+//RS     let mut node_refs = Vec::new();
+//RS     let callable_exports = canvas_callable_exports(bundle, facts);
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         collect_item_graphs(
+//RS             path,
+//RS             src,
+//RS             &index,
+//RS             &facts.name_ledger,
+//RS             module_idx,
+//RS             bundle.entry,
+//RS             &module.display,
+//RS             &module.source,
+//RS             &module.items,
+//RS             None,
+//RS             &mut graph_json,
+//RS             &mut inline_spans,
+//RS             &mut anchors,
+//RS             &mut node_refs,
+//RS         );
+//RS     }
+//RS     let game_facts = canvas_game_facts(source_id, src, bundle);
+//RS     let fmt = jet_driver::Formatter::format_source(src).unwrap_or_else(|_| src.to_string());
+//RS     let blueprint =
+//RS         canvas_blueprint_facts_json(path, src, bundle, &index, runtime_events, &game_facts);
+//RS     let enum_catalog = enum_catalog_json(bundle);
+//RS     let pattern_catalog = pattern_catalog_json(bundle);
+//RS     let effect_projection =
+//RS         jet_semindex::render_effect_projection_object(index.effect_projection());
+//RS     let reasoning = canvas_reasoning_json(path, &index);
+//RS     let json = format!(
+//RS         "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\",\"assets\",\"components\"],\"effect_projection\":{},\"enum_variants\":{},\"pattern_variants\":{},\"blueprint\":{},\"reasoning\":{}}}}}",
+//RS         GRAPH_SCHEMA_VERSION,
+//RS         json_str(source_id),
+//RS         json_str(&source_revision(src)),
+//RS         json_str(&source_revision(&fmt)),
+//RS         json_str(src),
+//RS         node_catalog::catalog_json(),
+//RS         graph_json.join(","),
+//RS         index.schema_version(),
+//RS         effect_projection,
+//RS         enum_catalog,
+//RS         pattern_catalog,
+//RS         blueprint,
+//RS         reasoning
+//RS     );
+//RS     Projection {
+//RS         json,
+//RS         inline_exprs: inline_spans,
+//RS         graph_anchors: anchors,
+//RS         node_refs,
+//RS         callable_exports,
+//RS         game_facts,
+//RS     }
+//RS }
+//RS 
+//RS /// Project the checked name ledger's callable surface for the current entry.
+//RS ///
+//RS /// Entry-local private functions are callable from Canvas because the editor
+//RS /// is editing that module. Imported functions must satisfy the same visibility
+//RS /// law as source code (`pub` or package-visible within the package). Matching
+//RS /// by module path and declaration span keeps this projection tied to the
+//RS /// checked AST instead of reconstructing names from SemIndex strings.
+//RS fn canvas_callable_exports(
+//RS     bundle: &AST::ProgramBundle,
+//RS     facts: &SemIndexEffectFacts,
+//RS ) -> Vec<CanvasCallableExport> {
+//RS     facts
+//RS         .name_ledger
+//RS         .declarations()
+//RS         .filter(|declaration| declaration.kind == "function")
+//RS         .filter(|declaration| {
+//RS             bundle
+//RS                 .modules
+//RS                 .get(declaration.module)
+//RS                 .is_some_and(|module| !is_foreign_module(&module.display))
+//RS         })
+//RS         .filter(|declaration| {
+//RS             facts
+//RS                 .name_ledger
+//RS                 .visible(bundle.entry, declaration.module, &declaration.name)
+//RS         })
+//RS         .filter_map(|declaration| {
+//RS             bundle
+//RS                 .modules
+//RS                 .get(declaration.module)
+//RS                 .map(|module| CanvasCallableExport {
+//RS                     module_path: module.display.clone(),
+//RS                     span: declaration.span.into(),
+//RS                     callee: canvas_callable_callee(bundle, declaration),
+//RS                 })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn is_foreign_module(display: &str) -> bool {
+//RS     display
+//RS         .split_once('.')
+//RS         .and_then(|(root, _)| AST::ForeignLanguage::from_root(root))
+//RS         .is_some()
+//RS }
+//RS 
+//RS fn canvas_callable_callee(
+//RS     bundle: &AST::ProgramBundle,
+//RS     declaration: &jet_foundation::Names::NameDeclaration,
+//RS ) -> String {
+//RS     let module_alias = bundle
+//RS         .modules
+//RS         .get(declaration.module)
+//RS         .map(|module| module.alias.as_str())
+//RS         .unwrap_or("");
+//RS     let source_path = source_item_path(
+//RS         &bundle.name_ledger,
+//RS         declaration.module,
+//RS         module_alias,
+//RS         &declaration.name,
+//RS         declaration.span,
+//RS         &[],
+//RS     );
+//RS     let leaf = source_path
+//RS         .rsplit_once('.')
+//RS         .map_or(source_path.as_str(), |(_, leaf)| leaf);
+//RS     if declaration.module == bundle.entry {
+//RS         return source_path;
+//RS     }
+//RS 
+//RS     if let Some(alias) = bundle.name_ledger.aliases().find(|alias| {
+//RS         alias.module == bundle.entry
+//RS             && alias.target_module == Some(declaration.module)
+//RS             && alias
+//RS                 .target
+//RS                 .rsplit_once('.')
+//RS                 .map_or(alias.target.as_str(), |(_, target_leaf)| target_leaf)
+//RS                 == leaf
+//RS     }) {
+//RS         return alias.name.clone();
+//RS     }
+//RS 
+//RS     let module_alias = if module_alias.is_empty() {
+//RS         leaf
+//RS     } else {
+//RS         module_alias
+//RS     };
+//RS     let prefix = bundle
+//RS         .name_ledger
+//RS         .aliases()
+//RS         .find(|alias| {
+//RS             alias.module == bundle.entry
+//RS                 && alias.target_module == Some(declaration.module)
+//RS                 && alias.target == module_alias
+//RS         })
+//RS         .map(|alias| alias.name.as_str())
+//RS         .unwrap_or(module_alias);
+//RS     format!("{prefix}.{source_path}")
+//RS }
+//RS 
+//RS fn enum_catalog_json(bundle: &AST::ProgramBundle) -> String {
+//RS     let mut catalog = BTreeMap::<String, Vec<String>>::new();
+//RS     for module in &bundle.modules {
+//RS         collect_enum_variants(&module.items, &mut catalog);
+//RS     }
+//RS     let entries = catalog
+//RS         .into_iter()
+//RS         .map(|(name, variants)| {
+//RS             let variants = variants
+//RS                 .into_iter()
+//RS                 .map(|variant| {
+//RS                     format!(
+//RS                         "{{\"name\":{},\"source\":{}}}",
+//RS                         json_str(&variant),
+//RS                         json_str(&format!("{name}.{variant}"))
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             format!("{}:[{}]", json_str(&name), variants)
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("{{{entries}}}")
+//RS }
+//RS 
+//RS fn collect_enum_variants(items: &[Item], catalog: &mut BTreeMap<String, Vec<String>>) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Enum(def) => {
+//RS                 let variants = def
+//RS                     .variants
+//RS                     .iter()
+//RS                     .filter(|variant| matches!(variant.payload, AST::VariantPayload::Unit))
+//RS                     .map(|variant| variant.name.clone())
+//RS                     .collect::<Vec<_>>();
+//RS                 catalog.entry(def.name.clone()).or_insert(variants);
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     collect_enum_variants(body, catalog);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn pattern_catalog_json(bundle: &AST::ProgramBundle) -> String {
+//RS     let mut catalog = BTreeMap::<String, Vec<(String, usize)>>::new();
+//RS     for module in &bundle.modules {
+//RS         collect_pattern_variants(&module.items, &mut catalog);
+//RS     }
+//RS     let entries = catalog
+//RS         .into_iter()
+//RS         .map(|(name, variants)| {
+//RS             let variants = variants
+//RS                 .into_iter()
+//RS                 .map(|(variant, arity)| {
+//RS                     format!("{{\"name\":{},\"arity\":{}}}", json_str(&variant), arity)
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             format!("{}:[{}]", json_str(&name), variants)
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("{{{entries}}}")
+//RS }
+//RS 
+//RS fn collect_pattern_variants(items: &[Item], catalog: &mut BTreeMap<String, Vec<(String, usize)>>) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Enum(def) => {
+//RS                 let variants = def
+//RS                     .variants
+//RS                     .iter()
+//RS                     .map(|variant| {
+//RS                         let arity = match &variant.payload {
+//RS                             AST::VariantPayload::Unit => 0,
+//RS                             AST::VariantPayload::Single(_, _) => 1,
+//RS                             AST::VariantPayload::Named(fields) => fields.len(),
+//RS                         };
+//RS                         (variant.name.clone(), arity)
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 catalog.entry(def.name.clone()).or_insert(variants);
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     collect_pattern_variants(body, catalog);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_item_graphs(
+//RS     entry_path: &Path,
+//RS     entry_src: &str,
+//RS     index: &SemIndex,
+//RS     ledger: &jet_foundation::Names::NameLedger,
+//RS     module_idx: usize,
+//RS     entry_module_idx: usize,
+//RS     module_display: &str,
+//RS     module_src: &str,
+//RS     items: &[Item],
+//RS     owner: Option<&str>,
+//RS     out: &mut Vec<String>,
+//RS     inline_spans: &mut Vec<InlineExpr>,
+//RS     anchors: &mut Vec<GraphEditAnchor>,
+//RS     node_refs: &mut Vec<NodeQueryRef>,
+//RS ) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(f) => {
+//RS                 let graph = project_func(index, module_display, module_src, f);
+//RS                 let ledger_name = owner
+//RS                     .map(|owner| jet_foundation::Names::member_name(owner, &f.name))
+//RS                     .unwrap_or_else(|| f.name.clone());
+//RS                 let visibility =
+//RS                     super::graph_json::ledger_function_visibility(ledger, module_idx, &ledger_name);
+//RS                 inline_spans.extend(graph.inline_exprs.iter().map(|i| InlineExpr {
+//RS                     id: i.id.clone(),
+//RS                     span: i.span,
+//RS                 }));
+//RS                 if module_idx == entry_module_idx {
+//RS                     anchors.push(GraphEditAnchor {
+//RS                         graph_id: graph.graph_id.clone(),
+//RS                         insert_offset: insert_offset(entry_src, f),
+//RS                         fallible: function_is_fallible(f),
+//RS                     });
+//RS                 }
+//RS                 collect_node_refs(&graph, node_refs);
+//RS                 out.push(graph_to_json(&graph, f, module_src, visibility));
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for method in &s.methods {
+//RS                     let graph = project_func(index, module_display, module_src, method);
+//RS                     let visibility = super::graph_json::ledger_function_visibility(
+//RS                         ledger,
+//RS                         module_idx,
+//RS                         &format!("{}.{}", s.name, method.name),
+//RS                     );
+//RS                     inline_spans.extend(graph.inline_exprs.iter().map(|i| InlineExpr {
+//RS                         id: i.id.clone(),
+//RS                         span: i.span,
+//RS                     }));
+//RS                     if module_idx == entry_module_idx {
+//RS                         anchors.push(GraphEditAnchor {
+//RS                             graph_id: graph.graph_id.clone(),
+//RS                             insert_offset: insert_offset(entry_src, method),
+//RS                             fallible: function_is_fallible(method),
+//RS                         });
+//RS                     }
+//RS                     collect_node_refs(&graph, node_refs);
+//RS                     out.push(graph_to_json(&graph, method, module_src, visibility));
+//RS                 }
+//RS             }
+//RS             Item::Impl(i) => {
+//RS                 for method in &i.methods {
+//RS                     let graph = project_func(index, module_display, module_src, method);
+//RS                     let visibility = super::graph_json::ledger_function_visibility(
+//RS                         ledger,
+//RS                         module_idx,
+//RS                         &format!("{}.{}", i.type_name, method.name),
+//RS                     );
+//RS                     inline_spans.extend(graph.inline_exprs.iter().map(|e| InlineExpr {
+//RS                         id: e.id.clone(),
+//RS                         span: e.span,
+//RS                     }));
+//RS                     if module_idx == entry_module_idx {
+//RS                         anchors.push(GraphEditAnchor {
+//RS                             graph_id: graph.graph_id.clone(),
+//RS                             insert_offset: insert_offset(entry_src, method),
+//RS                             fallible: function_is_fallible(method),
+//RS                         });
+//RS                     }
+//RS                     collect_node_refs(&graph, node_refs);
+//RS                     out.push(graph_to_json(&graph, method, module_src, visibility));
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(m) => {
+//RS                 if let Some(body) = &m.body {
+//RS                     collect_item_graphs(
+//RS                         entry_path,
+//RS                         entry_src,
+//RS                         index,
+//RS                         ledger,
+//RS                         module_idx,
+//RS                         entry_module_idx,
+//RS                         module_display,
+//RS                         module_src,
+//RS                         body,
+//RS                         Some(&m.name),
+//RS                         out,
+//RS                         inline_spans,
+//RS                         anchors,
+//RS                         node_refs,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     let _ = entry_path;
+//RS }
+//RS 
+//RS fn function_is_fallible(f: &AST::Func) -> bool {
+//RS     matches!(f.return_type.as_ref(), Some(AST::Type::Result { .. }))
+//RS }
+//RS 
+//RS fn canvas_blueprint_facts_json(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     bundle: &AST::ProgramBundle,
+//RS     index: &SemIndex,
+//RS     runtime_events: Option<&str>,
+//RS     game_facts: &[CanvasGameFact],
+//RS ) -> String {
+//RS     let mut interfaces = Vec::new();
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         let items = module.items.iter().collect::<Vec<_>>();
+//RS         collect_interface_facts(
+//RS             &items,
+//RS             &mut interfaces,
+//RS             &[],
+//RS             &module.source,
+//RS             module_idx,
+//RS             &module.alias,
+//RS             &bundle.name_ledger,
+//RS         );
+//RS     }
+//RS     let task_flows = task_flow_facts(src).join(",");
+//RS     let outputs = index
+//RS         .outputs()
+//RS         .iter()
+//RS         .map(output_fact_json)
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let package_facts = index
+//RS         .package_facts()
+//RS         .map(jet_semindex::package_facts_json)
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let workspace_overlays = index
+//RS         .workspace_overlay_policy()
+//RS         .map(jet_semindex::workspace_overlay_policy_json)
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let event_dispatchers = event_dispatcher_facts(path, src, bundle, index).join(",");
+//RS     let state_graphs = index
+//RS         .state_graphs()
+//RS         .iter()
+//RS         .map(state_graph_json)
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let assets = game_facts
+//RS         .iter()
+//RS         .filter(|fact| fact.kind == "asset")
+//RS         .map(canvas_game_fact_json)
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let components = game_facts
+//RS         .iter()
+//RS         .filter(|fact| fact.kind == "component")
+//RS         .map(canvas_game_fact_json)
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"runtime_events\":{},\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"assets\":[{}],\"components\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
+//RS         runtime_events.unwrap_or("null"),
+//RS         event_dispatchers,
+//RS         interfaces.join(","),
+//RS         task_flows,
+//RS         outputs,
+//RS         state_graphs,
+//RS         assets,
+//RS         components,
+//RS         package_facts,
+//RS         workspace_overlays,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn canvas_game_fact_json(fact: &CanvasGameFact) -> String {
+//RS     let field_span = fact
+//RS         .field_span
+//RS         .map(span_json)
+//RS         .unwrap_or_else(|| "null".to_string());
+//RS     let fields = format!(
+//RS         "{{{}:{{\"source_span\":{},\"source\":{}}}}}",
+//RS         json_str(&fact.field),
+//RS         field_span,
+//RS         json_str(&fact.value_source),
+//RS     );
+//RS     format!(
+//RS         "{{\"kind\":{},\"operation\":{},\"source_id\":{},\"source_span\":{},\"authored_instance_id\":{},\"field\":{},\"value\":{},\"fields\":{},\"source_truth\":\"ordinary_jet_source\",\"fact_source\":\"checked_game_call\"}}",
+//RS         json_str(&fact.kind),
+//RS         json_str(&fact.operation),
+//RS         json_str(&fact.source_id),
+//RS         span_json(fact.source_span),
+//RS         json_str(&fact.authored_instance_id),
+//RS         json_str(&fact.field),
+//RS         json_str(&fact.value_source),
+//RS         fields,
+//RS     )
+//RS }
+//RS fn canvas_game_facts(
+//RS     source_id: &str,
+//RS     src: &str,
+//RS     bundle: &AST::ProgramBundle,
+//RS ) -> Vec<CanvasGameFact> {
+//RS     let mut facts = Vec::new();
+//RS     let Some(module) = bundle.modules.get(bundle.entry) else {
+//RS         return facts;
+//RS     };
+//RS     collect_game_items(&module.items, source_id, src, &mut facts);
+//RS     facts.sort_by_key(|fact| (fact.source_span.start, fact.source_span.end));
+//RS     facts
+//RS }
+//RS 
+//RS fn collect_game_items(
+//RS     items: &[Item],
+//RS     source_id: &str,
+//RS     src: &str,
+//RS     out: &mut Vec<CanvasGameFact>,
+//RS ) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Func(function) => collect_game_statements(&function.body, source_id, src, out),
+//RS             Item::Struct(structure) => {
+//RS                 for method in &structure.methods {
+//RS                     collect_game_statements(&method.body, source_id, src, out);
+//RS                 }
+//RS             }
+//RS             Item::Impl(implementation) => {
+//RS                 for method in &implementation.methods {
+//RS                     collect_game_statements(&method.body, source_id, src, out);
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     collect_game_items(body, source_id, src, out);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_game_statements(
+//RS     statements: &[Stmt],
+//RS     source_id: &str,
+//RS     src: &str,
+//RS     out: &mut Vec<CanvasGameFact>,
+//RS ) {
+//RS     for statement in statements {
+//RS         statement.for_each_expr(|expr| {
+//RS             let Expr::MethodCall {
+//RS                 receiver,
+//RS                 method,
+//RS                 method_span,
+//RS                 owner_type_args,
+//RS                 type_args,
+//RS                 args,
+//RS                 ..
+//RS             } = expr
+//RS             else {
+//RS                 return;
+//RS             };
+//RS             let source_span = game_method_call_span(src, receiver, *method_span);
+//RS             let (operation, field, value_source, field_span) =
+//RS                 if matches!(method.as_str(), "image" | "sound")
+//RS                     && game_assets_receiver(receiver)
+//RS                 {
+//RS                     let Some(argument) = args.first() else {
+//RS                         return;
+//RS                     };
+//RS                     let span: SourceSpan = argument.expr.span().into();
+//RS                     (
+//RS                         format!("scene.assets.{method}"),
+//RS                         "path".to_string(),
+//RS                         source_span_text(src, span),
+//RS                         Some(span),
+//RS                     )
+//RS                 } else if method == "component" {
+//RS                     let type_arg = type_args.first().or_else(|| owner_type_args.first());
+//RS                     let (field, value_source, field_span) = if let Some(type_arg) = type_arg {
+//RS                         let value = type_arg.name();
+//RS                         let span = game_type_name_span(src, source_span, *method_span, &value);
+//RS                         ("component".to_string(), value, span)
+//RS                     } else if let Some(argument) = args.first() {
+//RS                         let span: SourceSpan = argument.expr.span().into();
+//RS                         (
+//RS                             "component".to_string(),
+//RS                             source_span_text(src, span),
+//RS                             Some(span),
+//RS                         )
+//RS                     } else {
+//RS                         return;
+//RS                     };
+//RS                     ("scene.component".to_string(), field, value_source, field_span)
+//RS                 } else {
+//RS                     return;
+//RS                 };
+//RS             let authored_instance_id = format!(
+//RS                 "{source_id}:game:{operation}:{}-{}",
+//RS                 source_span.start, source_span.end
+//RS             );
+//RS             out.push(CanvasGameFact {
+//RS                 source_id: source_id.to_string(),
+//RS                 kind: if operation == "scene.component" {
+//RS                     "component".to_string()
+//RS                 } else {
+//RS                     "asset".to_string()
+//RS                 },
+//RS                 operation,
+//RS                 field,
+//RS                 value_source,
+//RS                 source_span,
+//RS                 field_span,
+//RS                 authored_instance_id,
+//RS             });
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn game_assets_receiver(expr: &Expr) -> bool {
+//RS     match expr {
+//RS         Expr::Field(_, name, _) => name == "assets",
+//RS         Expr::Paren(inner, _) => game_assets_receiver(inner),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS fn game_receiver_start(expr: &Expr) -> usize {
+//RS     match expr {
+//RS         Expr::Field(base, ..) | Expr::Paren(base, ..) => game_receiver_start(base),
+//RS         _ => expr.span().start,
+//RS     }
+//RS }
+//RS 
+//RS fn game_method_call_span(
+//RS     src: &str,
+//RS     receiver: &Expr,
+//RS     method_span: jet_driver::Diagnostics::Span,
+//RS ) -> SourceSpan {
+//RS     let fallback = method_span.into();
+//RS     let start = game_receiver_start(receiver);
+//RS     let Some(open_relative) = src
+//RS         .get(method_span.end..)
+//RS         .and_then(|tail| tail.find('('))
+//RS     else {
+//RS         return fallback;
+//RS     };
+//RS     let open = method_span.end + open_relative;
+//RS     let Some(close) = matching_call_close(src, open) else {
+//RS         return fallback;
+//RS     };
+//RS     SourceSpan {
+//RS         start,
+//RS         end: close,
+//RS     }
+//RS }
+//RS 
+//RS fn matching_call_close(src: &str, open: usize) -> Option<usize> {
+//RS     let bytes = src.as_bytes();
+//RS     let mut depth = 1usize;
+//RS     let mut in_string = false;
+//RS     let mut escaped = false;
+//RS     for index in (open + 1)..bytes.len() {
+//RS         let byte = bytes[index];
+//RS         if in_string {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if byte == b'\\' {
+//RS                 escaped = true;
+//RS             } else if byte == b'"' {
+//RS                 in_string = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match byte {
+//RS             b'"' => in_string = true,
+//RS             b'(' => depth += 1,
+//RS             b')' => {
+//RS                 depth = depth.saturating_sub(1);
+//RS                 if depth == 0 {
+//RS                     return Some(index + 1);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS 
+//RS fn game_type_name_span(
+//RS     src: &str,
+//RS     enclosing: SourceSpan,
+//RS     method_span: jet_driver::Diagnostics::Span,
+//RS     type_name: &str,
+//RS ) -> Option<SourceSpan> {
+//RS     let start = method_span.end.min(enclosing.end);
+//RS     let end = enclosing.end.min(src.len());
+//RS     if start >= end {
+//RS         return None;
+//RS     }
+//RS     let relative = src.get(start..end)?.find(type_name)?;
+//RS     let token_start = start + relative;
+//RS     Some(SourceSpan {
+//RS         start: token_start,
+//RS         end: token_start + type_name.len(),
+//RS     })
+//RS }
+//RS 
+//RS fn source_span_text(src: &str, span: SourceSpan) -> String {
+//RS     src.get(span.start..span.end)
+//RS         .unwrap_or("")
+//RS         .trim()
+//RS         .to_string()
+//RS }
+//RS 
+//RS 
+//RS fn state_graph_json(graph: &StateGraphFact) -> String {
+//RS     let states = graph
+//RS         .states
+//RS         .iter()
+//RS         .map(|state| {
+//RS             let reachable = state
+//RS                 .reachable
+//RS                 .map_or_else(|| "null".to_string(), |value| value.to_string());
+//RS             format!(
+//RS                 "{{\"name\":{},\"terminal\":{},\"reachable\":{},\"span\":{}}}",
+//RS                 json_str(&state.name),
+//RS                 state.terminal,
+//RS                 reachable,
+//RS                 span_json(state.span)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let transitions = graph
+//RS         .transitions
+//RS         .iter()
+//RS         .map(|transition| {
+//RS             let from = transition
+//RS                 .from
+//RS                 .as_ref()
+//RS                 .map_or_else(|| "null".to_string(), |value| json_str(value));
+//RS             format!(
+//RS                 "{{\"operation\":{},\"from\":{},\"to\":{}}}",
+//RS                 json_str(&transition.operation),
+//RS                 from,
+//RS                 json_str(&transition.to)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"owner\":{},\"module\":{},\"states\":[{}],\"transitions\":[{}]}}",
+//RS         json_str(&graph.owner),
+//RS         json_str(&graph.module_path),
+//RS         states,
+//RS         transitions
+//RS     )
+//RS }
+//RS 
+//RS fn output_fact_json(output: &jet_semindex::OutputFact) -> String {
+//RS     let effects = output
+//RS         .entry
+//RS         .effects
+//RS         .iter()
+//RS         .map(|effect| json_str(effect))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let params = output
+//RS         .entry
+//RS         .params
+//RS         .iter()
+//RS         .map(|param| json_str(param))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"binding\":{},\"kind\":{},\"name\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"failure_contract\":{},\"failure_source\":{},\"authority\":{},\"effects\":[{}]}},\"fact_source\":\"semindex_resolved_output\"}}",
+//RS         json_str(&output.binding), json_str(&output.kind), json_str(&output.name),
+//RS         json_str(&output.entry.identity), json_str(&output.entry.name),
+//RS         json_str(&output.entry.module_path), span_json(output.entry.definition_span),
+//RS         span_json(output.entry.reference_span), params,
+//RS         output.entry.return_type.as_deref().map(json_str).unwrap_or_else(|| "null".to_string()),
+//RS         json_str(&output.entry.failure_contract), json_str(&output.entry.failure_source),
+//RS         json_str(&output.entry.authority), effects,
+//RS     )
+//RS }
+//RS 
+//RS fn collect_interface_facts(
+//RS     items: &[&Item],
+//RS     out: &mut Vec<String>,
+//RS     scope: &[String],
+//RS     src: &str,
+//RS     module_idx: usize,
+//RS     module_alias: &str,
+//RS     name_ledger: &jet_foundation::Names::NameLedger,
+//RS ) {
+//RS     for item in items {
+//RS         match item {
+//RS             Item::Trait(t) => {
+//RS                 let trait_path = source_item_path(
+//RS                     name_ledger,
+//RS                     module_idx,
+//RS                     module_alias,
+//RS                     &t.name,
+//RS                     t.name_span,
+//RS                     scope,
+//RS                 );
+//RS                 out.push(trait_fact_json(src, t, &trait_path));
+//RS             }
+//RS             Item::Impl(i) if i.trait_name.is_some() && !i.is_generated_serde => {
+//RS                 let type_path = source_item_path(
+//RS                     name_ledger,
+//RS                     module_idx,
+//RS                     module_alias,
+//RS                     &i.type_name,
+//RS                     i.type_span,
+//RS                     scope,
+//RS                 );
+//RS                 let trait_name = i.trait_name.as_deref().unwrap_or("");
+//RS                 let trait_path = source_item_path(
+//RS                     name_ledger,
+//RS                     module_idx,
+//RS                     module_alias,
+//RS                     trait_name,
+//RS                     i.trait_span.unwrap_or(i.type_span),
+//RS                     scope,
+//RS                 );
+//RS                 out.push(impl_fact_json(i, &type_path, &trait_path));
+//RS             }
+//RS             Item::Struct(s) => {
+//RS                 for block in s
+//RS                     .trait_impls
+//RS                     .iter()
+//RS                     .filter(|block| !block.compiler_generated)
+//RS                 {
+//RS                     let type_path = source_item_path(
+//RS                         name_ledger,
+//RS                         module_idx,
+//RS                         module_alias,
+//RS                         &s.name,
+//RS                         s.name_span,
+//RS                         scope,
+//RS                     );
+//RS                     let trait_path = source_item_path(
+//RS                         name_ledger,
+//RS                         module_idx,
+//RS                         module_alias,
+//RS                         &block.trait_name,
+//RS                         block.trait_span,
+//RS                         scope,
+//RS                     );
+//RS                     out.push(inline_trait_impl_fact_json(&type_path, &trait_path, block));
+//RS                 }
+//RS             }
+//RS             Item::Enum(e) => {
+//RS                 for block in e
+//RS                     .trait_impls
+//RS                     .iter()
+//RS                     .filter(|block| !block.compiler_generated)
+//RS                 {
+//RS                     let type_path = source_item_path(
+//RS                         name_ledger,
+//RS                         module_idx,
+//RS                         module_alias,
+//RS                         &e.name,
+//RS                         e.name_span,
+//RS                         scope,
+//RS                     );
+//RS                     let trait_path = source_item_path(
+//RS                         name_ledger,
+//RS                         module_idx,
+//RS                         module_alias,
+//RS                         &block.trait_name,
+//RS                         block.trait_span,
+//RS                         scope,
+//RS                     );
+//RS                     out.push(inline_trait_impl_fact_json(&type_path, &trait_path, block));
+//RS                 }
+//RS             }
+//RS             Item::CodeModule(m) => {
+//RS                 if let Some(body) = &m.body {
+//RS                     let nested = body.iter().collect::<Vec<_>>();
+//RS                     let mut nested_scope = scope.to_vec();
+//RS                     nested_scope.push(m.name.clone());
+//RS                     collect_interface_facts(
+//RS                         &nested,
+//RS                         out,
+//RS                         &nested_scope,
+//RS                         src,
+//RS                         module_idx,
+//RS                         module_alias,
+//RS                         name_ledger,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn source_item_path(
+//RS     name_ledger: &jet_foundation::Names::NameLedger,
+//RS     module_idx: usize,
+//RS     module_alias: &str,
+//RS     internal_name: &str,
+//RS     span: Span,
+//RS     fallback_scope: &[String],
+//RS ) -> String {
+//RS     for candidate in [
+//RS         format!("{module_alias}.{internal_name}"),
+//RS         if fallback_scope.is_empty() {
+//RS             format!("{module_alias}.{internal_name}")
+//RS         } else {
+//RS             format!(
+//RS                 "{module_alias}.{}.{}",
+//RS                 fallback_scope.join("."),
+//RS                 internal_name
+//RS             )
+//RS         },
+//RS     ] {
+//RS         if let Some(path) = name_ledger.display_path(module_idx, &candidate, Some(module_idx)) {
+//RS             return strip_module_alias(&path, module_alias);
+//RS         }
+//RS     }
+//RS     if let Some(path) = name_ledger.canonical_path_at(module_idx, span.start, span.end) {
+//RS         return strip_module_alias(&path, module_alias);
+//RS     }
+//RS     let fallback = if fallback_scope.is_empty() {
+//RS         internal_name.to_string()
+//RS     } else if internal_name.contains('.') {
+//RS         internal_name.to_string()
+//RS     } else {
+//RS         format!("{}.{}", fallback_scope.join("."), internal_name)
+//RS     };
+//RS     strip_module_alias(&fallback, module_alias)
+//RS }
+//RS 
+//RS fn strip_module_alias(path: &str, module_alias: &str) -> String {
+//RS     path.strip_prefix(module_alias)
+//RS         .and_then(|rest| rest.strip_prefix('.'))
+//RS         .unwrap_or(path)
+//RS         .to_string()
+//RS }
+//RS 
+//RS fn trait_fact_json(src: &str, t: &AST::TraitDef, display_path: &str) -> String {
+//RS     let (scope, trait_name) = display_path
+//RS         .rsplit_once('.')
+//RS         .map_or(("", display_path), |(scope, name)| (scope, name));
+//RS     let associated_types = t
+//RS         .assoc_types
+//RS         .iter()
+//RS         .map(|(name, _)| json_str(name))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let methods = t
+//RS         .methods
+//RS         .iter()
+//RS         .map(|m| {
+//RS             let effects = m
+//RS                 .declared_effects
+//RS                 .as_ref()
+//RS                 .map(|effects| {
+//RS                     effects
+//RS                         .iter()
+//RS                         .map(|(name, _)| json_str(name))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(",")
+//RS                 })
+//RS                 .unwrap_or_default();
+//RS             format!(
+//RS                 "{{\"name\":{},\"signature\":{},\"required\":{},\"default\":{},\"pure\":{},\"effects\":[{}],\"source_span\":{}}}",
+//RS                 json_str(&m.name),
+//RS                 json_str(&trait_method_signature(src, m)),
+//RS                 if m.default_body.is_none() { "true" } else { "false" },
+//RS                 if m.default_body.is_some() { "true" } else { "false" },
+//RS                 if m.is_pure { "true" } else { "false" },
+//RS                 effects,
+//RS                 span_json(m.span.into())
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"kind\":\"trait_interface\",\"trait\":{},\"scope\":{},\"associated_types\":[{}],\"methods\":[{}],\"source_span\":{},\"authoring\":[\"create_trait_impl\",\"jump_trait_to_impls\",\"palette_trait_methods\"]}}",
+//RS         json_str(trait_name),
+//RS         json_str(scope),
+//RS         associated_types,
+//RS         methods,
+//RS         span_json(t.name_span.into())
+//RS     )
+//RS }
+//RS 
+//RS fn impl_fact_json(i: &AST::ImplDef, type_path: &str, trait_path: &str) -> String {
+//RS     let methods = i
+//RS         .methods
+//RS         .iter()
+//RS         .map(|m| json_str(&m.name))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let associated_types = i
+//RS         .assoc_type_impls
+//RS         .iter()
+//RS         .map(|(name, _, _)| json_str(name))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"scope\":{},\"methods\":[{}],\"associated_types\":[{}],\"delegation_field\":{},\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
+//RS         json_str(type_path),
+//RS         json_str(trait_path.rsplit_once('.').map_or(trait_path, |(_, name)| name)),
+//RS         json_str(trait_path.rsplit_once('.').map_or("", |(scope, _)| scope)),
+//RS         methods,
+//RS         associated_types,
+//RS         i.delegation_field
+//RS             .as_deref()
+//RS             .map(json_str)
+//RS             .unwrap_or_else(|| "null".to_string()),
+//RS         span_json(i.type_span.into())
+//RS     )
+//RS }
+//RS 
+//RS fn inline_trait_impl_fact_json(
+//RS     type_path: &str,
+//RS     trait_path: &str,
+//RS     block: &AST::TraitImplBlock,
+//RS ) -> String {
+//RS     let methods = block
+//RS         .methods
+//RS         .iter()
+//RS         .map(|m| json_str(&m.name))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let associated_types = block
+//RS         .assoc_type_impls
+//RS         .iter()
+//RS         .map(|(name, _, _)| json_str(name))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"scope\":{},\"methods\":[{}],\"associated_types\":[{}],\"delegation_field\":null,\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
+//RS         json_str(type_path),
+//RS         json_str(trait_path.rsplit_once('.').map_or(trait_path, |(_, name)| name)),
+//RS         json_str(trait_path.rsplit_once('.').map_or("", |(scope, _)| scope)),
+//RS         methods,
+//RS         associated_types,
+//RS         span_json(block.trait_span.into())
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn trait_method_signature(src: &str, m: &AST::TraitMethodSig) -> String {
+//RS     let params = m
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .flat_map(|(i, p)| {
+//RS             let mut parts = Vec::new();
+//RS             if p.zone == AST::ParamZone::LabelOnly
+//RS                 && !m.params[..i]
+//RS                     .iter()
+//RS                     .any(|previous| previous.zone == AST::ParamZone::LabelOnly)
+//RS             {
+//RS                 parts.push("*".to_string());
+//RS             }
+//RS             parts.push(trait_param_signature(src, p));
+//RS             if p.zone == AST::ParamZone::PositionalOnly
+//RS                 && m.params
+//RS                     .get(i + 1)
+//RS                     .is_none_or(|next| next.zone != AST::ParamZone::PositionalOnly)
+//RS             {
+//RS                 parts.push("/".to_string());
+//RS             }
+//RS             parts
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let ret = m
+//RS         .return_type
+//RS         .as_ref()
+//RS         .map(|t| format!(" {}", t.name()))
+//RS         .unwrap_or_default();
+//RS     let provenance = trait_return_view_from(m, &m.params);
+//RS     let effects = if let Some(row) = &m.declared_effects {
+//RS         format!(
+//RS             " -[{}]>",
+//RS             row.iter()
+//RS                 .map(|(name, _)| name.as_str())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         )
+//RS     } else if m.is_pure {
+//RS         " -[]>".to_string()
+//RS     } else {
+//RS         String::new()
+//RS     };
+//RS     format!("fn {}({}){}{}{}", m.name, params, ret, provenance, effects)
+//RS }
+//RS 
+//RS fn event_dispatcher_facts(
+//RS     path: &Path,
+//RS     source: &str,
+//RS     bundle: &AST::ProgramBundle,
+//RS     index: &SemIndex,
+//RS ) -> Vec<String> {
+//RS     let path_text = path.to_string_lossy();
+//RS     let Some(module) = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .find(|module| module.display == path_text.as_ref())
+//RS         .or_else(|| bundle.modules.iter().find(|module| module.source == source))
+//RS     else {
+//RS         return Vec::new();
+//RS     };
+//RS     let src = module.source.as_str();
+//RS     index
+//RS         .call_edges()
+//RS         .iter()
+//RS         .filter(|call| call.module_path == module.display)
+//RS         .filter_map(|call| {
+//RS             let aliases = event_module_aliases(src);
+//RS             let call_source_span = event_call_span(src, call.call_span).unwrap_or(call.call_span);
+//RS             let source = src
+//RS                 .get(call_source_span.start..call_source_span.end)
+//RS                 .unwrap_or(&call.callee);
+//RS             let constructor = event_constructor_kind(
+//RS                 src,
+//RS                 call.call_span,
+//RS                 call.callee.as_str(),
+//RS                 source,
+//RS                 &aliases,
+//RS             );
+//RS             let receiver = event_receiver(src, index, call.call_span, &module.display);
+//RS             let kind = constructor.or_else(|| {
+//RS                 let receiver_type = receiver.as_ref().map(|(_, ty, _)| ty.as_str())?;
+//RS                 event_method_kind(receiver_type, call.callee.as_str())
+//RS             })?;
+//RS             let scope = event_scope_argument(index, call_source_span, &module.display);
+//RS             let receiver_type = constructor_type(call.callee.as_str(), source)
+//RS                 .or_else(|| receiver.as_ref().map(|(_, ty, _)| ty.clone()));
+//RS             let receiver_name = receiver.as_ref().map(|(name, _, _)| name.as_str());
+//RS             let receiver_span = receiver.as_ref().map(|(_, _, span)| span_json(*span));
+//RS             let scope_name = scope.as_ref().map(|(name, _)| name.as_str());
+//RS             let scope_span = scope.as_ref().map(|(_, span)| span_json(*span));
+//RS             Some(format!(
+//RS                 "{{\"kind\":{},\"source\":{},\"source_span\":{},\"receiver\":{},\"receiver_source_span\":{},\"receiver_type\":{},\"scope\":{},\"scope_source_span\":{},\"fact_source\":\"semindex_checked_call\",\"lifetime\":\"EventScope-owned\",\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"],\"semantics\":\"core.event_source_truth\"}}",
+//RS                 json_str(kind),
+//RS                 json_str(source),
+//RS                 span_json(call_source_span),
+//RS                 receiver_name.map(json_str).unwrap_or_else(|| "null".to_string()),
+//RS                 receiver_span.unwrap_or_else(|| "null".to_string()),
+//RS                 receiver_type
+//RS                     .as_deref()
+//RS                     .map(json_str)
+//RS                     .unwrap_or_else(|| "null".to_string()),
+//RS                 scope_name.map(json_str).unwrap_or_else(|| "null".to_string()),
+//RS                 scope_span.unwrap_or_else(|| "null".to_string()),
+//RS             ))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn event_module_aliases(src: &str) -> Vec<String> {
+//RS     let mut aliases = Vec::new();
+//RS     for line in src.lines() {
+//RS         let line = line.split("//").next().unwrap_or("").trim();
+//RS         let Some(rest) = line.strip_prefix("use core.") else {
+//RS             continue;
+//RS         };
+//RS         let full = format!("core.{rest}");
+//RS         let (module, alias) = full
+//RS             .split_once(" as ")
+//RS             .map(|(module, alias)| (module.trim(), alias.trim()))
+//RS             .unwrap_or_else(|| {
+//RS                 let module = full.trim();
+//RS                 (module, module.rsplit('.').next().unwrap_or(""))
+//RS             });
+//RS         if module == "core.event" && !alias.is_empty() {
+//RS             aliases.push(alias.to_string());
+//RS         }
+//RS     }
+//RS     aliases.sort();
+//RS     aliases.dedup();
+//RS     aliases
+//RS }
+//RS 
+//RS fn event_constructor_kind(
+//RS     src: &str,
+//RS     call_span: SourceSpan,
+//RS     callee: &str,
+//RS     _source: &str,
+//RS     aliases: &[String],
+//RS ) -> Option<&'static str> {
+//RS     let before = src.get(..call_span.start.min(src.len()))?.trim_end();
+//RS     if !aliases
+//RS         .iter()
+//RS         .any(|alias| before.ends_with(&format!("{alias}.")))
+//RS     {
+//RS         return None;
+//RS     }
+//RS     match callee {
+//RS         "new" => Some("event_stream_create"),
+//RS         "with_policy" => Some("event_stream_create_with_policy"),
+//RS         "async_result" => Some("async_event_create"),
+//RS         "hook" => Some("hook_create"),
+//RS         "decision_hook" => Some("decision_hook_create"),
+//RS         "scope" => Some("event_scope_create"),
+//RS         "policy_sync" => Some("event_policy_sync"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn constructor_type(callee: &str, source: &str) -> Option<String> {
+//RS     let type_args = source
+//RS         .find('<')
+//RS         .and_then(|start| {
+//RS             source[start + 1..]
+//RS                 .find('>')
+//RS                 .map(|end| &source[start + 1..start + 1 + end])
+//RS         })
+//RS         .map(str::trim)
+//RS         .filter(|args| !args.is_empty());
+//RS     match callee {
+//RS         "new" | "with_policy" => type_args.map(|args| format!("Event<{args}>")),
+//RS         "async_result" => type_args.map(|args| format!("AsyncEvent<{args}>")),
+//RS         "hook" => type_args.map(|args| format!("Hook<{args}>")),
+//RS         "decision_hook" => type_args.map(|args| format!("DecisionHook<{args}>")),
+//RS         "scope" => Some("EventScope".to_string()),
+//RS         "policy_sync" => Some("EventPolicy".to_string()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn event_call_span(src: &str, callee_span: SourceSpan) -> Option<SourceSpan> {
+//RS     let tail = src.get(callee_span.end..)?;
+//RS     let open_offset = tail.find('(')?;
+//RS     let open = callee_span.end + open_offset;
+//RS     let bytes = src.as_bytes();
+//RS     let mut depth = 0usize;
+//RS     let mut quoted = false;
+//RS     let mut escaped = false;
+//RS     for (offset, byte) in bytes.iter().enumerate().skip(open) {
+//RS         let ch = *byte as char;
+//RS         if quoted {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if ch == '\\' {
+//RS                 escaped = true;
+//RS             } else if ch == '"' {
+//RS                 quoted = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if ch == '"' {
+//RS             quoted = true;
+//RS             continue;
+//RS         }
+//RS         if ch == '(' {
+//RS             depth += 1;
+//RS         } else if ch == ')' {
+//RS             depth = depth.saturating_sub(1);
+//RS             if depth == 0 {
+//RS                 return Some(SourceSpan {
+//RS                     start: callee_span.start,
+//RS                     end: offset + 1,
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn event_receiver(
+//RS     src: &str,
+//RS     index: &SemIndex,
+//RS     call_span: SourceSpan,
+//RS     module_path: &str,
+//RS ) -> Option<(String, String, SourceSpan)> {
+//RS     let reference = index
+//RS         .references()
+//RS         .iter()
+//RS         .filter(|reference| reference.module_path == module_path)
+//RS         .filter(|reference| reference.span.end <= call_span.start)
+//RS         .filter(|reference| {
+//RS             src.get(reference.span.end..call_span.start)
+//RS                 .is_some_and(|between| between.trim() == ".")
+//RS         })
+//RS         .max_by_key(|reference| reference.span.end)?;
+//RS     let target = reference.target.as_ref()?;
+//RS     let definition = index.definitions().iter().find(|definition| {
+//RS         definition.module_path == target.module_path && definition.def_span == target.def_span
+//RS     })?;
+//RS     let ty = match &definition.kind {
+//RS         SymbolKind::Local { ty: Some(ty), .. } | SymbolKind::Param { ty } => ty.clone(),
+//RS         _ => return None,
+//RS     };
+//RS     Some((reference.name.clone(), ty, reference.span))
+//RS }
+//RS 
+//RS fn event_scope_argument(
+//RS     index: &SemIndex,
+//RS     call_span: SourceSpan,
+//RS     module_path: &str,
+//RS ) -> Option<(String, SourceSpan)> {
+//RS     index
+//RS         .references()
+//RS         .iter()
+//RS         .filter(|reference| reference.module_path == module_path)
+//RS         .filter(|reference| {
+//RS             reference.span.start >= call_span.start && reference.span.end <= call_span.end
+//RS         })
+//RS         .filter_map(|reference| {
+//RS             let target = reference.target.as_ref()?;
+//RS             let definition = index.definitions().iter().find(|definition| {
+//RS                 definition.module_path == target.module_path
+//RS                     && definition.def_span == target.def_span
+//RS             })?;
+//RS             matches!(&definition.kind, SymbolKind::Local { ty: Some(ty), .. } if ty == "EventScope")
+//RS                 .then(|| (reference.name.clone(), reference.span))
+//RS         })
+//RS         .min_by_key(|(_, span)| span.start)
+//RS }
+//RS 
+//RS fn event_method_kind(receiver_type: &str, method: &str) -> Option<&'static str> {
+//RS     let kind = match (receiver_type, method) {
+//RS         (ty, "on") if is_event_handler_type(ty) => "event_subscribe",
+//RS         (ty, "once") if is_event_handler_type(ty) => "event_subscribe_once",
+//RS         (ty, "on_priority") if is_event_handler_type(ty) => "event_subscribe_priority",
+//RS         (ty, "emit") if ty.starts_with("Event<") => "event_emit",
+//RS         (ty, "emit_async") if ty.starts_with("AsyncEvent<") => "event_emit_async",
+//RS         (ty, "close") if ty.starts_with("AsyncEvent<") => "event_close",
+//RS         (ty, "listener_count") if is_event_handler_type(ty) => "event_listener_count",
+//RS         (ty, "queued_count") if ty.starts_with("AsyncEvent<") => "event_queued_count",
+//RS         (ty, "running_count") if ty.starts_with("AsyncEvent<") => "event_running_count",
+//RS         (ty, "blocked_count") if ty.starts_with("AsyncEvent<") => "event_pending_count",
+//RS         (ty, "run") if ty.starts_with("Hook<") => "hook_run",
+//RS         (ty, "run") if ty.starts_with("DecisionHook<") => "decision_hook_run",
+//RS         ("EventScope", "cancel") => "event_scope_cancel",
+//RS         ("EventScope", "active_count") => "event_scope_active_count",
+//RS         ("Subscription", "unsubscribe") => "event_unsubscribe",
+//RS         ("Subscription", "is_active") => "event_subscription_active",
+//RS         ("EventTrace", "summary") => "event_trace_summary",
+//RS         ("EventTrace", "delivered" | "queued" | "dropped") => "event_trace_count",
+//RS         (ty, "accepted") if ty.starts_with("DispatchReport<") => "event_report_accepted",
+//RS         (ty, "delivered_handlers") if ty.starts_with("DispatchReport<") => "event_report_delivered",
+//RS         (ty, "state") if ty.starts_with("DispatchReport<") => "event_report_state",
+//RS         (ty, "failures") if ty.starts_with("DispatchReport<") => "event_report_failures",
+//RS         (ty, "trace") if ty.starts_with("DispatchReport<") => "event_report_trace",
+//RS         _ => return None,
+//RS     };
+//RS     Some(kind)
+//RS }
+//RS 
+//RS fn is_event_handler_type(ty: &str) -> bool {
+//RS     ty.starts_with("Event<")
+//RS         || ty.starts_with("AsyncEvent<")
+//RS         || ty.starts_with("Hook<")
+//RS         || ty.starts_with("DecisionHook<")
+//RS }
+//RS 
+//RS fn trait_param_signature(src: &str, p: &AST::Param) -> String {
+//RS     let is_self = p.name == "self" && p.ty.name().is_empty();
+//RS     let mut out = String::new();
+//RS     if p.root {
+//RS         out.push_str("#Root ");
+//RS     }
+//RS     if is_self {
+//RS         out.push_str(p.convention.sigil());
+//RS         out.push_str(&p.name);
+//RS         return out;
+//RS     }
+//RS     if let Some((label, _)) = &p.public_label {
+//RS         out.push_str(label);
+//RS         out.push(' ');
+//RS     }
+//RS     out.push_str(&p.name);
+//RS     out.push_str(": ");
+//RS     out.push_str(p.convention.sigil());
+//RS     if p.variadic {
+//RS         out.push_str("...");
+//RS     }
+//RS     if let Some(bounds) = &p.variadic_bound_list {
+//RS         out.push('[');
+//RS         out.push_str(&bounds.join(", "));
+//RS         out.push(']');
+//RS     } else {
+//RS         out.push_str(&p.ty.name());
+//RS     }
+//RS     if let Some(names) = &p.declared_view_from_names {
+//RS         if !names.is_empty() {
+//RS             out.push_str(" from ");
+//RS             out.push_str(&names.join(" | "));
+//RS         }
+//RS     }
+//RS     if let Some(default) = &p.default {
+//RS         out.push('{');
+//RS         out.push_str(&snippet(src, default.span()));
+//RS         out.push('}');
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn trait_return_view_from(m: &AST::TraitMethodSig, params: &[AST::Param]) -> String {
+//RS     let Some(map) = &m.declared_return_view_provenance else {
+//RS         return String::new();
+//RS     };
+//RS     if map.is_empty() {
+//RS         return String::new();
+//RS     }
+//RS     let source_union = |provenance: &AST::ViewProvenance| {
+//RS         provenance
+//RS             .sources
+//RS             .iter()
+//RS             .map(|path| {
+//RS                 let mut source = match &path.source {
+//RS                     AST::ViewSource::Receiver => "self".to_string(),
+//RS                     AST::ViewSource::Parameter(index) => params
+//RS                         .iter()
+//RS                         .filter(|param| param.name != "self")
+//RS                         .nth(*index)
+//RS                         .map(|param| param.name.clone())
+//RS                         .unwrap_or_else(|| format!("param{index}")),
+//RS                     AST::ViewSource::Static { module_path, name } => {
+//RS                         if module_path.is_empty() {
+//RS                             format!("static.{name}")
+//RS                         } else {
+//RS                             format!("static.{module_path}.{name}")
+//RS                         }
+//RS                     }
+//RS                 };
+//RS                 for projection in &path.projections {
+//RS                     if let AST::ViewSourceProjection::Field(field) = projection {
+//RS                         source.push('.');
+//RS                         source.push_str(field);
+//RS                     }
+//RS                 }
+//RS                 source
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(" | ")
+//RS     };
+//RS     let body = if map.len() == 1 {
+//RS         let (path, provenance) = map.iter().next().expect("non-empty view map");
+//RS         if path.is_empty() {
+//RS             source_union(provenance)
+//RS         } else {
+//RS             format!("{}: {}", path.join("."), source_union(provenance))
+//RS         }
+//RS     } else {
+//RS         map.iter()
+//RS             .map(|(path, provenance)| format!("{}: {}", path.join("."), source_union(provenance)))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ")
+//RS     };
+//RS     if map.len() == 1 && map.iter().next().is_some_and(|(path, _)| path.is_empty()) {
+//RS         format!(" from {body}")
+//RS     } else {
+//RS         format!(" from ({body})")
+//RS     }
+//RS }
+//RS 
+//RS fn task_flow_facts(src: &str) -> Vec<String> {
+//RS     let mut facts = Vec::new();
+//RS     // D-CONC-SPAWN1=D: `task.group g { … }` / bare `task …` /
+//RS     // `task.all|race|any { … }` are the canonical task surface.
+//RS     // "task " (trailing space) catches the bare spawn keyword without
+//RS     // matching the qualified `task.group`/`task.all`/`task.race`/`task.any`
+//RS     // forms, which are always `task` immediately followed by `.`.
+//RS     for (needle, kind) in [
+//RS         ("task.group", "structured_task_scope"),
+//RS         ("task ", "task_spawn"),
+//RS         ("task.all", "task_all"),
+//RS         ("task.race", "task_race"),
+//RS         ("task.any", "task_any"),
+//RS         (".join(", "join_task"),
+//RS         ("channel", "channel_create"),
+//RS         (".send(", "channel_send"),
+//RS         (".receive(", "channel_receive"),
+//RS         ("#Context", "deadline_context"),
+//RS     ] {
+//RS         for span in text_matches(src, needle) {
+//RS             facts.push(format!(
+//RS                 "{{\"kind\":{},\"source\":{},\"source_span\":{},\"rail\":\"async\",\"semantics\":\"core.tasks_source_truth\"}}",
+//RS                 json_str(kind),
+//RS                 json_str(needle),
+//RS                 span_json(span)
+//RS             ));
+//RS         }
+//RS     }
+//RS     facts
+//RS }
+//RS 
+//RS fn project_func(
+//RS     index: &SemIndex,
+//RS     module_display: &str,
+//RS     module_src: &str,
+//RS     f: &AST::Func,
+//RS ) -> GraphBuilder {
+//RS     let graph_id = graph_id(module_display, f);
+//RS     let mut g = GraphBuilder {
+//RS         graph_id: graph_id.clone(),
+//RS         ..GraphBuilder::default()
+//RS     };
+//RS     let entry_id = format!("{graph_id}:entry");
+//RS     let entry_descriptor = node_catalog::descriptor_for_id("entry");
+//RS     g.nodes.push(NodeRec {
+//RS         id: entry_id.clone(),
+//RS         kind: entry_descriptor.kind.to_string(),
+//RS         archetype: entry_descriptor.archetype.to_string(),
+//RS         title: f.name.clone(),
+//RS         span: f.name_span.into(),
+//RS         x: 40,
+//RS         y: 40,
+//RS         badges: effect_badges(index, &f.name)
+//RS             .into_iter()
+//RS             .map(str::to_string)
+//RS             .collect(),
+//RS         affordances: vec![
+//RS             "source_jump".to_string(),
+//RS             "insert_call".to_string(),
+//RS             "rename_function".to_string(),
+//RS             "edit_function_signature".to_string(),
+//RS             "create_function".to_string(),
+//RS         ],
+//RS         meta_json: meta_attr_json(f.meta.as_ref()),
+//RS     });
+//RS     for (i, p) in f.params.iter().enumerate() {
+//RS         let pin_id = format!("{entry_id}:out:{}", p.name);
+//RS         let ty = p.ty.name();
+//RS         g.local_pins.insert(p.name.clone(), pin_id.clone());
+//RS         g.local_types.insert(p.name.clone(), ty.clone());
+//RS         g.pins.push(PinRec {
+//RS             id: pin_id,
+//RS             node_id: entry_id.clone(),
+//RS             name: p.name.clone(),
+//RS             direction: "output".to_string(),
+//RS             ty,
+//RS             role: None,
+//RS             pattern_source: None,
+//RS             ability: p.convention.sigil().to_string(),
+//RS             fallible: false,
+//RS             effect_grant_need: None,
+//RS             span: p.name_span.into(),
+//RS             pattern_source_span: None,
+//RS             append_op: None,
+//RS             element_index: None,
+//RS         });
+//RS         let _ = i;
+//RS     }
+//RS     for def in index.definitions() {
+//RS         match &def.kind {
+//RS             SymbolKind::Local { ty, .. } => {
+//RS                 if let Some(t) = ty {
+//RS                     g.local_types.insert(def.name.clone(), t.clone());
+//RS                 }
+//RS             }
+//RS             SymbolKind::Param { ty } => {
+//RS                 g.local_types.insert(def.name.clone(), ty.clone());
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     project_stmt_block(&mut g, index, module_src, &f.body, 0, 220, 170);
+//RS     add_source_comment_regions(&mut g, module_src, f);
+//RS     add_execution_overlay(&mut g, module_src, &f.body);
+//RS     g
+//RS }
+//RS 
+//RS fn collect_node_refs(graph: &GraphBuilder, out: &mut Vec<NodeQueryRef>) {
+//RS     for node in &graph.nodes {
+//RS         out.push(NodeQueryRef {
+//RS             graph_id: graph.graph_id.clone(),
+//RS             node_id: node.id.clone(),
+//RS             kind: node.kind.clone(),
+//RS             title: node.title.clone(),
+//RS             span: node.span,
+//RS         });
+//RS     }
+//RS     for inline in &graph.inline_exprs {
+//RS         out.push(NodeQueryRef {
+//RS             graph_id: graph.graph_id.clone(),
+//RS             node_id: inline.node_id.clone(),
+//RS             kind: format!("inline:{}", inline.role),
+//RS             title: inline.source.clone(),
+//RS             span: inline.span,
+//RS         });
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0764 crates/jet-devserver/src/Canvas/graph_projection.rs:1-1791
+

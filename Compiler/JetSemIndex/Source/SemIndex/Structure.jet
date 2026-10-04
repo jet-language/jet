@@ -1,0 +1,417 @@
+// crates/jet-semindex/src/Build.rs:1045–1332,1776–1888.
+// Uses S5's sole DB/context/composite ordinal key and S6's checked identities.
+// Shape numbers below are the declaration order in Rust AST/{expressions,
+// statements,items}.rs, NOT Jet enum order or a native Show representation.
+// This whole leaf remains gated, not a compiled/accepted full walker: the
+// published CP-AST borrowed projection requires provider copy/native proof;
+// S8/C4/S20/CP-NAMES supply checked build/name/effect facts.
+// The independent normalization/bounds/call-row/breadcrumb helpers are separate
+// exercised algorithms. No full structural or checked-index parity is claimed.
+use core.text as semindex_text
+use jet_foundation.[Expr, Stmt, Item, Func, Param, Marker, Span, NamedSpan, Program, MIRNameFacts, MIRNameModule, MIRNameDeclaration, MIRNameAlias, MIRNameReference, MIRStructureFact, expr_span]
+use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph, SemaGraphResult]
+use jet_pkg_model.[EffectBudgetProgram, PackageEffectSummary]
+
+pub fn semindex_state_marker_path(expr: Expr) -> NamedSpan? Never! {
+    if expr == {
+        .Ident(name, span) -> Val(NamedSpan{name: name, span: span})
+        .Field(base, member, span) -> {
+            if semindex_state_marker_path(base) == .Val(path) -> return Val(NamedSpan{name: "{path.name}.{member}", span: span})
+            None
+        }
+        else -> None
+    }
+}
+
+pub fn semindex_collect_state_marker_references_for_method(db: &SymbolDB, ctx: WalkCtx, names: MIRNameFacts, method: Func, mp: String) Never! {
+    loop marker in method.markers {
+        slots :: if marker.name == "State" -> 1 else if marker.name == "Transition" -> 2 else -> 0
+        loop slot in 0..<slots {
+            if slot >= marker.args.len() -> next
+            if marker.args[slot] == .Expr(expr) {
+                if semindex_state_marker_path(expr) == .Val(path) {
+                    if path.name == "_" -> next
+                    leaves :: path.name.split(".")
+                    name := leaves[leaves.len() - 1] // #4303
+                    reference :: semindex_scoped_ref(&db, ctx, names, name, path.span, mp)
+                    &db.refs.push(reference)
+                }
+            }
+        }
+    }
+}
+
+pub fn semindex_collect_state_marker_references(db: &SymbolDB, ctx: WalkCtx, names: MIRNameFacts, item: Item, mp: String) Never! {
+    if item == {
+        .Struct(definition) -> {
+            loop method in definition.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
+            loop implementation in definition.trait_impls {
+                loop method in implementation.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
+            }
+        }
+        .Impl(implementation) -> {
+            loop method in implementation.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
+        }
+        .Enum(definition) -> {
+            loop method in definition.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
+        }
+        else -> {}
+    }
+}
+
+// #4397: a real (optional parent, slot) key; never encode it in a string.
+pub fn semindex_record_node(db: &SymbolDB, ctx: WalkCtx, class: String, shape: String, mp: String, span: Span) -> Int? Never! {
+    if span.end < span.start -> return None
+    parent := Int?{None}
+    if ctx.structural_parents.len() > 0 -> parent = Val(ctx.structural_parents[ctx.structural_parents.len() - 1])
+    assert(parent == None || ctx.structural_slot != "root", "compiler structural child missing explicit slot: {class}/{shape}")
+    key :: StructuralOrdinalKey{parent: parent, slot: ctx.structural_slot}
+    ordinal :: db.structural_ordinals.get(key) ?? 0
+    db.structural_ordinals[key] = ordinal + 1
+    id :: db.nodes.len()
+    &db.nodes.push(StructuralNode{id: id, parent: parent, slot: ctx.structural_slot, slot_kind: ctx.structural_slot_kind, ordinal: ordinal, class: class, shape: shape, module_path: mp, span: semindex_source_span(span)})
+    Val(id)
+}
+
+pub fn semindex_is_lexical_structural_slot(slot: String) -> Bool Never! {
+    slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
+}
+
+// Real arms enforce the upper bound, except the classic-if private arm whose
+// head-only span ends before its body starts. All parents enforce the lower bound.
+fn semindex_block_span_candidate(parent: StructuralNode, span: Span, claimed: Bool) -> Bool Never! {
+    parent.span.start <= span.start && (parent.class != "arm" || span.end <= parent.span.end || parent.span.end <= span.start) && !claimed
+}
+
+pub fn semindex_claim_slot_boundary(db: &SymbolDB, ctx: &WalkCtx, name: String) Never! {
+    if !semindex_is_lexical_structural_slot(name) || ctx.structural_parents.len() == 0 -> return
+    parent :: db.nodes[ctx.structural_parents[ctx.structural_parents.len() - 1]]
+    first := 0
+    // Rust partition_point; block_spans is sorted by the module initializer.
+    high := ctx.block_spans.len()
+    loop first < high {
+        middle :: first + (high - first) /% 2
+        if ctx.block_spans[middle].start < parent.span.start -> first = middle + 1 else -> high = middle
+    }
+    chosen := Span?{None}
+    loop index in first..<ctx.block_spans.len() {
+        span :: ctx.block_spans[index]
+        claimed :: ctx.claimed_block_spans.get(semindex_source_span(span)) != None
+        if !semindex_block_span_candidate(parent, span, claimed) -> next
+        if chosen == {
+            .Val(old) -> { if span.start < old.start -> chosen = Val(span) }
+            None -> chosen = Val(span)
+        }
+    }
+    if chosen == .Val(span) {
+        ctx.claimed_block_spans[semindex_source_span(span)] = true
+        &db.slot_boundaries.push(StructuralSlotBoundary{parent: parent.id, slot: name, module_path: parent.module_path, span: semindex_source_span(span)})
+    }
+}
+
+// The callback is run even for empty/optional slots. Restoration is stack-like,
+// so siblings never inherit a nested child's name or kind.
+pub fn semindex_structural_slot<T>(db: &SymbolDB, ctx: &WalkCtx, name: String, kind: StructuralSlotKind, f: fn(&SymbolDB, &WalkCtx) T) -> T {
+    semindex_claim_slot_boundary(&db, &ctx, name)
+    old_name :: ctx.structural_slot
+    old_kind :: ctx.structural_slot_kind
+    ctx.structural_slot = name
+    ctx.structural_slot_kind = kind
+    value :: f(&db, &ctx)
+    ctx.structural_slot = old_name
+    ctx.structural_slot_kind = old_kind
+    value
+}
+
+pub fn semindex_expr_shape(expr: Expr) -> String Never! {
+    ordinal :: if expr == {
+        .Str(_, _) -> 0
+        .StrMatchLit(_, _) -> 1
+        .BinMatchLit(_, _) -> 2
+        .Int(_, _, _, _) -> 3
+        .Float(_, _, _, _) -> 4
+        .Bool(_, _) -> 5
+        .Unit(_) -> 6
+        .Char(_, _) -> 7
+        .ListLit(_, _) -> 8
+        .MemberSpread(_, _, _) -> 9
+        .Spread(_, _) -> 10
+        .MapLit(_, _) -> 11
+        .Index(_, _, _, _) -> 12
+        .Slice(_, _, _, _, _) -> 13
+        .Range(_, _, _, _) -> 14
+        .Ident(_, _) -> 15
+        .Call(_) -> 16
+        .Unary(_, _, _) -> 17
+        .Binary(_, _, _, _) -> 18
+        .CompareChain(_, _, _, _) -> 19
+        .UnitLit(_, _, _, _, _, _) -> 20
+        .Deref(_, _) -> 21
+        .RawOf(_, _) -> 22
+        .Copy(_, _) -> 23
+        .Place(_, _, _) -> 24
+        .Field(_, _, _) -> 25
+        .OptField(_, _, _, _, _) -> 26
+        .MethodCall(_, _, _, _, _, _, _, _, _, _) -> 27
+        // The canonical borrowed visitor projects this as CallValue(OptField).
+        .OptMethodCall(_, _, _, _, _, _, _, _) -> 45
+        .StructLit(_, _, _, _, _, _, _) -> 28
+        .TypedLit(_, _, _) -> 29
+        .EnumLit(_, _, _, _, _, _) -> 30
+        .Tainted(_, _, _) -> 31
+        .Present(_, _) -> 32
+        .Absent(_) -> 33
+        .Todo(_, _) -> 34
+        .NoElse(_) -> 35
+        .ReduceMarker(_, _) -> 36
+        .PatternTest(_, _, _) -> 37
+        .Ok(_, _) -> 38
+        .Err(_, _) -> 39
+        .Try(_, _, _, _) -> 40
+        .OrFallback(_, _, _, _) -> 41
+        .If(_, _, _, _, _, _) -> 42
+        .TupleLit(_, _, _) -> 43
+        .Lambda(_) -> 44
+        .CallValue(_, _, _) -> 45
+        .PtrFromAddr(_, _, _, _, _) -> 46
+        .ComptimeName(_, _, _) -> 47
+        .Paren(_, _) -> 48
+    }
+    "Discriminant({ordinal})"
+}
+
+// Call/method end offsets use plain Int + 2 (empty) or + 1 (last argument);
+// retain the original name/receiver starts without saturation or clamping.
+pub fn semindex_structural_expr_span(expr: Expr) -> Span Never! {
+    if expr == {
+        .Call(call) -> {
+            end := call.name_span.end + 2
+            if call.args.len() > 0 -> end = semindex_structural_expr_span(call.args[call.args.len() - 1].expr).end + 1
+            Span{start: call.name_span.start, end: end}
+        }
+        .MethodCall(receiver, _, method_span, _, _, args, _, _, _, _) -> {
+            end := method_span.end + 2
+            if args.len() > 0 -> end = semindex_structural_expr_span(args[args.len() - 1].expr).end + 1
+            Span{start: semindex_structural_expr_span(receiver).start, end: end}
+        }
+        .OptMethodCall(_, _, _, _, _, _, _, call_span) -> call_span
+        else -> expr_span(expr)
+    }
+}
+
+pub fn semindex_stmt_shape(stmt: Stmt) -> String Never! {
+    ordinal :: if stmt == {
+        .Expr(_) -> 0
+        .Val(_) -> 1
+        .Assign(_, _, _, _) -> 2
+        .Return(_, _) -> 3
+        .While(_, _, _, _, _) -> 4
+        .For(_, _, _, _, _, _, _, _, _) -> 5
+        .Switch(_, _, _, _) -> 6
+        .Break(_) -> 7
+        .BreakValue(_, _) -> 8
+        .Continue(_) -> 9
+        .BreakLabel(_, _) -> 10
+        .BreakLabelValue(_, _, _, _) -> 11
+        .ContinueLabel(_, _) -> 12
+        .Loop(_, _, _, _) -> 13
+        .CountedLoop(_, _, _, _, _, _, _) -> 14
+        .Unsafe(_, _, _, _) -> 15
+        .Impure(_, _, _, _) -> 16
+        .Reactive(_, _) -> 17
+        .Shield(_, _) -> 18
+        .Switched(_, _, _) -> 19
+        .Region(_, _, _, _) -> 20
+        .Policy(_, _, _) -> 21
+        .TaskGroup(_, _, _, _, _) -> 22
+        .Layout(_, _, _, _) -> 23
+        .AuthorityScope(_, _, _, _, _) -> 24
+        .ComptimeIf(_, _, _, _, _, _) -> 25
+        .ComptimeSwitch(_, _, _, _) -> 26
+        .ComptimeBlock(_, _, _) -> 27
+        .ContextBlock(_, _, _) -> 28
+        .Live(_, _) -> 29
+        .AssumeDet(_, _, _, _) -> 30
+        .Transact(_, _, _, _, _) -> 31
+        .Yield(_, _) -> 32
+        .ScopeMember(_, _, _, _, _, _, _, _) -> 33
+        .DeferClose(_, _) -> 34
+    }
+    "Discriminant({ordinal})"
+}
+
+pub fn semindex_item_shape(item: Item) -> String Never! {
+    ordinal :: if item == {
+        .Func(_) -> 0
+        .Struct(_) -> 1
+        .Enum(_) -> 2
+        .Distinct(_) -> 3
+        .TypeAlias(_) -> 4
+        .UnitFamily(_) -> 5
+        .Trait(_) -> 6
+        .Tag(_) -> 7
+        .EffectDecl(_) -> 8
+        .Impl(_) -> 9
+        .Const(_) -> 10
+        .Test(_) -> 11
+        .ExternRust(_) -> 12
+        .Module(_) -> 13
+        .CModule(_) -> 14
+        .CodeModule(_) -> 15
+        .ErrorConv(_) -> 16
+        .Migration(_) -> 17
+        .ProtocolDecl(_) -> 18
+        .UserDerive(_) -> 19
+        .TemplateLoop(_) -> 20
+        .GenericModule(_) -> 21
+        .ModuleAlias(_) -> 22
+        .MarkerDecl(_) -> 23
+        .FactDecl(_) -> 24
+    }
+    "Discriminant({ordinal})"
+}
+
+pub fn semindex_item_span(item: Item) -> Span Never! {
+    if item == {
+        .Func(x) -> x.span
+        .Struct(x) -> x.span
+        .Enum(x) -> x.span
+        .Distinct(x) -> x.span
+        .TypeAlias(x) -> x.span
+        .UnitFamily(x) -> x.span
+        .Trait(x) -> x.span
+        .Tag(x) -> x.span
+        .EffectDecl(x) -> x.span
+        .Impl(x) -> x.span
+        .Const(x) -> x.span
+        .Test(x) -> x.span
+        .ExternRust(x) -> x.span
+        .Module(x) -> x.span
+        .CModule(x) -> x.span
+        .CodeModule(x) -> x.span
+        .ErrorConv(x) -> x.from_span
+        .Migration(x) -> x.span
+        .ProtocolDecl(x) -> x.span
+        .UserDerive(x) -> x.span
+        .TemplateLoop(x) -> x.span
+        .GenericModule(x) -> x.span
+        .ModuleAlias(x) -> x.span
+        .MarkerDecl(x) -> x.span
+        .FactDecl(x) -> x.span
+    }
+}
+
+pub fn semindex_record_func_type_nodes(db: &SymbolDB, ctx: &WalkCtx, function: Func, mp: String) {
+    semindex_structural_slot(&db, &ctx, "params", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+        loop param in function.params -> _ := semindex_record_node(&db, ctx, "type", "type", mp, param.ty_span)
+    })
+    if function.return_type_span == .Val(span) {
+        semindex_structural_slot(&db, &ctx, "return_type", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> {
+            _ := semindex_record_node(&db, ctx, "type", "type", mp, span)
+        })
+    }
+}
+
+pub fn semindex_collect_allow_markers(db: &SymbolDB, markers: [Marker], site: String, mp: String) Never! {
+    loop marker in markers {
+        if marker.name != "allow" -> next
+        loop arg in marker.args {
+            if arg == .Expr(expr) {
+                if expr == .Ident(lint_name, _) -> &db.bypasses.push(BypassFact{kind: BypassKind.LintAllow, site: site, detail: lint_name, module_path: mp, span: semindex_source_span(marker.span)})
+            }
+        }
+    }
+}
+
+fn semindex_record_call_rows(calls: &[CallEdge], caller: CallerFrame?, mp: String, callee: String, span: Span) Never! {
+    if caller == .Val(frame) -> &calls.push(CallEdge{caller: semindex_caller_key(frame), callee: callee, module_path: mp, call_span: semindex_source_span(span)})
+}
+pub fn semindex_record_call(db: &SymbolDB, ctx: WalkCtx, mp: String, callee: String, span: Span) Never! {
+    semindex_record_call_rows(&db.calls, ctx.caller, mp, callee, span)
+}
+pub fn semindex_with_caller(db: &SymbolDB, ctx: &WalkCtx, frame: CallerFrame, params: [Param], mp: String, f: fn(&SymbolDB, &WalkCtx)) {
+    previous :: ctx.caller
+    ctx.caller = Val(frame)
+    f(&db, &ctx)
+    ctx.caller = previous
+}
+
+pub fn semindex_normalize_definition(source: String) -> String Never! {
+    chars :: semindex_text.scalars(source)
+    out := [String]{}
+    string := false
+    index := 0
+    loop index < chars.len() {
+        ch :: chars[index]
+        index += 1
+        if string {
+            &out.push(ch)
+            if ch == "\\" {
+                if index < chars.len() {
+                    &out.push(chars[index])
+                    index += 1
+                }
+            } else if ch == "\"" -> string = false
+        } else if ch == "\"" {
+            string = true
+            &out.push(ch)
+        } else if ch == "/" && index < chars.len() && chars[index] == "/" {
+            index += 1
+            loop index < chars.len() {
+                next_ch :: chars[index]
+                index += 1
+                if next_ch == "\n" -> break
+            }
+        } else if !semindex_text.is_whitespace(ch) -> &out.push(ch)
+    }
+    out.join("")
+}
+
+// Parsed-only projection accepts the actual Driver loaded Program plus its
+// source-file path/text. S9–S12 must use this same walker with the checked
+// module's program/source; never synthesize an empty checked registration.
+// Gated by that canonical shared walker; this intentional parsed-only default
+// is Rust's default NameLedger, not a fake checked-registration carrier.
+pub fn semindex_structural_nodes_from_parsed(program: Program, module_path: String, source: String) -> [StructuralNode] {
+    block_spans := ~program.block_spans
+    &block_spans.sort_by((left: Span, right: Span) -> left.start <=> right.start)
+    db := SymbolDB.new()
+    ctx := WalkCtx.new(0, semindex_root_identity(module_path), ^block_spans)
+    names :: MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
+    loop item in program.items -> semindex_collect_item(&db, &ctx, names, program, source, item, module_path)
+    ^db.nodes
+}
+
+fn semindex_breadcrumb_label(owner: String, members: [MemberFact]) -> String? Never! {
+    remote := [MemberFact]{}
+    loop member in members {
+        if member.owner != owner || member.kind != MemberKind.Method -> next
+        if member.origin == {
+            .InherentImpl | .TraitImpl(_) -> &remote.push(member)
+            else -> {}
+        }
+    }
+    &remote.sort_by((a: MemberFact, b: MemberFact) -> (semindex_origin_label(a.origin) <=> semindex_origin_label(b.origin)).then(a.name <=> b.name).then(a.module_path <=> b.module_path).then(a.span.start <=> b.span.start))
+    if remote.len() == 0 -> return None
+    labels := [String]{}
+    loop member in remote -> &labels.push("+ {member.signature} [{member.module_path}:{member.span.start}..{member.span.end}]")
+    Val(labels.join(" | "))
+}
+
+pub fn semindex_add_breadcrumb_hints(db: &SymbolDB) Never! {
+    loop definition in db.defs {
+        if definition.kind == {
+            .Struct(_, _) | .Enum(_, _) -> {
+                if semindex_breadcrumb_label(definition.name, db.members) == .Val(label) -> &db.inlay.push(InlayHint{span: definition.def_span, module_path: definition.module_path, label: label})
+            }
+            else -> {}
+        }
+    }
+}
+
+// S8 delegates finalization to S5's sole DB, forwarding the caller's exact
+// module-source rows and explicit PackageModel program/summaries unchanged.
+// C4/S20 and the canonical checked-to-budget adapter remain producer gates.
+pub fn semindex_build_index(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -> SemIndex {
+    semindex_build_symbol_db(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries).index
+}

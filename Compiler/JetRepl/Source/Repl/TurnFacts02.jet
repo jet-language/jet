@@ -1,0 +1,2364 @@
+// PORT-PENDING 0808 crates-jet-repl-src-lib-slice-1795: crates/jet-repl/src/lib.rs:1795-4154
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(crate) fn raw_input_is_complete(text: &str) -> bool {
+//RS     let trimmed = text.trim();
+//RS     if trimmed.is_empty()
+//RS         || trimmed.starts_with(':')
+//RS         || trimmed.starts_with('?')
+//RS         || reject_feature(trimmed).is_some()
+//RS     {
+//RS         return true;
+//RS     }
+//RS 
+//RS     fn probe(prefix: &str, input: &str, suffix: &str) -> bool {
+//RS         let cutoff = prefix.len() + input.len();
+//RS         let source = format!("{prefix}{input}{suffix}");
+//RS         let (tokens, lex_diags) = if prefix.is_empty() {
+//RS             crate::Lexer::lex(&source)
+//RS         } else {
+//RS             crate::Lexer::lex_generated(&source)
+//RS         };
+//RS         if !lex_diags.is_empty() {
+//RS             // E0002 at the user's current end is an unfinished lexical
+//RS             // construct (quote/comment/interpolation). If the error ends
+//RS             // earlier, another line cannot repair it and Enter must submit.
+//RS             return !lex_diags.iter().any(|diag| {
+//RS                 diag.code == "E0002" && diag.span.is_some_and(|span| span.end >= cutoff)
+//RS             });
+//RS         }
+//RS         match crate::Parser::parse_for_check_with_source(&tokens, &source) {
+//RS             Ok(_) => true,
+//RS             Err(diags) => !diags
+//RS                 .iter()
+//RS                 .any(|diag| diag.span.is_some_and(|span| span.start >= cutoff)),
+//RS         }
+//RS     }
+//RS 
+//RS     if looks_like_item(trimmed) || looks_like_import(trimmed) {
+//RS         return probe("", trimmed, "");
+//RS     }
+//RS     if starts_with_stmt_keyword(trimmed) || trimmed.ends_with(';') {
+//RS         probe("fn __repl__() {\n", trimmed, "\n}\n")
+//RS     } else {
+//RS         probe("fn __repl__() {\n__repl_echo__ :: ", trimmed, "\n}\n")
+//RS     }
+//RS }
+//RS 
+//RS /// Classify the raw input text.
+//RS fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
+//RS     let trimmed = text.trim();
+//RS     if trimmed.is_empty() {
+//RS         return Ok(InputKind::Empty);
+//RS     }
+//RS 
+//RS     // Meta-commands (`:cmd [arg]`)
+//RS     if let Some(rest) = trimmed.strip_prefix(':') {
+//RS         let mut parts = rest.splitn(2, ' ');
+//RS         let cmd = parts.next().unwrap_or("").to_string();
+//RS         let arg = parts
+//RS             .next()
+//RS             .map(str::trim)
+//RS             .filter(|s| !s.is_empty())
+//RS             .map(str::to_string);
+//RS         return Ok(InputKind::Meta(cmd, arg));
+//RS     }
+//RS 
+//RS     // D-FE-REPL-DOCS1=B: bare `?name` is the primary REPL docs spelling —
+//RS     // parsed here, never reaches the Jet lexer/parser as source (no new
+//RS     // user-typeable syntax). `:?` (above) stays the colon-command alias;
+//RS     // both route to the same `"?"` meta-command handler.
+//RS     if let Some(rest) = trimmed.strip_prefix('?') {
+//RS         let name = rest.trim();
+//RS         let arg = if name.is_empty() {
+//RS             None
+//RS         } else {
+//RS             Some(name.to_string())
+//RS         };
+//RS         return Ok(InputKind::Meta("?".to_string(), arg));
+//RS     }
+//RS 
+//RS     // Hard rejects (D-REPL6=A) — these fire before imports so e.g.
+//RS     // `use core.files as fs` reports E1802 (the module needs the real compiler).
+//RS     if let Some(feature) = reject_feature(trimmed) {
+//RS         return Ok(InputKind::Reject(feature.to_string()));
+//RS     }
+//RS 
+//RS     // `use …` import line (S16). Carry it across the session so a later input
+//RS     // can resolve through its alias (D-REPL10).
+//RS     if looks_like_import(trimmed) {
+//RS         // Imports are line-terminated; an authored `;` stays for the parser to
+//RS         // report (E0373), and none is added.
+//RS         let normalized = trimmed.trim_end().to_string();
+//RS         let full = format!("// repl:{}\n{}\n", step, normalized);
+//RS         let (toks, lex_diags) = crate::Lexer::lex(&full);
+//RS         if !lex_diags.is_empty() {
+//RS             return Err(lex_diags);
+//RS         }
+//RS         match crate::Parser::parse_with_source(&toks, &full) {
+//RS             Ok(prog) if prog.items.is_empty() && !prog.imports.is_empty() => {
+//RS                 return Ok(InputKind::Import(format!("{}\n", normalized)));
+//RS             }
+//RS             Ok(_) => {
+//RS                 // Parsed but isn't a clean single import — fall through to the
+//RS                 // normal statement/item paths to produce a precise diagnostic.
+//RS             }
+//RS             Err(ds) => return Err(ds),
+//RS         }
+//RS     }
+//RS 
+//RS     // `;` at end suppresses expression echo (D-REPL16=B).
+//RS     // A block ending in `};` is a statement, not a suppressed expression.
+//RS     let suppress = trimmed.ends_with(';') && !looks_like_item(trimmed) && !trimmed.ends_with("};");
+//RS 
+//RS     // Top-level item?
+//RS     if looks_like_item(trimmed) {
+//RS         let src = format!("{}\n", trimmed);
+//RS         let full = format!("// repl:{}\n{}", step, src);
+//RS         let (toks, lex_diags) = crate::Lexer::lex(&full);
+//RS         if !lex_diags.is_empty() {
+//RS             return Err(lex_diags);
+//RS         }
+//RS         if let Err(ds) = crate::Parser::parse_with_source(&toks, &full) {
+//RS             return Err(ds);
+//RS         }
+//RS         return Ok(InputKind::Item(src));
+//RS     }
+//RS 
+//RS     // Wrappers below use Jet's reserved namespace. Validate user text before
+//RS     // entering that lane so a source-written `__name` still owns E0067.
+//RS     let (_, user_lex_diags) = crate::Lexer::lex(trimmed);
+//RS     if !user_lex_diags.is_empty() {
+//RS         return Err(user_lex_diags);
+//RS     }
+//RS 
+//RS     // For everything (statements AND bare expressions), try wrapping as:
+//RS     //   fn __repl__() { __repl_echo__ :: <input> }
+//RS     // first. If it parses, the last statement is a Val with the magic name.
+//RS     // In run_repl_step we detect `__repl_echo__` and echo its value (D-REPL16=B).
+//RS     // If input already ends in `;`, suppress the echo.
+//RS     //
+//RS     // For inputs that are already statements (bindings/print/if/loop/…),
+//RS     // the `__repl_echo__ :: stmt` form won't parse; we fall through to
+//RS     // plain statement wrapping.
+//RS     // Strategy: if the input isn't a statement keyword, try wrapping it as
+//RS     // `__repl_echo__ :: <input>`. This lets bare expressions like `1 + 2`
+//RS     // parse as a `Val` binding with the magic sentinel name. `run_repl_step`
+//RS     // then echoes the value without adding it to the session scope.
+//RS     //
+//RS     // For statements (bindings/print/if/loop/…) or suppressed inputs, try
+//RS     // the plain statement-wrapping form first; if that fails, try the echo
+//RS     // sentinel.
+//RS     let try_stmt_first = starts_with_stmt_keyword(trimmed) || suppress;
+//RS 
+//RS     // Keep generated wrappers in canonical Jet syntax. The lexer inserts
+//RS     // synthetic line terminators before the closing brace; authored
+//RS     // semicolons would be reported as E0373 by the source-aware parser.
+//RS     let plain_input = trimmed.trim_end().to_string();
+//RS     let plain_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, plain_input);
+//RS     // Echo-sentinel wrapping (D-BIND4: `::` sigil binding).
+//RS     let echo_stmt = format!("__repl_echo__ :: {}", trimmed);
+//RS     let echo_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, echo_stmt);
+//RS     if try_stmt_first {
+//RS         // Try plain statement form; if it succeeds, return it.
+//RS         // The check source uses the same line-boundary terminator.
+//RS         let (toks, lex_diags) = crate::Lexer::lex_generated(&plain_src);
+//RS         if lex_diags.is_empty() {
+//RS             if let Ok(prog) = crate::Parser::parse_with_source(&toks, &plain_src) {
+//RS                 if let Some(Item::Func(f)) = prog.items.into_iter().next() {
+//RS                     if !f.body.is_empty() {
+//RS                         return Ok(InputKind::Stmts(f.body, suppress, plain_input.clone()));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // Try echo-sentinel form.
+//RS     {
+//RS         let (toks, lex_diags) = crate::Lexer::lex_generated(&echo_src);
+//RS         if lex_diags.is_empty() {
+//RS             if let Ok(prog) = crate::Parser::parse_with_source(&toks, &echo_src) {
+//RS                 if let Some(Item::Func(f)) = prog.items.into_iter().next() {
+//RS                     if !f.body.is_empty() {
+//RS                         // The check source uses the same line-boundary
+//RS                         // terminator before the generated closing brace.
+//RS                         let echo_check_src = echo_stmt.clone();
+//RS                         return Ok(InputKind::Stmts(f.body, suppress, echo_check_src));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // Fallback: plain statement form (returns parse error if any).
+//RS     let (toks, lex_diags) = crate::Lexer::lex_generated(&plain_src);
+//RS     if !lex_diags.is_empty() {
+//RS         return Err(lex_diags);
+//RS     }
+//RS     match crate::Parser::parse_with_source(&toks, &plain_src) {
+//RS         Ok(prog) => {
+//RS             if let Some(Item::Func(f)) = prog.items.into_iter().next() {
+//RS                 return Ok(InputKind::Stmts(f.body, suppress, plain_input));
+//RS             }
+//RS             Ok(InputKind::Empty)
+//RS         }
+//RS         Err(ds) => Err(ds),
+//RS     }
+//RS }
+//RS 
+//RS // ── sema check helpers ─────────────────────────────────────────────────────
+//RS 
+//RS /// Standard prelude import injected into every REPL program (D-REPL-PRELOAD=A).
+//RS /// Note: `print`/`eprint` are builtins that don't require an import in Jet v1;
+//RS /// the `use core.term` line is included for teaching purposes (the REPL shows a
+//RS /// note about it on first use) but the import itself is a no-op for the checker.
+//RS const PRELOAD_SRC: &str = "";
+//RS 
+//RS /// Build a complete synthetic Jet source from accumulated declarations +
+//RS /// a new check function, then run sema. `check_src` is the statement(s) text
+//RS /// as produced by `classify` — it already ends in `;` (or `}`).
+//RS ///
+//RS /// Returns the *checked* statements — the AST sema normalized, which is the
+//RS /// only AST any tier executes — together with the checked module's Core alias
+//RS /// map (D-CTCORE1). The map matters because sema's one prelude opening
+//RS /// (D-NAME-ALIAS1=A) rewrites an ambient name such as `read_file` into a call
+//RS /// on a compiler-owned alias that exists only in this turn's synthetic
+//RS /// module, so the interpreter needs the same alias map sema resolved against.
+//RS fn type_check_stmts(
+//RS     session: &Session,
+//RS     stmts: &[Stmt],
+//RS     step: usize,
+//RS     check_src: &str,
+//RS ) -> Result<(Vec<Stmt>, HashMap<String, String>), Vec<Diagnostic>> {
+//RS     let base_src = format!(
+//RS         "{}{}{}",
+//RS         PRELOAD_SRC,
+//RS         session.import_src(),
+//RS         session.accumulated_src(),
+//RS     );
+//RS     let prog_src = format!("{base_src}\nfn __repl_check_{step}__() {{\n{check_src}\n}}\n");
+//RS     let mut body = session.sema_stmts.clone();
+//RS     body.extend_from_slice(stmts);
+//RS     run_sema_with_body(
+//RS         &prog_src,
+//RS         &base_src,
+//RS         &format!("__repl_check_{}__", step),
+//RS         body,
+//RS         stmts.len(),
+//RS     )
+//RS }
+//RS 
+//RS fn run_sema_with_body(
+//RS     src: &str,
+//RS     base_src: &str,
+//RS     fn_name: &str,
+//RS     body: Vec<Stmt>,
+//RS     current_len: usize,
+//RS ) -> Result<(Vec<Stmt>, HashMap<String, String>), Vec<Diagnostic>> {
+//RS     // Session declarations remain user source even though the final check
+//RS     // function is compiler-owned.
+//RS     let (_, base_lex_diags) = crate::Lexer::lex(base_src);
+//RS     if !base_lex_diags.is_empty() {
+//RS         return Err(base_lex_diags);
+//RS     }
+//RS     let (toks, lex_diags) = crate::Lexer::lex_generated(src);
+//RS     if !lex_diags.is_empty() {
+//RS         return Err(lex_diags);
+//RS     }
+//RS     let mut prog = match crate::Parser::parse_with_source(&toks, src) {
+//RS         Ok(p) => p,
+//RS         Err(ds) => return Err(ds),
+//RS     };
+//RS     if let Some(Item::Func(f)) = prog
+//RS         .items
+//RS         .iter_mut()
+//RS         .find(|item| matches!(item, Item::Func(f) if f.name == fn_name))
+//RS     {
+//RS         f.body = body;
+//RS     }
+//RS     let (diags, mut bundle) = if prog.imports.is_empty() {
+//RS         let mut bundle = program_bundle(src, prog);
+//RS         let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
+//RS         (diags, bundle)
+//RS     } else {
+//RS         let tmp_path = match write_unique_temp_file("check_ast", base_src) {
+//RS             Ok(path) => path,
+//RS             Err(_) => {
+//RS                 return Ok((
+//RS                     current_stmts(&mut prog.items, fn_name, current_len),
+//RS                     HashMap::new(),
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let path_str = tmp_path.to_string_lossy().to_string();
+//RS         let result = crate::Loader::load_entry(&path_str).map(|mut bundle| {
+//RS             let entry = bundle.entry;
+//RS             bundle.modules[entry].source = src.to_string();
+//RS             bundle.modules[entry].items = std::mem::take(&mut prog.items);
+//RS             bundle.modules[entry].block_spans = std::mem::take(&mut prog.block_spans);
+//RS             let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
+//RS             (diags, bundle)
+//RS         });
+//RS         let _ = std::fs::remove_file(&tmp_path);
+//RS         match result {
+//RS             Ok(result) => result,
+//RS             Err(ds) => return Err(ds),
+//RS         }
+//RS     };
+//RS     let errors: Vec<_> = diags
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     if errors.is_empty() {
+//RS         let entry = bundle.entry;
+//RS         let mut core_imports = HashMap::new();
+//RS         update_core_imports_from_ledger(&bundle, &mut core_imports);
+//RS         Ok((
+//RS             current_stmts(&mut bundle.modules[entry].items, fn_name, current_len),
+//RS             core_imports,
+//RS         ))
+//RS     } else {
+//RS         Err(errors)
+//RS     }
+//RS }
+//RS 
+//RS fn current_stmts(items: &mut [Item], fn_name: &str, current_len: usize) -> Vec<Stmt> {
+//RS     let body = items
+//RS         .iter_mut()
+//RS         .find_map(|item| match item {
+//RS             Item::Func(f) if f.name == fn_name => Some(&mut f.body),
+//RS             _ => None,
+//RS         })
+//RS         .expect("REPL check function survives sema");
+//RS     body.split_off(body.len() - current_len)
+//RS }
+//RS 
+//RS fn repl_executable_stmts(mut stmts: Vec<Stmt>) -> Vec<Stmt> {
+//RS     for stmt in &mut stmts {
+//RS         if let Stmt::Val(binding) = stmt {
+//RS             if let Expr::Place(inner, crate::AST::PlaceAccess::Read, _) = &binding.init {
+//RS                 // The tree-walker owns CtValues, so a checked read window is
+//RS                 // represented by evaluating its already-validated place.
+//RS                 binding.init = (**inner).clone();
+//RS             }
+//RS         }
+//RS     }
+//RS     stmts
+//RS }
+//RS 
+//RS fn restore_move_diagnostic(d: Diagnostic, moved_names: &HashSet<String>) -> Diagnostic {
+//RS     if d.code == "E0956" {
+//RS         if let Some(name) = moved_names
+//RS             .iter()
+//RS             .find(|name| d.what.contains(&format!("the name `{name}`")))
+//RS         {
+//RS             return Diagnostic::error(
+//RS                 "E0121",
+//RS                 format!("`{name}` was given away earlier, so it can't be used here"),
+//RS                 "after a value moves somewhere else, the old name no longer holds it".to_string(),
+//RS                 format!("give away a copy instead (`~{name}`) where it moved"),
+//RS                 d.span,
+//RS             );
+//RS         }
+//RS     }
+//RS     d
+//RS }
+//RS 
+//RS /// Build a complete synthetic Jet source from accumulated declarations +
+//RS /// new item, then run sema. The successful rebuild retains this checked AST.
+//RS pub(crate) fn type_check_item(
+//RS     session: &Session,
+//RS     new_item_src: &str,
+//RS ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
+//RS     let prog_src = format!(
+//RS         "{}{}{}\n{}\n",
+//RS         PRELOAD_SRC,
+//RS         session.import_src(),
+//RS         session.accumulated_src(),
+//RS         new_item_src,
+//RS     );
+//RS     checked_program(&prog_src)
+//RS }
+//RS 
+//RS fn checked_top_level_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, Func> {
+//RS     bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Func(function) => Some((function.name.clone(), function.clone())),
+//RS             _ => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn checked_top_level_structs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, StructDef> {
+//RS     bundle.modules[bundle.entry]
+//RS         .items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Struct(s) => Some((s.name.clone(), s.clone())),
+//RS             _ => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Parse + sema-check `src`, returning the checked AST. Uses `Check` mode so
+//RS /// E0101 (no `run`) is not fired — a REPL session is a library.
+//RS fn checked_program(src: &str) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
+//RS     let (toks, lex_diags) = crate::Lexer::lex(src);
+//RS     if !lex_diags.is_empty() {
+//RS         return Err(lex_diags
+//RS             .into_iter()
+//RS             .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
+//RS             .collect());
+//RS     }
+//RS     let prog = match crate::Parser::parse_with_source(&toks, src) {
+//RS         Ok(p) => p,
+//RS         Err(ds) => return Err(ds),
+//RS     };
+//RS     // File imports need Loader resolution. Import-free programs use the same
+//RS     // canonical one-module bundle checker as every other compile path.
+//RS     let mut bundle = if prog.imports.is_empty() {
+//RS         program_bundle(src, prog)
+//RS     } else {
+//RS         match write_unique_temp_file("check", src) {
+//RS             Err(_) => program_bundle(src, prog),
+//RS             Ok(tmp_path) => {
+//RS                 let loaded = crate::Loader::load_entry(&tmp_path.to_string_lossy());
+//RS                 let _ = std::fs::remove_file(&tmp_path);
+//RS                 loaded?
+//RS             }
+//RS         }
+//RS     };
+//RS     let errors: Vec<_> = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     if errors.is_empty() {
+//RS         Ok(bundle)
+//RS     } else {
+//RS         Err(errors)
+//RS     }
+//RS }
+//RS 
+//RS fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::ProgramBundle {
+//RS     let path = std::path::PathBuf::from("<repl>");
+//RS     crate::AST::ProgramBundle {
+//RS         entry: 0,
+//RS         project_root: std::path::PathBuf::from("."),
+//RS         modules: vec![crate::AST::LoadedModule {
+//RS             path,
+//RS             display: "<repl>".to_string(),
+//RS             source: src.to_string(),
+//RS             alias: "main".to_string(),
+//RS             imports: std::mem::take(&mut prog.imports),
+//RS             items: std::mem::take(&mut prog.items),
+//RS             script_body: std::mem::take(&mut prog.script_body),
+//RS             web_target_ceiling: prog.web_target_ceiling,
+//RS             pub_file: prog.pub_file,
+//RS             no_prelude: prog.no_prelude,
+//RS             default_target: prog.default_target,
+//RS             html_path: prog.html_path,
+//RS             policy_declarations: prog.policy_declarations.clone(),
+//RS             user_policy_declarations: prog.user_policy_declarations.clone(),
+//RS             block_spans: prog.block_spans.clone(),
+//RS             rule_facts: std::mem::take(&mut prog.rule_facts),
+//RS         }],
+//RS         devtools_registry: crate::AST::DevtoolsRegistry::default(),
+//RS         parse_teaching: Vec::new(),
+//RS         used_core: std::collections::HashSet::new(),
+//RS         ffi_callback_fns: std::collections::HashSet::new(),
+//RS         cffi: crate::AST::CFfi::default(),
+//RS         comptime_inputs: Vec::new(),
+//RS         name_ledger: crate::AST::NameLedger::default(),
+//RS         layer_ceiling: None,
+//RS         inferred_layer: crate::Syntax::RuntimeLayer::Core,
+//RS         web_partitions: std::collections::HashMap::new(),
+//RS         web_partition_enforced: false,
+//RS         web_partition_report: None,
+//RS         dep_roots: std::collections::HashMap::new(),
+//RS         package_guarantees: Default::default(),
+//RS         program_allocator: Default::default(),
+//RS         active_os: crate::Syntax::OSTarget::host(),
+//RS         build_facts: Default::default(),
+//RS         edition: crate::Manifest::latest_edition().to_string(),
+//RS     }
+//RS }
+//RS 
+//RS /// Rebuild the func_defs table from accumulated item sources.
+//RS fn rebuild_funcs(session: &mut Session) {
+//RS     let src = format!(
+//RS         "{}{}{}",
+//RS         PRELOAD_SRC,
+//RS         session.import_src(),
+//RS         session.accumulated_src()
+//RS     );
+//RS     if let Ok(bundle) = checked_program(&src) {
+//RS         session.func_defs = checked_top_level_funcs(&bundle);
+//RS         session.struct_defs = checked_top_level_structs(&bundle);
+//RS         return;
+//RS     }
+//RS     session.func_defs.clear();
+//RS     session.struct_defs.clear();
+//RS     let (toks, _) = crate::Lexer::lex(&src);
+//RS     if let Ok(prog) = crate::Parser::parse_with_source(&toks, &src) {
+//RS         for item in prog.items {
+//RS             match item {
+//RS                 Item::Func(f) => {
+//RS                     session.func_defs.insert(f.name.clone(), f);
+//RS                 }
+//RS                 Item::Struct(s) => {
+//RS                     session.struct_defs.insert(s.name.clone(), s);
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // ── value display (D-REPL16=B) ─────────────────────────────────────────────
+//RS 
+//RS pub(crate) fn display_value(v: &CtValue) -> String {
+//RS     let val_str = crate::Comptime::display_core_pure_value(v).unwrap_or_else(|| v.jet_show());
+//RS     let ty = type_name(v);
+//RS     if matches!(v, CtValue::Str(_)) {
+//RS         format!("\"{}\" : {}", val_str, ty)
+//RS     } else {
+//RS         format!("{} : {}", val_str, ty)
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn type_name(v: &CtValue) -> &str {
+//RS     match v {
+//RS         CtValue::Int(_) => "Int",
+//RS         CtValue::Float(_) => "Float",
+//RS         CtValue::Bool(_) => "Bool",
+//RS         CtValue::Char(_) => "Char",
+//RS         CtValue::Str(_) => "String",
+//RS         CtValue::BigInt(_) => "Int",
+//RS         CtValue::Bytes(_) => "[U8]",
+//RS         CtValue::List(_) => "List",
+//RS         CtValue::Map(_) => "Map",
+//RS         CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name,
+//RS         CtValue::Present(_) | CtValue::Failed(CtReport::Clean(_)) => "Option",
+//RS         CtValue::Failed(CtReport::Told(_)) => "Result",
+//RS         CtValue::Unit => "()",
+//RS         CtValue::Closure(_) => "Fn",
+//RS     }
+//RS }
+//RS 
+//RS // ── :load ─────────────────────────────────────────────────────────────────
+//RS 
+//RS /// `:load <file>` — load a Jet source file into the session. The one
+//RS /// file-into-session mechanism (D-REPL15=B).
+//RS ///
+//RS /// `run_entry` says whether a `fn run` in the file is invoked on load.
+//RS /// Interactive `:load` passes `true` (its shipped behavior). The `jet repl
+//RS /// <file>.jet` preload passes `false` (#2038): naming a file on the command
+//RS /// line makes its definitions available, it does not run the program — that
+//RS /// is `jet run`.
+//RS fn cmd_load(
+//RS     path_str: &str,
+//RS     session: &mut Session,
+//RS     base_dir: &Path,
+//RS     _color: bool,
+//RS     run_entry: bool,
+//RS     out_sink: &mut impl Write,
+//RS ) {
+//RS     let src = match std::fs::read_to_string(path_str) {
+//RS         Ok(s) => s,
+//RS         Err(e) => {
+//RS             let _ = writeln!(out_sink, "error: couldn't read `{}`: {}", path_str, e);
+//RS             return;
+//RS         }
+//RS     };
+//RS     // Parse to count items and detect run.
+//RS     let (toks, lex_diags) = crate::Lexer::lex(&src);
+//RS     if !lex_diags.is_empty() {
+//RS         let n = lex_diags.len();
+//RS         let _ = writeln!(out_sink, "{} parse error(s) in `{}`", n, path_str);
+//RS         return;
+//RS     }
+//RS     let prog = match crate::Parser::parse_with_source(&toks, &src) {
+//RS         Ok(p) => p,
+//RS         Err(ds) => {
+//RS             let _ = writeln!(out_sink, "{} parse error(s) in `{}`", ds.len(), path_str);
+//RS             return;
+//RS         }
+//RS     };
+//RS     let item_count = prog.items.len();
+//RS     let has_run = prog
+//RS         .items
+//RS         .iter()
+//RS         .any(|i| matches!(i, Item::Func(f) if f.name == "run"));
+//RS 
+//RS     // Add each item's source to the session (approximate: use the whole file).
+//RS     session.item_srcs.push(src.clone());
+//RS     rebuild_funcs(session);
+//RS 
+//RS     let _ = writeln!(out_sink, "loaded {} items from `{}`", item_count, path_str);
+//RS 
+//RS     // Run run() if present and the caller asked for it.
+//RS     if has_run && run_entry {
+//RS         if let Some(main) = session.func_defs.get("run") {
+//RS             let main_clone = main.clone();
+//RS             let funcs: HashMap<String, &Func> = session
+//RS                 .func_defs
+//RS                 .iter()
+//RS                 .map(|(k, v)| (k.clone(), v))
+//RS                 .collect();
+//RS             let mut sink = DevSink::new();
+//RS             let _ = crate::Comptime::run_main_with_fuel(
+//RS                 &main_clone,
+//RS                 &funcs,
+//RS                 base_dir,
+//RS                 &mut sink,
+//RS                 REPL_FUEL_BUDGET,
+//RS             );
+//RS             if !sink.stdout.is_empty() {
+//RS                 let _ = write!(out_sink, "{}", sink.stdout);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // ── :type ─────────────────────────────────────────────────────────────────
+//RS 
+//RS fn cmd_type(name: &str, session: &Session, color: bool) {
+//RS     if let Some(v) = session.scope.get(name) {
+//RS         let ty = session
+//RS             .binding_types
+//RS             .get(name)
+//RS             .map(|t| t.name())
+//RS             .unwrap_or_else(|| type_name(v).to_string());
+//RS         println!("{} : {}", name, ty);
+//RS     } else if session.func_defs.contains_key(name) {
+//RS         println!("{} : fn", name);
+//RS     } else {
+//RS         println!(
+//RS             "{}: `{}` isn't defined in this session",
+//RS             yellow("note", color),
+//RS             name
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS // ── diagnostic rendering ───────────────────────────────────────────────────
+//RS 
+//RS fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
+//RS     eprint!(
+//RS         "{}",
+//RS         crate::Diagnostics::render_all_colored(file, src, diags, color)
+//RS     );
+//RS     let n = diags.len();
+//RS     eprintln!("{} problem{} found", n, if n == 1 { "" } else { "s" });
+//RS }
+//RS /// REPL wrappers add generated source before the user's input, but diagnostics
+//RS /// render against the input line alone. Shift every returned span back to that
+//RS /// source before rendering; checked subtraction preserves zero-width spans and
+//RS /// clamps only diagnostics that point into the generated wrapper.
+//RS fn reanchor_repl_diagnostic(diagnostic: &mut Diagnostic, input_start: usize) {
+//RS     let Some(span) = diagnostic.span else {
+//RS         return;
+//RS     };
+//RS     let start = span.start.checked_sub(input_start).unwrap_or(0);
+//RS     let end = span.end.checked_sub(input_start).unwrap_or(start);
+//RS     diagnostic.span = Some(crate::Diagnostics::Span::new(start, end.max(start)));
+//RS }
+//RS 
+//RS // ── main REPL loop ─────────────────────────────────────────────────────────
+//RS 
+//RS /// Run an interactive REPL session.
+//RS /// `jet repl` entry point. Prints the D-FE-REPL1=D banner unconditionally
+//RS /// (TTY and non-TTY alike — only its wording changed from the pre-redesign
+//RS /// banner), then hands off to the interactive raw-mode loop when stdin/stdout
+//RS /// are both a real terminal and `stty` is available, or the cooked
+//RS /// line-buffered loop otherwise (I6: `stty` shell-out, no line-editing
+//RS /// crate). The cooked loop is also the exact non-TTY floor `run_transcript`
+//RS /// mirrors — piped/redirected sessions keep the pre-redesign plain output.
+//RS pub fn run(project_dir: Option<&str>, flags: ReplFlags) -> i32 {
+//RS     use std::io::IsTerminal;
+//RS     let color = flags.color.resolve(io::stdout().is_terminal());
+//RS     let raw_guard = Terminal::RawGuard::enable();
+//RS     println!(
+//RS         "{}",
+//RS         Render::render_banner(env!("CARGO_PKG_VERSION"), color)
+//RS     );
+//RS     println!();
+//RS     eprintln!(
+//RS         "{}",
+//RS         Render::render_discovery_hint(raw_guard.is_some(), color)
+//RS     );
+//RS 
+//RS     match raw_guard {
+//RS         Some(guard) => Interactive::run_interactive(project_dir, color, guard, flags),
+//RS         None => run_cooked(project_dir, color, flags),
+//RS     }
+//RS }
+//RS 
+//RS /// Pre-redesign line-buffered loop: `read_line` per input, plain `user> `
+//RS /// prompt (no turn gutter — that's an interactive-only affordance), full
+//RS /// unfolded echoes. This is the non-TTY fallback and stays byte-identical to
+//RS /// the REPL's prior behavior (tests/cli's `no_args_repl_banner_golden` and
+//RS /// every `tests/repl.rs` transcript floor depend on it).
+//RS fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
+//RS     let base_dir: std::path::PathBuf =
+//RS         project_dir
+//RS             .map(std::path::PathBuf::from)
+//RS             .unwrap_or_else(|| {
+//RS                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+//RS             });
+//RS 
+//RS     let mut session = Session::new();
+//RS     session.enable_persistent_history();
+//RS     let preload = flags.preload.clone();
+//RS     let mut policy = ReplPolicy::new(flags, &base_dir);
+//RS 
+//RS     // D-REPL10=A: --project loads the project's source items into the session
+//RS     // so functions/types are available without `use`.
+//RS     if let Some(dir) = project_dir {
+//RS         let mut stdout = io::stdout();
+//RS         load_project_items(Path::new(dir), &mut session, &mut stdout);
+//RS         session.preserve_project_baseline();
+//RS     }
+//RS 
+//RS     // #2038: `jet repl <file>.jet`. Same loader as `:load`, `fn run` not
+//RS     // invoked. Both may be given: `--project` seeds the package, the file
+//RS     // then loads on top.
+//RS     if let Some(file) = &preload {
+//RS         let mut stdout = io::stdout();
+//RS         cmd_load(file, &mut session, &base_dir, color, false, &mut stdout);
+//RS     }
+//RS 
+//RS     let stdin = io::stdin();
+//RS     let mut stdin_lock = stdin.lock();
+//RS 
+//RS     loop {
+//RS         let prompt = Render::render_prompt(session.turns.len() + 1, color);
+//RS         let text = match read_input(&mut stdin_lock, color, &prompt) {
+//RS             Some(t) => t,
+//RS             None => {
+//RS                 println!();
+//RS                 break;
+//RS             }
+//RS         };
+//RS 
+//RS         let trimmed = text.trim();
+//RS         if trimmed.is_empty() {
+//RS             continue;
+//RS         }
+//RS 
+//RS         if let Some(arg) = trimmed.strip_prefix(":rerun ") {
+//RS             let mut authorizer = policy.authorizer(None);
+//RS             rerun_cooked(
+//RS                 arg,
+//RS                 &mut stdin_lock,
+//RS                 &mut session,
+//RS                 &base_dir,
+//RS                 color,
+//RS                 &mut authorizer,
+//RS             );
+//RS             continue;
+//RS         }
+//RS 
+//RS         let mut authorizer = policy.authorizer(None);
+//RS         if execute_line(
+//RS             trimmed,
+//RS             &mut session,
+//RS             &base_dir,
+//RS             color,
+//RS             false,
+//RS             false,
+//RS             &mut authorizer,
+//RS         ) {
+//RS             break;
+//RS         }
+//RS     }
+//RS 
+//RS     0
+//RS }
+//RS 
+//RS fn rerun_cooked(
+//RS     id_text: &str,
+//RS     input: &mut dyn BufRead,
+//RS     session: &mut Session,
+//RS     base_dir: &Path,
+//RS     color: bool,
+//RS     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+//RS ) {
+//RS     let id = match id_text.trim().parse::<usize>() {
+//RS         Ok(id) if session.turns.iter().any(|turn| turn.id == id) => id,
+//RS         _ => {
+//RS             eprintln!("turn #{} does not exist", id_text.trim());
+//RS             return;
+//RS         }
+//RS     };
+//RS     let original = session
+//RS         .turns
+//RS         .iter()
+//RS         .find(|turn| turn.id == id)
+//RS         .unwrap()
+//RS         .input
+//RS         .clone();
+//RS     print!("Edit turn {id} [{original}]: ");
+//RS     io::stdout().flush().ok();
+//RS     let mut edited = String::new();
+//RS     if input
+//RS         .read_line(&mut edited)
+//RS         .ok()
+//RS         .filter(|n| *n > 0)
+//RS         .is_none()
+//RS     {
+//RS         eprintln!("rerun cancelled at end of input");
+//RS         return;
+//RS     }
+//RS     let edited = edited.trim();
+//RS     let replacement = (!edited.is_empty() && edited != original).then_some(edited);
+//RS     let plan = match RerunPlan::build_replay_plan(&session.turns, id, replacement) {
+//RS         Ok(plan) => plan,
+//RS         Err(message) => {
+//RS             eprintln!("{message}");
+//RS             return;
+//RS         }
+//RS     };
+//RS     println!("{}", RerunPlan::render_replay_plan(&plan, color));
+//RS     let mut stale_from = None;
+//RS     for step in &plan.steps {
+//RS         if step.kind != RerunPlan::StepKind::ConfirmEffect {
+//RS             continue;
+//RS         }
+//RS         print!(
+//RS             "Replay effect turn {}? [y] replay  [s] skip and mark stale: ",
+//RS             step.turn_id
+//RS         );
+//RS         io::stdout().flush().ok();
+//RS         let mut answer = String::new();
+//RS         if input.read_line(&mut answer).is_err() || !answer.trim().eq_ignore_ascii_case("y") {
+//RS             stale_from = Some(step.turn_id);
+//RS             break;
+//RS         }
+//RS     }
+//RS     apply_replay_plan_with_stale(session, &plan, stale_from, base_dir, color, authorizer);
+//RS }
+//RS 
+//RS /// Classify + execute one already-trimmed input line, printing results to
+//RS /// stdout/stderr and recording the turn. Shared by `run_cooked` and
+//RS /// `Interactive::run_interactive` — the two live-terminal loops (the
+//RS /// transcript-buffer path, `run_transcript`, stays independent below so its
+//RS /// pinned floor output can never be perturbed by this shared path).
+//RS ///
+//RS /// `fold_long_output` gates D-FE-REPL1=D auto-fold (`⋯ N rows folded …`) for
+//RS /// long `List` echoes — off for the cooked/plain floor, on in the
+//RS /// interactive TTY loop. `quiet` suppresses all printing while still
+//RS /// classifying/executing/recording the turn — used by
+//RS /// `apply_replay_plan` to silently rebuild session state for turns before
+//RS /// the one actually being rerun (D-FE-REPL-RERUN1=A).
+//RS ///
+//RS /// Returns `true` when `:quit`/`:q`/`:exit` was requested.
+//RS pub(crate) fn execute_line(
+//RS     trimmed: &str,
+//RS     session: &mut Session,
+//RS     base_dir: &Path,
+//RS     color: bool,
+//RS     fold_long_output: bool,
+//RS     quiet: bool,
+//RS     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+//RS ) -> bool {
+//RS     session.step += 1;
+//RS     let step_src = format!("<repl:{}>", session.step);
+//RS 
+//RS     macro_rules! qprintln {
+//RS         ($($arg:tt)*) => {
+//RS             if !quiet { println!($($arg)*); }
+//RS         };
+//RS     }
+//RS     macro_rules! qprint {
+//RS         ($($arg:tt)*) => {
+//RS             if !quiet { print!($($arg)*); }
+//RS         };
+//RS     }
+//RS     macro_rules! qeprint {
+//RS         ($($arg:tt)*) => {
+//RS             if !quiet { eprint!($($arg)*); }
+//RS         };
+//RS     }
+//RS 
+//RS     // D-REPL-PRELOAD teaching note: on first use of print/eprint/input.
+//RS     if !session.shown_preload_note
+//RS         && (trimmed.contains("print(") || trimmed.contains("eprint(") || trimmed.contains("input("))
+//RS     {
+//RS         qprintln!(
+//RS             "{}",
+//RS             dim(
+//RS                 "note: `print` is from `use core.term` — imported automatically in the REPL",
+//RS                 color
+//RS             )
+//RS         );
+//RS         session.shown_preload_note = true;
+//RS     }
+//RS 
+//RS     let kind = match classify(trimmed, session.step) {
+//RS         Ok(k) => k,
+//RS         Err(ds) => {
+//RS             if !quiet {
+//RS                 render_diags(&step_src, trimmed, &ds, color);
+//RS             }
+//RS             session.record_turn(
+//RS                 trimmed,
+//RS                 ReplTurnStatus::Error,
+//RS                 ds.iter()
+//RS                     .map(|d| format!("{}: {}", d.code, d.what))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("; "),
+//RS             );
+//RS             return false;
+//RS         }
+//RS     };
+//RS 
+//RS     match kind {
+//RS         InputKind::Empty => {}
+//RS 
+//RS         InputKind::Meta(cmd, arg) => {
+//RS             if quiet {
+//RS                 // Meta-commands don't create turns and aren't part of a
+//RS                 // replay plan's own steps — a quiet prior-state replay never
+//RS                 // reaches one (only Item/Import/Reject/Stmts turns are ever
+//RS                 // recorded), but guard defensively rather than print anyway.
+//RS                 return false;
+//RS             }
+//RS             return handle_meta(&cmd, arg.as_deref(), session, base_dir, color, authorizer);
+//RS         }
+//RS 
+//RS         InputKind::Reject(feature) => {
+//RS             let d = e1802(&feature);
+//RS             if !quiet {
+//RS                 render_diags(&step_src, trimmed, &[d], color);
+//RS             }
+//RS             session.record_turn(trimmed, ReplTurnStatus::Error, "E1802".to_string());
+//RS         }
+//RS 
+//RS         InputKind::Item(src) => {
+//RS             let bundle = match type_check_item(session, &src) {
+//RS                 Ok(bundle) => bundle,
+//RS                 Err(errors) => {
+//RS                     if !quiet {
+//RS                         render_diags(&step_src, trimmed, &errors, color);
+//RS                     }
+//RS                     session.record_turn(
+//RS                         trimmed,
+//RS                         ReplTurnStatus::Error,
+//RS                         errors
+//RS                             .iter()
+//RS                             .map(|d| format!("{}: {}", d.code, d.what))
+//RS                             .collect::<Vec<_>>()
+//RS                             .join("; "),
+//RS                     );
+//RS                     return false;
+//RS                 }
+//RS             };
+//RS             session.item_srcs.push(src);
+//RS             rebuild_funcs(session);
+//RS             update_core_imports_from_ledger(&bundle, &mut session.core_imports);
+//RS             qprintln!("{}", green("ok", color));
+//RS             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+//RS             if !quiet {
+//RS                 session.remember_success(trimmed);
+//RS             }
+//RS         }
+//RS 
+//RS         InputKind::Import(src) => {
+//RS             // Try it against the accumulated session so a bad import
+//RS             // (unknown core module, etc.) reports before being kept.
+//RS             session.import_srcs.push(src.clone());
+//RS             let bundle = match type_check_item(session, "") {
+//RS                 Ok(bundle) => bundle,
+//RS                 Err(errors) => {
+//RS                     session.import_srcs.pop();
+//RS                     if !quiet {
+//RS                         render_diags(&step_src, trimmed, &errors, color);
+//RS                     }
+//RS                     session.record_turn(
+//RS                         trimmed,
+//RS                         ReplTurnStatus::Error,
+//RS                         errors
+//RS                             .iter()
+//RS                             .map(|d| format!("{}: {}", d.code, d.what))
+//RS                             .collect::<Vec<_>>()
+//RS                             .join("; "),
+//RS                     );
+//RS                     return false;
+//RS                 }
+//RS             };
+//RS             rebuild_funcs(session);
+//RS             update_core_imports_from_ledger(&bundle, &mut session.core_imports);
+//RS             qprintln!("{}", green("ok", color));
+//RS             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+//RS             if !quiet {
+//RS                 session.remember_success(trimmed);
+//RS             }
+//RS         }
+//RS 
+//RS         InputKind::Stmts(stmts, suppress, check_src) => {
+//RS             // `stmts` came from the generated wrapper. The first statement
+//RS             // marks that wrapper's body start; `check_src` tells us whether
+//RS             // the body begins with an echo sentinel or the user's text.
+//RS             let input_start = stmts
+//RS                 .first()
+//RS                 .map(|stmt| stmt.span().start)
+//RS                 .unwrap_or(0)
+//RS                 .saturating_add(check_src.find(trimmed).unwrap_or(0));
+//RS             let (checked_stmts, checked_core_imports) =
+//RS                 match type_check_stmts(session, &stmts, session.step, &check_src) {
+//RS                     Ok(checked) => checked,
+//RS                     Err(mut errors) => {
+//RS                         for diagnostic in &mut errors {
+//RS                             reanchor_repl_diagnostic(diagnostic, input_start);
+//RS                         }
+//RS                         if !quiet {
+//RS                             render_diags(&step_src, trimmed, &errors, color);
+//RS                         }
+//RS                         session.record_turn(
+//RS                             trimmed,
+//RS                             ReplTurnStatus::Error,
+//RS                             errors
+//RS                                 .iter()
+//RS                                 .map(|d| format!("{}: {}", d.code, d.what))
+//RS                                 .collect::<Vec<_>>()
+//RS                                 .join("; "),
+//RS                         );
+//RS                         return false;
+//RS                     }
+//RS                 };
+//RS 
+//RS             // D-REPL8=A: detect which session bindings are moved by this input.
+//RS             let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
+//RS             let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
+//RS             let stmts = repl_executable_stmts(checked_stmts.clone());
+//RS             // The turn executes the checked AST, so it resolves aliases against
+//RS             // the map sema used — the session's own accepted `use` aliases plus
+//RS             // the compiler-owned prelude openings for this turn's ambients.
+//RS             let mut core_imports = session.core_imports.clone();
+//RS             core_imports.extend(checked_core_imports);
+//RS 
+//RS             // Snapshot keys before execution to detect new bindings.
+//RS             let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
+//RS 
+//RS             let funcs: HashMap<String, &Func> = session
+//RS                 .func_defs
+//RS                 .iter()
+//RS                 .map(|(k, v)| (k.clone(), v))
+//RS                 .collect();
+//RS             let structs: HashMap<String, &StructDef> = session
+//RS                 .struct_defs
+//RS                 .iter()
+//RS                 .map(|(k, v)| (k.clone(), v))
+//RS                 .collect();
+//RS             let mut sink = DevSink::new();
+//RS             let mut tracking_authorizer = TrackingAuthorizer {
+//RS                 inner: authorizer,
+//RS                 observed: false,
+//RS             };
+//RS             // A turn commits as one transaction. Interpreter writes land in
+//RS             // this private scope and become session-visible only on success.
+//RS             let mut trial_scope = session.scope.clone();
+//RS             let result = if crate::Comptime::repl_interruptible_turn_active() {
+//RS                 crate::Comptime::run_repl_step_interruptible(
+//RS                     &stmts,
+//RS                     &funcs,
+//RS                     base_dir,
+//RS                     &mut sink,
+//RS                     &mut trial_scope,
+//RS                     REPL_FUEL_BUDGET,
+//RS                     suppress,
+//RS                     &core_imports,
+//RS                     &structs,
+//RS                     &session.binding_types,
+//RS                     &mut tracking_authorizer,
+//RS                 )
+//RS             } else {
+//RS                 crate::Comptime::run_repl_step(
+//RS                     &stmts,
+//RS                     &funcs,
+//RS                     base_dir,
+//RS                     &mut sink,
+//RS                     &mut trial_scope,
+//RS                     REPL_FUEL_BUDGET,
+//RS                     suppress,
+//RS                     &core_imports,
+//RS                     &structs,
+//RS                     &session.binding_types,
+//RS                     &mut tracking_authorizer,
+//RS                 )
+//RS                 .map_err(crate::Comptime::ReplStepError::Diagnostic)
+//RS             };
+//RS             match result {
+//RS                 Ok(echo_val) => {
+//RS                     for name in &newly_moved {
+//RS                         trial_scope.remove(name);
+//RS                     }
+//RS                     session.scope = trial_scope;
+//RS                     let mut summary = String::new();
+//RS                     // Track moves: bindings consumed in this input are gone.
+//RS                     session.moved_names.extend(newly_moved);
+//RS                     // Record stmt source for :run materialization.
+//RS                     let raw = trimmed.trim_end_matches(';').trim().to_string();
+//RS                     if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
+//RS                         session.stmt_srcs.push(format!("{};", raw));
+//RS                     }
+//RS                     // Register any new bindings for sema visibility.
+//RS                     let new_names: Vec<String> = session
+//RS                         .scope
+//RS                         .keys()
+//RS                         .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
+//RS                         .cloned()
+//RS                         .collect();
+//RS                     session.record_stmts(&checked_stmts);
+//RS                     if !sink.stdout.is_empty() {
+//RS                         qprint!("{}", sink.stdout);
+//RS                         summary.push_str(&sink.stdout);
+//RS                     }
+//RS                     if !sink.stderr.is_empty() {
+//RS                         qeprint!("{}", sink.stderr);
+//RS                         summary.push_str(&sink.stderr);
+//RS                     }
+//RS                     // D-FE-REPL1=D: long List echoes auto-fold in the
+//RS                     // interactive loop (`fold_long_output`); the cooked/plain
+//RS                     // floor and quiet replays always print the full value.
+//RS                     let mut pending_unfold: Option<String> = None;
+//RS                     if let Some(v) = echo_val {
+//RS                         if !matches!(v, CtValue::Unit) {
+//RS                             let shown = display_value(&v);
+//RS                             let fold = fold_long_output
+//RS                                 .then(|| Render::fold_decision_for_value(&v))
+//RS                                 .flatten();
+//RS                             match fold {
+//RS                                 Some((count, elem_ty)) => {
+//RS                                     let marker = Render::render_fold_marker(count, &elem_ty, color);
+//RS                                     qprintln!("{}", marker);
+//RS                                     summary.push_str(&Render::render_fold_marker(
+//RS                                         count, &elem_ty, false,
+//RS                                     ));
+//RS                                     pending_unfold = Some(shown);
+//RS                                 }
+//RS                                 None => {
+//RS                                     qprintln!("{}", shown);
+//RS                                     summary.push_str(&shown);
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     let had_effect = tracking_authorizer.observed
+//RS                         || !sink.stdout.is_empty()
+//RS                         || !sink.stderr.is_empty();
+//RS                     let bound_name = match new_names.as_slice() {
+//RS                         [only] => Some(only.clone()),
+//RS                         _ => None,
+//RS                     };
+//RS                     session.record_turn_ex(
+//RS                         trimmed,
+//RS                         ReplTurnStatus::Ok,
+//RS                         summary,
+//RS                         had_effect,
+//RS                         bound_name,
+//RS                     );
+//RS                     if !quiet {
+//RS                         session.remember_success(trimmed);
+//RS                     }
+//RS                     if let Some(full) = pending_unfold {
+//RS                         if let Some(t) = session.turns.last_mut() {
+//RS                             t.folded = true;
+//RS                             t.pending_unfold = Some(full);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Err(crate::Comptime::ReplStepError::Interrupted) => {
+//RS                     qprintln!(
+//RS                         "Interrupted. External effects already performed were not rolled back."
+//RS                     );
+//RS                     session.record_turn_ex(
+//RS                         trimmed,
+//RS                         ReplTurnStatus::Interrupted,
+//RS                         "Interrupted".to_string(),
+//RS                         tracking_authorizer.observed
+//RS                             || !sink.stdout.is_empty()
+//RS                             || !sink.stderr.is_empty(),
+//RS                         None,
+//RS                     );
+//RS                 }
+//RS                 Err(crate::Comptime::ReplStepError::Diagnostic(d)) => {
+//RS                     let d = restore_move_diagnostic(d, &session.moved_names);
+//RS                     let mut d = if d.code == "E2202" {
+//RS                         e1801(REPL_FUEL_BUDGET)
+//RS                     } else {
+//RS                         d
+//RS                     };
+//RS                     reanchor_repl_diagnostic(&mut d, input_start);
+//RS                     if !quiet {
+//RS                         render_diags(&step_src, trimmed, std::slice::from_ref(&d), color);
+//RS                     }
+//RS                     session.record_turn(
+//RS                         trimmed,
+//RS                         ReplTurnStatus::Error,
+//RS                         format!("{}: {}", d.code, d.what),
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     false
+//RS }
+//RS 
+//RS /// Handle a `:command` meta-command (D-REPL15=B). Returns `true` when
+//RS /// `:quit`/`:q`/`:exit` was requested — the caller breaks its own loop and
+//RS /// returns normally instead of this function calling `std::process::exit`
+//RS /// directly, so a live `Terminal::RawGuard` (interactive TTY path) gets to
+//RS /// run its `Drop` and restore cooked terminal mode before the process exits
+//RS /// (`std::process::exit` skips destructors).
+//RS fn handle_meta(
+//RS     cmd: &str,
+//RS     arg: Option<&str>,
+//RS     session: &mut Session,
+//RS     base_dir: &Path,
+//RS     color: bool,
+//RS     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+//RS ) -> bool {
+//RS     match cmd {
+//RS         "quit" | "q" | "exit" => {
+//RS             println!("bye");
+//RS             return true;
+//RS         }
+//RS         "reset" => {
+//RS             session.reset();
+//RS             authorizer.reset_session();
+//RS             println!("session reset");
+//RS         }
+//RS         "load" => {
+//RS             let path = match arg {
+//RS                 Some(p) => p,
+//RS                 None => {
+//RS                     eprintln!("usage: :load <file.jet>");
+//RS                     return false;
+//RS                 }
+//RS             };
+//RS             let mut stdout = io::stdout();
+//RS             cmd_load(path, session, base_dir, color, true, &mut stdout);
+//RS         }
+//RS         "type" => {
+//RS             let name = match arg {
+//RS                 Some(n) => n,
+//RS                 None => {
+//RS                     eprintln!("usage: :type <name>");
+//RS                     return false;
+//RS                 }
+//RS             };
+//RS             cmd_type(name, session, color);
+//RS         }
+//RS         "run" => {
+//RS             // D-REPL-FUEL=A: compile the session to a temp file and run it natively.
+//RS             let mut stdout = io::stdout();
+//RS             cmd_run_native(session, color, &mut stdout);
+//RS         }
+//RS         "turns" => render_turns(session, color),
+//RS         "fold" => {
+//RS             match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "folded", true)) {
+//RS                 Ok(()) => println!("turn folded"),
+//RS                 Err(msg) => eprintln!("{msg}"),
+//RS             }
+//RS         }
+//RS         "unfold" => match parse_turn_id(arg).and_then(|id| unfold_turn(session, id)) {
+//RS             Ok(full) => {
+//RS                 println!("turn unfolded");
+//RS                 // D-FE-REPL1=D: a turn folded by the interactive auto-fold
+//RS                 // (a long List echo) carries the full text it elided — show
+//RS                 // it now rather than leaving `:unfold` a no-op note.
+//RS                 if let Some(full) = full {
+//RS                     println!("{}", full);
+//RS                 }
+//RS             }
+//RS             Err(msg) => eprintln!("{msg}"),
+//RS         },
+//RS         "pin" => match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "pinned", true))
+//RS         {
+//RS             Ok(()) => println!("turn pinned"),
+//RS             Err(msg) => eprintln!("{msg}"),
+//RS         },
+//RS         "unpin" => {
+//RS             match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "pinned", false)) {
+//RS                 Ok(()) => println!("turn unpinned"),
+//RS                 Err(msg) => eprintln!("{msg}"),
+//RS             }
+//RS         }
+//RS         "rerun" => match parse_turn_id(arg) {
+//RS             Ok(id) => {
+//RS                 // D-FE-REPL-RERUN1=A: build + show the replay plan; unedited
+//RS                 // `:rerun <id>` textual fallback applies it immediately when
+//RS                 // no step needs a side-effect confirmation, mirroring `^R`'s
+//RS                 // interactive flow without a prompt to answer in a script.
+//RS                 match RerunPlan::build_replay_plan(&session.turns, id, None) {
+//RS                     Ok(plan) => {
+//RS                         if RerunPlan::plan_needs_confirmation(&plan) {
+//RS                             // Shows the `Apply? [y/N]` shape (D-FE-REPL-RERUN1=A)
+//RS                             // but this textual fallback has no key to read a
+//RS                             // reply from — point at `^R`, which does.
+//RS                             println!("{}", RerunPlan::render_replay_plan(&plan, color));
+//RS                             println!(
+//RS                                 "note: this plan includes effectful turns — use the interactive `^R` to confirm/skip them"
+//RS                             );
+//RS                         } else {
+//RS                             apply_replay_plan(session, &plan, base_dir, color, authorizer);
+//RS                         }
+//RS                     }
+//RS                     Err(msg) => eprintln!("{msg}"),
+//RS                 }
+//RS             }
+//RS             Err(msg) => eprintln!("{msg}"),
+//RS         },
+//RS         "history" => handle_history(arg, &mut session.history),
+//RS         "?" => match arg {
+//RS             Some(name) => match Docs::lookup(session, name) {
+//RS                 Some(text) => print!("{}", text),
+//RS                 None => println!(
+//RS                     "{}: `{}` isn't defined in this session",
+//RS                     yellow("note", color),
+//RS                     name
+//RS                 ),
+//RS             },
+//RS             None => print_help(color),
+//RS         },
+//RS         "help" => print_help(color),
+//RS         _ => {
+//RS             eprintln!(
+//RS                 "unknown meta-command `:{}`; type {} to see available commands",
+//RS                 cmd,
+//RS                 bold(":help", color)
+//RS             );
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS /// D-FE-REPL-RERUN1=A: apply an already-built replay plan whose steps are all
+//RS /// `Auto` (or whose `ConfirmEffect` steps the caller already confirmed).
+//RS /// Rebuilds session state by clearing the session and replaying every turn
+//RS /// from turn 1 through the plan's last step in order — turns before
+//RS /// `plan.from_id` are known-good (their input/output already matched once)
+//RS /// so they replay silently; only the plan's own steps print.
+//RS fn apply_replay_plan(
+//RS     session: &mut Session,
+//RS     plan: &RerunPlan::ReplayPlan,
+//RS     base_dir: &Path,
+//RS     color: bool,
+//RS     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+//RS ) {
+//RS     apply_replay_plan_with_stale(session, plan, None, base_dir, color, authorizer);
+//RS }
+//RS 
+//RS /// Apply replay while conservatively retaining a skipped effect and every
+//RS /// downstream turn as stale notebook history. Those turns are not evaluated
+//RS /// and therefore cannot contribute bindings to the rebuilt live session.
+//RS pub(crate) fn apply_replay_plan_with_stale(
+//RS     session: &mut Session,
+//RS     plan: &RerunPlan::ReplayPlan,
+//RS     stale_from: Option<usize>,
+//RS     base_dir: &Path,
+//RS     color: bool,
+//RS     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+//RS ) {
+//RS     apply_replay_plan_with_stale_mode(session, plan, stale_from, base_dir, color, authorizer, true);
+//RS }
+//RS 
+//RS /// Notebook/headless callers need the same replay state transition without
+//RS /// human progress lines contaminating their JSONL output.
+//RS pub(crate) fn apply_replay_plan_with_stale_quiet(
+//RS     session: &mut Session,
+//RS     plan: &RerunPlan::ReplayPlan,
+//RS     stale_from: Option<usize>,
+//RS     base_dir: &Path,
+//RS     color: bool,
+//RS     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+//RS ) {
+//RS     apply_replay_plan_with_stale_mode(
+//RS         session, plan, stale_from, base_dir, color, authorizer, false,
+//RS     );
+//RS }
+//RS 
+//RS fn apply_replay_plan_with_stale_mode(
+//RS     session: &mut Session,
+//RS     plan: &RerunPlan::ReplayPlan,
+//RS     stale_from: Option<usize>,
+//RS     base_dir: &Path,
+//RS     color: bool,
+//RS     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+//RS     announce: bool,
+//RS ) {
+//RS     let prior: Vec<String> = session
+//RS         .turns
+//RS         .iter()
+//RS         .filter(|t| t.id < plan.from_id)
+//RS         .map(|t| t.input.clone())
+//RS         .collect();
+//RS     session.reset();
+//RS     // Turns before the edited one already matched once — replay them quietly
+//RS     // to rebuild state, so only the plan's own steps print.
+//RS     for input in &prior {
+//RS         execute_line(input, session, base_dir, color, false, true, authorizer);
+//RS     }
+//RS     for step in &plan.steps {
+//RS         if stale_from.is_some_and(|from| step.turn_id >= from) {
+//RS             session.turns.push(ReplTurn {
+//RS                 id: session.turns.len() + 1,
+//RS                 input: step.input.clone(),
+//RS                 summary: "not replayed".to_string(),
+//RS                 status: ReplTurnStatus::Ok,
+//RS                 folded: false,
+//RS                 pinned: false,
+//RS                 stale: true,
+//RS                 had_effect: step.kind == RerunPlan::StepKind::ConfirmEffect,
+//RS                 bound_name: None,
+//RS                 pending_unfold: None,
+//RS             });
+//RS             if announce {
+//RS                 println!(
+//RS                     "{}",
+//RS                     dim(&format!("turn {} stale: not replayed", step.turn_id), color)
+//RS                 );
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if announce {
+//RS             println!(
+//RS                 "{}",
+//RS                 dim(&format!("rerun #{}: {}", step.turn_id, step.input), color)
+//RS             );
+//RS         }
+//RS         execute_line(
+//RS             &step.input,
+//RS             session,
+//RS             base_dir,
+//RS             color,
+//RS             false,
+//RS             false,
+//RS             authorizer,
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn help_text(color: bool) -> String {
+//RS     use std::fmt::Write as _;
+//RS 
+//RS     let mut out = String::new();
+//RS     writeln!(out, "{}", bold("REPL Meta-Commands", color)).unwrap();
+//RS     writeln!(out, "  {}          end the session", bold(":quit", color)).unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}         clear all bindings and start fresh",
+//RS         bold(":reset", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}  load a Jet file into the session",
+//RS         bold(":load <file.jet>", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}      show the type of a binding",
+//RS         bold(":type <name>", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}           compile + run the session (bypasses fuel cap)",
+//RS         bold(":run", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}         list notebook turns, status, pins, and folds",
+//RS         bold(":turns", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {} search or erase successful submission history",
+//RS         bold(":history search <text> | clear", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}       rerun a prior turn as a preview",
+//RS         bold(":rerun <id>", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}        fold or unfold a turn's output summary",
+//RS         bold(":fold <id>", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}         pin or unpin a turn in the notebook rail",
+//RS         bold(":pin <id>", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}           show docs/type info for a name",
+//RS         bold("?name", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}         alias for {}",
+//RS         bold(":? <name>", color),
+//RS         bold("?name", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(out, "  {}          show this message", bold(":help", color)).unwrap();
+//RS     writeln!(out).unwrap();
+//RS     writeln!(out, "{}", bold("Interactive terminal only", color)).unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}             complete the current name",
+//RS         bold("Tab", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}              docs for the name under the cursor",
+//RS         bold("F1", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}              search successful submission history",
+//RS         bold("F3", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}              pin or unpin the latest turn",
+//RS         bold("^P", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}              fold or unfold the latest turn",
+//RS         bold("^F", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}              edit and rerun a prior turn",
+//RS         bold("^R", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  {}              open or close live bindings",
+//RS         bold("^B", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(out).unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  Tip: end a line with {} to suppress echo of its value.",
+//RS         bold(";", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  Tip: {} is auto-imported — type `print(\"hello\")` to try it.",
+//RS         bold("core.term", color)
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "  Tip: a `{}` line is kept for the whole session — import once, use it on any later line.",
+//RS         bold("use core.math as math", color)
+//RS     )
+//RS     .unwrap();
+//RS     out
+//RS }
+//RS 
+//RS fn print_help(color: bool) {
+//RS     print!("{}", help_text(color));
+//RS }
+//RS 
+//RS fn handle_history(arg: Option<&str>, history: &mut History::History) {
+//RS     let Some(arg) = arg else {
+//RS         eprintln!("usage: :history search <text> | :history clear");
+//RS         return;
+//RS     };
+//RS     if arg == "clear" {
+//RS         match history.clear() {
+//RS             Ok(()) => println!("History cleared."),
+//RS             Err(error) => eprintln!("warning: history could not be cleared: {error}"),
+//RS         }
+//RS         return;
+//RS     }
+//RS     if let Some(needle) = arg.strip_prefix("search ") {
+//RS         let matches = history.search(needle);
+//RS         if matches.is_empty() {
+//RS             println!("No history matches.");
+//RS         } else {
+//RS             for entry in matches {
+//RS                 println!("{entry}");
+//RS             }
+//RS         }
+//RS         return;
+//RS     }
+//RS     eprintln!("usage: :history search <text> | :history clear");
+//RS }
+//RS 
+//RS // ── one-shot command-line expression (#2068) ──────────────────────────────
+//RS 
+//RS /// What one command-line expression produced.
+//RS pub struct EvalOnce {
+//RS     /// The value the input evaluated to. `None` when the input only bound or
+//RS     /// declared something and so has no value to show.
+//RS     pub value: Option<CtValue>,
+//RS     /// Anything the input printed, in program order.
+//RS     pub stdout: String,
+//RS     pub stderr: String,
+//RS }
+//RS 
+//RS /// `jet eval "<expression>"` (#2068).
+//RS ///
+//RS /// One REPL turn against a fresh session: the same `classify` →
+//RS /// `type_check_stmts` → `Comptime::run_repl_step` pipeline every interactive
+//RS /// turn already uses. A command-line expression and a typed REPL line
+//RS /// therefore cannot disagree — there is no second expression evaluator (I8),
+//RS /// and the semantics stay in the shared comptime tree-walker while this only
+//RS /// marshals (I9).
+//RS ///
+//RS /// No `EffectPrompt` is attached, so an effect that no `--allow-*` covers is
+//RS /// refused with E1803 rather than blocking a non-interactive command on
+//RS /// stdin — `jet eval` is the pure/deterministic verb (S60 / D-PURE1).
+//RS pub fn eval_once(
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     flags: ReplFlags,
+//RS ) -> Result<EvalOnce, Vec<Diagnostic>> {
+//RS     jet_driver::boot_mir_eval();
+//RS     let mut policy = ReplPolicy::new(flags, base_dir);
+//RS     let session = Session::new();
+//RS 
+//RS     let (stmts, suppress, check_src) = match classify(src.trim(), 1)? {
+//RS         InputKind::Stmts(stmts, suppress, check_src) => (stmts, suppress, check_src),
+//RS         // The one registered E1802 renderer, same as an interactive turn.
+//RS         InputKind::Reject(feature) => return Err(vec![e1802(&feature)]),
+//RS         // A declaration or import on its own is checked and accepted; it
+//RS         // simply has no value to show, exactly like a `run()` that returns
+//RS         // nothing. A `:meta` command never reaches here — the CLI rejects it
+//RS         // as a malformed argument before calling in.
+//RS         InputKind::Meta(..) | InputKind::Item(_) | InputKind::Import(_) | InputKind::Empty => {
+//RS             return Ok(EvalOnce {
+//RS                 value: None,
+//RS                 stdout: String::new(),
+//RS                 stderr: String::new(),
+//RS             });
+//RS         }
+//RS     };
+//RS 
+//RS     let (checked_stmts, core_imports) = type_check_stmts(&session, &stmts, 1, &check_src)?;
+//RS     let executable = repl_executable_stmts(checked_stmts);
+//RS 
+//RS     let funcs: HashMap<String, &Func> = HashMap::new();
+//RS     let structs: HashMap<String, &StructDef> = HashMap::new();
+//RS     let mut sink = DevSink::new();
+//RS     let mut scope: HashMap<String, CtValue> = HashMap::new();
+//RS     let mut authorizer = policy.authorizer(None);
+//RS     match crate::Comptime::run_repl_step(
+//RS         &executable,
+//RS         &funcs,
+//RS         base_dir,
+//RS         &mut sink,
+//RS         &mut scope,
+//RS         REPL_FUEL_BUDGET,
+//RS         suppress,
+//RS         &core_imports,
+//RS         &structs,
+//RS         &session.binding_types,
+//RS         &mut authorizer,
+//RS     ) {
+//RS         Ok(value) => Ok(EvalOnce {
+//RS             value,
+//RS             stdout: sink.stdout,
+//RS             stderr: sink.stderr,
+//RS         }),
+//RS         Err(diagnostic) => Err(vec![diagnostic]),
+//RS     }
+//RS }
+//RS 
+//RS // ── transcript test harness (D-REPL20=A) ──────────────────────────────────
+//RS 
+//RS /// Run a REPL transcript test: feed `inputs` through the session, collect
+//RS /// the output lines. Used by `tests/repl.rs`. No color, no interactive I/O.
+//RS ///
+//RS /// Each input should be a single REPL input (may be multi-line if the caller
+//RS /// joins them). The returned string is the combined stdout of the session.
+//RS pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
+//RS     run_transcript_with_flags(inputs, project_dir, &[], &[])
+//RS }
+//RS 
+//RS /// Deterministic non-TTY transcript with explicit invocation policy. Used to
+//RS /// prove CLI flag behavior without inventing a test-only authorization path.
+//RS pub fn run_transcript_with_flags(
+//RS     inputs: &[&str],
+//RS     project_dir: Option<&str>,
+//RS     allow: &[&str],
+//RS     deny: &[&str],
+//RS ) -> String {
+//RS     run_transcript_with(
+//RS         inputs,
+//RS         project_dir,
+//RS         ReplFlags {
+//RS             allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
+//RS             deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
+//RS             color: ColorChoice::Never,
+//RS             preload: None,
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS /// #2038: the `jet repl <file>.jet` floor. Same session engine, same loader —
+//RS /// the transcript just starts with the named file already loaded.
+//RS pub fn run_transcript_with_preload(
+//RS     inputs: &[&str],
+//RS     project_dir: Option<&str>,
+//RS     preload: &str,
+//RS ) -> String {
+//RS     run_transcript_with(
+//RS         inputs,
+//RS         project_dir,
+//RS         ReplFlags {
+//RS             color: ColorChoice::Never,
+//RS             preload: Some(preload.to_string()),
+//RS             ..Default::default()
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn run_transcript_with(inputs: &[&str], project_dir: Option<&str>, flags: ReplFlags) -> String {
+//RS     jet_driver::boot_mir_eval();
+//RS     let base_dir: std::path::PathBuf = project_dir
+//RS         .map(std::path::PathBuf::from)
+//RS         .unwrap_or_else(|| std::path::PathBuf::from("."));
+//RS 
+//RS     let mut session = Session::new();
+//RS     let preload = flags.preload.clone();
+//RS     let mut policy = ReplPolicy::new(flags, &base_dir);
+//RS     let mut out = String::new();
+//RS 
+//RS     // D-REPL10=A: load project items when --project is set.
+//RS     if let Some(dir) = project_dir {
+//RS         let mut buf = Vec::new();
+//RS         load_project_items(Path::new(dir), &mut session, &mut buf);
+//RS         out.push_str(&String::from_utf8_lossy(&buf));
+//RS     }
+//RS 
+//RS     // #2038: the command-line file, through the same `cmd_load` the real
+//RS     // loops use — `fn run` is not invoked.
+//RS     if let Some(file) = &preload {
+//RS         let mut buf = Vec::new();
+//RS         cmd_load(file, &mut session, &base_dir, false, false, &mut buf);
+//RS         out.push_str(&String::from_utf8_lossy(&buf));
+//RS     }
+//RS 
+//RS     for &input in inputs {
+//RS         let normalized = normalize_repl_input(input);
+//RS         let trimmed = normalized.trim();
+//RS         if trimmed.is_empty() {
+//RS             continue;
+//RS         }
+//RS 
+//RS         session.step += 1;
+//RS 
+//RS         let kind = match classify(trimmed, session.step) {
+//RS             Ok(k) => k,
+//RS             Err(ds) => {
+//RS                 for d in &ds {
+//RS                     out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+//RS                 }
+//RS                 session.record_turn(
+//RS                     trimmed,
+//RS                     ReplTurnStatus::Error,
+//RS                     ds.iter()
+//RS                         .map(|d| format!("{}: {}", d.code, d.what))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join("; "),
+//RS                 );
+//RS                 continue;
+//RS             }
+//RS         };
+//RS 
+//RS         match kind {
+//RS             InputKind::Empty => {}
+//RS 
+//RS             InputKind::Meta(cmd, arg) => {
+//RS                 match cmd.as_str() {
+//RS                     "quit" | "q" | "exit" => {
+//RS                         out.push_str("bye\n");
+//RS                         return out;
+//RS                     }
+//RS                     "reset" => {
+//RS                         session.reset();
+//RS                         policy.session.clear();
+//RS                         out.push_str("session reset\n");
+//RS                     }
+//RS                     "load" => {
+//RS                         let path = match arg.as_deref() {
+//RS                             Some(p) => p.to_string(),
+//RS                             None => {
+//RS                                 out.push_str("error: :load needs a file path\n");
+//RS                                 continue;
+//RS                             }
+//RS                         };
+//RS                         let mut buf = Vec::new();
+//RS                         cmd_load(&path, &mut session, &base_dir, false, true, &mut buf);
+//RS                         out.push_str(&String::from_utf8_lossy(&buf));
+//RS                     }
+//RS                     "type" => {
+//RS                         let name = match arg.as_deref() {
+//RS                             Some(n) => n,
+//RS                             None => {
+//RS                                 out.push_str("error: :type needs a name\n");
+//RS                                 continue;
+//RS                             }
+//RS                         };
+//RS                         if let Some(v) = session.scope.get(name) {
+//RS                             let ty = session
+//RS                                 .binding_types
+//RS                                 .get(name)
+//RS                                 .map(|t| t.name())
+//RS                                 .unwrap_or_else(|| type_name(v).to_string());
+//RS                             out.push_str(&format!("{} : {}\n", name, ty));
+//RS                         } else if session.func_defs.contains_key(name) {
+//RS                             out.push_str(&format!("{} : fn\n", name));
+//RS                         } else {
+//RS                             out.push_str(&format!(
+//RS                                 "note: `{}` isn't defined in this session\n",
+//RS                                 name
+//RS                             ));
+//RS                         }
+//RS                     }
+//RS                     "run" => {
+//RS                         // D-REPL-FUEL=A: transcript path uses interpreter-based
+//RS                         // materialization (same semantics, no rustc dependency).
+//RS                         let run_out = cmd_run_transcript(&session);
+//RS                         out.push_str(&run_out);
+//RS                     }
+//RS                     "turns" => out.push_str(&render_turns_text(&session)),
+//RS                     "fold" => {
+//RS                         match parse_turn_id(arg.as_deref())
+//RS                             .and_then(|id| set_turn_flag(&mut session, id, "folded", true))
+//RS                         {
+//RS                             Ok(()) => out.push_str("turn folded\n"),
+//RS                             Err(msg) => out.push_str(&format!("{msg}\n")),
+//RS                         }
+//RS                     }
+//RS                     "unfold" => {
+//RS                         match parse_turn_id(arg.as_deref())
+//RS                             .and_then(|id| set_turn_flag(&mut session, id, "folded", false))
+//RS                         {
+//RS                             Ok(()) => out.push_str("turn unfolded\n"),
+//RS                             Err(msg) => out.push_str(&format!("{msg}\n")),
+//RS                         }
+//RS                     }
+//RS                     "pin" => {
+//RS                         match parse_turn_id(arg.as_deref())
+//RS                             .and_then(|id| set_turn_flag(&mut session, id, "pinned", true))
+//RS                         {
+//RS                             Ok(()) => out.push_str("turn pinned\n"),
+//RS                             Err(msg) => out.push_str(&format!("{msg}\n")),
+//RS                         }
+//RS                     }
+//RS                     "unpin" => {
+//RS                         match parse_turn_id(arg.as_deref())
+//RS                             .and_then(|id| set_turn_flag(&mut session, id, "pinned", false))
+//RS                         {
+//RS                             Ok(()) => out.push_str("turn unpinned\n"),
+//RS                             Err(msg) => out.push_str(&format!("{msg}\n")),
+//RS                         }
+//RS                     }
+//RS                     "rerun" => match parse_turn_id(arg.as_deref()) {
+//RS                         Ok(id) => {
+//RS                             if let Some(input) = session
+//RS                                 .turns
+//RS                                 .iter()
+//RS                                 .find(|t| t.id == id)
+//RS                                 .map(|t| t.input.clone())
+//RS                             {
+//RS                                 out.push_str(&format!("rerun #{id}: {input}\n"));
+//RS                                 out.push_str(&run_transcript(&[input.as_str()], project_dir));
+//RS                             } else {
+//RS                                 out.push_str(&format!("turn #{id} does not exist\n"));
+//RS                             }
+//RS                         }
+//RS                         Err(msg) => out.push_str(&format!("{msg}\n")),
+//RS                     },
+//RS                     "history" => match arg.as_deref() {
+//RS                         Some("clear") => {
+//RS                             session.history.clear().ok();
+//RS                             out.push_str("History cleared.\n");
+//RS                         }
+//RS                         Some(arg) if arg.starts_with("search ") => {
+//RS                             let needle = &arg[7..];
+//RS                             let matches = session.history.search(needle);
+//RS                             if matches.is_empty() {
+//RS                                 out.push_str("No history matches.\n");
+//RS                             } else {
+//RS                                 for entry in matches {
+//RS                                     out.push_str(entry);
+//RS                                     out.push('\n');
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         _ => out.push_str("usage: :history search <text> | :history clear\n"),
+//RS                     },
+//RS                     "?" => {
+//RS                         // D-FE-REPL-DOCS1=B: same shared-docs-index lookup the
+//RS                         // cooked/interactive loops use (`Docs::lookup`), so
+//RS                         // `?name`/`:? name` behave identically everywhere.
+//RS                         if let Some(name) = arg.as_deref() {
+//RS                             match Docs::lookup(&session, name) {
+//RS                                 Some(text) => out.push_str(&text),
+//RS                                 None => out.push_str(&format!(
+//RS                                     "note: `{}` isn't defined in this session\n",
+//RS                                     name
+//RS                                 )),
+//RS                             }
+//RS                         } else {
+//RS                             out.push_str("REPL Meta-Commands\n");
+//RS                         }
+//RS                     }
+//RS                     "help" => out.push_str("REPL Meta-Commands\n"),
+//RS                     _ => out.push_str(&format!("unknown meta-command `:{}`\n", cmd)),
+//RS                 }
+//RS             }
+//RS 
+//RS             InputKind::Reject(feature) => {
+//RS                 let d = e1802(&feature);
+//RS                 out.push_str(&format!("error [E1802]: {}\n", d.what));
+//RS                 session.record_turn(trimmed, ReplTurnStatus::Error, "E1802".to_string());
+//RS             }
+//RS 
+//RS             InputKind::Item(src) => {
+//RS                 let bundle = match type_check_item(&session, &src) {
+//RS                     Ok(bundle) => bundle,
+//RS                     Err(errors) => {
+//RS                         for d in &errors {
+//RS                             out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+//RS                         }
+//RS                         session.record_turn(
+//RS                             trimmed,
+//RS                             ReplTurnStatus::Error,
+//RS                             errors
+//RS                                 .iter()
+//RS                                 .map(|d| format!("{}: {}", d.code, d.what))
+//RS                                 .collect::<Vec<_>>()
+//RS                                 .join("; "),
+//RS                         );
+//RS                         continue;
+//RS                     }
+//RS                 };
+//RS                 session.item_srcs.push(src);
+//RS                 rebuild_funcs(&mut session);
+//RS                 update_core_imports_from_ledger(&bundle, &mut session.core_imports);
+//RS                 out.push_str("ok\n");
+//RS                 session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+//RS                 session.remember_success(trimmed);
+//RS             }
+//RS 
+//RS             InputKind::Import(src) => {
+//RS                 session.import_srcs.push(src.clone());
+//RS                 let bundle = match type_check_item(&session, "") {
+//RS                     Ok(bundle) => bundle,
+//RS                     Err(errors) => {
+//RS                         session.import_srcs.pop();
+//RS                         for d in &errors {
+//RS                             out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+//RS                         }
+//RS                         session.record_turn(
+//RS                             trimmed,
+//RS                             ReplTurnStatus::Error,
+//RS                             errors
+//RS                                 .iter()
+//RS                                 .map(|d| format!("{}: {}", d.code, d.what))
+//RS                                 .collect::<Vec<_>>()
+//RS                                 .join("; "),
+//RS                         );
+//RS                         continue;
+//RS                     }
+//RS                 };
+//RS                 rebuild_funcs(&mut session);
+//RS                 update_core_imports_from_ledger(&bundle, &mut session.core_imports);
+//RS                 out.push_str("ok\n");
+//RS                 session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+//RS                 session.remember_success(trimmed);
+//RS             }
+//RS 
+//RS             InputKind::Stmts(stmts, suppress, check_src) => {
+//RS                 let (checked_stmts, checked_core_imports) =
+//RS                     match type_check_stmts(&session, &stmts, session.step, &check_src) {
+//RS                         Ok(checked) => checked,
+//RS                         Err(errors) => {
+//RS                             for d in &errors {
+//RS                                 out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+//RS                             }
+//RS                             session.record_turn(
+//RS                                 trimmed,
+//RS                                 ReplTurnStatus::Error,
+//RS                                 errors
+//RS                                     .iter()
+//RS                                     .map(|d| format!("{}: {}", d.code, d.what))
+//RS                                     .collect::<Vec<_>>()
+//RS                                     .join("; "),
+//RS                             );
+//RS                             continue;
+//RS                         }
+//RS                     };
+//RS 
+//RS                 // D-REPL8=A: detect which session bindings are moved by this input.
+//RS                 let session_binding_names: HashSet<String> =
+//RS                     session.scope.keys().cloned().collect();
+//RS                 let newly_moved =
+//RS                     collect_moved_names(&stmts, &session_binding_names, &session.scope);
+//RS                 let stmts = repl_executable_stmts(checked_stmts.clone());
+//RS                 let mut core_imports = session.core_imports.clone();
+//RS                 core_imports.extend(checked_core_imports);
+//RS 
+//RS                 let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
+//RS 
+//RS                 let funcs: HashMap<String, &Func> = session
+//RS                     .func_defs
+//RS                     .iter()
+//RS                     .map(|(k, v)| (k.clone(), v))
+//RS                     .collect();
+//RS                 let structs: HashMap<String, &StructDef> = session
+//RS                     .struct_defs
+//RS                     .iter()
+//RS                     .map(|(k, v)| (k.clone(), v))
+//RS                     .collect();
+//RS                 let mut sink = DevSink::new();
+//RS                 let mut authorizer = policy.authorizer(None);
+//RS                 let mut trial_scope = session.scope.clone();
+//RS                 match crate::Comptime::run_repl_step(
+//RS                     &stmts,
+//RS                     &funcs,
+//RS                     &base_dir,
+//RS                     &mut sink,
+//RS                     &mut trial_scope,
+//RS                     REPL_FUEL_BUDGET,
+//RS                     suppress,
+//RS                     &core_imports,
+//RS                     &structs,
+//RS                     &session.binding_types,
+//RS                     &mut authorizer,
+//RS                 ) {
+//RS                     Ok(echo_val) => {
+//RS                         for name in &newly_moved {
+//RS                             trial_scope.remove(name);
+//RS                         }
+//RS                         session.scope = trial_scope;
+//RS                         let mut summary = String::new();
+//RS                         // Track moves for cross-input detection (D-REPL8=A).
+//RS                         session.moved_names.extend(newly_moved);
+//RS                         // Record stmt source for :run materialization.
+//RS                         let raw = trimmed.trim_end_matches(';').trim().to_string();
+//RS                         if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
+//RS                             session.stmt_srcs.push(format!("{};", raw));
+//RS                         }
+//RS                         // Register new bindings for sema visibility.
+//RS                         let new_names: Vec<String> = session
+//RS                             .scope
+//RS                             .keys()
+//RS                             .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
+//RS                             .cloned()
+//RS                             .collect();
+//RS                         session.record_stmts(&checked_stmts);
+//RS                         if !sink.stdout.is_empty() {
+//RS                             out.push_str(&sink.stdout);
+//RS                             summary.push_str(&sink.stdout);
+//RS                         }
+//RS                         if !sink.stderr.is_empty() {
+//RS                             out.push_str(&sink.stderr);
+//RS                             summary.push_str(&sink.stderr);
+//RS                         }
+//RS                         if let Some(v) = echo_val {
+//RS                             if !matches!(v, CtValue::Unit) {
+//RS                                 let shown = display_value(&v);
+//RS                                 out.push_str(&format!("{}\n", shown));
+//RS                                 summary.push_str(&shown);
+//RS                             }
+//RS                         }
+//RS                         let had_effect = looks_effectful(trimmed)
+//RS                             || !sink.stdout.is_empty()
+//RS                             || !sink.stderr.is_empty();
+//RS                         let bound_name = match new_names.as_slice() {
+//RS                             [only] => Some(only.clone()),
+//RS                             _ => None,
+//RS                         };
+//RS                         session.record_turn_ex(
+//RS                             trimmed,
+//RS                             ReplTurnStatus::Ok,
+//RS                             summary,
+//RS                             had_effect,
+//RS                             bound_name,
+//RS                         );
+//RS                         session.remember_success(trimmed);
+//RS                     }
+//RS                     Err(d) => {
+//RS                         let d = restore_move_diagnostic(d, &session.moved_names);
+//RS                         let d = if d.code == "E2202" {
+//RS                             e1801(REPL_FUEL_BUDGET)
+//RS                         } else {
+//RS                             d
+//RS                         };
+//RS                         if d.code == "E1801" {
+//RS                             out.push_str(&d.render("", ""));
+//RS                         } else {
+//RS                             out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+//RS                         }
+//RS                         session.record_turn(
+//RS                             trimmed,
+//RS                             ReplTurnStatus::Error,
+//RS                             format!("{}: {}", d.code, d.what),
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     out
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     struct CountingPrompt(usize);
+//RS 
+//RS     impl EffectPrompt for CountingPrompt {
+//RS         fn choose(&mut self, _: &crate::Comptime::ReplEffectRequest, _: bool) -> PromptChoice {
+//RS             self.0 += 1;
+//RS             PromptChoice::Once
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn unavailable_handle_backend_denies_before_prompt_or_operation() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet_repl_unavailable_backend_{}",
+//RS             std::process::id()
+//RS         ));
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let target = root.join("must-not-exist.txt");
+//RS         let mut policy = ReplPolicy::new(ReplFlags::default(), &root);
+//RS         policy.handles_available = false;
+//RS         let mut prompt = CountingPrompt(0);
+//RS         let request = crate::Comptime::ReplEffectRequest {
+//RS             root: "FS".to_string(),
+//RS             operation: "Write".to_string(),
+//RS             resource: "must-not-exist.txt".to_string(),
+//RS         };
+//RS         {
+//RS             let mut authorization = policy.authorizer(Some(&mut prompt));
+//RS             let error = crate::Comptime::ReplAuthorizer::preflight(
+//RS                 &mut authorization,
+//RS                 &request,
+//RS                 crate::Diagnostics::Span::new(0, 1),
+//RS             )
+//RS             .expect_err("unavailable confinement backend must fail closed");
+//RS             assert_eq!(error.code, "E1803");
+//RS             assert!(error.why.contains("no runtime authority was offered"));
+//RS         }
+//RS         assert_eq!(prompt.0, 0, "platform denial must not ask for authority");
+//RS         assert!(
+//RS             !target.exists(),
+//RS             "platform denial executed filesystem operation"
+//RS         );
+//RS         std::fs::remove_dir_all(root).ok();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn authority_answer_matches_compile_build_session_and_repl() {
+//RS         let written = "IO";
+//RS         let external_spelling = "io";
+//RS         let expected = jet_foundation::Authority::parse_right(written).expect("known right");
+//RS         assert_eq!(expected, "IO");
+//RS 
+//RS         let compile =
+//RS             crate::Sema::Effects::parse_effect_name(external_spelling).expect("compile right");
+//RS         assert_eq!(compile, expected);
+//RS         assert!(crate::Sema::Effects::effect_covers(written, &expected));
+//RS 
+//RS         let manifest = jet_driver::Package::PackageFacts {
+//RS             effects_enabled: true,
+//RS             authority: jet_driver::Package::PackageAuthority {
+//RS                 holds: jet_driver::Package::Blocks::AuthorityHolds {
+//RS                     allow: Some(vec![external_spelling.to_string()]),
+//RS                     deny: None,
+//RS                 },
+//RS                 ..Default::default()
+//RS             },
+//RS             ..Default::default()
+//RS         };
+//RS         let entries = [jet_driver::EffectBudget::PackageEffects {
+//RS             name: "dependency".to_string(),
+//RS             effects: Holds::from([expected.clone()]),
+//RS             effect_sites: std::collections::BTreeMap::new(),
+//RS             panic_sites: Vec::new(),
+//RS             boundary_span: None,
+//RS         }];
+//RS         assert!(jet_driver::EffectBudget::enforce(&entries, &manifest).is_empty());
+//RS         assert_eq!(
+//RS             jet_driver::EffectBudget::provenance_for(&entries, "dependency"),
+//RS             vec![expected.clone()]
+//RS         );
+//RS 
+//RS         let session = answer(
+//RS             &Holds::from([external_spelling.to_string()]),
+//RS             &Holds::new(),
+//RS             written,
+//RS         );
+//RS         assert_eq!(session, Verdict::Allowed);
+//RS 
+//RS         let flags = ReplFlags::new(&[external_spelling.to_string()], &[]);
+//RS         assert!(flags.allow.contains(&expected));
+//RS         let mut policy = ReplPolicy::new(flags, Path::new("."));
+//RS         let request = crate::Comptime::ReplEffectRequest {
+//RS             root: expected,
+//RS             operation: "Read".to_string(),
+//RS             resource: "authority-substrate".to_string(),
+//RS         };
+//RS         let mut authorization = policy.authorizer(None);
+//RS         crate::Comptime::ReplAuthorizer::preflight(
+//RS             &mut authorization,
+//RS             &request,
+//RS             crate::Diagnostics::Span::new(0, 1),
+//RS         )
+//RS         .expect("repl preflight");
+//RS         crate::Comptime::ReplAuthorizer::authorize(
+//RS             &mut authorization,
+//RS             &request,
+//RS             crate::Diagnostics::Span::new(0, 1),
+//RS         )
+//RS         .expect("repl authority");
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn repl_temp_writer_rejects_existing_symlink() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root =
+//RS             std::env::temp_dir().join(format!("jet-repl-temp-symlink-{}", std::process::id()));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let target = root.join("outside.txt");
+//RS         let link = root.join("session.jet");
+//RS         std::fs::write(&target, "must survive\n").unwrap();
+//RS         symlink(&target, &link).unwrap();
+//RS 
+//RS         assert!(write_temp_file_at(&link, "attacker\n").is_err());
+//RS         assert_eq!(std::fs::read_to_string(&target).unwrap(), "must survive\n");
+//RS 
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     #[test]
+//RS     fn repl_nofollow_flag_uses_linux_family_value() {
+//RS         assert_eq!(REPL_O_NOFOLLOW, 0o400000);
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     #[test]
+//RS     fn repl_nofollow_flag_uses_macos_family_value() {
+//RS         assert_eq!(REPL_O_NOFOLLOW, 0x0100);
+//RS     }
+//RS 
+//RS     #[cfg(all(
+//RS         unix,
+//RS         not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))
+//RS     ))]
+//RS     #[test]
+//RS     fn repl_temp_writer_rejects_unsupported_unix() {
+//RS         let path =
+//RS             std::env::temp_dir().join(format!("jet-repl-unsupported-{}.jet", std::process::id()));
+//RS         let error = write_temp_file_at(&path, "must not be written\n")
+//RS             .err()
+//RS             .expect("unsupported Unix target must fail closed");
+//RS         assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sigil_binding_is_classified_as_statement() {
+//RS         let kind = classify("t :: s", 1).expect("classify");
+//RS         match kind {
+//RS             InputKind::Stmts(stmts, suppress, check_src) => {
+//RS                 assert!(!suppress);
+//RS                 assert_eq!(check_src, "t :: s;");
+//RS                 assert!(matches!(stmts.as_slice(), [Stmt::Val(_)]));
+//RS             }
+//RS             _ => panic!("expected statement input"),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sigil_binding_from_string_session_name_marks_move() {
+//RS         let kind = classify("t :: s", 1).expect("classify");
+//RS         let InputKind::Stmts(stmts, _, _) = kind else {
+//RS             panic!("expected statement input");
+//RS         };
+//RS         let mut names = HashSet::new();
+//RS         names.insert("s".to_string());
+//RS         let mut scope = HashMap::new();
+//RS         scope.insert("s".to_string(), CtValue::Str("hello".to_string()));
+//RS         let moved = collect_moved_names(&stmts, &names, &scope);
+//RS         assert!(moved.contains("s"), "moved names: {:?}", moved);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn bare_binding_is_preserved_as_an_exact_statement() {
+//RS         let kind = classify("s :: \"\"", 1).expect("classify");
+//RS         let InputKind::Stmts(stmts, _, check_src) = kind else {
+//RS             panic!("expected statement input");
+//RS         };
+//RS         assert_eq!(check_src, "s :: \"\";");
+//RS         assert!(matches!(stmts.as_slice(), [Stmt::Val(_)]));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn notebook_item_classifier_uses_the_parser_item_plane() {
+//RS         assert!(is_item_input("@answer :: 42"));
+//RS         assert!(is_item_input("#Test(\"answer\") { assert(true) }"));
+//RS         assert!(!is_item_input("answer :: 42"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn raw_multiline_completeness_comes_from_repl_parser_shapes() {
+//RS         assert!(raw_input_is_complete("40 + 2"));
+//RS         assert!(raw_input_is_complete("answer :: = 42"));
+//RS         assert!(!raw_input_is_complete("40 +"));
+//RS         assert!(!raw_input_is_complete("answer ::"));
+//RS         assert!(!raw_input_is_complete("fn total(xs: [Int]) -> Int {"));
+//RS         assert!(!raw_input_is_complete("if true {\n    1"));
+//RS         assert!(!raw_input_is_complete("/* unfinished"));
+//RS         assert!(!raw_input_is_complete("\"\"\"\nunfinished"));
+//RS         assert!(raw_input_is_complete("\"single-line text\ncan't continue"));
+//RS     }
+//RS }
+// END-PORT-PENDING 0808 crates/jet-repl/src/lib.rs:1795-4154
+

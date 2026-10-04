@@ -1,0 +1,50 @@
+// Rust crates/jet-semindex/src/Symbols.rs:18–75: consumer-neutral symbol facts.
+// Index, editor completion and REPL menus consume these same canonical records.
+pub enum SemanticSymbolKind {
+    Module
+    Function
+    Type
+    Member
+    Constant
+    Local
+    Parameter
+    Keyword
+    Command
+}
+
+pub enum SemanticProvenance {
+    Source(module_path: String)
+    Builtin(module_name: String)
+    CommandRegistry
+    Session
+}
+
+pub struct SemanticLexicalScope {
+    pub identity: String
+    pub structural_parent: Int
+    pub structural_slot: String
+    pub span: SourceSpan
+    pub depth: Int
+    pub declaration_offset: Int
+}
+
+pub struct SemanticVisibilityAnchor {
+    pub module_path: String
+    pub offset: Int?
+    pub session_top_level: Bool
+}
+
+pub struct SemanticSymbol {
+    pub identity: String
+    pub name: String
+    pub qualified_name: String
+    pub owner: String?
+    pub module_path: String
+    pub kind: SemanticSymbolKind
+    pub signature: String
+    pub summary: String
+    pub examples: [String]
+    pub provenance: SemanticProvenance
+    pub span: SourceSpan?
+    pub lexical_scope: SemanticLexicalScope?
+}

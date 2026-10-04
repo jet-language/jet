@@ -10,6 +10,7 @@ DIAGNOSTIC_THEME_DIM :: "2;37"
 DIAGNOSTIC_THEME_WARN :: "33"
 DIAGNOSTIC_THEME_ERROR :: "31"
 DIAGNOSTIC_THEME_BOLD :: "1"
+DIAGNOSTIC_THEME_INVERT :: "48;5;24;97;1"
 
 // One `Theme` role: `ESC [ sgr m text ESC [ 0 m` when color is on.
 pub fn diagnostic_theme_paint(color: Bool, sgr: String, text: String) -> String Never! {
@@ -21,6 +22,7 @@ pub fn diagnostic_theme_paint(color: Bool, sgr: String, text: String) -> String 
 pub fn diagnostic_theme_accent(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ACCENT, text) }
 pub fn diagnostic_theme_dim(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, text) }
 pub fn diagnostic_theme_bold(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_BOLD, text) }
+pub fn diagnostic_theme_invert(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_INVERT, text) }
 
 fn diagnostic_theme_severity(color: Bool, severity: Int, text: String) -> String Never! {
     if severity == DIAGNOSTIC_LINT -> return diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, text)

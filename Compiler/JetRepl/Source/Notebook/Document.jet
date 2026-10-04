@@ -1,0 +1,368 @@
+// crates/jet-repl/src/Notebook/document.rs:1-469, D-NOTEBOOK-DOC1=D.
+// Persisted source graph/cache only: no runtime values or execution engine.
+use core.crypto.uuid as notebook_document_uuid
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_parse, canonical_json_sha256, mir_sha256_bytes, mir_sha256_hex_bytes]
+
+pub NOTEBOOK_OUTPUT_CACHE_POLICY :: "closure-v2"
+
+// Rust CellKind, CellOutput, NotebookCell, MergeConflict, OutputCacheEntry.
+pub enum NotebookCellKind {
+    Jet
+    Markdown
+}
+pub struct NotebookCellOutput {
+    pub bundle: NotebookMIMEBundle
+    pub execution_count: Int?
+    pub cache_key: String?
+    pub turn_id: Int?
+}
+pub struct NotebookCell {
+    pub id: String
+    pub kind: NotebookCellKind
+    pub source: String
+    pub output: NotebookCellOutput?
+    pub depends_on: [String]
+}
+pub struct NotebookMergeConflict {
+    pub cell_id: String
+    pub ours_source: String
+    pub theirs_source: String
+}
+pub struct NotebookOutputCacheEntry {
+    pub key: String
+    pub bundle: NotebookMIMEBundle
+    pub execution_count: Int
+}
+#Error
+pub struct NotebookError { pub message: String }
+
+// Rust LossReport::{push,is_empty,render}.
+pub struct NotebookLossReport {
+    pub items: [String]
+    pub fn default() -> NotebookLossReport Never! { NotebookLossReport{items: [String]{}} }
+    pub fn push(&self, item: String) Never! { &self.items.push(item) }
+    pub fn is_empty(self) -> Bool Never! { self.items.len() == 0 }
+    pub fn render(self) -> String Never! {
+        if self.is_empty() -> return "no loss\n"
+        out := [U8]{}
+        notebook_document_append(&out, "export loss:\n")
+        loop item in self.items {
+            notebook_document_append(&out, "  - ")
+            notebook_document_append(&out, item)
+            &out.push(U8{10})
+        }
+        String.from_bytes(out) ?? panic("loss report preserves UTF-8")
+    }
+}
+
+// Rust JetNotebook: owned document data; returned cell windows borrow self.
+pub struct JetNotebook {
+    pub schema: Int
+    pub environment_hash: String
+    pub cells: [NotebookCell]
+    pub output_cache: [String:NotebookOutputCacheEntry]
+    pub merge_conflicts: [NotebookMergeConflict]
+
+    // Rust JetNotebook::{new,mint_cell_id,add_cell}.
+    pub fn new(environment_hash: String) -> JetNotebook Never! {
+        JetNotebook{schema: 1, environment_hash: environment_hash, cells: [NotebookCell]{}, output_cache: [String:NotebookOutputCacheEntry]{}, merge_conflicts: [NotebookMergeConflict]{}}
+    }
+    pub fn mint_cell_id() -[Rand]> String NotebookError! {
+        notebook_document_uuid.v4() ?? return Err(NotebookError{message: err.reason})
+    }
+    pub fn add_cell(&self, kind: NotebookCellKind, source: String) -[Rand]> ViewMut<NotebookCell> NotebookError! {
+        id :: JetNotebook.mint_cell_id()
+        index :: self.cells.len()
+        &self.cells.push(NotebookCell{id: id, kind: kind, source: source, output: None, depends_on: [String]{}})
+        window :: &self.cell_write_window(index)
+        Ok(window)
+    }
+    // #4388: the frozen native emitter loses this writable returned window.
+    fn cell_write_window(&self, index: Int) -> ViewMut<NotebookCell> Never! {
+        &self.cells[index..index]
+    }
+
+    // Rust refresh_dependencies: authored edges retained, source edges ordered
+    // by layout only for deterministic storage, not as an execution fallback.
+    pub fn refresh_dependencies(&self) NotebookError! {
+        facts := [NotebookSourceNameFacts]{}
+        producers := [String:[Int]]{}
+        loop (index, cell) in self.cells {
+            fact :: notebook_source_name_facts(cell.source)
+            loop name in fact.declared {
+                if !producers.has_key(name) -> producers[name] = [Int]{}
+                &producers[name].push(index)
+            }
+            &facts.push(fact)
+        }
+        ids := [String:Int]{}
+        loop (index, cell) in self.cells {
+            if !ids.has_key(cell.id) -> ids[cell.id] = index
+        }
+        loop index in 0..<self.cells.len() {
+            dependencies := [String]{}
+            loop dependency in self.cells[index].depends_on {
+                if !ids.has_key(dependency) -> return Err(NotebookError{message: "cell `{self.cells[index].id}` depends on unknown cell `{dependency}`"})
+                if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+            }
+            loop name in facts[index].references {
+                if !producers.has_key(name) -> next
+                producer := Int?{None}
+                loop candidate in producers[name] {
+                    if candidate < index -> producer = Val(candidate)
+                }
+                if producer == None {
+                    loop candidate in producers[name] {
+                        if candidate != index {
+                            producer = Val(candidate)
+                            break
+                        }
+                    }
+                }
+                if producer == .Val(candidate) {
+                    dependency :: self.cells[candidate].id
+                    if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+                }
+            }
+            notebook_document_sort_dependencies(&dependencies, ids)
+            self.cells[index].depends_on = dependencies
+        }
+    }
+
+    // Rust dependency_order and nested visit: tri-color DFS, exact cycle path.
+    pub fn dependency_order(self, cell_id: String) -> [String] NotebookError! {
+        if self.cell_index(cell_id) == None -> return Err(NotebookError{message: "unknown cell `{cell_id}`"})
+        marks := [String:Int]{}
+        stack := [String]{}
+        order := [String]{}
+        notebook_document_visit(self, cell_id, &marks, &stack, &order)
+        Ok(order)
+    }
+
+    // Rust descendants_in_order: closure size then layout index, not BFS depth.
+    pub fn descendants_in_order(self, cell_id: String) -> [String] NotebookError! {
+        _ :: self.dependency_order(cell_id)
+        rows := [NotebookDocumentDescendant]{}
+        loop (index, cell) in self.cells {
+            if cell.id == cell_id -> next
+            order :: self.dependency_order(cell.id)
+            if order.contains(cell_id) -> &rows.push(NotebookDocumentDescendant{size: order.len(), index: index, id: cell.id})
+        }
+        &rows.sort_by((left: NotebookDocumentDescendant, right: NotebookDocumentDescendant) -> {
+            if left.size != right.size -> left.size <=> right.size else -> left.index <=> right.index
+        })
+        result := [String]{}
+        loop row in rows -> &result.push(row.id)
+        Ok(result)
+    }
+
+    // Rust source_hash: exact NUL-delimited UTF-8 identity, no environment/output.
+    pub fn source_hash(self) -> String Never! {
+        material := [U8]{}
+        notebook_document_append(&material, "jetnb-source-v1")
+        &material.push(U8{0})
+        loop cell in self.cells {
+            notebook_document_append_nul(&material, cell.id)
+            notebook_document_append_nul(&material, if cell.kind == NotebookCellKind.Jet -> "jet" else -> "markdown")
+            notebook_document_append_nul(&material, cell.source)
+            loop dependency in cell.depends_on -> notebook_document_append_nul(&material, dependency)
+        }
+        mir_sha256_hex_bytes(mir_sha256_bytes(material))
+    }
+
+    // Rust remove_cell: retain stale bundles while removing cache authority,
+    // scrub removed edges/conflicts, then refresh the remaining source graph.
+    pub fn remove_cell(&self, cell_id: String) -> [String] NotebookError! {
+        if self.cell_index(cell_id) == None -> return Err(NotebookError{message: "unknown cell `{cell_id}`"})
+        descendants :: self.descendants_in_order(cell_id)
+        doomed := [String:Bool]{cell_id: true}
+        loop id in descendants -> doomed[id] = true
+        &self.remove_cache_authority(doomed)
+        // #4367: canonical .Slot removal needs JetInt-to-native index lowering.
+        position := self.cells.len()
+        loop position > 0 {
+            position -= 1
+            if self.cells[position].id == cell_id -> _ :: &self.cells.remove(position, .Slot)
+        }
+        loop index in 0..<self.cells.len() {
+            dependency_index := self.cells[index].depends_on.len()
+            loop dependency_index > 0 {
+                dependency_index -= 1
+                if self.cells[index].depends_on[dependency_index] == cell_id -> _ :: &self.cells[index].depends_on.remove(dependency_index, .Slot)
+            }
+        }
+        &self.remove_cell_conflicts(cell_id)
+        &self.refresh_dependencies()
+        removed := [String]{cell_id}
+        loop id in descendants -> &removed.push(id)
+        Ok(removed)
+    }
+    // Rust cell_index: first match, including unvalidated documents.
+    pub fn cell_index(self, id: String) -> Int? Never! {
+        loop (index, cell) in self.cells { if cell.id == id -> return Val(index) }
+        None
+    }
+
+    // Rust edit_cell: unchanged edits do nothing; failed refresh restores this
+    // cell's source/edges (the reference's prior-cell refresh mutations remain).
+    pub fn edit_cell(&self, cell_id: String, source: String) NotebookError! {
+        index :: self.cell_index(cell_id) ?? return Err(NotebookError{message: "unknown cell `{cell_id}`"})
+        if self.cells[index].source == source -> return
+        previous_source :: ~self.cells[index].source
+        previous_dependencies :: ~self.cells[index].depends_on
+        self.cells[index].source = source
+        if &self.refresh_dependencies() == .Err(error) {
+            self.cells[index].source = previous_source
+            self.cells[index].depends_on = previous_dependencies
+            return Err(error)
+        }
+        &self.invalidate_from(cell_id)
+        &self.remove_cell_conflicts(cell_id)
+    }
+    fn remove_cell_conflicts(&self, cell_id: String) Never! {
+        index := self.merge_conflicts.len()
+        loop index > 0 {
+            index -= 1
+            if self.merge_conflicts[index].cell_id == cell_id -> _ :: &self.merge_conflicts.remove(index, .Slot)
+        }
+    }
+
+    // Rust invalidate_from: fixpoint over every cell, regardless of layout.
+    pub fn invalidate_from(&self, cell_id: String) Never! {
+        if self.cell_index(cell_id) == None -> return
+        doomed := [String:Bool]{cell_id: true}
+        loop {
+            changed := false
+            loop cell in self.cells {
+                if doomed.has_key(cell.id) -> next
+                loop dependency in cell.depends_on {
+                    if doomed.has_key(dependency) {
+                        doomed[cell.id] = true
+                        changed = true
+                        break
+                    }
+                }
+            }
+            if !changed -> break
+        }
+        &self.remove_cache_authority(doomed)
+    }
+    fn remove_cache_authority(&self, doomed: [String:Bool]) Never! {
+        // Gather keys before mutation so cells and cache never share a write view.
+        keys := [String]{}
+        loop cell in self.cells {
+            if doomed.has_key(cell.id) && cell.output == .Val(output) {
+                if output.cache_key == .Val(key) -> &keys.push(key)
+            }
+        }
+        loop key in keys -> _ :: &self.output_cache.remove(key)
+    }
+
+    // Rust closure_cache_key and nested walk, corrected by Main: closure-v2
+    // binds every declared edge as well as source/id/environment/trust policy
+    // through Foundation A-canonical JSON. No closure-v1 reader or identity.
+    pub fn closure_cache_key(self, cell_id: String) -> String? Never! {
+        // #4393: explicit option arms retain the destination's optional type.
+        index :: if self.cell_index(cell_id) == {
+            .Val(found) -> found
+            .None -> { return None }
+        }
+        if self.cells[index].kind != NotebookCellKind.Jet -> return None
+        nodes := [CanonicalJSON]{}
+        seen := [String:Bool]{}
+        loop dependency in self.cells[index].depends_on -> notebook_document_cache_walk(self, dependency, &seen, &nodes)
+        &nodes.push(notebook_document_cache_node(self.cells[index]))
+        material :: canonical_json_object([CanonicalJSONField]{
+            CanonicalJSONField{key: "cache_policy", value: .String(NOTEBOOK_OUTPUT_CACHE_POLICY)},
+            CanonicalJSONField{key: "environment_hash", value: .String(self.environment_hash)},
+            CanonicalJSONField{key: "trust_policy", value: .String(NOTEBOOK_TRUST_POLICY_VERSION)},
+            CanonicalJSONField{key: "cells", value: .Array(nodes)},
+        }) ?? panic("closure identity has unique keys")
+        Val(canonical_json_sha256(material))
+    }
+
+    // Rust store_output/invalidate_all_outputs/visible_output: cache key alone
+    // does not confer authority; entry key, full bundle and count must agree.
+    pub fn store_output(&self, cell_id: String, bundle: NotebookMIMEBundle, execution_count: Int, turn_id: Int?) NotebookError! {
+        key :: self.closure_cache_key(cell_id) ?? return Err(NotebookError{message: "cell `{cell_id}` is not a Jet cell"})
+        index :: self.cell_index(cell_id) ?? return Err(NotebookError{message: "unknown cell `{cell_id}`"})
+        self.output_cache[key] = NotebookOutputCacheEntry{key: key, bundle: ~bundle, execution_count: execution_count}
+        self.cells[index].output = Val(NotebookCellOutput{bundle: bundle, execution_count: Val(execution_count), cache_key: Val(key), turn_id: turn_id})
+    }
+    pub fn invalidate_all_outputs(&self) Never! { &self.output_cache.clear() }
+    pub fn visible_output(self, cell_id: String) -> View<NotebookCell>? Never! {
+        // #4393: keep optional values separate from the returned View slot.
+        index :: if self.cell_index(cell_id) == {
+            .Val(found) -> found
+            .None -> { return None }
+        }
+        if self.cells[index].output == .Val(output) {
+            live :: if self.closure_cache_key(cell_id) == {
+                .Val(value) -> value
+                .None -> { return None }
+            }
+            key :: if output.cache_key == {
+                .Val(value) -> value
+                .None -> { return None }
+            }
+            if key != live -> return None
+            if !self.output_cache.has_key(key) -> return None
+            cached :: self.output_cache[key]
+            if cached.key != key || cached.bundle != output.bundle || output.execution_count != (Val(cached.execution_count)) -> return None
+            window :: self.cells[index..index]
+            return Val(window)
+        }
+        None
+    }
+
+    // Rust from_canonical_bytes: Foundation A-canonical parser and N2 decoder.
+    pub fn from_canonical_bytes(bytes: [U8]) -> JetNotebook NotebookError! {
+        json :: canonical_json_parse(bytes) ?? return Err(NotebookError{message: err.message})
+        notebook_from_json(json)
+    }
+}
+
+struct NotebookDocumentDescendant { size: Int, index: Int, id: String }
+// Rust dependency_order::visit helper family.
+fn notebook_document_visit(nb: JetNotebook, id: String, marks: &[String:Int], stack: &[String], order: &[String]) NotebookError! {
+    mark :: marks.get(id) ?? 0
+    if mark == 2 -> return
+    if mark == 1 {
+        start :: stack.index_of(id) ?? 0
+        cycle := ~stack[start..<stack.len()]
+        &cycle.push(id)
+        return Err(NotebookError{message: "notebook dependency cycle: {cycle.join(" -> ")}"})
+    }
+    index :: nb.cell_index(id) ?? return Err(NotebookError{message: "cell `{id}` depends on unknown cell"})
+    marks[id] = 1
+    &stack.push(id)
+    loop dependency in nb.cells[index].depends_on -> notebook_document_visit(nb, dependency, &marks, &stack, &order)
+    _ :: &stack.pop()
+    marks[id] = 2
+    &order.push(id)
+}
+// Rust closure_cache_key::walk helper family; Main's canonical edge correction.
+fn notebook_document_cache_walk(nb: JetNotebook, id: String, seen: &[String:Bool], nodes: &[CanonicalJSON]) Never! {
+    if seen.has_key(id) -> return
+    seen[id] = true
+    index :: nb.cell_index(id) ?? return
+    loop dependency in nb.cells[index].depends_on -> notebook_document_cache_walk(nb, dependency, &seen, &nodes)
+    &nodes.push(notebook_document_cache_node(nb.cells[index]))
+}
+fn notebook_document_cache_node(cell: NotebookCell) -> CanonicalJSON Never! {
+    dependencies := [CanonicalJSON]{}
+    loop dependency in cell.depends_on -> &dependencies.push(.String(dependency))
+    canonical_json_object([CanonicalJSONField]{
+        CanonicalJSONField{key: "id", value: .String(cell.id)},
+        CanonicalJSONField{key: "source", value: .String(cell.source)},
+        CanonicalJSONField{key: "depends_on", value: .Array(dependencies)},
+    }) ?? panic("closure cell identity has unique keys")
+}
+fn notebook_document_append(material: &[U8], text: String) Never! { loop byte in text.bytes() -> &material.push(byte) }
+fn notebook_document_append_nul(material: &[U8], text: String) Never! {
+    notebook_document_append(&material, text)
+    &material.push(U8{0})
+}
+fn notebook_document_sort_dependencies(dependencies: &[String], ids: [String:Int]) Never! {
+    &dependencies.sort_by((left: String, right: String) -> ids[left] <=> ids[right])
+}

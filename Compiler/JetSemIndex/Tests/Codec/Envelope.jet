@@ -1,0 +1,218 @@
+// TOOLS-S19 JSON.rs1045–1169. These direct record edge claims are not a
+// checked-source producer or proof of C4/S4/full SemIndex composition.
+#Test("semindex_expand_values_keep_null_empty_scalars_and_exact_integer") {
+    values :: ExpandValue.Array{values: [ExpandValue]{
+        ExpandValue.Null, ExpandValue.Bool{value: false}, ExpandValue.Bool{value: true},
+        ExpandValue.Number{value: -42}, ExpandValue.Number{value: 4294967296},
+        ExpandValue.String{value: "é😀\"\\\n"},
+        ExpandValue.Array{values: [ExpandValue]{}}, ExpandValue.Object{entries: [ExpandObjectEntry]{}},
+    }}
+    assert_eq(semindex_json_expand_value(values), `[null,false,true,-42,4294967296,"é😀\"\\\n",[],{}]`)
+}
+
+#Test("semindex_typed_expand_numbers_use_the_canonical_bounded_integer_atom") {
+    bounded :: [Int]{-9223372036854775808, 9223372036854775807}
+    loop number in bounded {
+        value :: semindex_status_expand_value(ExpandValue.Number{value: number}) ?? panic("valid bounded expand number")
+        assert_eq(value, StatusValue.Integer{value: number})
+    }
+    overflowing :: [Int]{-9223372036854775809, 9223372036854775808}
+    loop number in overflowing {
+        raw :: "{number}"
+        assert_eq(semindex_json_expand_value(ExpandValue.Number{value: number}), raw)
+        if semindex_status_expand_value(ExpandValue.Number{value: number}) == {
+            .Err(error) -> {
+                expected :: "invalid number `{number}`"
+                assert_eq(error.message, expected)
+            }
+            .Ok(_) -> panic("typed expand envelope accepted an overflowing integer atom")
+        }
+    }
+}
+#Test("semindex_expand_objects_sort_keys_stably_without_losing_duplicate_values") {
+    value :: ExpandValue.Object{entries: [ExpandObjectEntry]{
+        ExpandObjectEntry{key: "z", value: ExpandValue.String{value: "last"}},
+        ExpandObjectEntry{key: "a", value: ExpandValue.Number{value: 1}},
+        ExpandObjectEntry{key: "z", value: ExpandValue.Null},
+        ExpandObjectEntry{key: "a", value: ExpandValue.Array{values: [ExpandValue]{ExpandValue.Number{value: 3}, ExpandValue.Number{value: 2}, ExpandValue.Number{value: 3}}}},
+    }}
+    assert_eq(semindex_json_expand_value(value), `{"a":1,"a":[3,2,3],"z":"last","z":null}`)
+    if value == .Object(entries) {
+        assert_eq(entries[0].key, "z")
+        assert_eq(entries[1].key, "a")
+        assert_eq(entries[2].key, "z")
+        assert_eq(entries[3].key, "a")
+    } else { panic("object input changed") }
+}
+#Test("semindex_expand_projection_preserves_lens_fact_order_and_empty_selection") {
+    projection :: ExpandProjection{selection: "", lenses: [ExpandLens]{
+        ExpandLens{name: "same", summary: "first\nline", facts: [ExpandValue]{ExpandValue.Null, ExpandValue.String{value: ""}}},
+        ExpandLens{name: "same", summary: "", facts: [ExpandValue]{}},
+    }}
+    assert_eq(semindex_json_expand_projection(projection), `{"selection":"","lenses":[{"name":"same","summary":"first\nline","facts":[null,""]},{"name":"same","summary":"","facts":[]}]}`)
+    assert_eq(semindex_json_expand_projection(ExpandProjection{selection: "x", lenses: [ExpandLens]{}}), `{"selection":"x","lenses":[]}`)
+}
+
+// Original tests/semindex.rs799–811: supply S4.open on basics/hello.jet.
+// Unregistered until the real checked C4/S4 producer and canonical typed Report
+// + all S17/S18 projections are available; no fabricated hello index.
+fn semindex_hello_json_shape(index: SemIndex) {
+    wire :: index.to_json()
+    assert(wire.starts_with("{"))
+    assert(wire.contains("\"schema_version\":{SEMINDEX_SCHEMA_VERSION}"))
+    assert(wire.contains("\"definition_facts\""))
+    assert(wire.contains("\"definitions\""))
+    assert(wire.contains("\"instances\""))
+    assert(wire.contains("\"identity\""))
+    assert(wire.contains("\"scope_identity\""))
+    assert(wire.contains("\"members\""))
+    assert(wire.contains("\"run\""))
+}
+
+// Original tests/semindex.rs814–920: C4 checks these exact two fixtures under
+// the SAME identity_reorder.jet path before calling the assertions below.
+fn semindex_envelope_reorder_before_source() -> String Never! {
+    "\nmodule math {\n    pub fn double(n: Int) -> Int {\n        return n * 2\n    }\n}\n\nstruct Point {\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {\n        return self.x + self.y\n    }\n}\n\nimpl Point {\n    fn origin() -> Point {\n        return Point.{x: 0, y: 0}\n    }\n}\n\nenum Light {\n    Red\n    Green\n}\n\nfn helper(p: Point) -> Int {\n    return p.sum()\n}\n\nfn run() {\n    p :: Point.origin()\n    print(helper(p))\n}\n"
+}
+fn semindex_envelope_reorder_after_source() -> String Never! {
+    "\nenum Light {\n    Red\n    Green\n}\n\nfn helper(p: Point) -> Int {\n    return p.sum()\n}\n\nstruct Point {\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {\n        return self.x + self.y\n    }\n}\n\nmodule math {\n    pub fn double(n: Int) -> Int {\n        return n * 2\n    }\n}\n\nimpl Point {\n    fn origin() -> Point {\n        return Point.{x: 0, y: 0}\n    }\n}\n\nfn run() {\n    p :: Point.origin()\n    print(helper(p))\n}\n"
+}
+fn semindex_identity_stable_across_reorder(before: SemIndex, after: SemIndex) {
+    before_ids := [String]{}
+    after_ids := [String]{}
+    loop definition in before.definitions() -> &before_ids.push(~definition.identity)
+    loop definition in after.definitions() -> &after_ids.push(~definition.identity)
+    &before_ids.sort()
+    &after_ids.sort()
+    assert_eq(before_ids, after_ids)
+    module_seen := false
+    function_seen := false
+    point_seen := false
+    field_seen := false
+    variant_seen := false
+    method_seen := false
+    loop identity in before_ids {
+        if identity.contains("module:") -> module_seen = true
+        if identity.contains("fn:") -> function_seen = true
+        if identity.contains("type:") && identity.contains("Point") -> point_seen = true
+        if identity.contains("field:") && identity.contains("Point.x") -> field_seen = true
+        if identity.contains("variant:") && identity.contains("Light.Red") -> variant_seen = true
+        if identity.contains("method:") && identity.contains("Point.sum") -> method_seen = true
+    }
+    assert(module_seen)
+    assert(function_seen)
+    assert(point_seen)
+    assert(field_seen)
+    assert(variant_seen)
+    assert(method_seen)
+}
+
+fn semindex_envelope_union_view_source() -> String Never! {
+    "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {\n    if first { return left[0..1] }\n    return right[0..1]\n}\nfn run() {}\n"
+}
+fn semindex_envelope_right_view_source() -> String Never! {
+    "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> { return right[0..1] }\nfn run() {}\n"
+}
+
+// Original tests/semindex.rs923–976. C4 checks both original pick sources at
+// view_provenance.jet; S1/S3 retain their full producer/provenance assertions.
+fn returned_view_provenance_is_structured_and_changes_signature_id(union: SemIndex, right: SemIndex) {
+    pick :: if union.lookup("pick") == { .Val(row) -> row, .None -> panic("pick definition") }
+    if pick[0].kind == {
+        .Function(_, _, _) -> {}
+        else -> panic("pick must be a function")
+    }
+    assert_eq(pick[0].view_provenance.len(), 1)
+    provenance :: pick[0].view_provenance[0]
+    assert_eq(provenance.output_path.len(), 0)
+    assert_eq(provenance.sources.len(), 2)
+    assert_eq(provenance.sources[0].source, ViewSourceFact.Parameter{index: 0})
+    assert_eq(provenance.sources[0].projections, [ViewProjectionFact]{ViewProjectionFact.Range})
+    assert_eq(provenance.sources[1].source, ViewSourceFact.Parameter{index: 1})
+    assert_eq(provenance.sources[1].projections, [ViewProjectionFact]{ViewProjectionFact.Range})
+    assert(!provenance.mutable)
+    wire :: union.to_json()
+    assert(wire.contains(`"view_provenance":[{"output_path":[],"sources":[{"source":{"kind":"parameter","index":0}`))
+    assert(wire.contains(`"source":{"kind":"parameter","index":1}`))
+    assert(wire.contains(`"projections":[{"kind":"range"}]`))
+    right_pick :: if right.lookup("pick") == { .Val(row) -> row, .None -> panic("pick definition") }
+    assert_eq(right_pick[0].view_provenance[0].canonical(), "slot:$;parameter:1;access:read;path:range")
+    union_signature := String?{None}
+    right_signature := String?{None}
+    loop fact in union.definition_facts() { if fact.name == "pick" { union_signature = Val(~fact.signature_id); break } }
+    loop fact in right.definition_facts() { if fact.name == "pick" { right_signature = Val(~fact.signature_id); break } }
+    assert(union_signature != None)
+    assert(right_signature != None)
+    assert(union_signature != right_signature)
+}
+
+fn semindex_envelope_aggregate_view_source(right_owner: String) -> String Never! {
+    "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\nfn pair(left: [Int], right: [Int]) -> Pair {{\n    left_view :: left[0..1]\n    right_view :: {right_owner}[0..1]\n    return Pair.{{ left: left_view, right: right_view }}\n}}\n\nfn run() {{}}\n"
+}
+
+// Original tests/semindex.rs979–1033, same aggregate_view_provenance.jet path:
+// distinct source right_view::right[0..1], changed source left[0..1].
+fn aggregate_view_provenance_preserves_slots_and_changes_signature_id(distinct: SemIndex, changed: SemIndex) {
+    pair :: if distinct.lookup("pair") == { .Val(row) -> row, .None -> panic("pair definition") }
+    assert_eq(pair[0].view_provenance.len(), 2)
+    assert_eq(pair[0].view_provenance[0].output_path, [String]{"left"})
+    assert_eq(pair[0].view_provenance[0].sources[0].source, ViewSourceFact.Parameter{index: 0})
+    assert_eq(pair[0].view_provenance[1].output_path, [String]{"right"})
+    assert_eq(pair[0].view_provenance[1].sources[0].source, ViewSourceFact.Parameter{index: 1})
+    wire :: distinct.to_json()
+    assert(wire.contains(`"output_path":["left"],"sources":[{"source":{"kind":"parameter","index":0}`))
+    assert(wire.contains(`"output_path":["right"],"sources":[{"source":{"kind":"parameter","index":1}`))
+    distinct_signature := String?{None}
+    changed_signature := String?{None}
+    loop fact in distinct.definition_facts() { if fact.name == "pair" { distinct_signature = Val(~fact.signature_id); break } }
+    loop fact in changed.definition_facts() { if fact.name == "pair" { changed_signature = Val(~fact.signature_id); break } }
+    assert(distinct_signature != None)
+    assert(changed_signature != None)
+    assert(distinct_signature != changed_signature)
+}
+
+// Expanded-status consumer stays C4-gated, not a source assertion.
+fn semindex_expanded_status_boundary(index: SemIndex, projection: ExpandProjection) {
+    plain :: index.to_status_envelope()
+    expanded :: index.to_status_envelope_with_expand(projection)
+    assert_eq(plain.action, "inspect.semindex")
+    assert(plain.ok)
+    assert_eq(expanded.action, "inspect.semindex")
+    assert(expanded.ok)
+    assert(!plain.json().contains(`"expand":`))
+    assert(expanded.json().contains(`"expand":`))
+    assert(expanded.json().contains(`"selection":`))
+    assert(expanded.json().contains(`"lenses":`))
+}
+
+// Canonical typed boundary assertions, independently authored but UNRUN until
+// CP-REPORT-STATUS-API public insert/constructor/encoder reaches this lane.
+#Test("semindex_expand_typed_tree_refuses_sorted_duplicates_without_collapsing_values") {
+    duplicate :: ExpandValue.Object{entries: [ExpandObjectEntry]{
+        ExpandObjectEntry{key: "z", value: ExpandValue.Number{value: 1}},
+        ExpandObjectEntry{key: "a", value: ExpandValue.Null},
+        ExpandObjectEntry{key: "z", value: ExpandValue.Number{value: 2}},
+    }}
+    if semindex_status_expand_value(duplicate) == {
+        .Ok(_) -> panic("duplicate expand key must be refused by canonical StatusFields")
+        .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
+    }
+    nested :: ExpandValue.Array{values: [ExpandValue]{duplicate}}
+    if semindex_status_expand_value(nested) == {
+        .Ok(_) -> panic("nested duplicate must not be erased")
+        .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
+    }
+}
+#Test("semindex_expand_typed_tree_keeps_null_array_order_and_sorted_object_fields") {
+    projection :: ExpandProjection{selection: "value", lenses: [ExpandLens]{
+        ExpandLens{name: "facts", summary: "", facts: [ExpandValue]{
+            ExpandValue.Object{entries: [ExpandObjectEntry]{
+                ExpandObjectEntry{key: "z", value: ExpandValue.Number{value: -42}},
+                ExpandObjectEntry{key: "a", value: ExpandValue.Array{values: [ExpandValue]{ExpandValue.Null, ExpandValue.String{value: ""}, ExpandValue.Bool{value: false}}}},
+            }},
+        }},
+    }}
+    value :: semindex_status_expand_projection(projection) ?? panic("valid typed expansion")
+    wire :: StatusEnvelope.new("inspect.semindex", true).with_field("expand", value).json()
+    assert_eq(wire, `{"schema":"jet.status/v1","action":"inspect.semindex","ok":true,"reports":[],"expand":{"selection":"value","lenses":[{"name":"facts","summary":"","facts":[{"a":[null,"",false],"z":-42}]}]}}`)
+}

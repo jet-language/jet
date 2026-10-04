@@ -1,0 +1,109 @@
+// TOOLS-S9: two independent real policy-filter tests. Remaining functions are
+// unregistered original checked acceptance fixtures, never fake checked rows.
+// S4/C4/S8/S10–S12/S20/CP-NAMES/CP-AST/CP-POLICY and #4397 gate composition.
+use jet_foundation.[PolicyDeclaration, PolicyKey, PolicyValue, PolicyScope, Span]
+
+fn semindex_items_test_policy(scope: PolicyScope, target: Span?) -> PolicyDeclaration Never! {
+    PolicyDeclaration{key: .Unsafe, value: .Forbid, scope: scope, span: Span{start: 0, end: 1}, target: target, source: "fixture"}
+}
+#Test("semindex_function_hover_policy_includes_ambient_scopes") {
+    function :: Span{start: 10, end: 40}
+    scopes :: [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module}
+    loop scope in scopes {
+        assert(semindex_policy_applies_to_function(semindex_items_test_policy(scope, None), function))
+        assert(semindex_policy_applies_to_function(semindex_items_test_policy(scope, Val(Span{start: 60, end: 80})), function))
+    }
+    assert(!semindex_policy_applies_to_function(semindex_items_test_policy(.Block, Val(function)), function))
+    assert(!semindex_policy_applies_to_function(semindex_items_test_policy(.Block, None), function))
+}
+#Test("semindex_function_hover_policy_requires_exact_function_target") {
+    function :: Span{start: 10, end: 40}
+    assert(semindex_policy_applies_to_function(semindex_items_test_policy(.Function, Val(function)), function))
+    assert(!semindex_policy_applies_to_function(semindex_items_test_policy(.Function, None), function))
+    assert(!semindex_policy_applies_to_function(semindex_items_test_policy(.Function, Val(Span{start: 10, end: 41})), function))
+    assert(!semindex_policy_applies_to_function(semindex_items_test_policy(.Function, Val(Span{start: 9, end: 40})), function))
+    assert(!semindex_policy_applies_to_function(semindex_items_test_policy(.Function, Val(Span{start: 0, end: 50})), function))
+}
+
+// tests/semindex.rs1378–1432, byte-exact original method/dossier source.
+pub fn semindex_s9_scattered_members_source() -> String Never! {
+    "\ntrait DrawThing {\n    fn render(self) -> String ->\n}\n\nstruct Widget {\n    title: String\n\n    fn label(self) -> String {\n        return ~self.title\n    }\n}\n\nimpl Widget {\n    fn size(self) -> Int {\n        return 1\n    }\n}\n\nimpl Widget.DrawThing {\n    fn render(self) -> String {\n        return self.label()\n    }\n}\n\nfn run() {\n    w :: Widget.{title: \"ok\"}\n    print(w.render())\n}\n"
+}
+pub fn semindex_s9_scattered_members_assertions(index: SemIndex, dossier_json: String) {
+    semindex_test_dossier_stitches_scattered_members(index)
+    assert(dossier_json.contains("\"target\":\"Widget\""))
+    assert(dossier_json.contains("\"trait_impl\""))
+    assert(dossier_json.contains("\"inherent_impl\""))
+}
+// tests/semindex.rs1435–1473 remains canonical in S6; reuse its exact fixture
+// and assertions, including defaults/public labels/zones/rest, no second oracle.
+pub fn semindex_s9_method_contract_source() -> String Never! { semindex_s6_method_contract_source() }
+pub fn semindex_s9_method_contract_assertions(index: SemIndex) Never! { semindex_s6_method_contract_assertions(index) }
+
+// tests/semindex.rs486–534: actual state owner and checked marker anchor.
+pub fn semindex_s9_state_owner_source() -> String Never! {
+    "\nstruct Door {\n    state { Closed, Open }\n}\nimpl Door {\n    #Transition(_, Door.State.Closed) fn new() -[]> Door { return Door{} }\n    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door { return self }\n}\nfn run() {}\n"
+}
+pub fn semindex_s9_state_owner_assertions(index: SemIndex, source: String, json: String) Never! {
+    definition_found := false
+    reference_found := false
+    loop definition in index.definitions() {
+        if !definition.qualified_name.ends_with("Door.State.Closed") -> next
+        if definition.kind == { .EnumVariant(parent) -> assert_eq(parent, "Door.State"), else -> panic("owning struct state definition kind") }
+        definition_found = true
+        loop window in index.references_to("Closed") {
+            loop reference in window {
+                if reference.target == .Val(target) {
+                    if target.def_span != definition.def_span -> next
+                    assert_eq(target.def_span, definition.def_span)
+                    selected := source.bytes()[reference.span.start..<reference.span.end] // #4303
+                    assert_eq(String.from_bytes(selected) ?? panic("valid source span"), "Closed")
+                    reference_found = true
+                    break
+                }
+            }
+            if reference_found -> break
+        }
+        assert(json.contains("\"name\":\"{definition.qualified_name}\""))
+        break
+    }
+    assert(definition_found && reference_found)
+}
+
+// tests/semindex.rs774–795: caller supplies real checked two-file symbols.
+pub fn semindex_s9_import_library_source() -> String Never! { "pub fn score(name: String) -> Int { return 1 }\n" }
+pub fn semindex_s9_import_main_source() -> String Never! {
+    "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() { print(imported_score(\"Ada\")) }\n"
+}
+pub fn semindex_s9_import_assertions(symbols: SemanticSymbolIndex) Never! {
+    assert_eq(symbols.lookup("api").len(), 1)
+    imported :: symbols.lookup("imported_score")
+    assert_eq(imported.len(), 1)
+    assert(imported[0].identity.starts_with("import:"))
+    assert(imported[0].signature.contains("score(name: String) Int"))
+}
+
+// lib.rs829–895: canonical original import-member/alias/two-receiver fixture
+// and checked target assertions already live in S5. No duplicated checked model.
+pub fn semindex_s9_reference_library_source() -> String Never! { semindex_build_test_reference_library_source() }
+pub fn semindex_s9_reference_main_source() -> String Never! { semindex_build_test_reference_main_source() }
+pub fn semindex_s9_reference_assertions(index: SemIndex) { semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(index) }
+
+// tests/semindex.rs169–227 canonical exact CheckedText source+all assertions
+// live in S20; S9's impl methods must compose with that nominal conversion.
+pub fn semindex_s9_checked_text_source() -> String Never! { semindex_s20_checked_text_source() }
+pub fn semindex_s9_checked_text_assertions(index: SemIndex, symbols: SemanticSymbolIndex, json: String, dossier_text: String) Never! {
+    semindex_s20_checked_text_assertions(index, symbols, json, dossier_text)
+}
+
+// tests/semindex.rs1476–1552: original spelled bypass fixture and assertions.
+pub fn semindex_s9_bypasses_source() -> String Never! {
+    "\nstruct Invoice {\n    #allow(float_money)\n    price: Float,\n}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {\n    print(\"danger\")\n}\n\nfn run() {\n    #Unsafe(\"index checked against len\") {\n        print(\"audited\")\n    }\n    #Unsafe(\"risky_fn's contract is upheld here\") {\n        risky_fn()\n    }\n    fetch_it().drop(\"telemetry only\")\n}\n\nfn fetch_it() -> Int {\n    return 1\n}\n"
+}
+pub fn semindex_s9_bypasses_assertions(index: SemIndex, dossier_json: String, dossier_text: String) {
+    semindex_test_dossier_bypass_facts(index)
+    assert(dossier_json.contains("\"bypass_facts\""))
+    assert(dossier_json.contains("\"lint_allow\""))
+    assert(dossier_text.contains("bypass facts"))
+    assert(dossier_text.contains("float_money"))
+}

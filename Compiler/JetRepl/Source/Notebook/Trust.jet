@@ -1,0 +1,220 @@
+// crates/jet-repl/src/Notebook/trust.rs: rich-output trust, D-NOTEBOOK-TRUST1=D.
+use core.files.host.retained_descriptor as notebook_trust_files
+use core.sys.host.os_path_ingress as notebook_trust_env
+use core.files.runtime.kernel_path_components as notebook_trust_paths
+use core.files.runtime.kernel_path_components.[OSPath]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_sha256, diagnostic_text_lines, mir_sha256_hex, TEXT_NUL]
+
+// Rust POLICY_VERSION. Ruling B migrates persisted payload identity once:
+// Foundation A-canonical JSON, including its final LF, not Rust Debug or JCS.
+pub NOTEBOOK_TRUST_POLICY_VERSION :: "notebook-trust-2"
+
+// Rust MimeBundle; named MIME rows preserve vector order and duplicates (#4357).
+pub struct NotebookMIMEEntry { pub media_type: String, pub payload: String }
+pub struct NotebookMIMEBundle {
+    pub text_plain: String
+    pub mime: [NotebookMIMEEntry]
+    pub quarantined: Bool
+    pub widget_id: String?
+    pub requested_origins: [String]
+    pub requested_messages: [String]
+}
+
+// Rust ActiveRequest and its key/needs_capabilities methods.
+pub struct NotebookActiveRequest {
+    pub notebook_source_hash: String
+    pub payload_hash: String
+    pub renderer_hash: String
+    pub environment_hash: String
+    pub policy_version: String
+    pub widget_id: String
+    pub origins: [String]
+    pub messages: [String]
+
+    pub fn key(self) -> String Never! {
+        notebook_trust_grant_key(self.notebook_source_hash, self.payload_hash, self.renderer_hash, self.environment_hash, self.policy_version)
+    }
+    pub fn needs_capabilities(self) -> Bool Never! {
+        self.origins.len() != 0 || self.messages.len() != 0
+    }
+}
+
+// Rust TrustGrant.
+pub struct NotebookTrustGrant {
+    pub key: String
+    pub widget_id: String
+    pub origins: [String]
+    pub messages: [String]
+}
+
+// Rust TrustStore: membership is unique, but load retains every record row.
+pub struct NotebookTrustStore {
+    grants: [String:Bool]
+    records: [NotebookTrustGrant]
+
+    pub fn default() -> NotebookTrustStore Never! {
+        NotebookTrustStore{grants: [String:Bool]{}, records: [NotebookTrustGrant]{}}
+    }
+    // Rust TrustStore::load: all read errors mean an empty store.
+    // #4494/#4409: sole retained provider, strict UTF-8 InvalidData law.
+    pub fn load(path: OSPath) -[FS]> NotebookTrustStore Never! {
+        text :: notebook_trust_files.read_text(path) ?? return NotebookTrustStore.default()
+        store := NotebookTrustStore.default()
+        prefix :: "grant:user:notebook:"
+        loop line in diagnostic_text_lines(text) {
+            if !line.starts_with(prefix) -> next
+            // Rust strip_prefix: the first occurrence is the checked prefix, so
+            // `after` is the rest in one pass, not a scalar-indexed re-slice.
+            // #4303: keep the string-view result in the call; a named `::`
+            // view passed to a String read parameter has broken native lowering.
+            if notebook_trust_parse_subject(line.after(prefix)) == .Val(grant) {
+                store.grants[grant.key] = true
+                &store.records.push(grant)
+            }
+        }
+        store
+    }
+    // Rust TrustStore::save: replace notebook rows only, preserving other lines.
+    pub fn save(self, path: OSPath) Err! -[FS]> {
+        if notebook_trust_paths.parent_span(path) == .Val(extent) {
+            parent :: notebook_trust_paths.owned_span(path, extent)
+            notebook_trust_files.create_dir_all(parent) ?? return Err(err.message)
+        }
+        // Rust push_str accumulation: collect each line once and join once,
+        // rather than re-copying the whole file per appended line. The empty
+        // final row gives every line its LF and keeps an empty store empty.
+        lines := [String]{}
+        if notebook_trust_files.read_text(path) == .Ok(text) {
+            loop line in diagnostic_text_lines(text) {
+                if !line.starts_with("grant:user:notebook:") -> &lines.push(line)
+            }
+        }
+        loop grant in self.records {
+            &lines.push("grant:user:notebook:{notebook_trust_encode_subject(grant)}")
+        }
+        &lines.push("")
+        notebook_trust_files.write(path, lines.join("\n").bytes()) ?? return Err(err.message)
+    }
+    // Rust TrustStore::insert: last inserted record moves to the end.
+    pub fn insert(&self, grant: ^NotebookTrustGrant) Never! {
+        self.grants[grant.key] = true
+        // Core has no stable retain-in-place primitive: reverse/pop drains
+        // owned rows in original order into one vector, without deep copies.
+        &self.records.reverse()
+        retained := [NotebookTrustGrant]{}
+        loop self.records.len() != 0 {
+            record :: &self.records.pop() ?? panic("nonempty trust records")
+            if record.key != grant.key -> &retained.push(^record)
+        }
+        &retained.push(^grant)
+        self.records = ^retained
+    }
+}
+
+// Rust var_os preserves non-Unicode HOME; fallback only on absence.
+pub fn notebook_trust_store_path() -[Env]> OSPath Never! {
+    home := notebook_trust_env.var_os("HOME") ?? notebook_native_path(".")
+    notebook_trust_paths.push(&home, notebook_trust_paths.from_text(".jet", home.platform))
+    notebook_trust_paths.push(&home, notebook_trust_paths.from_text("trust", home.platform))
+    home
+}
+
+// Rust grant_key: unchanged five components, separated by exactly four NULs.
+pub fn notebook_trust_grant_key(source: String, payload: String, renderer: String, environment: String, policy: String) -> String Never! {
+    mir_sha256_hex("{source}{TEXT_NUL}{payload}{TEXT_NUL}{renderer}{TEXT_NUL}{environment}{TEXT_NUL}{policy}")
+}
+// Rust is_granted/grant_active/revoke_matching.
+pub fn notebook_trust_is_granted(store: NotebookTrustStore, key: String) -> Bool Never! { store.grants.has_key(key) }
+pub fn notebook_trust_grant_active(store: &NotebookTrustStore, request: NotebookActiveRequest) -> NotebookTrustGrant Never! {
+    grant :: NotebookTrustGrant{key: request.key(), widget_id: request.widget_id, origins: ~request.origins, messages: ~request.messages}
+    &store.insert(~grant)
+    grant
+}
+pub fn notebook_trust_revoke_matching(store: &NotebookTrustStore, notebook_source_hash: String) Never! {
+    // Session stores are notebook-scoped; this argument does not select rows.
+    store.grants = [String:Bool]{}
+    store.records = [NotebookTrustGrant]{}
+}
+
+// Ruling B pinned material: sorted object keys, unsorted MIME row arrays;
+// null differs from a present empty widget ID. No capability fields are added.
+pub fn notebook_trust_payload_material(bundle: NotebookMIMEBundle) -> CanonicalJSON Never! {
+    rows := [CanonicalJSON]{}
+    loop row in bundle.mime {
+        &rows.push(CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.String(row.media_type), CanonicalJSON.String(row.payload)}))
+    }
+    widget :: if bundle.widget_id == {
+        .Val(id) -> CanonicalJSON.String(id)
+        .None -> CanonicalJSON.Null
+    }
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "mime", value: CanonicalJSON.Array(rows)},
+        CanonicalJSONField{key: "widget_id", value: widget},
+    })
+}
+pub fn notebook_trust_payload_hash(bundle: NotebookMIMEBundle) -> String Never! {
+    canonical_json_sha256(notebook_trust_payload_material(bundle))
+}
+
+// Rust RenderDecision/quarantine_outputs/decide_render. AllowPassive is still
+// caller-sanitized/opaque-origin content, not permission to bypass sandboxing.
+pub enum NotebookRenderDecision {
+    AllowPassive(text_plain: String, mime: [NotebookMIMEEntry])
+    AllowActive(text_plain: String, mime: [NotebookMIMEEntry])
+    FallbackPlain(text_plain: String, reason: String)
+}
+pub fn notebook_quarantine_outputs(bundle: &NotebookMIMEBundle) Never! { bundle.quarantined = true }
+pub fn notebook_decide_render(store: NotebookTrustStore, source: String, environment: String, renderer: String, bundle: NotebookMIMEBundle) -> NotebookRenderDecision Never! {
+    text :: if bundle.text_plain.is_empty() -> "(no text/plain)" else -> bundle.text_plain
+    if bundle.quarantined {
+        return NotebookRenderDecision.FallbackPlain{text_plain: text, reason: "imported output is quarantined until re-run under local trust"}
+    }
+    is_active := bundle.widget_id != None
+    loop row in bundle.mime {
+        if row.media_type == "application/javascript" || row.media_type == "text/html" || row.media_type.starts_with("application/vnd.jet.widget") -> is_active = true
+    }
+    if !is_active || (bundle.requested_origins.len() == 0 && bundle.requested_messages.len() == 0) {
+        return NotebookRenderDecision.AllowPassive{text_plain: text, mime: notebook_trust_sanitize_passive(bundle.mime)}
+    }
+    key :: notebook_trust_grant_key(source, notebook_trust_payload_hash(bundle), renderer, environment, NOTEBOOK_TRUST_POLICY_VERSION)
+    if notebook_trust_is_granted(store, key) -> return NotebookRenderDecision.AllowActive{text_plain: text, mime: ~bundle.mime}
+    widget_id :: bundle.widget_id ?? ""
+    NotebookRenderDecision.FallbackPlain{text_plain: text, reason: "active output blocked: widget `{widget_id}` needs an explicit jet trust notebook grant"}
+}
+
+// Rust sanitize_passive: exact whitelist; ordering and duplicate rows survive.
+fn notebook_trust_sanitize_passive(mime: [NotebookMIMEEntry]) -> [NotebookMIMEEntry] Never! {
+    out := [NotebookMIMEEntry]{}
+    loop row in mime {
+        kind :: row.media_type
+        if kind == "text/plain" || kind == "text/markdown" || kind == "image/png" || kind == "image/jpeg" || kind == "image/svg+xml" || kind == "text/html" || kind == "application/json" -> &out.push(row)
+    }
+    out
+}
+// Rust encode_notebook_grant_subject/parse_notebook_grant_subject/split_list/
+// escape/unescape. This deliberately retains the original comma-list codec.
+fn notebook_trust_encode_subject(grant: NotebookTrustGrant) -> String Never! {
+    widget :: notebook_trust_escape(grant.widget_id)
+    origins :: notebook_trust_escape(grant.origins.join(","))
+    messages :: notebook_trust_escape(grant.messages.join(","))
+    "{grant.key}|{widget}|{origins}|{messages}"
+}
+fn notebook_trust_parse_subject(subject: String) -> NotebookTrustGrant? Never! {
+    parts :: subject.split("|").to_list()
+    if parts.len() < 4 -> return None
+    // Rust splitn(4): any extra pipes belong to the fourth component.
+    rest := [String]{}
+    loop index in 3..<parts.len() -> &rest.push(parts[index])
+    Val(NotebookTrustGrant{
+        key: parts[0],
+        widget_id: notebook_trust_unescape(parts[1]),
+        origins: notebook_trust_split_list(notebook_trust_unescape(parts[2])),
+        messages: notebook_trust_split_list(notebook_trust_unescape(rest.join("|"))),
+    })
+}
+fn notebook_trust_split_list(text: String) -> [String] Never! {
+    if text.is_empty() -> return [String]{}
+    text.split(",").to_list()
+}
+fn notebook_trust_escape(text: String) -> String Never! { text.replace("%", "%25").replace("|", "%7C").replace("\n", "") }
+fn notebook_trust_unescape(text: String) -> String Never! { text.replace("%7C", "|").replace("%25", "%") }

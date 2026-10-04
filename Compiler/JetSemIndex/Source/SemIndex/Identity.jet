@@ -1,0 +1,123 @@
+// crates/jet-semindex/src/Build.rs:574–620,985–995: presentation replacement,
+// stable declaration identities, caller keys and active/local scope identities.
+// CP-NAMES owns generated display projections and checked reference anchors.
+// Presentation replacement never changes an identity or a definition span.
+use jet_foundation.[
+    MIRNameFacts, Span, TraitMethodSig,
+    name_facts_canonical_paths, name_facts_display_path,
+    name_facts_reference, name_facts_declaration, name_facts_semantic_identity,
+]
+use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
+
+// #4357: Rust `(internal, display)` replacement row; ephemeral presentation
+// input, not another checked-name ledger. Caller preserves longest-first order.
+pub struct SemIndexPresentationReplacement {
+    pub internal: String
+    pub display: String
+}
+
+pub fn semindex_project_text(replacements: [SemIndexPresentationReplacement], text: &String) Never! {
+    loop replacement in replacements -> text = text.replace(replacement.internal, replacement.display)
+}
+
+pub fn semindex_caller_key(frame: CallerFrame) -> String Never! {
+    if frame.owner == {
+        .Val(owner) -> "{owner}::{frame.name}"
+        None -> frame.name
+    }
+}
+
+pub fn semindex_root_identity(module_path: String) -> String Never! {
+    "module:{module_path}"
+}
+pub fn semindex_module_identity(scope: String, name: String) -> String Never! {
+    "module:{scope}::{name}"
+}
+pub fn semindex_type_identity(scope: String, name: String) -> String Never! {
+    "type:{scope}::{name}"
+}
+pub fn semindex_member_identity(scope: String, parent: String, kind: String, name: String) -> String Never! {
+    "{kind}:{scope}::{parent}.{name}"
+}
+// Rust's unused Func parameter is omitted: identity deliberately ignores edits
+// to the call contract/body; the structural audit compares signature separately.
+pub fn semindex_callable_identity(scope: String, owner: String?, name: String) -> String Never! {
+    if owner == {
+        .Val(owner) -> "method:{scope}::{owner}.{name}"
+        None -> "fn:{scope}::{name}"
+    }
+}
+pub fn semindex_trait_method_identity(scope: String, owner: String, signature: TraitMethodSig) -> String Never! {
+    "method:{scope}::{owner}.{signature.name}"
+}
+pub fn semindex_active_scope(ctx: WalkCtx) -> String Never! {
+    if ctx.caller == {
+        .Val(caller) -> caller.identity
+        None -> ctx.scope_identity
+    }
+}
+pub fn semindex_local_identity(scope: String, kind: String, name: String) -> String Never! {
+    "{kind}:{scope}::{name}"
+}
+pub fn semindex_scoped_local_identity(ctx: WalkCtx, kind: String, name: String) -> String Never! {
+    semindex_local_identity(semindex_active_scope(ctx), kind, name)
+}
+pub fn semindex_origin_label(origin: MemberOrigin) -> String Never! {
+    if origin == {
+        .TypeBody -> "type"
+        .InherentImpl -> "impl"
+        .TraitImpl(trait_name) -> "impl {trait_name}"
+        .TraitRequirement(trait_name) -> "trait {trait_name}"
+    }
+}
+
+// Build.rs:514–572: all replacements are collected before presentation mutates.
+// CP-NAMES owns canonical_paths/display_path and their checked producer.
+pub fn semindex_project_generated_presentation(db: &SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    projections := [Int:[SemIndexPresentationReplacement]]{}
+    sources :: semindex_loaded_source_rows_by_path(module_sources, loaded_module_rows)
+    loop source_index in loaded_module_rows {
+        module_index :: semindex_loaded_registration_index(registration, module_sources[source_index])
+        replacements := [SemIndexPresentationReplacement]{}
+        loop path in name_facts_canonical_paths(names, module_index) {
+            if path.name.contains(".") -> next
+            if name_facts_display_path(names, module_index, path.name, Val(module_index)) == .Val(display) {
+                leaves :: display.split(".")
+                leaf := leaves[leaves.len() - 1] // #4303
+                if display != path.name && leaf != path.name -> &replacements.push(SemIndexPresentationReplacement{internal: path.name, display: display})
+            }
+        }
+        // Rust sort is stable and compares UTF-8 byte lengths, not scalar count.
+        &replacements.sort_by((left: SemIndexPresentationReplacement, right: SemIndexPresentationReplacement) -> right.internal.bytes().len() <=> left.internal.bytes().len())
+        projections[module_index] = ^replacements
+    }
+    loop index in 0..<db.hover.len() {
+        if sources.get(db.hover[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], &db.hover[index].text)
+    }
+    loop index in 0..<db.inlay.len() {
+        if sources.get(db.inlay[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], &db.inlay[index].label)
+    }
+    loop index in 0..<db.members.len() {
+        if sources.get(db.members[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], &db.members[index].signature)
+    }
+}
+
+// Build.rs:998–1043: checked anchors only; no spelling-based target resolution.
+// The prefix reuses S5's one DB/state and explicit canonical names input.
+pub fn semindex_scoped_ref(db: &SymbolDB, ctx: WalkCtx, names: MIRNameFacts, name: String, span: Span, module_path: String) -> SymRef Never! {
+    target := DefinitionAnchor?{None}
+    checked_path :: names.modules[ctx.module_idx].path
+    if name_facts_reference(names, checked_path, span.start, span.end) == .Val(reference) {
+        target = Val(DefinitionAnchor{module_path: reference.module_path, kind: reference.kind, def_span: semindex_source_span(reference.def_span), semantic_identity: reference.semantic_identity})
+    }
+    SymRef{name: name, span: span, module_path: module_path, scope_identity: Val(semindex_active_scope(ctx)), target: target, fact: CompilerFact.from_member(name)}
+}
+pub fn semindex_declaration_ref(db: &SymbolDB, ctx: WalkCtx, names: MIRNameFacts, name: String, span: Span, module_path: String) -> SymRef Never! {
+    target := DefinitionAnchor?{None}
+    if name_facts_declaration(names, ctx.module_idx, name) == .Val(declaration) {
+        declaration_module := module_path
+        if declaration.module_index >= 0 && declaration.module_index < names.modules.len() -> declaration_module = names.modules[declaration.module_index].path
+        target = Val(DefinitionAnchor{module_path: declaration_module, kind: declaration.kind, def_span: semindex_source_span(declaration.span), semantic_identity: name_facts_semantic_identity(names, declaration.module_index, name)})
+    }
+    SymRef{name: name, span: span, module_path: module_path, scope_identity: Val(semindex_active_scope(ctx)), target: target, fact: None}
+}

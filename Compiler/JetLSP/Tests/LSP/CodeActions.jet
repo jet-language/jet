@@ -1,0 +1,16 @@
+// New controls for Server1112–1139, not W36/W38 original diagnostic fixtures.
+#Test("action serialization retains ordered independent edits and UTF16 endpoints") {
+    source :: "a😀b\r\nz"
+    edits :: [TextEdit]{
+        TextEdit{span: Span{start: 1, end: 5}, new_text: "\"x\"\n"},
+        TextEdit{span: Span{start: 8, end: 9}, new_text: "Z"},
+    }
+    json :: lsp_action_json("file:///a\"b.jet", -1, source, "title\nnext", "refactor.rewrite", edits)
+    expected :: "{{\"title\":\"title\\nnext\",\"kind\":\"refactor.rewrite\",\"edit\":{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":\"file:///a\\\"b.jet\",\"version\":-1}},\"edits\":[{{\"range\":{{\"start\":{{\"line\":0,\"character\":1}},\"end\":{{\"line\":0,\"character\":3}}}},\"newText\":\"\\\"x\\\"\\n\"}},{{\"range\":{{\"start\":{{\"line\":1,\"character\":0}},\"end\":{{\"line\":1,\"character\":1}}}},\"newText\":\"Z\"}}]}}]}}}}"
+    assert_eq(json, expected)
+}
+
+#Test("empty action edit list retains document version rather than silently losing authority") {
+    json :: lsp_action_json("file:///empty.jet", 2147483647, "", "nothing", "quickfix", [TextEdit]{})
+    assert_eq(json, "{{\"title\":\"nothing\",\"kind\":\"quickfix\",\"edit\":{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":\"file:///empty.jet\",\"version\":2147483647}},\"edits\":[]}}]}}}}")
+}

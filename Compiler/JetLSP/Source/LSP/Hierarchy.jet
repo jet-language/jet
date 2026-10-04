@@ -1,0 +1,128 @@
+// Source/LSP/Server.rs:1977–2160. Sole W38 Server/W36 documents and the SAME
+// retained Driver check result. Hierarchy item/trait projections are 0740/0741.
+use core.encoding.[DataTree]
+use jet_foundation.[Span]
+use core.files.runtime.kernel_path_components as lsp_hierarchy_path
+
+pub fn lsp_call_hierarchy_incoming_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    item :: value.field("item") ?? return None
+    name_value :: item.field("name") ?? return None
+    uri_value :: item.field("uri") ?? return None
+    if name_value == .Text(name) && uri_value == .Text(uri) {
+        path :: lsp_uri_to_path(uri, server.snapshot.cwd.platform == lsp_hierarchy_path.PathPlatform.Windows)
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        db :: lsp_build_symbol_db(permit.value.result)
+        rows := [String]{}
+        loop edge in db.calls {
+            if edge.module_path != path || edge.callee != name -> next
+            caller :: lsp_short_symbol_name(edge.caller)
+            loop def in db.defs {
+                if def.module_path != path || def.name != caller -> next
+                // Rust find() stops at the first def even if item projection
+                // declines; do not select a later same-spelled definition.
+                if lsp_call_hierarchy_item_json(def, doc.text) == .Val(json) {
+                    span :: Span{start: edge.call_span.start, end: edge.call_span.end}
+                    &rows.push("{{\"from\":{json},\"fromRanges\":[{lsp_range_json(lsp_byte_span_to_range(doc.text, span))}]}}")
+                }
+                break
+            }
+        }
+        return Val(lsp_response(id, "[{rows.join(",")}]"))
+    }
+    None
+}
+
+pub fn lsp_call_hierarchy_outgoing_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    item :: value.field("item") ?? return None
+    name_value :: item.field("name") ?? return None
+    uri_value :: item.field("uri") ?? return None
+    if name_value == .Text(name) && uri_value == .Text(uri) {
+        path :: lsp_uri_to_path(uri, server.snapshot.cwd.platform == lsp_hierarchy_path.PathPlatform.Windows)
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        db :: lsp_build_symbol_db(permit.value.result)
+        rows := [String]{}
+        loop edge in db.calls {
+            if edge.module_path != path || (edge.caller != name && lsp_short_symbol_name(edge.caller) != name) -> next
+            loop def in db.defs {
+                if def.module_path != path || def.name != edge.callee -> next
+                if lsp_call_hierarchy_item_json(def, doc.text) == .Val(json) {
+                    span :: Span{start: edge.call_span.start, end: edge.call_span.end}
+                    &rows.push("{{\"to\":{json},\"fromRanges\":[{lsp_range_json(lsp_byte_span_to_range(doc.text, span))}]}}")
+                }
+                break
+            }
+        }
+        return Val(lsp_response(id, "[{rows.join(",")}]"))
+    }
+    None
+}
+
+pub fn lsp_prepare_type_hierarchy_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        pos :: lsp_pos_from_json(value.field("position") ?? return None) ?? return None
+        offset :: lsp_pos_to_offset(doc.text, pos)
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        db :: lsp_build_symbol_db(permit.value.result)
+        path :: lsp_hierarchy_path.display(doc.path)
+        loop def in db.defs {
+            if def.module_path != path || def.def_span.start > offset || offset > def.def_span.end -> next
+            item :: lsp_type_hierarchy_item_json(def, doc.text) ?? return Val(lsp_response(id, "null"))
+            return Val(lsp_response(id, "[{item}]"))
+        }
+        return Val(lsp_response(id, "null"))
+    }
+    None
+}
+
+pub fn lsp_type_hierarchy_supertypes_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    request :: lsp_type_hierarchy_item_params(params) ?? return None
+    doc :: server.diagnostic_state.docs.get(request.0) ?? return None
+    checked :: server.check_with_bundle(doc)
+    permit :: checked.checked.guard_read()
+    result :: permit.value.result
+    if result.graph == None -> return None
+    db :: lsp_build_symbol_db(result)
+    rows := [String]{}
+    loop name in lsp_type_hierarchy_trait_impls(result, request.1) {
+        loop def in db.defs {
+            if def.name != name -> next
+            if def.kind == { .Trait | .Tag -> {} else -> next }
+            source :: lsp_module_source(result, def.module_path) ?? doc.text
+            if lsp_type_hierarchy_item_json(def, source) == .Val(item) -> &rows.push(item)
+            break
+        }
+    }
+    Val(lsp_response(id, "[{rows.join(",")}]"))
+}
+
+pub fn lsp_type_hierarchy_subtypes_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    request :: lsp_type_hierarchy_item_params(params) ?? return None
+    doc :: server.diagnostic_state.docs.get(request.0) ?? return None
+    checked :: server.check_with_bundle(doc)
+    permit :: checked.checked.guard_read()
+    result :: permit.value.result
+    if result.graph == None -> return None
+    db :: lsp_build_symbol_db(result)
+    rows := [String]{}
+    loop name in lsp_type_hierarchy_subtype_names(result, request.1) {
+        loop def in db.defs {
+            if def.name != name -> next
+            if def.kind == { .Struct(_, _) | .Enum(_, _) -> {} else -> next }
+            source :: lsp_module_source(result, def.module_path) ?? doc.text
+            if lsp_type_hierarchy_item_json(def, source) == .Val(item) -> &rows.push(item)
+            break
+        }
+    }
+    Val(lsp_response(id, "[{rows.join(",")}]"))
+}

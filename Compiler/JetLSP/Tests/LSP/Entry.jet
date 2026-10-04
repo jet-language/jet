@@ -1,0 +1,621 @@
+use jet_foundation.[Diagnostic, ProgramBundle, Span, TextEdit, FixApplicability, FixSafety, Severity]
+use jet_foundation.Syntax
+use jet_semindex.[SemIndexEffectFacts, SemanticSymbolKind, build_symbol_db]
+use jet_lexer.[lex]
+use jet_lsp.[check_document_with_bundle, collect_fixes, Fix, compute_hover, compute_definition, compute_references, compute_rename, compute_completions, encode_semantic_tokens_with_arithmetic, semantic_symbol_at, semantic_symbol_metadata_json, lsp_apply_all, lsp_apply_non_overlapping, lsp_byte_offset_to_lsp, lsp_pos_to_offset, LSPPos]
+use jet_driver.Loader.[find_manifest_root]
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.files.runtime.kernel_path_components as entry_path
+use core.files.host.retained_descriptor as entry_fs
+use core.sys.env as entry_env
+use core.sys.process as entry_process
+use core.sync.atomic.[AtomicU64, Ordering]
+
+// Rust: Source/LSP/mod.rs:46
+// GATE #4494: real atomic fetch_add, not a fabricated project identity.
+NEXT_TEST_PROJECT := AtomicU64.new(0)
+
+// Rust: Source/LSP/mod.rs:50
+struct TestProject {
+    root: OSPath
+    entry_path: String
+
+    // Rust: Source/LSP/mod.rs:56
+    fn new() -[FS, Env]> TestProject {
+        root :: loop {
+            // GATE #4494: native temp directory, process id and atomic counter.
+            candidate :: entry_path.join(entry_env.temp_dir(), entry_path.from_text("jet-lsp-unit-{entry_process.id()}-{NEXT_TEST_PROJECT.fetch_add(1, Ordering.Relaxed)}", core.sys.target.selected_path_platform()))
+            if entry_fs.create_dir(candidate) == {
+                .Ok(_) -> break candidate
+                .Err(error) -> {
+                    if error.kind() == .AlreadyExists -> next
+                    panic("create isolated LSP test project: {error}")
+                }
+            }
+        }
+        entry :: entry_path.to_string_lossy(entry_path.join(root, entry_path.from_text("test.jet", root.platform)))
+        project :: TestProject{root: root, entry_path: entry}
+        // GATE #4494: real filesystem write; #4409 preserves native error kind.
+        entry_fs.write(entry_path.join(project.root, entry_path.from_text(Syntax.PACKAGE_FILE, root.platform)), "name: \"lsp_unit\"\nversion: \"0.1.0\"\n".bytes()) ?? panic("write isolated LSP test manifest")
+        project
+    }
+
+    // Rust: Source/LSP/mod.rs:79
+    fn entry(self) -> String { self.entry_path }
+}
+
+// Rust: Source/LSP/mod.rs:85
+impl TestProject.Close {
+    fn close(^self) -[FS]> Never! {
+        // GATE #4494: best-effort native cleanup on every exit.
+        _ :: entry_fs.remove_dir_all(self.root)
+    }
+}
+
+// Rust: Source/LSP/mod.rs:90
+fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    project :: TestProject.new()
+    (diagnostics, bundle, facts) :: check_document_with_bundle(project.entry(), text)
+    (project, diagnostics, bundle, facts)
+}
+
+// Rust: Source/LSP/mod.rs:104
+#Test("old_binding_keyword_has_no_teaching_edit") {
+    src :: "fn run() {{\n    let x = 1\n}}\n"
+    (_project, diags, _, _) :: check_test_document(src)
+    assert(!diags.iter().any(fn(d) { d.code == "E0009" || d.code == "E0985" }), "old binding words should not produce migration diagnostics: {diags:Debug}")
+    assert(!diags.is_empty(), "old binding words should still fail")
+}
+
+// Rust: Source/LSP/mod.rs:115
+#Test("retired_interpolation_selector_has_one_shared_quick_fix") {
+    project :: TestProject.new()
+    source :: "fn run() {{\n    value :: 1\n    print(\"{{value{Syntax.RETIRED_INTERPOLATION_SELECTOR_RAIL}Debug}}\")\n}}\n"
+    fixes :: collect_fixes(project.entry(), source)
+    assert_eq(fixes.iter().filter(fn(fix) { fix.title.contains("D-ONCE-HASH1") }).count(), 1)
+    assert_eq(lsp_apply_all(source, fixes), "fn run() {{\n    value :: 1\n    print(\"{{value{Syntax.INTERPOLATION_SELECTOR_RAIL}Debug}}\")\n}}\n")
+}
+
+// Rust: Source/LSP/mod.rs:139
+#Test("retired_print_family_has_one_shared_quick_fix_per_spelling") {
+    project :: TestProject.new()
+    source :: "use core.term as io\n\nfn run() {{\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}}\n"
+    fixes :: collect_fixes(project.entry(), source)
+    print_fixes :: fixes.iter().filter(fn(fix) { fix.title.contains("D-ONCE-PRINT1") }).cloned().collect()
+    assert_eq(print_fixes.len(), 3)
+    assert_eq(lsp_apply_all(source, print_fixes), "use core.term as io\n\nfn run() {{\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{{value}}\")\n    print(\"{{value:Debug}}\")\n}}\n")
+}
+
+// Rust: Source/LSP/mod.rs:155
+#Test("overlapping_fixes_apply_the_wider_edit_and_defer_the_rest") {
+    fix :: fn(start: Int, end: Int, text: String) -> Fix {
+        Fix{title: "", edit: TextEdit{span: Span{start: start, end: end}, new_text: text}, applicability: FixApplicability.Safe, safety: FixSafety.Formatting}
+    }
+    source :: "abcdefghij"
+    (text, applied, deferred) :: lsp_apply_non_overlapping(source, [fix(2, 4, "X"), fix(0, 6, "OUTER"), fix(8, 9, "Y")])
+    assert_eq(text, "OUTERghYj")
+    assert_eq((applied, deferred), (2, 1))
+}
+
+// Rust: Source/LSP/mod.rs:175
+#Test("test_document_context_does_not_discover_the_workspace") {
+    (project, diagnostics, maybe_bundle, _) :: check_test_document("fn run() {{}}\n")
+    assert(diagnostics.is_empty(), "{diagnostics:Debug}")
+    bundle :: maybe_bundle ?? panic("bundle")
+    assert(entry_path.is_absolute(project.root))
+    assert_eq(find_manifest_root(project.root), Val(project.root))
+    assert_eq(bundle.project_root, project.root)
+    assert_eq(bundle.modules.len(), 1)
+    assert_eq(bundle.modules[0].display, project.entry())
+}
+
+// Rust: Source/LSP/mod.rs:190
+#Test("inline_package_is_masked_for_lsp_but_keeps_pub_package") {
+    project :: TestProject.new()
+    // GATE #4494: remove the real manifest, preserving inline-package coverage.
+    entry_fs.remove_file(entry_path.join(project.root, entry_path.from_text(Syntax.PACKAGE_FILE, project.root.platform))) ?? panic("remove the ordinary manifest for inline-package coverage")
+    source :: "package {{\n    name: \"lsp-inline\"\n}}\n\npub(package) fn secret() -> String {{\n    return \"ok\"\n}}\n\nfn run() {{\n    print(secret())\n}}\n"
+    (diagnostics, bundle, _) :: check_document_with_bundle(project.entry(), source)
+    assert(diagnostics.iter().all(fn(d) { d.code != "E1360" && d.code != "E1361" && d.code != "E1362" && d.code != "E1363" }), "inline Package should not produce carrier diagnostics: {diagnostics:Debug}")
+    assert(bundle != None, "LSP should retain a checked bundle")
+}
+
+// Rust: Source/LSP/mod.rs:217
+#Test("lsp_pos_round_trip") {
+    src :: "fn run() {{\n    x :: 1\n}}\n"
+    offset :: 18
+    pos :: lsp_byte_offset_to_lsp(src, offset)
+    assert_eq(lsp_pos_to_offset(src, pos), offset)
+}
+
+// Rust: Source/LSP/mod.rs:226
+#Test("symbol_db_finds_function") {
+    src :: "fn greet(name: String) {{\n    print(name)\n}}\nfn run() {{\n    greet(\"world\")\n}}\n"
+    (_project, _, maybe_bundle, facts) :: check_test_document(src)
+    bundle :: maybe_bundle ?? panic("bundle")
+    db :: build_symbol_db(bundle, facts)
+    assert(db.defs.iter().any(fn(d) { d.name == "greet" }))
+    assert(db.defs.iter().any(fn(d) { d.name == "run" }))
+    assert(db.refs.iter().any(fn(r) { r.name == "greet" }))
+}
+
+// Rust: Source/LSP/mod.rs:238
+#Test("hover_returns_function_signature") {
+    src :: "fn add(a: Int, b: Int) -> Int {{ return a + b }}\nfn run() {{ r :: add(1, 2) }}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (toks, _) :: lex(src)
+    hover :: compute_hover(db, toks, src, project.entry(), 3)
+    assert(hover != None, "expected hover for 'add'")
+    h :: hover ?? panic("hover")
+    assert(h.contains("add"), "hover should mention the function name")
+}
+
+// Rust: Source/LSP/mod.rs:252
+#Test("marker_hover_and_completion_show_one_canonical_parameter_list") {
+    src :: "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)\n#Needs(\"x\") fn work() {{}}\nfn run() {{\n    \n}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }), "marker declaration should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (tokens, _) :: lex(src)
+    expected :: "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)"
+    name_offset :: (src.find("Needs(value") ?? panic("marker declaration")) + 1
+    hover :: compute_hover(db, tokens, src, project.entry(), name_offset) ?? panic("marker hover")
+    assert(hover.contains(expected), "{hover}")
+    completion_offset :: (src.rfind("    \n") ?? panic("completion line")) + 4
+    completion :: compute_completions(db, src, completion_offset, project.entry(), None, None).iter().find(fn(item) { item.label == "Needs" }) ?? panic("marker completion")
+    assert_eq(completion.detail, Val(expected))
+}
+
+// Rust: Source/LSP/mod.rs:280
+#Test("hover_shows_callable_access_defaults_and_policies") {
+    src :: "#Policy(trace(\"users.load\"))\nfn load(value: &Int, label: String{{\"user\"}}) -> Int {{ return 1 }}\nfn run() {{}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }))
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (toks, _) :: lex(src)
+    offset :: (src.find("fn load") ?? panic("load declaration")) + 3
+    hover :: compute_hover(db, toks, src, project.entry(), offset) ?? panic("load hover")
+    assert(hover.contains("&value: Int"), "{hover}")
+    assert(hover.contains("label: String{{\"user\"}}"), "{hover}")
+    assert(hover.contains("policies=[trace(\"users.load\")]"), "{hover}")
+}
+
+// Rust: Source/LSP/mod.rs:300
+#Test("unique_type_uses_leaf_in_hover_and_json") {
+    src :: "struct Point {{ x: Int }}\nfn run() {{}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }), "unique type fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    point :: db.symbols.symbols().iter().find(fn(symbol) { symbol.name == "Point" && symbol.kind == SemanticSymbolKind.Type }) ?? panic("Point semantic symbol")
+    assert_eq(point.qualified_name, "Point")
+    (tokens, lex_diagnostics) :: lex(src)
+    assert(lex_diagnostics.is_empty(), "{lex_diagnostics:Debug}")
+    hover :: compute_hover(db, tokens, src, project.entry(), src.find("Point") ?? panic("Point declaration")) ?? panic("Point hover")
+    assert(hover.contains("Point"), "{hover}")
+    json :: db.index.to_json()
+    assert(json.contains("\"name\":\"Point\",\"leaf_name\":\"Point\""), "{json}")
+}
+
+// Rust: Source/LSP/mod.rs:341
+#Test("hover_shows_source_module_for_imported_root_call") {
+    project :: TestProject.new()
+    // GATE #4494: write the actual imported source, not checked facts.
+    entry_fs.write(entry_path.join(project.root, entry_path.from_text("library.jet", project.root.platform)), "pub fn render(#Root value: Int) -> Int {{ return value }}\n".bytes()) ?? panic("write imported root-call library")
+    src :: "use \"./library\" as one\nfn run() {{ value :: 1\n    value.render()\n}}\n"
+    (diagnostics, maybe_bundle, facts) :: check_document_with_bundle(project.entry(), src)
+    assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }), "imported root-call fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("imported root-call bundle"), facts)
+    (tokens, lex_diagnostics) :: lex(src)
+    assert(lex_diagnostics.is_empty(), "{lex_diagnostics:Debug}")
+    hover :: compute_hover(db, tokens, src, project.entry(), src.find("render") ?? panic("root-call method name")) ?? panic("imported root-call hover")
+    assert(hover.contains("from module `"), "{hover}")
+    assert(hover.contains("library.jet"), "{hover}")
+}
+
+// Rust: Source/LSP/mod.rs:373
+#Test("compiler_layout_fact_lsp_surface_is_visible_and_fixed") {
+    src :: "struct Packet {{ count: Int }}\nderive T.LayoutFacts {{ info :: T.@layout }}\nfn run() {{}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }), "layout fact LSP fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    layout_offset :: (src.find("@layout") ?? panic("layout fact")) + 2
+    completions :: compute_completions(db, src, layout_offset + 4, project.entry(), None, None)
+    assert(completions.iter().any(fn(item) { item.label == "@layout" && item.detail == Val("compiler fact: LayoutInfo") }), "compiler fact completion missing: {completions:Debug}")
+    (tokens, lex_diagnostics) :: lex(src)
+    assert(lex_diagnostics.is_empty(), "{lex_diagnostics:Debug}")
+    hover :: compute_hover(db, tokens, src, project.entry(), layout_offset) ?? panic("layout fact hover")
+    assert(hover.contains("@layout"), "{hover}")
+    // Definition lookup uses the concrete receiver and lands on its type.
+    navigation_src :: "struct Packet {{ count: Int }}\nfn run() {{ info :: Packet.@layout }}\n"
+    (navigation_tokens, navigation_diagnostics) :: lex(navigation_src)
+    assert(navigation_diagnostics.is_empty(), "{navigation_diagnostics:Debug}")
+    navigation_offset :: (navigation_src.find("@layout") ?? panic("layout fact")) + 2
+    (definition_path, definition_span) :: compute_definition(db, navigation_tokens, navigation_src, project.entry(), navigation_offset) ?? panic("layout fact definition")
+    assert_eq(definition_path, project.entry())
+    assert_eq(src[definition_span.start..<definition_span.end], "Packet")
+    rename_error :: compute_rename(db, tokens, project.entry(), layout_offset, "Other").err() ?? panic("compiler facts are not renameable")
+    assert(rename_error.contains("compiler-owned @layout"), "{rename_error}")
+}
+
+// Rust: Source/LSP/mod.rs:437
+#Test("compiler_origin_fact_lsp_surface_is_visible_and_fixed") {
+    src :: "fn run() {{\n    #Track speed :: Float{{3.5}}\n    @origin :: speed.@origin\n}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }), "origin fact LSP fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    completion_offset :: (src.find("speed.@origin") ?? panic("origin access")) + 7
+    completions :: compute_completions(db, src, completion_offset, project.entry(), None, None)
+    assert(completions.iter().any(fn(item) { item.label == "@origin" && item.detail == Val("compiler fact: OriginInfo?") }), "origin fact completion missing: {completions:Debug}")
+    (tokens, lex_diagnostics) :: lex(src)
+    assert(lex_diagnostics.is_empty(), "{lex_diagnostics:Debug}")
+    origin_offset :: (src.find("@origin") ?? panic("origin fact")) + 2
+    hover :: compute_hover(db, tokens, src, project.entry(), origin_offset) ?? panic("origin fact hover")
+    assert(hover.contains("@origin"), "{hover}")
+    assert(hover.contains("OriginInfo"), "{hover}")
+    (definition_path, definition_span) :: compute_definition(db, tokens, src, project.entry(), origin_offset) ?? panic("origin fact definition")
+    assert_eq(definition_path, project.entry())
+    assert_eq(src[definition_span.start..<definition_span.end], "speed")
+    references :: compute_references(db, tokens, project.entry(), origin_offset, true)
+    assert(references.iter().any(fn(pair) { src[pair.1.start..<pair.1.end] == "speed" }), "origin receiver references missing: {references:Debug}")
+    rename_error :: compute_rename(db, tokens, project.entry(), origin_offset, "other").err() ?? panic("compiler facts are not renameable")
+    assert(rename_error.contains("compiler-owned @origin"), "{rename_error}")
+}
+
+// Rust: Source/LSP/mod.rs:495
+#Test("rename_basic_function") {
+    src :: "fn greet() {{}}\nfn run() {{ greet() }}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (toks, _) :: lex(src)
+    spans :: compute_rename(db, toks, project.entry(), 3, "hello") ?? panic("rename ok")
+    assert(!spans.is_empty())
+    assert(spans.iter().any(fn(pair) { pair.1.start <= 3 && 3 <= pair.1.end }))
+}
+
+// Rust: Source/LSP/mod.rs:507
+#Test("rename_rejects_keyword") {
+    src :: "fn greet() {{}}\nfn run() {{ greet() }}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (toks, _) :: lex(src)
+    assert(compute_rename(db, toks, project.entry(), 3, "fn").is_err())
+}
+
+// Rust: Source/LSP/mod.rs:517
+#Test("rename_rejects_reserved_double_underscore_name") {
+    src :: "fn greet() {{}}\nfn run() {{ greet() }}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (tokens, _) :: lex(src)
+    assert(compute_rename(db, tokens, project.entry(), 3, "__generated").is_err())
+}
+
+// Rust: Source/LSP/mod.rs:526
+#Test("rename_preserves_identifier_case_category") {
+    src :: "fn greet() {{}}\nfn run() {{ greet() }}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (toks, _) :: lex(src)
+    error :: compute_rename(db, toks, project.entry(), 3, "BadName").err() ?? panic("rename must reject casing")
+    assert(error.contains("bad_name"), "{error}")
+}
+
+// Rust: Source/LSP/mod.rs:537
+#Test("rename_uses_semantic_category_for_uncased_unicode_names") {
+    src :: "fn 日本語() {{}}\nfn run() {{ 日本語() }}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (tokens, _) :: lex(src)
+    assert(compute_rename(db, tokens, project.entry(), 3, "new_name").is_ok())
+    error :: compute_rename(db, tokens, project.entry(), 3, "BadName").err() ?? panic("rename must reject casing")
+    assert(error.contains("bad_name"), "{error}")
+}
+
+// Rust: Source/LSP/mod.rs:549
+#Test("rename_preserves_case_for_all_declaration_families") {
+    src :: "UserId :: distinct Int\nalias Count :: Int\n#UnitFamily(Length) {{ meter }}\nstruct Door {{ state {{ Open }} }}\nprotocol Wire {{ client: Send(value: Int) }}\nmodule holder<T> {{ pub struct Box {{ value: T }} }}\nmodule cache :: holder<Int>\nfn run() {{}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (tokens, _) :: lex(src)
+    loop name in ["UserId", "Count", "Length", "Door", "Open", "Wire", "Send"] {
+        error :: compute_rename(db, tokens, project.entry(), src.find(name) ?? panic("declaration"), "bad_name").err() ?? panic("rename must reject casing")
+        assert(error.contains("BadName"), "{name}: {error}")
+    }
+    loop name in ["meter", "holder", "cache"] {
+        error :: compute_rename(db, tokens, project.entry(), src.find(name) ?? panic("declaration"), "BadName").err() ?? panic("rename must reject casing")
+        assert(error.contains("bad_name"), "{name}: {error}")
+    }
+}
+
+// Rust: Source/LSP/mod.rs:588
+#Test("semantic_tokens_non_empty") {
+    src :: "fn run() {{ x: Int :: 1 }}\n"
+    (toks, _) :: lex(src)
+    data :: encode_semantic_tokens_with_arithmetic(toks, src, [])
+    assert(data.len() >= 5, "expected at least one semantic token")
+}
+
+// Rust: Source/LSP/mod.rs:597
+#Test("semantic_tokens_keep_string_interpolations_one_color") {
+    src :: "fn run() {{\n    line :: \"{{escape(level)}}\"\n}}\n"
+    (toks, diags) :: lex(src)
+    assert(diags.is_empty(), "{diags:Debug}")
+    data :: encode_semantic_tokens_with_arithmetic(toks, src, [])
+    STRING :: 7 as U32
+    quote :: src.find("\"") ?? panic("opening quote")
+    end :: (src.rfind("\"") ?? panic("closing quote")) + 1
+    line := 0 as U32
+    character := 0 as U32
+    saw_string := false
+    loop chunk in data.chunks_exact(5) {
+        if chunk[0] == 0 { character += chunk[1] }
+        else { line += chunk[0]; character = chunk[1] }
+        start :: lsp_pos_to_offset(src, LSPPos{line: line as Int, character: character as Int})
+        tok_end :: start + chunk[2] as Int
+        if tok_end > quote && start < end {
+            assert_eq(chunk[3], STRING, "quoted span must stay string, got type {chunk[3]} at {start}..{tok_end}")
+            saw_string = true
+        }
+    }
+    assert(saw_string, "expected a string semantic token over the quoted span")
+}
+
+// Rust: Source/LSP/mod.rs:636
+#Test("semantic_tokens_name_arithmetic_policy") {
+    src :: "fn run() {{ #Arithmetic(.Wrapping) {{ value :: U8{{250}} + U8{{10}} }} }}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }), "arithmetic semantic-token fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("checked bundle"), facts)
+    (tokens, lex_diagnostics) :: lex(src)
+    assert(lex_diagnostics.is_empty(), "{lex_diagnostics:Debug}")
+    data :: encode_semantic_tokens_with_arithmetic(tokens, src, db.arithmetic)
+    MOD_ARITHMETIC_WRAPPING :: (1 as U32) << 7
+    assert(data.chunks_exact(5).any(fn(token) { token[4] & MOD_ARITHMETIC_WRAPPING != 0 }), "wrapping arithmetic modifier missing: {data:Debug}")
+    assert(db.arithmetic.iter().all(fn(fact) { fact.module_path == project.entry() }), "arithmetic provenance used the wrong source module")
+    operation :: db.arithmetic.first() ?? panic("arithmetic operation")
+    operator_offset :: operation.operation_span.start + (src[operation.operation_span.start..<operation.operation_span.end].find("+") ?? panic("arithmetic operator"))
+    hover :: compute_hover(db, tokens, src, project.entry(), operator_offset) ?? panic("arithmetic operation hover")
+    assert(hover.contains("fixed-width add: .Wrapping"), "{hover}")
+    assert(hover.contains("scope = {project.entry()}:{operation.scope_span.start}..{operation.scope_span.end}"), "hover lost exact arithmetic scope: {hover}")
+}
+
+// Rust: Source/LSP/mod.rs:681
+#Test("inlay_hints_for_int_literal") {
+    src :: "fn run() {{\n    x :: 42\n    count := 0\n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    hints :: db.inlay_hints_for(project.entry())
+    assert(hints.iter().any(fn(h) { h.label.contains(": Int") }), "expected : Int inlay hint for immutable binding")
+    assert(hints.iter().any(fn(h) { h.label.contains(": Int") }), "expected : Int inlay hint for mutable binding")
+}
+
+// Rust: Source/LSP/mod.rs:698
+#Test("inlay_hints_for_bare_call_parameter_names") {
+    src :: "fn clamp(value: Int, low: Int, high: Int) -> Int {{\n    return value\n}}\nfn run() {{\n    print(clamp(12, low: 0, high: 10))\n}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    hints :: db.inlay_hints_for(project.entry())
+    assert(hints.iter().any(fn(hint) { hint.label == "value: " }), "expected the bare argument to carry its public name: {hints:Debug}")
+    assert(!hints.iter().any(fn(hint) { hint.label == "low: " || hint.label == "high: " }), "written labels must not receive duplicate ghost text: {hints:Debug}")
+}
+
+// Rust: Source/LSP/mod.rs:721
+#Test("inlay_and_hover_for_inferred_struct_lit_from_place") {
+    src :: "struct Point {{ x: Int y: Int }}\nfn run() {{\n    p := Point{{ x: 1, y: 2 }}\n    p = {{ x: 3, y: 4 }}\n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    hints :: db.inlay_hints_for(project.entry())
+    assert(hints.iter().any(fn(h) { h.label.contains(": Point") }), "expected : Point inlay on inferred `.{{…}}` after place assign: {hints:Debug}")
+    assert(db.hover.iter().any(fn(h) { h.text.contains("`Point`") }), "expected hover naming Point on inferred struct lit")
+}
+
+// Rust: Source/LSP/mod.rs:744
+#Test("completion_includes_keywords") {
+    src :: "fn run() {{\n    \n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    items :: compute_completions(db, src, 14, project.entry(), None, None)
+    assert(!items.iter().any(fn(i) { i.label == "val" }), "old binding words must not appear in completions")
+    assert(items.iter().any(fn(i) { i.label == "fn" }), "expected fn in completions")
+    assert(items.iter().any(fn(i) { i.label == "use" }), "expected use (KW_USE) in completions")
+}
+
+// Rust: Source/LSP/mod.rs:767
+#Test("completion_hides_soft_public_names_until_explicitly_requested") {
+    src :: "pub fn _helper() {{}}\nfn run() {{}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    assert_eq(db.symbols.lookup("_helper").len(), 1)
+    assert(!db.symbols.complete_visible_in("", None, Val(project.entry())).iter().any(fn(symbol) { symbol.name == "_helper" }))
+    assert(db.symbols.complete_visible_in("_", None, Val(project.entry())).iter().any(fn(symbol) { symbol.name == "_helper" }))
+}
+
+// Rust: Source/LSP/mod.rs:785
+#Test("hover_and_completion_use_same_semantic_fact") {
+    src :: "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) -> Int {{ return a + b }}\nfn run() {{\n    \n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    // #1801: ledger module alias, never the on-disk path.
+    entry_alias :: entry_path.file_stem(entry_path.from_text(project.entry(), project.root.platform)).and_then(fn(stem) { entry_path.to_str(stem) }) ?? panic("entry file stem")
+    symbol :: db.symbols.lookup_identity("fn:module:{entry_alias}::add") ?? panic("add fact")
+    (tokens, _) :: lex(src)
+    hover_offset :: (src.find("\nfn add") ?? panic("add declaration")) + 4
+    hover :: compute_hover(db, tokens, src, project.entry(), hover_offset) ?? panic("hover")
+    offset :: (src.rfind("    \n") ?? panic("completion line")) + 4
+    completion :: compute_completions(db, src, offset, project.entry(), None, None).iter().find(fn(item) { item.label == "add" }) ?? panic("add completion")
+    assert(hover.contains(symbol.signature))
+    assert(hover.contains(symbol.summary))
+    assert(symbol.signature.contains("failure: Int (implicit default !Err)"))
+    assert(hover.contains("failure: Int (implicit default !Err)"))
+    assert_eq(completion.detail, Val(symbol.signature))
+}
+
+// Rust: Source/LSP/mod.rs:821
+#Test("failure_contract_hover_teaches_default_and_explicit_routes") {
+    src :: "#Error\nenum Problem {{ Bad }}\nfn default_helper() -> Int {{ return 1 }}\nfn explicit_helper() -> Int !Problem {{ return Ok(1) }}\nfn run() {{}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.is_empty(), "contract fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    (tokens, _) :: lex(src)
+    default_offset :: (src.find("default_helper") ?? panic("default helper")) + 2
+    default_hover :: compute_hover(db, tokens, src, project.entry(), default_offset) ?? panic("default helper hover")
+    assert(default_hover.contains("failure: Int (implicit default !Err)"), "{default_hover}")
+    explicit_offset :: (src.find("explicit_helper") ?? panic("explicit helper")) + 2
+    explicit_hover :: compute_hover(db, tokens, src, project.entry(), explicit_offset) ?? panic("explicit helper hover")
+    assert(explicit_hover.contains("failure: Int (explicit !Problem)"), "{explicit_hover}")
+}
+
+// Rust: Source/LSP/mod.rs:859
+#Test("checked_text_metadata_reaches_editor_symbol_surfaces") {
+    src :: "\n#Error\nenum PatternError {{ Bad }}\nPattern :: distinct String\nimpl Pattern.CheckedText {{\n    type Error = PatternError\n    fn check(text: String) !PatternError -[]> {{\n        return\n    }}\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"\"\n    }}\n}}\nfn run() {{\n    \n}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }), "checked text editor fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    pattern :: db.symbols.lookup_qualified("Pattern") ?? panic("Pattern semantic symbol")
+    assert(pattern.signature.contains("type Pattern :: distinct String"))
+    assert(pattern.signature.contains("implements CheckedText"))
+    (tokens, _) :: lex(src)
+    offset :: (src.find("Pattern ::") ?? panic("Pattern declaration")) + 1
+    symbol :: semantic_symbol_at(db, tokens, project.entry(), offset) ?? panic("Pattern symbol at declaration")
+    metadata :: semantic_symbol_metadata_json(db, symbol) ?? panic("nominal metadata")
+    assert(metadata.contains("\"nominal_base\":\"String\""))
+    assert(metadata.contains("\"name\":\"CheckedText\""))
+    assert(metadata.contains("encode_hole"))
+    completion_offset :: (src.rfind("    \n") ?? panic("completion scope")) + 4
+    completion :: compute_completions(db, src, completion_offset, project.entry(), None, None).iter().find(fn(item) { item.label == "Pattern" }) ?? panic("Pattern completion")
+    assert(completion.detail.is_some_and(fn(detail) { detail.contains("implements CheckedText") }))
+}
+
+// Rust: Source/LSP/mod.rs:916
+#Test("completion_exposes_public_labels_and_parameter_zones") {
+    src :: "fn connect(host: String, /, *, timeout seconds: Int{{30}}) -> String {{\n    return host\n}}\nfn run() {{\n    \n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    offset :: (src.rfind("    \n") ?? panic("completion line")) + 4
+    item :: compute_completions(db, src, offset, project.entry(), None, None).iter().find(fn(item) { item.label == "connect" }) ?? panic("connect completion")
+    assert_eq(item.detail, Val("fn connect(host: String, /, *, timeout seconds: Int) -> String"))
+}
+
+// Rust: Source/LSP/mod.rs:933
+#Test("completion_uses_builtin_member_facts_for_list_local") {
+    src :: "fn run() {{\n    items :: [1, 2]\n    count :: items.len()\n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    offset :: (src.find("items.len") ?? panic("list member")) + "items.l".len()
+    items :: compute_completions(db, src, offset, project.entry(), None, None)
+    len :: db.symbols.lookup_qualified("List.len") ?? panic("List.len")
+    assert(items.iter().any(fn(item) { item.label == "len" && item.detail == Val(len.signature) }))
+}
+
+// Rust: Source/LSP/mod.rs:947
+#Test("completion_exposes_call_for_function_value_param") {
+    src :: "fn run(callback: fn(Int) -> Int) {{\n    callback.call(1)\n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    offset :: (src.find("callback.call") ?? panic("function call")) + "callback.ca".len()
+    item :: compute_completions(db, src, offset, project.entry(), None, None).iter().find(fn(item) { item.label == "call" }) ?? panic("call completion")
+    assert_eq(item.detail, Val("call(...)"))
+}
+
+// Rust: Source/LSP/mod.rs:960
+#Test("completion_catalogs_numeric_destination_methods") {
+    src :: "fn run() {{\n    value :: F32.from_float(1.0) ?? F32.from_int(0)\n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    offset :: (src.find("F32.from_f") ?? panic("numeric method")) + "F32.from_f".len()
+    items :: compute_completions(db, src, offset, project.entry(), None, None)
+    assert(items.iter().any(fn(item) { item.label == "from_float" && item.detail == Val("F32.from_float(value: Float) -> F32 !String") }))
+}
+
+// Rust: Source/LSP/mod.rs:973
+#Test("completion_catalogs_source_distinct_and_unit_members") {
+    src :: "\n#Numeric Token :: distinct Int(0..10)\n#UnitFamily(Reward) {{ credit }}\n\nfn run() {{\n    token :: Token.from_u8(1)\n    money :: Credit.from_int(1)\n}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle diagnostics: {diagnostics:Debug}"), facts)
+    token_site :: src.find("Token.from_u8") ?? panic("Token method")
+    token_items :: compute_completions(db, src, token_site + "Token.from_u".len(), project.entry(), None, None)
+    assert(token_items.iter().any(fn(item) { item.label == "from_u8" && item.detail == Val("Token.from_u8(value: U8) -> Token !String") }))
+    loop (unit_site, _) in src.match_indices("Credit.from_int") {
+        unit_items :: compute_completions(db, src, unit_site + "Credit.from_i".len(), project.entry(), None, None)
+        assert_eq(unit_items.iter().filter(fn(item) { item.label == "from_int" }).count(), 1)
+    }
+}
+
+// Rust: Source/LSP/mod.rs:1022
+#Test("completion_excludes_locals_from_other_functions") {
+    src :: "fn first() {{\n    hidden :: 1\n}}\nfn second() {{\n    \n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    offset :: (src.rfind("    \n") ?? panic("completion line")) + 4
+    assert(!compute_completions(db, src, offset, project.entry(), None, None).iter().any(fn(item) { item.label == "hidden" }))
+}
+
+// Rust: Source/LSP/mod.rs:1035
+#Test("completion_respects_then_else_slot_boundaries") {
+    src :: "fn run(flag: Bool) {{\n    if flag {{\n        then_only :: 1\n        print(then_only)\n    }} else {{\n        else_only :: 2\n        print(else_only)\n    }}\n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    then_start :: (src.find("if flag {{") ?? panic("then start")) + "if flag {{".len()
+    then_end :: (src.find("    }} else {{") ?? panic("then end")) + 4
+    else_start :: (src.find("else {{") ?? panic("else start")) + "else {{".len()
+    else_end :: (src.rfind("    }}\n}}") ?? panic("else end")) + 4
+    assert(db.slot_boundaries.iter().any(fn(boundary) { boundary.slot == "body" && boundary.span.start == then_start && boundary.span.end == then_end }))
+    assert(db.slot_boundaries.iter().any(fn(boundary) { boundary.slot == "else_body" && boundary.span.start == else_start && boundary.span.end == else_end }))
+    then_offset :: src.find("print(then_only)") ?? panic("then completion")
+    then_items :: compute_completions(db, src, then_offset, project.entry(), None, None)
+    assert(then_items.iter().any(fn(item) { item.label == "then_only" }))
+    assert(!then_items.iter().any(fn(item) { item.label == "else_only" }))
+    else_offset :: src.find("print(else_only)") ?? panic("else completion")
+    else_items :: compute_completions(db, src, else_offset, project.entry(), None, None)
+    assert(else_items.iter().any(fn(item) { item.label == "else_only" }))
+    assert(!else_items.iter().any(fn(item) { item.label == "then_only" }))
+}
+
+// Rust: Source/LSP/mod.rs:1064
+#Test("completion_keeps_then_local_out_of_empty_else") {
+    src :: "fn run(flag: Bool) {{\n    if flag {{\n        then_only :: 1\n    }} else {{\n        \n    }}\n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    offset :: (src.rfind("        \n") ?? panic("empty else")) + 8
+    assert(!compute_completions(db, src, offset, project.entry(), None, None).iter().any(fn(item) { item.label == "then_only" }))
+}
+
+// Rust: Source/LSP/mod.rs:1077
+#Test("completion_sees_parameter_inside_empty_body") {
+    src :: "fn inspect(value: Int) {{\n    \n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    offset :: (src.find("    \n") ?? panic("empty body")) + 4
+    symbol :: db.symbols.symbols().iter().find(fn(symbol) { symbol.name == "value" }) ?? panic("parameter")
+    scope :: symbol.lexical_scope ?? panic("parameter scope")
+    assert_eq(scope.span.start, (src.find("{{") ?? panic("body opener")) + 1)
+    assert_eq(scope.span.end, src.rfind("}}") ?? panic("body closer"))
+    assert(compute_completions(db, src, offset, project.entry(), None, None).iter().any(fn(item) { item.label == "value" }))
+}
+
+// Rust: Source/LSP/mod.rs:1101
+#Test("completion_sees_last_local_on_trailing_blank_line") {
+    src :: "fn run() {{\n    last_local :: 1\n    \n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    offset :: (src.rfind("    \n") ?? panic("trailing blank line")) + 4
+    symbol :: db.symbols.symbols().iter().find(fn(symbol) { symbol.name == "last_local" }) ?? panic("last local")
+    scope :: symbol.lexical_scope ?? panic("last local scope")
+    assert_eq(scope.span.end, src.rfind("}}") ?? panic("body closer"))
+    assert(compute_completions(db, src, offset, project.entry(), None, None).iter().any(fn(item) { item.label == "last_local" }))
+}
+
+// Rust: Source/LSP/mod.rs:1124
+#Test("slot_boundaries_ignore_comment_and_interpolation_braces") {
+    src :: "fn run(flag: Bool) {{\n    text :: \"flag={{flag}}\"\n    // comment braces: {{ }}\n    \n}}\n"
+    (project, _, maybe_bundle, facts) :: check_test_document(src)
+    bundle :: maybe_bundle ?? panic("bundle")
+    expected_start :: (src.find("{{") ?? panic("body opener")) + 1
+    expected_end :: src.rfind("}}") ?? panic("body closer")
+    assert_eq(bundle.modules[0].block_spans, [Span{start: expected_start, end: expected_end}])
+    db :: build_symbol_db(bundle, facts)
+    offset :: (src.rfind("    \n") ?? panic("completion line")) + 4
+    assert(compute_completions(db, src, offset, project.entry(), None, None).iter().any(fn(item) { item.label == "flag" }))
+}

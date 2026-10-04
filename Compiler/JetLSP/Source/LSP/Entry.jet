@@ -1,0 +1,42 @@
+// Rust: Source/LSP/mod.rs:1
+// LSP v2: completion, hover, definitions, references, rename, semantic tokens,
+// inlay hints, quick fixes and formatting. JSON-RPC uses the canonical stdio
+// transport; handler failures are caught and every read observes the overlay.
+// Rust: Source/LSP/mod.rs:9
+use jet_lsp.[EditorHostAdapter, LSPServer, LSPDocument, LSPDiagnosticState]
+// Rust: Source/LSP/mod.rs:18
+// Check, Position, Bench, Doctor and Protocol own the entry points directly;
+// no parent-module re-export compatibility layer survives the Jet cutover.
+use jet_lsp.[lsp_apply_all, lsp_apply_fix_edit, lsp_apply_non_overlapping, lsp_build_graph_json, lsp_check_document, lsp_check_document_with_bundle, lsp_collect_fixes, lsp_fixes_from_diagnostics, lsp_safe_fixes, Fix]
+use jet_lsp.[measure_bench, run_bench, BenchReport, run_doctor]
+// Rust: Source/LSP/mod.rs:25
+use jet_lsp.[lsp_byte_offset_to_lsp, lsp_pos_to_offset, LSPPos]
+// Rust: Source/LSP/mod.rs:26
+use jet_lsp.[run_stdio]
+// Rust: Source/LSP/mod.rs:28
+// Test-only imports and all original tests live in Tests/LSP/Entry.jet.
+
+// Rust: Source/LSP/Server.rs:1
+// Canonical server state, protocol and request dispatch remain at their owners.
+// Rust: Source/LSP/Server.rs:3
+use jet_foundation.[report_clear_counts, Diagnostic, ReportPath, Severity, Span, Item, ProgramBundle, Type]
+use jet_lexer.[TokKind, Token]
+use jet_driver.[JetDriverCompilerQueries]
+use jet_queries.[FileKey, QueryKey]
+// Rust: Source/LSP/Server.rs:12
+use jet_lsp.[editor_host_error_code, lsp_collect_fixes_from_diagnostics, lsp_retain_document_diagnostics, compute_completions]
+use jet_lsp.EnvironmentResources.[ReadError]
+// Rust: Source/LSP/Server.rs:16
+use jet_lsp.[checked_rename_span_at, checked_semantic_identity_at, compute_definition, compute_discovery_hover, compute_hover, compute_refactor_actions, compute_references, compute_rename, compute_signature_change_preview, encode_semantic_tokens_in_span_with_arithmetic, encode_semantic_tokens_with_arithmetic, format_inlay_hints, generated_declaration_at, generated_definition_for_reference, reasoning_inlay_hints, reasoning_view_json, register_generated_declarations, semantic_symbol_at, semantic_symbol_at_span, semantic_symbol_metadata_json, RefactorAction, SignatureChangeEdit]
+// Rust: Source/LSP/Server.rs:26
+use jet_lsp.[lsp_apply_edit, lsp_byte_span_to_range, lsp_full_document_range, lsp_range_json, LSPRange]
+// Rust: Source/LSP/Server.rs:30
+use jet_semindex.[build_symbol_db, InlayHint, SymKind, SymbolDB]
+// Rust: Source/LSP/Server.rs:31
+use jet_devserver.EditorHost.[EDITOR_COMMAND_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_SELECT_METHOD, EDITOR_WORKBENCH_METHOD]
+// Rust: Source/LSP/Server.rs:35
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Hex.[nibble]
+use jet_foundation.JSON.[json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length, MAX_PROTOCOL_MESSAGE_BYTES]
+// Rust: Source/LSP/Server.rs:43
+// Document state is owned by DiagnosticFacts/Server, not duplicated here.

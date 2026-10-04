@@ -1,0 +1,260 @@
+// TOOLS-S12. Independent formatting/source-anchor checks below are NOT checked
+// index parity. All original fixtures/assertions remain unregistered until C4's
+// native checked graph, CP-NAMES use-site spans, Sema effect facts and S5–S12/S20
+// compose. Never supply an empty graph, prefilled refs or mirrored witnesses.
+use jet_foundation.[ArithmeticPolicyFact, ArithmeticMode, ArithmeticOperation, Span, MIRNameFacts, name_facts_reference]
+use jet_parser.[parse_source]
+
+#Test("semindex_arithmetic_hover_preserves_checked_policy_operation_and_exact_scope") {
+    fact :: ArithmeticPolicyFact{mode: ArithmeticMode.Wrapping, scope_span: Span{start: 7, end: 81}, operation_span: Span{start: 25, end: 26}, operation: Val(ArithmeticOperation.Add)}
+    assert_eq(semindex_format_arithmetic_hover(fact, "nested::main.jet"), "fixed-width add: .Wrapping; scope = nested::main.jet:7..81")
+    checked :: ArithmeticPolicyFact{mode: ArithmeticMode.Checked, scope_span: Span{start: 0, end: 0}, operation_span: Span{start: 9, end: 10}, operation: Val(ArithmeticOperation.Neg)}
+    assert_eq(semindex_format_arithmetic_hover(checked, ""), "fixed-width neg: .Checked; scope = :0..0")
+    saturated :: ArithmeticPolicyFact{mode: ArithmeticMode.Saturating, scope_span: Span{start: 4, end: 19}, operation_span: Span{start: 8, end: 9}, operation: Val(ArithmeticOperation.Pow)}
+    assert_eq(semindex_format_arithmetic_hover(saturated, "a.jet"), "fixed-width pow: .Saturating; scope = a.jet:4..19")
+    fallback :: ArithmeticPolicyFact{mode: ArithmeticMode.Wrapping, scope_span: Span{start: 2, end: 10}, operation_span: Span{start: 6, end: 7}, operation: None}
+    assert_eq(semindex_format_arithmetic_hover(fallback, "b.jet"), "fixed-width operation: .Wrapping; scope = b.jet:2..10")
+    assert_eq(semindex_arithmetic_operation_label(ArithmeticOperation.Sub), "sub")
+    assert_eq(semindex_arithmetic_operation_label(ArithmeticOperation.Mul), "mul")
+}
+#Test("semindex_comptime_origin_requires_sentinel_and_exact_utf8_source_member") {
+    source :: "é.origin + originator"
+    span :: Span{start: 3, end: 9}
+    nul :: String.from_bytes([U8]{0}) ?? panic("valid NUL scalar")
+    sentinel :: "{nul}jet.fact.origin"
+    assert(semindex_comptime_origin_reference(sentinel, span, source))
+    assert(!semindex_comptime_origin_reference("origin", span, source))
+    assert(!semindex_comptime_origin_reference("@origin", span, source))
+    assert(!semindex_comptime_origin_reference(sentinel, Span{start: 2, end: 8}, source))
+    assert(!semindex_comptime_origin_reference(sentinel, Span{start: 3, end: 10}, source))
+    assert(!semindex_comptime_origin_reference(sentinel, Span{start: 12, end: 22}, source))
+    assert(!semindex_comptime_origin_reference(sentinel, Span{start: 9, end: 3}, source))
+    assert(!semindex_comptime_origin_reference(sentinel, Span{start: 0, end: 100}, source))
+    assert(!semindex_comptime_origin_reference(sentinel, Span{start: 0, end: 0}, ""))
+}
+
+// tests/semindex.rs:1192–1198: actual Examples/features/effects/effects.jet.
+fn semindex_expressions_original_effects_and_calls(index: SemIndex) {
+    assert(index.lookup("report") != None)
+    has_call := false
+    loop edge in index.call_edges() -> has_call = true
+    assert(has_call)
+    report :: index.effect_of("report") ?? panic("report has effects")
+    assert(report[0].inferred.len() > 0 || report[0].direct.len() > 0)
+}
+// tests/semindex.rs:1201–1223; filename inferred_effect_signature.jet.
+fn semindex_expressions_original_inferred_source() -> String Never! {
+    "fn announce() {{ print(\"hello\") }}\nfn run() {{ announce() }}\n"
+}
+fn semindex_expressions_original_projects_omitted_inferred_effects(index: SemIndex) {
+    announce :: index.effect_of("announce") ?? panic("announce effects")
+    assert_eq(announce[0].inferred, [String]{"IO"})
+    assert(announce[0].callees.len() == 0, "direct effect has no call edge")
+    assert_eq(announce[0].provenance.len(), 1)
+    assert_eq(announce[0].provenance[0].effect_name, "IO")
+    assert_eq(announce[0].provenance[0].call_path, [String]{"announce"})
+    assert_eq(announce[0].provenance[0].spans.len(), 1)
+    run :: index.effect_of("run") ?? panic("run effects")
+    assert_eq(run[0].provenance[0].call_path, [String]{"run", "inferred_effect_signature::announce"})
+    assert_eq(run[0].provenance[0].spans.len(), 2)
+}
+// tests/semindex.rs:1226–1239; filename inline_inferred_effect_signature.jet.
+fn semindex_expressions_original_inline_inferred_source() -> String Never! {
+    "module inner {{ pub fn announce() {{ print(\"hello\") }} }}\nfn run() {{ inner.announce() }}\n"
+}
+fn semindex_expressions_original_projects_inline_module_inferred_effects(symbols: SemanticSymbolIndex) {
+    announce :: symbols.lookup("announce")
+    assert_eq(announce.len(), 1)
+    assert(announce[0][0].signature.contains("-[IO]>"), announce[0][0].signature)
+}
+// tests/semindex.rs:1242–1270; filename effect_provenance_origins.jet.
+fn semindex_expressions_original_dispatch_source() -> String Never! {
+    "trait Shape {{ fn area(self) -[IO]> Int }}\nfn dynamic(shape: Shape) -> Int {{ return shape.area() }}\nfn apply(f: fn() -> Int) -> Int {{ return f() }}\nfn stored(f: ^fn() -> Int) -> Int {{\n    g :: f\n    return g()\n}}\nfn run() {{}}\n"
+}
+fn semindex_expressions_original_effect_provenance_covers_open_and_trait_dispatch(index: SemIndex) {
+    apply :: index.effect_of("apply") ?? panic("open callback effects")
+    assert(!apply[0].maximal)
+    assert_eq(apply[0].inferred.len(), 0)
+    assert_eq(apply[0].provenance.len(), 0)
+    stored :: index.effect_of("stored") ?? panic("stored callback effects")
+    assert(stored[0].maximal)
+    assert_eq(stored[0].provenance.len(), stored[0].inferred.len())
+    loop origin in stored[0].provenance -> assert(origin.spans.len() > 0)
+    dynamic :: index.effect_of("dynamic") ?? panic("trait dispatch effects")
+    found := false
+    loop origin in dynamic[0].provenance {
+        if origin.effect_name != "IO" -> next
+        assert_eq(origin.call_path.len(), 2)
+        assert_eq(origin.spans.len(), 2)
+        found = true
+        break
+    }
+    assert(found, "IO provenance")
+}
+// tests/semindex.rs:1316–1339; filename rename_anchor_identity.jet.
+fn semindex_expressions_original_rename_source() -> String Never! {
+    "fn helper() -> Int {{ return 1 }}\nfn run() {{ print(helper()) }}\n"
+}
+fn semindex_expressions_original_rename_sites_keep_definition_identity_in_json(index: SemIndex, json: String) {
+    definition :: index.lookup("helper") ?? panic("helper definition")
+    found := false
+    loop reference in index.references() {
+        if reference.name != "helper" -> next
+        target :: reference.target ?? panic("resolved helper target")
+        assert_eq(target.def_span, definition[0].def_span)
+        assert_eq(target.semantic_identity, Val(definition[0].identity))
+        found = true
+        break
+    }
+    assert(found, "helper reference")
+    assert(json.contains("\"semantic_identity\":"))
+}
+// tests/semindex.rs:1342–1357; filename fenced_range_names.jet.
+fn semindex_expressions_original_fenced_source() -> String Never! {
+    "fn run() {{\n    <: t1..t4 :> :: 1\n    print(<: t1, t2, t3, t4 :>)\n}}\n"
+}
+fn semindex_expressions_original_indexes_generated_fenced_range_names(index: SemIndex) {
+    generated :: index.lookup("t4") ?? panic("generated t4 definition")
+    if generated[0].kind == {
+        .Local(mutable, ty) -> {
+            assert(!mutable)
+            assert(ty != None)
+        }
+        else -> panic("generated t4 must be a typed immutable local")
+    }
+    assert_eq(index.references_to("t4").len(), 1)
+}
+
+// lib.rs:829–895: C4 must load BOTH files through its real checked graph.
+fn semindex_expressions_original_reference_library_source() -> String Never! {
+    "pub fn report() {{ print(\"library\") }}\n"
+}
+fn semindex_expressions_original_reference_main_source() -> String Never! {
+    "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker {{ value: Int }}\nimpl Worker {{\n    fn step(self) {{ print(\"worker\") }}\n}}\nstruct Other {{ value: Int }}\nimpl Other {{\n    fn step(self) {{ print(\"other\") }}\n}}\n\nfn run() {{\n    api.report()\n    alias_report()\n    worker :: Worker{{value: 1}}\n    worker.step()\n    other :: Other{{value: 2}}\n    other.step()\n}}\n"
+}
+fn semindex_expressions_original_target_kind(index: SemIndex, name: String, kind: String) -> Bool {
+    loop reference in index.references() {
+        if reference.name != name -> next
+        if reference.target == .Val(target) {
+            if target.kind == kind -> return true
+        }
+    }
+    false
+}
+fn semindex_expressions_original_checked_reference_facts_cover_import_members_aliases_and_receivers(index: SemIndex) {
+    assert(semindex_expressions_original_target_kind(index, "api", "import_alias"))
+    assert(semindex_expressions_original_target_kind(index, "report", "function"))
+    assert(semindex_expressions_original_target_kind(index, "alias_report", "function"))
+    assert(semindex_expressions_original_target_kind(index, "step", "function"))
+    alias_definition :: index.lookup("api") ?? panic("module alias definition")
+    alias_found := false
+    // Rust find then and_then: the FIRST api reference must have a target.
+    loop reference in index.references() {
+        if reference.name != "api" -> next
+        target :: reference.target ?? panic("module alias reference target")
+        assert_eq(target.def_span, alias_definition[0].def_span)
+        assert_eq(target.semantic_identity, Val(alias_definition[0].identity))
+        alias_found = true
+        break
+    }
+    assert(alias_found, "module alias reference target")
+    // Original BTreeSet key is (module_path,start,end). Compare the actual
+    // checked anchors directly; no encoded key or spelling-based resolution.
+    targets := [DefinitionAnchor]{}
+    loop reference in index.references() {
+        if reference.name != "step" -> next
+        if reference.target == .Val(target) {
+            duplicate := false
+            loop old in targets {
+                if old.module_path == target.module_path && old.def_span == target.def_span -> duplicate = true
+            }
+            if !duplicate -> &targets.push(target)
+        }
+    }
+    assert(targets.len() == 2, "receiver type must select exact method definition")
+}
+
+// Published CP-AST borrowed projection; provider copy/native proof still gated.
+// Original S7 fixture retained unregistered: OptField span receiver start..method
+// token end; outer CallValue span parser '(' start..')' end. No local desugaring.
+fn semindex_expressions_optional_method_source() -> String Never! {
+    "fn run() {{ receiver?.method(1) }}"
+}
+fn semindex_expressions_optional_method_assertions(index: SemIndex, receiver_start: Int, method_end: Int, paren_start: Int, paren_end: Int) {
+    field_found := false
+    call_found := false
+    loop node in index.structural_nodes() {
+        if node.class == "expr" && node.shape == "Discriminant(26)" && node.span == SourceSpan{start: receiver_start, end: method_end} -> field_found = true
+        if node.class == "expr" && node.shape == "Discriminant(45)" && node.span == SourceSpan{start: paren_start, end: paren_end} -> call_found = true
+    }
+    assert(field_found && call_found)
+}
+
+// The harness supplies the actual producer's names for this original source
+// module. No fake ledger/default Program/prefilled nodes; #4397/C4/CP-NAMES and
+// provider-copy/native gates keep this full visitor assertion unregistered.
+fn semindex_expressions_test_parsed_optional_method_projection(names: MIRNameFacts, mp: String) {
+    source :: semindex_expressions_optional_method_source()
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    module_index :: semindex_module_index(names, mp) ?? panic("actual source module name facts")
+    db := SymbolDB.new()
+    ctx := WalkCtx.new(module_index, semindex_root_identity(mp), ~parsed.program.block_spans)
+    found := false
+    loop item in parsed.program.items {
+        if item == .Func(function) {
+            loop stmt in function.body {
+                if stmt == .Expr(expression) {
+                    frame :: CallerFrame{name: function.name, owner: None, identity: semindex_callable_identity(ctx.scope_identity, None, function.name)}
+                    semindex_with_caller(&db, &ctx, frame, function.params, mp, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                        semindex_collect_expr(&db, &ctx, names, parsed.program, source, expression, mp)
+                    })
+                    found = true
+                }
+            }
+        }
+    }
+    assert(found, "actual parsed optional method call")
+    assert_eq(db.nodes.len(), 4)
+    assert_eq(db.nodes[0].shape, "Discriminant(45)")
+    assert_eq(db.nodes[0].span, SourceSpan{start: 27, end: 30})
+    assert_eq(db.nodes[0].parent, None)
+    assert_eq(db.nodes[1].shape, "Discriminant(26)")
+    assert_eq(db.nodes[1].span, SourceSpan{start: 11, end: 27})
+    assert_eq(db.nodes[1].parent, Val(0))
+    assert_eq(db.nodes[1].slot, "callee")
+    assert_eq(db.nodes[1].slot_kind, StructuralSlotKind.Scalar)
+    assert_eq(db.nodes[2].shape, "Discriminant(15)")
+    assert_eq(db.nodes[2].span, SourceSpan{start: 11, end: 19})
+    assert_eq(db.nodes[2].parent, Val(1))
+    assert_eq(db.nodes[2].slot, "base")
+    assert_eq(db.nodes[2].slot_kind, StructuralSlotKind.Scalar)
+    assert_eq(db.nodes[3].shape, "Discriminant(3)")
+    assert_eq(db.nodes[3].span, SourceSpan{start: 28, end: 29})
+    assert_eq(db.nodes[3].parent, Val(0))
+    assert_eq(db.nodes[3].slot, "args")
+    assert_eq(db.nodes[3].slot_kind, StructuralSlotKind.List)
+    loop node in db.nodes -> assert_eq(node.ordinal, 0)
+    assert_eq(db.calls.len(), 0, "CallValue is not a MethodCall call edge")
+    assert_eq(db.bypasses.len(), 0)
+    assert_eq(db.inlay.len(), 0)
+    assert_eq(db.refs.len(), 2)
+    assert_eq(db.refs[0].name, "receiver")
+    assert_eq(db.refs[0].span, Span{start: 11, end: 19})
+    assert_eq(db.refs[1].name, "method")
+    assert_eq(db.refs[1].span, Span{start: 21, end: 27})
+    if name_facts_reference(names, mp, 21, 27) == {
+        .Val(reference) -> {
+            target :: db.refs[1].target ?? panic("checked method target")
+            assert_eq(target.module_path, reference.module_path)
+            assert_eq(target.def_span, semindex_source_span(reference.def_span))
+            assert_eq(target.kind, reference.kind)
+            assert_eq(target.semantic_identity, reference.semantic_identity)
+        }
+        None -> assert_eq(db.refs[1].target, None)
+    }
+    assert_eq(ctx.structural_parents.len(), 0)
+    assert_eq(ctx.structural_slot, "root")
+    assert_eq(ctx.structural_slot_kind, StructuralSlotKind.List)
+    assert_eq(ctx.caller, None)
+}

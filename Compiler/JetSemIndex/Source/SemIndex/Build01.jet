@@ -1,0 +1,823 @@
+// PORT-PENDING 0809 crates-jet-semindex-src-build-slice-514: crates/jet-semindex/src/Build.rs:514-1332
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn project_generated_presentation(db: &mut SymbolDB, bundle: &ProgramBundle) {
+//RS     let projections: HashMap<usize, Vec<(String, String)>> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(module_idx, _)| {
+//RS             let mut replacements: Vec<(String, String)> = bundle
+//RS                 .name_ledger
+//RS                 .canonical_paths(module_idx)
+//RS                 .into_iter()
+//RS                 .filter_map(|(name, _)| {
+//RS                     if name.contains('.') {
+//RS                         return None;
+//RS                     }
+//RS                     let display = bundle
+//RS                         .name_ledger
+//RS                         .display_path(module_idx, &name, Some(module_idx))?;
+//RS                     let display_leaf = display
+//RS                         .rsplit_once('.')
+//RS                         .map_or(display.as_str(), |(_, leaf)| leaf);
+//RS                     (display != name && display_leaf != name).then_some((name, display))
+//RS                 })
+//RS                 .collect();
+//RS             replacements.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+//RS             (module_idx, replacements)
+//RS         })
+//RS         .collect();
+//RS     for hover in &mut db.hover {
+//RS         let Some(module_idx) = module_index(bundle, &hover.module_path) else {
+//RS             continue;
+//RS         };
+//RS         if let Some(replacements) = projections.get(&module_idx) {
+//RS             project_text(replacements, &mut hover.text);
+//RS         }
+//RS     }
+//RS     for inlay in &mut db.inlay {
+//RS         let Some(module_idx) = module_index(bundle, &inlay.module_path) else {
+//RS             continue;
+//RS         };
+//RS         if let Some(replacements) = projections.get(&module_idx) {
+//RS             project_text(replacements, &mut inlay.label);
+//RS         }
+//RS     }
+//RS     for member in &mut db.members {
+//RS         let Some(module_idx) = module_index(bundle, &member.module_path) else {
+//RS             continue;
+//RS         };
+//RS         if let Some(replacements) = projections.get(&module_idx) {
+//RS             project_text(replacements, &mut member.signature);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn module_index(bundle: &ProgramBundle, module_path: &str) -> Option<usize> {
+//RS     bundle
+//RS         .modules
+//RS         .iter()
+//RS         .position(|module| module.display == module_path || module.alias == module_path)
+//RS }
+//RS 
+//RS fn project_text(replacements: &[(String, String)], text: &mut String) {
+//RS     for (internal, display) in replacements {
+//RS         *text = text.replace(internal, display);
+//RS     }
+//RS }
+//RS 
+//RS fn caller_key(frame: &CallerFrame) -> String {
+//RS     effect_key(frame.owner.as_deref(), &frame.name)
+//RS }
+//RS 
+//RS fn root_identity(mp: &str) -> String {
+//RS     format!("module:{mp}")
+//RS }
+//RS 
+//RS fn module_identity(scope: &str, name: &str) -> String {
+//RS     format!("module:{scope}::{name}")
+//RS }
+//RS 
+//RS fn type_identity(scope: &str, name: &str) -> String {
+//RS     format!("type:{scope}::{name}")
+//RS }
+//RS 
+//RS fn member_identity(scope: &str, parent: &str, kind: &str, name: &str) -> String {
+//RS     format!("{kind}:{scope}::{parent}.{name}")
+//RS }
+//RS 
+//RS fn callable_identity(scope: &str, owner: Option<&str>, name: &str, _f: &AST::Func) -> String {
+//RS     match owner {
+//RS         Some(owner) => format!("method:{scope}::{owner}.{name}"),
+//RS         None => format!("fn:{scope}::{name}"),
+//RS     }
+//RS }
+//RS 
+//RS fn trait_method_identity(scope: &str, owner: &str, sig: &AST::TraitMethodSig) -> String {
+//RS     format!("method:{scope}::{owner}.{}", sig.name)
+//RS }
+//RS 
+//RS fn active_scope<'a, 'b>(ctx: &'a WalkCtx<'b>) -> &'a str {
+//RS     ctx.caller
+//RS         .as_ref()
+//RS         .map(|c| c.identity.as_str())
+//RS         .unwrap_or(&ctx.scope_identity)
+//RS }
+//RS 
+//RS fn local_identity(scope: &str, kind: &str, name: &str) -> String {
+//RS     format!("{kind}:{scope}::{name}")
+//RS }
+//RS 
+//RS fn fn_signature(
+//RS     name: &str,
+//RS     params: &[(String, AST::Type)],
+//RS     param_contract: &[(String, String, AST::ParamZone)],
+//RS     param_variadic: &[bool],
+//RS     ret: &Option<AST::Type>,
+//RS     failure_contract: &CallableFactAvailability<AST::FailureContract>,
+//RS     effects: Option<&Vec<(String, Span)>>,
+//RS     effect_via: Option<&(String, Span)>,
+//RS     view_provenance: Option<&AST::ViewProvenanceMap>,
+//RS     param_access: &[AST::AccessConvention],
+//RS     param_defaults: &[Option<CallableDefaultFact>],
+//RS     policies: &[AST::CallablePolicy],
+//RS ) -> String {
+//RS     let mut parameter_parts = function_parameter_parts(params, param_contract, param_variadic);
+//RS     let mut parameter_index = 0;
+//RS     for part in &mut parameter_parts {
+//RS         if matches!(part.as_str(), "/" | "*") {
+//RS             continue;
+//RS         }
+//RS         let access = param_access
+//RS             .get(parameter_index)
+//RS             .copied()
+//RS             .unwrap_or(AST::AccessConvention::Read)
+//RS             .sigil();
+//RS         part.insert_str(0, access);
+//RS         if let Some(default) = param_defaults
+//RS             .get(parameter_index)
+//RS             .and_then(Option::as_ref)
+//RS         {
+//RS             part.push('{');
+//RS             part.push_str(&default.source_text);
+//RS             part.push('}');
+//RS         }
+//RS         parameter_index += 1;
+//RS     }
+//RS     let params = parameter_parts.join(", ");
+//RS     // D-SIG-AFTER1=A: return type follows the one arrow. An effect ceiling
+//RS     // splits that arrow as `-[IO]>`. The retired `=[…]=>` spelling must not
+//RS     // reach a hover or a completion.
+//RS     //
+//RS     // D-PANICROOT1=A and D-AUTHORITY-MEM1=B make Panic and Mem deny-only: they
+//RS     // are never a positive ceiling a user writes, so rendering them here would
+//RS     // show a row the user cannot type.
+//RS     let shown: Vec<&str> = effects
+//RS         .map(|row| {
+//RS             row.iter()
+//RS                 .map(|(name, _)| name.as_str())
+//RS                 .filter(|name| {
+//RS                     let root = name.split('.').next().unwrap_or(name);
+//RS                     root != "Panic" && root != "Mem"
+//RS                 })
+//RS                 .collect()
+//RS         })
+//RS         .unwrap_or_default();
+//RS     let result = ret.as_ref().map(|ty| ty.name()).unwrap_or_default();
+//RS     let ceiling = if let Some((param, _)) = effect_via {
+//RS         format!(" -[via {param}]>")
+//RS     } else if shown.is_empty() {
+//RS         String::new()
+//RS     } else {
+//RS         format!(" -[{}]>", shown.join(", "))
+//RS     };
+//RS     let suffix = if !ceiling.is_empty() {
+//RS         if result.is_empty() {
+//RS             ceiling
+//RS         } else {
+//RS             format!("{ceiling} {result}")
+//RS         }
+//RS     } else if !result.is_empty() {
+//RS         format!(" -> {result}")
+//RS     } else {
+//RS         String::new()
+//RS     };
+//RS     let mut signature = format!("fn {name}({params}){suffix}");
+//RS     if let Some(map) = view_provenance {
+//RS         if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
+//RS             signature.push_str(" ; view_source = ");
+//RS             signature.push_str(&direct.canonical());
+//RS         } else {
+//RS             signature.push_str(" ; view_sources = ");
+//RS             signature.push_str(&AST::canonical_view_provenance_map(map));
+//RS         }
+//RS     }
+//RS     let policy_names = policies
+//RS         .iter()
+//RS         .map(AST::CallablePolicy::display)
+//RS         .collect::<Vec<_>>();
+//RS     if !policy_names.is_empty() {
+//RS         signature.push_str(" ; policies=[");
+//RS         signature.push_str(&policy_names.join(", "));
+//RS         signature.push(']');
+//RS     }
+//RS     signature.push_str("\nfailure: ");
+//RS     match failure_contract {
+//RS         CallableFactAvailability::Checked(failure) => {
+//RS             signature.push_str(&failure.effective_type().name());
+//RS             signature.push_str(" (");
+//RS             signature.push_str(&failure.source());
+//RS         }
+//RS         CallableFactAvailability::Unavailable(unavailable) => {
+//RS             signature.push_str("unavailable (");
+//RS             signature.push_str(unavailable.reason);
+//RS         }
+//RS     }
+//RS     signature.push(')');
+//RS     signature
+//RS }
+//RS fn method_parameter_defaults(f: &AST::Func, source: &str) -> Vec<Option<CallableDefaultFact>> {
+//RS     parameter_defaults(&f.params, source, true)
+//RS }
+//RS 
+//RS fn parameter_defaults(
+//RS     params: &[AST::Param],
+//RS     source: &str,
+//RS     skip_self: bool,
+//RS ) -> Vec<Option<CallableDefaultFact>> {
+//RS     params
+//RS         .iter()
+//RS         .filter(|parameter| !skip_self || parameter.name != Syntax::KW_SELF)
+//RS         .map(|parameter| {
+//RS             parameter.default.as_ref().map(|default| {
+//RS                 CallableDefaultFact {
+//RS                     source_text: source
+//RS                         .get(default.span().start..default.span().end)
+//RS                         .expect("callable default span must select source text")
+//RS                         .to_string(),
+//RS                     source: SourceSpan::from(default.span()),
+//RS                     value_unavailable: CallableFactUnavailable {
+//RS                         required_stage: AST::CompilerStage::Prepared,
+//RS                         reason: "the semindex producer does not evaluate callable defaults",
+//RS                     },
+//RS                 }
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn callable_policies(f: &AST::Func) -> Vec<AST::CallablePolicy> {
+//RS     f.markers
+//RS         .iter()
+//RS         .find(|marker| marker.name == Syntax::MARKER_POLICY)
+//RS         .and_then(|marker| AST::CallablePolicyChain::parse(&marker.expr_args_owned()).ok())
+//RS         .map(|chain| chain.policies)
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn callable_kind(f: &AST::Func, source: &str) -> SymKind {
+//RS     SymKind::Function {
+//RS         params: method_params(f),
+//RS         param_sources: f
+//RS             .params
+//RS             .iter()
+//RS             .filter(|p| p.name != Syntax::KW_SELF)
+//RS             .map(|p| p.name_span.into())
+//RS             .collect(),
+//RS         signature_facts_available: true,
+//RS         param_contract: method_parameter_contract(f),
+//RS         param_variadic: method_parameter_variadic(f),
+//RS         return_type: f.return_type.clone(),
+//RS         failure_contract: CallableFactAvailability::Checked(f.failure_contract()),
+//RS         foreign_boundary: f.inline_foreign.is_some(),
+//RS         effects: f.declared_effects.clone(),
+//RS         effect_via: f.effect_via.clone(),
+//RS         param_access: method_parameter_access(f),
+//RS         param_defaults: method_parameter_defaults(f, source),
+//RS         policies: callable_policies(f),
+//RS         generic_parameters: CallableFactAvailability::Checked(f.type_params.clone()),
+//RS     }
+//RS }
+//RS 
+//RS fn method_params(f: &AST::Func) -> Vec<(String, AST::Type)> {
+//RS     f.params
+//RS         .iter()
+//RS         .filter(|p| p.name != Syntax::KW_SELF)
+//RS         .map(|p| (p.name.clone(), p.ty.clone()))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn method_parameter_contract(f: &AST::Func) -> Vec<(String, String, AST::ParamZone)> {
+//RS     parameter_contract(&f.params)
+//RS }
+//RS 
+//RS fn method_parameter_variadic(f: &AST::Func) -> Vec<bool> {
+//RS     f.params
+//RS         .iter()
+//RS         .filter(|p| p.name != Syntax::KW_SELF)
+//RS         .map(|p| p.variadic)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn method_parameter_access(f: &AST::Func) -> Vec<AST::AccessConvention> {
+//RS     f.params
+//RS         .iter()
+//RS         .filter(|p| p.name != Syntax::KW_SELF)
+//RS         .map(|p| p.convention)
+//RS         .collect()
+//RS }
+//RS 
+//RS 
+//RS fn parameter_contract(params: &[AST::Param]) -> Vec<(String, String, AST::ParamZone)> {
+//RS     params
+//RS         .iter()
+//RS         .filter(|p| p.name != Syntax::KW_SELF)
+//RS         .map(|p| (p.name.clone(), p.call_label().to_string(), p.zone))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn parameter_variadic(params: &[AST::Param]) -> Vec<bool> {
+//RS     params
+//RS         .iter()
+//RS         .filter(|p| p.name != Syntax::KW_SELF)
+//RS         .map(|p| p.variadic)
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Render the public call surface for LSP completion/signature help. Separators
+//RS /// are part of the displayed signature; callers only use the actual parameter
+//RS /// entries when constructing LSP parameter objects.
+//RS pub fn function_parameter_parts(
+//RS     params: &[(String, AST::Type)],
+//RS     contract: &[(String, String, AST::ParamZone)],
+//RS     variadic: &[bool],
+//RS ) -> Vec<String> {
+//RS     let mut parts = Vec::new();
+//RS     let mut star_done = false;
+//RS     for (index, (local, ty)) in params.iter().enumerate() {
+//RS         let (contract_local, label, zone) = contract
+//RS             .get(index)
+//RS             .map(|(local, label, zone)| (local.as_str(), label.as_str(), *zone))
+//RS             .unwrap_or((local.as_str(), local.as_str(), AST::ParamZone::Either));
+//RS         if zone == AST::ParamZone::LabelOnly && !star_done {
+//RS             star_done = true;
+//RS             parts.push(Syntax::PARAM_ZONE_LABEL_ONLY.to_string());
+//RS         }
+//RS         let shown = if zone == AST::ParamZone::PositionalOnly {
+//RS             contract_local.to_string()
+//RS         } else if label == contract_local {
+//RS             label.to_string()
+//RS         } else {
+//RS             format!("{label} {contract_local}")
+//RS         };
+//RS         let rest = if variadic.get(index).copied().unwrap_or(false) {
+//RS             "..."
+//RS         } else {
+//RS             ""
+//RS         };
+//RS         parts.push(format!("{shown}: {rest}{}", ty.name()));
+//RS         if zone == AST::ParamZone::PositionalOnly
+//RS             && contract
+//RS                 .get(index + 1)
+//RS                 .is_none_or(|(_, _, next)| *next != AST::ParamZone::PositionalOnly)
+//RS         {
+//RS             parts.push(Syntax::PARAM_ZONE_POSITIONAL_ONLY.to_string());
+//RS         }
+//RS     }
+//RS     parts
+//RS }
+//RS 
+//RS /// Map the argument slot the shared binder consumes to the visible LSP
+//RS /// parameter index. Declaration slots include label-only parameters; the
+//RS /// rendered signature does not include the `*` separator, so the two indices
+//RS /// must not be used interchangeably.
+//RS pub fn binder_active_parameter(
+//RS     active_label: Option<&str>,
+//RS     active_positional: usize,
+//RS     consumed_labels: &[String],
+//RS     contract: &[(String, String, AST::ParamZone)],
+//RS     visible_parameter_count: usize,
+//RS ) -> usize {
+//RS     if visible_parameter_count == 0 {
+//RS         return 0;
+//RS     }
+//RS     let mut consumed_slots = Vec::new();
+//RS     for label in consumed_labels {
+//RS         if let Some((index, _)) = contract
+//RS             .iter()
+//RS             .enumerate()
+//RS             .find(|(index, (_, public, zone))| {
+//RS                 !consumed_slots.contains(index)
+//RS                     && *zone != AST::ParamZone::PositionalOnly
+//RS                     && public == label
+//RS             })
+//RS         {
+//RS             consumed_slots.push(index);
+//RS         }
+//RS     }
+//RS     let positional_before_active = active_positional.saturating_sub(consumed_slots.len());
+//RS     let declaration_slot = active_label
+//RS         .and_then(|label| {
+//RS             contract.iter().position(|(_, public, zone)| {
+//RS                 *zone != AST::ParamZone::PositionalOnly && public == label
+//RS             })
+//RS         })
+//RS         .or_else(|| {
+//RS             let mut bare_parameters_before_active = positional_before_active;
+//RS             for (index, (_, _, zone)) in contract.iter().enumerate() {
+//RS                 if consumed_slots_contains(&consumed_slots, index) {
+//RS                     continue;
+//RS                 }
+//RS                 if *zone == AST::ParamZone::LabelOnly {
+//RS                     if bare_parameters_before_active == 0 {
+//RS                         return Some(index);
+//RS                     }
+//RS                     continue;
+//RS                 }
+//RS                 if bare_parameters_before_active == 0 {
+//RS                     return Some(index);
+//RS                 }
+//RS                 bare_parameters_before_active -= 1;
+//RS             }
+//RS             None
+//RS         });
+//RS     // `parameter_parts` removes only the zone separators (`/` and `*`), not
+//RS     // label-only declarations. Every declaration slot therefore occupies one
+//RS     // visible parameter index.
+//RS     let visible_index = declaration_slot.map_or(active_positional, |slot| slot);
+//RS     visible_index.min(visible_parameter_count - 1)
+//RS }
+//RS 
+//RS fn consumed_slots_contains(slots: &[usize], slot: usize) -> bool {
+//RS     slots.contains(&slot)
+//RS }
+//RS 
+//RS fn method_fact(
+//RS     scope: &str,
+//RS     owner: &str,
+//RS     f: &AST::Func,
+//RS     origin: MemberOrigin,
+//RS     mp: &str,
+//RS     source: &str,
+//RS ) -> MemberFact {
+//RS     let params = method_params(f);
+//RS     let param_access = method_parameter_access(f);
+//RS     let param_defaults = method_parameter_defaults(f, source);
+//RS     let policies = callable_policies(f);
+//RS     let return_type = Some(f.effective_return_type());
+//RS     let failure = CallableFactAvailability::Checked(f.failure_contract());
+//RS     MemberFact {
+//RS         owner: owner.to_string(),
+//RS         name: f.name.clone(),
+//RS         identity: callable_identity(scope, Some(owner), &f.name, f),
+//RS         kind: MemberKind::Method,
+//RS         origin,
+//RS         signature: fn_signature(
+//RS             &f.name,
+//RS             &params,
+//RS             &method_parameter_contract(f),
+//RS             &method_parameter_variadic(f),
+//RS             &return_type,
+//RS             &failure,
+//RS             f.declared_effects.as_ref(),
+//RS             f.effect_via.as_ref(),
+//RS             f.return_view_provenance.as_ref(),
+//RS             &param_access,
+//RS             &param_defaults,
+//RS             &policies,
+//RS         ),
+//RS         module_path: mp.to_string(),
+//RS         span: f.name_span.into(),
+//RS     }
+//RS }
+//RS 
+//RS fn origin_label(origin: &MemberOrigin) -> String {
+//RS     match origin {
+//RS         MemberOrigin::TypeBody => "type".to_string(),
+//RS         MemberOrigin::InherentImpl => "impl".to_string(),
+//RS         MemberOrigin::TraitImpl { trait_name } => format!("impl {trait_name}"),
+//RS         MemberOrigin::TraitRequirement { trait_name } => format!("trait {trait_name}"),
+//RS     }
+//RS }
+//RS 
+//RS fn scoped_local_identity(ctx: &WalkCtx<'_>, kind: &str, name: &str) -> String {
+//RS     local_identity(active_scope(ctx), kind, name)
+//RS }
+//RS 
+//RS fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
+//RS     let fact = CompilerFact::from_member(&name);
+//RS     let target = ctx
+//RS         .name_ledger
+//RS         .reference(mp, span.start, span.end)
+//RS         .map(|fact| DefinitionAnchor {
+//RS             module_path: fact.module_path.clone(),
+//RS             kind: fact.kind.clone(),
+//RS             def_span: fact.def_span.into(),
+//RS             semantic_identity: fact.semantic_identity.clone(),
+//RS         });
+//RS     SymRef {
+//RS         name,
+//RS         span,
+//RS         module_path: mp.to_string(),
+//RS         scope_identity: Some(active_scope(ctx).to_string()),
+//RS         target,
+//RS         fact,
+//RS     }
+//RS }
+//RS 
+//RS fn declaration_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
+//RS     let target = ctx
+//RS         .name_ledger
+//RS         .declaration(ctx.module_idx, &name)
+//RS         .map(|declaration| DefinitionAnchor {
+//RS             module_path: ctx
+//RS                 .name_ledger
+//RS                 .module_path(declaration.module)
+//RS                 .unwrap_or(mp)
+//RS                 .to_string(),
+//RS             kind: declaration.kind.clone(),
+//RS             def_span: declaration.span.into(),
+//RS             semantic_identity: ctx
+//RS                 .name_ledger
+//RS                 .semantic_identity(declaration.module, &name),
+//RS         });
+//RS     SymRef {
+//RS         name,
+//RS         span,
+//RS         module_path: mp.to_string(),
+//RS         scope_identity: Some(active_scope(ctx).to_string()),
+//RS         target,
+//RS         fact: None,
+//RS     }
+//RS }
+//RS 
+//RS fn state_marker_path(expr: &AST::Expr) -> Option<(String, Span)> {
+//RS     match expr {
+//RS         AST::Expr::Ident(name, span) => Some((name.clone(), *span)),
+//RS         AST::Expr::Field(base, member, span) => {
+//RS             Some((format!("{}.{}", state_marker_path(base)?.0, member), *span))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn collect_state_marker_references_for_method(
+//RS     method: &AST::Func,
+//RS     mp: &str,
+//RS     ctx: &mut WalkCtx<'_>,
+//RS ) {
+//RS     for marker in &method.markers {
+//RS         let slots: &[usize] = match marker.name.as_str() {
+//RS             Syntax::KW_STATE => &[0],
+//RS             Syntax::KW_TRANSITION => &[0, 1],
+//RS             _ => &[],
+//RS         };
+//RS         for &slot in slots {
+//RS             let Some((raw, span)) = marker.expr_arg(slot).and_then(state_marker_path) else {
+//RS                 continue;
+//RS             };
+//RS             if raw == Syntax::STATE_ENTRY {
+//RS                 continue;
+//RS             }
+//RS             // Member references are indexed by their leaf name. Keep the
+//RS             // owner-qualified target from the ledger, but use the same leaf
+//RS             // spelling here so completion, references, and rename include
+//RS             // `Door.State.Closed` marker arguments.
+//RS             let name = raw.rsplit('.').next().unwrap_or(raw.as_str()).to_string();
+//RS             ctx.db.refs.push(scoped_ref(name, span, mp, ctx));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn collect_state_marker_references(item: &Item, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     match item {
+//RS         Item::Struct(definition) => {
+//RS             for method in &definition.methods {
+//RS                 collect_state_marker_references_for_method(method, mp, ctx);
+//RS             }
+//RS             for implementation in &definition.trait_impls {
+//RS                 for method in &implementation.methods {
+//RS                     collect_state_marker_references_for_method(method, mp, ctx);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Item::Impl(implementation) => {
+//RS             for method in &implementation.methods {
+//RS                 collect_state_marker_references_for_method(
+//RS                     method,
+//RS                     mp,
+//RS                     ctx,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Item::Enum(definition) => {
+//RS             for method in &definition.methods {
+//RS                 collect_state_marker_references_for_method(method, mp, ctx);
+//RS             }
+//RS         }
+//RS         _ => {}
+//RS     }
+//RS }
+//RS 
+//RS fn record_node(
+//RS     ctx: &mut WalkCtx<'_>,
+//RS     class: &str,
+//RS     shape: &str,
+//RS     mp: &str,
+//RS     span: Span,
+//RS ) -> Option<usize> {
+//RS     if span.end >= span.start {
+//RS         let id = ctx.db.nodes.len();
+//RS         let parent = ctx.structural_parents.last().copied();
+//RS         assert!(
+//RS             parent.is_none() || ctx.structural_slot != "root",
+//RS             "compiler structural child missing explicit slot: {class}/{shape}"
+//RS         );
+//RS         let slot = ctx.structural_slot.clone();
+//RS         let ordinal = {
+//RS             let next = ctx
+//RS                 .db
+//RS                 .structural_ordinals
+//RS                 .entry((parent, slot.clone()))
+//RS                 .or_default();
+//RS             let ordinal = *next;
+//RS             *next += 1;
+//RS             ordinal
+//RS         };
+//RS         ctx.db.nodes.push(StructuralNode {
+//RS             id,
+//RS             parent,
+//RS             slot,
+//RS             slot_kind: ctx.structural_slot_kind,
+//RS             ordinal,
+//RS             class: class.to_string(),
+//RS             shape: shape.to_string(),
+//RS             module_path: mp.to_string(),
+//RS             span: span.into(),
+//RS         });
+//RS         Some(id)
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS fn structural_slot<T>(
+//RS     ctx: &mut WalkCtx<'_>,
+//RS     name: &str,
+//RS     kind: StructuralSlotKind,
+//RS     f: impl FnOnce(&mut WalkCtx<'_>) -> T,
+//RS ) -> T {
+//RS     if is_lexical_structural_slot(name) {
+//RS         if let Some(parent) = ctx.structural_parents.last().copied() {
+//RS             let parent_start = ctx.db.nodes[parent].span.start;
+//RS             let parent_end = ctx.db.nodes[parent].span.end;
+//RS             let exact_parent_end = ctx.db.nodes[parent].class == "arm";
+//RS             let first = ctx
+//RS                 .block_spans
+//RS                 .partition_point(|span| span.start < parent_start);
+//RS             if let Some(span) = ctx
+//RS                 .block_spans[first..]
+//RS                 .iter()
+//RS                 .filter(|span| {
+//RS                     parent_start <= span.start
+//RS                         // Classic `if` lowers to a private arm whose AST span
+//RS                         // ends at the condition. Its body still owns the next
+//RS                         // parser block span; keep the exact upper bound for
+//RS                         // real arm spans, but allow this head-only shape.
+//RS                         && (!exact_parent_end
+//RS                             || span.end <= parent_end
+//RS                             || parent_end <= span.start)
+//RS                         && !ctx.claimed_block_spans.contains(&(span.start, span.end))
+//RS                 })
+//RS                 .min_by_key(|span| span.start)
+//RS                 .copied()
+//RS             {
+//RS                 ctx.claimed_block_spans.insert((span.start, span.end));
+//RS                 ctx.db.slot_boundaries.push(StructuralSlotBoundary {
+//RS                     parent,
+//RS                     slot: name.to_string(),
+//RS                     module_path: ctx.db.nodes[parent].module_path.clone(),
+//RS                     span: span.into(),
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     let old_name = std::mem::replace(&mut ctx.structural_slot, name.to_string());
+//RS     let old_kind = std::mem::replace(&mut ctx.structural_slot_kind, kind);
+//RS     let value = f(ctx);
+//RS     ctx.structural_slot = old_name;
+//RS     ctx.structural_slot_kind = old_kind;
+//RS     value
+//RS }
+//RS 
+//RS fn is_lexical_structural_slot(slot: &str) -> bool {
+//RS     slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
+//RS }
+//RS 
+//RS fn expr_shape(expr: &AST::Expr) -> String {
+//RS     format!("{:?}", std::mem::discriminant(expr))
+//RS }
+//RS 
+//RS fn structural_expr_span(expr: &AST::Expr) -> Span {
+//RS     match expr {
+//RS         AST::Expr::Call(call) => Span::new(
+//RS             call.name_span.start,
+//RS             call.args
+//RS                 .last()
+//RS                 .map_or(call.name_span.end.saturating_add(2), |arg| {
+//RS                     structural_expr_span(&arg.expr).end.saturating_add(1)
+//RS                 }),
+//RS         ),
+//RS         AST::Expr::MethodCall {
+//RS             receiver,
+//RS             method_span,
+//RS             args,
+//RS             ..
+//RS         } => Span::new(
+//RS             structural_expr_span(receiver).start,
+//RS             args.last()
+//RS                 .map_or(method_span.end.saturating_add(2), |arg| {
+//RS                     structural_expr_span(&arg.expr).end.saturating_add(1)
+//RS                 }),
+//RS         ),
+//RS         _ => expr.span(),
+//RS     }
+//RS }
+//RS 
+//RS fn stmt_shape(stmt: &AST::Stmt) -> String {
+//RS     format!("{:?}", std::mem::discriminant(stmt))
+//RS }
+//RS 
+//RS fn item_shape(item: &AST::Item) -> String {
+//RS     format!("{:?}", std::mem::discriminant(item))
+//RS }
+//RS 
+//RS fn item_span(item: &AST::Item) -> Span {
+//RS     match item {
+//RS         AST::Item::EffectDecl(x) => x.span,
+//RS         AST::Item::MarkerDecl(x) => x.span,
+//RS         AST::Item::FactDecl(x) => x.span,
+//RS         AST::Item::Func(x) => x.span,
+//RS         AST::Item::Struct(x) => x.span,
+//RS         AST::Item::Enum(x) => x.span,
+//RS         AST::Item::Distinct(x) => x.span,
+//RS         AST::Item::TypeAlias(x) => x.span,
+//RS         AST::Item::UnitFamily(x) => x.span,
+//RS         AST::Item::Trait(x) => x.span,
+//RS         AST::Item::Tag(x) => x.span,
+//RS         AST::Item::Impl(x) => x.span,
+//RS         AST::Item::Const(x) => x.span,
+//RS         AST::Item::Test(x) => x.span,
+//RS         AST::Item::ExternRust(x) => x.span,
+//RS         AST::Item::Module(x) => x.span,
+//RS         AST::Item::CModule(x) => x.span,
+//RS         AST::Item::CodeModule(x) => x.span,
+//RS         AST::Item::ErrorConv(x) => x.from_span,
+//RS         AST::Item::Migration(x) => x.span,
+//RS         AST::Item::ProtocolDecl(x) => x.span,
+//RS         AST::Item::UserDerive(x) => x.span,
+//RS         AST::Item::TemplateLoop(x) => x.span,
+//RS         AST::Item::GenericModule(x) => x.span,
+//RS         AST::Item::ModuleAlias(x) => x.span,
+//RS     }
+//RS }
+//RS 
+//RS fn record_func_type_nodes(f: &AST::Func, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     structural_slot(ctx, "params", StructuralSlotKind::List, |ctx| {
+//RS         for param in &f.params {
+//RS             record_node(ctx, "type", "type", mp, param.ty_span);
+//RS         }
+//RS     });
+//RS     if let Some(span) = f.return_type_span {
+//RS         structural_slot(ctx, "return_type", StructuralSlotKind::Scalar, |ctx| {
+//RS             record_node(ctx, "type", "type", mp, span);
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS /// D-LINTPOLICY1=A: record one `BypassFact` per lint name inside an
+//RS /// `#[allow(lint, …)]` marker (D-DECIMAL1 and kin) — any marker whose
+//RS /// `name` is `"allow"`, wherever it appears (struct or field).
+//RS fn collect_allow_markers(markers: &[AST::Marker], site: &str, mp: &str, ctx: &mut WalkCtx<'_>) {
+//RS     for marker in markers {
+//RS         if marker.name != "allow" {
+//RS             continue;
+//RS         }
+//RS         for arg in marker.expr_args() {
+//RS             if let AST::Expr::Ident(lint_name, _) = arg {
+//RS                 ctx.db.bypasses.push(BypassFact {
+//RS                     kind: BypassKind::LintAllow,
+//RS                     site: site.to_string(),
+//RS                     detail: lint_name.clone(),
+//RS                     module_path: mp.to_string(),
+//RS                     span: marker.span.into(),
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn record_call(ctx: &mut WalkCtx<'_>, mp: &str, callee: &str, span: Span) {
+//RS     if let Some(caller) = &ctx.caller {
+//RS         ctx.db.calls.push(CallEdge {
+//RS             caller: caller_key(caller),
+//RS             callee: callee.to_string(),
+//RS             module_path: mp.to_string(),
+//RS             call_span: span.into(),
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn with_caller<F>(ctx: &mut WalkCtx<'_>, frame: CallerFrame, params: &[AST::Param], mp: &str, f: F)
+//RS where
+//RS     F: FnOnce(&mut WalkCtx<'_>),
+//RS {
+//RS     let prev = ctx.caller.replace(frame);
+//RS     let _ = (params, mp);
+//RS     f(ctx);
+//RS     ctx.caller = prev;
+//RS }
+//RS 
+//RS /// Build the shared symbol index for a checked bundle (LSP + public API).
+// END-PORT-PENDING 0809 crates/jet-semindex/src/Build.rs:514-1332
+

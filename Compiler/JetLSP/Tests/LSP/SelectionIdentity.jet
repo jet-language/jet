@@ -1,0 +1,129 @@
+// Pure retained-fact/lexer controls for Features.rs1152–1813. They exercise
+// canonical typed carriers, never supply a fake compiler/provider success.
+use jet_foundation.[Span, Type, DerivationRecord]
+use jet_lexer.[lex, TOKEN_IDENT, TOKEN_LPAREN]
+use jet_semindex.[SymbolDB, SymDef, SymRef, DefinitionAnchor, SourceSpan, InstanceFact, InstanceApplicationFact, SemIndex, SymbolDef, SymbolRef, CallEdge, EffectFact, MemberFact, StructuralNode, DefinitionFact, SemanticSymbolIndex, SemanticSymbol]
+
+fn lsp_selection_test_def(identity: String, start: Int, end: Int) -> SymDef Never! {
+    SymDef{identity: identity, name: "value", def_span: Span{start: start, end: end}, module_path: "main.jet", kind: .Param{ty: Type.Named{name: "Mode"}}}
+}
+fn lsp_selection_test_ref(identity: String?, start: Int, end: Int) -> SymRef Never! {
+    target := DefinitionAnchor?{None}
+    if identity == .Val(value) -> target = Val(DefinitionAnchor{module_path: "defs.jet", kind: "param", def_span: SourceSpan{start: 0, end: 1}, semantic_identity: Val(value)})
+    SymRef{name: "value", span: Span{start: start, end: end}, module_path: "main.jet", scope_identity: None, target: target, fact: None}
+}
+
+#Test("checked anchor identity keeps explicit fact otherwise rejects differing exact-span definitions") {
+    db := SymbolDB.new()
+    db.defs = [SymDef]{lsp_selection_test_def("a", 1, 2), lsp_selection_test_def("b", 1, 2)}
+    anchor := DefinitionAnchor{module_path: "main.jet", kind: "param", def_span: SourceSpan{start: 1, end: 2}, semantic_identity: Val("explicit")}
+    assert_eq(lsp_checked_anchor_identity(db, anchor), Val("explicit"))
+    anchor.semantic_identity = Val("")
+    assert_eq(lsp_checked_anchor_identity(db, anchor), None)
+    db.defs[1].identity = "a"
+    assert_eq(lsp_checked_anchor_identity(db, anchor), Val("a"))
+    anchor.module_path = "other.jet"
+    assert_eq(lsp_checked_anchor_identity(db, anchor), None)
+}
+
+#Test("checked reference selects smallest containing span and preserves absent unresolved ambiguous distinctions") {
+    db := SymbolDB.new()
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Ok(None))
+    db.refs = [SymRef]{lsp_selection_test_ref(Val("outer"), 0, 10), lsp_selection_test_ref(None, 3, 6)}
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Err(()))
+    db.refs[1] = lsp_selection_test_ref(Val("inner"), 3, 6)
+    result :: lsp_checked_reference_in_span(db, "main.jet", 4, 5) ?? panic("selection")
+    row :: result ?? panic("reference")
+    assert_eq(row[0].span, Span{start: 3, end: 6})
+    &db.refs.push(lsp_selection_test_ref(Val("different"), 3, 6))
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Err(()))
+    db.refs[2] = lsp_selection_test_ref(Val("inner"), 3, 6)
+    assert(lsp_checked_reference_in_span(db, "main.jet", 4, 5) == .Ok(.Val(_)))
+    assert(lsp_checked_reference_in_span(db, "other.jet", 4, 5) == .Ok(None))
+}
+
+#Test("checked definition keeps smallest span ambiguity and reference errors prevent fallback") {
+    db := SymbolDB.new()
+    db.defs = [SymDef]{lsp_selection_test_def("outer", 0, 10), lsp_selection_test_def("inner", 3, 6)}
+    result :: lsp_checked_definition_in_span(db, "main.jet", 4, 5) ?? panic("selection")
+    row :: result ?? panic("definition")
+    assert_eq(row[0].identity, "inner")
+    assert_eq(lsp_checked_identity_in_span(db, "main.jet", 4, 5), Ok(Val("inner")))
+    &db.defs.push(lsp_selection_test_def("different", 3, 6))
+    assert(lsp_checked_definition_in_span(db, "main.jet", 4, 5) == .Err(()))
+    db.refs = [SymRef]{lsp_selection_test_ref(None, 3, 6)}
+    assert(lsp_checked_identity_in_span(db, "main.jet", 4, 5) == .Err(()))
+}
+
+#Test("instance identity chooses smallest retained application and refuses tied differing identities") {
+    db := SymbolDB.new()
+    instance := InstanceFact{name: "Box", module_path: "main.jet", fingerprint: "", full_key_hex: "", template_definition_id: "", template_span: SourceSpan{start: 0, end: 1}, arguments: [String]{}, argument_values: [String]{}, argument_provenance: [[String]]{}, applications: [InstanceApplicationFact]{InstanceApplicationFact{name: "Box", module_path: "main.jet", semantic_identity: "outer", span: SourceSpan{start: 0, end: 10}}, InstanceApplicationFact{name: "Box", module_path: "main.jet", semantic_identity: "inner", span: SourceSpan{start: 3, end: 6}}}, exported_members: [String]{}}
+    &db.index.set_instances([InstanceFact]{~instance})
+    assert_eq(lsp_checked_instance_identity(db, "main.jet", 4, 5), Ok(Val("inner")))
+    assert_eq(lsp_checked_identity_in_span(db, "main.jet", 4, 5), Ok(Val("inner")))
+    &instance.applications.push(InstanceApplicationFact{name: "Box", module_path: "main.jet", semantic_identity: "different", span: SourceSpan{start: 3, end: 6}})
+    &db.index.set_instances([InstanceFact]{instance})
+    assert(lsp_checked_instance_identity(db, "main.jet", 4, 5) == .Err(()))
+    assert_eq(lsp_checked_instance_identity(db, "other.jet", 4, 5), Ok(None))
+}
+
+#Test("checked subject type never guesses by unresolved expression spelling and handles self scope") {
+    tokens :: lex("value".bytes()).tokens
+    db := SymbolDB.new()
+    db.defs = [SymDef]{lsp_selection_test_def("param", 20, 25)}
+    assert_eq(lsp_checked_subject_type_name(db, tokens, "main.jet", 0), None)
+    db.refs = [SymRef]{lsp_selection_test_ref(Val("param"), 0, 5)}
+    assert_eq(lsp_checked_subject_type_name(db, tokens, "main.jet", 0), Val("Mode"))
+    self_tokens :: lex("self".bytes()).tokens
+    db.refs[0].name = "self"
+    db.refs[0].target = None
+    db.refs[0].scope_identity = Val("method:main::Mode.read")
+    assert_eq(lsp_checked_subject_type_name(db, self_tokens, "main.jet", 0), Val("Mode"))
+    assert_eq(lsp_method_owner_from_scope("fn:main::read"), None)
+    assert_eq(lsp_method_owner_from_scope("method:main::Mode.read"), Val("Mode"))
+}
+
+#Test("pattern dispatch helper uses active braces not a closed earlier dispatch") {
+    source :: "if subject == {{ .Ready -> 1 }}\nif other == {{ .Ready -> 2 }}"
+    tokens :: lex(source.bytes()).tokens
+    ready := 0
+    loop (i, token) in tokens { if token.kind == TOKEN_IDENT && token.payload.text == "Ready" -> ready = i }
+    subject :: lsp_active_pattern_subject(tokens, ready) ?? panic("active dispatch")
+    assert_eq(tokens[subject].payload.text, "other")
+    dot :: lsp_previous_code_token(tokens, ready) ?? panic("dot")
+    assert(lsp_pattern_head_start(tokens, dot) != None)
+    assert_eq(lsp_active_pattern_subject(tokens, tokens.len()), None)
+}
+
+#Test("function head enum type comes from unique checked variant not empty payload parameters") {
+    source :: "fn run(Ready()) {{}}"
+    tokens :: lex(source.bytes()).tokens
+    head := 0
+    loop (i, token) in tokens { if token.kind == TOKEN_LPAREN { head = i; break } }
+    db := SymbolDB.new()
+    db.index = SemIndex.new([SymbolDef]{}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{DefinitionFact{stable_id: "fn", signature_id: "", content_id: "", human_identity: "fn:run", name: "run", kind: "function", module_path: "main.jet", span: SourceSpan{start: 0, end: source.bytes().len()}}})
+    db.defs = [SymDef]{SymDef{identity: "variant:Mode.Ready", name: "Ready", def_span: Span{start: 100, end: 105}, module_path: "main.jet", kind: .EnumVariant{parent: "Mode"}}}
+    assert_eq(lsp_function_head_type_name(db, tokens, "main.jet", head), Val("Mode"))
+    other := ~db.defs[0]
+    other.identity = "variant:Other.Ready"
+    other.kind = .EnumVariant{parent: "Other"}
+    &db.defs.push(other)
+    assert_eq(lsp_function_head_type_name(db, tokens, "main.jet", head), None)
+}
+
+#Test("semantic symbol span returns exact owner-backed row and metadata preserves nominal contract") {
+    db := lsp_signature_test_db(lsp_signature_test_definition())
+    symbol := lsp_hover_test_symbol()
+    symbol.identity = "fn:main::run"
+    symbol.module_path = "main.jet"
+    symbol.span = Val(SourceSpan{start: 3, end: 6})
+    db.symbols = SemanticSymbolIndex.new([SemanticSymbol]{~symbol})
+    row :: lsp_semantic_symbol_at_span(db, "main.jet", Span{start: 3, end: 6}) ?? panic("symbol")
+    assert_eq(row[0].identity, symbol.identity)
+    assert_eq(lsp_semantic_symbol_at_span(db, "main.jet", Span{start: 3, end: 5}), None)
+    assert_eq(lsp_semantic_symbol_metadata_json(db, row[0]), None)
+    definition := lsp_signature_test_definition()
+    definition.nominal_base = Val("Base")
+    db.index = SemIndex.new([SymbolDef]{definition}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{})
+    assert(lsp_semantic_symbol_metadata_json(db, symbol) != None)
+}

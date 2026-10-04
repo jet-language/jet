@@ -1,0 +1,436 @@
+// Original Server4039–4269,4456–4492,4588–4671 and tests/lsp3934–4006.
+// SOURCE ONLY: these registrations are not execution receipts. C4, actual
+// OsPath ingress, pure PackageModel, Foundation Report and #4204 propagation
+// gate composition. Real host request/flush transcripts (L19), code-action
+// consumers and all-tier native execution remain explicit integration gates.
+// Main greenfield ruling: current REPORT_SCHEMA/registry/C4 input law replaces
+// stale v1/v2, comma/Formatting and four-input Rust goldens (Rust TANDEM).
+// Original crypto/data byte contracts, cause identity and module corpus stay;
+// no compatibility wire or registry fork is introduced.
+use jet_foundation.[DiagnosticCryptoMisuseReason, DiagnosticStructured, DiagnosticOrigin, TextEdit, DIAGNOSTIC_ERROR, REPORT_SCHEMA, diagnostic_to_json, diagnostic_render_all_json, diagnostic_from_registry, diagnostic_caused_by, diagnostic_with_origin, diagnostic_with_structured_edit, foundation_embedded_core, mir_sha256_hex]
+use jet_driver.[JetDriverCompileRequest, JetDriverCompileTarget, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts, JetDriverQueryExternalFile, jet_driver_embedded_core_sources]
+use jet_eval.[jet_eval_default_config]
+use jet_pkg_model.[BuildStamp]
+use jet_queries.[QueryKey, FileKey, InputKey]
+use core.encoding.[DataTree]
+use jet_parser.[parse_source]
+use core.encoding.json as lsp_diag_test_json
+
+fn lsp_diag_test_path(path: String) -> lsp_diag_path.OsPath Never! {
+    lsp_diag_path.from_text(path, lsp_diag_path.PathPlatform.Unix)
+}
+fn lsp_diag_test_report(code: String, what: String, why: String, fix: String, span: Span?) -> Diagnostic Never! {
+    // Original Diagnostic::error test facts, with authored prose untouched.
+    Diagnostic{severity: DIAGNOSTIC_ERROR, code: code, what: what, why: why, fix: fix, span: span}
+}
+fn lsp_diag_test_one(diagnostic: Diagnostic, file: ReportPath, src: String) -[FS, Env]> String Never! {
+    lsp_diagnostic_json_with_clears(diagnostic, file, src, 0, lsp_path_to_uri(file.as_str()), [Diagnostic]{diagnostic})
+}
+fn lsp_diag_test_field(value: DataTree, name: String) -> DataTree Never! {
+    value.field(name) ?? panic("missing JSON field {name}")
+}
+fn lsp_diag_test_params(json: String) -> DataTree Never! {
+    value :: lsp_diag_test_json.parse(json) ?? panic("published notification JSON")
+    lsp_diag_test_field(value, "params")
+}
+
+#Test("e2702_lsp_diagnostic_carries_the_closed_compiler_projection") {
+    diagnostic := lsp_diag_test_report("E2702", "crypto API misuse", "nonce has 1 byte; this operation requires exactly 24", "pass a 24-byte nonce", Val(Span{start: 4, end: 7}))
+    diagnostic.structured = Val(DiagnosticStructured.CryptoMisuse{reason: DiagnosticCryptoMisuseReason.NonceLength, operation: "xchacha20poly1305_seal", expected: Val("exactly 24"), actual: Val(1)})
+    file :: ReportPath.from_process("/workspace/src/main.jet")
+    assert_eq(file.as_str(), "/workspace/src/main.jet")
+    src :: "xxxx[0]"
+    compiler_data :: diagnostic_to_json(diagnostic, file, src)
+    json :: lsp_diag_test_one(diagnostic, file, src)
+    // Full byte contract, not a second codec or a mere substring assertion.
+    // Canonical v3 adds denial metadata to the frozen v1 report projection.
+    expected_data :: "{{\"schema\":{foundation_json_quote(REPORT_SCHEMA)},\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E2702\",\"what\":\"crypto API misuse\",\"why\":\"nonce has 1 byte; this operation requires exactly 24\",\"fix\":\"pass a 24-byte nonce\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":\"/workspace/src/main.jet\",\"line\":1,\"col\":5,\"span\":{{\"start\":4,\"end\":7}},\"fix_edits\":[],\"cause\":[],\"clears\":0,\"reason\":\"nonce_length\",\"operation\":\"xchacha20poly1305_seal\",\"expected\":\"exactly 24\",\"actual\":1}}"
+    expected :: "{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, Span{start: 4, end: 7}))},\"severity\":1,\"code\":\"E2702\",\"source\":\"jet\",\"message\":\"crypto API misuse\",\"codeDescription\":{{\"href\":\"jet://explain/E2702\"}},\"data\":{expected_data}}}"
+    assert_eq(json, expected)
+    assert(json.ends_with(",\"data\":{compiler_data}}}"))
+    assert(!json.contains("backend"))
+}
+
+#Test("lsp_diagnostic_carries_the_complete_registry_report") {
+    diagnostic :: diagnostic_with_structured_edit(diagnostic_from_registry("E0999", Val(Span{start: 0, end: 10}), "one marker is written without brackets", "brackets group two or more markers; one marker stays bare", "replace `#[Codable]` with `#Codable`"), TextEdit{span: Span{start: 0, end: 10}, new_text: "#Codable"})
+    file :: ReportPath.from_process("src/main.jet")
+    json :: lsp_diag_test_one(diagnostic, file, "#[Codable]\n")
+    assert(json.contains("\"message\":{foundation_json_quote(diagnostic.what)}"))
+    assert_eq(diagnostic.what, "One marker is written without brackets")
+    assert(json.contains("\"codeDescription\":{{\"href\":\"jet://explain/E0999\"}}"))
+    assert(json.contains("\"data\":{{\"schema\":{foundation_json_quote(REPORT_SCHEMA)}"))
+    assert(json.contains("\"why\":{foundation_json_quote(diagnostic.why)}"))
+    assert_eq(diagnostic.why, "Brackets group two or more markers; one marker stays bare")
+    assert(json.contains("\"fix\":{foundation_json_quote(diagnostic.fix)}"))
+    assert_eq(diagnostic.fix, "Replace `#[Codable]` with `#Codable`")
+    assert(json.contains("\"new_text\":\"#Codable\""))
+    assert(json.ends_with(",\"data\":{diagnostic_to_json(diagnostic, file, "#[Codable]\n")}}}"))
+}
+
+#Test("lsp_uses_registry_fix_for_report") {
+    // Server4123–4140 original corpus: the real Parser now owns the registered
+    // SourceEdit semicolon -> linebreak, with BehaviorPreserving grading.
+    // Main's Rust TANDEM updates the stale comma/Formatting expectation.
+    // The action assertions4142–4150 still require the real action provider:
+    // same edit after rewording, one fix, canonical title, newText linebreak.
+    src :: "fn run() {\n    loop item; [1, 2, 3] { print(item) }\n}\n"
+    start := 0
+    loop (index, byte) in src.bytes() {
+        if byte == (U8{59}) { start = index; break }
+    }
+    parsed :: parse_source(src.bytes())
+    selected := Diagnostic?{None}
+    loop candidate in parsed.diagnostics {
+        if candidate.code == "E0373" { selected = Val(candidate); break }
+    }
+    diagnostic :: selected ?? panic("parser must report the registered explicit semicolon")
+    edit :: diagnostic.edit ?? panic("E0373 owns its SourceEdit")
+    assert_eq(edit.span, Span{start: start, end: start + 1})
+    assert_eq(edit.new_text, "\n")
+    file :: ReportPath.from_process("src/main.jet")
+    json :: lsp_diag_test_one(diagnostic, file, src)
+    marker :: "\"fix_edits\":[{{\"file\":{foundation_json_quote(file.as_str())},\"span\":{{\"start\":{start},\"end\":{start + 1}}},\"new_text\":\"\\n\",\"safety\":\"behavior-preserving\"}}]"
+    assert(json.contains(marker))
+}
+
+#Test("lsp_diagnostic_projects_cause_as_related_location") {
+    root :: lsp_diag_test_report("E0956", "root construct failed", "the root construct is unsupported", "use a supported construct", Val(Span{start: 0, end: 1}))
+    dependent :: diagnostic_caused_by(lsp_diag_test_report("E0957", "dependent expansion failed", "the dependent expansion ran the root", "fix the root construct", Val(Span{start: 2, end: 3})), root)
+    diagnostics :: [Diagnostic]{root, dependent}
+    json :: lsp_diagnostic_json_with_clears(dependent, ReportPath.from_process("src/main.jet"), "a b", 0, "file:///workspace/src/main.jet", diagnostics)
+    assert(json.contains("\"relatedInformation\":["))
+    assert(json.contains("\"uri\":\"file:///workspace/src/main.jet\""))
+    assert(json.contains("\"message\":\"root construct failed\""))
+}
+
+#Test("lsp_repeated_code_cause_keeps_the_selected_source_identity") {
+    first :: lsp_diag_test_report("E0956", "first repeated root", "first", "fix first", Val(Span{start: 0, end: 2}))
+    selected :: lsp_diag_test_report("E0956", "selected repeated root", "selected", "fix selected", Val(Span{start: 3, end: 5}))
+    dependent :: diagnostic_caused_by(lsp_diag_test_report("E0957", "dependent", "dependent", "fix root", Val(Span{start: 6, end: 8})), selected)
+    diagnostics :: [Diagnostic]{first, selected, dependent}
+    json :: lsp_diagnostic_json_with_clears(dependent, ReportPath.from_process("src/main.jet"), "aa\nbb\ncc", 0, "file:///workspace/src/main.jet", diagnostics)
+    assert(json.contains("\"message\":\"selected repeated root\""))
+    assert(!json.contains("\"message\":\"first repeated root\""))
+    assert(json.contains("\"range\":{{\"start\":{{\"line\":1,\"character\":0}},\"end\":{{\"line\":1,\"character\":2}}}}"))
+}
+
+#Test("e2702_lsp_omits_bounds_that_do_not_apply") {
+    diagnostic := lsp_diag_test_report("E2702", "crypto API misuse", "safe envelopes manage nonces", "remove the raw nonce", Val(Span{start: 2, end: 7}))
+    diagnostic.structured = Val(DiagnosticStructured.CryptoMisuse{reason: DiagnosticCryptoMisuseReason.RawNonce, operation: "seal", expected: None, actual: None})
+    json :: lsp_diag_test_one(diagnostic, ReportPath.from_process("src/main.jet"), "xxnonce")
+    assert(json.contains("\"reason\":\"raw_nonce\""))
+    assert(json.contains("\"operation\":\"seal\""))
+    assert(!json.contains("\"expected\":"))
+    assert(!json.contains("\"actual\":"))
+}
+
+#Test("e2702_lsp_uses_a_resolvable_path_without_a_workspace_root") {
+    file :: ReportPath.from_process("/private/attacker-controlled/project/src/main.jet")
+    assert_eq(file.as_str(), "/private/attacker-controlled/project/src/main.jet")
+    assert(ReportPath.from_process("src/main.jet").as_str().ends_with("/src/main.jet"))
+}
+
+#Test("related imported cause owns UTF16 location and clear count") {
+    source :: "😀x\na"
+    origin :: DiagnosticOrigin{display: "cause.jet", path: "/work/cause.jet", source: source, revision: mir_sha256_hex(source)}
+    root :: diagnostic_with_origin(lsp_diag_test_report("E0956", "imported root", "why", "fix", Val(Span{start: 4, end: 5})), origin)
+    dependent :: diagnostic_caused_by(lsp_diag_test_report("E0957", "dependent", "why", "fix", None), root)
+    diagnostics :: [Diagnostic]{root, dependent}
+    assert_eq(diagnostic_report_clear_counts(diagnostics), [Int]{1, 0})
+    json :: lsp_diagnostic_json_with_clears(root, ReportPath.from_process("/wrong.jet"), source, 1, "file:///work/cause.jet", diagnostics)
+    assert(json.contains("\"clears\":1"))
+    assert(!json.contains("relatedInformation"))
+    related :: lsp_related_information_json(dependent, "file:///wrong.jet", "wrong", diagnostics)
+    assert(related.contains("\"uri\":\"file:///work/cause.jet\""))
+    assert(related.contains("\"start\":{{\"line\":0,\"character\":2}},\"end\":{{\"line\":0,\"character\":3}}"))
+}
+
+#Test("bidi visible editor messages preserve machine bytes and source ranges") {
+    bidi :: String.from_bytes([U8]{226, 128, 174}) ?? panic("U+202E fixture")
+    root :: lsp_diag_test_report("E0956", "root {bidi}visible\nnext", "why", "fix", Val(Span{start: 0, end: 1}))
+    dependent :: diagnostic_caused_by(lsp_diag_test_report("E0957", "dependent {bidi}", "why", "fix", Val(Span{start: 1, end: 4})), root)
+    diagnostics :: [Diagnostic]{root, dependent}
+    json :: lsp_diagnostic_json_with_clears(dependent, ReportPath.from_process("/work/main.jet"), "x{bidi}", 0, "file:///work/main.jet", diagnostics)
+    value :: lsp_diag_test_json.parse(json) ?? panic("bidi editor JSON")
+    assert_eq(lsp_diag_test_field(value, "message"), DataTree.Text("dependent \\u{{202e}}"))
+    data :: lsp_diag_test_field(value, "data")
+    assert_eq(lsp_diag_test_field(data, "what"), DataTree.Text("dependent {bidi}"))
+    assert_eq(lsp_diag_test_field(value, "range"), lsp_diag_test_json.parse(lsp_range_json(lsp_byte_span_to_range("x{bidi}", Span{start: 1, end: 4}))) ?? panic("range"))
+    assert(json.contains("root \\\\u{{202e}}visible\\nnext"))
+}
+
+// Authorized fixture INPUTS, never fabricated Checked/SemIndex facts. The same
+// actual embedded Core, Driver loader, shared Q1 cache and Sema produce results.
+fn lsp_diag_test_file(relative: String, source: String) -> JetDriverAuthorizedSourceFile Never! {
+    JetDriverAuthorizedSourceFile{path: lsp_diag_test_path("/lsp/{relative}"), relative_path: lsp_diag_test_path(relative), identity: "lsp-fixture:{relative}", source: source}
+}
+fn lsp_diag_test_snapshot(relative: String, source: String, extras: [JetDriverAuthorizedSourceFile]) -> JetDriverQuerySnapshot Never! {
+    files := [JetDriverAuthorizedSourceFile]{lsp_diag_test_file(relative, source)}
+    loop file in extras -> &files.push(file)
+    core :: foundation_embedded_core()
+    request :: JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: lsp_diag_test_path("/lsp"), identity: "lsp-fixture-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: "lsp-fixture-root", entry_path: lsp_diag_test_path("/lsp/{relative}")},
+        canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("jet@0.1.0#lsp-test"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
+        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+    }
+    JetDriverQuerySnapshot{request: request, external_files: [JetDriverQueryExternalFile]{}, cwd: lsp_diag_test_path("/lsp")}
+}
+fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
+    permit :: checked.guard_read()
+    assert_eq(permit.value.result.diagnostics.len(), 0)
+    assert_eq(permit.value.result.internal_problem, None)
+}
+
+#Test("incremental_lsp_query_diagnostics_match_fresh_check_bytes") {
+    before :: "pub fn alpha() -> Int { return 1 }\npub fn beta() -> Int { return 2 }\n"
+    snapshot :: lsp_diag_test_snapshot("lsp_incremental_diagnostic_parity.jet", before, [JetDriverAuthorizedSourceFile]{})
+    doc := LSPDocument.new(lsp_diag_test_path("/lsp/lsp_incremental_diagnostic_parity.jet"), ~before, 1)
+    state :: LSPDiagnosticState.new()
+    queries := JetDriverCompilerQueries.new()
+    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, doc))
+    value := 0
+    loop (index, byte) in before.bytes() { if byte == (U8{50}) -> value = index }
+    range :: LSPRange{start: lsp_byte_offset_to_lsp(before, value), end: lsp_byte_offset_to_lsp(before, value + 1)}
+    assert(&doc.apply_range_edit(range, Val(1), "\"wrong\""))
+    incremental :: lsp_check_with_bundle(state, &queries, snapshot, doc)
+    fresh_queries := JetDriverCompilerQueries.new()
+    fresh :: lsp_check_with_bundle(state, &fresh_queries, snapshot, doc)
+    incremental_permit :: incremental.guard_read()
+    fresh_permit :: fresh.guard_read()
+    file :: ReportPath.from_process(lsp_diag_path.display(doc.path))
+    assert_eq(diagnostic_render_all_json(file, doc.text, jet_driver_present_checked_diagnostics(incremental_permit.value.result)), diagnostic_render_all_json(file, doc.text, jet_driver_present_checked_diagnostics(fresh_permit.value.result)))
+    assert(incremental_permit.value.result.diagnostics.len() > 0)
+}
+
+#Test("shared_queries_preserve_unrelated_roots") {
+    snapshot :: lsp_diag_test_snapshot("query-a.jet", "fn run() {}\n", [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("query-b.jet", "fn helper() {}\n")})
+    state :: LSPDiagnosticState.new()
+    queries := JetDriverCompilerQueries.new()
+    a := LSPDocument.new(lsp_diag_test_path("/lsp/query-a.jet"), "fn run() {}\n", 1)
+    b :: LSPDocument.new(lsp_diag_test_path("/lsp/query-b.jet"), "fn helper() {}\n", 1)
+    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, a))
+    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, a))
+    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, b))
+    &a.replace_text("fn run() { print(\"changed\") }\n")
+    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, a))
+    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, b))
+    stats :: queries.stats()
+    assert_eq(stats.hits, 2)
+    assert_eq(stats.recomputes, 3)
+    // Actual C4 input list: document bytes, external-source fingerprint and
+    // policy fingerprint for each of these two resident root queries.
+    inputs := [InputKey]{}
+    roots :: [lsp_diag_path.OsPath]{a.path, b.path}
+    loop root in roots {
+        label :: lsp_diag_path.display(root)
+        &inputs.push(InputKey.file(FileKey.new(label)))
+        &inputs.push(InputKey.new("checked-external:{label}"))
+        &inputs.push(InputKey.new("checked-policy:{label}"))
+    }
+    assert_eq(stats.live_inputs, inputs.len())
+    assert_eq(stats.live_memos, 2)
+    assert_eq(stats.live_query_counters, 2)
+    assert_eq(queries.recompute_count(QueryKey.for_file("checked.lsp", FileKey.new(lsp_diag_path.display(b.path)))), 1)
+}
+
+#Test("open_dependency_overlay_invalidates_importer") {
+    main :: "module b\nfn run() -> Int { return b.value() }\n"
+    snapshot :: lsp_diag_test_snapshot("main.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("b.jet", "pub fn value() -> Int { return 1 }\n")})
+    main_uri :: "file:///lsp/main.jet"
+    dependency_uri :: "file:///lsp/b.jet"
+    state := LSPDiagnosticState.new()
+    state.docs[main_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/main.jet"), ~main, 1)
+    state.docs[dependency_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/b.jet"), "pub fn value() -> String { return \"unsaved\" }\n", 1)
+    queries := JetDriverCompilerQueries.new()
+    broken :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    permit :: broken.guard_read()
+    assert(permit.value.result.diagnostics.len() > 0)
+    &state.docs[dependency_uri].replace_text("pub fn value() -> Int { return 2 }\n")
+    repaired :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    lsp_diag_test_clean(repaired)
+    assert_eq(queries.recompute_count(QueryKey.for_file("checked.lsp", FileKey.new(lsp_diag_path.display(state.docs[main_uri].path)))), 2)
+}
+
+#Test("checked imported diagnostics retain original corpus origins and versions") {
+    // tests/lsp3934–4006 unchanged main/scoring corpus and unsaved emoji prefix.
+    // The repairs/action documentChanges claims4007–4029 require their owner;
+    // never offer a fake action in order to register the diagnostic subset.
+    main :: "use \"scoring\"\nfn run() { print(scoring.letter(91)) }\n"
+    scoring :: "pub fn letter(score: Int, offset: Int) -> String {\n    adjusted = score + offset\n    return if {\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }\n}\nfn repair_probe() {\n    m :: [String:Int]{}\n    _ :: m.gett(\"a\")\n}\n"
+    overlay :: "// unsaved 🚀\n\n{scoring}"
+    snapshot :: lsp_diag_test_snapshot("run.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("package.jet", "name: \"reports\"\nversion: \"0.1.0\"\n"), lsp_diag_test_file("scoring.jet", scoring)})
+    main_uri :: "file:///lsp/run.jet"
+    scoring_uri :: "file:///lsp/scoring.jet"
+    state := LSPDiagnosticState.new()
+    state.docs[main_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/run.jet"), ~main, 1)
+    state.docs[scoring_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/scoring.jet"), ~overlay, 2)
+    queries := JetDriverCompilerQueries.new()
+    checked :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    permit :: checked.guard_read()
+    diagnostics :: jet_driver_present_checked_diagnostics(permit.value.result)
+    targets := [String:Bool]{}
+    groups :: lsp_diagnostic_groups(state, main_uri, permit.value.result, diagnostics, snapshot.cwd.platform, &targets)
+    clears :: diagnostic_report_clear_counts(diagnostics)
+    imported :: lsp_diag_test_params(lsp_document_group_json(state, scoring_uri, diagnostics, groups[scoring_uri], clears))
+    assert_eq(lsp_diag_test_field(imported, "version"), DataTree.Int(2))
+    imported_errors := [Diagnostic]{}
+    loop index in groups[scoring_uri] {
+        if diagnostics[index].code == "E0107" -> &imported_errors.push(diagnostics[index])
+        origin :: diagnostics[index].origin ?? panic("imported diagnostic must own its checked bytes")
+        assert_eq(origin.source, overlay)
+    }
+    assert_eq(imported_errors.len(), 3)
+    first_span :: imported_errors[0].span ?? panic("imported body span")
+    assert_eq(lsp_byte_span_to_range(overlay, first_span).start.line, 3)
+    caller_found := false
+    loop index in groups[main_uri] {
+        assert(diagnostics[index].code != "E0107")
+        if diagnostics[index].code == "E0104" {
+            caller_found = true
+            assert_eq(lsp_byte_span_to_range(main, diagnostics[index].span ?? panic("caller span")).start.line, 1)
+        }
+    }
+    assert(caller_found)
+    // The source snapshot is the version witness, not just an open URI.
+    state.docs[scoring_uri].text = "{overlay}// later\n"
+    stale :: lsp_diag_test_params(lsp_document_group_json(state, scoring_uri, diagnostics, groups[scoring_uri], clears))
+    assert_eq(stale.field("version"), None)
+    _ := &state.docs.remove(scoring_uri)
+    closed :: lsp_diag_test_params(lsp_document_group_json(state, scoring_uri, diagnostics, groups[scoring_uri], clears))
+    assert_eq(closed.field("version"), None)
+}
+
+#Test("prior target clears distinguish still checked and retained elsewhere") {
+    main :: "module b\nfn run() -> Int { return b.value() }\n"
+    snapshot :: lsp_diag_test_snapshot("main.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("b.jet", "pub fn value() -> Int { return 1 }\n")})
+    uri :: "file:///lsp/main.jet"
+    dependency :: "file:///lsp/b.jet"
+    dropped :: "file:///unowned/dropped.jet"
+    elsewhere :: "file:///unowned/elsewhere.jet"
+    state := LSPDiagnosticState.new()
+    state.docs[uri] = LSPDocument.new(lsp_diag_test_path("/lsp/main.jet"), ~main, 1)
+    state.diagnostic_targets[uri] = [String:Bool]{}
+    state.diagnostic_targets[uri][dependency] = true
+    state.diagnostic_targets[uri][dropped] = true
+    state.diagnostic_targets[uri][elsewhere] = true
+    state.diagnostic_targets["file:///lsp/other.jet"] = [String:Bool]{}
+    state.diagnostic_targets["file:///lsp/other.jet"][dependency] = true
+    state.diagnostic_targets["file:///lsp/other.jet"][elsewhere] = true
+    queries := JetDriverCompilerQueries.new()
+    checked :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[uri])
+    permit :: checked.guard_read()
+    diagnostics :: jet_driver_present_checked_diagnostics(permit.value.result)
+    assert_eq(diagnostics.len(), 0)
+    targets := [String:Bool]{}
+    groups :: lsp_diagnostic_groups(state, uri, permit.value.result, diagnostics, snapshot.cwd.platform, &targets)
+    assert(groups.has_key(uri))
+    assert(groups.has_key(dependency))
+    assert(groups.has_key(dropped))
+    assert(!groups.has_key(elsewhere))
+    assert_eq(groups[dependency], [Int]{})
+    assert_eq(groups[dropped], [Int]{})
+    assert(targets.has_key(uri))
+    assert(!targets.has_key(dependency))
+    assert(!targets.has_key(dropped))
+    assert(!targets.has_key(elsewhere))
+    assert(lsp_target_retained_elsewhere(state, uri, dependency))
+    assert(lsp_target_retained_elsewhere(state, uri, elsewhere))
+    assert(!lsp_target_retained_elsewhere(state, uri, dropped))
+    clear :: lsp_publish_diagnostics(dropped, ReportPath.from_process("/unowned/dropped.jet"), "", None, [Diagnostic]{}, [Int]{}, [Int]{})
+    assert_eq(clear, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":\"file:///unowned/dropped.jet\",\"diagnostics\":[]}}}}")
+}
+
+#Test("original checked module membership drives dirty sibling invalidation") {
+    // tests/lsp3376–3462 exact main/helper/other source corpus. This checks the
+    // actual retained rows and newest overlay verdict. The request/notification
+    // count and version4 wire transcript is gated on L19, not a memory sink.
+    helper_int :: "pub fn value() -> Int { return 1 }\n"
+    helper_text :: "pub fn value() -> String { return \"one\" }\n"
+    main :: "use \"helper\"\nfn run() { print(helper.value() + 1) }\n"
+    other :: "fn run() { print(2) }\n"
+    snapshot :: lsp_diag_test_snapshot("run.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("package.jet", "name: \"sibling\"\nversion: \"0.1.0\"\n"), lsp_diag_test_file("helper.jet", helper_int), lsp_diag_test_file("other.jet", other)})
+    helper_uri :: "file:///lsp/helper.jet"
+    main_uri :: "file:///lsp/run.jet"
+    other_uri :: "file:///lsp/other.jet"
+    state := LSPDiagnosticState.new()
+    state.docs[helper_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/helper.jet"), ~helper_int, 1)
+    state.docs[main_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/run.jet"), ~main, 1)
+    state.docs[other_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/other.jet"), ~other, 1)
+    queries := JetDriverCompilerQueries.new()
+    opened :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    lsp_diag_test_clean(opened)
+    opened_permit :: opened.guard_read()
+    state.checked_modules[main_uri] = lsp_checked_module_paths(opened_permit.value.result, snapshot.cwd.platform)
+    // Other reads no edited module: it must not enter the importer batch.
+    independent :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[other_uri])
+    lsp_diag_test_clean(independent)
+    independent_permit :: independent.guard_read()
+    state.checked_modules[other_uri] = lsp_checked_module_paths(independent_permit.value.result, snapshot.cwd.platform)
+    &state.docs[helper_uri].replace_text(~helper_text)
+    state.docs[helper_uri].version = 2
+    state.dirty[helper_uri] = true
+    assert_eq(lsp_dirty_documents(&state), [String]{helper_uri, main_uri})
+    broken :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    broken_permit :: broken.guard_read()
+    assert(broken_permit.value.result.diagnostics.len() > 0)
+    // Two rapid sibling changes coalesce; the latest bytes are the witness.
+    &state.docs[helper_uri].replace_text(~helper_text)
+    state.docs[helper_uri].version = 3
+    state.dirty[helper_uri] = true
+    &state.docs[helper_uri].replace_text(~helper_int)
+    state.docs[helper_uri].version = 4
+    state.dirty[helper_uri] = true
+    assert_eq(lsp_dirty_documents(&state), [String]{helper_uri, main_uri})
+    repaired :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    lsp_diag_test_clean(repaired)
+    assert_eq(lsp_dirty_documents(&state), [String]{})
+    assert_eq(state.docs[helper_uri].version, 4)
+}
+
+// REAL NATIVE PIPE INTEGRATION GATES, not fake success tests:
+// * Parent closes the child's stdout reader before lsp_publish_document;
+//   real write/flush failure must leave prior diagnostic_targets and
+//   checked_modules unchanged. Dirty was drained before that failure.
+// * For didClose, overlay removal + importer dirty + this root's target removal
+//   happen before a failing clear; targets owned by another root emit no clear.
+// * A request after sibling version3/version4 edits observes exactly one fresh
+//   importer publication, newest helper version4, no unrelated publication.
+// Core.term.Stdout is currently a unit native handle: a forged fd:-1 does NOT
+// create a failure. L19/real native pipe synchronization must exercise these.
+
+#Test("publication respects selected index order versions and complete data") {
+    first :: lsp_diag_test_report("E0956", "first", "why", "fix", Val(Span{start: 0, end: 1}))
+    second :: diagnostic_caused_by(lsp_diag_test_report("E0957", "second", "why", "fix", Val(Span{start: 2, end: 3})), first)
+    diagnostics :: [Diagnostic]{first, second}
+    file :: ReportPath.from_process("/work/a b.jet")
+    json :: lsp_publish_diagnostics("file:///work/a%20b.jet", file, "a b", Val(12), diagnostics, [Int]{1, 0}, diagnostic_report_clear_counts(diagnostics))
+    params :: lsp_diag_test_params(json)
+    assert_eq(lsp_diag_test_field(params, "version"), DataTree.Int(12))
+    values :: lsp_diag_test_field(params, "diagnostics")
+    if values == {
+        .Array(items) -> {
+            assert_eq(items.len(), 2)
+            assert_eq(lsp_diag_test_field(items[0], "code"), DataTree.Text("E0957"))
+            assert_eq(lsp_diag_test_field(items[1], "code"), DataTree.Text("E0956"))
+            expected :: lsp_diag_test_json.parse(diagnostic_to_json_with_clears(first, file, "a b", 1)) ?? panic("compiler data")
+            assert_eq(lsp_diag_test_field(items[1], "data"), expected)
+        }
+        else -> panic("published diagnostics must be an array")
+    }
+    no_version :: lsp_diag_test_params(lsp_publish_diagnostics("file:///work/a%20b.jet", file, "", None, [Diagnostic]{}, [Int]{}, [Int]{}))
+    assert_eq(no_version.field("version"), None)
+}
+
+#Test("retain_document_diagnostics uses exact checked source and canonical path") {
+    src :: "a b"
+    raw :: lsp_diag_test_report("E0956", "root", "why", "fix", Val(Span{start: 0, end: 1}))
+    owned :: diagnostic_with_origin(~raw, DiagnosticOrigin{display: "main.jet", path: "/work/main.jet", source: src, revision: mir_sha256_hex(src)})
+    other :: diagnostic_with_origin(~raw, DiagnosticOrigin{display: "sibling.jet", path: "/work/sibling.jet", source: src, revision: mir_sha256_hex(src)})
+    stale :: diagnostic_with_origin(~raw, DiagnosticOrigin{display: "main.jet", path: "/work/main.jet", source: "older", revision: mir_sha256_hex("older")})
+    retained :: lsp_retain_document_diagnostics([Diagnostic]{raw, owned, other, stale}, lsp_diag_test_path("/work"), lsp_diag_test_path("main.jet"), src)
+    assert_eq(retained.len(), 2)
+    assert_eq(retained[0].origin, None)
+    assert_eq(retained[1].origin, owned.origin)
+}

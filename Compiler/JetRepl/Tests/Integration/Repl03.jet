@@ -1,0 +1,30 @@
+// PORT-PENDING 2061 tests-repl-slice-3601: tests/repl.rs:3601-3626
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     use std::process::Command;
+//RS 
+//RS     let project = std::env::temp_dir().join(format!("jet_repl_proj_arg_{}", std::process::id()));
+//RS     std::fs::create_dir_all(&project).unwrap();
+//RS     std::fs::write(
+//RS         project.join("helper.jet"),
+//RS         "fn helper() -[]> Int { return 7 }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .arg("repl")
+//RS         .arg("--project")
+//RS         .arg(&project)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run repl");
+//RS     std::fs::remove_dir_all(&project).ok();
+//RS 
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !stderr.contains("E2105"),
+//RS         "`--project <dir>` must not be mistaken for a preload file: {stderr}"
+//RS     );
+//RS }
+//RS 
+// END-PORT-PENDING 2061 tests/repl.rs:3601-3626
+

@@ -1,0 +1,116 @@
+use jet_foundation.[JET_DEVTOOLS_PROTOCOL, foundation_parse_protocol_json]
+
+// EditorHost.rs:1603–1721: all six original tests and their real wire fixture.
+fn editor_test_transport(grants: [String]) -> EditorHostTransport Never! {
+    EditorHostTransport.new("http://127.0.0.1:4312/__jet_devtools", "session-1", "src/main.jet", "src/main.jet", "rev-1", grants) ?? panic("transport")
+}
+fn editor_test_open_request(host: EditorHost) -> EditorWorkbenchOpenRequest Never! {
+    EditorWorkbenchOpenRequest.new(host, "session-1", "src/main.jet", "src/main.jet", "rev-1")
+}
+fn editor_test_envelope() -> String Never! {
+    `{"protocol":"jet.devtools.v1","session_id":"session-1","started_at_ms":10,"events":[{"sequence":1,"timestamp_ms":11,"source":"test","kind":"Build","entity":"main","fields":{"status":"ready"},"payload":null},{"sequence":2,"timestamp_ms":12,"source":"test","kind":"Trace","entity":"main","fields":{"duration_ms":3},"payload":{"published":"yes"}}],"history":[{"sequence":1,"timestamp_ms":11,"source":"test","kind":"Build","entity":"main","fields":{"status":"ready"},"payload":null},{"sequence":2,"timestamp_ms":12,"source":"test","kind":"Trace","entity":"main","fields":{"duration_ms":3},"payload":{"published":"yes"}}],"selection":{"panel_id":"build","item_key":null},"cursor":2}`
+}
+#Test("one_transport_opens_both_editor_hosts_from_one_envelope") {
+    transport := editor_test_transport([String]{})
+    &transport.replace_devtools_json(editor_test_envelope()) ?? panic("envelope")
+    vscode :: &transport.open(editor_test_open_request(.VsCode)) ?? panic("vscode")
+    zed :: &transport.open(editor_test_open_request(.Zed)) ?? panic("zed")
+    assert_eq(vscode.protocol, JET_DEVTOOLS_PROTOCOL)
+    assert_eq(vscode.events, zed.events)
+    assert_eq(vscode.panels, zed.panels)
+    assert_eq(vscode.host, EditorHost.VsCode)
+    assert_eq(zed.host, EditorHost.Zed)
+    assert_eq(vscode.events[0].payload, None)
+    assert(vscode.events[1].payload != None)
+}
+#Test("reconnect_cursor_is_bounded_and_deterministic") {
+    transport := editor_test_transport([String]{})
+    &transport.replace_devtools_json(editor_test_envelope()) ?? panic("envelope")
+    request :: EditorReconnectRequest.new(.Zed, "session-1", "src/main.jet", "src/main.jet", "rev-1", Val(U64{1}))
+    resumed :: transport.reconnect(request) ?? panic("resume")
+    assert_eq(resumed.resumed_from, Val(U64{1}))
+    assert_eq(resumed.cursor, Val(U64{2}))
+    assert_eq(resumed.events.len(), 1)
+    assert_eq(resumed.events[0].sequence, U64{2})
+}
+#Test("stale_identity_path_and_revision_are_rejected") {
+    transport := editor_test_transport([String]{})
+    request := editor_test_open_request(.VsCode)
+    request.source_path = "../secret.jet"
+    assert(if &transport.open(request) == .Err(.SourcePathRejected(_)) -> true else -> false)
+    request.source_path = "src/main.jet"
+    request.revision = "rev-2"
+    assert(if &transport.open(request) == .Err(.RevisionMismatch{..}) -> true else -> false)
+}
+#Test("commands_require_the_transport_grant") {
+    request :: EditorCommandRequest.new(.VsCode, "session-1", "src/main.jet", "src/main.jet", "rev-1", .Build)
+    denied :: editor_test_transport([String]{})
+    assert(if denied.command(request) == .Err(.CommandDenied{..}) -> true else -> false)
+    authorized :: editor_test_transport([String]{"editor.command:build"})
+    receipt :: authorized.command(request) ?? panic("authorized command")
+    assert_eq(receipt.required_grant, "editor.command:build")
+}
+#Test("source_navigation_is_project_relative_and_loopback") {
+    transport :: editor_test_transport([String]{})
+    request :: EditorSourceNavigationRequest.new(.Zed, "session-1", "src/main.jet", "src/main.jet", "rev-1", U32{4}, U32{2})
+    navigation :: transport.navigate_source(request) ?? panic("navigation")
+    assert_eq(navigation.source_url, "http://127.0.0.1:4312/__jet_devtools?source_id=src%2Fmain.jet&line=4&column=2")
+}
+#Test("lsp_json_response_keeps_json_rpc_id_and_typed_result") {
+    transport := editor_test_transport([String]{})
+    request :: `{"jsonrpc":"2.0","id":7,"method":"jet/devtools/open","params":{"editor":"vscode","session_id":"session-1","source_id":"src/main.jet","source_path":"src/main.jet","revision":"rev-1"}}`
+    response :: &transport.handle_lsp_json(request) ?? panic("response")
+    assert(response.starts_with(`{"jsonrpc":"2.0","id":7,"result":{`))
+    assert(response.contains(`"protocol":"jet.devtools.v1"`))
+}
+
+// Additional controls exercise the bounded ring rather than substitute providers.
+#Test("editor retained ring expires cursors and rejects nonmonotonic events atomically") {
+    transport := editor_test_transport([String]{})
+    loop sequence in 1..<259 {
+        event :: EditorStreamEvent.new(U64{sequence}, U64{sequence}, "test", "Build", "main", [String:EditorFactValue]{}, None) ?? panic("event")
+        &transport.append_event(event) ?? panic("append")
+    }
+    assert_eq(transport.event_count(), 256)
+    assert_eq(transport.latest_cursor(), Val(U64{258}))
+    assert(if transport.stream_after(Val(U64{1})) == .Err(.CursorExpired{requested: U64{1}, oldest: U64{3}}) -> true else -> false)
+    retained :: transport.stream_after(Val(U64{2})) ?? panic("oldest predecessor")
+    assert_eq(retained.events[0].sequence, U64{3})
+    assert_eq(retained.events[255].sequence, U64{258})
+    future :: transport.stream_after(Val(U64{18446744073709551615})) ?? panic("saturating future")
+    assert_eq(future.events.len(), 0)
+    assert_eq(future.next_cursor, Val(U64{18446744073709551615}))
+    duplicate :: EditorStreamEvent.new(U64{258}, U64{259}, "test", "Build", "main", [String:EditorFactValue]{}, None) ?? panic("event")
+    assert(if &transport.append_event(duplicate) == .Err(.InvalidEnvelope("event sequence must increase monotonically")) -> true else -> false)
+    assert_eq(transport.latest_cursor(), Val(U64{258}))
+}
+#Test("editor validation retains Unicode controls port parsing and grant normalization") {
+    c1 :: String.from_bytes([U8]{194, 128}) ?? panic("C1 UTF-8")
+    assert(if EditorFactValue.text(c1) == .Err(.InvalidRequest(_)) -> true else -> false)
+    editor_validate_loopback_url("http://[::1]:+4312/__jet_devtools") ?? panic("IPv6 loopback")
+    assert(if editor_validate_loopback_url("http://example.com:4312/x") == .Err(.LoopbackViolation(_)) -> true else -> false)
+    assert(if editor_validate_loopback_url("http://localhost:65536/x") == .Err(.LoopbackViolation(_)) -> true else -> false)
+    assert(if editor_validate_source_identity("src/../main.jet") == .Err(.SourcePathRejected(_)) -> true else -> false)
+    transport :: editor_test_transport([String]{"editor.command:test", "editor.command:build", "editor.command:build"})
+    assert_eq(transport.grants(), [String]{"editor.command:build", "editor.command:test"})
+}
+#Test("editor selection preserves shared state but explicit panel clears item") {
+    transport := editor_test_transport([String]{})
+    request := editor_test_open_request(.VsCode)
+    request.item_key = Val("main")
+    first :: &transport.open(request) ?? panic("selection")
+    assert_eq(first.selection.item_key, Val("main"))
+    implicit :: &transport.open(editor_test_open_request(.Zed)) ?? panic("shared selection")
+    assert_eq(implicit.selection.item_key, Val("main"))
+    explicit := editor_test_open_request(.Zed)
+    explicit.panel_id = Val("build")
+    cleared :: &transport.open(explicit) ?? panic("explicit panel")
+    assert_eq(cleared.selection.item_key, None)
+}
+#Test("editor JSON dispatch preserves unsupported-method precedence and float cursor domain") {
+    transport := editor_test_transport([String]{})
+    unknown :: `{"jsonrpc":"2.0","id":null,"method":"unknown","params":{}}`
+    assert(if &transport.handle_lsp_json(unknown) == .Err(.UnsupportedMethod("unknown")) -> true else -> false)
+    params :: foundation_parse_protocol_json(`{"cursor":18446744073709551616.0}`) ?? panic("float fixture")
+    assert_eq(editor_optional_cursor(params) ?? panic("Rust saturating float cast"), Val(U64{18446744073709551615}))
+}

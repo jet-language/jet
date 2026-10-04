@@ -1,0 +1,184 @@
+// TOOLS-S11: real leaf byte-span claims plus unregistered full-walker oracles.
+// C4/CP-NAMES/S12/CP-AST/#4397 gate actual checked products. No prefilled index,
+// empty registration graph or fake parser/name provider substitutes for them.
+use jet_foundation.[Stmt, Expr, Binding, CallArg, CallLabel, Span, NamedSpan, Program, MIRNameFacts, AccessConvention, ast_empty_call_arg_flags, type_name, bind_pattern_names]
+
+#Test("semindex_loop_label_reference_span_uses_utf8_bytes") {
+    assert_eq(semindex_loop_label_span("outer", Span{start: 7, end: 99}), Span{start: 7, end: 12})
+    assert_eq(semindex_loop_label_span("é外", Span{start: 7, end: 99}), Span{start: 7, end: 12})
+    assert_eq(semindex_loop_label_span("label😀", Span{start: 0, end: 99}), Span{start: 0, end: 9})
+}
+#Test("semindex_loop_label_reference_span_keeps_start_and_empty_name") {
+    assert_eq(semindex_loop_label_span("", Span{start: 11, end: 100}), Span{start: 11, end: 11})
+    assert_eq(semindex_loop_label_span("x", Span{start: 0, end: 0}), Span{start: 0, end: 1})
+}
+#Test("semindex_loop_label_span_selects_only_name_after_multibyte_prefix") {
+    source :: "αé外)"
+    span :: semindex_loop_label_span("é外", Span{start: 2, end: 8})
+    assert_eq(span, Span{start: 2, end: 7})
+    bytes :: source.bytes()
+    selected := bytes[span.start..<span.end] // #4303
+    assert_eq(String.from_bytes(selected) ?? panic("label token UTF-8"), "é外")
+}
+
+// Original tests/semindex.rs1107–1161: the COMPLETE unified-loop source,
+// source/stride/init/condition/afterthought/body assertions, deepest cursor
+// target and separate E0107 negative fixture are retained in Structure.jet:
+// semindex_structure_original_unified_loops_source,
+// semindex_structure_original_out_of_scope_source,
+// semindex_structure_original_unified_loops_assertions. Intentionally unchanged;
+// registering only the slot half while dropping E0107 is not this oracle.
+
+// Original tests/semindex.rs1360–1374. Driver opens this actual checked source.
+pub fn semindex_s11_loop_label_source() -> String Never! {
+    "fn run() {{\n    outer :: loop {{\n        if true {{ next(outer) }}\n        break(outer)\n    }}\n}}\n"
+}
+pub fn semindex_s11_loop_label_assertions(index: SemIndex) Never! {
+    outer :: (index.lookup("outer") ?? panic("loop label definition"))[0]
+    assert(outer.kind == .Local(mutable, ty) && !mutable && ty == None)
+    assert_eq(index.references_to("outer").len(), 2)
+}
+
+// Original tests/semindex.rs1273–1292, including EVERY provenance assertion,
+// remains canonically in Convert.jet semindex_s20_via_effect_source/assertions.
+// S11 does not rerun/re-solve effects or duplicate S20's real producer.
+// Original tests/semindex.rs1295–1306 source and exact S13 signature assertion
+// remain in Convert.jet semindex_s20_via_signature_source/assertions. Both via
+// originals stay unregistered until the real checked producer is available.
+
+// Original tests/lsp.rs4791–4826 and4832–4871 source/output oracles. S11 owns
+// the inlay producer; initialize/open/response transport is the LSP gate.
+pub fn semindex_s11_type_hint_source() -> String Never! {
+    "fn run() {{\n    x :: 42\n    count := 0\n}}\n"
+}
+pub fn semindex_s11_call_hint_source() -> String Never! {
+    "fn clamp(value: Int, low: Int, high: Int) -> Int {{ return value }}\nfn run() {{ print(clamp(12, 0, 10)) }}\n"
+}
+pub fn semindex_s11_type_hint_response_assertions(initialize: String, response: String, shutdown: String) Never! {
+    assert(initialize.contains("inlayHintProvider"))
+    assert(response.contains(": Int"))
+    assert(shutdown.contains("result"))
+}
+pub fn semindex_s11_call_hint_response_assertions(initialize: String, response: String, shutdown: String) Never! {
+    assert(initialize.contains("inlayHintProvider"))
+    assert(response.contains("value: "))
+    assert(response.contains("low: "))
+    assert(response.contains("high: "))
+    assert(shutdown.contains("result"))
+}
+// Complete named-call/default fixtures/oracles intentionally unchanged:
+// Signatures.jet semindex_s6_lsp_signature_source/assertions (LSP2522–2582):
+// positional-only host, public timeout/tls labels, label-only tls, variadic
+// rest, defaults30/true, named-call active parameters2/1 and return String.
+// CallableFacts.jet semindex_test_callable_signature_facts_keep_typed_and_
+// unavailable_states retains lib.rs313–466's typed(default7)/generic/foreign
+// fixture and typed return/default/availability/stable-ID assertions.
+// Structure.jet semindex_structure_original_explicit_slots_fixture/assertions
+// retains lib.rs819–825's actual Examples/features/basics/default_refs.jet:
+// Rect.square(height defaults width), box_dims(h defaults w, d defaults h).
+// No rewritten source or omitted defaults are used for a cheaper proof.
+
+// Unregistered consumer boundary regressions below use the actual S5 DB and
+// canonical AST. They test collector behavior only, not a fabricated sema run.
+fn semindex_s11_arg(start: Int, label: String?, binder_label: String?, slot: Int?) -> CallArg Never! {
+    flags := ast_empty_call_arg_flags()
+    flags.binder_label = binder_label
+    flags.binder_slot = slot
+    authored := CallLabel?{None}
+    if label == .Val(label) -> authored = Val(CallLabel{name: label, span: Span{start: start - 2, end: start - 1}})
+    // Argument span includes its access sigil; hint anchors the expression.
+    CallArg{convention: AccessConvention.Write, expr: Expr.Unit{span: Span{start: start, end: start + 2}}, span: Span{start: start - 1, end: start + 2}, flags: flags, label: authored, spread: false}
+}
+fn semindex_s11_call_inlays_filter_labels_and_dedup_variadic_slots() {
+    db := SymbolDB.new()
+    args :: [CallArg]{
+        semindex_s11_arg(10, Val("named"), Val("named"), Val(0)),
+        semindex_s11_arg(20, None, None, Val(1)),
+        semindex_s11_arg(30, None, Val(""), Val(2)),
+        semindex_s11_arg(40, None, Val("missing_slot"), None),
+        semindex_s11_arg(50, None, Val("value"), Val(0)),
+        semindex_s11_arg(60, None, Val("tail"), Val(9)),
+        semindex_s11_arg(70, None, Val("tail"), Val(9)),
+        semindex_s11_arg(80, None, Val("other"), Val(3)),
+    }
+    semindex_collect_call_inlay_hints(&db, args, "main.jet")
+    assert_eq(db.inlay.len(), 3)
+    assert_eq(db.inlay[0].label, "value: ")
+    assert_eq(db.inlay[0].span, Span{start: 50, end: 50})
+    assert_eq(db.inlay[1].label, "tail: ")
+    assert_eq(db.inlay[1].span, Span{start: 60, end: 60})
+    assert_eq(db.inlay[2].label, "other: ")
+    assert_eq(db.inlay[2].span, Span{start: 80, end: 80})
+    loop hint in db.inlay -> assert_eq(hint.module_path, "main.jet")
+    // Each call owns its own dedup set; slot9 in another call still gets a hint.
+    semindex_collect_call_inlay_hints(&db, [CallArg]{semindex_s11_arg(100, None, Val("tail"), Val(9))}, "other.jet")
+    assert_eq(db.inlay.len(), 4)
+    assert_eq(db.inlay[3].module_path, "other.jet")
+    assert_eq(db.inlay[3].span, Span{start: 100, end: 100})
+}
+fn semindex_s11_loop_label_defs_use_ordinary_namespace_and_scope() {
+    db := SymbolDB.new()
+    ctx := WalkCtx.new(0, "module:main.jet", [Span]{})
+    ctx.caller = Val(CallerFrame{name: "run", owner: None, identity: "fn:module:main.jet::run"})
+    semindex_collect_loop_label_def(&db, ctx, None, "main.jet")
+    assert_eq(db.defs.len(), 0)
+    semindex_collect_loop_label_def(&db, ctx, Val(NamedSpan{name: "é外", span: Span{start: 3, end: 8}}), "main.jet")
+    assert_eq(db.defs.len(), 1)
+    assert_eq(db.defs[0].identity, "loop_label:fn:module:main.jet::run::é外")
+    assert_eq(db.defs[0].name, "é外")
+    assert_eq(db.defs[0].def_span, Span{start: 3, end: 8})
+    assert_eq(db.defs[0].module_path, "main.jet")
+    assert(db.defs[0].kind == .Local(mutable, ty) && !mutable && ty == None)
+}
+
+// Harness supplies a REAL checked body + names/program/source and lexical spans.
+// The algorithm must restore the initial parent/slot stack even for empty bodies
+// and conditional optional slots. This never supplies an empty sema provider.
+pub fn semindex_s11_body_restoration_assertions(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, body: [Stmt], mp: String) {
+    parents :: ~ctx.structural_parents
+    slot :: ctx.structural_slot
+    kind :: ctx.structural_slot_kind
+    first :: db.nodes.len()
+    semindex_collect_stmts(&db, &ctx, names, program, source, body, mp)
+    assert_eq(ctx.structural_parents, parents)
+    assert_eq(ctx.structural_slot, slot)
+    assert_eq(ctx.structural_slot_kind, kind)
+    loop index in first..<db.nodes.len() -> assert(db.nodes[index].parent == None || db.nodes[index].slot != "root")
+}
+// Sema supplies actual Binding including its inferred ty; explicit source
+// annotation means no type hint. Spans remain the real name token, never sigil.
+pub fn semindex_s11_binding_assertions(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, binding: Binding, mp: String) {
+    first_def :: db.defs.len()
+    first_hover :: db.hover.len()
+    first_inlay :: db.inlay.len()
+    semindex_collect_binding(&db, &ctx, names, program, source, binding, mp)
+    if binding.pattern == .Val(pattern) {
+        captures :: bind_pattern_names(pattern)
+        first_capture :: db.defs.len() - captures.len()
+        loop index in 0..<captures.len() {
+            definition :: db.defs[first_capture + index]
+            assert_eq(definition.name, captures[index].name)
+            assert_eq(definition.def_span, captures[index].span)
+            assert_eq(definition.module_path, mp)
+            assert(definition.kind == .Local(mutable, ty) && mutable == binding.mutable && ty == None)
+        }
+        return
+    }
+    definition :: db.defs[first_def]
+    assert_eq(definition.name, binding.name)
+    assert_eq(definition.def_span, binding.name_span)
+    assert(definition.kind == .Local(mutable, ty) && mutable == binding.mutable && ty == binding.ty)
+    if binding.ty == .Val(ty) {
+        hover :: db.hover[first_hover]
+        assert_eq(hover.span, binding.name_span)
+        assert_eq(hover.module_path, mp)
+        mutability :: if binding.mutable -> "mutable" else -> "immutable"
+        expected :: "`{binding.name}`: {type_name(ty)} ({mutability})"
+        assert_eq(hover.text, expected)
+        if binding.ty_span == None {
+            assert_eq(db.inlay[first_inlay].span, binding.name_span)
+            hint :: ": {type_name(ty)}"
+            assert_eq(db.inlay[first_inlay].label, hint)
+        }
+    }
+}

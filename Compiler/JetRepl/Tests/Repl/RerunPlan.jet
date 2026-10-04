@@ -1,0 +1,116 @@
+// RerunPlan.rs:119–132 original fixture uses the sole canonical turn record.
+fn repl_replay_test_turn(id: Int, input: String, had_effect: Bool, bound_name: String?) -> ReplTurn Never! {
+    ReplTurn{
+        id, input: ~input, summary: "", status: ReplTurnStatus.Ok,
+        folded: false, pinned: false, stale: false, had_effect,
+        bound_name: ~bound_name, pending_unfold: None,
+    }
+}
+
+// RerunPlan.rs:135–153: all original fixtures and assertions.
+#Test("plan_marks_pure_turns_auto_and_effectful_confirm") {
+    turns :: [ReplTurn]{
+        repl_replay_test_turn(1, "rate :: 0.07", false, Val("rate")),
+        repl_replay_test_turn(2, "invoice_total :: subtotal * (1.0 + rate)", false, Val("invoice_total")),
+        repl_replay_test_turn(3, "write_file(\"out.txt\", invoice_total)", true, None),
+    }
+    plan :: build_replay_plan(turns, 1, Val("rate :: 0.08")) ?? panic("plan")
+    assert_eq(plan.steps.len(), 3)
+    assert_eq(plan.steps[0].input, "rate :: 0.08")
+    assert_eq(plan.steps[0].kind, StepKind.Auto)
+    assert_eq(plan.steps[1].kind, StepKind.Auto)
+    assert_eq(plan.steps[2].kind, StepKind.ConfirmEffect)
+    assert(plan_needs_confirmation(plan))
+}
+
+// RerunPlan.rs:156–163.
+#Test("plan_without_effects_needs_no_confirmation") {
+    turns :: [ReplTurn]{
+        repl_replay_test_turn(1, "x :: 1", false, Val("x")),
+        repl_replay_test_turn(2, "x * 2", false, None),
+    }
+    plan :: build_replay_plan(turns, 1, None) ?? panic("plan")
+    assert(!plan_needs_confirmation(plan))
+}
+
+// RerunPlan.rs:166–169, with exact error propagation checked too.
+#Test("unknown_turn_id_errors") {
+    turns :: [ReplTurn]{repl_replay_test_turn(1, "x :: 1", false, Val("x"))}
+    error :: if build_replay_plan(turns, 5, None) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("unknown turn accepted")
+    }
+    assert_eq(error, "turn #5 does not exist")
+    empty :: [ReplTurn]{}
+    if build_replay_plan(empty, 1, None) == {
+        .Err(empty_error) -> assert_eq(empty_error.message, "turn #1 does not exist")
+        .Ok(_) -> panic("empty turn ledger accepted")
+    }
+}
+
+#Test("replay_plan_filters_numeric_ids_keeps_recorded_order_and_duplicate_edits") {
+    turns :: [ReplTurn]{
+        repl_replay_test_turn(9, "later but recorded first", true, None),
+        repl_replay_test_turn(1, "excluded", true, None),
+        repl_replay_test_turn(4, "selected", false, Val("selected")),
+        repl_replay_test_turn(4, "duplicate", true, None),
+        repl_replay_test_turn(2, "excluded after selected", false, None),
+        repl_replay_test_turn(6, "retained", false, None),
+    }
+    original :: ~turns
+    plan :: build_replay_plan(turns, 4, Val("")) ?? panic("plan")
+    assert_eq(plan.from_id, 4)
+    assert_eq(plan.steps, [ReplayStep]{
+        ReplayStep{turn_id: 9, input: "later but recorded first", kind: StepKind.ConfirmEffect},
+        ReplayStep{turn_id: 4, input: "", kind: StepKind.Auto},
+        ReplayStep{turn_id: 4, input: "", kind: StepKind.ConfirmEffect},
+        ReplayStep{turn_id: 6, input: "retained", kind: StepKind.Auto},
+    })
+    // Building and inspecting the plan must not change session facts.
+    assert_eq(turns, original)
+    unchanged :: build_replay_plan(turns, 4, None) ?? panic("unedited plan")
+    assert_eq(unchanged.steps[1].input, "selected")
+    assert_eq(unchanged.steps[2].input, "duplicate")
+}
+
+#Test("replay_confirmation_uses_observed_effect_not_status_or_notebook_flags") {
+    pure := repl_replay_test_turn(1, "x :: 1", false, Val("x"))
+    pure.status = ReplTurnStatus.Error
+    pure.summary = "print/write effect"
+    pure.folded = true
+    pure.pinned = true
+    pure.stale = true
+    pure.pending_unfold = Val("full output")
+    effectful := repl_replay_test_turn(2, "print(1)", true, None)
+    effectful.status = ReplTurnStatus.Interrupted
+    effectful.stale = true
+    turns :: [ReplTurn]{pure, effectful}
+    plan :: build_replay_plan(turns, 1, Val("pure replacement")) ?? panic("plan")
+    assert_eq(plan.steps[0].kind, StepKind.Auto)
+    assert_eq(plan.steps[1].kind, StepKind.ConfirmEffect)
+    assert(plan_needs_confirmation(plan))
+    empty :: ReplayPlan{from_id: 1, steps: [ReplayStep]{}}
+    assert(!plan_needs_confirmation(empty))
+}
+
+// Consumer edge, not the excluded wording-only render_matches_ratified_shape:
+// differing byte/cell/scalar widths must align by scalars, and only the default
+// refusal token is styled by the canonical Foundation theme.
+#Test("replay_render_padding_counts_scalars_and_color_preserves_row_bytes") {
+    turns :: [ReplTurn]{
+        repl_replay_test_turn(12, "界", false, None),
+        repl_replay_test_turn(13, "é", true, None),
+        repl_replay_test_turn(14, "abc", false, None),
+    }
+    plan :: build_replay_plan(turns, 12, None) ?? panic("plan")
+    rows :: "Replay plan:\n  12 界    auto\n  13 é   confirm effect\n  14 abc  auto\n"
+    plain :: "{rows}Apply? [y/N]"
+    assert_eq(render_replay_plan(plan, false), plain)
+    esc :: String.from_bytes([U8]{27}) ?? panic("ESC")
+    styled :: "{rows}Apply? [y/{esc}[1mN{esc}[0m]"
+    assert_eq(render_replay_plan(plan, true), styled)
+    empty :: ReplayPlan{from_id: 12, steps: [ReplayStep]{}}
+    assert_eq(render_replay_plan(empty, false), "Replay plan:\nApply? [y/N]")
+    empty_styled :: "Replay plan:\nApply? [y/{esc}[1mN{esc}[0m]"
+    assert_eq(render_replay_plan(empty, true), empty_styled)
+}

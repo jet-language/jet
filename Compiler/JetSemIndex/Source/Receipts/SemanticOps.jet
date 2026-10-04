@@ -1,0 +1,281 @@
+use core.files as semops_files
+use core.sys as semops_sys
+use core.encoding.[DataTree]
+use jet_foundation.[foundation_parse_protocol_json]
+
+// Rust SemanticOps.rs:12–39,188–194: persisted operation and blame records.
+// Paths use the tooling host's native path String carrier, never a source span.
+pub struct SemanticOpTarget {
+    pub stable_id: String
+    pub before: String
+    pub after: String
+    pub kind: String
+    pub module_path: String
+}
+pub struct SemanticOpFile {
+    pub path: String
+    pub before_hash: String
+    pub after_hash: String
+}
+pub struct SemanticOp {
+    pub kind: String
+    pub rule_id: String?
+    pub from: String?
+    pub to: String?
+    pub node: String?
+    pub match_template: String?
+    pub replace_template: String?
+    pub targets: [SemanticOpTarget]
+    pub files: [SemanticOpFile]
+}
+pub struct SemanticBlameEntry {
+    pub stable_id: String
+    pub identity: String
+    pub kind: String
+    pub operation: SemanticOp?
+}
+
+// Rust SemanticOp::matches_file_transition: both path authority and checkpoints.
+impl SemanticOp {
+    pub fn matches_file_transition(self, paths: [String], before_hash: String, after_hash: String) -[FS, Env]> Bool Never! {
+        loop file in self.files {
+            loop path in paths {
+                if semops_normalize(file.path) == semops_normalize(path)
+                    && semops_same_hash(file.before_hash, before_hash)
+                    && semops_same_hash(file.after_hash, after_hash) -> return true
+            }
+        }
+        false
+    }
+}
+
+// Rust normalize/normalize_from: canonicalize existing paths, but do not
+// lexically collapse a failed canonicalization (including nonexistent `..`).
+fn semops_normalize(path: String) -[FS, Env]> String Never! {
+    canonical :: semops_files.canonicalize(path) ?? {
+        if semops_files.is_absolute(path) -> return path
+        cwd :: semops_sys.current_dir() ?? "."
+        return semops_files.join(cwd, path)
+    }
+    canonical
+}
+fn semops_normalize_from(path: String, root: String) -[FS, Env]> String Never! {
+    if semops_files.is_absolute(path) -> return semops_normalize(path)
+    semops_normalize(semops_files.join(root, path))
+}
+// Rust same_hash: strip at most one side's prefix, never two prefixes.
+fn semops_same_hash(recorded: String, current: String) -> Bool Never! {
+    recorded == current
+        || (recorded.starts_with("sha256-") && recorded.removeprefix("sha256-") == current)
+        || (current.starts_with("sha256-") && current.removeprefix("sha256-") == recorded)
+}
+
+// Rust Foundation parse_json: canonical strict bounded codec, enforcing the
+// 64-container/1 MiB boundary during parsing rather than after materialization.
+fn semops_parse_receipt(raw: String) -> DataTree? Never! {
+    foundation_parse_protocol_json(raw)
+}
+
+// Rust field/string/optional_string and parse_files/file, ops/op, target.
+// Nonobject rows and rows missing required strings are skipped, not fatal.
+fn semops_field(object: [String: DataTree], key: String) -> DataTree? Never! {
+    object.get(key)
+}
+fn semops_string(object: [String: DataTree], key: String) -> String? Never! {
+    value :: semops_field(object, key) ?? return None
+    if value == .Text(text) -> return Val(text)
+    None
+}
+fn semops_file(value: DataTree) -> SemanticOpFile? Never! {
+    if value == .Object(object) {
+        path :: semops_string(object, "path") ?? return None
+        before_hash :: semops_string(object, "before_hash") ?? return None
+        after_hash :: semops_string(object, "after_hash") ?? return None
+        return Val(SemanticOpFile{path, before_hash, after_hash})
+    }
+    None
+}
+fn semops_parse_files(value: DataTree) -> [SemanticOpFile]? Never! {
+    if value == .Array(values) {
+        files := [SemanticOpFile]{}
+        loop row in values {
+            if semops_file(row) == .Val(file) -> &files.push(file)
+        }
+        return Val(files)
+    }
+    None
+}
+fn semops_target(value: DataTree) -> SemanticOpTarget? Never! {
+    if value == .Object(object) {
+        stable_id :: semops_string(object, "stable_id") ?? return None
+        before :: semops_string(object, "before") ?? return None
+        after :: semops_string(object, "after") ?? return None
+        kind :: semops_string(object, "kind") ?? return None
+        module_path :: semops_string(object, "module_path") ?? return None
+        return Val(SemanticOpTarget{stable_id, before, after, kind, module_path})
+    }
+    None
+}
+fn semops_op(value: DataTree) -> SemanticOp? Never! {
+    if value == .Object(object) {
+        kind :: semops_string(object, "kind") ?? return None
+        targets := [SemanticOpTarget]{}
+        if semops_field(object, "targets") == .Val(target_value) {
+            if target_value == .Array(rows) {
+                loop row in rows {
+                    if semops_target(row) == .Val(target) -> &targets.push(target)
+                }
+            }
+        }
+        return Val(SemanticOp{
+            kind,
+            rule_id: semops_string(object, "rule_id"),
+            from: semops_string(object, "from"),
+            to: semops_string(object, "to"),
+            node: semops_string(object, "node"),
+            match_template: semops_string(object, "match"),
+            replace_template: semops_string(object, "replace"),
+            targets,
+            files: [SemanticOpFile]{},
+        })
+    }
+    None
+}
+fn semops_ops(value: DataTree) -> [SemanticOp]? Never! {
+    if value == .Array(values) {
+        operations := [SemanticOp]{}
+        loop row in values {
+            if semops_op(row) == .Val(operation) -> &operations.push(operation)
+        }
+        return Val(operations)
+    }
+    None
+}
+
+// Rust semantic_ops_for_file: nearest ancestor first; receipt names sorted
+// within each ancestor. Unreadable/malformed/nonapplicable receipts are skipped.
+pub fn semantic_ops_for_file(path: String, source_hash: String) -[FS, Env]> [SemanticOp] Never! {
+    normalized :: semops_normalize(path)
+    directory := semops_files.dirname(normalized)
+    out := [SemanticOp]{}
+    loop directory != "" {
+        receipts :: semops_files.join(directory, ".jet/codemods")
+        paths := [String]{}
+        if semops_files.list_dir(receipts) == .Ok(entries) {
+            loop entry in entries {
+                if entry.name.ends_with(".log.json") && semops_files.is_file(entry.path) -> &paths.push(entry.path)
+            }
+        }
+        &paths.sort()
+        loop receipt in paths {
+            raw :: semops_files.read(receipt) ?? next
+            value :: semops_parse_receipt(raw) ?? next
+            if value == .Object(object) {
+                file_value :: semops_field(object, "files") ?? next
+                files := semops_parse_files(file_value) ?? next
+                applies := false
+                loop index in 0..<files.len() {
+                    files[index].path = semops_normalize_from(files[index].path, directory)
+                    file :: files[index]
+                    if file.path == normalized
+                        && (semops_same_hash(file.before_hash, source_hash)
+                            || semops_same_hash(file.after_hash, source_hash)) -> applies = true
+                }
+                if !applies -> next
+                op_value :: semops_field(object, "semantic_ops") ?? next
+                operations :: semops_ops(op_value) ?? next
+                loop operation in operations {
+                    attached := ^operation
+                    attached.files = ~files
+                    &out.push(attached)
+                }
+            }
+        }
+        parent :: semops_files.dirname(directory)
+        if parent == directory -> break
+        directory = parent
+    }
+    out
+}
+
+// Rust semantic_rename_ops: only an edit-owning producer pairs signatures.
+// Forward and reverse uniqueness are both required; consumed after rows are
+// excluded only from the forward search, exactly as in the Rust BTreeSet loop.
+pub fn semantic_rename_ops(before: SemIndex, after: SemIndex) -> [SemanticOp] Never! {
+    before_defs :: before.definition_facts()
+    after_defs :: after.definition_facts()
+    used_after := [Int: Bool]{}
+    out := [SemanticOp]{}
+    loop before_index in 0..<before_defs.len() {
+        old :: before_defs[before_index]
+        candidate := -1
+        count := 0
+        loop after_index in 0..<after_defs.len() {
+            new :: after_defs[after_index]
+            if !used_after.has_key(after_index)
+                && old.kind == new.kind && old.module_path == new.module_path
+                && old.signature_id == new.signature_id && old.name != new.name {
+                candidate = after_index
+                count += 1
+            }
+        }
+        if count != 1 -> next
+        new :: after_defs[candidate]
+        reverse := 0
+        loop index in 0..<before_defs.len() {
+            other :: before_defs[index]
+            if index == before_index
+                || (other.kind == new.kind && other.module_path == new.module_path
+                    && other.signature_id == new.signature_id && other.name != new.name) -> reverse += 1
+        }
+        if reverse != 1 -> next
+        used_after[candidate] = true
+        &out.push(SemanticOp{
+            kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(new.name),
+            node: None, match_template: None, replace_template: None,
+            targets: [SemanticOpTarget]{SemanticOpTarget{
+                stable_id: old.stable_id, before: old.human_identity, after: new.human_identity,
+                kind: new.kind, module_path: new.module_path,
+            }},
+            files: [SemanticOpFile]{},
+        })
+    }
+    out
+}
+// Rust operation_applies_to_fact: recorded identities and rename destination
+// only. There is no source text, same-shape matching, or kind/module gate here.
+fn semops_operation_applies_to_fact(operation: SemanticOp, fact: DefinitionFact) -> Bool Never! {
+    suffix :: "::{fact.name}"
+    loop target in operation.targets {
+        if target.stable_id == fact.stable_id || target.after == fact.human_identity
+            || target.after == fact.name || target.after.ends_with(suffix) -> return true
+    }
+    if operation.kind == "rename" {
+        if operation.to == .Val(to) {
+            to_suffix :: "::{to}"
+            if to == fact.name || to == fact.human_identity || fact.human_identity.ends_with(to_suffix) -> return true
+        }
+    }
+    false
+}
+// Rust semantic_blame/semantic_blame_for_file: first applicable receipt wins
+// in retained checked-definition order; a hand edit receives no operation.
+pub fn semantic_blame(index: SemIndex, receipts: [SemanticOp]) -> [SemanticBlameEntry] Never! {
+    out := [SemanticBlameEntry]{}
+    loop fact in index.definition_facts() {
+        operation := SemanticOp?{None}
+        loop receipt in receipts {
+            if semops_operation_applies_to_fact(receipt, fact) {
+                operation = Val(~receipt)
+                break
+            }
+        }
+        &out.push(SemanticBlameEntry{
+            stable_id: fact.stable_id, identity: fact.human_identity, kind: fact.kind, operation,
+        })
+    }
+    out
+}
+pub fn semantic_blame_for_file(path: String, source_hash: String, index: SemIndex) -[FS, Env]> [SemanticBlameEntry] Never! {
+    semantic_blame(index, semantic_ops_for_file(path, source_hash))
+}

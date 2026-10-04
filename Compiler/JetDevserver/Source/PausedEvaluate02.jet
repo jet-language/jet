@@ -1,0 +1,891 @@
+// PORT-PENDING 0781 crates-jet-devserver-src-pausedevaluate-slice-1792: crates/jet-devserver/src/PausedEvaluate.rs:1792-2678
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     pub fn json(&self) -> String {
+//RS         match self {
+//RS             Self::SessionUnavailable => format!(
+//RS                 "{{\"protocol\":\"{}\",\"schema_version\":{},\"ok\":false,\"error\":\"session_unavailable\"}}",
+//RS                 PAUSED_EVALUATE_PROTOCOL, PAUSED_EVALUATE_SCHEMA_VERSION
+//RS             ),
+//RS             Self::EvaluatorUnavailable => format!(
+//RS                 "{{\"protocol\":\"{}\",\"schema_version\":{},\"ok\":false,\"error\":\"evaluator_unavailable\"}}",
+//RS                 PAUSED_EVALUATE_PROTOCOL, PAUSED_EVALUATE_SCHEMA_VERSION
+//RS             ),
+//RS             Self::InvalidRequest(detail) => format!(
+//RS                 "{{\"protocol\":\"{}\",\"schema_version\":{},\"ok\":false,\"error\":\"invalid_request\",\"detail\":\"{}\"}}",
+//RS                 PAUSED_EVALUATE_PROTOCOL,
+//RS                 PAUSED_EVALUATE_SCHEMA_VERSION,
+//RS                 json_escape(detail)
+//RS             ),
+//RS             Self::Rejected(err) => err.json(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for PausedEvaluateHostError {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::SessionUnavailable => formatter.write_str("session_unavailable"),
+//RS             Self::EvaluatorUnavailable => formatter.write_str("evaluator_unavailable"),
+//RS             Self::InvalidRequest(detail) => write!(formatter, "invalid_request: {detail}"),
+//RS             Self::Rejected(err) => fmt::Display::fmt(err, formatter),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for PausedEvaluateHostError {}
+//RS 
+//RS impl From<RequestError> for PausedEvaluateHostError {
+//RS     fn from(err: RequestError) -> Self {
+//RS         Self::Rejected(err)
+//RS     }
+//RS }
+//RS 
+//RS /// Host-owned state wrapper around the paused inspect/evaluate kernel.
+//RS ///
+//RS /// A host stores exactly one instance per devtools connection and injects
+//RS /// the real paused session and the real evaluator's result as those facts
+//RS /// become available; it never runs an evaluator, never decides pause state
+//RS /// on its own, and never invents a value.  An absent session or an absent
+//RS /// evaluator result is reported as an explicit [`PausedEvaluateHostError`],
+//RS /// never silently substituted.  `handle_inspect` and `handle_evaluate` are
+//RS /// the only entry points a host needs to serve `/paused/inspect` and
+//RS /// `/paused/evaluate`: they parse the typed request, delegate to the
+//RS /// kernel, and return a bounded JSON body with no semantic logic left for
+//RS /// the caller.
+//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
+//RS pub struct PausedEvaluateHost {
+//RS     session: Option<PausedSession>,
+//RS     evaluator_result: Option<EvaluatorResult>,
+//RS }
+//RS 
+//RS impl PausedEvaluateHost {
+//RS     pub fn new() -> Self {
+//RS         Self::default()
+//RS     }
+//RS 
+//RS     /// Inject the real paused session.  Replaces any session injected
+//RS     /// earlier; does not touch a separately staged evaluator result.
+//RS     pub fn set_session(&mut self, session: PausedSession) {
+//RS         self.session = Some(session);
+//RS     }
+//RS 
+//RS     /// Clear the paused session (resume, detach, or process exit).  Also
+//RS     /// drops any evaluator result staged for a request the session can no
+//RS     /// longer serve.
+//RS     pub fn clear_session(&mut self) {
+//RS         self.session = None;
+//RS         self.evaluator_result = None;
+//RS     }
+//RS 
+//RS     /// Mark the injected session cancelled in place, e.g. the host is
+//RS     /// stopping the debug target while a paused inspect/evaluate call may
+//RS     /// still be in flight.  Kept distinct from `clear_session`: the session
+//RS     /// facts (identity, scopes) stay retained and visible for one last
+//RS     /// `handle_inspect`, but the kernel now fails every further request
+//RS     /// with `RejectReason::Cancelled` per [`PausedSession::cancel`].
+//RS     /// Returns an explicit error if no session is injected, or if the
+//RS     /// reason text fails the kernel's own bounded-text validation.
+//RS     pub fn cancel_session(
+//RS         &mut self,
+//RS         reason: impl Into<String>,
+//RS     ) -> Result<(), PausedEvaluateHostError> {
+//RS         let Some(session) = self.session.as_mut() else {
+//RS             return Err(PausedEvaluateHostError::SessionUnavailable);
+//RS         };
+//RS         session.cancel(reason).map_err(PausedEvaluateHostError::InvalidRequest)
+//RS     }
+//RS 
+//RS     /// The currently injected session, if any.
+//RS     pub fn session(&self) -> Option<&PausedSession> {
+//RS         self.session.as_ref()
+//RS     }
+//RS 
+//RS     /// Whether the injected session is actually paused right now.
+//RS     pub fn is_paused(&self) -> bool {
+//RS         self.session.as_ref().is_some_and(|session| session.state == SessionState::Paused)
+//RS     }
+//RS 
+//RS     /// Inject the real evaluator's result fact ahead of the evaluate call it
+//RS     /// answers.  The evaluator computes this out of band; this wrapper
+//RS     /// never runs one itself.
+//RS     pub fn set_evaluator_result(&mut self, result: EvaluatorResult) {
+//RS         self.evaluator_result = Some(result);
+//RS     }
+//RS 
+//RS     /// Clear a staged evaluator result without consuming it, e.g. because
+//RS     /// the request it would have answered was cancelled.
+//RS     pub fn clear_evaluator_result(&mut self) {
+//RS         self.evaluator_result = None;
+//RS     }
+//RS 
+//RS     /// Handle one `/paused/inspect` request body against the injected
+//RS     /// session.  Returns the bounded JSON response on success, or an
+//RS     /// explicit JSON error; the body is a `String` either way so a host can
+//RS     /// write it back without further branching on success shape.
+//RS     pub fn handle_inspect(&self, raw: &str) -> Result<String, PausedEvaluateHostError> {
+//RS         self.inspect_request(raw).map(|response| response.json())
+//RS     }
+//RS 
+//RS     /// Handle one `/paused/inspect` request body and return the typed
+//RS     /// response for a host that needs the structured fields rather than
+//RS     /// serialized JSON.
+//RS     pub fn inspect_request(&self, raw: &str) -> Result<InspectResponse, PausedEvaluateHostError> {
+//RS         let Some(session) = self.session.as_ref() else {
+//RS             return Err(PausedEvaluateHostError::SessionUnavailable);
+//RS         };
+//RS         let request =
+//RS             InspectRequest::from_json(raw).map_err(PausedEvaluateHostError::InvalidRequest)?;
+//RS         Ok(inspect(session, &request)?)
+//RS     }
+//RS 
+//RS     /// Handle one `/paused/evaluate` request body against the injected
+//RS     /// session and the currently staged evaluator result, consuming the
+//RS     /// staged result.  Returns the bounded JSON response on success, or an
+//RS     /// explicit JSON error.
+//RS     pub fn handle_evaluate(&mut self, raw: &str) -> Result<String, PausedEvaluateHostError> {
+//RS         self.evaluate_request(raw).map(|response| response.json())
+//RS     }
+//RS 
+//RS     /// Handle one `/paused/evaluate` request body and return the typed
+//RS     /// response for a host that needs the structured fields rather than
+//RS     /// serialized JSON.
+//RS     pub fn evaluate_request(
+//RS         &mut self,
+//RS         raw: &str,
+//RS     ) -> Result<EvaluateResponse, PausedEvaluateHostError> {
+//RS         let Some(session) = self.session.as_ref() else {
+//RS             return Err(PausedEvaluateHostError::SessionUnavailable);
+//RS         };
+//RS         let request =
+//RS             EvaluateRequest::from_json(raw).map_err(PausedEvaluateHostError::InvalidRequest)?;
+//RS         let Some(result) = self.evaluator_result.take() else {
+//RS             return Err(PausedEvaluateHostError::EvaluatorUnavailable);
+//RS         };
+//RS         Ok(evaluate(session, &request, result)?)
+//RS     }
+//RS }
+//RS 
+//RS fn inspect_authority(request: &InspectRequest) -> Vec<AuthorityRequirement> {
+//RS     let mut authority = request.authority.clone();
+//RS     authority.push(AuthorityRequirement {
+//RS         capability: INSPECT_AUTHORITY.to_string(),
+//RS         scope_id: request.scope_id.clone(),
+//RS     });
+//RS     authority
+//RS }
+//RS 
+//RS fn evaluate_authority(request: &EvaluateRequest) -> Vec<AuthorityRequirement> {
+//RS     let mut authority = request.authority.clone();
+//RS     authority.push(AuthorityRequirement {
+//RS         capability: EVALUATE_AUTHORITY.to_string(),
+//RS         scope_id: request.scope_id.clone(),
+//RS     });
+//RS     if request.mode == EvaluationMode::Mutate {
+//RS         authority.push(AuthorityRequirement {
+//RS             capability: MUTATE_AUTHORITY.to_string(),
+//RS             scope_id: request.scope_id.clone(),
+//RS         });
+//RS         authority.extend(request.effects.iter().map(|effect| AuthorityRequirement {
+//RS             capability: effect.clone(),
+//RS             scope_id: request.scope_id.clone(),
+//RS         }));
+//RS     }
+//RS     authority.sort();
+//RS     authority.dedup();
+//RS     authority
+//RS }
+//RS 
+//RS fn validate_common(
+//RS     session: &PausedSession,
+//RS     identity: &SessionIdentity,
+//RS     request_id: &str,
+//RS     scope_id: &str,
+//RS     budget: &EvaluationBudget,
+//RS     cancellation: &Cancellation,
+//RS     authority: &[AuthorityRequirement],
+//RS ) -> Result<(), RejectReason> {
+//RS     if session.state == SessionState::Stale {
+//RS         return Err(RejectReason::StaleSession);
+//RS     }
+//RS     if session.state != SessionState::Paused {
+//RS         return Err(if session.state == SessionState::Cancelled || cancellation.requested {
+//RS             RejectReason::Cancelled
+//RS         } else {
+//RS             RejectReason::SessionNotPaused
+//RS         });
+//RS     }
+//RS     if identity.validate().is_err()
+//RS         || valid_id(request_id, "request id").is_err()
+//RS         || valid_id(scope_id, "scope id").is_err()
+//RS         || budget.validate().is_err()
+//RS         || cancellation.validate().is_err()
+//RS         || authority.iter().any(|requirement| requirement.validate().is_err())
+//RS     {
+//RS         return Err(RejectReason::InvalidRequest);
+//RS     }
+//RS     if identity.session_id != session.identity.session_id {
+//RS         return Err(RejectReason::SessionIdentityMismatch);
+//RS     }
+//RS     if identity.source_id != session.identity.source_id
+//RS         || identity.source_revision != session.identity.source_revision
+//RS     {
+//RS         return Err(RejectReason::SourceIdentityMismatch);
+//RS     }
+//RS     if identity.pause_id != session.identity.pause_id {
+//RS         return Err(RejectReason::PauseIdentityMismatch);
+//RS     }
+//RS     if identity.frame_id != session.identity.frame_id {
+//RS         return Err(RejectReason::FrameIdentityMismatch);
+//RS     }
+//RS     if session.cancellation.requested || cancellation.requested {
+//RS         return Err(RejectReason::Cancelled);
+//RS     }
+//RS     if !session.budget.contains(budget) {
+//RS         return Err(RejectReason::BudgetExceeded);
+//RS     }
+//RS     if authority
+//RS         .iter()
+//RS         .any(|requirement| !session.authority.allows(requirement))
+//RS     {
+//RS         return Err(RejectReason::InsufficientAuthority);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn reject(
+//RS     operation: &str,
+//RS     request_id: &str,
+//RS     identity: &SessionIdentity,
+//RS     scope_id: &str,
+//RS     authority: &[AuthorityRequirement],
+//RS     reason: RejectReason,
+//RS     usage: EvaluationUsage,
+//RS ) -> RequestError {
+//RS     RequestError {
+//RS         reason,
+//RS         audit: AuditReceipt::new(
+//RS             operation,
+//RS             request_id,
+//RS             identity,
+//RS             scope_id,
+//RS             authority,
+//RS             AuditOutcome::Rejected,
+//RS             Some(reason),
+//RS             usage,
+//RS             false,
+//RS             0,
+//RS             0,
+//RS             None,
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn project_root(
+//RS     value: &ValueProjection,
+//RS     identity: &SessionIdentity,
+//RS     budget: EvaluationBudget,
+//RS     stats: &mut ProjectionStats,
+//RS ) -> Result<ValueProjection, String> {
+//RS     let mut nodes = stats.usage.nodes;
+//RS     let projected = project_node(value, identity, budget, 1, true, &mut nodes, stats)
+//RS         .ok_or_else(|| "paused value root could not be retained".to_string())?;
+//RS     stats.usage.nodes = nodes;
+//RS     Ok(projected)
+//RS }
+//RS 
+//RS fn project_node(
+//RS     value: &ValueProjection,
+//RS     _identity: &SessionIdentity,
+//RS     budget: EvaluationBudget,
+//RS     depth: u32,
+//RS     root: bool,
+//RS     nodes: &mut u64,
+//RS     stats: &mut ProjectionStats,
+//RS ) -> Option<ValueProjection> {
+//RS     if value.publication == Publication::Absent {
+//RS         return None;
+//RS     }
+//RS     if !root && *nodes >= budget.max_nodes {
+//RS         stats.truncated = true;
+//RS         return None;
+//RS     }
+//RS     if *nodes < budget.max_nodes {
+//RS         *nodes = nodes.saturating_add(1);
+//RS     } else {
+//RS         // Keep a root node visible even when earlier siblings used the node
+//RS         // budget; the omitted children are represented by truncation.
+//RS         stats.truncated = true;
+//RS     }
+//RS     stats.usage.nodes = *nodes;
+//RS     stats.usage.depth = stats.usage.depth.max(depth);
+//RS     let metadata = value.metadata_bytes();
+//RS     let available = budget.max_bytes.saturating_sub(stats.usage.bytes);
+//RS     let metadata_fits = metadata <= available;
+//RS     if metadata_fits {
+//RS         stats.usage.bytes = stats.usage.bytes.saturating_add(metadata);
+//RS     } else {
+//RS         stats.usage.bytes = budget.max_bytes;
+//RS         stats.truncated = true;
+//RS     }
+//RS     let mut projected = value.clone();
+//RS     projected.value = None;
+//RS     projected.children.clear();
+//RS     projected.truncated = value.truncated || !metadata_fits;
+//RS     if value.publication == Publication::Published {
+//RS         if let Some(typed) = value.value.as_ref() {
+//RS             let payload = typed.bytes();
+//RS             let available = budget.max_bytes.saturating_sub(stats.usage.bytes);
+//RS             if metadata_fits && payload <= available {
+//RS                 stats.usage.bytes = stats.usage.bytes.saturating_add(payload);
+//RS                 projected.value = Some(typed.clone());
+//RS             } else {
+//RS                 stats.truncated = true;
+//RS                 projected.truncated = true;
+//RS             }
+//RS         }
+//RS     }
+//RS     if !value.children.is_empty() {
+//RS         if depth >= budget.max_depth {
+//RS             stats.truncated = true;
+//RS             projected.truncated = true;
+//RS         } else if !metadata_fits {
+//RS             stats.truncated = true;
+//RS             projected.truncated = true;
+//RS         } else {
+//RS             for child in &value.children {
+//RS                 if let Some(child) = project_node(
+//RS                     child,
+//RS                     _identity,
+//RS                     budget,
+//RS                     depth.saturating_add(1),
+//RS                     false,
+//RS                     nodes,
+//RS                     stats,
+//RS                 ) {
+//RS                     projected.children.push(child);
+//RS                 } else {
+//RS                     stats.truncated = true;
+//RS                     projected.truncated = true;
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     if value.publication == Publication::Published {
+//RS         let measured = value.measure();
+//RS         stats.usage.depth = stats.usage.depth.max(measured.depth.min(budget.max_depth));
+//RS     }
+//RS     Some(projected)
+//RS }
+//RS 
+//RS fn valid_id(value: &str, label: &str) -> Result<(), String> {
+//RS     if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+//RS         return Err(format!("{label} is empty, too long, or contains control text"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn valid_text(value: &str, label: &str, max_bytes: usize) -> Result<(), String> {
+//RS     if value.len() > max_bytes || value.chars().any(char::is_control) {
+//RS         return Err(format!("{label} exceeds its bounded text contract"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn array_json(values: impl Iterator<Item = String>) -> String {
+//RS     format!("[{}]", values.collect::<Vec<_>>().join(","))
+//RS }
+//RS 
+//RS fn object(raw: &str) -> Result<std::collections::BTreeMap<String, DataTree>, String> {
+//RS     let root = parse_json_with_limit(raw, MAX_REQUEST_BYTES)
+//RS         .map_err(|_| "paused request is not valid bounded JSON".to_string())?;
+//RS     let DataTree::Object(fields) = root else {
+//RS         return Err("paused request must be a JSON object".to_string());
+//RS     };
+//RS     Ok(fields.into_iter().collect())
+//RS }
+//RS 
+//RS fn required_string(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS     key: &str,
+//RS ) -> Result<String, String> {
+//RS     let value = fields
+//RS         .get(key)
+//RS         .and_then(|value| match value {
+//RS             DataTree::Text(value) => Some(value.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .ok_or_else(|| format!("paused request requires string `{key}`"))?;
+//RS     valid_text(&value, key, 256)?;
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn optional_string(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS     key: &str,
+//RS ) -> Result<Option<String>, String> {
+//RS     match fields.get(key) {
+//RS         None | Some(DataTree::Null) => Ok(None),
+//RS         Some(DataTree::Text(value)) => {
+//RS             valid_text(value, key, 256)?;
+//RS             Ok(Some(value.clone()))
+//RS         }
+//RS         Some(_) => Err(format!("paused request field `{key}` must be a string or null")),
+//RS     }
+//RS }
+//RS 
+//RS fn required_u64(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS     key: &str,
+//RS ) -> Result<u64, String> {
+//RS     let value = fields
+//RS         .get(key)
+//RS         .and_then(json_int)
+//RS         .and_then(|value| u64::try_from(value).ok())
+//RS         .ok_or_else(|| format!("paused request requires non-negative integer `{key}`"))?;
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn required_u32(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS     key: &str,
+//RS ) -> Result<u32, String> {
+//RS     let value = required_u64(fields, key)?;
+//RS     u32::try_from(value).map_err(|_| format!("paused request integer `{key}` is too large"))
+//RS }
+//RS 
+//RS fn optional_bool(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS     key: &str,
+//RS ) -> Result<bool, String> {
+//RS     match fields.get(key) {
+//RS         None => Ok(false),
+//RS         Some(DataTree::Bool(value)) => Ok(*value),
+//RS         Some(_) => Err(format!("paused request field `{key}` must be boolean")),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_identity(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS ) -> Result<SessionIdentity, String> {
+//RS     let identity: std::collections::BTreeMap<String, DataTree> = match fields.get("identity") {
+//RS         Some(DataTree::Object(identity)) => identity.iter().cloned().collect(),
+//RS         Some(_) => return Err("paused request `identity` must be an object".to_string()),
+//RS         None => fields.clone(),
+//RS     };
+//RS     SessionIdentity::new(
+//RS         required_string(&identity, "session_id")?,
+//RS         required_string(&identity, "source_id")?,
+//RS         required_string(&identity, "source_revision")?,
+//RS         required_string(&identity, "pause_id")?,
+//RS         required_string(&identity, "frame_id")?,
+//RS     )
+//RS }
+//RS 
+//RS fn parse_budget(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS  ) -> Result<EvaluationBudget, String> {
+//RS     let Some(DataTree::Object(budget)) = fields.get("budget") else {
+//RS         return Ok(DEFAULT_EVALUATION_BUDGET);
+//RS     };
+//RS     let budget: std::collections::BTreeMap<String, DataTree> =
+//RS         budget.iter().cloned().collect();
+//RS     EvaluationBudget::new(
+//RS         required_u32(&budget, "max_depth")?,
+//RS         required_u64(&budget, "max_nodes")?,
+//RS         required_u64(&budget, "max_bytes")?,
+//RS         required_u64(&budget, "max_steps")?,
+//RS     )
+//RS }
+//RS 
+//RS fn parse_authority(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS ) -> Result<Vec<AuthorityRequirement>, String> {
+//RS     let Some(value) = fields.get("authority") else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let DataTree::Array(values) = value else {
+//RS         return Err("paused request `authority` must be an array".to_string());
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let DataTree::Object(fields) = value else {
+//RS                 return Err("paused authority requirement must be an object".to_string());
+//RS             };
+//RS             let fields: std::collections::BTreeMap<String, DataTree> =
+//RS                 fields.iter().cloned().collect();
+//RS             AuthorityRequirement::new(
+//RS                 required_string(&fields, "capability")?,
+//RS                 required_string(&fields, "scope_id")?,
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn validate_header(
+//RS     fields: &std::collections::BTreeMap<String, DataTree>,
+//RS     kind: &str,
+//RS ) -> Result<(), String> {
+//RS     if required_string(fields, "protocol")? != PAUSED_EVALUATE_PROTOCOL {
+//RS         return Err("paused request protocol does not match jet.devtools.v1".to_string());
+//RS     }
+//RS     let schema = fields
+//RS         .get("schema_version")
+//RS         .and_then(json_int)
+//RS         .and_then(|value| u32::try_from(value).ok())
+//RS         .ok_or_else(|| "paused request schema_version is missing or invalid".to_string())?;
+//RS     if schema != PAUSED_EVALUATE_SCHEMA_VERSION {
+//RS         return Err("paused request schema_version is unsupported".to_string());
+//RS     }
+//RS     if required_string(fields, "kind")? != kind {
+//RS         return Err(format!("paused request kind must be `{kind}`"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn parse_inspect_request(raw: &str) -> Result<InspectRequest, String> {
+//RS     let fields = object(raw)?;
+//RS     validate_header(&fields, "paused.inspect")?;
+//RS     let mut request = InspectRequest::new(
+//RS         required_string(&fields, "request_id")?,
+//RS         parse_identity(&fields)?,
+//RS         required_string(&fields, "scope_id")?,
+//RS         parse_budget(&fields)?,
+//RS         parse_authority(&fields)?,
+//RS     )?;
+//RS     request.value_id = optional_string(&fields, "value_id")?;
+//RS     request.cancellation = if optional_bool(&fields, "cancelled")? {
+//RS         Cancellation::requested("request cancelled")?
+//RS     } else {
+//RS         Cancellation::none()
+//RS     };
+//RS     request.validate_shape()?;
+//RS     Ok(request)
+//RS }
+//RS 
+//RS pub fn parse_evaluate_request(raw: &str) -> Result<EvaluateRequest, String> {
+//RS     let fields = object(raw)?;
+//RS     validate_header(&fields, "paused.evaluate")?;
+//RS     let mode = match required_string(&fields, "mode")?.as_str() {
+//RS         "read_only" => EvaluationMode::ReadOnly,
+//RS         "mutate" => EvaluationMode::Mutate,
+//RS         _ => return Err("paused evaluation mode is unsupported".to_string()),
+//RS     };
+//RS     let effects = match fields.get("effects") {
+//RS         None => Vec::new(),
+//RS         Some(DataTree::Array(values)) => values
+//RS             .iter()
+//RS             .map(|value| match value {
+//RS                 DataTree::Text(value) => {
+//RS                     valid_id(value, "evaluation effect")?;
+//RS                     Ok(value.clone())
+//RS                 }
+//RS                 _ => Err("paused evaluation effects must be strings".to_string()),
+//RS             })
+//RS             .collect::<Result<Vec<_>, String>>()?,
+//RS         Some(_) => return Err("paused evaluation `effects` must be an array".to_string()),
+//RS     };
+//RS     let mut request = EvaluateRequest::new(
+//RS         required_string(&fields, "request_id")?,
+//RS         parse_identity(&fields)?,
+//RS         required_string(&fields, "scope_id")?,
+//RS         required_string(&fields, "expression")?,
+//RS         mode,
+//RS         effects,
+//RS         parse_authority(&fields)?,
+//RS         parse_budget(&fields)?,
+//RS     )?;
+//RS     request.cancellation = if optional_bool(&fields, "cancelled")? {
+//RS         Cancellation::requested("request cancelled")?
+//RS     } else {
+//RS         Cancellation::none()
+//RS     };
+//RS     request.validate_shape()?;
+//RS     Ok(request)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn identity() -> SessionIdentity {
+//RS         SessionIdentity::new("session-1", "src/main.jet", "rev-1", "pause-1", "frame-1")
+//RS             .unwrap()
+//RS     }
+//RS 
+//RS     fn source() -> SourceLocation {
+//RS         SourceLocation::new("src/main.jet", "rev-1", 0, 10).unwrap()
+//RS     }
+//RS 
+//RS     fn scope() -> LexicalScope {
+//RS         let source = source();
+//RS         LexicalScope::new(
+//RS             "scope-1",
+//RS             "run",
+//RS             None,
+//RS             source.clone(),
+//RS             vec![
+//RS                 ValueProjection::published(
+//RS                     "value-public",
+//RS                     "count",
+//RS                     "Int",
+//RS                     source.clone(),
+//RS                     TypedValue::Int(7),
+//RS                 ),
+//RS                 ValueProjection::redacted(
+//RS                     "value-secret",
+//RS                     "token",
+//RS                     "String",
+//RS                     source.clone(),
+//RS                 ),
+//RS                 ValueProjection::absent(
+//RS                     "value-hidden",
+//RS                     "password",
+//RS                     "String",
+//RS                     source,
+//RS                 ),
+//RS             ],
+//RS         )
+//RS         .unwrap()
+//RS     }
+//RS 
+//RS     fn authority() -> AuthoritySet {
+//RS         AuthoritySet::new(vec![
+//RS             AuthorityGrant::new(INSPECT_AUTHORITY, "scope-1").unwrap(),
+//RS             AuthorityGrant::new(EVALUATE_AUTHORITY, "scope-1").unwrap(),
+//RS             AuthorityGrant::new(MUTATE_AUTHORITY, "scope-1").unwrap(),
+//RS             AuthorityGrant::new("fs.write", "scope-1").unwrap(),
+//RS         ])
+//RS     }
+//RS 
+//RS     fn session() -> PausedSession {
+//RS         PausedSession::paused(
+//RS             identity(),
+//RS             vec![scope()],
+//RS             authority(),
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS         )
+//RS         .unwrap()
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn inspect_is_typed_and_omits_unpublished_values() {
+//RS         let session = session();
+//RS         let request = InspectRequest::new(
+//RS             "request-1",
+//RS             identity(),
+//RS             "scope-1",
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         let response = inspect(&session, &request).unwrap();
+//RS         let json = response.json();
+//RS         assert!(json.contains("\"kind\":\"int\""));
+//RS         assert!(json.contains("\"publication\":\"redacted\""));
+//RS         assert!(!json.contains("password"));
+//RS         assert!(json.contains("\"name\":\"token\""));
+//RS         assert_eq!(response.audit.outcome, AuditOutcome::Accepted);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stale_running_and_wrong_source_fail_closed() {
+//RS         let mut stale = session();
+//RS         stale.state = SessionState::Stale;
+//RS         let request = InspectRequest::new(
+//RS             "request-2",
+//RS             identity(),
+//RS             "scope-1",
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(inspect(&stale, &request).unwrap_err().reason, RejectReason::StaleSession);
+//RS 
+//RS         let mut running = session();
+//RS         running.state = SessionState::Running;
+//RS         assert_eq!(inspect(&running, &request).unwrap_err().reason, RejectReason::SessionNotPaused);
+//RS 
+//RS         let wrong = SessionIdentity::new("session-1", "src/other.jet", "rev-1", "pause-1", "frame-1")
+//RS             .unwrap();
+//RS         let request = InspectRequest::new(
+//RS             "request-3",
+//RS             wrong,
+//RS             "scope-1",
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(inspect(&session(), &request).unwrap_err().reason, RejectReason::SourceIdentityMismatch);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn evaluator_result_is_injected_and_mutation_needs_authority_and_observation() {
+//RS         let session = session();
+//RS         let request = EvaluateRequest::new(
+//RS             "request-4",
+//RS             identity(),
+//RS             "scope-1",
+//RS             "count + 1",
+//RS             EvaluationMode::ReadOnly,
+//RS             Vec::new(),
+//RS             Vec::new(),
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS         )
+//RS         .unwrap();
+//RS         let source = source();
+//RS         let value = ValueProjection::published(
+//RS             "eval-value",
+//RS             "result",
+//RS             "Int",
+//RS             source,
+//RS             TypedValue::Int(8),
+//RS         );
+//RS         let response = evaluate(
+//RS             &session,
+//RS             &request,
+//RS             EvaluatorResult::completed(
+//RS                 identity(),
+//RS                 "scope-1",
+//RS                 Some(value),
+//RS                 EvaluationUsage::new(1, 1, 64, 2),
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(response.value.unwrap().value, Some(TypedValue::Int(8)));
+//RS 
+//RS         let request = EvaluateRequest::new(
+//RS             "request-5",
+//RS             identity(),
+//RS             "scope-1",
+//RS             "count = 8",
+//RS             EvaluationMode::Mutate,
+//RS             vec!["fs.write".to_string()],
+//RS             Vec::new(),
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS         )
+//RS         .unwrap();
+//RS         let observation = ObservationFact::new(
+//RS             "event-1",
+//RS             "paused.update",
+//RS             "session-1",
+//RS             "src/main.jet",
+//RS             "rev-1",
+//RS             "scope-1",
+//RS             "value-public",
+//RS             "fs.write",
+//RS         )
+//RS         .unwrap();
+//RS         let result = EvaluatorResult::mutated(
+//RS             identity(),
+//RS             "scope-1",
+//RS             None,
+//RS             EvaluationUsage::new(1, 1, 32, 2),
+//RS             observation,
+//RS         );
+//RS         assert!(evaluate(&session, &request, result).is_ok());
+//RS 
+//RS         let mut denied = request.clone();
+//RS         denied.authority.push(AuthorityRequirement::new("fs.read", "scope-1").unwrap());
+//RS         assert_eq!(evaluate(&session, &denied, EvaluatorResult::completed(identity(), "scope-1", None, EvaluationUsage::new(1, 0, 0, 1))).unwrap_err().reason, RejectReason::InsufficientAuthority);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn audit_receipts_are_deterministic() {
+//RS         let session = session();
+//RS         let request = InspectRequest::new(
+//RS             "request-6",
+//RS             identity(),
+//RS             "scope-1",
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         let first = inspect(&session, &request).unwrap();
+//RS         let second = inspect(&session, &request).unwrap();
+//RS         assert_eq!(first.audit, second.audit);
+//RS         assert_eq!(first.audit.receipt_id, "paused-audit-".to_string() + &first.audit.receipt_id[13..]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cancellation_budget_and_absent_result_are_fail_closed() {
+//RS         let session = session();
+//RS         let mut inspect_request = InspectRequest::new(
+//RS             "request-cancelled",
+//RS             identity(),
+//RS             "scope-1",
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         inspect_request.cancellation = Cancellation::requested("user stopped").unwrap();
+//RS         assert_eq!(
+//RS             inspect(&session, &inspect_request).unwrap_err().reason,
+//RS             RejectReason::Cancelled
+//RS         );
+//RS 
+//RS         let budget = EvaluationBudget::new(4, 16, 4096, 1).unwrap();
+//RS         let evaluate_request = EvaluateRequest::new(
+//RS             "request-budget",
+//RS             identity(),
+//RS             "scope-1",
+//RS             "count",
+//RS             EvaluationMode::ReadOnly,
+//RS             Vec::new(),
+//RS             Vec::new(),
+//RS             budget,
+//RS         )
+//RS         .unwrap();
+//RS         let over_budget = EvaluatorResult::completed(
+//RS             identity(),
+//RS             "scope-1",
+//RS             None,
+//RS             EvaluationUsage::new(1, 1, 1, 2),
+//RS         );
+//RS         assert_eq!(
+//RS             evaluate(&session, &evaluate_request, over_budget)
+//RS                 .unwrap_err()
+//RS                 .reason,
+//RS             RejectReason::BudgetExceeded
+//RS         );
+//RS 
+//RS         let absent = ValueProjection::absent(
+//RS             "eval-hidden",
+//RS             "secret",
+//RS             "String",
+//RS             source(),
+//RS         );
+//RS         let response = evaluate(
+//RS             &session,
+//RS             &evaluate_request,
+//RS             EvaluatorResult::completed(
+//RS                 identity(),
+//RS                 "scope-1",
+//RS                 Some(absent),
+//RS                 EvaluationUsage::new(1, 1, 1, 1),
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS         assert!(response.value.is_none());
+//RS         assert!(!response.json().contains("secret"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn request_json_round_trips() {
+//RS         let request = EvaluateRequest::new(
+//RS             "request-7",
+//RS             identity(),
+//RS             "scope-1",
+//RS             "count",
+//RS             EvaluationMode::ReadOnly,
+//RS             Vec::new(),
+//RS             Vec::new(),
+//RS             DEFAULT_EVALUATION_BUDGET,
+//RS         )
+//RS         .unwrap();
+//RS         let parsed = EvaluateRequest::from_json(&request.json()).unwrap();
+//RS         assert_eq!(parsed, request);
+//RS     }
+//RS }
+// END-PORT-PENDING 0781 crates/jet-devserver/src/PausedEvaluate.rs:1792-2678
+

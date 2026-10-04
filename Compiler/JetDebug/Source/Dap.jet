@@ -1,0 +1,1045 @@
+// Native debugger DAP wire adapter. Jet presentation is verified through LineMap;
+// raw-frame presentation never changes checked task/step identities.
+// Rust: crates/jet-debug/src/Dap.rs:20
+use std.io as io
+use std.sync.mpsc as mpsc
+use std.sync.atomic.[AtomicBool, Ordering]
+use std.sync.[Arc]
+use std.thread.[JoinHandle]
+use std.time.[Duration]
+use std.collections.[VecDeque]
+use core.files.[OSPath]
+use core.sys.target.[selected_family]
+use jet_debug.Inferior.[parse_current_thread_id, parse_exit_signal, Inferior, RawFrame, ResumeResult]
+use jet_debug.LineMap.[LineMap]
+use jet_debug.Native.[build_native_candidate, NativeCandidateArtifact]
+use jet_debug.[DebugCheckpoint, DebugEvent, DebugHistory, DebugWrite, FrameSnapshot, ValueSnapshot, native_checkpoint_shape, ExitCodes]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_escape, json_get, json_str, json_u32, parse_json_with_limit, MAX_PROTOCOL_HEADER_BYTES, MAX_PROTOCOL_HEADER_COUNT]
+
+// Rust: crates/jet-debug/src/Dap.rs:48
+MAX_DAP_MESSAGE_BYTES :: 16 * 1024 * 1024
+
+// Rust: crates/jet-debug/src/Dap.rs:51
+enum State { New; Ready; Configuring; Running; Stopped; Terminated }
+// Rust: crates/jet-debug/src/Dap.rs:60
+impl State {
+    // Rust: crates/jet-debug/src/Dap.rs:61
+    fn is_stopped(self) -> Bool { return self == .Stopped }
+}
+
+// Rust: crates/jet-debug/src/Dap.rs:66
+pub fn run(binary: OSPath, rust_file: String, rust_src: String, jet_file: String, jet_src: String) -> I32 {
+    map_path :: binary.with_extension("jetmap")
+    written :: LineMap.write_artifact(map_path, jet_file, jet_src, rust_file, rust_src, binary)
+    if written == .Err(error) {
+        io.eprintln("error: cannot write native debugger map: {error}") // GATE #4494
+        return ExitCodes.USER_ERROR
+    }
+    loaded :: LineMap.load_verified(map_path, jet_file, jet_src, rust_file, rust_src, binary)
+    if loaded == .Err(error) {
+        io.eprintln("error: native debugger map is not usable: {error}") // GATE #4494
+        return ExitCodes.USER_ERROR
+    }
+    map :: loaded ?? panic("failed map branch returned")
+    server := DapServer {
+        map: ^map, rust_file: ~rust_file, rust_src: ~rust_src, jet_file: ~jet_file,
+        jet_src: ~jet_src, binary: ~binary, inf: None, pending_breakpoints: [],
+        pending_specs: [], hit_counts: [], source_breakpoint_ids: [], client_breakpoint_ids: [],
+        next_client_breakpoint_id: 1, entry_breakpoint_id: None, stop_on_entry: true,
+        target: None, launch_args: [], launch_cwd: None, launch_env: [],
+        current_thread: 1, last_signal: None, last_exception: None,
+        exception_filters: default_exception_filters(), show_raw_frames: false,
+        lines_start_at_1: true, columns_start_at_1: true, supports_ansi_styling: false,
+        unmapped_steps: 0, references: ObjectReferences.default(), state: .New,
+        terminal_failure: false, client_sequences: [U32:Bool]{}, seq: 1,
+        resume_task: None, resume_stop_requested: false,
+        history: DebugHistory {
+            events: [], checkpoint: .Val(DebugCheckpoint {
+                source_identity: jet_foundation.SHA256.sha256_hex("{jet_file}:{jet_src}".as_bytes()),
+                shape: native_checkpoint_shape(jet_file, jet_src), sequence: 0
+            }), cursor: None, capped: false, decision_ledger: None
+        },
+        history_cursor: None, data_watches: [String:Bool]{},
+        candidate_artifacts: [], replay_only_after_fix: false
+    }
+    // GATE #4494: retained real stdin/stdout, not synthetic protocol streams.
+    reader :: io.BufReader.new(io.stdin())
+    stdout := io.stdout()
+    return run_io(&server, ^reader, &stdout)
+}
+
+// Rust: crates/jet-debug/src/Dap.rs:142
+fn run_io(server: &DapServer, reader: io.BufRead, out: &io.Write) -> I32 {
+    // GATE #4494: real channel/thread ownership and IO error fidelity #4409.
+    (input_tx, input_rx) :: mpsc.channel[io.Result[String?]]()
+    _ :: std.thread.spawn(() -> {
+        reader := ^reader
+        loop {
+            message :: read_message(&reader)
+            done :: message != .Ok(.Val(_))
+            if input_tx.send(^message).is_err() || done -> break
+        }
+    })
+    requests := VecDeque[DataTree].new()
+    input_closed := false
+    loop {
+        &server.poll_resume(out)
+        if server.state == .Terminated || server.terminal_failure -> break
+        if take_next_request(&requests, server.has_pending_resume()) == .Val(msg) {
+            if &server.handle(msg, out) == None || server.state == .Terminated || server.terminal_failure -> break
+            next
+        }
+        if input_closed && (!server.has_pending_resume() || requests.is_empty()) -> break
+        received :: input_rx.recv_timeout(Duration.from_millis(10))
+        if received == {
+            .Ok(.Ok(.Val(body))) -> {
+                parsed :: parse_dap_request(body)
+                if parsed == {
+                    .Ok(msg) -> &requests.push_back(^msg)
+                    .Err(error) -> {
+                        io.eprintln("error: invalid DAP request: {error}")
+                        return &server.finish(ExitCodes.USER_ERROR)
+                    }
+                }
+            }
+            .Ok(.Ok(None)) -> input_closed = true
+            .Ok(.Err(error)) -> {
+                // Uncorrelated framing/UTF-8 failures produce no fabricated reply.
+                io.eprintln("error: invalid DAP frame: {error}")
+                return &server.finish(ExitCodes.USER_ERROR)
+            }
+            .Err(.Timeout) -> {}
+            .Err(.Disconnected) -> input_closed = true
+        }
+    }
+    return &server.finish(ExitCodes.OK)
+}
+
+// Rust: crates/jet-debug/src/Dap.rs:201
+fn is_running_control_request(msg: DataTree) -> Bool {
+    command :: json_str(json_get(msg, "command") ?? return false) ?? return false
+    return command == "cancel" || command == "disconnect" || command == "pause" ||
+        command == "restart" || command == "setBreakpoints" ||
+        command == "setDataBreakpoints" || command == "terminate"
+}
+// Rust: crates/jet-debug/src/Dap.rs:216
+fn take_next_request(requests: &VecDeque[DataTree], resume_pending: Bool) -> DataTree? {
+    if resume_pending {
+        loop (position, request) in requests {
+            if is_running_control_request(request) -> return &requests.remove(position)
+        }
+        return None
+    }
+    return &requests.pop_front()
+}
+
+// Rust: crates/jet-debug/src/Dap.rs:230
+struct DapServer {
+    map: LineMap
+    rust_file: String
+    rust_src: String
+    jet_file: String
+    jet_src: String
+    binary: OSPath
+    inf: Inferior?
+    pending_breakpoints: [USize]
+    pending_specs: [BreakpointSpec]
+    hit_counts: [U32]
+    source_breakpoint_ids: [USize]
+    client_breakpoint_ids: [U32]
+    next_client_breakpoint_id: U32
+    entry_breakpoint_id: USize?
+    stop_on_entry: Bool
+    target: TargetKind?
+    launch_args: [String]
+    launch_cwd: String?
+    launch_env: [(String, String)]
+    current_thread: U32
+    last_signal: String?
+    last_exception: String?
+    exception_filters: [String:Bool]
+    show_raw_frames: Bool
+    lines_start_at_1: Bool
+    columns_start_at_1: Bool
+    supports_ansi_styling: Bool
+    unmapped_steps: USize
+    references: ObjectReferences
+    state: State
+    // Failed close/terminal diagnostics survive consumption of the inferior.
+    terminal_failure: Bool
+    client_sequences: [U32:Bool]
+    seq: I64
+    resume_task: ResumeTask?
+    resume_stop_requested: Bool
+    history: DebugHistory
+    history_cursor: USize?
+    data_watches: [String:Bool]
+    // Keep typed candidate code rooted as long as LLDB may call it.
+    candidate_artifacts: [NativeCandidateArtifact]
+    replay_only_after_fix: Bool
+}
+// Rust: crates/jet-debug/src/Dap.rs:284
+enum TargetKind { Launched; Attached }
+// Rust: crates/jet-debug/src/Dap.rs:288
+struct BreakpointSpec {
+    line: USize
+    condition: String?
+    hit_condition: String?
+    log_message: String?
+}
+// Rust: crates/jet-debug/src/Dap.rs:288 (derived Default)
+impl Default for BreakpointSpec {
+    fn default() -> BreakpointSpec {
+        return BreakpointSpec { line: 0, condition: None, hit_condition: None, log_message: None }
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:296
+enum BreakpointAction { Stop([U32]); Continue; Log(String) }
+// Rust: crates/jet-debug/src/Dap.rs:302
+enum ResumeControl { Interrupt; Stop }
+// Rust: crates/jet-debug/src/Dap.rs:307
+struct ResumeEvent { inferior: Inferior; result: io.Result[ResumeResult]; mode: ResumeMode }
+// Rust: crates/jet-debug/src/Dap.rs:313
+struct ResumeTask {
+    control: mpsc.Sender[ResumeControl]
+    events: mpsc.Receiver[ResumeEvent]
+    join: JoinHandle[()]?
+}
+// Rust: crates/jet-debug/src/Dap.rs:319
+impl ResumeTask {
+    // Rust: crates/jet-debug/src/Dap.rs:320
+    fn spawn(inferior: Inferior, command: String, mode: ResumeMode) -> ResumeTask {
+        // GATE #4494: real channels, shared atomic lifetime, threads and joins.
+        (control, control_rx) :: mpsc.channel[ResumeControl]()
+        (events, event_rx) :: mpsc.channel[ResumeEvent]()
+        stop :: control.clone()
+        pid :: inferior.debugger_pid()
+        interrupted :: Arc.new(AtomicBool.new(false))
+        worker_interrupted :: interrupted.clone()
+        join :: std.thread.spawn(() -> {
+            signaler :: std.thread.spawn(() -> {
+                loop {
+                    received :: control_rx.recv()
+                    if received == .Err(_) -> break
+                    if received == .Ok(control) {
+                        if control == {
+                            .Interrupt -> {
+                                worker_interrupted.store(true, Ordering.Release)
+                                _ :: signal_debugger(pid)
+                            }
+                            .Stop -> break
+                        }
+                    }
+                }
+            })
+            inferior := ^inferior
+            result :: &inferior.resume_and_locate(command)
+            _ :: stop.send(.Stop)
+            _ :: signaler.join()
+            _ :: events.send(ResumeEvent {
+                inferior: ^inferior, result: ^result,
+                mode: if interrupted.load(Ordering.Acquire) -> .Pause else -> mode
+            })
+        })
+        return ResumeTask { control: ^control, events: ^event_rx, join: .Val(^join) }
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:360
+    fn interrupt(self) { _ :: self.control.send(.Interrupt) }
+    // Rust: crates/jet-debug/src/Dap.rs:364
+    fn take_event(self: &ResumeTask) -> ResumeEvent? !() {
+        if self.events.try_recv() == {
+            .Ok(event) -> {
+                if &self.join.take() == .Val(join) -> _ :: join.join()
+                return .Ok(.Val(^event))
+            }
+            .Err(.Empty) -> return .Ok(None)
+            .Err(.Disconnected) -> return .Err(())
+        }
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:377
+    fn wait(self: ResumeTask) -> io.Result[ResumeEvent] {
+        self := ^self
+        self.interrupt()
+        received :: self.events.recv()
+        if received == .Err(_) -> return .Err(io.Error.new(.UnexpectedEof, "native debugger resume worker closed before settling"))
+        event :: received ?? panic("error branch returned")
+        if &self.join.take() == .Val(join) -> _ :: join.join()
+        return .Ok(^event)
+    }
+}
+
+// Rust: crates/jet-debug/src/Dap.rs:393,408
+fn signal_debugger(pid: U32) -> io.Result[()] {
+    // GATE #4483: dispatch on selected target, never host cfg.
+    if selected_family() == .Unix {
+        // GATE #4494: native process spawn/wait. #4409 retains error kinds.
+        status :: std.process.Command.new("kill").args(["-INT", pid.to_string()]).status()?
+        if status.success() -> return .Ok(())
+        return .Err(io.Error.new(.Other, "native debugger rejected the interrupt signal"))
+    }
+    return .Err(io.Error.new(.Unsupported, "native debugger interruption is unsupported on this platform"))
+}
+// Rust: crates/jet-debug/src/Dap.rs:416
+enum ResumeMode { Launch; Continue; Step; Pause }
+// Rust: crates/jet-debug/src/Dap.rs:425
+struct AttachArguments { pid: U32; program: OSPath; map: OSPath; show_raw_frames: Bool }
+// Rust: crates/jet-debug/src/Dap.rs:433
+#Error
+enum AttachFailure { InvalidArguments; MapMismatch; Denied; Unavailable }
+// Rust: crates/jet-debug/src/Dap.rs:440
+impl AttachFailure {
+    // Rust: crates/jet-debug/src/Dap.rs:441
+    fn error(self) -> (I64, String) {
+        return if self == {
+            .InvalidArguments -> (22032, "debug attach arguments are invalid")
+            .MapMismatch -> (22037, "debugger map does not match the attach target")
+            .Denied -> (22037, "debug attach target is not authorized")
+            .Unavailable -> (22034, "the local attach target is unavailable")
+        }
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:451
+enum ReferenceKind { Frame; Scope; RawScope; Value }
+// Rust: crates/jet-debug/src/Dap.rs:459
+struct FrameLocation { thread_id: U32; position: USize }
+// Rust: crates/jet-debug/src/Dap.rs:465
+struct ProjectedFrame { position: USize; frame: RawFrame; jet_line: USize?; raw: Bool }
+
+// Rust: crates/jet-debug/src/Dap.rs:472
+fn project_frames(frames: [RawFrame], map: LineMap, rust_file: String, show_raw_frames: Bool) -> [ProjectedFrame] {
+    projected := [ProjectedFrame]{}
+    loop (position, frame) in frames {
+        line :: map.jet_line_for_file(frame.rust_file, rust_file, frame.rust_line) ?? next
+        &projected.push(ProjectedFrame { position: position, frame: frame, jet_line: .Val(line), raw: false })
+    }
+    if show_raw_frames {
+        loop (position, frame) in frames -> &projected.push(ProjectedFrame {
+            position: position, frame: frame,
+            jet_line: map.jet_line_for_file(frame.rust_file, rust_file, frame.rust_line), raw: true
+        })
+    }
+    return projected
+}
+// Rust: crates/jet-debug/src/Dap.rs:511
+fn has_jet_frame(frames: [RawFrame], map: LineMap, rust_file: String) -> Bool {
+    loop frame in frames {
+        if map.jet_line_for_file(frame.rust_file, rust_file, frame.rust_line) != None -> return true
+    }
+    return false
+}
+// Rust: crates/jet-debug/src/Dap.rs:523
+fn jet_thread_name(thread_id: U32, backtrace: String, map: LineMap, rust_file: String) -> String {
+    if thread_id == 1 -> return "main"
+    loop frame in Inferior.parse_frames(backtrace) {
+        if map.jet_line_for_file(frame.rust_file, rust_file, frame.rust_line) == None -> next
+        function :: Inferior.safe_jet_func(frame.func)
+        if function != "<native frame>" -> return "task {function} (stopped)"
+        break
+    }
+    return "task (stopped)"
+}
+// Rust: crates/jet-debug/src/Dap.rs:542
+struct ValueReference { frame: FrameLocation; expression: String; raw: Bool }
+// Rust: crates/jet-debug/src/Dap.rs:551
+// GATE #4499: exact native composite-key equality/hash; IDs stay generational.
+struct ObjectReferences {
+    generation: U64
+    next_id: U32
+    live: [U32:(U64, ReferenceKind)]
+    frame_ids: [(U32, USize):U32]
+    raw_frame_ids: [(U32, USize):U32]
+    frame_positions: [U32:FrameLocation]
+    frame_raw: [U32:Bool]
+    scope_ids: [(U32, ReferenceKind):U32]
+    scope_positions: [U32:FrameLocation]
+    value_ids: [(FrameLocation, String, Bool):U32]
+    values: [U32:ValueReference]
+}
+// Rust: crates/jet-debug/src/Dap.rs:565
+impl Default for ObjectReferences {
+    // Rust: crates/jet-debug/src/Dap.rs:566
+    fn default() -> ObjectReferences {
+        return ObjectReferences {
+            generation: 1, next_id: 1, live: [:], frame_ids: [:], raw_frame_ids: [:],
+            frame_positions: [:], frame_raw: [:], scope_ids: [:], scope_positions: [:],
+            value_ids: [:], values: [:]
+        }
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:583
+impl ObjectReferences {
+    // Rust: crates/jet-debug/src/Dap.rs:584
+    fn issue(self: &ObjectReferences, kind: ReferenceKind) -> U32 {
+        if self.next_id == 0 { &self.invalidate(); self.next_id = 1 }
+        id :: self.next_id
+        self.next_id = self.next_id.checked_add(1) ?? 0
+        self.live[id] = (self.generation, kind)
+        return id
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:598
+    fn is_live(self, id: U32, kind: ReferenceKind) -> Bool {
+        return self.live.get(id) == .Val((self.generation, kind))
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:602
+    fn issue_frame(self: &ObjectReferences, thread_id: U32, position: USize) -> U32 {
+        if self.frame_ids.get((thread_id, position)) == .Val(id) -> return id
+        id :: &self.issue(.Frame)
+        self.frame_ids[(thread_id, position)] = id
+        self.frame_positions[id] = FrameLocation { thread_id: thread_id, position: position }
+        self.frame_raw[id] = false
+        return id
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:619
+    fn issue_raw_frame(self: &ObjectReferences, thread_id: U32, position: USize) -> U32 {
+        if self.raw_frame_ids.get((thread_id, position)) == .Val(id) -> return id
+        id :: &self.issue(.Frame)
+        self.raw_frame_ids[(thread_id, position)] = id
+        self.frame_positions[id] = FrameLocation { thread_id: thread_id, position: position }
+        self.frame_raw[id] = true
+        return id
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:636
+    fn frame_is_raw(self, id: U32) -> Bool? { return self.frame_raw.get(id) }
+    // Rust: crates/jet-debug/src/Dap.rs:640
+    fn issue_scope(self: &ObjectReferences, frame_id: U32, kind: ReferenceKind) -> U32 {
+        if self.scope_ids.get((frame_id, kind)) == .Val(id) -> return id
+        id :: &self.issue(kind)
+        if self.frame_positions.get(frame_id) == .Val(location) {
+            self.scope_ids[(frame_id, kind)] = id
+            self.scope_positions[id] = location
+        }
+        return id
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:652
+    fn frame_location(self, id: U32) -> FrameLocation? { return self.frame_positions.get(id) }
+    // Rust: crates/jet-debug/src/Dap.rs:656
+    fn scope_location(self, id: U32) -> FrameLocation? { return self.scope_positions.get(id) }
+    // Rust: crates/jet-debug/src/Dap.rs:660
+    fn issue_value_at(self: &ObjectReferences, frame: FrameLocation, expression: String, raw: Bool) -> U32 {
+        key :: (frame, ~expression, raw)
+        if self.value_ids.get(key) == .Val(id) -> return id
+        id :: &self.issue(.Value)
+        self.value_ids[key] = id
+        self.values[id] = ValueReference { frame: frame, expression: ^expression, raw: raw }
+        return id
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:678
+    fn value(self, id: U32) -> ValueReference? { return self.values.get(id) }
+    // Rust: crates/jet-debug/src/Dap.rs:682
+    fn invalidate(self: &ObjectReferences) {
+        self.generation = self.generation.wrapping_add(1).max(1)
+        &self.live.clear()
+        &self.frame_ids.clear()
+        &self.raw_frame_ids.clear()
+        &self.frame_positions.clear()
+        &self.frame_raw.clear()
+        &self.scope_ids.clear()
+        &self.scope_positions.clear()
+        &self.value_ids.clear()
+        &self.values.clear()
+    }
+}
+
+// Rust: crates/jet-debug/src/Dap.rs:696
+impl DapServer {
+    // Rust: crates/jet-debug/src/Dap.rs:697
+    fn has_pending_resume(self) -> Bool { return self.resume_task != None }
+    // Rust: crates/jet-debug/src/Dap.rs:701
+    fn poll_resume(self: &DapServer, out: &io.Write) {
+        event := None as ResumeEvent?
+        if self.resume_task == .Val(task) {
+            result :: &task.take_event()
+            if result == {
+                .Ok(value) -> event = ^value
+                .Err(()) -> {
+                    self.resume_task = None
+                    &self.terminate_with_diagnostic(out, "E2234", "the native debugger resume worker closed unexpectedly")
+                    return
+                }
+            }
+        }
+        settled :: event ?? return
+        self.resume_task = None
+        self.inf = .Val(^settled.inferior)
+        if settled.result == {
+            .Ok(result) -> &self.emit_resume(out, ^result, settled.mode)
+            .Err(error) -> &self.terminate_backend(out, error, "the native debugger lost the running session")
+        }
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:729
+    fn wait_resume(self: &DapServer) -> io.Result[ResumeEvent] {
+        task :: &self.resume_task.take() ?? return .Err(io.Error.new(.NotFound, "no native debugger resume is pending"))
+        return task.wait()
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:739
+    fn settle_resume(self: &DapServer) -> io.Result[()] {
+        (_, result) :: &self.take_resume_result()?
+        if result == .Err(error) -> return .Err(^error)
+        return .Ok(())
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:744
+    fn take_resume_result(self: &DapServer) -> io.Result[(ResumeMode, io.Result[ResumeResult])] {
+        event :: &self.wait_resume()?
+        self.inf = .Val(^event.inferior)
+        return .Ok((event.mode, ^event.result))
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:750
+    fn finish(self: &DapServer, code: I32) -> I32 {
+        if self.resume_task != None {
+            waited :: &self.wait_resume()
+            if waited == {
+                .Ok(event) -> {
+                    self.inf = .Val(^event.inferior)
+                    if event.result == .Err(error) {
+                        self.terminal_failure = true
+                        io.eprintln("error: native debugger resume failed during cleanup: {error}")
+                    }
+                }
+                .Err(error) -> {
+                    self.terminal_failure = true
+                    io.eprintln("error: native debugger resume cleanup failed: {error}")
+                }
+            }
+        }
+        self.state = .Terminated
+        &self.invalidate_references()
+        terminate :: self.target == .Val(.Launched)
+        closed :: &self.close_target(terminate)
+        if closed == .Ok(()) {
+            if !self.terminal_failure -> return code
+            return ExitCodes.USER_ERROR
+        }
+        if closed == .Err(error) {
+            (id, message) :: cleanup_error_details(error)
+            diagnostic :: if id == 22037 -> "E2231" else if id == 22038 -> "E2237" else -> "E2234"
+            io.eprintln("error [{diagnostic}]: {message}")
+        }
+        return ExitCodes.USER_ERROR
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:785
+    fn close_target(self: &DapServer, terminate: Bool) -> io.Result[()] {
+        inf := &self.inf.take() ?? { self.target = None; return .Ok(()) }
+        _entry_breakpoint :: &self.entry_breakpoint_id.take()
+        // Non-terminating disconnect must really detach before LLDB exits.
+        action :: if terminate -> &inf.terminate_debuggee() else -> &inf.detach()
+        &inf.quit()
+        self.target = None
+        &self.source_breakpoint_ids.clear()
+        if action.is_err() -> self.terminal_failure = true
+        return action
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:810
+    fn cleanup_after_terminal_state(self: &DapServer, out: &io.Write) -> Bool {
+        terminate :: self.target == .Val(.Launched)
+        if &self.close_target(terminate) == .Err(error) {
+            self.terminal_failure = true
+            (id, message) :: cleanup_error_details(error)
+            diagnostic :: if id == 22037 -> "E2231" else if id == 22038 -> "E2237" else -> "E2234"
+            body :: "{{\"category\":\"stderr\",\"output\":\"[{diagnostic}] {message}\\n\"}}"
+            &self.event(out, "output", body)
+            return false
+        }
+        return true
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:830
+    fn source_line(self, line: USize) -> String {
+        requested :: line.saturating_sub(1)
+        loop (index, text) in self.jet_src.lines() { if index == requested -> return text }
+        return ""
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:837
+    fn dap_line(self, jet_line: USize) -> USize {
+        return if self.lines_start_at_1 -> jet_line else -> jet_line.saturating_sub(1)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:844
+    fn history_event(self) -> DebugEvent? {
+        index :: self.history_cursor ?? return None
+        if self.history.events.get(index) == .Val(event) -> return ~event
+        return None
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:849
+    fn history_stack_body(self: &DapServer, thread_id: U32, start_frame: USize, levels: USize?) -> String? {
+        event :: self.history_event() ?? return None
+        stack :: if event.stack.is_empty() -> [FrameSnapshot { function: ^event.function, line: event.line }] else -> ^event.stack
+        total_frames :: stack.len()
+        entries := [String]{}
+        limit :: levels ?? USize.MAX
+        loop (position, frame) in stack {
+            if position < start_frame -> next
+            if entries.len() == limit -> break
+            id :: &self.references.issue_frame(thread_id, position)
+            &entries.push("{{\"id\":{id},\"name\":\"{json_escape(frame.function)}\",\"source\":{{\"path\":\"{json_escape(self.source_path())}\"}},\"line\":{self.dap_line(frame.line)},\"column\":{self.dap_column(1)}}}")
+        }
+        return "{{\"stackFrames\":[{entries.join(",")}],\"totalFrames\":{total_frames}}}"
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:889
+    fn history_variables_body(self) -> String? {
+        event :: self.history_event() ?? return None
+        entries := [String]{}
+        loop value in event.locals -> &entries.push("{{\"name\":\"{json_escape(value.name)}\",\"value\":\"{json_escape(value.value)}\",\"type\":\"{json_escape(value.type_name)}\",\"variablesReference\":0}}")
+        return "{{\"variables\":[{entries.join(",")}],\"namedVariables\":{entries.len()}}}"
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:910
+    fn record_history_event(self: &DapServer, backtrace: String, jet_line: USize) {
+        frames := [FrameSnapshot]{}
+        loop frame in Inferior.parse_frames(backtrace) {
+            line :: self.map.jet_line_for_file(frame.rust_file, self.rust_file, frame.rust_line) ?? next
+            &frames.push(FrameSnapshot { function: Inferior.rust_func_to_jet(frame.func), line: line })
+        }
+        function :: if frames.first() == .Val(frame) -> ~frame.function else -> "<native>"
+        locals := [ValueSnapshot]{}
+        if self.inf == .Val(inf) {
+            if &inf.locals() == .Ok(raw) {
+                loop (type_name, rust_name, raw_value) in Inferior.parse_typed_locals(raw) {
+                    name :: Inferior.rust_local_to_jet(rust_name) ?? next
+                    value :: Inferior.safe_value(type_name, raw_value)
+                    &locals.push(ValueSnapshot { name: ^name, type_name: ^type_name, value: ^value })
+                }
+            }
+        }
+        writes := [DebugWrite]{}
+        if self.history.events.last() == .Val(previous) {
+            loop current in locals {
+                loop old in previous.locals {
+                    if old.name != current.name -> next
+                    if old.value != current.value -> &writes.push(DebugWrite { line: jet_line, place: ~current.name, old_value: ~old.value, new_value: ~current.value })
+                    break
+                }
+            }
+        }
+        sequence :: if self.history.events.last() == .Val(event) -> event.sequence.saturating_add(1) else -> 0
+        &self.history.push(DebugEvent {
+            sequence: sequence, function: ^function, line: jet_line, depth: 0,
+            stack: ^frames, locals: ^locals, writes: ^writes
+        })
+        self.history_cursor = None
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:984
+    fn current_history_index(self) -> USize? {
+        return self.history_cursor ?? self.history.events.len().checked_sub(1)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:989
+    fn emit_history_stop(self: &DapServer, out: &io.Write, reason: String) {
+        &self.invalidate_references()
+        self.state = .Stopped
+        thread_id :: self.current_thread.max(1)
+        description := "recorded Jet source event"
+        if self.history_event() == .Val(event) {
+            description = "recorded event {event.sequence} at {self.source_path()}:{self.dap_line(event.line)}"
+            if event.writes.first() == .Val(write) -> description += " (write {write.place}: {write.old_value} -> {write.new_value})"
+        }
+        &self.event(out, "stopped", "{{\"reason\":\"{json_escape(reason)}\",\"description\":\"{json_escape(description)}\",\"threadId\":{thread_id},\"allThreadsStopped\":true}}")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1030
+    fn replay_native_history(self: &DapServer, command: String, start: USize, include_controls: Bool) -> DebugHistory Err! {
+        if self.history.events.is_empty() -> return .Err("reverse unavailable: this session has no recorded source history")
+        if start >= self.history.events.len() -> return .Err("reverse unavailable: the requested native stop is no longer retained")
+        expected_identity :: jet_foundation.SHA256.sha256_hex("{self.jet_file}:{self.jet_src}".as_bytes())
+        if self.history.checkpoint == .Val(checkpoint) {
+            if checkpoint.source_identity != expected_identity -> return .Err("native history no longer matches the selected Jet source")
+        }
+        history := ~self.history
+        history.cursor = .Val(start)
+        inputs := [String]{}
+        if include_controls {
+            loop line in self.pending_breakpoints -> &inputs.push("break {line}")
+            loop (watch, _) in self.data_watches -> &inputs.push("watch {watch}")
+        }
+        &inputs.push(~command)
+        result :: jet_debug.run_native_session_replay(self.jet_file, self.jet_src, history, inputs, true)
+        if result.status != .Running -> return .Err("native source history could not be replayed")
+        if result.history.cursor == None -> return .Err("native replay returned no retained stop")
+        return .Ok(^result.history)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1081
+    fn history_write_matches(self, event: DebugEvent) -> Bool {
+        loop write in event.writes {
+            loop (watch, _) in self.data_watches {
+                if watch == write.place || write.place.starts_with("{watch}.") || watch.starts_with("{write.place}.") -> return true
+            }
+        }
+        return false
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1090
+    fn data_breakpoint_info(self: &DapServer, out: &io.Write, request_seq: I64, command: String, args: DataTree?) {
+        if self.state == .Terminated {
+            &self.respond_jet_error(out, request_seq, command, 22031, "data breakpoint information is unavailable after target termination")
+            return
+        }
+        name := None as String?
+        if args == .Val(args) {
+            if json_get(args, "name") == .Val(value) {
+                if json_str(value) == .Val(text) {
+                    trimmed := text.trim() // #4303
+                    if jet_expression(trimmed) != None -> name = trimmed
+                }
+            }
+        }
+        selected :: name ?? {
+            &self.respond_jet_error(out, request_seq, command, 22032, "dataBreakpointInfo requires a bounded Jet local path in `name`")
+            return
+        }
+        &self.respond(out, request_seq, command, true, "{{\"dataId\":\"{json_escape(selected)}\",\"description\":\"Jet write watch: {json_escape(selected)}\",\"accessTypes\":[\"write\"],\"canPersist\":false}}")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1134
+    fn set_data_breakpoints(self: &DapServer, out: &io.Write, request_seq: I64, command: String, args: DataTree?) {
+        if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+            &self.respond_jet_error(out, request_seq, command, 22031, "data breakpoints are not legal after the target terminated")
+            return
+        }
+        parsed :: data_breakpoint_places(args)
+        if parsed == .Err(message) { &self.respond_jet_error(out, request_seq, command, 22032, message); return }
+        places :: parsed ?? panic("failed parse branch returned")
+        self.data_watches = [String:Bool]{}
+        loop place in places -> self.data_watches[~place] = true
+        breakpoints := [String]{}
+        loop (index, place) in places -> &breakpoints.push("{{\"id\":{index + 1},\"verified\":true,\"dataId\":\"{json_escape(place)}\",\"message\":\"session write watch: {json_escape(place)}\"}}")
+        &self.respond(out, request_seq, command, true, "{{\"breakpoints\":[{breakpoints.join(",")}]}}")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1183
+    fn replay_forward_history(self: &DapServer, out: &io.Write, request_seq: I64, command: String, response_command: String?) {
+        response_command :: response_command ?? command
+        current :: self.current_history_index() ?? {
+            &self.respond_jet_error(out, request_seq, command, 22034, "forward replay unavailable: this session has no recorded source history")
+            return
+        }
+        last :: self.history.events.len().saturating_sub(1)
+        is_continue :: command == "continue"
+        target := None as USize?
+        if is_continue {
+            loop index in current + 1..self.history.events.len() {
+                event :: self.history.events.get(index) ?? next
+                if self.pending_breakpoints.contains(event.line) || self.history_write_matches(event) { target = index; break }
+            }
+            if target == None && current < last -> target = last
+        } else if current < last -> target = current + 1
+        if target == None {
+            if self.replay_only_after_fix {
+                &self.respond_jet_error(out, request_seq, command, 22037, "fix checkpoint is checked but cannot resume the stale native artifact; rebuild and restart")
+                return
+            }
+            if self.history_cursor != None {
+                &self.respond_jet_error(out, request_seq, command, 22037, "forward replay reached the retained history boundary; restart is required before live resume")
+                return
+            }
+            self.history.cursor = None
+            self.history_cursor = None
+            &self.invalidate_references()
+            self.state = .Running
+            &self.respond(out, request_seq, response_command, true, "{\"allThreadsContinued\":true}")
+            resume_cmd :: if command == {
+                "continue" -> "continue"
+                "next" -> "thread step-over"
+                "stepIn" -> "thread step-in"
+                _ -> "thread step-out"
+            }
+            mode :: if command == "continue" -> ResumeMode.Continue else -> ResumeMode.Step
+            &self.begin_resume(out, resume_cmd, mode)
+            return
+        }
+        destination :: target ?? panic("missing target branch returned")
+        replay_command :: if is_continue -> "continue" else if command == {
+            "next" -> "next"
+            "stepIn" -> "step"
+            "stepOut" -> "finish"
+            _ -> "step"
+        }
+        replayed :: &self.replay_native_history(replay_command, current, is_continue)
+        if replayed == .Err(message) { &self.respond_jet_error(out, request_seq, command, 22034, message); return }
+        history :: replayed ?? panic("failed replay branch returned")
+        if history.cursor != .Val(destination) {
+            &self.respond_jet_error(out, request_seq, command, 22034, "native replay did not reach the requested recorded stop")
+            return
+        }
+        self.history = ^history
+        self.history_cursor = .Val(destination)
+        &self.respond(out, request_seq, response_command, true, "{}")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1294
+    fn apply_fix(self: &DapServer, out: &io.Write, request_seq: I64, command: String, _args: DataTree?) {
+        if !self.state.is_stopped() {
+            &self.respond_jet_error(out, request_seq, command, 22031, "source repair requires a stopped target")
+            return
+        }
+        current :: self.current_history_index() ?? {
+            &self.respond_jet_error(out, request_seq, command, 22034, "fix unavailable: this session has no recorded source history")
+            return
+        }
+        // GATE #4494: real source read; native paths retain authority at ingress.
+        read :: std.fs.read_to_string(OSPath.from(self.jet_file))
+        if read == .Err(_) {
+            &self.respond_jet_error(out, request_seq, command, 22039, "fix rejected: the selected Jet source could not be read")
+            return
+        }
+        source_on_disk :: read ?? panic("failed source read branch returned")
+        if source_on_disk == self.jet_src {
+            &self.respond_jet_error(out, request_seq, command, 22034, "fix unavailable: source is unchanged; edit the selected file and retry")
+            return
+        }
+        checked :: jet_debug.checked_bundle_for_fix(self.jet_file)
+        if checked == .Err(reason) {
+            &self.respond_jet_error(out, request_seq, command, 22034, "fix rejected: {reason}")
+            return
+        }
+        (_, candidate_source, candidate_shape) :: checked ?? panic("failed check branch returned")
+        if self.history.checkpoint == .Val(checkpoint) {
+            shape :: checkpoint.shape
+            if shape != "native-dap-debug-artifact" && shape != "native-debug-artifact" && shape != candidate_shape {
+                &self.respond_jet_error(out, request_seq, command, 22034, "fix rejected: checkpoint incompatible (source type, layout, or authority changed); restart required")
+                return
+            }
+        }
+        built :: build_native_candidate(self.jet_file, self.rust_file, candidate_source)
+        if built == .Err(reason) {
+            &self.respond_jet_error(out, request_seq, command, 22034, "fix rejected: native candidate was not built: {reason}")
+            return
+        }
+        candidate :: built ?? panic("failed candidate branch returned")
+        if self.inf == None {
+            &self.respond_jet_error(out, request_seq, command, 22031, "fix rejected: the native target is no longer available")
+            return
+        }
+        inferior :: self.inf ?? panic("missing target branch returned")
+        activated :: &inferior.rebind_native_candidate(candidate.binary, self.rust_src, candidate.rust_source)
+        if activated == .Err(error) {
+            &self.respond_jet_error(out, request_seq, command, 22034, "fix rejected: native candidate was not activated: {error}")
+            return
+        }
+        receipt :: activated ?? panic("failed activation branch returned")
+        if self.history.checkpoint == .Val(checkpoint) {
+            checkpoint.source_identity = jet_foundation.SHA256.sha256_hex("{self.jet_file}:{candidate_source}".as_bytes())
+            checkpoint.shape = ^candidate_shape
+        }
+        self.rust_src = ~candidate.rust_source
+        self.map = LineMap.build(self.rust_src)
+        self.jet_src = ^candidate_source
+        self.history.cursor = .Val(current)
+        self.history_cursor = .Val(current)
+        self.replay_only_after_fix = false
+        changed := [String]{}
+        loop name in receipt.changed -> &changed.push("\"{json_escape(name)}\"")
+        sequence :: if self.history.events.get(current) == .Val(event) -> event.sequence else -> 0
+        body :: "{{\"checkpoint\":\"compatible\",\"native\":\"committed\",\"buildId\":\"{json_escape(candidate.build_id)}\",\"changed\":[{changed.join(",")}],\"source\":\"{json_escape(self.source_path())}\",\"historySequence\":{sequence}}}"
+        &self.candidate_artifacts.push(^candidate)
+        &self.respond(out, request_seq, command, true, body)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1448
+    fn reverse_history(self: &DapServer, out: &io.Write, request_seq: I64, command: String, reverse_continue: Bool) {
+        if !self.state.is_stopped() {
+            &self.respond_jet_error(out, request_seq, command, 22031, "reverse execution requires a stopped target")
+            return
+        }
+        current :: self.current_history_index() ?? {
+            &self.respond_jet_error(out, request_seq, command, 22034, "reverse unavailable: this session has no recorded source history")
+            return
+        }
+        target := None as USize?
+        if reverse_continue {
+            cursor := current
+            loop while cursor > 0 {
+                cursor -= 1
+                event :: self.history.events.get(cursor) ?? next
+                if self.pending_breakpoints.contains(event.line) || self.history_write_matches(event) { target = cursor; break }
+            }
+        } else -> target = current.checked_sub(1)
+        destination :: target ?? {
+            reason :: if reverse_continue -> "reverse unavailable: no earlier breakpoint or data write exists" else -> "reverse unavailable: no earlier source event exists"
+            &self.respond_jet_error(out, request_seq, command, 22034, reason)
+            return
+        }
+        replay_command :: if reverse_continue -> "reverse-continue" else -> "back"
+        replayed :: &self.replay_native_history(replay_command, current, reverse_continue)
+        if replayed == .Err(message) { &self.respond_jet_error(out, request_seq, command, 22034, message); return }
+        history :: replayed ?? panic("failed replay branch returned")
+        if history.cursor != .Val(destination) {
+            &self.respond_jet_error(out, request_seq, command, 22034, "native replay did not reach the requested recorded stop")
+            return
+        }
+        self.history = ^history
+        self.history_cursor = .Val(destination)
+        &self.respond(out, request_seq, command, true, "{}")
+        data_write := false
+        if reverse_continue {
+            if self.history_event() == .Val(event) -> data_write = self.history_write_matches(event)
+        }
+        reason :: if data_write -> "data breakpoint" else if reverse_continue -> "breakpoint" else -> "step"
+        &self.emit_history_stop(out, reason)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1539
+    fn dap_column(self, jet_column: USize) -> USize {
+        return if self.columns_start_at_1 -> jet_column else -> jet_column.saturating_sub(1)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1547
+    fn source_path(self) -> String {
+        // GATE #4494: actual native canonicalization; display only at DAP edge.
+        path := OSPath.from(self.jet_file)
+        if std.fs.canonicalize(path) == .Ok(canonical) -> path = ^canonical
+        return path.to_string_lossy().into_owned()
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1554
+    fn reset_history(self: &DapServer) {
+        self.history = DebugHistory {
+            events: [], checkpoint: .Val(DebugCheckpoint {
+                source_identity: jet_foundation.SHA256.sha256_hex("{self.jet_file}:{self.jet_src}".as_bytes()),
+                shape: native_checkpoint_shape(self.jet_file, self.jet_src), sequence: 0
+            }), cursor: None, capped: false, decision_ledger: None
+        }
+        self.history_cursor = None
+        self.replay_only_after_fix = false
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1572
+    fn assign_client_breakpoint_ids(self: &DapServer, specs: [BreakpointSpec]) -> [U32] {
+        old_specs :: self.pending_specs
+        old_ids :: self.client_breakpoint_ids
+        assigned_specs := [BreakpointSpec]{}
+        assigned_ids := [U32]{}
+        loop spec in specs {
+            position := None as USize?
+            loop (index, old) in assigned_specs { if old == spec { position = index; break } }
+            if position == .Val(index) { &assigned_ids.push(assigned_ids[index]); next }
+            existing := None as U32?
+            loop (index, old) in old_specs {
+                if index >= old_ids.len() -> break
+                if old == spec { existing = old_ids[index]; break }
+            }
+            id := existing ?? 0
+            if existing == None {
+                id = self.next_client_breakpoint_id.max(1)
+                self.next_client_breakpoint_id = id.checked_add(1) ?? 1
+            }
+            &assigned_specs.push(~spec)
+            &assigned_ids.push(id)
+        }
+        return assigned_ids
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1597
+    fn emit_target_started_events(self: &DapServer, out: &io.Write) {
+        start_method :: if self.target == .Val(.Attached) -> "attach" else -> "launch"
+        &self.event(out, "process", "{{\"name\":\"Jet\",\"startMethod\":\"{start_method}\",\"isLocalProcess\":true}}")
+        &self.event(out, "thread", "{\"reason\":\"started\",\"threadId\":1}")
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1614
+    fn raw_frames_for_request(self, args: DataTree?) -> Bool Err! {
+        if args == .Val(arguments) {
+            if json_get(arguments, "showRawFrames") == .Val(value) {
+                requested :: json_bool(value) ?? return .Err("showRawFrames must be a boolean")
+                return .Ok(self.show_raw_frames || requested)
+            }
+        }
+        return .Ok(self.show_raw_frames)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1623
+    fn output_text(self, text: String) -> String {
+        if self.supports_ansi_styling -> return ~text
+        clean := String.with_capacity(text.len())
+        escape := false
+        loop ch in text.chars() {
+            if escape {
+                if ch.is_ascii_alphabetic() -> escape = false
+                next
+            }
+            if ch == '\u{1b}' -> escape = true else -> &clean.push(ch)
+        }
+        return clean
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1645
+    fn spawn_target(self) -> io.Result[(Inferior, USize?)] {
+        inf := Inferior.spawn(self.binary)?
+        setup := .Ok(None) as io.Result[USize?]
+        if self.stop_on_entry {
+            line :: self.map.main_entry_line(self.rust_src)
+            if line == .Val(entry_line) {
+                breakpoint :: &inf.set_breakpoint(self.rust_file, entry_line)
+                if breakpoint == {
+                    .Ok(value) -> setup = .Ok(if value.resolved -> .Val(value.id) else -> None)
+                    .Err(error) -> setup = .Err(^error)
+                }
+            } else -> setup = .Err(io.Error.new(.InvalidData, "entry has no source line")) // GATE #4409
+        }
+        if setup == .Ok(entry) -> return .Ok((^inf, entry))
+        if setup == .Err(error) {
+            &inf.quit()
+            return .Err(^error)
+        }
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1669
+    fn attach_target(self, args: DataTree?) -> (Inferior, LineMap, Bool) !AttachFailure {
+        parsed :: parse_attach_arguments(args)
+        if parsed == .Err(_) -> return .Err(.InvalidArguments)
+        attach :: parsed ?? panic("failed attach argument branch returned")
+        loaded :: LineMap.load_verified(attach.map, self.jet_file, self.jet_src, self.rust_file, self.rust_src, attach.program)
+        if loaded == .Err(_) -> return .Err(.MapMismatch)
+        map :: loaded ?? panic("failed attach map branch returned")
+        attached :: Inferior.attach(attach.program, attach.pid)
+        if attached == .Err(error) {
+            if error.kind() == .PermissionDenied || error.kind() == .InvalidInput -> return .Err(.Denied)
+            return .Err(.Unavailable)
+        }
+        inferior :: attached ?? panic("failed attach branch returned")
+        return .Ok((^inferior, ^map, attach.show_raw_frames))
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1696
+    fn install_breakpoints(map: LineMap, rust_file: String, lines: [USize], inf: &Inferior) -> io.Result[([USize], [Bool])] {
+        ids := [USize]{}
+        verified := [Bool]{}
+        loop jline in lines {
+            if map.rust_line_for(jline) == .Val(rust_line) {
+                breakpoint :: &inf.set_breakpoint(rust_file, rust_line)?
+                &ids.push(breakpoint.id)
+                &verified.push(breakpoint.resolved)
+            } else -> &verified.push(false)
+        }
+        return .Ok((^ids, ^verified))
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1716
+    fn replace_source_breakpoints(self: &DapServer) -> io.Result[[Bool]] {
+        old :: ^self.source_breakpoint_ids
+        self.source_breakpoint_ids = []
+        lines :: self.pending_breakpoints
+        map :: self.map
+        rust_file :: self.rust_file
+        inf :: self.inf ?? return .Err(io.Error.new(.InvalidInput, "target is not launched"))
+        loop id in old -> &inf.delete_breakpoint(id)?
+        (ids, verified) :: DapServer.install_breakpoints(map, rust_file, lines, &inf)?
+        self.source_breakpoint_ids = ^ids
+        return .Ok(^verified)
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1737
+    fn emit_breakpoint_statuses(self: &DapServer, out: &io.Write, statuses: [Bool]) {
+        specs :: ~self.pending_specs
+        client_ids :: ~self.client_breakpoint_ids
+        source_path :: self.source_path()
+        loop (index, spec) in specs {
+            id :: client_ids.get(index) ?? 0
+            verified := statuses.get(index) ?? false
+            if spec.condition == .Val(condition) -> verified = verified && valid_condition(condition)
+            if spec.hit_condition == .Val(condition) -> verified = verified && valid_hit_condition(condition)
+            line :: self.dap_line(spec.line)
+            breakpoint :: if verified ->
+                "{{\"id\":{id},\"verified\":true,\"line\":{line},\"source\":{{\"path\":\"{json_escape(source_path)}\"}}}}" else ->
+                "{{\"id\":{id},\"verified\":false,\"line\":{line},\"source\":{{\"path\":\"{json_escape(source_path)}\"}},\"message\":\"E2235: no stoppable Jet statement at {json_escape(source_path)}:{line}\"}}"
+            &self.event(out, "breakpoint", "{{\"reason\":\"changed\",\"breakpoint\":{breakpoint}}}")
+        }
+    }
+    // Rust: crates/jet-debug/src/Dap.rs:1772
+    fn invalidate_references(self: &DapServer) { &self.references.invalidate() }
+    // Rust: crates/jet-debug/src/Dap.rs:1776
+    fn select_resume_thread(self: &DapServer, args: DataTree?) -> () !(I64, String) {
+        arguments :: args ?? return .Err((22032, "run control requires a positive threadId"))
+        value :: json_get(arguments, "threadId") ?? return .Err((22032, "run control requires a positive threadId"))
+        thread_id :: json_u32(value) ?? return .Err((22032, "run control requires a positive threadId"))
+        if thread_id == 0 -> return .Err((22032, "run control requires a positive threadId"))
+        map :: self.map
+        rust_file :: self.rust_file
+        inf :: self.inf ?? return .Err((22034, "Jet debugger has no target"))
+        if &inf.select_thread(thread_id) == .Err(_) -> return .Err((22034, "the requested Jet task is no longer stopped"))
+        trace :: &inf.backtrace()
+        if trace == .Err(_) -> return .Err((22034, "the requested Jet task is no longer stopped"))
+        backtrace :: trace ?? panic("failed backtrace branch returned")
+        if !has_jet_frame(Inferior.parse_frames(backtrace), map, rust_file) -> return .Err((22039, "the requested thread has no verified Jet source location"))
+        self.current_thread = thread_id
+        return .Ok(())
+    }
+}
+

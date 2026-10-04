@@ -1,0 +1,409 @@
+// crates/jet-repl/src/Console.rs:1–638 (D-DX-CONSOLE1=A): protocol limits,
+// ConsoleMode/ConsoleCapability parse/as_str/required_right, ConsoleIdentity,
+// ConsoleServiceHandle/ConsoleDatabaseHandle, ConsoleProject new/from_root/
+// validate/with_identity/add/with/has_service/bindings_json, ConsoleOptions
+// defaults and builders, ConsoleRequest and ConsoleResponse builders and
+// validation. Validation helpers and ConsoleError live in Validation.jet.
+// Authority is the canonical Foundation CanonicalAuthority; a denied set is a
+// Foundation rights set (sorted, duplicate-free [String], Rust `Holds`).
+// Router/data adapters (639+) belong to Adapters.jet.
+use core.files as console_types_files
+use jet_foundation.[foundation_json_quote, mir_sha256_hex]
+
+pub CONSOLE_PROTOCOL :: "jet.console.v1"
+pub CONSOLE_MAX_HISTORY :: 256
+pub CONSOLE_MAX_AUDIT :: 256
+pub CONSOLE_MAX_OUTPUTS :: 256
+pub CONSOLE_MAX_LOG_BYTES :: 65536
+pub CONSOLE_MAX_RESULT_BYTES :: 65536
+pub CONSOLE_MAX_HEADERS :: 64
+pub CONSOLE_MAX_TOKEN_BYTES :: 256
+pub CONSOLE_MAX_TEXT_BYTES :: 65536
+pub CONSOLE_MAX_PARAMETERS :: 64
+pub CONSOLE_MAX_BODY_BYTES :: 1048576
+pub CONSOLE_MAX_ROWS :: 256
+// Rust u64 milliseconds: 30 minutes.
+pub CONSOLE_DEFAULT_TTL_MS :: U64{1800000}
+
+// Rust ConsoleMode: access starts read-only; SandboxData still needs DB.Write.
+pub enum ConsoleMode {
+    ReadOnly
+    SandboxData
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .ReadOnly -> "read-only"
+            .SandboxData -> "sandbox-data"
+        }
+    }
+}
+
+// Rust ConsoleCapability: one spelling shared by the command surface and the
+// authority carrier; the authority itself remains the only grant set.
+pub enum ConsoleCapability {
+    Repl
+    ServiceRead
+    DBRead
+    DBWrite
+    HTTPRequest
+    Commit
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Repl -> "REPL.Execute"
+            .ServiceRead -> "Service.Read"
+            .DBRead -> "DB.Read"
+            .DBWrite -> "DB.Write"
+            .HTTPRequest -> "Net.Connect"
+            .Commit -> "DB.Commit"
+        }
+    }
+    pub fn required_right(self) -> String Never! {
+        if self == {
+            .Repl -> "IO"
+            .ServiceRead -> "Service.Read"
+            .DBRead -> "DB.Read"
+            .DBWrite -> "DB.Write"
+            .Commit -> "DB.Write"
+            .HTTPRequest -> "Net.Connect"
+        }
+    }
+    // Rust parse: Unicode-trimmed, ASCII-lowercased aliases.
+    pub fn parse(value: String) -> ConsoleCapability? Never! {
+        // #4303: trimmed view flows into a String-typed normalization call.
+        trimmed := value.trim()
+        normalized :: trimmed.to_ascii_lower()
+        if normalized == {
+            "repl" | "repl.execute" | "io" -> Val(ConsoleCapability.Repl)
+            "service" | "service.read" -> Val(ConsoleCapability.ServiceRead)
+            "db" | "db.read" -> Val(ConsoleCapability.DBRead)
+            "db.write" | "write" -> Val(ConsoleCapability.DBWrite)
+            "net" | "net.connect" | "http" | "http.request" -> Val(ConsoleCapability.HTTPRequest)
+            "db.commit" | "commit" -> Val(ConsoleCapability.Commit)
+            else -> None
+        }
+    }
+}
+
+// Rust ConsoleIdentity: the project digest binds the exact root spelling (no
+// canonicalization); the session digest binds project, revision and nonce.
+pub struct ConsoleIdentity {
+    pub project_id: String
+    pub source_revision: String
+    pub session_id: String
+    pub fn new(project_root: String, source_revision: ^String, session_nonce: String) -> ConsoleIdentity ConsoleError! {
+        validate_token("source revision", source_revision) ?? return Err(err)
+        validate_token("session nonce", session_nonce) ?? return Err(err)
+        nul :: String.from_bytes([U8]{0}) ?? panic("NUL is UTF-8")
+        project_digest :: mir_sha256_hex("{CONSOLE_PROTOCOL}{nul}project{nul}{project_root}")
+        session_digest :: mir_sha256_hex("{CONSOLE_PROTOCOL}{nul}session{nul}{project_digest}{nul}{source_revision}{nul}{session_nonce}")
+        // #4303: slice views flow into String interpolation.
+        project_prefix := project_digest.slice(0, 24)
+        session_prefix := session_digest.slice(0, 24)
+        Ok(ConsoleIdentity{project_id: "project-{project_prefix}", source_revision: ^source_revision, session_id: "console-{session_prefix}"})
+    }
+}
+
+// Rust ConsoleServiceHandle: identity and status projection only; the host
+// graph owns the service.
+pub struct ConsoleServiceHandle {
+    pub name: String
+    pub identity: String
+    pub state: String
+    pub fn new(name: ^String, identity: ^String, state: ^String) -> ConsoleServiceHandle ConsoleError! {
+        validate_token("service name", name) ?? return Err(err)
+        validate_token("service identity", identity) ?? return Err(err)
+        validate_token("service state", state) ?? return Err(err)
+        Ok(ConsoleServiceHandle{name: ^name, identity: ^identity, state: ^state})
+    }
+}
+
+// Rust ConsoleDatabaseHandle: a declared identity, never a fake connection.
+pub struct ConsoleDatabaseHandle {
+    pub name: String
+    pub identity: String
+    pub fn new(name: ^String, identity: ^String) -> ConsoleDatabaseHandle ConsoleError! {
+        validate_token("database name", name) ?? return Err(err)
+        validate_token("database identity", identity) ?? return Err(err)
+        Ok(ConsoleDatabaseHandle{name: ^name, identity: ^identity})
+    }
+}
+
+// Rust ConsoleProject: facts loaded before the first turn. Handles are
+// attached by the host, kept sorted by name, and never guessed from source.
+pub struct ConsoleProject {
+    pub root: String
+    pub identity: ConsoleIdentity
+    pub services: [ConsoleServiceHandle]
+    pub databases: [ConsoleDatabaseHandle]
+    pub fn new(root: ^String, source_revision: ^String) -[FS.Read]> ConsoleProject ConsoleError! {
+        if !console_types_files.is_dir(root) -> return Err(ConsoleError.ProjectUnavailable{reason: "project root `{root}` is not a directory"})
+        identity :: ConsoleIdentity.new(root, ^source_revision, "default") ?? return Err(err)
+        Ok(ConsoleProject{root: ^root, identity: ^identity, services: [ConsoleServiceHandle]{}, databases: [ConsoleDatabaseHandle]{}})
+    }
+    pub fn from_root(root: ^String) -[FS.Read]> ConsoleProject ConsoleError! {
+        ConsoleProject.new(^root, "working-tree")
+    }
+    // Rust private validate: re-derives the default-nonce project identity and
+    // refuses invalid or duplicate declared handles.
+    fn validate(self) ConsoleError! -[FS.Read]> {
+        if !console_types_files.is_dir(self.root) -> return Err(ConsoleError.ProjectUnavailable{reason: "project root `{self.root}` is not a directory"})
+        validate_token("project id", self.identity.project_id) ?? return Err(err)
+        validate_token("source revision", self.identity.source_revision) ?? return Err(err)
+        validate_token("session id", self.identity.session_id) ?? return Err(err)
+        expected :: ConsoleIdentity.new(self.root, ~self.identity.source_revision, "default") ?? return Err(err)
+        if self.identity.project_id != expected.project_id -> return Err(ConsoleError.InvalidInput{reason: "project identity does not match its declared root"})
+        loop service in self.services {
+            validate_token("service name", service.name) ?? return Err(err)
+            validate_token("service identity", service.identity) ?? return Err(err)
+            validate_token("service state", service.state) ?? return Err(err)
+        }
+        loop database in self.databases {
+            validate_token("database name", database.name) ?? return Err(err)
+            validate_token("database identity", database.identity) ?? return Err(err)
+        }
+        service_names := [String:Bool]{}
+        loop service in self.services {
+            if service_names.has_key(service.name) -> return Err(ConsoleError.InvalidInput{reason: "project declares duplicate service handles"})
+            service_names[service.name] = true
+        }
+        database_names := [String:Bool]{}
+        loop database in self.databases {
+            if database_names.has_key(database.name) -> return Err(ConsoleError.InvalidInput{reason: "project declares duplicate database handles"})
+            database_names[database.name] = true
+        }
+    }
+    pub fn with_identity(^self, source_revision: ^String, session_nonce: String) -> ConsoleProject ConsoleError! {
+        updated := ^self
+        updated.identity = ConsoleIdentity.new(updated.root, ^source_revision, session_nonce) ?? return Err(err)
+        Ok(^updated)
+    }
+    pub fn add_service(&self, handle: ^ConsoleServiceHandle) ConsoleError! {
+        loop existing in self.services {
+            if existing.name == handle.name -> return Err(ConsoleError.InvalidInput{reason: "service `{handle.name}` is declared more than once"})
+        }
+        &self.services.push(^handle)
+        &self.services.sort_by((left: ConsoleServiceHandle, right: ConsoleServiceHandle) -> left.name <=> right.name)
+    }
+    pub fn add_database(&self, handle: ^ConsoleDatabaseHandle) ConsoleError! {
+        loop existing in self.databases {
+            if existing.name == handle.name -> return Err(ConsoleError.InvalidInput{reason: "database `{handle.name}` is declared more than once"})
+        }
+        &self.databases.push(^handle)
+        &self.databases.sort_by((left: ConsoleDatabaseHandle, right: ConsoleDatabaseHandle) -> left.name <=> right.name)
+    }
+    pub fn with_service(^self, handle: ^ConsoleServiceHandle) -> ConsoleProject ConsoleError! {
+        updated := ^self
+        &updated.add_service(^handle) ?? return Err(err)
+        Ok(^updated)
+    }
+    pub fn with_database(^self, handle: ^ConsoleDatabaseHandle) -> ConsoleProject ConsoleError! {
+        updated := ^self
+        &updated.add_database(^handle) ?? return Err(err)
+        Ok(^updated)
+    }
+    pub fn has_service(self, name: String) -> Bool Never! {
+        loop service in self.services {
+            if service.name == name -> return true
+        }
+        false
+    }
+    pub fn bindings_json(self) -> String Never! {
+        services := [String]{}
+        loop service in self.services {
+            &services.push("{{\"name\":{foundation_json_quote(service.name)},\"identity\":{foundation_json_quote(service.identity)},\"state\":{foundation_json_quote(service.state)}}}")
+        }
+        databases := [String]{}
+        loop database in self.databases {
+            &databases.push("{{\"name\":{foundation_json_quote(database.name)},\"identity\":{foundation_json_quote(database.identity)}}}")
+        }
+        "{{\"project\":{foundation_json_quote(self.identity.project_id)},\"services\":[{services.join(",")}],\"databases\":[{databases.join(",")}]}}"
+    }
+}
+
+// Rust ConsoleOptions: release builds, authority, loopback trust and expiry
+// are explicit, never inferred from ambient process state.
+pub struct ConsoleOptions {
+    pub project: ConsoleProject
+    pub mode: ConsoleMode
+    pub authority: CanonicalAuthority
+    pub denied: [String]
+    pub session_nonce: String
+    pub now_ms: U64
+    pub ttl_ms: U64
+    pub release_build: Bool
+    pub loopback: Bool
+    pub max_history: Int
+    pub max_outputs: Int
+    pub max_audit: Int
+    pub script: String?
+    pub fn new(project: ^ConsoleProject) -> ConsoleOptions Never! {
+        ConsoleOptions{
+            project: ^project,
+            mode: ConsoleMode.ReadOnly,
+            authority: CanonicalAuthority.from_rights([String]{"IO", "Mem.Alloc"}),
+            denied: [String]{},
+            session_nonce: "default",
+            now_ms: U64{0},
+            ttl_ms: CONSOLE_DEFAULT_TTL_MS,
+            release_build: false,
+            loopback: true,
+            max_history: CONSOLE_MAX_HISTORY,
+            max_outputs: CONSOLE_MAX_OUTPUTS,
+            max_audit: CONSOLE_MAX_AUDIT,
+            script: None
+        }
+    }
+    pub fn for_project(root: ^String) -[FS.Read]> ConsoleOptions ConsoleError! {
+        project :: ConsoleProject.from_root(^root) ?? return Err(err)
+        Ok(ConsoleOptions.new(^project))
+    }
+    pub fn with_mode(^self, mode: ConsoleMode) -> ConsoleOptions Never! {
+        updated := ^self
+        updated.mode = mode
+        ^updated
+    }
+    pub fn with_authority(^self, authority: ^CanonicalAuthority) -> ConsoleOptions Never! {
+        updated := ^self
+        updated.authority = ^authority
+        ^updated
+    }
+    pub fn with_rights(^self, rights: [String]) -> ConsoleOptions Never! {
+        updated := ^self
+        updated.authority = CanonicalAuthority.from_rights(rights)
+        ^updated
+    }
+    // Rust collects each canonical right (or its unknown spelling) into Holds.
+    pub fn with_denied(^self, rights: [String]) -> ConsoleOptions Never! {
+        denied := [String]{}
+        loop right in rights -> &denied.push(authority_parse_right(right) ?? right)
+        updated := ^self
+        updated.denied = authority_holds(denied)
+        ^updated
+    }
+    pub fn with_ttl_ms(^self, ttl_ms: U64) -> ConsoleOptions Never! {
+        updated := ^self
+        updated.ttl_ms = ttl_ms
+        ^updated
+    }
+    // Rust's builder is `release_build`; Jet E0105 forbids a method named
+    // like the `release_build` field, so the builder takes the with_ prefix.
+    pub fn with_release_build(^self, release: Bool) -> ConsoleOptions Never! {
+        updated := ^self
+        updated.release_build = release
+        ^updated
+    }
+    pub fn with_script(^self, script: ^String) -> ConsoleOptions Never! {
+        updated := ^self
+        updated.script = Val(^script)
+        ^updated
+    }
+    // Rust usize max(1): every ring keeps at least one row.
+    pub fn with_limits(^self, history: Int, outputs: Int, audit: Int) -> ConsoleOptions Never! {
+        updated := ^self
+        updated.max_history = if history < 1 -> 1 else -> history
+        updated.max_outputs = if outputs < 1 -> 1 else -> outputs
+        updated.max_audit = if audit < 1 -> 1 else -> audit
+        ^updated
+    }
+}
+
+// Rust ConsoleRequest: typed request for the existing in-process router.
+// The default origin is loopback text, never authority by itself.
+pub struct ConsoleRequest {
+    pub request_id: String
+    pub session_id: String
+    pub method: String
+    pub path: String
+    pub origin: String
+    pub headers: [String:String]
+    pub body: [U8]
+    pub fn new(request_id: ^String, session_id: ^String, method: String, path: ^String) -> ConsoleRequest ConsoleError! {
+        upper :: method.to_ascii_upper()
+        validate_token("request id", request_id) ?? return Err(err)
+        validate_token("session id", session_id) ?? return Err(err)
+        validate_method(upper) ?? return Err(err)
+        validate_local_path(path) ?? return Err(err)
+        Ok(ConsoleRequest{request_id: ^request_id, session_id: ^session_id, method: ^upper, path: ^path, origin: "127.0.0.1", headers: [String:String]{}, body: [U8]{}})
+    }
+    pub fn with_origin(^self, origin: ^String) -> ConsoleRequest ConsoleError! {
+        validate_origin(origin) ?? return Err(err)
+        updated := ^self
+        updated.origin = ^origin
+        Ok(^updated)
+    }
+    pub fn with_header(^self, name: String, value: ^String) -> ConsoleRequest ConsoleError! {
+        lowered :: name.to_ascii_lower()
+        if self.headers.len() >= CONSOLE_MAX_HEADERS && !self.headers.has_key(lowered) -> return Err(ConsoleError.LimitExceeded{what: "request headers"})
+        validate_token("header name", lowered) ?? return Err(err)
+        if is_secret_header(lowered) -> return Err(ConsoleError.InvalidRequest{reason: "credential headers are not permitted"})
+        validate_text("header value", value) ?? return Err(err)
+        updated := ^self
+        updated.headers[^lowered] = ^value
+        Ok(^updated)
+    }
+    pub fn with_body(^self, body: ^[U8]) -> ConsoleRequest ConsoleError! {
+        if body.len() > CONSOLE_MAX_BODY_BYTES -> return Err(ConsoleError.LimitExceeded{what: "request body"})
+        updated := ^self
+        updated.body = ^body
+        updated.validate() ?? return Err(err)
+        Ok(^updated)
+    }
+    pub fn is_loopback(self) -> Bool Never! {
+        is_loopback_host(self.origin)
+    }
+    // Rust private validate: re-checks every public field before dispatch.
+    fn validate(self) ConsoleError! {
+        validate_token("request id", self.request_id) ?? return Err(err)
+        validate_token("session id", self.session_id) ?? return Err(err)
+        validate_method(self.method) ?? return Err(err)
+        validate_local_path(self.path) ?? return Err(err)
+        validate_origin(self.origin) ?? return Err(err)
+        if self.headers.len() > CONSOLE_MAX_HEADERS -> return Err(ConsoleError.LimitExceeded{what: "request headers"})
+        loop (name, value) in self.headers {
+            validate_token("header name", name) ?? return Err(err)
+            if is_secret_header(name) -> return Err(ConsoleError.InvalidRequest{reason: "credential headers are not permitted"})
+            validate_text("header value", value) ?? return Err(err)
+        }
+        if self.body.len() > CONSOLE_MAX_BODY_BYTES -> return Err(ConsoleError.LimitExceeded{what: "request body"})
+        validate_safe_request(self.method, self.body) ?? return Err(err)
+    }
+}
+
+// Rust ConsoleResponse: typed response from an in-process route handler.
+pub struct ConsoleResponse {
+    pub request_id: String
+    pub status: U16
+    pub headers: [String:String]
+    pub body: [U8]
+    pub fn new(request_id: ^String, status: U16) -> ConsoleResponse ConsoleError! {
+        validate_token("response request id", request_id) ?? return Err(err)
+        if status < U16{100} || status > U16{599} -> return Err(ConsoleError.InvalidInput{reason: "response status {status} is outside 100..=599"})
+        Ok(ConsoleResponse{request_id: ^request_id, status: status, headers: [String:String]{}, body: [U8]{}})
+    }
+    pub fn with_header(^self, name: String, value: ^String) -> ConsoleResponse ConsoleError! {
+        lowered :: name.to_ascii_lower()
+        if self.headers.len() >= CONSOLE_MAX_HEADERS && !self.headers.has_key(lowered) -> return Err(ConsoleError.LimitExceeded{what: "response headers"})
+        validate_token("response header name", lowered) ?? return Err(err)
+        validate_text("response header value", value) ?? return Err(err)
+        updated := ^self
+        updated.headers[^lowered] = ^value
+        Ok(^updated)
+    }
+    pub fn with_body(^self, body: ^[U8]) -> ConsoleResponse ConsoleError! {
+        if body.len() > CONSOLE_MAX_BODY_BYTES -> return Err(ConsoleError.LimitExceeded{what: "response body"})
+        updated := ^self
+        updated.body = ^body
+        updated.validate() ?? return Err(err)
+        Ok(^updated)
+    }
+    // Rust private validate: response bounds are checked before publication.
+    fn validate(self) ConsoleError! {
+        validate_token("response request id", self.request_id) ?? return Err(err)
+        if self.status < U16{100} || self.status > U16{599} -> return Err(ConsoleError.InvalidInput{reason: "response status {self.status} is outside 100..=599"})
+        if self.headers.len() > CONSOLE_MAX_HEADERS -> return Err(ConsoleError.LimitExceeded{what: "response headers"})
+        loop (name, value) in self.headers {
+            validate_token("response header name", name) ?? return Err(err)
+            validate_text("response header value", value) ?? return Err(err)
+        }
+        if self.body.len() > CONSOLE_MAX_BODY_BYTES -> return Err(ConsoleError.LimitExceeded{what: "response body"})
+    }
+}

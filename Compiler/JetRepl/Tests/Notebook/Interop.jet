@@ -1,0 +1,226 @@
+// Rust tests/notebook.rs:192-321. Composed merge/cache/export/import proof
+// requires N1/N2 native gates #4367/#4388/#4392/#4423; retained, not bypassed.
+use core.files as notebook_interop_test_files
+use core.testing as notebook_interop_test_testing
+use core.encoding.[DataTree]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_bytes, canonical_json_parse, foundation_json_parse]
+
+fn notebook_interop_test_cell(id: String, source: String) -> NotebookCell Never! {
+    NotebookCell{id: id, kind: .Jet, source: source, output: None, depends_on: [String]{}}
+}
+fn notebook_interop_test_document() -> JetNotebook Never! {
+    nb := JetNotebook.new("env-doc")
+    &nb.cells.push(notebook_interop_test_cell("one", "answer :: 42"))
+    nb
+}
+fn notebook_interop_test_object(fields: [CanonicalJSONField]) -> CanonicalJSON Never! {
+    canonical_json_object(fields) ?? panic("unique fixture fields")
+}
+fn notebook_interop_test_import(text: String) -[Rand]> NotebookImportResult Never! {
+    notebook_import_ipynb(text) ?? panic("import fixture")
+}
+fn notebook_interop_test_import_error(text: String) -[Rand]> String Never! {
+    if notebook_import_ipynb(text) == {
+        .Err(error) -> error.message
+        .Ok(_) -> panic("invalid notebook accepted")
+    }
+}
+// Original mixed oracle: N2 also retains the save/load assertions; this full
+// consumer uses actual codec persistence before exporting the loaded document.
+#Test("jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss") {
+    nb := notebook_interop_test_document()
+    &nb.store_output("one", notebook_plain_bundle("answer : Int :: 42"), 1, None) ?? panic("store output")
+    assert(nb.visible_output("one") != None)
+    nb.cells[0].source = "answer :: 7"
+    assert(nb.visible_output("one") == None)
+    theirs := JetNotebook.new("env-doc")
+    &theirs.cells.push(notebook_interop_test_cell("one", "answer :: 7"))
+    &theirs.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# hi", output: None, depends_on: [String]{}})
+    merged :: notebook_merge_by_id(nb, theirs)
+    markdown := false
+    loop cell in merged.cells { if cell.kind == .Markdown -> markdown = true }
+    assert(markdown)
+    assert_eq(merged.cells[merged.cell_index("one") ?? panic("shared id")].source, "answer :: 7")
+    nb.cells[0].source = "answer :: 42"
+    &nb.store_output("one", notebook_plain_bundle("42"), 2, None) ?? panic("restore output")
+    directory :: notebook_interop_test_testing.temp_dir("jetnb-interop")
+    path :: notebook_interop_test_files.join(directory, "demo.jetnb")
+    notebook_save_jetnb(nb, path) ?? panic("save notebook")
+    loaded :: notebook_load_jetnb(path) ?? panic("load notebook")
+    assert_eq(loaded.cells.len(), 1)
+    exported :: notebook_export_ipynb(loaded) ?? panic("export ipynb")
+    assert(exported.loss.render().contains("export loss") || exported.loss.render().contains("omitted"))
+    assert(exported.text.contains("nbformat"))
+    assert(exported.text.contains("one"))
+    jet :: notebook_export_jet(loaded)
+    assert(jet.loss.render().contains("stated-loss") || jet.loss.items.len() >= 2)
+    assert(jet.text.contains("answer"))
+    fixture :: notebook_interop_test_object([CanonicalJSONField]{
+        CanonicalJSONField{key: "nbformat", value: .Integer("4")},
+        CanonicalJSONField{key: "nbformat_minor", value: .Integer("5")},
+        CanonicalJSONField{key: "metadata", value: notebook_interop_test_object([CanonicalJSONField]{})},
+        CanonicalJSONField{key: "cells", value: .Array([CanonicalJSON]{notebook_interop_test_object([CanonicalJSONField]{
+            CanonicalJSONField{key: "id", value: .String("keep-me")},
+            CanonicalJSONField{key: "cell_type", value: .String("code")},
+            CanonicalJSONField{key: "source", value: .Array([CanonicalJSON]{CanonicalJSON.String("1")})},
+            CanonicalJSONField{key: "metadata", value: notebook_interop_test_object([CanonicalJSONField]{})},
+            CanonicalJSONField{key: "outputs", value: .Array([CanonicalJSON]{notebook_interop_test_object([CanonicalJSONField]{
+                CanonicalJSONField{key: "output_type", value: .String("execute_result")},
+                CanonicalJSONField{key: "data", value: notebook_interop_test_object([CanonicalJSONField]{CanonicalJSONField{key: "text/plain", value: .String("1")}})},
+                CanonicalJSONField{key: "metadata", value: notebook_interop_test_object([CanonicalJSONField]{})},
+                CanonicalJSONField{key: "execution_count", value: .Integer("1")},
+            })})},
+            CanonicalJSONField{key: "execution_count", value: .Null},
+        })})},
+    })
+    imported :: notebook_interop_test_import(String.from_bytes(canonical_json_bytes(fixture)) ?? panic("UTF-8 fixture"))
+    quarantined_loss := false
+    loop item in imported.loss.items { if item.contains("quarantined") -> quarantined_loss = true }
+    assert(quarantined_loss)
+    assert_eq(imported.notebook.cells[0].id, "keep-me")
+    assert((imported.notebook.cells[0].output ?? panic("imported output")).bundle.quarantined)
+    notebook_interop_test_files.remove_all(directory) ?? panic("remove fixture")
+}
+
+#Test("notebook_merge_preserves_source_conflicts_last_theirs_and_cache_union") {
+    base := notebook_interop_test_document()
+    base.schema = 2
+    &base.store_output("one", notebook_plain_bundle("42"), 1, None) ?? panic("base output")
+    theirs := notebook_interop_test_document()
+    &theirs.store_output("one", notebook_plain_bundle("other"), 2, None) ?? panic("other output")
+    their_key :: (theirs.cells[0].output ?? panic("other output")).cache_key ?? panic("other key")
+    theirs.output_cache[their_key].bundle.text_plain = "cache must not replace base"
+    &theirs.cells.push(notebook_interop_test_cell("append", "1"))
+    &theirs.cells.push(notebook_interop_test_cell("append", "2"))
+    union :: notebook_merge_by_id(base, theirs)
+    assert_eq(union.schema, 2)
+    assert_eq(union.cells.len(), 2)
+    assert_eq(union.cells[1].source, "1")
+    assert_eq(union.output_cache[their_key].bundle.text_plain, "42")
+    assert_eq((union.cells[0].output ?? panic("prefer ours")).bundle.text_plain, "42")
+    // Last same-ID row in theirs drives matching, not the first one.
+    &theirs.cells.push(notebook_interop_test_cell("one", "answer :: 7"))
+    conflict :: notebook_merge_by_id(base, theirs)
+    assert_eq(conflict.cells[0].source, "answer :: 42")
+    assert_eq(conflict.cells[0].output, None)
+    assert_eq(conflict.merge_conflicts[0].theirs_source, "answer :: 7")
+    &base.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "first ours", theirs_source: "first theirs"})
+    retained :: notebook_merge_by_id(base, theirs)
+    assert_eq(retained.merge_conflicts.len(), 1)
+    assert_eq(retained.merge_conflicts[0].ours_source, "first ours")
+    theirs.cells[0].output = Val(NotebookCellOutput{bundle: notebook_plain_bundle("7"), execution_count: Val(3), cache_key: Val("different"), turn_id: None})
+    theirs.cells = [NotebookCell]{~theirs.cells[0]}
+    different_key :: notebook_merge_by_id(base, theirs)
+    assert_eq(different_key.cells[0].output, None)
+    base.cells[0].output = None
+    adopted :: notebook_merge_by_id(base, theirs)
+    assert_eq((adopted.cells[0].output ?? panic("adopt output")).bundle.text_plain, "7")
+}
+
+#Test("notebook_import_filters_sources_flattens_outputs_and_quarantines_trust_markers") {
+    fixture :: `{"nbformat":3,"cells":[null,{"id":"raw","cell_type":"raw","source":["a",1,"b"],"metadata":{"trusted":true},"outputs":[{"data":{"application/json":{"n":1.5},"text/html":["<b>",null,"42</b>"],"text/plain":["42",false]},"text":["\n","stream"]},{"text":"!"}]},{"id":"odd","cell_type":"other"}]}`
+    result :: notebook_interop_test_import(fixture)
+    assert_eq(result.notebook.cells.len(), 2)
+    cell :: result.notebook.cells[0]
+    assert_eq(cell.kind, NotebookCellKind.Markdown)
+    assert_eq(cell.source, "ab")
+    output :: cell.output ?? panic("flattened output")
+    assert_eq(output.bundle.text_plain, "42\nstream!")
+    assert_eq(output.bundle.mime[0].media_type, "application/json")
+    assert_eq(output.bundle.mime[0].payload, `{"n":"1.5"}`)
+    assert_eq(output.bundle.mime[1].payload, "<b>42</b>")
+    assert(output.bundle.quarantined)
+    assert_eq(output.execution_count, None)
+    assert_eq(output.cache_key, None)
+    assert_eq(output.turn_id, None)
+    assert_eq(result.loss.items, [String]{"nbformat 3 upgraded to 4.5 semantics", "skipped non-object cell", "raw cell imported as Markdown", "cell `raw`: imported outputs quarantined (no ambient execution)", "cell `raw`: non-Jet metadata dropped on import", "unsupported cell type `other` imported as Markdown"})
+    assert_eq(notebook_interop_test_import_error(`{"cells":[{"id":"same"},{"id":"same"}]}`), "ipynb has duplicate cell id `same`")
+    assert_eq(notebook_interop_test_import_error("[]"), "ipynb root must be an object")
+    assert_eq(notebook_interop_test_import_error(`{}`), "ipynb missing cells array")
+    assert_eq(notebook_interop_test_import_error("not json"), "ipynb is not valid JSON; export a complete Jupyter notebook")
+    loop format in [String]{"-1", "4294967296", "1.5", "null"} {
+        defaults :: notebook_interop_test_import("{{\"nbformat\":{format},\"cells\":[]}}")
+        assert(defaults.loss.is_empty())
+    }
+    minted :: notebook_interop_test_import(`{"cells":[{}, {"id":""}]}`)
+    assert(!minted.notebook.cells[0].id.is_empty())
+    assert(minted.notebook.cells[0].id != minted.notebook.cells[1].id)
+}
+
+#Test("notebook_export_distinguishes_live_stale_and_quarantined_outputs") {
+    nb := notebook_interop_test_document()
+    bundle := notebook_plain_bundle("42")
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/plain", payload: "ignored duplicate plain"}, NotebookMIMEEntry{media_type: "text/html", payload: "<b>42</b>"}}
+    &nb.store_output("one", bundle, 2, None) ?? panic("live output")
+    live :: notebook_export_ipynb(nb) ?? panic("live export")
+    assert(live.text.contains("execute_result"))
+    assert(live.text.contains("<b>42</b>"))
+    assert(!live.text.contains("ignored duplicate plain"))
+    assert(canonical_json_parse(live.text.bytes()) == .Ok(_))
+    nb.cells[0].source = "answer :: 7"
+    stale :: notebook_export_ipynb(nb) ?? panic("stale export")
+    assert(!stale.text.contains("execute_result"))
+    assert(stale.loss.items.contains("cell `one`: stale output omitted (closure key mismatch)"))
+    if nb.cells[0].output == .Val(output) {
+        quarantined := ~output
+        notebook_quarantine_outputs(&quarantined.bundle)
+        nb.cells[0].output = Val(^quarantined)
+    }
+    quarantine :: notebook_export_ipynb(nb) ?? panic("quarantined export")
+    assert(quarantine.text.contains("display_data"))
+    assert(!quarantine.text.contains("<b>42</b>"))
+    assert(quarantine.loss.items.contains("cell `one`: quarantined output exported as text/plain"))
+    notebook_quarantine_outputs(&bundle)
+    &nb.store_output("one", bundle, 3, None) ?? panic("live quarantined output")
+    live_quarantine :: notebook_export_ipynb(nb) ?? panic("live quarantined export")
+    assert(live_quarantine.text.contains("execute_result"))
+    assert(!live_quarantine.text.contains("<b>42</b>"))
+    assert(live_quarantine.loss.items.contains("cell `one`: quarantined rich output exported as text/plain"))
+    assert(live_quarantine.loss.items.contains("cell `one`: quarantined output exported as text only"))
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/html", payload: "first"}, NotebookMIMEEntry{media_type: "text/html", payload: "second"}}
+    bundle.quarantined = false
+    &nb.store_output("one", bundle, 4, None) ?? panic("duplicate rich output")
+    assert(notebook_export_ipynb(nb) == .Err(_))
+}
+
+// Independent real projection/conversion helpers: no graph/window gates.
+#Test("notebook_jet_projection_reports_loss_and_preserves_source_newlines") {
+    nb := notebook_interop_test_document()
+    &nb.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# omitted", output: None, depends_on: [String]{}})
+    &nb.cells.push(notebook_interop_test_cell("two", "next :: 7\n"))
+    &nb.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "answer :: 42", theirs_source: "answer :: 7"})
+    result :: notebook_export_jet(nb)
+    assert_eq(result.text, "// generated from .jetnb — stated-loss projection (D-NOTEBOOK-DOC1=D)\nanswer :: 42\n\nnext :: 7\n\n")
+    assert_eq(result.loss.items, [String]{"markdown cells omitted", "outputs / trust / cell ids omitted", "notebook environment identity omitted", "1 unresolved merge conflict(s) retained; execution is blocked"})
+    assert_eq(NotebookLossReport.default().render(), "no loss\n")
+    assert(result.loss.render().contains("execution is blocked"))
+}
+#Test("notebook_ipynb_text_preserves_payload_whitespace_and_filters_arrays") {
+    assert_eq(notebook_interop_ipynb_text(.String("text \n")), "text \n")
+    assert_eq(notebook_interop_ipynb_text(.Array([CanonicalJSON]{CanonicalJSON.String("a"), CanonicalJSON.Null, CanonicalJSON.String("b\n")})), "ab\n")
+    assert_eq(notebook_interop_ipynb_text(.Null), "null")
+    assert_eq(notebook_interop_ipynb_text(.Integer("42")), "42")
+    object :: notebook_interop_test_object([CanonicalJSONField]{CanonicalJSONField{key: "z", value: .Bool(true)}, CanonicalJSONField{key: "a", value: .String("é\n")}})
+    assert_eq(notebook_interop_ipynb_text(object), `{"a":"é\n","z":true}`)
+}
+#Test("notebook_general_json_fallback_converts_float_to_text_and_retains_exact_int") {
+    tree :: foundation_json_parse(`{"z":1.5,"i":9007199254740993,"a":[true,null,"é"]}`) ?? panic("Foundation parse")
+    converted :: notebook_interop_json_to_canonical(tree)
+    assert_eq(notebook_interop_ipynb_text(converted), `{"a":[true,null,"é"],"i":9007199254740993,"z":"1.5"}`)
+}
+#Test("notebook_merge_source_identity_includes_kind_and_authored_edges") {
+    ours := notebook_interop_test_cell("same", "answer :: 42")
+    theirs := notebook_interop_test_cell("other-id", "answer :: 42")
+    assert(notebook_interop_same_source(ours, theirs))
+    theirs.kind = .Markdown
+    assert(!notebook_interop_same_source(ours, theirs))
+    theirs.kind = .Jet
+    theirs.depends_on = [String]{"upstream"}
+    assert(!notebook_interop_same_source(ours, theirs))
+    ours.depends_on = [String]{"upstream", "upstream"}
+    assert(!notebook_interop_same_source(ours, theirs))
+    theirs.depends_on = [String]{"upstream", "upstream"}
+    assert(notebook_interop_same_source(ours, theirs))
+    theirs.source = "answer :: 7"
+    assert(!notebook_interop_same_source(ours, theirs))
+}

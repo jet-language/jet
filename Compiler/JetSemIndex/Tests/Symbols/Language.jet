@@ -1,0 +1,137 @@
+use jet_foundation.[
+    AccessConvention,
+    TAppliedRuleArgumentMenu,
+    Type,
+    builtin_method_row,
+    builtin_static_rows,
+    core_module_export,
+    foundation_core_argument_menus,
+    foundation_embedded_core,
+    numeric_conversion_return,
+    rule_arg_declaration,
+    sema_collection_method_contract,
+    sema_collection_method_result_type,
+    type_name,
+]
+
+// Rust tests/semindex.rs:113–129, same destination/parse membership cases.
+// Ratified docs reconciliation renders the checked suffix String!, not the
+// frozen obsolete !String golden; the assertion still observes narrowing.
+#Test("numeric_destination_conversions_and_parse_are_cataloged") {
+    symbols :: SemanticSymbolIndex.language()
+    assert(symbols.lookup_qualified("Int.parse") != None)
+    assert(symbols.lookup_qualified("Float.parse") != None)
+    narrow :: symbols.lookup_qualified("F32.from_float") ?? panic("F32 narrowing catalog entry")
+    result :: numeric_conversion_return(Type.Float32, "from_float", 1) ?? panic("checked F32 conversion")
+    assert_eq(result, Type.Result{ok: Type.Float32, err: Type.String})
+    assert(narrow[0].signature.ends_with("-> {type_name(result)}"))
+    assert(symbols.lookup_qualified("U8.from_u64") != None)
+    assert(symbols.lookup_qualified("Float.from_i8") != None)
+    assert(symbols.lookup_qualified("I64.from_f32") != None)
+    wide :: symbols.lookup_qualified("F64.from_u32") ?? panic("F64 widening catalog entry")
+    wide_result :: numeric_conversion_return(Type.Float, "from_u32", 1) ?? panic("checked F64 conversion")
+    assert_eq(wide_result, Type.Float)
+    assert(wide[0].signature.ends_with("-> F64"))
+}
+
+// These are consumer-side catalog facts, not replacements for the checked
+// open_symbols fixtures at tests/semindex.rs:98–109 and724–739. Those fixtures
+// retain their original source and need S14/C4's real producer at integration.
+#Test("language_catalog_keeps_contextual_result_names_out_of_keywords") {
+    symbols :: semantic_language_symbols()
+    loop symbol in symbols {
+        if symbol.name == "Ok" || symbol.name == "Err" -> assert(symbol.kind != SemanticSymbolKind.Keyword)
+    }
+}
+
+fn semantic_builtin_test_slot(symbols: [SemanticSymbol], qualified_name: String) -> Int Never! {
+    loop index in 0..<symbols.len() {
+        if symbols[index].qualified_name == qualified_name -> return index
+    }
+    panic("missing shared builtin docs: {qualified_name}")
+}
+
+#Test("language_builtin_contracts_reach_shared_docs") {
+    symbols :: semantic_builtin_doc_symbols()
+    semantic_assert_shared_collection_doc_contracts(symbols)
+    parse :: symbols[semantic_builtin_test_slot(symbols, "Int.parse")]
+    parse_rows :: builtin_static_rows("Int", "parse")
+    assert_eq(parse_rows[0].return_type, Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}})
+    assert(parse.signature.ends_with("-> {type_name(parse_rows[0].return_type)}"))
+}
+
+#Test("core_module_completion_and_lookup_share_registered_exports") {
+    module_name :: "core.math"
+    declaration :: core_module_export(module_name) ?? panic("registered core.math")
+    // core.math does not project compiler-language menus.
+    no_menus :: [TAppliedRuleArgumentMenu]{}
+    completion :: SemanticSymbolIndex.complete_core_module(module_name, "", no_menus)
+    assert_eq(completion.len(), declaration.members.len())
+    loop index in 0..<declaration.members.len() {
+        assert_eq(completion[index].name, declaration.members[index])
+        assert_eq(completion[index].owner, String?{None})
+        member :: SemanticSymbolIndex.lookup_core_module_member(module_name, declaration.members[index], no_menus) ?? panic("registered member")
+        assert_eq(member.identity, completion[index].identity)
+        assert_eq(member.provenance, SemanticProvenance.Builtin{module_name: module_name})
+    }
+    assert(SemanticSymbolIndex.lookup_core_module_member(module_name, "not_a_core_member", no_menus) == None)
+    assert(SemanticSymbolIndex.complete_core_module("not_a_core_module", "", no_menus).is_empty())
+    assert(SemanticSymbolIndex.complete_core_module(module_name, "not_a_core_member", no_menus).is_empty())
+    // Use the actual canonical embedded declarations/effect roots/tags.
+    // Production and this consumer share the same menu initialization law.
+    menus :: foundation_core_argument_menus(foundation_embedded_core()) ?? panic("canonical embedded menus")
+    abi :: SemanticSymbolIndex.lookup_core_module_member("core.compiler.lang", "ABI", menus) ?? panic("compiler ABI enum")
+    abi_declaration :: rule_arg_declaration("ABI", menus) ?? panic("canonical ABI vocabulary")
+    assert_eq(abi.kind, SemanticSymbolKind.Type)
+    assert(abi.signature.contains(abi_declaration.variants.join(", ")))
+    assert(abi.summary.contains("ordinary enum"))
+    assert(abi.examples.is_empty())
+}
+
+#Test("numeric_catalog_does_not_invent_unsupported_exact_source_pairs") {
+    symbols :: SemanticSymbolIndex.language()
+    assert(symbols.lookup_qualified("Int.from_decimal") != None)
+    assert(symbols.lookup_qualified("Float.from_fraction") != None)
+    assert(symbols.lookup_qualified("U8.from_decimal") == None)
+    assert(symbols.lookup_qualified("F32.from_fraction") == None)
+    assert(numeric_conversion_return(Type.Float32, "from_float", 0) == None)
+    assert(numeric_conversion_return(Type.Float32, "not_a_conversion", 1) == None)
+}
+
+fn semantic_assert_shared_collection_doc_contracts(symbols: [SemanticSymbol]) Never! {
+    filter :: symbols[semantic_builtin_test_slot(symbols, "List.filter")]
+    receiver :: Type.List{element: Type.Named{name: "T"}}
+    contract :: sema_collection_method_contract(receiver, "filter") ?? panic("checked filter")
+    result :: sema_collection_method_result_type(contract, Val(Type.Bool), None) ?? panic("checked filter result")
+    assert_eq(result, receiver)
+    assert_eq(contract.receiver_access, AccessConvention.Read)
+    assert(filter.signature.ends_with("-> {type_name(result)}"))
+    assert(filter.summary.contains("Keeps items"))
+    assert(filter.examples.len() > 0)
+    assert_eq(filter.provenance, SemanticProvenance.Builtin{module_name: "core.collections"})
+    // Mutation/access and displaced-value returns are the CURRENT contracts,
+    // not the obsolete Map.insert/contains_key projection from frozen Rust.
+    add :: symbols[semantic_builtin_test_slot(symbols, "Map.add")]
+    map_type :: Type.Map{key: Type.Named{name: "K"}, key_span: None, value: Type.Named{name: "V"}}
+    add_contract :: sema_collection_method_contract(map_type, "add") ?? panic("checked Map.add")
+    add_result :: sema_collection_method_result_type(add_contract, None, None) ?? panic("checked Map.add result")
+    assert_eq(add_contract.receiver_access, AccessConvention.Write)
+    assert_eq(add_result, Type.Option{inner: Type.Named{name: "V"}})
+    assert(add.signature.ends_with("-> {type_name(add_result)}"))
+    assert(add.summary.contains("displaced value"))
+    _ :: semantic_builtin_test_slot(symbols, "Map.add_new")
+    _ :: semantic_builtin_test_slot(symbols, "Map.has_key")
+    _ :: semantic_builtin_test_slot(symbols, "List.indexed")
+    _ :: semantic_builtin_test_slot(symbols, "List.indexes")
+    split :: symbols[semantic_builtin_test_slot(symbols, "String.split")]
+    split_contract :: builtin_method_row(Type.String, "split", 1) ?? panic("checked split")
+    assert_eq(split_contract.result, Type.Apply{name: "Iter", args: [Type]{Type.String}})
+    assert(split.signature.ends_with("-> {type_name(split_contract.result)}"))
+}
+
+#Test("shared_collection_docs_preserve_checked_access_and_returns") {
+    symbols := [SemanticSymbol]{}
+    semantic_append_builtin_collection_docs(&symbols)
+    semantic_append_builtin_string_docs(&symbols)
+    semantic_assert_shared_collection_doc_contracts(symbols)
+}

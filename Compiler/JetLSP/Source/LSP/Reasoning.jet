@@ -1,0 +1,260 @@
+// Rust: Source/LSP/Features.rs:213–661,978–1045. Checked relation projections.
+use core.text as reasoning_text
+use jet_foundation.[Span, DerivationRecord, DerivationObservation, foundation_json_quote, derivation_method_raw, derivation_disposition_text, derivation_payload_json, AccessConvention, compiler_stage_as_str, failure_contract_effective_type, failure_contract_source, type_name]
+use jet_semindex.[SymbolDB, SymbolDef, SemanticSymbol, InlayHint]
+
+// Rust: Source/LSP/Features.rs:213
+pub fn lsp_derivation_for_symbol(db: SymbolDB, symbol: SemanticSymbol) -> View<DerivationRecord>? Never! {
+    definition := db.index.lookup_identity(symbol.identity)
+    if definition == None {
+        span :: symbol.span ?? return None
+        rows :: db.index.definitions()
+        loop (i, row) in rows {
+            if row.module_path == symbol.module_path && row.def_span == span {
+                window :: rows[i..i]
+                definition = Val(window)
+                break
+            }
+        }
+    }
+    window :: definition ?? return None
+    def :: window[0]
+    facts :: db.index.definition_facts()
+    stable := Int?{None}
+    loop (i, fact) in facts {
+        if fact.human_identity == def.identity { stable = Val(i); break }
+    }
+    records :: db.index.derivations()
+    if stable == .Val(fact_index) {
+        subject :: facts[fact_index].stable_id
+        loop (i, record) in records {
+            if record.subject == subject { found :: records[i..i]; return Val(found) }
+        }
+    }
+    loop (i, record) in records {
+        if record.subject == def.identity || record.subject == symbol.identity { found :: records[i..i]; return Val(found) }
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:239
+pub fn lsp_reasoning_summary(record: DerivationRecord) -> String Never! {
+    identity :: record.identity
+    "Reasoning\n\nclaim: `{record.claim}`\nrecord: `{record.id}`\nproducer: `{record.producer}`\nmethod: `{derivation_method_raw(record.method)}`\ndisposition: `{derivation_disposition_text(record.disposition)}`\npremises: {record.premises.len()}\nsource/build/run/target: `{identity.source}` / `{identity.build}` / `{identity.run}` / `{identity.target}`"
+}
+
+// Rust: Source/LSP/Features.rs:260. Preserve first matching fact and hint order.
+pub fn lsp_reasoning_inlay_hints(db: SymbolDB, path: String) -> [InlayHint] Never! {
+    hints := [InlayHint]{}
+    loop record in db.index.derivations() {
+        loop fact in db.index.definition_facts() {
+            if fact.stable_id != record.subject -> next
+            if fact.module_path == path -> &hints.push(InlayHint{span: Span{start: fact.span.start, end: fact.span.end}, module_path: ~fact.module_path, label: "reason: {record.claim} · {derivation_disposition_text(record.disposition)}"})
+            break
+        }
+        if hints.len() == 64 -> break
+    }
+    hints
+}
+
+// Rust: Source/LSP/Features.rs:285
+pub fn lsp_reasoning_span_json(db: SymbolDB, record: DerivationRecord) -> String Never! {
+    loop fact in db.index.definition_facts() {
+        if fact.stable_id == record.subject -> return "{{\"start\":{fact.span.start},\"end\":{fact.span.end}}}"
+    }
+    "null"
+}
+
+// Rust: Source/LSP/Features.rs:297. Scalar cap, not byte cap. Cursor advances
+// directly over borrowed UTF8 and never allocates a scalar table or rescans.
+pub fn lsp_bounded_reasoning_text(value: String, limit: Int) -> (text: String, truncated: Bool) Never! {
+    cursor := reasoning_text.cursor(value)
+    count := 0
+    length :: value.bytes().len()
+    loop while count < limit && cursor.offset < length {
+        cursor = reasoning_text.cursor_advance(value, cursor)
+        count += 1
+    }
+    truncated :: cursor.offset < length
+    prefix := value.slice(0, cursor.offset) // #4303
+    text :: if truncated -> "{prefix}…" else -> ~prefix
+    (text: text, truncated: truncated)
+}
+
+fn lsp_reasoning_observation_json(observation: DerivationObservation?) -> String Never! {
+    row :: observation ?? return "null"
+    event :: if row.event_id == { .Val(value) -> foundation_json_quote(value) None -> "null" }
+    counterexample :: if row.counterexample_id == { .Val(value) -> foundation_json_quote(value) None -> "null" }
+    "{{\"event\":{event},\"counterexample\":{counterexample}}}"
+}
+
+// Rust: Source/LSP/Features.rs:306 (constants311–312).
+pub fn lsp_reasoning_record_json(db: SymbolDB, record: DerivationRecord, expanded: Bool) -> String Never! {
+    claim :: lsp_bounded_reasoning_text(record.claim, 1024)
+    producer :: lsp_bounded_reasoning_text(record.producer, 512)
+    rule :: lsp_bounded_reasoning_text(record.rule, 1024)
+    premise_rows := [String]{}
+    loop (index, value) in record.premises {
+        if index == 128 -> break
+        bounded :: lsp_bounded_reasoning_text(value, 1024)
+        &premise_rows.push(foundation_json_quote(bounded.text))
+    }
+    premises :: premise_rows.join(",")
+    assumption_rows := [String]{}
+    loop (index, value) in record.assumptions {
+        if index == 128 -> break
+        bounded :: lsp_bounded_reasoning_text(value, 1024)
+        &assumption_rows.push(foundation_json_quote(bounded.text))
+    }
+    payload := "null"
+    payload_truncated := false
+    if expanded {
+        if record.payload == .Val(value) {
+            raw :: derivation_payload_json(value)
+            payload_truncated = raw.bytes().len() > 16 * 1024
+            if !payload_truncated -> payload = raw
+        }
+    }
+    raw_premises :: if expanded -> ",\"raw_premises\":[{premises}]" else -> ""
+    "{{\"id\":{foundation_json_quote(record.id)},\"subject\":{foundation_json_quote(record.subject)},\"claim\":{foundation_json_quote(claim.text)},\"producer\":{foundation_json_quote(producer.text)},\"method\":{foundation_json_quote(derivation_method_raw(record.method))},\"rule\":{foundation_json_quote(rule.text)},\"disposition\":{foundation_json_quote(derivation_disposition_text(record.disposition))},\"identity\":{{\"source\":{foundation_json_quote(record.identity.source)},\"build\":{foundation_json_quote(record.identity.build)},\"run\":{foundation_json_quote(record.identity.run)},\"target\":{foundation_json_quote(record.identity.target)}}},\"source_span\":{lsp_reasoning_span_json(db, record)},\"premises\":[{premises}],\"assumptions\":[{assumption_rows.join(",")}],\"observation\":{lsp_reasoning_observation_json(record.observation)},\"payload\":{payload},\"limits\":{{\"premises_truncated\":{record.premises.len() > 128},\"assumptions_truncated\":{record.assumptions.len() > 128},\"claim_truncated\":{claim.truncated},\"producer_truncated\":{producer.truncated},\"rule_truncated\":{rule.truncated},\"payload_truncated\":{payload_truncated}}}{raw_premises}}}"
+}
+
+// Rust: Source/LSP/Features.rs:402. First family wins, fixed ordered vocabulary.
+pub fn lsp_reasoning_family(record: DerivationRecord) -> String Never! {
+    text :: "{record.subject} {record.claim} {record.rule} {record.producer}".to_ascii_lowercase()
+    families :: [(String, [String])]{
+        ("value", [String]{"value", "observed"}),
+        ("ownership", [String]{"owner", "ownership", "lifetime", "borrow"}),
+        ("state", [String]{"state", "transition"}),
+        ("effects", [String]{"effect", "event", "callback", "task"}),
+        ("dependencies", [String]{"depend", "premise", "input"}),
+        ("impact", [String]{"impact", "changed", "change"}),
+        ("optimization", [String]{"optim", "copy", "cost", "vector"}),
+        ("counterexamples", [String]{"counterexample", "witness"}),
+    }
+    loop (family, needles) in families {
+        loop needle in needles { if text.contains(needle) -> return ~family }
+    }
+    "relationships"
+}
+
+// Rust: Source/LSP/Features.rs:433. No spelling recovery for shadowed callables.
+pub fn lsp_callable_definition_for_selection(db: SymbolDB, selection: String?) -> View<SymbolDef>? Never! {
+    selected :: selection ?? return None
+    if selected.is_empty() || selected == "all" -> return None
+    records :: db.index.derivations()
+    subject_index := Int?{None}
+    loop (i, record) in records {
+        if record.id == selected || record.claim == selected { subject_index = Val(i); break }
+    }
+    definitions :: db.index.definitions()
+    loop (i, definition) in definitions {
+        if definition.callable_signature == None -> next
+        matched := definition.identity == selected || definition.qualified_name == selected
+        if subject_index == .Val(index) {
+            if records[index].subject == definition.identity -> matched = true
+        }
+        if !matched {
+            loop fact in db.index.definition_facts() {
+                subject_match :: if subject_index == { .Val(index) -> fact.stable_id == records[index].subject None -> fact.stable_id == "" }
+                if subject_match && fact.human_identity == definition.identity { matched = true; break }
+            }
+        }
+        if matched { row :: definitions[i..i]; return Val(row) }
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:460
+pub fn lsp_json_string_array(values: [String]) -> String Never! {
+    rows := [String]{}
+    loop value in values -> &rows.push(foundation_json_quote(value))
+    rows.join(",")
+}
+
+// Rust: Source/LSP/Features.rs:472. Missing checked rows never imply purity.
+pub fn lsp_callable_summary_json(db: SymbolDB, selection: String?) -> String Never! {
+    window :: lsp_callable_definition_for_selection(db, selection) ?? return "{{\"status\":\"unavailable\",\"reason\":\"select one checked callable identity or derivation\"}}"
+    definition :: window[0]
+    signature :: definition.callable_signature ?? return "{{\"status\":\"unavailable\",\"reason\":\"selected definition is not callable\"}}"
+    facts :: db.index.definition_facts()
+    stable := Int?{None}
+    loop (i, fact) in facts {
+        if fact.human_identity == definition.identity { stable = Val(i); break }
+    }
+    records :: db.index.derivations()
+    selected := [Int]{}
+    stale := false
+    observed := false
+    loop (i, record) in records {
+        stable_match := false
+        if stable == .Val(fact_index) -> stable_match = facts[fact_index].stable_id == record.subject
+        if !stable_match && record.subject != definition.identity -> next
+        &selected.push(i)
+        if derivation_disposition_text(record.disposition) == "stale" -> stale = true
+        if record.observation != None -> observed = true
+    }
+    write_rows := [String]{}
+    loop parameter in signature.parameters {
+        if parameter.access == .Write -> &write_rows.push("{{\"name\":{foundation_json_quote(parameter.name)},\"type\":{foundation_json_quote(parameter.type_name())},\"access\":\"write\",\"evidence\":\"declared_parameter\"}}")
+    }
+    effects := "{{\"status\":\"unavailable\",\"reason\":\"no checked effect row\"}}"
+    if db.index.effect_of(definition.identity) == .Val(effect_window) {
+        effect :: effect_window[0]
+        witnesses := [String]{}
+        loop witness in effect.provenance {
+            spans := [String]{}
+            loop span in witness.spans -> &spans.push("{{\"start\":{span.start},\"end\":{span.end}}}")
+            &witnesses.push("{{\"effect\":{foundation_json_quote(witness.effect_name)},\"call_path\":[{lsp_json_string_array(witness.call_path)}],\"spans\":[{spans.join(",")}]}}")
+        }
+        effects = "{{\"status\":\"checked\",\"direct\":[{lsp_json_string_array(effect.direct)}],\"inferred\":[{lsp_json_string_array(effect.inferred)}],\"callees\":[{lsp_json_string_array(effect.callees)}],\"maximal\":{effect.maximal},\"provenance\":[{witnesses.join(",")}]}}"
+    }
+    checked_rows := [String]{}
+    loop (position, index) in selected {
+        if position == 64 -> break
+        record :: records[index]
+        &checked_rows.push("{{\"id\":{foundation_json_quote(record.id)},\"disposition\":{foundation_json_quote(derivation_disposition_text(record.disposition))},\"identity\":{{\"source\":{foundation_json_quote(record.identity.source)},\"build\":{foundation_json_quote(record.identity.build)},\"run\":{foundation_json_quote(record.identity.run)},\"target\":{foundation_json_quote(record.identity.target)}}},\"observation\":{lsp_reasoning_observation_json(record.observation)},\"evidence\":\"checked\"}}")
+    }
+    status :: if stale -> "stale" else if selected.is_empty() -> "checked_without_derivation" else -> "checked"
+    views := [String]{}
+    loop view in signature.returned_views -> &views.push(foundation_json_quote(view.canonical()))
+    callable :: "{{\"identity\":{foundation_json_quote(definition.identity)},\"qualified_name\":{foundation_json_quote(definition.qualified_name)},\"module_path\":{foundation_json_quote(definition.module_path)},\"span\":{{\"start\":{definition.def_span.start},\"end\":{definition.def_span.end}}}}}"
+    declaration :: "{{\"kind\":\"checked_declaration\",\"module_path\":{foundation_json_quote(definition.module_path)}}}"
+    failure :: if signature.failure_contract == {
+        .Checked(contract) -> "{{\"status\":\"checked\",\"type\":{foundation_json_quote(type_name(failure_contract_effective_type(contract)))},\"source\":{foundation_json_quote(failure_contract_source(contract))},\"evidence\":\"checked_contract\"}}"
+        .Unavailable(unavailable) -> "{{\"status\":\"unavailable\",\"required_stage\":{foundation_json_quote(compiler_stage_as_str(unavailable.required_stage))},\"reason\":{foundation_json_quote(unavailable.reason)}}}"
+    }
+    producer_status :: if signature.metadata_producer_status == {
+        .ContractOnly -> "contract_only"
+        .NotImplemented -> "not_implemented"
+        .ExistingCallableProducerNeedsExtension -> "existing_callable_producer_needs_extension"
+    }
+    observation :: if observed -> "present" else -> "not_observed"
+    "{{\"status\":\"{status}\",\"callable\":{callable},\"declaration_source\":{declaration},\"failure\":{failure},\"write_access_parameters\":[{write_rows.join(",")}],\"effects\":{effects},\"returned_views\":[{views.join(",")}],\"policies\":[{lsp_json_string_array(signature.policy_names())}],\"metadata_producer_status\":\"{producer_status}\",\"checked_records\":[{checked_rows.join(",")}],\"limits\":{{\"records\":64,\"records_truncated\":{selected.len() > 64}}},\"runtime_observation\":\"{observation}\"}}"
+}
+
+// Rust: Source/LSP/Features.rs:978 (constant984). Bounded output over SAME table.
+pub fn lsp_reasoning_view_json(db: SymbolDB, path: String, selection: String?, expanded: Bool) -> String Never! {
+    selected := selection
+    if selected == .Val(value) { if value.is_empty() || value == "all" -> selected = None }
+    rendered := [String]{}
+    lens_rows := [String:[String]]{}
+    count := 0
+    loop record in db.index.derivations() {
+        if selected == .Val(value) { if record.id != value && record.subject != value && record.claim != value -> next }
+        count += 1
+        if count > 64 -> next
+        &rendered.push(lsp_reasoning_record_json(db, record, expanded))
+        family :: lsp_reasoning_family(record)
+        if !lens_rows.has_key(family) -> lens_rows[family] = [String]{}
+        &lens_rows[family].push(foundation_json_quote(record.id))
+    }
+    lenses := [String]{}
+    loop name in [String]{"value", "ownership", "state", "effects", "dependencies", "impact", "optimization", "counterexamples", "relationships"} {
+        rows := ""
+        if lens_rows.get(name) == .Val(items) -> rows = items.join(",")
+        &lenses.push("{{\"name\":\"{name}\",\"records\":[{rows}]}}")
+    }
+    selected_json :: if selected == { .Val(value) -> foundation_json_quote(value) None -> "\"all\"" }
+    "{{\"kind\":\"jet.reasoning/v1\",\"source\":{foundation_json_quote(path)},\"selection\":{selected_json},\"summary\":{lsp_callable_summary_json(db, selected)},\"records\":[{rendered.join(",")}],\"lenses\":[{lenses.join(",")}],\"limits\":{{\"records\":64,\"records_truncated\":{count > 64},\"expanded\":{expanded}}}}}"
+}

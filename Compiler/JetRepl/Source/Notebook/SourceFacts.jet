@@ -1,0 +1,62 @@
+// Rust Notebook/document.rs:470-566 source_name_facts: token facts only, not a
+// second parser or checked-name resolver. Like Rust, lexer diagnostics do not
+// prevent gathering the available facts; sets are sorted and deduplicated.
+use jet_lexer.[lex, TOKEN_IDENT, TOKEN_KW_FN, TOKEN_KW_STRUCT, TOKEN_KW_ENUM, TOKEN_KW_TRAIT, TOKEN_KW_MODULE, TOKEN_KW_TAG, TOKEN_KW_EFFECT, TOKEN_KW_CONST, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COLON, TOKEN_DOT]
+
+pub struct NotebookSourceNameFacts {
+    pub declared: [String]
+    pub references: [String]
+}
+fn notebook_declaration_keyword(kind: Int) -> Bool Never! {
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EFFECT || kind == TOKEN_KW_CONST
+}
+fn notebook_sorted_names(names: [String:Bool]) -> [String] Never! {
+    result := names.keys().to_list()
+    &result.sort()
+    result
+}
+pub fn notebook_source_name_facts(source: String) -> NotebookSourceNameFacts Never! {
+    tokens :: lex(source.bytes()).tokens
+    declared := [String:Bool]{}
+    ignored := [String:Bool]{}
+    loop index in 0..<tokens.len() {
+        if tokens[index].kind != TOKEN_KW_FN -> next
+        name_index := index + 1
+        loop name_index < tokens.len() && tokens[name_index].kind != TOKEN_IDENT -> name_index += 1
+        if name_index == tokens.len() -> next
+        declared[tokens[name_index].payload.text] = true
+        open := name_index + 1
+        loop open < tokens.len() && tokens[open].kind != TOKEN_LPAREN -> open += 1
+        if open == tokens.len() -> next
+        depth := 0
+        loop position in open..<tokens.len() {
+            token :: tokens[position]
+            if {
+                token.kind == TOKEN_LPAREN -> depth += 1
+                token.kind == TOKEN_RPAREN -> {
+                    if depth > 0 -> depth -= 1
+                    if depth == 0 -> break
+                }
+                token.kind == TOKEN_IDENT && depth > 0 -> ignored[token.payload.text] = true
+                else -> {}
+            }
+        }
+    }
+    loop index in 0..<tokens.len() {
+        token :: tokens[index]
+        if token.kind != TOKEN_IDENT -> next
+        previous :: if index > 0 -> tokens[index - 1].kind else -> -1
+        following :: if index + 1 < tokens.len() -> tokens[index + 1].kind else -> -1
+        // Owner-ratified Rust tandem: a binding declares the LEFT operand.
+        if notebook_declaration_keyword(previous) || following == TOKEN_COLON_COLON || following == TOKEN_COLON_EQ || following == TOKEN_COLON -> declared[token.payload.text] = true
+    }
+    references := [String:Bool]{}
+    loop index in 0..<tokens.len() {
+        token :: tokens[index]
+        if token.kind != TOKEN_IDENT -> next
+        previous :: if index > 0 -> tokens[index - 1].kind else -> -1
+        name :: token.payload.text
+        if !declared.has_key(name) && !ignored.has_key(name) && previous != TOKEN_DOT -> references[name] = true
+    }
+    NotebookSourceNameFacts{declared: notebook_sorted_names(declared), references: notebook_sorted_names(references)}
+}

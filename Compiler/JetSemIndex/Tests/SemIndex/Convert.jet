@@ -1,0 +1,293 @@
+// JSON.rs1357–1901 projection tests. Row-only assertions below are independent
+// conversions, not substitute checked providers. Full checked fixtures retained
+// canonically in Tests/SemIndex/CallableFacts.jet and Build.jet remain gated on
+// C4/CP-NAMES/AST/Sema SemIndexEffectFacts. Provenance fixtures below likewise
+// require the real same-solve producer; never create a local effect summary.
+fn semindex_convert_test_member(identity: String, owner: String, origin: MemberOrigin, signature: String) -> MemberFact Never! {
+    MemberFact{owner: owner, name: "same", identity: identity, kind: .Method, origin: origin, signature: signature, module_path: "main.jet", span: SourceSpan{start: 2, end: 6}}
+}
+#Test("semindex_convert_member_owner_keeps_first_identity") {
+    rows :: [MemberFact]{
+        semindex_convert_test_member("method:a", "First", .TypeBody, "z"),
+        semindex_convert_test_member("method:a", "Second", .InherentImpl, "a"),
+        semindex_convert_test_member("method:b", "Second", .TypeBody, "b"),
+        semindex_convert_test_member("method:a", "Third", .TraitImpl{trait_name: "T"}, "c"),
+    }
+    owners :: semindex_convert_member_owners(rows)
+    assert_eq(owners.get("method:a"), Val("First"))
+    assert_eq(owners.get("method:b"), Val("Second"))
+    assert_eq(owners.get("absent"), None)
+    assert_eq(semindex_convert_member_owners([MemberFact]{}).get("method:a"), None)
+}
+#Test("semindex_convert_trait_signatures_filter_origin_sort_and_dedup") {
+    rows :: [MemberFact]{
+        semindex_convert_test_member("a", "Owner", .TraitImpl{trait_name: "T"}, "fn z()"),
+        semindex_convert_test_member("b", "Other", .TraitImpl{trait_name: "T"}, "fn other()"),
+        semindex_convert_test_member("c", "Owner", .TraitRequirement{trait_name: "T"}, "fn required()"),
+        semindex_convert_test_member("d", "Owner", .TraitImpl{trait_name: "U"}, "fn other_trait()"),
+        semindex_convert_test_member("e", "Owner", .TraitImpl{trait_name: "T"}, "fn a()"),
+        semindex_convert_test_member("f", "Owner", .TraitImpl{trait_name: "T"}, "fn z()"),
+        semindex_convert_test_member("g", "Owner", .InherentImpl, "fn inherent()"),
+    }
+    assert_eq(semindex_member_signatures(rows, "Owner", .TraitImpl{trait_name: "T"}), [String]{"fn a()", "fn z()"})
+    assert_eq(semindex_member_signatures(rows, "Owner", .TraitRequirement{trait_name: "T"}), [String]{"fn required()"})
+    assert_eq(semindex_member_signatures(rows, "absent", .TraitImpl{trait_name: "T"}), [String]{})
+    assert_eq(semindex_member_signatures([MemberFact]{}, "Owner", .TypeBody), [String]{})
+}
+#Test("semindex_convert_views_preserve_ordered_alternatives_slots_and_paths") {
+    provenance :: ViewProvenance{sources: [ViewSourcePath]{
+        ViewSourcePath{source: .Parameter{index: 1}, projections: [ViewSourceProjection]{.Range}},
+        ViewSourcePath{source: .Receiver, projections: [ViewSourceProjection]{.Field{name: "data"}, .Index, .Range}},
+        ViewSourcePath{source: .Static{module_path: "mód", name: "data"}, projections: [ViewSourceProjection]{}},
+        ViewSourcePath{source: .Parameter{index: 1}, projections: [ViewSourceProjection]{.Range}},
+    }, mutable: true}
+    converted :: semindex_convert_view_provenance([String]{"outer", "left"}, provenance)
+    assert_eq(converted.output_path, [String]{"outer", "left"})
+    assert(converted.mutable)
+    assert_eq(converted.sources.len(), 4)
+    assert_eq(converted.sources[0].source, ViewSourceFact.Parameter{index: 1})
+    assert_eq(converted.sources[0].projections, [ViewProjectionFact]{.Range})
+    assert(converted.sources[1].source == .Receiver)
+    assert_eq(converted.sources[1].projections, [ViewProjectionFact]{.Field{name: "data"}, .Index, .Range})
+    assert_eq(converted.sources[2].source, ViewSourceFact.Static{module_path: "mód", name: "data"})
+    assert_eq(converted.sources[2].projections.len(), 0)
+    assert_eq(converted.canonical(), "slot:outer.left;one_of(parameter:1;path:range,receiver;path:field:data/index/range,static:mód::data;path:,parameter:1;path:range);access:write")
+}
+#Test("semindex_convert_views_keep_empty_and_single_source_distinct") {
+    empty :: semindex_convert_view_provenance([String]{}, ViewProvenance{sources: [ViewSourcePath]{}, mutable: false})
+    assert_eq(empty.canonical(), "slot:$;one_of();access:read")
+    single :: semindex_convert_view_provenance([String]{}, ViewProvenance{sources: [ViewSourcePath]{ViewSourcePath{source: .Parameter{index: 0}, projections: [ViewSourceProjection]{.Range}}}, mutable: false})
+    assert_eq(single.canonical(), "slot:$;parameter:0;access:read;path:range")
+}
+
+fn semindex_convert_test_callable() -> SymKind Never! {
+    SymKind.Function{
+        params: [SymNameType]{SymNameType{name: "local", ty: .Int}, SymNameType{name: "rest", ty: .String}},
+        param_sources: [SourceSpan]{SourceSpan{start: 8, end: 13}, SourceSpan{start: 30, end: 34}},
+        signature_facts_available: true,
+        param_contract: [SymParamContract]{SymParamContract{name: "ignored_binder", label: "input", zone: .PositionalOnly}, SymParamContract{name: "rest", label: "values", zone: .LabelOnly}},
+        param_variadic: [Bool]{false, true}, return_type: Val(Type.Bool),
+        failure_contract: .Unavailable{reason: CallableFactUnavailable{required_stage: .Typed, reason: "checked failure unavailable"}},
+        foreign_boundary: false, effects: Val([EffectRowEntry]{}), effect_via: None,
+        param_access: [AccessConvention]{.Write, .Move},
+        param_defaults: [CallableDefaultFact?]{Val(CallableDefaultFact{source_text: "7", source: SourceSpan{start: 20, end: 21}, value_unavailable: CallableFactUnavailable{required_stage: .Prepared, reason: "the semindex producer does not evaluate callable defaults"}}), None},
+        policies: [CallablePolicy]{CallablePolicy{name: "retry", arguments: [String]{"3"}}},
+        generic_parameters: .Checked{value: [TypeParam]{TypeParam{name: "T", name_span: Span{start: 2, end: 3}, bounds: [String]{"Printable"}, prep: None}}},
+    }
+}
+#Test("semindex_convert_callable_preserves_ordered_contract_source_and_availability") {
+    kind :: semindex_convert_test_callable()
+    views :: [ViewProvenanceFact]{semindex_convert_view_provenance([String]{}, ViewProvenance{sources: [ViewSourcePath]{}, mutable: true})}
+    signature :: semindex_callable_signature(kind, views) ?? panic("available signature missing")
+    assert_eq(signature.parameters.len(), 2)
+    assert_eq(signature.parameters[0].name, "local")
+    assert_eq(signature.parameters[0].label, "input")
+    assert_eq(signature.parameters[0].source, SourceSpan{start: 8, end: 13})
+    assert(signature.parameters[0].access == .Write)
+    assert(signature.parameters[0].zone == .PositionalOnly)
+    assert(!signature.parameters[0].variadic)
+    assert_eq((signature.parameters[0].default ?? panic("default lost")).source_text, "7")
+    assert(signature.parameters[1].default == None)
+    assert(signature.parameters[1].access == .Move)
+    assert(signature.parameters[1].zone == .LabelOnly)
+    assert(signature.parameters[1].variadic)
+    assert_eq(signature.return_type, Val(Type.Bool))
+    assert_eq(signature.effects, CallableEffectsFact.Checked{effects: [CallableEffectFact]{}})
+    assert_eq(signature.failure_contract, CallableFactAvailability<FailureContract>.Unavailable{reason: CallableFactUnavailable{required_stage: .Typed, reason: "checked failure unavailable"}})
+    assert_eq(signature.returned_views, views)
+    assert_eq(signature.policies.len(), 1)
+    assert(signature.metadata_producer_status == .ExistingCallableProducerNeedsExtension)
+    if signature.generic_parameters == { .Checked(parameters) -> assert_eq(parameters[0].name, "T"), else -> panic("generic fact lost") }
+}
+#Test("semindex_convert_callable_missing_signature_is_none_before_invariants") {
+    kind := semindex_convert_test_callable()
+    if kind == .Function(params, _, _, contract, variadic, ret, failure, foreign, effects, via, access, defaults, policies, generic) {
+        kind = .Function{params: params, param_sources: [SourceSpan]{}, signature_facts_available: false, param_contract: contract, param_variadic: variadic, return_type: ret, failure_contract: failure, foreign_boundary: foreign, effects: effects, effect_via: via, param_access: access, param_defaults: defaults, policies: policies, generic_parameters: generic}
+    }
+    assert(semindex_callable_signature(kind, [ViewProvenanceFact]{}) == None)
+    assert(semindex_callable_signature(.Module, [ViewProvenanceFact]{}) == None)
+}
+#Test("semindex_convert_callable_via_precedes_explicit_and_unavailable_rows") {
+    kind :: semindex_convert_test_callable()
+    if kind == .Function(params, sources, available, contract, variadic, ret, failure, foreign, _, _, access, defaults, policies, generic) {
+        via :: NamedSpan{name: "act", span: Span{start: 50, end: 53}}
+        with_via :: SymKind.Function{params: params, param_sources: sources, signature_facts_available: available, param_contract: contract, param_variadic: variadic, return_type: ret, failure_contract: failure, foreign_boundary: foreign, effects: Val([EffectRowEntry]{EffectRowEntry{name: "IO", span: Span{start: 60, end: 62}}}), effect_via: Val(via), param_access: access, param_defaults: defaults, policies: policies, generic_parameters: generic}
+        projected :: semindex_callable_signature(with_via, [ViewProvenanceFact]{}) ?? panic("via signature missing")
+        assert_eq(projected.effects, CallableEffectsFact.Checked{effects: [CallableEffectFact]{CallableEffectFact.ViaParameter{name: "act", source: SourceSpan{start: 50, end: 53}}}})
+        unavailable :: SymKind.Function{params: params, param_sources: sources, signature_facts_available: available, param_contract: contract, param_variadic: variadic, return_type: ret, failure_contract: failure, foreign_boundary: true, effects: None, effect_via: None, param_access: access, param_defaults: defaults, policies: policies, generic_parameters: generic}
+        missing :: semindex_callable_signature(unavailable, [ViewProvenanceFact]{}) ?? panic("unavailable row lost signature")
+        assert_eq(missing.effects, CallableEffectsFact.Unavailable{reason: CallableFactUnavailable{required_stage: .Typed, reason: "the checker has not published a checked callable effect row"}})
+    } else -> panic("function test fixture lost")
+}
+#Test("semindex_convert_refs_preserves_unresolved_anchor_and_registry_fact") {
+    target :: DefinitionAnchor{module_path: "definition.jet", kind: "function", def_span: SourceSpan{start: 1, end: 6}, semantic_identity: Val("fn:real")}
+    rows :: [SymRef]{
+        SymRef{name: "same", span: Span{start: 5, end: 3}, module_path: "use.jet", scope_identity: Val("block:1"), target: Val(target), fact: Val(CompilerFact{name: "type_of", kind: "type", type_name: "Type"})},
+        SymRef{name: "same", span: Span{start: 4, end: 4}, module_path: "other.jet", scope_identity: None, target: None, fact: None},
+    }
+    converted :: semindex_convert_refs(rows)
+    assert_eq(converted.len(), 2)
+    assert_eq(converted[0].target, Val(target))
+    assert_eq(converted[0].scope_identity, Val("block:1"))
+    assert_eq(converted[0].span, SourceSpan{start: 5, end: 3})
+    assert(converted[0].fact != None)
+    assert(converted[1].target == None)
+    assert(converted[1].scope_identity == None)
+    assert(converted[1].fact == None)
+    assert_eq(converted[1].module_path, "other.jet")
+    assert_eq(semindex_convert_refs([SymRef]{}).len(), 0)
+}
+
+// Original real checked effects/dispatch/via fixtures, tests/semindex1201–1306.
+// Unregistered until canonical SemaGraphResult.effect_facts + open producer land.
+pub fn semindex_s20_inferred_effect_source() -> String Never! {
+    "fn announce() { print(\"hello\") }\nfn run() { announce() }\n"
+}
+pub fn semindex_s20_inferred_effect_assertions(index: SemIndex) Never! {
+    announce :: (index.effect_of("announce") ?? panic("announce effects"))[0]
+    assert_eq(announce.inferred, [String]{"IO"})
+    assert_eq(announce.callees.len(), 0)
+    assert_eq(announce.provenance.len(), 1)
+    assert_eq(announce.provenance[0].effect_name, "IO")
+    assert_eq(announce.provenance[0].call_path, [String]{"announce"})
+    assert_eq(announce.provenance[0].spans.len(), 1)
+    run_facts :: (index.effect_of("run") ?? panic("run effects"))[0]
+    assert_eq(run_facts.provenance[0].call_path, [String]{"run", "inferred_effect_signature::announce"})
+    assert_eq(run_facts.provenance[0].spans.len(), 2)
+}
+pub fn semindex_s20_inline_effect_source() -> String Never! {
+    "module inner { pub fn announce() { print(\"hello\") } }\nfn run() { inner.announce() }\n"
+}
+pub fn semindex_s20_inline_effect_assertions(symbols: SemanticSymbolIndex) Never! {
+    announce :: symbols.lookup("announce")
+    assert_eq(announce.len(), 1)
+    assert(announce[0][0].signature.contains("-[IO]>"))
+}
+pub fn semindex_s20_dispatch_effect_source() -> String Never! {
+    "trait Shape { fn area(self) -[IO]> Int }\nfn dynamic(shape: Shape) -> Int { return shape.area() }\nfn apply(f: fn() -> Int) -> Int { return f() }\nfn stored(f: ^fn() -> Int) -> Int {\n    g :: f\n    return g()\n}\nfn run() {}\n"
+}
+pub fn semindex_s20_dispatch_effect_assertions(index: SemIndex) Never! {
+    apply :: (index.effect_of("apply") ?? panic("open callback effects"))[0]
+    assert(!apply.maximal)
+    assert_eq(apply.inferred.len(), 0)
+    assert_eq(apply.provenance.len(), 0)
+    stored :: (index.effect_of("stored") ?? panic("stored callback effects"))[0]
+    assert(stored.maximal)
+    assert_eq(stored.provenance.len(), stored.inferred.len())
+    loop origin in stored.provenance -> assert(origin.spans.len() > 0)
+    dynamic :: (index.effect_of("dynamic") ?? panic("trait dispatch effects"))[0]
+    found := false
+    loop origin in dynamic.provenance {
+        if origin.effect_name == "IO" {
+            assert_eq(origin.call_path.len(), 2)
+            assert_eq(origin.spans.len(), 2)
+            found = true
+        }
+    }
+    assert(found)
+}
+pub fn semindex_s20_via_effect_source() -> String Never! {
+    "fn bounded(act: fn() -[IO]>) -[via act]> {}\nfn open(act: fn()) -[via act]> {}\nfn run() {}\n"
+}
+pub fn semindex_s20_via_effect_assertions(index: SemIndex) Never! {
+    bounded :: (index.effect_of("bounded") ?? panic("bounded via effects"))[0]
+    assert_eq(bounded.inferred, [String]{"IO"})
+    assert_eq(bounded.provenance.len(), 1)
+    assert_eq(bounded.provenance[0].spans.len(), 1)
+    opened :: (index.effect_of("open") ?? panic("unbounded via effects"))[0]
+    assert(opened.maximal)
+    assert_eq(opened.provenance.len(), opened.inferred.len())
+    loop origin in opened.provenance -> assert(origin.spans.len() > 0)
+}
+pub fn semindex_s20_via_signature_source() -> String Never! {
+    "fn invoke(act: fn() -[IO]>) -[via act]> { act() }\nfn run() {}\n"
+}
+pub fn semindex_s20_via_signature_assertions(symbols: SemanticSymbolIndex) Never! {
+    invoke :: symbols.lookup("invoke")
+    assert(invoke.len() > 0)
+    assert_eq(invoke[0][0].signature, "fn invoke(act: fn() -[IO]>) -[via act]>")
+}
+
+// Exact real checked nominal contract fixture/oracle, tests/semindex169–226.
+// Requires open/open_symbols over this source; not a handcrafted checked index.
+pub fn semindex_s20_checked_text_source() -> String Never! {
+    "\n#Error\nenum PatternError { Bad }\n\nPattern :: distinct String\n\nimpl Pattern.CheckedText {\n    type Error = PatternError\n\n    fn check(text: String) PatternError! -[]> {\n        return\n    }\n\n    fn encode_hole<T: Printable>(value: T) -[]> String {\n        return \"\"\n    }\n}\n\nfn run() {}\n"
+}
+pub fn semindex_s20_checked_text_assertions(index: SemIndex, symbols: SemanticSymbolIndex, json: String, dossier_text: String) Never! {
+    definition :: (index.lookup("Pattern") ?? panic("Pattern definition"))[0]
+    assert_eq(definition.nominal_base, Val("String"))
+    found := false
+    loop contract in definition.trait_contracts {
+        if contract.trait_name != "CheckedText" -> next
+        assert_eq(contract.associated_types, [SemIndexAssociatedTypeFact]{SemIndexAssociatedTypeFact{name: "Error", implementation: Val("PatternError")}})
+        has_check := false
+        has_hole := false
+        loop method in contract.methods {
+            if method.contains("check") -> has_check = true
+            if method.contains("encode_hole") -> has_hole = true
+        }
+        assert(has_check)
+        assert(has_hole)
+        found = true
+    }
+    assert(found)
+    symbol :: (symbols.lookup_qualified("Pattern") ?? panic("Pattern semantic symbol"))[0]
+    assert(symbol.signature.contains("type Pattern :: distinct String"))
+    assert(symbol.signature.contains("implements CheckedText"))
+    assert(symbol.signature.contains("type Error = PatternError"))
+    assert(symbol.signature.contains("encode_hole"))
+    assert(json.contains("\"nominal_base\":\"String\""))
+    assert(json.contains("\"trait\":\"CheckedText\""))
+    assert(json.contains("\"associated_types\":[{\"name\":\"Error\""))
+    assert(dossier_text.contains("trait contracts"))
+}
+
+fn semindex_convert_test_distinct(start: Int, end: Int) -> Item Never! {
+    Item.Distinct{value: DistinctDef{is_pub: false, is_package_pub: false, type_markers: [Marker]{}, derives: [NamedSpan]{}, quantity: None, name: "Pattern", name_span: Span{start: start, end: end}, base: .String, base_span: Span{start: 30, end: 36}, range: None, span: Span{start: 0, end: 40}}}
+}
+#Test("semindex_convert_declaration_lookup_recurses_code_and_generic_modules") {
+    target :: semindex_convert_test_distinct(20, 27)
+    nested :: Item.GenericModule{value: GenericModuleDef{name: "Template", name_span: Span{start: 2, end: 10}, is_pub: false, is_package_pub: false, params: [GenericModuleParam]{}, imports: [ImportDecl]{}, body: [Item]{target}, span: Span{start: 0, end: 50}}}
+    items :: [Item]{semindex_convert_test_distinct(1, 8), Item.CodeModule{value: CodeModule{name: "outer", name_span: Span{start: 12, end: 17}, is_pub: false, is_package_pub: false, body: Val([Item]{nested}), imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: Span{start: 0, end: 60}}}}
+    assert_eq(semindex_find_declaration(items, SourceSpan{start: 20, end: 27}), Val(target))
+    assert(semindex_find_declaration(items, SourceSpan{start: 20, end: 26}) == None)
+    assert(semindex_find_declaration(items, SourceSpan{start: 0, end: 40}) == None)
+    assert(semindex_find_declaration([Item]{}, SourceSpan{start: 20, end: 27}) == None)
+}
+#Test("semindex_convert_contracts_match_owner_leaf_preserve_associated_rows_and_order") {
+    associated :: [NamedType]{NamedType{name: "Error", span: Span{start: 0, end: 0}, ty: .Int}, NamedType{name: "Error", span: Span{start: 0, end: 0}, ty: .String}}
+    implementation :: Item.Impl{value: ImplDef{span: Span{start: 0, end: 0}, type_name: "outer.Pattern", type_span: Span{start: 0, end: 0}, trait_name: Val("CheckedText"), trait_span: None, operator_rhs: None, operator_marker: None, methods: [Func]{}, delegation_field: None, assoc_type_impls: associated, is_generated_serde: false, os_target: None}}
+    members :: [MemberFact]{semindex_convert_test_member("a", "Pattern", .TraitImpl{trait_name: "CheckedText"}, "fn z()"), semindex_convert_test_member("b", "Pattern", .TraitImpl{trait_name: "CheckedText"}, "fn a()"), semindex_convert_test_member("c", "Pattern", .TraitImpl{trait_name: "CheckedText"}, "fn z()")}
+    items :: [Item]{semindex_convert_test_distinct(20, 27), implementation}
+    metadata :: semindex_declaration_contract_metadata(items[0], items, members)
+    assert_eq(metadata.nominal_base, Val("String"))
+    assert_eq(metadata.trait_contracts.len(), 1)
+    assert_eq(metadata.trait_contracts[0].associated_types, [SemIndexAssociatedTypeFact]{SemIndexAssociatedTypeFact{name: "Error", implementation: Val("Int")}, SemIndexAssociatedTypeFact{name: "Error", implementation: Val("String")}})
+    assert_eq(metadata.trait_contracts[0].methods, [String]{"fn a()", "fn z()"})
+    assert_eq(semindex_trait_contracts_for_owner(items, "outer.Pattern", members).len(), 0)
+}
+#Test("semindex_convert_semantic_kinds_preserve_display_fallback_and_every_variant") {
+    assert_eq(semindex_convert_kind(.Module), SemIndexSymbolKind.Module)
+    assert_eq(semindex_convert_kind(.Trait), SemIndexSymbolKind.Trait)
+    assert_eq(semindex_convert_kind(.Tag), SemIndexSymbolKind.Tag)
+    assert_eq(semindex_convert_kind(.Type{derives: [String]{"Eq"}}), SemIndexSymbolKind.Type)
+    assert_eq(semindex_convert_kind(.Const), SemIndexSymbolKind.Const)
+    assert_eq(semindex_convert_kind(.Enum{variants: [String]{"B", "A", "B"}, derives: [String]{}}), SemIndexSymbolKind.Enum{variants: [String]{"B", "A", "B"}})
+    assert_eq(semindex_convert_kind(.Struct{fields: [SymNameType]{SymNameType{name: "a", ty: .Int}, SymNameType{name: "a", ty: .String}}, derives: [String]{}}), SemIndexSymbolKind.Struct{fields: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "a", ty: "Int"}, SemIndexNameTypeFact{name: "a", ty: "String"}}})
+    assert_eq(semindex_convert_kind(.EnumVariant{parent: "Owner"}), SemIndexSymbolKind.EnumVariant{parent: "Owner"})
+    assert_eq(semindex_convert_kind(.Field{ty: .Int, parent: "Owner"}), SemIndexSymbolKind.Field{ty: "Int", parent: "Owner"})
+    assert_eq(semindex_convert_kind(.Local{mutable: true, ty: None}), SemIndexSymbolKind.Local{mutable: true, ty: None})
+    assert_eq(semindex_convert_kind(.Local{mutable: false, ty: Val(Type.Bool)}), SemIndexSymbolKind.Local{mutable: false, ty: Val("Bool")})
+    assert_eq(semindex_convert_kind(.Param{ty: .String}), SemIndexSymbolKind.Param{ty: "String"})
+    converted :: semindex_convert_kind(semindex_convert_test_callable())
+    if converted == .Function(params, contract, ret) {
+        assert_eq(params[0].name, "local")
+        assert_eq(params[0].ty, "Int")
+        assert_eq(contract[0].label, "input")
+        assert_eq(contract[0].zone, "positional_only")
+        assert(!contract[0].variadic)
+        assert_eq(contract[1].zone, "label_only")
+        assert(contract[1].variadic)
+        assert_eq(ret, Val("Bool"))
+    } else -> panic("function kind lost")
+}

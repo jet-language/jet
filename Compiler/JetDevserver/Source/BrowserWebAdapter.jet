@@ -1,0 +1,2436 @@
+// PORT-PENDING 0757 crates-jet-devserver-src-browserwebadapter: crates/jet-devserver/src/BrowserWebAdapter.rs:1-2432
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! HTTP-facing adapter for the typed browser devtools host.
+//RS //!
+//RS //! `ResidentDevSession` owns the canonical event stream.  This module only
+//RS //! converts its typed projection into `BrowserHost` facts and renders those
+//RS //! facts for the in-app and workbench routes.  It does not decode the
+//RS //! canonical JSON envelope or assign panel meaning.
+//RS 
+//RS use std::collections::{BTreeMap, VecDeque};
+//RS use std::fmt::Write as _;
+//RS 
+//RS use jet_foundation::DataTree::DataTree;
+//RS use jet_foundation::Devtools::jet_observe_live_value_update;
+//RS use jet_foundation::DevtoolsControl::JetDevtoolsCommandReceipt;
+//RS use jet_foundation::HotSwap::HotSwapDecision;
+//RS use jet_foundation::JSON::{json_escape, parse_json_with_limit};
+//RS use jet_foundation::SHA256::sha256_hex;
+//RS 
+//RS use crate::BrowserHost::{
+//RS     BrowserActionGrant, BrowserDock, BrowserHost, BrowserHostAction, BrowserHostEffect,
+//RS     BrowserHostError, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserNodeKind,
+//RS     BrowserPanelFact, BrowserPanelView, BrowserPlacement, BrowserReconnectCursor, BrowserSelection,
+//RS     BrowserSessionState, BrowserSourceGrant, BrowserSourceLocation, MAX_BROWSER_TEXT,
+//RS     MAX_BROWSER_VALUE,
+//RS };
+//RS use crate::Devtools::{
+//RS     JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelProjection,
+//RS };
+//RS use crate::Session::{
+//RS     DevtoolsProjection, DevtoolsSessionState, DevtoolsStatusFact, ResidentDevSession,
+//RS };
+//RS use crate::WebModuleSwap::{
+//RS     WebFocusFact, WebFormDraftFact, WebIslandFact, WebModuleFact, WebModuleSwapIdentity,
+//RS     WebModuleSwapPlan, WebModuleSwapReceipt, WebModuleSwapSnapshot, WebModuleSwapState,
+//RS     WebModuleSwapStateFact, WebPageFact, WebQueryCacheFact, WebScrollFact, WebSignalFact,
+//RS     WebStateValue, WebStoreFact,
+//RS };
+//RS 
+//RS const BROWSER_PAGE_SCHEMA: &str = "jet.devtools.browser.v1";
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS struct WebLiveValueUpdate {
+//RS     key: String,
+//RS     type_identity: String,
+//RS     rendered_value: Option<String>,
+//RS }
+//RS 
+//RS /// What the devtools page may really do on this host.  Every `false` carries
+//RS /// the one reason the page shows; the page never infers a tool from a panel.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub(crate) struct BrowserTools {
+//RS     /// Canvas source authority (inspect, checked preview, revision-bound apply).
+//RS     pub source: bool,
+//RS     pub source_reason: Option<String>,
+//RS     /// A resident rebuild executor is registered for `ProjectRebuild`.
+//RS     pub rebuild: bool,
+//RS     pub rebuild_reason: Option<String>,
+//RS }
+//RS 
+//RS /// One placement's flattened typed browser frame plus canonical session
+//RS /// identity/status metadata.  The host view remains the source of panel,
+//RS /// element, and selection facts; the adapter adds no semantic panel.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub(crate) struct BrowserDevtoolsFrame {
+//RS     pub placement: BrowserPlacement,
+//RS     pub route: String,
+//RS     pub protocol: String,
+//RS     pub session_id: String,
+//RS     pub source_id: Option<String>,
+//RS     pub build_id: Option<String>,
+//RS     pub revision: String,
+//RS     pub world_id: Option<String>,
+//RS     pub sequence: Option<u64>,
+//RS     pub cursor: Option<BrowserReconnectCursor>,
+//RS     pub state: BrowserSessionState,
+//RS     pub status: DevtoolsStatusFact,
+//RS     pub tools: BrowserTools,
+//RS     pub receipts: Vec<JetDevtoolsCommandReceipt>,
+//RS     pub selection: Option<BrowserSelection>,
+//RS     pub panels: Vec<BrowserPanelView>,
+//RS     pub elements: Vec<BrowserHtmlElement>,
+//RS }
+//RS 
+//RS /// One shared browser state for both browser placements.
+//RS #[derive(Debug)]
+//RS pub(crate) struct BrowserWebState {
+//RS     host: BrowserHost,
+//RS     facts: BTreeMap<String, BrowserPanelFact>,
+//RS     panel_order: VecDeque<String>,
+//RS     source_id: Option<String>,
+//RS     build_id: Option<String>,
+//RS     revision: String,
+//RS     world_id: Option<String>,
+//RS     status: DevtoolsStatusFact,
+//RS     tools: BrowserTools,
+//RS     receipts: Vec<JetDevtoolsCommandReceipt>,
+//RS     swap: Option<WebModuleSwapState>,
+//RS     last_swap: Option<WebModuleSwapReceipt>,
+//RS     swap_error: Option<String>,
+//RS     dom_state: Vec<WebModuleSwapStateFact>,
+//RS }
+//RS 
+//RS impl BrowserWebState {
+//RS     fn new(session_id: String) -> Self {
+//RS         Self {
+//RS             host: BrowserHost::new(session_id),
+//RS             facts: BTreeMap::new(),
+//RS             panel_order: VecDeque::new(),
+//RS             source_id: None,
+//RS             build_id: None,
+//RS             revision: String::new(),
+//RS             world_id: None,
+//RS             status: starting_status(),
+//RS             tools: BrowserTools {
+//RS                 source: false,
+//RS                 source_reason: None,
+//RS                 rebuild: false,
+//RS                 rebuild_reason: None,
+//RS             },
+//RS             receipts: Vec::new(),
+//RS             swap: None,
+//RS             last_swap: None,
+//RS             swap_error: None,
+//RS             dom_state: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn host(&self) -> &BrowserHost {
+//RS         &self.host
+//RS     }
+//RS 
+//RS     pub(crate) fn frame(&self, placement: BrowserPlacement) -> BrowserDevtoolsFrame {
+//RS         let model = self.host.view_model(placement);
+//RS         BrowserDevtoolsFrame {
+//RS             placement: model.placement,
+//RS             route: model.route,
+//RS             protocol: model.protocol,
+//RS             session_id: model.session_id,
+//RS             source_id: self.source_id.clone(),
+//RS             build_id: self.build_id.clone(),
+//RS             revision: self.revision.clone(),
+//RS             world_id: self.world_id.clone(),
+//RS             sequence: model.sequence,
+//RS             cursor: model.cursor,
+//RS             state: browser_session_state(&self.status.state),
+//RS             status: self.status.clone(),
+//RS             tools: self.tools.clone(),
+//RS             receipts: self.receipts.clone(),
+//RS             selection: model.selection,
+//RS             panels: model.panels,
+//RS             elements: model.elements,
+//RS         }
+//RS     }
+//RS 
+//RS     fn reset(&mut self, session_id: String) {
+//RS         self.host = BrowserHost::new(session_id);
+//RS         self.facts.clear();
+//RS         self.panel_order.clear();
+//RS         self.source_id = None;
+//RS         self.build_id = None;
+//RS         self.revision.clear();
+//RS         self.world_id = None;
+//RS         self.status = starting_status();
+//RS         self.receipts.clear();
+//RS         self.swap = None;
+//RS         self.last_swap = None;
+//RS         self.swap_error = None;
+//RS         self.dom_state.clear();
+//RS     }
+//RS 
+//RS     fn sync(
+//RS         &mut self,
+//RS         projection: DevtoolsProjection,
+//RS         canonical_panels: Vec<JetDevtoolsPanelProjection>,
+//RS     ) -> Result<(), String> {
+//RS         if projection.protocol != crate::Session::JET_DEVTOOLS_PROTOCOL {
+//RS             return Err("devtools projection protocol does not match jet.devtools.v1".to_string());
+//RS         }
+//RS         if projection.session_id != self.host.session_id() {
+//RS             self.reset(projection.session_id.clone());
+//RS         }
+//RS         if projection.reset {
+//RS             self.facts.clear();
+//RS             self.panel_order.clear();
+//RS             self.host = BrowserHost::new(projection.session_id.clone());
+//RS         }
+//RS 
+//RS         let source_id = bounded_optional(projection.source_id.clone(), MAX_BROWSER_TEXT);
+//RS         let build_id = bounded_optional(projection.build_id.clone(), MAX_BROWSER_TEXT);
+//RS 
+//RS         self.source_id = source_id;
+//RS         self.build_id = build_id;
+//RS         self.revision = bounded_text(&projection.revision, "", MAX_BROWSER_TEXT);
+//RS         self.world_id = bounded_optional(projection.world_id, MAX_BROWSER_TEXT);
+//RS         self.status = normalize_status(projection.status);
+//RS         self.tools.rebuild = projection.command_capabilities.project_rebuild;
+//RS         self.tools.rebuild_reason = bounded_optional(
+//RS             projection.command_capabilities.project_rebuild_reason,
+//RS             MAX_BROWSER_TEXT,
+//RS         );
+//RS         self.receipts = projection.command_receipts;
+//RS 
+//RS         self.facts.clear();
+//RS         self.panel_order.clear();
+//RS         for panel in canonical_panels {
+//RS             let fact = panel_from_projection(&panel);
+//RS             let panel_id = fact.panel_id.clone();
+//RS             self.panel_order.push_back(panel_id.clone());
+//RS             self.facts.insert(panel_id, fact);
+//RS         }
+//RS 
+//RS         let sequence = projection.sequence;
+//RS         let should_apply = self
+//RS             .host
+//RS             .sequence()
+//RS             .map_or(true, |current| sequence > current);
+//RS         if should_apply {
+//RS             let revision = self
+//RS                 .host
+//RS                 .revision()
+//RS                 .unwrap_or(0)
+//RS                 .max(parse_revision(&projection.revision).unwrap_or(sequence));
+//RS             let panels = self
+//RS                 .panel_order
+//RS                 .iter()
+//RS                 .filter_map(|panel_id| self.facts.get(panel_id))
+//RS                 .cloned()
+//RS                 .collect();
+//RS             let event = BrowserHostEvent::new(
+//RS                 self.host.session_id(),
+//RS                 revision,
+//RS                 sequence,
+//RS                 projection.observed_at,
+//RS                 panels,
+//RS             );
+//RS             self.host
+//RS                 .apply_event(event)
+//RS                 .map_err(|error| format!("browser projection rejected event: {error}"))?;
+//RS         }
+//RS 
+//RS         match projection.selection {
+//RS             Some(selection) => {
+//RS                 if self.host.panel(&selection.panel_id).is_some() {
+//RS                     if selection.item_key.is_empty()
+//RS                         || self
+//RS                             .host
+//RS                             .select(&selection.panel_id, Some(selection.item_key.clone()))
+//RS                             .is_ok()
+//RS                     {
+//RS                         if selection.item_key.is_empty() {
+//RS                             self.host
+//RS                                 .select(&selection.panel_id, Option::<String>::None)
+//RS                                 .map_err(|error| error.to_string())?;
+//RS                         }
+//RS                     } else {
+//RS                         self.host
+//RS                             .select(&selection.panel_id, Option::<String>::None)
+//RS                             .map_err(|error| error.to_string())?;
+//RS                     }
+//RS                 } else {
+//RS                     self.host.clear_selection();
+//RS                 }
+//RS             }
+//RS             None => self.host.clear_selection(),
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn starting_status() -> DevtoolsStatusFact {
+//RS     DevtoolsStatusFact {
+//RS         state: DevtoolsSessionState::Starting,
+//RS         diagnostic_code: None,
+//RS         diagnostic: None,
+//RS         accepted_revision: None,
+//RS         last_good_revision: None,
+//RS         run_target: None,
+//RS         run_output: None,
+//RS         test_state: None,
+//RS     }
+//RS }
+//RS 
+//RS fn normalize_status(mut status: DevtoolsStatusFact) -> DevtoolsStatusFact {
+//RS     status.diagnostic_code = bounded_optional(status.diagnostic_code, MAX_BROWSER_TEXT);
+//RS     status.diagnostic = bounded_optional(status.diagnostic, MAX_BROWSER_VALUE);
+//RS     status.accepted_revision = bounded_optional(status.accepted_revision, MAX_BROWSER_TEXT);
+//RS     status.last_good_revision = bounded_optional(status.last_good_revision, MAX_BROWSER_TEXT);
+//RS     status.run_target = bounded_optional(status.run_target, MAX_BROWSER_TEXT);
+//RS     status.run_output = bounded_optional(status.run_output, MAX_BROWSER_VALUE);
+//RS     status.test_state = bounded_optional(status.test_state, MAX_BROWSER_TEXT);
+//RS     status
+//RS }
+//RS 
+//RS fn bounded_optional(value: Option<String>, limit: usize) -> Option<String> {
+//RS     value.and_then(|value| {
+//RS         let value = bounded_text(&value, "", limit);
+//RS         (!value.is_empty()).then_some(value)
+//RS     })
+//RS }
+//RS 
+//RS fn browser_session_state(state: &DevtoolsSessionState) -> BrowserSessionState {
+//RS     match state {
+//RS         DevtoolsSessionState::Starting | DevtoolsSessionState::Ready => BrowserSessionState::Idle,
+//RS         DevtoolsSessionState::Building => BrowserSessionState::Building,
+//RS         DevtoolsSessionState::Error => BrowserSessionState::BuildFailed,
+//RS         DevtoolsSessionState::Unavailable | DevtoolsSessionState::Stopped => {
+//RS             BrowserSessionState::RuntimeFailure
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Advance one shared browser state from the session's typed projection.
+//RS pub(crate) fn sync_session(
+//RS     state: &mut Option<BrowserWebState>,
+//RS     session: &ResidentDevSession,
+//RS ) -> Result<(), String> {
+//RS     let cursor = state.as_ref().and_then(|state| state.host().sequence());
+//RS     let projection = session.devtools_events_since(cursor);
+//RS     let canonical_panels = session
+//RS         .devtools_panels(
+//RS             JetDevtoolsHostKind::BrowserInApp,
+//RS             &JetDevtoolsPanelCapability::ALL,
+//RS         )
+//RS         .map_err(|error| format!("browser panel catalog rejected projection: {error}"))?;
+//RS     if state.is_none() {
+//RS         *state = Some(BrowserWebState::new(projection.session_id.clone()));
+//RS     }
+//RS     let state = state.as_mut().expect("browser web state initialized");
+//RS     // Source tools exist only where this host holds Canvas source authority;
+//RS     // the page shows this one reason instead of a disabled-tool wall.
+//RS     state.tools.source = session.canvas_port() != 0;
+//RS     state.tools.source_reason = (!state.tools.source).then(|| SOURCE_TOOLS_OFF_REASON.to_string());
+//RS     state.sync(projection, canonical_panels)
+//RS }
+//RS 
+//RS /// Shown once by the devtools page (and returned by the host's 404) when a
+//RS /// host has no Canvas source authority.
+//RS pub(crate) const SOURCE_TOOLS_OFF_REASON: &str =
+//RS     "This host runs without Canvas, so source is read and edited elsewhere.";
+//RS 
+//RS fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
+//RS     match value {
+//RS         DataTree::Object(fields) => Ok(fields.iter().cloned().collect()),
+//RS         _ => Err("expected a JSON object".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS /// Consume a typed DOM/runtime snapshot captured from the live page.  The
+//RS /// browser may publish the seven `WebModuleSwap` state families plus raw
+//RS /// `persist_live_value` rows; only the former become swap host state, while
+//RS /// the latter go through Foundation's shared live-value policy.
+//RS pub(crate) fn record_dom_snapshot(
+//RS     state: &mut Option<BrowserWebState>,
+//RS     session_id: &str,
+//RS     payload: &[u8],
+//RS ) -> Result<(), String> {
+//RS     let text = std::str::from_utf8(payload)
+//RS         .map_err(|_| "web DOM snapshot body must be UTF-8 JSON".to_string())?;
+//RS     let root = parse_json_with_limit(text, crate::MAX_REQUEST_BODY_BYTES)
+//RS         .map_err(|_| "web DOM snapshot body is not valid bounded JSON".to_string())?;
+//RS     let object =
+//RS         object_map(&root).map_err(|_| "web DOM snapshot must be a JSON object".to_string())?;
+//RS     let protocol = required_json_string(&object, "protocol")?;
+//RS     if protocol != crate::Session::JET_DEVTOOLS_PROTOCOL {
+//RS         return Err("web DOM snapshot protocol does not match jet.devtools.v1".to_string());
+//RS     }
+//RS     if required_json_string(&object, "kind")? != "web.dom-snapshot" {
+//RS         return Err("web DOM snapshot kind is not web.dom-snapshot".to_string());
+//RS     }
+//RS     let rows = object
+//RS         .get("state")
+//RS         .ok_or_else(|| "web DOM snapshot must include state".to_string())?
+//RS         .as_array()
+//RS         .map_err(|_| "web DOM snapshot state must be an array".to_string())?;
+//RS     let mut facts = Vec::with_capacity(rows.len());
+//RS     let mut live_value_updates = Vec::new();
+//RS     let mut seen = BTreeMap::new();
+//RS     for row in rows {
+//RS         let row = object_map(row)
+//RS             .map_err(|_| "web DOM snapshot state rows must be objects".to_string())?;
+//RS         let kind = required_json_string(&row, "kind")?;
+//RS         if kind == "persist_live_value" {
+//RS             let update = parse_live_value_update(&row)?;
+//RS             let seen_key = (kind.clone(), update.key.clone());
+//RS             if seen.insert(seen_key, ()).is_some() {
+//RS                 return Err("web DOM snapshot state keys must be unique per family".to_string());
+//RS             }
+//RS             live_value_updates.push(update);
+//RS             continue;
+//RS         }
+//RS         let key = required_json_string(&row, "key")?;
+//RS         let type_fingerprint = required_json_string(&row, "type_fingerprint")?;
+//RS         let identity = row
+//RS             .get("identity")
+//RS             .map(|value| {
+//RS                 value
+//RS                     .as_str()
+//RS                     .map(str::to_string)
+//RS                     .map_err(|_| "web DOM island identity must be a string".to_string())
+//RS             })
+//RS             .transpose()?;
+//RS         let value = parse_dom_state_value(
+//RS             row.get("value")
+//RS                 .ok_or_else(|| "web DOM snapshot state row has no value".to_string())?,
+//RS         )?;
+//RS         let seen_key = (kind.clone(), key.clone());
+//RS         if seen.insert(seen_key, ()).is_some() {
+//RS             return Err("web DOM snapshot state keys must be unique per family".to_string());
+//RS         }
+//RS         facts.push(match kind.as_str() {
+//RS             "signal" => {
+//RS                 WebModuleSwapStateFact::Signal(WebSignalFact::new(key, type_fingerprint, value))
+//RS             }
+//RS             "store" => {
+//RS                 WebModuleSwapStateFact::Store(WebStoreFact::new(key, type_fingerprint, value))
+//RS             }
+//RS             "query_cache" => WebModuleSwapStateFact::QueryCache(WebQueryCacheFact::new(
+//RS                 key,
+//RS                 type_fingerprint,
+//RS                 value,
+//RS             )),
+//RS             "form_draft" => WebModuleSwapStateFact::FormDraft(WebFormDraftFact::new(
+//RS                 key,
+//RS                 type_fingerprint,
+//RS                 value,
+//RS             )),
+//RS             "scroll" => {
+//RS                 WebModuleSwapStateFact::Scroll(WebScrollFact::new(key, type_fingerprint, value))
+//RS             }
+//RS             "focus" => {
+//RS                 WebModuleSwapStateFact::Focus(WebFocusFact::new(key, type_fingerprint, value))
+//RS             }
+//RS             "island" => WebModuleSwapStateFact::Island(WebIslandFact::new(
+//RS                 key,
+//RS                 identity.ok_or_else(|| "web DOM island state needs identity".to_string())?,
+//RS                 type_fingerprint,
+//RS                 value,
+//RS             )),
+//RS             _ => {
+//RS                 return Err(format!(
+//RS                     "web DOM snapshot has unknown state family `{kind}`"
+//RS                 ))
+//RS             }
+//RS         });
+//RS     }
+//RS     for update in live_value_updates {
+//RS         jet_observe_live_value_update(
+//RS             &update.key,
+//RS             &update.type_identity,
+//RS             update.rendered_value.as_deref(),
+//RS         );
+//RS     }
+//RS     let state = state.get_or_insert_with(|| BrowserWebState::new(session_id.to_string()));
+//RS     state.dom_state = facts;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn parse_live_value_update(
+//RS     object: &std::collections::BTreeMap<String, DataTree>,
+//RS ) -> Result<WebLiveValueUpdate, String> {
+//RS     for field in object.keys() {
+//RS         if !matches!(
+//RS             field.as_str(),
+//RS             "kind" | "key" | "type_identity" | "rendered_value"
+//RS         ) {
+//RS             return Err(format!(
+//RS                 "web DOM snapshot persist_live_value has unknown field `{field}`"
+//RS             ));
+//RS         }
+//RS     }
+//RS     if required_json_string(object, "kind")? != "persist_live_value" {
+//RS         return Err("web DOM snapshot live value row has the wrong kind".to_string());
+//RS     }
+//RS     let key = required_json_string(object, "key")?;
+//RS     let type_identity = required_json_string(object, "type_identity")?;
+//RS     let rendered_value = match object.get("rendered_value") {
+//RS         Some(DataTree::Null) => None,
+//RS         Some(DataTree::Text(value)) => Some(value.to_string()),
+//RS         Some(_) => {
+//RS             return Err(
+//RS                 "web DOM snapshot persist_live_value `rendered_value` must be a string or null"
+//RS                     .to_string(),
+//RS             )
+//RS         }
+//RS         None => {
+//RS             return Err("web DOM snapshot persist_live_value has no `rendered_value`".to_string())
+//RS         }
+//RS     };
+//RS     Ok(WebLiveValueUpdate {
+//RS         key,
+//RS         type_identity,
+//RS         rendered_value,
+//RS     })
+//RS }
+//RS 
+//RS fn required_json_string(
+//RS     object: &std::collections::BTreeMap<String, DataTree>,
+//RS     key: &str,
+//RS ) -> Result<String, String> {
+//RS     object
+//RS         .get(key)
+//RS         .ok_or_else(|| format!("web DOM snapshot has no `{key}`"))
+//RS         .and_then(|value| {
+//RS             value
+//RS                 .as_str()
+//RS                 .map(str::to_string)
+//RS                 .map_err(|_| format!("web DOM snapshot `{key}` must be a string"))
+//RS         })
+//RS }
+//RS 
+//RS fn parse_dom_state_value(value: &DataTree) -> Result<WebStateValue, String> {
+//RS     let object = object_map(value)
+//RS         .map_err(|_| "web DOM snapshot state value must be an object".to_string())?;
+//RS     let kind = required_json_string(&object, "kind")?;
+//RS     match kind.as_str() {
+//RS         "text" => Ok(WebStateValue::Text(required_json_string(&object, "value")?)),
+//RS         "integer" => match object.get("value") {
+//RS             Some(DataTree::Int(value)) => Ok(WebStateValue::Integer(*value)),
+//RS             _ => Err("web DOM integer state value must be a JSON integer".to_string()),
+//RS         },
+//RS         "unsigned" => match object.get("value") {
+//RS             Some(DataTree::Int(value)) if *value >= 0 => Ok(WebStateValue::Unsigned(*value as u64)),
+//RS             _ => Err("web DOM unsigned state value must be a non-negative integer".to_string()),
+//RS         },
+//RS         "boolean" => match object.get("value") {
+//RS             Some(DataTree::Bool(value)) => Ok(WebStateValue::Boolean(*value)),
+//RS             _ => Err("web DOM boolean state value must be a JSON boolean".to_string()),
+//RS         },
+//RS         "bytes" => {
+//RS             let values = object
+//RS                 .get("value")
+//RS                 .ok_or_else(|| "web DOM bytes state value has no value".to_string())?
+//RS                 .as_array()
+//RS                 .map_err(|_| "web DOM bytes state value must be an array".to_string())?;
+//RS             let mut bytes = Vec::with_capacity(values.len());
+//RS             for value in values {
+//RS                 match value {
+//RS                     DataTree::Int(value) if (0..=255).contains(value) => bytes.push(*value as u8),
+//RS                     _ => return Err("web DOM bytes state value has a non-byte element".to_string()),
+//RS                 }
+//RS             }
+//RS             Ok(WebStateValue::Bytes(bytes))
+//RS         }
+//RS         _ => Err(format!("web DOM state value has unknown kind `{kind}`")),
+//RS     }
+//RS }
+//RS 
+//RS /// Return the JSON view model consumed by browser scripts and tests.
+//RS pub(crate) fn view_json(state: &BrowserWebState, placement: BrowserPlacement) -> String {
+//RS     frame_json(&state.frame(placement))
+//RS }
+//RS pub(crate) fn swap_json(state: &BrowserWebState) -> String {
+//RS     let mut output = String::with_capacity(2048);
+//RS     output.push('{');
+//RS     field_string(
+//RS         &mut output,
+//RS         "protocol",
+//RS         crate::Session::JET_DEVTOOLS_PROTOCOL,
+//RS         true,
+//RS     );
+//RS     field_string(&mut output, "kind", "web.module-swap", false);
+//RS     output.push_str(",\"active\":");
+//RS     match state.swap.as_ref() {
+//RS         Some(swap) => write_swap_snapshot(&mut output, swap.active()),
+//RS         None => output.push_str("null"),
+//RS     }
+//RS     output.push_str(",\"committed\":");
+//RS     match state.swap.as_ref() {
+//RS         Some(swap) => write_swap_snapshot(&mut output, swap.committed()),
+//RS         None => output.push_str("null"),
+//RS     }
+//RS     output.push_str(",\"phase\":");
+//RS     match state.swap.as_ref() {
+//RS         Some(swap) => quoted(swap.phase().as_str(), &mut output),
+//RS         None => output.push_str("null"),
+//RS     }
+//RS     output.push_str(",\"last_receipt\":");
+//RS     match state.last_swap.as_ref() {
+//RS         Some(receipt) => write_swap_receipt(&mut output, receipt),
+//RS         None => output.push_str("null"),
+//RS     }
+//RS     output.push_str(",\"error\":");
+//RS     match state.swap_error.as_deref() {
+//RS         Some(error) => quoted(error, &mut output),
+//RS         None => output.push_str("null"),
+//RS     }
+//RS     output.push('}');
+//RS     output
+//RS }
+//RS 
+//RS /// Render the release inspection surface without exposing event payloads.
+//RS /// Release builds may publish the canonical panel catalog and session
+//RS /// lineage, but never diagnostics, request bodies, source text, or actions.
+//RS pub(crate) fn release_json(
+//RS     projection: &DevtoolsProjection,
+//RS     panels: &[JetDevtoolsPanelProjection],
+//RS ) -> String {
+//RS     let mut output = String::with_capacity(2048);
+//RS     output.push('{');
+//RS     field_string(&mut output, "protocol", &projection.protocol, true);
+//RS     field_string(&mut output, "kind", "devtools.release", false);
+//RS     field_string(&mut output, "session_id", &projection.session_id, false);
+//RS     field_optional_string(&mut output, "source_id", projection.source_id.as_deref());
+//RS     field_optional_string(&mut output, "build_id", projection.build_id.as_deref());
+//RS     field_string(&mut output, "revision", &projection.revision, false);
+//RS     field_string(
+//RS         &mut output,
+//RS         "lifecycle",
+//RS         projection.status.state.as_str(),
+//RS         false,
+//RS     );
+//RS     field_bool(&mut output, "read_only", true, false);
+//RS     field_bool(&mut output, "payloads_redacted", true, false);
+//RS     output.push_str(",\"panels\":[");
+//RS     for (index, panel) in panels.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         let descriptor = &panel.availability.descriptor;
+//RS         output.push('{');
+//RS         field_string(&mut output, "id", descriptor.id.as_str(), true);
+//RS         field_string(&mut output, "title", descriptor.title, false);
+//RS         field_bool(
+//RS             &mut output,
+//RS             "available",
+//RS             panel.availability.is_available(),
+//RS             false,
+//RS         );
+//RS         output.push_str(",\"capabilities\":[");
+//RS         for (capability_index, capability) in descriptor.required_capabilities.iter().enumerate() {
+//RS             if capability_index != 0 {
+//RS                 output.push(',');
+//RS             }
+//RS             quoted(capability.as_str(), &mut output);
+//RS         }
+//RS         output.push_str("]}");
+//RS     }
+//RS     output.push(']');
+//RS     output.push('}');
+//RS     output
+//RS }
+//RS 
+//RS /// Build and apply one browser swap from the compiler's published Web
+//RS /// manifest.  The manifest is the source of module/page identity and
+//RS /// fingerprints; the browser contributes only its typed DOM state facts.
+//RS pub(crate) fn apply_web_swap_from_manifest(
+//RS     state: &mut Option<BrowserWebState>,
+//RS     session_id: &str,
+//RS     source_revision: &str,
+//RS     build_revision: &str,
+//RS     manifest: &str,
+//RS     decision: Option<&HotSwapDecision>,
+//RS ) -> Result<(), String> {
+//RS     let dom_state = state
+//RS         .as_ref()
+//RS         .map(|state| state.dom_state.clone())
+//RS         .unwrap_or_default();
+//RS     let candidate =
+//RS         match snapshot_from_manifest(source_revision, build_revision, manifest, dom_state) {
+//RS             Ok(candidate) => candidate,
+//RS             Err(error) => {
+//RS                 let state =
+//RS                     state.get_or_insert_with(|| BrowserWebState::new(session_id.to_string()));
+//RS                 state.swap_error = Some(error.clone());
+//RS                 return Err(error);
+//RS             }
+//RS         };
+//RS     apply_web_swap_snapshot(state, session_id, candidate, decision)
+//RS }
+//RS pub(crate) fn manifest_artifact_identity(manifest: &str) -> Result<String, String> {
+//RS     let root = parse_manifest(manifest)?;
+//RS     let root = object_map(&root).map_err(|_| "web manifest must be a JSON object".to_string())?;
+//RS     let package = required_json_string(&root, "package")?;
+//RS     if package.is_empty() {
+//RS         return Err("web manifest package identity is empty".to_string());
+//RS     }
+//RS     let artifact = root
+//RS         .get("artifact")
+//RS         .ok_or_else(|| "web manifest has no selected artifact".to_string())?;
+//RS     let artifact =
+//RS         object_map(artifact).map_err(|_| "web manifest artifact must be an object".to_string())?;
+//RS     let identity = required_json_string(&artifact, "artifact_identity")?;
+//RS     if identity.is_empty() {
+//RS         return Err("web manifest artifact identity is empty".to_string());
+//RS     }
+//RS     Ok(identity)
+//RS }
+//RS 
+//RS fn parse_manifest(manifest: &str) -> Result<DataTree, String> {
+//RS     let root = parse_json_with_limit(manifest, super::MAX_STATIC_RESPONSE_BYTES as usize)
+//RS         .map_err(|_| "web manifest is not valid bounded JSON".to_string())?;
+//RS     let object = object_map(&root).map_err(|_| "web manifest must be a JSON object".to_string())?;
+//RS     let schema = required_json_string(&object, "schema")?;
+//RS     if schema != "mir-web-v1" {
+//RS         return Err(format!("unsupported web manifest schema `{schema}`"));
+//RS     }
+//RS     Ok(root)
+//RS }
+//RS 
+//RS fn snapshot_from_manifest(
+//RS     source_revision: &str,
+//RS     build_revision: &str,
+//RS     manifest: &str,
+//RS     state: Vec<WebModuleSwapStateFact>,
+//RS ) -> Result<WebModuleSwapSnapshot, String> {
+//RS     if source_revision.is_empty() || build_revision.is_empty() {
+//RS         return Err("web swap requires non-empty source and build revisions".to_string());
+//RS     }
+//RS     let root = parse_manifest(manifest)?;
+//RS     let root = object_map(&root).map_err(|_| "web manifest must be a JSON object".to_string())?;
+//RS     let package = required_json_string(&root, "package")?;
+//RS     let artifact = root
+//RS         .get("artifact")
+//RS         .ok_or_else(|| "web manifest has no selected artifact".to_string())?;
+//RS     let artifact =
+//RS         object_map(artifact).map_err(|_| "web manifest artifact must be an object".to_string())?;
+//RS     let artifact_identity = required_json_string(&artifact, "artifact_identity")?;
+//RS     let selected_modules = artifact
+//RS         .get("modules")
+//RS         .ok_or_else(|| "web manifest artifact has no modules".to_string())?
+//RS         .as_array()
+//RS         .map_err(|_| "web manifest artifact modules must be an array".to_string())?;
+//RS     let modules = root
+//RS         .get("modules")
+//RS         .ok_or_else(|| "web manifest has no module table".to_string())?
+//RS         .as_array()
+//RS         .map_err(|_| "web manifest modules must be an array".to_string())?;
+//RS     let mut module_facts = Vec::with_capacity(selected_modules.len());
+//RS     for selected in selected_modules {
+//RS         let DataTree::Int(module_id) = selected else {
+//RS             return Err("web manifest module id must be an integer".to_string());
+//RS         };
+//RS         let module_value = modules
+//RS             .iter()
+//RS             .find(|module| {
+//RS                 let Ok(module) = object_map(module) else {
+//RS                     return false;
+//RS                 };
+//RS                 matches!(module.get("id"), Some(DataTree::Int(id)) if *id == *module_id)
+//RS             })
+//RS             .ok_or_else(|| format!("web manifest selected module {module_id} is missing"))?;
+//RS         let module = object_map(module_value)
+//RS             .map_err(|_| "web manifest module must be an object".to_string())?;
+//RS         let identity = required_json_string(&module, "key")?;
+//RS         let path = required_json_string(&module, "path")?;
+//RS         let imports = module
+//RS             .get("imports")
+//RS             .ok_or_else(|| "web manifest module has no imports".to_string())?
+//RS             .as_array()
+//RS             .map_err(|_| "web manifest module imports must be an array".to_string())?
+//RS             .iter()
+//RS             .map(|id| match id {
+//RS                 DataTree::Int(id) => Ok(id.to_string()),
+//RS                 _ => Err("web manifest module import id must be an integer".to_string()),
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?
+//RS             .join(",");
+//RS         let item_order = module
+//RS             .get("item_order")
+//RS             .ok_or_else(|| "web manifest module has no item_order".to_string())?
+//RS             .as_array()
+//RS             .map_err(|_| "web manifest module item_order must be an array".to_string())?
+//RS             .iter()
+//RS             .map(|item| {
+//RS                 item.as_str().map(str::to_string).map_err(|_| {
+//RS                     "web manifest module item_order entries must be strings".to_string()
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?
+//RS             .join("\0");
+//RS         let interface_seed = format!("{identity}\0{path}\0{imports}\0{item_order}");
+//RS         let interface_fingerprint = format!("sha256-{}", sha256_hex(interface_seed.as_bytes()));
+//RS         let body_seed = format!("{artifact_identity}\0{module_id}\0{path}");
+//RS         let body_fingerprint = format!("sha256-{}", sha256_hex(body_seed.as_bytes()));
+//RS         module_facts.push(WebModuleFact::new(
+//RS             identity,
+//RS             interface_fingerprint,
+//RS             body_fingerprint,
+//RS         ));
+//RS     }
+//RS     WebModuleSwapSnapshot::new(
+//RS         WebModuleSwapIdentity::new(package, "application"),
+//RS         source_revision,
+//RS         build_revision,
+//RS         WebPageFact::new("application", artifact_identity),
+//RS         module_facts,
+//RS         state,
+//RS     )
+//RS     .map_err(|error| format!("web swap candidate rejected: {error}"))
+//RS }
+//RS 
+//RS fn apply_web_swap_snapshot(
+//RS     state: &mut Option<BrowserWebState>,
+//RS     session_id: &str,
+//RS     candidate: WebModuleSwapSnapshot,
+//RS     decision: Option<&HotSwapDecision>,
+//RS ) -> Result<(), String> {
+//RS     let state = state.get_or_insert_with(|| BrowserWebState::new(session_id.to_string()));
+//RS     if state.swap.is_none() {
+//RS         if decision.is_some() {
+//RS             let error =
+//RS                 "web swap decision has no resident snapshot; rebuild was rejected".to_string();
+//RS             state.swap_error = Some(error.clone());
+//RS             return Err(error);
+//RS         }
+//RS         state.swap = Some(
+//RS             WebModuleSwapState::new(candidate)
+//RS                 .map_err(|error| format!("web swap state rejected: {error}"))?,
+//RS         );
+//RS         state.last_swap = None;
+//RS         state.swap_error = None;
+//RS         return Ok(());
+//RS     }
+//RS 
+//RS     let decision = decision.ok_or_else(|| {
+//RS         let error =
+//RS             "web rebuild has no canonical HotSwapDecision; compatibility planning was rejected"
+//RS                 .to_string();
+//RS         state.swap_error = Some(error.clone());
+//RS         error
+//RS     })?;
+//RS     let swap = state.swap.as_mut().expect("web swap state initialized");
+//RS     let plan = WebModuleSwapPlan::from_hot_swap_decision(swap.committed(), &candidate, decision)
+//RS         .map_err(|error| format!("web swap plan rejected: {error}"))?;
+//RS     match swap.apply_decision(plan) {
+//RS         Ok(receipt) => {
+//RS             state.last_swap = Some(receipt);
+//RS             state.swap_error = None;
+//RS             Ok(())
+//RS         }
+//RS         Err(error) => {
+//RS             state.swap_error = Some(error.to_string());
+//RS             Err(format!("web swap transaction rejected: {error}"))
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn write_swap_snapshot(output: &mut String, snapshot: &WebModuleSwapSnapshot) {
+//RS     output.push('{');
+//RS     output.push_str("\"identity\":{");
+//RS     field_string(output, "module", &snapshot.identity.module, true);
+//RS     field_string(output, "page", &snapshot.identity.page, false);
+//RS     output.push('}');
+//RS     field_string(output, "source_revision", &snapshot.source_revision, false);
+//RS     field_string(output, "build_revision", &snapshot.build_revision, false);
+//RS     output.push_str(",\"page\":{");
+//RS     field_string(output, "identity", &snapshot.page.identity, true);
+//RS     field_string(output, "artifact", &snapshot.page.artifact, false);
+//RS     output.push('}');
+//RS     output.push_str(",\"modules\":[");
+//RS     for (index, module) in snapshot.modules.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push('{');
+//RS         field_string(output, "identity", &module.identity, true);
+//RS         field_string(
+//RS             output,
+//RS             "interface_fingerprint",
+//RS             &module.interface_fingerprint,
+//RS             false,
+//RS         );
+//RS         field_string(output, "body_fingerprint", &module.body_fingerprint, false);
+//RS         output.push('}');
+//RS     }
+//RS     output.push(']');
+//RS     field_u64(output, "state_count", snapshot.state.len() as u64, false);
+//RS     output.push('}');
+//RS }
+//RS 
+//RS fn write_swap_receipt(output: &mut String, receipt: &WebModuleSwapReceipt) {
+//RS     output.push('{');
+//RS     field_string(output, "operation", receipt.operation.as_str(), true);
+//RS     field_string(output, "status", receipt.status.as_str(), false);
+//RS     field_string(output, "phase", receipt.phase.as_str(), false);
+//RS     field_string(output, "source_revision", &receipt.source_revision, false);
+//RS     field_string(output, "build_revision", &receipt.build_revision, false);
+//RS     output.push_str(",\"identity\":{");
+//RS     field_string(output, "module", &receipt.identity.module, true);
+//RS     field_string(output, "page", &receipt.identity.page, false);
+//RS     output.push('}');
+//RS     output.push_str(",\"candidate_identity\":{");
+//RS     field_string(output, "module", &receipt.candidate_identity.module, true);
+//RS     field_string(output, "page", &receipt.candidate_identity.page, false);
+//RS     output.push('}');
+//RS     write_string_array(output, "changed_modules", &receipt.changed_modules);
+//RS     write_string_array(
+//RS         output,
+//RS         "reason_codes",
+//RS         &receipt
+//RS             .reason_codes
+//RS             .iter()
+//RS             .map(|reason| reason.as_str().to_string())
+//RS             .collect::<Vec<_>>(),
+//RS     );
+//RS     output.push_str(",\"preserved\":[");
+//RS     for (index, fact) in receipt.preserved.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push('{');
+//RS         field_string(output, "kind", fact.kind().as_str(), true);
+//RS         field_string(output, "key", fact.key(), false);
+//RS         field_string(output, "identity", fact.identity(), false);
+//RS         field_string(output, "type_fingerprint", fact.type_fingerprint(), false);
+//RS         output.push('}');
+//RS     }
+//RS     output.push(']');
+//RS     output.push_str(",\"reset\":[");
+//RS     for (index, fact) in receipt.reset.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push('{');
+//RS         field_string(output, "kind", fact.state.kind().as_str(), true);
+//RS         field_string(output, "key", fact.state.key(), false);
+//RS         field_string(output, "identity", fact.state.identity(), false);
+//RS         field_optional_string(output, "prior_identity", fact.prior_identity.as_deref());
+//RS         field_optional_string(
+//RS             output,
+//RS             "prior_type_fingerprint",
+//RS             fact.prior_type_fingerprint.as_deref(),
+//RS         );
+//RS         field_string(output, "reason", fact.reason.as_str(), false);
+//RS         output.push('}');
+//RS     }
+//RS     output.push(']');
+//RS     output.push_str(",\"committed_page\":{");
+//RS     field_string(output, "identity", &receipt.committed_page.identity, true);
+//RS     field_string(output, "artifact", &receipt.committed_page.artifact, false);
+//RS     output.push_str("},\"active_page\":{");
+//RS     field_string(output, "identity", &receipt.active_page.identity, true);
+//RS     field_string(output, "artifact", &receipt.active_page.artifact, false);
+//RS     output.push_str("}}");
+//RS }
+//RS 
+//RS fn write_string_array(output: &mut String, key: &str, values: &[String]) {
+//RS     output.push(',');
+//RS     quoted(key, output);
+//RS     output.push_str(":[");
+//RS     for (index, value) in values.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         quoted(value, output);
+//RS     }
+//RS     output.push(']');
+//RS }
+//RS 
+//RS /// Page styling shared by both placements.  Obsidian ground, a quiet raised
+//RS /// surface, and Jet red only where something needs attention.  Groups stay
+//RS /// collapsed until their intent is relevant or the developer opens them.
+//RS const PAGE_CSS: &str = r#"
+//RS :root{color-scheme:dark;--bg:#0F1013;--raised:#17191D;--raised-2:#1D2026;--well:#0A0B0D;--line:#30343C;--ink:#F6F5F2;--dim:#9B9EA8;--red:#E8232A;--ok:#56C271;--amber:#E3A43B;--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+//RS *{box-sizing:border-box}html,body{height:100%}
+//RS body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+//RS button,select,textarea{font:inherit;color:inherit}button{background:none;border:0;padding:0;cursor:pointer;text-align:left}
+//RS :focus-visible{outline:2px solid var(--red);outline-offset:3px}textarea:focus-visible{outline:1px solid var(--dim);outline-offset:0}
+//RS code,pre,textarea,.mono{font:12px/1.55 var(--mono)}
+//RS main{height:100%;display:flex;flex-direction:column}
+//RS .bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line);flex:none}
+//RS .embedded .bar{display:none}
+//RS .mark{display:grid;place-items:center;flex:none;width:40px;height:40px;border:1px solid var(--ok);border-radius:13px;background:var(--well);box-shadow:0 0 14px #56c27144}
+//RS .mark svg{display:block;width:32px;height:20px}
+//RS [data-state=building] .mark{border-color:var(--amber);border-style:dashed;box-shadow:0 0 14px #e3a43b55}
+//RS [data-state=error] .mark,[data-state=unavailable] .mark,[data-state=stopped] .mark{border-color:var(--red);border-style:double;box-shadow:0 0 14px #e8232a66}
+//RS [data-state=starting] .mark,[data-state=reconnecting] .mark{border-color:var(--dim);border-style:dotted;box-shadow:0 0 14px #9b9ea844}
+//RS .state{display:inline-flex;align-items:center;gap:8px;font-weight:600}
+//RS .status-mark{display:inline-block;width:10px;height:10px;border:2px solid var(--ok);border-radius:3px;flex:none}
+//RS [data-state=building] .status-mark{border-color:var(--amber);border-style:dashed}
+//RS [data-state=error] .status-mark,[data-state=unavailable] .status-mark,[data-state=stopped] .status-mark{border-color:var(--red);border-radius:2px}
+//RS [data-state=starting] .status-mark,[data-state=reconnecting] .status-mark{border-color:var(--dim);border-style:dotted}
+//RS .grow{flex:1}
+//RS .note{color:var(--dim);font-size:12px}.note:empty{display:none}
+//RS .link{color:var(--ink);text-decoration:none;border:1px solid var(--line);border-radius:9px;padding:6px 11px;font-size:12px}.link:hover{background:var(--raised)}
+//RS .link[hidden]{display:none}
+//RS .btn{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid var(--line);border-radius:9px;background:var(--raised);font-size:12px;font-weight:500;white-space:nowrap}
+//RS .btn:hover{background:var(--raised-2)}.btn.primary{border-color:var(--red)}.btn[disabled]{opacity:.45;cursor:default}
+//RS .btn.quiet{background:none;border-color:transparent;color:var(--dim)}.btn.quiet:hover{color:var(--ink);background:var(--raised)}
+//RS .attention{flex:none;padding:16px 18px 14px;border-bottom:1px solid var(--line)}
+//RS .attention h2{margin:0;display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;line-height:1.3;flex-wrap:wrap}
+//RS .attention h2 small{font-weight:400;color:var(--dim);font-size:11px}
+//RS .attention .diag{margin:11px 0 0;padding:11px 13px;background:var(--well);border:1px solid var(--line);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:34vh;overflow:auto}
+//RS main:has(.source:not([hidden])) .attention .diag{max-height:88px}
+//RS .acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:11px}.acts:empty{display:none}
+//RS .why{flex:1 1 100%;color:var(--dim);font-size:12px}
+//RS .receipt{color:var(--dim);font-size:12px}.receipt:empty{display:none}.receipt[data-status=failed]{color:var(--red)}.receipt[data-status=completed]{color:var(--ok)}
+//RS .source{flex:none;display:flex;flex-direction:column;border-bottom:1px solid var(--line);max-height:min(62vh,540px)}
+//RS .source[hidden]{display:none}
+//RS .source header{display:flex;align-items:center;gap:8px;padding:9px 18px;flex-wrap:wrap}
+//RS .source select{background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:5px 8px;color:var(--ink);max-width:60%;font-family:var(--mono);font-size:12px}
+//RS .source .rev{color:var(--dim);font-size:11px;font-family:var(--mono)}
+//RS .source textarea{flex:1 1 auto;min-height:130px;margin:0 18px;padding:11px 13px;background:var(--well);color:var(--ink);border:1px solid var(--line);border-radius:10px;resize:vertical;tab-size:4;white-space:pre;overflow:auto}
+//RS .source textarea[data-dirty=true]{border-color:var(--amber)}
+//RS .source footer{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 18px}
+//RS .source .out{margin:0 18px 11px;padding:11px 13px;background:var(--well);border:1px solid var(--line);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:26vh;overflow:auto}
+//RS .source .out[hidden]{display:none}.source .out[data-ok=true]{border-color:var(--ok)}.source .out[data-ok=false]{border-color:var(--red)}
+//RS .result{color:var(--dim);font-size:12px;min-width:0;overflow-wrap:anywhere}.result:empty{display:none}.result[data-tone=bad]{color:var(--red)}.result[data-tone=good]{color:var(--ok)}
+//RS .body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
+//RS [data-placement=workbench] .body{grid-template-columns:minmax(0,1fr) minmax(300px,.78fr)}
+//RS .facts,.inspector{min-height:0;overflow:auto}
+//RS .facts{padding:9px 0 28px}
+//RS .selected{margin:8px 18px 14px;padding:12px 14px;background:var(--raised);border:1px solid var(--line);border-radius:12px}
+//RS .selected .eyebrow{margin-bottom:5px;color:var(--dim);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+//RS .crumbs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:var(--dim)}.crumbs button{color:var(--dim)}.crumbs button:hover{color:var(--ink)}
+//RS .selected h3{margin:5px 0 7px;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+//RS .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;margin:0;font-size:12px;color:var(--dim)}.kv dt,.kv dd{margin:0}.kv dd{color:var(--ink);font-family:var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+//RS .group{margin:0 18px 8px;border:1px solid var(--line);border-radius:12px;background:rgba(23,25,29,.6);overflow:hidden}
+//RS .group>summary{display:flex;align-items:center;gap:10px;min-height:46px;padding:10px 13px;cursor:pointer;list-style:none}
+//RS .group>summary::-webkit-details-marker{display:none}
+//RS .group>summary::before{content:"";width:0;height:0;border:4px solid transparent;border-left:5px solid var(--dim);flex:none;transform-origin:2px 50%}
+//RS .group[open]>summary::before{transform:rotate(90deg)}
+//RS .group>summary:hover{background:var(--raised)}
+//RS .group[data-active=true]>summary{border-bottom:1px solid var(--line)}
+//RS .group-label{font-size:13px;font-weight:600}.group-meta{margin-left:auto;color:var(--dim);font-size:11px;white-space:nowrap}
+//RS .group-body{padding:5px 5px 8px}
+//RS .panel{margin:0 2px}.panel+ .panel{border-top:1px solid rgba(48,52,60,.6)}
+//RS .panel>header{display:flex;align-items:center;gap:8px;padding-right:7px}
+//RS .panel h2{margin:0;flex:1;min-width:0;font:inherit}
+//RS .toggle{display:flex;align-items:center;gap:8px;width:100%;padding:8px;border-radius:8px;font-weight:500}.toggle:hover{background:var(--raised)}
+//RS .chev{width:0;height:0;border:4px solid transparent;border-left:5px solid var(--dim);flex:none}
+//RS .panel[data-open=true] .chev{transform:rotate(90deg)}
+//RS .panel small{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
+//RS .nodes{list-style:none;margin:0 0 5px;padding:0 0 0 14px}
+//RS .node{display:flex;align-items:baseline;gap:8px;width:100%;padding:6px 8px;border-radius:8px;min-width:0}.node:hover{background:var(--raised)}
+//RS li[data-selected=true]>.node{background:var(--raised);box-shadow:inset 2px 0 0 var(--red)}
+//RS .node .lbl{overflow-wrap:anywhere;min-width:0;font-family:var(--mono);font-size:12px}.node b{font-weight:500;color:var(--dim);font-size:11px;margin-left:auto;white-space:nowrap}
+//RS .fold{margin:11px 18px}.fold>summary{list-style:none;cursor:pointer;color:var(--dim);font-size:12px;padding:7px 0}.fold>summary::-webkit-details-marker{display:none}.fold>summary:hover{color:var(--ink)}
+//RS .fold .u{display:flex;gap:8px;padding:4px 0;font-size:12px}.fold .u small{color:var(--dim)}
+//RS .group-body .fold{margin:6px 10px;padding-left:12px;border-left:1px solid var(--line)}
+//RS .group-body .u{flex-wrap:wrap;column-gap:10px}
+//RS .inspector{border-left:1px solid var(--line);padding:17px 18px}
+//RS .inspector h3{margin:6px 0 9px;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+//RS .value{display:block;margin:7px 0;padding:9px 11px;background:var(--well);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+//RS .empty{padding:32px 18px;color:var(--dim);text-align:center;font-size:12px}
+//RS @media(max-width:900px){[data-placement=workbench] .body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}.inspector{border-left:0;border-top:1px solid var(--line);max-height:40vh}}
+//RS @media(max-width:560px){.bar,.attention,.source header,.source footer{padding-left:14px;padding-right:14px}.selected,.group,.fold{margin-left:14px;margin-right:14px}.group>summary{padding-left:11px;padding-right:11px}.group-meta{font-size:10px}}
+//RS @media(prefers-reduced-motion:no-preference){.chev,.group>summary::before{transition:transform .12s}.selected,.source{animation:in .18s ease}@keyframes in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}}
+//RS "#;
+//RS 
+//RS /// Page script: real routes only.
+//RS ///
+//RS /// Layout and selection post to the host, then reload with focus and scroll
+//RS /// restored; a 1s poll reloads when the shared sequence, state, selection, or
+//RS /// command receipts changed elsewhere.  The source tool reads and edits
+//RS /// through the existing Canvas endpoints (`/__jet_canvas/project`, `/source`,
+//RS /// `/command` checked preview, `/transaction` revision-bound apply); its draft
+//RS /// lives in `sessionStorage`, so polling never wipes an edit in progress and a
+//RS /// dirty editor defers the reload instead.  Rebuild queues one canonical
+//RS /// `ProjectRebuild` command and then only reports what the host's receipts
+//RS /// say.  Embedded in the in-app lens, Escape and Alt+J are forwarded to the
+//RS /// parent so the return path works from inside the frame.
+//RS const PAGE_JS: &str = r#"const session=new URL(location.href).searchParams.get('session')||'';const params=new URL(location.href).searchParams;const q=(p)=>p+'?session='+encodeURIComponent(session);const key='jet-devtools:'+S.placement;const DRAFT='jet-devtools:draft';const OPEN='jet-devtools:source';const $=(s)=>document.querySelector(s);const note=$('.note');const embedded=window.parent!==window;$('main').classList.toggle('embedded',embedded);document.querySelectorAll('a[data-route]').forEach((a)=>{a.href=q(a.dataset.route);a.hidden=embedded});
+//RS const store={get(k){try{return JSON.parse(sessionStorage.getItem(k)||'null')}catch(_){return null}},set(k,v){try{if(v==null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
+//RS const intentKey='jet-devtools:intents:'+S.placement;const restoreIntentGroups=()=>{const saved=store.get(intentKey)||{};document.querySelectorAll('details[data-intent]').forEach((group)=>{if(group.dataset.active!=='true'&&Object.prototype.hasOwnProperty.call(saved,group.dataset.intent))group.open=!!saved[group.dataset.intent];group.addEventListener('toggle',()=>{const next=store.get(intentKey)||{};next[group.dataset.intent]=group.open;store.set(intentKey,next)})})};restoreIntentGroups();
+//RS const focusKey=()=>document.activeElement&&document.activeElement.dataset.focus||null;const scrollers=()=>[...document.querySelectorAll('[data-scroll]')];
+//RS const reload=(focus)=>{store.set(key,{focus,scroll:scrollers().map((e)=>e.scrollTop)});location.reload()};
+//RS {const m=store.get(key);if(m){store.set(key,null);scrollers().forEach((e,i)=>{if(m.scroll[i]!=null)e.scrollTop=m.scroll[i]});const f=[...document.querySelectorAll('[data-focus]')].find((e)=>e.dataset.focus===m.focus);if(f)f.focus({preventScroll:true})}}
+//RS const fail=(r)=>r.text().then((t)=>{throw new Error(t||('HTTP '+r.status))});
+//RS const post=(path,body)=>fetch(q(path),{method:'POST',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+//RS const send=(path,body,focus)=>post(path,body).then((r)=>r.ok?r.json():fail(r)).then(()=>reload(focus)).catch((e)=>{note.textContent=String(e.message||e)});
+//RS document.addEventListener('click',(ev)=>{const el=ev.target.closest('[data-select],[data-layout],[data-clear],[data-tool],[data-refresh]');if(!el)return;if(el.dataset.select)send('/__jet_devtools/selection',{selection:{panel_id:el.dataset.panel,item_key:el.dataset.node}},el.dataset.focus);else if(el.dataset.layout)send('/__jet_devtools/action',{action:el.dataset.layout==='open'?'open_panel':'close_panel',placement:S.placement,panel_id:el.dataset.panel},el.dataset.focus);else if(el.dataset.clear)send('/__jet_devtools/selection',{selection:null},null);else if(el.dataset.refresh)reload(focusKey());else if(el.dataset.tool==='source')openSource(el.dataset.file||null);else if(el.dataset.tool==='rebuild')rebuild(el)});
+//RS /* Rebuild: one canonical host_to_runtime command; the receipt the host publishes is the only progress shown. */
+//RS const receiptEl=$('.receipt');const rebuildResult=$('.acts .result');
+//RS function rebuild(button){button.disabled=true;rebuildResult.dataset.tone='';rebuildResult.textContent='Requesting rebuild…';const id='rebuild-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);post('/__jet_devtools',{protocol:'jet.devtools.v1',session_id:S.session_id,started_at_ms:Date.now(),direction:'host_to_runtime',commands:[{kind:'ProjectRebuild',payload:{session_id:S.session_id,request_id:id,expected_revision:S.revision}}]}).then((r)=>{if(!r.ok)return fail(r);rebuildResult.textContent='';return live(true)}).catch((e)=>{rebuildResult.dataset.tone='bad';rebuildResult.textContent=String(e.message||e)}).finally(()=>{button.disabled=false})}
+//RS const receiptText={queued:'Rebuild queued',building:'Rebuilding…',completed:'Rebuild finished',failed:'Rebuild failed'};
+//RS function renderReceipt(list){const r=(list||[]).filter((x)=>x.kind==='ProjectRebuild').pop();if(!receiptEl)return;if(!r){receiptEl.textContent='';receiptEl.removeAttribute('data-status');return}receiptEl.dataset.status=r.status;receiptEl.textContent=(receiptText[r.status]||r.status)+(r.error?': '+r.error:'')}
+//RS renderReceipt(S.receipts);
+//RS /* Source tool */
+//RS const src={box:$('.source'),file:$('.source select'),rev:$('.source .rev'),text:$('.source textarea'),out:$('.source .out'),result:$('.source .result'),apply:$('[data-src=apply]'),check:$('[data-src=check]'),discard:$('[data-src=discard]'),files:[],source_id:null,revision:null,base:'',loading:false};
+//RS const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);const dirty=()=>!!src.box&&!src.box.hidden&&src.text.value!==src.base;
+//RS function say(el,tone,text){el.dataset.tone=tone||'';el.textContent=text||''}
+//RS function showOut(ok,text){src.out.hidden=!text;src.out.dataset.ok=String(ok);src.out.textContent=text||''}
+//RS function fileFromDiagnostic(){const m=/-->\s*([^\s:]+\.jet)/.exec(S.status.diagnostic||'');return m?m[1]:null}
+//RS function pickFile(wanted){if(!src.files.length)return null;const norm=(p)=>String(p||'').replace(/^\.\//,'');if(wanted){const w=norm(wanted);const hit=src.files.find((f)=>norm(f)===w)||src.files.find((f)=>w.endsWith('/'+norm(f))||norm(f).endsWith('/'+w)||norm(f).split('/').pop()===w.split('/').pop());if(hit)return hit}return src.files.includes(src.entry)?src.entry:src.files[0]}
+//RS function openSource(file){if(!src.box)return;src.box.hidden=false;const draft=store.get(DRAFT);const want=file||(draft&&draft.source_id)||fileFromDiagnostic()||null;loadProject().then(()=>loadFile(pickFile(want),draft)).catch((e)=>say(src.result,'bad',String(e.message||e)))}
+//RS function loadProject(){return fetch(q('/__jet_canvas/project'),{cache:'no-store'}).then((r)=>r.ok?r.json():fail(r)).then((j)=>{const c=j.canvas||{};src.entry=String(c.entry||'').replace(/^\.\//,'');src.revisions={};src.files=(c.files||[]).filter((f)=>f.kind==='source').map((f)=>{const p=String(f.path).replace(/^\.\//,'');src.revisions[p]=f.revision;return p});src.file.innerHTML='';src.files.forEach((p)=>{const o=document.createElement('option');o.value=p;o.textContent=p;src.file.appendChild(o)});if(src.source_id)src.file.value=src.source_id})}
+//RS function loadFile(id,draft){if(!id)throw new Error('This project has no Jet source files to edit.');src.loading=true;src.file.value=id;return fetch(q('/__jet_canvas/source?source_id='+encodeURIComponent(id)),{cache:'no-store'}).then((r)=>r.ok?r.text():fail(r)).then((text)=>{src.source_id=id;src.revision=src.revisions[id]||null;src.base=text;src.rev.textContent=src.revision?src.revision.slice(0,15):'';showOut(true,'');say(src.result,'','');if(draft&&draft.source_id===id&&draft.text!==text){src.text.value=draft.text;if(draft.revision!==src.revision)say(src.result,'','The file changed on disk since this draft started; Apply checks against the current file.')}else{src.text.value=text;if(draft&&draft.source_id===id)store.set(DRAFT,null)}markDirty();store.set(OPEN,{source_id:id});if(draft&&draft.sel&&draft.source_id===id){try{src.text.setSelectionRange(draft.sel[0],draft.sel[1]);src.text.scrollTop=draft.scroll||0}catch(_){}}}).finally(()=>{src.loading=false})}
+//RS function markDirty(){const d=dirty();src.text.dataset.dirty=String(d);src.apply.disabled=!d;src.discard.hidden=!d;if(d)store.set(DRAFT,{source_id:src.source_id,revision:src.revision,text:src.text.value,sel:[src.text.selectionStart,src.text.selectionEnd],scroll:src.text.scrollTop});else if(!src.loading)store.set(DRAFT,null)}
+//RS function readCanvas(r){return r.text().then((t)=>{let j=null;try{j=JSON.parse(t)}catch(_){}if(!j)throw new Error(t||('HTTP '+r.status));return j.canvas||j})}
+//RS function diagText(c){const lines=[];if(c.message)lines.push(c.message);(c.diagnostics||[]).forEach((d)=>{if(typeof d==='string'){lines.push(d);return}const where=d.file?(d.file+(d.line?':'+d.line+(d.col?':'+d.col:''):'')):'';lines.push([d.code?'['+d.code+']':'',d.what||d.message||'',where?'— '+where:''].filter(Boolean).join(' '));if(d.fix)lines.push('  fix: '+d.fix)});return lines.join('\n')}
+//RS function conflict(c){src.revisions={};return loadProject().then(()=>{src.revision=src.revisions[src.source_id]||c.current_revision||src.revision;src.rev.textContent=src.revision?src.revision.slice(0,15):'';say(src.result,'bad',(c.message||'The file changed on disk.')+' Your draft is kept; Check or Apply again runs against the current file, or Discard reloads it.')})}
+//RS if(src.box){src.text.addEventListener('input',markDirty);src.text.addEventListener('select',markDirty);src.text.addEventListener('scroll',()=>{if(dirty())markDirty()});
+//RS src.file.addEventListener('change',()=>{if(dirty()){src.file.value=src.source_id;say(src.result,'','Apply or discard the current draft before switching files.');return}loadFile(src.file.value,null).catch((e)=>say(src.result,'bad',String(e.message||e)))});
+//RS src.discard.addEventListener('click',()=>{store.set(DRAFT,null);loadFile(src.source_id,null).catch((e)=>say(src.result,'bad',String(e.message||e)))});
+//RS $('[data-src=close]').addEventListener('click',()=>{if(dirty()&&!confirm('Close the source tool and keep the draft for later?'))return;src.box.hidden=true;store.set(OPEN,null);const u=new URL(location.href);u.searchParams.delete('tool');u.searchParams.delete('file');history.replaceState(null,'',u)});
+//RS src.check.addEventListener('click',()=>{src.check.disabled=true;say(src.result,'','Checking…');showOut(true,'');post('/__jet_canvas/command',{action_id:'canvas.command:check',source_id:src.source_id,revision:src.revision,source_text:src.text.value}).then((r)=>readCanvas(r).then((c)=>{if(c.ok===false&&c.kind==='conflict')return conflict(c);if(c.ok===false)throw new Error(c.message||'check refused');if(c.success){say(src.result,'good','No errors — Apply writes this exact text, formatted.')}else{say(src.result,'bad','Check found errors; nothing was written.');showOut(false,c.stderr||diagText(c))}})).catch((e)=>say(src.result,'bad',String(e.message||e))).finally(()=>{src.check.disabled=false})});
+//RS src.apply.addEventListener('click',()=>{src.apply.disabled=true;say(src.result,'','Applying…');showOut(true,'');post('/__jet_canvas/transaction',{schema_version:1,op:'replace_source',source_id:src.source_id,revision:src.revision,source:src.text.value}).then((r)=>readCanvas(r).then((c)=>{if(c.ok===false&&c.kind==='conflict')return conflict(c);if(c.ok===false){say(src.result,'bad','Not applied'+(c.message?': '+c.message:'.'));if((c.diagnostics||[]).length)showOut(false,diagText(c));return}src.base=c.source_text!=null?c.source_text:src.text.value;src.text.value=src.base;src.revision=c.revision||src.revision;src.revisions[src.source_id]=src.revision;src.rev.textContent=src.revision?src.revision.slice(0,15):'';store.set(DRAFT,null);markDirty();say(src.result,'good',c.changed===false?'No change to write.':'Applied — the host is rebuilding from this revision.')})).catch((e)=>say(src.result,'bad',String(e.message||e))).finally(()=>{markDirty()})});
+//RS const open=store.get(OPEN);const draft=store.get(DRAFT);if(params.get('tool')==='source'||open||draft)openSource(params.get('file')||(open&&open.source_id)||null)}
+//RS /* Live: reload when shared facts move, unless a draft is in progress; then only the receipt updates and a refresh chip appears. */
+//RS const refresh=$('[data-refresh]');
+//RS function live(once){return fetch(q('/__jet_devtools/state'),{cache:'no-store'}).then((r)=>r.json()).then((n)=>{const moved=n.sequence!==S.sequence||n.state!==S.state||n.status.state!==S.status.state||!same(n.selection,S.selection)||!same(n.receipts,S.receipts)||!same(n.tools,S.tools);if(!moved)return;if(dirty()||document.activeElement===src.text){renderReceipt(n.receipts);if(refresh)refresh.hidden=false;return}reload(focusKey())}).catch(()=>{}).finally(()=>{if(!once)setTimeout(live,1000)})}
+//RS setTimeout(live,1000);
+//RS const sel=S.selection&&S.panels.find((p)=>p.panel_id===S.selection.panel_id);if(sel&&!sel.open){const once='jet-devtools:reveal:'+S.placement+':'+sel.panel_id;let done=false;try{done=sessionStorage.getItem(once)===String(S.sequence);sessionStorage.setItem(once,String(S.sequence))}catch(_){}if(!done)send('/__jet_devtools/action',{action:'open_panel',placement:S.placement,panel_id:sel.panel_id},focusKey())}
+//RS addEventListener('keydown',(ev)=>{if(ev.key==='Escape'&&document.activeElement===src.text){src.text.blur();ev.preventDefault();return}if(!embedded)return;const alt=ev.altKey&&!ev.ctrlKey&&!ev.metaKey&&ev.key.toLowerCase()==='j';if(ev.key==='Escape'||alt){ev.preventDefault();parent.postMessage({jet:'devtools',key:ev.key,altKey:ev.altKey},location.origin)}});"#;
+//RS 
+//RS /// Panels grouped by the job a developer is trying to finish.  The page keeps
+//RS /// these groups collapsed until a selection, open panel, or active failure
+//RS /// makes one relevant.  Unknown panel ids stay in the final group.
+//RS const INTENT_GROUPS: &[(&str, &[&str])] = &[
+//RS     (
+//RS         "Build & source",
+//RS         &["build", "gates", "structure", "tests", "jobs"],
+//RS     ),
+//RS     (
+//RS         "Data & requests",
+//RS         &[
+//RS             "routes",
+//RS             "queries",
+//RS             "mutations",
+//RS             "forms",
+//RS             "table",
+//RS             "store",
+//RS             "database",
+//RS         ],
+//RS     ),
+//RS     (
+//RS         "Runtime & interface",
+//RS         &[
+//RS             "traces", "cost", "profiler", "ui-tree", "topology", "game", "world",
+//RS         ],
+//RS     ),
+//RS ];
+//RS 
+//RS fn intent_group(panel_id: &str) -> usize {
+//RS     INTENT_GROUPS
+//RS         .iter()
+//RS         .position(|(_, ids)| ids.contains(&panel_id))
+//RS         .unwrap_or(INTENT_GROUPS.len() - 1)
+//RS }
+//RS 
+//RS fn panel_available(panel: &BrowserPanelView) -> bool {
+//RS     !panel.status.starts_with("unavailable")
+//RS }
+//RS 
+//RS /// Human wording for a canonical unavailability reason id; unknown ids stay
+//RS /// verbatim so the exact reason is never lost.
+//RS fn unavailable_reason_text(status: &str) -> String {
+//RS     status
+//RS         .trim_start_matches("unavailable:")
+//RS         .split(',')
+//RS         .map(|reason| match reason {
+//RS             "unsupported-host" | "host-kind" => "not offered by this host".to_string(),
+//RS             "missing-capability" => "needs a grant this session does not hold".to_string(),
+//RS             other => other.to_string(),
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ")
+//RS }
+//RS 
+//RS /// The `path` named by a diagnostic's `--> path:line:col` line, if any.
+//RS fn diagnostic_file(diagnostic: &str) -> Option<&str> {
+//RS     let rest = diagnostic.split("-->").nth(1)?.trim_start();
+//RS     let token = rest.split_whitespace().next()?;
+//RS     let file = token.split(':').next()?;
+//RS     file.ends_with(".jet").then_some(file)
+//RS }
+//RS 
+//RS /// Render one placement.  Both placements read the same `BrowserWebState` and
+//RS /// the same shared selection.  Lens is contextual: attention, the selected
+//RS /// fact, and collapsed intent groups.  Workbench uses the same groups but
+//RS /// opens its deeper inspector beside them.  Tools render only where the host
+//RS /// really has them; a missing tool is one sentence, not a disabled wall.
+//RS pub(crate) fn render_page(state: &BrowserWebState, placement: BrowserPlacement) -> String {
+//RS     let frame = state.frame(placement);
+//RS     let state_json = frame_json(&frame);
+//RS     let workbench = placement == BrowserPlacement::Workbench;
+//RS     let selection = frame.selection.as_ref();
+//RS     let any_open = frame
+//RS         .panels
+//RS         .iter()
+//RS         .any(|panel| panel.open && panel_available(panel));
+//RS     let mut html = String::with_capacity(16 * 1024);
+//RS     html.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'\"><title>Jet devtools");
+//RS     if workbench {
+//RS         html.push_str(" workbench");
+//RS     }
+//RS     html.push_str("</title><style>");
+//RS     html.push_str(PAGE_CSS);
+//RS     html.push_str("</style></head><body><main data-schema=\"");
+//RS     html.push_str(BROWSER_PAGE_SCHEMA);
+//RS     html.push_str("\" data-placement=\"");
+//RS     html.push_str(placement.as_str());
+//RS     html.push_str("\" data-session-id=\"");
+//RS     html.push_str(&html_escape(&frame.session_id));
+//RS     html.push_str("\" data-state=\"");
+//RS     let state_word = devtools_state_as_str(&frame.status.state);
+//RS     html.push_str(state_word);
+//RS     html.push_str("\"><header class=\"bar\"><span class=\"mark\">");
+//RS     html.push_str(include_str!("../../../Docs/site/assets/mark.svg"));
+//RS     html.push_str("</span><strong>Jet devtools</strong><span class=\"state\"><i class=\"status-mark\" aria-hidden=\"true\"></i>");
+//RS     html.push_str(state_word);
+//RS     html.push_str(
+//RS         "</span><span class=\"grow\"></span><span class=\"note\" role=\"status\"></span>",
+//RS     );
+//RS     if !workbench {
+//RS         html.push_str("<a class=\"link\" data-route=\"/__jet_devtools/workbench\">Workbench</a>");
+//RS     }
+//RS     html.push_str("</header>");
+//RS     render_attention(&mut html, &frame);
+//RS     render_source_tool(&mut html, &frame);
+//RS     html.push_str("<div class=\"body\">");
+//RS     html.push_str("<section class=\"facts\" data-scroll aria-label=\"Facts\">");
+//RS     if !workbench {
+//RS         render_selected(&mut html, &frame);
+//RS     }
+//RS     for (index, (title, _)) in INTENT_GROUPS.iter().enumerate() {
+//RS         let members = frame
+//RS             .panels
+//RS             .iter()
+//RS             .filter(|panel| intent_group(&panel.panel_id) == index)
+//RS             .collect::<Vec<_>>();
+//RS         if members.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let available_count = members
+//RS             .iter()
+//RS             .filter(|panel| panel_available(panel))
+//RS             .count();
+//RS         let open_count = members
+//RS             .iter()
+//RS             .filter(|panel| panel.open && panel_available(panel))
+//RS             .count();
+//RS         let selected_here = selection.is_some_and(|selected| {
+//RS             members
+//RS                 .iter()
+//RS                 .any(|panel| panel.panel_id == selected.panel_id)
+//RS         });
+//RS         let forced = selected_here
+//RS             || open_count > 0
+//RS             || (!workbench
+//RS                 && index == 0
+//RS                 && matches!(
+//RS                     frame.status.state,
+//RS                     DevtoolsSessionState::Building | DevtoolsSessionState::Error
+//RS                 ));
+//RS         let initially_open =
+//RS             forced || (workbench && index == 0 && !any_open && selection.is_none());
+//RS         html.push_str("<details class=\"group\" data-intent=\"");
+//RS         let _ = write!(html, "{}", index);
+//RS         if forced {
+//RS             html.push_str("\" data-active=\"true\"");
+//RS         } else {
+//RS             html.push_str("\"");
+//RS         }
+//RS         if initially_open {
+//RS             html.push_str(" open");
+//RS         }
+//RS         html.push_str("><summary data-focus=\"intent:");
+//RS         let _ = write!(html, "{}\"><span class=\"group-label\">", index);
+//RS         html.push_str(&html_escape(title));
+//RS         html.push_str("</span><span class=\"group-meta\">");
+//RS         if selected_here {
+//RS             html.push_str("Selected");
+//RS         } else if open_count > 0 {
+//RS             let _ = write!(
+//RS                 html,
+//RS                 "{} open · {} panel{}",
+//RS                 open_count,
+//RS                 available_count,
+//RS                 if available_count == 1 { "" } else { "s" }
+//RS             );
+//RS         } else {
+//RS             let _ = write!(html, "{} available", available_count,);
+//RS         }
+//RS         html.push_str("</span></summary><div class=\"group-body\">");
+//RS         for panel in members.iter().filter(|panel| panel_available(panel)) {
+//RS             render_panel(&mut html, panel, selection);
+//RS         }
+//RS         let unavailable_count = members.len() - available_count;
+//RS         if unavailable_count > 0 {
+//RS             let _ = write!(
+//RS                 html,
+//RS                 "<details class=\"fold\"><summary>{} not available here</summary>",
+//RS                 unavailable_count,
+//RS             );
+//RS             for panel in members.iter().filter(|panel| !panel_available(panel)) {
+//RS                 html.push_str("<div class=\"u\"><span>");
+//RS                 html.push_str(&html_escape(&panel.title));
+//RS                 html.push_str("</span><small>");
+//RS                 html.push_str(&html_escape(&unavailable_reason_text(&panel.status)));
+//RS                 html.push_str("</small></div>");
+//RS             }
+//RS             html.push_str("</details>");
+//RS         }
+//RS         html.push_str("</div></details>");
+//RS     }
+//RS     if frame.panels.is_empty() {
+//RS         html.push_str("<p class=\"empty\">Waiting for the first devtools fact.</p>");
+//RS     } else if frame.panels.iter().all(|panel| !panel_available(panel)) {
+//RS         html.push_str("<p class=\"empty\">No live panels are available on this host.</p>");
+//RS     }
+//RS     html.push_str("</section>");
+//RS     if workbench {
+//RS         render_inspector(&mut html, &frame);
+//RS     }
+//RS     html.push_str("</div><script>const S=JSON.parse(\"");
+//RS     html.push_str(&js_string(&state_json));
+//RS     html.push_str("\");");
+//RS     html.push_str(PAGE_JS);
+//RS     html.push_str("</script></main></body></html>");
+//RS     html
+//RS }
+//RS 
+//RS /// What needs attention right now, with the real actions next to it.
+//RS fn render_attention(html: &mut String, frame: &BrowserDevtoolsFrame) {
+//RS     let status = &frame.status;
+//RS     let failing_file = status.diagnostic.as_deref().and_then(diagnostic_file);
+//RS     html.push_str("<section class=\"attention\" aria-label=\"Attention\"><h2><i class=\"status-mark\" aria-hidden=\"true\"></i>");
+//RS     match status.state {
+//RS         DevtoolsSessionState::Starting => html.push_str("Starting"),
+//RS         DevtoolsSessionState::Building => html.push_str("Building"),
+//RS         DevtoolsSessionState::Ready => html.push_str("Ready"),
+//RS         DevtoolsSessionState::Error => html.push_str("Build failed"),
+//RS         DevtoolsSessionState::Unavailable => html.push_str("Runtime unavailable"),
+//RS         DevtoolsSessionState::Stopped => html.push_str("Stopped"),
+//RS     }
+//RS     if let Some(code) = &status.diagnostic_code {
+//RS         html.push_str("<small class=\"mono\">");
+//RS         html.push_str(&html_escape(code));
+//RS         html.push_str("</small>");
+//RS     }
+//RS     if let Some(file) = failing_file {
+//RS         html.push_str("<small class=\"mono\">");
+//RS         html.push_str(&html_escape(file));
+//RS         html.push_str("</small>");
+//RS     }
+//RS     if let Some(tests) = &status.test_state {
+//RS         html.push_str("<small>tests ");
+//RS         html.push_str(&html_escape(tests));
+//RS         html.push_str("</small>");
+//RS     }
+//RS     html.push_str("</h2>");
+//RS     if let Some(diagnostic) = &status.diagnostic {
+//RS         // Verbatim diagnostic (I4): escaped for HTML, never reworded.
+//RS         html.push_str("<pre class=\"diag\">");
+//RS         html.push_str(&html_escape(diagnostic));
+//RS         html.push_str("</pre>");
+//RS     }
+//RS     html.push_str("<div class=\"acts\">");
+//RS     if frame.tools.source {
+//RS         if status.state == DevtoolsSessionState::Error {
+//RS             html.push_str("<button class=\"btn primary\" type=\"button\" data-tool=\"source\" data-focus=\"tool:source\"");
+//RS             if let Some(file) = failing_file {
+//RS                 html.push_str(" data-file=\"");
+//RS                 html.push_str(&html_escape(file));
+//RS                 html.push('"');
+//RS             }
+//RS             html.push_str(">Fix in source</button>");
+//RS         } else {
+//RS             html.push_str("<button class=\"btn\" type=\"button\" data-tool=\"source\" data-focus=\"tool:source\">Source</button>");
+//RS         }
+//RS     }
+//RS     if frame.tools.rebuild {
+//RS         html.push_str("<button class=\"btn\" type=\"button\" data-tool=\"rebuild\" data-focus=\"tool:rebuild\">Rebuild</button>");
+//RS     }
+//RS     html.push_str("<span class=\"receipt\" role=\"status\"></span><span class=\"result\" role=\"status\"></span>");
+//RS     let mut reasons = Vec::new();
+//RS     if let Some(reason) = frame.tools.source_reason.as_deref() {
+//RS         reasons.push(reason);
+//RS     }
+//RS     if !frame.tools.rebuild {
+//RS         if let Some(reason) = frame.tools.rebuild_reason.as_deref() {
+//RS             reasons.push(reason);
+//RS         }
+//RS     }
+//RS     if !reasons.is_empty() {
+//RS         html.push_str("<span class=\"why\">");
+//RS         html.push_str(&html_escape(&reasons.join(" ")));
+//RS         html.push_str("</span>");
+//RS     }
+//RS     html.push_str("</div></section>");
+//RS }
+//RS 
+//RS /// The source tool: rendered only where Canvas source authority exists.  It
+//RS /// is hidden until opened; the script fills the file list from the project.
+//RS fn render_source_tool(html: &mut String, frame: &BrowserDevtoolsFrame) {
+//RS     if !frame.tools.source {
+//RS         return;
+//RS     }
+//RS     html.push_str(
+//RS         "<section class=\"source\" aria-label=\"Source\" hidden><header><select aria-label=\"Source file\"></select><span class=\"rev\"></span><span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-refresh hidden>Facts changed — refresh</button><button class=\"btn quiet\" type=\"button\" data-src=\"close\">Close</button></header><textarea spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" aria-label=\"Source text\" data-focus=\"tool:source-text\"></textarea><footer><button class=\"btn\" type=\"button\" data-src=\"check\">Check</button><button class=\"btn primary\" type=\"button\" data-src=\"apply\" disabled>Apply</button><button class=\"btn quiet\" type=\"button\" data-src=\"discard\" hidden>Discard draft</button><span class=\"result\" role=\"status\"></span></footer><pre class=\"out\" hidden></pre></section>",
+//RS     );
+//RS }
+//RS 
+//RS /// One panel: a header that toggles the host's open state, and (when open)
+//RS /// its typed rows.  Rows show the entity and the event kind; the row's raw
+//RS /// fields are expert detail shown for the selected row only.
+//RS fn render_panel(html: &mut String, panel: &BrowserPanelView, selection: Option<&BrowserSelection>) {
+//RS     let node_id = selection
+//RS         .filter(|selection| selection.panel_id == panel.panel_id)
+//RS         .and_then(|selection| selection.node_id.as_deref());
+//RS     html.push_str("<article class=\"panel\" data-panel-id=\"");
+//RS     html.push_str(&html_escape(&panel.panel_id));
+//RS     html.push_str("\" data-open=\"");
+//RS     html.push_str(if panel.open { "true" } else { "false" });
+//RS     html.push_str("\"><header><h2><button class=\"toggle\" data-layout=\"");
+//RS     html.push_str(if panel.open { "close" } else { "open" });
+//RS     html.push_str("\" data-panel=\"");
+//RS     html.push_str(&html_escape(&panel.panel_id));
+//RS     html.push_str("\" data-focus=\"toggle:");
+//RS     html.push_str(&html_escape(&panel.panel_id));
+//RS     html.push_str("\" aria-expanded=\"");
+//RS     html.push_str(if panel.open { "true" } else { "false" });
+//RS     html.push_str("\"><span class=\"chev\"></span>");
+//RS     html.push_str(&html_escape(&panel.title));
+//RS     html.push_str("</button></h2><small>");
+//RS     html.push_str(&html_escape(&panel.status));
+//RS     html.push_str("</small></header>");
+//RS     if panel.open {
+//RS         html.push_str("<ul class=\"nodes\">");
+//RS         render_nodes_html(html, &panel.panel_id, &panel.nodes, node_id);
+//RS         html.push_str("</ul>");
+//RS     }
+//RS     html.push_str("</article>");
+//RS }
+//RS 
+//RS /// Lens: the shared selection as a compact context card above the panels.
+//RS fn render_selected(html: &mut String, frame: &BrowserDevtoolsFrame) {
+//RS     let Some(selection) = &frame.selection else {
+//RS         return;
+//RS     };
+//RS     let Some(panel) = frame
+//RS         .panels
+//RS         .iter()
+//RS         .find(|panel| panel.panel_id == selection.panel_id)
+//RS     else {
+//RS         return;
+//RS     };
+//RS     let mut path = Vec::new();
+//RS     let node = selection
+//RS         .node_id
+//RS         .as_deref()
+//RS         .filter(|node_id| find_path(&panel.nodes, node_id, &mut path))
+//RS         .and_then(|_| path.last().copied());
+//RS     html.push_str("<section class=\"selected\" aria-label=\"Selected\"><div class=\"eyebrow\">Selected fact</div>");
+//RS     render_crumbs(html, panel, &path);
+//RS     match node {
+//RS         Some(node) => render_node_detail(html, &panel.panel_id, node),
+//RS         None => {
+//RS             html.push_str("<h3>");
+//RS             html.push_str(&html_escape(&panel.title));
+//RS             html.push_str("</h3>");
+//RS         }
+//RS     }
+//RS     html.push_str("</section>");
+//RS }
+//RS 
+//RS fn render_crumbs(html: &mut String, panel: &BrowserPanelView, path: &[&BrowserNode]) {
+//RS     html.push_str("<div class=\"crumbs\"><span>");
+//RS     html.push_str(&html_escape(&panel.title));
+//RS     html.push_str("</span>");
+//RS     for ancestor in path.iter().take(path.len().saturating_sub(1)) {
+//RS         html.push_str("<span>›</span><button data-select=\"1\" data-panel=\"");
+//RS         html.push_str(&html_escape(&panel.panel_id));
+//RS         html.push_str("\" data-node=\"");
+//RS         html.push_str(&html_escape(&ancestor.id));
+//RS         html.push_str("\">");
+//RS         html.push_str(&html_escape(&ancestor.label));
+//RS         html.push_str("</button>");
+//RS     }
+//RS     html.push_str("<span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-clear=\"1\" data-focus=\"clear\">Clear</button></div>");
+//RS }
+//RS 
+//RS /// The selected node's facts: its own value, then its children as a key/value
+//RS /// sheet (an event's source/kind/entity/fields), deeper trees as rows.
+//RS fn render_node_detail(html: &mut String, panel_id: &str, node: &BrowserNode) {
+//RS     html.push_str("<h3>");
+//RS     html.push_str(&html_escape(&node.label));
+//RS     if let Some(status) = &node.status {
+//RS         html.push_str(" <small class=\"mono\">");
+//RS         html.push_str(&html_escape(status));
+//RS         html.push_str("</small>");
+//RS     }
+//RS     html.push_str("</h3>");
+//RS     if let Some(value) = &node.value {
+//RS         html.push_str("<code class=\"value\">");
+//RS         html.push_str(&html_escape(value));
+//RS         html.push_str("</code>");
+//RS     }
+//RS     let (leaves, trees): (Vec<_>, Vec<_>) = node
+//RS         .children
+//RS         .iter()
+//RS         .partition(|child| child.children.is_empty() && child.value.is_some());
+//RS     if !leaves.is_empty() {
+//RS         html.push_str("<dl class=\"kv\">");
+//RS         for leaf in leaves {
+//RS             html.push_str("<dt>");
+//RS             html.push_str(&html_escape(&leaf.label));
+//RS             html.push_str("</dt><dd>");
+//RS             html.push_str(&html_escape(leaf.value.as_deref().unwrap_or("")));
+//RS             html.push_str("</dd>");
+//RS         }
+//RS         html.push_str("</dl>");
+//RS     }
+//RS     if !trees.is_empty() {
+//RS         html.push_str("<ul class=\"nodes\">");
+//RS         let owned = trees.into_iter().cloned().collect::<Vec<_>>();
+//RS         render_nodes_html(html, panel_id, &owned, None);
+//RS         html.push_str("</ul>");
+//RS     }
+//RS }
+//RS 
+//RS /// Workbench inspector: the shared selection, with its ancestors as a
+//RS /// return path and its facts as a sheet.
+//RS fn render_inspector(html: &mut String, frame: &BrowserDevtoolsFrame) {
+//RS     html.push_str("<aside class=\"inspector\" data-scroll aria-label=\"Inspector\">");
+//RS     let Some(selection) = &frame.selection else {
+//RS         html.push_str("<p class=\"empty\">Select a fact to inspect it.</p></aside>");
+//RS         return;
+//RS     };
+//RS     let Some(panel) = frame
+//RS         .panels
+//RS         .iter()
+//RS         .find(|panel| panel.panel_id == selection.panel_id)
+//RS     else {
+//RS         html.push_str(
+//RS             "<p class=\"empty\">Selected panel is not in the current catalog.</p></aside>",
+//RS         );
+//RS         return;
+//RS     };
+//RS     let mut path = Vec::new();
+//RS     let node = selection
+//RS         .node_id
+//RS         .as_deref()
+//RS         .filter(|node_id| find_path(&panel.nodes, node_id, &mut path))
+//RS         .and_then(|_| path.last().copied());
+//RS     render_crumbs(html, panel, &path);
+//RS     match node {
+//RS         Some(node) => render_node_detail(html, &panel.panel_id, node),
+//RS         None => {
+//RS             html.push_str("<h3>");
+//RS             html.push_str(&html_escape(&panel.title));
+//RS             html.push_str("</h3><dl class=\"kv\"><dt>status</dt><dd>");
+//RS             html.push_str(&html_escape(&panel.status));
+//RS             let _ = write!(
+//RS                 html,
+//RS                 "</dd><dt>facts</dt><dd>{}</dd></dl>",
+//RS                 panel.nodes.len()
+//RS             );
+//RS         }
+//RS     }
+//RS     html.push_str("</aside>");
+//RS }
+//RS 
+//RS /// Path from a panel's roots to `node_id`, inclusive.  Returns `false` and
+//RS /// leaves `path` empty when the node is not present.
+//RS fn find_path<'a>(nodes: &'a [BrowserNode], node_id: &str, path: &mut Vec<&'a BrowserNode>) -> bool {
+//RS     for node in nodes {
+//RS         path.push(node);
+//RS         if node.id == node_id || find_path(&node.children, node_id, path) {
+//RS             return true;
+//RS         }
+//RS         path.pop();
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn panel_from_projection(panel: &JetDevtoolsPanelProjection) -> BrowserPanelFact {
+//RS     let descriptor = &panel.availability.descriptor;
+//RS     let mut status = if panel.availability.is_available() {
+//RS         panel
+//RS             .events
+//RS             .last()
+//RS             .map(|event| event.kind().to_string())
+//RS             .unwrap_or_else(|| "available".to_string())
+//RS     } else {
+//RS         let reasons = panel
+//RS             .availability
+//RS             .unavailable_reasons()
+//RS             .iter()
+//RS             .map(|reason| reason.as_str())
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!("unavailable:{reasons}")
+//RS     };
+//RS     status = bounded_text(&status, "unavailable", MAX_BROWSER_TEXT);
+//RS 
+//RS     let mut nodes = Vec::with_capacity(panel.events.len().max(1));
+//RS     for event in &panel.events {
+//RS         let prefix = format!("event:{}", event.sequence());
+//RS         let children = vec![
+//RS             BrowserNode::new(format!("{prefix}:source"), BrowserNodeKind::Text, "source")
+//RS                 .with_value(bounded_value(event.source())),
+//RS             BrowserNode::new(format!("{prefix}:kind"), BrowserNodeKind::Text, "kind")
+//RS                 .with_value(bounded_value(event.kind())),
+//RS             BrowserNode::new(format!("{prefix}:entity"), BrowserNodeKind::Text, "entity")
+//RS                 .with_value(bounded_value(event.entity())),
+//RS             BrowserNode::new(format!("{prefix}:fields"), BrowserNodeKind::Text, "fields")
+//RS                 .with_value(bounded_value(event.fields_json())),
+//RS             BrowserNode::new(
+//RS                 format!("{prefix}:payload"),
+//RS                 BrowserNodeKind::Text,
+//RS                 "payload",
+//RS             )
+//RS             .with_value(bounded_value(event.payload_json().unwrap_or("(absent)"))),
+//RS         ];
+//RS         let label = bounded_text(event.entity(), event.kind(), MAX_BROWSER_TEXT);
+//RS         // The row shows entity and kind; source/fields/payload stay behind
+//RS         // selection as expert detail.
+//RS         nodes.push(
+//RS             BrowserNode::new(
+//RS                 format!("event:{}", event.sequence()),
+//RS                 BrowserNodeKind::Tree,
+//RS                 label,
+//RS             )
+//RS             .with_status(bounded_text(event.kind(), "event", MAX_BROWSER_TEXT))
+//RS             .with_children(children),
+//RS         );
+//RS     }
+//RS     if nodes.is_empty() {
+//RS         nodes.push(
+//RS             BrowserNode::new("availability", BrowserNodeKind::Status, "availability")
+//RS                 .with_status(status.clone()),
+//RS         );
+//RS     }
+//RS     BrowserPanelFact::new(descriptor.id.as_str(), descriptor.title, 0, status, nodes)
+//RS         .with_cursor(panel.cursor)
+//RS }
+//RS 
+//RS fn parse_revision(value: &str) -> Option<u64> {
+//RS     value.parse::<u64>().ok()
+//RS }
+//RS 
+//RS fn bounded_text(value: &str, fallback: &str, limit: usize) -> String {
+//RS     let source = if value.is_empty() { fallback } else { value };
+//RS     let mut output = String::new();
+//RS     for character in source.chars() {
+//RS         let character = if character.is_control() {
+//RS             ' '
+//RS         } else {
+//RS             character
+//RS         };
+//RS         if output.len() + character.len_utf8() > limit {
+//RS             break;
+//RS         }
+//RS         output.push(character);
+//RS     }
+//RS     if output.is_empty() {
+//RS         fallback.to_string()
+//RS     } else {
+//RS         output
+//RS     }
+//RS }
+//RS 
+//RS fn bounded_value(value: &str) -> String {
+//RS     bounded_text(value, "(none)", MAX_BROWSER_VALUE)
+//RS }
+//RS 
+//RS fn frame_json(frame: &BrowserDevtoolsFrame) -> String {
+//RS     let mut output = String::with_capacity(4096);
+//RS     output.push('{');
+//RS     field_string(&mut output, "schema", BROWSER_PAGE_SCHEMA, true);
+//RS     field_string(&mut output, "protocol", &frame.protocol, false);
+//RS     field_string(&mut output, "placement", frame.placement.as_str(), false);
+//RS     field_string(&mut output, "route", &frame.route, false);
+//RS     field_string(&mut output, "session_id", &frame.session_id, false);
+//RS     field_optional_string(&mut output, "source_id", frame.source_id.as_deref());
+//RS     field_optional_string(&mut output, "build_id", frame.build_id.as_deref());
+//RS     field_string(&mut output, "revision", &frame.revision, false);
+//RS     field_optional_string(&mut output, "world_id", frame.world_id.as_deref());
+//RS     field_u64_option(&mut output, "sequence", frame.sequence);
+//RS     field_u64_option(
+//RS         &mut output,
+//RS         "cursor",
+//RS         frame.cursor.map(|cursor| cursor.sequence),
+//RS     );
+//RS     field_string(&mut output, "state", frame.state.as_str(), false);
+//RS     output.push_str(",\"status\":");
+//RS     status_json(&mut output, &frame.status);
+//RS     output.push_str(",\"tools\":{\"source\":{");
+//RS     field_bool(&mut output, "available", frame.tools.source, true);
+//RS     field_optional_string(&mut output, "reason", frame.tools.source_reason.as_deref());
+//RS     output.push_str("},\"rebuild\":{");
+//RS     field_bool(&mut output, "available", frame.tools.rebuild, true);
+//RS     field_optional_string(&mut output, "reason", frame.tools.rebuild_reason.as_deref());
+//RS     output.push_str("}},\"receipts\":[");
+//RS     for (index, receipt) in frame.receipts.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push('{');
+//RS         field_u64(&mut output, "sequence", receipt.sequence, true);
+//RS         field_string(&mut output, "request_id", &receipt.request_id, false);
+//RS         field_string(&mut output, "kind", &receipt.kind, false);
+//RS         field_string(&mut output, "status", &receipt.status, false);
+//RS         field_optional_string(&mut output, "error", receipt.error.as_deref());
+//RS         output.push('}');
+//RS     }
+//RS     output.push(']');
+//RS     output.push_str(",\"selection\":");
+//RS     match &frame.selection {
+//RS         Some(selection) => {
+//RS             output.push('{');
+//RS             field_string(&mut output, "panel_id", &selection.panel_id, true);
+//RS             output.push_str(",\"node_id\":");
+//RS             match &selection.node_id {
+//RS                 Some(node_id) => quoted(node_id, &mut output),
+//RS                 None => output.push_str("null"),
+//RS             }
+//RS             output.push('}');
+//RS         }
+//RS         None => output.push_str("null"),
+//RS     }
+//RS     output.push_str(",\"panels\":[");
+//RS     for (index, panel) in frame.panels.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push('{');
+//RS         field_string(&mut output, "panel_id", &panel.panel_id, true);
+//RS         field_string(&mut output, "title", &panel.title, false);
+//RS         field_u64(&mut output, "freshness_ms", panel.freshness_ms, false);
+//RS         field_string(&mut output, "status", &panel.status, false);
+//RS         field_u64_option(&mut output, "cursor", panel.cursor);
+//RS         field_bool(&mut output, "open", panel.open, false);
+//RS         field_string(&mut output, "dock", panel.dock.as_str(), false);
+//RS         output.push_str(",\"nodes\":[");
+//RS         write_nodes_json(&mut output, &panel.nodes);
+//RS         output.push_str("]}");
+//RS     }
+//RS     output.push_str("],\"elements\":[");
+//RS     for (index, element) in frame.elements.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push('{');
+//RS         field_string(&mut output, "id", &element.id, true);
+//RS         field_string(&mut output, "kind", &element.kind, false);
+//RS         field_optional_string(&mut output, "panel_id", element.panel_id.as_deref());
+//RS         field_optional_string(&mut output, "node_id", element.node_id.as_deref());
+//RS         field_string(&mut output, "label", &element.label, false);
+//RS         field_optional_string(&mut output, "value", element.value.as_deref());
+//RS         field_optional_string(&mut output, "status", element.status.as_deref());
+//RS         output.push('}');
+//RS     }
+//RS     output.push_str("]}");
+//RS     output
+//RS }
+//RS 
+//RS fn status_json(output: &mut String, status: &DevtoolsStatusFact) {
+//RS     output.push('{');
+//RS     field_string(output, "state", devtools_state_as_str(&status.state), true);
+//RS     field_optional_string(output, "diagnostic_code", status.diagnostic_code.as_deref());
+//RS     field_optional_string(output, "diagnostic", status.diagnostic.as_deref());
+//RS     field_optional_string(
+//RS         output,
+//RS         "accepted_revision",
+//RS         status.accepted_revision.as_deref(),
+//RS     );
+//RS     field_optional_string(
+//RS         output,
+//RS         "last_good_revision",
+//RS         status.last_good_revision.as_deref(),
+//RS     );
+//RS     field_optional_string(output, "run_target", status.run_target.as_deref());
+//RS     field_optional_string(output, "run_output", status.run_output.as_deref());
+//RS     field_optional_string(output, "test_state", status.test_state.as_deref());
+//RS     output.push('}');
+//RS }
+//RS 
+//RS fn devtools_state_as_str(state: &DevtoolsSessionState) -> &'static str {
+//RS     match state {
+//RS         DevtoolsSessionState::Starting => "starting",
+//RS         DevtoolsSessionState::Building => "building",
+//RS         DevtoolsSessionState::Ready => "ready",
+//RS         DevtoolsSessionState::Error => "error",
+//RS         DevtoolsSessionState::Unavailable => "unavailable",
+//RS         DevtoolsSessionState::Stopped => "stopped",
+//RS     }
+//RS }
+//RS 
+//RS fn write_nodes_json(output: &mut String, nodes: &[BrowserNode]) {
+//RS     for (index, node) in nodes.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push('{');
+//RS         field_string(output, "id", &node.id, true);
+//RS         field_string(output, "kind", node.kind.as_str(), false);
+//RS         field_string(output, "label", &node.label, false);
+//RS         field_optional_string(output, "value", node.value.as_deref());
+//RS         field_optional_string(output, "status", node.status.as_deref());
+//RS         output.push_str(",\"children\":[");
+//RS         write_nodes_json(output, &node.children);
+//RS         output.push_str("]}");
+//RS     }
+//RS }
+//RS 
+//RS fn field_string(output: &mut String, key: &str, value: &str, first: bool) {
+//RS     if !first {
+//RS         output.push(',');
+//RS     }
+//RS     quoted(key, output);
+//RS     output.push(':');
+//RS     quoted(value, output);
+//RS }
+//RS 
+//RS fn field_optional_string(output: &mut String, key: &str, value: Option<&str>) {
+//RS     output.push(',');
+//RS     quoted(key, output);
+//RS     output.push(':');
+//RS     match value {
+//RS         Some(value) => quoted(value, output),
+//RS         None => output.push_str("null"),
+//RS     }
+//RS }
+//RS 
+//RS fn field_u64_option(output: &mut String, key: &str, value: Option<u64>) {
+//RS     output.push(',');
+//RS     quoted(key, output);
+//RS     output.push(':');
+//RS     match value {
+//RS         Some(value) => output.push_str(&value.to_string()),
+//RS         None => output.push_str("null"),
+//RS     }
+//RS }
+//RS 
+//RS fn field_u64(output: &mut String, key: &str, value: u64, first: bool) {
+//RS     if !first {
+//RS         output.push(',');
+//RS     }
+//RS     quoted(key, output);
+//RS     output.push(':');
+//RS     output.push_str(&value.to_string());
+//RS }
+//RS 
+//RS fn field_bool(output: &mut String, key: &str, value: bool, first: bool) {
+//RS     if !first {
+//RS         output.push(',');
+//RS     }
+//RS     quoted(key, output);
+//RS     output.push(':');
+//RS     output.push_str(if value { "true" } else { "false" });
+//RS }
+//RS 
+//RS fn quoted(value: &str, output: &mut String) {
+//RS     output.push('"');
+//RS     output.push_str(&json_escape(value));
+//RS     output.push('"');
+//RS }
+//RS 
+//RS /// Encode a bounded reconnect result.  Old cursors are explicit resets, not
+//RS /// silent partial views.
+//RS pub(crate) fn reconnect_json(
+//RS     state: &BrowserWebState,
+//RS     from: Option<u64>,
+//RS     reset: bool,
+//RS     truncation: bool,
+//RS ) -> Result<String, String> {
+//RS     let mut output = String::with_capacity(4096);
+//RS     output.push('{');
+//RS     field_string(&mut output, "schema", BROWSER_PAGE_SCHEMA, true);
+//RS     field_string(
+//RS         &mut output,
+//RS         "protocol",
+//RS         crate::Session::JET_DEVTOOLS_PROTOCOL,
+//RS         false,
+//RS     );
+//RS     field_string(&mut output, "session_id", state.host().session_id(), false);
+//RS     field_u64_option(&mut output, "from", from);
+//RS     field_u64_option(&mut output, "cursor", state.host().sequence());
+//RS     field_bool(&mut output, "reset", reset, false);
+//RS     field_bool(&mut output, "truncation", truncation, false);
+//RS     output.push_str(",\"complete\":");
+//RS     if truncation {
+//RS         output.push_str("false");
+//RS     } else {
+//RS         output.push_str("true");
+//RS     }
+//RS     output.push_str(",\"events\":[");
+//RS     if !truncation {
+//RS         let events = state
+//RS             .host()
+//RS             .resume_from(from.map(BrowserReconnectCursor::new))
+//RS             .map_err(|error| error.to_string())?
+//RS             .events;
+//RS         for (index, event) in events.iter().enumerate() {
+//RS             if index != 0 {
+//RS                 output.push(',');
+//RS             }
+//RS             event_json(&mut output, event);
+//RS         }
+//RS     }
+//RS     output.push_str("],\"view\":");
+//RS     output.push_str(&view_json(state, BrowserPlacement::Workbench));
+//RS     output.push('}');
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn event_json(output: &mut String, event: &BrowserHostEvent) {
+//RS     output.push('{');
+//RS     field_string(output, "protocol", &event.protocol, true);
+//RS     field_string(output, "session_id", &event.session_id, false);
+//RS     field_u64(output, "revision", event.revision, false);
+//RS     field_u64(output, "sequence", event.sequence, false);
+//RS     field_u64(output, "observed_at_ms", event.observed_at_ms, false);
+//RS     output.push_str(",\"panels\":[");
+//RS     for (index, panel) in event.panels.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         panel_json(output, panel);
+//RS     }
+//RS     output.push_str("]}");
+//RS }
+//RS 
+//RS fn panel_json(output: &mut String, panel: &BrowserPanelFact) {
+//RS     output.push('{');
+//RS     field_string(output, "panel_id", &panel.panel_id, true);
+//RS     field_string(output, "title", &panel.title, false);
+//RS     field_u64(output, "freshness_ms", panel.freshness_ms, false);
+//RS     field_string(output, "status", &panel.status, false);
+//RS     field_u64_option(output, "cursor", panel.cursor);
+//RS     output.push_str(",\"nodes\":[");
+//RS     write_nodes_json(output, &panel.nodes);
+//RS     output.push_str("]}");
+//RS }
+//RS 
+//RS /// Parse the canonical nested browser selection envelope.  Selection is
+//RS /// shared by both placements and therefore cannot carry title aliases or
+//RS /// legacy top-level fallback fields.
+//RS pub(crate) fn parse_selection(payload: &[u8]) -> Result<Option<(String, Option<String>)>, String> {
+//RS     let text = std::str::from_utf8(payload)
+//RS         .map_err(|_| "browser selection body must be UTF-8 JSON".to_string())?;
+//RS     let root = parse_json_with_limit(text, crate::MAX_REQUEST_BODY_BYTES)
+//RS         .map_err(|_| "browser selection body is not valid bounded JSON".to_string())?;
+//RS     let object =
+//RS         object_map(&root).map_err(|_| "browser selection body must be an object".to_string())?;
+//RS     let selection = object
+//RS         .get("selection")
+//RS         .ok_or_else(|| "browser selection body must include selection".to_string())?;
+//RS     if matches!(selection, DataTree::Null) {
+//RS         return Ok(None);
+//RS     }
+//RS     let selection = object_map(selection)
+//RS         .map_err(|_| "browser selection must be an object or null".to_string())?;
+//RS     let panel_id = selection
+//RS         .get("panel_id")
+//RS         .ok_or_else(|| "browser selection must include panel_id".to_string())?
+//RS         .as_str()
+//RS         .map_err(|_| "browser selection panel_id must be a string".to_string())?;
+//RS     if panel_id.is_empty() {
+//RS         return Err("browser selection panel_id must not be empty".to_string());
+//RS     }
+//RS     let item_key = match selection.get("item_key") {
+//RS         None | Some(DataTree::Null) => None,
+//RS         Some(value) => Some(
+//RS             value
+//RS                 .as_str()
+//RS                 .map_err(|_| "browser selection item_key must be a string".to_string())?
+//RS                 .to_string(),
+//RS         ),
+//RS     };
+//RS     Ok(Some((panel_id.to_string(), item_key)))
+//RS }
+//RS 
+//RS /// Parse one browser action at the HTTP boundary with the shared foundation
+//RS /// JSON parser.  The resulting action is still checked by `BrowserHost`.
+//RS pub(crate) fn parse_action(
+//RS     payload: &[u8],
+//RS     default_placement: BrowserPlacement,
+//RS ) -> Result<BrowserHostAction, String> {
+//RS     let text = std::str::from_utf8(payload)
+//RS         .map_err(|_| "browser action body must be UTF-8 JSON".to_string())?;
+//RS     let root = parse_json_with_limit(text, crate::MAX_REQUEST_BODY_BYTES)
+//RS         .map_err(|_| "browser action body is not valid bounded JSON".to_string())?;
+//RS     let object =
+//RS         object_map(&root).map_err(|_| "browser action body must be an object".to_string())?;
+//RS     let name = required_string(&object, "action").or_else(|_| required_string(&object, "op"))?;
+//RS     let placement = object
+//RS         .get("placement")
+//RS         .map(parse_placement)
+//RS         .transpose()?
+//RS         .unwrap_or(default_placement);
+//RS     match name {
+//RS         "open" | "open_panel" => Ok(BrowserHostAction::open(
+//RS             placement,
+//RS             required_string(&object, "panel_id")?,
+//RS         )),
+//RS         "close" | "close_panel" => Ok(BrowserHostAction::close(
+//RS             placement,
+//RS             required_string(&object, "panel_id")?,
+//RS         )),
+//RS         "dock" | "dock_panel" => Ok(BrowserHostAction::dock(
+//RS             placement,
+//RS             required_string(&object, "panel_id")?,
+//RS             parse_dock(required_string(&object, "dock")?)?,
+//RS         )),
+//RS         "navigate_source" | "navigate" => Ok(BrowserHostAction::navigate_source(
+//RS             placement,
+//RS             required_string(&object, "panel_id")?,
+//RS             required_string(&object, "node_id")?,
+//RS             parse_source_grant(&object)?,
+//RS         )),
+//RS         "invoke_action" | "invoke" => {
+//RS             let action_id = required_string(&object, "action_id")?;
+//RS             Ok(BrowserHostAction::invoke_action(
+//RS                 placement,
+//RS                 required_string(&object, "panel_id")?,
+//RS                 required_string(&object, "node_id")?,
+//RS                 action_id,
+//RS                 parse_action_grant(&object)?,
+//RS             ))
+//RS         }
+//RS         _ => Err(format!("unknown browser action `{name}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_source_grant(object: &BTreeMap<String, DataTree>) -> Result<BrowserSourceGrant, String> {
+//RS     let grant = nested_object(object, "grant")?;
+//RS     let source = nested_object(&grant, "source")?;
+//RS     let function = optional_string(&source, "function");
+//RS     let location = BrowserSourceLocation::new(
+//RS         required_string(&source, "source_id")?,
+//RS         required_u32(&source, "line")?,
+//RS         optional_u32(&source, "column").unwrap_or(0),
+//RS         function.map(str::to_string),
+//RS     );
+//RS     Ok(BrowserSourceGrant::new(
+//RS         required_string(&grant, "session_id")?,
+//RS         required_u64(&grant, "revision")?,
+//RS         required_string(&grant, "panel_id")?,
+//RS         required_string(&grant, "node_id")?,
+//RS         location,
+//RS     ))
+//RS }
+//RS 
+//RS fn parse_action_grant(object: &BTreeMap<String, DataTree>) -> Result<BrowserActionGrant, String> {
+//RS     let grant = nested_object(object, "grant")?;
+//RS     Ok(BrowserActionGrant::new(
+//RS         required_string(&grant, "session_id")?,
+//RS         required_u64(&grant, "revision")?,
+//RS         required_string(&grant, "panel_id")?,
+//RS         required_string(&grant, "node_id")?,
+//RS         required_string(&grant, "action_id")?,
+//RS     ))
+//RS }
+//RS 
+//RS fn nested_object(
+//RS     object: &BTreeMap<String, DataTree>,
+//RS     key: &str,
+//RS ) -> Result<BTreeMap<String, DataTree>, String> {
+//RS     let value = object
+//RS         .get(key)
+//RS         .ok_or_else(|| format!("browser action is missing `{key}`"))?;
+//RS     object_map(value).map_err(|_| format!("browser action `{key}` must be an object"))
+//RS }
+//RS 
+//RS fn required_string<'a>(
+//RS     object: &'a BTreeMap<String, DataTree>,
+//RS     key: &str,
+//RS ) -> Result<&'a str, String> {
+//RS     object
+//RS         .get(key)
+//RS         .ok_or_else(|| format!("browser action is missing `{key}`"))?
+//RS         .as_str()
+//RS         .map_err(|_| format!("browser action `{key}` must be a string"))
+//RS }
+//RS 
+//RS fn optional_string<'a>(object: &'a BTreeMap<String, DataTree>, key: &str) -> Option<&'a str> {
+//RS     object.get(key).and_then(|value| value.as_str().ok())
+//RS }
+//RS 
+//RS fn required_u64(object: &BTreeMap<String, DataTree>, key: &str) -> Result<u64, String> {
+//RS     match object.get(key) {
+//RS         Some(DataTree::Int(value)) if *value >= 0 => {
+//RS             u64::try_from(*value).map_err(|_| format!("browser action `{key}` is out of range"))
+//RS         }
+//RS         _ => Err(format!(
+//RS             "browser action `{key}` must be a non-negative integer"
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn required_u32(object: &BTreeMap<String, DataTree>, key: &str) -> Result<u32, String> {
+//RS     required_u64(object, key).and_then(|value| {
+//RS         u32::try_from(value).map_err(|_| format!("browser action `{key}` is out of range"))
+//RS     })
+//RS }
+//RS 
+//RS fn optional_u32(object: &BTreeMap<String, DataTree>, key: &str) -> Option<u32> {
+//RS     object.get(key).and_then(|value| match value {
+//RS         DataTree::Int(value) if *value >= 0 => u32::try_from(*value).ok(),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_placement(value: &DataTree) -> Result<BrowserPlacement, String> {
+//RS     match value
+//RS         .as_str()
+//RS         .map_err(|_| "browser action placement must be a string".to_string())?
+//RS     {
+//RS         "in-app" | "in_app" => Ok(BrowserPlacement::InApp),
+//RS         "workbench" => Ok(BrowserPlacement::Workbench),
+//RS         value => Err(format!("unknown browser placement `{value}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_dock(value: &str) -> Result<BrowserDock, String> {
+//RS     match value {
+//RS         "left" => Ok(BrowserDock::Left),
+//RS         "right" => Ok(BrowserDock::Right),
+//RS         "bottom" => Ok(BrowserDock::Bottom),
+//RS         "floating" => Ok(BrowserDock::Floating),
+//RS         _ => Err(format!("unknown browser dock `{value}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn effect_json(effect: &BrowserHostEffect) -> String {
+//RS     let mut output = String::from("{\"schema\":\"");
+//RS     output.push_str(BROWSER_PAGE_SCHEMA);
+//RS     output.push_str("\",\"effect\":");
+//RS     match effect {
+//RS         BrowserHostEffect::PanelOpened {
+//RS             placement,
+//RS             panel_id,
+//RS         } => {
+//RS             output.push_str("{\"kind\":\"panel-opened\",\"placement\":");
+//RS             quoted(placement.as_str(), &mut output);
+//RS             output.push_str(",\"panel_id\":");
+//RS             quoted(panel_id, &mut output);
+//RS         }
+//RS         BrowserHostEffect::PanelClosed {
+//RS             placement,
+//RS             panel_id,
+//RS         } => {
+//RS             output.push_str("{\"kind\":\"panel-closed\",\"placement\":");
+//RS             quoted(placement.as_str(), &mut output);
+//RS             output.push_str(",\"panel_id\":");
+//RS             quoted(panel_id, &mut output);
+//RS         }
+//RS         BrowserHostEffect::PanelDocked {
+//RS             placement,
+//RS             panel_id,
+//RS             dock,
+//RS         } => {
+//RS             output.push_str("{\"kind\":\"panel-docked\",\"placement\":");
+//RS             quoted(placement.as_str(), &mut output);
+//RS             output.push_str(",\"panel_id\":");
+//RS             quoted(panel_id, &mut output);
+//RS             output.push_str(",\"dock\":");
+//RS             quoted(dock.as_str(), &mut output);
+//RS         }
+//RS         BrowserHostEffect::SourceNavigated {
+//RS             placement,
+//RS             panel_id,
+//RS             node_id,
+//RS             source,
+//RS         } => {
+//RS             output.push_str("{\"kind\":\"source-navigated\",\"placement\":");
+//RS             quoted(placement.as_str(), &mut output);
+//RS             output.push_str(",\"panel_id\":");
+//RS             quoted(panel_id, &mut output);
+//RS             output.push_str(",\"node_id\":");
+//RS             quoted(node_id, &mut output);
+//RS             output.push_str(",\"source\":{");
+//RS             field_string(&mut output, "source_id", &source.source_id, true);
+//RS             field_u64(&mut output, "line", source.line as u64, false);
+//RS             field_u64(&mut output, "column", source.column as u64, false);
+//RS             field_optional_string(&mut output, "function", source.function.as_deref());
+//RS             output.push('}');
+//RS         }
+//RS         BrowserHostEffect::ActionInvoked {
+//RS             placement,
+//RS             panel_id,
+//RS             node_id,
+//RS             action_id,
+//RS         } => {
+//RS             output.push_str("{\"kind\":\"action-invoked\",\"placement\":");
+//RS             quoted(placement.as_str(), &mut output);
+//RS             output.push_str(",\"panel_id\":");
+//RS             quoted(panel_id, &mut output);
+//RS             output.push_str(",\"node_id\":");
+//RS             quoted(node_id, &mut output);
+//RS             output.push_str(",\"action_id\":");
+//RS             quoted(action_id, &mut output);
+//RS         }
+//RS     }
+//RS     output.push_str("}}");
+//RS     output
+//RS }
+//RS 
+//RS pub(crate) fn dispatch_action(
+//RS     state: &mut BrowserWebState,
+//RS     action: BrowserHostAction,
+//RS ) -> Result<String, BrowserHostError> {
+//RS     state
+//RS         .host
+//RS         .dispatch(action)
+//RS         .map(|effect| effect_json(&effect))
+//RS }
+//RS 
+//RS /// Render flat node rows: label, then the typed status (an event's kind) as a
+//RS /// quiet chip.  `selected` is the shared selection inside this panel; a row
+//RS /// also reads as selected when it holds the selected descendant, because the
+//RS /// selected card or inspector carries that detail.
+//RS fn render_nodes_html(
+//RS     output: &mut String,
+//RS     panel_id: &str,
+//RS     nodes: &[BrowserNode],
+//RS     selected: Option<&str>,
+//RS ) {
+//RS     for node in nodes {
+//RS         let is_selected = selected == Some(node.id.as_str());
+//RS         let holds = contains_node(&node.children, selected);
+//RS         output.push_str("<li data-selected=\"");
+//RS         output.push_str(if is_selected || holds {
+//RS             "true"
+//RS         } else {
+//RS             "false"
+//RS         });
+//RS         output.push_str("\"><button class=\"node\" data-select=\"1\" data-panel=\"");
+//RS         output.push_str(&html_escape(panel_id));
+//RS         output.push_str("\" data-node=\"");
+//RS         output.push_str(&html_escape(&node.id));
+//RS         output.push_str("\" data-focus=\"node:");
+//RS         output.push_str(&html_escape(panel_id));
+//RS         output.push(':');
+//RS         output.push_str(&html_escape(&node.id));
+//RS         output.push_str("\" aria-pressed=\"");
+//RS         output.push_str(if is_selected { "true" } else { "false" });
+//RS         output.push_str("\"><span class=\"lbl\">");
+//RS         output.push_str(&html_escape(&node.label));
+//RS         output.push_str("</span>");
+//RS         if let Some(status) = &node.status {
+//RS             output.push_str("<b>");
+//RS             output.push_str(&html_escape(status));
+//RS             output.push_str("</b>");
+//RS         }
+//RS         output.push_str("</button></li>");
+//RS     }
+//RS }
+//RS 
+//RS fn contains_node(nodes: &[BrowserNode], node_id: Option<&str>) -> bool {
+//RS     let Some(node_id) = node_id else {
+//RS         return false;
+//RS     };
+//RS     nodes
+//RS         .iter()
+//RS         .any(|node| node.id == node_id || contains_node(&node.children, Some(node_id)))
+//RS }
+//RS 
+//RS fn html_escape(value: &str) -> String {
+//RS     let mut output = String::with_capacity(value.len());
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '&' => output.push_str("&amp;"),
+//RS             '<' => output.push_str("&lt;"),
+//RS             '>' => output.push_str("&gt;"),
+//RS             '"' => output.push_str("&quot;"),
+//RS             '\'' => output.push_str("&#39;"),
+//RS             character if character.is_control() => output.push(' '),
+//RS             character => output.push(character),
+//RS         }
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn js_string(value: &str) -> String {
+//RS     let mut output = String::with_capacity(value.len());
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '\\' => output.push_str("\\\\"),
+//RS             '"' => output.push_str("\\\""),
+//RS             '\n' => output.push_str("\\n"),
+//RS             '\r' => output.push_str("\\r"),
+//RS             '\t' => output.push_str("\\t"),
+//RS             '\u{2028}' => output.push_str("\\u2028"),
+//RS             '\u{2029}' => output.push_str("\\u2029"),
+//RS             '<' => output.push_str("\\u003c"),
+//RS             '>' => output.push_str("\\u003e"),
+//RS             '&' => output.push_str("\\u0026"),
+//RS             character if character.is_control() => {
+//RS                 let _ = write!(output, "\\u{:04x}", character as u32);
+//RS             }
+//RS             character => output.push(character),
+//RS         }
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use crate::Devtools::{JetDevtoolsEnvelope, JetDevtoolsEvent};
+//RS 
+//RS     fn projection(sequence: u64) -> (DevtoolsProjection, Vec<JetDevtoolsPanelProjection>) {
+//RS         let mut envelope = JetDevtoolsEnvelope::new("s1", 0);
+//RS         envelope.push(
+//RS             JetDevtoolsEvent::from_parts(
+//RS                 100 + sequence,
+//RS                 "devserver",
+//RS                 "state",
+//RS                 "session",
+//RS                 "{\"state\":\"ready\"}",
+//RS             )
+//RS             .unwrap(),
+//RS         );
+//RS         let event = envelope.events().next().unwrap().clone();
+//RS         let panels = crate::Devtools::catalog::canonical().unwrap().project(
+//RS             &envelope,
+//RS             JetDevtoolsHostKind::BrowserInApp,
+//RS             &JetDevtoolsPanelCapability::ALL,
+//RS         );
+//RS         let projection = DevtoolsProjection {
+//RS             protocol: crate::Session::JET_DEVTOOLS_PROTOCOL.to_string(),
+//RS             session_id: "s1".to_string(),
+//RS             source_id: None,
+//RS             build_id: None,
+//RS             revision: "rev".to_string(),
+//RS             world_id: None,
+//RS             sequence,
+//RS             observed_at: 100 + sequence,
+//RS             panels: vec![event],
+//RS             selection: None,
+//RS             status: DevtoolsStatusFact {
+//RS                 state: DevtoolsSessionState::Ready,
+//RS                 diagnostic_code: None,
+//RS                 diagnostic: None,
+//RS                 accepted_revision: None,
+//RS                 last_good_revision: None,
+//RS                 run_target: None,
+//RS                 run_output: None,
+//RS                 test_state: None,
+//RS             },
+//RS             command_capabilities: crate::Session::DevtoolsCommandCapabilities {
+//RS                 project_rebuild: false,
+//RS                 project_rebuild_reason: Some(
+//RS                     "no rebuild executor is registered for this host".to_string(),
+//RS                 ),
+//RS             },
+//RS             command_receipts: Vec::new(),
+//RS             reset: sequence == 1,
+//RS             truncation: false,
+//RS         };
+//RS         (projection, panels)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_projection_renders_both_placements_from_one_state() {
+//RS         let mut state = BrowserWebState::new("s1".to_string());
+//RS         let (projection, panels) = projection(1);
+//RS         state.sync(projection, panels).unwrap();
+//RS         let in_app = state.host().view_model(BrowserPlacement::InApp);
+//RS         let workbench = state.host().view_model(BrowserPlacement::Workbench);
+//RS         assert_eq!(in_app.session_id, workbench.session_id);
+//RS         assert_eq!(in_app.panels[0].panel_id, workbench.panels[0].panel_id);
+//RS         assert_ne!(in_app.route, workbench.route);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_status_and_identity_stay_frame_metadata() {
+//RS         let (mut projection, panels) = projection(1);
+//RS         projection.source_id = Some("src/main.jet".to_string());
+//RS         projection.build_id = Some("build-1".to_string());
+//RS         projection.world_id = Some("world-1".to_string());
+//RS         projection.status = DevtoolsStatusFact {
+//RS             state: DevtoolsSessionState::Building,
+//RS             diagnostic_code: Some("E0102".to_string()),
+//RS             diagnostic: Some("missing name".to_string()),
+//RS             accepted_revision: Some("accepted".to_string()),
+//RS             last_good_revision: Some("good".to_string()),
+//RS             run_target: Some("browser".to_string()),
+//RS             run_output: Some("web".to_string()),
+//RS             test_state: Some("idle".to_string()),
+//RS         };
+//RS         let mut state = BrowserWebState::new("s1".to_string());
+//RS         state.sync(projection, panels).unwrap();
+//RS         let frame = state.frame(BrowserPlacement::InApp);
+//RS         assert_eq!(frame.source_id.as_deref(), Some("src/main.jet"));
+//RS         assert_eq!(frame.state, BrowserSessionState::Building);
+//RS         assert!(!frame.panels.is_empty());
+//RS         assert_eq!(frame.status.diagnostic_code.as_deref(), Some("E0102"));
+//RS         assert!(!frame.tools.rebuild);
+//RS         let json = view_json(&state, BrowserPlacement::InApp);
+//RS         assert!(json.contains("\"source_id\":\"src/main.jet\""));
+//RS         assert!(json.contains("\"status\":{\"state\":\"building\""));
+//RS         assert!(json.contains("\"rebuild\":{\"available\":false,\"reason\":\"no rebuild executor is registered for this host\"}"));
+//RS         assert!(json.contains("\"receipts\":[]"));
+//RS         assert!(!json.contains("__session_status"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn page_offers_tools_only_where_the_host_has_them() {
+//RS         let (mut projection, panels) = projection(1);
+//RS         projection.status.state = DevtoolsSessionState::Error;
+//RS         projection.status.diagnostic_code = Some("E0102".to_string());
+//RS         projection.status.diagnostic =
+//RS             Some("Error [E0102]: unknown symbol\n  --> app.jet:12:9\n".to_string());
+//RS         let mut state = BrowserWebState::new("s1".to_string());
+//RS         state.sync(projection, panels).unwrap();
+//RS         let page = render_page(&state, BrowserPlacement::InApp);
+//RS         assert!(!page.contains("data-tool=\"source\""));
+//RS         assert!(!page.contains("data-tool=\"rebuild\""));
+//RS         assert!(page.contains("no rebuild executor is registered for this host"));
+//RS         assert!(page.contains("<pre class=\"diag\">Error [E0102]: unknown symbol"));
+//RS 
+//RS         state.tools.source = true;
+//RS         state.tools.source_reason = None;
+//RS         let page = render_page(&state, BrowserPlacement::InApp);
+//RS         assert!(page.contains(
+//RS             "data-tool=\"source\" data-focus=\"tool:source\" data-file=\"app.jet\">Fix in source"
+//RS         ));
+//RS         assert!(page.contains("class=\"source\""));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn reconnect_reset_returns_bounded_snapshot_events() {
+//RS         let mut state = BrowserWebState::new("s1".to_string());
+//RS         let (projection, panels) = projection(1);
+//RS         state.sync(projection, panels).unwrap();
+//RS         let body = reconnect_json(&state, None, true, false).unwrap();
+//RS         assert!(body.contains("\"reset\":true"));
+//RS         assert!(body.contains("\"complete\":true"));
+//RS         assert!(body.contains("\"sequence\":1"));
+//RS 
+//RS         let body = reconnect_json(&state, Some(0), true, true).unwrap();
+//RS         assert!(body.contains("\"truncation\":true"));
+//RS         assert!(body.contains("\"complete\":false"));
+//RS         assert!(body.contains("\"events\":[]"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn action_parser_requires_typed_grant_for_source_navigation() {
+//RS         let error = parse_action(
+//RS             br#"{"action":"navigate_source","panel_id":"build","node_id":"source"}"#,
+//RS             BrowserPlacement::InApp,
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(error.contains("grant"));
+//RS     }
+//RS }
+// END-PORT-PENDING 0757 crates/jet-devserver/src/BrowserWebAdapter.rs:1-2432
+

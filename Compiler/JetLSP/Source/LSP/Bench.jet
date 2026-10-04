@@ -1,0 +1,149 @@
+// Source/LSP/Check.rs:312–410. Canonical Driver query/cache/receipt owners.
+// Snapshot is the actual host-authorized source view for bench.jet/cone-bench.jet.
+// #4483: elapsed Duration.ns currently has the Core Int range; full Rust Instant
+// Duration u128-microsecond range requires Core's exact wide elapsed provider.
+// Counters inherit Driver's Int/target-usize range gate, not a local cache.
+use core.time as lsp_bench_time
+use core.files.runtime.kernel_path_components as lsp_bench_path
+use jet_driver.[JetDriverCompilerQueries, JetDriverQuerySnapshot, JetDriverReverdictReceipt]
+use core.files.host.retained_descriptor as lsp_doctor_native
+use core.files.runtime.kernel_path_components as lsp_doctor_path
+use core.files.runtime.kernel_path_components.[OSPath]
+use jet_lexer.[lex]
+use jet_parser.[parse_with_source, jet_format_source]
+
+pub struct BenchReport {
+    pub cold_us: U128
+    pub warm_hit_us: U128
+    pub warm_edit_us: U128
+    pub hits: U64
+    pub recomputes: U64
+    pub live_inputs: Int
+    pub live_input_bytes: Int
+    pub live_memos: Int
+    pub item_hits: U64
+    pub item_recomputes: U64
+    pub live_items: Int
+    pub live_item_bytes: Int
+}
+
+pub fn lsp_measure_bench(snapshot: JetDriverQuerySnapshot, source: String, rounds: Int) -[Time]> BenchReport {
+    count :: if rounds < 1 -> 1 else -> rounds
+    queries := JetDriverCompilerQueries.new()
+    path :: lsp_bench_path.from_text("bench.jet", snapshot.cwd.platform)
+    cold :: lsp_bench_time.instant()
+    _ :: &queries.check_text_lsp(snapshot, path, source)
+    cold_us :: U128.from_int((lsp_bench_time.instant() - cold).ns) ?? panic("monotonic duration is nonnegative")
+    warm :: lsp_bench_time.instant()
+    _ :: &queries.check_text_lsp(snapshot, path, source)
+    warm_us :: U128.from_int((lsp_bench_time.instant() - warm).ns) ?? panic("monotonic duration is nonnegative")
+    edits :: lsp_bench_time.instant()
+    loop round in 0..<count {
+        edited :: "{source}\n// lsp-bench-edit:{round % 2}\n"
+        _ :: &queries.check_text_lsp(snapshot, path, edited)
+    }
+    edit_us :: (U128.from_int((lsp_bench_time.instant() - edits).ns) ?? panic("monotonic duration is nonnegative")) /% U128{1000} /% U128{count}
+    stats :: queries.stats()
+    BenchReport{cold_us: cold_us /% U128{1000}, warm_hit_us: warm_us /% U128{1000}, warm_edit_us: edit_us, hits: U64{stats.hits}, recomputes: U64{stats.recomputes}, live_inputs: stats.live_inputs, live_input_bytes: stats.live_input_bytes, live_memos: stats.live_memos, item_hits: U64{stats.item_hits}, item_recomputes: U64{stats.item_recomputes}, live_items: stats.live_items, live_item_bytes: stats.live_item_bytes}
+}
+
+pub fn lsp_measure_cone_bench(snapshot: JetDriverQuerySnapshot) -[Time]> [JetDriverReverdictReceipt] {
+    receipts := [JetDriverReverdictReceipt]{}
+    path :: lsp_bench_path.from_text("cone-bench.jet", snapshot.cwd.platform)
+    sizes :: [Int]{16, 128}
+    loop functions in sizes {
+        // One forward append per byte instead of repeatedly copying a prefix.
+        bytes := [U8]{}
+        loop index in 0..<functions {
+            loop byte in "fn helper_{index}() -> Int {{ return {index} }}\n".bytes() -> &bytes.push(byte)
+        }
+        loop byte in "fn target() -> Int {{ return 1 }}\nfn run() -> Int {{ return target() }}\n".bytes() -> &bytes.push(byte)
+        source :: String.from_bytes(bytes) ?? panic("generated ASCII source")
+        edited :: source.replace("fn target() -> Int {{ return 1 }}", "fn target() -> Int {{ return 2 }}")
+        queries := JetDriverCompilerQueries.new()
+        _ :: &queries.check_text_with_receipt(snapshot, path, source, true)
+        measured :: &queries.check_text_with_receipt(snapshot, path, edited, true)
+        &receipts.push(measured.receipt)
+    }
+    receipts
+}
+
+pub fn lsp_run_bench(snapshot: JetDriverQuerySnapshot, source: String, rounds: Int, reference_budget_ms: U128) -[Time, IO]> {
+    report :: lsp_measure_bench(snapshot, source, rounds)
+    count :: if rounds < 1 -> 1 else -> rounds
+    print("bench [{source.bytes().len()}B, {count} edits]: cold={report.cold_us}us warm-hit={report.warm_hit_us}us warm-edit={report.warm_edit_us}us reference={reference_budget_ms}ms hits={report.hits} recomputes={report.recomputes} live-inputs={report.live_inputs} live-input-bytes={report.live_input_bytes} live-memos={report.live_memos} item-hits={report.item_hits} item-recomputes={report.item_recomputes} live-items={report.live_items} live-item-bytes={report.live_item_bytes}")
+    loop receipt in lsp_measure_cone_bench(snapshot) {
+        row := receipt.to_json().trim_end() // #4303
+        print("cone-receipt {row}")
+    }
+}
+
+// Source/LSP/Check.rs:273–279: read_dir failure => zero, entry errors =>
+// skip, end-of-stream => stop. Count by extension only, even for directories.
+// Explicit consuming closes ignore errors just as Rust ReadDir/File drop does.
+fn lsp_doctor_transcript_count(transcripts: OSPath) -[FS]> Int Never! {
+    count := 0
+    options :: lsp_doctor_native.OpenOptions{nofollow: false, cloexec: true, open_reparse_point: false, read: None, write: None, share_mode: None, custom_flags: None}
+    if lsp_doctor_native.open_directory(transcripts, options) == .Ok(directory) {
+        if directory.entries() == .Ok(entries) {
+            loop {
+                if entries.next() == {
+                    .Err(_) -> next
+                    .None -> break
+                    .Val(entry) -> {
+                        path :: entry.path()
+                        if lsp_doctor_path.extension_span(path) == .Val(extension) {
+                            // Compare encoded ASCII extension without lossy display.
+                            json :: lsp_doctor_path.from_text("json", path.platform)
+                            if lsp_doctor_path.equals(lsp_doctor_path.owned_span(path, extension), json) -> count += 1
+                        }
+                    }
+                }
+            }
+            _ :: entries.close()
+        }
+        _ :: directory.close()
+    }
+    count
+}
+
+// Source/LSP/Check.rs:242–308. Real language pipeline, never provider mocks.
+// #4494 / RuntimeD375 gate: canonical retained_descriptor.exists(OSPath)
+// has a published native ABI but its real descriptor body remains gated.
+// Native enumeration uses Directory.entries()/DirectoryEntries.next() and
+// consuming close; Core's UTF-8 String/scandir API is NOT equivalent.
+pub fn lsp_run_doctor(snapshot: JetDriverQuerySnapshot, manifest_dir: OSPath) -[IO, FS, Env]> {
+    print("jet self lsp doctor")
+    print("--------------")
+    source :: "fn run() {{ print(\"hello\") }}\n"
+    lexed :: lex(source.bytes())
+    if lexed.diagnostics.len() == 0 -> print("  [ok] lexer")
+    else -> print("  [FAIL] lexer: {lexed.diagnostics.len()} errors")
+    parsed :: parse_with_source(lexed.tokens, source.bytes())
+    if parsed.program != None -> print("  [ok] parser")
+    else -> print("  [FAIL] parser: {parsed.diagnostics.len()} errors")
+    queries := JetDriverCompilerQueries.new()
+    diagnostics :: lsp_check_document(&queries, snapshot, lsp_doctor_path.from_text("test.jet", snapshot.cwd.platform), source)
+    if diagnostics.len() == 0 -> print("  [ok] sema")
+    else -> print("  [FAIL] sema: {diagnostics.len()} diagnostics")
+    if jet_format_source(source).source != None -> print("  [ok] formatter")
+    else -> print("  [FAIL] formatter")
+    print("  [ok] JSON-RPC framing")
+
+    transcripts := ~manifest_dir
+    lsp_doctor_path.push(&transcripts, lsp_doctor_path.from_text("tests/lsp", manifest_dir.platform))
+    if lsp_doctor_native.exists(transcripts) {
+        count :: lsp_doctor_transcript_count(transcripts)
+        print("  [ok] transcript runner: {count} fixture(s) found in tests/lsp/")
+    } else -> print("  [WARN] transcript runner: tests/lsp/ not found")
+    grammar := ~manifest_dir
+    lsp_doctor_path.push(&grammar, lsp_doctor_path.from_text("Tools/editors/tree-sitter/grammar.js", manifest_dir.platform))
+    if lsp_doctor_native.exists(grammar) -> print("  [ok] Tools/editors/tree-sitter/grammar.js present")
+    else -> print("  [WARN] Tools/editors/tree-sitter/grammar.js not found — run `tree-sitter generate` to build")
+    textmate := ~manifest_dir
+    lsp_doctor_path.push(&textmate, lsp_doctor_path.from_text("Tools/editors/jet.tmGrammar", manifest_dir.platform))
+    if lsp_doctor_native.exists(textmate) -> print("  [ok] Tools/editors/jet.tmGrammar present")
+    else -> print("  [WARN] Tools/editors/jet.tmGrammar not found")
+    // Original prints this even after FAIL/WARN; do not silently change policy.
+    print("all checks passed — the language server is healthy")
+}

@@ -1,0 +1,132 @@
+// Source/LSP/Server.rs:1943–1975,2162–2351. Sole W38 retained request witness.
+// Features/Discovery/generated build-plan providers remain explicit publication
+// gates; this file never guesses generated source or falls back to disk bytes.
+use core.encoding.[DataTree]
+use jet_foundation.[foundation_json_quote]
+use jet_semindex.[semindex_package_facts_for_entry]
+use jet_pkg_model.[WorkspaceDeclarationCache, pkg_render_effect_projection_line]
+use core.files.runtime.kernel_path_components as lsp_navigation_path
+
+pub fn lsp_prepare_call_hierarchy_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        position :: lsp_pos_from_json(value.field("position") ?? return None) ?? return None
+        offset :: lsp_pos_to_offset(doc.text, position)
+        token_owner :: server.lex(doc)
+        token_permit :: token_owner.guard_read()
+        tokens :: token_permit.value
+        name :: lsp_ident_at(tokens, offset) ?? return Val(lsp_response(id, "[]"))
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        db :: lsp_build_symbol_db(permit.value.result)
+        path :: lsp_navigation_path.display(doc.path)
+        loop def in db.defs {
+            if def.module_path != path || def.name != name -> next
+            item :: lsp_call_hierarchy_item_json(def, doc.text) ?? return Val(lsp_response(id, "[]"))
+            return Val(lsp_response(id, "[{item}]"))
+        }
+        return Val(lsp_response(id, "[]"))
+    }
+    None
+}
+
+pub fn lsp_hover_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        position :: lsp_pos_from_json(value.field("position") ?? return None) ?? return None
+        offset :: lsp_pos_to_offset(doc.text, position)
+        token_owner :: server.lex(doc)
+        token_permit :: token_owner.guard_read()
+        tokens :: token_permit.value
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        result :: permit.value.result
+        path :: lsp_navigation_path.display(doc.path)
+        module_path := ~path
+        if lsp_checked_module(result, path, doc.path.platform) == .Val(index) -> module_path = result.module_sources[index].display
+        db := lsp_build_symbol_db(result)
+        if result.graph != None {
+            cache := WorkspaceDeclarationCache.new()
+            if semindex_package_facts_for_entry(&cache, path) == .Ok(package) {
+                if package == .Val(facts) -> &db.attach_package_facts(~facts)
+            }
+        }
+        discovery :: lsp_load_discovery_index(path, doc.path.platform)
+        hover := String?{None}
+        if discovery == .Val(index) -> hover = lsp_compute_discovery_hover(doc.text, offset, index)
+        if hover == None -> hover = lsp_compute_hover(db, tokens, doc.text, module_path, offset)
+        if hover == .Val(text) {
+            shown :: if text.contains("required effects:") -> ~text else -> "{text}\n\n{pkg_render_effect_projection_line(db.index.effect_projection())}"
+            return Val(lsp_response(id, "{{\"contents\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(shown)}}}}}"))
+        }
+        return Val(lsp_response(id, "null"))
+    }
+    None
+}
+
+pub fn lsp_definition_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        position :: lsp_pos_from_json(value.field("position") ?? return None) ?? return None
+        offset :: lsp_pos_to_offset(doc.text, position)
+        token_owner :: server.lex(doc)
+        token_permit :: token_owner.guard_read()
+        tokens :: token_permit.value
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        result :: permit.value.result
+        db := lsp_build_navigation_symbol_db(result)
+        path :: lsp_navigation_path.display(doc.path)
+        module_path := ~path
+        if lsp_checked_module(result, path, doc.path.platform) == .Val(index) -> module_path = result.module_sources[index].display
+        generated := [GeneratedDeclarationFact]{}
+        if lsp_compute_definition(db, tokens, doc.text, module_path, offset) == None {
+            // Driver owns checked authorization/build-plan acquisition. Never
+            // substitute a generated-name string heuristic for this query.
+            if lsp_query_build_plan_with_overlay(server.snapshot, doc.path, doc.text) == .Ok(plan) {
+                if plan == .Val(build) -> generated = lsp_register_generated_declarations(&db, build, module_path, tokens)
+            }
+        }
+        target := lsp_compute_definition(db, tokens, doc.text, module_path, offset)
+        if target == None -> target = lsp_generated_definition_for_reference(db, generated, tokens, module_path, offset)
+        definition :: target ?? return Val(lsp_response(id, "null"))
+        def_path :: definition.0
+        def_span :: definition.1
+        if lsp_generated_declaration_at(generated, def_path, def_span) == .Val(declaration) {
+            root := result.project_root
+            if root == None {
+                if lsp_navigation_path.parent_span(doc.path) == .Val(extent) -> root = Val(lsp_navigation_path.owned_span(doc.path, extent))
+            }
+            absolute := ~(root ?? lsp_navigation_path.from_text(".", doc.path.platform))
+            lsp_navigation_path.push(&absolute, lsp_navigation_path.from_text(declaration.module_path, absolute.platform))
+            range :: lsp_checked_byte_span_to_range(declaration.source, declaration.span) ?? return Val(lsp_error_response(id, -32603, "generated definition range is outside its checked source"))
+            artifact :: declaration.module_path
+            status :: if declaration.module_name.is_empty() && declaration.plugin == None -> "missing" else -> "available"
+            plugin :: if declaration.plugin == { .Val(name) -> foundation_json_quote(name) None -> "null" }
+            origin :: "{{\"status\":\"{status}\",\"generator\":{foundation_json_quote(declaration.module_name)},\"schema\":null,\"source\":{foundation_json_quote(artifact)},\"plugin\":{plugin}}}"
+            data :: "{{\"identity\":{foundation_json_quote(declaration.identity)},\"generated\":true,\"artifact\":{foundation_json_quote(artifact)},\"origin\":{origin}}}"
+            uri :: lsp_path_to_uri(lsp_navigation_path.display(absolute))
+            return Val(lsp_response(id, "{{\"uri\":{foundation_json_quote(uri)},\"range\":{lsp_range_json(range)},\"data\":{data}}}"))
+        }
+        if result.graph == None -> return Val(lsp_error_response(id, -32603, "definition source is not in a checked snapshot"))
+        snapshot :: lsp_checked_source_snapshot(server.diagnostic_state, result, checked.checked_versions, def_path, doc.path.platform) ?? return Val(lsp_error_response(id, -32603, "definition source is not in a checked snapshot"))
+        source :: result.module_sources[snapshot.0]
+        range :: lsp_checked_byte_span_to_range(source.loaded_source, def_span) ?? return Val(lsp_error_response(id, -32603, "definition range is outside the checked snapshot"))
+        native :: source.physical_path ?? return Val(lsp_error_response(id, -32603, "definition source is not in a checked snapshot"))
+        uri :: lsp_path_to_uri(lsp_navigation_path.display(native))
+        data := ""
+        if lsp_semantic_symbol_at_span(db, def_path, def_span) == .Val(symbol) {
+            if lsp_semantic_symbol_metadata_json(db, symbol) == .Val(json) -> data = ",\"data\":{json}"
+        }
+        Val(lsp_response(id, "{{\"uri\":{foundation_json_quote(uri)},\"range\":{lsp_range_json(range)}{data}}}"))
+    } else -> None
+}

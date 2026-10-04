@@ -1,0 +1,228 @@
+// Pure graph inputs exercise Impact over the real SemIndex query API. These
+// algorithm tests do not claim checked compiler extraction of declarations.
+use jet_semindex.[
+    SemIndex, SymbolDef, SymbolRef, CallEdge, SourceSpan, SemIndexSymbolKind,
+    CallableFactUnavailable, ViewProvenanceFact, TraitContractFact,
+    EffectFact, MemberFact, StructuralNode, DefinitionFact,
+]
+use jet_foundation.[CompilerStage]
+
+fn impact_test_definition(name: String, module_path: String) -> SymbolDef Never! {
+    SymbolDef{
+        identity: "{module_path}::{name}",
+        declaration_identity_unavailable: CallableFactUnavailable{
+            required_stage: CompilerStage.Resolved,
+            reason: "graph algorithm input; no checked DeclarationHandle producer",
+        },
+        name: ~name, qualified_name: "{module_path}::{name}", module_path: ~module_path,
+        def_span: SourceSpan{start: 0, end: 0}, kind: SemIndexSymbolKind.Const,
+        view_provenance: [ViewProvenanceFact]{}, callable_signature: None,
+        derives: [String]{}, nominal_base: None, trait_contracts: [TraitContractFact]{},
+    }
+}
+fn impact_test_reference(name: String, start: Int) -> SymbolRef Never! {
+    SymbolRef{name: ~name, module_path: "mód", scope_identity: None,
+        target: None, fact: None, span: SourceSpan{start, end: start + 4}}
+}
+fn impact_test_edge(caller: String, callee: String, start: Int) -> CallEdge Never! {
+    CallEdge{caller: ~caller, callee: ~callee, module_path: "mód",
+        call_span: SourceSpan{start, end: start + 4}}
+}
+fn impact_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge]) -> SemIndex Never! {
+    SemIndex.new(^defs, ^refs, ^calls, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{})
+}
+
+#Test("impact_depth_zero_retains_direct_sites_and_utf8_byte_spans") {
+    index :: impact_test_index(
+        [SymbolDef]{impact_test_definition("target", "mód")},
+        [SymbolRef]{impact_test_reference("target", 7), impact_test_reference("other", 11)},
+        [CallEdge]{impact_test_edge("run", "target", 19), impact_test_edge("target", "leaf", 27)},
+    )
+    report :: ImpactReport.analyze(index, "target", 0)
+    assert(report.found)
+    assert_eq(report.definition_module, Val("mód"))
+    assert_eq(report.references.len(), 1)
+    assert_eq(report.references[0].depth, 1)
+    assert_eq(report.references[0].span_start, 7)
+    assert_eq(report.references[0].span_end, 11)
+    assert_eq(report.call_sites.len(), 1)
+    assert_eq(report.call_sites[0].depth, 1)
+    assert_eq(report.call_sites[0].span_start, 19)
+    assert_eq(report.upstream_callers.len(), 0)
+    assert_eq(report.downstream_callees.len(), 0)
+}
+
+#Test("impact_bfs_preserves_edge_pair_identity_cycles_and_shortest_depth") {
+    index :: impact_test_index(
+        [SymbolDef]{impact_test_definition("root", "mód")}, [SymbolRef]{},
+        [CallEdge]{
+            impact_test_edge("root", "left", 1),
+            impact_test_edge("root", "right", 5),
+            impact_test_edge("root", "left", 9),
+            impact_test_edge("left", "join", 13),
+            impact_test_edge("right", "join", 17),
+            impact_test_edge("join", "root", 21),
+            impact_test_edge("join", "leaf", 25),
+        },
+    )
+    report :: ImpactReport.analyze(index, "root", 100)
+    downstream :: report.downstream_callees
+    assert_eq(downstream.len(), 6)
+    assert_eq(downstream[0].caller, "root")
+    assert_eq(downstream[0].callee, "left")
+    assert_eq(downstream[0].span_start, 1)
+    assert_eq(downstream[1].callee, "right")
+    assert_eq(downstream[2].caller, "left")
+    assert_eq(downstream[3].caller, "right")
+    assert_eq(downstream[4].callee, "root")
+    assert_eq(downstream[5].callee, "leaf")
+    assert_eq(loop edge in downstream -> edge.depth, [Int]{1, 1, 2, 2, 3, 3})
+    upstream :: report.upstream_callers
+    assert_eq(upstream.len(), 5)
+    assert_eq(upstream[0].caller, "join")
+    assert_eq(upstream[1].caller, "left")
+    assert_eq(upstream[2].caller, "right")
+    assert_eq(upstream[3].callee, "left")
+    assert_eq(upstream[3].span_start, 1)
+    assert_eq(upstream[4].callee, "right")
+    assert_eq(loop edge in upstream -> edge.depth, [Int]{1, 2, 2, 3, 3})
+    capped :: ImpactReport.analyze(index, "root", 2)
+    assert_eq(capped.downstream_callees.len(), 4)
+    assert_eq(capped.upstream_callers.len(), 3)
+}
+
+#Test("impact_direct_sites_keep_repeated_pairs_while_bfs_keeps_first") {
+    index :: impact_test_index(
+        [SymbolDef]{impact_test_definition("target", "mód")}, [SymbolRef]{},
+        [CallEdge]{impact_test_edge("run", "target", 3), impact_test_edge("run", "target", 15)},
+    )
+    report :: ImpactReport.analyze(index, "target", 3)
+    assert_eq(report.call_sites.len(), 2)
+    assert_eq(report.call_sites[0].span_start, 3)
+    assert_eq(report.call_sites[1].span_start, 15)
+    assert_eq(report.upstream_callers.len(), 1)
+    assert_eq(report.upstream_callers[0].span_start, 3)
+}
+
+#Test("impact_unknown_name_keeps_partial_matches_without_traversal") {
+    index :: impact_test_index([SymbolDef]{}, [SymbolRef]{impact_test_reference("missing", 5)},
+        [CallEdge]{impact_test_edge("run", "missing", 9), impact_test_edge("missing", "leaf", 13)})
+    report :: ImpactReport.analyze(index, "missing", 10)
+    assert(!report.found)
+    assert_eq(report.definition_module, None)
+    assert_eq(report.references.len(), 1)
+    assert_eq(report.call_sites.len(), 1)
+    assert_eq(report.upstream_callers.len(), 0)
+    assert_eq(report.downstream_callees.len(), 0)
+    expected :: `symbol ` + "`missing`" + ` not found in index
+partial matches from name references/calls:
+  references:        1
+  direct call sites: 1
+  upstream callers:  0 (depth <= 10)
+  downstream callees:0 (depth <= 10)
+  ref  mód:5..9
+  call run -> missing @ mód:9..13
+`
+    assert_eq(report.render_text(), expected)
+    absent :: ImpactReport.analyze(index, "absent", 10)
+    assert_eq(absent.render_text(), "symbol `absent` not found in index\n")
+    assert(absent.to_json().contains("\"found\":false"))
+    assert(absent.to_json().contains("\"definition_module\":null"))
+}
+
+#Test("impact_qualified_resolution_uses_last_separator_and_original_query") {
+    index :: impact_test_index(
+        [SymbolDef]{impact_test_definition("target", "prefix::mód::nested"), impact_test_definition("target", "mód::nested")},
+        [SymbolRef]{impact_test_reference("target", 1), impact_test_reference("mód::nested::target", 5)},
+        [CallEdge]{impact_test_edge("run", "target", 9), impact_test_edge("other", "mód::nested::target", 13),
+            impact_test_edge("mód::nested::target", "leaf", 17)},
+    )
+    qualified :: ImpactReport.analyze(index, "mód::nested::target", 3)
+    assert(qualified.found)
+    assert_eq(qualified.definition_module, Val("prefix::mód::nested"))
+    assert_eq(qualified.references.len(), 1)
+    assert_eq(qualified.references[0].name, "mód::nested::target")
+    assert_eq(qualified.call_sites.len(), 1)
+    assert_eq(qualified.call_sites[0].caller, "other")
+    assert_eq(qualified.upstream_callers[0].caller, "other")
+    assert_eq(qualified.downstream_callees[0].callee, "leaf")
+    plain :: ImpactReport.analyze(index, "target", 3)
+    assert_eq(plain.definition_module, Val("prefix::mód::nested"))
+    assert_eq(plain.references[0].name, "target")
+    assert_eq(plain.call_sites[0].caller, "run")
+    assert_eq(plain.downstream_callees.len(), 0)
+    assert(!ImpactReport.analyze(index, "wrong::target", 3).found)
+}
+
+#Test("impact_qualified_suffix_is_not_a_component_boundary_match") {
+    index :: impact_test_index([SymbolDef]{impact_test_definition("target", "prefixmodule")}, [SymbolRef]{}, [CallEdge]{})
+    assert(ImpactReport.analyze(index, "module::target", 1).found)
+    assert(!ImpactReport.analyze(index, "prefix::module::target", 1).found)
+    assert(!ImpactReport.analyze(index, "", 1).found)
+    assert(!ImpactReport.analyze(index, ":", 1).found)
+    assert(!ImpactReport.analyze(index, "module::", 1).found)
+}
+
+#Test("impact_json_escapes_rust_control_set_and_retains_unicode") {
+    name :: String.from_bytes([U8]{34, 92, 10, 13, 9, 8, 12, 0, 31, 127, 194, 128, 194, 159, 195, 169}) ?? panic("valid UTF-8")
+    index :: impact_test_index([SymbolDef]{impact_test_definition(name, "mód")},
+        [SymbolRef]{impact_test_reference(name, 3)}, [CallEdge]{impact_test_edge(name, name, 7)})
+    report :: ImpactReport.analyze(index, name, 1)
+    quoted :: `"\"\\\n\r\t\u0008\u000c\u0000\u001f\u007f\u0080\u009fé"`
+    output :: report.to_json()
+    assert(output.contains("\"symbol\":{quoted},\"found\":true"))
+    assert(output.contains("\"name\":{quoted},\"module_path\":\"mód\",\"span\":{{\"start\":3,\"end\":7}}"))
+    assert(output.contains("\"caller\":{quoted},\"callee\":{quoted}"))
+}
+
+#Test("impact_report_renders_ordered_consumer_text_and_json") {
+    index :: impact_test_index([SymbolDef]{impact_test_definition("target", "mód")},
+        [SymbolRef]{impact_test_reference("target", 3)},
+        [CallEdge]{impact_test_edge("run", "target", 7), impact_test_edge("target", "leaf", 11)})
+    report :: ImpactReport.analyze(index, "target", 2)
+    expected_text :: "blast radius for `target` (defined in mód)\n  references:        1\n  direct call sites: 1\n  upstream callers:  1 (depth <= 2)\n  downstream callees:1 (depth <= 2)\n  ref  mód:3..7\n  call run -> target @ mód:7..11\n  upstream[d1] run -> target @ mód\n  downstream[d1] target -> leaf @ mód\n"
+    assert_eq(report.render_text(), expected_text)
+    expected_json :: `{"symbol":"target","found":true,"depth_limit":2,"definition_module":"mód","references":[{"depth":1,"name":"target","module_path":"mód","span":{"start":3,"end":7}}],"call_sites":[{"depth":1,"caller":"run","callee":"target","module_path":"mód","span":{"start":7,"end":11}}],"upstream_callers":[{"depth":1,"caller":"run","callee":"target","module_path":"mód","span":{"start":7,"end":11}}],"downstream_callees":[{"depth":1,"caller":"target","callee":"leaf","module_path":"mód","span":{"start":11,"end":15}}]}`
+    assert_eq(report.to_json(), expected_json)
+}
+
+// Original checked fixtures, lib.rs:296–313. S4/C4 must supply the index opened
+// from Examples/features/effects/effects.jet. Do not replace it with graph inputs
+// or mark these helpers as exercised #Test blocks before the real open exists.
+fn impact_test_checked_effects(index: SemIndex) Never! {
+    // impact_finds_report_callers
+    report :: ImpactReport.analyze(index, "report", 3)
+    assert(report.found)
+    assert(report.call_sites.len() != 0 || report.upstream_callers.len() != 0)
+    found_run := false
+    loop edge in report.upstream_callers {
+        if edge.caller == "run" -> found_run = true
+    }
+    assert(found_run)
+    // impact_json_shape
+    json :: ImpactReport.analyze(index, "square", 2).to_json()
+    assert(json.contains("\"symbol\":\"square\""))
+    assert(json.contains("\"references\""))
+    assert(json.contains("\"downstream_callees\""))
+}
+
+// tests/impact.rs CLI assertions belong to the inspect-impact front door owner.
+// These helpers retain the report/exit assertions for a real CLI invocation;
+// they are not called with a raw report in place of a status-envelope response.
+// The independent tests/impact.rs:50–53 machine-record decoder assertion remains
+// at the CLI owner's seam until the canonical read_machine_output port exists.
+fn impact_test_cli_upstream(exit_code: Int, stdout: String) Never! {
+    assert_eq(exit_code, 0)
+    assert(stdout.contains("blast radius for `report`"))
+    assert(stdout.contains("upstream"))
+}
+fn impact_test_cli_json(exit_code: Int, stdout: String) Never! {
+    assert_eq(exit_code, 0)
+    assert(stdout.starts_with("{\"schema\":\"jet.status/v1\""))
+    assert(stdout.contains("\"symbol\":\"square\""))
+    assert(stdout.contains("\"found\":true"))
+    assert(stdout.contains("\"check\":{\"status\":\"passed\""))
+}
+fn impact_test_cli_unknown(exit_code: Int) Never! {
+    assert(exit_code != 0)
+}

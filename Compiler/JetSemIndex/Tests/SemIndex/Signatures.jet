@@ -1,0 +1,111 @@
+fn semindex_signature_test_contract() -> [SymParamContract] Never! {
+    [SymParamContract]{
+        SymParamContract{name: "host", label: "host", zone: .PositionalOnly},
+        SymParamContract{name: "seconds", label: "timeout", zone: .Either},
+        SymParamContract{name: "enabled", label: "tls", zone: .LabelOnly},
+        SymParamContract{name: "rest", label: "rest", zone: .LabelOnly},
+    }
+}
+// Rust tests/lsp.rs:2522–2582 binder inputs from the original connect fixture.
+// Protocol transcript assertions are retained below, not replaced by this test.
+#Test("semindex_binder_active_parameter_preserves_label_declaration_slots") {
+    contract :: semindex_signature_test_contract()
+    assert_eq(semindex_binder_active_parameter(Val("tls"), 1, [String]{}, contract, 4), 2)
+    assert_eq(semindex_binder_active_parameter(Val("timeout"), 2, [String]{"tls"}, contract, 4), 1)
+    assert_eq(semindex_binder_active_parameter(None, 0, [String]{}, contract, 4), 0)
+    assert_eq(semindex_binder_active_parameter(None, 1, [String]{}, contract, 4), 1)
+    assert_eq(semindex_binder_active_parameter(None, 2, [String]{"timeout"}, contract, 4), 2)
+    assert_eq(semindex_binder_active_parameter(None, 3, [String]{}, contract, 4), 3)
+    assert_eq(semindex_binder_active_parameter(Val("host"), 1, [String]{}, contract, 4), 1)
+    assert_eq(semindex_binder_active_parameter(Val("missing"), 99, [String]{}, contract, 4), 3)
+    assert_eq(semindex_binder_active_parameter(None, 99, [String]{}, contract, 0), 0)
+}
+#Test("semindex_binder_duplicate_labels_consume_first_unclaimed_eligible_slot") {
+    contract :: [SymParamContract]{
+        SymParamContract{name: "hidden", label: "same", zone: .PositionalOnly},
+        SymParamContract{name: "first", label: "same", zone: .Either},
+        SymParamContract{name: "second", label: "same", zone: .Either},
+        SymParamContract{name: "last", label: "last", zone: .LabelOnly},
+    }
+    assert_eq(semindex_binder_active_parameter(None, 2, [String]{"same", "same"}, contract, 4), 0)
+    assert_eq(semindex_binder_active_parameter(None, 3, [String]{"same", "same"}, contract, 4), 3)
+    assert_eq(semindex_binder_active_parameter(Val("same"), 3, [String]{"same"}, contract, 4), 1)
+    assert_eq(semindex_binder_active_parameter(None, 0, [String]{"missing", "same"}, contract, 4), 0)
+    assert_eq(semindex_binder_active_parameter(None, 5, [String]{}, [SymParamContract]{}, 3), 2)
+}
+#Test("semindex_function_parameter_parts_preserves_public_call_surface") {
+    params :: [SymNameType]{
+        SymNameType{name: "host", ty: .String}, SymNameType{name: "seconds", ty: .Int},
+        SymNameType{name: "enabled", ty: .Bool}, SymNameType{name: "rest", ty: .String},
+    }
+    assert_eq(semindex_function_parameter_parts(params, semindex_signature_test_contract(), [Bool]{false, false, false, true}), [String]{"host: String", "/", "timeout seconds: Int", "*", "tls enabled: Bool", "rest: ...String"})
+    assert_eq(semindex_function_parameter_parts(params, [SymParamContract]{}, [Bool]{}), [String]{"host: String", "seconds: Int", "enabled: Bool", "rest: String"})
+}
+
+// Original checked fixture retained: tests/semindex.rs1435–1473. Invoked only
+// with an index produced from this exact source through S4/C4/S5–S12/S20.
+pub fn semindex_s6_method_contract_source() -> String Never! {
+    "\nstruct Client {\n    host: String\n}\n\nimpl Client {\n    fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -> String {\n        return host\n    }\n}\n\nfn run() {}\n"
+}
+
+fn semindex_s6_test_param(name: String, default: Expr?) -> Param Never! {
+    Param{convention: .Read, root: false, name: name, name_span: Span{start: 0, end: 0}, public_label: None, zone: .Either, ty: .Int, ty_span: Span{start: 0, end: 0}, default: default, variadic: false, variadic_bound_list: None, declared_view_from_names: None}
+}
+#Test("semindex_callable_defaults_select_utf8_source_bytes_without_evaluation") {
+    params :: [Param]{
+        semindex_s6_test_param("self", None),
+        semindex_s6_test_param("seconds", Val(Expr.Int{value: 30, span: Span{start: 3, end: 5}, width: None, raw: None})),
+        semindex_s6_test_param("enabled", Val(Expr.Bool{value: true, span: Span{start: 6, end: 10}})),
+        semindex_s6_test_param("absent", None),
+    }
+    defaults :: semindex_parameter_defaults(params, "α 30 true", true)
+    assert_eq(defaults.len(), 3)
+    if defaults[0] == {
+        .Val(default) -> {
+            assert_eq(default.source_text, "30")
+            assert_eq(default.source, SourceSpan{start: 3, end: 5})
+            assert(default.value_unavailable.required_stage == .Prepared)
+            assert_eq(default.value_unavailable.reason, "the semindex producer does not evaluate callable defaults")
+        }
+        None -> panic("source default lost")
+    }
+    if defaults[1] == { .Val(default) -> assert_eq(default.source_text, "true"), None -> panic("source default lost") }
+    assert(defaults[2] == None)
+    assert_eq(semindex_parameter_defaults(params, "α 30 true", false).len(), 4)
+}
+pub fn semindex_s6_method_contract_assertions(index: SemIndex) Never! {
+    dossier :: index.dossier("Client")
+    found := false
+    loop member in dossier.members {
+        if member.name != "connect" -> next
+        assert(member.signature.contains("timeout seconds: Int"))
+        assert(member.signature.contains("*, tls enabled: Bool"))
+        assert(member.signature.contains("rest: ...String"))
+        found = true
+        break
+    }
+    assert(found)
+}
+// Original signature-audit assertions1063–1104 are already retained canonically
+// by Queries.jet semindex_test_structural_audit_tracks_callable_signature_changes.
+// Do not duplicate the audit implementation or register a fake checked index.
+pub fn semindex_s6_signature_audit_before_source() -> String Never! {
+    "\nfn score(name: String) -> Int {\n    return 1\n}\n\nfn run() {}\n"
+}
+pub fn semindex_s6_signature_audit_after_source() -> String Never! {
+    "\nfn score(name: String, bonus: Int) -> Float {\n    return 1.0\n}\n\nfn run() {}\n"
+}
+
+// Original LSP source/response assertions2522–2582. Real initialize/open and
+// signature-help router execution is the LSP integration gate, not this binder.
+pub fn semindex_s6_lsp_signature_source() -> String Never! {
+    "fn connect(host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -[IO]> String {\n    return host\n}\nfn run() {\n    r :: connect(\"db\", tls: true, timeout: 5)\n}\n"
+}
+pub fn semindex_s6_lsp_signature_assertions(initialize_response: String, tls_response: String, timeout_response: String) Never! {
+    assert(initialize_response.contains("signatureHelpProvider"))
+    assert(tls_response.contains("fn connect(host: String, /, timeout seconds: Int, *, tls enabled: Bool, rest: ...String) -[IO]> String"))
+    assert(tls_response.contains("\"activeParameter\":2"))
+    assert(tls_response.contains("tls enabled: Bool"))
+    assert(timeout_response.contains("\"activeParameter\":1"))
+    assert(timeout_response.contains("timeout seconds: Int"))
+}

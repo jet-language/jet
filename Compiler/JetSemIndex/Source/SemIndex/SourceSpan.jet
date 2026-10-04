@@ -1,0 +1,15 @@
+use jet_foundation.[Span]
+
+// Rust SourceSpan and From<Span>/From<SourceSpan> (Types.rs:305–328).
+// UTF-8 byte coordinates with an exclusive end, not character indices.
+// Conversion is lossless even for empty, reversed, or unchecked coordinates.
+pub struct SourceSpan {
+    pub start: Int
+    pub end: Int
+}
+pub fn semindex_source_span(span: Span) -> SourceSpan Never! {
+    SourceSpan{start: span.start, end: span.end}
+}
+pub fn semindex_foundation_span(span: SourceSpan) -> Span Never! {
+    Span{start: span.start, end: span.end}
+}

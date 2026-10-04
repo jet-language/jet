@@ -1,0 +1,184 @@
+// crates/jet-semindex/src/Build.rs:2901–3273: collect_stmts/collect_stmt,
+// loop-label definitions/references, lvalues, bindings and binder inlay hints.
+// One walker: S5 owns DB/context, S6 checked anchors, S7 nodes/slots, S12 exprs.
+// Full composition remains gated by C4/CP-NAMES/S12 and S7's CP-AST optional-
+// projection/#4397 gate. No checked graph or reference target is synthesized.
+// Policy regions recurse exactly as Rust3110–3115: CP-POLICY's canonical
+// Foundation POLICY_RULES/resolver/explain belong to the item walker, not here.
+// CP-AST must publish stmt_span (AST/statements.rs865–902) and the borrowed
+// bind_pattern_names projection (AST/patterns.rs278–284); no local replicas.
+use jet_foundation.[Stmt, LValue, Binding, NamedSpan, Span, CallArg, Program, MIRNameFacts, expr_span, stmt_span, type_name, bind_pattern_names]
+
+pub fn semindex_collect_stmts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, stmts: [Stmt], mp: String) {
+    loop stmt in stmts -> semindex_collect_stmt(&db, &ctx, names, program, source, stmt, mp)
+}
+
+pub fn semindex_collect_loop_label_def(db: &SymbolDB, ctx: WalkCtx, label: NamedSpan?, mp: String) Never! {
+    if label == .Val(label) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "loop_label", label.name), name: label.name, def_span: label.span, module_path: mp, kind: .Local{mutable: false, ty: None}})
+}
+// Rust2924: byte length, not String scalar length. The label span can include
+// punctuation after the token; the reference covers only the label's name.
+// Source offsets plus valid source token lengths cannot overflow Rust usize.
+// Jet Int is unbounded, so plain addition preserves that source-span behavior.
+pub fn semindex_loop_label_span(name: String, span: Span) -> Span Never! {
+    Span{start: span.start, end: span.start + name.bytes().len()}
+}
+pub fn semindex_collect_loop_label_ref(db: &SymbolDB, ctx: WalkCtx, names: MIRNameFacts, name: String, span: Span, mp: String) Never! {
+    reference :: semindex_scoped_ref(&db, ctx, names, name, semindex_loop_label_span(name, span), mp)
+    &db.refs.push(reference)
+}
+
+pub fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
+    structural_id :: semindex_record_node(&db, ctx, "stmt", semindex_stmt_shape(stmt), mp, stmt_span(stmt))
+    if structural_id == .Val(id) -> &ctx.structural_parents.push(id)
+    if stmt == {
+        .Val(binding) -> semindex_collect_binding(&db, &ctx, names, program, source, binding, mp)
+        .Expr(expr) | .Yield(expr, _) -> semindex_structural_slot(&db, &ctx, "value", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, expr, mp))
+        .DeferClose(close, _) -> semindex_structural_slot(&db, &ctx, "close", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, close, mp))
+        .Assign(target, _, _, value) -> {
+            semindex_collect_lvalue(&db, &ctx, names, program, source, target, mp)
+            semindex_structural_slot(&db, &ctx, "value", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, value, mp))
+        }
+        .Return(value, _) -> {
+            if value == .Val(expr) -> semindex_structural_slot(&db, &ctx, "value", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, expr, mp))
+        }
+        .BreakValue(value, _) -> semindex_structural_slot(&db, &ctx, "value", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, value, mp))
+        .BreakLabelValue(name, name_span, value, _) -> {
+            semindex_collect_loop_label_ref(&db, ctx, names, name, name_span, mp)
+            semindex_structural_slot(&db, &ctx, "value", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, value, mp))
+        }
+        .While(cond, body, _, _, label) -> {
+            semindex_collect_loop_label_def(&db, ctx, label, mp)
+            semindex_structural_slot(&db, &ctx, "condition", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, cond, mp))
+            semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+        .For(var, var_span, var2, kind, body, _, _, label, _) -> {
+            semindex_collect_loop_label_def(&db, ctx, label, mp)
+            &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", var), name: var, def_span: var_span, module_path: mp, kind: .Local{mutable: false, ty: None}})
+            if var2 == .Val(second) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", second.name), name: second.name, def_span: second.span, module_path: mp, kind: .Local{mutable: false, ty: None}})
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    semindex_structural_slot(&db, &ctx, "range_start", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, start, mp))
+                    semindex_structural_slot(&db, &ctx, "range_end", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, end, mp))
+                    if step == .Val(step) -> semindex_structural_slot(&db, &ctx, "range_step", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, step, mp))
+                }
+                .In(collection, step) -> {
+                    semindex_structural_slot(&db, &ctx, "source", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, collection, mp))
+                    if step == .Val(step) -> semindex_structural_slot(&db, &ctx, "stride", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, step, mp))
+                }
+            }
+            semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            semindex_structural_slot(&db, &ctx, "subject", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, subject, mp))
+            semindex_structural_slot(&db, &ctx, "arms", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop arm in arms {
+                    arm_id :: semindex_record_node(&db, ctx, "arm", "switch_arm", mp, arm.span)
+                    if arm_id == .Val(id) -> &ctx.structural_parents.push(id)
+                    semindex_structural_slot(&db, &ctx, "condition", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, arm.cond, mp))
+                    semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, arm.body, mp))
+                    if arm_id == .Val(id) {
+                        has_boundary := false
+                        loop boundary in db.slot_boundaries { if boundary.parent == id && boundary.slot == "body" -> has_boundary = true }
+                        if !has_boundary && arm.body.len() == 1 -> &db.slot_boundaries.push(StructuralSlotBoundary{parent: id, slot: "body", module_path: mp, span: semindex_source_span(stmt_span(arm.body[0]))})
+                        &ctx.structural_parents.pop()
+                    }
+                }
+            })
+            if else_body == .Val(body) -> semindex_structural_slot(&db, &ctx, "else_body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+        .CountedLoop(init, cond, step, body, _, _, label) -> {
+            semindex_collect_loop_label_def(&db, ctx, label, mp)
+            &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", init.name), name: init.name, def_span: init.name_span, module_path: mp, kind: .Local{mutable: true, ty: None}})
+            // Rust3079: not collect_binding; no type/hover/inlay for this init.
+            semindex_structural_slot(&db, &ctx, "init", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, init.init, mp))
+            semindex_structural_slot(&db, &ctx, "condition", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, cond, mp))
+            if step == .Val(step) -> semindex_structural_slot(&db, &ctx, "afterthought", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmt(&db, &ctx, names, program, source, step, mp))
+            semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+        .Unsafe(audit, _, body, span) -> {
+            &db.bypasses.push(BypassFact{kind: BypassKind.UnsafeRegion, site: semindex_active_scope(ctx), detail: audit ?? "", module_path: mp, span: semindex_source_span(span)})
+            semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+        .Loop(body, _, _, label) -> {
+            semindex_collect_loop_label_def(&db, ctx, label, mp)
+            semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+        // Build.rs3104–3115,3122,3142–3147: these arms deliberately index only
+        // bodies, not reason/limit/caps/member-argument/name metadata.
+        .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _)
+        | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _)
+        | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _)
+        | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _)
+        | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _)
+        | .Live(body, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> {
+            semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+        // Original no-reference branches, Build.rs3117 (still record stmt node).
+        .Break(_) | .Continue(_) -> {}
+        .BreakLabel(name, span) | .ContinueLabel(name, span) -> semindex_collect_loop_label_ref(&db, ctx, names, name, span, mp)
+        .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+            semindex_structural_slot(&db, &ctx, "condition", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, cond, mp))
+            semindex_structural_slot(&db, &ctx, "then_body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, then_body, mp))
+            if else_body == .Val(body) -> semindex_structural_slot(&db, &ctx, "else_body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+        .ContextBlock(fields, body, _) -> {
+            semindex_structural_slot(&db, &ctx, "fields", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> {
+                loop field in fields -> semindex_collect_expr(&db, &ctx, names, program, source, field.value, mp)
+            })
+            semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
+        }
+    }
+    if structural_id != None -> &ctx.structural_parents.pop()
+}
+
+pub fn semindex_collect_lvalue(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, target: LValue, mp: String) {
+    if target == {
+        .Local(name, span) -> {
+            reference :: semindex_scoped_ref(&db, ctx, names, name, span, mp)
+            &db.refs.push(reference)
+        }
+        .Index(base, index, _, _) -> {
+            semindex_structural_slot(&db, &ctx, "target_base", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, base, mp))
+            semindex_structural_slot(&db, &ctx, "target_index", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, index, mp))
+        }
+        .Field(base, _, _) -> semindex_structural_slot(&db, &ctx, "target_base", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, base, mp))
+    }
+}
+
+pub fn semindex_collect_binding(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, binding: Binding, mp: String) {
+    if binding.ty_span == .Val(span) -> semindex_structural_slot(&db, &ctx, "type", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> { semindex_record_node(&db, ctx, "type", "type", mp, span) })
+    if binding.pattern == .Val(pattern) {
+        semindex_structural_slot(&db, &ctx, "initializer", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, binding.init, mp))
+        // CP-AST owns the canonical borrowed BindPattern::names projection.
+        // Rust3190–3199 uses n.name/n.span exactly, not n.rename or a guessed
+        // span derived from spelling. Initializer precedes destructured defs.
+        loop name in bind_pattern_names(pattern) -> &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", name.name), name: name.name, def_span: name.span, module_path: mp, kind: .Local{mutable: binding.mutable, ty: None}})
+        return
+    }
+    &db.defs.push(SymDef{identity: semindex_scoped_local_identity(ctx, "local", binding.name), name: binding.name, def_span: binding.name_span, module_path: mp, kind: .Local{mutable: binding.mutable, ty: binding.ty}})
+    if binding.ty == .Val(ty) {
+        mutability :: if binding.mutable -> "mutable" else -> "immutable"
+        &db.hover.push(HoverEntry{span: binding.name_span, module_path: mp, text: "`{binding.name}`: {type_name(ty)} ({mutability})"})
+        if binding.ty_span == None -> &db.inlay.push(InlayHint{span: binding.name_span, module_path: mp, label: ": {type_name(ty)}"})
+    }
+    semindex_structural_slot(&db, &ctx, "initializer", StructuralSlotKind.Scalar, (db: &SymbolDB, ctx: &WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, binding.init, mp))
+}
+
+// Rust3243–3272: binder facts are already checked. No source declaration lookup,
+// policy resolver, textual parameter inference or re-binding supplied args.
+pub fn semindex_collect_call_inlay_hints(db: &SymbolDB, args: [CallArg], mp: String) {
+    seen_slots := [Int:Bool]{:}
+    loop arg in args {
+        if arg.label != None -> next
+        if arg.flags.binder_label == .Val(label) {
+            if label == "" -> next
+            if arg.flags.binder_slot == .Val(slot) {
+                if seen_slots.get(slot) != None -> next
+                seen_slots[slot] = true
+                start :: expr_span(arg.expr).start
+                &db.inlay.push(InlayHint{span: Span{start: start, end: start}, module_path: mp, label: "{label}: "})
+            }
+        }
+    }
+}

@@ -1,0 +1,239 @@
+// Source/LSP/Server.rs:353–632: resident request/notification dispatch,
+// workspace transitions and the original advertised capability contract.
+use core.encoding.[DataTree]
+use core.files.runtime.kernel_path_components as lsp_request_path
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.term as lsp_request_term
+use jet_devserver.[EDITOR_WORKBENCH_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_SELECT_METHOD, EDITOR_COMMAND_METHOD]
+use jet_driver.[jet_driver_query_path]
+
+// Rust353–414: known methods always reach their sole feature provider.
+pub fn lsp_handle_request(server: &LSPServer, method: String, params: DataTree?, id: DataTree) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
+    if method == {
+        "initialize" -> {
+            lsp_configure_workspace_roots(&server.workspace_roots, &server.workspace_folders, params, server.snapshot.cwd)
+            Val(lsp_initialize_response(id))
+        }
+        "resources/list" -> Val(lsp_response(id, lsp_environment_resource_list_json(server.workspace_roots)))
+        "resources/read" -> lsp_environment_resource_read_response(server, params, id)
+        "ping" -> Val(lsp_response(id, "{}"))
+        "shutdown" -> {
+            server.shutdown = true
+            Val(lsp_response(id, "null"))
+        }
+        "textDocument/codeAction" -> lsp_code_action_response(server, params, id)
+        "textDocument/formatting" -> lsp_format_response(server, params, id)
+        "textDocument/rangeFormatting" -> lsp_range_format_response(server, params, id)
+        "textDocument/onTypeFormatting" -> lsp_on_type_format_response(server, params, id)
+        "textDocument/completion" -> lsp_completion_response(server, params, id)
+        "textDocument/signatureHelp" -> lsp_signature_help_response(server, params, id)
+        "textDocument/documentSymbol" -> lsp_document_symbol_response(server, params, id)
+        "textDocument/foldingRange" -> lsp_folding_range_response(server, params, id)
+        "textDocument/documentHighlight" -> lsp_document_highlight_response(server, params, id)
+        "textDocument/selectionRange" -> lsp_selection_range_response(server, params, id)
+        "textDocument/documentLink" -> lsp_document_link_response(server, params, id)
+        "textDocument/codeLens" -> lsp_code_lens_response(server, params, id)
+        "textDocument/hover" -> lsp_hover_response(server, params, id)
+        "textDocument/definition" -> lsp_definition_response(server, params, id)
+        "textDocument/references" -> lsp_references_response(server, params, id)
+        "textDocument/prepareRename" -> lsp_prepare_rename_response(server, params, id)
+        "textDocument/rename" -> lsp_rename_response(server, params, id)
+        "textDocument/semanticTokens/full" -> lsp_semantic_tokens_response(server, params, id)
+        "textDocument/semanticTokens/range" -> lsp_semantic_tokens_range_response(server, params, id)
+        "textDocument/semanticTokens/full/delta" -> lsp_semantic_tokens_delta_response(server, params, id)
+        "textDocument/inlayHint" -> lsp_inlay_hint_response(server, params, id)
+        "workspace/symbol" -> lsp_workspace_symbol_response(server, params, id)
+        "textDocument/prepareCallHierarchy" -> lsp_prepare_call_hierarchy_response(server, params, id)
+        "callHierarchy/incomingCalls" -> lsp_call_hierarchy_incoming_response(server, params, id)
+        "callHierarchy/outgoingCalls" -> lsp_call_hierarchy_outgoing_response(server, params, id)
+        "textDocument/prepareTypeHierarchy" -> lsp_prepare_type_hierarchy_response(server, params, id)
+        "typeHierarchy/supertypes" -> lsp_type_hierarchy_supertypes_response(server, params, id)
+        "typeHierarchy/subtypes" -> lsp_type_hierarchy_subtypes_response(server, params, id)
+        "workspace/executeCommand" -> lsp_execute_command_response(server, params, id)
+        "jet/buildGraph" -> lsp_build_graph_response(server, params, id)
+        EDITOR_WORKBENCH_METHOD | EDITOR_RECONNECT_METHOD | EDITOR_NAVIGATE_METHOD | EDITOR_SELECT_METHOD | EDITOR_COMMAND_METHOD -> lsp_editor_host_response(&server, method, params, id)
+        else -> Val(lsp_response(id, "null"))
+    }
+}
+
+// Rust415–429: EditorHostAdapter owns parsing, typed host state and errors.
+pub fn lsp_editor_host_response(server: &LSPServer, method: String, params: DataTree?, id: DataTree) -> String? Never! {
+    if (&server.editor_host.dispatch(method, params)) == {
+        .Ok(result) -> Val(lsp_response(id, result))
+        .Err(error) -> Val(lsp_error_response(id, Int{editor_host_error_code(error)}, "{error}"))
+    }
+}
+
+pub fn lsp_build_graph_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? Never! {
+    value :: params ?? return None
+    document :: value.field("textDocument") ?? return None
+    uri :: document.field("uri") ?? return None
+    if uri == .Text(text) {
+        doc :: server.diagnostic_state.docs.get(text) ?? return None
+        if lsp_build_graph_json(server.snapshot, doc.path, doc.text) == {
+            .Ok(.Val(graph)) -> return Val(lsp_response(id, graph))
+            .Ok(None) | .Err(_) -> return Val(lsp_response(id, "null"))
+        }
+    }
+    None
+}
+
+// Rust505–563: cancellation is recorded in the native reader BEFORE queueing.
+// The main loop removes late IDs after handling; this branch must not simulate
+// cancellation or duplicate the reader's shared set.
+pub fn lsp_handle_notification(server: &LSPServer, method: String, params: DataTree?, stdout: &lsp_request_term.Stdout) -[IO, Time.Wait, FS, Env]> IOError! {
+    if method == {
+        "initialized" | "notifications/initialized" | "$/cancelRequest" | "notifications/cancelled" -> {}
+        "exit" -> server.shutdown = true
+        "textDocument/didOpen" -> lsp_publish_after_open(&server.diagnostic_state, &server.queries, server.snapshot, params, &stdout) ?? return Err(err)
+        "textDocument/didChange" -> lsp_publish_after_change(&server.diagnostic_state, params, server.snapshot.cwd.platform)
+        "workspace/didChangeWorkspaceFolders" -> lsp_update_workspace_roots(&server.workspace_roots, &server.workspace_folders, params, server.snapshot.cwd)
+        "textDocument/didClose" -> {
+            value :: params ?? return
+            document :: value.field("textDocument") ?? return
+            uri :: document.field("uri") ?? return
+            if uri == .Text(text) -> lsp_close_document_diagnostics(&server.diagnostic_state, &server.queries, server.snapshot.cwd, text, &stdout) ?? return Err(err)
+        }
+        else -> {}
+    }
+}
+
+pub fn lsp_initialize_response(id: DataTree) -> String Never! {
+    result :: """
+{{
+  "protocolVersion": "2025-11-25",
+  "capabilities": {{
+    "textDocumentSync": 2,
+    "documentFormattingProvider": true,
+    "documentRangeFormattingProvider": true,
+    "documentOnTypeFormattingProvider": {{
+      "firstTriggerCharacter": "\\n",
+      "moreTriggerCharacter": ["}}"]
+    }},
+    "codeActionProvider": true,
+    "completionProvider": {{
+      "triggerCharacters": ["."],
+      "resolveProvider": false
+    }},
+    "signatureHelpProvider": {{
+      "triggerCharacters": ["(", ","]
+    }},
+    "documentSymbolProvider": true,
+    "workspaceSymbolProvider": true,
+    "foldingRangeProvider": true,
+    "documentHighlightProvider": true,
+    "selectionRangeProvider": true,
+    "documentLinkProvider": {{ "resolveProvider": false }},
+    "codeLensProvider": {{ "resolveProvider": false }},
+    "hoverProvider": true,
+    "definitionProvider": true,
+    "referencesProvider": true,
+    "renameProvider": {{ "prepareProvider": true }},
+    "semanticTokensProvider": {{
+      "legend": {{
+        "tokenTypes": [
+          "keyword","type","function","variable","parameter",
+          "property","enumMember","string","number","comment",
+          "operator","namespace","ownership","decorator"
+        ],
+        "tokenModifiers": [
+          "declaration","readonly","move","writeBorrow","copy",
+          "rule","arithmeticChecked","arithmeticWrapping","arithmeticSaturating"
+        ]
+      }},
+      "full": {{ "delta": true }},
+      "range": true
+    }},
+    "inlayHintProvider": true,
+    "callHierarchyProvider": true,
+    "typeHierarchyProvider": true,
+    "workspace": {{
+      "workspaceFolders": {{ "supported": true, "changeNotifications": true }}
+    }},
+    "executeCommandProvider": {{
+      "commands": ["jet.impact", "jet.budgetReports", "jet.reasoning", "jet.changeSignature"]
+    }},
+    "resources": {{ "subscribe": false, "listChanged": false }}
+  }},
+  "serverInfo": {{ "name": "jet", "version": "0.2.0" }}
+}}
+"""
+    lsp_response(id, result)
+}
+
+// Rust452–503. The host supplies its authorized cwd; roots retain native
+// identity. Driver owns absolute/relative path handling, not a local resolver.
+pub fn lsp_push_workspace_root(roots: &[OSPath], path: OSPath, cwd: OSPath) Never! {
+    if path.encoded.len() == 0 -> return
+    normalized :: jet_driver_query_path(cwd, path)
+    loop root in roots {
+        if lsp_request_path.equals(root, normalized) -> return
+    }
+    &roots.push(normalized)
+}
+
+fn lsp_push_workspace_folder(roots: &[OSPath], folder: DataTree, cwd: OSPath) Never! {
+    uri :: folder.field("uri") ?? return
+    if uri == .Text(text) {
+        path :: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
+        lsp_push_workspace_root(&roots, path, cwd)
+    }
+}
+
+pub fn lsp_configure_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params: DataTree?, cwd: OSPath) Never! {
+    configured := [OSPath]{}
+    if params == .Val(value) {
+        workspace_folders = value.field("workspaceFolders") != None
+        if value.field("workspaceFolders") == {
+            .Val(folders) -> {
+                // Presence suppresses rootUri/rootPath even for null or a
+                // wrong type; a present empty array deliberately clears roots.
+                if folders == .Array(rows) {
+                    loop folder in rows -> lsp_push_workspace_folder(&configured, folder, cwd)
+                }
+            }
+            None -> {
+                if value.field("rootUri") == {
+                    .Val(uri) -> {
+                        if uri == .Text(text) {
+                            path :: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
+                            lsp_push_workspace_root(&configured, path, cwd)
+                        }
+                    }
+                    None -> {
+                        if value.field("rootPath") == .Val(path) {
+                            if path == .Text(text) -> lsp_push_workspace_root(&configured, lsp_request_path.from_text(text, cwd.platform), cwd)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    roots = configured
+}
+
+pub fn lsp_update_workspace_roots(roots: &[OSPath], workspace_folders: &Bool, params: DataTree?, cwd: OSPath) Never! {
+    event :: (params ?? return).field("event") ?? return
+    workspace_folders = true
+    if event.field("removed") == .Val(removed) {
+        if removed == .Array(rows) {
+            loop folder in rows {
+                uri :: folder.field("uri") ?? next
+                if uri == .Text(text) {
+                    path :: jet_driver_query_path(cwd, lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform))
+                    // Remove in place; no whole-root-vector copy per removal.
+                    index := 0
+                    loop index < roots.len() {
+                        if lsp_request_path.equals(roots[index], path) -> _ := &roots.remove(index)
+                        else -> index += 1
+                    }
+                }
+            }
+        }
+    }
+    if event.field("added") == .Val(added) {
+        if added == .Array(rows) {
+            loop folder in rows -> lsp_push_workspace_folder(&roots, folder, cwd)
+        }
+    }
+}

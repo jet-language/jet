@@ -1,0 +1,61 @@
+// Original Server.rs4723–4750. Real native files + real checked Driver input,
+// not a fake directory provider. #4494 native FS and sole ProjectParts gate.
+#Test("workspace_index_skips_internal_parts_until_explicit_import") {
+    root :: lsp_action_root("jet-lsp-project-parts")
+    server := lsp_action_fixture(root, "fn run() {{}}\n", 1, [(name: String, text: String)]{(name: "bench.jet", text: "module _bench {{ }}\nfn hidden_probe() {{}}\n")})
+    // Original first scan has no open entry overlay.
+    uri :: lsp_action_uri(root)
+    _ :: &server.diagnostic_state.docs.remove(uri)
+    entry :: lsp_action_child(root, "main.jet")
+    internal :: lsp_action_child(root, "bench.jet")
+    sources :: lsp_workspace_sources(server, Val(entry))
+    found := false
+    loop row in sources { if lsp_workspace_path.equals(row.path, internal) -> found = true }
+    assert(!found)
+    server.diagnostic_state.docs[uri] = LSPDocument.new(~entry, "use project._bench\nfn run() {{}}\n", 1)
+    sources :: lsp_workspace_sources(server, Val(entry))
+    found := false
+    loop row in sources { if lsp_workspace_path.equals(row.path, internal) -> found = true }
+    assert(found)
+    _ :: lsp_action_fs.remove_dir_all(root)
+}
+
+// Unavailable-original gates; NOT registered tests and NOT parity claims.
+// Rust4494–4529 ShortTestDir / reserve / Drop, Unix-only:
+// reserve(base:OSPath,prefix:String,attempts:Int) loops attempts in0..<attempts,
+// native create_dir(base.join("{prefix}-{attempt}")); success retains path;
+// AlreadyExists continues; ANY other native error preserves the SAME error kind
+// with exact text "failed to create {path}: {error}". Exhaustion is AlreadyExists
+// with "failed to reserve a unique {prefix} directory under {base} after
+// {attempts} attempts". Consuming Close ignores remove_dir_all error. Missing
+// prerequisite: canonical IOError kind capture/recontext+AlreadyExists creator
+// (#4409), native FS/consuming cleanup (#4494), selected cfg(unix) (#4483).
+// Rust4675 short_socket_directory_reservation_is_bounded_and_skips_collisions:
+// reserve(/tmp,"jet-lsp-reservation-{actual PID}",64), create slot-0,
+// reserve(root,"slot",2) -> basename slot-1; create full-0, reserve(root,"full",1)
+// -> AlreadyExists and text containing "after 1 attempts". Scope close removes
+// both reserved and root directories; no fixed directory/fake allocator.
+// Rust4704 workspace_scan_ignores_non_regular_jet_entries, Unix-only:
+// ShortTestDir.reserve(/tmp,"jet-lsp-{actual PID}",64); native write main.jet
+// "fn run() {}\n"; real UnixListener.bind(root/blocked.jet); collect_jet_files
+// returns EXACTLY [main.jet], then close socket before directory cleanup.
+// Missing prerequisite: real Unix-domain Listener bind/close (#4494/#4500), not
+// a TCP/socket-shaped file substitute. RuntimeLead8 confirms no published owner.
+
+// Rust4272 cancellation_suppresses_an_in_flight_success_response:
+// shared cancellation HashSet, actual two-party Barrier; OS canceller task waits,
+// inserts "7" under recover-poison guard, waits again. Handler computing a true
+// result waits twice at the SAME Barrier. Join canceller; assert wire contains
+// `"code":-32800`, does NOT contain `"result":true`. Missing exact public
+// Barrier/OS spawn+join contract and W38 cancellable_response borrowed FnOnce;
+// Runtime CONCURRENCY-INVENTORY.md lines19–26 (#4494). No synchronous surrogate.
+// Rust4549 lsp_rejects_oversized_frame_before_reading_a_body:
+// input bytes "Content-Length: 1048577\r\n\r\n" with NO body; original read_message
+// must reject immediately, IOError InvalidData, EXACT message
+// "protocol message exceeds the 1048576-byte limit". Missing canonical retained
+// BufRead/read_exact test cursor+InvalidData error-kind fidelity (#4494/#4409).
+// Rust4693 lsp_panic_log_emits_to_stderr_sink:
+// original write_log_line over actual byte Vec Write sink, input
+// "[jet-lsp] normal logging" -> EXACT UTF8 "[jet-lsp] normal logging\n" after
+// successful flush. W38 public sink polymorphism unpublished; substituting
+// term.eprint/stderr writes without inspecting real bytes would lose the oracle.

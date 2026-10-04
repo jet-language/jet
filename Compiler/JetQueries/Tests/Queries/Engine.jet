@@ -1,0 +1,255 @@
+// Rust crates/jet-queries/src/lib.rs:294–499, with the direct mutable demand /
+// finish seam in place of Rust's FnOnce(&mut QueryEngine) callback.
+// The complete behavior suite is retained: execution is blocked on #4397
+// composite-key Rust derives, not replaced with string keys or literal stats.
+enum QueryTestValue {
+    Count(value: Int)
+    Text(value: String)
+}
+fn query_test_count(value: QueryTestValue) -> Int Never! {
+    if value == {
+        .Count(n) -> n
+        else -> panic("expected count")
+    }
+}
+fn query_test_text(value: QueryTestValue) -> String Never! {
+    if value == {
+        .Text(text) -> text
+        else -> panic("expected text")
+    }
+}
+fn query_test_words(text: String) -> Int Never! {
+    count := 0
+    in_word := false
+    loop i in 0..<text.len() {
+        space :: text.slice(i, i + 1).is_whitespace()
+        if !space && !in_word -> count += 1
+        in_word = !space
+    }
+    count
+}
+fn query_test_word_count(db: &QueryEngine<QueryTestValue>, path: String) -> Int Never! {
+    key :: QueryKey.new("tokens", path)
+    if (&db.query(key, "count")) == .Val(hit) -> return query_test_count(hit)
+    text :: (&db.input_text(InputKey.new(path))) ?? ""
+    query_test_count(&db.finish_query(key, "count", QueryTestValue.Count{value: query_test_words(text)}))
+}
+fn query_test_read(db: &QueryEngine<QueryTestValue>, key: QueryKey, input: InputKey) -> String Never! {
+    if (&db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
+    text :: (&db.input_text(input)) ?? ""
+    query_test_text(&db.finish_query(key, "text", QueryTestValue.Text{value: text}))
+}
+fn query_test_graph(db: &QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
+    if (&db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
+    a :: (&db.input_text(InputKey.new("a.jet"))) ?? ""
+    b :: (&db.input_text(InputKey.new("b.jet"))) ?? ""
+    query_test_text(&db.finish_query(key, "text", QueryTestValue.Text{value: "{a}+{b}"}))
+}
+fn query_test_symbols(db: &QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
+    if (&db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
+    n :: query_test_word_count(&db, "a.jet")
+    query_test_text(&db.finish_query(key, "text", QueryTestValue.Text{value: "symbols:{n}"}))
+}
+
+#Test("unchanged_input_reuses_memo") {
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(InputKey.new("a.jet"), "one two")
+    assert_eq(query_test_word_count(&db, "a.jet"), 2)
+    assert_eq(query_test_word_count(&db, "a.jet"), 2)
+    assert_eq(db.recompute_count(QueryKey.new("tokens", "a.jet")), 1)
+}
+#Test("local_edit_only_recomputes_dependent_query") {
+    db := QueryEngine<QueryTestValue>.new()
+    loop path in ["a.jet", "b.jet", "c.jet"] {
+        text :: if path == "a.jet" -> "fn a" else if path == "b.jet" -> "fn b" else -> "fn c"
+        _ :: &db.set_input(InputKey.new(path), text)
+        assert_eq(query_test_word_count(&db, path), 2)
+    }
+    _ :: &db.set_input(InputKey.new("b.jet"), "fn b changed")
+    assert_eq(query_test_word_count(&db, "a.jet"), 2)
+    assert_eq(query_test_word_count(&db, "b.jet"), 3)
+    assert_eq(query_test_word_count(&db, "c.jet"), 2)
+    assert_eq(db.recompute_count(QueryKey.new("tokens", "a.jet")), 1)
+    assert_eq(db.recompute_count(QueryKey.new("tokens", "b.jet")), 2)
+    assert_eq(db.recompute_count(QueryKey.new("tokens", "c.jet")), 1)
+}
+#Test("multi_file_query_recomputes_when_any_input_changes") {
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(InputKey.new("a.jet"), "alpha")
+    _ :: &db.set_input(InputKey.new("b.jet"), "beta")
+    key :: QueryKey.new("module_graph", "root")
+    assert_eq(query_test_graph(&db, key), "alpha+beta")
+    _ :: &db.set_input(InputKey.new("a.jet"), "alpha2")
+    assert_eq(query_test_graph(&db, key), "alpha2+beta")
+    assert_eq(db.recompute_count(key), 2)
+}
+#Test("query_dependencies_invalidate_transitively") {
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(InputKey.new("a.jet"), "alpha beta")
+    tokens :: QueryKey.new("tokens", "a.jet")
+    symbols :: QueryKey.new("symbols", "a.jet")
+    assert_eq(query_test_symbols(&db, symbols), "symbols:2")
+    _ :: &db.set_input(InputKey.new("a.jet"), "alpha beta gamma")
+    assert_eq(query_test_symbols(&db, symbols), "symbols:3")
+    assert_eq(db.recompute_count(tokens), 2)
+    assert_eq(db.recompute_count(symbols), 2)
+}
+#Test("explicit_invalidation_preserves_unrelated_queries") {
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(InputKey.new("a.jet"), "alpha")
+    _ :: &db.set_input(InputKey.new("b.jet"), "beta")
+    assert_eq(query_test_word_count(&db, "a.jet"), 1)
+    assert_eq(query_test_word_count(&db, "b.jet"), 1)
+    &db.invalidate(QueryKey.new("tokens", "a.jet"))
+    assert_eq(query_test_word_count(&db, "a.jet"), 1)
+    assert_eq(query_test_word_count(&db, "b.jet"), 1)
+    assert_eq(db.recompute_count(QueryKey.new("tokens", "a.jet")), 2)
+    assert_eq(db.recompute_count(QueryKey.new("tokens", "b.jet")), 1)
+}
+#Test("counters_and_live_memory_are_deterministic") {
+    file :: FileKey.new("a.jet")
+    input :: InputKey.file(file)
+    query :: QueryKey.for_file("tokens", file)
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(input, "one two")
+    assert_eq(query_test_read(&db, query, input), "one two")
+    hit :: (&db.query(query, "text")) ?? panic("memo hit")
+    assert_eq(query_test_text(hit), "one two")
+    assert_eq(db.stats(), QueryStats{hits: 1, recomputes: 1, live_inputs: 1,
+        live_input_bytes: 7, live_memos: 1, live_query_counters: 1})
+}
+#Test("removing_input_reclaims_dead_memos_and_key_counters") {
+    input :: InputKey.new("gone.jet")
+    query :: QueryKey.new("tokens", "gone.jet")
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(input, "gone")
+    _ :: query_test_read(&db, query, input)
+    assert(&db.remove_input(input))
+    assert_eq(db.stats().live_inputs, 0)
+    assert_eq(db.stats().live_input_bytes, 0)
+    assert_eq(db.stats().live_memos, 0)
+    assert_eq(db.stats().live_query_counters, 0)
+    assert_eq(db.stats().recomputes, 1)
+    assert_eq(db.recompute_count(query), 0)
+}
+#Test("removing_input_reclaims_counter_after_explicit_invalidation") {
+    input :: InputKey.new("gone.jet")
+    query :: QueryKey.new("check", "gone.jet")
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(input, "gone")
+    _ :: query_test_read(&db, query, input)
+    &db.invalidate_kind("check")
+    assert_eq(db.stats().live_memos, 0)
+    assert_eq(db.stats().live_query_counters, 1)
+    assert(&db.remove_input(input))
+    assert_eq(db.stats().live_query_counters, 0)
+    assert_eq(db.recompute_count(query), 0)
+}
+#Test("adding_previously_missing_input_invalidates_reader") {
+    input :: InputKey.new("late.jet")
+    query :: QueryKey.new("tokens", "late.jet")
+    db := QueryEngine<QueryTestValue>.new()
+    assert_eq(query_test_read(&db, query, input), "")
+    _ :: &db.set_input(input, "now present")
+    assert_eq(query_test_read(&db, query, input), "now present")
+    assert_eq(db.recompute_count(query), 2)
+}
+#Test("document_churn_does_not_retain_query_history") {
+    db := QueryEngine<QueryTestValue>.new()
+    loop index in 0..<64 {
+        file :: FileKey.new("closed-{index}.jet")
+        input :: InputKey.file(file)
+        _ :: &db.set_input(input, "fn run() {{}}")
+        _ :: query_test_read(&db, QueryKey.for_file("check", file), input)
+        assert(&db.remove_input(input))
+    }
+    assert_eq(db.stats().recomputes, 64)
+    assert_eq(db.stats().live_inputs, 0)
+    assert_eq(db.stats().live_memos, 0)
+    assert_eq(db.stats().live_query_counters, 0)
+}
+
+#Test("file_and_named_subjects_do_not_collide") {
+    db := QueryEngine<QueryTestValue>.new()
+    file :: FileKey.new("a.jet")
+    named :: InputKey.new("a.jet")
+    physical :: InputKey.file(file)
+    named_query :: QueryKey.new("tokens", "a.jet")
+    file_query :: QueryKey.for_file("tokens", file)
+    _ :: &db.set_input(named, "named")
+    _ :: &db.set_input(physical, "file")
+    assert_eq(query_test_read(&db, named_query, named), "named")
+    assert_eq(query_test_read(&db, file_query, physical), "file")
+    _ :: &db.set_input(named, "changed")
+    assert_eq(query_test_read(&db, file_query, physical), "file")
+    assert_eq(query_test_read(&db, named_query, named), "changed")
+    assert_eq(db.recompute_count(file_query), 1)
+    assert_eq(db.recompute_count(named_query), 2)
+}
+#Test("same_key_different_result_kind_recomputes") {
+    db := QueryEngine<QueryTestValue>.new()
+    input :: InputKey.new("a.jet")
+    key :: QueryKey.new("tokens", "a.jet")
+    _ :: &db.set_input(input, "one two")
+    assert_eq(query_test_word_count(&db, "a.jet"), 2)
+    assert_eq(query_test_read(&db, key, input), "one two")
+    assert_eq(query_test_word_count(&db, "a.jet"), 2)
+    assert_eq(db.recompute_count(key), 3)
+    assert_eq(db.stats().hits, 0)
+}
+#Test("cache_hit_child_records_parent_dependency") {
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(InputKey.new("a.jet"), "alpha beta")
+    tokens :: QueryKey.new("tokens", "a.jet")
+    symbols :: QueryKey.new("symbols", "a.jet")
+    assert_eq(query_test_word_count(&db, "a.jet"), 2)
+    assert_eq(query_test_symbols(&db, symbols), "symbols:2")
+    assert_eq(db.stats().hits, 1)
+    &db.invalidate(tokens)
+    assert_eq(db.stats().live_memos, 0)
+    assert_eq(query_test_symbols(&db, symbols), "symbols:2")
+    assert_eq(db.recompute_count(tokens), 2)
+    assert_eq(db.recompute_count(symbols), 2)
+}
+#Test("identical_utf8_input_preserves_revision_and_memo") {
+    db := QueryEngine<QueryTestValue>.new()
+    input :: InputKey.new("utf8.jet")
+    query :: QueryKey.new("read", "utf8.jet")
+    assert(&db.set_input(input, "é😀"))
+    assert_eq(query_test_read(&db, query, input), "é😀")
+    assert(!(&db.set_input(input, "é😀")))
+    assert_eq(query_test_read(&db, query, input), "é😀")
+    assert_eq(db.stats().live_input_bytes, 6)
+    assert_eq(db.recompute_count(query), 1)
+    assert(!(&db.remove_input(InputKey.new("absent"))))
+    assert_eq(db.recompute_count(query), 1)
+}
+#Test("invalidate_kind_revalidates_transitive_memos_on_demand") {
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(InputKey.new("a.jet"), "alpha beta")
+    tokens :: QueryKey.new("tokens", "a.jet")
+    symbols :: QueryKey.new("symbols", "a.jet")
+    assert_eq(query_test_symbols(&db, symbols), "symbols:2")
+    &db.invalidate_kind("tokens")
+    assert_eq(db.stats().live_memos, 1)
+    assert_eq(query_test_symbols(&db, symbols), "symbols:2")
+    assert_eq(db.recompute_count(tokens), 2)
+    assert_eq(db.recompute_count(symbols), 2)
+}
+
+#Test("nested_generation_is_independent_of_global_input_revision") {
+    db := QueryEngine<QueryTestValue>.new()
+    _ :: &db.set_input(InputKey.new("unrelated.jet"), "revision one")
+    _ :: &db.set_input(InputKey.new("a.jet"), "alpha beta")
+    symbols :: QueryKey.new("symbols", "root")
+    tokens :: QueryKey.new("tokens", "a.jet")
+    assert_eq(query_test_symbols(&db, symbols), "symbols:2")
+    _ :: &db.set_input(InputKey.new("unrelated.jet"), "revision three")
+    assert_eq(query_test_symbols(&db, symbols), "symbols:2")
+    assert_eq(db.recompute_count(tokens), 1)
+    assert_eq(db.recompute_count(symbols), 1)
+    assert(&db.remove_input(InputKey.new("a.jet")))
+    assert_eq(db.recompute_count(tokens), 0)
+    assert_eq(db.recompute_count(symbols), 0)
+    assert_eq(db.stats().live_memos, 0)
+}

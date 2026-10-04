@@ -1,0 +1,1367 @@
+// PORT-PENDING 0777 crates-jet-devserver-src-nativeoverlayhost: crates/jet-devserver/src/NativeOverlayHost.rs:1-1363
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Typed native GUI/game overlay projection over `jet.devtools.v1`.
+//RS //!
+//RS //! The host consumes canonical typed session events and returns bounded draw
+//RS //! commands to the real game-window backend.  It does not parse the wire
+//RS //! envelope or execute actions; `NativeOverlayAdapter` remains the only typed
+//RS //! projection bridge.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet, VecDeque};
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS use crate::Devtools::{
+//RS     JetDevtoolsEvent, JetDevtoolsNativeColor, JetDevtoolsNativeDrawCommand,
+//RS     JetDevtoolsNativeFrame, JetDevtoolsNativeHost, JetDevtoolsNativeInput,
+//RS     JetDevtoolsNativeWindow, JetDevtoolsSelection, JetDevtoolsViewState,
+//RS };
+//RS use crate::NativeOverlayAdapter::NativeOverlayAdapter;
+//RS use crate::Session::ResidentDevSession;
+//RS use crate::TerminalHost::{
+//RS     panel_availability as project_panel_availability, JetDevtoolsHostKind,
+//RS     JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor,
+//RS };
+//RS 
+//RS 
+//RS /// The only protocol accepted by this host projection.
+//RS pub const JET_DEVTOOLS_PROTOCOL: &str = "jet.devtools.v1";
+//RS 
+//RS /// Bounded panel count for one native projection.
+//RS pub const MAX_OVERLAY_PANELS: usize = 64;
+//RS /// Bounded node count across all panel trees in one event/frame.
+//RS pub const MAX_OVERLAY_NODES: usize = 512;
+//RS /// Bounded tree depth accepted from a panel producer.
+//RS pub const MAX_OVERLAY_DEPTH: usize = 32;
+//RS /// Bounded retained frame snapshots.
+//RS pub const MAX_OVERLAY_FRAMES: usize = 64;
+//RS /// Shared devtools text budget for typed labels and identifiers.
+//RS pub const MAX_OVERLAY_TEXT_BYTES: usize = 16 * 1024;
+//RS 
+//RS /// The closed node vocabulary understood by a native overlay renderer.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum NativeOverlayNodeKind {
+//RS     Text,
+//RS     Status,
+//RS     Table,
+//RS     Tree,
+//RS     Chart,
+//RS     Action,
+//RS }
+//RS 
+//RS /// A grant required before a typed action can be executed by a later host
+//RS /// integration.  This module only projects the requirement; it never grants or
+//RS /// executes it.
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum NativeOverlayGrant {
+//RS     Observe,
+//RS     Interact,
+//RS     Control,
+//RS }
+//RS 
+//RS /// The complete action metadata carried by an action node.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct NativeOverlayAction {
+//RS     pub action_id: String,
+//RS     pub required_grant: NativeOverlayGrant,
+//RS }
+//RS 
+//RS impl NativeOverlayAction {
+//RS     pub fn new(action_id: impl Into<String>, required_grant: NativeOverlayGrant) -> Self {
+//RS         Self {
+//RS             action_id: action_id.into(),
+//RS             required_grant,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A backend-neutral node.  Values are optional by design: the projection does
+//RS /// not invent or recover payload values that the observation site did not
+//RS /// publish.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct NativeOverlayNode {
+//RS     pub id: String,
+//RS     pub kind: NativeOverlayNodeKind,
+//RS     pub label: String,
+//RS     pub value: Option<String>,
+//RS     pub status: Option<String>,
+//RS     pub children: Vec<NativeOverlayNode>,
+//RS     pub action: Option<NativeOverlayAction>,
+//RS }
+//RS 
+//RS impl NativeOverlayNode {
+//RS     pub fn new(
+//RS         id: impl Into<String>,
+//RS         kind: NativeOverlayNodeKind,
+//RS         label: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             id: id.into(),
+//RS             kind,
+//RS             label: label.into(),
+//RS             value: None,
+//RS             status: None,
+//RS             children: Vec::new(),
+//RS             action: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn text(id: impl Into<String>, label: impl Into<String>) -> Self {
+//RS         Self::new(id, NativeOverlayNodeKind::Text, label)
+//RS     }
+//RS 
+//RS     pub fn with_value(mut self, value: impl Into<String>) -> Self {
+//RS         self.value = Some(value.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_status(mut self, status: impl Into<String>) -> Self {
+//RS         self.status = Some(status.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_children(mut self, children: Vec<NativeOverlayNode>) -> Self {
+//RS         self.children = children;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_action(mut self, action: NativeOverlayAction) -> Self {
+//RS         self.action = Some(action);
+//RS         self
+//RS     }
+//RS 
+//RS     fn validate(
+//RS         &self,
+//RS         depth: usize,
+//RS         count: &mut usize,
+//RS         ids: &mut BTreeSet<String>,
+//RS     ) -> Result<(), String> {
+//RS         if depth > MAX_OVERLAY_DEPTH {
+//RS             return Err("native overlay node tree exceeds its depth budget".to_string());
+//RS         }
+//RS         validate_text(&self.id, "native overlay node id", false)?;
+//RS         validate_text(&self.label, "native overlay node label", false)?;
+//RS         if !ids.insert(self.id.clone()) {
+//RS             return Err(format!(
+//RS                 "native overlay node id `{}` is duplicated",
+//RS                 self.id
+//RS             ));
+//RS         }
+//RS         *count = count
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "native overlay node count overflowed".to_string())?;
+//RS         if *count > MAX_OVERLAY_NODES {
+//RS             return Err("native overlay frame exceeds its node budget".to_string());
+//RS         }
+//RS         if let Some(value) = self.value.as_deref() {
+//RS             validate_text(value, "native overlay node value", true)?;
+//RS         }
+//RS         if let Some(status) = self.status.as_deref() {
+//RS             validate_text(status, "native overlay node status", true)?;
+//RS         }
+//RS         match (&self.kind, &self.action) {
+//RS             (NativeOverlayNodeKind::Action, None) => {
+//RS                 return Err(format!(
+//RS                     "native overlay action node `{}` has no typed action",
+//RS                     self.id
+//RS                 ));
+//RS             }
+//RS             (NativeOverlayNodeKind::Action, Some(action)) => {
+//RS                 validate_text(&action.action_id, "native overlay action id", false)?;
+//RS             }
+//RS             (_, Some(_)) => {
+//RS                 return Err(format!(
+//RS                     "native overlay node `{}` carries an action but is not an action node",
+//RS                     self.id
+//RS                 ));
+//RS             }
+//RS             (_, None) => {}
+//RS         }
+//RS         for child in &self.children {
+//RS             child.validate(depth + 1, count, ids)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// One panel's already-typed facts.  The native host keeps these fields intact
+//RS /// and does not infer panel meaning from their names.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct NativeOverlayPanelFact {
+//RS     pub panel_id: String,
+//RS     pub title: String,
+//RS     pub freshness: u64,
+//RS     pub status: String,
+//RS     pub nodes: Vec<NativeOverlayNode>,
+//RS }
+//RS 
+//RS impl NativeOverlayPanelFact {
+//RS     pub fn new(
+//RS         panel_id: impl Into<String>,
+//RS         title: impl Into<String>,
+//RS         freshness: u64,
+//RS         status: impl Into<String>,
+//RS         nodes: Vec<NativeOverlayNode>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             panel_id: panel_id.into(),
+//RS             title: title.into(),
+//RS             freshness,
+//RS             status: status.into(),
+//RS             nodes,
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate(&self, count: &mut usize) -> Result<(), String> {
+//RS         validate_text(&self.panel_id, "native overlay panel id", false)?;
+//RS         validate_text(&self.title, "native overlay panel title", false)?;
+//RS         validate_text(&self.status, "native overlay panel status", true)?;
+//RS         let mut ids = BTreeSet::new();
+//RS         for node in &self.nodes {
+//RS             node.validate(0, count, &mut ids)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// The typed projection adapter hands to [`NativeOverlayHost`].  It is
+//RS /// deliberately narrower than the wire envelope: protocol/session/revision
+//RS /// identity stays visible, while panel facts are the only renderable input.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct NativeOverlayEvent {
+//RS     pub protocol: String,
+//RS     pub session_id: String,
+//RS     pub revision: String,
+//RS     pub sequence: u64,
+//RS     pub observed_at_ms: u64,
+//RS     pub panels: Vec<NativeOverlayPanelFact>,
+//RS }
+//RS 
+//RS impl NativeOverlayEvent {
+//RS     pub fn new(
+//RS         protocol: impl Into<String>,
+//RS         session_id: impl Into<String>,
+//RS         revision: impl Into<String>,
+//RS         sequence: u64,
+//RS         observed_at_ms: u64,
+//RS         panels: Vec<NativeOverlayPanelFact>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             protocol: protocol.into(),
+//RS             session_id: session_id.into(),
+//RS             revision: revision.into(),
+//RS             sequence,
+//RS             observed_at_ms,
+//RS             panels,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn current(
+//RS         session_id: impl Into<String>,
+//RS         revision: impl Into<String>,
+//RS         sequence: u64,
+//RS         observed_at_ms: u64,
+//RS         panels: Vec<NativeOverlayPanelFact>,
+//RS     ) -> Self {
+//RS         Self::new(
+//RS             JET_DEVTOOLS_PROTOCOL,
+//RS             session_id,
+//RS             revision,
+//RS             sequence,
+//RS             observed_at_ms,
+//RS             panels,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         if self.protocol != JET_DEVTOOLS_PROTOCOL {
+//RS             return Err(format!(
+//RS                 "native overlay protocol must be `{JET_DEVTOOLS_PROTOCOL}`"
+//RS             ));
+//RS         }
+//RS         validate_text(&self.revision, "native overlay revision", false)?;
+//RS         if self.sequence == 0 {
+//RS             return Err("native overlay event sequence must be greater than zero".to_string());
+//RS         }
+//RS         if self.panels.len() > MAX_OVERLAY_PANELS {
+//RS             return Err("native overlay event exceeds its panel budget".to_string());
+//RS         }
+//RS         let mut panel_ids = BTreeSet::new();
+//RS         let mut count = 0;
+//RS         for panel in &self.panels {
+//RS             if !panel_ids.insert(panel.panel_id.clone()) {
+//RS                 return Err(format!(
+//RS                     "native overlay event repeats panel `{}`",
+//RS                     panel.panel_id
+//RS                 ));
+//RS             }
+//RS             panel.validate(&mut count)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// Physical viewport and integer DPI scale.  `scale_milli = 1000` is 1x;
+//RS /// using an integer keeps headless geometry reproducible across hosts.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct NativeOverlayViewport {
+//RS     pub width: u32,
+//RS     pub height: u32,
+//RS     pub scale_milli: u32,
+//RS }
+//RS 
+//RS impl NativeOverlayViewport {
+//RS     pub fn new(width: u32, height: u32, scale_milli: u32) -> Result<Self, String> {
+//RS         let viewport = Self {
+//RS             width,
+//RS             height,
+//RS             scale_milli,
+//RS         };
+//RS         viewport.validate()?;
+//RS         Ok(viewport)
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         if self.width == 0 || self.height == 0 {
+//RS             return Err("native overlay viewport dimensions must be non-zero".to_string());
+//RS         }
+//RS         if self.width > i32::MAX as u32 || self.height > i32::MAX as u32 {
+//RS             return Err("native overlay viewport exceeds coordinate range".to_string());
+//RS         }
+//RS         if self.scale_milli == 0 || self.scale_milli > 10_000 {
+//RS             return Err("native overlay scale must be between 1 and 10000 milli-units".to_string());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn scale(&self) -> f64 {
+//RS         f64::from(self.scale_milli) / 1000.0
+//RS     }
+//RS 
+//RS     pub fn overlay_rect(&self, dock: NativeOverlayDock) -> NativeOverlayRect {
+//RS         let width = self.scaled_extent(480, self.width);
+//RS         let height = self.scaled_extent(360, self.height);
+//RS         match dock {
+//RS             NativeOverlayDock::Floating => NativeOverlayRect {
+//RS                 x: ((self.width - width) / 2) as i32,
+//RS                 y: ((self.height - height) / 2) as i32,
+//RS                 width,
+//RS                 height,
+//RS             },
+//RS             NativeOverlayDock::Left => NativeOverlayRect {
+//RS                 x: 0,
+//RS                 y: 0,
+//RS                 width,
+//RS                 height: self.height,
+//RS             },
+//RS             NativeOverlayDock::Right => NativeOverlayRect {
+//RS                 x: (self.width - width) as i32,
+//RS                 y: 0,
+//RS                 width,
+//RS                 height: self.height,
+//RS             },
+//RS             NativeOverlayDock::Top => NativeOverlayRect {
+//RS                 x: 0,
+//RS                 y: 0,
+//RS                 width: self.width,
+//RS                 height,
+//RS             },
+//RS             NativeOverlayDock::Bottom => NativeOverlayRect {
+//RS                 x: 0,
+//RS                 y: (self.height - height) as i32,
+//RS                 width: self.width,
+//RS                 height,
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn scaled_extent(&self, logical: u32, available: u32) -> u32 {
+//RS         (u64::from(logical)
+//RS             .saturating_mul(u64::from(self.scale_milli))
+//RS             .saturating_add(999)
+//RS             / 1000)
+//RS             .max(1)
+//RS             .min(u64::from(available)) as u32
+//RS     }
+//RS }
+//RS 
+//RS impl Default for NativeOverlayViewport {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             width: 1280,
+//RS             height: 720,
+//RS             scale_milli: 1000,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A physical overlay hit rectangle.  It is geometry only; no backend is
+//RS /// selected here.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct NativeOverlayRect {
+//RS     pub x: i32,
+//RS     pub y: i32,
+//RS     pub width: u32,
+//RS     pub height: u32,
+//RS }
+//RS 
+//RS impl NativeOverlayRect {
+//RS     pub fn contains(self, x: i32, y: i32) -> bool {
+//RS         x >= self.x
+//RS             && y >= self.y
+//RS             && (x as i64) < i64::from(self.x) + i64::from(self.width)
+//RS             && (y as i64) < i64::from(self.y) + i64::from(self.height)
+//RS     }
+//RS }
+//RS 
+//RS /// Docking choices are host layout state, not panel semantics.
+//RS #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum NativeOverlayDock {
+//RS     #[default]
+//RS     Floating,
+//RS     Left,
+//RS     Right,
+//RS     Top,
+//RS     Bottom,
+//RS }
+//RS 
+//RS 
+//RS /// Local open/focus state owned by the native host.
+//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+//RS pub struct NativeOverlayState {
+//RS     pub open: bool,
+//RS     pub dock: NativeOverlayDock,
+//RS     pub focused: bool,
+//RS }
+//RS 
+//RS /// Input arriving from a GUI/game window.  The host returns a route rather than
+//RS /// invoking the game, so focused overlays cannot accidentally leak events.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum NativeOverlayInput {
+//RS     Toggle,
+//RS     Close,
+//RS     Dock(NativeOverlayDock),
+//RS     Focus(bool),
+//RS     Key { code: String, pressed: bool },
+//RS     Gamepad {
+//RS         gamepad: i64,
+//RS         control: String,
+//RS         pressed: bool,
+//RS     },
+//RS     Pointer { x: i32, y: i32, pressed: bool },
+//RS     Text(String),
+//RS     Activate { action_id: String },
+//RS }
+//RS 
+//RS /// Where the native host sends an input event after applying overlay policy.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum NativeOverlayInputRoute {
+//RS     Overlay,
+//RS     Game,
+//RS }
+//RS 
+//RS /// One retained, bounded projection frame handed to a later `JetBackend`.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct NativeOverlayFrame {
+//RS     pub frame_id: u64,
+//RS     pub protocol: String,
+//RS     pub session_id: String,
+//RS     pub revision: String,
+//RS     pub sequence: u64,
+//RS     pub observed_at_ms: u64,
+//RS     pub open: bool,
+//RS     pub dock: NativeOverlayDock,
+//RS     pub focused: bool,
+//RS     pub viewport: NativeOverlayViewport,
+//RS     pub bounds: NativeOverlayRect,
+//RS     pub cursor: Option<u64>,
+//RS     pub selection: Option<JetDevtoolsSelection>,
+//RS     pub panels: Vec<NativeOverlayPanelFact>,
+//RS }
+//RS 
+//RS impl NativeOverlayFrame {
+//RS     pub fn panel_count(&self) -> usize {
+//RS         self.panels.len()
+//RS     }
+//RS 
+//RS     pub fn node_count(&self) -> usize {
+//RS         self.panels
+//RS             .iter()
+//RS             .map(|panel| panel.nodes.iter().map(node_count).sum::<usize>())
+//RS             .sum()
+//RS     }
+//RS }
+//RS 
+//RS fn node_count(node: &NativeOverlayNode) -> usize {
+//RS     1 + node.children.iter().map(node_count).sum::<usize>()
+//RS }
+//RS fn panel_node_count(panel: &NativeOverlayPanelFact) -> usize {
+//RS     panel.nodes.iter().map(node_count).sum()
+//RS }
+//RS 
+//RS /// Native overlay host state and bounded frame history.
+//RS pub struct NativeOverlayHost {
+//RS     state: NativeOverlayState,
+//RS     viewport: NativeOverlayViewport,
+//RS     toggle_key: String,
+//RS     release_build: bool,
+//RS     session_id: Option<String>,
+//RS     revision: Option<String>,
+//RS     sequence: Option<u64>,
+//RS     view: JetDevtoolsViewState,
+//RS     observed_at_ms: u64,
+//RS     panels: BTreeMap<String, NativeOverlayPanelFact>,
+//RS     next_frame_id: u64,
+//RS     max_frames: usize,
+//RS     frames: VecDeque<NativeOverlayFrame>,
+//RS     /// Last typed draw callback observed from the real game window.  Retaining
+//RS     /// one value keeps this boundary bounded while proving the callback is not
+//RS     /// a projection-only no-op.
+//RS     last_native_draw: Option<JetDevtoolsNativeDrawCommand>,
+//RS }
+//RS 
+//RS impl NativeOverlayHost {
+//RS     pub fn new() -> Self {
+//RS         Self::with_viewport(NativeOverlayViewport::default())
+//RS     }
+//RS 
+//RS     pub fn with_viewport(viewport: NativeOverlayViewport) -> Self {
+//RS         assert!(viewport.validate().is_ok(), "invalid native overlay viewport");
+//RS         Self {
+//RS             state: NativeOverlayState::default(),
+//RS             viewport,
+//RS             toggle_key: "F12".to_string(),
+//RS             release_build: false,
+//RS             session_id: None,
+//RS             revision: None,
+//RS             sequence: None,
+//RS             view: JetDevtoolsViewState::default(),
+//RS             observed_at_ms: 0,
+//RS             last_native_draw: None,
+//RS             panels: BTreeMap::new(),
+//RS             next_frame_id: 1,
+//RS             max_frames: MAX_OVERLAY_FRAMES,
+//RS             frames: VecDeque::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_frame_capacity(mut self, capacity: usize) -> Self {
+//RS         self.max_frames = capacity.clamp(1, MAX_OVERLAY_FRAMES);
+//RS         self
+//RS     }
+//RS     /// Build a host with the development overlay explicitly excluded.
+//RS     pub fn with_release_build(mut self, release_build: bool) -> Self {
+//RS         self.set_release_build(release_build);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn release_build(&self) -> bool {
+//RS         self.release_build
+//RS     }
+//RS 
+//RS     /// Toggle the release exclusion policy and discard retained devtools data
+//RS     /// when entering release mode.
+//RS     pub fn set_release_build(&mut self, release_build: bool) {
+//RS         self.release_build = release_build;
+//RS         if release_build {
+//RS             self.state.open = false;
+//RS             self.state.focused = false;
+//RS             self.session_id = None;
+//RS             self.revision = None;
+//RS             self.sequence = None;
+//RS             self.view = JetDevtoolsViewState::default();
+//RS             self.observed_at_ms = 0;
+//RS             self.panels.clear();
+//RS             self.frames.clear();
+//RS             self.last_native_draw = None;
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn panel_catalog(&self) -> &'static [JetDevtoolsPanelDescriptor] {
+//RS         crate::Devtools::catalog::descriptors()
+//RS     }
+//RS     pub fn panel_availability(&self) -> Vec<JetDevtoolsPanelAvailability> {
+//RS         let grants: &[JetDevtoolsPanelCapability] = if self.release_build {
+//RS             &[]
+//RS         } else {
+//RS             &JetDevtoolsPanelCapability::ALL
+//RS         };
+//RS         self.panel_availability_for(grants)
+//RS     }
+//RS 
+//RS     pub fn panel_availability_for(
+//RS         &self,
+//RS         grants: &[JetDevtoolsPanelCapability],
+//RS     ) -> Vec<JetDevtoolsPanelAvailability> {
+//RS         let grants = if self.release_build { &[] } else { grants };
+//RS         project_panel_availability(JetDevtoolsHostKind::NativeOverlay, grants)
+//RS     }
+//RS 
+//RS 
+//RS     pub fn state(&self) -> NativeOverlayState {
+//RS         self.state
+//RS     }
+//RS 
+//RS     pub fn viewport(&self) -> NativeOverlayViewport {
+//RS         self.viewport
+//RS     }
+//RS 
+//RS     pub fn toggle_key(&self) -> &str {
+//RS         &self.toggle_key
+//RS     }
+//RS 
+//RS     pub fn set_viewport(&mut self, viewport: NativeOverlayViewport) -> Result<(), String> {
+//RS         viewport.validate()?;
+//RS         self.viewport = viewport;
+//RS         self.push_frame();
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn open(&mut self) {
+//RS         if self.release_build {
+//RS             return;
+//RS         }
+//RS         self.state.open = true;
+//RS         self.state.focused = true;
+//RS         self.push_frame();
+//RS     }
+//RS 
+//RS     pub fn close(&mut self) {
+//RS         self.state.open = false;
+//RS         self.state.focused = false;
+//RS     }
+//RS     pub fn toggle(&mut self) {
+//RS         if self.release_build {
+//RS             return;
+//RS         }
+//RS         if self.state.open {
+//RS             self.close();
+//RS         } else {
+//RS             self.open();
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn set_dock(&mut self, dock: NativeOverlayDock) {
+//RS         self.state.dock = dock;
+//RS         self.push_frame();
+//RS     }
+//RS 
+//RS     pub fn set_focus(&mut self, focused: bool) {
+//RS         self.state.focused = self.state.open && focused;
+//RS         self.push_frame();
+//RS     }
+//RS 
+//RS     pub fn is_open(&self) -> bool {
+//RS         self.state.open
+//RS     }
+//RS 
+//RS     pub fn is_focused(&self) -> bool {
+//RS         self.state.open && self.state.focused
+//RS     }
+//RS 
+//RS     pub fn captures_input(&self) -> bool {
+//RS         self.is_focused()
+//RS     }
+//RS 
+//RS     /// Ingest one already-parsed canonical projection.  Sequence is strictly
+//RS     /// increasing; source revision and panel freshness are non-decreasing.
+//RS     pub fn ingest(&mut self, event: NativeOverlayEvent) -> Result<(), String> {
+//RS         if self.release_build {
+//RS             return Err("native overlay is excluded from release builds".to_string());
+//RS         }
+//RS         event.validate()?;
+//RS         if let Some(session_id) = self.session_id.as_deref() {
+//RS             if session_id != event.session_id {
+//RS                 return Err("native overlay event belongs to a different session".to_string());
+//RS             }
+//RS         }
+//RS         if let Some(sequence) = self.sequence {
+//RS             if event.sequence <= sequence {
+//RS                 if self.revision.as_deref() != Some(event.revision.as_str()) {
+//RS                     return Err("native overlay stale event revision identity".to_string());
+//RS                 }
+//RS                 return Err("native overlay event sequence is not increasing".to_string());
+//RS             }
+//RS         }
+//RS         let revision_changed = self
+//RS             .revision
+//RS             .as_deref()
+//RS             .is_some_and(|revision| revision != event.revision.as_str());
+//RS         let mut projected_panel_count = if revision_changed {
+//RS             0
+//RS         } else {
+//RS             self.panels.len()
+//RS         };
+//RS         let mut projected_node_count = if revision_changed {
+//RS             0
+//RS         } else {
+//RS             self.panels
+//RS                 .values()
+//RS                 .map(panel_node_count)
+//RS                 .sum::<usize>()
+//RS         };
+//RS         for panel in &event.panels {
+//RS             if !revision_changed {
+//RS                 if let Some(previous) = self.panels.get(&panel.panel_id) {
+//RS                     if panel.freshness < previous.freshness {
+//RS                         return Err(format!(
+//RS                             "native overlay panel `{}` freshness moved backwards",
+//RS                             panel.panel_id
+//RS                         ));
+//RS                     }
+//RS                     projected_node_count = projected_node_count
+//RS                         .saturating_sub(panel_node_count(previous))
+//RS                         .checked_add(panel_node_count(panel))
+//RS                         .ok_or_else(|| "native overlay node count overflowed".to_string())?;
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             projected_panel_count = projected_panel_count
+//RS                 .checked_add(1)
+//RS                 .ok_or_else(|| "native overlay panel count overflowed".to_string())?;
+//RS             projected_node_count = projected_node_count
+//RS                 .checked_add(panel_node_count(panel))
+//RS                 .ok_or_else(|| "native overlay node count overflowed".to_string())?;
+//RS         }
+//RS         if projected_panel_count > MAX_OVERLAY_PANELS {
+//RS             return Err("native overlay frame exceeds its panel budget".to_string());
+//RS         }
+//RS         if projected_node_count > MAX_OVERLAY_NODES {
+//RS             return Err("native overlay frame exceeds its node budget".to_string());
+//RS         }
+//RS         if revision_changed {
+//RS             self.panels.clear();
+//RS         }
+//RS 
+//RS         let NativeOverlayEvent {
+//RS             protocol: _,
+//RS             session_id,
+//RS             revision,
+//RS             sequence,
+//RS             observed_at_ms,
+//RS             panels,
+//RS         } = event;
+//RS         self.session_id = Some(session_id);
+//RS         self.revision = Some(revision);
+//RS         self.sequence = Some(sequence);
+//RS         self.view.cursor = Some(sequence);
+//RS         self.observed_at_ms = observed_at_ms;
+//RS         for panel in panels {
+//RS             self.panels.insert(panel.panel_id.clone(), panel);
+//RS         }
+//RS         self.push_frame();
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Consume the adapter's canonical update without introducing a second
+//RS     /// event stream at the rendering boundary.
+//RS     pub fn ingest_update(
+//RS         &mut self,
+//RS         update: &crate::NativeOverlayAdapter::NativeOverlayUpdate,
+//RS     ) -> Result<(), String> {
+//RS         if self.release_build {
+//RS             return Err("native overlay is excluded from release builds".to_string());
+//RS         }
+//RS         self.view.cursor = update.identity.cursor.map(|cursor| cursor.sequence);
+//RS         self.view.selection = update
+//RS             .selection
+//RS             .as_ref()
+//RS             .map(|selection| {
+//RS                 JetDevtoolsSelection::new(
+//RS                     &selection.panel_id,
+//RS                     (!selection.item_key.is_empty()).then(|| selection.item_key.clone()),
+//RS                 )
+//RS             });
+//RS         if let Some(event) = update.event.clone() {
+//RS             self.ingest(event)?;
+//RS         } else if self.sequence.is_some() {
+//RS             self.push_frame();
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn frame(&self) -> Option<&NativeOverlayFrame> {
+//RS         self.frames.back()
+//RS     }
+//RS 
+//RS     pub fn frames(&self) -> impl Iterator<Item = &NativeOverlayFrame> {
+//RS         self.frames.iter()
+//RS     }
+//RS 
+//RS     pub fn frame_count(&self) -> usize {
+//RS         self.frames.len()
+//RS     }
+//RS     pub fn last_native_draw(&self) -> Option<&JetDevtoolsNativeDrawCommand> {
+//RS         self.last_native_draw.as_ref()
+//RS     }
+//RS 
+//RS     /// Retain one typed draw callback from the real game backend. The host
+//RS     /// keeps this bounded; overlay pixels are emitted by `native_draw_commands`.
+//RS     pub fn record_native_draw(&mut self, command: JetDevtoolsNativeDrawCommand) {
+//RS         if !self.release_build {
+//RS             self.last_native_draw = Some(command);
+//RS         }
+//RS     }
+//RS 
+//RS     /// Render the current typed projection through the canonical native draw
+//RS     /// command carrier. The raylib bridge executes these commands in its real
+//RS     /// `BeginDrawing`/`EndDrawing` window context.
+//RS     pub fn native_draw_commands(&self) -> Vec<JetDevtoolsNativeDrawCommand> {
+//RS         let Some(frame) = self.frame() else {
+//RS             return Vec::new();
+//RS         };
+//RS         if self.release_build || !frame.open {
+//RS             return Vec::new();
+//RS         }
+//RS         let bounds = frame.bounds;
+//RS         let bottom = i64::from(bounds.y) + i64::from(bounds.height);
+//RS         let mut commands = Vec::with_capacity(MAX_OVERLAY_NODES.min(64));
+//RS         commands.push(JetDevtoolsNativeDrawCommand::Rectangle {
+//RS             x: bounds.x,
+//RS             y: bounds.y,
+//RS             width: bounds.width as i32,
+//RS             height: bounds.height as i32,
+//RS             color: JetDevtoolsNativeColor::new(16, 20, 28, 232),
+//RS         });
+//RS         commands.push(JetDevtoolsNativeDrawCommand::Text {
+//RS             text: format!("Jet Devtools [{}]", frame.session_id),
+//RS             x: bounds.x.saturating_add(12),
+//RS             y: bounds.y.saturating_add(22),
+//RS             size: 18,
+//RS             color: JetDevtoolsNativeColor::WHITE,
+//RS         });
+//RS         let mut y = i64::from(bounds.y).saturating_add(46);
+//RS         for panel in &frame.panels {
+//RS             if y >= bottom || commands.len() >= MAX_OVERLAY_NODES {
+//RS                 break;
+//RS             }
+//RS             commands.push(JetDevtoolsNativeDrawCommand::Text {
+//RS                 text: panel.title.clone(),
+//RS                 x: bounds.x.saturating_add(12),
+//RS                 y: y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+//RS                 size: 15,
+//RS                 color: JetDevtoolsNativeColor::new(255, 220, 120, 255),
+//RS             });
+//RS             y = y.saturating_add(18);
+//RS             if !panel.status.is_empty() && y < bottom {
+//RS                 commands.push(JetDevtoolsNativeDrawCommand::Text {
+//RS                     text: panel.status.clone(),
+//RS                     x: bounds.x.saturating_add(18),
+//RS                     y: y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+//RS                     size: 12,
+//RS                     color: JetDevtoolsNativeColor::new(170, 190, 210, 255),
+//RS                 });
+//RS                 y = y.saturating_add(16);
+//RS             }
+//RS             for node in &panel.nodes {
+//RS                 append_native_node_commands(
+//RS                     &mut commands,
+//RS                     node,
+//RS                     bounds.x.saturating_add(18),
+//RS                     &mut y,
+//RS                     bottom,
+//RS                     0,
+//RS                 );
+//RS                 if y >= bottom || commands.len() >= MAX_OVERLAY_NODES {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS         }
+//RS         commands
+//RS     }
+//RS 
+//RS     /// Route input without ever calling into the game.  A focused, open overlay
+//RS     /// captures every event, including pointer events outside its rectangle.
+//RS     pub fn route_input(&mut self, input: NativeOverlayInput) -> NativeOverlayInputRoute {
+//RS         match input {
+//RS             NativeOverlayInput::Toggle => {
+//RS                 if self.release_build {
+//RS                     NativeOverlayInputRoute::Game
+//RS                 } else {
+//RS                     self.toggle();
+//RS                     NativeOverlayInputRoute::Overlay
+//RS                 }
+//RS             }
+//RS             NativeOverlayInput::Close => {
+//RS                 if self.state.open {
+//RS                     self.close();
+//RS                     NativeOverlayInputRoute::Overlay
+//RS                 } else {
+//RS                     NativeOverlayInputRoute::Game
+//RS                 }
+//RS             }
+//RS             NativeOverlayInput::Dock(dock) => {
+//RS                 if self.state.open {
+//RS                     self.set_dock(dock);
+//RS                     NativeOverlayInputRoute::Overlay
+//RS                 } else {
+//RS                     NativeOverlayInputRoute::Game
+//RS                 }
+//RS             }
+//RS             NativeOverlayInput::Focus(focused) => {
+//RS                 if self.state.open {
+//RS                     self.set_focus(focused);
+//RS                     NativeOverlayInputRoute::Overlay
+//RS                 } else {
+//RS                     NativeOverlayInputRoute::Game
+//RS                 }
+//RS             }
+//RS             NativeOverlayInput::Key { code, pressed } => {
+//RS                 if pressed && code == self.toggle_key {
+//RS                     if self.release_build {
+//RS                         NativeOverlayInputRoute::Game
+//RS                     } else {
+//RS                         self.toggle();
+//RS                         NativeOverlayInputRoute::Overlay
+//RS                     }
+//RS                 } else if self.captures_input() {
+//RS                     NativeOverlayInputRoute::Overlay
+//RS                 } else {
+//RS                     NativeOverlayInputRoute::Game
+//RS                 }
+//RS             }
+//RS             NativeOverlayInput::Gamepad { .. } => {
+//RS                 if self.captures_input() {
+//RS                     NativeOverlayInputRoute::Overlay
+//RS                 } else {
+//RS                     NativeOverlayInputRoute::Game
+//RS                 }
+//RS             }
+//RS             NativeOverlayInput::Pointer { x, y, .. } => {
+//RS                 if self.captures_input()
+//RS                     || (self.state.open && self.viewport.overlay_rect(self.state.dock).contains(x, y))
+//RS                 {
+//RS                     NativeOverlayInputRoute::Overlay
+//RS                 } else {
+//RS                     NativeOverlayInputRoute::Game
+//RS                 }
+//RS             }
+//RS             NativeOverlayInput::Text(_) | NativeOverlayInput::Activate { .. } => {
+//RS                 if self.captures_input() {
+//RS                     NativeOverlayInputRoute::Overlay
+//RS                 } else {
+//RS                     NativeOverlayInputRoute::Game
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Produce a deterministic headless frame without selecting a graphics
+//RS     /// backend.  Two calls with equal typed facts produce equal frames.
+//RS     pub fn headless_projection(event: &NativeOverlayEvent) -> Result<NativeOverlayFrame, String> {
+//RS         let mut host = Self::new();
+//RS         host.open();
+//RS         host.ingest(event.clone())?;
+//RS         host.frame()
+//RS             .cloned()
+//RS             .ok_or_else(|| "native overlay did not produce a headless frame".to_string())
+//RS     }
+//RS 
+//RS     fn push_frame(&mut self) {
+//RS         if self.release_build {
+//RS             return;
+//RS         }
+//RS         let Some(session_id) = self.session_id.as_deref() else {
+//RS             return;
+//RS         };
+//RS         let Some(revision) = self.revision.as_deref() else {
+//RS             return;
+//RS         };
+//RS         let Some(sequence) = self.sequence else {
+//RS             return;
+//RS         };
+//RS         let frame_id = self.next_frame_id;
+//RS         self.next_frame_id = self.next_frame_id.saturating_add(1).max(1);
+//RS         let frame = NativeOverlayFrame {
+//RS             frame_id,
+//RS             protocol: JET_DEVTOOLS_PROTOCOL.to_string(),
+//RS             session_id: session_id.to_string(),
+//RS             revision: revision.to_string(),
+//RS             sequence,
+//RS             observed_at_ms: self.observed_at_ms,
+//RS             open: self.state.open,
+//RS             dock: self.state.dock,
+//RS             focused: self.is_focused(),
+//RS             viewport: self.viewport,
+//RS             bounds: self.viewport.overlay_rect(self.state.dock),
+//RS             cursor: self.view.cursor,
+//RS             selection: self.view.selection.clone(),
+//RS             panels: self.panels.values().cloned().collect(),
+//RS         };
+//RS         if self.frames.len() == self.max_frames {
+//RS             self.frames.pop_front();
+//RS         }
+//RS         self.frames.push_back(frame);
+//RS     }
+//RS }
+//RS 
+//RS impl Default for NativeOverlayHost {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS fn append_native_node_commands(
+//RS     commands: &mut Vec<JetDevtoolsNativeDrawCommand>,
+//RS     node: &NativeOverlayNode,
+//RS     x: i32,
+//RS     y: &mut i64,
+//RS     bottom: i64,
+//RS     depth: usize,
+//RS ) {
+//RS     if *y >= bottom || commands.len() >= MAX_OVERLAY_NODES {
+//RS         return;
+//RS     }
+//RS     let indent = depth.saturating_mul(12).min(i32::MAX as usize) as i32;
+//RS     let mut text = node.label.clone();
+//RS     if let Some(value) = node.value.as_deref() {
+//RS         text.push_str(": ");
+//RS         text.push_str(value);
+//RS     }
+//RS     if let Some(status) = node.status.as_deref() {
+//RS         text.push_str(" [");
+//RS         text.push_str(status);
+//RS         text.push(']');
+//RS     }
+//RS     commands.push(JetDevtoolsNativeDrawCommand::Text {
+//RS         text,
+//RS         x: x.saturating_add(indent),
+//RS         y: (*y).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+//RS         size: 12,
+//RS         color: JetDevtoolsNativeColor::new(220, 230, 240, 255),
+//RS     });
+//RS     *y = (*y).saturating_add(16);
+//RS     for child in &node.children {
+//RS         append_native_node_commands(commands, child, x, y, bottom, depth.saturating_add(1));
+//RS         if *y >= bottom || commands.len() >= MAX_OVERLAY_NODES {
+//RS             break;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Foundation callback adapter installed by `jet dev`. It joins one resident
+//RS /// session to the real window hooks without importing `jet-devserver` into the
+//RS /// generated Prelude or inventing another event stream.
+//RS pub struct NativeOverlayHostBridge {
+//RS     session: Arc<ResidentDevSession>,
+//RS     adapter: Mutex<NativeOverlayAdapter>,
+//RS     host: Mutex<NativeOverlayHost>,
+//RS     toggle_key_state: Mutex<BTreeMap<String, bool>>,
+//RS }
+//RS 
+//RS impl NativeOverlayHostBridge {
+//RS     pub fn new(session: Arc<ResidentDevSession>, release_build: bool) -> Self {
+//RS         let adapter = NativeOverlayAdapter::for_session(&session).with_release_build(release_build);
+//RS         let host = NativeOverlayHost::new().with_release_build(release_build);
+//RS         Self {
+//RS             session,
+//RS             adapter: Mutex::new(adapter),
+//RS             host: Mutex::new(host),
+//RS             toggle_key_state: Mutex::new(BTreeMap::new()),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn frame(&self) -> Option<NativeOverlayFrame> {
+//RS         self.host.lock().ok()?.frame().cloned()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDevtoolsNativeHost for NativeOverlayHostBridge {
+//RS     fn on_event(&self, session_id: &str, _event: JetDevtoolsEvent) {
+//RS         if session_id != self.session.id() {
+//RS             return;
+//RS         }
+//RS         let Ok(mut adapter) = self.adapter.lock() else {
+//RS             return;
+//RS         };
+//RS         let Ok(update) = adapter.sync_session(&self.session) else {
+//RS             return;
+//RS         };
+//RS         if let Ok(mut host) = self.host.lock() {
+//RS             let _ = host.ingest_update(&update);
+//RS         }
+//RS     }
+//RS 
+//RS     fn on_window_open(&self, window: JetDevtoolsNativeWindow) {
+//RS         if window.session_id != self.session.id() {
+//RS             return;
+//RS         }
+//RS         let Ok(viewport) = NativeOverlayViewport::new(window.width, window.height, 1000) else {
+//RS             return;
+//RS         };
+//RS         if let Ok(mut host) = self.host.lock() {
+//RS             let _ = host.set_viewport(viewport);
+//RS         }
+//RS     }
+//RS 
+//RS     fn on_window_close(&self, session_id: &str) {
+//RS         if session_id != self.session.id() {
+//RS             return;
+//RS         }
+//RS         if let Ok(mut host) = self.host.lock() {
+//RS             host.close();
+//RS         }
+//RS     }
+//RS 
+//RS     fn on_input(&self, session_id: &str, input: JetDevtoolsNativeInput) -> bool {
+//RS         if session_id != self.session.id() {
+//RS             return false;
+//RS         }
+//RS         let Ok(mut host) = self.host.lock() else {
+//RS             return false;
+//RS         };
+//RS         let input = match input {
+//RS             JetDevtoolsNativeInput::Key { code, pressed } => {
+//RS                 let edge_pressed = if code == host.toggle_key() {
+//RS                     let Ok(mut states) = self.toggle_key_state.lock() else {
+//RS                         return false;
+//RS                     };
+//RS                     let was_pressed = states.insert(code.clone(), pressed).unwrap_or(false);
+//RS                     pressed && !was_pressed
+//RS                 } else {
+//RS                     pressed
+//RS                 };
+//RS                 NativeOverlayInput::Key {
+//RS                     code,
+//RS                     pressed: edge_pressed,
+//RS                 }
+//RS             }
+//RS             JetDevtoolsNativeInput::Gamepad {
+//RS                 gamepad,
+//RS                 control,
+//RS                 pressed,
+//RS             } => NativeOverlayInput::Gamepad {
+//RS                 gamepad,
+//RS                 control,
+//RS                 pressed,
+//RS             },
+//RS         };
+//RS         matches!(host.route_input(input), NativeOverlayInputRoute::Overlay)
+//RS     }
+//RS 
+//RS     fn on_frame_begin(&self, frame: JetDevtoolsNativeFrame) -> Vec<JetDevtoolsNativeDrawCommand> {
+//RS         if frame.session_id != self.session.id() {
+//RS             return Vec::new();
+//RS         }
+//RS         let Ok(viewport) = NativeOverlayViewport::new(frame.width, frame.height, 1000) else {
+//RS             return Vec::new();
+//RS         };
+//RS         let Ok(mut host) = self.host.lock() else {
+//RS             return Vec::new();
+//RS         };
+//RS         if host.viewport() != viewport {
+//RS             let _ = host.set_viewport(viewport);
+//RS         }
+//RS         host.native_draw_commands()
+//RS     }
+//RS 
+//RS     fn on_draw(&self, session_id: &str, command: JetDevtoolsNativeDrawCommand) {
+//RS         if session_id != self.session.id() {
+//RS             return;
+//RS         }
+//RS         if let Ok(mut host) = self.host.lock() {
+//RS             host.record_native_draw(command);
+//RS         }
+//RS     }
+//RS 
+//RS     fn on_frame_end(&self, session_id: &str) {
+//RS         if session_id != self.session.id() {
+//RS             return;
+//RS         }
+//RS         let _ = self.frame();
+//RS     }
+//RS }
+//RS 
+//RS fn validate_text(value: &str, label: &str, allow_empty: bool) -> Result<(), String> {
+//RS     if (!allow_empty && value.is_empty())
+//RS         || value.len() > MAX_OVERLAY_TEXT_BYTES
+//RS         || value.chars().any(char::is_control)
+//RS     {
+//RS         return Err(format!("{label} is empty, too long, or contains control text"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn panel(id: &str, freshness: u64) -> NativeOverlayPanelFact {
+//RS         NativeOverlayPanelFact::new(
+//RS             id,
+//RS             id,
+//RS             freshness,
+//RS             "ready",
+//RS             vec![NativeOverlayNode::text(format!("{id}:item"), "item")],
+//RS         )
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn projection_keeps_panel_identity_and_freshness() {
+//RS         let mut host = NativeOverlayHost::new();
+//RS         host.ingest(NativeOverlayEvent::current(
+//RS             "session",
+//RS             "revision",
+//RS             1,
+//RS             10,
+//RS             vec![panel("Build", 4)],
+//RS         ))
+//RS         .unwrap();
+//RS         let first = host.frame().unwrap().clone();
+//RS         host.ingest(NativeOverlayEvent::current(
+//RS             "session",
+//RS             "revision",
+//RS             2,
+//RS             11,
+//RS             vec![panel("Build", 5)],
+//RS         ))
+//RS         .unwrap();
+//RS         let second = host.frame().unwrap();
+//RS         assert_eq!(first.panels[0].panel_id, second.panels[0].panel_id);
+//RS         assert_eq!(second.panels[0].freshness, 5);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stale_revision_identity_is_rejected_at_equal_sequence() {
+//RS         let mut host = NativeOverlayHost::new();
+//RS         host.ingest(NativeOverlayEvent::current(
+//RS             "session",
+//RS             "revision-a",
+//RS             1,
+//RS             10,
+//RS             vec![panel("Build", 1)],
+//RS         ))
+//RS         .unwrap();
+//RS         let error = host
+//RS             .ingest(NativeOverlayEvent::current(
+//RS                 "session",
+//RS                 "revision-b",
+//RS                 1,
+//RS                 11,
+//RS                 vec![panel("Build", 2)],
+//RS             ))
+//RS             .unwrap_err();
+//RS         assert!(error.contains("revision identity"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn revision_rollover_discards_old_panels() {
+//RS         let mut host = NativeOverlayHost::new();
+//RS         host.ingest(NativeOverlayEvent::current(
+//RS             "session",
+//RS             "revision-a",
+//RS             1,
+//RS             10,
+//RS             vec![panel("Old", 1)],
+//RS         ))
+//RS         .unwrap();
+//RS         host.ingest(NativeOverlayEvent::current(
+//RS             "session",
+//RS             "revision-b",
+//RS             2,
+//RS             11,
+//RS             vec![panel("New", 1)],
+//RS         ))
+//RS         .unwrap();
+//RS         let frame = host.frame().unwrap();
+//RS         assert_eq!(frame.panels.len(), 1);
+//RS         assert_eq!(frame.panels[0].panel_id, "New");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn focused_overlay_never_routes_input_to_game() {
+//RS         let mut host = NativeOverlayHost::new();
+//RS         host.open();
+//RS         for input in [
+//RS             NativeOverlayInput::Key {
+//RS                 code: "Space".to_string(),
+//RS                 pressed: true,
+//RS             },
+//RS             NativeOverlayInput::Pointer {
+//RS                 x: -100,
+//RS                 y: -100,
+//RS                 pressed: true,
+//RS             },
+//RS             NativeOverlayInput::Text("typed".to_string()),
+//RS             NativeOverlayInput::Activate {
+//RS                 action_id: "inspect".to_string(),
+//RS             },
+//RS         ] {
+//RS             assert_eq!(host.route_input(input), NativeOverlayInputRoute::Overlay);
+//RS         }
+//RS         host.close();
+//RS         assert_eq!(
+//RS             host.route_input(NativeOverlayInput::Key {
+//RS                 code: "Space".to_string(),
+//RS                 pressed: true,
+//RS             }),
+//RS             NativeOverlayInputRoute::Game
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn headless_projection_is_deterministic() {
+//RS         let event = NativeOverlayEvent::current(
+//RS             "session",
+//RS             "revision",
+//RS             7,
+//RS             99,
+//RS             vec![panel("Traces", 3), panel("Build", 3)],
+//RS         );
+//RS         assert_eq!(
+//RS             NativeOverlayHost::headless_projection(&event).unwrap(),
+//RS             NativeOverlayHost::headless_projection(&event).unwrap()
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn merged_projection_stays_bounded() {
+//RS         let mut host = NativeOverlayHost::new();
+//RS         let nodes = (0..MAX_OVERLAY_NODES)
+//RS             .map(|index| NativeOverlayNode::text(format!("node-{index}"), "node"))
+//RS             .collect();
+//RS         host.ingest(NativeOverlayEvent::current(
+//RS             "session",
+//RS             "revision",
+//RS             1,
+//RS             1,
+//RS             vec![NativeOverlayPanelFact::new(
+//RS                 "first",
+//RS                 "first",
+//RS                 1,
+//RS                 "ready",
+//RS                 nodes,
+//RS             )],
+//RS         ))
+//RS         .unwrap();
+//RS         let error = host
+//RS             .ingest(NativeOverlayEvent::current(
+//RS                 "session",
+//RS                 "revision",
+//RS                 2,
+//RS                 2,
+//RS                 vec![panel("second", 1)],
+//RS             ))
+//RS             .unwrap_err();
+//RS         assert!(error.contains("node budget"));
+//RS         assert_eq!(host.frame().unwrap().sequence, 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn frame_history_is_bounded() {
+//RS         let mut host = NativeOverlayHost::new().with_frame_capacity(2);
+//RS         for sequence in 1..=4 {
+//RS             host.ingest(NativeOverlayEvent::current(
+//RS                 "session",
+//RS                 "revision",
+//RS                 sequence,
+//RS                 sequence,
+//RS                 vec![panel("Build", sequence)],
+//RS             ))
+//RS             .unwrap();
+//RS         }
+//RS         assert_eq!(host.frame_count(), 2);
+//RS         assert_eq!(host.frame().unwrap().sequence, 4);
+//RS     }
+//RS }
+// END-PORT-PENDING 0777 crates/jet-devserver/src/NativeOverlayHost.rs:1-1363
+

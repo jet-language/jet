@@ -1,0 +1,445 @@
+// PORT-PENDING 0751 crates-jet-debug-src-linemap: crates/jet-debug/src/LineMap.rs:1-441
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-DBG3 step 2 (dap-debugger): the rust-line <-> jet-line table for the native
+//RS //! backend. Built by scanning generated Rust text for the `// jet:line N` markers
+//RS //! `TStmt::LineMarker` emits (only present when the bundle was compiled through
+//RS //! `jet::Codegen::emit_bundle_dbg(.., true)` — the native `jet debug` build path).
+//RS //!
+//RS //! I2: this is the ONLY place the native backend is allowed to reason about
+//RS //! generated-Rust line numbers directly; everywhere else (the `(jet)` prompt, the
+//RS //! DAP adapter) works in Jet lines, translated through this table.
+//RS 
+//RS use std::collections::{BTreeMap, HashMap};
+//RS use std::io;
+//RS use std::path::Path;
+//RS 
+//RS use jet_foundation::DataTree::DataTree;
+//RS use jet_foundation::JSON::{json_escape, json_get, json_int, json_str, parse_json};
+//RS use jet_foundation::SHA256::{sha256_file_hex, sha256_hex};
+//RS 
+//RS const MAP_SCHEMA_VERSION: i64 = 1;
+//RS 
+//RS pub(crate) struct LineMap {
+//RS     /// Generated-Rust line -> Jet line, for every line a marker introduces.
+//RS     rust_to_jet: BTreeMap<usize, usize>,
+//RS     /// Jet line -> the FIRST rust line that begins it (used to place a
+//RS     /// `breakpoint set -f <file> -l <rust_line>` for a user's `break <jet_line>`).
+//RS     jet_to_rust: HashMap<usize, usize>,
+//RS     /// The generated entry wrapper begins after the Jet body. Lines there are
+//RS     /// Rust plumbing, not Jet source, even though the final Jet marker would
+//RS     /// otherwise remain the nearest preceding marker.
+//RS     jet_body_end: Option<usize>,
+//RS }
+//RS 
+//RS impl LineMap {
+//RS     /// Scan `rust_src` for `// jet:line N` markers (one per lowered `Stmt`,
+//RS     /// `crates/jet-codegen/src/Codegen/TIR/emit.rs`'s `TStmt::LineMarker` arm). The
+//RS     /// marker sits on its own line immediately before the statement's generated
+//RS     /// Rust, so the table maps that FOLLOWING rust line (not the comment's own
+//RS     /// line) to the Jet line.
+//RS     pub(crate) fn build(rust_src: &str) -> LineMap {
+//RS         let mut rust_to_jet = BTreeMap::new();
+//RS         let mut jet_to_rust = HashMap::new();
+//RS         let mut pending: Option<usize> = None;
+//RS         for (i, line) in rust_src.lines().enumerate() {
+//RS             let rust_line = i + 1;
+//RS             if let Some(n) = pending.take() {
+//RS                 rust_to_jet.insert(rust_line, n);
+//RS                 jet_to_rust.entry(n).or_insert(rust_line);
+//RS             }
+//RS             if let Some(rest) = line.trim_start().strip_prefix("// jet:line ") {
+//RS                 pending = rest.trim().parse::<usize>().ok();
+//RS             }
+//RS         }
+//RS         let jet_body_end = if rust_src
+//RS             .lines()
+//RS             .any(|line| line.trim_start().starts_with("pub fn __jet_run("))
+//RS         {
+//RS             let mut in_jet_entry = false;
+//RS             rust_src.lines().enumerate().find_map(|(index, line)| {
+//RS                 if line.trim_start().starts_with("pub fn __jet_run(") {
+//RS                     in_jet_entry = true;
+//RS                     return None;
+//RS                 }
+//RS                 (in_jet_entry && line.starts_with("fn main(")).then_some(index + 1)
+//RS             })
+//RS         } else {
+//RS             None
+//RS         };
+//RS         LineMap {
+//RS             rust_to_jet,
+//RS             jet_to_rust,
+//RS             jet_body_end,
+//RS         }
+//RS     }
+//RS 
+//RS     /// The Jet line a stopped rust frame belongs to: the marker at or immediately
+//RS     /// before `rust_line` (a multi-line Rust statement stops anywhere inside its
+//RS     /// span, not just the marker's own next line). `None` means the frame has no
+//RS     /// Jet line at all (prelude/generated glue) — the caller steps over it (I2).
+//RS     pub(crate) fn jet_line_for(&self, rust_line: usize) -> Option<usize> {
+//RS         if self
+//RS             .jet_body_end
+//RS             .is_some_and(|jet_body_end| rust_line >= jet_body_end)
+//RS         {
+//RS             return None;
+//RS         }
+//RS         self.rust_to_jet
+//RS             .range(..=rust_line)
+//RS             .next_back()
+//RS             .map(|(_, v)| *v)
+//RS     }
+//RS 
+//RS     /// Translate a frame only when LLDB's file identity agrees with the
+//RS     /// generated source recorded in the sidecar.  A line number without its
+//RS     /// file is not a safe source location: unrelated Rust/library frames can
+//RS     /// reuse the same line number.
+//RS     pub(crate) fn jet_line_for_file(
+//RS         &self,
+//RS         rust_file: &str,
+//RS         expected_rust_file: &str,
+//RS         rust_line: usize,
+//RS     ) -> Option<usize> {
+//RS         source_file_matches(rust_file, expected_rust_file)
+//RS             .then(|| self.jet_line_for(rust_line))
+//RS             .flatten()
+//RS     }
+//RS 
+//RS     /// The rust line to set a native breakpoint on for `break <jet_line>`.
+//RS     pub(crate) fn rust_line_for(&self, jet_line: usize) -> Option<usize> {
+//RS         self.jet_to_rust.get(&jet_line).copied()
+//RS     }
+//RS 
+//RS     /// The first marked rust line AT OR AFTER `rust_line` — used to place the
+//RS     /// initial breakpoint at the generated `__jet_run` body's first real
+//RS     /// statement by `-f -l` (line-based) rather than `-n main` (name-based,
+//RS     /// which can resolve to more than one symbol and land with no source line
+//RS     /// at all).
+//RS     pub(crate) fn first_at_or_after(&self, rust_line: usize) -> Option<usize> {
+//RS         self.rust_to_jet.range(rust_line..).next().map(|(k, _)| *k)
+//RS     }
+//RS 
+//RS     /// The rust line to set the INITIAL breakpoint on: `__jet_run`'s first real
+//RS     /// statement. Rust still has a tiny `fn main` wrapper, but the Jet user's
+//RS     /// code lives in `__jet_run`, which carries the line markers. Shared by the terminal session
+//RS     /// (`Native.rs`) and the DAP `launch` handler (`Dap.rs`) so both use the
+//RS     /// same file:line breakpoint, never the ambiguous `-n main`.
+//RS     pub(crate) fn main_entry_line(&self, rust_src: &str) -> Option<usize> {
+//RS         let entry_header = rust_src
+//RS             .lines()
+//RS             .position(|l| l.trim_start().starts_with("pub fn __jet_run("))
+//RS             .or_else(|| {
+//RS                 rust_src
+//RS                     .lines()
+//RS                     .position(|l| l.trim_start().starts_with("fn main("))
+//RS             })
+//RS             .map(|i| i + 1)
+//RS             .unwrap_or(1);
+//RS         self.first_at_or_after(entry_header)
+//RS     }
+//RS 
+//RS     /// Persist the exact source-to-generated table used by a native debug
+//RS     /// build. The hashes make stale binaries and stale generated sources a
+//RS     /// hard failure at the adapter boundary instead of a plausible wrong
+//RS     /// breakpoint.
+//RS     pub(crate) fn write_artifact(
+//RS         path: &Path,
+//RS         jet_file: &str,
+//RS         jet_src: &str,
+//RS         rust_file: &str,
+//RS         rust_src: &str,
+//RS         binary: &Path,
+//RS     ) -> io::Result<()> {
+//RS         let map = Self::build(rust_src);
+//RS         let binary_sha256 = sha256_file_hex(binary)?;
+//RS         let entries = map
+//RS             .rust_to_jet
+//RS             .iter()
+//RS             .map(|(rust, jet)| format!("{{\"rust\":{rust},\"jet\":{jet}}}"))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let json = format!(
+//RS             "{{\"schema_version\":{MAP_SCHEMA_VERSION},\"jet_file\":\"{}\",\"rust_file\":\"{}\",\"jet_sha256\":\"{}\",\"rust_sha256\":\"{}\",\"binary_sha256\":\"{}\",\"entries\":[{}]}}\n",
+//RS             json_escape(jet_file),
+//RS             json_escape(rust_file),
+//RS             sha256_hex(jet_src.as_bytes()),
+//RS             sha256_hex(rust_src.as_bytes()),
+//RS             binary_sha256,
+//RS             entries,
+//RS         );
+//RS         static MAP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+//RS         let counter = MAP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS         let temporary = path.with_extension(format!("jetmap.tmp-{}-{counter}", std::process::id()));
+//RS         if let Err(error) = std::fs::write(&temporary, json.as_bytes()) {
+//RS             let _ = std::fs::remove_file(&temporary);
+//RS             return Err(error);
+//RS         }
+//RS         if let Err(error) = std::fs::rename(&temporary, path) {
+//RS             let _ = std::fs::remove_file(&temporary);
+//RS             return Err(error);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Load and verify a sidecar before it is allowed to translate a native
+//RS     /// stop. The generated source remains the source of truth for the caller,
+//RS     /// but the sidecar is the build identity check for editor/attach flows.
+//RS     pub(crate) fn load_verified(
+//RS         path: &Path,
+//RS         jet_file: &str,
+//RS         jet_src: &str,
+//RS         rust_file: &str,
+//RS         rust_src: &str,
+//RS         binary: &Path,
+//RS     ) -> Result<LineMap, String> {
+//RS         let text = std::fs::read_to_string(path)
+//RS             .map_err(|error| format!("cannot read debugger map {}: {error}", path.display()))?;
+//RS         let root = parse_json(&text).map_err(|()| "debugger map is not valid JSON".to_string())?;
+//RS         let schema = json_get(&root, "schema_version")
+//RS             .and_then(json_int)
+//RS             .ok_or_else(|| "debugger map has no schema version".to_string())?;
+//RS         if schema != MAP_SCHEMA_VERSION {
+//RS             return Err(format!("unsupported debugger map schema {schema}"));
+//RS         }
+//RS         let jet_sha256 = sha256_hex(jet_src.as_bytes());
+//RS         let rust_sha256 = sha256_hex(rust_src.as_bytes());
+//RS         for (field, expected) in [
+//RS             ("jet_file", jet_file),
+//RS             ("rust_file", rust_file),
+//RS             ("jet_sha256", jet_sha256.as_str()),
+//RS             ("rust_sha256", rust_sha256.as_str()),
+//RS         ] {
+//RS             let actual = json_get(&root, field)
+//RS                 .and_then(json_str)
+//RS                 .ok_or_else(|| format!("debugger map has no {field}"))?;
+//RS             if field.ends_with("_file") {
+//RS                 let expected_path = std::fs::canonicalize(expected)
+//RS                     .ok()
+//RS                     .map(|path| path.display().to_string());
+//RS                 if actual != expected
+//RS                     && expected_path.as_deref() != Some(actual)
+//RS                     && !(field == "rust_file"
+//RS                         && Path::new(actual).file_name() == Path::new(expected).file_name())
+//RS                 {
+//RS                     return Err(format!("debugger map {field} does not match the target"));
+//RS                 }
+//RS             } else if actual != expected {
+//RS                 return Err(format!("debugger map {field} does not match the target"));
+//RS             }
+//RS         }
+//RS         let expected_binary = sha256_file_hex(binary)
+//RS             .map_err(|error| format!("cannot hash debugger binary: {error}"))?;
+//RS         let actual_binary = json_get(&root, "binary_sha256")
+//RS             .and_then(json_str)
+//RS             .ok_or_else(|| "debugger map has no binary_sha256".to_string())?;
+//RS         if actual_binary != expected_binary {
+//RS             return Err("debugger map does not match the debug binary".to_string());
+//RS         }
+//RS         let entries = json_get(&root, "entries")
+//RS             .and_then(|value| match value {
+//RS                 DataTree::Array(values) => Some(values),
+//RS                 _ => None,
+//RS             })
+//RS             .ok_or_else(|| "debugger map has no entries".to_string())?;
+//RS         let mut rust_to_jet = BTreeMap::new();
+//RS         let mut jet_to_rust = HashMap::new();
+//RS         for entry in entries {
+//RS             let rust = json_get(entry, "rust")
+//RS                 .and_then(json_int)
+//RS                 .and_then(|value| usize::try_from(value).ok())
+//RS                 .filter(|value| *value > 0)
+//RS                 .ok_or_else(|| "debugger map has an invalid rust line".to_string())?;
+//RS             let jet = json_get(entry, "jet")
+//RS                 .and_then(json_int)
+//RS                 .and_then(|value| usize::try_from(value).ok())
+//RS                 .filter(|value| *value > 0)
+//RS                 .ok_or_else(|| "debugger map has an invalid Jet line".to_string())?;
+//RS             if rust_to_jet.insert(rust, jet).is_some() {
+//RS                 return Err("debugger map has duplicate line entries".to_string());
+//RS             }
+//RS             // Several generated statements may originate from one Jet line.
+//RS             // Preserve the first stoppable Rust line, matching `build` and
+//RS             // keeping source breakpoints deterministic.
+//RS             jet_to_rust.entry(jet).or_insert(rust);
+//RS         }
+//RS         // The hashes prove that this sidecar names the current build, but they
+//RS         // do not prove that its table was produced from that build. Rebuild the
+//RS         // table from the generated source and reject any edited mapping before
+//RS         // it can influence a breakpoint or frame projection.
+//RS         let expected = Self::build(rust_src);
+//RS         if rust_to_jet != expected.rust_to_jet || jet_to_rust != expected.jet_to_rust {
+//RS             return Err("debugger map entries do not match the generated source".to_string());
+//RS         }
+//RS         Ok(LineMap {
+//RS             rust_to_jet,
+//RS             jet_to_rust,
+//RS             jet_body_end: expected.jet_body_end,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS fn source_file_matches(actual: &str, expected: &str) -> bool {
+//RS     if actual == expected {
+//RS         return true;
+//RS     }
+//RS     let actual_path = Path::new(actual);
+//RS     let expected_path = Path::new(expected);
+//RS     if std::fs::canonicalize(actual_path).ok() == std::fs::canonicalize(expected_path).ok()
+//RS         && actual_path.exists()
+//RS         && expected_path.exists()
+//RS     {
+//RS         return true;
+//RS     }
+//RS     matches!(
+//RS         (actual_path.file_name(), expected_path.file_name()),
+//RS         (Some(actual), Some(expected)) if actual == expected
+//RS     )
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn maps_marker_to_the_following_line() {
+//RS         let rust = "fn main() {\n    // jet:line 7\n    let x = 1;\n    // jet:line 8\n    let y = 2;\n}\n";
+//RS         let map = LineMap::build(rust);
+//RS         assert_eq!(map.jet_line_for(3), Some(7));
+//RS         assert_eq!(map.jet_line_for(5), Some(8));
+//RS         assert_eq!(map.rust_line_for(7), Some(3));
+//RS         assert_eq!(map.rust_line_for(8), Some(5));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn multi_line_statement_resolves_to_the_marker_before_it() {
+//RS         let rust = "    // jet:line 12\n    let x = some_call(\n        1,\n        2,\n    );\n";
+//RS         let map = LineMap::build(rust);
+//RS         assert_eq!(map.jet_line_for(2), Some(12));
+//RS         assert_eq!(map.jet_line_for(4), Some(12));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn no_marker_before_a_line_is_none() {
+//RS         let rust = "fn main() {\n    let x = 1;\n}\n";
+//RS         let map = LineMap::build(rust);
+//RS         assert_eq!(map.jet_line_for(2), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generated_entry_wrapper_is_not_projected_as_jet() {
+//RS         let rust = "pub fn __jet_run() {\n    // jet:line 2\n    let x = 1;\n}\nfn main() {\n    __jet_run();\n}\n";
+//RS         let map = LineMap::build(rust);
+//RS         assert_eq!(map.jet_line_for(3), Some(2));
+//RS         assert_eq!(map.jet_line_for(5), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn file_aware_mapping_rejects_an_unrelated_frame() {
+//RS         let map = LineMap::build("fn main() {\n// jet:line 7\nlet x = 1;\n}\n");
+//RS         assert_eq!(
+//RS             map.jet_line_for_file("generated.rs", "generated.rs", 3),
+//RS             Some(7)
+//RS         );
+//RS         assert_eq!(map.jet_line_for_file("library.rs", "generated.rs", 3), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn first_at_or_after_finds_the_next_marked_line() {
+//RS         let rust = "fn main() {\n    // jet:line 2\n    let x = 1;\n    // jet:line 3\n    let y = 2;\n}\n";
+//RS         let map = LineMap::build(rust);
+//RS         // The `fn main() {` line itself (1) has no marker on it — the search
+//RS         // should land on the first REAL statement's rust line (3), not 1.
+//RS         assert_eq!(map.first_at_or_after(1), Some(3));
+//RS         assert_eq!(map.first_at_or_after(4), Some(5));
+//RS         assert_eq!(map.first_at_or_after(6), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sidecar_round_trip_rejects_a_stale_binary() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-debug-map-test-{}-{}",
+//RS             std::process::id(),
+//RS             std::thread::current().name().unwrap_or("test")
+//RS         ));
+//RS         let _ = std::fs::create_dir_all(&root);
+//RS         let binary = root.join("program");
+//RS         let map_path = root.join("program.jetmap");
+//RS         let jet_src = "main() {\n  print(1)\n}\n";
+//RS         let rust_src = "fn main() {\n// jet:line 2\nlet x = 1;\n}\n";
+//RS         std::fs::write(&binary, b"debug-binary").unwrap();
+//RS         LineMap::write_artifact(
+//RS             &map_path,
+//RS             "program.jet",
+//RS             jet_src,
+//RS             "program.rs",
+//RS             rust_src,
+//RS             &binary,
+//RS         )
+//RS         .unwrap();
+//RS         let loaded = LineMap::load_verified(
+//RS             &map_path,
+//RS             "program.jet",
+//RS             jet_src,
+//RS             "program.rs",
+//RS             rust_src,
+//RS             &binary,
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(loaded.rust_line_for(2), Some(3));
+//RS         std::fs::write(&binary, b"stale-binary").unwrap();
+//RS         assert!(LineMap::load_verified(
+//RS             &map_path,
+//RS             "program.jet",
+//RS             jet_src,
+//RS             "program.rs",
+//RS             rust_src,
+//RS             &binary,
+//RS         )
+//RS         .is_err());
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sidecar_round_trip_rejects_edited_entries_with_matching_hashes() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-debug-map-entry-test-{}-{}",
+//RS             std::process::id(),
+//RS             std::thread::current().name().unwrap_or("test")
+//RS         ));
+//RS         let _ = std::fs::create_dir_all(&root);
+//RS         let binary = root.join("program");
+//RS         let map_path = root.join("program.jetmap");
+//RS         let jet_src = "main() {\n  print(1)\n}\n";
+//RS         let rust_src = "fn main() {\n// jet:line 2\nlet x = 1;\n}\n";
+//RS         std::fs::write(&binary, b"debug-binary").unwrap();
+//RS         LineMap::write_artifact(
+//RS             &map_path,
+//RS             "program.jet",
+//RS             jet_src,
+//RS             "program.rs",
+//RS             rust_src,
+//RS             &binary,
+//RS         )
+//RS         .unwrap();
+//RS         let map = std::fs::read_to_string(&map_path).unwrap();
+//RS         let edited = map.replace("\"rust\":3,\"jet\":2", "\"rust\":3,\"jet\":99");
+//RS         assert_ne!(edited, map, "fixture must contain the expected mapping");
+//RS         std::fs::write(&map_path, edited).unwrap();
+//RS         let result = LineMap::load_verified(
+//RS             &map_path,
+//RS             "program.jet",
+//RS             jet_src,
+//RS             "program.rs",
+//RS             rust_src,
+//RS             &binary,
+//RS         );
+//RS         let error = match result {
+//RS             Ok(_) => panic!("edited sidecar entries must not be trusted"),
+//RS             Err(error) => error,
+//RS         };
+//RS         assert!(error.contains("entries do not match"), "{error}");
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS     }
+//RS }
+// END-PORT-PENDING 0751 crates/jet-debug/src/LineMap.rs:1-441
+

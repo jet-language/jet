@@ -1,0 +1,1804 @@
+// PORT-PENDING 2059 tests-repl-slice-1: tests/repl.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! E2-M18 — REPL transcript tests (D-REPL20=A).
+//RS //!
+//RS //! Each transcript in `tests/repl/*.txt` is run through `jet::REPL::run_transcript`.
+//RS //! Lines starting with `> ` are REPL inputs; other non-comment lines are
+//RS //! expected output. Lines starting with `# ` are ignored.
+//RS //!
+//RS //! Test failures show the first diverging expected/actual line.
+//RS 
+//RS mod common;
+//RS 
+//RS use jet::REPL::{run_transcript, run_transcript_with_flags};
+//RS 
+//RS fn run_repl_process(
+//RS     state: &std::path::Path,
+//RS     input: &[u8],
+//RS     limit: Option<&str>,
+//RS ) -> std::process::Output {
+//RS     use std::io::Write as _;
+//RS     use std::process::{Command, Stdio};
+//RS 
+//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     command
+//RS         .arg("repl")
+//RS         .env("XDG_STATE_HOME", state)
+//RS         .env_remove("JET_REPL_HISTORY")
+//RS         .env("NO_COLOR", "1")
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped());
+//RS     if let Some(limit) = limit {
+//RS         command.env("JET_REPL_HISTORY_LIMIT", limit);
+//RS     }
+//RS     let mut child = command.spawn().expect("start repl");
+//RS     child.stdin.as_mut().unwrap().write_all(input).unwrap();
+//RS     child.wait_with_output().expect("finish repl")
+//RS }
+//RS 
+//RS fn spawn_repl_process(state: &std::path::Path) -> std::process::Child {
+//RS     use std::process::{Command, Stdio};
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .arg("repl")
+//RS         .env("XDG_STATE_HOME", state)
+//RS         .env_remove("JET_REPL_HISTORY")
+//RS         .env("NO_COLOR", "1")
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("start repl")
+//RS }
+//RS 
+//RS fn wait_for_history_dir(state: &std::path::Path) {
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS     while !state.join("jet").is_dir() {
+//RS         assert!(
+//RS             std::time::Instant::now() < deadline,
+//RS             "history directory was not opened"
+//RS         );
+//RS         std::thread::sleep(std::time::Duration::from_millis(10));
+//RS     }
+//RS     std::thread::sleep(std::time::Duration::from_millis(50));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_history_persists_only_successes_searches_clears_and_is_private() {
+//RS     let state = std::env::temp_dir().join(format!("jet_repl_history_{}", std::process::id()));
+//RS     std::fs::remove_dir_all(&state).ok();
+//RS     let first = run_repl_process(&state, b"answer :: 42\nmissing_name\n:quit\n", None);
+//RS     assert!(first.status.success(), "first session: {:?}", first.status);
+//RS 
+//RS     let history = state.join("jet/repl-history");
+//RS     let stored = std::fs::read_to_string(&history).expect("history file");
+//RS     assert_eq!(
+//RS         stored.lines().count(),
+//RS         1,
+//RS         "failed turn persisted: {stored:?}"
+//RS     );
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         assert_eq!(
+//RS             std::fs::metadata(&history).unwrap().permissions().mode() & 0o777,
+//RS             0o600
+//RS         );
+//RS     }
+//RS 
+//RS     let second = run_repl_process(
+//RS         &state,
+//RS         b":history search answer\n:history search missing\n:history clear\n:quit\n",
+//RS         None,
+//RS     );
+//RS     let out = String::from_utf8_lossy(&second.stdout);
+//RS     assert!(out.contains("answer :: 42"), "search output: {out:?}");
+//RS     assert!(
+//RS         out.contains("No history matches."),
+//RS         "failed turn was searchable: {out:?}"
+//RS     );
+//RS     assert!(out.contains("History cleared."), "clear output: {out:?}");
+//RS     assert!(!history.exists(), "clear must erase whole file");
+//RS     std::fs::remove_dir_all(state).ok();
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_history_limit_and_corrupt_tail_recover_visibly() {
+//RS     let state = std::env::temp_dir().join(format!("jet_repl_history_tail_{}", std::process::id()));
+//RS     std::fs::remove_dir_all(&state).ok();
+//RS     let first = run_repl_process(&state, b"1 + 1\n2 + 2\n3 + 3\n:quit\n", Some("2"));
+//RS     assert!(first.status.success());
+//RS     let history = state.join("jet/repl-history");
+//RS     use std::io::Write as _;
+//RS     std::fs::OpenOptions::new()
+//RS         .append(true)
+//RS         .open(&history)
+//RS         .unwrap()
+//RS         .write_all(b"broken-tail")
+//RS         .unwrap();
+//RS 
+//RS     let second = run_repl_process(&state, b":history search +\n:quit\n", Some("2"));
+//RS     let out = String::from_utf8_lossy(&second.stdout);
+//RS     let err = String::from_utf8_lossy(&second.stderr);
+//RS     assert!(!out.contains("1 + 1"), "retention exceeded: {out:?}");
+//RS     assert!(
+//RS         out.contains("2 + 2") && out.contains("3 + 3"),
+//RS         "retained entries missing: {out:?}"
+//RS     );
+//RS     assert!(
+//RS         err.contains("corrupt history tail") && err.contains("discarded"),
+//RS         "warning missing: {err:?}"
+//RS     );
+//RS     assert!(!std::fs::read_to_string(&history)
+//RS         .unwrap()
+//RS         .contains("broken-tail"));
+//RS     std::fs::remove_dir_all(state).ok();
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_history_off_is_session_only_and_visible_storage_failure_falls_back() {
+//RS     use std::io::Write as _;
+//RS     use std::process::{Command, Stdio};
+//RS     let state = std::env::temp_dir().join(format!("jet_repl_history_off_{}", std::process::id()));
+//RS     std::fs::remove_dir_all(&state).ok();
+//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .arg("repl")
+//RS         .env("XDG_STATE_HOME", &state)
+//RS         .env("JET_REPL_HISTORY", "off")
+//RS         .env("NO_COLOR", "1")
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     child
+//RS         .stdin
+//RS         .as_mut()
+//RS         .unwrap()
+//RS         .write_all(b"8 + 9\n:history search 8\n:quit\n")
+//RS         .unwrap();
+//RS     let output = child.wait_with_output().unwrap();
+//RS     assert!(String::from_utf8_lossy(&output.stdout).contains("8 + 9"));
+//RS     assert!(!state.join("jet/repl-history").exists());
+//RS 
+//RS     let blocked = state.join("blocked");
+//RS     std::fs::create_dir_all(&state).unwrap();
+//RS     std::fs::write(&blocked, b"not a directory").unwrap();
+//RS     let fallback = run_repl_process(&blocked, b":quit\n", None);
+//RS     assert!(String::from_utf8_lossy(&fallback.stderr).contains("session-only history"));
+//RS     std::fs::remove_dir_all(state).ok();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn repl_history_rejects_symlinked_state_parent_without_chmod_or_escape() {
+//RS     use std::os::unix::fs::{symlink, PermissionsExt};
+//RS     let root = std::env::temp_dir().join(format!("jet_repl_history_link_{}", std::process::id()));
+//RS     let outside =
+//RS         std::env::temp_dir().join(format!("jet_repl_history_outside_{}", std::process::id()));
+//RS     std::fs::remove_dir_all(&root).ok();
+//RS     std::fs::remove_dir_all(&outside).ok();
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     std::fs::create_dir_all(&outside).unwrap();
+//RS     std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o755)).unwrap();
+//RS     symlink(&outside, root.join("linked")).unwrap();
+//RS 
+//RS     let output = run_repl_process(&root.join("linked/state"), b"5 + 5\n:quit\n", None);
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         stderr.contains("session-only history"),
+//RS         "fallback invisible: {stderr:?}"
+//RS     );
+//RS     assert!(
+//RS         !outside.join("state").exists(),
+//RS         "history escaped through state symlink"
+//RS     );
+//RS     assert_eq!(
+//RS         std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777,
+//RS         0o755
+//RS     );
+//RS     std::fs::remove_dir_all(root).ok();
+//RS     std::fs::remove_dir_all(outside).ok();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn repl_history_parent_swap_stays_on_held_directory() {
+//RS     use std::io::Write as _;
+//RS     use std::os::unix::fs::symlink;
+//RS     let state = std::env::temp_dir().join(format!("jet_repl_history_swap_{}", std::process::id()));
+//RS     let outside =
+//RS         std::env::temp_dir().join(format!("jet_repl_history_swap_out_{}", std::process::id()));
+//RS     std::fs::remove_dir_all(&state).ok();
+//RS     std::fs::remove_dir_all(&outside).ok();
+//RS     std::fs::create_dir_all(&outside).unwrap();
+//RS     let mut child = spawn_repl_process(&state);
+//RS     wait_for_history_dir(&state);
+//RS     let held = state.join("held-jet");
+//RS     std::fs::rename(state.join("jet"), &held).unwrap();
+//RS     symlink(&outside, state.join("jet")).unwrap();
+//RS     child
+//RS         .stdin
+//RS         .as_mut()
+//RS         .unwrap()
+//RS         .write_all(b"4 + 4\n:quit\n")
+//RS         .unwrap();
+//RS     let output = child.wait_with_output().unwrap();
+//RS     assert!(output.status.success());
+//RS     assert!(
+//RS         !outside.join("repl-history").exists(),
+//RS         "swap redirected history write"
+//RS     );
+//RS     assert_eq!(
+//RS         std::fs::read_to_string(held.join("repl-history"))
+//RS             .unwrap()
+//RS             .lines()
+//RS             .count(),
+//RS         1
+//RS     );
+//RS     std::fs::remove_file(state.join("jet")).ok();
+//RS     std::fs::remove_dir_all(state).ok();
+//RS     std::fs::remove_dir_all(outside).ok();
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_history_two_processes_merge_and_clear_cannot_resurrect() {
+//RS     use std::io::Write as _;
+//RS     let state = std::env::temp_dir().join(format!("jet_repl_history_tx_{}", std::process::id()));
+//RS     std::fs::remove_dir_all(&state).ok();
+//RS     let mut first = spawn_repl_process(&state);
+//RS     let mut second = spawn_repl_process(&state);
+//RS     wait_for_history_dir(&state);
+//RS     let mut first_stdin = first.stdin.take().unwrap();
+//RS     let mut second_stdin = second.stdin.take().unwrap();
+//RS     let writer_a = std::thread::spawn(move || first_stdin.write_all(b"left_marker :: 1\n:quit\n"));
+//RS     let writer_b =
+//RS         std::thread::spawn(move || second_stdin.write_all(b"right_marker :: 2\n:quit\n"));
+//RS     writer_a.join().unwrap().unwrap();
+//RS     writer_b.join().unwrap().unwrap();
+//RS     assert!(first.wait().unwrap().success());
+//RS     assert!(second.wait().unwrap().success());
+//RS     let merged = run_repl_process(
+//RS         &state,
+//RS         b":history search left_marker\n:history search right_marker\n:quit\n",
+//RS         None,
+//RS     );
+//RS     let merged = String::from_utf8_lossy(&merged.stdout);
+//RS     assert!(
+//RS         merged.contains("left_marker :: 1") && merged.contains("right_marker :: 2"),
+//RS         "lost update: {merged:?}"
+//RS     );
+//RS 
+//RS     let mut stale = spawn_repl_process(&state);
+//RS     wait_for_history_dir(&state);
+//RS     let cleared = run_repl_process(&state, b":history clear\n:quit\n", None);
+//RS     assert!(cleared.status.success());
+//RS     stale
+//RS         .stdin
+//RS         .as_mut()
+//RS         .unwrap()
+//RS         .write_all(b"fresh_marker :: 3\n:quit\n")
+//RS         .unwrap();
+//RS     assert!(stale.wait().unwrap().success());
+//RS     let after = run_repl_process(
+//RS         &state,
+//RS         b":history search left_marker\n:history search right_marker\n:history search fresh_marker\n:quit\n",
+//RS         None,
+//RS     );
+//RS     let after = String::from_utf8_lossy(&after.stdout);
+//RS     assert!(
+//RS         after.contains("fresh_marker :: 3"),
+//RS         "fresh write missing: {after:?}"
+//RS     );
+//RS     assert!(
+//RS         !after.contains("left_marker :: 1") && !after.contains("right_marker :: 2"),
+//RS         "clear resurrected history: {after:?}"
+//RS     );
+//RS     std::fs::remove_dir_all(state).ok();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn repl_raw_f3_search_recalls_and_submits_persistent_history() {
+//RS     use std::process::Command;
+//RS     let state = std::env::temp_dir().join(format!("jet_repl_history_f3_{}", std::process::id()));
+//RS     std::fs::remove_dir_all(&state).ok();
+//RS     assert!(run_repl_process(&state, b"3 + 3\n:quit\n", None)
+//RS         .status
+//RS         .success());
+//RS     let shell = r#"
+//RS {
+//RS   sleep 0.2
+//RS   printf '\033OR'
+//RS   sleep 0.1
+//RS   printf '3 +\r'
+//RS   sleep 0.1
+//RS   printf '\r'
+//RS   sleep 0.2
+//RS   printf ':quit\r'
+//RS } | script -qec '"$JET_REPL_BIN" repl' /dev/null
+//RS "#;
+//RS     let output = Command::new("sh")
+//RS         .args(["-c", shell])
+//RS         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+//RS         .env("XDG_STATE_HOME", &state)
+//RS         .env_remove("JET_REPL_HISTORY")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run raw REPL under PTY");
+//RS     let out = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "PTY status: {:?}\n{out}",
+//RS         output.status
+//RS     );
+//RS     assert!(
+//RS         out.contains("history search>"),
+//RS         "F3 did not open search: {out:?}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("6 : Int"),
+//RS         "recalled submission did not execute: {out:?}"
+//RS     );
+//RS     std::fs::remove_dir_all(state).ok();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn run_raw_multiline_pty(writer: &str) -> std::process::Output {
+//RS     use std::process::Command;
+//RS     let shell = format!(
+//RS         "{{ sleep 0.2; {writer}; sleep 0.2; printf ':quit\\r'; }} | \
+//RS          timeout 8s script -qec '\"$JET_REPL_BIN\" repl' /dev/null"
+//RS     );
+//RS     Command::new("sh")
+//RS         .args(["-c", &shell])
+//RS         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+//RS         .env("JET_REPL_HISTORY", "off")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run raw multiline REPL under PTY")
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn repl_raw_enter_uses_parser_completeness_not_bracket_balance() {
+//RS     let output = run_raw_multiline_pty("printf '40 +\\r'; sleep 0.15; printf '2\\r'");
+//RS     let out = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "PTY status: {:?}\n{out}",
+//RS         output.status
+//RS     );
+//RS     assert!(out.contains("· "), "continuation prompt missing: {out:?}");
+//RS     assert!(
+//RS         out.contains("42 : Int"),
+//RS         "parser-complete input did not submit: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn repl_raw_escape_enter_forces_newline_then_blank_submits() {
+//RS     let output = run_raw_multiline_pty("printf '40 + 2\\033\\r'; sleep 0.15; printf '\\r'");
+//RS     let out = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "PTY status: {:?}\n{out}",
+//RS         output.status
+//RS     );
+//RS     assert!(
+//RS         out.contains("· "),
+//RS         "forced newline did not redraw continuation: {out:?}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("42 : Int"),
+//RS         "blank continuation did not submit: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn repl_raw_blank_continuation_force_submits_incomplete_input() {
+//RS     let output = run_raw_multiline_pty("printf '1 +\\r'; sleep 0.15; printf '\\r'");
+//RS     let out = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "PTY status: {:?}\n{out}",
+//RS         output.status
+//RS     );
+//RS     assert!(
+//RS         out.contains("E0003"),
+//RS         "blank continuation kept waiting: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn repl_raw_multiline_redraw_keeps_second_line_editable() {
+//RS     let output = run_raw_multiline_pty("printf '10 +\\r'; sleep 0.15; printf '3\\1772\\r'");
+//RS     let out = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "PTY status: {:?}\n{out}",
+//RS         output.status
+//RS     );
+//RS     assert!(
+//RS         out.contains("· 2"),
+//RS         "continuation redraw lost edited line: {out:?}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("12 : Int"),
+//RS         "edited multiline input was wrong: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn repl_raw_narrow_soft_wrap_keeps_cursor_delete_and_redraw_aligned() {
+//RS     use std::process::Command;
+//RS     let shell = r#"
+//RS {
+//RS   sleep 0.2
+//RS   printf '10 + 20 + 30 + 49'
+//RS   sleep 0.15
+//RS   printf '\033[D\033[3~\r'
+//RS   sleep 0.2
+//RS   printf ':quit\r'
+//RS } | timeout 8s script -qec 'stty cols 20; "$JET_REPL_BIN" repl' /dev/null
+//RS "#;
+//RS     let output = Command::new("sh")
+//RS         .args(["-c", shell])
+//RS         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+//RS         .env("JET_REPL_HISTORY", "off")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run narrow raw REPL under PTY");
+//RS     let out = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "PTY status: {:?}\n{out}",
+//RS         output.status
+//RS     );
+//RS     assert!(
+//RS         out.contains("\x1b[1A"),
+//RS         "soft-wrap redraw never moved to prior physical row: {out:?}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("64 : Int"),
+//RS         "cursor/delete changed wrapped input incorrectly: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_cooked_keeps_bracket_balance_continuation() {
+//RS     use std::io::Write as _;
+//RS     use std::process::{Command, Stdio};
+//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .arg("repl")
+//RS         .env("JET_REPL_HISTORY", "off")
+//RS         .env("NO_COLOR", "1")
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     child
+//RS         .stdin
+//RS         .as_mut()
+//RS         .unwrap()
+//RS         .write_all(b"[1,\n2]\n:quit\n")
+//RS         .unwrap();
+//RS     let output = child.wait_with_output().unwrap();
+//RS     let out = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "cooked status: {:?}\n{out}",
+//RS         output.status
+//RS     );
+//RS     assert!(
+//RS         out.contains("...  "),
+//RS         "cooked continuation prompt missing: {out:?}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("[1, 2]"),
+//RS         "balanced cooked input failed: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS /// Parse a transcript file: return `(inputs, expected_outputs)`.
+//RS /// Lines `> input` become inputs; non-comment, non-`>` lines become expected.
+//RS /// Lines starting with `# ` are comments. Blank expected-output lines are
+//RS /// represented as blank strings (the transcript may expect a blank output line).
+//RS fn parse_transcript(txt: &str) -> (Vec<String>, Vec<String>) {
+//RS     let mut inputs: Vec<String> = Vec::new();
+//RS     let mut expected: Vec<String> = Vec::new();
+//RS     for line in txt.lines() {
+//RS         if line.starts_with("# ") || line == "#" {
+//RS             // comment — skip
+//RS         } else if let Some(input) = line.strip_prefix("> ") {
+//RS             inputs.push(input.to_string());
+//RS         } else {
+//RS             // expected output line (may be blank)
+//RS             expected.push(line.to_string());
+//RS         }
+//RS     }
+//RS     (inputs, expected)
+//RS }
+//RS 
+//RS fn run_transcript_file(txt: &str) {
+//RS     run_transcript_file_with_trailing_policy(txt, true);
+//RS }
+//RS 
+//RS fn run_transcript_file_strict(txt: &str) {
+//RS     run_transcript_file_with_trailing_policy(txt, false);
+//RS }
+//RS 
+//RS fn run_transcript_file_with_trailing_policy(txt: &str, allow_trailing: bool) {
+//RS     run_transcript_file_with_trailing_policy_and_flags(txt, allow_trailing, &[], &[]);
+//RS }
+//RS 
+//RS fn run_transcript_file_strict_with_flags(txt: &str, allow: &[&str]) {
+//RS     run_transcript_file_with_trailing_policy_and_flags(txt, false, allow, &[]);
+//RS }
+//RS 
+//RS fn run_transcript_file_with_trailing_policy_and_flags(
+//RS     txt: &str,
+//RS     allow_trailing: bool,
+//RS     allow: &[&str],
+//RS     deny: &[&str],
+//RS ) {
+//RS     let (inputs, expected_lines) = parse_transcript(txt);
+//RS     let input_refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
+//RS     let actual = run_transcript_with_flags(&input_refs, None, allow, deny);
+//RS 
+//RS     // Split actual output into lines (preserve blank lines).
+//RS     let actual_lines: Vec<&str> = actual.lines().collect();
+//RS 
+//RS     // Compare line by line; skip blank expected lines that represent
+//RS     // "no output" comments in the transcript.
+//RS     let mut ai = 0; // index into actual_lines
+//RS     for (i, exp) in expected_lines.iter().enumerate() {
+//RS         if exp.is_empty() {
+//RS             // blank expected line — skip (these are transcript spacing)
+//RS             continue;
+//RS         }
+//RS         let got = actual_lines.get(ai).copied().unwrap_or("<no output>");
+//RS         assert_eq!(
+//RS             got,
+//RS             exp.as_str(),
+//RS             "transcript line {}: expected {:?} but got {:?}\nfull actual output:\n{}",
+//RS             i + 1,
+//RS             exp,
+//RS             got,
+//RS             actual
+//RS         );
+//RS         ai += 1;
+//RS     }
+//RS     if !allow_trailing {
+//RS         assert_eq!(
+//RS             ai,
+//RS             actual_lines.len(),
+//RS             "unexpected trailing transcript output: {:?}\nfull actual output:\n{}",
+//RS             &actual_lines[ai..],
+//RS             actual
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS // ── test cases ────────────────────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn repl_arithmetic_echo() {
+//RS     let out = run_transcript(&["1 + 2"], None);
+//RS     assert_eq!(out.trim(), "3 : Int");
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_rejects_user_dunder() {
+//RS     let out = run_transcript(&["__user :: 1"], None);
+//RS     assert!(
+//RS         out.contains("E0067") && out.contains("reserved for Jet"),
+//RS         "got: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_val_binding_then_expr() {
+//RS     let inputs = &["x :: 10", "x * 2"];
+//RS     let out = run_transcript(inputs, None);
+//RS     // First input produces no output (val declaration).
+//RS     // Second produces the echo.
+//RS     assert!(out.trim().ends_with("20 : Int"), "got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_print_output() {
+//RS     let out = run_transcript(&["print(\"hello, world\")"], None);
+//RS     assert!(out.contains("hello, world"), "got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_stream_break_runs_deferred_close() {
+//RS     let declarations = r#"
+//RS struct Marker {
+//RS     name: String
+//RS }
+//RS 
+//RS impl Marker.Close {
+//RS     fn close(^self) {
+//RS         print("closed: {self.name}")
+//RS     }
+//RS }
+//RS 
+//RS fn values() -[]> Stream<Int> {
+//RS     marker := Marker{name: "stream"}
+//RS     defer close(^marker)
+//RS     print("before")
+//RS     yield 1
+//RS     print("after")
+//RS     yield 2
+//RS }
+//RS 
+//RS fn run() {
+//RS     loop value in values() {
+//RS         print("value: {value}")
+//RS         break
+//RS     }
+//RS }
+//RS "#;
+//RS     let out = run_transcript(&[declarations, ":run"], None);
+//RS     assert!(out.contains("before"), "got: {out:?}");
+//RS     assert!(out.contains("value: 1"), "got: {out:?}");
+//RS     assert!(out.contains("closed: stream"), "got: {out:?}");
+//RS     assert!(
+//RS         !out.contains("after"),
+//RS         "producer resumed after break: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_string_echo() {
+//RS     let out = run_transcript(&["\"abc\""], None);
+//RS     assert!(out.contains("\"abc\" : String"), "got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_bool_echo() {
+//RS     let out = run_transcript(&["2 > 1"], None);
+//RS     assert!(out.trim().ends_with("true : Bool"), "got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_suppress_semicolon() {
+//RS     // A binding declaration produces no echo.
+//RS     let out = run_transcript(&["_ignored :: 42"], None);
+//RS     assert!(out.trim().is_empty(), "expected no output, got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_reset_clears_bindings() {
+//RS     let inputs = &["x :: 10", ":reset", ":type x"];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(out.contains("session reset"), "got: {:?}", out);
+//RS     assert!(out.contains("isn't defined"), "got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_function_declare_and_call() {
+//RS     let inputs = &["fn double(n: Int) -[]> Int { return n * 2 }", "double(5)"];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(
+//RS         out.contains("ok"),
+//RS         "no ok for fn declaration, got: {:?}",
+//RS         out
+//RS     );
+//RS     assert!(
+//RS         out.contains("10 : Int"),
+//RS         "fn call result wrong, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_imaginary_literal_uses_the_unit_path() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "use core.math.[abs]",
+//RS             "z :: 3 + 4i",
+//RS             "z * z",
+//RS             "abs(z)",
+//RS             "i :: 9",
+//RS             "i",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert!(
+//RS         !out.contains("error ["),
+//RS         "imaginary REPL transcript failed: {out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("-7 + 24i"),
+//RS         "square missing from transcript: {out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("5.0"),
+//RS         "magnitude missing from transcript: {out}"
+//RS     );
+//RS     assert!(out.contains("9 : Int"), "bare i did not stay an Int: {out}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_range_fact_proves_fixed_list_index() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "Die :: distinct Int(1..6)",
+//RS             "fn pick(faces: [String#6], roll: Die) -[]> String { return faces[roll.raw() - 1] }",
+//RS             "pick([\"zero\", \"one\", \"two\", \"three\", \"four\", \"five\"], Die.from_int(3))",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert!(
+//RS         out.contains("two : String"),
+//RS         "REPL range proof failed: {out:?}"
+//RS     );
+//RS     assert!(
+//RS         !out.contains("E0965"),
+//RS         "REPL range proof emitted a bounds error: {out:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_hard_reject_unsafe() {
+//RS     let out = run_transcript(&["#Unsafe { }"], None);
+//RS     assert!(
+//RS         out.contains("E1802"),
+//RS         "expected E1802 hard-reject, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_hard_reject_extern_rust() {
+//RS     let out = run_transcript(&["extern rust \"mycrate\" { }"], None);
+//RS     assert!(
+//RS         out.contains("E1802"),
+//RS         "expected E1802 hard-reject, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_type_meta_command() {
+//RS     let inputs = &["y :: 42", ":type y"];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(out.contains("y : Int"), "got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_type_unknown() {
+//RS     let out = run_transcript(&[":type nosuchvar"], None);
+//RS     assert!(out.contains("isn't defined"), "got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_quit_exits() {
+//RS     let out = run_transcript(&[":quit"], None);
+//RS     assert_eq!(out.trim(), "bye");
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_help_shows_commands() {
+//RS     use std::io::Write as _;
+//RS     use std::process::{Command, Stdio};
+//RS 
+//RS     // Merge the child's stderr into stdout before launch. The discovery hint
+//RS     // intentionally uses stderr so the historical stdout banner stays stable;
+//RS     // one pipe lets this regression verify the order users actually observe.
+//RS     let mut child = Command::new("sh")
+//RS         .args(["-c", "exec \"$JET_REPL_BIN\" repl 2>&1"])
+//RS         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+//RS         .env("NO_COLOR", "1")
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .spawn()
+//RS         .expect("start jet repl");
+//RS     child
+//RS         .stdin
+//RS         .as_mut()
+//RS         .expect("piped stdin")
+//RS         .write_all(b":help\n:quit\n")
+//RS         .expect("write transcript");
+//RS     let output = child.wait_with_output().expect("finish jet repl");
+//RS     assert!(output.status.success(), "status: {:?}", output.status);
+//RS     let out = String::from_utf8(output.stdout).expect("utf-8 help");
+//RS     let banner = out.find("Jet 0.1.0 — Interactive REPL").expect("banner");
+//RS     let cooked_hint = out
+//RS         .find("Try: ?name docs · :pin/:fold/:rerun <id> · interactive keys require a TTY")
+//RS         .expect("cooked discovery hint from stderr");
+//RS     assert!(banner < cooked_hint, "banner must precede hint: {out:?}");
+//RS     assert!(out.contains("REPL meta-commands"), "got: {:?}", out);
+//RS     for hint in [
+//RS         "?name",
+//RS         ":? <name>",
+//RS         "Interactive terminal only",
+//RS         "Tab",
+//RS         "F1",
+//RS         "^P",
+//RS         "^F",
+//RS         "^R",
+//RS         "^B",
+//RS     ] {
+//RS         assert!(out.contains(hint), "help missing {hint:?}: {out:?}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_notebook_turn_controls() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "1 + 2",
+//RS             ":turns",
+//RS             ":pin 1",
+//RS             ":fold 1",
+//RS             ":turns",
+//RS             ":unfold 1",
+//RS             ":unpin 1",
+//RS             ":rerun 1",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert!(out.contains("#1 ok"), "got: {out:?}");
+//RS     assert!(out.contains("turn pinned"), "got: {out:?}");
+//RS     assert!(out.contains("turn folded"), "got: {out:?}");
+//RS     assert!(out.contains("#1 ok pinned folded"), "got: {out:?}");
+//RS     assert!(out.contains("rerun #1: 1 + 2"), "got: {out:?}");
+//RS     assert!(out.matches("3 : Int").count() >= 2, "got: {out:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_question_name_shows_type() {
+//RS     let out = run_transcript(&["answer :: 42", ":? answer"], None);
+//RS     assert!(out.contains("answer: Int :: 42"), "got: {out:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_strips_terminal_control_bytes() {
+//RS     let out = run_transcript(&["\x0e1 + 2"], None);
+//RS     assert_eq!(out.trim(), "3 : Int");
+//RS     assert!(
+//RS         !out.contains('\x0e'),
+//RS         "control byte leaked into transcript: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_load_hello() {
+//RS     // Load Examples/features/basics/hello.jet and check it runs.
+//RS     let out = run_transcript(&[":load Examples/features/basics/hello.jet"], None);
+//RS     assert!(
+//RS         out.contains("hello, world"),
+//RS         "load should run main, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_basics_transcript() {
+//RS     let txt = include_str!("repl/basics.txt");
+//RS     run_transcript_file(txt);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_exact_int_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/exact_int.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_f32_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/f32.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_zoned_exact_transcript() {
+//RS     run_transcript_file_strict_with_flags(include_str!("repl/zoned.txt"), &["time"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_time_plane_exact_transcript() {
+//RS     run_transcript_file_strict_with_flags(include_str!("repl/time.txt"), &["time"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_decimal_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/decimal.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_string_from_bytes_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/string_from_bytes.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_sketch_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/sketch.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_archive_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/archive.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_compress_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/compress.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_pool_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/pool.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_ui_values_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/ui_values.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_net_style_values_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/net_style_values.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_crypto_expert_ports_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/crypto_expert_ports.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_crypto_expert_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/crypto_expert.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_encoding_xml_exact_transcript() {
+//RS     run_transcript_file_strict(include_str!("repl/encoding_xml.txt"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_net_runtime_call_still_requires_authority() {
+//RS     let out = run_transcript(
+//RS         &["use core.net as net", "net.tcp_connect(\"127.0.0.1:1\")"],
+//RS         None,
+//RS     );
+//RS     assert!(
+//RS         out.contains("ok"),
+//RS         "core.net import should be accepted: {out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("E1803"),
+//RS         "live socket call must require authority: {out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn strict_transcript_rejects_unexpected_trailing_output() {
+//RS     assert!(
+//RS         std::panic::catch_unwind(|| run_transcript_file_strict("> 1 + 1")).is_err(),
+//RS         "strict transcripts must fail when an input emits an unasserted line"
+//RS     );
+//RS }
+//RS 
+//RS // ── D-REPL8=A: move semantics across inputs ───────────────────────────────
+//RS 
+//RS #[test]
+//RS fn repl_move_across_inputs_string() {
+//RS     // `t :: s` moves s (String is non-scalar). A later reference to s must error.
+//RS     let inputs = &["s :: \"hello\"", "t :: s", "s"];
+//RS     let out = run_transcript(inputs, None);
+//RS     // After s is moved into t, using s in input 3 must produce an error.
+//RS     // The error will be E0121 ("was given away") because the binding_stubs_src
+//RS     // emits a synthetic consume of s before the check.
+//RS     assert!(
+//RS         out.contains("error")
+//RS             && (out.contains("E0121")
+//RS                 || out.contains("given away")
+//RS                 || out.contains("nothing named")),
+//RS         "expected use-after-move error, got: {:?}",
+//RS         out
+//RS     );
+//RS     // Must NOT silently succeed (no echo of the moved value).
+//RS     assert!(
+//RS         !out.trim_end().ends_with(": String"),
+//RS         "moved value should not be echoed, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_move_within_single_input_still_errors() {
+//RS     // Move within a single input: x is moved in the same step it's used again.
+//RS     let inputs = &["x :: \"hi\"", "y :: x; x"];
+//RS     let out = run_transcript(inputs, None);
+//RS     // Within the same input, sema catches the use after move.
+//RS     assert!(
+//RS         out.contains("error"),
+//RS         "expected within-input move error, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_move_int_not_moved() {
+//RS     // Int is a scalar — `t :: s` where s is an Int does NOT move s.
+//RS     let inputs = &["s :: 42", "t :: s", "s"];
+//RS     let out = run_transcript(inputs, None);
+//RS     // s should still be accessible since Int is copy.
+//RS     assert!(
+//RS         out.contains("42 : Int"),
+//RS         "Int should be accessible after copy, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_failed_multi_statement_turn_rolls_back_scope_and_moves() {
+//RS     let out = run_transcript(&["s :: \"hello\"", "t :: s; 1 / 0", ":type t", "s"], None);
+//RS     assert!(
+//RS         out.contains("isn't defined"),
+//RS         "failed turn leaked `t`: {out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("\"hello\" : String"),
+//RS         "failed turn consumed `s`: {out}"
+//RS     );
+//RS }
+//RS 
+//RS // ── D-REPL-FUEL=A: :run ──────────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn repl_run_empty_session() {
+//RS     // :run on an empty session is a clean no-op.
+//RS     let out = run_transcript(&[":run"], None);
+//RS     assert!(
+//RS         out.contains("empty") || out.contains("nothing"),
+//RS         "empty :run should note nothing to run, got: {:?}",
+//RS         out
+//RS     );
+//RS     // Must not produce an error code.
+//RS     assert!(
+//RS         !out.contains("error [E"),
+//RS         "empty :run must not error, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_run_produces_output() {
+//RS     // :run on a session with a print should produce that output.
+//RS     let inputs = &["print(\"hello from run\")", ":run"];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(
+//RS         out.contains("hello from run"),
+//RS         ":run should replay print output, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_run_consistency_with_interpreter() {
+//RS     // The output of :run must match the interpreter's direct output.
+//RS     // First run with interpreter: print("ping") produces "ping".
+//RS     let direct_out = run_transcript(&["print(\"ping\")"], None);
+//RS     // Now run the same with :run.
+//RS     let run_out = run_transcript(&["print(\"ping\")", ":run"], None);
+//RS     // :run output must contain the same output as the interpreter.
+//RS     assert!(
+//RS         run_out.contains("ping"),
+//RS         ":run output must contain interpreter output; got: {:?}",
+//RS         run_out
+//RS     );
+//RS     // Direct interpreter also produced "ping".
+//RS     assert!(direct_out.contains("ping"), "got: {:?}", direct_out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_native_run_uses_stdin_snapshot_not_replaced_temp_path() {
+//RS     use std::io::Write as _;
+//RS 
+//RS     let state = std::env::temp_dir().join(format!(
+//RS         "jet_repl_native_run_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     std::fs::remove_dir_all(&state).ok();
+//RS     let mut child = spawn_repl_process(&state);
+//RS     wait_for_history_dir(&state);
+//RS 
+//RS     let hostile_path = std::env::temp_dir().join(format!(
+//RS         "__jet_repl_run_{}_0.jet",
+//RS         child.id()
+//RS     ));
+//RS     std::fs::write(&hostile_path, "fn run() { print(\"replaced\") }\n").unwrap();
+//RS 
+//RS     let mut stdin = child.stdin.take().unwrap();
+//RS     stdin
+//RS         .write_all(
+//RS             b"fn answer() -[]> Int { return 41 }\nprint(\"authoritative\")\nprint(answer())\n:run\n:quit\n",
+//RS         )
+//RS         .unwrap();
+//RS     drop(stdin);
+//RS     let output = child.wait_with_output().expect("finish native REPL");
+//RS     std::fs::remove_file(&hostile_path).ok();
+//RS     std::fs::remove_dir_all(&state).ok();
+//RS 
+//RS     assert!(output.status.success(), "native REPL: {:?}", output.status);
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains("authoritative"),
+//RS         "native :run must execute the stdin snapshot, got: {stdout:?}"
+//RS     );
+//RS     assert!(
+//RS         !stdout.contains("replaced"),
+//RS         "native :run must not consume a replaced temp pathname, got: {stdout:?}"
+//RS     );
+//RS }
+//RS 
+//RS // Probe test — not a real test, only used during dev to see exact output.
+//RS // Kept for reference but skipped in CI.
+//RS #[test]
+//RS #[ignore]
+//RS fn repl_probe_exact_outputs() {
+//RS     use jet::REPL::run_transcript;
+//RS 
+//RS     // Move: String binding s moved into t, then use of s
+//RS     let out = run_transcript(&["s :: \"hello\"", "t :: s", "s"], None);
+//RS     eprintln!("MOVE_STRING: {:?}", out);
+//RS 
+//RS     // Move: Int binding s copied into t, then use of s
+//RS     let out = run_transcript(&["s :: 42", "t :: s", "s"], None);
+//RS     eprintln!("COPY_INT: {:?}", out);
+//RS 
+//RS     // :run empty
+//RS     let out = run_transcript(&[":run"], None);
+//RS     eprintln!("RUN_EMPTY: {:?}", out);
+//RS 
+//RS     // :run with print
+//RS     let out = run_transcript(&["print(\"hello from run\")", ":run"], None);
+//RS     eprintln!("RUN_PRINT: {:?}", out);
+//RS 
+//RS     // --project probe
+//RS     let fixture = std::env::temp_dir().join("jet_repl_project_probe");
+//RS     std::fs::create_dir_all(&fixture).ok();
+//RS     std::fs::write(
+//RS         fixture.join("helper.jet"),
+//RS         "fn add_three(x: Int) -[]> Int { return x + 3 }\n",
+//RS     )
+//RS     .ok();
+//RS     let project_dir = fixture.to_string_lossy().to_string();
+//RS     let out = run_transcript(&["add_three(10)"], Some(&project_dir));
+//RS     eprintln!("PROJECT_ADD_THREE: {:?}", out);
+//RS     std::fs::remove_dir_all(&fixture).ok();
+//RS }
+//RS 
+//RS // ── D-REPL10=A: --project mode ───────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn repl_project_loads_items() {
+//RS     // Create a tiny fixture project with a function.
+//RS     let fixture = std::env::temp_dir().join("jet_repl_project_test");
+//RS     std::fs::create_dir_all(&fixture).ok();
+//RS     std::fs::write(
+//RS         fixture.join("helper.jet"),
+//RS         "fn add_three(x: Int) -[]> Int { return x + 3 }\n",
+//RS     )
+//RS     .expect("write fixture");
+//RS 
+//RS     let project_dir = fixture.to_string_lossy().to_string();
+//RS     // With --project, add_three() is available without `use`.
+//RS     let out = run_transcript(&["add_three(10)"], Some(&project_dir));
+//RS     // Must not report unknown function error.
+//RS     assert!(
+//RS         !out.contains("E0102") && !out.contains("error [E0107]"),
+//RS         "--project should make project functions available, got: {:?}",
+//RS         out
+//RS     );
+//RS     // Must produce the correct result.
+//RS     assert!(
+//RS         out.contains("13 : Int"),
+//RS         "--project: add_three(10) should return 13, got: {:?}",
+//RS         out
+//RS     );
+//RS 
+//RS     // Without --project, add_three() is unknown.
+//RS     let out_no_project = run_transcript(&["add_three(10)"], None);
+//RS     assert!(
+//RS         out_no_project.contains("error"),
+//RS         "without --project, unknown fn should error, got: {:?}",
+//RS         out_no_project
+//RS     );
+//RS 
+//RS     // Clean up.
+//RS     std::fs::remove_dir_all(&fixture).ok();
+//RS }
+//RS 
+//RS // ── S16/D-REPL10: `use` imports carried across REPL inputs ────────────────
+//RS 
+//RS #[test]
+//RS fn repl_use_import_accepted() {
+//RS     // A bare `use core.math as math` import is accepted (not "expected a
+//RS     // statement, found `use`"), and reports `ok`.
+//RS     let out = run_transcript(&["use core.math as math"], None);
+//RS     assert!(
+//RS         out.contains("ok"),
+//RS         "import should be accepted, got: {:?}",
+//RS         out
+//RS     );
+//RS     assert!(
+//RS         !out.contains("E0003"),
+//RS         "import must not be a statement error, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_use_import_resolves_alias_in_later_input() {
+//RS     // The import typed in input 1 must make `math` resolve in input 2 — the
+//RS     // alias is carried across inputs (this is the c55 cross-input delta). Before
+//RS     // the fix this produced E0107 ("nothing named `math`").
+//RS     let out = run_transcript(&["use core.math as math", "r :: math.sqrt(16.0)"], None);
+//RS     assert!(
+//RS         !out.contains("E0107") && !out.contains("nothing named `math`"),
+//RS         "carried import should resolve the alias, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_use_import_persists_across_unrelated_input() {
+//RS     // An intervening unrelated input must not drop the import: the alias still
+//RS     // resolves two inputs later.
+//RS     let out = run_transcript(
+//RS         &["use core.math as math", "x :: 1", "r :: math.sqrt(9.0)"],
+//RS         None,
+//RS     );
+//RS     assert!(
+//RS         !out.contains("E0107") && !out.contains("nothing named `math`"),
+//RS         "import should persist across inputs, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_use_unknown_core_module_rejected() {
+//RS     // An unknown core module reports E1001 and is not retained.
+//RS     let out = run_transcript(&["use core.bogus as b"], None);
+//RS     assert!(
+//RS         out.contains("E1001"),
+//RS         "unknown core module should error, got: {:?}",
+//RS         out
+//RS     );
+//RS     assert!(
+//RS         !out.contains("ok"),
+//RS         "bad import must not be accepted, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_use_repl_incompatible_module_hard_rejected() {
+//RS     // Native-only modules (HTTP, DB, …) hard-reject with E1802 before import.
+//RS     let out = run_transcript(&["use core.http.client as http"], None);
+//RS     assert!(
+//RS         out.contains("E1802"),
+//RS         "core.http.client should hard-reject, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_infinite_loop_hits_e1801_fuel_cap() {
+//RS     let out = run_transcript(&["loop { }"], None);
+//RS     assert!(
+//RS         out.contains("Error [E1801]:"),
+//RS         "missing REPL fuel diagnostic:\n{out}"
+//RS     );
+//RS     assert!(out.contains("Why:"), "missing E1801 reason:\n{out}");
+//RS     assert!(out.contains("Fix:"), "missing E1801 fix:\n{out}");
+//RS     let path =
+//RS         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli/repl_e1801.txt");
+//RS     if std::env::var_os("UPDATE_EXPECT").is_some() {
+//RS         std::fs::write(&path, &out).unwrap();
+//RS     }
+//RS     assert_eq!(out, std::fs::read_to_string(path).unwrap());
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_use_core_fs_import_accepted() {
+//RS     let out = run_transcript(&["use core.files as fs"], None);
+//RS     assert!(
+//RS         out.contains("ok"),
+//RS         "core.files import should work, got: {:?}",
+//RS         out
+//RS     );
+//RS     assert!(!out.contains("E1802"), "got: {:?}", out);
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_reset_clears_imports() {
+//RS     // After :reset, a carried import is gone — the alias no longer resolves.
+//RS     let out = run_transcript(
+//RS         &["use core.math as math", ":reset", "r :: math.sqrt(4.0)"],
+//RS         None,
+//RS     );
+//RS     assert!(out.contains("session reset"), "got: {:?}", out);
+//RS     assert!(
+//RS         out.contains("error"),
+//RS         "after reset the alias must not resolve, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS // ── D-CTCORE1: inline pure Core execution in the REPL ────────────────────
+//RS 
+//RS #[test]
+//RS fn repl_core_math_sqrt_inline() {
+//RS     // c133/D-CTCORE1: after importing core.math, math.sqrt() must execute
+//RS     // inline in the interpreter (not raise E0956).
+//RS     let inputs = &["use core.math as math", "math.sqrt(16.0)"];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(
+//RS         out.contains("ok") && out.contains("4") && !out.contains("E0956"),
+//RS         "math.sqrt(16.0) should produce 4 inline, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_math_multiple_calls() {
+//RS     // Confirm several effect-approved math calls work sequentially in one session.
+//RS     let inputs = &[
+//RS         "use core.math as math",
+//RS         "math.floor(3.7)",
+//RS         "math.ceil(2.1)",
+//RS         "math.abs(-5)",
+//RS     ];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(out.contains("3"), "floor(3.7) should be 3, got: {:?}", out);
+//RS     assert!(out.contains("3"), "ceil(2.1) should be 3, got: {:?}", out);
+//RS     assert!(out.contains("5"), "abs(-5) should be 5, got: {:?}", out);
+//RS     assert!(
+//RS         !out.contains("E0956"),
+//RS         "no E0956 for effect-approved calls, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_grouped_math_use_list_inline() {
+//RS     let out = run_transcript(&["use core.math.[abs, min]", "abs(-8) + min(9, 4)"], None);
+//RS     assert_eq!(out.trim(), "ok\n12 : Int");
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_math_pow_inline() {
+//RS     // Another effect-approved math function: math.pow(2.0, 10.0) = 1024.
+//RS     let inputs = &["use core.math as math", "math.pow(2.0, 10.0)"];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(
+//RS         out.contains("1024") && !out.contains("E0956"),
+//RS         "math.pow(2.0, 10.0) should produce 1024 inline, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_result_stored_in_binding() {
+//RS     // The result of an effect-approved core call can be stored and used.
+//RS     let inputs = &["use core.math as math", "r :: math.sqrt(9.0)", "r"];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(
+//RS         out.contains("3") && !out.contains("E0956"),
+//RS         "binding from math.sqrt should work, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_loadable_constructors_and_methods_exact() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "use core.reactive.loadable as loadable",
+//RS             "loadable.idle()",
+//RS             "loadable.loading()",
+//RS             "loadable.loaded(7)",
+//RS             "loadable.failed(\"offline\")",
+//RS             "loadable.loading().loaded()",
+//RS             "loadable.idle().is_idle()",
+//RS             "loadable.loading().is_loading()",
+//RS             "ready :: loadable.loaded(7)",
+//RS             "ready.is_loaded()",
+//RS             "offline :: loadable.failed(\"offline\")",
+//RS             "offline.is_failed()",
+//RS             "ready.loaded() ?? 0",
+//RS             "ready.or_else(0)",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert_eq!(
+//RS         out.trim(),
+//RS         "ok\nIdle : Loadable\nLoading : Loadable\nLoaded(7) : Loadable\nFailed(offline) : Loadable\nnull : Option\ntrue : Bool\ntrue : Bool\ntrue : Bool\ntrue : Bool\n7 : Int\n7 : Int"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_complex_bindings_keep_exact_typed_ast_across_turns() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "struct Point { x: Int y: Int }",
+//RS             "p :: Point{x: 3, y: 4}",
+//RS             "p.x + p.y",
+//RS             "inc :: (x: Int) -> x + 1",
+//RS             "inc(4)",
+//RS             "words :: [\"jet\", \"repl\"]",
+//RS             "words[1]",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert!(!out.contains("error ["), "complex state regressed: {out}");
+//RS     assert!(out.contains("7 : Int"), "struct value unavailable: {out}");
+//RS     assert!(out.contains("5 : Int"), "closure value unavailable: {out}");
+//RS     assert!(
+//RS         out.contains("\"repl\" : String"),
+//RS         "list element type collapsed: {out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_all_complex_binding_shapes_survive_across_turns() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "enum State { Ready(Int) }",
+//RS         "fn state_value(s: State) -[]> Int { if s == { .Ready(value) -> { return value } } return 0 }",
+//RS             "items: [String] :: [\"jet\", \"repl\"]",
+//RS             "items[0]",
+//RS             "counts: [String:Int] :: [\"jet\": 2]",
+//RS             "counts[\"jet\"]",
+//RS             "maybe: Int? :: Val(7)",
+//RS             "maybe ?? 0",
+//RS             "result: Int String! :: Ok(9)",
+//RS             "result ?? 0",
+//RS             "state :: State.Ready(11)",
+//RS             "state_value(state)",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert!(!out.contains("error ["), "typed state regressed: {out}");
+//RS     for expected in [
+//RS         "\"jet\" : String",
+//RS         "2 : Int",
+//RS         "7 : Int",
+//RS         "9 : Int",
+//RS         "11 : Int",
+//RS     ] {
+//RS         assert!(out.contains(expected), "missing {expected:?}: {out}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_declared_types_survive_empty_and_absent_values() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "names: [String] :: []",
+//RS             "missing: String? :: None",
+//RS             ":type names",
+//RS             ":type missing",
+//RS             "names.len()",
+//RS             "missing ?? \"fallback\"",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert!(
+//RS         !out.contains("error ["),
+//RS         "declared type state regressed: {out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("names : [String]"),
+//RS         "empty list type collapsed: {out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("missing : String?"),
+//RS         "None type collapsed: {out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("0 : Int") && out.contains("\"fallback\" : String"),
+//RS         "values unusable: {out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_io_eprint_inline() {
+//RS     let inputs = &["use core.term as io", "io.eprint(\"repl-err\")"];
+//RS     let out = run_transcript_with_flags(inputs, None, &[], &["io"]);
+//RS     assert!(
+//RS         out.contains("ok") && out.contains("repl-err"),
+//RS         "io.eprint should run inline, got: {:?}",
+//RS         out
+//RS     );
+//RS     assert!(
+//RS         !out.contains("E3410") && !out.contains("E0956"),
+//RS         "got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_io_print_keeps_variadic_lines_inline() {
+//RS     let inputs = &[
+//RS         "use core.term as io",
+//RS         "io.print(\"repl-one\", \"repl-two\")",
+//RS     ];
+//RS     let out = run_transcript_with_flags(inputs, None, &[], &["io"]);
+//RS     assert!(
+//RS         out.contains("repl-one") && out.contains("repl-two"),
+//RS         "io.print should preserve every argument in the transcript, got: {:?}",
+//RS         out
+//RS     );
+//RS     assert!(
+//RS         !out.contains("E1803") && !out.contains("E3410") && !out.contains("E0956"),
+//RS         "got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_deny_rand_blocks_draw_and_mutating_shuffle() {
+//RS     let inputs = &[
+//RS         "use core.math.random as random",
+//RS         "xs := [1, 2, 3]",
+//RS         "#FX(authority: Rand) { random.int(1, 10) }",
+//RS         "#FX(authority: Rand) { random.shuffle(&xs) }",
+//RS         "xs",
+//RS     ];
+//RS     let out = run_transcript_with_flags(inputs, None, &["rand"], &["rand"]);
+//RS     assert!(
+//RS         out.matches("E1803").count() >= 2 && out.contains("Rand.Draw"),
+//RS         "ambient random calls escaped deny policy: {out}"
+//RS     );
+//RS     assert!(
+//RS         out.contains("[1, 2, 3]"),
+//RS         "denied shuffle mutated its binding: {out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_json_parse_inline() {
+//RS     let inputs = &[
+//RS         "use core.[encoding.json]",
+//RS         "json.to_string(json.parse(\"[42]\") ?? panic(\"bad\"))",
+//RS     ];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(
+//RS         out.contains("42") && !out.contains("E0956"),
+//RS         "json.parse/to_string should work inline, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_path_join_inline() {
+//RS     let inputs = &["Path.from(\"a\").join(\"b\").to_string()"];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(
+//RS         out.contains("a/b") || out.contains("a\\b"),
+//RS         "Path.join should work, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_regex_is_match_inline() {
+//RS     let inputs = &[
+//RS         "use core.regex as re",
+//RS         "re.is_match(.{\"\\d+\"}, \"order 42\")",
+//RS     ];
+//RS     let out = run_transcript(inputs, None);
+//RS     assert!(
+//RS         out.contains("true") && !out.contains("E0956"),
+//RS         "regex.is_match should work inline, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_fs_read_inline() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet_repl_fs_{}_{}",
+//RS         std::process::id(),
+//RS         std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .unwrap()
+//RS             .as_nanos()
+//RS     ));
+//RS     std::fs::create_dir_all(&root).expect("create fixture root");
+//RS     std::fs::write(root.join("payload.txt"), "repl-fs-payload").expect("write fixture");
+//RS     let read_expr = "#FX(authority: FS, IO) { io.eprint(fs.read(\"payload.txt\") ?? panic(\"read failed\")) }";
+//RS     let inputs = &["use core.files as fs", "use core.term as io", read_expr];
+//RS     let out = run_transcript_with_flags(inputs, root.to_str(), &["fs", "io"], &[]);
+//RS     std::fs::remove_dir_all(&root).ok();
+//RS     assert!(
+//RS         out.contains("repl-fs-payload") && !out.contains("E1802"),
+//RS         "fs.read should work in REPL, got: {:?}",
+//RS         out
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_core_process_run_is_authorized_and_captured() {
+//RS     let inputs = &[
+//RS         "use core.process as process",
+//RS         "use core.term as io",
+//RS         "#FX(authority: Exec, IO) { io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
+//RS     ];
+//RS     let out = run_transcript_with_flags(inputs, None, &["exec"], &["io"]);
+//RS     assert!(
+//RS         out.contains("repl-process-ok") && !out.contains("E1803"),
+//RS         "authorized process.run should capture output, got: {out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_process_boundary_uses_the_passed_authority_value() {
+//RS     let inputs = &[
+//RS         "use core.process as process",
+//RS         r#"#FX(authority: Exec, IO) {
+//RS     restricted :: authority.without("Exec")
+//RS     process.run(["printf", "should-not-run"], restricted)
+//RS }"#,
+//RS     ];
+//RS     let out = run_transcript_with_flags(inputs, None, &["exec"], &[]);
+//RS     assert!(
+//RS         out.contains("E1803"),
+//RS         "the narrowed boundary value was ignored: {out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_interrupt_signal_paths_cover_apple_and_bsd_unix() {
+//RS     let terminal = include_str!("../crates/jet-repl/src/Term.rs");
+//RS     let evaluation_path = terminal
+//RS         .split("pub struct EvaluationInterruptGuard")
+//RS         .nth(1)
+//RS         .and_then(|source| source.split("/// One decoded input event.").next())
+//RS         .expect("evaluation interrupt implementation");
+//RS     assert!(
+//RS         evaluation_path.contains("#[cfg(unix)]"),
+//RS         "raw evaluation interrupt must compile on POSIX Unix"
+//RS     );
+//RS     assert!(
+//RS         !evaluation_path.contains("target_os = \"linux\""),
+//RS         "raw evaluation interrupt must not exclude Apple or BSD"
+//RS     );
+//RS 
+//RS     let methods = include_str!("../crates/jet-comptime/src/Comptime/Methods/repl_process.rs");
+//RS     let forwarding_path = methods
+//RS         .split("static REPL_CHILD_GROUP")
+//RS         .nth(1)
+//RS         .and_then(|source| source.split("// ---------------------------------------------------------------------------").next())
+//RS         .expect("runtime child interrupt forwarding implementation");
+//RS     assert!(
+//RS         forwarding_path.contains("#[cfg(unix)]"),
+//RS         "runtime child forwarding must compile on POSIX Unix"
+//RS     );
+//RS     assert!(
+//RS         !forwarding_path.contains("target_os = \"linux\""),
+//RS         "runtime child forwarding must not exclude Apple or BSD"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS fn repl_tty_ctrl_c_reaches_child_group_and_restores_input() {
+//RS     use std::process::Command;
+//RS 
+//RS     let root = std::env::temp_dir().join(format!("jet_repl_interrupt_{}", std::process::id()));
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     let shell = r#"
+//RS {
+//RS   sleep 0.2
+//RS   printf 'use core.process as process\r'
+//RS   sleep 0.2
+//RS   printf '#FX(authority: Exec) { process.run(["sh", "-c", "trap '\''printf done > child-exited.txt; exit 130'\'' INT; printf $$ > child.pid; while :; do :; done"]) ?? panic("run failed") }\r'
+//RS   sleep 0.8
+//RS   printf '\003'
+//RS   sleep 0.5
+//RS   printf '40 + 2\r'
+//RS   sleep 0.3
+//RS   printf ':quit\r'
+//RS } | timeout 8s script -qec '"$JET_REPL_BIN" repl --project "$JET_REPL_ROOT" --allow-exec' /dev/null
+//RS "#;
+//RS     let output = Command::new("sh")
+//RS         .args(["-c", shell])
+//RS         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+//RS         .env("JET_REPL_ROOT", &root)
+//RS         .output()
+//RS         .unwrap();
+//RS     let transcript = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "PTY interrupt session failed: {transcript}"
+//RS     );
+//RS     assert!(
+//RS         transcript.contains("42 : Int"),
+//RS         "REPL did not resume after Ctrl-C: {transcript}"
+//RS     );
+//RS     assert_eq!(
+//RS         std::fs::read_to_string(root.join("child-exited.txt")).unwrap(),
+//RS         "done"
+//RS     );
+//RS     let pid = std::fs::read_to_string(root.join("child.pid")).unwrap();
+//RS     let alive = Command::new("kill")
+//RS         .args(["-0", pid.trim()])
+//RS         .stdout(std::process::Stdio::null())
+//RS         .stderr(std::process::Stdio::null())
+//RS         .status()
+//RS         .unwrap()
+//RS         .success();
+//RS     assert!(!alive, "interrupted REPL child {pid} leaked");
+//RS     std::fs::remove_dir_all(root).ok();
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS fn repl_tty_ctrl_c_cancels_compute_atomically_and_records_turn() {
+//RS     use std::process::Command;
+//RS 
+//RS     let shell = r#"
+//RS {
+//RS   sleep 0.2
+//RS   printf 'kept :: 42\r'
+//RS   sleep 0.15
+//RS   printf 'partial :: 1\033\rloop { }\033\r\r'
+//RS   sleep 0.3
+//RS   printf '\003'
+//RS   sleep 0.15
+//RS   printf 'kept\rpartial\r:turns\r:quit\r'
+//RS } | timeout 6s script -qec '"$JET_REPL_BIN" repl' /dev/null
+//RS "#;
+//RS     let started = std::time::Instant::now();
+//RS     let output = Command::new("sh")
+//RS         .args(["-c", shell])
+//RS         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+//RS         .env("JET_REPL_HISTORY", "off")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let transcript = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "PTY compute interrupt failed: {transcript}"
+//RS     );
+//RS     assert!(
+//RS         started.elapsed() < std::time::Duration::from_secs(3),
+//RS         "interrupt missed 100ms recovery path"
+//RS     );
+//RS     assert!(
+//RS         transcript
+//RS             .contains("Interrupted. External effects already performed were not rolled back."),
+//RS         "interrupt notice missing: {transcript}"
+//RS     );
+//RS     assert!(
+//RS         transcript.contains("42 : Int"),
+//RS         "prior binding lost: {transcript}"
+//RS     );
+//RS     assert!(
+//RS         transcript.contains("E0107") && transcript.contains("partial"),
+//RS         "partial binding committed: {transcript}"
+//RS     );
+//RS     assert!(
+//RS         transcript.contains("#2 interrupted"),
+//RS         "interrupted turn not addressable: {transcript}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+// END-PORT-PENDING 2059 tests/repl.rs:1-1800
+

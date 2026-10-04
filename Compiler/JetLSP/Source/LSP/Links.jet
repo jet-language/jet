@@ -1,0 +1,72 @@
+// Source/LSP/Server.rs:5699–5742,5777–5877. URI/Position/JSON remain canonical.
+use jet_semindex.[SymbolDB]
+
+// repository_root is the Jet build's actual repository-root fact replacing
+// env!(CARGO_MANIFEST_DIR), not cwd and not a user-selected workspace root.
+pub fn lsp_document_links_for(path: OSPath, workspace_root: OSPath?, src: String, repository_root: OSPath) -[FS, Env]> [String] Never! {
+    out := [String]{}
+    fallback :: if lsp_source_path.parent_span(path) == {
+        .Val(extent) -> lsp_source_path.owned_span(path, extent)
+        None -> lsp_source_path.from_text(".", path.platform)
+    }
+    base :: if workspace_root == {
+        .Val(root) -> root
+        None -> lsp_normalize_os_path(fallback)
+    }
+    loop (line_index, span) in lsp_source_lines(src) {
+        line := src.slice(span.start, span.end) // #4303
+        trimmed := lsp_source_text.trim_start(line) // #4303
+        if !trimmed.starts_with("use ") -> next
+        indent :: line.bytes().len() - trimmed.bytes().len()
+        path_start :: indent + 4
+        bytes :: line.bytes()
+        end := path_start
+        loop end < bytes.len() {
+            width :: diagnostic_utf8_width(bytes, end)
+            ch := line.slice(end, end + width) // #4303
+            if bytes[end] == (U8{123}) || lsp_source_text.is_whitespace(ch) -> break
+            end += width
+        }
+        if end == path_start -> next
+        import := line.slice(path_start, end) // #4303
+        target :: lsp_resolve_use_target(base, import, repository_root) ?? next
+        // Rust's link columns are bytes (including multibyte indent/import),
+        // not scalar counts and not Position's UTF-16 conversion.
+        range :: LSPRange{start: LSPPos{line: line_index & 4294967295, character: path_start & 4294967295}, end: LSPPos{line: line_index & 4294967295, character: end & 4294967295}}
+        &out.push("{{\"range\":{lsp_range_json(range)},\"target\":{foundation_json_quote(target)}}}")
+    }
+    out
+}
+pub fn lsp_reasoning_code_lenses(uri: String, path: String, src: String, db: SymbolDB) -> [String] Never! {
+    out := [String]{}
+    facts :: db.index.definition_facts()
+    loop record in db.index.derivations() {
+        loop fact in facts {
+            if fact.stable_id != record.subject || fact.module_path != path -> next
+            range :: LSPRange{start: lsp_byte_offset_to_lsp(src, fact.span.start), end: lsp_byte_offset_to_lsp(src, fact.span.end)}
+            &out.push(lsp_code_lens_range_json(range, "Explain reasoning", "jet.reasoning", [String]{uri, record.id, "true"}))
+            break
+        }
+    }
+    out
+}
+pub fn lsp_code_lenses_for(uri: String, src: String) -> [String] Never! {
+    out := [String]{}
+    loop (index, span) in lsp_source_lines(src) {
+        line := src.slice(span.start, span.end) // #4303
+        trimmed := lsp_source_text.trim_start(line) // #4303
+        indent :: line.bytes().len() - trimmed.bytes().len()
+        if trimmed.starts_with("fn run") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", [String]{uri}))
+        else if trimmed.starts_with("#Test") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run test", "jet.testFile", [String]{uri, "{index}"}))
+    }
+    out
+}
+pub fn lsp_code_lens_json(line: Int, start: Int, end: Int, title: String, command: String, args: [String]) -> String Never! {
+    range :: LSPRange{start: LSPPos{line: line & 4294967295, character: start & 4294967295}, end: LSPPos{line: line & 4294967295, character: end & 4294967295}}
+    lsp_code_lens_range_json(range, title, command, args)
+}
+pub fn lsp_code_lens_range_json(range: LSPRange, title: String, command: String, args: [String]) -> String Never! {
+    arguments := [String]{}
+    loop arg in args -> &arguments.push(foundation_json_quote(arg))
+    "{{\"range\":{lsp_range_json(range)},\"command\":{{\"title\":{foundation_json_quote(title)},\"command\":{foundation_json_quote(command)},\"arguments\":[{arguments.join(",")}]}}}}"
+}

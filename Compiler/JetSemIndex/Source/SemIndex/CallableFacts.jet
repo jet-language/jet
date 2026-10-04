@@ -1,0 +1,240 @@
+// crates/jet-semindex/src/Types.rs:14–281: additive projections, callable
+// checked facts, arithmetic facts, and their public presentation helpers.
+use jet_foundation.[
+    AccessConvention,
+    CallablePolicy,
+    CompilerStage,
+    FailureContract,
+    MetadataProducerStatus,
+    ParamZone,
+    Type,
+    TypeParam,
+    failure_contract_effective_type,
+    failure_contract_source,
+    type_name,
+]
+
+// Rust ExpandValue/Lens/Projection. An object is an ordered list, not a map:
+// duplicate keys and their order remain representable. Named rows avoid the
+// bootstrap tuple Debug/Show defect (#4357).
+pub enum ExpandValue {
+    Null
+    Bool(value: Bool)
+    Number(value: Int)
+    String(value: String)
+    Array(values: [ExpandValue])
+    Object(entries: [ExpandObjectEntry])
+}
+
+pub struct ExpandObjectEntry {
+    pub key: String
+    pub value: ExpandValue
+}
+
+pub struct ExpandLens {
+    pub name: String
+    pub summary: String
+    pub facts: [ExpandValue]
+}
+
+pub struct ExpandProjection {
+    pub selection: String
+    pub lenses: [ExpandLens]
+}
+
+// Rust ViewSourceFact/ViewProjectionFact/ViewSourcePathFact.
+pub enum ViewSourceFact {
+    Receiver
+    Parameter(index: Int)
+    Static(module_path: String, name: String)
+}
+
+pub enum ViewProjectionFact {
+    Field(name: String)
+    Index
+    Range
+}
+
+pub struct ViewSourcePathFact {
+    pub source: ViewSourceFact
+    pub projections: [ViewProjectionFact]
+}
+
+// Rust ViewProvenanceFact::canonical: these exact bytes feed signature identity.
+// Preserve the returned aggregate slot and the order of all alternative sources.
+pub struct ViewProvenanceFact {
+    pub output_path: [String]
+    pub sources: [ViewSourcePathFact]
+    pub mutable: Bool
+
+    pub fn canonical(self) -> String Never! {
+        access :: if self.mutable -> "write" else -> "read"
+        slot :: if self.output_path.len() == 0 -> "$" else -> self.output_path.join(".")
+        paths := [String]{}
+        loop source_path in self.sources {
+            source :: if source_path.source == {
+                .Receiver -> "receiver"
+                .Parameter(index) -> "parameter:{index}"
+                .Static(module_path, name) -> "static:{module_path}::{name}"
+            }
+            projections := [String]{}
+            loop projection in source_path.projections {
+                name :: if projection == {
+                    .Field(name) -> "field:{name}"
+                    .Index -> "index"
+                    .Range -> "range"
+                }
+                &projections.push(name)
+            }
+            path :: projections.join("/")
+            if self.sources.len() == 1 -> return "slot:{slot};{source};access:{access};path:{path}"
+            &paths.push("{source};path:{path}")
+        }
+        "slot:{slot};one_of({paths.join(",")});access:{access}"
+    }
+}
+
+// Rust CallableDefaultFact/CallableFactUnavailable/CallableFactAvailability.
+// SourceSpan is S2's lossless byte-range record. Defaults are source projections,
+// never prepared values; a checked empty collection is not unavailable.
+pub struct CallableDefaultFact {
+    pub source_text: String
+    pub source: SourceSpan
+    pub value_unavailable: CallableFactUnavailable
+}
+
+pub struct CallableFactUnavailable {
+    pub required_stage: CompilerStage
+    pub reason: String
+}
+
+pub enum CallableFactAvailability<T> {
+    Checked(value: T)
+    Unavailable(reason: CallableFactUnavailable)
+}
+
+// Rust CallableParameterFact::{access_name,zone_name,type_name}.
+pub struct CallableParameterFact {
+    pub name: String
+    pub label: String
+    pub source: SourceSpan
+    pub default: CallableDefaultFact?
+    pub access: AccessConvention
+    pub zone: ParamZone
+    pub ty: Type
+    pub variadic: Bool
+
+    pub fn access_name(self) -> String Never! {
+        if self.access == {
+            .Read -> "read"
+            .Write -> "write"
+            .Move -> "move"
+        }
+    }
+
+    pub fn zone_name(self) -> String Never! {
+        if self.zone == {
+            .PositionalOnly -> "positional_only"
+            .Either -> "either"
+            .LabelOnly -> "label_only"
+        }
+    }
+
+    pub fn type_name(self) -> String Never! { type_name(self.ty) }
+}
+
+// Rust CallableEffectFact::display_name and CallableEffectsFact.
+pub enum CallableEffectFact {
+    Named(name: String, source: SourceSpan)
+    ViaParameter(name: String, source: SourceSpan)
+
+    pub fn display_name(self) -> String Never! {
+        if self == {
+            .Named(name, _) -> name
+            .ViaParameter(name, _) -> "via {name}"
+        }
+    }
+}
+
+pub enum CallableEffectsFact {
+    Checked(effects: [CallableEffectFact])
+    Unavailable(reason: CallableFactUnavailable)
+}
+
+// Rust CallableSignatureFact::{effect_names,error_names,error_types,
+// failure_contract_name,failure_source_name,policy_names}. Effective failure
+// types come from Foundation's checked contract, not parsed display strings.
+pub struct CallableSignatureFact {
+    pub parameters: [CallableParameterFact]
+    pub return_type: Type?
+    pub effects: CallableEffectsFact
+    pub failure_contract: CallableFactAvailability<FailureContract>
+    pub returned_views: [ViewProvenanceFact]
+    pub policies: [CallablePolicy]
+    pub generic_parameters: CallableFactAvailability<[TypeParam]>
+    pub metadata_producer_status: MetadataProducerStatus
+
+    pub fn effect_names(self) -> [String]? Never! {
+        if self.effects == {
+            .Checked(effects) -> {
+                names :: loop fact in effects -> fact.display_name()
+                Val(names)
+            }
+            .Unavailable(_) -> None
+        }
+    }
+
+    pub fn error_types(self) -> [Type]? Never! {
+        if self.failure_contract == {
+            .Checked(contract) -> {
+                effective :: failure_contract_effective_type(contract)
+                errors := [Type]{}
+                if effective == .Result(_, error) {
+                    // AST::Type::is_never matches only the Named Never variant.
+                    if error != (Type.Named{name: "Never"}) -> &errors.push(error)
+                }
+                Val(errors)
+            }
+            .Unavailable(_) -> None
+        }
+    }
+
+    pub fn error_names(self) -> [String]? Never! {
+        if self.error_types() == {
+            .Val(errors) -> {
+                names :: loop error in errors -> type_name(error)
+                Val(names)
+            }
+            .None -> None
+        }
+    }
+
+    pub fn failure_contract_name(self) -> String? Never! {
+        if self.failure_contract == {
+            .Checked(contract) -> Val(type_name(failure_contract_effective_type(contract)))
+            .Unavailable(_) -> None
+        }
+    }
+
+    pub fn failure_source_name(self) -> String? Never! {
+        if self.failure_contract == {
+            .Checked(contract) -> Val(failure_contract_source(contract))
+            .Unavailable(_) -> None
+        }
+    }
+
+    pub fn policy_names(self) -> [String] Never! {
+        // AST::CallablePolicy::display; arguments are already checked spellings.
+        loop policy in self.policies -> "{policy.name}({policy.arguments.join(", ")})"
+    }
+}
+
+// Rust ArithmeticOperationFact: operation and lexical policy spans are exact
+// parser-owned byte ranges, not token-window estimates.
+pub struct ArithmeticOperationFact {
+    pub operation: String
+    pub policy: String
+    pub module_path: String
+    pub operation_span: SourceSpan
+    pub scope_span: SourceSpan
+}

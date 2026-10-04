@@ -1,0 +1,445 @@
+// Permanent behavior tests for main.rs/build.rs's reachable Jet policy. The
+// original Rust files contain no #[test] bodies. These observe real binary
+// fields, borrowed payload bytes, prefixes, filesystem outputs and refusals;
+// they do not claim to exercise the still-unported canonical backend owners.
+use jet_foundation.[TEXT_NUL]
+
+fn repack_test_push_u64(out: &[U8], value: U64) Never! {
+    loop index in 0..<8 -> &out.push(U8{Int.from_u64((value >> (8 * index)) & U64{255})})
+}
+
+fn repack_test_image() -> [U8] Never! {
+    out := "JETCIMG{TEXT_NUL}".bytes()
+    &out.extend([U8]{U8{3}, U8{0}, U8{6}, U8{0}})
+    repack_test_push_u64(&out, U64{18446744073709551615})
+    repack_test_push_u64(&out, U64{123})
+    loop index in 0..<32 -> &out.push(U8{index})
+    repack_test_push_u64(&out, U64{2})
+    &out.extend([U8]{U8{254}, U8{255}})
+    repack_test_push_u64(&out, U64{4})
+    &out.extend([U8]{U8{0}, U8{128}, U8{255}, U8{10}})
+    out
+}
+
+fn repack_test_parse_error(bytes: [U8], pointer_bytes: Int) -> String Never! {
+    _ :: repack_parse_image(bytes, pointer_bytes) ?? return err.message
+    panic("expected compiler-image selection failure")
+}
+
+fn repack_test_length_error(value: U64, pointer_bytes: Int, label: String) -> String Never! {
+    _ :: repack_host_length(value, pointer_bytes, label) ?? return err.message
+    panic("expected host-size overflow")
+}
+
+fn repack_test_main_error(text: String, roots: Bool) -> String Never! {
+    _ :: repack_extract_artifact_main(text, "Tests.rs", roots) ?? return err.message
+    panic("expected generated-main extraction failure")
+}
+
+fn repack_test_stamp_error(text: String) -> String Never! {
+    _ :: repack_task_roots(text, "stage-zero.stamp") ?? return err.message
+    panic("expected task-root stamp failure")
+}
+
+fn repack_test_raw_main(body: String) -> String Never! {
+    "before const GENERATED_ARTIFACT_MAIN: &str = r#\"{body}\"#; after"
+}
+
+#Test("compiler-image selection preserves u64 artifact, authority and borrowed binary payload") {
+    bytes :: repack_test_image()
+    image :: repack_parse_image(bytes, 8) ?? panic("parse kept image")
+    assert_eq(image.artifact.value, U64{18446744073709551615})
+    assert_eq(image.source_authority_digest.len(), 32)
+    loop index in 0..<32 -> assert_eq(image.source_authority_digest[index], U8{index})
+    assert_eq(image.payload.len(), 4)
+    assert_eq(image.payload[0], U8{0})
+    assert_eq(image.payload[1], U8{128})
+    assert_eq(image.payload[2], U8{255})
+    assert_eq(image.payload[3], U8{10})
+}
+
+#Test("compiler-image selection reports every truncated header, identity and payload boundary") {
+    bytes :: repack_test_image()
+    loop end in 0..<bytes.len() {
+        assert_eq(repack_test_parse_error(bytes[0..<end], 8), "truncated compiler image")
+    }
+}
+
+#Test("compiler-image wrong magic and unsigned format use original error texts") {
+    bytes := repack_test_image()
+    bytes[0] = U8{0}
+    assert_eq(repack_test_parse_error(bytes, 8), "not a compiler image (bad magic)")
+    bytes[0] = U8{74}
+    bytes[8] = U8{255}
+    bytes[9] = U8{255}
+    assert_eq(repack_test_parse_error(bytes, 8), "compiler image format 65535 is not the supported format 3")
+}
+
+#Test("host-size conversion checks unsigned lengths before attempting to take bytes") {
+    assert_eq(repack_host_length(U64{4294967295}, 4, "identity") ?? panic("u32 maximum"), 4294967295)
+    assert_eq(repack_test_length_error(U64{4294967296}, 4, "identity"), "identity length overflows")
+    assert_eq(repack_test_length_error(U64{18446744073709551615}, 4, "payload"), "payload length overflows")
+    assert_eq(repack_host_length(U64{18446744073709551615}, 8, "payload") ?? panic("u64 maximum"), 18446744073709551615)
+    bytes := repack_test_image()
+    loop index in 60..<68 -> bytes[index] = U8{255}
+    assert_eq(repack_test_parse_error(bytes, 4), "identity length overflows")
+    assert_eq(repack_test_parse_error(bytes, 8), "truncated compiler image")
+    bytes = repack_test_image()
+    loop index in 70..<78 -> bytes[index] = U8{255}
+    assert_eq(repack_test_parse_error(bytes, 4), "payload length overflows")
+    assert_eq(repack_test_parse_error(bytes, 8), "truncated compiler image")
+}
+
+#Test("selection does not invent schema, entry, identity, checksum or trailing-byte validation") {
+    bytes := repack_test_image()
+    bytes[10] = U8{255}
+    bytes[11] = U8{255}
+    bytes[20] = U8{255}
+    &bytes.extend([U8]{U8{42}, U8{0}, U8{255}})
+    image :: repack_parse_image(bytes, 8) ?? panic("selection ignores owner-decoded fields")
+    assert_eq(image.payload.len(), 4)
+    assert_eq(image.payload[2], U8{255})
+}
+
+#Test("hex, first byte difference and line use binary bytes and shorter extent") {
+    assert_eq(repack_hex([U8]{U8{0}, U8{1}, U8{15}, U8{16}, U8{128}, U8{255}}), "00010f1080ff")
+    assert_eq(repack_hex([U8]{}), "")
+    assert_eq(repack_first_difference("abc".bytes(), "abc".bytes()), 3)
+    assert_eq(repack_first_difference("ab".bytes(), "abc".bytes()), 2)
+    assert_eq(repack_first_difference("abc".bytes(), "axc".bytes()), 1)
+    assert_eq(repack_first_difference([U8]{}, [U8]{U8{255}}), 0)
+    assert_eq(repack_line_of("é\nx\n".bytes(), 2), 1)
+    assert_eq(repack_line_of("é\nx\n".bytes(), 3), 2)
+    assert_eq(repack_line_of("é\nx\n".bytes(), 999), 3)
+}
+
+#Test("authority mismatch reports both actual binary digests and kept revision refusal") {
+    _ :: repack_check_source_authority("project", [U8]{U8{0}, U8{255}}, [U8]{U8{0}, U8{255}}) ?? panic("same authority")
+    _ :: repack_check_source_authority("project", [U8]{U8{0}, U8{254}}, [U8]{U8{0}, U8{255}}) ?? {
+        assert_eq(err.message, "the compiler sources in `project` (authority 00fe) are not the ones the kept image was built from (00ff); reassemble them at the kept run's revision")
+        return
+    }
+    panic("wrong authority was accepted")
+}
+
+#Test("artifact main raw delimiter is exact and chooses first declaration and closing delimiter") {
+    text :: "const GENERATED_ARTIFACT_MAIN: &str = r#\"first\"#; const GENERATED_ARTIFACT_MAIN: &str = r#\"second\"#"
+    assert_eq(repack_extract_artifact_main(text, "Tests.rs", true) ?? panic("raw main"), "first")
+    assert_eq(repack_test_main_error("const GENERATED_ARTIFACT_MAIN: &str = r\"wrong\";", false), "`Tests.rs` has no `GENERATED_ARTIFACT_MAIN` raw string")
+    assert_eq(repack_test_main_error("const GENERATED_ARTIFACT_MAIN: &str = r#\"missing end", true), "`Tests.rs` has no `GENERATED_ARTIFACT_MAIN` raw string")
+}
+
+#Test("task-root stripping keeps surrounding newlines, unicode and multiple regions") {
+    body :: "α\n{REPACK_TASK_BEGIN}\nroot1\n{REPACK_TASK_END}\nβ{REPACK_TASK_BEGIN}root2{REPACK_TASK_END}γ"
+    text :: repack_test_raw_main(body)
+    assert_eq(repack_extract_artifact_main(text, "Tests.rs", true) ?? panic("keep roots"), body)
+    assert_eq(repack_extract_artifact_main(text, "Tests.rs", false) ?? panic("strip roots"), "α\n\nβγ")
+    stray :: repack_test_raw_main("left {REPACK_TASK_END} right")
+    assert_eq(repack_extract_artifact_main(stray, "Tests.rs", false) ?? panic("stray end"), "left {REPACK_TASK_END} right")
+}
+
+#Test("malformed task-root region fails only when stripping and cannot find an end outside raw body") {
+    body :: "main\n{REPACK_TASK_BEGIN}\nunfinished"
+    text :: "{repack_test_raw_main(body)} {REPACK_TASK_END}"
+    assert_eq(repack_extract_artifact_main(text, "Tests.rs", true) ?? panic("unstripped malformed region"), body)
+    assert_eq(repack_test_main_error(text, false), "`GENERATED_ARTIFACT_MAIN` has an unterminated task-root region")
+}
+
+#Test("task stamp preserves true false, first matching line and CRLF semantics") {
+    assert_eq(repack_task_roots("header\ntask_roots=true\n", "stamp") ?? panic("true stamp"), true)
+    assert_eq(repack_task_roots("task_roots=false\r\n", "stamp") ?? panic("false CRLF stamp"), false)
+    assert_eq(repack_task_roots("task_roots=false\ntask_roots=true", "stamp") ?? panic("first value"), false)
+    expected :: "`stage-zero.stamp` has no `task_roots=true|false` line"
+    loop bad in [String]{"", " task_roots=true", "task_roots=TRUE", "task_roots=true ", "task_roots=true\r", "task_roots=bad\ntask_roots=true\n"} -> assert_eq(repack_test_stamp_error(bad), expected)
+}
+
+#Test("prefix derivation uses reference length, packaged starts_with and exact old suffix") {
+    assert_eq(repack_derive_prefix("REFTAILmain", "REFTAIL", 3, "base", "PREFIXTAILmain", "main") ?? panic("prefix"), "PREFIX")
+    assert_eq(repack_derive_prefix("REF", "REF", 3, "base", "PREFIX", "main") ?? panic("empty suffix"), "PREFIX")
+    _ :: repack_derive_prefix("a\nb\n", "a\nc\n", 2, "base", "anything", "main") ?? {
+        assert_eq(err.message, "first run: the packaged source differs from `base` at line 2, so `stage-zero/main.prefix.rs` cannot be derived; run once with JET_REPACK_SOURCE_ROOT set to the generator sources of the kept run")
+        return
+    }
+    panic("changed packaged base was accepted")
+}
+
+#Test("prefix derivation refuses a main crate without the exact packaged suffix") {
+    _ :: repack_derive_prefix("REFTAILmain", "REFTAIL", 3, "base", "PREFIXTAILwrong", "main.rs.orig") ?? {
+        assert_eq(err.message, "`main.rs.orig` does not end with the packaged suffix of the base source; restore the main crate the kept run wrote")
+        return
+    }
+    panic("wrong main suffix was accepted")
+}
+
+// Unique, disk-backed permanent test fixtures, not a generated test harness.
+fn repack_test_root(label: String) -[FS, Env]> String Never! {
+    home :: repack_sys.get("HOME") ?? panic("test HOME")
+    root :: repack_files.join(home, ".cache/jet-test-scratch/ToolW34-REPACK/{repack_sys.pid()}-{label}")
+    repack_files.create_dir_all(root) ?? panic("create repack fixture")
+    root
+}
+
+fn repack_test_setup(label: String) -[FS, Env]> String Never! {
+    root :: repack_test_root(label)
+    repack_files.create_dir_all(repack_files.join(root, "stage-zero/src")) ?? panic("create kept backend")
+    repack_files.create_dir_all(repack_files.join(root, "Compiler/Bootstrap")) ?? panic("create source fixture")
+    repack_files.write(repack_files.join(root, "Compiler/Bootstrap/Tests.rs"), repack_test_raw_main("main\n")) ?? panic("write harness fixture")
+    repack_files.write(repack_files.join(root, "stage-zero.rs"), "REFpackage\nmain\n") ?? panic("write kept source")
+    repack_files.write(repack_files.join(root, "stage-zero/main.rs.orig"), "ORIGINAL\npackage\nmain\n") ?? panic("write original main")
+    repack_files.write(repack_files.join(root, "stage-zero/src/main.rs"), "CURRENT\npackage\nmain\n") ?? panic("write current main")
+    repack_files.write(repack_files.join(root, "stage-zero.stamp"), "task_roots=false\n") ?? panic("write stamp")
+    repack_files.write_bytes(repack_files.join(root, "stage-zero.image"), [U8]{U8{1}, U8{2}}) ?? panic("write kept image")
+    repack_files.write_bytes(repack_files.join(root, "stage-zero/src/compiler.image"), [U8]{U8{9}}) ?? panic("write embedded image sentinel")
+    root
+}
+
+fn repack_test_finish_error(root: String, reference_length: Int, packaged: ^String, image: [U8]?) -[FS, Time, IO]> String Never! {
+    repack_finish(root, root, reference_length, ^packaged, image, [U8]{U8{1}, U8{2}}, repack_time.instant()) ?? return err.message
+    panic("expected repack publication failure")
+}
+
+#Test("first publication derives orig prefix, retains base and leaves unchanged images untouched") {
+    root :: repack_test_setup("unchanged")
+    repack_finish(root, root, 3, "REFpackage\n", Val([U8]{U8{1}, U8{2}}), [U8]{U8{1}, U8{2}}, repack_time.instant()) ?? panic("publish kept source")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero/main.prefix.rs")) ?? panic("read prefix"), "ORIGINAL\n")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero.base.rs")) ?? panic("read base"), "REFpackage\nmain\n")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero/src/main.rs")) ?? panic("read main"), "ORIGINAL\npackage\nmain\n")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero/generated.rs")) ?? panic("read generated"), "REFpackage\nmain\n")
+    assert_eq(repack_read_text(repack_files.join(root, "artifact-main.rs")) ?? panic("read harness"), "main\n")
+    assert_eq(repack_read(repack_files.join(root, "stage-zero.image")) ?? panic("read kept image"), [U8]{U8{1}, U8{2}})
+    assert_eq(repack_read(repack_files.join(root, "stage-zero/src/compiler.image")) ?? panic("read embedded image"), [U8]{U8{9}})
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("saved prefix permits changed package and rewrites both images without replacing base") {
+    root :: repack_test_setup("changed")
+    repack_files.write(repack_files.join(root, "stage-zero/main.prefix.rs"), "SAVED\n") ?? panic("saved prefix")
+    repack_files.write(repack_files.join(root, "stage-zero.base.rs"), "older base") ?? panic("saved base")
+    fresh :: [U8]{U8{0}, U8{255}, U8{128}}
+    repack_finish(root, root, 3, "REFnew\n", Val(fresh), [U8]{U8{1}, U8{2}}, repack_time.instant()) ?? panic("publish changed source")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero.base.rs")) ?? panic("base"), "older base")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero.rs")) ?? panic("source"), "REFnew\nmain\n")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero/generated.rs")) ?? panic("generated"), "REFnew\nmain\n")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero/src/main.rs")) ?? panic("main"), "SAVED\nnew\nmain\n")
+    assert_eq(repack_read(repack_files.join(root, "stage-zero.image")) ?? panic("image"), fresh)
+    assert_eq(repack_read(repack_files.join(root, "stage-zero/src/compiler.image")) ?? panic("embedded image"), fresh)
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("missing compiler image refuses before base or harness writes") {
+    root :: repack_test_setup("missing-image")
+    assert_eq(repack_test_finish_error(root, 3, "REFpackage\n", None), "stage-zero Host/Runner packaging embedded no compiler image")
+    assert(!repack_files.is_file(repack_files.join(root, "stage-zero.base.rs")))
+    assert(!repack_files.is_file(repack_files.join(root, "artifact-main.rs")))
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("first-run divergence saves base then refuses before selecting main or writing prefix") {
+    root :: repack_test_setup("first-difference")
+    repack_files.remove(repack_files.join(root, "stage-zero/main.rs.orig")) ?? panic("remove original main")
+    repack_files.remove(repack_files.join(root, "stage-zero/src/main.rs")) ?? panic("remove current main")
+    problem :: repack_test_finish_error(root, 3, "REFchanged\n", Val([U8]{U8{1}}))
+    base_path :: repack_files.join(root, "stage-zero.base.rs")
+    assert_eq(problem, "first run: the packaged source differs from `{base_path}` at line 1, so `stage-zero/main.prefix.rs` cannot be derived; run once with JET_REPACK_SOURCE_ROOT set to the generator sources of the kept run")
+    assert_eq(repack_read_text(base_path) ?? panic("retained base"), "REFpackage\nmain\n")
+    assert(!repack_files.is_file(repack_files.join(root, "stage-zero/main.prefix.rs")))
+    assert(!repack_files.is_file(repack_files.join(root, "artifact-main.rs")))
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("original main priority does not silently fall back when its suffix is malformed") {
+    root :: repack_test_setup("original-priority")
+    repack_files.write(repack_files.join(root, "stage-zero/main.rs.orig"), "malformed") ?? panic("corrupt original")
+    original :: repack_files.join(root, "stage-zero/main.rs.orig")
+    assert_eq(repack_test_finish_error(root, 3, "REFpackage\n", Val([U8]{U8{1}})), "`{original}` does not end with the packaged suffix of the base source; restore the main crate the kept run wrote")
+    assert(!repack_files.is_file(repack_files.join(root, "stage-zero/main.prefix.rs")))
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("current main is selected only when orig is absent and no source has exact refusal") {
+    root :: repack_test_setup("current-fallback")
+    repack_files.remove(repack_files.join(root, "stage-zero/main.rs.orig")) ?? panic("remove orig")
+    repack_finish(root, root, 3, "REFpackage\n", Val([U8]{U8{1}, U8{2}}), [U8]{U8{1}, U8{2}}, repack_time.instant()) ?? panic("fallback publication")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero/main.prefix.rs")) ?? panic("prefix"), "CURRENT\n")
+    repack_files.remove(repack_files.join(root, "stage-zero/src/main.rs")) ?? panic("remove main")
+    _ :: repack_base_main_path(repack_files.join(root, "stage-zero")) ?? {
+        assert_eq(err.message, "the kept backend project has no main crate source")
+        repack_files.remove_all(root) ?? panic("remove fixture")
+        return
+    }
+    panic("missing main was accepted")
+}
+
+#Test("malformed stamp happens after prefix derivation but before harness or image publication") {
+    root :: repack_test_setup("bad-stamp")
+    repack_files.write(repack_files.join(root, "stage-zero.stamp"), "task_roots=invalid\n") ?? panic("invalid stamp")
+    stamp :: repack_files.join(root, "stage-zero.stamp")
+    assert_eq(repack_test_finish_error(root, 3, "REFpackage\n", Val([U8]{U8{3}})), "`{stamp}` has no `task_roots=true|false` line")
+    assert(repack_files.is_file(repack_files.join(root, "stage-zero/main.prefix.rs")))
+    assert(!repack_files.is_file(repack_files.join(root, "artifact-main.rs")))
+    assert_eq(repack_read(repack_files.join(root, "stage-zero.image")) ?? panic("old image"), [U8]{U8{1}, U8{2}})
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("changed image write ordering keeps source untouched when embedded-image publication fails") {
+    root :: repack_test_setup("image-order")
+    repack_files.write(repack_files.join(root, "stage-zero/main.prefix.rs"), "SAVED\n") ?? panic("saved prefix")
+    embedded :: repack_files.join(root, "stage-zero/src/compiler.image")
+    repack_files.remove(embedded) ?? panic("remove image file")
+    repack_files.create_dir(embedded) ?? panic("block embedded write with directory")
+    problem :: repack_test_finish_error(root, 3, "REFnew\n", Val([U8]{U8{255}}))
+    assert(problem.starts_with("cannot write `{embedded}`: "))
+    assert_eq(repack_read(repack_files.join(root, "stage-zero.image")) ?? panic("updated kept image"), [U8]{U8{255}})
+    assert_eq(repack_read_text(repack_files.join(root, "artifact-main.rs")) ?? panic("harness already written"), "main\n")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero.rs")) ?? panic("source not written"), "REFpackage\nmain\n")
+    assert(!repack_files.is_file(repack_files.join(root, "stage-zero/generated.rs")))
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("reference extent failure occurs after harness and both changed image writes") {
+    root :: repack_test_setup("extent-order")
+    repack_files.write(repack_files.join(root, "stage-zero/main.prefix.rs"), "SAVED\n") ?? panic("saved prefix")
+    assert_eq(repack_test_finish_error(root, 999, "REFnew\n", Val([U8]{U8{255}})), "the packaged source does not extend reference.rs")
+    assert_eq(repack_read(repack_files.join(root, "stage-zero.image")) ?? panic("kept image"), [U8]{U8{255}})
+    assert_eq(repack_read(repack_files.join(root, "stage-zero/src/compiler.image")) ?? panic("embedded image"), [U8]{U8{255}})
+    assert_eq(repack_read_text(repack_files.join(root, "artifact-main.rs")) ?? panic("harness"), "main\n")
+    assert_eq(repack_read_text(repack_files.join(root, "stage-zero.rs")) ?? panic("unchanged source"), "REFpackage\nmain\n")
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("task-root stamp actually selects stripped or kept artifact main bytes") {
+    root :: repack_test_setup("roots-selection")
+    body :: "a{REPACK_TASK_BEGIN}roots{REPACK_TASK_END}b"
+    repack_files.write(repack_files.join(root, "Compiler/Bootstrap/Tests.rs"), repack_test_raw_main(body)) ?? panic("root harness")
+    repack_files.write(repack_files.join(root, "stage-zero/main.prefix.rs"), "SAVED\n") ?? panic("saved prefix")
+    repack_finish(root, root, 3, "REFpackage\n", Val([U8]{U8{1}, U8{2}}), [U8]{U8{1}, U8{2}}, repack_time.instant()) ?? panic("strip roots")
+    assert_eq(repack_read_text(repack_files.join(root, "artifact-main.rs")) ?? panic("stripped harness"), "ab")
+    repack_files.write(repack_files.join(root, "stage-zero.stamp"), "task_roots=true\n") ?? panic("true stamp")
+    repack_finish(root, root, 3, "REFpackage\n", Val([U8]{U8{1}, U8{2}}), [U8]{U8{1}, U8{2}}, repack_time.instant()) ?? panic("keep roots")
+    assert_eq(repack_read_text(repack_files.join(root, "artifact-main.rs")) ?? panic("kept harness"), body)
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("build-root validation preserves exact ordered module names paths and missing-source error") {
+    root :: repack_test_root("build-root")
+    modules :: repack_bootstrap_modules()
+    names :: [String]{"BootstrapBuildIdentity", "compiler_bootstrap_runtime_mir_codec", "compiler_bootstrap_runtime_mir", "compiler_bootstrap_diagnostic_codec", "compiler_bootstrap_entry_codec", "compiler_bootstrap_compiler_image", "compiler_bootstrap_host", "compiler_bootstrap_runner"}
+    paths :: [String]{"Compiler/Bootstrap/BuildIdentity.rs", "Compiler/Bootstrap/Host/RuntimeMirCodec.rs", "Compiler/Bootstrap/Host/RuntimeMir.rs", "Compiler/Bootstrap/Host/DiagnosticCodec.rs", "Compiler/Bootstrap/Host/EntryCodec.rs", "Compiler/Bootstrap/Host/CompilerImage.rs", "Compiler/Bootstrap/Host/Native.rs", "Compiler/Bootstrap/Runner.rs"}
+    assert_eq(modules.len(), names.len())
+    loop index in 0..<modules.len() {
+        assert_eq(modules[index].module_name, names[index])
+        assert_eq(modules[index].relative_path, paths[index])
+        path :: repack_files.join(root, paths[index])
+        repack_files.create_dir_all(repack_files.dirname(path)) ?? panic("module parent")
+        repack_files.write(path, "module fixture") ?? panic("module file")
+    }
+    canonical :: repack_files.canonicalize(root) ?? panic("canonical fixture")
+    assert_eq(repack_validate_build_root(root) ?? panic("validated root"), canonical)
+    missing :: repack_files.join(canonical, paths[2])
+    repack_files.remove(missing) ?? panic("remove module")
+    _ :: repack_validate_build_root(root) ?? {
+        assert_eq(err.message, "bootstrap source `{missing}` is missing")
+        repack_files.remove_all(root) ?? panic("remove fixture")
+        return
+    }
+    panic("missing module was accepted")
+}
+
+#Test("Bootstrap bridge inventory preserves complete original ordered reexport sets") {
+    bridges :: repack_bootstrap_bridges()
+    assert_eq(bridges.len(), 5)
+    assert_eq(bridges[0].module_name, "compiler_bootstrap_entry_codec")
+    assert_eq(bridges[0].exports, [String]{"BootstrapEntryCodec", "BootstrapEntryPhysicalBindings", "BootstrapEntryValue"})
+    assert_eq(bridges[1].module_name, "compiler_bootstrap_compiler_image")
+    assert_eq(bridges[1].exports, [String]{"archive_compiler_image", "restore_compiler_image", "CompilerImageError", "CompilerImageHeader", "RestoredCompilerImage"})
+    assert_eq(bridges[2].module_name, "compiler_bootstrap_runtime_mir")
+    assert_eq(bridges[2].exports, [String]{"execute_source_mir", "SourceMirExecution", "SourceMirExecutionError"})
+    assert_eq(bridges[3].module_name, "compiler_bootstrap_host")
+    assert_eq(bridges[3].exports, [String]{"append_bootstrap_host_glue", "open_authorized_sources", "AuthorizedSourceLease", "AuthorizedSourceSnapshot", "BootstrapBindingDescriptor", "BootstrapHostCodecError"})
+    assert_eq(bridges[4].module_name, "compiler_bootstrap_runner")
+    assert_eq(bridges[4].exports, [String]{"bootstrap_artifact_build_id", "invoke_bootstrap_entry", "prepare_bootstrap_artifact", "prepare_bootstrap_artifact_from_aot", "BootstrapArtifact", "BootstrapBackendArtifact", "BootstrapFactoryTier", "BootstrapJetCompileResult", "BootstrapRunError", "BootstrapRunOutput", "BootstrapSourceResume", "BootstrapSourceResumeFactory", "BootstrapWebArtifacts"})
+}
+
+#Test("FFI record splits once and trims LF alone without inventing a link when absent") {
+    assert(repack_ffi_record("no newline") == None)
+    record :: repack_ffi_record("bridge\n/cache/key\n\n") ?? panic("FFI record")
+    assert_eq(record.crate_name, "bridge")
+    assert_eq(record.directory, "/cache/key")
+    empty :: repack_ffi_record("\n") ?? panic("empty FFI fields")
+    assert_eq(empty.crate_name, "")
+    assert_eq(empty.directory, "")
+    cr :: repack_ffi_record("bridge\r\n/cache/key\r\n") ?? panic("CRLF FFI record")
+    assert_eq(cr.crate_name, "bridge\r")
+    assert_eq(cr.directory, "/cache/key\r")
+    internal :: repack_ffi_record("bridge\n/cache/one\nsecond\n") ?? panic("internal LF directory")
+    assert_eq(internal.directory, "/cache/one\nsecond")
+}
+
+#Test("invocation uses explicit compiler project then retained directory then HOME assembly") {
+    root :: repack_test_root("invocation")
+    selected :: repack_invocation([String]{root, "explicit", "ignored"}) ?? panic("explicit project")
+    assert_eq(selected.keep, root)
+    assert_eq(selected.compiler_project, "explicit")
+    home :: repack_sys.get("HOME") ?? panic("fixture home")
+    fallback :: repack_invocation([String]{root}) ?? panic("HOME project")
+    assert_eq(fallback.compiler_project, repack_files.join(home, ".cache/jet-luna/compiler-bootstrap/project"))
+    retained :: repack_files.join(root, "compiler-project")
+    repack_files.create_dir(retained) ?? panic("retained project directory")
+    selected_retained :: repack_invocation([String]{root}) ?? panic("retained project")
+    assert_eq(selected_retained.compiler_project, retained)
+    repack_files.remove_all(root) ?? panic("remove fixture")
+    _ :: repack_invocation([String]{}) ?? {
+        assert_eq(err.message, "usage: stage0-repack <keep-dir> [<compiler-project>]")
+        return
+    }
+    panic("missing keep argument was accepted")
+}
+
+#Test("read read_text and write observe binary bytes and path-specific IO refusals") {
+    root :: repack_test_root("io")
+    path :: repack_files.join(root, "binary")
+    binary :: [U8]{U8{0}, U8{255}, U8{128}, U8{13}, U8{10}}
+    repack_write(path, binary) ?? panic("write binary")
+    assert_eq(repack_read(path) ?? panic("read binary"), binary)
+    missing :: repack_files.join(root, "missing")
+    _ :: repack_read(missing) ?? {
+        assert(err.message.starts_with("cannot read `{missing}`: "))
+        repack_files.remove_all(root) ?? panic("remove fixture")
+        return
+    }
+    panic("missing file was readable")
+}
+
+fn repack_test_read_text_error(path: String) -[FS]> String Never! {
+    _ :: repack_read_text(path) ?? return err.message
+    panic("expected text read failure")
+}
+
+#Test("text IO refuses invalid UTF-8 and cannot write error keeps requested path") {
+    root :: repack_test_root("text-io")
+    path :: repack_files.join(root, "text")
+    repack_write(path, [U8]{U8{255}}) ?? panic("invalid text fixture")
+    problem := repack_test_read_text_error(path)
+    assert(problem.starts_with("cannot read `{path}`: "))
+    problem = ""
+    repack_write(root, [U8]{U8{1}}) ?? { problem = err.message }
+    assert(problem.starts_with("cannot write `{root}`: "))
+    repack_files.remove_all(root) ?? panic("remove fixture")
+}
+
+#Test("byte-based prefix and generated-main extraction do not use Unicode scalar offsets") {
+    body :: "é\\nfn main() {{}}\\n"
+    assert_eq(repack_extract_artifact_main(repack_test_raw_main(body), "Tests.rs", true) ?? panic("unicode raw main"), body)
+    assert_eq(repack_derive_prefix("éTAILmain", "éTAIL", 2, "base", "前缀TAILmain", "main") ?? panic("unicode prefix"), "前缀")
+}
+
+#Test("build root canonicalization failure precedes module inventory validation") {
+    root :: repack_test_root("missing-build-root")
+    missing :: repack_files.join(root, "does-not-exist")
+    _ :: repack_validate_build_root(missing) ?? {
+        assert(err.message.starts_with("JET_REPACK_SOURCE_ROOT `{missing}`: "))
+        repack_files.remove_all(root) ?? panic("remove fixture")
+        return
+    }
+    panic("missing source root canonicalized")
+}

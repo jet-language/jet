@@ -1,0 +1,60 @@
+// Original Server.rs4296–4452. All edit offsets are bytes and positions UTF16.
+// Dependencies: real 0739 formatter/token context plus canonical Lexer.
+use jet_foundation.[TextEdit]
+use jet_lexer.[lex]
+
+fn lsp_apply_on_type_edits(src: String, edits: [TextEdit]) -> String Never! {
+    ordered := ~edits
+    &ordered.sort_by((left: TextEdit, right: TextEdit) -> right.span.start <=> left.span.start)
+    out := ~src
+    loop edit in ordered {
+        range :: lsp_byte_span_to_range(out, edit.span)
+        out = lsp_apply_edit(out, range, None, edit.new_text) ?? panic("valid on-type edit")
+    }
+    out
+}
+fn lsp_apply_on_type(src: String, position: LSPPos, trigger: String) -> String Never! {
+    tokens :: lex(src.bytes()).tokens
+    lsp_apply_on_type_edits(src, lsp_on_type_format_edits(src, tokens, position, trigger))
+}
+
+#Test("range_formatting_leaves_unselected_lines_unchanged") {
+    source :: "fn one(){{\nprint(1)\n}}\nfn two(){{\nprint(2)\n}}\n"
+    requested :: LSPRange{start: LSPPos{line: 0, character: 0}, end: LSPPos{line: 3, character: 0}}
+    edit :: lsp_format_requested_lines(source, requested) ?? panic("range formatting edit")
+    edited :: lsp_apply_edit(source, edit.range, None, edit.new_text) ?? panic("valid edit")
+    assert(edited.starts_with("fn one() {{ print(1) }}\n"))
+    assert(edited.ends_with("fn two(){{\nprint(2)\n}}\n"))
+    assert_eq(edit.range.start, requested.start)
+    assert_eq(edit.range.end, requested.end)
+}
+
+#Test("on_type_newline_indents_inline_empty_nested_and_unicode_blocks") {
+    pos :: LSPPos{line: 1, character: 0}
+    assert_eq(lsp_apply_on_type("fn run() {{\n statement }}\n", pos, "\n"), "fn run() {{\n    statement\n}}\n")
+    assert_eq(lsp_apply_on_type("fn run() {{\n}}\n", pos, "\n"), "fn run() {{\n    \n}}\n")
+    assert_eq(lsp_apply_on_type("fn run() {{\n    if ok {{\n value }}\n}}\n", LSPPos{line: 2, character: 0}, "\n"), "fn run() {{\n    if ok {{\n        value\n    }}\n}}\n")
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    assert_eq(lsp_apply_on_type("fn run() {{{cr}\n café }}{cr}\n", pos, "\n"), "fn run() {{{cr}\n    café{cr}\n}}{cr}\n")
+}
+
+#Test("on_type_closing_brace_outdents_only_matching_block") {
+    source :: "fn run() {{\n    value\n        }}\n"
+    // Only one closing brace in the original fixture; same byte position as rfind.
+    close :: source.find("}") ?? panic("closing brace")
+    position :: lsp_byte_offset_to_lsp(source, close + 1)
+    assert_eq(lsp_apply_on_type(source, position, "}"), "fn run() {{\n    value\n}}\n")
+}
+
+#Test("on_type_ignores_opaque_and_unmatched_contexts") {
+    rows :: [(source: String, position: LSPPos)]{
+        (source: "// {{\nvalue\n", position: LSPPos{line: 1, character: 0}),
+        (source: "fn run() {{\n value\n", position: LSPPos{line: 1, character: 0}),
+        (source: "fn run() {{ /* {{\nvalue }} */ }}\n", position: LSPPos{line: 1, character: 0}),
+        (source: "fn run() {{ \"\"\"{{\nvalue}}\"\"\" }}\n", position: LSPPos{line: 1, character: 0}),
+        (source: "fn run() {{ SQL{{\"\"\"{{\nvalue}}\"\"\"}} }}\n", position: LSPPos{line: 1, character: 0}),
+        (source: "fn run() {{ SQL{{\n\"value\"}} }}\n", position: LSPPos{line: 1, character: 0}),
+        (source: "// }}\n", position: LSPPos{line: 0, character: 4}),
+    }
+    loop row in rows -> assert_eq(lsp_apply_on_type(row.source, row.position, "\n"), row.source)
+}

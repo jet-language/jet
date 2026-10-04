@@ -1,0 +1,1818 @@
+// PORT-PENDING 0760 crates-jet-devserver-src-canvas-edit-actions-slice-1: crates/jet-devserver/src/Canvas/edit_actions.rs:1-1814
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Deep Canvas edit transaction: JSON decode through atomic source commit.
+//RS //!
+//RS //! `apply_transaction_json` is the only sibling-facing seam.
+//RS 
+//RS use std::path::Path;
+//RS 
+//RS use jet_driver::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
+//RS use jet_driver::FixEngine;
+//RS use jet_driver::AST::{self, Expr, Item, Stmt};
+//RS use jet_semindex::SourceSpan;
+//RS 
+//RS use super::debug_source_git::canonical_path;
+//RS use super::graph_helpers::{
+//RS     canvas_action_preview_ok, diagnostics_error, edit, edit_conflict, edit_error, edit_ok,
+//RS     edit_ok_source, function_signature_span, graph_id_name_span, indentation_at, line_after,
+//RS     line_start, preview_ok, snippet, span_through_closing_parens,
+//RS };
+//RS use super::graph_json::{canvas_collapse_hints, func_source_span};
+//RS use super::graph_projection::{trait_method_signature, GraphEditAnchor, Projection};
+//RS use super::project_scan::project_file;
+//RS use super::query_actions::default_arg_for_type;
+//RS use super::source_model::{
+//RS     read_source_without_symlinks, source_revision, write_new_file_without_symlinks,
+//RS     write_source_if_unchanged, SourceWriteError,
+//RS };
+//RS use super::validation_json::{
+//RS     extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str,
+//RS     json_string_array, json_string_field, json_usize_field, normalize_bounds, parse_simple_call,
+//RS     quoted_attr, replace_ident, required_string, validate_comment_alpha, validate_comment_color,
+//RS     validate_function_signature, validate_ident, validate_qualified_name,
+//RS     validate_signature_fragment, validate_single_line_fragment, validate_type_fragment,
+//RS     wire_span_from_json_chunk,
+//RS };
+//RS 
+//RS pub const EDIT_SCHEMA_VERSION: u32 = 1;
+//RS 
+//RS pub(super) fn apply_transaction_json(path: &Path, request: &str) -> Result<String, String> {
+//RS     jet_driver::run_compiler_work(|| apply_transaction_json_on_compiler_stack(path, request))
+//RS }
+//RS 
+//RS fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Result<String, String> {
+//RS     let src = read_source_without_symlinks(path)
+//RS         .map_err(|e| edit_error("io", &e.to_string()))?;
+//RS     let revision = required_string(request, "revision")?;
+//RS     let current_revision = source_revision(&src);
+//RS     if revision != current_revision {
+//RS         return Err(edit_conflict(
+//RS             "source changed since this Canvas graph was drawn",
+//RS             &current_revision,
+//RS         ));
+//RS     }
+//RS     let schema = json_usize_field(request, "schema_version").unwrap_or(0);
+//RS     if schema != EDIT_SCHEMA_VERSION as usize {
+//RS         return Err(edit_error("schema", "Canvas edit schema_version must be 1"));
+//RS     }
+//RS     let op = required_string(request, "op")?;
+//RS     match op.as_str() {
+//RS         "noop" => apply_noop(path, &src),
+//RS         "rename_binding" => {
+//RS             let from = required_string(request, "from")?;
+//RS             let to = required_string(request, "to")?;
+//RS             validate_ident(&from)?;
+//RS             validate_ident(&to)?;
+//RS             apply_rename(path, &src, &from, &to)
+//RS         }
+//RS         "rename_function" => {
+//RS             let from = required_string(request, "from")?;
+//RS             let to = required_string(request, "to")?;
+//RS             validate_ident(&from)?;
+//RS             validate_ident(&to)?;
+//RS             apply_rename(path, &src, &from, &to)
+//RS         }
+//RS         "create_function" => {
+//RS             let name = required_string(request, "name")?;
+//RS             validate_ident(&name)?;
+//RS             let params = json_string_field(request, "params").unwrap_or_default();
+//RS             validate_signature_fragment(&params)?;
+//RS             let ret_type =
+//RS                 json_string_field(request, "ret_type").unwrap_or_else(|| "Int".to_string());
+//RS             validate_type_fragment(&ret_type)?;
+//RS             apply_create_function(path, &src, &name, &params, &ret_type)
+//RS         }
+//RS         "edit_function_signature" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let signature = required_string(request, "signature")?;
+//RS             validate_function_signature(&signature)?;
+//RS             apply_edit_function_signature(path, &src, &graph_id, &signature)
+//RS         }
+//RS         "edit_inline_expr" => {
+//RS             let inline_id = required_string(request, "inline_expr_id")?;
+//RS             let new_expr = required_string(request, "new_expr")?;
+//RS             apply_inline_edit(path, &src, &inline_id, &new_expr)
+//RS         }
+//RS         "promote_to_binding" => {
+//RS             let inline_id = required_string(request, "inline_expr_id")?;
+//RS             let name = required_string(request, "name")?;
+//RS             validate_ident(&name)?;
+//RS             apply_promote_inline(path, &src, &inline_id, &name)
+//RS         }
+//RS         "insert_visible_conversion" => {
+//RS             let inline_id = required_string(request, "inline_expr_id")?;
+//RS             let callee = required_string(request, "callee")?;
+//RS             validate_qualified_name(&callee)?;
+//RS             apply_visible_conversion(path, &src, &inline_id, &callee)
+//RS         }
+//RS         "break_link" => {
+//RS             let wire_id = required_string(request, "wire_id")?;
+//RS             apply_break_link(path, &src, &wire_id)
+//RS         }
+//RS         "move_link" => {
+//RS             let wire_id = required_string(request, "wire_id")?;
+//RS             let replacement = required_string(request, "replacement")?;
+//RS             validate_qualified_name(&replacement)?;
+//RS             apply_move_link(path, &src, &wire_id, &replacement)
+//RS         }
+//RS         "reorder_statements" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let moved = SourceSpan {
+//RS                 start: json_usize_field(request, "moved_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `moved_start`"))?,
+//RS                 end: json_usize_field(request, "moved_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `moved_end`"))?,
+//RS             };
+//RS             let anchor = SourceSpan {
+//RS                 start: json_usize_field(request, "anchor_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `anchor_start`"))?,
+//RS                 end: json_usize_field(request, "anchor_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `anchor_end`"))?,
+//RS             };
+//RS             let position = json_string_field(request, "position").unwrap_or_else(|| "after".into());
+//RS             apply_reorder_statements(path, &src, &graph_id, moved, anchor, &position)
+//RS         }
+//RS         "add_pattern_arm" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let pattern = required_string(request, "pattern")?;
+//RS             validate_single_line_fragment(&pattern, "pattern arm text must stay on one line")?;
+//RS             let node = SourceSpan {
+//RS                 start: json_usize_field(request, "node_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+//RS                 end: json_usize_field(request, "node_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+//RS             };
+//RS             apply_add_pattern_arm(path, &src, &graph_id, node, &pattern)
+//RS         }
+//RS         "edit_pattern_arm" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let pattern = required_string(request, "pattern")?;
+//RS             validate_single_line_fragment(&pattern, "pattern arm text must stay on one line")?;
+//RS             let pattern_span = SourceSpan {
+//RS                 start: json_usize_field(request, "pattern_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `pattern_start`"))?,
+//RS                 end: json_usize_field(request, "pattern_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `pattern_end`"))?,
+//RS             };
+//RS             apply_edit_pattern_arm(path, &src, &graph_id, pattern_span, &pattern)
+//RS         }
+//RS         "remove_pattern_arm" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let pattern_span = SourceSpan {
+//RS                 start: json_usize_field(request, "pattern_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `pattern_start`"))?,
+//RS                 end: json_usize_field(request, "pattern_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `pattern_end`"))?,
+//RS             };
+//RS             apply_remove_pattern_arm(path, &src, &graph_id, pattern_span)
+//RS         }
+//RS         "toggle_switch_state" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let node_span = SourceSpan {
+//RS                 start: json_usize_field(request, "node_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+//RS                 end: json_usize_field(request, "node_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+//RS             };
+//RS             apply_toggle_switch_state(path, &src, &graph_id, node_span)
+//RS         }
+//RS         "append_multi_input" => {
+//RS             let element = json_string_field(request, "element").unwrap_or_else(|| "1".to_string());
+//RS             validate_single_line_fragment(&element, "multi-input element must stay on one line")?;
+//RS             let node = SourceSpan {
+//RS                 start: json_usize_field(request, "node_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+//RS                 end: json_usize_field(request, "node_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+//RS             };
+//RS             apply_append_multi_input(path, &src, node, &element)
+//RS         }
+//RS         "remove_multi_input_element" => {
+//RS             let node = SourceSpan {
+//RS                 start: json_usize_field(request, "node_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+//RS                 end: json_usize_field(request, "node_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+//RS             };
+//RS             let element = SourceSpan {
+//RS                 start: json_usize_field(request, "element_start")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `element_start`"))?,
+//RS                 end: json_usize_field(request, "element_end")
+//RS                     .ok_or_else(|| edit_error("bad_request", "missing `element_end`"))?,
+//RS             };
+//RS             apply_remove_multi_input_element(path, &src, node, element)
+//RS         }
+//RS         "replace_source" => {
+//RS             if json_string_field(request, "source_edit").as_deref() == Some("exec_convergence") {
+//RS                 let graph_id = required_string(request, "graph_id")?;
+//RS                 let from_pin_name = required_string(request, "from_pin_name")?;
+//RS                 let strategy = required_string(request, "strategy")?;
+//RS                 let function = required_string(request, "function")?;
+//RS                 let from_span = SourceSpan {
+//RS                     start: json_usize_field(request, "from_start")
+//RS                         .ok_or_else(|| edit_error("bad_request", "missing `from_start`"))?,
+//RS                     end: json_usize_field(request, "from_end")
+//RS                         .ok_or_else(|| edit_error("bad_request", "missing `from_end`"))?,
+//RS                 };
+//RS                 let target_span = SourceSpan {
+//RS                     start: json_usize_field(request, "target_start")
+//RS                         .ok_or_else(|| edit_error("bad_request", "missing `target_start`"))?,
+//RS                     end: json_usize_field(request, "target_end")
+//RS                         .ok_or_else(|| edit_error("bad_request", "missing `target_end`"))?,
+//RS                 };
+//RS                 return apply_exec_convergence(
+//RS                     path,
+//RS                     &src,
+//RS                     &graph_id,
+//RS                     from_span,
+//RS                     target_span,
+//RS                     &from_pin_name,
+//RS                     &strategy,
+//RS                     &function,
+//RS                     json_string_field(request, "helper_name").as_deref(),
+//RS                 );
+//RS             }
+//RS             let source = required_string(request, "source")?;
+//RS             if json_string_field(request, "undo_restore").is_some() {
+//RS                 write_checked_source(path, &src, &source)
+//RS             } else {
+//RS                 write_checked_formatted(path, &src, &source)
+//RS             }
+//RS         }
+//RS         "insert_branch" | "insert_switch" | "insert_loop" | "insert_fallible_rail" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let wire_origin_pin_id = json_string_field(request, "wire_origin_pin_id");
+//RS             let wire_target_pin = json_string_field(request, "wire_target_pin");
+//RS             apply_insert_structural(
+//RS                 path,
+//RS                 &src,
+//RS                 &graph_id,
+//RS                 op.as_str(),
+//RS                 wire_origin_pin_id.as_deref(),
+//RS                 wire_target_pin.as_deref(),
+//RS             )
+//RS         }
+//RS         "create_comment_region" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let title = required_string(request, "title")?;
+//RS             let color =
+//RS                 json_string_field(request, "color").unwrap_or_else(|| "#2563eb".to_string());
+//RS             let alpha = json_string_field(request, "alpha").unwrap_or_else(|| "0.18".to_string());
+//RS             let start = json_usize_field(request, "start").unwrap_or(0);
+//RS             let end = json_usize_field(request, "end").unwrap_or(start);
+//RS             let bounds =
+//RS                 json_string_field(request, "bounds").unwrap_or_else(|| "0,0,360,180".to_string());
+//RS             apply_create_comment_region(
+//RS                 path, &src, &graph_id, start, end, &title, &color, &alpha, &bounds,
+//RS             )
+//RS         }
+//RS         "edit_comment_region" | "move_comment_region" | "resize_comment_region" => {
+//RS             let region_id = required_string(request, "region_id")?;
+//RS             let title = json_string_field(request, "title");
+//RS             let color = json_string_field(request, "color");
+//RS             let alpha = json_string_field(request, "alpha");
+//RS             let bounds = json_string_field(request, "bounds");
+//RS             apply_update_comment_region(
+//RS                 path,
+//RS                 &src,
+//RS                 &region_id,
+//RS                 title.as_deref(),
+//RS                 color.as_deref(),
+//RS                 alpha.as_deref(),
+//RS                 bounds.as_deref(),
+//RS             )
+//RS         }
+//RS         "delete_comment_region" => {
+//RS             let region_id = required_string(request, "region_id")?;
+//RS             apply_delete_comment_region(path, &src, &region_id)
+//RS         }
+//RS         "create_collapsed_region" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let title = required_string(request, "title")?;
+//RS             let start = json_usize_field(request, "start").unwrap_or(0);
+//RS             let end = json_usize_field(request, "end").unwrap_or(start);
+//RS             apply_create_collapse_region(path, &src, &graph_id, start, end, &title)
+//RS         }
+//RS         "expand_collapsed_region" => {
+//RS             let region_id = required_string(request, "region_id")?;
+//RS             apply_delete_hint_region(path, &src, &region_id, "collapse")
+//RS         }
+//RS         "extract_inline_expr" | "preview_extract_inline_expr" => {
+//RS             let inline_id = required_string(request, "inline_expr_id")?;
+//RS             let function = required_string(request, "function")?;
+//RS             validate_ident(&function)?;
+//RS             let ret_type =
+//RS                 json_string_field(request, "ret_type").unwrap_or_else(|| "Int".to_string());
+//RS             let candidate = extract_inline_candidate(path, &src, &inline_id, &function, &ret_type)?;
+//RS             if op == "preview_extract_inline_expr" {
+//RS                 Ok(preview_ok(&src, &candidate))
+//RS             } else {
+//RS                 write_checked_formatted(path, &src, &candidate)
+//RS             }
+//RS         }
+//RS         "inline_helper_call" => {
+//RS             let inline_id = json_string_field(request, "inline_expr_id");
+//RS             let start = json_usize_field(request, "start");
+//RS             let end = json_usize_field(request, "end");
+//RS             let candidate = inline_helper_candidate(path, &src, inline_id.as_deref(), start, end)?;
+//RS             write_checked_formatted(path, &src, &candidate)
+//RS         }
+//RS         "insert_call" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let callee = required_string(request, "callee")?;
+//RS             validate_qualified_name(&callee)?;
+//RS             let args = json_string_array(request, "args");
+//RS             let bind = json_string_field(request, "bind");
+//RS             let wire_inline_expr_id = json_string_field(request, "wire_inline_expr_id");
+//RS             let wire_expr = json_string_field(request, "wire_expr");
+//RS             let wire_origin_pin_id = json_string_field(request, "wire_origin_pin_id");
+//RS             let wire_target_pin = json_string_field(request, "wire_target_pin");
+//RS             let module_path = json_string_field(request, "module_path");
+//RS             if let Some(name) = &bind {
+//RS                 validate_ident(name)?;
+//RS             }
+//RS             if let Some(expr) = &wire_expr {
+//RS                 validate_qualified_name(expr)?;
+//RS             }
+//RS             if let Some(module) = &module_path {
+//RS                 validate_qualified_name(module)?;
+//RS             }
+//RS             apply_insert_call(
+//RS                 path,
+//RS                 &src,
+//RS                 &graph_id,
+//RS                 &callee,
+//RS                 &args,
+//RS                 bind.as_deref(),
+//RS                 wire_inline_expr_id.as_deref(),
+//RS                 wire_expr.as_deref(),
+//RS                 wire_origin_pin_id.as_deref(),
+//RS                 wire_target_pin.as_deref(),
+//RS                 module_path.as_deref(),
+//RS             )
+//RS         }
+//RS         "create_trait_impl" => {
+//RS             let type_name = required_string(request, "type_name")?;
+//RS             let trait_name = required_string(request, "trait_name")?;
+//RS             validate_qualified_name(&type_name)?;
+//RS             validate_qualified_name(&trait_name)?;
+//RS             apply_create_trait_impl(path, &src, &type_name, &trait_name)
+//RS         }
+//RS         "preview_canvas_action" => {
+//RS             let graph_id = required_string(request, "graph_id")?;
+//RS             let action_id = required_string(request, "action_id")?;
+//RS             let callee = required_string(request, "callee")?;
+//RS             validate_qualified_name(&callee)?;
+//RS             let args = json_string_array(request, "args");
+//RS             let candidate =
+//RS                 canvas_action_candidate(path, &src, &graph_id, &action_id, &callee, &args)?;
+//RS             Ok(canvas_action_preview_ok(
+//RS                 path, &src, &candidate, &action_id, &callee,
+//RS             ))
+//RS         }
+//RS         _ => Err(edit_error("unsupported", "unknown Canvas edit operation")),
+//RS     }
+//RS }
+//RS 
+//RS fn apply_noop(path: &Path, _src: &str) -> Result<String, String> {
+//RS     Ok(edit_ok(false, path))
+//RS }
+//RS 
+//RS fn apply_rename(path: &Path, src: &str, from: &str, to: &str) -> Result<String, String> {
+//RS     let idx = jet_semindex::open(path).map_err(|e| edit_error("check", &e.to_string()))?;
+//RS     let mut edits = Vec::new();
+//RS     for def in idx.definitions().iter().filter(|d| d.name == from) {
+//RS         edits.push(edit(def.def_span, to));
+//RS     }
+//RS     for r in idx.references().iter().filter(|r| r.name == from) {
+//RS         edits.push(edit(r.span, to));
+//RS     }
+//RS     if edits.is_empty() {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas rename found no matching binding",
+//RS         ));
+//RS     }
+//RS     let changed = FixEngine::apply_edits(src, &edits)
+//RS         .map_err(|_| edit_error("overlap", "Canvas rename edits overlapped"))?;
+//RS     let formatted = jet_driver::Formatter::format_source(&changed)
+//RS         .map_err(|diags| diagnostics_error(path, &changed, &diags))?;
+//RS     let result = write_checked_source(path, src, &formatted)?;
+//RS     if formatted != src {
+//RS         record_canvas_rename(path, src, &formatted, from, to, &idx)?;
+//RS     }
+//RS     Ok(result)
+//RS }
+//RS 
+//RS fn record_canvas_rename(
+//RS     path: &Path,
+//RS     before: &str,
+//RS     after: &str,
+//RS     from: &str,
+//RS     to: &str,
+//RS     index: &jet_semindex::SemIndex,
+//RS ) -> Result<(), String> {
+//RS     let project = path.parent().unwrap_or_else(|| Path::new("."));
+//RS     let directory = project.join(".jet/codemods");
+//RS     super::source_model::ensure_no_symlink_directory(&directory)
+//RS         .map_err(|error| edit_error("io", &format!("could not record semantic rename: {error}")))?;
+//RS     let before_hash = jet_driver::SHA256::sha256_hex(before.as_bytes());
+//RS     let after_hash = jet_driver::SHA256::sha256_hex(after.as_bytes());
+//RS     let targets = index
+//RS         .definition_facts()
+//RS         .iter()
+//RS         .filter(|fact| fact.name == from)
+//RS         .map(|fact| {
+//RS             format!(
+//RS                 "{{\"stable_id\":{},\"before\":{},\"after\":{},\"kind\":{},\"module_path\":{}}}",
+//RS                 json_str(&fact.stable_id),
+//RS                 json_str(&fact.human_identity),
+//RS                 json_str(&format!("{}::{to}", fact.module_path)),
+//RS                 json_str(&fact.kind),
+//RS                 json_str(&fact.module_path),
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let file = format!(
+//RS         "{{\"path\":{},\"before_hash\":{},\"after_hash\":{}}}",
+//RS         json_str(&path.display().to_string()),
+//RS         json_str(&before_hash),
+//RS         json_str(&after_hash),
+//RS     );
+//RS     let op = format!(
+//RS         "{{\"kind\":\"rename\",\"from\":{},\"to\":{},\"targets\":[{}],\"files\":[{}]}}",
+//RS         json_str(from),
+//RS         json_str(to),
+//RS         targets,
+//RS         file,
+//RS     );
+//RS     let base = format!("CanvasRename-{}", &after_hash[..12]);
+//RS     let mut receipt = directory.join(format!("{base}.log.json"));
+//RS     let mut suffix = 0;
+//RS     let log = format!(
+//RS         "{{\"schema\":2,\"name\":{},\"project\":{},\"semantic_ops\":[{}],\"files\":[{}]}}\n",
+//RS         json_str(&base),
+//RS         json_str(&project.display().to_string()),
+//RS         op,
+//RS         file,
+//RS     );
+//RS     loop {
+//RS         match write_new_file_without_symlinks(&receipt, log.as_bytes()) {
+//RS             Ok(()) => return Ok(()),
+//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+//RS                 suffix += 1;
+//RS                 receipt = directory.join(format!("{base}-{suffix}.log.json"));
+//RS             }
+//RS             Err(error) => {
+//RS                 return Err(edit_error(
+//RS                     "io",
+//RS                     &format!("could not record semantic rename: {error}"),
+//RS                 ))
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn apply_create_function(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     name: &str,
+//RS     params: &str,
+//RS     ret_type: &str,
+//RS ) -> Result<String, String> {
+//RS     let body = if ret_type == "Void" {
+//RS         String::new()
+//RS     } else {
+//RS         format!("    return {}\n", default_arg_for_type(ret_type))
+//RS     };
+//RS     let ret = if ret_type == "Void" {
+//RS         String::new()
+//RS     } else {
+//RS         format!(" -> {ret_type}")
+//RS     };
+//RS     let function = format!("fn {name}({params}){ret} {{\n{body}}}\n\n");
+//RS     let changed = FixEngine::apply_edits(src, &[edit(SourceSpan { start: 0, end: 0 }, &function)])
+//RS         .map_err(|_| edit_error("overlap", "Canvas create function edit overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_create_trait_impl(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     type_name: &str,
+//RS     trait_name: &str,
+//RS ) -> Result<String, String> {
+//RS     let path_str = path.to_string_lossy();
+//RS     let (diags, bundle) = jet_driver::Driver::check_file(&path_str, None, true);
+//RS     let errors = diags
+//RS         .iter()
+//RS         .filter(|d| d.severity == Severity::Error)
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS     if !errors.is_empty() {
+//RS         return Err(diagnostics_error(path, src, &errors));
+//RS     }
+//RS     let Some(bundle) = bundle else {
+//RS         return Err(edit_error(
+//RS             "check",
+//RS             "Canvas could not read checked trait facts",
+//RS         ));
+//RS     };
+//RS     let Some(location) = find_trait_location(&bundle, path, trait_name) else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas trait was not found in source",
+//RS         ));
+//RS     };
+//RS     let trait_def = location.trait_def;
+//RS     if !trait_def.assoc_types.is_empty() {
+//RS         return Err(edit_error(
+//RS             "needs_associated_types",
+//RS             "Canvas will not guess associated type implementations; add each associated type in source first",
+//RS         ));
+//RS     }
+//RS     let mut body = String::new();
+//RS     for method in trait_def
+//RS         .methods
+//RS         .iter()
+//RS         .filter(|method| method.default_body.is_none())
+//RS     {
+//RS         let sig = trait_method_signature(src, method);
+//RS         body.push_str("    ");
+//RS         body.push_str(&sig);
+//RS         if method
+//RS             .return_type
+//RS             .as_ref()
+//RS             .is_some_and(|ret| ret.name() != "Void")
+//RS             && method.declared_effects.is_none()
+//RS             && !method.is_pure
+//RS         {
+//RS             body.push_str(" ->");
+//RS         }
+//RS         body.push_str(" {\n");
+//RS         if let Some(ret) = &method.return_type {
+//RS             if ret.name() != "Void" {
+//RS                 body.push_str("        return ");
+//RS                 body.push_str(&default_arg_for_type(&ret.name()));
+//RS                 body.push('\n');
+//RS             }
+//RS         }
+//RS         body.push_str("    }\n");
+//RS     }
+//RS     let local_trait_name = trait_name.rsplit('.').next().unwrap_or(trait_name);
+//RS     let insert_at = if location.scope.is_empty() {
+//RS         src.len()
+//RS     } else {
+//RS         line_start(src, location.module_close)
+//RS     };
+//RS     let item_indent = if location.scope.is_empty() {
+//RS         String::new()
+//RS     } else {
+//RS         indentation_at(src, trait_def.span.start)
+//RS     };
+//RS     let prefix = if insert_at == 0 || src[..insert_at].ends_with('\n') {
+//RS         ""
+//RS     } else {
+//RS         "\n"
+//RS     };
+//RS     let method_body = body
+//RS         .lines()
+//RS         .map(|line| format!("{item_indent}{line}\n"))
+//RS         .collect::<String>();
+//RS     let impl_block = format!(
+//RS         "{prefix}{item_indent}impl {type_name}.{local_trait_name} {{\n{method_body}{item_indent}}}\n"
+//RS     );
+//RS     let changed = FixEngine::apply_edits(
+//RS         src,
+//RS         &[edit(
+//RS             SourceSpan {
+//RS                 start: insert_at,
+//RS                 end: insert_at,
+//RS             },
+//RS             &impl_block,
+//RS         )],
+//RS     )
+//RS     .map_err(|_| edit_error("overlap", "Canvas trait impl edit overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS struct TraitLocation<'a> {
+//RS     trait_def: &'a AST::TraitDef,
+//RS     scope: Vec<String>,
+//RS     module_close: usize,
+//RS }
+//RS 
+//RS fn source_trait_path(
+//RS     bundle: &AST::ProgramBundle,
+//RS     module_idx: usize,
+//RS     module_alias: &str,
+//RS     name: &str,
+//RS     span: Span,
+//RS     fallback_scope: &[String],
+//RS ) -> Option<String> {
+//RS     let ledger = &bundle.name_ledger;
+//RS     let path = [
+//RS         format!("{module_alias}.{name}"),
+//RS         if fallback_scope.is_empty() {
+//RS             format!("{module_alias}.{name}")
+//RS         } else {
+//RS             format!("{module_alias}.{}.{}", fallback_scope.join("."), name)
+//RS         },
+//RS     ]
+//RS     .into_iter()
+//RS     .find_map(|candidate| ledger.display_path(module_idx, &candidate, Some(module_idx)))
+//RS     .or_else(|| ledger.canonical_path_at(module_idx, span.start, span.end))?;
+//RS     Some(
+//RS         path.strip_prefix(module_alias)
+//RS             .and_then(|rest| rest.strip_prefix('.'))
+//RS             .unwrap_or(&path)
+//RS             .to_string(),
+//RS     )
+//RS }
+//RS 
+//RS fn enclosing_inline_module(items: &[Item], position: usize) -> Option<(Vec<String>, usize)> {
+//RS     for item in items {
+//RS         let Item::CodeModule(module) = item else {
+//RS             continue;
+//RS         };
+//RS         let Some(body) = &module.body else {
+//RS             continue;
+//RS         };
+//RS         if !(module.span.start <= position && position < module.span.end) {
+//RS             continue;
+//RS         }
+//RS         if let Some((mut scope, close)) = enclosing_inline_module(body, position) {
+//RS             scope.insert(0, module.name.clone());
+//RS             return Some((scope, close));
+//RS         }
+//RS         return Some((vec![module.name.clone()], module.span.end.saturating_sub(1)));
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn find_trait_location<'a>(
+//RS     bundle: &'a AST::ProgramBundle,
+//RS     path: &Path,
+//RS     trait_name: &str,
+//RS ) -> Option<TraitLocation<'a>> {
+//RS     let parts = trait_name.split('.').collect::<Vec<_>>();
+//RS     let local_name = parts.last().copied().unwrap_or(trait_name);
+//RS     let requested_scope = &parts[..parts.len().saturating_sub(1)];
+//RS     let source_path = canonical_path(path);
+//RS 
+//RS     fn find_in_items<'a>(
+//RS         items: &'a [Item],
+//RS         scope: &mut Vec<String>,
+//RS         requested_scope: &[&str],
+//RS         requested_name: &str,
+//RS         local_name: &str,
+//RS         module_idx: usize,
+//RS         module_alias: &str,
+//RS         root_items: &'a [Item],
+//RS         source_len: usize,
+//RS         bundle: &'a AST::ProgramBundle,
+//RS     ) -> Option<TraitLocation<'a>> {
+//RS         for item in items {
+//RS             match item {
+//RS                 Item::Trait(t) => {
+//RS                     let display_path = source_trait_path(
+//RS                         bundle,
+//RS                         module_idx,
+//RS                         module_alias,
+//RS                         &t.name,
+//RS                         t.name_span,
+//RS                         scope,
+//RS                     );
+//RS                     let fallback_match = t.name == local_name
+//RS                         && scope
+//RS                             .iter()
+//RS                             .map(String::as_str)
+//RS                             .eq(requested_scope.iter().copied());
+//RS                     if display_path.as_deref() != Some(requested_name) && !fallback_match {
+//RS                         continue;
+//RS                     }
+//RS                     let (scope, module_close) =
+//RS                         enclosing_inline_module(root_items, t.name_span.start)
+//RS                             .unwrap_or_else(|| (scope.clone(), source_len));
+//RS                     let scope = display_path
+//RS                         .as_deref()
+//RS                         .and_then(|path| path.rsplit_once('.'))
+//RS                         .map(|(scope, _)| scope.split('.').map(str::to_string).collect())
+//RS                         .unwrap_or(scope);
+//RS                     return Some(TraitLocation {
+//RS                         trait_def: t,
+//RS                         scope,
+//RS                         module_close,
+//RS                     });
+//RS                 }
+//RS                 Item::CodeModule(m) => {
+//RS                     if let Some(body) = &m.body {
+//RS                         scope.push(m.name.clone());
+//RS                         if let Some(t) = find_in_items(
+//RS                             body,
+//RS                             scope,
+//RS                             requested_scope,
+//RS                             requested_name,
+//RS                             local_name,
+//RS                             module_idx,
+//RS                             module_alias,
+//RS                             root_items,
+//RS                             source_len,
+//RS                             bundle,
+//RS                         ) {
+//RS                             return Some(t);
+//RS                         }
+//RS                         scope.pop();
+//RS                     }
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         None
+//RS     }
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         if canonical_path(&module.path) != source_path {
+//RS             continue;
+//RS         }
+//RS         if let Some(t) = find_in_items(
+//RS             &module.items,
+//RS             &mut Vec::new(),
+//RS             requested_scope,
+//RS             trait_name,
+//RS             local_name,
+//RS             module_idx,
+//RS             &module.alias,
+//RS             &module.items,
+//RS             module.source.len(),
+//RS             bundle,
+//RS         ) {
+//RS             return Some(t);
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn apply_edit_function_signature(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     signature: &str,
+//RS ) -> Result<String, String> {
+//RS     let Some(name_span) = graph_id_name_span(graph_id) else {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas graph id is not a function graph",
+//RS         ));
+//RS     };
+//RS     let span = function_signature_span(src, name_span)?;
+//RS     let changed = FixEngine::apply_edits(src, &[edit(span, signature)])
+//RS         .map_err(|_| edit_error("overlap", "Canvas function signature edit overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_inline_edit(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     inline_id: &str,
+//RS     new_expr: &str,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas inline expression no longer exists",
+//RS         ));
+//RS     };
+//RS     let changed = FixEngine::apply_edits(src, &[edit(inline.span, new_expr)])
+//RS         .map_err(|_| edit_error("overlap", "Canvas inline edit overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_promote_inline(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     inline_id: &str,
+//RS     name: &str,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas inline expression no longer exists",
+//RS         ));
+//RS     };
+//RS     let expr = snippet(src, Span::new(inline.span.start, inline.span.end));
+//RS     let line = line_start(src, inline.span.start);
+//RS     let indent = indentation_at(src, inline.span.start);
+//RS     let insert = format!("{indent}{name} :: {expr}\n");
+//RS     let edits = [
+//RS         edit(
+//RS             SourceSpan {
+//RS                 start: line,
+//RS                 end: line,
+//RS             },
+//RS             &insert,
+//RS         ),
+//RS         edit(inline.span, name),
+//RS     ];
+//RS     let changed = FixEngine::apply_edits(src, &edits)
+//RS         .map_err(|_| edit_error("overlap", "Canvas promote edits overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_visible_conversion(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     inline_id: &str,
+//RS     callee: &str,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas inline expression no longer exists",
+//RS         ));
+//RS     };
+//RS     let expr = snippet(src, Span::new(inline.span.start, inline.span.end));
+//RS     let replacement = format!("{callee}({expr})");
+//RS     let changed = FixEngine::apply_edits(src, &[edit(inline.span, &replacement)])
+//RS         .map_err(|_| edit_error("overlap", "Canvas conversion edit overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_break_link(path: &Path, src: &str, wire_id: &str) -> Result<String, String> {
+//RS     rewrite_wire_expr(path, src, wire_id, "#Todo")
+//RS }
+//RS 
+//RS fn apply_move_link(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     wire_id: &str,
+//RS     replacement: &str,
+//RS ) -> Result<String, String> {
+//RS     rewrite_wire_expr(path, src, wire_id, replacement)
+//RS }
+//RS 
+//RS fn rewrite_wire_expr(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     wire_id: &str,
+//RS     replacement: &str,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(span) = projection
+//RS         .json
+//RS         .split("\"wire_id\":")
+//RS         .skip(1)
+//RS         .find_map(|chunk| wire_span_from_json_chunk(chunk, wire_id))
+//RS     else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas wire no longer maps to a source expression",
+//RS         ));
+//RS     };
+//RS     let changed = FixEngine::apply_edits(src, &[edit(span, replacement)])
+//RS         .map_err(|_| edit_error("overlap", "Canvas wire edit overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_insert_call(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     callee: &str,
+//RS     args: &[String],
+//RS     bind: Option<&str>,
+//RS     wire_inline_expr_id: Option<&str>,
+//RS     wire_expr: Option<&str>,
+//RS     wire_origin_pin_id: Option<&str>,
+//RS     wire_target_pin: Option<&str>,
+//RS     module_path: Option<&str>,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let final_args = if args.is_empty() {
+//RS         wire_expr
+//RS             .map(|expr| vec![expr.to_string()])
+//RS             .unwrap_or_default()
+//RS     } else {
+//RS         args.to_vec()
+//RS     };
+//RS     let plan = insert_call_plan(src, callee, &final_args, module_path);
+//RS     let call = if plan.fallible {
+//RS         format!(
+//RS             "{}({}) ?? panic(\"canvas\")",
+//RS             plan.callee,
+//RS             plan.args.join(", ")
+//RS         )
+//RS     } else {
+//RS         format!("{}({})", plan.callee, plan.args.join(", "))
+//RS     };
+//RS     if let Some(inline_id) = wire_inline_expr_id {
+//RS         let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
+//RS             return Err(edit_error(
+//RS                 "not_found",
+//RS                 "Canvas inline expression no longer exists",
+//RS             ));
+//RS         };
+//RS         let mut edits = vec![edit(inline.span, &call)];
+//RS         if let Some(import) = plan.import {
+//RS             edits.push(import);
+//RS         }
+//RS         let changed = FixEngine::apply_edits(src, &edits)
+//RS             .map_err(|_| edit_error("overlap", "Canvas wired insert edit overlapped"))?;
+//RS         return write_checked_formatted(path, src, &changed);
+//RS     }
+//RS     let Some(anchor) = projection
+//RS         .graph_anchors
+//RS         .iter()
+//RS         .find(|a| a.graph_id == graph_id)
+//RS     else {
+//RS         return Err(edit_error("not_found", "Canvas graph no longer exists"));
+//RS     };
+//RS     let (insert_offset, indent) = call_insert_target(
+//RS         src,
+//RS         graph_id,
+//RS         &projection,
+//RS         anchor,
+//RS         wire_origin_pin_id,
+//RS         wire_target_pin,
+//RS     )?;
+//RS     let stmt = match bind {
+//RS         Some(name) => format!("{indent}{name} :: {call}\n"),
+//RS         None => format!("{indent}{call}\n"),
+//RS     };
+//RS     let mut edits = vec![edit(
+//RS         SourceSpan {
+//RS             start: insert_offset,
+//RS             end: insert_offset,
+//RS         },
+//RS         &stmt,
+//RS     )];
+//RS     if let Some(import) = plan.import {
+//RS         edits.push(import);
+//RS     }
+//RS     let changed = FixEngine::apply_edits(src, &edits)
+//RS         .map_err(|_| edit_error("overlap", "Canvas insert edit overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn call_insert_target(
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     projection: &Projection,
+//RS     anchor: &GraphEditAnchor,
+//RS     wire_origin_pin_id: Option<&str>,
+//RS     _wire_target_pin: Option<&str>,
+//RS ) -> Result<(usize, String), String> {
+//RS     let Some(pin_id) = wire_origin_pin_id else {
+//RS         return Ok((anchor.insert_offset, "    ".to_string()));
+//RS     };
+//RS     let (node_id, direction) = pin_id
+//RS         .rsplit_once(":input:")
+//RS         .map(|(node, _)| (node, "input"))
+//RS         .or_else(|| {
+//RS             pin_id
+//RS                 .rsplit_once(":output:")
+//RS                 .map(|(node, _)| (node, "output"))
+//RS         })
+//RS         .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+//RS     let node = projection
+//RS         .node_refs
+//RS         .iter()
+//RS         .filter(|node| node.graph_id == graph_id)
+//RS         .filter(|node| node.node_id == node_id || node.node_id.ends_with(&format!(":{node_id}")))
+//RS         .max_by_key(|node| node.span.end.saturating_sub(node.span.start))
+//RS         .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+//RS     if node.node_id.ends_with(":entry") {
+//RS         return Ok((anchor.insert_offset, "    ".to_string()));
+//RS     }
+//RS     let indent = indentation_at(src, node.span.start);
+//RS     let statement_indent = if indent.is_empty() {
+//RS         "    ".to_string()
+//RS     } else {
+//RS         indent
+//RS     };
+//RS     let line = line_start(src, node.span.start);
+//RS     let node_end = node.span.end.min(src.len());
+//RS     let line_end = src[node_end..]
+//RS         .find('\n')
+//RS         .map(|offset| node_end + offset)
+//RS         .unwrap_or(src.len());
+//RS     let inline_body = line == line_start(src, anchor.insert_offset)
+//RS         && src
+//RS             .get(line..node.span.start.min(src.len()))
+//RS             .is_some_and(|prefix| prefix.contains('{'))
+//RS         && src
+//RS             .get(node_end..line_end)
+//RS             .is_some_and(|suffix| suffix.contains('}'));
+//RS     if inline_body {
+//RS         let insert = if direction == "input" {
+//RS             anchor.insert_offset
+//RS         } else {
+//RS             src[node_end..line_end]
+//RS                 .find('}')
+//RS                 .map(|offset| node_end + offset)
+//RS                 .unwrap_or(line_end)
+//RS         };
+//RS         return Ok((insert, format!("\n{statement_indent}")));
+//RS     }
+//RS     let insert = if direction == "input" {
+//RS         line
+//RS     } else {
+//RS         line_after(src, node.span.end)
+//RS     };
+//RS     Ok((insert, statement_indent))
+//RS }
+//RS 
+//RS struct InsertCallPlan {
+//RS     callee: String,
+//RS     args: Vec<String>,
+//RS     fallible: bool,
+//RS     import: Option<TextEdit>,
+//RS }
+//RS 
+//RS fn insert_call_plan(
+//RS     src: &str,
+//RS     callee: &str,
+//RS     args: &[String],
+//RS     module_path: Option<&str>,
+//RS ) -> InsertCallPlan {
+//RS     let Some(target) = core_target_for_callee(src, callee, module_path) else {
+//RS         return InsertCallPlan {
+//RS             callee: callee.to_string(),
+//RS             args: args.to_vec(),
+//RS             fallible: false,
+//RS             import: None,
+//RS         };
+//RS     };
+//RS     let module = normalize_core_module(&target.module, &target.member);
+//RS     let (prefix, import) = core_call_prefix_and_import(src, &module);
+//RS     let final_args = if args.is_empty() {
+//RS         core_default_args(&module, &target.member)
+//RS     } else {
+//RS         args.to_vec()
+//RS     };
+//RS     InsertCallPlan {
+//RS         callee: format!("{prefix}.{}", target.member),
+//RS         args: final_args,
+//RS         fallible: core_call_is_fallible(&module, &target.member),
+//RS         import,
+//RS     }
+//RS }
+//RS 
+//RS struct CoreCallTarget {
+//RS     module: String,
+//RS     member: String,
+//RS }
+//RS 
+//RS fn core_target_for_callee(
+//RS     src: &str,
+//RS     callee: &str,
+//RS     module_path: Option<&str>,
+//RS ) -> Option<CoreCallTarget> {
+//RS     let parts = callee.split('.').collect::<Vec<_>>();
+//RS     if parts.len() < 2 {
+//RS         return None;
+//RS     }
+//RS     let member = parts.last()?.to_string();
+//RS     if let Some(module) = module_path {
+//RS         let alias = default_core_alias(module);
+//RS         if module.starts_with("core.")
+//RS             && parts.len() == 2
+//RS             && parts.first().copied() == Some(alias.as_str())
+//RS         {
+//RS             return Some(CoreCallTarget {
+//RS                 module: module.to_string(),
+//RS                 member,
+//RS             });
+//RS         }
+//RS     }
+//RS     if parts.first() == Some(&"core") && parts.len() >= 3 {
+//RS         return Some(CoreCallTarget {
+//RS             module: parts[..parts.len() - 1].join("."),
+//RS             member,
+//RS         });
+//RS     }
+//RS     for import in core_imports(src) {
+//RS         if import.alias != parts[0] {
+//RS             continue;
+//RS         }
+//RS         let suffix = if parts.len() > 2 {
+//RS             format!(".{}", parts[1..parts.len() - 1].join("."))
+//RS         } else {
+//RS             String::new()
+//RS         };
+//RS         return Some(CoreCallTarget {
+//RS             module: format!("{}{}", import.module, suffix),
+//RS             member,
+//RS         });
+//RS     }
+//RS     let alias = parts[0];
+//RS     if let Some(module) = jet_driver::Syntax::core_module_for_alias(alias) {
+//RS         let suffix = if parts.len() > 2 {
+//RS             format!(".{}", parts[1..parts.len() - 1].join("."))
+//RS         } else {
+//RS             String::new()
+//RS         };
+//RS         return Some(CoreCallTarget {
+//RS             module: format!("{module}{suffix}"),
+//RS             member,
+//RS         });
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn normalize_core_module(module: &str, member: &str) -> String {
+//RS     jet_driver::Syntax::core_module_for_call(module, member)
+//RS         .unwrap_or(module)
+//RS         .to_string()
+//RS }
+//RS 
+//RS fn core_call_prefix_and_import(src: &str, module: &str) -> (String, Option<TextEdit>) {
+//RS     if let Some(prefix) = imported_core_prefix(src, module) {
+//RS         return (prefix, None);
+//RS     }
+//RS     let alias = default_core_alias(module);
+//RS     let (offset, joins_use_block) = core_import_insert_point(src);
+//RS     let suffix = if joins_use_block { "\n" } else { "\n\n" };
+//RS     let import = edit(
+//RS         SourceSpan {
+//RS             start: offset,
+//RS             end: offset,
+//RS         },
+//RS         &format!("use {module} as {alias}{suffix}"),
+//RS     );
+//RS     (alias, Some(import))
+//RS }
+//RS 
+//RS fn imported_core_prefix(src: &str, module: &str) -> Option<String> {
+//RS     let mut best: Option<(usize, String)> = None;
+//RS     for import in core_imports(src) {
+//RS         if import.module == module {
+//RS             return Some(import.alias);
+//RS         }
+//RS         let prefix = format!("{}.", import.module);
+//RS         if module.starts_with(&prefix) {
+//RS             let suffix = &module[prefix.len()..];
+//RS             let candidate = format!("{}.{}", import.alias, suffix);
+//RS             if best
+//RS                 .as_ref()
+//RS                 .map_or(true, |(len, _)| import.module.len() > *len)
+//RS             {
+//RS                 best = Some((import.module.len(), candidate));
+//RS             }
+//RS         }
+//RS     }
+//RS     best.map(|(_, alias)| alias)
+//RS }
+//RS 
+//RS struct CoreImport {
+//RS     module: String,
+//RS     alias: String,
+//RS }
+//RS 
+//RS fn core_imports(src: &str) -> Vec<CoreImport> {
+//RS     let mut imports = Vec::new();
+//RS     for line in src.lines() {
+//RS         let code = line.split("//").next().unwrap_or("").trim();
+//RS         let Some(rest) = code.strip_prefix("use core.") else {
+//RS             continue;
+//RS         };
+//RS         let full = format!("core.{rest}");
+//RS         let (module, alias) = if let Some((module, alias)) = full.split_once(" as ") {
+//RS             (module.trim(), ident_prefix(alias.trim()))
+//RS         } else {
+//RS             let module = full.trim();
+//RS             (module, default_core_alias(module))
+//RS         };
+//RS         if !module.is_empty() && !alias.is_empty() {
+//RS             imports.push(CoreImport {
+//RS                 module: module.to_string(),
+//RS                 alias,
+//RS             });
+//RS         }
+//RS     }
+//RS     imports
+//RS }
+//RS 
+//RS fn ident_prefix(text: &str) -> String {
+//RS     text.chars()
+//RS         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+//RS         .collect()
+//RS }
+//RS 
+//RS fn default_core_alias(module: &str) -> String {
+//RS     module.rsplit('.').next().unwrap_or("core").to_string()
+//RS }
+//RS 
+//RS fn core_import_insert_point(src: &str) -> (usize, bool) {
+//RS     let mut offset = 0usize;
+//RS     let mut insert_at = 0usize;
+//RS     let mut saw_use = false;
+//RS     for line in src.split_inclusive('\n') {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.starts_with("use ") {
+//RS             saw_use = true;
+//RS             insert_at = offset + line.len();
+//RS         } else if saw_use {
+//RS             break;
+//RS         } else if trimmed.is_empty() || trimmed.starts_with("//") {
+//RS             insert_at = offset + line.len();
+//RS         } else {
+//RS             break;
+//RS         }
+//RS         offset += line.len();
+//RS     }
+//RS     (insert_at, saw_use)
+//RS }
+//RS 
+//RS fn core_default_args(module: &str, member: &str) -> Vec<String> {
+//RS     core_call_signature(module, member)
+//RS         .map(|(params, _)| {
+//RS             params
+//RS                 .into_iter()
+//RS                 .map(|(_, ty)| default_arg_for_type(&ty.name()))
+//RS                 .collect()
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn core_call_signature(
+//RS     module: &str,
+//RS     member: &str,
+//RS ) -> Option<(Vec<(AST::AccessConvention, AST::Type)>, Option<AST::Type>)> {
+//RS     if let Some(row) = jet_driver::Syntax::core_call(module, member) {
+//RS         if let Some(signature) = jet_driver::Sema::core_fixed_sig_for_row(row) {
+//RS             return Some(signature);
+//RS         }
+//RS     }
+//RS     jet_driver::Sema::core_call_surface_signature(module, member)
+//RS }
+//RS 
+//RS fn core_call_is_fallible(module: &str, member: &str) -> bool {
+//RS     if let Some(row) = jet_driver::Syntax::core_call(module, member) {
+//RS         if let Some((_, ret)) = jet_driver::Sema::core_fixed_sig_for_row(row) {
+//RS             return ret.is_some_and(|ret| ret.is_fallible());
+//RS         }
+//RS     }
+//RS     jet_driver::Sema::core_call_is_fallible(module, member)
+//RS }
+//RS 
+//RS fn check_canvas_candidate(path: &Path, overlay_path: &Path, source: &str) -> Vec<Diagnostic> {
+//RS     let path_str = path.to_string_lossy();
+//RS     jet_driver::Driver::check_file(&path_str, Some((overlay_path, source)), true).0
+//RS }
+//RS 
+//RS fn canvas_action_candidate(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     action_id: &str,
+//RS     callee: &str,
+//RS     args: &[String],
+//RS ) -> Result<String, String> {
+//RS     let overlay_path = canonical_path(path);
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(anchor) = projection
+//RS         .graph_anchors
+//RS         .iter()
+//RS         .find(|a| a.graph_id == graph_id)
+//RS     else {
+//RS         return Err(edit_error("not_found", "Canvas graph no longer exists"));
+//RS     };
+//RS     if !action_id.starts_with("canvas.action:") {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas action id must be a package Canvas action",
+//RS         ));
+//RS     }
+//RS     let Some((_, descriptor_callee)) = action_id.rsplit_once(':') else {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas action id has no checked source callee",
+//RS         ));
+//RS     };
+//RS     if descriptor_callee != callee {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas action callee does not match its checked descriptor",
+//RS         ));
+//RS     }
+//RS     let stmt = format!("    {callee}({})\n", args.join(", "));
+//RS     let changed = FixEngine::apply_edits(
+//RS         src,
+//RS         &[edit(
+//RS             SourceSpan {
+//RS                 start: anchor.insert_offset,
+//RS                 end: anchor.insert_offset,
+//RS             },
+//RS             &stmt,
+//RS         )],
+//RS     )
+//RS     .map_err(|_| edit_error("overlap", "Canvas action edit overlapped"))?;
+//RS     let formatted = jet_driver::Formatter::format_source(&changed)
+//RS         .map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     // Check the staged source through Driver's in-memory overlay. A pathname
+//RS     // scratch can be swapped after creation and before Driver reopens it.
+//RS     let check = check_canvas_candidate(path, &overlay_path, &formatted);
+//RS     let errors = check
+//RS         .iter()
+//RS         .filter(|d| d.severity == Severity::Error)
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS     if !errors.is_empty() {
+//RS         return Err(diagnostics_error(path, &formatted, &errors));
+//RS     }
+//RS     Ok(formatted)
+//RS }
+//RS 
+//RS fn apply_insert_structural(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     op: &str,
+//RS     wire_origin_pin_id: Option<&str>,
+//RS     wire_target_pin: Option<&str>,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(anchor) = projection
+//RS         .graph_anchors
+//RS         .iter()
+//RS         .find(|a| a.graph_id == graph_id)
+//RS     else {
+//RS         return Err(edit_error("not_found", "Canvas graph no longer exists"));
+//RS     };
+//RS     let (insert, indent) = structural_insert_target(
+//RS         src,
+//RS         graph_id,
+//RS         &projection,
+//RS         anchor,
+//RS         wire_origin_pin_id,
+//RS         wire_target_pin,
+//RS     )?;
+//RS     let stmt = match op {
+//RS         "insert_branch" => format!(
+//RS             "{indent}if true {{\n{indent}    print(\"branch\")\n{indent}}} else {{\n{indent}    print(\"else\")\n{indent}}}\n"
+//RS         ),
+//RS         "insert_switch" => format!(
+//RS             "{indent}if 0 == {{\n{indent}    0 -> {{ print(\"case\") }}\n{indent}    else -> {{ print(\"else\") }}\n{indent}}}\n"
+//RS         ),
+//RS         "insert_loop" => format!("{indent}loop {{\n{indent}    break\n{indent}}}\n"),
+//RS         "insert_fallible_rail" => {
+//RS             if !anchor.fallible {
+//RS                 return Err(edit_error("unavailable", "needs a fallible function"));
+//RS             }
+//RS             format!(
+//RS                 "{indent}fallible_value :: Int.parse(\"1\")\n{indent}unwrapped :: fallible_value ?? 0\n"
+//RS             )
+//RS         }
+//RS         _ => return Err(edit_error("unsupported", "unknown Canvas structural operation")),
+//RS     };
+//RS     let changed = FixEngine::apply_edits(
+//RS         src,
+//RS         &[edit(
+//RS             SourceSpan {
+//RS                 start: insert,
+//RS                 end: insert,
+//RS             },
+//RS             &stmt,
+//RS         )],
+//RS     )
+//RS     .map_err(|_| edit_error("overlap", "Canvas structural insert overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn structural_insert_target(
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     projection: &Projection,
+//RS     anchor: &GraphEditAnchor,
+//RS     wire_origin_pin_id: Option<&str>,
+//RS     wire_target_pin: Option<&str>,
+//RS ) -> Result<(usize, String), String> {
+//RS     let Some(pin_id) = wire_origin_pin_id else {
+//RS         if wire_target_pin.is_some() {
+//RS             return Err(edit_error(
+//RS                 "bad_request",
+//RS                 "Canvas structural wire origin is missing",
+//RS             ));
+//RS         }
+//RS         return Ok((anchor.insert_offset, "    ".to_string()));
+//RS     };
+//RS     let Some(target) = wire_target_pin else {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas structural wire target is missing",
+//RS         ));
+//RS     };
+//RS     if target != "exec" {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas structural nodes connect through the exec pin",
+//RS         ));
+//RS     }
+//RS     let (node_id, direction) = pin_id
+//RS         .rsplit_once(":input:")
+//RS         .map(|(node, _)| (node, "input"))
+//RS         .or_else(|| {
+//RS             pin_id
+//RS                 .rsplit_once(":output:")
+//RS                 .map(|(node, _)| (node, "output"))
+//RS         })
+//RS         .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+//RS     let pin_marker = format!("\"pin_id\":{}", json_str(pin_id));
+//RS     if !projection.json.contains(&pin_marker) {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas insertion pin no longer exists",
+//RS         ));
+//RS     }
+//RS     let pin_is_exec = projection.json.split(&pin_marker).skip(1).any(|chunk| {
+//RS         chunk
+//RS             .split("\"pin_id\":")
+//RS             .next()
+//RS             .is_some_and(|pin| pin.contains("\"type\":\"exec\""))
+//RS     });
+//RS     if !pin_is_exec {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas structural nodes connect through the exec pin",
+//RS         ));
+//RS     }
+//RS     let node = projection
+//RS         .node_refs
+//RS         .iter()
+//RS         .filter(|node| node.graph_id == graph_id)
+//RS         .filter(|node| node.node_id == node_id)
+//RS         .max_by_key(|node| node.span.end.saturating_sub(node.span.start))
+//RS         .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+//RS     if node.node_id.ends_with(":entry") {
+//RS         return Ok((anchor.insert_offset, "    ".to_string()));
+//RS     }
+//RS     let insert = if direction == "input" {
+//RS         line_start(src, node.span.start)
+//RS     } else {
+//RS         line_after(src, node.span.end)
+//RS     };
+//RS     let indent = indentation_at(src, node.span.start);
+//RS     let indent = if indent.is_empty() {
+//RS         "    ".to_string()
+//RS     } else {
+//RS         indent
+//RS     };
+//RS     Ok((insert, indent))
+//RS }
+//RS 
+//RS fn apply_create_comment_region(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     start: usize,
+//RS     end: usize,
+//RS     title: &str,
+//RS     color: &str,
+//RS     alpha: &str,
+//RS     bounds: &str,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     if !projection
+//RS         .graph_anchors
+//RS         .iter()
+//RS         .any(|a| a.graph_id == graph_id)
+//RS     {
+//RS         return Err(edit_error("not_found", "Canvas graph no longer exists"));
+//RS     }
+//RS     validate_comment_color(color)?;
+//RS     validate_comment_alpha(alpha)?;
+//RS     let bounds = normalize_bounds(bounds)?;
+//RS     let anchor = SourceSpan { start, end };
+//RS     let insert_at = line_after(src, end.min(src.len()));
+//RS     let indent = indentation_at(src, insert_at.min(src.len()));
+//RS     let comment = format!(
+//RS         "{indent}// canvas:comment span={}..{} title={} color={} alpha={} bounds=({})\n",
+//RS         anchor.start,
+//RS         anchor.end,
+//RS         quoted_attr(title),
+//RS         quoted_attr(color),
+//RS         alpha,
+//RS         bounds
+//RS     );
+//RS     let changed = FixEngine::apply_edits(
+//RS         src,
+//RS         &[edit(
+//RS             SourceSpan {
+//RS                 start: insert_at,
+//RS                 end: insert_at,
+//RS             },
+//RS             &comment,
+//RS         )],
+//RS     )
+//RS     .map_err(|_| edit_error("overlap", "Canvas comment insert overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_update_comment_region(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     region_id: &str,
+//RS     title: Option<&str>,
+//RS     color: Option<&str>,
+//RS     alpha: Option<&str>,
+//RS     bounds: Option<&str>,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(hint) = find_comment_hint(src, &projection.json, region_id) else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas comment region no longer exists",
+//RS         ));
+//RS     };
+//RS     let color = color.unwrap_or(&hint.color);
+//RS     let alpha = alpha.unwrap_or(&hint.alpha);
+//RS     validate_comment_color(color)?;
+//RS     validate_comment_alpha(alpha)?;
+//RS     let fallback_bounds = format!(
+//RS         "{},{},{},{}",
+//RS         hint.bounds.0, hint.bounds.1, hint.bounds.2, hint.bounds.3
+//RS     );
+//RS     let bounds = normalize_bounds(bounds.unwrap_or(&fallback_bounds))?;
+//RS     let title = title.unwrap_or(&hint.title);
+//RS     let replacement = format!(
+//RS         "// canvas:comment span={}..{} title={} color={} alpha={} bounds=({})",
+//RS         hint.anchor.start,
+//RS         hint.anchor.end,
+//RS         quoted_attr(title),
+//RS         quoted_attr(color),
+//RS         alpha,
+//RS         bounds
+//RS     );
+//RS     let changed = FixEngine::apply_edits(src, &[edit(hint.hint_span, &replacement)])
+//RS         .map_err(|_| edit_error("overlap", "Canvas comment edit overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_delete_comment_region(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     region_id: &str,
+//RS ) -> Result<String, String> {
+//RS     apply_delete_hint_region(path, src, region_id, "comment")
+//RS }
+//RS 
+//RS fn apply_delete_hint_region(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     region_id: &str,
+//RS     kind: &str,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(hint) = find_hint_region(src, &projection.json, region_id, kind) else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas source hint no longer exists",
+//RS         ));
+//RS     };
+//RS     let mut span = hint.hint_span;
+//RS     if span.end < src.len() && src.as_bytes().get(span.end) == Some(&b'\n') {
+//RS         span.end += 1;
+//RS     }
+//RS     let changed = FixEngine::apply_edits(src, &[edit(span, "")])
+//RS         .map_err(|_| edit_error("overlap", "Canvas source hint delete overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn apply_create_collapse_region(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     start: usize,
+//RS     end: usize,
+//RS     title: &str,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     if !projection
+//RS         .graph_anchors
+//RS         .iter()
+//RS         .any(|a| a.graph_id == graph_id)
+//RS     {
+//RS         return Err(edit_error("not_found", "Canvas graph no longer exists"));
+//RS     }
+//RS     if start >= end || end > src.len() {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas collapse needs one valid source span",
+//RS         ));
+//RS     }
+//RS     let selected = validated_collapse_selection(path, src, graph_id, SourceSpan { start, end })?;
+//RS     if canvas_collapse_hints(src)
+//RS         .iter()
+//RS         .any(|hint| hint.anchor.start == selected.start && hint.anchor.end == selected.end)
+//RS     {
+//RS         return Err(edit_error(
+//RS             "conflict",
+//RS             "Canvas selection is already collapsed",
+//RS         ));
+//RS     }
+//RS     let insert_at = selected.end;
+//RS     let indent = indentation_at(src, insert_at.min(src.len()));
+//RS     let comment = format!(
+//RS         "{indent}// canvas:collapse span={}..{} title={}\n",
+//RS         selected.start,
+//RS         selected.end,
+//RS         quoted_attr(title)
+//RS     );
+//RS     let changed = FixEngine::apply_edits(
+//RS         src,
+//RS         &[edit(
+//RS             SourceSpan {
+//RS                 start: insert_at,
+//RS                 end: insert_at,
+//RS             },
+//RS             &comment,
+//RS         )],
+//RS     )
+//RS     .map_err(|_| edit_error("overlap", "Canvas collapse insert overlapped"))?;
+//RS     write_checked_formatted(path, src, &changed)
+//RS }
+//RS 
+//RS fn validated_collapse_selection(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     graph_id: &str,
+//RS     requested: SourceSpan,
+//RS ) -> Result<SourceSpan, String> {
+//RS     let Some(name_span) = graph_id_name_span(graph_id) else {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas graph id is not a function graph",
+//RS         ));
+//RS     };
+//RS     let path_str = path.to_string_lossy();
+//RS     let (diags, bundle) = jet_driver::Driver::check_file(&path_str, None, true);
+//RS     let errors = diags
+//RS         .iter()
+//RS         .filter(|d| d.severity == Severity::Error)
+//RS         .cloned()
+//RS         .collect::<Vec<_>>();
+//RS     if !errors.is_empty() {
+//RS         return Err(diagnostics_error(path, src, &errors));
+//RS     }
+//RS     let Some(bundle) = bundle else {
+//RS         return Err(edit_error(
+//RS             "check",
+//RS             "Canvas could not read checked statement facts",
+//RS         ));
+//RS     };
+//RS     let Some(func) = find_func_by_name_span(&bundle, name_span) else {
+//RS         return Err(edit_error("not_found", "Canvas graph no longer exists"));
+//RS     };
+//RS     let mut locs = Vec::new();
+//RS     collect_statement_locs(src, &func.body, &mut Vec::new(), &mut locs);
+//RS     let first = locs
+//RS         .iter()
+//RS         .find(|loc| {
+//RS             requested.start == loc.anchor.start
+//RS                 || requested.start == loc.source.start
+//RS                 || requested.start == loc.full.start
+//RS         })
+//RS         .or_else(|| {
+//RS             // Subjectless guards render the condition span, not the `if` token.
+//RS             // Accept that graph boundary and let the block comparison below make
+//RS             // the final safety decision.
+//RS             locs.iter().find(|loc| {
+//RS                 loc.is_guard
+//RS                     && loc.guard_span.is_some_and(|span| {
+//RS                         requested.start >= span.start && requested.start < span.end
+//RS                     })
+//RS             })
+//RS         });
+//RS     let last = locs
+//RS         .iter()
+//RS         .find(|loc| {
+//RS             requested.end == loc.anchor.end
+//RS                 || requested.end == loc.source.end
+//RS                 || requested.end == loc.full.end
+//RS         })
+//RS         .or_else(|| {
+//RS             // Call nodes may expose the callee span while the checked statement
+//RS             // owns the complete call expression. Treat an endpoint inside that
+//RS             // expression as the graph's statement boundary.
+//RS             locs.iter().find(|loc| {
+//RS                 loc.is_expr && requested.end > loc.source.start && requested.end <= loc.source.end
+//RS             })
+//RS         });
+//RS     let (Some(first), Some(last)) = (first, last) else {
+//RS         return Err(edit_error(
+//RS             "bad_request",
+//RS             "Canvas collapse must select whole statements from this graph",
+//RS         ));
+//RS     };
+//RS     if first.block != last.block || first.index > last.index {
+//RS         return Err(edit_error(
+//RS             "cross_block",
+//RS             "Canvas collapse cannot cross a block boundary",
+//RS         ));
+//RS     }
+//RS     Ok(SourceSpan {
+//RS         start: first.full.start,
+//RS         end: last.full.end,
+//RS     })
+//RS }
+//RS 
+//RS fn extract_inline_candidate(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     inline_id: &str,
+//RS     function: &str,
+//RS     ret_type: &str,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas inline expression no longer exists",
+//RS         ));
+//RS     };
+//RS     let expr = snippet(src, Span::new(inline.span.start, inline.span.end));
+//RS     if expr.contains("#Unsafe") {
+//RS         return Err(edit_error(
+//RS             "diagnostic",
+//RS             "Error [E2203]: Canvas extract cannot cross an unsafe source span",
+//RS         ));
+//RS     }
+//RS     let params = extract_params(&projection.json, &expr);
+//RS     let signature = params
+//RS         .iter()
+//RS         .map(|(name, ty)| format!("{name}: {ty}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let args = params
+//RS         .iter()
+//RS         .map(|(name, _)| name.clone())
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let helper = format!("fn {function}({signature}) -> {ret_type} {{\n    return {expr}\n}}\n\n");
+//RS     let replacement = format!("{function}({args})");
+//RS     FixEngine::apply_edits(
+//RS         src,
+//RS         &[
+//RS             edit(SourceSpan { start: 0, end: 0 }, &helper),
+//RS             edit(inline.span, &replacement),
+//RS         ],
+//RS     )
+//RS     .map_err(|_| edit_error("overlap", "Canvas extract edits overlapped"))
+//RS }
+//RS 
+//RS fn inline_helper_candidate(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     inline_id: Option<&str>,
+//RS     start: Option<usize>,
+//RS     end: Option<usize>,
+//RS ) -> Result<String, String> {
+//RS     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
+//RS     let span = if let Some(inline_id) = inline_id {
+//RS         let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
+//RS             return Err(edit_error(
+//RS                 "not_found",
+//RS                 "Canvas inline expression no longer exists",
+//RS             ));
+//RS         };
+//RS         inline.span
+//RS     } else {
+//RS         SourceSpan {
+//RS             start: start.unwrap_or(0),
+//RS             end: end.unwrap_or(0),
+//RS         }
+//RS     };
+//RS     let call = snippet(src, Span::new(span.start, span.end));
+//RS     let Some((name, args)) = parse_simple_call(&call) else {
+//RS         return Err(edit_error(
+//RS             "diagnostic",
+//RS             "Canvas inline needs a direct helper call expression",
+//RS         ));
+//RS     };
+//RS     let Some((params, body)) = find_simple_helper(src, &name) else {
+//RS         return Err(edit_error(
+//RS             "diagnostic",
+//RS             "Canvas inline could not find a simple helper return body",
+//RS         ));
+//RS     };
+//RS     if params.len() != args.len() {
+//RS         return Err(edit_error(
+//RS             "diagnostic",
+//RS             "Canvas inline helper argument count changed",
+//RS         ));
+//RS     }
+//RS     let mut expr = body;
+//RS     for (param, arg) in params.iter().zip(args.iter()) {
+//RS         expr = replace_ident(&expr, param, arg);
+//RS     }
+//RS     FixEngine::apply_edits(src, &[edit(span, &expr)])
+//RS         .map_err(|_| edit_error("overlap", "Canvas inline helper edit overlapped"))
+//RS }
+//RS 
+//RS #[derive(Clone)]
+// END-PORT-PENDING 0760 crates/jet-devserver/src/Canvas/edit_actions.rs:1-1814
+

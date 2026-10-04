@@ -1,0 +1,451 @@
+// crates/jet-semindex/src/JSON.rs:28–520: json_instance/json_output/
+// json_definition_fact, package_facts_json/workspace_overlay_policy_json and
+// their complete typed payload/authority/service/environment/config/member
+// helper family. PackageModel is the actual Jetpack aggregate, not a local
+// model, resolver, or JSON parser. Presentation preserves Rust field order,
+// explicit nulls, raw number spelling, authored paths and vector duplicates.
+// S18 alone owns json_strings/json_string_array (145–154) and json_span.
+use jet_foundation.[foundation_json_quote, status_value_from_json_number_atom]
+use core.text as semindex_package_text
+// CP-REPORT-STATUS-API public visibility/provider gate: the actual canonical
+// Compiler Foundation Report owns these types, never the stale Jetpack copy.
+use jet_foundation.[StatusValue, StatusFields, ReportError]
+
+pub fn semindex_json_instance(value: InstanceFact) -> String Never! {
+    provenance :: loop origins in value.argument_provenance -> semindex_json_string_array(origins)
+    applications := [String]{}
+    loop application in value.applications {
+        &applications.push("{{\"name\":{foundation_json_quote(application.name)},\"module_path\":{foundation_json_quote(application.module_path)},\"semantic_identity\":{foundation_json_quote(application.semantic_identity)},\"span\":{semindex_json_span(application.span)}}}")
+    }
+    "{{\"name\":{foundation_json_quote(value.name)},\"module_path\":{foundation_json_quote(value.module_path)},\"fingerprint\":{foundation_json_quote(value.fingerprint)},\"full_key\":{foundation_json_quote(value.full_key_hex)},\"template_definition_id\":{foundation_json_quote(value.template_definition_id)},\"template_span\":{semindex_json_span(value.template_span)},\"arguments\":{semindex_json_string_array(value.arguments)},\"argument_values\":{semindex_json_string_array(value.argument_values)},\"argument_provenance\":[{provenance.join(",")}],\"applications\":[{applications.join(",")}],\"exported_members\":{semindex_json_string_array(value.exported_members)}}}"
+}
+
+pub fn semindex_json_output(value: SemIndexOutputFact) -> String Never! {
+    entry :: value.entry
+    "{{\"binding\":{foundation_json_quote(value.binding)},\"kind\":{foundation_json_quote(value.kind)},\"name\":{foundation_json_quote(value.name)},\"module_path\":{foundation_json_quote(value.module_path)},\"span\":{semindex_json_span(value.span)},\"entry\":{{\"identity\":{foundation_json_quote(entry.identity)},\"name\":{foundation_json_quote(entry.name)},\"module_path\":{foundation_json_quote(entry.module_path)},\"definition_span\":{semindex_json_span(entry.definition_span)},\"reference_span\":{semindex_json_span(entry.reference_span)},\"params\":{semindex_json_string_array(entry.params)},\"return_type\":{semindex_json_optional_str(entry.return_type)},\"failure_contract\":{foundation_json_quote(entry.failure_contract)},\"failure_source\":{foundation_json_quote(entry.failure_source)},\"authority\":{foundation_json_quote(entry.authority)},\"effects\":{semindex_json_string_array(entry.effects)}}}}}"
+}
+
+pub fn semindex_json_definition_fact(fact: DefinitionFact) -> String Never! {
+    "{{\"stable_id\":{foundation_json_quote(fact.stable_id)},\"signature_id\":{foundation_json_quote(fact.signature_id)},\"content_id\":{foundation_json_quote(fact.content_id)},\"human_identity\":{foundation_json_quote(fact.human_identity)},\"name\":{foundation_json_quote(fact.name)},\"kind\":{foundation_json_quote(fact.kind)},\"module\":{foundation_json_quote(fact.module_path)},\"span\":{semindex_json_span(fact.span)}}}"
+}
+
+// Rust json_output_payload: Number is already checked textual JSON, not a
+// Float conversion. Only map keys sort (Rust BTreeMap); arrays never sort.
+pub fn semindex_json_output_payload(value: OutputPayload) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Number(text) -> text
+        .String(text) -> foundation_json_quote(text)
+        .Array(values) -> {
+            parts :: loop child in values -> semindex_json_output_payload(child)
+            "[{parts.join(",")}]"
+        }
+        .Object(values) -> {
+            names := values.keys().to_list()
+            &names.sort()
+            parts := [String]{}
+            loop name in names -> &parts.push("{foundation_json_quote(name)}:{semindex_json_output_payload(values[name])}")
+            "{{{parts.join(",")}}}"
+        }
+    }
+}
+
+// Rust json_optional_str/json_optional_strings (141–143,156–160).
+pub fn semindex_json_optional_str(value: String?) -> String Never! {
+    if value == {
+        .Val(text) -> foundation_json_quote(text)
+        .None -> "null"
+    }
+}
+
+pub fn semindex_json_optional_strings(values: [String]?) -> String Never! {
+    if values == {
+        .Val(strings) -> semindex_json_string_array(strings)
+        .None -> "null"
+    }
+}
+
+// Rust json_trust_decision: these are codec labels, not authority evaluation.
+pub fn semindex_json_trust_decision(decision: TrustDecision) -> String Never! {
+    if decision == {
+        .Allow -> "allow"
+        .Prompt -> "prompt"
+        .Deny -> "deny"
+    }
+}
+
+pub fn semindex_json_package_authority(authority: PackageAuthority) -> String Never! {
+    grants := [String]{}
+    loop grant in authority.grants -> &grants.push("{foundation_json_quote(grant.package)}:{semindex_json_string_array(grant.rights)}")
+    trust := "null"
+    if authority.trust == .Val(policy) {
+        services := [String]{}
+        loop service in policy.services -> &services.push("{foundation_json_quote(service.service)}:{foundation_json_quote(semindex_json_trust_decision(service.decision))}")
+        default_decision := "null"
+        if policy.default == .Val(decision) -> default_decision = foundation_json_quote(semindex_json_trust_decision(decision))
+        ci := "null"
+        if policy.ci_prompt == .Val(decision) -> ci = foundation_json_quote(semindex_json_trust_decision(decision))
+        require := "null"
+        if policy.require == .Val(floor) -> require = foundation_json_quote(floor.label())
+        trust = "{{\"default\":{default_decision},\"ci\":{ci},\"services\":{{{services.join(",")}}},\"require\":{require}}}"
+    }
+    providers := [String]{}
+    loop provider in authority.providers {
+        &providers.push("{foundation_json_quote(provider.provider)}:{{\"registry\":{foundation_json_quote(provider.registry)},\"allow\":{semindex_json_string_array(provider.allow)},\"deny\":{semindex_json_string_array(provider.deny)}}}")
+    }
+    // Rust's wire deliberately omits the model's needs field.
+    "{{\"holds\":{{\"allow\":{semindex_json_optional_strings(authority.holds.allow)},\"deny\":{semindex_json_optional_strings(authority.holds.deny)}}},\"grants\":{{{grants.join(",")}}},\"trust\":{trust},\"providers\":{{{providers.join(",")}}}}}"
+}
+
+// Rust json_string_map/json_service/json_services.
+pub fn semindex_json_string_map(values: [String: String]) -> String Never! {
+    names := values.keys().to_list()
+    &names.sort()
+    parts := [String]{}
+    loop name in names -> &parts.push("{foundation_json_quote(name)}:{foundation_json_quote(values[name])}")
+    parts.join(",")
+}
+
+pub fn semindex_json_service(value: ServiceFact) -> String Never! {
+    ports :: loop port in value.ports -> "{port}"
+    enabled :: if value.enable -> "true" else -> "false"
+    "{{\"enable\":{enabled},\"ports\":[{ports.join(",")}],\"ready\":{semindex_json_optional_str(value.ready)},\"fields\":{{{semindex_json_string_map(value.fields)}}}}}"
+}
+
+pub fn semindex_json_services(values: [String: ServiceFact]) -> String Never! {
+    names := values.keys().to_list()
+    &names.sort()
+    parts := [String]{}
+    loop name in names -> &parts.push("{foundation_json_quote(name)}:{semindex_json_service(values[name])}")
+    parts.join(",")
+}
+
+// Rust json_environment/json_environments: actual checked EnvironmentFact,
+// not EnvPlan realization or a second environment/provider evaluation.
+pub fn semindex_json_environment(value: EnvironmentFact) -> String Never! {
+    "{{\"name\":{foundation_json_quote(value.name)},\"tools\":{semindex_json_string_array(value.tools)},\"services\":{{{semindex_json_services(value.services)}}},\"secrets\":{{{semindex_json_string_map(value.secrets)}}},\"fields\":{{{semindex_json_string_map(value.fields)}}}}}"
+}
+
+pub fn semindex_json_environments(values: [String: EnvironmentFact]) -> String Never! {
+    names := values.keys().to_list()
+    &names.sort()
+    parts := [String]{}
+    loop name in names -> &parts.push("{foundation_json_quote(name)}:{semindex_json_environment(values[name])}")
+    parts.join(",")
+}
+
+// Rust json_package_output/json_package_outputs: provenance absence is []
+// here (not null). Output keys select provenance, not the output's name field.
+pub fn semindex_json_package_output(value: OutputFact, provenance: [String]?) -> String Never! {
+    origins :: if provenance == {
+        .Val(values) -> semindex_json_string_array(values)
+        .None -> "[]"
+    }
+    kind :: semindex_package_text.lower(value.kind.debug_name())
+    "{{\"name\":{foundation_json_quote(value.name)},\"kind\":{foundation_json_quote(kind)},\"entry\":{semindex_json_optional_str(value.entry)},\"fields\":{{{semindex_json_string_map(value.fields)}}},\"payload\":{semindex_json_output_payload(value.payload)},\"provenance\":{origins}}}"
+}
+
+pub fn semindex_json_package_outputs(values: [String: OutputFact], provenance: [String: [String]]?) -> String Never! {
+    names := values.keys().to_list()
+    &names.sort()
+    parts := [String]{}
+    loop name in names {
+        origins: [String]? := None
+        if provenance == .Val(all) -> origins = all.get("outputs.{name}")
+        &parts.push(semindex_json_package_output(values[name], origins))
+    }
+    parts.join(",")
+}
+
+// Rust dependency tuple projection in json_config_facts/package_facts_json;
+// redaction belongs solely to canonical PackageModel pkg_dep_display_redacted.
+fn semindex_json_dependencies(values: [String: DepSource]) -> String Never! {
+    names := values.keys().to_list()
+    &names.sort()
+    parts := [String]{}
+    loop name in names -> &parts.push("{{\"name\":{foundation_json_quote(name)},\"source\":{foundation_json_quote(pkg_dep_display_redacted(values[name]))}}}")
+    parts.join(",")
+}
+
+pub fn semindex_json_config_facts(value: ConfigFacts) -> String Never! {
+    "{{\"name\":{semindex_json_optional_str(value.name)},\"version\":{semindex_json_optional_str(value.version)},\"source\":{semindex_json_optional_str(value.source)},\"deps\":[{semindex_json_dependencies(value.deps)}],\"services\":{{{semindex_json_services(value.services)}}},\"outputs\":[{semindex_json_package_outputs(value.outputs, None)}],\"environments\":{{{semindex_json_environments(value.environments)}}},\"defaults\":{{{semindex_json_string_map(value.defaults)}}},\"origin\":{foundation_json_quote(value.origin)}}}"
+}
+
+pub fn semindex_json_inline_configs(values: [String: ConfigFacts]) -> String Never! {
+    names := values.keys().to_list()
+    &names.sort()
+    parts := [String]{}
+    loop name in names -> &parts.push("{foundation_json_quote(name)}:{semindex_json_config_facts(values[name])}")
+    parts.join(",")
+}
+
+pub fn semindex_json_members(values: [MemberRef]) -> String Never! {
+    parts := [String]{}
+    loop member in values {
+        row :: if member == {
+            .Path(path) -> "{{\"kind\":\"path\",\"path\":{foundation_json_quote(path)}}}"
+            .Find(path) -> "{{\"kind\":\"find\",\"path\":{foundation_json_quote(path)}}}"
+        }
+        &parts.push(row)
+    }
+    parts.join(",")
+}
+
+// Rust public package_facts_json. Digest comes from the canonical model and
+// binds the composed facts; this presentation never hashes its own JSON.
+pub fn package_facts_json(facts: PackageFacts) -> String Never! {
+    names := facts.provenance.keys().to_list()
+    &names.sort()
+    provenance := [String]{}
+    loop name in names -> &provenance.push("{foundation_json_quote(name)}:{semindex_json_string_array(facts.provenance[name])}")
+    "{{\"name\":{foundation_json_quote(facts.name)},\"version\":{semindex_json_optional_str(facts.version)},\"jet\":{semindex_json_optional_str(facts.jet)},\"source\":{semindex_json_optional_str(facts.source)},\"deps\":[{semindex_json_dependencies(facts.deps)}],\"services\":{{{semindex_json_services(facts.services)}}},\"outputs\":[{semindex_json_package_outputs(facts.outputs, Val(facts.provenance))}],\"environments\":{{{semindex_json_environments(facts.environments)}}},\"defaults\":{{{semindex_json_string_map(facts.defaults)}}},\"configs\":{semindex_json_string_array(facts.configs)},\"resolved_config_paths\":{semindex_json_string_array(facts.resolved_config_paths)},\"inline_configs\":{{{semindex_json_inline_configs(facts.inline_configs)}}},\"members\":[{semindex_json_members(facts.members)}],\"provenance\":{{{provenance.join(",")}}},\"authority\":{semindex_json_package_authority(facts.authority)},\"origin\":{foundation_json_quote(facts.origin)},\"semantic_digest\":{foundation_json_quote(facts.semantic_digest())}}}"
+}
+
+// Rust public workspace_overlay_policy_json. Persisted overlay facts are
+// disclosure only: no re-resolution, flag dedup, path cleaning or validation.
+pub fn workspace_overlay_policy_json(policy: OverlayPolicy) -> String Never! {
+    grants := [String]{}
+    loop grant in policy.build_grants -> &grants.push("{{\"package\":{foundation_json_quote(grant.subject)},\"effects\":{semindex_json_string_array(grant.effects)}}}")
+    overlays := [String]{}
+    loop overlay in policy.overlays {
+        provider := "null"
+        if overlay.provider == .Val(value) -> provider = "{{\"provider\":{foundation_json_quote(value.provider)},\"channel\":{semindex_json_optional_str(value.channel)}}}"
+        packages := [String]{}
+        loop package in overlay.packages {
+            env := [String]{}
+            loop entry in package.env -> &env.push("[{foundation_json_quote(entry.key)},{foundation_json_quote(entry.value)}]")
+            fields := package.field_priorities.keys().to_list()
+            &fields.sort()
+            priorities := [String]{}
+            loop field in fields -> &priorities.push("{foundation_json_quote(field)}:{package.field_priorities[field]}")
+            unfree :: if package.allow_unfree -> "true" else -> "false"
+            &packages.push("{{\"package\":{foundation_json_quote(package.package)},\"source\":{semindex_json_optional_str(package.source)},\"version\":{semindex_json_optional_str(package.version)},\"flags\":{semindex_json_string_array(package.flags)},\"priority\":{package.priority},\"field_priorities\":{{{priorities.join(",")}}},\"env\":[{env.join(",")}],\"patches\":{semindex_json_string_array(package.patches)},\"allow_unfree\":{unfree}}}")
+        }
+        &overlays.push("{{\"name\":{foundation_json_quote(overlay.name)},\"provider\":{provider},\"packages\":[{packages.join(",")}]}}")
+    }
+    "{{\"allow_unfree\":{semindex_json_string_array(policy.allow_unfree)},\"build_deny\":{semindex_json_string_array(policy.build_deny)},\"build_grants\":[{grants.join(",")}],\"overlays\":[{overlays.join(",")}]}}"
+}
+
+// Typed counterpart of the full JSON.rs:28–520 helper family. Fixed schema
+// keys retain source order. Dynamic object keys use canonical insert, so
+// duplicate/non-printable keys refuse instead of collapsing into a Core map.
+pub fn semindex_status_instance(value: InstanceFact) -> StatusValue Never! {
+    provenance :: loop origins in value.argument_provenance -> semindex_status_strings(origins)
+    applications :: loop application in value.applications -> StatusValue.Object(StatusFields.new()
+        .with("name", StatusValue.String(application.name)).with("module_path", StatusValue.String(application.module_path))
+        .with("semantic_identity", StatusValue.String(application.semantic_identity)).with("span", semindex_status_span(application.span)))
+    StatusValue.Object(StatusFields.new()
+        .with("name", StatusValue.String(value.name)).with("module_path", StatusValue.String(value.module_path))
+        .with("fingerprint", StatusValue.String(value.fingerprint)).with("full_key", StatusValue.String(value.full_key_hex))
+        .with("template_definition_id", StatusValue.String(value.template_definition_id)).with("template_span", semindex_status_span(value.template_span))
+        .with("arguments", semindex_status_strings(value.arguments)).with("argument_values", semindex_status_strings(value.argument_values))
+        .with("argument_provenance", StatusValue.Array(provenance)).with("applications", StatusValue.Array(applications))
+        .with("exported_members", semindex_status_strings(value.exported_members)))
+}
+pub fn semindex_status_output(value: SemIndexOutputFact) -> StatusValue Never! {
+    entry :: value.entry
+    entry_value :: StatusValue.Object(StatusFields.new()
+        .with("identity", StatusValue.String(entry.identity)).with("name", StatusValue.String(entry.name))
+        .with("module_path", StatusValue.String(entry.module_path))
+        .with("definition_span", semindex_status_span(entry.definition_span)).with("reference_span", semindex_status_span(entry.reference_span))
+        .with("params", semindex_status_strings(entry.params)).with("return_type", semindex_status_optional_str(entry.return_type))
+        .with("failure_contract", StatusValue.String(entry.failure_contract)).with("failure_source", StatusValue.String(entry.failure_source))
+        .with("authority", StatusValue.String(entry.authority)).with("effects", semindex_status_strings(entry.effects)))
+    StatusValue.Object(StatusFields.new().with("binding", StatusValue.String(value.binding)).with("kind", StatusValue.String(value.kind))
+        .with("name", StatusValue.String(value.name)).with("module_path", StatusValue.String(value.module_path))
+        .with("span", semindex_status_span(value.span)).with("entry", entry_value))
+}
+pub fn semindex_status_definition_fact(fact: DefinitionFact) -> StatusValue Never! {
+    StatusValue.Object(StatusFields.new().with("stable_id", StatusValue.String(fact.stable_id))
+        .with("signature_id", StatusValue.String(fact.signature_id)).with("content_id", StatusValue.String(fact.content_id))
+        .with("human_identity", StatusValue.String(fact.human_identity)).with("name", StatusValue.String(fact.name))
+        .with("kind", StatusValue.String(fact.kind)).with("module", StatusValue.String(fact.module_path)).with("span", semindex_status_span(fact.span)))
+}
+pub fn semindex_status_output_payload(value: OutputPayload) -> StatusValue ReportError! {
+    if value == {
+        .Null -> Ok(StatusValue.Null)
+        .Bool(flag) -> Ok(StatusValue.Bool(flag))
+        // Rust JSON.rs:1116 parses the raw payload at the typed envelope
+        // boundary: canonical finite-f64 rendering and bounded-i64 refusal.
+        // The raw S17 presentation helper above remains lexical.
+        .Number(text) -> status_value_from_json_number_atom(text)
+        .String(text) -> Ok(StatusValue.String(text))
+        .Array(values) -> {
+            rows := [StatusValue]{}
+            loop child in values -> &rows.push(semindex_status_output_payload(child))
+            Ok(StatusValue.Array(rows))
+        }
+        .Object(values) -> {
+            names := values.keys().to_list()
+            &names.sort()
+            fields := StatusFields.new()
+            loop name in names -> &fields.insert(name, semindex_status_output_payload(values[name]))
+            Ok(StatusValue.Object(fields))
+        }
+    }
+}
+pub fn semindex_status_optional_str(value: String?) -> StatusValue Never! {
+    if value == {
+        .Val(text) -> StatusValue.String(text)
+        .None -> StatusValue.Null
+    }
+}
+pub fn semindex_status_optional_strings(values: [String]?) -> StatusValue Never! {
+    if values == {
+        .Val(strings) -> semindex_status_strings(strings)
+        .None -> StatusValue.Null
+    }
+}
+pub fn semindex_status_trust_decision(value: TrustDecision) -> StatusValue Never! {
+    StatusValue.String(semindex_json_trust_decision(value))
+}
+pub fn semindex_status_package_authority(authority: PackageAuthority) -> StatusValue ReportError! {
+    grants := StatusFields.new()
+    loop grant in authority.grants -> &grants.insert(grant.package, semindex_status_strings(grant.rights))
+    trust := StatusValue.Null
+    if authority.trust == .Val(policy) {
+        services := StatusFields.new()
+        loop service in policy.services -> &services.insert(service.service, semindex_status_trust_decision(service.decision))
+        default_decision :: if policy.default == {
+            .Val(decision) -> semindex_status_trust_decision(decision)
+            .None -> StatusValue.Null
+        }
+        ci :: if policy.ci_prompt == {
+            .Val(decision) -> semindex_status_trust_decision(decision)
+            .None -> StatusValue.Null
+        }
+        require :: if policy.require == {
+            .Val(floor) -> StatusValue.String(floor.label())
+            .None -> StatusValue.Null
+        }
+        trust = StatusValue.Object(StatusFields.new().with("default", default_decision).with("ci", ci).with("services", StatusValue.Object(services)).with("require", require))
+    }
+    providers := StatusFields.new()
+    loop provider in authority.providers {
+        &providers.insert(provider.provider, StatusValue.Object(StatusFields.new().with("registry", StatusValue.String(provider.registry))
+            .with("allow", semindex_status_strings(provider.allow)).with("deny", semindex_status_strings(provider.deny))))
+    }
+    Ok(StatusValue.Object(StatusFields.new()
+        .with("holds", StatusValue.Object(StatusFields.new().with("allow", semindex_status_optional_strings(authority.holds.allow)).with("deny", semindex_status_optional_strings(authority.holds.deny))))
+        .with("grants", StatusValue.Object(grants)).with("trust", trust).with("providers", StatusValue.Object(providers))))
+}
+pub fn semindex_status_string_map(values: [String: String]) -> StatusValue ReportError! {
+    names := values.keys().to_list()
+    &names.sort()
+    fields := StatusFields.new()
+    loop name in names -> &fields.insert(name, StatusValue.String(values[name]))
+    Ok(StatusValue.Object(fields))
+}
+pub fn semindex_status_service(value: ServiceFact) -> StatusValue ReportError! {
+    ports :: loop port in value.ports -> StatusValue.Integer(port)
+    Ok(StatusValue.Object(StatusFields.new().with("enable", StatusValue.Bool(value.enable)).with("ports", StatusValue.Array(ports))
+        .with("ready", semindex_status_optional_str(value.ready)).with("fields", semindex_status_string_map(value.fields))))
+}
+pub fn semindex_status_services(values: [String: ServiceFact]) -> StatusValue ReportError! {
+    names := values.keys().to_list()
+    &names.sort()
+    fields := StatusFields.new()
+    loop name in names -> &fields.insert(name, semindex_status_service(values[name]))
+    Ok(StatusValue.Object(fields))
+}
+pub fn semindex_status_environment(value: EnvironmentFact) -> StatusValue ReportError! {
+    Ok(StatusValue.Object(StatusFields.new().with("name", StatusValue.String(value.name)).with("tools", semindex_status_strings(value.tools))
+        .with("services", semindex_status_services(value.services)).with("secrets", semindex_status_string_map(value.secrets)).with("fields", semindex_status_string_map(value.fields))))
+}
+pub fn semindex_status_environments(values: [String: EnvironmentFact]) -> StatusValue ReportError! {
+    names := values.keys().to_list()
+    &names.sort()
+    fields := StatusFields.new()
+    loop name in names -> &fields.insert(name, semindex_status_environment(values[name]))
+    Ok(StatusValue.Object(fields))
+}
+pub fn semindex_status_package_output(value: OutputFact, provenance: [String]?) -> StatusValue ReportError! {
+    origins :: if provenance == {
+        .Val(values) -> semindex_status_strings(values)
+        .None -> StatusValue.Array([StatusValue]{})
+    }
+    kind :: semindex_package_text.lower(value.kind.debug_name())
+    Ok(StatusValue.Object(StatusFields.new().with("name", StatusValue.String(value.name)).with("kind", StatusValue.String(kind))
+        .with("entry", semindex_status_optional_str(value.entry)).with("fields", semindex_status_string_map(value.fields))
+        .with("payload", semindex_status_output_payload(value.payload)).with("provenance", origins)))
+}
+pub fn semindex_status_package_outputs(values: [String: OutputFact], provenance: [String: [String]]?) -> StatusValue ReportError! {
+    names := values.keys().to_list()
+    &names.sort()
+    rows := [StatusValue]{}
+    loop name in names {
+        origins: [String]? := None
+        if provenance == .Val(all) -> origins = all.get("outputs.{name}")
+        &rows.push(semindex_status_package_output(values[name], origins))
+    }
+    Ok(StatusValue.Array(rows))
+}
+pub fn semindex_status_dependencies(values: [String: DepSource]) -> StatusValue Never! {
+    names := values.keys().to_list()
+    &names.sort()
+    rows :: loop name in names -> StatusValue.Object(StatusFields.new().with("name", StatusValue.String(name)).with("source", StatusValue.String(pkg_dep_display_redacted(values[name]))))
+    StatusValue.Array(rows)
+}
+pub fn semindex_status_config_facts(value: ConfigFacts) -> StatusValue ReportError! {
+    Ok(StatusValue.Object(StatusFields.new().with("name", semindex_status_optional_str(value.name)).with("version", semindex_status_optional_str(value.version))
+        .with("source", semindex_status_optional_str(value.source)).with("deps", semindex_status_dependencies(value.deps))
+        .with("services", semindex_status_services(value.services)).with("outputs", semindex_status_package_outputs(value.outputs, None))
+        .with("environments", semindex_status_environments(value.environments)).with("defaults", semindex_status_string_map(value.defaults)).with("origin", StatusValue.String(value.origin))))
+}
+pub fn semindex_status_inline_configs(values: [String: ConfigFacts]) -> StatusValue ReportError! {
+    names := values.keys().to_list()
+    &names.sort()
+    fields := StatusFields.new()
+    loop name in names -> &fields.insert(name, semindex_status_config_facts(values[name]))
+    Ok(StatusValue.Object(fields))
+}
+pub fn semindex_status_members(values: [MemberRef]) -> StatusValue Never! {
+    rows :: loop member in values -> if member == {
+        .Path(path) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("path")).with("path", StatusValue.String(path)))
+        .Find(path) -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("find")).with("path", StatusValue.String(path)))
+    }
+    StatusValue.Array(rows)
+}
+pub fn package_facts_status_value(facts: PackageFacts) -> StatusValue ReportError! {
+    names := facts.provenance.keys().to_list()
+    &names.sort()
+    provenance := StatusFields.new()
+    loop name in names -> &provenance.insert(name, semindex_status_strings(facts.provenance[name]))
+    Ok(StatusValue.Object(StatusFields.new()
+        .with("name", StatusValue.String(facts.name)).with("version", semindex_status_optional_str(facts.version))
+        .with("jet", semindex_status_optional_str(facts.jet)).with("source", semindex_status_optional_str(facts.source))
+        .with("deps", semindex_status_dependencies(facts.deps)).with("services", semindex_status_services(facts.services))
+        .with("outputs", semindex_status_package_outputs(facts.outputs, Val(facts.provenance)))
+        .with("environments", semindex_status_environments(facts.environments)).with("defaults", semindex_status_string_map(facts.defaults))
+        .with("configs", semindex_status_strings(facts.configs)).with("resolved_config_paths", semindex_status_strings(facts.resolved_config_paths))
+        .with("inline_configs", semindex_status_inline_configs(facts.inline_configs)).with("members", semindex_status_members(facts.members))
+        .with("provenance", StatusValue.Object(provenance)).with("authority", semindex_status_package_authority(facts.authority))
+        .with("origin", StatusValue.String(facts.origin)).with("semantic_digest", StatusValue.String(facts.semantic_digest()))))
+}
+pub fn workspace_overlay_policy_status_value(policy: OverlayPolicy) -> StatusValue ReportError! {
+    grants :: loop grant in policy.build_grants -> StatusValue.Object(StatusFields.new().with("package", StatusValue.String(grant.subject)).with("effects", semindex_status_strings(grant.effects)))
+    overlays := [StatusValue]{}
+    loop overlay in policy.overlays {
+        provider :: if overlay.provider == {
+            .Val(value) -> StatusValue.Object(StatusFields.new().with("provider", StatusValue.String(value.provider)).with("channel", semindex_status_optional_str(value.channel)))
+            .None -> StatusValue.Null
+        }
+        packages := [StatusValue]{}
+        loop package in overlay.packages {
+            env :: loop entry in package.env -> StatusValue.Array([StatusValue]{StatusValue.String(entry.key), StatusValue.String(entry.value)})
+            names := package.field_priorities.keys().to_list()
+            &names.sort()
+            priorities := StatusFields.new()
+            loop name in names -> &priorities.insert(name, StatusValue.Integer(package.field_priorities[name]))
+            &packages.push(StatusValue.Object(StatusFields.new().with("package", StatusValue.String(package.package))
+                .with("source", semindex_status_optional_str(package.source)).with("version", semindex_status_optional_str(package.version))
+                .with("flags", semindex_status_strings(package.flags)).with("priority", StatusValue.Integer(package.priority))
+                .with("field_priorities", StatusValue.Object(priorities)).with("env", StatusValue.Array(env))
+                .with("patches", semindex_status_strings(package.patches)).with("allow_unfree", StatusValue.Bool(package.allow_unfree))))
+        }
+        &overlays.push(StatusValue.Object(StatusFields.new().with("name", StatusValue.String(overlay.name)).with("provider", provider).with("packages", StatusValue.Array(packages))))
+    }
+    Ok(StatusValue.Object(StatusFields.new().with("allow_unfree", semindex_status_strings(policy.allow_unfree))
+        .with("build_deny", semindex_status_strings(policy.build_deny)).with("build_grants", StatusValue.Array(grants)).with("overlays", StatusValue.Array(overlays))))
+}

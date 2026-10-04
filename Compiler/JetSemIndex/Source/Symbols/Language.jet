@@ -1,0 +1,123 @@
+use jet_foundation.[
+    Type,
+    TAppliedRuleArgumentMenu,
+    core_module_export,
+    fact_read_members,
+    jet_type_names,
+    jet_keyword_names,
+    numeric_conversion_sources,
+    numeric_conversion_catalog_targets,
+    numeric_conversion_return,
+    rule_arg_declaration,
+    type_name,
+]
+
+// Rust Symbols.rs:1378–1419: Core completion/help share the canonical module
+// export registry. A compiler-language enum uses the applied-rule declaration,
+// whose canonical variants need not equal the Core source enum spellings.
+fn semantic_core_module_symbol(module_name: String, name: String, menus: [TAppliedRuleArgumentMenu]) -> SemanticSymbol Never! {
+    qualified_name :: "{module_name}.{name}"
+    signature := qualified_name
+    summary := ""
+    kind := SemanticSymbolKind.Function
+    if module_name == "core.compiler.lang" {
+        if rule_arg_declaration(name, menus) == .Val(declaration) {
+            kind = SemanticSymbolKind.Type
+            signature = "enum {qualified_name} {{ {declaration.variants.join(", ")} }}"
+            summary = "Compiler vocabulary published as an ordinary enum."
+        }
+    }
+    SemanticSymbol{
+        identity: "builtin:module:{qualified_name}",
+        name: name,
+        qualified_name: qualified_name,
+        owner: None,
+        module_path: module_name,
+        kind: kind,
+        signature: signature,
+        summary: summary,
+        examples: [String]{},
+        provenance: SemanticProvenance.Builtin{module_name: module_name},
+        span: None,
+        lexical_scope: None,
+    }
+}
+
+// Rust SemanticSymbolIndex::complete_core_module (203–208), helper1378–1419.
+// Retain registry order; do not sort or treat exported types in other modules
+// differently from the reference. Only matching members allocate facts.
+fn semantic_complete_core_module(module_name: String, prefix: String, menus: [TAppliedRuleArgumentMenu]) -> [SemanticSymbol] Never! {
+    symbols := [SemanticSymbol]{}
+    declaration :: core_module_export(module_name) ?? return symbols
+    loop name in declaration.members {
+        if name.starts_with(prefix) -> &symbols.push(semantic_core_module_symbol(module_name, name, menus))
+    }
+    symbols
+}
+
+// Rust SemanticSymbolIndex::lookup_core_module_member (211–215).
+fn semantic_lookup_core_module_member(module_name: String, name: String, menus: [TAppliedRuleArgumentMenu]) -> SemanticSymbol? Never! {
+    declaration :: core_module_export(module_name) ?? return None
+    loop member in declaration.members {
+        if member == name -> return Val(semantic_core_module_symbol(module_name, member, menus))
+    }
+    None
+}
+
+fn semantic_language_leaf(identity: String, name: String, module_name: String, kind: SemanticSymbolKind, signature: String, summary: String) -> SemanticSymbol Never! {
+    SemanticSymbol{
+        identity: identity,
+        name: name,
+        qualified_name: name,
+        owner: None,
+        module_path: module_name,
+        kind: kind,
+        signature: signature,
+        summary: summary,
+        examples: [String]{},
+        provenance: SemanticProvenance.Builtin{module_name: module_name},
+        span: None,
+        lexical_scope: None,
+    }
+}
+
+// Rust Symbols.rs:1533–1569: destination-owned conversions. The canonical
+// Foundation law decides whether a source/target pair exists and is fallible;
+// notably Decimal/Fraction sources do not have a rectangular numeric catalog.
+// Jet owns these strings; no OnceLock, leaked boxes, or extra numeric dictionary.
+pub fn semantic_numeric_conversion_symbols() -> [SemanticSymbol] Never! {
+    symbols := [SemanticSymbol]{}
+    targets :: numeric_conversion_catalog_targets()
+    loop source in numeric_conversion_sources() {
+        loop target in targets {
+            result :: numeric_conversion_return(target.ty, source.method, 1) ?? next
+            qualified_name :: "{target.name}.{source.method}"
+            // Preserve the destination's published alias (F64 vs Float), as
+            // Rust does; the checked carrier/error still decides fallibility.
+            result_label :: if result == {
+                .Result(_, error) -> "{target.name} {type_name(error)}!"
+                else -> target.name
+            }
+            signature :: "{qualified_name}(value: {source.source}) -> {result_label}"
+            &symbols.push(semantic_builtin_member(target.name, source.method, "core.numeric", signature, "Converts {source.source} to {target.name}.", [String]{qualified_name}))
+        }
+    }
+    symbols
+}
+
+// Rust language_symbols1421–1571; callers use SemanticSymbolIndex.language()
+// for canonical identity lookup, owner completion, and borrowed catalog facts.
+// Syntax and CompilerFact own all type/keyword/fact names; docs are not another
+// lexer/registry and never reconstruct a checked verdict from display strings.
+pub fn semantic_language_symbols() -> [SemanticSymbol] Never! {
+    symbols := [SemanticSymbol]{}
+    loop name in jet_type_names() -> &symbols.push(semantic_language_leaf("builtin:type:{name}", name, "core", SemanticSymbolKind.Type, "type {name}", "Built-in Jet type."))
+    loop member in fact_read_members() {
+        fact :: CompilerFact.from_member(member) ?? next
+        &symbols.push(semantic_language_leaf("builtin:fact:{fact.name}", fact.name, "compiler", SemanticSymbolKind.Member, "{fact.name}: {fact.type_name}", "Compiler-owned typed fact."))
+    }
+    loop name in jet_keyword_names() -> &symbols.push(semantic_language_leaf("builtin:keyword:{name}", name, "syntax", SemanticSymbolKind.Keyword, name, "Jet keyword."))
+    loop symbol in semantic_builtin_doc_symbols() -> &symbols.push(symbol)
+    loop symbol in semantic_numeric_conversion_symbols() -> &symbols.push(symbol)
+    symbols
+}

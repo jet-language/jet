@@ -1,0 +1,1804 @@
+// PORT-PENDING 2098 crates-jet-semindex-src-symbols-slice-1: crates/jet-semindex/src/Symbols.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Consumer-neutral semantic symbol facts for docs, completion, hover, and help.
+//RS //!
+//RS //! Program symbols come from `SymbolDB`; language builtins live here once.
+//RS //! Consumers choose presentation only — never rebuild signatures or identity.
+//RS 
+//RS use std::collections::HashMap;
+//RS 
+//RS use jet_foundation::Syntax;
+//RS use jet_foundation::AST::ProgramBundle;
+//RS use jet_foundation::{Collections, AST};
+//RS 
+//RS use crate::Build::{function_parameter_parts, SymKind, SymbolDB};
+//RS use crate::Types::{
+//RS     CallableFactAvailability, CompilerFact, MemberFact, MemberOrigin, SourceSpan,
+//RS     StructuralNode, SymbolDef, TraitContractFact,
+//RS };
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum SemanticSymbolKind {
+//RS     Module,
+//RS     Function,
+//RS     Type,
+//RS     Member,
+//RS     Constant,
+//RS     Local,
+//RS     Parameter,
+//RS     Keyword,
+//RS     Command,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum SemanticProvenance {
+//RS     Source { module_path: String },
+//RS     Builtin { module: String },
+//RS     CommandRegistry,
+//RS     Session,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct SemanticLexicalScope {
+//RS     pub identity: String,
+//RS     pub structural_parent: usize,
+//RS     pub structural_slot: String,
+//RS     pub span: SourceSpan,
+//RS     pub depth: usize,
+//RS     pub declaration_offset: usize,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct SemanticVisibilityAnchor<'a> {
+//RS     pub module_path: &'a str,
+//RS     pub offset: Option<usize>,
+//RS     pub session_top_level: bool,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct SemanticSymbol {
+//RS     pub identity: String,
+//RS     pub name: String,
+//RS     pub qualified_name: String,
+//RS     pub owner: Option<String>,
+//RS     pub module_path: String,
+//RS     pub kind: SemanticSymbolKind,
+//RS     pub signature: String,
+//RS     pub summary: String,
+//RS     pub examples: Vec<String>,
+//RS     pub provenance: SemanticProvenance,
+//RS     pub span: Option<SourceSpan>,
+//RS     pub lexical_scope: Option<SemanticLexicalScope>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
+//RS pub struct SemanticSymbolIndex {
+//RS     symbols: Vec<SemanticSymbol>,
+//RS }
+//RS 
+//RS impl SemanticSymbolIndex {
+//RS     pub fn new(symbols: Vec<SemanticSymbol>) -> Self {
+//RS         let mut index = Self { symbols };
+//RS         index.sort();
+//RS         index
+//RS     }
+//RS 
+//RS     pub fn language() -> Self {
+//RS         Self::new(language_symbols())
+//RS     }
+//RS 
+//RS     pub fn symbols(&self) -> &[SemanticSymbol] {
+//RS         &self.symbols
+//RS     }
+//RS 
+//RS     pub fn push(&mut self, symbol: SemanticSymbol) {
+//RS         if let Some(slot) = self
+//RS             .symbols
+//RS             .iter_mut()
+//RS             .find(|existing| existing.identity == symbol.identity)
+//RS         {
+//RS             *slot = symbol;
+//RS         } else {
+//RS             self.symbols.push(symbol);
+//RS         }
+//RS         self.sort();
+//RS     }
+//RS 
+//RS     pub fn extend(&mut self, symbols: impl IntoIterator<Item = SemanticSymbol>) {
+//RS         for symbol in symbols {
+//RS             self.push(symbol);
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn lookup_identity(&self, identity: &str) -> Option<&SemanticSymbol> {
+//RS         self.symbols
+//RS             .iter()
+//RS             .find(|symbol| symbol.identity == identity)
+//RS     }
+//RS 
+//RS     pub fn lookup_qualified(&self, name: &str) -> Option<&SemanticSymbol> {
+//RS         let mut matches = self
+//RS             .symbols
+//RS             .iter()
+//RS             .filter(|symbol| symbol.qualified_name == name);
+//RS         let symbol = matches.next()?;
+//RS         matches.next().is_none().then_some(symbol)
+//RS     }
+//RS 
+//RS     pub fn lookup(&self, name: &str) -> Vec<&SemanticSymbol> {
+//RS         self.symbols
+//RS             .iter()
+//RS             .filter(|symbol| symbol.name == name || symbol.qualified_name == name)
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub fn lookup_member(&self, owner: &str, name: &str) -> Vec<&SemanticSymbol> {
+//RS         self.symbols
+//RS             .iter()
+//RS             .filter(|symbol| symbol.owner.as_deref() == Some(owner) && symbol.name == name)
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// Resolve the symbol visible through an unqualified spelling, or an
+//RS     /// explicitly qualified symbol when `name` contains its owner.
+//RS     ///
+//RS     /// Identity lookup remains lossless; this method applies Jet's shadowing
+//RS     /// order only at a consumer's visible-name boundary.
+//RS     pub fn resolve_visible(&self, name: &str) -> Option<&SemanticSymbol> {
+//RS         self.resolve_visible_in(name, None)
+//RS     }
+//RS 
+//RS     pub fn resolve_visible_in(
+//RS         &self,
+//RS         name: &str,
+//RS         module_path: Option<&str>,
+//RS     ) -> Option<&SemanticSymbol> {
+//RS         self.resolve_with_anchor(
+//RS             name,
+//RS             module_path.map(|module_path| SemanticVisibilityAnchor {
+//RS                 module_path,
+//RS                 offset: None,
+//RS                 session_top_level: false,
+//RS             }),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn resolve_visible_at(
+//RS         &self,
+//RS         name: &str,
+//RS         anchor: SemanticVisibilityAnchor<'_>,
+//RS     ) -> Option<&SemanticSymbol> {
+//RS         self.resolve_with_anchor(name, Some(anchor))
+//RS     }
+//RS 
+//RS     fn resolve_with_anchor(
+//RS         &self,
+//RS         name: &str,
+//RS         anchor: Option<SemanticVisibilityAnchor<'_>>,
+//RS     ) -> Option<&SemanticSymbol> {
+//RS         let qualified = name.contains('.');
+//RS         self.symbols
+//RS             .iter()
+//RS             .filter(|symbol| {
+//RS                 if qualified {
+//RS                     symbol.qualified_name == name
+//RS                 } else {
+//RS                     symbol.owner.is_none() && symbol.name == name
+//RS                 }
+//RS             })
+//RS             .filter_map(|symbol| visibility_key(symbol, anchor).map(|key| (key, symbol)))
+//RS             .min_by_key(|(key, _)| *key)
+//RS             .map(|(_, symbol)| symbol)
+//RS     }
+//RS 
+//RS     pub fn complete(&self, prefix: &str, owner: Option<&str>) -> Vec<&SemanticSymbol> {
+//RS         self.symbols
+//RS             .iter()
+//RS             .filter(|symbol| symbol.owner.as_deref() == owner && symbol.name.starts_with(prefix))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// Members of a Core module path (`core.math`, …) for REPL/LSP completion.
+//RS     ///
+//RS     /// Names come from the canonical Sema catalog (`core_module_items`) so
+//RS     /// completion, diagnostics, and codegen stay on one list.
+//RS     pub fn complete_core_module(module: &str, prefix: &str) -> Vec<SemanticSymbol> {
+//RS         core_module_member_symbols(module)
+//RS             .into_iter()
+//RS             .filter(|symbol| symbol.name.starts_with(prefix))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// One Core module member by exact name, or `None` when absent.
+//RS     pub fn lookup_core_module_member(module: &str, name: &str) -> Option<SemanticSymbol> {
+//RS         core_module_member_symbols(module)
+//RS             .into_iter()
+//RS             .find(|symbol| symbol.name == name)
+//RS     }
+//RS 
+//RS     /// Complete visible spellings once while retaining every symbol by
+//RS     /// identity and every explicitly qualified owner path.
+//RS     pub fn complete_visible(&self, prefix: &str, owner: Option<&str>) -> Vec<&SemanticSymbol> {
+//RS         self.complete_visible_in(prefix, owner, None)
+//RS     }
+//RS 
+//RS     pub fn complete_visible_in(
+//RS         &self,
+//RS         prefix: &str,
+//RS         owner: Option<&str>,
+//RS         module_path: Option<&str>,
+//RS     ) -> Vec<&SemanticSymbol> {
+//RS         self.complete_with_anchor(
+//RS             prefix,
+//RS             owner,
+//RS             module_path.map(|module_path| SemanticVisibilityAnchor {
+//RS                 module_path,
+//RS                 offset: None,
+//RS                 session_top_level: false,
+//RS             }),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn complete_visible_at(
+//RS         &self,
+//RS         prefix: &str,
+//RS         owner: Option<&str>,
+//RS         anchor: SemanticVisibilityAnchor<'_>,
+//RS     ) -> Vec<&SemanticSymbol> {
+//RS         self.complete_with_anchor(prefix, owner, Some(anchor))
+//RS     }
+//RS 
+//RS     fn complete_with_anchor(
+//RS         &self,
+//RS         prefix: &str,
+//RS         owner: Option<&str>,
+//RS         anchor: Option<SemanticVisibilityAnchor<'_>>,
+//RS     ) -> Vec<&SemanticSymbol> {
+//RS         let explicit_qualified = owner.is_none() && prefix.contains('.');
+//RS         let mut visible: Vec<(&str, (u8, usize, usize), &SemanticSymbol)> = Vec::new();
+//RS         for symbol in &self.symbols {
+//RS             if prefix.is_empty()
+//RS                 && Syntax::classify_identifier(&symbol.name) == Syntax::IdentifierClass::SoftPublic
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             let matches = if explicit_qualified {
+//RS                 symbol.qualified_name.starts_with(prefix)
+//RS             } else {
+//RS                 symbol.owner.as_deref() == owner && symbol.name.starts_with(prefix)
+//RS             };
+//RS             if !matches {
+//RS                 continue;
+//RS             }
+//RS             let Some(key) = visibility_key(symbol, anchor) else {
+//RS                 continue;
+//RS             };
+//RS             let spelling = if explicit_qualified {
+//RS                 symbol.qualified_name.as_str()
+//RS             } else {
+//RS                 symbol.name.as_str()
+//RS             };
+//RS             if let Some((_, current_key, current)) =
+//RS                 visible.iter_mut().find(|(name, _, _)| *name == spelling)
+//RS             {
+//RS                 if key < *current_key {
+//RS                     *current_key = key;
+//RS                     *current = symbol;
+//RS                 }
+//RS             } else {
+//RS                 visible.push((spelling, key, symbol));
+//RS             }
+//RS         }
+//RS         visible.into_iter().map(|(_, _, symbol)| symbol).collect()
+//RS     }
+//RS 
+//RS     pub fn at(&self, module_path: &str, offset: usize) -> Option<&SemanticSymbol> {
+//RS         self.symbols.iter().find(|symbol| {
+//RS             symbol.module_path == module_path
+//RS                 && symbol
+//RS                     .span
+//RS                     .is_some_and(|span| span.start <= offset && offset <= span.end)
+//RS         })
+//RS     }
+//RS 
+//RS     fn sort(&mut self) {
+//RS         self.symbols.sort_by(|a, b| {
+//RS             a.qualified_name
+//RS                 .cmp(&b.qualified_name)
+//RS                 .then(a.module_path.cmp(&b.module_path))
+//RS                 .then(a.identity.cmp(&b.identity))
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn visibility_key(
+//RS     symbol: &SemanticSymbol,
+//RS     anchor: Option<SemanticVisibilityAnchor<'_>>,
+//RS ) -> Option<(u8, usize, usize)> {
+//RS     if symbol.identity.starts_with("session:binding:") {
+//RS         return Some((0, 0, 0));
+//RS     }
+//RS     if let Some(scope) = &symbol.lexical_scope {
+//RS         let anchor = anchor?;
+//RS         if anchor.session_top_level || symbol.module_path != anchor.module_path {
+//RS             return None;
+//RS         }
+//RS         let offset = anchor.offset?;
+//RS         if offset < scope.declaration_offset || offset < scope.span.start || scope.span.end < offset
+//RS         {
+//RS             return None;
+//RS         }
+//RS         return Some((
+//RS             1,
+//RS             usize::MAX - scope.depth,
+//RS             usize::MAX - scope.declaration_offset,
+//RS         ));
+//RS     }
+//RS     if matches!(
+//RS         symbol.kind,
+//RS         SemanticSymbolKind::Local | SemanticSymbolKind::Parameter
+//RS     ) {
+//RS         if let Some(anchor) = anchor {
+//RS             if anchor.session_top_level {
+//RS                 return None;
+//RS             }
+//RS             return None;
+//RS         }
+//RS         return Some((1, 0, 0));
+//RS     }
+//RS     let module_path = anchor.map(|anchor| anchor.module_path);
+//RS     if !symbol.identity.starts_with("import:") {
+//RS         match symbol.provenance {
+//RS             SemanticProvenance::Session => return Some((2, 0, 0)),
+//RS             SemanticProvenance::Source { .. } => {
+//RS                 return Some((
+//RS                     if module_path.is_none_or(|path| symbol.module_path == path) {
+//RS                         2
+//RS                     } else {
+//RS                         5
+//RS                     },
+//RS                     0,
+//RS                     0,
+//RS                 ));
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     if symbol.identity.starts_with("import:") {
+//RS         if module_path.is_some_and(|path| symbol.module_path != path) {
+//RS             return None;
+//RS         }
+//RS         return Some((3, 0, 0));
+//RS     }
+//RS     Some((4, 0, 0))
+//RS }
+//RS 
+//RS pub(crate) fn canonical_symbol_name(
+//RS     bundle: &ProgramBundle,
+//RS     module_path: &str,
+//RS     name: &str,
+//RS     owner: Option<&str>,
+//RS     span: Option<(usize, usize)>,
+//RS ) -> String {
+//RS     let Some(module_idx) = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .position(|module| module.display == module_path || module.alias == module_path)
+//RS     else {
+//RS         return owner.map_or_else(|| name.to_string(), |owner| format!("{owner}.{name}"));
+//RS     };
+//RS     let ledger = &bundle.name_ledger;
+//RS     if let Some((start, end)) = span {
+//RS         // The span resolves generated inline-module keys, while the ledger
+//RS         // still owns the short-vs-canonical user-facing spelling.
+//RS         if let Some(path) =
+//RS             ledger.display_path_at(module_idx, start, end, name, owner, Some(module_idx))
+//RS         {
+//RS             return path;
+//RS         }
+//RS     }
+//RS     match owner {
+//RS         Some(owner) => {
+//RS             let owner_path = ledger
+//RS                 .display_path(module_idx, owner, Some(module_idx))
+//RS                 .or_else(|| ledger.canonical_path(module_idx, owner))
+//RS                 .unwrap_or_else(|| owner.to_string());
+//RS             format!("{owner_path}.{name}")
+//RS         }
+//RS         None => ledger
+//RS             .display_path(module_idx, name, Some(module_idx))
+//RS             .or_else(|| ledger.canonical_path(module_idx, name))
+//RS             .unwrap_or_else(|| name.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> SemanticSymbolIndex {
+//RS     let mut symbols = language_symbols();
+//RS     for module in &bundle.modules {
+//RS         collect_distinct_conversion_symbols(
+//RS             db,
+//RS             &module.items,
+//RS             &module.display,
+//RS             &format!("module:{}", module.display),
+//RS             None,
+//RS             &mut symbols,
+//RS         );
+//RS     }
+//RS     let members: HashMap<&str, &str> = db
+//RS         .members
+//RS         .iter()
+//RS         .map(|member| (member.identity.as_str(), member.owner.as_str()))
+//RS         .collect();
+//RS     let member_facts: HashMap<&str, &MemberFact> = db
+//RS         .members
+//RS         .iter()
+//RS         .fold(HashMap::new(), |mut facts, member| {
+//RS             facts.entry(member.identity.as_str()).or_insert(member);
+//RS             facts
+//RS         });
+//RS     let definitions: HashMap<&str, &SymbolDef> = db
+//RS         .index
+//RS         .definitions()
+//RS         .iter()
+//RS         .fold(HashMap::new(), |mut definitions, definition| {
+//RS             definitions
+//RS                 .entry(definition.identity.as_str())
+//RS                 .or_insert(definition);
+//RS             definitions
+//RS         });
+//RS     let sources: HashMap<&str, &str> = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .map(|module| (module.display.as_str(), module.source.as_str()))
+//RS         .collect();
+//RS     let lexical_scopes = LexicalScopeIndex::new(db);
+//RS 
+//RS     for def in &db.defs {
+//RS         // Import bindings have richer source/import provenance below. Their
+//RS         // exact declaration anchors still live in `db.defs` for references
+//RS         // and rename, but must not duplicate the import symbol projection.
+//RS         if def.identity.starts_with("import:") {
+//RS             continue;
+//RS         }
+//RS         let owner = members
+//RS             .get(def.identity.as_str())
+//RS             .map(|owner| (*owner).to_string())
+//RS             .or_else(|| match &def.kind {
+//RS                 SymKind::Field { parent, .. } | SymKind::EnumVariant { parent } => {
+//RS                     Some(parent.clone())
+//RS                 }
+//RS                 _ => None,
+//RS             });
+//RS         let qualified_name = canonical_symbol_name(
+//RS             bundle,
+//RS             &def.module_path,
+//RS             &def.name,
+//RS             owner.as_deref(),
+//RS             Some((def.def_span.start, def.def_span.end)),
+//RS         );
+//RS         let module_idx = bundle
+//RS             .modules
+//RS             .iter()
+//RS             .position(|module| module.display == def.module_path || module.alias == def.module_path)
+//RS             .unwrap_or(bundle.entry);
+//RS         let display_type = |name: &str| {
+//RS             bundle
+//RS                 .name_ledger
+//RS                 .display_path(module_idx, name, Some(module_idx))
+//RS                 .unwrap_or_else(|| name.to_string())
+//RS         };
+//RS         let display_name = display_type(&def.name);
+//RS         let display_owner = owner.as_deref().map(|name| display_type(name));
+//RS         let (kind, mut signature) = semantic_shape(
+//RS             &display_name,
+//RS             &def.kind,
+//RS             display_owner.as_deref(),
+//RS             &display_type,
+//RS         );
+//RS         if let Some(marker_signature) = marker_declaration_signature(bundle, def) {
+//RS             signature = marker_signature;
+//RS         }
+//RS         if let Some(metadata) = definitions.get(def.identity.as_str()) {
+//RS             if let Some(base) = &metadata.nominal_base {
+//RS                 signature = format!("type {display_name} :: distinct {}", display_type(base));
+//RS             }
+//RS             if !metadata.trait_contracts.is_empty() {
+//RS                 signature.push('\n');
+//RS                 signature.push_str(&render_trait_contracts(
+//RS                     &metadata.trait_contracts,
+//RS                     matches!(def.kind, SymKind::Trait),
+//RS                     &display_type,
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if let Some(member) = member_facts.get(def.identity.as_str()) {
+//RS             let trait_name = match &member.origin {
+//RS                 MemberOrigin::TraitImpl { trait_name }
+//RS                 | MemberOrigin::TraitRequirement { trait_name } => Some(trait_name),
+//RS                 _ => None,
+//RS             };
+//RS             if let Some(trait_name) = trait_name {
+//RS                 signature.push_str("\ntrait: ");
+//RS                 signature.push_str(trait_name);
+//RS             }
+//RS         }
+//RS         let mut docs = sources
+//RS             .get(def.module_path.as_str())
+//RS             .map(|source| source_docs(source, def.def_span.start))
+//RS             .unwrap_or_default();
+//RS         if docs.0.is_empty() {
+//RS             if let SymKind::Local { mutable, .. } = &def.kind {
+//RS                 docs.0 = if *mutable {
+//RS                     "mutable binding".to_string()
+//RS                 } else {
+//RS                     "immutable binding".to_string()
+//RS                 };
+//RS             }
+//RS         }
+//RS         let lexical_scope = if matches!(def.kind, SymKind::Local { .. } | SymKind::Param { .. }) {
+//RS             lexical_scopes.scope(
+//RS                 &def.module_path,
+//RS                 def.def_span.into(),
+//RS                 matches!(def.kind, SymKind::Param { .. }),
+//RS             )
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let identity = if lexical_scope.is_some() {
+//RS             format!("{}@{}", def.identity, def.def_span.start)
+//RS         } else {
+//RS             def.identity.clone()
+//RS         };
+//RS         symbols.push(SemanticSymbol {
+//RS             identity,
+//RS             name: def.name.clone(),
+//RS             qualified_name,
+//RS             owner,
+//RS             module_path: def.module_path.clone(),
+//RS             kind,
+//RS             signature,
+//RS             summary: docs.0,
+//RS             examples: docs.1,
+//RS             provenance: SemanticProvenance::Source {
+//RS                 module_path: def.module_path.clone(),
+//RS             },
+//RS             span: Some(def.def_span.into()),
+//RS             lexical_scope,
+//RS         });
+//RS     }
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         collect_import_symbols(
+//RS             &mut symbols,
+//RS             bundle,
+//RS             module_idx,
+//RS             module,
+//RS             &module.imports,
+//RS             None,
+//RS         );
+//RS         collect_inline_import_symbols(
+//RS             db,
+//RS             bundle,
+//RS             module_idx,
+//RS             module,
+//RS             &module.items,
+//RS             None,
+//RS             &mut symbols,
+//RS         );
+//RS     }
+//RS     SemanticSymbolIndex::new(symbols)
+//RS }
+//RS 
+//RS fn render_trait_contracts(
+//RS     contracts: &[TraitContractFact],
+//RS     declaration: bool,
+//RS     display_type: &dyn Fn(&str) -> String,
+//RS ) -> String {
+//RS     contracts
+//RS         .iter()
+//RS         .map(|contract| {
+//RS             let prefix = if declaration { "contract" } else { "implements" };
+//RS             let mut lines = vec![format!("{prefix} {}", display_type(&contract.trait_name))];
+//RS             lines.extend(contract.associated_types.iter().map(|(name, ty)| {
+//RS                 ty.as_ref().map_or_else(
+//RS                     || format!("  type {name}"),
+//RS                     |ty| format!("  type {name} = {}", display_type(ty)),
+//RS                 )
+//RS             }));
+//RS             lines.extend(contract.methods.iter().map(|method| format!("  {method}")));
+//RS             lines.join("\n")
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS }
+//RS 
+//RS fn collect_import_symbols(
+//RS     symbols: &mut Vec<SemanticSymbol>,
+//RS     bundle: &ProgramBundle,
+//RS     module_idx: usize,
+//RS     module: &jet_foundation::AST::LoadedModule,
+//RS     imports: &[jet_foundation::AST::ImportDecl],
+//RS     lexical_scope: Option<&SemanticLexicalScope>,
+//RS ) {
+//RS     for import in imports {
+//RS         match &import.kind {
+//RS             jet_foundation::AST::ImportKind::Unqualified { module_alias, .. } => {
+//RS                 let source_import = imports
+//RS                     .iter()
+//RS                     .chain(module.imports.iter())
+//RS                     .find(|candidate| {
+//RS                         !matches!(
+//RS                             &candidate.kind,
+//RS                             jet_foundation::AST::ImportKind::Unqualified { .. }
+//RS                         ) && candidate.import_alias() == *module_alias
+//RS                     });
+//RS                 let imported_module =
+//RS                     source_import.and_then(|source_import| match &source_import.kind {
+//RS                         jet_foundation::AST::ImportKind::File(path, _) => {
+//RS                             let relative = module
+//RS                                 .path
+//RS                                 .parent()
+//RS                                 .unwrap_or_else(|| std::path::Path::new("."))
+//RS                                 .join(format!("{path}.jet"));
+//RS                             bundle.modules.iter().find(|candidate| {
+//RS                                 candidate.path == relative
+//RS                                     || candidate.path.file_stem() == relative.file_stem()
+//RS                             })
+//RS                         }
+//RS                         jet_foundation::AST::ImportKind::Module(name, _) => bundle
+//RS                             .modules
+//RS                             .iter()
+//RS                             .find(|candidate| candidate.alias == *name),
+//RS                         jet_foundation::AST::ImportKind::Unqualified { .. } => None,
+//RS                     });
+//RS                 let bindings = import.walk_bindings();
+//RS                 let items_span = bindings
+//RS                     .first()
+//RS                     .and_then(|binding| binding.items_span)
+//RS                     .unwrap_or(import.span);
+//RS                 for binding in &bindings {
+//RS                     let original = binding
+//RS                         .original
+//RS                         .expect("member walker returned a binding without a member");
+//RS                     let local_name = binding.local.clone();
+//RS                     let target = imported_module
+//RS                         .and_then(|imported| {
+//RS                             symbols.iter().find(|symbol| {
+//RS                                 symbol.module_path == imported.display && symbol.name == original
+//RS                             })
+//RS                         })
+//RS                         .cloned();
+//RS                     let mut symbol = target.unwrap_or_else(|| SemanticSymbol {
+//RS                         identity: String::new(),
+//RS                         name: local_name.clone(),
+//RS                         qualified_name: local_name.clone(),
+//RS                         owner: None,
+//RS                         module_path: module.display.clone(),
+//RS                         kind: SemanticSymbolKind::Local,
+//RS                         signature: local_name.clone(),
+//RS                         summary: format!("Imported from {module_alias}."),
+//RS                         examples: Vec::new(),
+//RS                         provenance: SemanticProvenance::Source {
+//RS                             module_path: module.display.clone(),
+//RS                         },
+//RS                         span: Some(items_span.into()),
+//RS                         lexical_scope: lexical_scope.cloned(),
+//RS                     });
+//RS                     let suffix = format!("{module_alias}.{original}::{local_name}");
+//RS                     symbol.identity = bundle
+//RS                         .name_ledger
+//RS                         .alias_identity(module_idx, binding.local_span)
+//RS                         .unwrap_or_else(|| import_identity(module, lexical_scope, &suffix));
+//RS                     symbol.name = local_name.clone();
+//RS                     symbol.qualified_name = local_name;
+//RS                     symbol.owner = None;
+//RS                     symbol.module_path = module.display.clone();
+//RS                     symbol.provenance = SemanticProvenance::Source {
+//RS                         module_path: module.display.clone(),
+//RS                     };
+//RS                     symbol.span = Some(items_span.into());
+//RS                     symbol.lexical_scope = lexical_scope.cloned();
+//RS                     symbols.push(symbol);
+//RS                 }
+//RS             }
+//RS             jet_foundation::AST::ImportKind::File(_, _)
+//RS             | jet_foundation::AST::ImportKind::Module(_, _) => {
+//RS                 let alias = import.import_alias();
+//RS                 let imported_module_idx = bundle
+//RS                     .modules
+//RS                     .iter()
+//RS                     .position(|candidate| candidate.display == module.display);
+//RS                 let alias_name = imported_module_idx
+//RS                     .and_then(|module_idx| bundle.name_ledger.effective_alias(module_idx, &alias))
+//RS                     .map(|name| name.name.clone())
+//RS                     .unwrap_or_else(|| alias.clone());
+//RS                 let identity = bundle
+//RS                     .name_ledger
+//RS                     .alias_identity(module_idx, import.alias_span)
+//RS                     .unwrap_or_else(|| import_identity(module, lexical_scope, &alias_name));
+//RS                 symbols.push(SemanticSymbol {
+//RS                     identity,
+//RS                     name: alias_name.clone(),
+//RS                     qualified_name: alias_name.clone(),
+//RS                     owner: None,
+//RS                     module_path: module.display.clone(),
+//RS                     kind: SemanticSymbolKind::Module,
+//RS                     signature: format!("use {alias_name}"),
+//RS                     summary: "Imported module.".to_string(),
+//RS                     examples: Vec::new(),
+//RS                     provenance: SemanticProvenance::Source {
+//RS                         module_path: module.display.clone(),
+//RS                     },
+//RS                     span: Some(import.alias_span.into()),
+//RS                     lexical_scope: lexical_scope.cloned(),
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn import_identity(
+//RS     module: &jet_foundation::AST::LoadedModule,
+//RS     lexical_scope: Option<&SemanticLexicalScope>,
+//RS     suffix: &str,
+//RS ) -> String {
+//RS     lexical_scope.map_or_else(
+//RS         || format!("import:{}::{suffix}", module.display),
+//RS         |scope| format!("import:{}::{}::{suffix}", module.display, scope.identity),
+//RS     )
+//RS }
+//RS 
+//RS fn collect_inline_import_symbols(
+//RS     db: &SymbolDB,
+//RS     bundle: &ProgramBundle,
+//RS     module_idx: usize,
+//RS     module: &jet_foundation::AST::LoadedModule,
+//RS     items: &[AST::Item],
+//RS     parent_scope: Option<&SemanticLexicalScope>,
+//RS     symbols: &mut Vec<SemanticSymbol>,
+//RS ) {
+//RS     for item in items {
+//RS         let AST::Item::CodeModule(code_module) = item else {
+//RS             continue;
+//RS         };
+//RS         let scope = inline_module_scope(db, module.display.as_str(), code_module, parent_scope);
+//RS         collect_import_symbols(
+//RS             symbols,
+//RS             bundle,
+//RS             module_idx,
+//RS             module,
+//RS             &code_module.imports,
+//RS             Some(&scope),
+//RS         );
+//RS         if let Some(body) = &code_module.body {
+//RS             collect_inline_import_symbols(
+//RS                 db,
+//RS                 bundle,
+//RS                 module_idx,
+//RS                 module,
+//RS                 body,
+//RS                 Some(&scope),
+//RS                 symbols,
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn inline_module_scope(
+//RS     db: &SymbolDB,
+//RS     module_path: &str,
+//RS     module: &AST::CodeModule,
+//RS     parent_scope: Option<&SemanticLexicalScope>,
+//RS ) -> SemanticLexicalScope {
+//RS     let identity = db
+//RS         .defs
+//RS         .iter()
+//RS         .find(|def| {
+//RS             def.module_path == module_path
+//RS                 && def.def_span == module.name_span
+//RS                 && matches!(&def.kind, SymKind::Module)
+//RS         })
+//RS         .map(|def| def.identity.clone())
+//RS         .unwrap_or_else(|| {
+//RS             let parent_identity = parent_scope
+//RS                 .map(|scope| scope.identity.clone())
+//RS                 .unwrap_or_else(|| format!("module:{module_path}"));
+//RS             format!("module:{parent_identity}::{}", module.name)
+//RS         });
+//RS     let structural_parent = db
+//RS         .nodes
+//RS         .iter()
+//RS         .find(|node| {
+//RS             node.module_path == module_path
+//RS                 && node.span == module.span.into()
+//RS                 && node.class == "item"
+//RS         })
+//RS         .map_or(0, |node| node.id);
+//RS     SemanticLexicalScope {
+//RS         identity,
+//RS         structural_parent,
+//RS         structural_slot: "items".to_string(),
+//RS         span: module.span.into(),
+//RS         depth: parent_scope.map_or(1, |scope| scope.depth + 1),
+//RS         declaration_offset: module.name_span.start,
+//RS     }
+//RS }
+//RS 
+//RS fn collect_distinct_conversion_symbols(
+//RS     db: &SymbolDB,
+//RS     items: &[AST::Item],
+//RS     module_path: &str,
+//RS     scope_identity: &str,
+//RS     lexical_scope: Option<&SemanticLexicalScope>,
+//RS     symbols: &mut Vec<SemanticSymbol>,
+//RS ) {
+//RS     for item in items {
+//RS         match item {
+//RS             AST::Item::Distinct(def) => symbols.extend(distinct_conversion_symbols(
+//RS                 &def.name,
+//RS                 &def.base,
+//RS                 def.range.is_some(),
+//RS                 checked_text_error(items, &def.name),
+//RS                 module_path,
+//RS                 scope_identity,
+//RS                 def.name_span.into(),
+//RS                 lexical_scope,
+//RS             )),
+//RS             AST::Item::UnitFamily(family) => {
+//RS                 for def in family.distinct_defs() {
+//RS                     symbols.extend(distinct_conversion_symbols(
+//RS                         &def.name,
+//RS                         &def.base,
+//RS                         false,
+//RS                         None,
+//RS                         module_path,
+//RS                         scope_identity,
+//RS                         def.name_span.into(),
+//RS                         lexical_scope,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             AST::Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     let identity = db
+//RS                         .defs
+//RS                         .iter()
+//RS                         .find(|def| {
+//RS                             def.module_path == module_path
+//RS                                 && def.def_span == module.name_span
+//RS                                 && matches!(def.kind, SymKind::Module)
+//RS                         })
+//RS                         .map(|def| def.identity.clone())
+//RS                         .unwrap_or_else(|| format!("module:{scope_identity}::{}", module.name));
+//RS                     let structural_parent = db
+//RS                         .nodes
+//RS                         .iter()
+//RS                         .find(|node| {
+//RS                             node.module_path == module_path
+//RS                                 && node.span == module.span.into()
+//RS                                 && node.class == "item"
+//RS                         })
+//RS                         .map_or(0, |node| node.id);
+//RS                     let scope = SemanticLexicalScope {
+//RS                         identity: identity.clone(),
+//RS                         structural_parent,
+//RS                         structural_slot: "items".to_string(),
+//RS                         span: module.span.into(),
+//RS                         depth: lexical_scope.map_or(1, |scope| scope.depth + 1),
+//RS                         declaration_offset: module.name_span.start,
+//RS                     };
+//RS                     collect_distinct_conversion_symbols(
+//RS                         db,
+//RS                         body,
+//RS                         module_path,
+//RS                         &identity,
+//RS                         Some(&scope),
+//RS                         symbols,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn distinct_conversion_symbols(
+//RS     owner: &str,
+//RS     base: &AST::Type,
+//RS     ranged: bool,
+//RS     checked_text_error: Option<String>,
+//RS     module_path: &str,
+//RS     scope_identity: &str,
+//RS     span: SourceSpan,
+//RS     lexical_scope: Option<&SemanticLexicalScope>,
+//RS ) -> Vec<SemanticSymbol> {
+//RS     let methods: Vec<(String, String)> = if base.is_numeric() {
+//RS         Syntax::NUMERIC_CONVERSION_SOURCES
+//RS             .iter()
+//RS             .map(|(method, source)| (method.to_string(), source.to_string()))
+//RS             .collect()
+//RS     } else {
+//RS         vec![(
+//RS             Syntax::conversion_method_for_source(&base.name()),
+//RS             base.name(),
+//RS         )]
+//RS     };
+//RS     methods
+//RS         .into_iter()
+//RS         .map(|(method, source)| {
+//RS             let fallible = checked_text_error.is_some()
+//RS                 || ranged
+//RS                 || Collections::numeric_conversion_return(base, &method, 1)
+//RS                     .flatten()
+//RS                     .is_some_and(|ty| matches!(ty, AST::Type::Result { .. }));
+//RS             let qualified_name = format!("{owner}.{method}");
+//RS             let (signature, summary) = if let Some(error) = &checked_text_error {
+//RS                 (
+//RS                     format!(
+//RS                         "{owner}.{method}(value: {source}) -> {owner}\nfailure: {error} (CheckedText)"
+//RS                     ),
+//RS                     format!("Validates {source} through {owner}.CheckedText."),
+//RS                 )
+//RS             } else {
+//RS                 (
+//RS                     format!(
+//RS                         "{owner}.{method}(value: {source}) -> {owner}{}",
+//RS                         if fallible { " !String" } else { "" }
+//RS                     ),
+//RS                     format!("Converts {source} to {owner}."),
+//RS                 )
+//RS             };
+//RS             SemanticSymbol {
+//RS                 identity: format!("source:method:{scope_identity}:{qualified_name}"),
+//RS                 name: method.to_string(),
+//RS                 qualified_name,
+//RS                 owner: Some(owner.to_string()),
+//RS                 module_path: module_path.to_string(),
+//RS                 kind: SemanticSymbolKind::Member,
+//RS                 signature,
+//RS                 summary,
+//RS                 examples: Vec::new(),
+//RS                 provenance: SemanticProvenance::Source {
+//RS                     module_path: module_path.to_string(),
+//RS                 },
+//RS                 span: Some(span),
+//RS                 lexical_scope: lexical_scope.cloned(),
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn checked_text_error(items: &[AST::Item], owner: &str) -> Option<String> {
+//RS     for item in items {
+//RS         match item {
+//RS             AST::Item::Impl(implementation)
+//RS                 if type_leaf(&implementation.type_name) == owner
+//RS                     && implementation.trait_name.as_deref()
+//RS                         == Some(jet_foundation::Generics::CHECKED_TEXT) =>
+//RS             {
+//RS                 if let Some((_, _, ty)) = implementation
+//RS                     .assoc_type_impls
+//RS                     .iter()
+//RS                     .find(|(name, _, _)| name == "Error")
+//RS                 {
+//RS                     return Some(ty.name());
+//RS                 }
+//RS             }
+//RS             AST::Item::CodeModule(module) => {
+//RS                 if let Some(body) = &module.body {
+//RS                     if let Some(error) = checked_text_error(body, owner) {
+//RS                         return Some(error);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             AST::Item::GenericModule(module) => {
+//RS                 if let Some(error) = checked_text_error(&module.body, owner) {
+//RS                     return Some(error);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn type_leaf(name: &str) -> &str {
+//RS     name.rsplit_once('.').map_or(name, |(_, leaf)| leaf)
+//RS }
+//RS 
+//RS /// Structural lookups behind the lexical scope of each local and parameter,
+//RS /// built once per symbol index. A scan of every structural node per
+//RS /// definition made the index quadratic in program size; here each definition
+//RS /// costs the number of nodes that overlap its start.
+//RS struct LexicalScopeIndex<'a> {
+//RS     db: &'a SymbolDB,
+//RS     /// (module, def start, def end) to the smallest enclosing node and the
+//RS     /// smallest enclosing item node. Ties go to the earlier node.
+//RS     enclosing: HashMap<(&'a str, usize, usize), (Option<usize>, Option<usize>)>,
+//RS     /// (module, parent) to the parent's first child in a lexical slot.
+//RS     first_lexical_child: HashMap<(&'a str, usize), &'a StructuralNode>,
+//RS     /// (module, parent, slot) to the first matching slot boundary.
+//RS     boundaries: HashMap<(&'a str, usize, &'a str), SourceSpan>,
+//RS }
+//RS 
+//RS impl<'a> LexicalScopeIndex<'a> {
+//RS     fn new(db: &'a SymbolDB) -> Self {
+//RS         let mut queries: HashMap<&'a str, Vec<(usize, usize)>> = HashMap::new();
+//RS         for def in &db.defs {
+//RS             if matches!(def.kind, SymKind::Local { .. } | SymKind::Param { .. }) {
+//RS                 let span: SourceSpan = def.def_span.into();
+//RS                 queries
+//RS                     .entry(def.module_path.as_str())
+//RS                     .or_default()
+//RS                     .push((span.start, span.end));
+//RS             }
+//RS         }
+//RS         let mut module_nodes: HashMap<&'a str, Vec<&'a StructuralNode>> = HashMap::new();
+//RS         let mut first_lexical_child = HashMap::new();
+//RS         for node in &db.nodes {
+//RS             let module = node.module_path.as_str();
+//RS             if !queries.contains_key(module) {
+//RS                 continue;
+//RS             }
+//RS             module_nodes.entry(module).or_default().push(node);
+//RS             if let Some(parent) = node.parent {
+//RS                 if is_lexical_slot(&node.slot) {
+//RS                     first_lexical_child.entry((module, parent)).or_insert(node);
+//RS                 }
+//RS             }
+//RS         }
+//RS         let mut boundaries = HashMap::new();
+//RS         for boundary in &db.slot_boundaries {
+//RS             boundaries
+//RS                 .entry((
+//RS                     boundary.module_path.as_str(),
+//RS                     boundary.parent,
+//RS                     boundary.slot.as_str(),
+//RS                 ))
+//RS                 .or_insert(boundary.span);
+//RS         }
+//RS         let mut enclosing = HashMap::new();
+//RS         for (module, mut spans) in queries {
+//RS             spans.sort_unstable();
+//RS             spans.dedup();
+//RS             let mut nodes = module_nodes.remove(module).unwrap_or_default();
+//RS             // Stable sort: equal starts keep structural order.
+//RS             nodes.sort_by_key(|node| node.span.start);
+//RS             let mut next = 0;
+//RS             // Nodes that start at or before the current definition and have
+//RS             // not ended before it; definitions arrive in start order, so a
+//RS             // node that ends before one can never enclose a later one.
+//RS             let mut active: Vec<&StructuralNode> = Vec::new();
+//RS             for (start, end) in spans {
+//RS                 while next < nodes.len() && nodes[next].span.start <= start {
+//RS                     active.push(nodes[next]);
+//RS                     next += 1;
+//RS                 }
+//RS                 active.retain(|node| node.span.end >= start);
+//RS                 let found = if end < start {
+//RS                     // A reversed span can sit inside a node that ended
+//RS                     // before its start; answer it from every module node.
+//RS                     (
+//RS                         smallest_enclosing(nodes.iter().copied(), start, end, false),
+//RS                         smallest_enclosing(nodes.iter().copied(), start, end, true),
+//RS                     )
+//RS                 } else {
+//RS                     (
+//RS                         smallest_enclosing(active.iter().copied(), start, end, false),
+//RS                         smallest_enclosing(active.iter().copied(), start, end, true),
+//RS                     )
+//RS                 };
+//RS                 enclosing.insert((module, start, end), found);
+//RS             }
+//RS         }
+//RS         LexicalScopeIndex {
+//RS             db,
+//RS             enclosing,
+//RS             first_lexical_child,
+//RS             boundaries,
+//RS         }
+//RS     }
+//RS 
+//RS     fn scope(
+//RS         &self,
+//RS         module_path: &str,
+//RS         def_span: SourceSpan,
+//RS         is_param: bool,
+//RS     ) -> Option<SemanticLexicalScope> {
+//RS         let (initial, item) = *self
+//RS             .enclosing
+//RS             .get(&(module_path, def_span.start, def_span.end))?;
+//RS         let initial = initial?;
+//RS         let mut current = initial;
+//RS         let mut innermost = self
+//RS             .first_lexical_child
+//RS             .get(&(module_path, initial))
+//RS             .map(|node| (initial, node.slot.clone()));
+//RS         let mut depth = usize::from(innermost.is_some());
+//RS         loop {
+//RS             let node = self.db.nodes.get(current)?;
+//RS             if is_lexical_slot(&node.slot) {
+//RS                 depth += 1;
+//RS                 if innermost.is_none() {
+//RS                     innermost = Some((node.parent?, node.slot.clone()));
+//RS                 }
+//RS             }
+//RS             let Some(parent) = node.parent else {
+//RS                 break;
+//RS             };
+//RS             current = parent;
+//RS         }
+//RS         let (parent, slot) = innermost.or_else(|| item.map(|id| (id, "body".to_string())))?;
+//RS         let span = *self
+//RS             .boundaries
+//RS             .get(&(module_path, parent, slot.as_str()))?;
+//RS         Some(SemanticLexicalScope {
+//RS             identity: format!("scope:{module_path}:{parent}:{slot}"),
+//RS             structural_parent: parent,
+//RS             structural_slot: slot,
+//RS             span,
+//RS             depth: depth.max(1),
+//RS             declaration_offset: if is_param { 0 } else { def_span.start },
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// The smallest node (optionally only item nodes) whose span encloses
+//RS /// `start..end`; among equal sizes, the earliest structural node.
+//RS fn smallest_enclosing<'n>(
+//RS     nodes: impl Iterator<Item = &'n StructuralNode>,
+//RS     start: usize,
+//RS     end: usize,
+//RS     items_only: bool,
+//RS ) -> Option<usize> {
+//RS     nodes
+//RS         .filter(|node| {
+//RS             (!items_only || node.class == "item")
+//RS                 && node.span.start <= start
+//RS                 && end <= node.span.end
+//RS         })
+//RS         .min_by_key(|node| (node.span.end.saturating_sub(node.span.start), node.id))
+//RS         .map(|node| node.id)
+//RS }
+//RS 
+//RS fn is_lexical_slot(slot: &str) -> bool {
+//RS     slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
+//RS }
+//RS 
+//RS fn semantic_shape(
+//RS     name: &str,
+//RS     kind: &SymKind,
+//RS     owner: Option<&str>,
+//RS     display_type: &dyn Fn(&str) -> String,
+//RS ) -> (SemanticSymbolKind, String) {
+//RS     match kind {
+//RS         SymKind::Module => (SemanticSymbolKind::Module, format!("module {name}")),
+//RS         SymKind::Function {
+//RS             params,
+//RS             param_contract,
+//RS             param_variadic,
+//RS             return_type,
+//RS             failure_contract,
+//RS             effects,
+//RS             effect_via,
+//RS             ..
+//RS         } => {
+//RS             let mut parameter_parts =
+//RS                 function_parameter_parts(params, param_contract, param_variadic);
+//RS             for part in &mut parameter_parts {
+//RS                 for (_, ty) in params {
+//RS                     let raw = ty.name();
+//RS                     let displayed = display_type(&raw);
+//RS                     if raw != displayed {
+//RS                         *part = part.replace(&raw, &displayed);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             let params = parameter_parts.join(", ");
+//RS             let prefix =
+//RS                 owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
+//RS             // D-SIG-AFTER1=A: return type follows the one arrow. An effect
+//RS             // ceiling splits that arrow as `-[IO]>`. The retired `=[…]=>` must
+//RS             // not reach a hover, completion or symbol label.
+//RS             //
+//RS             // D-PANICROOT1=A and D-AUTHORITY-MEM1=B make Panic and Mem
+//RS             // deny-only, so they never belong in a rendered positive ceiling —
+//RS             // showing one would display a row the user cannot type.
+//RS             let shown: Vec<&str> = effects
+//RS                 .as_ref()
+//RS                 .map(|row| {
+//RS                     row.iter()
+//RS                         .map(|(name, _)| name.as_str())
+//RS                         .filter(|name| {
+//RS                             let root = name.split('.').next().unwrap_or(name);
+//RS                             root != "Panic" && root != "Mem"
+//RS                         })
+//RS                         .collect()
+//RS                 })
+//RS                 .unwrap_or_default();
+//RS             let result_type = match failure_contract {
+//RS                 CallableFactAvailability::Checked(failure) => {
+//RS                     Some(failure.effective_type())
+//RS                 }
+//RS                 CallableFactAvailability::Unavailable(_) => return_type.clone(),
+//RS             };
+//RS             let result = result_type
+//RS                 .as_ref()
+//RS                 .map(|ty| display_type(&ty.name()))
+//RS                 .unwrap_or_default();
+//RS             let ceiling = if let Some((param, _)) = effect_via {
+//RS                 format!(" -[via {param}]>")
+//RS             } else if shown.is_empty() {
+//RS                 String::new()
+//RS             } else {
+//RS                 format!(" -[{}]>", shown.join(", "))
+//RS             };
+//RS             let suffix = if !ceiling.is_empty() {
+//RS                 if result.is_empty() {
+//RS                     ceiling
+//RS                 } else {
+//RS                     format!("{ceiling} {result}")
+//RS                 }
+//RS             } else if !result.is_empty() {
+//RS                 format!(" -> {result}")
+//RS             } else {
+//RS                 String::new()
+//RS             };
+//RS             let failure = match failure_contract {
+//RS                 CallableFactAvailability::Checked(failure) => {
+//RS                     format!("{} ({})", failure.effective_type().name(), failure.source())
+//RS                 }
+//RS                 CallableFactAvailability::Unavailable(unavailable) => {
+//RS                     format!("unavailable ({})", unavailable.reason)
+//RS                 }
+//RS             };
+//RS             (
+//RS                 SemanticSymbolKind::Function,
+//RS                 format!("{prefix}({params}){suffix}\nfailure: {failure}"),
+//RS             )
+//RS         }
+//RS         SymKind::Struct { fields, .. } => (
+//RS             SemanticSymbolKind::Type,
+//RS             format!(
+//RS                 "struct {name} {{ {} }}",
+//RS                 fields
+//RS                     .iter()
+//RS                     .map(|(name, ty)| format!("{name}: {}", display_type(&ty.name())))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             ),
+//RS         ),
+//RS         SymKind::Enum { variants, .. } => (
+//RS             SemanticSymbolKind::Type,
+//RS             format!("enum {name} {{ {} }}", variants.join(", ")),
+//RS         ),
+//RS         SymKind::Trait => (SemanticSymbolKind::Type, format!("trait {name}")),
+//RS         SymKind::Tag => (SemanticSymbolKind::Type, format!("tag {name}")),
+//RS         SymKind::Type { .. } => (SemanticSymbolKind::Type, format!("type {name}")),
+//RS         SymKind::Const => (SemanticSymbolKind::Constant, format!("const {name}")),
+//RS         SymKind::EnumVariant { parent } => (SemanticSymbolKind::Member, format!("{parent}.{name}")),
+//RS         SymKind::Field { ty, parent } => (
+//RS             SemanticSymbolKind::Member,
+//RS             format!("{parent}.{name}: {}", display_type(&ty.name())),
+//RS         ),
+//RS         SymKind::Local { mutable: _, ty } => {
+//RS             let ty = ty
+//RS                 .as_ref()
+//RS                 .map(|ty| display_type(&ty.name()))
+//RS                 .unwrap_or_else(|| "value".to_string());
+//RS             (SemanticSymbolKind::Local, format!("{name}: {ty}"))
+//RS         }
+//RS         SymKind::Param { ty } => (
+//RS             SemanticSymbolKind::Parameter,
+//RS             format!("{name}: {}", display_type(&ty.name())),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS /// D-MARKER-SITES1=B: marker declarations use the same semantic symbol
+//RS /// presentation as every other declaration, but their signature must retain
+//RS /// the one canonical parameter list. The AST is the source of truth; source
+//RS /// spans supply expression spellings for fixed metadata values and defaults.
+//RS fn marker_declaration_signature(
+//RS     bundle: &ProgramBundle,
+//RS     def: &crate::Build::SymDef,
+//RS ) -> Option<String> {
+//RS     if !def.identity.starts_with("rule:") {
+//RS         return None;
+//RS     }
+//RS     let module = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .find(|module| module.display == def.module_path || module.alias == def.module_path)?;
+//RS     let declaration = module.items.iter().find_map(|item| match item {
+//RS         AST::Item::MarkerDecl(declaration)
+//RS             if declaration.name == def.name && declaration.name_span == def.def_span =>
+//RS         {
+//RS             Some(declaration)
+//RS         }
+//RS         _ => None,
+//RS     })?;
+//RS     let params = declaration
+//RS         .params
+//RS         .iter()
+//RS         .map(|parameter| {
+//RS             if let Some(ty) = &parameter.ty {
+//RS                 let variadic = parameter.variadic.then_some("...").unwrap_or("");
+//RS                 let default = parameter
+//RS                     .value
+//RS                     .as_deref()
+//RS                     .map(|value| format!("{{{}}}", marker_expr_source(&module.source, value)))
+//RS                     .unwrap_or_default();
+//RS                 format!("{}: {variadic}{}{default}", parameter.name, ty.name())
+//RS             } else {
+//RS                 let value = parameter
+//RS                     .value
+//RS                     .as_deref()
+//RS                     .map(|value| marker_expr_source(&module.source, value))
+//RS                     .unwrap_or_else(|| "…".to_string());
+//RS                 format!("{}: {value}", parameter.name)
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     Some(format!("marker {}({params})", declaration.name))
+//RS }
+//RS 
+//RS fn marker_expr_source(source: &str, expression: &AST::Expr) -> String {
+//RS     let span = expression.span();
+//RS     source
+//RS         .get(span.start..span.end)
+//RS         .map(str::trim)
+//RS         .filter(|value| !value.is_empty())
+//RS         .map(str::to_string)
+//RS         .unwrap_or_else(|| "…".to_string())
+//RS }
+//RS 
+//RS fn source_docs(source: &str, def_start: usize) -> (String, Vec<String>) {
+//RS     let prefix = &source[..def_start.min(source.len())];
+//RS     let before_declaration = prefix.rsplit_once('\n').map_or("", |(before, _)| before);
+//RS     let mut lines = Vec::new();
+//RS     for line in before_declaration.lines().rev() {
+//RS         let line = line.trim();
+//RS         let Some(doc) = line.strip_prefix("///") else {
+//RS             break;
+//RS         };
+//RS         lines.push(doc.trim().to_string());
+//RS     }
+//RS     lines.reverse();
+//RS     let mut summary = String::new();
+//RS     let mut examples = Vec::new();
+//RS     for line in lines {
+//RS         if let Some(example) = line.strip_prefix("Example:") {
+//RS             examples.push(example.trim().to_string());
+//RS         } else if summary.is_empty() && !line.is_empty() {
+//RS             summary = line;
+//RS         }
+//RS     }
+//RS     (summary, examples)
+//RS }
+//RS 
+//RS fn core_module_member_symbols(module: &str) -> Vec<SemanticSymbol> {
+//RS     jet_sema::Sema::core_module_items(module)
+//RS         .into_iter()
+//RS         .map(|name| {
+//RS             let qualified_name = format!("{module}.{name}");
+//RS             let declaration = (module == "core.compiler.lang")
+//RS                 .then(|| jet_foundation::Policy::rule_arg_declaration(&name))
+//RS                 .flatten();
+//RS             SemanticSymbol {
+//RS                 identity: format!("builtin:module:{qualified_name}"),
+//RS                 name: name.clone(),
+//RS                 qualified_name: qualified_name.clone(),
+//RS                 owner: None,
+//RS                 module_path: module.to_string(),
+//RS                 kind: if declaration.is_some() {
+//RS                     SemanticSymbolKind::Type
+//RS                 } else {
+//RS                     SemanticSymbolKind::Function
+//RS                 },
+//RS                 signature: declaration.map_or_else(
+//RS                     || qualified_name.clone(),
+//RS                     |declaration| {
+//RS                         format!(
+//RS                             "enum {} {{ {} }}",
+//RS                             qualified_name,
+//RS                             declaration.variants.join(", ")
+//RS                         )
+//RS                     },
+//RS                 ),
+//RS                 summary: declaration.map_or_else(String::new, |_| {
+//RS                     "Compiler vocabulary published as an ordinary enum.".to_string()
+//RS                 }),
+//RS                 examples: Vec::new(),
+//RS                 provenance: SemanticProvenance::Builtin {
+//RS                     module: module.to_string(),
+//RS                 },
+//RS                 span: None,
+//RS                 lexical_scope: None,
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn language_symbols() -> Vec<SemanticSymbol> {
+//RS     let mut symbols = Vec::new();
+//RS     for ty in Syntax::JET_TYPE_LIST {
+//RS         symbols.push(SemanticSymbol {
+//RS             identity: format!("builtin:type:{ty}"),
+//RS             name: (*ty).to_string(),
+//RS             qualified_name: (*ty).to_string(),
+//RS             owner: None,
+//RS             module_path: "core".to_string(),
+//RS             kind: SemanticSymbolKind::Type,
+//RS             signature: format!("type {ty}"),
+//RS             summary: "Built-in Jet type.".to_string(),
+//RS             examples: Vec::new(),
+//RS             provenance: SemanticProvenance::Builtin {
+//RS                 module: "core".to_string(),
+//RS             },
+//RS             span: None,
+//RS             lexical_scope: None,
+//RS         });
+//RS     }
+//RS     for member in Syntax::fact_read_members() {
+//RS         let Some(fact) = CompilerFact::from_member(&member) else {
+//RS             continue;
+//RS         };
+//RS         symbols.push(SemanticSymbol {
+//RS             identity: format!("builtin:fact:{}", fact.name),
+//RS             name: fact.name.clone(),
+//RS             qualified_name: fact.name.clone(),
+//RS             owner: None,
+//RS             module_path: "compiler".to_string(),
+//RS             kind: SemanticSymbolKind::Member,
+//RS             signature: format!("{}: {}", fact.name, fact.type_name),
+//RS             summary: "Compiler-owned typed fact.".to_string(),
+//RS             examples: Vec::new(),
+//RS             provenance: SemanticProvenance::Builtin {
+//RS                 module: "compiler".to_string(),
+//RS             },
+//RS             span: None,
+//RS             lexical_scope: None,
+//RS         });
+//RS     }
+//RS     for keyword in Syntax::JET_KEYWORD_LIST {
+//RS         symbols.push(SemanticSymbol {
+//RS             identity: format!("builtin:keyword:{keyword}"),
+//RS             name: (*keyword).to_string(),
+//RS             qualified_name: (*keyword).to_string(),
+//RS             owner: None,
+//RS             module_path: "syntax".to_string(),
+//RS             kind: SemanticSymbolKind::Keyword,
+//RS             signature: (*keyword).to_string(),
+//RS             summary: "Jet keyword.".to_string(),
+//RS             examples: Vec::new(),
+//RS             provenance: SemanticProvenance::Builtin {
+//RS                 module: "syntax".to_string(),
+//RS             },
+//RS             span: None,
+//RS             lexical_scope: None,
+//RS         });
+//RS     }
+//RS     for &(qualified_name, signature, summary, example) in BUILTIN_METHODS {
+//RS         let (owner, name) = qualified_name
+//RS             .split_once('.')
+//RS             .expect("qualified builtin method");
+//RS         symbols.push(SemanticSymbol {
+//RS             identity: format!("builtin:method:{qualified_name}"),
+//RS             name: name.to_string(),
+//RS             qualified_name: qualified_name.to_string(),
+//RS             owner: Some(owner.to_string()),
+//RS             module_path: "core.collections".to_string(),
+//RS             kind: SemanticSymbolKind::Member,
+//RS             signature: signature.to_string(),
+//RS             summary: summary.to_string(),
+//RS             examples: example.into_iter().map(str::to_string).collect(),
+//RS             provenance: SemanticProvenance::Builtin {
+//RS                 module: "core.collections".to_string(),
+//RS             },
+//RS             span: None,
+//RS             lexical_scope: None,
+//RS         });
+//RS     }
+//RS     for (owner, signature, summary, example) in [
+//RS         (
+//RS             "Int",
+//RS             "Int.parse(text: String) -> Int ParseError!",
+//RS             "Parses text as an Int.",
+//RS             "Int.parse(text)",
+//RS         ),
+//RS         (
+//RS             "Float",
+//RS             "Float.parse(text: String) -> Float ParseError!",
+//RS             "Parses text as a Float.",
+//RS             "Float.parse(text)",
+//RS         ),
+//RS     ] {
+//RS         let qualified_name = format!("{owner}.parse");
+//RS         symbols.push(SemanticSymbol {
+//RS             identity: format!("builtin:method:{qualified_name}"),
+//RS             name: "parse".to_string(),
+//RS             qualified_name,
+//RS             owner: Some(owner.to_string()),
+//RS             module_path: "core.numeric".to_string(),
+//RS             kind: SemanticSymbolKind::Member,
+//RS             signature: signature.to_string(),
+//RS             summary: summary.to_string(),
+//RS             examples: vec![example.to_string()],
+//RS             provenance: SemanticProvenance::Builtin {
+//RS                 module: "core.numeric".to_string(),
+//RS             },
+//RS             span: None,
+//RS             lexical_scope: None,
+//RS         });
+//RS     }
+//RS     for &(method, source_name) in Syntax::NUMERIC_CONVERSION_SOURCES {
+//RS         for target_name in [
+//RS             "I8", "I16", "I32", "I64", "Int", "U8", "U16", "U32", "U64", "F32", "F64", "Float",
+//RS         ] {
+//RS             let target = AST::numeric_type_from_name(target_name)
+//RS                 .expect("numeric catalog target names a numeric type");
+//RS             // D-TYPE2-EXACT-CONVERT1: exact-number sources (Decimal, Fraction)
+//RS             // convert only to Int/Float and the exact family — the source ×
+//RS             // target cross-product is intentionally sparse. A pair without a
+//RS             // conversion is skipped, not a catalog defect.
+//RS             let Some(ret) = Collections::numeric_conversion_return(&target, method, 1).flatten()
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let result = match ret {
+//RS                 AST::Type::Result { .. } => format!("{target_name} !String"),
+//RS                 _ => target_name.to_string(),
+//RS             };
+//RS             let qualified_name = format!("{target_name}.{method}");
+//RS             symbols.push(SemanticSymbol {
+//RS                 identity: format!("builtin:method:{qualified_name}"),
+//RS                 name: method.to_string(),
+//RS                 qualified_name,
+//RS                 owner: Some(target_name.to_string()),
+//RS                 module_path: "core.numeric".to_string(),
+//RS                 kind: SemanticSymbolKind::Member,
+//RS                 signature: format!("{target_name}.{method}(value: {source_name}) -> {result}"),
+//RS                 summary: format!("Converts {source_name} to {target_name}."),
+//RS                 examples: Vec::new(),
+//RS                 provenance: SemanticProvenance::Builtin {
+//RS                     module: "core.numeric".to_string(),
+//RS                 },
+//RS                 span: None,
+//RS                 lexical_scope: None,
+//RS             });
+//RS         }
+//RS     }
+//RS     symbols
+//RS }
+//RS 
+//RS const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
+//RS     (
+//RS         "Duration.milliseconds",
+//RS         "Duration.milliseconds(value: Int | Float) -> Duration RangeError!",
+//RS         "Checked runtime duration in milliseconds.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "Duration.seconds",
+//RS         "Duration.seconds(value: Int | Float) -> Duration RangeError!",
+//RS         "Checked runtime duration in seconds.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "Duration.minutes",
+//RS         "Duration.minutes(value: Int | Float) -> Duration RangeError!",
+//RS         "Checked runtime duration in minutes.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "Clock.system",
+//RS         "Clock.system() -> Clock #(Time)",
+//RS         "Explicit monotonic production clock.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "Duration.hours",
+//RS         "Duration.hours(value: Int | Float) -> Duration RangeError!",
+//RS         "Checked runtime duration in hours.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "Duration.in",
+//RS         "Duration.in(unit: DurationUnit) -> Int RangeError!",
+//RS         "Reads a checked whole duration unit.",
+//RS         Some("duration.in(.Milliseconds)"),
+//RS     ),
+//RS     (
+//RS         "List.len",
+//RS         "List.len() -> Int",
+//RS         "Number of items.",
+//RS         Some("items.len()"),
+//RS     ),
+//RS     (
+//RS         "List.is_empty",
+//RS         "List.is_empty() -> Bool",
+//RS         "True when there are no items.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.push",
+//RS         "List.push(item: T)",
+//RS         "Appends an item to the end.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.pop",
+//RS         "List.pop() -> ?T",
+//RS         "Removes and returns the last item, if any.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.get",
+//RS         "List.get(i: Int) -> T?",
+//RS         "The item at index i, if in bounds.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.first",
+//RS         "List.first() -> ?T",
+//RS         "The first item, if any.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.last",
+//RS         "List.last() -> ?T",
+//RS         "The last item, if any.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.contains",
+//RS         "List.contains(item: T) -> Bool",
+//RS         "True when item appears in the list.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.index_of",
+//RS         "List.index_of(item: T) -> Int?",
+//RS         "Index of the first matching item, if any.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.join",
+//RS         "List.join(sep: String) -> String",
+//RS         "Joins string items with sep.",
+//RS         None,
+//RS     ),
+//RS     ("List.sum", "List.sum() -> T", "Sum of all items.", None),
+//RS     (
+//RS         "List.product",
+//RS         "List.product() -> T",
+//RS         "Product of all items.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.min",
+//RS         "List.min() -> ?T",
+//RS         "The smallest item, if any.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.max",
+//RS         "List.max() -> ?T",
+//RS         "The largest item, if any.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.map",
+//RS         "List.map(f: fn(T) -> R) -> [R]",
+//RS         "Transforms each item with f.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.filter",
+//RS         "List.filter(f: fn(T) -> Bool) -> List<T>",
+//RS         "Keeps items where f(item) is true.",
+//RS         Some("items.filter(fn (item: T) Bool { return true })"),
+//RS     ),
+//RS     (
+//RS         "List.filter_map",
+//RS         "List.filter_map(f: fn(T) -> ?V) -> [V]",
+//RS         "Maps then drops failures — keeps only successes.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.each",
+//RS         "List.each(f: fn(T))",
+//RS         "Runs f once per item, for its side effects.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.find",
+//RS         "List.find(f: fn(T) -> Bool) -> ?T",
+//RS         "The first item where f(item) is true, if any.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.any",
+//RS         "List.any(f: fn(T) -> Bool) -> Bool",
+//RS         "True if f is true for at least one item.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.all",
+//RS         "List.all(f: fn(T) -> Bool) -> Bool",
+//RS         "True if f is true for every item.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.sort_by",
+//RS         "List.sort_by(key: fn(T) -> K)",
+//RS         "Sorts in place by the key f extracts.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.sort_by_desc",
+//RS         "List.sort_by_desc(key: fn(T) -> K)",
+//RS         "Sorts in place by the key f extracts, descending.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.reduce",
+//RS         "List.reduce(init: R, f: fn(R, T) -> R) -> R",
+//RS         "Folds items into one value, starting from init.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.fold",
+//RS         "List.fold(init: R, f: fn(R, T) -> R) -> R",
+//RS         "Folds items into one value, starting from init.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.reverse",
+//RS         "List.reverse()",
+//RS         "Reverses the list in place.",
+//RS         None,
+//RS     ),
+//RS     ("List.sort", "List.sort()", "Sorts the list in place.", None),
+//RS     (
+//RS         "List.sort_desc",
+//RS         "List.sort_desc()",
+//RS         "Sorts the list in place, descending.",
+//RS         None,
+//RS     ),
+//RS     ("List.clear", "List.clear()", "Removes every item.", None),
+//RS     (
+//RS         "List.insert",
+//RS         "List.insert(i: Int, item: T)",
+//RS         "Inserts item at index i.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.remove",
+//RS         "List.remove(value: T, by: RemoveBy{.Val}) -> T?",
+//RS         "Removes the first equal value; `.Slot` selects positional removal.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.count",
+//RS         "List.count(value: T) -> Int",
+//RS         "Counts items equal to value.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.extend",
+//RS         "List.extend(other: [T])",
+//RS         "Appends every item from other in order.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.concat",
+//RS         "List.concat(other: [T]) -> [T]",
+//RS         "Returns this list followed by other.",
+//RS         None,
+//RS     ),
+//RS     (
+//RS         "List.enumerate",
+// END-PORT-PENDING 2098 crates/jet-semindex/src/Symbols.rs:1-1800
+

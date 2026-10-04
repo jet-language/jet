@@ -1,0 +1,168 @@
+// Source/LSP/Server.rs:4845–5264. The checked SemIndex builder is the
+// sole index producer; type annotations borrow CompW36's ORIGINAL loaded AST
+// through result.bundle, not expanded registration items or an AST replica.
+use jet_foundation.[Item, Func, Type, Span, ProgramBundle, NameLedger, MIRNameDeclaration, name_ledger_declaration, name_ledger_nominal_module, name_ledger_effective_alias, name_ledger_semantic_identity, name_ledger_module_path]
+use jet_driver.[JetDriverCompilerCheckResult]
+use jet_semindex.[SymbolDB, SymKind, SymRef, DefinitionAnchor, SourceSpan]
+
+pub fn lsp_build_navigation_symbol_db(result: JetDriverCompilerCheckResult) -> SymbolDB {
+    db := lsp_build_symbol_db(result)
+    owner :: result.bundle ?? return db
+    permit :: owner.guard_read()
+    checked :: result.graph ?? return db
+    lsp_rebind_checked_reference_identities(&db)
+    lsp_add_checked_type_references(permit.value, checked.effect_facts.name_ledger, &db)
+    lsp_rebind_checked_reference_identities(&db)
+    db
+}
+
+pub fn lsp_rebind_checked_reference_identities(db: &SymbolDB) Never! {
+    loop index in 0..<db.refs.len() {
+        anchor :: db.refs[index].target ?? next
+        identity := String?{None}
+        loop definition in db.defs {
+            if definition.module_path != anchor.module_path || definition.def_span.start != anchor.def_span.start || definition.def_span.end != anchor.def_span.end || !lsp_navigation_target_kind_matches(definition.kind, anchor.kind) -> next
+            if identity == { None -> identity = Val(~definition.identity) .Val(left) -> if left != definition.identity -> identity = Val("") }
+        }
+        if identity == .Val("") -> identity = None
+        if identity == None {
+            loop definition in db.defs {
+                if definition.module_path != anchor.module_path || definition.name != db.refs[index].name || !lsp_navigation_target_kind_matches(definition.kind, anchor.kind) -> next
+                if identity == { None -> identity = Val(~definition.identity) .Val(left) -> if left != definition.identity -> identity = Val("") }
+            }
+            if identity == .Val("") -> identity = None
+        }
+        // Mutate only the optional target's identity, not copy the reference.
+        if db.refs[index].target == .Val(target) -> target.semantic_identity = identity
+    }
+}
+
+pub fn lsp_navigation_target_kind_matches(kind: SymKind, target: String) -> Bool Never! {
+    if target == {
+        "module" | "import_alias" -> kind == .Module
+        "function" | "method" | "extern" -> kind == .Function{..}
+        "struct" -> kind == .Struct{..}
+        "enum" -> kind == .Enum{..}
+        "trait" -> kind == .Trait
+        "tag" -> kind == .Tag
+        "type" | "protocol" -> if kind == { .Struct{..} | .Enum{..} | .Trait | .Type{..} -> true else -> false }
+        "state" | "enum_variant" | "variant" -> if kind == { .EnumVariant{..} | .Type{..} -> true else -> false }
+        "const" -> kind == .Const
+        "field" -> kind == .Field{..}
+        "local" -> kind == .Local{..}
+        "param" -> kind == .Param{..}
+        else -> true
+    }
+}
+
+pub fn lsp_add_checked_type_references(bundle: ProgramBundle, ledger: NameLedger, db: &SymbolDB) Never! {
+    loop (module_idx, module) in bundle.modules {
+        loop item in module.items -> lsp_add_item_type_references(item, module_idx, module.display, module.source, ledger, &db)
+    }
+}
+
+pub fn lsp_add_item_type_references(item: Item, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
+    if item == {
+        .Func(function) -> lsp_add_func_type_references(function, module_idx, module_path, source, ledger, &db)
+        .Struct(definition) -> {
+            loop field in definition.fields -> lsp_add_checked_type_reference(field.ty, field.ty_span, module_idx, module_path, source, ledger, &db)
+            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+            loop implementation in definition.trait_impls {
+                loop method in implementation.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+            }
+        }
+        .Enum(definition) -> {
+            loop variant in definition.variants {
+                if variant.payload == {
+                    .Single(ty, span) -> lsp_add_checked_type_reference(ty, span, module_idx, module_path, source, ledger, &db)
+                    .Named(fields) -> loop field in fields -> lsp_add_checked_type_reference(field.ty, field.ty_span, module_idx, module_path, source, ledger, &db)
+                    .Unit -> {}
+                }
+            }
+            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+            loop implementation in definition.trait_impls {
+                loop method in implementation.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+            }
+        }
+        .Distinct(definition) -> lsp_add_checked_type_reference(definition.base, definition.base_span, module_idx, module_path, source, ledger, &db)
+        .TypeAlias(definition) -> lsp_add_checked_type_reference(definition.target, definition.target_span, module_idx, module_path, source, ledger, &db)
+        .Impl(definition) -> {
+            lsp_add_named_type_reference(definition.type_name, definition.type_span, module_idx, module_path, source, ledger, &db)
+            if definition.trait_name == .Val(name) {
+                if definition.trait_span == .Val(span) -> lsp_add_named_type_reference(name, span, module_idx, module_path, source, ledger, &db)
+            }
+            loop associated in definition.assoc_type_impls -> lsp_add_checked_type_reference(associated.ty, associated.span, module_idx, module_path, source, ledger, &db)
+            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+        }
+        .Trait(definition) -> loop method in definition.methods {
+            loop parameter in method.params -> lsp_add_checked_type_reference(parameter.ty, parameter.ty_span, module_idx, module_path, source, ledger, &db)
+        }
+        .CodeModule(definition) -> if definition.body == .Val(body) {
+            loop nested in body -> lsp_add_item_type_references(nested, module_idx, module_path, source, ledger, &db)
+        }
+        .GenericModule(definition) -> loop nested in definition.body -> lsp_add_item_type_references(nested, module_idx, module_path, source, ledger, &db)
+        else -> {}
+    }
+}
+
+pub fn lsp_add_func_type_references(function: Func, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
+    loop parameter in function.params -> lsp_add_checked_type_reference(parameter.ty, parameter.ty_span, module_idx, module_path, source, ledger, &db)
+    if function.return_type == .Val(ty) {
+        if function.return_type_span == .Val(span) -> lsp_add_checked_type_reference(ty, span, module_idx, module_path, source, ledger, &db)
+    }
+}
+
+pub fn lsp_add_checked_type_reference(ty: Type, span: Span, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
+    name :: if ty == {
+        .Named(name) | .Apply(name, _) -> name
+        .TraitObject(names) -> { if names.len() != 1 -> return; names[0] }
+        else -> return
+    }
+    lsp_add_named_type_reference(name, span, module_idx, module_path, source, ledger, &db)
+}
+
+pub fn lsp_add_named_type_reference(name: String, span: Span, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
+    bytes :: source.bytes()
+    if span.start < 0 || span.start >= span.end || span.end > bytes.len() -> return
+    if (Int.from_u8(bytes[span.start]) & 192) == 128 -> return
+    if span.end < bytes.len() && (Int.from_u8(bytes[span.end]) & 192) == 128 -> return
+    resolved :: lsp_checked_type_declaration(ledger, module_idx, name) ?? return
+    declaration :: resolved.declaration
+    identity :: name_ledger_semantic_identity(ledger, resolved.module_idx, declaration.name) ?? return
+    target_path :: name_ledger_module_path(ledger, resolved.module_idx) ?? module_path
+    loop reference in db.refs {
+        if reference.module_path != module_path || reference.span != span -> next
+        if reference.target == .Val(target) {
+            if target.semantic_identity == Val(identity) -> return
+        }
+    }
+    &db.refs.push(SymRef{name: ~name, span: span, module_path: ~module_path, scope_identity: None, target: Val(DefinitionAnchor{module_path: ~target_path, kind: ~declaration.kind, def_span: SourceSpan{start: declaration.span.start, end: declaration.span.end}, semantic_identity: Val(identity)}), fact: None})
+}
+
+// Foundation's ledger methods determine exact alias/nominal precedence.
+pub fn lsp_checked_type_declaration(ledger: NameLedger, module_idx: Int, name: String) -> (module_idx: Int, declaration: MIRNameDeclaration)? Never! {
+    if name_ledger_declaration(ledger, module_idx, name) == .Val(declaration) -> return Val((module_idx: module_idx, declaration: declaration))
+    if name_ledger_nominal_module(ledger, name) == .Val(target_module) {
+        parts :: name.split("::")
+        canonical_name := parts[parts.len() - 1] // #4303
+        if name_ledger_declaration(ledger, target_module, canonical_name) == .Val(declaration) -> return Val((module_idx: target_module, declaration: declaration))
+        leaves :: canonical_name.split(".")
+        leaf := leaves[leaves.len() - 1] // #4303
+        if name_ledger_declaration(ledger, target_module, leaf) == .Val(declaration) -> return Val((module_idx: target_module, declaration: declaration))
+    }
+    if name_ledger_effective_alias(ledger, module_idx, name) == .Val(alias) {
+        if alias.target_module == .Val(target_module) {
+            parts :: alias.target.split(".")
+            target_name := parts[parts.len() - 1] // #4303
+            if name_ledger_declaration(ledger, target_module, target_name) == .Val(declaration) -> return Val((module_idx: target_module, declaration: declaration))
+        }
+    }
+    parts :: name.split(".")
+    if parts.len() < 2 -> return None
+    leaf := parts[parts.len() - 1] // #4303
+    qualifier := parts[0..<parts.len() - 1].join(".") // #4303
+    alias :: name_ledger_effective_alias(ledger, module_idx, qualifier) ?? return None
+    target_module :: alias.target_module ?? return None
+    declaration :: name_ledger_declaration(ledger, target_module, leaf) ?? return None
+    Val((module_idx: target_module, declaration: declaration))
+}

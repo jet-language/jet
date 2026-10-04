@@ -1,0 +1,326 @@
+// jet-semindex Types.rs:282–715: schema-20 checked program records.
+// Foundation and package-model facts remain canonical; this is a projection,
+// not the compiler-service value schema and never a second checker.
+use jet_foundation.[
+    DerivationRecord,
+    fact_read_kind,
+    fact_read_source_member,
+    fact_read_reflection_kind,
+    fact_read_public_read_type,
+]
+
+// Rust Types.rs SCHEMA_VERSION (10–12), independent of documentation schemas.
+pub SEMINDEX_SCHEMA_VERSION :: 20
+
+// Rust InstanceApplicationFact and InstanceFact (282–303).
+pub struct InstanceApplicationFact {
+    pub name: String
+    pub module_path: String
+    pub semantic_identity: String
+    pub span: SourceSpan
+}
+pub struct InstanceFact {
+    pub name: String
+    pub module_path: String
+    pub fingerprint: String
+    pub full_key_hex: String
+    pub template_definition_id: String
+    pub template_span: SourceSpan
+    pub arguments: [String]
+    pub argument_values: [String]
+    pub argument_provenance: [[String]]
+    pub applications: [InstanceApplicationFact]
+    pub exported_members: [String]
+}
+
+// Rust SymbolKind (330–365); Foundation SymbolKind is the declaration ID kind.
+// Tuple rows retain declaration order, including duplicate visible spellings.
+// #4357: ordered tuple rows use records until tuple Debug/Show emission is fixed.
+pub struct SemIndexNameTypeFact {
+    pub name: String
+    pub ty: String
+}
+pub struct SemIndexCallContractEntry {
+    pub label: String
+    pub zone: String
+    pub variadic: Bool
+}
+pub enum SemIndexSymbolKind {
+    Module
+    Function(params: [SemIndexNameTypeFact], call_contract: [SemIndexCallContractEntry], ret: String?)
+    Struct(fields: [SemIndexNameTypeFact])
+    Enum(variants: [String])
+    Trait
+    Tag
+    Type
+    Const
+    EnumVariant(parent: String)
+    Field(ty: String, parent: String)
+    Local(mutable: Bool, ty: String?)
+    Param(ty: String)
+}
+
+// Rust MemberKind, MemberOrigin, MemberFact (367–392).
+pub enum MemberKind {
+    Field
+    Variant
+    Method
+}
+pub enum MemberOrigin {
+    TypeBody
+    InherentImpl
+    TraitImpl(trait_name: String)
+    TraitRequirement(trait_name: String)
+}
+pub struct MemberFact {
+    pub owner: String
+    pub name: String
+    pub identity: String
+    pub kind: MemberKind
+    pub origin: MemberOrigin
+    pub signature: String
+    pub module_path: String
+    pub span: SourceSpan
+}
+
+// Rust BypassKind::as_str and BypassFact (394–432), D-LINTPOLICY1 override law.
+pub enum BypassKind {
+    UnsafeRegion
+    UnsafeFn
+    ExplicitDrop
+    LintAllow
+
+    fn as_str(self) -> String Never! {
+        if self == {
+            .UnsafeRegion -> "unsafe_region"
+            .UnsafeFn -> "unsafe_fn"
+            .ExplicitDrop -> "explicit_drop"
+            .LintAllow -> "lint_allow"
+        }
+    }
+}
+pub struct BypassFact {
+    pub kind: BypassKind
+    pub site: String
+    pub detail: String
+    pub module_path: String
+    pub span: SourceSpan
+}
+
+// Rust TypeDossier (434–451): bypass audit is program-wide, not target-filtered.
+pub struct TypeDossier {
+    pub schema_version: Int
+    pub target: String
+    pub definition: SymbolDef?
+    pub members: [MemberFact]
+    pub references: [SymbolRef]
+    pub bypass_facts: [BypassFact]
+    pub state_graphs: [StateGraphFact]
+    pub effect_projection: EffectProjection
+}
+
+// Rust TraitContractFact and SymbolDef (453–493).
+// Checked empty callable rows differ from unavailable rows in the S1 carrier.
+// #4357: this record is the lossless ordered (name, optional implementation) row.
+pub struct SemIndexAssociatedTypeFact {
+    pub name: String
+    pub implementation: String?
+}
+pub struct TraitContractFact {
+    pub trait_name: String
+    pub associated_types: [SemIndexAssociatedTypeFact]
+    pub methods: [String]
+}
+pub struct SymbolDef {
+    pub identity: String
+    pub declaration_identity_unavailable: CallableFactUnavailable
+    pub name: String
+    pub qualified_name: String
+    pub module_path: String
+    pub def_span: SourceSpan
+    pub kind: SemIndexSymbolKind
+    pub view_provenance: [ViewProvenanceFact]
+    pub callable_signature: CallableSignatureFact?
+    pub derives: [String]
+    pub nominal_base: String?
+    pub trait_contracts: [TraitContractFact]
+}
+
+// Rust DefinitionFact and DefinitionAnchor (495–523).
+// Stable IDs classify semantic ancestry/kind, not spelling, signature, or body;
+// same-kind sibling collisions require unique-candidate checks by consumers.
+pub struct DefinitionFact {
+    pub stable_id: String
+    pub signature_id: String
+    pub content_id: String
+    pub human_identity: String
+    pub name: String
+    pub kind: String
+    pub module_path: String
+    pub span: SourceSpan
+}
+pub struct DefinitionAnchor {
+    pub module_path: String
+    pub kind: String
+    pub def_span: SourceSpan
+    pub semantic_identity: String?
+}
+
+// Rust CompilerFact (525–545): typed registry projection, not source inference.
+pub struct CompilerFact {
+    pub name: String
+    pub kind: String
+    pub type_name: String
+
+    // Rust CompilerFact::from_member (537–544). The canonical Foundation
+    // registry supplies all three optional projections; no local name table.
+    // #4393: explicit optional arms keep native return payloads typed.
+    pub fn from_member(member: String) -> CompilerFact? Never! {
+        read :: if fact_read_kind(member) == {
+            .Val(value) -> value
+            .None -> return None
+        }
+        name :: if fact_read_source_member(read) == {
+            .Val(value) -> value
+            .None -> return None
+        }
+        kind :: if fact_read_reflection_kind(read) == {
+            .Val(value) -> value
+            .None -> return None
+        }
+        type_name :: if fact_read_public_read_type(read) == {
+            .Val(value) -> value
+            .None -> return None
+        }
+        Val(CompilerFact{name: name, kind: kind, type_name: type_name})
+    }
+}
+
+// Rust SymbolRef (547–560): absent target means unresolved or ambiguous.
+// Semantic refactors must never replace an absent anchor with a spelling match.
+pub struct SymbolRef {
+    pub name: String
+    pub module_path: String
+    pub scope_identity: String?
+    pub target: DefinitionAnchor?
+    pub fact: CompilerFact?
+    pub span: SourceSpan
+}
+
+// Rust StructuralNode, StructuralSlotBoundary, StructuralSlotKind (562–594).
+// Parent/slot/ordinal are explicit AST ownership, never reconstructed by spans.
+pub struct StructuralNode {
+    pub id: Int
+    pub parent: Int?
+    pub slot: String
+    pub slot_kind: StructuralSlotKind
+    pub ordinal: Int
+    pub class: String
+    pub shape: String
+    pub module_path: String
+    pub span: SourceSpan
+}
+pub struct StructuralSlotBoundary {
+    pub parent: Int
+    pub slot: String
+    pub module_path: String
+    pub span: SourceSpan
+}
+pub enum StructuralSlotKind {
+    Scalar
+    List
+}
+
+// Rust CallEdge, EffectFact, EffectProvenance (596–623).
+// Transitive effects and deterministic witnesses arrive from the checked solve.
+pub struct CallEdge {
+    pub caller: String
+    pub callee: String
+    pub module_path: String
+    pub call_span: SourceSpan
+}
+pub struct EffectFact {
+    pub function: String
+    pub direct: [String]
+    pub callees: [String]
+    pub inferred: [String]
+    pub maximal: Bool
+    pub provenance: [EffectProvenance]
+}
+pub struct EffectProvenance {
+    pub effect_name: String
+    pub call_path: [String]
+    pub spans: [SourceSpan]
+}
+
+// Rust OutputFact and OutputEntryFact (625–653).
+// SemIndexOutputFact is distinct from PackageModel's manifest OutputFact.
+pub struct SemIndexOutputFact {
+    pub binding: String
+    pub kind: String
+    pub name: String
+    pub module_path: String
+    pub span: SourceSpan
+    pub entry: OutputEntryFact
+}
+pub struct OutputEntryFact {
+    pub identity: String
+    pub name: String
+    pub module_path: String
+    pub definition_span: SourceSpan
+    pub reference_span: SourceSpan
+    pub params: [String]
+    pub return_type: String?
+    pub failure_contract: String
+    pub failure_source: String
+    pub authority: String
+    pub effects: [String]
+}
+
+// Rust StateNodeFact, StateTransitionFact, StateGraphFact (655–678).
+// Unavailable reachability/from-state stay optional rather than becoming false.
+pub struct StateNodeFact {
+    pub name: String
+    pub terminal: Bool
+    pub reachable: Bool?
+    pub span: SourceSpan
+}
+pub struct StateTransitionFact {
+    pub operation: String
+    pub from: String?
+    pub to: String
+}
+pub struct StateGraphFact {
+    pub owner: String
+    pub module_path: String
+    pub states: [StateNodeFact]
+    pub transitions: [StateTransitionFact]
+}
+
+// Rust SemIndex and StructuralAudit (680–714). Query APIs are owned by S3.
+// Canonical package policy/derivations are attached facts, not local copies of
+// their schemas. Index fields remain package-private as in the Rust product.
+pub struct SemIndex {
+    schema_version: Int
+    defs: [SymbolDef]
+    refs: [SymbolRef]
+    calls: [CallEdge]
+    effects: [EffectFact]
+    arithmetic: [ArithmeticOperationFact]
+    members: [MemberFact]
+    nodes: [StructuralNode]
+    _definition_facts: [DefinitionFact]
+    bypasses: [BypassFact]
+    instances: [InstanceFact]
+    outputs: [SemIndexOutputFact]
+    state_graphs: [StateGraphFact]
+    package_facts: PackageFacts?
+    workspace_overlay_policy: OverlayPolicy?
+    effect_projection: EffectProjection
+    derivations: [DerivationRecord]
+}
+pub struct StructuralAudit {
+    pub added: [String]
+    pub removed: [String]
+    pub changed: [String]
+}

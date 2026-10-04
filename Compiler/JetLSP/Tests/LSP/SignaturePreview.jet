@@ -1,0 +1,107 @@
+// Pure Features.rs664–973 controls; native staged recheck/apply and filesystem
+// versions remain the original Server/1108–1110 tests, not mocked here.
+use jet_foundation.[Span, Type, TypeParam, CallablePolicy, FailureContract]
+use jet_lexer.[lex, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN]
+use jet_semindex.[SymbolDB, SymbolDef, SymbolRef, SymRef, DefinitionAnchor, TraitContractFact, CallEdge, EffectFact, MemberFact, StructuralNode, DefinitionFact, SourceSpan, CallableFactUnavailable, CallableFactAvailability, CallableEffectsFact, CallableEffectFact, CallableSignatureFact, CallableParameterFact, ViewProvenanceFact, SemIndexNameTypeFact, SemIndexCallContractEntry, SemIndex]
+
+fn lsp_signature_test_definition() -> SymbolDef Never! {
+    signature :: CallableSignatureFact{
+        parameters: [CallableParameterFact]{}, return_type: None,
+        effects: .Checked{effects: [CallableEffectFact]{}},
+        failure_contract: CallableFactAvailability<FailureContract>.Checked{value: .DeclaredNever},
+        returned_views: [ViewProvenanceFact]{}, policies: [CallablePolicy]{},
+        generic_parameters: CallableFactAvailability<[TypeParam]>.Checked{value: [TypeParam]{}},
+        metadata_producer_status: .ExistingCallableProducerNeedsExtension,
+    }
+    SymbolDef{identity: "fn:main::run", declaration_identity_unavailable: CallableFactUnavailable{required_stage: .Resolved, reason: "typed algorithm input"}, name: "run", qualified_name: "main.run", module_path: "main.jet", def_span: SourceSpan{start: 3, end: 6}, kind: .Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: None}, view_provenance: [ViewProvenanceFact]{}, callable_signature: Val(signature), derives: [String]{}, nominal_base: None, trait_contracts: [TraitContractFact]{}}
+}
+
+fn lsp_signature_test_db(definition: ^SymbolDef) -> SymbolDB Never! {
+    db := SymbolDB.new()
+    db.index = SemIndex.new([SymbolDef]{^definition}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{})
+    db
+}
+
+#Test("signature preview validation preserves exact identifier type and missing identity errors") {
+    db :: SymbolDB.new()
+    sources :: [String:String]{}
+    values :: [String:String]{}
+    assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "bad name", "\n", values), Err("`bad name` is not a valid parameter identifier"))
+    assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "extra", "\n", values), Err("parameter type must be one explicit, single-line type"))
+    assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "extra", "Int", values), Err("no checked callable identity `missing`"))
+    loop ty in [String]{"", "  ", "Int\r", "Int\n", "{{Int", "Int}}"} -> assert_eq(lsp_compute_signature_change_preview(db, sources, "missing", "extra", ty, values), Err("parameter type must be one explicit, single-line type"))
+}
+
+#Test("signature declaration rejects noncallable duplicate then variadic before missing source") {
+    definition := lsp_signature_test_definition()
+    definition.callable_signature = None
+    no_callable :: lsp_signature_test_db(~definition)
+    assert_eq(lsp_compute_signature_change_preview(no_callable, [String:String]{}, definition.identity, "extra", "Int", [String:String]{}), Err("`fn:main::run` is not a checked callable"))
+    definition = lsp_signature_test_definition()
+    signature := definition.callable_signature ?? panic("input callable")
+    signature.parameters = [CallableParameterFact]{CallableParameterFact{name: "extra", label: "extra", source: SourceSpan{start: 0, end: 0}, default: None, access: .Read, zone: .Either, ty: Type.Int, variadic: true}}
+    definition.callable_signature = Val(~signature)
+    duplicate :: lsp_signature_test_db(~definition)
+    assert_eq(lsp_compute_signature_change_preview(duplicate, [String:String]{}, definition.identity, "extra", "Int", [String:String]{}), Err("callable `fn:main::run` already has parameter `extra`"))
+    assert_eq(lsp_compute_signature_change_preview(duplicate, [String:String]{}, definition.identity, "other", "Int", [String:String]{}), Err("callable `fn:main::run` has a variadic parameter; its insertion order is unavailable"))
+    definition = lsp_signature_test_definition()
+    db :: lsp_signature_test_db(~definition)
+    assert_eq(lsp_compute_signature_change_preview(db, [String:String]{}, definition.identity, "extra", "Int", [String:String]{}), Err("checked declaration source `main.jet` is unavailable"))
+}
+
+#Test("signature preview carries exact declaration insertion and trims only parameter type") {
+    db :: lsp_signature_test_db(lsp_signature_test_definition())
+    source :: "fn run() {{}}\n"
+    preview :: lsp_compute_signature_change_preview(db, [String:String]{"main.jet": source}, "fn:main::run", "extra", "  Int  ", [String:String]{}) ?? panic("preview")
+    assert_eq(preview.parameter_type, "Int")
+    assert_eq(preview.edits.len(), 1)
+    assert_eq(preview.edits[0].span, Span{start: 7, end: 7})
+    assert_eq(preview.edits[0].new_text, "extra: Int")
+    assert(preview.can_apply())
+    public :: "pub fn run() {{}}\n"
+    definition := lsp_signature_test_definition()
+    definition.def_span = SourceSpan{start: 7, end: 10}
+    exported :: lsp_signature_test_db(definition)
+    boundary :: lsp_compute_signature_change_preview(exported, [String:String]{"main.jet": public}, "fn:main::run", "extra", "Int", [String:String]{}) ?? panic("public preview")
+    assert_eq(boundary.unknown, [String]{"external_callers_outside_checked_workspace"})
+    assert(!boundary.can_apply())
+}
+
+// #4499: actual composite-key map must be available to exercise this body.
+#Test("signature callers require checked identity explicit value and preserve raw user expression") {
+    source :: "fn run() {{}}\nfn caller() {{ run() }}\n"
+    tokens :: lex(source.bytes()).tokens
+    call_span := SourceSpan{start: 0, end: 0}
+    loop token in tokens { if token.kind == TOKEN_IDENT && token.payload.text == "run" -> call_span = SourceSpan{start: token.span.start, end: token.span.end} }
+    db := lsp_signature_test_db(lsp_signature_test_definition())
+    db.calls = [CallEdge]{CallEdge{caller: "fn:caller", callee: "run", module_path: "main.jet", call_span: call_span}}
+    db.refs = [SymRef]{SymRef{name: "run", span: Span{start: call_span.start, end: call_span.end}, module_path: "main.jet", scope_identity: Val("fn:caller"), target: Val(DefinitionAnchor{module_path: "main.jet", kind: "function", def_span: SourceSpan{start: 3, end: 6}, semantic_identity: Val("fn:main::run")}), fact: None}}
+    sources :: [String:String]{"main.jet": source}
+    missing :: lsp_compute_signature_change_preview(db, sources, "fn:main::run", "extra", "Int", [String:String]{}) ?? panic("missing value preview")
+    assert_eq(missing.callers[0].status, "missing_explicit_value")
+    assert_eq(missing.callers[0].value, None)
+    assert(!missing.can_apply())
+    preview :: lsp_compute_signature_change_preview(db, sources, "fn:main::run", "extra", "Int", [String:String]{"fn:caller": " 42 "}) ?? panic("explicit preview")
+    assert_eq(preview.callers.len(), 1)
+    assert_eq(preview.callers[0].value, Val(" 42 "))
+    assert_eq(preview.edits[1].new_text, " 42 ")
+    assert(preview.can_apply())
+    db.refs[0].target = None
+    unresolved :: lsp_compute_signature_change_preview(db, sources, "fn:main::run", "extra", "Int", [String:String]{"fn:caller": "42"}) ?? panic("unresolved preview")
+    assert_eq(unresolved.callers.len(), 0)
+    assert_eq(unresolved.unknown, [String]{"unresolved_call:main.jet:{call_span.start}-{call_span.end}"})
+    assert(!unresolved.can_apply())
+}
+
+#Test("signature paren helpers preserve nesting and statement boundaries") {
+    tokens :: lex("run((1), 2)".bytes()).tokens
+    open :: lsp_next_paren(tokens, 0) ?? panic("open")
+    close :: lsp_matching_paren(tokens, open) ?? panic("close")
+    assert_eq(tokens[open].kind, TOKEN_LPAREN)
+    assert_eq(tokens[close].kind, TOKEN_RPAREN)
+    assert_eq(lsp_call_open(tokens, SourceSpan{start: 0, end: 3}), Val(open))
+    incomplete :: lex("run((1)".bytes()).tokens
+    assert_eq(lsp_matching_paren(incomplete, 1), None)
+    stopped :: lex("run\nother()".bytes()).tokens
+    assert_eq(lsp_call_open(stopped, SourceSpan{start: 0, end: 3}), None)
+}

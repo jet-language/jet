@@ -1,0 +1,198 @@
+// Pure editor utilities from crates/jet-repl/src/Interactive.rs. Buffers are
+// Unicode scalar strings (Core text.scalars), and cursor indices count scalars,
+// not UTF-8 bytes or terminal display cells. TTY rendering belongs to Display.
+use core.text as repl_geometry_text
+use core.text.parse as repl_geometry_parse
+
+// Rust ghost_for (709–719): first matching entry in the supplied history order.
+pub fn repl_ghost_for(buf: [String], history: [String]) -> String? Never! {
+    if buf.len() == 0 || buf.contains("\n") -> return None
+    prefix :: buf.join("")
+    prefix_bytes :: prefix.bytes().len()
+    loop entry in history {
+        // Rust compares UTF-8 byte lengths; for a matching prefix that is the
+        // same test as a longer scalar sequence, without a per-entry scalar
+        // count. Slice once, by the scalar prefix length.
+        if !entry.contains("\n") && entry.bytes().len() > prefix_bytes && entry.starts_with(prefix) {
+            return Val(entry.slice(prefix.len()..<entry.len()))
+        }
+    }
+    None
+}
+
+// Rust collection_rows (780–829): retain the first '[' but close only at an
+// unquoted, top-level '] : List' presentation marker.
+pub fn repl_collection_rows(full: String) -> [String] Never! {
+    start :: repl_geometry_parse.find(full, "[")
+    if start < 0 -> return [String]{~full}
+    // Core find returns a byte offset. Every delimiter and the marker are
+    // ASCII, and an ASCII byte never occurs inside a multi-byte UTF-8 scalar,
+    // so one linear byte scan sees exactly Rust's char-level decisions and
+    // every row boundary is a scalar boundary.
+    raw :: full.bytes()
+    rows := [String]{}
+    current_start := start + 1
+    depth := 0
+    quoted := false
+    escaped := false
+    index := start + 1
+    loop index < raw.len() {
+        byte :: Int.from_u8(raw[index])
+        if quoted {
+            if byte == 34 && !escaped -> quoted = false
+            escaped = byte == 92 && !escaped
+        } else if byte == 93 && depth == 0 && repl_collection_marker_at(raw, index) {
+            // Checked before decrementing depth: nested closing brackets are data.
+            last :: repl_collection_row(raw, current_start, index)
+            if !last.is_empty() -> &rows.push(last)
+            return rows
+        } else if byte == 34 {
+            quoted = true
+        } else if byte == 91 || byte == 123 || byte == 40 {
+            depth += 1
+        } else if byte == 93 || byte == 125 || byte == 41 {
+            if depth > 0 -> depth -= 1
+        } else if byte == 44 && depth == 0 {
+            &rows.push(repl_collection_row(raw, current_start, index))
+            current_start = index + 1
+        }
+        index += 1
+    }
+    // Commas encountered without a valid closing marker do not form a list.
+    [String]{~full}
+}
+
+// "] : List" at `index`, matched in place without allocating a suffix.
+fn repl_collection_marker_at(raw: [U8], index: Int) -> Bool Never! {
+    index + 8 <= raw.len() && raw[index + 1] == (U8{32}) && raw[index + 2] == (U8{58}) && raw[index + 3] == (U8{32}) && raw[index + 4] == (U8{76}) && raw[index + 5] == (U8{105}) && raw[index + 6] == (U8{115}) && raw[index + 7] == (U8{116})
+}
+
+fn repl_collection_row(raw: [U8], start: Int, end: Int) -> String Never! {
+    row :: String.from_bytes(raw.slice(start, end)) ?? panic("collection row is not a UTF-8 scalar range")
+    repl_geometry_text.trim(row)
+}
+
+// Rust line_start/line_end/vertical_cursor (866–901). The caller supplies a
+// cursor in 0..=buf.len(), as the raw editor does; columns here count scalars.
+pub fn repl_line_start(buf: [String], cursor: Int) -> Int Never! {
+    index := cursor
+    loop index > 0 {
+        index -= 1
+        if buf[index] == "\n" -> return index + 1
+    }
+    0
+}
+
+pub fn repl_line_end(buf: [String], cursor: Int) -> Int Never! {
+    loop index in cursor..<buf.len() {
+        if buf[index] == "\n" -> return index
+    }
+    buf.len()
+}
+
+pub fn repl_vertical_cursor(buf: [String], cursor: Int, down: Bool) -> Int Never! {
+    start :: repl_line_start(buf, cursor)
+    column :: cursor - start
+    if down {
+        end :: repl_line_end(buf, cursor)
+        if end == buf.len() -> return cursor
+        next_start :: end + 1
+        next_end :: repl_line_end(buf, next_start)
+        next_column :: if column < next_end - next_start -> column else -> next_end - next_start
+        return next_start + next_column
+    }
+    if start == 0 -> return cursor
+    previous_end :: start - 1
+    previous_start :: repl_line_start(buf, previous_end)
+    previous_column :: if column < previous_end - previous_start -> column else -> previous_end - previous_start
+    previous_start + previous_column
+}
+
+// Rust DisplayPosition and its write_cells/newline methods (912–949).
+// A full terminal row retains the last cell and defers wrap until a visible
+// scalar arrives. Zero-width scalars must not consume that deferred wrap.
+pub struct ReplDisplayPosition {
+    pub row: Int
+    pub column: Int
+    pub pending_wrap: Bool
+
+    pub fn default() -> ReplDisplayPosition Never! {
+        ReplDisplayPosition{row: 0, column: 0, pending_wrap: false}
+    }
+
+    pub fn write_cells(&self, cells: Int, terminal_width: Int) Never! {
+        if cells == 0 -> return
+        width :: if terminal_width > 1 -> terminal_width else -> 1
+        if self.pending_wrap {
+            self.row += 1
+            self.column = 0
+            self.pending_wrap = false
+        }
+        if self.column + cells > width {
+            self.row += 1
+            self.column = 0
+        }
+        // A wide scalar wraps as one unit, and is clamped at width one.
+        clamped_cells :: if cells < width -> cells else -> width
+        self.column += clamped_cells
+        if self.column == width {
+            self.column = width - 1
+            self.pending_wrap = true
+        }
+    }
+
+    pub fn newline(&self) Never! {
+        self.row += 1
+        self.column = 0
+        self.pending_wrap = false
+    }
+}
+
+// Rust DisplayGeometry (951–956).
+pub struct ReplDisplayGeometry {
+    pub rows: Int
+    pub cursor: ReplDisplayPosition
+    pub end: ReplDisplayPosition
+}
+
+// Rust display_geometry (1029–1069). Core display_width is applied to EACH
+// scalar, not a grapheme/whole string, matching Diagnostics::display_char_width.
+pub fn repl_display_geometry(prompt: String, continuation: String, buf: [String], cursor: Int, ghost: String?, terminal_width: Int) -> ReplDisplayGeometry Never! {
+    position := ReplDisplayPosition.default()
+    repl_write_display_text(&position, prompt, terminal_width)
+    cursor_position := ReplDisplayPosition?{None}
+    if cursor == 0 -> cursor_position = Val(~position)
+    loop (index, ch) in buf {
+        if ch == "\n" {
+            &position.newline()
+            repl_write_display_text(&position, continuation, terminal_width)
+        } else {
+            &position.write_cells(repl_geometry_text.display_width(ch), terminal_width)
+        }
+        if index + 1 == cursor -> cursor_position = Val(~position)
+    }
+    if cursor == buf.len() {
+        if ghost == .Val(text) {
+            loop ch in repl_geometry_text.scalars(text) {
+                &position.write_cells(repl_geometry_text.display_width(ch), terminal_width)
+            }
+        }
+    }
+    ReplDisplayGeometry{rows: position.row + 1, cursor: cursor_position ?? ~position, end: position}
+}
+
+// Rust write_display_text (1071–1087): skip ESC through the next ASCII letter.
+// Newlines in prompt/continuation are width-zero scalars, not explicit rows.
+pub fn repl_write_display_text(position: &ReplDisplayPosition, text: String, terminal_width: Int) Never! {
+    escape := false
+    loop ch in repl_geometry_text.scalars(text) {
+        code :: Int.from_u8(ch.bytes()[0])
+        if escape {
+            if (code >= 65 && code <= 90) || (code >= 97 && code <= 122) -> escape = false
+        } else if code == 27 {
+            escape = true
+        } else {
+            &position.write_cells(repl_geometry_text.display_width(ch), terminal_width)
+        }
+    }
+}

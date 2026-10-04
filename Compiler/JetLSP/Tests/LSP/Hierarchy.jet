@@ -1,0 +1,11 @@
+// New hierarchy admission controls; original item/trait projections are 0740.
+#Test("hierarchy requests require an open item document and a text name") {
+    server :: lsp_handler_test_server("fn run() {{}}\n")
+    absent :: lsp_handler_test_params("{{\"item\":{{\"uri\":\"file:///lsp/absent.jet\",\"name\":\"run\"}}}}")
+    wrong :: lsp_handler_test_params("{{\"item\":{{\"uri\":\"file:///lsp/handler.jet\",\"name\":1}}}}")
+    assert_eq(lsp_call_hierarchy_incoming_response(server, Val(absent), DataTree.Int(1)), None)
+    assert_eq(lsp_call_hierarchy_outgoing_response(server, Val(wrong), DataTree.Int(1)), None)
+    assert_eq(lsp_type_hierarchy_supertypes_response(server, Val(absent), DataTree.Int(1)), None)
+    assert_eq(lsp_type_hierarchy_subtypes_response(server, Val(wrong), DataTree.Int(1)), None)
+    assert_eq(server.queries.stats().recomputes, 0)
+}

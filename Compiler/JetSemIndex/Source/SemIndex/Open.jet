@@ -1,0 +1,175 @@
+// crates/jet-semindex/src/lib.rs:55–294: stable checked opening and the
+// canonical Package/workspace attachment boundary.
+// Rust exports 1–54 stay at their original Jet owners: PackageModel owns
+// PackageFacts/EffectProjection; Sema owns SemIndexEffectFacts; Build/Structure/
+// Signatures own DB/build/binder facts; Docs owns its graph; Receipts owns
+// semantic operations; Symbols owns the language/symbol index; Facts/CallableFacts
+// own schema20 records; Foundation owns derivations; Codec owns JSON. No
+// re-export facade or second compiler/package model is introduced here.
+use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, diagnostic_from_registry]
+use jet_sema.[SemaRegistrationGraph, SemaGraphResult, SemaCompilerModuleSource]
+use jet_pkg_model.[
+    AuthorityResolver, EffectBudgetProgram, ManifestError, OverlayPolicy,
+    PackageEffectSummary, PackageFacts, WorkspaceDeclarationCache, WorkspacePlan,
+    UNIFIED_LOCK_FILE, pkg_package_facts_for_entry, pkg_path_parent,
+    pkg_lock_looks_like_workspace_lock, pkg_lock_e1202_workspace,
+    pkg_workspace_lock_load_checked_file,
+]
+use jet_driver.[JetDriverCompilerCheckResult, jet_driver_compiler_check_loaded_module_rows]
+
+// Rust SemIndexError::Load and Display. Compiler diagnostics are retained in
+// authored order, including the empty vector when no checked bundle exists.
+#Error
+pub enum SemIndexError {
+    Load(diagnostics: [Diagnostic])
+
+    pub fn message(self) -> String Never! {
+        if self == { .Load(diagnostics) -> "{diagnostics.len()} load/check diagnostic(s)" }
+    }
+}
+impl SemIndexError.Display { fn display(^self) -> String { self.message() } }
+
+// Rust Result<Option<PackageFacts>, String>: Jet errors need a typed carrier;
+// the message is exactly the joined Driver/PackageModel diagnostic projection.
+#Error
+pub struct SemIndexPackageFactsError {
+    pub message: String
+}
+impl SemIndexPackageFactsError.Display { fn display(^self) -> String { self.message } }
+
+// Rust from_checked: the build's canonical checked graph/source/effect inputs
+// are READ parameters. Do not rerun the checker or copy a retained snapshot.
+pub fn semindex_from_checked(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -> SemIndex {
+    semindex_build_index(registration, checked, module_sources, effect_program, effect_summaries)
+}
+
+// Rust package_facts_for_entry: one PackageModel authority owns discovery,
+// composition and validation. Standalone absence is distinct from failure.
+pub fn semindex_package_facts_for_entry(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> PackageFacts? SemIndexPackageFactsError! {
+    if pkg_package_facts_for_entry(&cache, entry) == {
+        .Ok(facts) -> Ok(^facts)
+        .Err(error) -> Err(SemIndexPackageFactsError{message: "{error.diagnostic.code}: {error.diagnostic.what} — {error.diagnostic.why}"})
+    }
+}
+
+// Rust package_facts_for_entry's error mapping; retain code/what/why, not
+// Display formatting or fix text, and preserve original diagnostic ordering.
+pub fn semindex_package_facts_error_text(diagnostics: [Diagnostic]) -> String Never! {
+    parts := [String]{}
+    loop diagnostic in diagnostics -> &parts.push("{diagnostic.code}: {diagnostic.what} — {diagnostic.why}")
+    parts.join("; ")
+}
+
+// Rust package_facts_diagnostic: shared registered E1206 projection.
+pub fn semindex_package_facts_diagnostic(entry: String, error: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1206", None,
+        "package facts for `{entry}` have a shape error",
+        "one typed Package fact graph must own this projection; {error}",
+        "fix package.jet, the inline Package carrier, or its declared Config files before tooling uses package facts")
+}
+
+// Rust workspace_overlay_policy_for_entry. ManifestError is PackageModel's
+// canonical diagnostic-only error carrier, not a new workspace error model.
+// The nearest workspace SOURCE stops the walk even if its lock is missing,
+// not a workspace lock, or validated with an empty policy.
+pub fn semindex_workspace_overlay_policy_for_entry(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> OverlayPolicy? ManifestError! {
+    if entry == "" || entry == "/" -> return Ok(None)
+    parent := pkg_path_parent(entry) // #4303: parent view flows into String calls.
+    first :: AuthorityResolver.open(parent) ?? return Err(ManifestError{diagnostic: err.diagnostic()})
+    dir := ~first.root
+    loop {
+        resolver :: AuthorityResolver.open(dir) ?? return Err(ManifestError{diagnostic: err.diagnostic()})
+        source :: resolver.resolve_workspace_source(&cache) ?? return Err(ManifestError{diagnostic: err.workspace_diagnostic()})
+        if source != None {
+            plan :: semindex_workspace_lock_at(&cache, resolver)
+            if plan == .Val(loaded) {
+                if !loaded.overlay_policy.is_empty() -> return Ok(Val(^loaded.overlay_policy))
+            }
+            return Ok(None)
+        }
+        if dir == "/" || dir == "" -> return Ok(None)
+        next_dir := pkg_path_parent(dir) // #4303: parent view flows into String calls.
+        if next_dir == dir -> return Ok(None)
+        dir = ^next_dir
+    }
+}
+
+// Rust workspace_lock_at: opened lock identity and decode/validation are
+// canonical PackageModel operations. A recognized invalid/stale inner lock
+// returns E1202 immediately; it never authorizes an outward scan.
+fn semindex_workspace_lock_at(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan? ManifestError! {
+    lock_file :: if resolver.checked_file(UNIFIED_LOCK_FILE) == {
+        .Ok(file) -> file
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            return Err(ManifestError{diagnostic: error.diagnostic()})
+        }
+    }
+    raw :: lock_file.text() ?? return Err(ManifestError{diagnostic: err.diagnostic()})
+    if !pkg_lock_looks_like_workspace_lock(raw) -> return Ok(None)
+    if pkg_workspace_lock_load_checked_file(&cache, resolver, lock_file) == {
+        .Val(plan) -> Ok(Val(^plan))
+        .None -> Err(ManifestError{diagnostic: pkg_lock_e1202_workspace(lock_file.path)})
+    }
+}
+
+// Rust attach_package_facts: package comes first; workspace failure stays
+// observable, rather than silently returning the partially attached index.
+fn semindex_attach_package_facts(index: &SemIndex, cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> SemIndexError! {
+    facts :: semindex_package_facts_for_entry(&cache, entry) ?? return Err(SemIndexError.Load{diagnostics: [Diagnostic]{semindex_package_facts_diagnostic(entry, err.message)}})
+    if facts == .Val(package) -> &index.attach_package_facts(^package)
+    policy :: semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? return Err(SemIndexError.Load{diagnostics: [Diagnostic]{^err.diagnostic}})
+    if policy == .Val(overlays) -> &index.attach_workspace_overlay_policy(^overlays)
+}
+
+fn semindex_open_has_errors(diagnostics: [Diagnostic]) -> Bool Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return true
+    }
+    false
+}
+
+// The existing retained Driver result is the consumer seam. Opening itself
+// requires CP-DRIVER-ENTRY-CHECK's canonical checked-to-budget projection
+// from the SAME retained result; entry/import_root checking is Driver-owned.
+// These helpers do not load a file, replace the public opens, or fabricate facts.
+fn semindex_index_from_open_result(result: JetDriverCompilerCheckResult, cache: &WorkspaceDeclarationCache, entry: String, effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary], allow_diagnostics: Bool) -[FS, Env]> SemIndex SemIndexError! {
+    if !allow_diagnostics && semindex_open_has_errors(result.diagnostics) -> return Err(SemIndexError.Load{diagnostics: ~result.diagnostics})
+    registration :: result.registration ?? return Err(SemIndexError.Load{diagnostics: ~result.diagnostics})
+    checked :: result.graph ?? return Err(SemIndexError.Load{diagnostics: ~result.diagnostics})
+    // `complete` is deliberately not the admission test in diagnostic mode:
+    // canonical Driver diagnostic packets retain the real checked graph.
+    index := semindex_from_checked(registration, checked, result.module_sources, effect_program, effect_summaries)
+    semindex_attach_package_facts(&index, &cache, entry)
+    Ok(^index)
+}
+
+// Rust open_symbols has the normal Error admission check but NEVER attaches
+// package/workspace facts. Package metadata failure cannot poison completion.
+fn semindex_symbols_from_open_result(result: JetDriverCompilerCheckResult, effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -> SemanticSymbolIndex SemIndexError! {
+    if semindex_open_has_errors(result.diagnostics) -> return Err(SemIndexError.Load{diagnostics: ~result.diagnostics})
+    registration :: result.registration ?? return Err(SemIndexError.Load{diagnostics: ~result.diagnostics})
+    checked :: result.graph ?? return Err(SemIndexError.Load{diagnostics: ~result.diagnostics})
+    db := semindex_build_symbol_db(registration, checked, result.module_sources, effect_program, effect_summaries)
+    Ok(^db.symbols)
+}
+
+// Rust open_with_overlays_diagnostics_and_inputs: paths come from the SAME
+// checked result's original loader membership, not definitions, source_files,
+// dependency sets, source-origin guesses, sorted/deduplicated query paths, or
+// the injected canonical registration module. Driver's compact original-bundle
+// index list excludes no-source Core namespaces without changing registration
+// order. Symbol-free imports and genuinely loaded Core source paths survive.
+fn semindex_inputs_from_open_result(result: JetDriverCompilerCheckResult) -> [String] Never! {
+    inputs := [String]{}
+    loop row_index in jet_driver_compiler_check_loaded_module_rows(result) -> &inputs.push(~result.module_sources[row_index].path)
+    inputs
+}
+
+// Named fields preserve Rust's returned triple without tuple-position guesses.
+// Own the newly produced index and copy diagnostics/paths only when publishing
+// them; the retained checked graph is never copied into a Tools result carrier.
+fn semindex_diagnostics_and_inputs_from_open_result(result: JetDriverCompilerCheckResult, cache: &WorkspaceDeclarationCache, entry: String, effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -[FS, Env]> (index: SemIndex, diagnostics: [Diagnostic], inputs: [String]) SemIndexError! {
+    index :: semindex_index_from_open_result(result, &cache, entry, effect_program, effect_summaries, true)
+    (index: ^index, diagnostics: ~result.diagnostics, inputs: semindex_inputs_from_open_result(result))
+}

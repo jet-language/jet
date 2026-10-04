@@ -1,0 +1,671 @@
+// PORT-PENDING 0762 crates-jet-devserver-src-canvas-graph-helpers: crates/jet-devserver/src/Canvas/graph_helpers.rs:1-667
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::path::Path;
+//RS 
+//RS use jet_driver::Diagnostics::{Diagnostic, Span, TextEdit};
+//RS use jet_driver::AST::{self, Expr};
+//RS use jet_semindex::{SemIndex, SourceSpan, SymbolKind};
+//RS 
+//RS use super::graph_json::add_wire_with_span;
+//RS use super::project_scan::project_file;
+//RS use super::query_actions::canvas_authority_context;
+//RS use super::edit_transaction::EDIT_SCHEMA_VERSION;
+//RS use super::graph_projection::{GraphBuilder, NodeQueryRef, Projection};
+//RS use super::schema_api::{ACTION_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION, QUERY_SCHEMA_VERSION};
+//RS use super::source_model::{read_source_without_symlinks, source_revision};
+//RS use super::validation_json::{json_str, span_json};
+//RS 
+//RS pub(super) fn graph_id(module_display: &str, f: &AST::Func) -> String {
+//RS     let file = Path::new(module_display)
+//RS         .file_name()
+//RS         .and_then(|s| s.to_str())
+//RS         .unwrap_or(module_display);
+//RS     format!(
+//RS         "fn:{file}::{}@{}-{}",
+//RS         f.name, f.name_span.start, f.name_span.end
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn span_through_closing_parens(src: &str, span: Span) -> SourceSpan {
+//RS     let Some(text) = src.get(span.start..span.end) else {
+//RS         return span.into();
+//RS     };
+//RS     let opens = text.bytes().filter(|byte| *byte == b'(').count();
+//RS     let mut closes = text.bytes().filter(|byte| *byte == b')').count();
+//RS     let mut end = span.end;
+//RS     while closes < opens && src.as_bytes().get(end) == Some(&b')') {
+//RS         end += 1;
+//RS         closes += 1;
+//RS     }
+//RS     SourceSpan {
+//RS         start: span.start,
+//RS         end,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn graph_id_name_span(graph_id: &str) -> Option<SourceSpan> {
+//RS     let (_, range) = graph_id.rsplit_once('@')?;
+//RS     let (start, end) = range.split_once('-')?;
+//RS     Some(SourceSpan {
+//RS         start: start.parse().ok()?,
+//RS         end: end.parse().ok()?,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn function_signature_span(
+//RS     src: &str,
+//RS     name_span: SourceSpan,
+//RS ) -> Result<SourceSpan, String> {
+//RS     let start = line_start(src, name_span.start);
+//RS     let Some(brace_rel) = src[name_span.end.min(src.len())..].find('{') else {
+//RS         return Err(edit_error(
+//RS             "not_found",
+//RS             "Canvas function signature no longer has a body",
+//RS         ));
+//RS     };
+//RS     let mut end = name_span.end + brace_rel;
+//RS     while end > start && src.as_bytes()[end - 1].is_ascii_whitespace() {
+//RS         end -= 1;
+//RS     }
+//RS     Ok(SourceSpan { start, end })
+//RS }
+//RS 
+//RS pub(super) fn insert_offset(src: &str, f: &AST::Func) -> usize {
+//RS     if let Some(first) = f.body.first() {
+//RS         let first_start = first.span().start;
+//RS         let line = line_start(src, first_start);
+//RS         if src[line..first_start].contains('{') {
+//RS             return first_start;
+//RS         }
+//RS         return line;
+//RS     }
+//RS     line_after(src, f.name_span.end)
+//RS }
+//RS 
+//RS pub(super) fn line_start(src: &str, offset: usize) -> usize {
+//RS     src[..offset.min(src.len())]
+//RS         .rfind('\n')
+//RS         .map(|i| i + 1)
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS pub(super) fn line_after(src: &str, offset: usize) -> usize {
+//RS     src[offset.min(src.len())..]
+//RS         .find('\n')
+//RS         .map(|i| offset + i + 1)
+//RS         .unwrap_or(src.len())
+//RS }
+//RS 
+//RS pub(super) fn indentation_at(src: &str, offset: usize) -> String {
+//RS     let start = line_start(src, offset);
+//RS     src[start..offset.min(src.len())]
+//RS         .chars()
+//RS         .take_while(|c| *c == ' ' || *c == '\t')
+//RS         .collect()
+//RS }
+//RS 
+//RS pub(super) fn assignment_title(target: &AST::LValue, op: Option<AST::BinOp>) -> String {
+//RS     let op = op
+//RS         .map(|op| format!("{op:?}="))
+//RS         .unwrap_or_else(|| "=".to_string());
+//RS     match target {
+//RS         AST::LValue::Local { name, .. } => format!("{name} {op}"),
+//RS         AST::LValue::Index { .. } => format!("index {op}"),
+//RS         AST::LValue::Field { field, .. } => format!(".{field} {op}"),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn lvalue_type(g: &GraphBuilder, target: &AST::LValue) -> String {
+//RS     match target {
+//RS         AST::LValue::Local { name, .. } => g
+//RS             .local_types
+//RS             .get(name)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| "unknown".to_string()),
+//RS         AST::LValue::Index { .. } | AST::LValue::Field { .. } => "unknown".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn expr_title(expr: &Expr) -> &'static str {
+//RS     match expr {
+//RS         Expr::StructLit { .. } => "construct",
+//RS         Expr::EnumLit { .. } => "variant",
+//RS         Expr::Lambda(_) => "lambda",
+//RS         Expr::If { .. } => "if expression",
+//RS         Expr::ListLit(_, _) => "list",
+//RS         Expr::MapLit(_, _) => "map",
+//RS         Expr::TupleLit(_, _, _) => "tuple",
+//RS         Expr::Index { .. } => "index",
+//RS         Expr::Slice { .. } => "slice",
+//RS         Expr::CallValue { .. } => "call value",
+//RS         Expr::Deref(_, _) | Expr::RawOf(_, _) | Expr::PtrFromAddr { .. } => "unsafe expr",
+//RS         Expr::OrFallback { .. } => "fallback",
+//RS         Expr::PatternTest { .. } => "pattern test",
+//RS         Expr::Try(_, _, _, _) => "fallible",
+//RS         _ => "expression",
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn starts_uppercase(s: &str) -> bool {
+//RS     s.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+//RS }
+//RS 
+//RS pub(super) fn binding_type(g: &GraphBuilder, name: &str, b: &AST::Binding) -> String {
+//RS     b.ty.as_ref()
+//RS         .map(AST::Type::name)
+//RS         .or_else(|| g.local_types.get(name).cloned())
+//RS         .unwrap_or_else(|| "unknown".to_string())
+//RS }
+//RS 
+//RS pub(super) fn expr_type(g: &GraphBuilder, index: &SemIndex, expr: &Expr) -> String {
+//RS     match expr {
+//RS         Expr::Int(_, _, _, _) => "Int".to_string(),
+//RS         Expr::Float(_, _, is_f32, _) => if *is_f32 { "F32" } else { "Float" }.to_string(),
+//RS         Expr::Bool(_, _) => "Bool".to_string(),
+//RS         Expr::Str(_, _) => "String".to_string(),
+//RS         Expr::Char(_, _) => "Char".to_string(),
+//RS         Expr::Ident(name, _) => g
+//RS             .local_types
+//RS             .get(name)
+//RS             .cloned()
+//RS             .or_else(|| {
+//RS                 index.definitions().iter().find_map(|definition| {
+//RS                     if definition.name != *name {
+//RS                         return None;
+//RS                     }
+//RS                     let SymbolKind::Function { params, ret, .. } = &definition.kind else {
+//RS                         return None;
+//RS                     };
+//RS                     let params = params
+//RS                         .iter()
+//RS                         .map(|(_, ty)| ty.as_str())
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ");
+//RS                     Some(format!(
+//RS                         "fn({params}){}",
+//RS                         ret.as_deref()
+//RS                             .map(|ty| format!(" {ty}"))
+//RS                             .unwrap_or_default()
+//RS                     ))
+//RS                 })
+//RS             })
+//RS             .unwrap_or_else(|| "unknown".to_string()),
+//RS         Expr::Binary(op, left, _, _) => {
+//RS             if op_is_bool(*op) {
+//RS                 "Bool".to_string()
+//RS             } else {
+//RS                 expr_type(g, index, left)
+//RS             }
+//RS         }
+//RS         Expr::Call(c) => call_ret(index, &c.name).unwrap_or_else(|| "unknown".to_string()),
+//RS         Expr::MethodCall { resolved_ret, .. } => resolved_ret
+//RS             .as_ref()
+//RS             .map(AST::Type::name)
+//RS             .unwrap_or_else(|| "unknown".to_string()),
+//RS         Expr::Try(inner, _, _, _) => expr_type(g, index, inner).trim_end_matches('?').to_string(),
+//RS         _ => "unknown".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn op_is_bool(op: AST::BinOp) -> bool {
+//RS     matches!(
+//RS         op,
+//RS         AST::BinOp::Eq
+//RS             | AST::BinOp::Ne
+//RS             | AST::BinOp::Lt
+//RS             | AST::BinOp::Le
+//RS             | AST::BinOp::Gt
+//RS             | AST::BinOp::Ge
+//RS             | AST::BinOp::And
+//RS             | AST::BinOp::Or
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn call_ret(index: &SemIndex, name: &str) -> Option<String> {
+//RS     index.definitions().iter().find_map(|d| {
+//RS         if d.name == name {
+//RS             if let SymbolKind::Function { ret, .. } = &d.kind {
+//RS                 return ret.clone();
+//RS             }
+//RS         }
+//RS         None
+//RS     })
+//RS }
+//RS 
+//RS fn callable_signature_for_name<'a>(
+//RS     index: &'a SemIndex,
+//RS     function: &str,
+//RS ) -> Option<&'a jet_semindex::CallableSignatureFact> {
+//RS     index
+//RS         .definitions()
+//RS         .iter()
+//RS         .find(|definition| {
+//RS             definition.name == function
+//RS                 && matches!(&definition.kind, SymbolKind::Function { .. })
+//RS         })
+//RS         .and_then(|definition| definition.callable_signature.as_ref())
+//RS }
+//RS 
+//RS pub(super) fn effect_badges(index: &SemIndex, function: &str) -> Vec<&'static str> {
+//RS     if let Some(signature) = callable_signature_for_name(index, function) {
+//RS         return match &signature.effects {
+//RS             jet_semindex::CallableEffectsFact::Checked(effects) if effects.is_empty() => {
+//RS                 Vec::new()
+//RS             }
+//RS             jet_semindex::CallableEffectsFact::Checked(_) => vec!["effects"],
+//RS             jet_semindex::CallableEffectsFact::Unavailable(_) => {
+//RS                 vec!["effects_unavailable"]
+//RS             }
+//RS         };
+//RS     }
+//RS     match index.effect_of(function) {
+//RS         Some(effects) if !effects.direct.is_empty() || !effects.inferred.is_empty() => {
+//RS             vec!["effects"]
+//RS         }
+//RS         Some(_) => Vec::new(),
+//RS         None => vec!["effects_unavailable"],
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn call_has_effects(index: &SemIndex, function: &str) -> bool {
+//RS     if let Some(signature) = callable_signature_for_name(index, function) {
+//RS         return match &signature.effects {
+//RS             jet_semindex::CallableEffectsFact::Checked(effects) => !effects.is_empty(),
+//RS             jet_semindex::CallableEffectsFact::Unavailable(_) => true,
+//RS         };
+//RS     }
+//RS     index
+//RS         .effect_of(function)
+//RS         .map(|effects| !effects.direct.is_empty() || !effects.inferred.is_empty())
+//RS         .unwrap_or(true)
+//RS }
+//RS 
+//RS pub(super) fn pure_leaf(expr: &Expr) -> bool {
+//RS     match expr {
+//RS         Expr::Str(_, _)
+//RS         | Expr::Int(_, _, _, _)
+//RS         | Expr::Float(_, _, _, _)
+//RS         | Expr::Bool(_, _)
+//RS         | Expr::Char(_, _)
+//RS         | Expr::Ident(_, _)
+//RS         | Expr::Field(_, _, _)
+//RS         | Expr::OptField { .. }
+//RS         | Expr::Absent(_)
+//RS         | Expr::Todo { .. } => true,
+//RS         Expr::Unary(_, inner, _) | Expr::Paren(inner, _) | Expr::Copy(inner, _) => pure_leaf(inner),
+//RS         Expr::Binary(_, left, right, _) => pure_leaf(left) && pure_leaf(right),
+//RS         Expr::CompareChain { operands, .. } => operands.iter().all(pure_leaf),
+//RS         Expr::ListLit(_, _) => false,
+//RS         Expr::MapLit(items, _) => items.iter().all(|(k, v)| pure_leaf(k) && pure_leaf(v)),
+//RS         Expr::TupleLit(items, _, _) => items.iter().all(|(_, e)| pure_leaf(e)),
+//RS         Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Present(inner, _) => pure_leaf(inner),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn wire_ident_refs(g: &mut GraphBuilder, expr: &Expr, input_pin: &str) {
+//RS     if let Expr::Ident(name, span) = expr {
+//RS         if let Some(out) = g.local_pins.get(name).cloned() {
+//RS             add_wire_with_span(g, &out, input_pin, "data", Some((*span).into()));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn snippet(src: &str, span: Span) -> String {
+//RS     src.get(span.start..span.end)
+//RS         .unwrap_or("")
+//RS         .trim()
+//RS         .to_string()
+//RS }
+//RS 
+//RS pub(super) fn edit(span: SourceSpan, text: &str) -> TextEdit {
+//RS     TextEdit {
+//RS         span: Span::new(span.start, span.end),
+//RS         new_text: text.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn edit_ok(changed: bool, path: &Path) -> String {
+//RS     let src = read_source_without_symlinks(path).unwrap_or_default();
+//RS     edit_ok_source(changed, &src)
+//RS }
+//RS 
+//RS pub(super) fn edit_ok_source(changed: bool, src: &str) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"changed\":{},\"revision\":{},\"source_text\":{}}}",
+//RS         EDIT_SCHEMA_VERSION,
+//RS         if changed { "true" } else { "false" },
+//RS         json_str(&source_revision(&src)),
+//RS         json_str(&src)
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn preview_ok(before: &str, after: &str) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.preview\",\"schema_version\":{},\"changed\":{},\"diff\":{},\"after_revision\":{}}}",
+//RS         EDIT_SCHEMA_VERSION,
+//RS         if before != after { "true" } else { "false" },
+//RS         json_str(&simple_diff(before, after)),
+//RS         json_str(&source_revision(after))
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn canvas_action_preview_ok(
+//RS     path: &Path,
+//RS     before: &str,
+//RS     after: &str,
+//RS     action_id: &str,
+//RS     callee: &str,
+//RS ) -> String {
+//RS     let authority = canvas_authority_context(path);
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.action\",\"schema_version\":{},\"ok\":true,\"changed\":{},\"action_id\":{},\"callee\":{},\"engine\":\"checked-tir+jit\",\"execution\":\"preview\",\"writes\":\"source_transaction_only\",\"authority\":[{}],\"audit\":{{\"package_id\":{},\"version\":{},\"hash\":{},\"touched_files\":[{}],\"diagnostics\":[]}},\"diff\":{},\"after_revision\":{}}}",
+//RS         ACTION_SCHEMA_VERSION,
+//RS         if before != after { "true" } else { "false" },
+//RS         json_str(action_id),
+//RS         json_str(callee),
+//RS         json_str(&authority.grant),
+//RS         json_str(&authority.package_id),
+//RS         json_str(&authority.version),
+//RS         json_str(&source_revision(after)),
+//RS         json_str(&authority.touched_file),
+//RS         json_str(&simple_diff(before, after)),
+//RS         json_str(&source_revision(after))
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn query_ok(op: &str, src: &str, results_json: &str, extra_fields: &str) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":true,\"op\":{},\"revision\":{},\"results\":{},{} }}",
+//RS         QUERY_SCHEMA_VERSION,
+//RS         json_str(op),
+//RS         json_str(&source_revision(src)),
+//RS         results_json,
+//RS         extra_fields
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn query_result_json(
+//RS     kind: &str,
+//RS     title: &str,
+//RS     symbol: &str,
+//RS     module_path: &str,
+//RS     span: SourceSpan,
+//RS     node: Option<&NodeQueryRef>,
+//RS     src: &str,
+//RS ) -> String {
+//RS     let (graph_id, node_id, node_kind) = match node {
+//RS         Some(n) => (n.graph_id.as_str(), n.node_id.as_str(), n.kind.as_str()),
+//RS         None => ("", "", ""),
+//RS     };
+//RS     format!(
+//RS         "{{\"kind\":{},\"title\":{},\"symbol\":{},\"module_path\":{},\"graph_id\":{},\"node_id\":{},\"node_kind\":{},\"source_span\":{},\"line\":{},\"excerpt\":{}}}",
+//RS         json_str(kind),
+//RS         json_str(title),
+//RS         json_str(symbol),
+//RS         json_str(module_path),
+//RS         json_str(graph_id),
+//RS         json_str(node_id),
+//RS         json_str(node_kind),
+//RS         span_json(span),
+//RS         line_number_for(src, span.start),
+//RS         json_str(&source_line_for(src, span.start))
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn open_query_context(path: &Path, src: &str) -> Result<(Projection, SemIndex), String> {
+//RS     let projection =
+//RS         project_file(path).map_err(|diags| query_diagnostics_error(path, src, &diags))?;
+//RS     let index = jet_semindex::open(path).map_err(|e| query_error("check", &e.to_string()))?;
+//RS     Ok((projection, index))
+//RS }
+//RS 
+//RS pub(super) fn node_for_span(projection: &Projection, span: SourceSpan) -> Option<NodeQueryRef> {
+//RS     projection
+//RS         .node_refs
+//RS         .iter()
+//RS         .filter(|node| spans_overlap(node.span, span))
+//RS         .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
+//RS         .cloned()
+//RS }
+//RS 
+//RS pub(super) fn nearest_node(projection: &Projection, offset: usize) -> Option<NodeQueryRef> {
+//RS     projection
+//RS         .node_refs
+//RS         .iter()
+//RS         .min_by_key(|node| {
+//RS             if offset < node.span.start {
+//RS                 node.span.start - offset
+//RS             } else {
+//RS                 offset.saturating_sub(node.span.end)
+//RS             }
+//RS         })
+//RS         .cloned()
+//RS }
+//RS 
+//RS pub(super) fn spans_overlap(a: SourceSpan, b: SourceSpan) -> bool {
+//RS     a.start <= b.end && b.start <= a.end
+//RS }
+//RS 
+//RS pub(super) fn contains_ci(text: &str, needle: &str) -> bool {
+//RS     text.to_ascii_lowercase()
+//RS         .contains(&needle.to_ascii_lowercase())
+//RS }
+//RS 
+//RS pub(super) fn text_matches(src: &str, needle: &str) -> Vec<SourceSpan> {
+//RS     let mut out = Vec::new();
+//RS     if needle.is_empty() {
+//RS         return out;
+//RS     }
+//RS     let hay = src.to_ascii_lowercase();
+//RS     let needle = needle.to_ascii_lowercase();
+//RS     let mut offset = 0;
+//RS     while let Some(pos) = hay[offset..].find(&needle) {
+//RS         let start = offset + pos;
+//RS         let end = start + needle.len();
+//RS         out.push(SourceSpan { start, end });
+//RS         offset = end;
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(super) fn dedupe_results(results: &mut Vec<String>) {
+//RS     let mut seen = Vec::<String>::new();
+//RS     results.retain(|r| {
+//RS         if seen.iter().any(|s| s == r) {
+//RS             false
+//RS         } else {
+//RS             seen.push(r.clone());
+//RS             true
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn line_number_for(src: &str, offset: usize) -> usize {
+//RS     let offset = floor_char_boundary(src, offset);
+//RS     src[..offset].bytes().filter(|b| *b == b'\n').count() + 1
+//RS }
+//RS 
+//RS fn source_line_for(src: &str, offset: usize) -> String {
+//RS     let offset = floor_char_boundary(src, offset);
+//RS     let start = src[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+//RS     let end = src[offset..]
+//RS         .find('\n')
+//RS         .map(|i| offset + i)
+//RS         .unwrap_or(src.len());
+//RS     src[start..end].trim().to_string()
+//RS }
+//RS 
+//RS fn floor_char_boundary(src: &str, mut offset: usize) -> usize {
+//RS     offset = offset.min(src.len());
+//RS     while offset > 0 && !src.is_char_boundary(offset) {
+//RS         offset -= 1;
+//RS     }
+//RS     offset
+//RS }
+//RS 
+//RS pub(super) fn simple_diff(before: &str, after: &str) -> String {
+//RS     let before_lines = before.lines().collect::<Vec<_>>();
+//RS     let after_lines = after.lines().collect::<Vec<_>>();
+//RS     let mut out = String::from("--- before\n+++ after\n");
+//RS     for line in &before_lines {
+//RS         if !after_lines.contains(line) {
+//RS             out.push('-');
+//RS             out.push_str(line);
+//RS             out.push('\n');
+//RS         }
+//RS     }
+//RS     for line in &after_lines {
+//RS         if !before_lines.contains(line) {
+//RS             out.push('+');
+//RS             out.push_str(line);
+//RS             out.push('\n');
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(super) fn edit_error(kind: &str, message: &str) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
+//RS         EDIT_SCHEMA_VERSION,
+//RS         json_str(kind),
+//RS         json_str(message)
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn edit_conflict(message: &str, current_revision: &str) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"ok\":false,\"kind\":\"conflict\",\"message\":{},\"current_revision\":{}}}",
+//RS         EDIT_SCHEMA_VERSION,
+//RS         json_str(message),
+//RS         json_str(current_revision)
+//RS     )
+//RS }
+//RS 
+//RS fn edit_error_with_diagnostics(
+//RS     kind: &str,
+//RS     message: &str,
+//RS     path: &Path,
+//RS     src: &str,
+//RS     diags: &[Diagnostic],
+//RS ) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{},\"revision\":{},\"diagnostic_revision\":{},\"diagnostics\":[{}]}}",
+//RS         EDIT_SCHEMA_VERSION,
+//RS         json_str(kind),
+//RS         json_str(message),
+//RS         json_str(&source_revision(src)),
+//RS         json_str(&source_revision(src)),
+//RS         diagnostics_json(path, src, diags)
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn query_error(kind: &str, message: &str) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
+//RS         QUERY_SCHEMA_VERSION,
+//RS         json_str(kind),
+//RS         json_str(message)
+//RS     )
+//RS }
+//RS 
+//RS fn query_error_with_diagnostics(
+//RS     kind: &str,
+//RS     message: &str,
+//RS     path: &Path,
+//RS     src: &str,
+//RS     diags: &[Diagnostic],
+//RS ) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{},\"revision\":{},\"diagnostic_revision\":{},\"diagnostics\":[{}]}}",
+//RS         QUERY_SCHEMA_VERSION,
+//RS         json_str(kind),
+//RS         json_str(message),
+//RS         json_str(&source_revision(src)),
+//RS         json_str(&source_revision(src)),
+//RS         diagnostics_json(path, src, diags)
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS pub(super) fn project_edit_ok_with_audit(
+//RS     op: &str,
+//RS     preview: bool,
+//RS     changed: bool,
+//RS     before_revision: &str,
+//RS     after_revision: &str,
+//RS     touched_files: &str,
+//RS     diff: &str,
+//RS     audit: &str,
+//RS ) -> String {
+//RS     let game_audit = if audit.is_empty() {
+//RS         String::new()
+//RS     } else {
+//RS         format!(",\"game_selection\":{audit}")
+//RS     };
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":true,\"op\":{},\"preview\":{},\"changed\":{},\"project_revision\":{},\"after_project_revision\":{},\"writes\":{},\"authority\":[\"canvas.source_edit:project\"],\"audit\":{{\"touched_files\":[{}],\"diagnostics\":[]{}}},\"diff\":{}}}",
+//RS         PROJECT_SCHEMA_VERSION,
+//RS         json_str(op),
+//RS         if preview { "true" } else { "false" },
+//RS         if changed { "true" } else { "false" },
+//RS         json_str(before_revision),
+//RS         json_str(after_revision),
+//RS         if preview { "\"preview_only\"" } else { "\"source_transaction\"" },
+//RS         touched_files,
+//RS         game_audit,
+//RS         json_str(diff)
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn project_edit_error(kind: &str, message: &str) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
+//RS         PROJECT_SCHEMA_VERSION,
+//RS         json_str(kind),
+//RS         json_str(message)
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn project_edit_conflict(message: &str, current_revision: &str) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":false,\"kind\":\"conflict\",\"message\":{},\"current_revision\":{}}}",
+//RS         PROJECT_SCHEMA_VERSION,
+//RS         json_str(message),
+//RS         json_str(current_revision)
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
+//RS     edit_error_with_diagnostics(
+//RS         "diagnostic",
+//RS         &jet_driver::Diagnostics::render_all(&path.display().to_string(), src, diags),
+//RS         path,
+//RS         src,
+//RS         diags,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn query_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
+//RS     query_error_with_diagnostics(
+//RS         "diagnostic",
+//RS         &jet_driver::Diagnostics::render_all(&path.display().to_string(), src, diags),
+//RS         path,
+//RS         src,
+//RS         diags,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn diagnostics_json(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
+//RS     jet_driver::Diagnostics::render_all_json(
+//RS         &jet_driver::Diagnostics::ReportPath::from_path(path),
+//RS         src,
+//RS         diags,
+//RS     )
+//RS     .lines()
+//RS     .collect::<Vec<_>>()
+//RS     .join(",")
+//RS }
+// END-PORT-PENDING 0762 crates/jet-devserver/src/Canvas/graph_helpers.rs:1-667
+

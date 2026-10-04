@@ -1,0 +1,2065 @@
+// PORT-PENDING 0748 crates-jet-debug-src-dap-slice-3656: crates/jet-debug/src/Dap.rs:3656-5716
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn resume_hidden_stop(&mut self, resume_command: &str) -> Result<ResumeResult, io::Error> {
+//RS         self.state = State::Running;
+//RS         let Some(inf) = self.inf.as_mut() else {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::NotFound,
+//RS                 "the native debugger has no target while skipping a non-Jet stop",
+//RS             ));
+//RS         };
+//RS         inf.resume_and_locate(resume_command)
+//RS     }
+//RS 
+//RS     fn exception_kind(&self, backtrace: &str) -> Option<&'static str> {
+//RS         // Only the LLDB stop banner carries the reason.  Searching every
+//RS         // frame makes ordinary Jet stops look like panics because the Rust
+//RS         // runtime's catch_unwind helpers are present in otherwise normal
+//RS         // stacks.
+//RS         let reason = backtrace
+//RS             .lines()
+//RS             .find(|line| line.contains("stop reason ="))
+//RS             .unwrap_or("")
+//RS             .to_ascii_lowercase();
+//RS         if self.last_signal.is_some() || reason.contains("stop reason = signal ") {
+//RS             Some("signal")
+//RS         } else if reason.contains("panic") {
+//RS             Some("panic")
+//RS         } else if reason.contains("exception")
+//RS             || reason.contains("fatal error")
+//RS             || reason.contains("exc_")
+//RS         {
+//RS             Some("error")
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS     fn exception_filter_enabled(&self, kind: &str) -> bool {
+//RS         self.exception_filters.contains("all") || self.exception_filters.contains(kind)
+//RS     }
+//RS 
+//RS     fn terminate_backend(&mut self, out: &mut impl Write, error: &io::Error, message: &str) {
+//RS         let id = backend_error_id(error);
+//RS         let (diagnostic, _, _) = diagnostic_details(id, message);
+//RS         self.terminate_with_diagnostic(out, diagnostic, message);
+//RS     }
+//RS 
+//RS     fn terminate_with_diagnostic(&mut self, out: &mut impl Write, diagnostic: &str, message: &str) {
+//RS         self.terminal_failure = true;
+//RS         self.state = State::Terminated;
+//RS         self.invalidate_references();
+//RS         let cleanup_proven = self.cleanup_after_terminal_state(out);
+//RS         let body = format!(
+//RS             "{{\"category\":\"stderr\",\"output\":\"[{}] {}\\n\"}}",
+//RS             json_escape(diagnostic),
+//RS             json_escape(message)
+//RS         );
+//RS         self.event(out, "output", &body);
+//RS         if cleanup_proven {
+//RS             self.event(out, "terminated", "{}");
+//RS         }
+//RS     }
+//RS 
+//RS     fn breakpoint_action(&mut self, line: usize) -> BreakpointAction {
+//RS         if self.pending_specs.is_empty() {
+//RS             return BreakpointAction::Continue;
+//RS         }
+//RS         let mut log = None;
+//RS         let mut matched = false;
+//RS         let mut stop_ids = Vec::new();
+//RS         let mut should_stop = false;
+//RS         for index in 0..self.pending_specs.len() {
+//RS             let spec = self.pending_specs[index].clone();
+//RS             if spec.line != line {
+//RS                 continue;
+//RS             }
+//RS             matched = true;
+//RS             let count = self
+//RS                 .hit_counts
+//RS                 .get_mut(index)
+//RS                 .map(|count| {
+//RS                     *count = count.saturating_add(1);
+//RS                     *count
+//RS                 })
+//RS                 .unwrap_or(1);
+//RS             if spec
+//RS                 .condition
+//RS                 .as_deref()
+//RS                 .is_some_and(|condition| !self.condition_matches(condition))
+//RS                 || spec
+//RS                     .hit_condition
+//RS                     .as_deref()
+//RS                     .is_some_and(|condition| !hit_condition_matches(condition, count))
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             if let Some(message) = spec.log_message.as_deref() {
+//RS                 log = Some(self.expand_log_message(message));
+//RS             } else {
+//RS                 should_stop = true;
+//RS                 if let Some(id) = self.client_breakpoint_ids.get(index).copied() {
+//RS                     stop_ids.push(id);
+//RS                 }
+//RS             }
+//RS         }
+//RS         if should_stop {
+//RS             return BreakpointAction::Stop(stop_ids);
+//RS         }
+//RS         if let Some(message) = log {
+//RS             BreakpointAction::Log(message)
+//RS         } else if matched {
+//RS             BreakpointAction::Continue
+//RS         } else {
+//RS             // A `continue` request stops only at a requested source
+//RS             // breakpoint.  Every other mapped statement is ordinary program
+//RS             // execution and must stay hidden from the editor.
+//RS             BreakpointAction::Continue
+//RS         }
+//RS     }
+//RS 
+//RS     fn condition_matches(&mut self, condition: &str) -> bool {
+//RS         let operators = ["==", "!=", ">=", "<=", ">", "<"];
+//RS         let Some((left, operator, right)) = operators.iter().find_map(|operator| {
+//RS             condition
+//RS                 .split_once(operator)
+//RS                 .map(|parts| (parts.0, *operator, parts.1))
+//RS         }) else {
+//RS             return self
+//RS                 .read_jet_value(condition)
+//RS                 .is_some_and(|value| value == "true");
+//RS         };
+//RS         let Some(value) = self.read_jet_value(left.trim()) else {
+//RS             return false;
+//RS         };
+//RS         let right = right.trim();
+//RS         if let (Ok(left), Ok(right)) = (value.parse::<f64>(), right.parse::<f64>()) {
+//RS             return match operator {
+//RS                 "==" => left == right,
+//RS                 "!=" => left != right,
+//RS                 ">=" => left >= right,
+//RS                 "<=" => left <= right,
+//RS                 ">" => left > right,
+//RS                 "<" => left < right,
+//RS                 _ => false,
+//RS             };
+//RS         }
+//RS         match operator {
+//RS             "==" => value == right,
+//RS             "!=" => value != right,
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn read_jet_value(&mut self, expression: &str) -> Option<String> {
+//RS         let (root, suffix) = jet_expression(expression)?;
+//RS         let rust_expression = Inferior::jet_path_to_rust(&root, &suffix)?;
+//RS         let output = self.inf.as_mut()?.frame_variable(&rust_expression).ok()?;
+//RS         Inferior::parse_typed_locals(&output)
+//RS             .into_iter()
+//RS             .next()
+//RS             .map(|(ty, _, value)| Inferior::safe_value(&ty, &value))
+//RS     }
+//RS 
+//RS     fn expand_log_message(&mut self, message: &str) -> String {
+//RS         let mut rendered = String::new();
+//RS         let mut rest = message;
+//RS         while let Some(open) = rest.find('{') {
+//RS             rendered.push_str(&rest[..open]);
+//RS             let after_open = &rest[open + 1..];
+//RS             let Some(close) = after_open.find('}') else {
+//RS                 rendered.push_str(&rest[open..]);
+//RS                 return rendered;
+//RS             };
+//RS             let expression = &after_open[..close];
+//RS             rendered.push_str(
+//RS                 &self
+//RS                     .read_jet_value(expression)
+//RS                     .unwrap_or_else(|| "<unavailable>".to_string()),
+//RS             );
+//RS             rest = &after_open[close + 1..];
+//RS         }
+//RS         rendered.push_str(rest);
+//RS         rendered
+//RS     }
+//RS 
+//RS     fn respond(
+//RS         &mut self,
+//RS         out: &mut impl Write,
+//RS         request_seq: i64,
+//RS         command: &str,
+//RS         success: bool,
+//RS         body: &str,
+//RS     ) {
+//RS         let seq = self.next_seq();
+//RS         let json = format!(
+//RS             "{{\"seq\":{},\"type\":\"response\",\"request_seq\":{},\"success\":{},\"command\":\"{}\",\"body\":{}}}",
+//RS             seq,
+//RS             request_seq,
+//RS             success,
+//RS             json_escape(command),
+//RS             body
+//RS         );
+//RS         if write_message(out, &json).is_err() {
+//RS             self.terminal_failure = true;
+//RS         }
+//RS     }
+//RS 
+//RS     fn respond_err(
+//RS         &mut self,
+//RS         out: &mut impl Write,
+//RS         request_seq: i64,
+//RS         command: &str,
+//RS         message: &str,
+//RS     ) {
+//RS         let id = if message.contains("must")
+//RS             || message.contains("required")
+//RS             || message.contains("positive")
+//RS             || message.contains("invalid")
+//RS             || message.contains("array")
+//RS         {
+//RS             22032
+//RS         } else {
+//RS             22034
+//RS         };
+//RS         self.respond_jet_error(out, request_seq, command, id, message);
+//RS     }
+//RS 
+//RS     fn respond_backend_error(
+//RS         &mut self,
+//RS         out: &mut impl Write,
+//RS         request_seq: i64,
+//RS         command: &str,
+//RS         error: &io::Error,
+//RS         message: &str,
+//RS     ) {
+//RS         let id = backend_error_id(error);
+//RS         self.respond_jet_error(out, request_seq, command, id, message);
+//RS     }
+//RS 
+//RS     fn respond_stale_reference(&mut self, out: &mut impl Write, request_seq: i64, command: &str) {
+//RS         self.respond_jet_error(
+//RS             out,
+//RS             request_seq,
+//RS             command,
+//RS             22036,
+//RS             "frame, scope, or variable reference expired when execution resumed",
+//RS         );
+//RS     }
+//RS 
+//RS     fn respond_jet_error(
+//RS         &mut self,
+//RS         out: &mut impl Write,
+//RS         request_seq: i64,
+//RS         command: &str,
+//RS         id: i64,
+//RS         format: &str,
+//RS     ) {
+//RS         let message = match id {
+//RS             22031 => "jet.invalidState",
+//RS             22032 => "jet.invalidArguments",
+//RS             22033 => "jet.unsupported",
+//RS             22034 => "jet.unavailable",
+//RS             22035 => "jet.timeout",
+//RS             22036 => "jet.staleReference",
+//RS             22037 => "jet.mapMismatch",
+//RS             22038 => "jet.cancelled",
+//RS             22039 => "jet.noSourceLocation",
+//RS             _ => "jet.unavailable",
+//RS         };
+//RS         let (diagnostic, why, fix) = diagnostic_details(id, format);
+//RS         let body = format!(
+//RS             "{{\"error\":{{\"id\":{},\"format\":\"{}\",\"showUser\":true,\"variables\":{{\"retryable\":\"false\"}}}},\"jetDiagnostic\":{{\"schema\":\"jet.diagnostic/v1\",\"code\":\"{}\",\"what\":\"{}\",\"why\":\"{}\",\"fix\":\"{}\"}}}}",
+//RS             id,
+//RS             json_escape(format),
+//RS             diagnostic,
+//RS             json_escape(format),
+//RS             json_escape(why),
+//RS             json_escape(fix),
+//RS         );
+//RS         let seq = self.next_seq();
+//RS         let json = format!(
+//RS             "{{\"seq\":{},\"type\":\"response\",\"request_seq\":{},\"success\":false,\"command\":\"{}\",\"message\":\"{}\",\"body\":{}}}",
+//RS             seq,
+//RS             request_seq,
+//RS             json_escape(command),
+//RS             json_escape(message),
+//RS             body
+//RS         );
+//RS         if write_message(out, &json).is_err() {
+//RS             self.terminal_failure = true;
+//RS         }
+//RS     }
+//RS 
+//RS     fn event(&mut self, out: &mut impl Write, event: &str, body: &str) {
+//RS         let seq = self.next_seq();
+//RS         let json = format!(
+//RS             "{{\"seq\":{},\"type\":\"event\",\"event\":\"{}\",\"body\":{}}}",
+//RS             seq, event, body
+//RS         );
+//RS         if write_message(out, &json).is_err() {
+//RS             self.terminal_failure = true;
+//RS         }
+//RS     }
+//RS 
+//RS     fn progress_start(&mut self, out: &mut impl Write, progress_id: &str, title: &str) {
+//RS         self.event(
+//RS             out,
+//RS             "progressStart",
+//RS             &format!(
+//RS                 "{{\"progressId\":\"{}\",\"title\":\"{}\",\"cancellable\":false}}",
+//RS                 json_escape(progress_id),
+//RS                 json_escape(title)
+//RS             ),
+//RS         );
+//RS     }
+//RS 
+//RS     fn progress_end(&mut self, out: &mut impl Write, progress_id: &str, message: &str) {
+//RS         self.event(
+//RS             out,
+//RS             "progressEnd",
+//RS             &format!(
+//RS                 "{{\"progressId\":\"{}\",\"message\":\"{}\"}}",
+//RS                 json_escape(progress_id),
+//RS                 json_escape(message)
+//RS             ),
+//RS         );
+//RS     }
+//RS 
+//RS     fn next_seq(&mut self) -> i64 {
+//RS         let s = self.seq;
+//RS         self.seq += 1;
+//RS         s
+//RS     }
+//RS }
+//RS 
+//RS fn backend_error_id(error: &io::Error) -> i64 {
+//RS     match error.kind() {
+//RS         io::ErrorKind::TimedOut => 22035,
+//RS         io::ErrorKind::BrokenPipe
+//RS         | io::ErrorKind::UnexpectedEof
+//RS         | io::ErrorKind::ConnectionAborted
+//RS         | io::ErrorKind::ConnectionReset => 22038,
+//RS         _ => 22034,
+//RS     }
+//RS }
+//RS 
+//RS fn cleanup_error_details(error: &io::Error) -> (i64, &'static str) {
+//RS     match error.kind() {
+//RS         io::ErrorKind::PermissionDenied => {
+//RS             (22037, "debugger could not verify attach target identity")
+//RS         }
+//RS         io::ErrorKind::BrokenPipe
+//RS         | io::ErrorKind::UnexpectedEof
+//RS         | io::ErrorKind::ConnectionAborted
+//RS         | io::ErrorKind::ConnectionReset => (
+//RS             22038,
+//RS             "debug session connection closed before cleanup was proven",
+//RS         ),
+//RS         _ => (22034, "the debugger could not cleanly close the target"),
+//RS     }
+//RS }
+//RS 
+//RS fn default_exception_filters() -> HashSet<String> {
+//RS     ["panic".to_string()].into_iter().collect()
+//RS }
+//RS 
+//RS fn diagnostic_details(id: i64, format: &str) -> (&'static str, &'static str, &'static str) {
+//RS     match id {
+//RS         22031 => (
+//RS             "E2232",
+//RS             "the DAP lifecycle or stop generation does not permit the request",
+//RS             "wait for the stated lifecycle event, then retry",
+//RS         ),
+//RS         22032 => (
+//RS             "E2236",
+//RS             "a request field violates the debugger's bounded local contract",
+//RS             "correct the field named in the diagnostic, then retry",
+//RS         ),
+//RS         22033 => (
+//RS             "E2234",
+//RS             "the supported local backend is missing or returned an unsupported result",
+//RS             "install or repair the supported backend, then retry",
+//RS         ),
+//RS         22034 if format.contains("attach") || format.contains("identity") => (
+//RS             "E2231",
+//RS             "the process identity, executable, source hashes, or `.jetmap` did not remain verified",
+//RS             "stop the target or choose the matching local Jet build, then attach again",
+//RS         ),
+//RS         22034 => (
+//RS             "E2234",
+//RS             "the supported local backend is missing, lost, or returned an unsupported result",
+//RS             "install or repair the supported backend, then retry",
+//RS         ),
+//RS         22035 => (
+//RS             "E2233",
+//RS             "the backend did not answer before the bounded read deadline",
+//RS             "check the target process and start a new session",
+//RS         ),
+//RS         22036 => (
+//RS             "E2238",
+//RS             "a frame, scope, or variable reference expired when execution resumed",
+//RS             "refresh the editor's stack and variables after the next stop",
+//RS         ),
+//RS         22037 => (
+//RS             "E2231",
+//RS             "the process identity, executable, source hashes, or `.jetmap` did not remain verified",
+//RS             "stop the target or choose the matching local Jet build, then attach again",
+//RS         ),
+//RS         22038 => (
+//RS             "E2237",
+//RS             "the editor, adapter, or debugger control channel closed before cleanup was proven",
+//RS             "check the target process, then start a new debug session",
+//RS         ),
+//RS         22039 => (
+//RS             "E2235",
+//RS             "the requested thread has no verified Jet source location",
+//RS             "select a stopped Jet task or move the breakpoint to a mapped Jet statement",
+//RS         ),
+//RS         _ => (
+//RS             "E2239",
+//RS             "Jet could not preserve a debugger invariant",
+//RS             "start a new session and report the diagnostic if it repeats",
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_dap_request(body: &str) -> Result<DataTree, &'static str> {
+//RS     let message =
+//RS         parse_json_with_limit(body, MAX_DAP_MESSAGE_BYTES).map_err(|()| "invalid JSON")?;
+//RS     let DataTree::Object(_) = &message else {
+//RS         return Err("request must be an object");
+//RS     };
+//RS     if json_get(&message, "type").and_then(json_str) != Some("request") {
+//RS         return Err("type must be request");
+//RS     }
+//RS     let seq = json_get(&message, "seq")
+//RS         .and_then(json_u32)
+//RS         .ok_or("seq must be a nonnegative integer")?;
+//RS     if seq == 0 {
+//RS         return Err("seq must be positive");
+//RS     }
+//RS     let command = json_get(&message, "command")
+//RS         .and_then(json_str)
+//RS         .ok_or("command must be a string")?;
+//RS     if command.is_empty() {
+//RS         return Err("command must not be empty");
+//RS     }
+//RS     if !matches!(
+//RS         json_get(&message, "arguments"),
+//RS         None | Some(DataTree::Object(_))
+//RS     ) {
+//RS         return Err("arguments must be an object");
+//RS     }
+//RS     Ok(message)
+//RS }
+//RS 
+//RS fn jet_expression(value: &str) -> Option<(String, String)> {
+//RS     let value = value.trim();
+//RS     if value.is_empty() || value.len() > 256 || value.chars().any(|c| c.is_control()) {
+//RS         return None;
+//RS     }
+//RS     let root_len = value
+//RS         .char_indices()
+//RS         .find(|(_, c)| !c.is_ascii_alphanumeric() && *c != '_')
+//RS         .map(|(index, _)| index)
+//RS         .unwrap_or(value.len());
+//RS     let root = &value[..root_len];
+//RS     if root.is_empty()
+//RS         || root.starts_with('_')
+//RS         || !root.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let suffix = &value[root_len..];
+//RS     if !suffix
+//RS         .chars()
+//RS         .all(|c| c == '.' || c == '[' || c == ']' || c.is_ascii_digit())
+//RS     {
+//RS         return None;
+//RS     }
+//RS     Some((root.to_string(), suffix.to_string()))
+//RS }
+//RS 
+//RS struct InitializeArguments {
+//RS     lines_start_at_1: bool,
+//RS     columns_start_at_1: bool,
+//RS     supports_ansi_styling: bool,
+//RS }
+//RS 
+//RS fn parse_initialize_arguments(
+//RS     args: Option<&DataTree>,
+//RS ) -> Result<InitializeArguments, &'static str> {
+//RS     let args = args.ok_or("initialize arguments are required")?;
+//RS     if json_get(args, "adapterID").and_then(json_str) != Some("jet") {
+//RS         return Err("initialize adapterID must be `jet`");
+//RS     }
+//RS     if let Some(path_format) = json_get(args, "pathFormat") {
+//RS         if json_str(path_format) != Some("path") {
+//RS             return Err("initialize pathFormat must be `path`");
+//RS         }
+//RS     }
+//RS     let lines_start_at_1 = match json_get(args, "linesStartAt1") {
+//RS         None => true,
+//RS         Some(value) => json_bool(value).ok_or("initialize linesStartAt1 must be a boolean")?,
+//RS     };
+//RS     let columns_start_at_1 = match json_get(args, "columnsStartAt1") {
+//RS         None => true,
+//RS         Some(value) => json_bool(value).ok_or("initialize columnsStartAt1 must be a boolean")?,
+//RS     };
+//RS     let supports_ansi_styling = match json_get(args, "supportsANSIStyling") {
+//RS         None => false,
+//RS         Some(value) => {
+//RS             json_bool(value).ok_or("initialize supportsANSIStyling must be a boolean")?
+//RS         }
+//RS     };
+//RS     Ok(InitializeArguments {
+//RS         lines_start_at_1,
+//RS         columns_start_at_1,
+//RS         supports_ansi_styling,
+//RS     })
+//RS }
+//RS 
+//RS struct LaunchArguments {
+//RS     args: Vec<String>,
+//RS     cwd: Option<String>,
+//RS     env: Vec<(String, String)>,
+//RS     show_raw_frames: bool,
+//RS }
+//RS 
+//RS fn parse_launch_arguments(
+//RS     args: Option<&DataTree>,
+//RS     jet_file: &str,
+//RS ) -> Result<LaunchArguments, &'static str> {
+//RS     if let Some(program) = args
+//RS         .and_then(|args| json_get(args, "program"))
+//RS         .and_then(json_str)
+//RS     {
+//RS         if !same_path(program, jet_file) {
+//RS             return Err("launch program must be the selected Jet source file");
+//RS         }
+//RS     }
+//RS     let values = match args.and_then(|args| json_get(args, "args")) {
+//RS         None => Vec::new(),
+//RS         Some(DataTree::Array(values)) => values
+//RS             .iter()
+//RS             .map(|value| json_str(value).ok_or("launch args must be strings"))
+//RS             .collect::<Result<Vec<_>, _>>()?
+//RS             .into_iter()
+//RS             .map(str::to_string)
+//RS             .collect(),
+//RS         Some(_) => return Err("launch args must be an array"),
+//RS     };
+//RS     let cwd = match args.and_then(|args| json_get(args, "cwd")) {
+//RS         None => std::fs::canonicalize(jet_file)
+//RS             .ok()
+//RS             .and_then(|path| path.parent().map(Path::to_path_buf))
+//RS             .map(|path| path.to_string_lossy().into_owned()),
+//RS         Some(value) => {
+//RS             let raw = json_str(value).ok_or("launch cwd must be a string")?;
+//RS             let path =
+//RS                 std::fs::canonicalize(raw).map_err(|_| "launch cwd must be a local directory")?;
+//RS             if !path.is_dir() {
+//RS                 return Err("launch cwd must be a local directory");
+//RS             }
+//RS             if let Ok(source) = std::fs::canonicalize(jet_file) {
+//RS                 if !source.starts_with(&path) {
+//RS                     return Err("launch cwd must contain the selected Jet source");
+//RS                 }
+//RS             }
+//RS             Some(path.to_string_lossy().into_owned())
+//RS         }
+//RS     };
+//RS     let env = match args.and_then(|args| json_get(args, "env")) {
+//RS         None => Vec::new(),
+//RS         Some(DataTree::Object(values)) => values
+//RS             .iter()
+//RS             .map(|(key, value)| {
+//RS                 if !valid_launch_env_key(key) {
+//RS                     return Err("launch environment keys must be ASCII letters, digits, or `_`");
+//RS                 }
+//RS                 Ok((
+//RS                     key.clone(),
+//RS                     json_str(value)
+//RS                         .ok_or("launch environment values must be strings")?
+//RS                         .to_string(),
+//RS                 ))
+//RS             })
+//RS             .collect::<Result<Vec<_>, &'static str>>()?,
+//RS         Some(_) => return Err("launch env must be an object of strings"),
+//RS     };
+//RS     let show_raw_frames = match args.and_then(|args| json_get(args, "showRawFrames")) {
+//RS         None => false,
+//RS         Some(value) => json_bool(value).ok_or("showRawFrames must be a boolean")?,
+//RS     };
+//RS     Ok(LaunchArguments {
+//RS         args: values,
+//RS         cwd,
+//RS         env,
+//RS         show_raw_frames,
+//RS     })
+//RS }
+//RS 
+//RS fn valid_launch_env_key(key: &str) -> bool {
+//RS     !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+//RS }
+//RS 
+//RS fn same_path(left: &str, right: &str) -> bool {
+//RS     let left_path = Path::new(left);
+//RS     let right_path = Path::new(right);
+//RS     if left_path == right_path {
+//RS         return true;
+//RS     }
+//RS     match (
+//RS         std::fs::canonicalize(left_path),
+//RS         std::fs::canonicalize(right_path),
+//RS     ) {
+//RS         (Ok(left), Ok(right)) => left == right,
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn data_breakpoint_places(args: Option<&DataTree>) -> Result<Vec<String>, &'static str> {
+//RS     let value = args
+//RS         .and_then(|args| json_get(args, "breakpoints"))
+//RS         .ok_or("setDataBreakpoints requires a breakpoints array")?;
+//RS     let DataTree::Array(items) = value else {
+//RS         return Err("setDataBreakpoints breakpoints must be an array");
+//RS     };
+//RS     if items.len() > 32 {
+//RS         return Err("setDataBreakpoints supports at most 32 session watchpoints");
+//RS     }
+//RS     items
+//RS         .iter()
+//RS         .map(|item| {
+//RS             let place = json_get(item, "dataId")
+//RS                 .and_then(json_str)
+//RS                 .ok_or("data breakpoint dataId must be a Jet local path")?;
+//RS             if jet_expression(place).is_none() {
+//RS                 return Err("data breakpoint dataId must be a bounded Jet local path");
+//RS             }
+//RS             if let Some(access) = json_get(item, "accessType").and_then(json_str) {
+//RS                 if access != "write" {
+//RS                     return Err("Jet data breakpoints support write access only");
+//RS                 }
+//RS             }
+//RS             Ok(place.to_string())
+//RS         })
+//RS         .try_fold(Vec::new(), |mut places, place| {
+//RS             let place = place?;
+//RS             if !places.contains(&place) {
+//RS                 places.push(place);
+//RS             }
+//RS             Ok(places)
+//RS         })
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS fn breakpoint_lines(args: Option<&DataTree>) -> Result<Vec<usize>, &'static str> {
+//RS     breakpoint_lines_for_origin(args, true)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS fn breakpoint_lines_for_origin(
+//RS     args: Option<&DataTree>,
+//RS     lines_start_at_1: bool,
+//RS ) -> Result<Vec<usize>, &'static str> {
+//RS     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let DataTree::Array(items) = value else {
+//RS         return Err("breakpoints must be an array");
+//RS     };
+//RS     items
+//RS         .iter()
+//RS         .map(|item| {
+//RS             let line = json_get(item, "line")
+//RS                 .and_then(json_u32)
+//RS                 .ok_or("breakpoint line must be a nonnegative integer")?;
+//RS             if lines_start_at_1 && line == 0 {
+//RS                 return Err("breakpoint line must be a positive integer");
+//RS             }
+//RS             let line = if lines_start_at_1 {
+//RS                 line
+//RS             } else {
+//RS                 line.checked_add(1).ok_or("breakpoint line is too large")?
+//RS             };
+//RS             usize::try_from(line).map_err(|_| "breakpoint line is too large")
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn breakpoint_source(args: Option<&DataTree>, jet_file: &str) -> Result<(), &'static str> {
+//RS     let source = args
+//RS         .and_then(|args| json_get(args, "source"))
+//RS         .ok_or("setBreakpoints requires a source object")?;
+//RS     let path = json_get(source, "path")
+//RS         .and_then(json_str)
+//RS         .filter(|path| !path.is_empty() && !path.chars().any(char::is_control))
+//RS         .ok_or("setBreakpoints source.path must be a non-empty string")?;
+//RS     if !same_path(path, jet_file) {
+//RS         return Err("setBreakpoints source.path is not the selected Jet file");
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn breakpoint_specs_for_origin(
+//RS     args: Option<&DataTree>,
+//RS     lines_start_at_1: bool,
+//RS ) -> Result<Vec<BreakpointSpec>, &'static str> {
+//RS     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let DataTree::Array(items) = value else {
+//RS         return Err("breakpoints must be an array");
+//RS     };
+//RS     items
+//RS         .iter()
+//RS         .map(|item| {
+//RS             let line = json_get(item, "line")
+//RS                 .and_then(json_u32)
+//RS                 .ok_or("breakpoint line must be a nonnegative integer")?;
+//RS             if lines_start_at_1 && line == 0 {
+//RS                 return Err("breakpoint line must be a positive integer");
+//RS             }
+//RS             let line = if lines_start_at_1 {
+//RS                 line
+//RS             } else {
+//RS                 line.checked_add(1).ok_or("breakpoint line is too large")?
+//RS             };
+//RS             let line = usize::try_from(line).map_err(|_| "breakpoint line is too large")?;
+//RS             let condition = breakpoint_text(item, "condition")?;
+//RS             let hit_condition = breakpoint_text(item, "hitCondition")?;
+//RS             let log_message = breakpoint_text(item, "logMessage")?;
+//RS             Ok(BreakpointSpec {
+//RS                 line,
+//RS                 condition,
+//RS                 hit_condition,
+//RS                 log_message,
+//RS             })
+//RS         })
+//RS         .try_fold(Vec::new(), |mut specs, spec| {
+//RS             let spec = spec?;
+//RS             if !specs.contains(&spec) {
+//RS                 specs.push(spec);
+//RS             }
+//RS             Ok(specs)
+//RS         })
+//RS }
+//RS 
+//RS fn breakpoint_text(item: &DataTree, key: &str) -> Result<Option<String>, &'static str> {
+//RS     let Some(value) = json_get(item, key) else {
+//RS         return Ok(None);
+//RS     };
+//RS     let text = json_str(value).ok_or("breakpoint conditions and log messages must be strings")?;
+//RS     if text.len() > 512 || text.chars().any(char::is_control) {
+//RS         return Err("breakpoint condition or log message is too long or contains control text");
+//RS     }
+//RS     Ok(Some(text.to_string()))
+//RS }
+//RS 
+//RS fn hit_condition_matches(condition: &str, count: u32) -> bool {
+//RS     let condition = condition.trim();
+//RS     if let Some(value) = condition.strip_prefix(">=") {
+//RS         return value
+//RS             .trim()
+//RS             .parse::<u32>()
+//RS             .ok()
+//RS             .filter(|value| *value > 0)
+//RS             .is_some_and(|value| count >= value);
+//RS     }
+//RS     condition
+//RS         .parse::<u32>()
+//RS         .ok()
+//RS         .filter(|value| *value > 0)
+//RS         .map(|value| count == value)
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS fn valid_hit_condition(condition: &str) -> bool {
+//RS     let condition = condition.trim();
+//RS     let value = condition.strip_prefix(">=").unwrap_or(condition).trim();
+//RS     !value.is_empty()
+//RS         && value.bytes().all(|byte| byte.is_ascii_digit())
+//RS         && value.parse::<u32>().ok().is_some_and(|value| value > 0)
+//RS }
+//RS 
+//RS fn valid_condition(condition: &str) -> bool {
+//RS     let condition = condition.trim();
+//RS     if jet_expression(condition).is_some() {
+//RS         return true;
+//RS     }
+//RS     ["==", "!=", ">=", "<=", ">", "<"]
+//RS         .iter()
+//RS         .find_map(|operator| condition.split_once(operator))
+//RS         .is_some_and(|(left, right)| {
+//RS             jet_expression(left.trim()).is_some()
+//RS                 && !right.trim().is_empty()
+//RS                 && !right.chars().any(char::is_control)
+//RS         })
+//RS }
+//RS 
+//RS fn validate_breakpoint_specs(specs: &[BreakpointSpec]) -> Result<(), &'static str> {
+//RS     if specs.iter().any(|spec| {
+//RS         spec.condition
+//RS             .as_deref()
+//RS             .is_some_and(|condition| !valid_condition(condition))
+//RS     }) {
+//RS         return Err("breakpoint condition must be a bounded read-only Jet local expression");
+//RS     }
+//RS     if specs.iter().any(|spec| {
+//RS         spec.hit_condition
+//RS             .as_deref()
+//RS             .is_some_and(|condition| !valid_hit_condition(condition))
+//RS     }) {
+//RS         return Err("breakpoint hitCondition must be a positive integer or `>=` integer");
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn parse_attach_arguments(args: Option<&DataTree>) -> Result<AttachArguments, &'static str> {
+//RS     let args = args.ok_or("attach arguments are required")?;
+//RS     let pid = json_get(args, "processId")
+//RS         .and_then(json_u32)
+//RS         .filter(|pid| *pid > 0)
+//RS         .ok_or("attach processId must be a positive integer")?;
+//RS     let program = attach_path(args, "program")?;
+//RS     let map = attach_path(args, "map")?;
+//RS     let show_raw_frames = match json_get(args, "showRawFrames") {
+//RS         None => false,
+//RS         Some(value) => json_bool(value).ok_or("showRawFrames must be a boolean")?,
+//RS     };
+//RS     Ok(AttachArguments {
+//RS         pid,
+//RS         program,
+//RS         map,
+//RS         show_raw_frames,
+//RS     })
+//RS }
+//RS 
+//RS fn attach_path(args: &DataTree, key: &str) -> Result<PathBuf, &'static str> {
+//RS     let raw = json_get(args, key)
+//RS         .and_then(json_str)
+//RS         .filter(|value| !value.is_empty() && !value.chars().any(char::is_control))
+//RS         .ok_or("attach paths must be non-empty strings")?;
+//RS     let metadata = std::fs::symlink_metadata(raw).map_err(|_| "attach path is not a local file")?;
+//RS     if metadata.file_type().is_symlink() {
+//RS         return Err("attach paths must not be symbolic links");
+//RS     }
+//RS     let path = std::fs::canonicalize(raw).map_err(|_| "attach path is not a local file")?;
+//RS     if !path.is_file() {
+//RS         return Err("attach path is not a local file");
+//RS     }
+//RS     Ok(path)
+//RS }
+//RS 
+//RS fn json_bool(value: &DataTree) -> Option<bool> {
+//RS     match value {
+//RS         DataTree::Bool(value) => Some(*value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Content-Length framed read, the same convention `Source/LSP/Server.rs` uses
+//RS /// for LSP (DAP shares the exact same header-framing rule).
+//RS fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
+//RS     let mut content_length = None;
+//RS     let mut total = 0usize;
+//RS     let mut fields = 0usize;
+//RS     let mut saw_header = false;
+//RS     let len = loop {
+//RS         let remaining = MAX_PROTOCOL_HEADER_BYTES.saturating_sub(total);
+//RS         let mut line = String::new();
+//RS         let read =
+//RS             std::io::Read::take(&mut *reader, (remaining + 1) as u64).read_line(&mut line)?;
+//RS         if read == 0 {
+//RS             if saw_header {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::UnexpectedEof,
+//RS                     "protocol headers ended before the frame body",
+//RS                 ));
+//RS             }
+//RS             return Ok(None);
+//RS         }
+//RS         saw_header = true;
+//RS         if read > remaining {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 "protocol headers exceed the 8192-byte limit",
+//RS             ));
+//RS         }
+//RS         total += read;
+//RS         if line == "\r\n" || line == "\n" {
+//RS             break content_length.ok_or_else(|| {
+//RS                 io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "protocol frame has no Content-Length",
+//RS                 )
+//RS             })?;
+//RS         }
+//RS         fields += 1;
+//RS         if fields > MAX_PROTOCOL_HEADER_COUNT {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 "protocol headers exceed the 64-field limit",
+//RS             ));
+//RS         }
+//RS         let header = line
+//RS             .strip_suffix("\r\n")
+//RS             .or_else(|| line.strip_suffix('\n'))
+//RS             .unwrap_or(&line);
+//RS         let Some((name, value)) = header.split_once(':') else {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 "protocol header is malformed",
+//RS             ));
+//RS         };
+//RS         if !name.is_ascii() {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 "protocol header name is not ASCII",
+//RS             ));
+//RS         }
+//RS         if name.trim().eq_ignore_ascii_case("Content-Length") {
+//RS             if content_length.is_some() {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "protocol frame has duplicate Content-Length headers",
+//RS                 ));
+//RS             }
+//RS             let value = value.trim();
+//RS             if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "protocol Content-Length is invalid",
+//RS                 ));
+//RS             }
+//RS             content_length = Some(value.parse::<usize>().map_err(|_| {
+//RS                 io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "protocol Content-Length is invalid",
+//RS                 )
+//RS             })?);
+//RS         }
+//RS     };
+//RS     if len > MAX_DAP_MESSAGE_BYTES {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "protocol message exceeds the 16777216-byte limit",
+//RS         ));
+//RS     }
+//RS     let mut body = vec![0u8; len];
+//RS     reader.read_exact(&mut body)?;
+//RS     String::from_utf8(body)
+//RS         .map(Some)
+//RS         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "protocol message is not UTF-8"))
+//RS }
+//RS 
+//RS fn write_message<W: Write>(w: &mut W, json: &str) -> std::io::Result<()> {
+//RS     write!(
+//RS         w,
+//RS         "Content-Length: {}\r\n\r\n{}",
+//RS         json.as_bytes().len(),
+//RS         json
+//RS     )?;
+//RS     w.flush()
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn test_server(state: State) -> DapServer {
+//RS         DapServer {
+//RS             map: LineMap::build(""),
+//RS             rust_file: "main.rs".to_string(),
+//RS             rust_src: String::new(),
+//RS             jet_file: "main.jet".to_string(),
+//RS             jet_src: String::new(),
+//RS             binary: PathBuf::from("missing-debug-binary"),
+//RS             inf: None,
+//RS             pending_breakpoints: Vec::new(),
+//RS             pending_specs: Vec::new(),
+//RS             hit_counts: Vec::new(),
+//RS             source_breakpoint_ids: Vec::new(),
+//RS             client_breakpoint_ids: Vec::new(),
+//RS             next_client_breakpoint_id: 1,
+//RS             entry_breakpoint_id: None,
+//RS             stop_on_entry: true,
+//RS             target: None,
+//RS             launch_args: Vec::new(),
+//RS             launch_cwd: None,
+//RS             launch_env: Vec::new(),
+//RS             current_thread: 1,
+//RS             last_signal: None,
+//RS             last_exception: None,
+//RS             exception_filters: default_exception_filters(),
+//RS             show_raw_frames: false,
+//RS             lines_start_at_1: true,
+//RS             columns_start_at_1: true,
+//RS             supports_ansi_styling: false,
+//RS             unmapped_steps: 0,
+//RS             references: ObjectReferences::default(),
+//RS             state,
+//RS             terminal_failure: false,
+//RS             client_sequences: HashSet::new(),
+//RS             seq: 1,
+//RS             resume_task: None,
+//RS             resume_stop_requested: false,
+//RS             history: DebugHistory {
+//RS                 events: Vec::new(),
+//RS                 checkpoint: Some(DebugCheckpoint {
+//RS                     source_identity: jet_foundation::SHA256::sha256_hex(
+//RS                         "main.jet:".as_bytes(),
+//RS                     ),
+//RS                     shape: "native-dap-debug-artifact".to_string(),
+//RS                     sequence: 0,
+//RS                 }),
+//RS                 cursor: None,
+//RS                 capped: false,
+//RS                 decision_ledger: None,
+//RS             },
+//RS             history_cursor: None,
+//RS             data_watches: HashSet::new(),
+//RS             candidate_artifacts: Vec::new(),
+//RS             replay_only_after_fix: false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn frame(body: &str) -> String {
+//RS         format!("Content-Length: {}\r\n\r\n{body}", body.len())
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stack_projection_pages_over_unmapped_native_frames() {
+//RS         let map = LineMap::build("// jet:line 2\nlet x = 1;\n// jet:line 3\nlet y = 2;\n");
+//RS         let frames = vec![
+//RS             RawFrame {
+//RS                 func: "runtime_helper".to_string(),
+//RS                 rust_file: "main.rs".to_string(),
+//RS                 rust_line: 1,
+//RS             },
+//RS             RawFrame {
+//RS                 func: "__jet_run".to_string(),
+//RS                 rust_file: "main.rs".to_string(),
+//RS                 rust_line: 2,
+//RS             },
+//RS             RawFrame {
+//RS                 func: "__jet_run".to_string(),
+//RS                 rust_file: "main.rs".to_string(),
+//RS                 rust_line: 4,
+//RS             },
+//RS         ];
+//RS 
+//RS         let jet_frames = project_frames(&frames, &map, "main.rs", false);
+//RS         assert_eq!(jet_frames.len(), 2);
+//RS         assert_eq!(jet_frames[0].position, 1);
+//RS         assert_eq!(jet_frames[0].jet_line, Some(2));
+//RS         assert_eq!(jet_frames[1].position, 2);
+//RS         assert_eq!(jet_frames[1].jet_line, Some(3));
+//RS 
+//RS         let second_page = jet_frames.iter().skip(1).take(1).collect::<Vec<_>>();
+//RS         assert_eq!(second_page[0].frame.rust_line, 4);
+//RS         assert_eq!(second_page[0].jet_line, Some(3));
+//RS 
+//RS         let raw_frames = project_frames(&frames, &map, "main.rs", true);
+//RS         assert_eq!(raw_frames.len(), 5);
+//RS         assert!(!raw_frames[0].raw);
+//RS         assert!(!raw_frames[1].raw);
+//RS         assert!(raw_frames[2].raw);
+//RS         assert_eq!(raw_frames[0].position, 1);
+//RS         assert_eq!(raw_frames[1].position, 2);
+//RS         assert_eq!(raw_frames[2].position, 0);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn async_task_threads_use_their_jet_frame_name() {
+//RS         let map = LineMap::build("// jet:line 6\nlet value = 1;\n");
+//RS         let backtrace =
+//RS             "frame #0: 0x1 bin`__jet_work at main.rs:2:1\nframe #1: 0x2 bin`__jet_run at main.rs:9:1\n";
+//RS 
+//RS         assert_eq!(
+//RS             jet_thread_name(2, backtrace, &map, "main.rs"),
+//RS             "task work (stopped)"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn raw_frame_opt_in_does_not_make_a_helper_stop_a_jet_task() {
+//RS         let map = LineMap::build("// jet:line 2\nlet x = 1;\n");
+//RS         let helper = [RawFrame {
+//RS             func: "runtime_helper".to_string(),
+//RS             rust_file: "main.rs".to_string(),
+//RS             rust_line: 1,
+//RS         }];
+//RS         assert!(!has_jet_frame(&helper, &map, "main.rs"));
+//RS 
+//RS         let jet_and_helper = [
+//RS             RawFrame {
+//RS                 func: "runtime_helper".to_string(),
+//RS                 rust_file: "main.rs".to_string(),
+//RS                 rust_line: 1,
+//RS             },
+//RS             RawFrame {
+//RS                 func: "__jet_run".to_string(),
+//RS                 rust_file: "main.rs".to_string(),
+//RS                 rust_line: 2,
+//RS             },
+//RS         ];
+//RS         assert!(has_jet_frame(&jet_and_helper, &map, "main.rs"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_request_envelope_rejects_wrong_shapes_and_numbers() {
+//RS         assert!(parse_dap_request(
+//RS             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#
+//RS         )
+//RS         .is_ok());
+//RS         for raw in [
+//RS             r#"{"seq":1,"type":"event","command":"initialize"}"#,
+//RS             r#"{"seq":1.5,"type":"request","command":"initialize"}"#,
+//RS             r#"{"seq":-1,"type":"request","command":"initialize"}"#,
+//RS             r#"{"seq":0,"type":"request","command":"initialize"}"#,
+//RS             r#"{"seq":1,"type":"request","command":""}"#,
+//RS             r#"{"seq":1,"type":"request","command":2}"#,
+//RS             r#"{"seq":1,"type":"request","command":"initialize","arguments":[]}"#,
+//RS             r#"["not","a","request"]"#,
+//RS         ] {
+//RS             assert!(
+//RS                 parse_dap_request(raw).is_err(),
+//RS                 "accepted hostile DAP: {raw}"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn initialize_requires_jet_and_negotiates_origins() {
+//RS         let mut server = test_server(State::New);
+//RS         let rejected = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"other"}}"#,
+//RS         );
+//RS         assert!(rejected.contains("\"success\":false"), "{rejected}");
+//RS         assert!(rejected.contains("\"id\":22032"), "{rejected}");
+//RS         assert_eq!(server.state, State::New);
+//RS 
+//RS         let accepted = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":2,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path","linesStartAt1":false,"columnsStartAt1":false,"supportsANSIStyling":true}}"#,
+//RS         );
+//RS         assert!(accepted.contains("\"success\":true"), "{accepted}");
+//RS         assert!(accepted.contains("supportsPauseRequest"), "{accepted}");
+//RS         assert!(accepted.contains("supportsVariablePaging"), "{accepted}");
+//RS         assert!(!server.lines_start_at_1);
+//RS         assert!(!server.columns_start_at_1);
+//RS         assert!(server.supports_ansi_styling);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_framing_accepts_case_insensitive_length_and_rejects_duplicates() {
+//RS         let body = r#"{"seq":1,"type":"request","command":"threads"}"#;
+//RS         let wire = format!(
+//RS             "X-Editor: test\r\ncontent-length: {}\r\n\r\n{}",
+//RS             body.len(),
+//RS             body
+//RS         );
+//RS         assert_eq!(
+//RS             read_message(&mut std::io::Cursor::new(wire)).unwrap(),
+//RS             Some(body.to_string())
+//RS         );
+//RS 
+//RS         let duplicate = format!("Content-Length: 1\r\ncontent-length: 1\r\n\r\na");
+//RS         assert!(read_message(&mut std::io::Cursor::new(duplicate)).is_err());
+//RS         let invalid = "Content-Length: +1\r\n\r\na";
+//RS         assert!(read_message(&mut std::io::Cursor::new(invalid)).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn queued_snapshot_requests_wait_for_resume_to_settle() {
+//RS         let mut requests = VecDeque::from([
+//RS             parse_dap_request(r#"{"seq":1,"type":"request","command":"threads","arguments":{}}"#)
+//RS                 .unwrap(),
+//RS             parse_dap_request(
+//RS                 r#"{"seq":2,"type":"request","command":"stackTrace","arguments":{}}"#,
+//RS             )
+//RS             .unwrap(),
+//RS             parse_dap_request(r#"{"seq":3,"type":"request","command":"pause","arguments":{}}"#)
+//RS                 .unwrap(),
+//RS             parse_dap_request(r#"{"seq":4,"type":"request","command":"restart","arguments":{}}"#)
+//RS                 .unwrap(),
+//RS             parse_dap_request(
+//RS                 r#"{"seq":5,"type":"request","command":"setBreakpoints","arguments":{}}"#,
+//RS             )
+//RS             .unwrap(),
+//RS         ]);
+//RS 
+//RS         let control = take_next_request(&mut requests, true).expect("running control request");
+//RS         assert_eq!(
+//RS             json_get(&control, "command").and_then(json_str),
+//RS             Some("pause")
+//RS         );
+//RS         let restart = take_next_request(&mut requests, true).expect("restart request");
+//RS         assert_eq!(
+//RS             json_get(&restart, "command").and_then(json_str),
+//RS             Some("restart")
+//RS         );
+//RS         let breakpoints =
+//RS             take_next_request(&mut requests, true).expect("breakpoint replacement request");
+//RS         assert_eq!(
+//RS             json_get(&breakpoints, "command").and_then(json_str),
+//RS             Some("setBreakpoints")
+//RS         );
+//RS         assert!(take_next_request(&mut requests, true).is_none());
+//RS         assert_eq!(requests.len(), 2);
+//RS 
+//RS         let first = take_next_request(&mut requests, false).expect("queued request");
+//RS         assert_eq!(
+//RS             json_get(&first, "command").and_then(json_str),
+//RS             Some("threads")
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn breakpoint_ids_are_stable_and_client_lines_follow_negotiation() {
+//RS         let mut server = test_server(State::New);
+//RS         let initialized = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#,
+//RS         );
+//RS         assert!(initialized.contains("\"success\":true"), "{initialized}");
+//RS         let first = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":2,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"main.jet"},"breakpoints":[{"line":2}]}}"#,
+//RS         );
+//RS         let first_id = dap_body_id(&first, "breakpoints", "id");
+//RS         let second = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"main.jet"},"breakpoints":[{"line":2}]}}"#,
+//RS         );
+//RS         assert_eq!(dap_body_id(&second, "breakpoints", "id"), first_id);
+//RS 
+//RS         let mut zero_based = test_server(State::New);
+//RS         let initialized = dap_call(
+//RS             &mut zero_based,
+//RS             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","linesStartAt1":false}}"#,
+//RS         );
+//RS         assert!(initialized.contains("\"success\":true"), "{initialized}");
+//RS         let response = dap_call(
+//RS             &mut zero_based,
+//RS             r#"{"seq":2,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"main.jet"},"breakpoints":[{"line":0}]}}"#,
+//RS         );
+//RS         assert!(response.contains("\"line\":0"), "{response}");
+//RS         assert_eq!(zero_based.pending_breakpoints, vec![1]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn breakpoint_status_events_publish_backend_resolution() {
+//RS         let mut server = test_server(State::Configuring);
+//RS         server.pending_specs = vec![
+//RS             BreakpointSpec {
+//RS                 line: 2,
+//RS                 ..BreakpointSpec::default()
+//RS             },
+//RS             BreakpointSpec {
+//RS                 line: 3,
+//RS                 ..BreakpointSpec::default()
+//RS             },
+//RS         ];
+//RS         server.client_breakpoint_ids = vec![7, 8];
+//RS         let mut output = Vec::new();
+//RS         server.emit_breakpoint_statuses(&mut output, &[false, true]);
+//RS         let text = String::from_utf8(output).unwrap();
+//RS         assert!(
+//RS             text.contains("\"event\":\"breakpoint\""),
+//RS             "missing DAP breakpoint change events: {text}"
+//RS         );
+//RS         assert!(
+//RS             text.contains("\"id\":7,\"verified\":false"),
+//RS             "unresolved native breakpoint must be reported as pending: {text}"
+//RS         );
+//RS         assert!(
+//RS             text.contains("\"id\":8,\"verified\":true"),
+//RS             "resolved native breakpoint must be reported as verified: {text}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn invalid_breakpoint_conditions_fail_before_replacing_active_specs() {
+//RS         let mut server = test_server(State::Ready);
+//RS         server.pending_specs = vec![BreakpointSpec {
+//RS             line: 2,
+//RS             ..BreakpointSpec::default()
+//RS         }];
+//RS         server.pending_breakpoints = vec![2];
+//RS 
+//RS         let response = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":1,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"main.jet"},"breakpoints":[{"line":3,"condition":"not a Jet expression"}]}}"#,
+//RS         );
+//RS 
+//RS         assert!(response.contains("\"success\":false"), "{response}");
+//RS         assert!(response.contains("\"id\":22032"), "{response}");
+//RS         assert!(response.contains("\"code\":\"E2236\""), "{response}");
+//RS         assert_eq!(server.pending_breakpoints, vec![2]);
+//RS         assert_eq!(server.pending_specs[0].line, 2);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_breakpoint_lines_require_positive_integers() {
+//RS         for raw in [
+//RS             r#"{"breakpoints":[{"line":-1}]}"#,
+//RS             r#"{"breakpoints":[{"line":1.5}]}"#,
+//RS             r#"{"breakpoints":[{"line":0}]}"#,
+//RS             r#"{"breakpoints":[{"line":"2"}]}"#,
+//RS         ] {
+//RS             let args = parse_json(raw).unwrap();
+//RS             assert!(
+//RS                 breakpoint_lines(Some(&args)).is_err(),
+//RS                 "accepted hostile line: {raw}"
+//RS             );
+//RS         }
+//RS         let args = parse_json(r#"{"breakpoints":[{"line":2},{"line":9}]}"#).unwrap();
+//RS         assert_eq!(breakpoint_lines(Some(&args)).unwrap(), vec![2, 9]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn launch_raw_frames_are_explicit_and_reference_scopes_are_marked() {
+//RS         let args = parse_json(r#"{"program":"main.jet","showRawFrames":true,"args":[],"env":{}}"#)
+//RS             .unwrap();
+//RS         let launch = parse_launch_arguments(Some(&args), "main.jet").unwrap();
+//RS         assert!(launch.show_raw_frames);
+//RS 
+//RS         let mut refs = ObjectReferences::default();
+//RS         let frame = refs.issue_frame(7, 0);
+//RS         let scope = refs.issue_scope(frame, ReferenceKind::RawScope);
+//RS         assert!(refs.is_live(scope, ReferenceKind::RawScope));
+//RS         assert_eq!(
+//RS             refs.scope_location(scope),
+//RS             Some(FrameLocation {
+//RS                 thread_id: 7,
+//RS                 position: 0,
+//RS             })
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn raw_scopes_append_to_jet_scopes_and_raw_frame_handles_stay_raw() {
+//RS         let mut server = test_server(State::Stopped);
+//RS         let jet_frame = server.references.issue_frame(1, 0);
+//RS         let scopes = dap_call(
+//RS             &mut server,
+//RS             &format!(
+//RS                 "{{\"seq\":1,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{jet_frame},\"showRawFrames\":true}}}}"
+//RS             ),
+//RS         );
+//RS         assert!(scopes.contains("\"name\":\"Locals\""), "{scopes}");
+//RS         assert!(scopes.contains("\"name\":\"[raw] Locals\""), "{scopes}");
+//RS         assert!(server.references.is_live(2, ReferenceKind::Scope));
+//RS         assert!(server.references.is_live(3, ReferenceKind::RawScope));
+//RS 
+//RS         let raw_frame = server.references.issue_raw_frame(1, 1);
+//RS         let raw_scopes = dap_call(
+//RS             &mut server,
+//RS             &format!(
+//RS                 "{{\"seq\":2,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{raw_frame},\"showRawFrames\":false}}}}"
+//RS             ),
+//RS         );
+//RS         assert!(
+//RS             raw_scopes.contains("\"name\":\"[raw] Locals\""),
+//RS             "{raw_scopes}"
+//RS         );
+//RS         assert!(!raw_scopes.contains("\"name\":\"Locals\""), "{raw_scopes}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stack_requests_can_opt_into_raw_frames_without_changing_the_session() {
+//RS         let server = test_server(State::Stopped);
+//RS         let requested = parse_json(r#"{"showRawFrames":true}"#).unwrap();
+//RS         assert!(server
+//RS             .raw_frames_for_request(Some(&requested))
+//RS             .expect("valid raw-frame request"));
+//RS 
+//RS         let defaulted = parse_json(r#"{"showRawFrames":false}"#).unwrap();
+//RS         assert!(!server
+//RS             .raw_frames_for_request(Some(&defaulted))
+//RS             .expect("valid default-frame request"));
+//RS 
+//RS         let invalid = parse_json(r#"{"showRawFrames":"yes"}"#).unwrap();
+//RS         assert!(server.raw_frames_for_request(Some(&invalid)).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn attach_arguments_require_local_program_map_and_explicit_raw_frame_shape() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-dap-attach-{}-{}",
+//RS             std::process::id(),
+//RS             std::thread::current().name().unwrap_or("test")
+//RS         ));
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let program = root.join("program");
+//RS         let map = root.join("program.jetmap");
+//RS         std::fs::write(&program, b"program").unwrap();
+//RS         std::fs::write(&map, b"map").unwrap();
+//RS         let request = parse_json(&format!(
+//RS             "{{\"processId\":1,\"program\":\"{}\",\"map\":\"{}\",\"showRawFrames\":false}}",
+//RS             json_escape(&program.to_string_lossy()),
+//RS             json_escape(&map.to_string_lossy())
+//RS         ))
+//RS         .unwrap();
+//RS         let parsed = parse_attach_arguments(Some(&request)).unwrap();
+//RS         assert_eq!(parsed.pid, 1);
+//RS         assert_eq!(parsed.program, std::fs::canonicalize(&program).unwrap());
+//RS         assert_eq!(parsed.map, std::fs::canonicalize(&map).unwrap());
+//RS         assert!(!parsed.show_raw_frames);
+//RS 
+//RS         let raw_request = parse_json(&format!(
+//RS             "{{\"processId\":1,\"program\":\"{}\",\"map\":\"{}\",\"showRawFrames\":true}}",
+//RS             json_escape(&program.to_string_lossy()),
+//RS             json_escape(&map.to_string_lossy())
+//RS         ))
+//RS         .unwrap();
+//RS         assert!(
+//RS             parse_attach_arguments(Some(&raw_request))
+//RS                 .unwrap()
+//RS                 .show_raw_frames
+//RS         );
+//RS 
+//RS         for raw in [
+//RS             "{\"processId\":0}",
+//RS             "{\"processId\":1,\"program\":\"missing\",\"map\":\"missing\"}",
+//RS         ] {
+//RS             let args = parse_json(raw).unwrap();
+//RS             assert!(
+//RS                 parse_attach_arguments(Some(&args)).is_err(),
+//RS                 "accepted {raw}"
+//RS             );
+//RS         }
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_attach_invalid_arguments_fails_through_wire_before_backend() {
+//RS         let mut server = test_server(State::New);
+//RS         let input = format!(
+//RS             "{}{}",
+//RS             frame(
+//RS                 r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#
+//RS             ),
+//RS             frame(r#"{"seq":2,"type":"request","command":"attach","arguments":{"processId":0}}"#),
+//RS         );
+//RS         let mut output = Vec::new();
+//RS         let code = run_io(&mut server, std::io::Cursor::new(input), &mut output);
+//RS         let text = String::from_utf8(output).unwrap();
+//RS         assert_eq!(code, crate::ExitCodes::OK);
+//RS         assert!(text.contains("\"command\":\"attach\""));
+//RS         assert!(text.contains("\"success\":false"));
+//RS         assert!(text.contains("\"id\":22032"));
+//RS         assert!(server.inf.is_none());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_attach_rejects_a_real_process_running_another_binary() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-debug-attach-denied-{}-{}",
+//RS             std::process::id(),
+//RS             std::thread::current().name().unwrap_or("test")
+//RS         ));
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let program = std::env::current_exe().unwrap();
+//RS         let map = root.join("program.jetmap");
+//RS         LineMap::write_artifact(&map, "main.jet", "", "main.rs", "", &program).unwrap();
+//RS         let mut target = std::process::Command::new("sleep")
+//RS             .arg("30")
+//RS             .spawn()
+//RS             .expect("spawn real attach target");
+//RS         let input = format!(
+//RS             "{}{}",
+//RS             frame(r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#),
+//RS             frame(&format!(
+//RS                 "{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{},\"program\":\"{}\",\"map\":\"{}\"}}}}",
+//RS                 target.id(),
+//RS                 json_escape(&program.to_string_lossy()),
+//RS                 json_escape(&map.to_string_lossy())
+//RS             ))
+//RS         );
+//RS         let mut server = test_server(State::New);
+//RS         let mut output = Vec::new();
+//RS         let code = run_io(&mut server, std::io::Cursor::new(input), &mut output);
+//RS         let text = String::from_utf8(output).unwrap();
+//RS         let _ = target.kill();
+//RS         let _ = target.wait();
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS         assert_eq!(code, crate::ExitCodes::OK);
+//RS         assert!(text.contains("\"command\":\"attach\""), "{text}");
+//RS         assert!(text.contains("\"success\":false"), "{text}");
+//RS         assert!(text.contains("\"id\":22037"), "{text}");
+//RS         assert!(text.contains("\"code\":\"E2231\""), "{text}");
+//RS         assert!(server.inf.is_none());
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn dap_attaches_and_disconnects_without_terminating_a_real_target() {
+//RS         if !Inferior::available() {
+//RS             return;
+//RS         }
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-dap-attach-disconnect-{}-{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .expect("clock after epoch")
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(&root).expect("create debugger test directory");
+//RS         let mut target = std::process::Command::new("sleep")
+//RS             .arg("30")
+//RS             .spawn()
+//RS             .expect("spawn real attach target");
+//RS         let pid = target.id();
+//RS         let program = std::fs::canonicalize(format!("/proc/{pid}/exe"))
+//RS             .expect("resolve real attach target binary");
+//RS         let map = root.join("target.jetmap");
+//RS         LineMap::write_artifact(&map, "main.jet", "", "main.rs", "", &program)
+//RS             .expect("write matching attach map");
+//RS         let input = format!(
+//RS             "{}{}{}",
+//RS             frame(r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#),
+//RS             frame(&format!(
+//RS                 "{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{},\"program\":\"{}\",\"map\":\"{}\"}}}}",
+//RS                 pid,
+//RS                 json_escape(&program.to_string_lossy()),
+//RS                 json_escape(&map.to_string_lossy())
+//RS             )),
+//RS             frame(r#"{"seq":3,"type":"request","command":"disconnect","arguments":{}}"#),
+//RS         );
+//RS         let mut server = test_server(State::New);
+//RS         let mut output = Vec::new();
+//RS         let code = run_io(&mut server, std::io::Cursor::new(input), &mut output);
+//RS         let text = String::from_utf8(output).expect("DAP output is UTF-8");
+//RS         let target_alive = target.try_wait().expect("check detached target").is_none();
+//RS         let _ = target.kill();
+//RS         let _ = target.wait();
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS 
+//RS         assert_eq!(code, crate::ExitCodes::OK, "{text}");
+//RS         assert!(text.contains("\"command\":\"attach\""), "{text}");
+//RS         assert!(text.contains("\"command\":\"disconnect\""), "{text}");
+//RS         assert!(!text.contains("\"success\":false"), "{text}");
+//RS         assert!(
+//RS             target_alive,
+//RS             "disconnect must leave an attached target alive"
+//RS         );
+//RS         assert_eq!(server.state, State::Terminated);
+//RS         assert!(server.inf.is_none());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_rejects_oversized_frame_before_reading_a_body() {
+//RS         let frame = format!("Content-Length: {}\r\n\r\n", MAX_DAP_MESSAGE_BYTES + 1);
+//RS         let error = read_message(&mut std::io::Cursor::new(frame)).unwrap_err();
+//RS         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+//RS         assert_eq!(
+//RS             error.to_string(),
+//RS             "protocol message exceeds the 16777216-byte limit"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn broken_dap_output_cannot_finish_as_a_clean_session() {
+//RS         struct BrokenPipe;
+//RS 
+//RS         impl Write for BrokenPipe {
+//RS             fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+//RS                 Err(io::Error::new(io::ErrorKind::BrokenPipe, "client closed"))
+//RS             }
+//RS 
+//RS             fn flush(&mut self) -> io::Result<()> {
+//RS                 Err(io::Error::new(io::ErrorKind::BrokenPipe, "client closed"))
+//RS             }
+//RS         }
+//RS 
+//RS         let input = frame(
+//RS             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#,
+//RS         );
+//RS         let mut server = test_server(State::New);
+//RS         let code = run_io(&mut server, std::io::Cursor::new(input), &mut BrokenPipe);
+//RS 
+//RS         assert_eq!(code, crate::ExitCodes::USER_ERROR);
+//RS         assert!(server.terminal_failure);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn object_references_expire_on_generation_change() {
+//RS         let mut refs = ObjectReferences::default();
+//RS         let frame = refs.issue(ReferenceKind::Frame);
+//RS         let scope = refs.issue(ReferenceKind::Scope);
+//RS         assert!(refs.is_live(frame, ReferenceKind::Frame));
+//RS         assert!(refs.is_live(scope, ReferenceKind::Scope));
+//RS 
+//RS         refs.invalidate();
+//RS 
+//RS         assert!(!refs.is_live(frame, ReferenceKind::Frame));
+//RS         assert!(!refs.is_live(scope, ReferenceKind::Scope));
+//RS         let replacement = refs.issue(ReferenceKind::Frame);
+//RS         assert_ne!(replacement, frame);
+//RS         assert!(refs.is_live(replacement, ReferenceKind::Frame));
+//RS 
+//RS         let stable = refs.issue_frame(1, 0);
+//RS         assert_eq!(stable, refs.issue_frame(1, 0));
+//RS         assert_ne!(stable, refs.issue_frame(2, 0));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn repeated_stopped_snapshot_requests_reuse_object_references() {
+//RS         let mut refs = ObjectReferences::default();
+//RS         let raw_frame = refs.issue_raw_frame(1, 2);
+//RS         let frame = refs.issue_frame(1, 2);
+//RS         let raw_scope = refs.issue_scope(raw_frame, ReferenceKind::RawScope);
+//RS         let scope = refs.issue_scope(frame, ReferenceKind::Scope);
+//RS         let location = FrameLocation {
+//RS             thread_id: 1,
+//RS             position: 2,
+//RS         };
+//RS 
+//RS         assert_eq!(raw_frame, refs.issue_raw_frame(1, 2));
+//RS         assert_eq!(
+//RS             raw_scope,
+//RS             refs.issue_scope(raw_frame, ReferenceKind::RawScope)
+//RS         );
+//RS         assert_eq!(scope, refs.issue_scope(frame, ReferenceKind::Scope));
+//RS 
+//RS         let value = refs.issue_value_at(location, "answer".to_string(), false);
+//RS         assert_eq!(
+//RS             value,
+//RS             refs.issue_value_at(location, "answer".to_string(), false)
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn continue_only_stops_at_requested_source_breakpoints() {
+//RS         let mut server = test_server(State::Stopped);
+//RS         assert!(matches!(
+//RS             server.breakpoint_action(3),
+//RS             BreakpointAction::Continue
+//RS         ));
+//RS         server.pending_specs = vec![BreakpointSpec {
+//RS             line: 7,
+//RS             ..BreakpointSpec::default()
+//RS         }];
+//RS         server.client_breakpoint_ids = vec![42];
+//RS         assert!(matches!(
+//RS             server.breakpoint_action(3),
+//RS             BreakpointAction::Continue
+//RS         ));
+//RS         assert!(matches!(
+//RS             server.breakpoint_action(7),
+//RS             BreakpointAction::Stop(_)
+//RS         ));
+//RS     }
+//RS 
+//RS     fn dap_call(server: &mut DapServer, body: &str) -> String {
+//RS         let request = parse_dap_request(body).expect("valid DAP request");
+//RS         let mut output = Vec::new();
+//RS         assert!(server.handle(&request, &mut output).is_some());
+//RS         String::from_utf8(output).expect("DAP output is UTF-8")
+//RS     }
+//RS 
+//RS     fn dap_message(output: &str) -> DataTree {
+//RS         let mut reader = std::io::Cursor::new(output.as_bytes());
+//RS         let body = read_message(&mut reader)
+//RS             .expect("DAP response frame")
+//RS             .expect("DAP response body");
+//RS         parse_json(&body).expect("DAP response JSON")
+//RS     }
+//RS 
+//RS     fn dap_body_id(output: &str, collection: &str, field: &str) -> u32 {
+//RS         let message = dap_message(output);
+//RS         let body = json_get(&message, "body").expect("DAP response body object");
+//RS         let values = match json_get(body, collection).expect("DAP response collection") {
+//RS             DataTree::Array(values) => values,
+//RS             _ => panic!("DAP response collection is not an array"),
+//RS         };
+//RS         json_get(values.first().expect("DAP response collection item"), field)
+//RS             .and_then(json_u32)
+//RS             .expect("DAP response id")
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_restart_rebuilds_target_preserves_breakpoints_and_expires_references() {
+//RS         if !Inferior::available() {
+//RS             return;
+//RS         }
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-dap-restart-{}-{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .expect("clock after epoch")
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(&root).expect("create debugger test directory");
+//RS         let jet_file = root.join("program.jet");
+//RS         let rust_file = root.join("program.rs");
+//RS         let binary = root.join("program");
+//RS         let jet_src = "fn run() {\n    value := 7\n    print(value)\n}\n";
+//RS         let rust_src = "fn main() {\n    // jet:line 2\n    let __jet_value: i32 = 7;\n    // jet:line 3\n    println!(\"{}\", __jet_value);\n}\n";
+//RS         std::fs::write(&jet_file, jet_src).expect("write Jet fixture");
+//RS         std::fs::write(&rust_file, rust_src).expect("write Rust fixture");
+//RS         let rustc = std::process::Command::new("rustc")
+//RS             .args(["--edition", "2021", "-C", "debuginfo=2"])
+//RS             .arg(&rust_file)
+//RS             .arg("-o")
+//RS             .arg(&binary)
+//RS             .output()
+//RS             .expect("run rustc");
+//RS         assert!(
+//RS             rustc.status.success(),
+//RS             "rustc rejected DAP fixture: {}",
+//RS             String::from_utf8_lossy(&rustc.stderr)
+//RS         );
+//RS         let map_path = binary.with_extension("jetmap");
+//RS         LineMap::write_artifact(
+//RS             &map_path,
+//RS             &jet_file.to_string_lossy(),
+//RS             jet_src,
+//RS             &rust_file.to_string_lossy(),
+//RS             rust_src,
+//RS             &binary,
+//RS         )
+//RS         .expect("write debugger map");
+//RS 
+//RS         let mut server = test_server(State::New);
+//RS         server.map = LineMap::load_verified(
+//RS             &map_path,
+//RS             &jet_file.to_string_lossy(),
+//RS             jet_src,
+//RS             &rust_file.to_string_lossy(),
+//RS             rust_src,
+//RS             &binary,
+//RS         )
+//RS         .expect("load debugger map");
+//RS         server.rust_file = rust_file.to_string_lossy().into_owned();
+//RS         server.rust_src = rust_src.to_string();
+//RS         server.jet_file = jet_file.to_string_lossy().into_owned();
+//RS         server.jet_src = jet_src.to_string();
+//RS         server.binary = binary.clone();
+//RS 
+//RS         assert!(dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#
+//RS         )
+//RS         .contains("\"success\":true"));
+//RS         let breakpoint = dap_call(
+//RS             &mut server,
+//RS             &format!(
+//RS                 "{{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"{}\"}},\"breakpoints\":[{{\"line\":3}}]}}}}",
+//RS                 json_escape(&jet_file.to_string_lossy())
+//RS             ),
+//RS         );
+//RS         assert!(breakpoint.contains("\"verified\":true"), "{breakpoint}");
+//RS         let launch = dap_call(
+//RS             &mut server,
+//RS             &format!(
+//RS                 "{{\"seq\":3,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{{\"program\":\"{}\",\"stopOnEntry\":true}}}}",
+//RS                 json_escape(&jet_file.to_string_lossy())
+//RS             ),
+//RS         );
+//RS         assert!(launch.contains("\"event\":\"initialized\""), "{launch}");
+//RS         let configured = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":4,"type":"request","command":"configurationDone","arguments":{}}"#,
+//RS         );
+//RS         assert!(configured.contains("\"event\":\"stopped\""), "{configured}");
+//RS         assert!(server.state == State::Stopped);
+//RS 
+//RS         let stack = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":5,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#,
+//RS         );
+//RS         let old_frame = dap_body_id(&stack, "stackFrames", "id");
+//RS         let scopes = dap_call(
+//RS             &mut server,
+//RS             &format!(
+//RS                 "{{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{old_frame}}}}}"
+//RS             ),
+//RS         );
+//RS         let old_scope = dap_body_id(&scopes, "scopes", "variablesReference");
+//RS         let variables = dap_call(
+//RS             &mut server,
+//RS             &format!(
+//RS                 "{{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{{\"variablesReference\":{old_scope}}}}}"
+//RS             ),
+//RS         );
+//RS         assert!(variables.contains("\"success\":true"), "{variables}");
+//RS 
+//RS         let restarted = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":8,"type":"request","command":"restart","arguments":{}}"#,
+//RS         );
+//RS         assert!(restarted.contains("\"command\":\"restart\""), "{restarted}");
+//RS         assert!(restarted.contains("\"success\":true"), "{restarted}");
+//RS         assert!(restarted.contains("\"event\":\"stopped\""), "{restarted}");
+//RS         assert!(server.state == State::Stopped);
+//RS 
+//RS         let stale_scope = dap_call(
+//RS             &mut server,
+//RS             &format!(
+//RS                 "{{\"seq\":9,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{{\"variablesReference\":{old_scope}}}}}"
+//RS             ),
+//RS         );
+//RS         assert!(stale_scope.contains("\"id\":22036"), "{stale_scope}");
+//RS         assert!(stale_scope.contains("\"code\":\"E2238\""), "{stale_scope}");
+//RS 
+//RS         let continued = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":10,"type":"request","command":"continue","arguments":{"threadId":1}}"#,
+//RS         );
+//RS         assert!(continued.contains("\"event\":\"stopped\""), "{continued}");
+//RS         assert!(server.state == State::Stopped);
+//RS         let breakpoint_stack = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":101,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#,
+//RS         );
+//RS         assert!(
+//RS             breakpoint_stack.contains("\"line\":3"),
+//RS             "{breakpoint_stack}"
+//RS         );
+//RS         assert!(
+//RS             breakpoint_stack.contains(&json_escape(&jet_file.to_string_lossy())),
+//RS             "{breakpoint_stack}"
+//RS         );
+//RS 
+//RS         // Linux keeps the running executable inode busy. Rename a replacement
+//RS         // over the path so the stale-artifact check remains live without an
+//RS         // ETXTBSY overwrite failure.
+//RS         let replacement = root.join("replacement-debug-binary");
+//RS         std::fs::write(&replacement, b"replaced binary").expect("write replacement binary");
+//RS         std::fs::rename(&replacement, &binary).expect("replace debugger binary");
+//RS         let stale_binary = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":11,"type":"request","command":"restart","arguments":{}}"#,
+//RS         );
+//RS         assert!(stale_binary.contains("\"success\":false"), "{stale_binary}");
+//RS         assert!(stale_binary.contains("\"id\":22037"), "{stale_binary}");
+//RS         assert!(
+//RS             stale_binary.contains("\"code\":\"E2231\""),
+//RS             "{stale_binary}"
+//RS         );
+//RS         assert!(server.state == State::Ready);
+//RS         assert!(server.inf.is_none());
+//RS         assert_eq!(server.finish(crate::ExitCodes::OK), crate::ExitCodes::OK);
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_rejects_stale_scope_after_resume_generation_is_invalidated() {
+//RS         let mut server = test_server(State::Stopped);
+//RS         let frame_id = server.references.issue_frame(1, 0);
+//RS         let scopes = parse_dap_request(&format!(
+//RS             "{{\"seq\":1,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{frame_id}}}}}"
+//RS         ))
+//RS         .unwrap();
+//RS         let mut out = Vec::new();
+//RS         server.handle(&scopes, &mut out);
+//RS         let text = String::from_utf8(out).unwrap();
+//RS         assert!(text.contains("\"success\":true"));
+//RS         assert!(text.contains("\"variablesReference\":2"));
+//RS 
+//RS         let continue_request = parse_dap_request(
+//RS             r#"{"seq":2,"type":"request","command":"continue","arguments":{"threadId":1}}"#,
+//RS         )
+//RS         .unwrap();
+//RS         let mut out = Vec::new();
+//RS         server.handle(&continue_request, &mut out);
+//RS         let text = String::from_utf8(out).unwrap();
+//RS         assert!(text.contains("\"success\":false"));
+//RS         server.state = State::Stopped;
+//RS 
+//RS         let variables = parse_dap_request(
+//RS             r#"{"seq":3,"type":"request","command":"variables","arguments":{"variablesReference":2}}"#,
+//RS         )
+//RS         .unwrap();
+//RS         let mut out = Vec::new();
+//RS         server.handle(&variables, &mut out);
+//RS         let text = String::from_utf8(out).unwrap();
+//RS         assert!(text.contains("\"success\":false"));
+//RS         assert!(text.contains("\"message\":\"jet.staleReference\""));
+//RS         assert!(text.contains("\"id\":22036"));
+//RS         assert!(text.contains("\"schema\":\"jet.diagnostic/v1\""));
+//RS         assert!(text.contains("\"code\":\"E2238\""));
+//RS 
+//RS         server.target = Some(TargetKind::Attached);
+//RS         let restart =
+//RS             parse_dap_request(r#"{"seq":4,"type":"request","command":"restart","arguments":{}}"#)
+//RS                 .unwrap();
+//RS         let mut out = Vec::new();
+//RS         server.handle(&restart, &mut out);
+//RS         let text = String::from_utf8(out).unwrap();
+//RS         assert!(text.contains("\"success\":false"));
+//RS         assert!(text.contains("\"message\":\"jet.unsupported\""));
+//RS         assert!(text.contains("\"id\":22033"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_exception_filters_and_loaded_sources_obey_lifecycle() {
+//RS         let mut server = test_server(State::New);
+//RS         let before_initialize = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":1,"type":"request","command":"setExceptionBreakpoints","arguments":{"filters":["panic"]}}"#,
+//RS         );
+//RS         assert!(before_initialize.contains("\"id\":22031"));
+//RS 
+//RS         let initialized = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":2,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#,
+//RS         );
+//RS         assert!(initialized.contains("\"success\":true"));
+//RS         let selected = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":3,"type":"request","command":"setExceptionBreakpoints","arguments":{"filters":["panic","signal"]}}"#,
+//RS         );
+//RS         assert!(selected.contains("\"success\":true"));
+//RS         assert!(server.exception_filters.contains("panic"));
+//RS         assert!(server.exception_filters.contains("signal"));
+//RS         assert!(!server.exception_filters.contains("all"));
+//RS 
+//RS         let invalid = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":4,"type":"request","command":"setExceptionBreakpoints","arguments":{"filters":["generated-rust"]}}"#,
+//RS         );
+//RS         assert!(invalid.contains("\"id\":22032"));
+//RS 
+//RS         server.state = State::Terminated;
+//RS         let after_termination = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":5,"type":"request","command":"loadedSources","arguments":{}}"#,
+//RS         );
+//RS         assert!(after_termination.contains("\"id\":22031"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_exception_info_keeps_jet_panic_error_and_signal_meaning() {
+//RS         let mut server = test_server(State::Stopped);
+//RS         server.last_exception = Some("panic".to_string());
+//RS         let panic = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":1,"type":"request","command":"exceptionInfo","arguments":{}}"#,
+//RS         );
+//RS         assert!(panic.contains("\"exceptionId\":\"JetPanic\""), "{panic}");
+//RS         assert!(panic.contains("\"description\":\"Jet panic\""), "{panic}");
+//RS 
+//RS         server.last_exception = Some("error".to_string());
+//RS         let error = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":2,"type":"request","command":"exceptionInfo","arguments":{}}"#,
+//RS         );
+//RS         assert!(error.contains("\"exceptionId\":\"JetError\""), "{error}");
+//RS         assert!(error.contains("\"description\":\"Jet error\""), "{error}");
+//RS 
+//RS         server.last_signal = Some("SIGABRT".to_string());
+//RS         server.last_exception = Some("SIGABRT".to_string());
+//RS         let signal = dap_call(
+//RS             &mut server,
+//RS             r#"{"seq":3,"type":"request","command":"exceptionInfo","arguments":{}}"#,
+//RS         );
+//RS         assert!(signal.contains("\"exceptionId\":\"SIGABRT\""), "{signal}");
+//RS         assert!(signal.contains("Jet target stopped on SIGABRT"), "{signal}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn macos_exception_stops_use_the_error_filter() {
+//RS         let server = test_server(State::Running);
+//RS         assert_eq!(
+//RS             server.exception_kind("* thread #1, stop reason = EXC_BAD_ACCESS (code=1)"),
+//RS             Some("error")
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn unwind_frames_do_not_turn_breakpoints_into_jet_panics() {
+//RS         let server = test_server(State::Running);
+//RS         let backtrace = concat!(
+//RS             "* thread #1, stop reason = breakpoint 1.1\n",
+//RS             "    frame #0: 0x1 bin`__jet_run at main.rs:2:1\n",
+//RS             "    frame #1: 0x2 bin`std::panic::catch_unwind at panicking.rs:1:1\n",
+//RS             "    frame #2: 0x3 bin`core::panic::unwind_safe::AssertUnwindSafe at unwind_safe.rs:1:1\n",
+//RS         );
+//RS 
+//RS         assert_eq!(server.exception_kind(backtrace), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn terminal_diagnostic_cannot_finish_as_success() {
+//RS         let mut server = test_server(State::Running);
+//RS         let mut output = Vec::new();
+//RS         server.terminate_with_diagnostic(&mut output, "E2235", "stop storm");
+//RS         assert_eq!(
+//RS             server.finish(crate::ExitCodes::OK),
+//RS             crate::ExitCodes::USER_ERROR
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_unmapped_stop_terminates_with_a_jet_diagnostic() {
+//RS         let mut server = test_server(State::Running);
+//RS         let mut output = Vec::new();
+//RS         server.emit_resume(
+//RS             &mut output,
+//RS             ResumeResult::Stopped("stop reason = breakpoint\n".to_string()),
+//RS             ResumeMode::Continue,
+//RS         );
+//RS         let text = String::from_utf8(output).expect("DAP output is UTF-8");
+//RS         assert_eq!(server.state, State::Terminated);
+//RS         assert!(text.contains("E2235"));
+//RS         assert!(text.contains("\"event\":\"terminated\""));
+//RS         assert!(!text.contains("\"event\":\"stopped\""));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dap_pause_does_not_expose_an_unmapped_native_frame() {
+//RS         let mut server = test_server(State::Running);
+//RS         let mut output = Vec::new();
+//RS         server.emit_resume(
+//RS             &mut output,
+//RS             ResumeResult::Stopped(
+//RS                 "frame #0: 0x0000 `runtime_helper at generated.rs:99:1\n".to_string(),
+//RS             ),
+//RS             ResumeMode::Pause,
+//RS         );
+//RS         let text = String::from_utf8(output).expect("DAP output is UTF-8");
+//RS         assert_eq!(server.state, State::Terminated);
+//RS         assert!(!text.contains("\"event\":\"stopped\""));
+//RS         assert!(text.contains("E2235") || text.contains("E2234"), "{text}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn exited_target_releases_server_target_state() {
+//RS         let mut server = test_server(State::Running);
+//RS         server.target = Some(TargetKind::Launched);
+//RS         let mut output = Vec::new();
+//RS         server.emit_resume(
+//RS             &mut output,
+//RS             ResumeResult::Exited {
+//RS                 status: Some(0),
+//RS                 signal: None,
+//RS             },
+//RS             ResumeMode::Continue,
+//RS         );
+//RS         assert_eq!(server.state, State::Terminated);
+//RS         assert!(server.inf.is_none());
+//RS         assert!(server.target.is_none());
+//RS         let text = String::from_utf8(output).expect("DAP output is UTF-8");
+//RS         assert!(text.contains("\"event\":\"exited\""), "{text}");
+//RS         assert!(text.contains("\"event\":\"terminated\""), "{text}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn breakpoint_conditions_fail_closed_when_jet_value_is_unavailable() {
+//RS         let mut server = test_server(State::Stopped);
+//RS         assert!(!server.condition_matches("missing == 1"));
+//RS         assert!(!server.condition_matches("missing > 1"));
+//RS     }
+//RS }
+// END-PORT-PENDING 0748 crates/jet-debug/src/Dap.rs:3656-5716
+

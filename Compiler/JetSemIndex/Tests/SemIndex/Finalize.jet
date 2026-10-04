@@ -1,0 +1,204 @@
+// TOOLS-S8 checked-product acceptance functions. Intentionally UNREGISTERED
+// until C4 exposes the real typed checked bundle, canonical module sources and
+// PackageModel provider; CP-S20/checked state producer, CP-NAMES, CP-AST, S14 and
+// native composite-key #4397 also gate the whole builder. No prefilled facts,
+// alternate checker, default-empty carrier, mock registry, or leaf-focus claim.
+// C4 must load/check the original fixture in its canonical existing test home
+// BEFORE calling these functions. Every test invokes the actual public builder.
+// Original full arithmetic/state/dossier/output/generic/import/ancestry/rename
+// source bytes and wire assertions stay in Build/Items/Signatures/Queries/Convert
+// and Codec tests; none are replaced or narrowed by this packet.
+use jet_foundation.[name_facts_alias_identity, mir_sha256_hex]
+use jet_sema.[SemaRegistrationGraph, SemaGraphResult, SemaCompilerModuleSource, SemaSourceOrigin, sema_effect_facts_state_graph]
+use jet_pkg_model.[EffectBudgetProgram, PackageEffectSummary]
+
+// Row-only membership lookup regression, not a fabricated checked producer.
+fn semindex_finalize_source_row(identity: String, display: String, alias: String, ordinal: Int?) -> SemaCompilerModuleSource Never! {
+    SemaCompilerModuleSource{
+        module_identity: identity, source: "masked", loaded_source: "authored",
+        path: display, display: display, relative_path: display, alias: alias,
+        pub_file: false, source_origin: .CompilerGenerated, physical_path: None,
+        loaded_module_index: ordinal,
+    }
+}
+#Test("semindex_loaded_membership_is_caller_order_not_registration_or_source_position") {
+    sources :: [SemaCompilerModuleSource]{
+        semindex_finalize_source_row("native", "Core/native", "native", None),
+        semindex_finalize_source_row("second", "same.jet", "second", Val(1)),
+        semindex_finalize_source_row("omitted", "omitted.jet", "omitted", Val(2)),
+        semindex_finalize_source_row("first", "same.jet", "first", Val(0)),
+        semindex_finalize_source_row("core", "Core/math/module.jet", "math", Val(2)),
+    }
+    rows :: semindex_loaded_source_rows_by_path(sources, [Int]{3, 1, 4})
+    assert_eq(rows.get("same.jet"), Val(3))
+    assert_eq(rows.get("first"), Val(3))
+    assert_eq(rows.get("second"), Val(1))
+    assert_eq(rows.get("Core/math/module.jet"), Val(4))
+    assert_eq(rows.get("math"), Val(4))
+    assert_eq(rows.get("Core/native"), None)
+    assert_eq(rows.get("native"), None)
+    assert_eq(rows.get("omitted.jet"), None)
+    assert_eq(semindex_loaded_source_rows_by_path(sources, [Int]{}).get("same.jet"), None)
+}
+
+fn semindex_finalize_test_checked_product(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -> SymbolDB {
+    assert(checked.complete, "fixture must have the actual completed Checks solve")
+    semindex_build_symbol_db(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
+}
+
+// tests/semindex.rs1201–1223: use Build.jet's original exact fixture and oracle.
+// Check both the public effect facts and the inferred signature/hover refresh.
+fn semindex_finalize_test_omitted_inferred_effects(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) {
+    db :: semindex_finalize_test_checked_product(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
+    semindex_build_test_semindex_projects_omitted_inferred_effects(db.index)
+    found := false
+    loop definition in db.defs {
+        if definition.name != "announce" -> next
+        if definition.kind == {
+            .Function(_, _, _, _, _, _, _, _, effects, _, _, _, _, _) -> {
+                if effects == { .Val(row) -> { assert_eq(row.len(), 1); assert_eq(row[0].name, "IO"); assert_eq(row[0].span, definition.def_span) }, None -> panic("checked solved effects were not applied") }
+            }
+            else -> panic("announce is not a checked function")
+        }
+        loop hover in db.hover {
+            if hover.module_path != definition.module_path || hover.span != definition.def_span -> next
+            assert(hover.text.contains("-[IO]>"))
+            assert_eq(hover.text.split("\nfailure: ").len(), 2)
+            assert_eq(hover.text.split("\nrequired effects:").len(), 2)
+            found = true
+            break
+        }
+    }
+    assert(found)
+}
+
+// lib.rs829–895: original two-file fixture and receiver-specific anchor oracle
+// remain in Build.jet. Alias definitions must exist before anchor alignment.
+fn semindex_finalize_test_checked_import_aliases(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) {
+    db :: semindex_finalize_test_checked_product(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
+    semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(db.index)
+    sources := [Int:Int]{}
+    loop source_index in loaded_module_rows -> sources[semindex_loaded_registration_index(registration, module_sources[source_index])] = source_index
+    loop alias in checked.effect_facts.name_ledger.aliases {
+        if alias.span.start >= alias.span.end -> next
+        if alias.module_index < 0 || alias.module_index >= checked.effect_facts.name_ledger.modules.len() -> next
+        source_index :: sources.get(alias.module_index) ?? next
+        if name_facts_alias_identity(checked.effect_facts.name_ledger, alias.module_index, alias.span) == .Val(identity) {
+            matches := 0
+            loop definition in db.defs {
+                if definition.identity != identity -> next
+                assert_eq(definition.name, alias.name)
+                assert_eq(definition.def_span, alias.span)
+                assert_eq(definition.module_path, module_sources[source_index].display)
+                assert(definition.kind == .Module)
+                matches += 1
+            }
+            assert(matches == 1, "alias insertion belongs solely to Finalize")
+        }
+    }
+}
+
+// tests/semindex.rs453–483: original terminal_state_hover source lives Build.jet.
+// Public state rows, exact AST declaration bytes, hover and dossier are all real.
+// Full original graph/dossier JSON assertions403–450 remain in Build.jet.
+// Compare projection/order/options against the actual retained Foundation graph,
+// not a constructed graph or an AST-derived replacement.
+fn semindex_finalize_test_checked_state_hovers(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) {
+    db :: semindex_finalize_test_checked_product(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
+    semindex_build_test_semindex_hover_projects_terminal_and_reachability_facts(db)
+    found := false
+    sources := [String:Int]{}
+    loop source_index in loaded_module_rows {
+        display :: module_sources[source_index].display
+        if sources.get(display) == None -> sources[display] = source_index
+    }
+    loop graph in db.index.state_graphs() {
+        if graph.owner != "Door" -> next
+        retained :: sema_effect_facts_state_graph(checked.effect_facts, "{graph.owner}.State") ?? panic("checked Door fixture must retain its actual state graph")
+        assert_eq(graph.states.len(), retained.states.len())
+        loop index in 0..<graph.states.len() {
+            assert_eq(graph.states[index].name, retained.states[index].name)
+            assert_eq(graph.states[index].terminal, retained.states[index].terminal)
+            assert_eq(graph.states[index].reachable, retained.states[index].reachable)
+        }
+        assert_eq(graph.transitions.len(), retained.transitions.len())
+        loop index in 0..<graph.transitions.len() {
+            assert_eq(graph.transitions[index].operation, retained.transitions[index].operation)
+            assert_eq(graph.transitions[index].from, retained.transitions[index].from)
+            assert_eq(graph.transitions[index].to, retained.transitions[index].to)
+        }
+        assert_eq(graph.states.len(), 3)
+        source_index :: sources.get(graph.module_path) ?? panic("state graph must belong to the loaded bundle")
+        source_bytes :: module_sources[source_index].loaded_source.bytes()
+        loop state in graph.states {
+            if state.name == "Closed" { assert(!state.terminal); assert_eq(state.reachable, Val(true)) }
+            if state.name == "Open" { assert(state.terminal); assert_eq(state.reachable, Val(true)) }
+            if state.name == "Orphan" { assert(state.terminal); assert_eq(state.reachable, Val(false)) }
+            bytes := source_bytes[state.span.start..<state.span.end] // #4303
+            assert_eq(String.from_bytes(bytes) ?? panic("valid checked declaration bytes"), state.name)
+        }
+        found = true
+    }
+    assert(found)
+    assert_eq(db.index.dossier("Door").state_graphs.len(), 1)
+}
+
+// Uncertain checked acceptance: definition derivations refer to exactly the
+// finalized ancestry IDs and signature/content evidence, in stable order.
+fn semindex_finalize_test_checked_definition_derivations(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) {
+    db :: semindex_finalize_test_checked_product(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
+    count := 0
+    prior := ""
+    sources := [String:Int]{}
+    loop source_index in loaded_module_rows {
+        display :: module_sources[source_index].display
+        if sources.get(display) == None -> sources[display] = source_index
+    }
+    loop definition in db.index.definition_facts() {
+        assert(prior <= definition.stable_id)
+        prior = ~definition.stable_id
+        assert(definition.stable_id.starts_with("def:") && definition.stable_id.len() == 20)
+        assert(definition.signature_id.starts_with("sig:") && definition.signature_id.len() == 20)
+        assert(definition.content_id.starts_with("sha256:") && definition.content_id.len() == 71)
+        source_index :: sources.get(definition.module_path) ?? panic("definition must belong to the loaded bundle")
+        bytes := module_sources[source_index].loaded_source.bytes()
+        authored :: String.from_bytes(bytes[definition.span.start..<definition.span.end]) ?? panic("definition span must delimit loaded UTF8 source")
+        assert_eq(definition.content_id, "sha256:{mir_sha256_hex(semindex_normalize_definition(authored))}")
+        found := false
+        loop derivation in db.index.derivations() {
+            if derivation.subject != definition.stable_id -> next
+            assert_eq(derivation.claim, definition.human_identity)
+            assert_eq(derivation.premises, [String]{definition.content_id, definition.signature_id})
+            found = true
+        }
+        assert(found)
+        count += 1
+    }
+    assert(count > 0, "real checked fixture must publish definitions")
+}
+
+// tests/semindex.rs1164–1189: C4 checks before and after using the same module
+// identity/path and the two original byte-exact Build.jet ancestry fixtures.
+fn semindex_finalize_test_checked_ancestry_changes(before_registration: SemaRegistrationGraph, before_checked: SemaGraphResult, before_sources: [SemaCompilerModuleSource], before_loaded_module_rows: [Int], before_program: EffectBudgetProgram, before_summaries: [String:PackageEffectSummary], after_registration: SemaRegistrationGraph, after_checked: SemaGraphResult, after_sources: [SemaCompilerModuleSource], after_loaded_module_rows: [Int], after_program: EffectBudgetProgram, after_summaries: [String:PackageEffectSummary]) {
+    before :: semindex_finalize_test_checked_product(before_registration, before_checked, before_sources, before_loaded_module_rows, before_program, before_summaries)
+    after :: semindex_finalize_test_checked_product(after_registration, after_checked, after_sources, after_loaded_module_rows, after_program, after_summaries)
+    semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_shape(before.index, after.index)
+}
+
+// C4 supplies a real complete graph containing native registration-only Core
+// rows plus loaded Core and user modules. No rechecked/mocked registry is used.
+fn semindex_finalize_test_loaded_membership(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) {
+    db :: semindex_finalize_test_checked_product(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
+    displays := [String:Bool]{}
+    loop source_index in loaded_module_rows -> displays[module_sources[source_index].display] = true
+    loop definition in db.defs -> assert(displays.get(definition.module_path) != None)
+    loop node in db.nodes -> assert(displays.get(node.module_path) != None)
+    loop hover in db.hover -> assert(displays.get(hover.module_path) != None)
+    loop hint in db.inlay -> assert(displays.get(hint.module_path) != None)
+    loop graph in db.index.state_graphs() -> assert(displays.get(graph.module_path) != None)
+    loop instance in db.index.instances() -> assert(displays.get(instance.module_path) != None)
+    loop output in db.index.outputs() -> assert(displays.get(output.module_path) != None)
+    loop symbol in db.symbols.symbols() {
+        if symbol.provenance == .Source(path) -> assert(displays.get(path) != None)
+    }
+}

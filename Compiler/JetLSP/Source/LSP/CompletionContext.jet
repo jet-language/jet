@@ -1,0 +1,99 @@
+// Rust: Source/LSP/Completion.rs:111-195,392-408,1222-1254.
+// UTF-8 byte cursors; never apply scalar String.slice to compiler offsets.
+use jet_lexer.[Token, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT]
+
+fn lsp_completion_word_byte(byte: U8) -> Bool Never! {
+    (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95})
+}
+fn lsp_completion_end(src: String, offset: Int) -> Int Never! {
+    if offset < 0 -> panic("completion offset is unsigned")
+    if offset < src.bytes().len() -> offset else -> src.bytes().len()
+}
+fn lsp_completion_slice(src: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes(src.bytes()[start..<end]) ?? panic("completion UTF-8 boundary")
+}
+// Rust: Source/LSP/Completion.rs:111.
+pub fn lsp_context_is_member_access(src: String, offset: Int) -> String? Never! {
+    bytes :: src.bytes()
+    i := lsp_completion_end(src, offset)
+    loop i > 0 && lsp_completion_word_byte(bytes[i - 1]) -> i -= 1
+    if i == 0 || bytes[i - 1] != (U8{46}) -> return None
+    i -= 1
+    end :: i
+    loop i > 0 && (lsp_completion_word_byte(bytes[i - 1]) || bytes[i - 1] == (U8{46})) -> i -= 1
+    if i < end -> return Val(lsp_completion_slice(src, i, end))
+    None
+}
+// Rust: Source/LSP/Completion.rs:146.
+pub fn lsp_context_is_compiler_fact_access(src: String, offset: Int) -> (receiver: String, prefix: String)? Never! {
+    bytes :: src.bytes()
+    end :: lsp_completion_end(src, offset)
+    mark := end
+    loop mark > 0 {
+        mark -= 1
+        if bytes[mark] == (U8{64}) -> break
+    }
+    if mark == 0 || bytes[mark] != (U8{64}) || bytes[mark - 1] != (U8{46}) -> return None
+    receiver_end :: mark - 1
+    start := receiver_end
+    loop start > 0 && lsp_completion_word_byte(bytes[start - 1]) -> start -= 1
+    if start == receiver_end -> return None
+    loop i in mark + 1..<end { if !lsp_completion_word_byte(bytes[i]) -> return None }
+    Val((receiver: lsp_completion_slice(src, start, receiver_end), prefix: lsp_completion_slice(src, mark, end)))
+}
+// Rust: Source/LSP/Completion.rs:182.
+pub fn lsp_completion_previous_code_token(tokens: [Token], index: Int) -> Int? Never! {
+    candidate := index
+    loop candidate > 0 {
+        candidate -= 1
+        kind :: tokens[candidate].kind
+        if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT -> return Val(candidate)
+    }
+    None
+}
+// Rust: Source/LSP/Completion.rs:392.
+pub fn lsp_context_is_binding_start(src: String, offset: Int) -> Bool Never! {
+    end :: lsp_completion_end(src, offset)
+    bytes :: src.bytes()
+    start := end
+    loop start > 0 && bytes[start - 1] != (U8{10}) -> start -= 1
+    prefix := lsp_completion_slice(src, start, end).trim() // #4303
+    if !prefix.is_empty() -> return false
+    prior := lsp_completion_slice(src, 0, start).trim_end() // #4303
+    prior.is_empty() || prior.ends_with("{")
+}
+// Rust: Source/LSP/Completion.rs:403.
+pub fn lsp_context_allows_keyword(src: String, offset: Int, kw: String) -> Bool Never! {
+    if lsp_context_is_binding_start(src, offset) -> return true
+    kw == "return" || kw == "if" || kw == "else" || kw == "true" || kw == "false" || kw == "break"
+}
+// Rust: Source/LSP/Completion.rs:1222.
+pub fn lsp_context_is_package_ref(src: String, offset: Int) -> (source: String, prefix: String)? Never! {
+    source :: lsp_context_is_member_access(src, offset) ?? return None
+    Val((source: source, prefix: lsp_current_identifier_prefix(src, offset)))
+}
+// Rust: Source/LSP/Completion.rs:1228.
+pub fn lsp_context_is_option_field(src: String, offset: Int) -> String? Never! {
+    before :: lsp_completion_slice(src, 0, lsp_completion_end(src, offset))
+    // Byte scans match ASCII markers; rfind's scalar coordinates never escape.
+    bytes :: before.bytes()
+    marker := -1
+    open := -1
+    close := -1
+    loop i in 0..<bytes.len() {
+        if bytes[i] == (U8{123}) -> open = i
+        if bytes[i] == (U8{125}) -> close = i
+        if i + 8 <= bytes.len() && bytes[i..<i + 8] == "Service{".bytes() -> marker = i
+        if i + 4 <= bytes.len() && bytes[i..<i + 4] == "Env{".bytes() -> marker = i
+    }
+    if marker < 0 || (close >= marker && close > open) -> return None
+    Val(lsp_current_identifier_prefix(src, offset))
+}
+// Rust: Source/LSP/Completion.rs:1247.
+pub fn lsp_current_identifier_prefix(src: String, offset: Int) -> String Never! {
+    end :: lsp_completion_end(src, offset)
+    bytes :: src.bytes()
+    start := end
+    loop start > 0 && lsp_completion_word_byte(bytes[start - 1]) -> start -= 1
+    lsp_completion_slice(src, start, end)
+}

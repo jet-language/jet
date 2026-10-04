@@ -1,0 +1,85 @@
+// PORT-PENDING 2172 tools-stage0-repack-build: Tools/stage0-repack/build.rs:1-81
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Mount the bootstrap Host/Runner module set from `JET_REPACK_SOURCE_ROOT`
+//RS //! (set by repack.sh) with the same module names and
+//RS //! re-exports `Source/lib.rs` and the packaged compiler crate use, so the
+//RS //! modules resolve identical `crate::` paths here. The root is also the
+//RS //! `BOOTSTRAP_CANONICAL_SOURCE_ROOT` the packaged source names in its
+//RS //! `#[path]` attributes.
+//RS 
+//RS use std::fmt::Write as _;
+//RS use std::path::PathBuf;
+//RS 
+//RS fn main() {
+//RS     println!("cargo:rerun-if-env-changed=JET_REPACK_SOURCE_ROOT");
+//RS     // Set only when the modules are compiled into the packaged compiler crate.
+//RS     println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
+//RS     let root = PathBuf::from(
+//RS         std::env::var_os("JET_REPACK_SOURCE_ROOT").expect("JET_REPACK_SOURCE_ROOT (set by repack.sh)"),
+//RS     );
+//RS     let root = root
+//RS         .canonicalize()
+//RS         .unwrap_or_else(|error| panic!("JET_REPACK_SOURCE_ROOT `{}`: {error}", root.display()));
+//RS     let path = |relative: &str| {
+//RS         let file = root.join(relative);
+//RS         assert!(file.is_file(), "bootstrap source `{}` is missing", file.display());
+//RS         format!("{:?}", file.to_string_lossy().as_ref())
+//RS     };
+//RS     let mut out = String::new();
+//RS     writeln!(
+//RS         out,
+//RS         "pub(crate) const BOOTSTRAP_CANONICAL_SOURCE_ROOT: &str = {:?};",
+//RS         root.to_string_lossy().as_ref()
+//RS     )
+//RS     .unwrap();
+//RS     writeln!(
+//RS         out,
+//RS         "#[doc(hidden)]\npub mod BootstrapBuildIdentity {{\n    include!({});\n}}",
+//RS         path("Compiler/Bootstrap/BuildIdentity.rs")
+//RS     )
+//RS     .unwrap();
+//RS     for (relative, module) in [
+//RS         ("Compiler/Bootstrap/Host/RuntimeMirCodec.rs", "compiler_bootstrap_runtime_mir_codec"),
+//RS         ("Compiler/Bootstrap/Host/RuntimeMir.rs", "compiler_bootstrap_runtime_mir"),
+//RS         ("Compiler/Bootstrap/Host/DiagnosticCodec.rs", "compiler_bootstrap_diagnostic_codec"),
+//RS         ("Compiler/Bootstrap/Host/EntryCodec.rs", "compiler_bootstrap_entry_codec"),
+//RS         ("Compiler/Bootstrap/Host/CompilerImage.rs", "compiler_bootstrap_compiler_image"),
+//RS         ("Compiler/Bootstrap/Host/Native.rs", "compiler_bootstrap_host"),
+//RS         ("Compiler/Bootstrap/Runner.rs", "compiler_bootstrap_runner"),
+//RS     ] {
+//RS         writeln!(out, "#[path = {}]\n#[allow(dead_code)]\nmod {module};", path(relative)).unwrap();
+//RS     }
+//RS     out.push_str(
+//RS         "#[allow(unused_imports)]\n\
+//RS          pub(crate) use compiler_bootstrap_entry_codec::{\n\
+//RS              BootstrapEntryCodec, BootstrapEntryPhysicalBindings, BootstrapEntryValue,\n\
+//RS          };\n\
+//RS          #[allow(unused_imports)]\n\
+//RS          pub(crate) use compiler_bootstrap_compiler_image::{\n\
+//RS              archive_compiler_image, restore_compiler_image, CompilerImageError, CompilerImageHeader,\n\
+//RS              RestoredCompilerImage,\n\
+//RS          };\n\
+//RS          #[allow(unused_imports)]\n\
+//RS          pub(crate) use compiler_bootstrap_runtime_mir::{\n\
+//RS              execute_source_mir, SourceMirExecution, SourceMirExecutionError,\n\
+//RS          };\n\
+//RS          #[allow(unused_imports)]\n\
+//RS          pub(crate) use compiler_bootstrap_host::{\n\
+//RS              append_bootstrap_host_glue, open_authorized_sources, AuthorizedSourceLease,\n\
+//RS              AuthorizedSourceSnapshot, BootstrapBindingDescriptor, BootstrapHostCodecError,\n\
+//RS          };\n\
+//RS          #[allow(unused_imports)]\n\
+//RS          pub(crate) use compiler_bootstrap_runner::{\n\
+//RS              bootstrap_artifact_build_id, invoke_bootstrap_entry, prepare_bootstrap_artifact,\n\
+//RS              prepare_bootstrap_artifact_from_aot, BootstrapArtifact,\n\
+//RS              BootstrapBackendArtifact, BootstrapFactoryTier, BootstrapJetCompileResult,\n\
+//RS              BootstrapRunError, BootstrapRunOutput, BootstrapSourceResume, BootstrapSourceResumeFactory,\n\
+//RS              BootstrapWebArtifacts,\n\
+//RS          };\n",
+//RS     );
+//RS     let target = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR")).join("host_modules.rs");
+//RS     std::fs::write(&target, out).unwrap_or_else(|error| panic!("cannot write `{}`: {error}", target.display()));
+//RS }
+//RS 
+// END-PORT-PENDING 2172 Tools/stage0-repack/build.rs:1-81
+

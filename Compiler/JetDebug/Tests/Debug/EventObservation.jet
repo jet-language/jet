@@ -1,0 +1,144 @@
+// TOOLS-D1 EventObservation.rs consumer tests (158/167) plus closed-schema
+// edges. These exercise the debugger's validator only; the runtime producer
+// feed (tests/event_observations.rs) needs the unported runtime observer.
+
+fn debug_event_test_record() -> String Never! {
+    `{"sequence":1,"source":"AsyncEvent","event_id":2,"owner_id":3,"subscription_id":4,"dispatch_id":5,"lifecycle":"HandlerFailed","queued":1,"blocked":0,"running":1,"capacity":8,"overflow":"DropNewest","priority":17,"failure":"Handler","terminal":"None"}`
+}
+
+fn debug_event_test_snapshot(records: String) -> String Never! {
+    "{{\"event_observations\":[{records}]}}"
+}
+
+fn debug_event_test_with(field: String, replacement: String) -> String Never! {
+    record :: debug_event_test_record()
+    original :: if field == {
+        "sequence" -> "\"sequence\":1"
+        "source" -> "\"source\":\"AsyncEvent\""
+        "event_id" -> "\"event_id\":2"
+        "lifecycle" -> "\"lifecycle\":\"HandlerFailed\""
+        "queued" -> "\"queued\":1"
+        "blocked" -> "\"blocked\":0"
+        "capacity" -> "\"capacity\":8"
+        "overflow" -> "\"overflow\":\"DropNewest\""
+        "priority" -> "\"priority\":17"
+        "failure" -> "\"failure\":\"Handler\""
+        "terminal" -> "\"terminal\":\"None\""
+        else -> panic("unknown test field {field}")
+    }
+    record.replace(original, replacement)
+}
+
+fn debug_event_test_error(snapshot: String) -> String Never! {
+    if render_event_observations(snapshot) == {
+        .Ok(_) -> panic("expected the observation to be refused")
+        .Err(error) -> error.message
+    }
+}
+
+fn debug_event_test_render(snapshot: String) -> String Never! {
+    render_event_observations(snapshot) ?? panic("expected the observation to render: {err.message}")
+}
+
+fn debug_event_test_padded(total_bytes: Int) -> String Never! {
+    bytes := "{{\"event_observations\":[]}}".bytes()
+    loop bytes.len() < total_bytes -> &bytes.push(U8{32})
+    String.from_bytes(bytes) ?? panic("padding is UTF-8")
+}
+
+// Original EventObservation.rs:158.
+#Test("preserves_closed_runtime_facts") {
+    snapshot :: debug_event_test_snapshot(debug_event_test_record())
+    assert_eq(debug_event_test_render(snapshot), "sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=17 failure=Handler terminal=None")
+}
+
+// Original EventObservation.rs:167.
+#Test("rejects_payload_fields_and_unbounded_sequences") {
+    unsafe_record :: debug_event_test_record().replace("\"terminal\":\"None\"", "\"terminal\":\"None\",\"payload\":\"secret\"")
+    assert(debug_event_test_error(debug_event_test_snapshot(unsafe_record)).contains("unsafe or unknown"))
+    rows := [String]{}
+    loop _ in 0..<257 -> &rows.push(debug_event_test_record())
+    assert(debug_event_test_error(debug_event_test_snapshot(rows.join(","))).contains("256-record"))
+}
+
+#Test("event_observations_render_ordered_lines_up_to_the_record_bound") {
+    assert_eq(debug_event_test_render(debug_event_test_snapshot("")), "")
+    rows := [String]{}
+    loop index in 1..<257 -> &rows.push(debug_event_test_with("sequence", "\"sequence\":{index * 3}"))
+    rendered :: debug_event_test_render(debug_event_test_snapshot(rows.join(",")))
+    lines :: rendered.split("\n").to_list()
+    assert_eq(lines.len(), 256)
+    assert(lines[0].starts_with("sequence=3 source=AsyncEvent"))
+    assert(lines[255].starts_with("sequence=768 source=AsyncEvent"))
+}
+
+#Test("event_observations_require_strictly_increasing_positive_sequences") {
+    not_increasing :: "runtime event observation sequence is not strictly increasing"
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("sequence", "\"sequence\":0"))), not_increasing)
+    repeated :: "{debug_event_test_record()},{debug_event_test_record()}"
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(repeated)), not_increasing)
+    fifth :: debug_event_test_with("sequence", "\"sequence\":5")
+    fourth :: debug_event_test_with("sequence", "\"sequence\":4")
+    decreasing :: "{fifth},{fourth}"
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(decreasing)), not_increasing)
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("sequence", "\"sequence\":-1"))), "runtime event observation has negative `sequence`")
+}
+
+#Test("event_observations_require_exactly_the_fifteen_closed_fields") {
+    unsafe_field :: "runtime event observation contains an unsafe or unknown field"
+    missing :: debug_event_test_record().replace(",\"priority\":17", "")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(missing)), unsafe_field)
+    renamed :: debug_event_test_record().replace("\"priority\":17", "\"value\":17")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(renamed)), unsafe_field)
+    // Duplicate keys are refused by the strict protocol parser itself.
+    duplicate :: debug_event_test_record().replace("\"priority\":17", "\"priority\":17,\"priority\":18")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(duplicate)), "runtime observation is not valid JSON")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot("[1]")), "runtime event observation is not an object")
+}
+
+#Test("event_observations_keep_numeric_domains_exact") {
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("event_id", "\"event_id\":-2"))), "runtime event observation has negative `event_id`")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("capacity", "\"capacity\":-1"))), "runtime event observation has negative `capacity`")
+    // Counts publish -1 as unavailable but nothing lower.
+    available :: debug_event_test_render(debug_event_test_snapshot(debug_event_test_with("queued", "\"queued\":-1")))
+    assert(available.contains(" queued=-1 "))
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("blocked", "\"blocked\":-2"))), "runtime event observation has invalid `blocked`")
+    // Priority is signed and keeps the full i64 range.
+    signed :: debug_event_test_render(debug_event_test_snapshot(debug_event_test_with("priority", "\"priority\":-9223372036854775808")))
+    assert(signed.contains(" priority=-9223372036854775808 "))
+    // Non-integers and out-of-i64 integers are not observation numbers.
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("priority", "\"priority\":17.0"))), "runtime event observation has invalid `priority`")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("priority", "\"priority\":\"17\""))), "runtime event observation has invalid `priority`")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("priority", "\"priority\":9223372036854775808"))), "runtime observation is not valid JSON")
+}
+
+#Test("event_observations_accept_only_closed_runtime_enum_values") {
+    accepted :: [String]{
+        debug_event_test_with("source", "\"source\":\"DecisionHook\""),
+        debug_event_test_with("lifecycle", "\"lifecycle\":\"HandlerTransform\""),
+        debug_event_test_with("overflow", "\"overflow\":\"None\""),
+        debug_event_test_with("failure", "\"failure\":\"Panic\""),
+        debug_event_test_with("terminal", "\"terminal\":\"DeadlineExceeded\""),
+    }
+    loop record in accepted {
+        rendered :: debug_event_test_render(debug_event_test_snapshot(record))
+        assert(rendered.starts_with("sequence=1 "))
+    }
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("source", "\"source\":\"Hook\""))), "runtime event observation has unknown `source` value")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("lifecycle", "\"lifecycle\":\"handlerfailed\""))), "runtime event observation has unknown `lifecycle` value")
+    // Overflow is the observation vocabulary, not Core's DispatchState names.
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("overflow", "\"overflow\":\"DroppedNewest\""))), "runtime event observation has unknown `overflow` value")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("failure", "\"failure\":null"))), "runtime event observation has invalid `failure`")
+    assert_eq(debug_event_test_error(debug_event_test_snapshot(debug_event_test_with("terminal", "\"terminal\":\"Transform\""))), "runtime event observation has unknown `terminal` value")
+}
+
+#Test("event_observations_bound_the_snapshot_and_require_the_sequence") {
+    assert_eq(debug_event_test_render(debug_event_test_padded(1048576)), "")
+    assert_eq(debug_event_test_error(debug_event_test_padded(1048577)), "runtime observation exceeds the 1 MiB debugger limit")
+    assert_eq(debug_event_test_error("{{\"event_observations\":"), "runtime observation is not valid JSON")
+    no_sequence :: "runtime observation has no event sequence"
+    assert_eq(debug_event_test_error("{{}}"), no_sequence)
+    assert_eq(debug_event_test_error("[]"), no_sequence)
+    assert_eq(debug_event_test_error("{{\"event_observations\":{{}}}}"), no_sequence)
+    assert_eq(debug_event_test_error("{{\"event_observations\":null}}"), no_sequence)
+}

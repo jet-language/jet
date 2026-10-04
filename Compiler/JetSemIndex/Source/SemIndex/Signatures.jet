@@ -1,0 +1,222 @@
+// crates/jet-semindex/src/Build.rs:622–984: signature/parameter/default/access/
+// zone/rest/policy projections, callable/member facts and public binder helpers.
+// Foundation owns call labels, failure inference, policy parsing and returned-
+// view canonical bytes. Those canonical helper dependencies are CP-NAMES/AST
+// gates, not locally reconstructed semantic facts.
+use jet_foundation.[
+    AccessConvention, CallablePolicy, CompilerStage, EffectRowEntry, FailureContract,
+    Func, NamedSpan, Param, ParamZone, Type, ViewProvenanceMap,
+    access_sigil, callable_policy_display, expr_span,
+    failure_contract_effective_type, failure_contract_source, type_name,
+    param_call_label, func_failure_contract, func_effective_return_type,
+    marker_expr_args_owned, callable_policy_chain_parse,
+    view_provenance_canonical, canonical_view_provenance_map,
+]
+
+pub fn semindex_function_parameter_parts(params: [SymNameType], contract: [SymParamContract], variadic: [Bool]) -> [String] Never! {
+    parts := [String]{}
+    star_done := false
+    loop index in 0..<params.len() {
+        local :: params[index].name
+        contract_local := local
+        label := local
+        zone := ParamZone.Either
+        if index < contract.len() {
+            contract_local = contract[index].name
+            label = contract[index].label
+            zone = contract[index].zone
+        }
+        if zone == .LabelOnly && !star_done {
+            star_done = true
+            &parts.push("*")
+        }
+        shown :: if zone == .PositionalOnly -> contract_local else if label == contract_local -> label else -> "{label} {contract_local}"
+        rest :: if index < variadic.len() && variadic[index] -> "..." else -> ""
+        &parts.push("{shown}: {rest}{type_name(params[index].ty)}")
+        if zone == .PositionalOnly && (index + 1 >= contract.len() || contract[index + 1].zone != .PositionalOnly) -> &parts.push("/")
+    }
+    parts
+}
+
+// Declaration slots include label-only parameters, but not the '/' and '*'
+// display separators. Consumed labels match first unconsumed eligible slot.
+pub fn semindex_binder_active_parameter(active_label: String?, active_positional: Int, consumed_labels: [String], contract: [SymParamContract], visible_parameter_count: Int) -> Int Never! {
+    if visible_parameter_count == 0 -> return 0
+    consumed_slots := [Int]{}
+    loop label in consumed_labels {
+        loop index in 0..<contract.len() {
+            if !semindex_consumed_slots_contains(consumed_slots, index) && contract[index].zone != .PositionalOnly && contract[index].label == label {
+                &consumed_slots.push(index)
+                break
+            }
+        }
+    }
+    positional_before_active :: if active_positional > consumed_slots.len() -> active_positional - consumed_slots.len() else -> 0
+    declaration_slot := Int?{None}
+    if active_label == .Val(label) {
+        loop index in 0..<contract.len() {
+            if contract[index].zone != .PositionalOnly && contract[index].label == label {
+                declaration_slot = Val(index)
+                break
+            }
+        }
+    }
+    if declaration_slot == None {
+        bare_parameters_before_active := positional_before_active
+        loop index in 0..<contract.len() {
+            if semindex_consumed_slots_contains(consumed_slots, index) -> next
+            if contract[index].zone == .LabelOnly {
+                if bare_parameters_before_active == 0 {
+                    declaration_slot = Val(index)
+                    break
+                }
+                next
+            }
+            if bare_parameters_before_active == 0 {
+                declaration_slot = Val(index)
+                break
+            }
+            bare_parameters_before_active -= 1
+        }
+    }
+    visible_index :: declaration_slot ?? active_positional
+    if visible_index < visible_parameter_count -> visible_index else -> visible_parameter_count - 1
+}
+
+pub fn semindex_consumed_slots_contains(slots: [Int], slot: Int) -> Bool Never! {
+    loop consumed in slots { if consumed == slot -> return true }
+    false
+}
+
+pub fn semindex_fn_signature(name: String, params: [SymNameType], param_contract: [SymParamContract], param_variadic: [Bool], ret: Type?, failure_contract: CallableFactAvailability<FailureContract>, effects: [EffectRowEntry]?, effect_via: NamedSpan?, view_provenance: ViewProvenanceMap?, param_access: [AccessConvention], param_defaults: [CallableDefaultFact?], policies: [CallablePolicy]) -> String Never! {
+    parameter_parts := semindex_function_parameter_parts(params, param_contract, param_variadic)
+    parameter_index := 0
+    loop index in 0..<parameter_parts.len() {
+        if parameter_parts[index] == "/" || parameter_parts[index] == "*" -> next
+        access :: if parameter_index < param_access.len() -> access_sigil(param_access[parameter_index]) else -> ""
+        parameter_parts[index] = "{access}{parameter_parts[index]}"
+        if parameter_index < param_defaults.len() {
+            if param_defaults[parameter_index] == .Val(default) -> parameter_parts[index] += "{{{default.source_text}}}"
+        }
+        parameter_index += 1
+    }
+    // D-SIG-AFTER1=A: one arrow; Panic and Mem are deny-only roots.
+    shown := [String]{}
+    if effects == .Val(row) {
+        loop fact in row {
+            root := fact.name.split(".")[0] // #4303
+            if root != "Panic" && root != "Mem" -> &shown.push(fact.name)
+        }
+    }
+    result :: if ret == { .Val(ty) -> type_name(ty), None -> "" }
+    ceiling :: if effect_via == {
+        .Val(via) -> " -[via {via.name}]>"
+        None -> if shown.len() == 0 -> "" else -> " -[{shown.join(", ")}]>"
+    }
+    suffix :: if ceiling != "" -> if result == "" -> ceiling else -> "{ceiling} {result}" else if result != "" -> " -> {result}" else -> ""
+    signature := "fn {name}({parameter_parts.join(", ")}){suffix}"
+    if view_provenance == .Val(map) {
+        if map.entries.len() == 1 && map.entries[0].slot.len() == 0 {
+            signature += " ; view_source = {view_provenance_canonical(map.entries[0].value)}"
+        } else {
+            signature += " ; view_sources = {canonical_view_provenance_map(map)}"
+        }
+    }
+    policy_names := [String]{}
+    loop policy in policies -> &policy_names.push(callable_policy_display(policy))
+    if policy_names.len() > 0 -> signature += " ; policies=[{policy_names.join(", ")}]"
+    signature += "\nfailure: "
+    if failure_contract == {
+        .Checked(failure) -> signature += "{type_name(failure_contract_effective_type(failure))} ({failure_contract_source(failure)}"
+        .Unavailable(unavailable) -> signature += "unavailable ({unavailable.reason}"
+    }
+    signature += ")"
+    signature
+}
+
+pub fn semindex_method_parameter_defaults(function: Func, source: String) -> [CallableDefaultFact?] Never! {
+    semindex_parameter_defaults(function.params, source, true)
+}
+pub fn semindex_parameter_defaults(params: [Param], source: String, skip_self: Bool) -> [CallableDefaultFact?] Never! {
+    defaults := [CallableDefaultFact?]{}
+    bytes :: source.bytes()
+    loop parameter in params {
+        if skip_self && parameter.name == "self" -> next
+        if parameter.default == {
+            .Val(default) -> {
+                span :: expr_span(default)
+                if span.start < 0 || span.end < span.start || span.end > bytes.len() -> panic("callable default span must select source text")
+                selected := bytes[span.start..<span.end] // #4303
+                text :: String.from_bytes(selected) ?? panic("callable default span must select source text")
+                &defaults.push(Val(CallableDefaultFact{
+                    source_text: text, source: semindex_source_span(span),
+                    value_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Prepared, reason: "the semindex producer does not evaluate callable defaults"},
+                }))
+            }
+            None -> &defaults.push(None)
+        }
+    }
+    defaults
+}
+pub fn semindex_callable_policies(function: Func) -> [CallablePolicy] Never! {
+    loop marker in function.markers {
+        if marker.name == "Policy" {
+            if callable_policy_chain_parse(marker_expr_args_owned(marker)) == {
+                .Ok(chain) -> return chain.policies
+                .Err(_) -> return [CallablePolicy]{}
+            }
+        }
+    }
+    [CallablePolicy]{}
+}
+pub fn semindex_method_params(function: Func) -> [SymNameType] Never! {
+    params := [SymNameType]{}
+    loop parameter in function.params {
+        if parameter.name != "self" -> &params.push(SymNameType{name: parameter.name, ty: parameter.ty})
+    }
+    params
+}
+pub fn semindex_method_parameter_contract(function: Func) -> [SymParamContract] Never! {
+    semindex_parameter_contract(function.params)
+}
+pub fn semindex_parameter_contract(params: [Param]) -> [SymParamContract] Never! {
+    contract := [SymParamContract]{}
+    loop parameter in params {
+        if parameter.name != "self" -> &contract.push(SymParamContract{name: parameter.name, label: param_call_label(parameter), zone: parameter.zone})
+    }
+    contract
+}
+pub fn semindex_method_parameter_variadic(function: Func) -> [Bool] Never! {
+    semindex_parameter_variadic(function.params)
+}
+pub fn semindex_parameter_variadic(params: [Param]) -> [Bool] Never! {
+    variadic := [Bool]{}
+    loop parameter in params { if parameter.name != "self" -> &variadic.push(parameter.variadic) }
+    variadic
+}
+pub fn semindex_method_parameter_access(function: Func) -> [AccessConvention] Never! {
+    access := [AccessConvention]{}
+    loop parameter in function.params { if parameter.name != "self" -> &access.push(parameter.convention) }
+    access
+}
+pub fn semindex_callable_kind(function: Func, source: String) -> SymKind Never! {
+    param_sources := [SourceSpan]{}
+    loop parameter in function.params { if parameter.name != "self" -> &param_sources.push(semindex_source_span(parameter.name_span)) }
+    SymKind.Function{
+        params: semindex_method_params(function), param_sources: param_sources,
+        signature_facts_available: true, param_contract: semindex_method_parameter_contract(function),
+        param_variadic: semindex_method_parameter_variadic(function), return_type: function.return_type,
+        failure_contract: .Checked{value: func_failure_contract(function)}, foreign_boundary: function.inline_foreign != None,
+        effects: function.declared_effects, effect_via: function.effect_via,
+        param_access: semindex_method_parameter_access(function), param_defaults: semindex_method_parameter_defaults(function, source),
+        policies: semindex_callable_policies(function), generic_parameters: .Checked{value: function.type_params},
+    }
+}
+pub fn semindex_method_fact(scope: String, owner: String, function: Func, origin: MemberOrigin, module_path: String, source: String) -> MemberFact Never! {
+    MemberFact{
+        owner: owner, name: function.name, identity: semindex_callable_identity(scope, Val(owner), function.name),
+        kind: .Method, origin: origin,
+        signature: semindex_fn_signature(function.name, semindex_method_params(function), semindex_method_parameter_contract(function), semindex_method_parameter_variadic(function), Val(func_effective_return_type(function)), .Checked{value: func_failure_contract(function)}, function.declared_effects, function.effect_via, function.return_view_provenance, semindex_method_parameter_access(function), semindex_method_parameter_defaults(function, source), semindex_callable_policies(function)),
+        module_path: module_path, span: semindex_source_span(function.name_span),
+    }
+}

@@ -1,0 +1,72 @@
+// New pure controls for Features.rs22–209,1127–1148. No inline Rust tests in
+// Features1–1813; original native LSP journeys belong to 1108–1110, not fixtures.
+use jet_foundation.[Span, COMPILER_FACT_LAYOUT]
+use jet_lexer.[lex]
+use jet_semindex.[SymbolDB, SemanticSymbol, SemanticSymbolKind, SemanticSymbolIndex, SourceSpan, HoverEntry]
+
+fn lsp_hover_test_symbol() -> SemanticSymbol Never! {
+    SemanticSymbol{identity: "fn:other::run", name: "run", qualified_name: "other.run", owner: None, module_path: "other.jet", kind: .Function, signature: "fn run() Never!", summary: "Run it", examples: [String]{"run()", "run(1)"}, provenance: .Source{module_path: "other.jet"}, span: Val(SourceSpan{start: 3, end: 6}), lexical_scope: None}
+}
+
+#Test("semantic hover preserves module provenance summary signature and example order") {
+    symbol := lsp_hover_test_symbol()
+    assert_eq(lsp_semantic_hover(symbol, "main.jet"), "from module `other.jet`\n\nRun it\n\n---\n\nfn run() Never!\n\nExample: `run()`\n\nExample: `run(1)`")
+    symbol.kind = .Member
+    symbol.summary = ""
+    symbol.examples = [String]{}
+    assert_eq(lsp_semantic_hover(symbol, "main.jet"), "`other.run`\n\nfn run() Never!")
+    symbol.qualified_name = "run"
+    assert_eq(lsp_semantic_hover(symbol, "other.jet"), "fn run() Never!")
+}
+
+#Test("checked hover removes only failure-prefix lines without a trailing duplicate") {
+    hover := "base"
+    lsp_append_checked_signature(&hover, "failure: Never\ndetail\nfailure: Err\nnot failure: keep\n")
+    assert_eq(hover, "base\n\ndetail\nnot failure: keep")
+    lsp_append_checked_signature(&hover, "failure: Never\n")
+    assert_eq(hover, "base\n\ndetail\nnot failure: keep")
+    lsp_append_checked_signature(&hover, "")
+    assert_eq(hover, "base\n\ndetail\nnot failure: keep")
+}
+
+#Test("hover uses canonical symbol and direct checked details without copying semantic rows") {
+    db := SymbolDB.new()
+    db.symbols = SemanticSymbolIndex.new([SemanticSymbol]{lsp_hover_test_symbol()})
+    db.hover = [HoverEntry]{HoverEntry{span: Span{start: 3, end: 6}, module_path: "other.jet", text: "failure: Never\nchecked detail"}}
+    tokens :: lex("   run".bytes()).tokens
+    assert_eq(lsp_compute_hover(db, tokens, "   run", "other.jet", 4), Val("Run it\n\n---\n\nfn run() Never!\n\nExample: `run()`\n\nExample: `run(1)`\n\nchecked detail"))
+}
+
+#Test("state graph hover wins over semantic symbols with inclusive endpoints and exact state match") {
+    db := SymbolDB.new()
+    db.symbols = SemanticSymbolIndex.new([SemanticSymbol]{lsp_hover_test_symbol()})
+    db.hover = [HoverEntry]{
+        HoverEntry{span: Span{start: 3, end: 6}, module_path: "elsewhere.jet", text: "state `Wrong.State.S`"},
+        HoverEntry{span: Span{start: 3, end: 6}, module_path: "other.jet", text: "state `Mode.State.Ready`"},
+    }
+    tokens :: lex("   run".bytes()).tokens
+    assert_eq(lsp_compute_hover(db, tokens, "   run", "other.jet", 6), Val("state `Mode.State.Ready`"))
+    assert_eq(lsp_state_graph_hover_at(db, "other.jet", Span{start: 3, end: 6}), Val("state `Mode.State.Ready`"))
+    assert_eq(lsp_state_graph_hover_at(db, "other.jet", Span{start: 3, end: 5}), None)
+}
+
+#Test("identifier and compiler fact tokens retain inclusive endpoint semantics") {
+    tokens :: lex("alpha beta".bytes()).tokens
+    assert_eq(lsp_find_ident_at(tokens, 5), Val("alpha"))
+    assert_eq(lsp_find_ident_at(tokens, 6), Val("beta"))
+    assert_eq(lsp_find_ident_at(tokens, 99), None)
+    facts :: lex(COMPILER_FACT_LAYOUT.bytes()).tokens
+    assert_eq(lsp_compiler_fact_at(facts, 0), Val(COMPILER_FACT_LAYOUT))
+    db :: SymbolDB.new()
+    assert_eq(lsp_compute_hover(db, facts, COMPILER_FACT_LAYOUT, "main.jet", 0), Val("Compiler fact {COMPILER_FACT_LAYOUT}: focused layout metadata with typed optional physical facts."))
+}
+
+// Dictionary controls intentionally require the genuine Foundation dictionary
+// packet; these call its real pending producer, never a test-only dictionary.
+#Test("syntax hover rejects identifier tokens and preserves operator dictionary text") {
+    source :: "value + 1"
+    tokens :: lex(source.bytes()).tokens
+    assert_eq(lsp_syntax_token_hover(tokens, source, 0), None)
+    assert(lsp_syntax_token_hover(tokens, source, 6) != None)
+    assert_eq(lsp_syntax_token_hover(tokens, source, 7), None)
+}

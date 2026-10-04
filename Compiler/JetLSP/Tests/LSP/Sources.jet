@@ -1,0 +1,92 @@
+// Packet 0741 has no original inline tests. Behavioral controls below use
+// canonical Lexer/Driver/W36 fixtures, not private compiler/IO providers.
+// Native identity/snapshot tests require real Core canonicalize (#4494).
+use jet_foundation.[LoadedModule, MIROSTarget, BuildFactSnapshot]
+use jet_parser.[parse_source]
+#Test("source lines preserve Rust LF CRLF lone CR and final-line laws") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR")
+    assert_eq(lsp_source_lines(""), [Span]{})
+    assert_eq(lsp_source_lines("a{cr}\nb{cr}c\n"), [Span]{Span{start: 0, end: 1}, Span{start: 3, end: 6}})
+    assert_eq(lsp_source_lines("\n\n"), [Span]{Span{start: 0, end: 0}, Span{start: 1, end: 1}})
+    assert(lsp_is_comment_line(" // note"))
+    assert(!lsp_is_comment_line(" / not-comment"))
+    assert(lsp_is_import_line("\timport a"))
+    assert(!lsp_is_import_line("use a"))
+    assert_eq(lsp_first_non_ws(" \t😀"), 2)
+    assert_eq(lsp_first_non_ws(" \t"), 0)
+    assert_eq(lsp_short_symbol_name("a::b::name"), "name")
+    assert_eq(lsp_short_symbol_name("a::::b"), "b")
+    assert_eq(lsp_short_symbol_name("a::"), "")
+}
+#Test("selection keeps inclusive token endpoints smallest block and ordered unique parents") {
+    src :: "fn run() {{\n  alpha\n}}\n"
+    tokens :: lex(src.bytes()).tokens
+    blocks :: lsp_brace_block_spans(src)
+    assert_eq(blocks, [LSPBlockSpan]{LSPBlockSpan{start: 9, end: 20}})
+    assert_eq(lsp_ident_at(tokens, 13), Val("alpha"))
+    assert_eq(lsp_ident_at(tokens, 18), Val("alpha"))
+    assert_eq(lsp_token_span_at(tokens, 18), Val(Span{start: 13, end: 18}))
+    assert_eq(lsp_line_span_at(src, 14), Val(Span{start: 11, end: 18}))
+    ranges :: lsp_selection_ranges_for(src, tokens, blocks, 14)
+    assert_eq(ranges, [LSPRange]{lsp_byte_span_to_range(src, Span{start: 13, end: 18}), lsp_byte_span_to_range(src, Span{start: 11, end: 18}), lsp_byte_span_to_range(src, Span{start: 9, end: 20}), lsp_full_document_range(src)})
+    assert_eq(lsp_line_span_at("", 999), None)
+    assert_eq(lsp_line_span_at("x\n", 999), Val(Span{start: 2, end: 2}))
+    same :: lsp_full_document_range("x")
+    assert_eq(lsp_selection_ranges_for("x", lex("x".bytes()).tokens, [LSPBlockSpan]{}, 0), [LSPRange]{same})
+    assert_eq(lsp_selection_range_json([LSPRange]{}), "{{\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":0,\"character\":0}}}}}}")
+    assert_eq(lsp_selection_range_json([LSPRange]{same, lsp_full_document_range("xx")}), "{{\"range\":{lsp_range_json(same)},\"parent\":{{\"range\":{lsp_range_json(lsp_full_document_range("xx"))}}}}}")
+}
+#Test("checked source ranges reject reversed beyond-end and scalar-interior byte spans") {
+    src :: "é😀"
+    assert_eq(lsp_checked_byte_span_to_range(src, Span{start: 2, end: 6}), Val(lsp_byte_span_to_range(src, Span{start: 2, end: 6})))
+    loop span in [Span]{Span{start: 1, end: 2}, Span{start: 0, end: 3}, Span{start: 6, end: 2}, Span{start: 0, end: 7}} -> assert_eq(lsp_checked_byte_span_to_range(src, span), None)
+    assert_eq(lsp_brace_block_spans("}}{{{{x}}"), [LSPBlockSpan]{LSPBlockSpan{start: 2, end: 5}})
+    assert_eq(lsp_sorted_unique_names([String]{"b", "a", "b", "a", "c"}), [String]{"a", "b", "c"})
+}
+#Test("checked snapshot versions reject changed closed reopened ambiguous and mismatched identities") {
+    source :: "fn run() {{}}\n"
+    snapshot :: lsp_diag_test_snapshot("source-witness.jet", source, [JetDriverAuthorizedSourceFile]{})
+    state := LSPDiagnosticState.new()
+    queries := JetDriverCompilerQueries.new()
+    path :: "/lsp/source-witness.jet"
+    uri :: lsp_path_to_uri(path)
+    state.docs[uri] = LSPDocument.new(lsp_diag_test_path(path), ~source, 1)
+    checked :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[uri])
+    permit :: checked.guard_read()
+    result :: permit.value.result
+    versions :: lsp_checked_document_versions(state, result, PathPlatform.Unix)
+    selected :: lsp_checked_source_snapshot(state, result, versions, path, PathPlatform.Unix) ?? panic("matching checked source")
+    assert_eq(selected.version, Val(1))
+    assert_eq(result.module_sources[selected.module_index].loaded_source, source)
+    state.docs[uri].version = 2
+    assert_eq(lsp_checked_source_snapshot(state, result, versions, path, PathPlatform.Unix), None)
+    state.docs[uri].version = 1
+    alias :: "file://%2Flsp/source-witness.jet"
+    state.docs[alias] = LSPDocument.new(lsp_diag_test_path(path), ~source, 1)
+    assert_eq(lsp_checked_source_snapshot(state, result, versions, path, PathPlatform.Unix), None)
+    assert_eq(lsp_checked_document_versions(state, result, PathPlatform.Unix), [String:Int]{})
+    _ :: &state.docs.remove(alias)
+    _ :: &state.docs.remove(uri)
+    assert_eq(lsp_checked_source_snapshot(state, result, versions, path, PathPlatform.Unix), None)
+    closed :: lsp_checked_source_snapshot(state, result, [String:Int]{}, path, PathPlatform.Unix) ?? panic("unopened checked source")
+    assert_eq(closed.version, None)
+    state.docs[uri] = LSPDocument.new(lsp_diag_test_path("/lsp/other.jet"), ~source, 1)
+    assert_eq(lsp_checked_document_identity(uri, state.docs[uri], result.project_root, PathPlatform.Unix), None)
+    state.docs[uri] = LSPDocument.new(lsp_diag_test_path(path), ~source, 1)
+    restored :: lsp_checked_source_snapshot(state, result, versions, path, PathPlatform.Unix) ?? panic("restored matching identity")
+    assert_eq(restored.module_index, selected.module_index)
+    assert_eq(restored.version, Val(1))
+}
+#Test("type hierarchy reads original module trait implementations with sorted unique names") {
+    source :: "trait Z {{ fn z(self) }}\ntrait A {{ fn a(self) }}\nstruct B {{ impl Z {{ fn z(self) {{}} }} impl A {{ fn a(self) {{}} }} }}\nstruct C {{ impl A {{ fn a(self) {{}} }} }}\nfn run() {{}}\n"
+    parsed := parse_source(source)
+    assert_eq(parsed.diagnostics.len(), 0)
+    bundle := ProgramBundle.new(lsp_diag_test_path("/fixture"), MIROSTarget.Linux, BuildFactSnapshot.for_host(MIROSTarget.Linux, "x86_64-unknown-linux-gnu"), "2028")
+    &bundle.modules.push(LoadedModule.from_program(lsp_diag_test_path("/fixture/main.jet"), "/fixture/main.jet", ~source, "main", ^parsed.program))
+    duplicate := parse_source(source)
+    &bundle.modules.push(LoadedModule.from_program(lsp_diag_test_path("/fixture/other.jet"), "/fixture/other.jet", ~source, "other", ^duplicate.program))
+    assert_eq(lsp_type_hierarchy_trait_impls(bundle, "B"), [String]{"A", "Z"})
+    assert_eq(lsp_type_hierarchy_subtype_names(bundle, "A"), [String]{"B", "C"})
+    assert_eq(lsp_type_hierarchy_trait_impls(bundle, "missing"), [String]{})
+    assert_eq(lsp_type_hierarchy_subtype_names(bundle, "missing"), [String]{})
+}

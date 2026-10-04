@@ -1,0 +1,175 @@
+// Rust: Source/LSP/Features.rs:1–209,1050–1148. Sole hover/discovery owner.
+use jet_foundation.[Span, COMPILER_FACT_LAYOUT, COMPILER_FACT_ORIGIN, fact_read_kind, fact_read_public_read_type, fact_read_reflection_kind]
+use jet_lexer.[Token, TOKEN_IDENT]
+use jet_semindex.[SymbolDB, SemanticSymbol, SemanticSymbolKind]
+use jetpack_provider.[PackageIndex, PackageIndexEntry, PackageOptionField]
+// PROVIDER-PENDING: original Syntax dictionary lookup/display/plain_text and
+// SyntaxDictionaryKind (Rust crates/jet-foundation/src/Syntax.rs); not a local
+// catalogue. This import is pending publication at that sole Foundation owner.
+use jet_foundation.Syntax
+
+// Rust: Source/LSP/Features.rs:22
+pub fn lsp_semantic_hover(symbol: SemanticSymbol, requested_path: String) -> String Never! {
+    parts := [String]{}
+    if symbol.module_path != requested_path && symbol.kind == .Function -> &parts.push("from module `{symbol.module_path}`\n\n")
+    if (symbol.kind == .Type || symbol.kind == .Member) && symbol.qualified_name != symbol.name -> &parts.push("`{symbol.qualified_name}`\n\n")
+    if !symbol.summary.is_empty() -> &parts.push("{symbol.summary}\n\n---\n\n")
+    &parts.push(~symbol.signature)
+    loop example in symbol.examples -> &parts.push("\n\nExample: `{example}`")
+    parts.join("")
+}
+
+// Rust: Source/LSP/Features.rs:53
+pub fn lsp_append_checked_signature(hover: &String, checked_signature: String) Never! {
+    lines := [String]{}
+    loop line in checked_signature.lines() {
+        if !line.starts_with("failure: ") -> &lines.push(~line)
+    }
+    checked :: lines.join("\n")
+    if !checked.is_empty() -> hover += "\n\n{checked}"
+}
+
+// Rust: Source/LSP/Features.rs:70
+pub fn lsp_state_graph_hover_at(db: SymbolDB, module_path: String, span: Span) -> String? Never! {
+    loop hover in db.hover {
+        if hover.module_path == module_path && hover.span == span && hover.text.starts_with("state `") && hover.text.contains(".State.") -> return Val(~hover.text)
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:82
+pub fn lsp_compute_hover(db: SymbolDB, tokens: [Token], src: String, path: String, offset: Int) -> String? Never! {
+    arithmetic :: db.arithmetic_hover_at(path, offset)
+    if lsp_compiler_fact_at(tokens, offset) == .Val(fact) {
+        if fact == COMPILER_FACT_LAYOUT -> return Val("Compiler fact {COMPILER_FACT_LAYOUT}: focused layout metadata with typed optional physical facts.")
+        if fact == COMPILER_FACT_ORIGIN {
+            read :: fact_read_kind(fact) ?? panic("origin fact has a public read type")
+            type_name :: fact_read_public_read_type(read) ?? panic("origin fact has a public read type")
+            name := type_name.trim_end_matches("?") // #4303
+            return Val("Compiler fact {COMPILER_FACT_ORIGIN}: optional {name} provenance derived from sema flow.")
+        }
+        kind := "typed"
+        if fact_read_kind(fact) == .Val(read) -> kind = fact_read_reflection_kind(read) ?? "typed"
+        return Val("Compiler fact {fact}: typed {kind} metadata.")
+    }
+    loop hover in db.hover {
+        if hover.module_path == path && hover.span.start <= offset && offset <= hover.span.end && hover.text.starts_with("state `") && hover.text.contains(".State.") -> return Val(~hover.text)
+    }
+    if db.symbols.at(path, offset) == .Val(window) {
+        symbol :: window[0]
+        hover := lsp_semantic_hover(symbol, path)
+        if symbol.kind == .Function {
+            if symbol.span == .Val(span) {
+                if db.hover_at(path, span.start) == .Val(checked) -> lsp_append_checked_signature(&hover, checked[0].text)
+            }
+        }
+        if lsp_derivation_for_symbol(db, symbol) == .Val(record) -> hover += "\n\n---\n\n{lsp_reasoning_summary(record[0])}"
+        if arithmetic == .Val(row) -> hover += "\n\n{row[0].text}"
+        return Val(hover)
+    }
+    // The first containing reference is authoritative, even when unresolved.
+    loop reference in db.refs {
+        if reference.module_path != path || reference.span.start > offset || offset > reference.span.end -> next
+        if reference.target == .Val(target) {
+            if target.kind == "state" {
+                span :: Span{start: target.def_span.start, end: target.def_span.end}
+                if lsp_state_graph_hover_at(db, target.module_path, span) == .Val(hover) -> return Val(hover)
+            }
+            loop symbol in db.symbols.symbols() {
+                if symbol.module_path != target.module_path || symbol.span != Val(target.def_span) -> next
+                hover := lsp_semantic_hover(symbol, path)
+                if lsp_derivation_for_symbol(db, symbol) == .Val(record) -> hover += "\n\n---\n\n{lsp_reasoning_summary(record[0])}"
+                if arithmetic == .Val(row) -> hover += "\n\n{row[0].text}"
+                return Val(hover)
+            }
+        }
+        break
+    }
+    if lsp_find_ident_at(tokens, offset) == .Val(name) {
+        if db.symbols.resolve_visible_in(name, Val(path)) == .Val(window) {
+            symbol :: window[0]
+            hover := lsp_semantic_hover(symbol, path)
+            if lsp_derivation_for_symbol(db, symbol) == .Val(record) -> hover += "\n\n---\n\n{lsp_reasoning_summary(record[0])}"
+            if arithmetic == .Val(row) -> hover += "\n\n{row[0].text}"
+            return Val(hover)
+        }
+    }
+    if arithmetic == .Val(row) -> return Val(~row[0].text)
+    if lsp_syntax_token_hover(tokens, src, offset) == .Val(text) -> return Val(text)
+    if db.hover_at(path, offset) == .Val(row) -> return Val(~row[0].text)
+    None
+}
+
+// Rust: Source/LSP/Features.rs:197. Pending original dictionary producer above;
+// never replace this branch with a guessed token catalogue or a null fallback.
+pub fn lsp_syntax_token_hover(tokens: [Token], src: String, offset: Int) -> String? Never! {
+    loop token in tokens {
+        if token.span.start > offset || offset >= token.span.end || token.kind == TOKEN_IDENT -> next
+        row :: Syntax.lookup(token_text(src, token)) ?? return None // 0737 Rust name pending.
+        if row.kind == .Sigil || row.kind == .Operator -> return Val("{Syntax.display(row)}\n\n{Syntax.plain_text(row)}")
+        return None
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1050. Actual local discovery data, not a catalogue.
+pub fn lsp_compute_discovery_hover(src: String, offset: Int, discovery: PackageIndex) -> String? Never! {
+    name :: lsp_identifier_at(src, offset) ?? return None
+    if lsp_context_is_member_access(src, offset) == .Val(source) {
+        if discovery.info("{source}.{name}") == .Val(record) -> return Val(lsp_package_hover(record))
+    }
+    if lsp_context_is_option_field(src, offset) != None {
+        loop record in discovery.packages {
+            loop field in record.options { if field.name == name -> return Val(lsp_option_hover(field)) }
+        }
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1076
+pub fn lsp_identifier_at(src: String, offset: Int) -> String? Never! {
+    bytes :: src.bytes()
+    cursor := offset.min(bytes.len())
+    if cursor == bytes.len() || !lsp_is_identifier_byte(bytes[cursor]) {
+        if cursor == 0 || !lsp_is_identifier_byte(bytes[cursor - 1]) -> return None
+        cursor -= 1
+    }
+    loop while cursor > 0 && lsp_is_identifier_byte(bytes[cursor - 1]) -> cursor -= 1
+    end := offset.min(bytes.len())
+    loop while end < bytes.len() && lsp_is_identifier_byte(bytes[end]) -> end += 1
+    if cursor >= end -> return None
+    name := src.slice(cursor, end) // #4303 ASCII boundaries in UTF8 byte space
+    Val(~name)
+}
+
+// Rust: Source/LSP/Features.rs:1095
+pub fn lsp_is_identifier_byte(byte: U8) -> Bool Never! {
+    (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95})
+}
+
+// Rust: Source/LSP/Features.rs:1099
+pub fn lsp_package_hover(record: PackageIndexEntry) -> String Never! {
+    version :: if record.version.is_empty() -> "-" else -> record.version
+    "`{record.display_ref()}`\n\nref: `{record.reference}`\nversion: `{version}`\nplatforms: {record.platforms.join(", ")}\ntier: {record.tier}\nmaintainer liveness: {record.maintainer_liveness()}\nsource: local discovery index\n\n{record.docs}"
+}
+
+// Rust: Source/LSP/Features.rs:1120
+pub fn lsp_option_hover(field: PackageOptionField) -> String Never! {
+    "Environment option `{field.name}`\n\nDefault: `{field.default}`\n\n{field.docs}\n\nSource: local discovery index"
+}
+
+// Rust: Source/LSP/Features.rs:1127
+pub fn lsp_find_ident_at(tokens: [Token], offset: Int) -> String? Never! {
+    loop token in tokens {
+        if token.span.start <= offset && offset <= token.span.end && token.kind == TOKEN_IDENT -> return Val(~token.payload.text)
+    }
+    None
+}
+
+// Rust: Source/LSP/Features.rs:1138
+pub fn lsp_compiler_fact_at(tokens: [Token], offset: Int) -> String? Never! {
+    loop token in tokens {
+        if token.kind == TOKEN_IDENT && fact_read_kind(token.payload.text) != None && token.span.start <= offset && offset <= token.span.end -> return Val(~token.payload.text)
+    }
+    None
+}

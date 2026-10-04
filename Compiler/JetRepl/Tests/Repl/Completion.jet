@@ -1,0 +1,143 @@
+use core.text as repl_completion_test_text
+use jet_semindex.[SemanticSymbol, SemanticSymbolKind, SemanticProvenance]
+
+// Original Interactive.rs:1123–1141 fixture and both assertions, unchanged.
+#Test("completion_menu_has_textual_no_color_selection") {
+    candidates :: [SemanticSymbol]{SemanticSymbol{
+        identity: "session:binding:alpha",
+        name: "alpha",
+        qualified_name: "alpha",
+        owner: None,
+        module_path: "this session",
+        kind: SemanticSymbolKind.Local,
+        signature: "alpha :: <Int>",
+        summary: "",
+        examples: [String]{},
+        provenance: SemanticProvenance.Session,
+        span: None,
+        lexical_scope: None,
+    }}
+    menu :: repl_completion_menu(candidates, 0, false)
+    assert(menu.contains("> alpha"))
+    esc :: String.from_bytes([U8]{27}) ?? panic("ESC fixture")
+    assert(!menu.contains("{esc}[7m"))
+}
+
+#Test("name_at_cursor_selects_under_before_and_inside_the_full_name") {
+    buf :: repl_completion_test_text.scalars("alpha + module.member!")
+    assert_eq(repl_name_at_cursor(buf, 0), Val("alpha"))
+    assert_eq(repl_name_at_cursor(buf, 2), Val("alpha"))
+    assert_eq(repl_name_at_cursor(buf, 5), Val("alpha"))
+    assert_eq(repl_name_at_cursor(buf, 6), None)
+    assert_eq(repl_name_at_cursor(buf, 8), Val("module.member"))
+    assert_eq(repl_name_at_cursor(buf, 15), Val("module.member"))
+    assert_eq(repl_name_at_cursor(buf, buf.len()), Val("module.member"))
+    assert_eq(repl_name_at_cursor([String]{}, 0), None)
+    assert_eq(repl_name_at_cursor(repl_completion_test_text.scalars(" + "), 0), None)
+}
+
+#Test("name_at_cursor_trims_only_outer_dots_and_preserves_unicode_scalars") {
+    dotted :: repl_completion_test_text.scalars("..module..member..")
+    assert_eq(repl_name_at_cursor(dotted, 0), Val("module..member"))
+    assert_eq(repl_name_at_cursor(dotted, dotted.len()), Val("module..member"))
+    assert_eq(repl_name_at_cursor(repl_completion_test_text.scalars("..."), 1), None)
+    unicode :: repl_completion_test_text.scalars("é_界2.member")
+    assert_eq(repl_name_at_cursor(unicode, 2), Val("é_界2.member"))
+    assert_eq(repl_name_at_cursor(repl_completion_test_text.scalars("á"), 1), Val("a"))
+}
+
+// Full Unicode character classification is the Core/UCD owner's law (#4426),
+// not a REPL-local range table. Preserve Rust char::is_alphanumeric boundaries.
+#Test("name_at_cursor_uses_unicode_alphabetic_and_numeric_properties") {
+    punctuation :: repl_completion_test_text.scalars("a;b") // U+037E is punctuation
+    assert_eq(repl_name_at_cursor(punctuation, 1), Val("a"))
+    assert_eq(repl_name_at_cursor(punctuation, 2), Val("b"))
+    numeric :: repl_completion_test_text.scalars("x²") // U+00B2 is numeric
+    assert_eq(repl_name_at_cursor(numeric, 1), Val("x²"))
+    assert_eq(repl_name_at_cursor(numeric, numeric.len()), Val("x²"))
+}
+
+#Test("insert_completion_truncates_the_old_suffix_and_moves_scalar_cursor") {
+    buf := repl_completion_test_text.scalars("use mo.rest + tail")
+    cursor := 6
+    repl_insert_completion(&buf, &cursor, 4, "界é")
+    assert_eq(buf.join(""), "use 界é")
+    assert_eq(cursor, 6)
+    repl_insert_completion(&buf, &cursor, 4, "")
+    assert_eq(buf.join(""), "use ")
+    assert_eq(cursor, 4)
+    repl_insert_completion(&buf, &cursor, 4, "member")
+    assert_eq(buf.join(""), "use member")
+    assert_eq(cursor, 10)
+    repl_insert_completion(&buf, &cursor, 0, "alpha")
+    assert_eq(buf.join(""), "alpha")
+    assert_eq(cursor, 5)
+}
+
+#Test("longest_common_prefix_handles_empty_single_divergent_and_shorter_names") {
+    assert_eq(repl_longest_common_prefix([String]{}), "")
+    assert_eq(repl_longest_common_prefix([String]{"alpha"}), "alpha")
+    assert_eq(repl_longest_common_prefix([String]{"alpha", "alpine", "alps"}), "alp")
+    assert_eq(repl_longest_common_prefix([String]{"alpha", "alp", "alpine"}), "alp")
+    assert_eq(repl_longest_common_prefix([String]{"alpha", "beta"}), "")
+    assert_eq(repl_longest_common_prefix([String]{"alpha", ""}), "")
+    assert_eq(repl_longest_common_prefix([String]{"", "alpha"}), "")
+}
+
+#Test("longest_common_prefix_compares_scalars_not_grapheme_boundaries") {
+    assert_eq(repl_longest_common_prefix([String]{"éclair", "écouter"}), "éc")
+    assert_eq(repl_longest_common_prefix([String]{"é", "ê"}), "")
+    assert_eq(repl_longest_common_prefix([String]{"界甲", "界乙"}), "界")
+    assert_eq(repl_longest_common_prefix([String]{"éx", "éy"}), "é")
+    assert_eq(repl_longest_common_prefix([String]{"éx", "ex"}), "e")
+}
+
+#Test("completion_menu_uses_qualified_names_and_only_styles_the_selected_row") {
+    candidates :: [SemanticSymbol]{
+        SemanticSymbol{
+            identity: "source:module:alpha", name: "alpha", qualified_name: "module.alpha",
+            owner: Val("module"), module_path: "module.jet", kind: SemanticSymbolKind.Function,
+            signature: "alpha() -> Int", summary: "", examples: [String]{},
+            provenance: SemanticProvenance.Source{module_path: "module.jet"}, span: None, lexical_scope: None,
+        },
+        SemanticSymbol{
+            identity: "session:binding:wide", name: "界é", qualified_name: "界é",
+            owner: None, module_path: "this session", kind: SemanticSymbolKind.Local,
+            signature: "界é :: <Int>", summary: "", examples: [String]{},
+            provenance: SemanticProvenance.Session, span: None, lexical_scope: None,
+        },
+    }
+    first :: "  module.alpha         alpha() -> Int"
+    second :: "> 界é                   界é :: <Int>"
+    plain :: repl_completion_menu(candidates, 1, false)
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF fixture")
+    assert(plain.contains("{first}{crlf}{second}{crlf}"))
+    esc :: String.from_bytes([U8]{27}) ?? panic("ESC fixture")
+    assert(!plain.contains(esc))
+    color :: repl_completion_menu(candidates, 1, true)
+    assert(color.contains("{esc}[1;96mCompletion"))
+    assert(color.contains("{first}{crlf}{esc}[48;5;24;97;1m{second}{esc}[0m{crlf}"))
+    assert(!color.contains("{esc}[48;5;24;97;1m{first}"))
+    unselected :: repl_completion_menu(candidates, 2, true)
+    assert(!unselected.contains("{esc}[48;5;24;97;1m"))
+}
+
+#Test("completion_menu_does_not_clip_names_longer_than_its_minimum_width") {
+    candidates :: [SemanticSymbol]{SemanticSymbol{
+        identity: "source:module:long", name: "a_very_long_member",
+        qualified_name: "module.a_very_long_member", owner: Val("module"),
+        module_path: "module.jet", kind: SemanticSymbolKind.Function,
+        signature: "a_very_long_member() -> Int", summary: "", examples: [String]{},
+        provenance: SemanticProvenance.Source{module_path: "module.jet"}, span: None, lexical_scope: None,
+    }}
+    menu :: repl_completion_menu(candidates, 0, false)
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF fixture")
+    assert(menu.contains("> module.a_very_long_member a_very_long_member() -> Int{crlf}"))
+}
+
+#Test("completion_menu_empty_candidates_still_emits_a_crlf_header") {
+    menu :: repl_completion_menu([SemanticSymbol]{}, 0, false)
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF fixture")
+    assert(menu.ends_with(crlf))
+    assert_eq(menu.split(crlf).len(), 2)
+}

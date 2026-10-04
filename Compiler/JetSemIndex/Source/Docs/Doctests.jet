@@ -1,0 +1,178 @@
+// crates/jet-semindex/src/Docs.rs:1353–1485: source-only doctest discovery,
+// fence/expectation scanning, adjacent source docs and leading module summary.
+// Execution belongs to CLI Doctest; this module never evaluates expressions.
+// DocTest/DocExpectation/DocSource and source/line helpers belong to Graph.jet.
+
+pub fn doc_discover_doctests(root: doc_os_path.OsPath?, file_path: doc_os_path.OsPath?, display_path: String, source: String, module_path: String) -> [DocTest] Never! {
+    bytes :: source.bytes()
+    path :: doc_stable_module_path(root, file_path, display_path)
+    tests := [DocTest]{}
+    in_fence := false
+    setup := [String]{}
+    expectations := [DocExpectation]{}
+    fence_line := 0
+    fence_offset := 0
+    line_number := 0
+    start := 0
+    loop start < bytes.len() {
+        line_number += 1
+        end :: doc_raw_line_end(bytes, start)
+        raw_end :: doc_raw_line_content_end(bytes, start, end)
+        raw := doc_bytes_text(bytes, start, raw_end) // #4303
+        line := raw.trim() // #4303
+        start_offset :: start
+        start = if end < bytes.len() -> end + 1 else -> end
+        if !line.starts_with("///") {
+            if in_fence {
+                in_fence = false
+                setup = [String]{}
+                expectations = [DocExpectation]{}
+            }
+            next
+        }
+        doc_line := line.slice(3, line.len()).trim() // #4303
+        if !in_fence {
+            if doc_line.starts_with("```") && doc_doctest_fence_is_jet(doc_line) {
+                in_fence = true
+                fence_line = line_number
+                fence_offset = start_offset
+                setup = [String]{}
+                expectations = [DocExpectation]{}
+            }
+            next
+        }
+        if doc_line == "```" {
+            &tests.push(DocTest{
+                module_path: ~module_path, line: fence_line,
+                setup: ^setup, expectations: ^expectations,
+                // Rust uses the opening offset + closing raw line byte length,
+                // not the fence extent. The closing line follows the opening,
+                // so that end is already bounded by source byte length. Opening
+                // offsets are known line starts: no per-fence prefix rescan.
+                source: DocSource{path: ~path, start: fence_offset,
+                    end: fence_offset + raw_end - start_offset,
+                    line: fence_line, column: 1, link: "{path}#L{fence_line}"},
+            })
+            // #4461: preserve the original move-then-reinitialize loop gate;
+            // neither cloning the lists nor a replacement evaluator is valid.
+            setup = [String]{}
+            expectations = [DocExpectation]{}
+            in_fence = false
+            next
+        }
+        if doc_find_doctest_expect_marker(doc_line) == .Val(marker) {
+            doc_bytes :: doc_line.bytes()
+            expression := doc_bytes_text(doc_bytes, 0, marker).trim() // #4303
+            expected := doc_bytes_text(doc_bytes, marker + 5, doc_bytes.len()).trim() // #4303
+            &expectations.push(DocExpectation{expression: ~expression, expected: ~expected})
+        } else if doc_line != "" -> &setup.push(~doc_line)
+    }
+    tests
+}
+
+// Rust doctest_fence_is_jet. Strip all leading ticks, then ASCII-insensitive
+// language comparison; empty fences are Jet and language options are not.
+fn doc_doctest_fence_is_jet(fence: String) -> Bool Never! {
+    bytes :: fence.bytes()
+    start := 0
+    loop start < bytes.len() && bytes[start] == 96 -> start += 1
+    language := doc_bytes_text(bytes, start, bytes.len()).trim() // #4303
+    if language == "" -> return true
+    letters :: language.bytes()
+    letters.len() == 3 && (letters[0] == 106 || letters[0] == 74) && (letters[1] == 101 || letters[1] == 69) && (letters[2] == 116 || letters[2] == 84)
+}
+
+// Rust find_doctest_expect_marker returns a UTF8 byte offset. ASCII delimiter
+// scanning cannot mistake a UTF8 continuation byte for a quote/slash, and
+// avoids repeated scalar-indexed slicing of growing prefixes.
+fn doc_find_doctest_expect_marker(line: String) -> Int? Never! {
+    bytes :: line.bytes()
+    in_string := false
+    escaped := false
+    loop index in 0..<bytes.len() {
+        byte :: bytes[index]
+        if in_string {
+            if escaped -> escaped = false
+            else if byte == 92 -> escaped = true
+            else if byte == 34 -> in_string = false
+            next
+        }
+        if byte == 34 -> in_string = true
+        else if byte == 47 && index + 5 <= bytes.len() {
+            if bytes[index + 1] == 47 && bytes[index + 2] == 32 && bytes[index + 3] == 61 && bytes[index + 4] == 62 -> return Val(index)
+        }
+    }
+    None
+}
+
+// Rust source_docs's pair uses output receivers (#4357), not another Doc
+// schema record. Only the uninterrupted /// run directly preceding the
+// declaration line participates; parent/module comments cannot bleed through.
+pub fn doc_source_docs(source: String, def_start: Int, summary: &String, examples: &[String]) Never! {
+    summary = ""
+    examples = [String]{}
+    bytes :: source.bytes()
+    prefix_end :: if def_start < bytes.len() -> def_start else -> bytes.len()
+    before_end := prefix_end
+    loop before_end > 0 && bytes[before_end - 1] != 10 -> before_end -= 1
+    if before_end == 0 -> return
+    before_end -= 1
+    lines := [String]{}
+    // str::lines() has no trailing empty row and strips CR only before LF.
+    end := before_end
+    if end > 0 && bytes[end - 1] == 10 -> end -= 1
+    loop end > 0 {
+        start := end
+        loop start > 0 && bytes[start - 1] != 10 -> start -= 1
+        content_end :: doc_raw_line_content_end(bytes, start, end)
+        line := doc_bytes_text(bytes, start, content_end).trim() // #4303
+        if !line.starts_with("///") -> break
+        doc := line.slice(3, line.len()).trim() // #4303
+        &lines.push(~doc)
+        if start == 0 -> break
+        end = start - 1
+    }
+    &lines.reverse()
+    loop line in lines {
+        if line.starts_with("Example:") {
+            example := line.slice(8, line.len()).trim() // #4303
+            &examples.push(~example)
+        } else if summary == "" && line != "" && !line.starts_with("```") -> summary = ~line
+    }
+}
+
+// Rust leading_summary: blank non-doc lines do not terminate the leading run;
+// the first nonblank non-doc line does, even if no summary has been found.
+pub fn doc_leading_summary(source: String) -> String Never! {
+    bytes :: source.bytes()
+    summary := ""
+    start := 0
+    loop start < bytes.len() {
+        end :: doc_raw_line_end(bytes, start)
+        content_end :: doc_raw_line_content_end(bytes, start, end)
+        line := doc_bytes_text(bytes, start, content_end).trim() // #4303
+        start = if end < bytes.len() -> end + 1 else -> end
+        if !line.starts_with("///") {
+            if line != "" -> break
+            next
+        }
+        doc := line.slice(3, line.len()).trim() // #4303
+        if summary == "" && doc != "" && !doc.starts_with("```") -> summary = ~doc
+    }
+    summary
+}
+
+// Shared private str::lines projection. LF/CRLF only, no trailing empty line;
+// a lone CR is retained (the caller's canonical Unicode trim may remove it).
+fn doc_raw_line_end(bytes: [U8], start: Int) -> Int Never! {
+    end := start
+    loop end < bytes.len() && bytes[end] != 10 -> end += 1
+    end
+}
+fn doc_raw_line_content_end(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    if end > start && bytes[end - 1] == 13 && end < bytes.len() && bytes[end] == 10 -> end - 1 else -> end
+}
+fn doc_bytes_text(bytes: [U8], start: Int, end: Int) -> String Never! {
+    selected := bytes[start..<end] // #4303
+    String.from_bytes(selected) ?? panic("documentation span must select UTF8 source text")
+}

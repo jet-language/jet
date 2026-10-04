@@ -1,0 +1,274 @@
+// Pure callable/provenance helper tests, followed by unregistered integration
+// assertions ported from Rust lib.rs:313–467 and tests/semindex.rs:923–1033.
+// Integration helpers consume actual checked records and JSON; their fixtures
+// must pass through S4/C4/S6 before these helpers become registered tests.
+
+fn semindex_test_callable(effects: CallableEffectsFact, failure: CallableFactAvailability<FailureContract>) -> CallableSignatureFact Never! {
+    CallableSignatureFact{
+        parameters: [CallableParameterFact]{},
+        return_type: None,
+        effects: effects,
+        failure_contract: failure,
+        returned_views: [ViewProvenanceFact]{},
+        policies: [CallablePolicy]{},
+        generic_parameters: CallableFactAvailability<[TypeParam]>.Checked{value: [TypeParam]{}},
+        metadata_producer_status: MetadataProducerStatus.ExistingCallableProducerNeedsExtension,
+    }
+}
+
+#Test("callable_fact_helpers_distinguish_checked_empty_from_unavailable") {
+    unavailable :: CallableFactUnavailable{required_stage: CompilerStage.Prepared, reason: "prepared values are not supplied by semindex"}
+    checked :: semindex_test_callable(
+        CallableEffectsFact.Checked{effects: [CallableEffectFact]{}},
+        CallableFactAvailability<FailureContract>.Checked{value: FailureContract.ProvenUnreachable{success: Type.Bool}},
+    )
+    assert_eq(checked.effect_names(), Val([String]{}))
+    assert_eq(checked.error_names(), Val([String]{}))
+    assert_eq(checked.error_types(), Val([Type]{}))
+    external :: semindex_test_callable(
+        CallableEffectsFact.Unavailable{reason: unavailable},
+        CallableFactAvailability<FailureContract>.Unavailable{reason: unavailable},
+    )
+    assert_eq(external.effect_names(), None)
+    assert_eq(external.error_names(), None)
+    assert_eq(external.error_types(), None)
+    assert_eq(external.failure_contract_name(), None)
+    assert_eq(external.failure_source_name(), None)
+}
+
+#Test("callable_signature_helpers_preserve_checked_contracts") {
+    span :: SourceSpan{start: 2, end: 6}
+    effects :: CallableEffectsFact.Checked{effects: [CallableEffectFact]{
+        CallableEffectFact.Named{name: "FS.Read", source: span},
+        CallableEffectFact.ViaParameter{name: "action", source: span},
+        CallableEffectFact.Named{name: "FS.Read", source: span},
+    }}
+    contracts :: [FailureContract]{
+        FailureContract.Default{success: Type.Int, error: Type.Named{name: "Err"}},
+        FailureContract.Optional{success: Type.Int},
+        FailureContract.DeclaredNever,
+        FailureContract.Explicit{success: Type.Bool, error: Type.Named{name: "ReadError"}},
+        FailureContract.Converted{success: Type.Bool, source: Type.Named{name: "IOError"}, target: Type.Named{name: "ReadError"}},
+        FailureContract.ProvenUnreachable{success: Type.Bool},
+    }
+    expected_errors :: [[Type]]{
+        [Type]{Type.Named{name: "Err"}},
+        [Type]{},
+        [Type]{},
+        [Type]{Type.Named{name: "ReadError"}},
+        [Type]{Type.Named{name: "ReadError"}},
+        [Type]{},
+    }
+    loop (index, contract) in contracts {
+        signature :: semindex_test_callable(effects, CallableFactAvailability<FailureContract>.Checked{value: contract})
+        assert_eq(signature.effect_names(), Val([String]{"FS.Read", "via action", "FS.Read"}))
+        assert_eq(signature.error_types(), Val(expected_errors[index]))
+        assert_eq(signature.failure_contract_name(), Val(type_name(failure_contract_effective_type(contract))))
+        assert_eq(signature.failure_source_name(), Val(failure_contract_source(contract)))
+    }
+    // Preserve a structured union as one error type, rather than splitting a
+    // rendered name; only Named Never represents an empty failure set.
+    union :: Type.Union{members: [Type]{Type.Named{name: "ReadError"}, Type.Named{name: "ParseError"}}}
+    signature := semindex_test_callable(effects, CallableFactAvailability<FailureContract>.Checked{value: FailureContract.Explicit{success: Type.Int, error: union}})
+    assert_eq(signature.error_types(), Val([Type]{union}))
+    assert_eq(signature.error_names(), Val([String]{"ReadError | ParseError"}))
+    signature.policies = [CallablePolicy]{
+        CallablePolicy{name: "retry", arguments: [String]{"3", "delay"}},
+        CallablePolicy{name: "trace", arguments: [String]{}},
+    }
+    assert_eq(signature.policy_names(), [String]{"retry(3, delay)", "trace()"})
+}
+
+#Test("callable_parameter_helpers_preserve_access_zone_and_type") {
+    parameter := CallableParameterFact{
+        name: "value", label: "input", source: SourceSpan{start: 1, end: 6},
+        default: None, access: AccessConvention.Read, zone: ParamZone.Either,
+        ty: Type.List{element: Type.Int}, variadic: true,
+    }
+    assert_eq(parameter.type_name(), "[Int]")
+    accesses :: [AccessConvention]{AccessConvention.Read, AccessConvention.Write, AccessConvention.Move}
+    access_names :: [String]{"read", "write", "move"}
+    loop (index, access) in accesses {
+        parameter.access = access
+        assert_eq(parameter.access_name(), access_names[index])
+    }
+    zones :: [ParamZone]{ParamZone.PositionalOnly, ParamZone.Either, ParamZone.LabelOnly}
+    zone_names :: [String]{"positional_only", "either", "label_only"}
+    loop (index, zone) in zones {
+        parameter.zone = zone
+        assert_eq(parameter.zone_name(), zone_names[index])
+    }
+}
+
+#Test("view_provenance_canonical_preserves_ordered_alternatives") {
+    left :: ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 0}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}}
+    right :: ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 1}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}}
+    provenance := ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{left, right}, mutable: false}
+    union :: provenance.canonical()
+    assert_eq(union, "slot:$;one_of(parameter:0;path:range,parameter:1;path:range);access:read")
+    provenance.sources = [ViewSourcePathFact]{right}
+    assert_eq(provenance.canonical(), "slot:$;parameter:1;access:read;path:range")
+    assert(union != provenance.canonical())
+    provenance.sources = [ViewSourcePathFact]{right, left}
+    assert(union != provenance.canonical())
+}
+
+#Test("view_provenance_canonical_preserves_aggregate_output_slots") {
+    left := ViewProvenanceFact{output_path: [String]{"left"}, sources: [ViewSourcePathFact]{
+        ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 0}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
+    }, mutable: false}
+    right := ~left
+    right.output_path = [String]{"right"}
+    right.sources = [ViewSourcePathFact]{ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 1}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}}}
+    assert(left.canonical() != right.canonical())
+    right.sources = left.sources
+    assert(left.canonical() != right.canonical())
+    original :: left.canonical()
+    left.output_path = [String]{"outer", "left"}
+    assert(original != left.canonical())
+    assert_eq(left.canonical(), "slot:outer.left;parameter:0;access:read;path:range")
+}
+
+#Test("view_provenance_canonical_preserves_source_paths_and_access") {
+    provenance := ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{
+        ViewSourcePathFact{source: ViewSourceFact.Receiver, projections: [ViewProjectionFact]{ViewProjectionFact.Field{name: "data"}, ViewProjectionFact.Index, ViewProjectionFact.Range}},
+    }, mutable: true}
+    assert_eq(provenance.canonical(), "slot:$;receiver;access:write;path:field:data/index/range")
+    provenance.sources = [ViewSourcePathFact]{ViewSourcePathFact{source: ViewSourceFact.Static{module_path: "mód", name: "values"}, projections: [ViewProjectionFact]{}}}
+    assert_eq(provenance.canonical(), "slot:$;static:mód::values;access:write;path:")
+    provenance.sources = [ViewSourcePathFact]{}
+    assert_eq(provenance.canonical(), "slot:$;one_of();access:write")
+}
+
+// Exact Rust lib.rs:330–338 fixture. Not opened here: the shared checked producer
+// and open API must supply the records to the integration assertions below.
+fn semindex_test_typed_callable_fixture() -> String Never! {
+    `fn no_value() {}
+fn typed(label: String, value: Int{7}) -[]> Bool { return true }
+fn generic<T>(value: T) {}
+extern rust "std" {
+    fn external_drop(value: ^String) = "std::mem::drop"
+}
+fn run() {}
+`
+}
+
+fn semindex_test_typed_callable_package_fixture() -> String Never! {
+    `name: "jet-semindex-typed-callable"
+version: "0.1.0"
+edition: "2026"
+authority: { holds: { allow: [FFI] } }
+`
+}
+
+fn semindex_test_checked_definition(definitions: [SymbolDef], name: String) -> SymbolDef Never! {
+    loop definition in definitions {
+        if definition.name == name -> return definition
+    }
+    panic("callable definition should be indexed")
+}
+
+fn semindex_test_checked_identity(facts: [DefinitionFact], identity: String) -> DefinitionFact Never! {
+    loop fact in facts {
+        if fact.human_identity == identity -> return fact
+    }
+    panic("typed declaration should have a stable semindex identity")
+}
+
+// All original Rust lib.rs:353–462 assertions, apart from filesystem lifecycle.
+// Unregistered until actual open/repeated-open and index JSON are available.
+fn semindex_test_callable_signature_facts_keep_typed_and_unavailable_states(definitions: [SymbolDef], facts: [DefinitionFact], repeated_facts: [DefinitionFact], json: String) {
+    source :: semindex_test_typed_callable_fixture().bytes()
+    typed_definition :: semindex_test_checked_definition(definitions, "typed")
+    typed :: typed_definition.callable_signature ?? panic("typed callable signature should be present")
+    parameter_names :: loop parameter in typed.parameters -> parameter.name
+    assert_eq(parameter_names, [String]{"label", "value"})
+    assert(typed.parameters[0].default == None)
+    assert_eq(typed.parameters[1].ty, Type.Int)
+    parameter_source :: typed.parameters[1].source
+    assert_eq(String.from_bytes(source[parameter_source.start..<parameter_source.end]) ?? panic("parameter UTF-8"), "value")
+    default :: typed.parameters[1].default ?? panic("declared default should be present")
+    assert_eq(String.from_bytes(source[default.source.start..<default.source.end]) ?? panic("default UTF-8"), "7")
+    assert_eq(default.value_unavailable.required_stage, CompilerStage.Prepared)
+    assert(typed.effects == .Checked(effects) && effects.len() == 0)
+    assert_eq(typed.return_type, Val(Type.Bool))
+    assert_eq(typed.metadata_producer_status, MetadataProducerStatus.ExistingCallableProducerNeedsExtension)
+    assert_eq(typed_definition.declaration_identity_unavailable.required_stage, CompilerStage.Resolved)
+    assert(typed_definition.declaration_identity_unavailable.reason.contains("checker-issued DeclarationHandle"))
+    stable_id :: semindex_test_checked_identity(facts, typed_definition.identity).stable_id
+    assert_eq(semindex_test_checked_identity(repeated_facts, typed_definition.identity).stable_id, stable_id)
+    no_value_definition :: semindex_test_checked_definition(definitions, "no_value")
+    no_value :: no_value_definition.callable_signature ?? panic("no-value callable signature should be present")
+    assert(no_value.return_type == None)
+    generic_definition :: semindex_test_checked_definition(definitions, "generic")
+    generic :: generic_definition.callable_signature ?? panic("generic callable signature should be present")
+    if generic.generic_parameters == {
+        .Checked(parameters) -> {
+            names :: loop parameter in parameters -> parameter.name
+            assert_eq(names, [String]{"T"})
+        }
+        .Unavailable(_) -> panic("source generic parameter should be checked")
+    }
+    external_definition :: semindex_test_checked_definition(definitions, "external_drop")
+    external :: external_definition.callable_signature ?? panic("external callable signature should be present")
+    assert(external.failure_contract == .Unavailable(_))
+    assert(external.effects == .Unavailable(_))
+    assert(external.generic_parameters == .Unavailable(_))
+    assert(json.contains("\"effects\":[],\"effect_status\":{\"status\":\"checked\"}"))
+    assert(json.contains("\"effects\":null,\"effect_status\":{\"status\":\"unavailable\""))
+    assert(json.contains("\"metadata_declaration_identity\":{\"status\":\"unavailable\",\"required_stage\":\"Resolved\",\"reason\":\"the semindex producer does not receive a checker-issued DeclarationHandle\"}"))
+}
+
+// Exact Rust tests/semindex.rs:926,960 fixtures, opened as two checked revisions.
+fn semindex_test_returned_view_union_fixture() -> String Never! {
+    `fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {
+    if first { return left[0..1] }
+    return right[0..1]
+}
+fn run() {}
+`
+}
+
+fn semindex_test_returned_view_right_fixture() -> String Never! {
+    `fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> { return right[0..1] }
+fn run() {}
+`
+}
+
+// Original Rust tests/semindex.rs:930–975 assertions on real checked records.
+// Unregistered until S4/C4/S6 and index JSON supply both checked revisions.
+fn semindex_test_returned_view_provenance_is_structured_and_changes_signature_id(union_pick: SymbolDef, right_pick: SymbolDef, union_fact: DefinitionFact, right_fact: DefinitionFact, union_json: String) {
+    assert(union_pick.kind == .Function(_, _, _))
+    assert_eq(union_pick.view_provenance.len(), 1)
+    provenance :: union_pick.view_provenance[0]
+    assert_eq(provenance.output_path, [String]{})
+    assert_eq(provenance.sources.len(), 2)
+    assert_eq(provenance.sources[0].source, ViewSourceFact.Parameter{index: 0})
+    assert_eq(provenance.sources[0].projections, [ViewProjectionFact]{ViewProjectionFact.Range})
+    assert_eq(provenance.sources[1].source, ViewSourceFact.Parameter{index: 1})
+    assert_eq(provenance.sources[1].projections, [ViewProjectionFact]{ViewProjectionFact.Range})
+    assert(!provenance.mutable)
+    assert(union_json.contains("\"view_provenance\":[{\"output_path\":[],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}"))
+    assert(union_json.contains("\"source\":{\"kind\":\"parameter\",\"index\":1}"))
+    assert(union_json.contains("\"projections\":[{\"kind\":\"range\"}]"))
+    assert_eq(right_pick.view_provenance[0].canonical(), "slot:$;parameter:1;access:read;path:range")
+    assert(union_fact.signature_id != right_fact.signature_id)
+}
+
+// Exact Rust tests/semindex.rs:982–992 fixture parameterized by right_owner.
+fn semindex_test_aggregate_view_fixture(right_owner: String) -> String Never! {
+    "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\nfn pair(left: [Int], right: [Int]) -> Pair {{\n    left_view :: left[0..1]\n    right_view :: {right_owner}[0..1]\n    return Pair.{{ left: left_view, right: right_view }}\n}}\n\nfn run() {{}}\n"
+}
+
+// Original Rust tests/semindex.rs:998–1032 assertions on actual pair facts.
+// Before opens aggregate_view_fixture("right"), after opens ("left").
+fn semindex_test_aggregate_view_provenance_preserves_slots_and_changes_signature_id(pair: SymbolDef, distinct_fact: DefinitionFact, changed_fact: DefinitionFact, distinct_json: String) {
+    assert_eq(pair.view_provenance.len(), 2)
+    assert_eq(pair.view_provenance[0].output_path, [String]{"left"})
+    assert_eq(pair.view_provenance[0].sources[0].source, ViewSourceFact.Parameter{index: 0})
+    assert_eq(pair.view_provenance[1].output_path, [String]{"right"})
+    assert_eq(pair.view_provenance[1].sources[0].source, ViewSourceFact.Parameter{index: 1})
+    assert(distinct_json.contains("\"output_path\":[\"left\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}"))
+    assert(distinct_json.contains("\"output_path\":[\"right\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":1}"))
+    assert(distinct_fact.signature_id != changed_fact.signature_id)
+}

@@ -1,0 +1,41 @@
+// crates/jet-canvas/src/js.rs:1–20: canvas_js, exact retained IIFE assembly.
+// One canonical independently lintable asset set, embedded relative to this
+// source directory at build time. No runtime cwd reads or asset concatenation.
+// #4450: nested embed_file calls under prep join lose their checked target.
+// Prepare the exact same child assets directly, then join once at build time.
+// Restore the compound form after the compiler fix; original repro is retained.
+CANVAS_JS_RUNTIME_STATE :: prep { embed_file("js/runtime-state.js") }
+CANVAS_JS_SESSION_WORKBENCH :: prep { embed_file("js/session-workbench.js") }
+CANVAS_JS_EDITING_HISTORY :: prep { embed_file("js/editing-history.js") }
+CANVAS_JS_DIAGNOSTICS_QUERY :: prep { embed_file("js/diagnostics-query.js") }
+CANVAS_JS_DRAWING_PALETTE :: prep { embed_file("js/drawing-palette.js") }
+CANVAS_JS_PROJECT_NAVIGATION :: prep { embed_file("js/project-navigation.js") }
+CANVAS_JS_GRAPH_RENDERING :: prep { embed_file("js/graph-rendering.js") }
+CANVAS_JS_INSPECTOR_CONNECTIONS :: prep { embed_file("js/inspector-connections.js") }
+CANVAS_JS_INPUT_EVENTS :: prep { embed_file("js/input-events.js") }
+CANVAS_JS_TRANSACTIONS_CATALOG :: prep { embed_file("js/transactions-catalog.js") }
+CANVAS_JS_REVIEW :: prep { embed_file("js/review.js") }
+CANVAS_JS_BOOTSTRAP :: prep { embed_file("js/bootstrap.js") }
+
+CANVAS_JAVASCRIPT :: prep {
+    [String]{
+        "(function () {{\n",
+        CANVAS_JS_RUNTIME_STATE,
+        CANVAS_JS_SESSION_WORKBENCH,
+        CANVAS_JS_EDITING_HISTORY,
+        CANVAS_JS_DIAGNOSTICS_QUERY,
+        CANVAS_JS_DRAWING_PALETTE,
+        CANVAS_JS_PROJECT_NAVIGATION,
+        CANVAS_JS_GRAPH_RENDERING,
+        CANVAS_JS_INSPECTOR_CONNECTIONS,
+        CANVAS_JS_INPUT_EVENTS,
+        CANVAS_JS_TRANSACTIONS_CATALOG,
+        CANVAS_JS_REVIEW,
+        CANVAS_JS_BOOTSTRAP,
+        "}})();\n"
+    }.join("")
+}
+
+pub fn canvas_js() -> String Never! {
+    CANVAS_JAVASCRIPT
+}

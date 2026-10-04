@@ -1,0 +1,353 @@
+// TOOLS-S18 fact codec tests for jet-semindex JSON.rs:145–154,521–1043.
+// Registered tests exercise the actual codec functions on S1/S2 records and
+// pin the presentation bytes whose null/empty/order distinctions consumers
+// depend on. The original checked-fixture assertions follow as unregistered
+// helpers: they need the actual S4/C4 producer to supply the records.
+
+use jet_foundation.[StatusValue, StatusEnvelope, foundation_json_parse]
+
+// Exercise the real canonical Report writer and the real Foundation JSON
+// consumer. Equality is on decoded values, not constructor equality; exact
+// bytes are additionally required where the quote policies coincide.
+fn semindex_fact_status_consumer(raw: String, value: StatusValue, exact: Bool) Never! {
+    rendered :: StatusEnvelope.new("inspect-semindex", true).with_field("value", value).json()
+    expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect-semindex\",\"ok\":true,\"reports\":[],\"value\":{raw}}}"
+    actual_tree :: foundation_json_parse(rendered) ?? panic("typed Report consumer rejects emitted JSON")
+    raw_tree :: foundation_json_parse(expected) ?? panic("raw codec consumer rejects emitted JSON")
+    assert_eq(actual_tree, raw_tree)
+    if exact -> assert_eq(rendered, expected)
+}
+
+#Test("semindex_json_strings_keep_order_duplicates_and_canonical_quote") {
+    assert_eq(semindex_json_strings([String]{}), "")
+    assert_eq(semindex_json_string_array([String]{}), "[]")
+    assert_eq(semindex_json_string_array([String]{"b", "a", "b"}), `["b","a","b"]`)
+    // Foundation quote: short escapes, every Cc scalar as \u00xx (CR, U+0001,
+    // C1 U+0085, DEL), non-control Unicode verbatim, and the empty string kept.
+    controls :: String.from_bytes([U8]{13, 1, 194, 133, 127}) ?? panic("valid control scalars")
+    assert_eq(semindex_json_string_array([String]{"q\"\\\n\t{controls}é😀", ""}), `["q\"\\\n\t\r\u0001\u0085\u007fé😀",""]`)
+    semindex_fact_status_consumer(semindex_json_string_array([String]{"b", "a", "b"}), semindex_status_strings([String]{"b", "a", "b"}), true)
+    semindex_fact_status_consumer(semindex_json_string_array([String]{"q\"\\\n\t{controls}é😀", ""}), semindex_status_strings([String]{"q\"\\\n\t{controls}é😀", ""}), false)
+}
+
+#Test("semindex_json_span_keeps_unchecked_utf8_byte_offsets") {
+    assert_eq(semindex_json_span(SourceSpan{start: 3, end: 7}), `{"start":3,"end":7}`)
+    // Reversed and beyond-32-bit coordinates are emitted exactly as recorded.
+    assert_eq(semindex_json_span(SourceSpan{start: 8, end: 3}), `{"start":8,"end":3}`)
+    assert_eq(semindex_json_span(SourceSpan{start: 2147483648, end: 4294967296}), `{"start":2147483648,"end":4294967296}`)
+    semindex_fact_status_consumer(semindex_json_span(SourceSpan{start: 2147483648, end: 4294967296}), semindex_status_span(SourceSpan{start: 2147483648, end: 4294967296}), true)
+}
+
+#Test("semindex_json_view_provenance_keeps_slots_alternatives_and_projections") {
+    // tests/semindex.rs:954–956 union fragments on the returned-view record.
+    union :: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{
+        ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 0}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
+        ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 1}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
+    }, mutable: false}
+    assert_eq(semindex_json_view_provenance(union), `{"output_path":[],"sources":[{"source":{"kind":"parameter","index":0},"projections":[{"kind":"range"}]},{"source":{"kind":"parameter","index":1},"projections":[{"kind":"range"}]}],"mutable":false}`)
+    // Aggregate slots, receiver/static sources, ordered projection paths and
+    // write access stay distinct; strings use the canonical Foundation quote.
+    aggregate :: ViewProvenanceFact{output_path: [String]{"outer", "le\"ft"}, sources: [ViewSourcePathFact]{
+        ViewSourcePathFact{source: ViewSourceFact.Receiver, projections: [ViewProjectionFact]{ViewProjectionFact.Field{name: "data"}, ViewProjectionFact.Index, ViewProjectionFact.Range}},
+        ViewSourcePathFact{source: ViewSourceFact.Static{module_path: "mód", name: "va\\lues"}, projections: [ViewProjectionFact]{}},
+    }, mutable: true}
+    assert_eq(semindex_json_view_provenance(aggregate), `{"output_path":["outer","le\"ft"],"sources":[{"source":{"kind":"receiver"},"projections":[{"kind":"field","name":"data"},{"kind":"index"},{"kind":"range"}]},{"source":{"kind":"static","module":"mód","name":"va\\lues"},"projections":[]}],"mutable":true}`)
+    empty :: ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{}, mutable: false}
+    assert_eq(semindex_json_view_provenance(empty), `{"output_path":[],"sources":[],"mutable":false}`)
+    semindex_fact_status_consumer(semindex_json_view_provenance(union), semindex_status_view_provenance(union), true)
+    semindex_fact_status_consumer(semindex_json_view_provenance(aggregate), semindex_status_view_provenance(aggregate), true)
+    semindex_fact_status_consumer(semindex_json_view_provenance(empty), semindex_status_view_provenance(empty), true)
+}
+
+#Test("semindex_json_callable_unavailable_uses_canonical_stage_spelling") {
+    // lib.rs:460–462 metadata_declaration_identity object, exact bytes.
+    declaration :: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "the semindex producer does not receive a checker-issued DeclarationHandle"}
+    assert_eq(semindex_json_callable_unavailable(declaration), `{"status":"unavailable","required_stage":"Resolved","reason":"the semindex producer does not receive a checker-issued DeclarationHandle"}`)
+    semindex_fact_status_consumer(semindex_json_callable_unavailable(declaration), semindex_status_callable_unavailable(declaration), true)
+    stages :: [CompilerStage]{CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed, CompilerStage.Prepared, CompilerStage.Emitted}
+    spellings :: [String]{"Parsed", "Resolved", "Typed", "Prepared", "Emitted"}
+    loop (index, stage) in stages {
+        row :: semindex_json_callable_unavailable(CallableFactUnavailable{required_stage: stage, reason: ""})
+        expected :: "{{\"status\":\"unavailable\",\"required_stage\":\"{spellings[index]}\",\"reason\":\"\"}}"
+        assert_eq(row, expected)
+    }
+}
+
+#Test("semindex_json_kind_keeps_null_empty_and_declaration_order") {
+    function :: SemIndexSymbolKind.Function{
+        params: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "a", ty: "Int"}, SemIndexNameTypeFact{name: "a", ty: "[String]"}},
+        call_contract: [SemIndexCallContractEntry]{
+            SemIndexCallContractEntry{label: "timeout seconds", zone: "either", variadic: false},
+            SemIndexCallContractEntry{label: "rest", zone: "positional_only", variadic: true},
+        },
+        ret: None,
+    }
+    // Function params expose only their types; an absent return is null.
+    assert_eq(semindex_json_kind(function), `{"kind":"function","params":[{"type":"Int"},{"type":"[String]"}],"call_contract":[{"label":"timeout seconds","zone":"either","variadic":false},{"label":"rest","zone":"positional_only","variadic":true}],"ret":null}`)
+    returning :: SemIndexSymbolKind.Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: Val("")}
+    assert_eq(semindex_json_kind(returning), `{"kind":"function","params":[],"call_contract":[],"ret":""}`)
+    assert_eq(semindex_json_kind(SemIndexSymbolKind.Struct{fields: [SemIndexNameTypeFact]{}}), `{"kind":"struct","fields":[]}`)
+    fields :: [SemIndexNameTypeFact]{SemIndexNameTypeFact{name: "y", ty: "Float"}, SemIndexNameTypeFact{name: "x", ty: "Float"}}
+    assert_eq(semindex_json_kind(SemIndexSymbolKind.Struct{fields: fields}), `{"kind":"struct","fields":[{"name":"y","type":"Float"},{"name":"x","type":"Float"}]}`)
+    assert_eq(semindex_json_kind(SemIndexSymbolKind.Enum{variants: [String]{"Red", "Amber", "Red"}}), `{"kind":"enum","variants":["Red","Amber","Red"]}`)
+    assert_eq(semindex_json_kind(SemIndexSymbolKind.EnumVariant{parent: "Door.State"}), `{"kind":"enum_variant","parent":"Door.State"}`)
+    assert_eq(semindex_json_kind(SemIndexSymbolKind.Field{ty: "Int", parent: "Point"}), `{"kind":"field","type":"Int","parent":"Point"}`)
+    // Fenced-range locals keep a checked type; loop labels keep null, not "".
+    assert_eq(semindex_json_kind(SemIndexSymbolKind.Local{mutable: false, ty: None}), `{"kind":"local","mutable":false,"type":null}`)
+    assert_eq(semindex_json_kind(SemIndexSymbolKind.Local{mutable: true, ty: Val("Int")}), `{"kind":"local","mutable":true,"type":"Int"}`)
+    assert_eq(semindex_json_kind(SemIndexSymbolKind.Param{ty: "String"}), `{"kind":"param","type":"String"}`)
+    units :: [SemIndexSymbolKind]{SemIndexSymbolKind.Module, SemIndexSymbolKind.Trait, SemIndexSymbolKind.Tag, SemIndexSymbolKind.Type, SemIndexSymbolKind.Const}
+    unit_rows :: loop kind in units -> semindex_json_kind(kind)
+    assert_eq(unit_rows, [String]{`{"kind":"module"}`, `{"kind":"trait"}`, `{"kind":"tag"}`, `{"kind":"type"}`, `{"kind":"const"}`})
+    kinds :: [SemIndexSymbolKind]{function, returning, .Struct{fields: fields}, .Enum{variants: [String]{"Red", "Amber", "Red"}}, .EnumVariant{parent: "Door.State"}, .Field{ty: "Int", parent: "Point"}, .Local{mutable: false, ty: None}, .Local{mutable: true, ty: Val("")}, .Param{ty: "String"}, .Module, .Trait, .Tag, .Type, .Const}
+    loop kind in kinds {
+        semindex_fact_status_consumer(semindex_json_kind(kind), semindex_status_kind(kind), true)
+    }
+}
+
+#Test("semindex_json_trait_contract_keeps_unimplemented_associated_type_null") {
+    contract :: TraitContractFact{
+        trait_name: "CheckedText",
+        associated_types: [SemIndexAssociatedTypeFact]{
+            SemIndexAssociatedTypeFact{name: "Error", implementation: Val("PatternError")},
+            SemIndexAssociatedTypeFact{name: "Item", implementation: None},
+        },
+        methods: [String]{"fn check(text: String) PatternError! -[]>", "fn encode_hole<T: Printable>(value: T) -[]> String"},
+    }
+    assert_eq(semindex_json_trait_contract(contract), `{"trait":"CheckedText","associated_types":[{"name":"Error","type":"PatternError"},{"name":"Item","type":null}],"methods":["fn check(text: String) PatternError! -[]>","fn encode_hole<T: Printable>(value: T) -[]> String"]}`)
+    empty :: TraitContractFact{trait_name: "Marker", associated_types: [SemIndexAssociatedTypeFact]{}, methods: [String]{}}
+    assert_eq(semindex_json_trait_contract(empty), `{"trait":"Marker","associated_types":[],"methods":[]}`)
+    semindex_fact_status_consumer(semindex_json_trait_contract(contract), semindex_status_trait_contract(contract), true)
+    semindex_fact_status_consumer(semindex_json_trait_contract(empty), semindex_status_trait_contract(empty), true)
+}
+
+#Test("semindex_json_ref_keeps_unresolved_target_and_missing_identity_null") {
+    unresolved :: SymbolRef{name: "helper", module_path: "main", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 40, end: 46}}
+    assert_eq(semindex_json_ref(unresolved), `{"name":"helper","module":"main","scope_identity":null,"target":null,"fact":null,"span":{"start":40,"end":46}}`)
+    // A resolved target without a checked semantic identity keeps null rather
+    // than borrowing the spelling; rename anchors keep their checked identity.
+    anonymous :: SymbolRef{name: "helper", module_path: "main", scope_identity: Val("fn:main::run"),
+        target: Val(DefinitionAnchor{module_path: "main", kind: "function", def_span: SourceSpan{start: 3, end: 9}, semantic_identity: None}),
+        fact: None, span: SourceSpan{start: 40, end: 46}}
+    assert_eq(semindex_json_ref(anonymous), `{"name":"helper","module":"main","scope_identity":"fn:main::run","target":{"module":"main","kind":"function","semantic_identity":null,"span":{"start":3,"end":9}},"fact":null,"span":{"start":40,"end":46}}`)
+    // tests/semindex.rs:681–683 typed compiler-fact fragment, exact bytes.
+    origin :: SymbolRef{name: "origin", module_path: "main", scope_identity: None,
+        target: Val(DefinitionAnchor{module_path: "main", kind: "local", def_span: SourceSpan{start: 1, end: 7}, semantic_identity: Val("local:main::origin")}),
+        fact: Val(CompilerFact{name: "origin", kind: "Origin", type_name: "OriginInfo?"}), span: SourceSpan{start: 9, end: 15}}
+    assert_eq(semindex_json_ref(origin), `{"name":"origin","module":"main","scope_identity":null,"target":{"module":"main","kind":"local","semantic_identity":"local:main::origin","span":{"start":1,"end":7}},"fact":{"name":"origin","kind":"Origin","type":"OriginInfo?"},"span":{"start":9,"end":15}}`)
+    semindex_fact_status_consumer(semindex_json_ref(unresolved), semindex_status_ref(unresolved), true)
+    semindex_fact_status_consumer(semindex_json_ref(anonymous), semindex_status_ref(anonymous), true)
+    semindex_fact_status_consumer(semindex_json_ref(origin), semindex_status_ref(origin), true)
+}
+
+#Test("semindex_json_call_and_arithmetic_keep_exact_spans") {
+    call :: CallEdge{caller: "run", callee: "score", module_path: "mód", call_span: SourceSpan{start: 7, end: 15}}
+    assert_eq(semindex_json_call(call), `{"caller":"run","callee":"score","module":"mód","span":{"start":7,"end":15}}`)
+    // tests/semindex.rs:389 policy fragment; scope precedes the operation.
+    arithmetic :: ArithmeticOperationFact{operation: "add", policy: "Wrapping", module_path: "main", operation_span: SourceSpan{start: 60, end: 77}, scope_span: SourceSpan{start: 15, end: 85}}
+    assert_eq(semindex_json_arithmetic(arithmetic), `{"operation":"add","policy":"Wrapping","module":"main","operation_span":{"start":60,"end":77},"scope_span":{"start":15,"end":85}}`)
+    semindex_fact_status_consumer(semindex_json_call(call), semindex_status_call(call), true)
+    semindex_fact_status_consumer(semindex_json_arithmetic(arithmetic), semindex_status_arithmetic(arithmetic), true)
+}
+
+#Test("semindex_json_effect_keeps_witness_order_and_effect_wire_key") {
+    pure :: EffectFact{function: "main::pure", direct: [String]{}, callees: [String]{}, inferred: [String]{}, maximal: false, provenance: [EffectProvenance]{}}
+    assert_eq(semindex_json_effect(pure), `{"function":"main::pure","direct":[],"callees":[],"inferred":[],"maximal":false,"provenance":[]}`)
+    effect_fact :: EffectFact{
+        function: "main::run",
+        direct: [String]{"IO"},
+        callees: [String]{"main::save", "main::log", "main::save"},
+        inferred: [String]{"IO", "FS.Write"},
+        maximal: true,
+        provenance: [EffectProvenance]{
+            EffectProvenance{effect_name: "FS.Write", call_path: [String]{"main::run", "main::save"}, spans: [SourceSpan]{SourceSpan{start: 30, end: 36}, SourceSpan{start: 4, end: 9}}},
+            EffectProvenance{effect_name: "IO", call_path: [String]{}, spans: [SourceSpan]{}},
+        },
+    }
+    assert_eq(semindex_json_effect(effect_fact), `{"function":"main::run","direct":["IO"],"callees":["main::save","main::log","main::save"],"inferred":["IO","FS.Write"],"maximal":true,"provenance":[{"effect":"FS.Write","call_path":["main::run","main::save"],"spans":[{"start":30,"end":36},{"start":4,"end":9}]},{"effect":"IO","call_path":[],"spans":[]}]}`)
+    semindex_fact_status_consumer(semindex_json_effect(pure), semindex_status_effect(pure), true)
+    semindex_fact_status_consumer(semindex_json_effect(effect_fact), semindex_status_effect(effect_fact), true)
+}
+
+#Test("semindex_json_member_keeps_every_kind_and_origin_distinct") {
+    kinds :: [MemberKind]{MemberKind.Field, MemberKind.Variant, MemberKind.Method}
+    kind_rows :: loop kind in kinds -> semindex_json_member_kind(kind)
+    assert_eq(kind_rows, [String]{"field", "variant", "method"})
+    origins :: [MemberOrigin]{MemberOrigin.TypeBody, MemberOrigin.InherentImpl, MemberOrigin.TraitImpl{trait_name: "DrawThing"}, MemberOrigin.TraitRequirement{trait_name: "DrawThing"}}
+    origin_rows :: loop origin in origins -> semindex_json_origin(origin)
+    assert_eq(origin_rows, [String]{`{"kind":"type_body"}`, `{"kind":"inherent_impl"}`, `{"kind":"trait_impl","trait":"DrawThing"}`, `{"kind":"trait_requirement","trait":"DrawThing"}`})
+    member :: MemberFact{owner: "Widget", name: "render", identity: "method:Widget.render", kind: MemberKind.Method,
+        origin: MemberOrigin.TraitImpl{trait_name: "DrawThing"}, signature: "fn render() -> String", module_path: "main", span: SourceSpan{start: 5, end: 11}}
+    assert_eq(semindex_json_member(member), `{"owner":"Widget","name":"render","identity":"method:Widget.render","kind":"method","origin":{"kind":"trait_impl","trait":"DrawThing"},"signature":"fn render() -> String","module":"main","span":{"start":5,"end":11}}`)
+    semindex_fact_status_consumer(semindex_json_member(member), semindex_status_member(member), true)
+    loop origin in origins -> semindex_fact_status_consumer(semindex_json_origin(origin), semindex_status_origin(origin), true)
+}
+
+#Test("semindex_json_state_graph_keeps_unknown_reachability_and_initial_from_null") {
+    graph :: StateGraphFact{
+        owner: "Door",
+        module_path: "main",
+        states: [StateNodeFact]{
+            StateNodeFact{name: "Closed", terminal: false, reachable: Val(true), span: SourceSpan{start: 20, end: 26}},
+            StateNodeFact{name: "Orphan", terminal: true, reachable: Val(false), span: SourceSpan{start: 34, end: 40}},
+            StateNodeFact{name: "Pending", terminal: true, reachable: None, span: SourceSpan{start: 42, end: 49}},
+        },
+        transitions: [StateTransitionFact]{
+            StateTransitionFact{operation: "close", from: None, to: "Closed"},
+            StateTransitionFact{operation: "hold", from: Val("Closed"), to: "Closed"},
+        },
+    }
+    assert_eq(semindex_json_state_graph(graph), `{"owner":"Door","module":"main","states":[{"name":"Closed","terminal":false,"reachable":true,"span":{"start":20,"end":26}},{"name":"Orphan","terminal":true,"reachable":false,"span":{"start":34,"end":40}},{"name":"Pending","terminal":true,"reachable":null,"span":{"start":42,"end":49}}],"transitions":[{"operation":"close","from":null,"to":"Closed"},{"operation":"hold","from":"Closed","to":"Closed"}]}`)
+    empty :: StateGraphFact{owner: "Idle", module_path: "main", states: [StateNodeFact]{}, transitions: [StateTransitionFact]{}}
+    assert_eq(semindex_json_state_graph(empty), `{"owner":"Idle","module":"main","states":[],"transitions":[]}`)
+    semindex_fact_status_consumer(semindex_json_state_graph(graph), semindex_status_state_graph(graph), true)
+    semindex_fact_status_consumer(semindex_json_state_graph(empty), semindex_status_state_graph(empty), true)
+}
+
+fn semindex_codec_test_parameter(name: String, default_fact: CallableDefaultFact?) -> CallableParameterFact Never! {
+    CallableParameterFact{name: name, label: name, source: SourceSpan{start: 9, end: 14}, default: default_fact,
+        access: AccessConvention.Read, zone: ParamZone.Either, ty: Type.Int, variadic: false}
+}
+
+// The two callable-signature claims below construct the generic S1
+// CallableFactAvailability<T>.Checked payload; their proof waits for #4459.
+#Test("semindex_json_callable_signature_distinguishes_checked_empty_from_unavailable") {
+    checked :: CallableSignatureFact{
+        parameters: [CallableParameterFact]{},
+        return_type: None,
+        effects: CallableEffectsFact.Checked{effects: [CallableEffectFact]{}},
+        failure_contract: CallableFactAvailability<FailureContract>.Checked{value: FailureContract.ProvenUnreachable{success: Type.Bool}},
+        returned_views: [ViewProvenanceFact]{},
+        policies: [CallablePolicy]{},
+        generic_parameters: CallableFactAvailability<[TypeParam]>.Checked{value: [TypeParam]{}},
+        metadata_producer_status: MetadataProducerStatus.ExistingCallableProducerNeedsExtension,
+    }
+    // lib.rs:456 checked-empty fragment; no return is null, not "Void".
+    assert_eq(semindex_json_callable_signature(checked), `{"parameters":[],"return_type":null,"return_type_status":"checked","effects":[],"effect_status":{"status":"checked"},"effect_facts":[],"errors":[],"failure_contract":"Bool Never!","failure_source":"explicit !Never (proven unreachable)","failure_status":{"status":"checked"},"returned_views":[],"policies":[],"generic_parameters":[],"generic_parameters_status":{"status":"checked"},"metadata_producer_status":"existing_callable_producer_needs_extension"}`)
+    unavailable :: CallableFactUnavailable{required_stage: CompilerStage.Typed, reason: "external callable"}
+    external :: CallableSignatureFact{
+        parameters: [CallableParameterFact]{},
+        return_type: Val(Type.Bool),
+        effects: CallableEffectsFact.Unavailable{reason: unavailable},
+        failure_contract: CallableFactAvailability<FailureContract>.Unavailable{reason: unavailable},
+        returned_views: [ViewProvenanceFact]{},
+        policies: [CallablePolicy]{},
+        generic_parameters: CallableFactAvailability<[TypeParam]>.Unavailable{reason: unavailable},
+        metadata_producer_status: MetadataProducerStatus.ContractOnly,
+    }
+    // lib.rs:457–459 unavailable fragment: each unavailable row is null.
+    assert_eq(semindex_json_callable_signature(external), `{"parameters":[],"return_type":"Bool","return_type_status":"checked","effects":null,"effect_status":{"status":"unavailable","required_stage":"Typed","reason":"external callable"},"effect_facts":null,"errors":null,"failure_contract":null,"failure_source":null,"failure_status":{"status":"unavailable","required_stage":"Typed","reason":"external callable"},"returned_views":[],"policies":[],"generic_parameters":null,"generic_parameters_status":{"status":"unavailable","required_stage":"Typed","reason":"external callable"},"metadata_producer_status":"contract_only"}`)
+    semindex_fact_status_consumer(semindex_json_callable_signature(checked), semindex_status_callable_signature(checked), true)
+    semindex_fact_status_consumer(semindex_json_callable_signature(external), semindex_status_callable_signature(external), true)
+}
+
+#Test("semindex_json_callable_signature_keeps_defaults_effects_errors_and_order") {
+    default_fact :: CallableDefaultFact{source_text: "7", source: SourceSpan{start: 20, end: 21},
+        value_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Prepared, reason: "prepared values are not supplied by semindex"}}
+    signature :: CallableSignatureFact{
+        parameters: [CallableParameterFact]{semindex_codec_test_parameter("label", None), semindex_codec_test_parameter("value", Val(default_fact))},
+        return_type: Val(Type.Bool),
+        effects: CallableEffectsFact.Checked{effects: [CallableEffectFact]{
+            CallableEffectFact.ViaParameter{name: "action", source: SourceSpan{start: 30, end: 36}},
+            CallableEffectFact.Named{name: "FS.Read", source: SourceSpan{start: 38, end: 45}},
+        }},
+        failure_contract: CallableFactAvailability<FailureContract>.Checked{value: FailureContract.Explicit{success: Type.Bool, error: Type.Named{name: "ReadError"}}},
+        returned_views: [ViewProvenanceFact]{ViewProvenanceFact{output_path: [String]{}, sources: [ViewSourcePathFact]{
+            ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 1}, projections: [ViewProjectionFact]{ViewProjectionFact.Range}},
+        }, mutable: false}},
+        policies: [CallablePolicy]{CallablePolicy{name: "retry", arguments: [String]{"3", "delay"}}},
+        generic_parameters: CallableFactAvailability<[TypeParam]>.Checked{value: [TypeParam]{
+            TypeParam{name: "T", name_span: Span{start: 3, end: 4}, bounds: [String]{}, prep: None},
+            TypeParam{name: "U", name_span: Span{start: 6, end: 7}, bounds: [String]{"Printable"}, prep: None},
+        }},
+        metadata_producer_status: MetadataProducerStatus.NotImplemented,
+    }
+    // A parameter without a default keeps all three default fields null; a
+    // declared default keeps source text/span and an unavailable prepared value.
+    assert_eq(semindex_json_callable_signature(signature), `{"parameters":[{"name":"label","label":"label","source":{"start":9,"end":14},"default":null,"default_source":null,"default_value":null,"access":"read","zone":"either","type":"Int","variadic":false},{"name":"value","label":"value","source":{"start":9,"end":14},"default":"7","default_source":{"start":20,"end":21},"default_value":{"status":"unavailable","required_stage":"Prepared","reason":"prepared values are not supplied by semindex"},"access":"read","zone":"either","type":"Int","variadic":false}],"return_type":"Bool","return_type_status":"checked","effects":["via action","FS.Read"],"effect_status":{"status":"checked"},"effect_facts":[{"kind":"via_parameter","name":"action","source":{"start":30,"end":36}},{"kind":"named","name":"FS.Read","source":{"start":38,"end":45}}],"errors":["ReadError"],"failure_contract":"Bool ReadError!","failure_source":"explicit !ReadError","failure_status":{"status":"checked"},"returned_views":[{"output_path":[],"sources":[{"source":{"kind":"parameter","index":1},"projections":[{"kind":"range"}]}],"mutable":false}],"policies":["retry(3, delay)"],"generic_parameters":["T","U"],"generic_parameters_status":{"status":"checked"},"metadata_producer_status":"not_implemented"}`)
+    semindex_fact_status_consumer(semindex_json_callable_signature(signature), semindex_status_callable_signature(signature), true)
+}
+
+#Test("semindex_json_def_keeps_qualified_leaf_and_absent_facts") {
+    definition :: SymbolDef{
+        identity: "variant:Door.State.Closed",
+        declaration_identity_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "the semindex producer does not receive a checker-issued DeclarationHandle"},
+        name: "Closed",
+        qualified_name: "Door.State.Closed",
+        module_path: "main",
+        def_span: SourceSpan{start: 24, end: 30},
+        kind: SemIndexSymbolKind.EnumVariant{parent: "Door.State"},
+        view_provenance: [ViewProvenanceFact]{},
+        callable_signature: None,
+        derives: [String]{},
+        nominal_base: None,
+        trait_contracts: [TraitContractFact]{},
+    }
+    // tests/semindex.rs:531: `name` is the qualified spelling; leaf is separate.
+    assert_eq(semindex_json_def(definition), `{"identity":"variant:Door.State.Closed","metadata_declaration_identity":{"status":"unavailable","required_stage":"Resolved","reason":"the semindex producer does not receive a checker-issued DeclarationHandle"},"name":"Door.State.Closed","leaf_name":"Closed","module":"main","span":{"start":24,"end":30},"detail":{"kind":"enum_variant","parent":"Door.State"},"view_provenance":[],"callable_signature":null,"derives":[],"nominal_base":null,"trait_contracts":[]}`)
+    nominal := ~definition
+    nominal.identity = "type:Pattern"
+    nominal.name = "Pattern"
+    nominal.qualified_name = "Pattern"
+    nominal.kind = SemIndexSymbolKind.Type
+    nominal.derives = [String]{"Eq", "Hash", "Eq"}
+    nominal.nominal_base = Val("String")
+    nominal.trait_contracts = [TraitContractFact]{TraitContractFact{trait_name: "CheckedText", associated_types: [SemIndexAssociatedTypeFact]{SemIndexAssociatedTypeFact{name: "Error", implementation: Val("PatternError")}}, methods: [String]{}}}
+    // tests/semindex.rs:223–225 nominal/trait fragments, derives kept in order.
+    assert_eq(semindex_json_def(nominal), `{"identity":"type:Pattern","metadata_declaration_identity":{"status":"unavailable","required_stage":"Resolved","reason":"the semindex producer does not receive a checker-issued DeclarationHandle"},"name":"Pattern","leaf_name":"Pattern","module":"main","span":{"start":24,"end":30},"detail":{"kind":"type"},"view_provenance":[],"callable_signature":null,"derives":["Eq","Hash","Eq"],"nominal_base":"String","trait_contracts":[{"trait":"CheckedText","associated_types":[{"name":"Error","type":"PatternError"}],"methods":[]}]}`)
+    semindex_fact_status_consumer(semindex_json_def(definition), semindex_status_def(definition), true)
+    semindex_fact_status_consumer(semindex_json_def(nominal), semindex_status_def(nominal), true)
+}
+
+// Original checked-fixture assertions, applied at the fact-codec layer.
+// Unregistered: the actual S4/C4 producer must open each original fixture and
+// pass its checked records here; no literal records stand in for them.
+
+// tests/semindex.rs:169–225 checked_text_contract_is_one_tooling_fact JSON
+// fragments, on the checked `Pattern` definition.
+fn semindex_codec_test_checked_text_contract_json(pattern: SymbolDef) {
+    json :: semindex_json_def(pattern)
+    assert(json.contains(`"nominal_base":"String"`))
+    assert(json.contains(`"trait":"CheckedText"`))
+    assert(json.contains(`"associated_types":[{"name":"Error"`))
+}
+
+// tests/semindex.rs:369–389 arithmetic policy fragment on the first checked
+// arithmetic fact of the `#Arithmetic(.Wrapping)` fixture.
+fn semindex_codec_test_arithmetic_policy_json(operation: ArithmeticOperationFact) {
+    assert(semindex_json_arithmetic(operation).contains(`"policy":"Wrapping"`))
+}
+
+// tests/semindex.rs:403–449 terminal state fragment on the checked Door graph.
+fn semindex_codec_test_terminal_state_graph_json(door: StateGraphFact) {
+    assert(semindex_json_state_graph(door).contains(`"terminal":true`))
+}
+
+// tests/semindex.rs:486–533 qualified state name on the checked Closed state.
+fn semindex_codec_test_state_symbol_qualified_name_json(closed: SymbolDef) {
+    expected :: "\"name\":{foundation_json_quote(closed.qualified_name)}"
+    assert(semindex_json_def(closed).contains(expected))
+}
+
+// tests/semindex.rs:649–683 typed origin fact on the checked `origin` reference.
+fn semindex_codec_test_tracked_origin_fact_json(origin_read: SymbolRef) {
+    assert(semindex_json_ref(origin_read).contains(`"fact":{"name":"origin","kind":"Origin","type":"OriginInfo?"}`))
+}
+
+// tests/semindex.rs:1316–1338 rename anchor identity on the checked helper reference.
+fn semindex_codec_test_rename_anchor_identity_json(helper: SymbolRef) {
+    assert(semindex_json_ref(helper).contains(`"semantic_identity":`))
+}
+
+// tests/semindex.rs:1378–1431 member origins across the checked Widget dossier.
+fn semindex_codec_test_dossier_member_origins_json(members: [MemberFact]) {
+    rows :: loop member in members -> semindex_json_member(member)
+    json :: rows.join(",")
+    assert(json.contains(`"trait_impl"`))
+    assert(json.contains(`"inherent_impl"`))
+}
+
+// Deliberate-failure control uses the original state reachability assertion
+// above: invert its expected `"reachable":null` to `"reachable":false` in the
+// focused scratch unit, require exactly that original test to fail, restore.
+// Unrun while CP-REPORT-STATUS-API publication and proof admission are gated.

@@ -1,0 +1,2258 @@
+// PORT-PENDING 0770 crates-jet-devserver-src-canvas-query-actions: crates/jet-devserver/src/Canvas/query_actions.rs:1-2254
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::collections::HashSet;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS use jet_driver::FixEngine;
+//RS use jet_semindex::{SemIndex, SourceSpan, SymbolDef, SymbolKind};
+//RS 
+//RS use super::graph_helpers::{
+//RS     contains_ci, dedupe_results, edit, nearest_node, node_for_span, open_query_context,
+//RS     query_diagnostics_error, query_error, query_ok, query_result_json, simple_diff, spans_overlap,
+//RS     text_matches,
+//RS };
+//RS use super::graph_json::node_catalog;
+//RS use super::project_scan::{env_project_json, project_context_for_entry, project_file};
+//RS use super::graph_projection::{canvas_game_fact_json, CanvasGameFact, Projection};
+//RS use super::project_transactions::{
+//RS     module_belongs_to, normalize_and_format_project_changes, prepare_project_rename,
+//RS     project_revision_after_changes, rel_path, validate_project_rename_overlay,
+//RS };
+//RS use super::schema_api::{ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION};
+//RS use super::source_model::{read_source_without_symlinks, source_revision};
+//RS use super::validation_json::{json_optional_str, json_str, json_string_field, span_json};
+//RS 
+//RS const PROJECT_QUERY_RESULT_LIMIT: usize = 200;
+//RS 
+//RS struct ProjectSourceIndex {
+//RS     path: PathBuf,
+//RS     source_id: String,
+//RS     source: String,
+//RS     revision: String,
+//RS     index: SemIndex,
+//RS }
+//RS 
+//RS struct ProjectQueryContext {
+//RS     project_root: PathBuf,
+//RS     project_revision: String,
+//RS     selected_source_id: String,
+//RS     selected_path: PathBuf,
+//RS     selected_source: String,
+//RS     sources: Vec<ProjectSourceIndex>,
+//RS }
+//RS 
+//RS pub(super) fn canvas_find(path: &Path, src: &str, query: &str) -> Result<String, String> {
+//RS     let (projection, index) = open_query_context(path, src)?;
+//RS     let needle = query.trim();
+//RS     if needle.is_empty() {
+//RS         return Ok(query_ok("find", src, "[]", "\"impact\":null,\"diff\":null"));
+//RS     }
+//RS     let mut results = Vec::new();
+//RS     for def in index.definitions() {
+//RS         if contains_ci(&def.name, needle) || contains_ci(&def.identity, needle) {
+//RS             results.push(query_result_json(
+//RS                 "definition",
+//RS                 &def.name,
+//RS                 &def.name,
+//RS                 &def.module_path,
+//RS                 def.def_span,
+//RS                 node_for_span(&projection, def.def_span).as_ref(),
+//RS                 src,
+//RS             ));
+//RS         }
+//RS     }
+//RS     for r in index.references() {
+//RS         if contains_ci(&r.name, needle) {
+//RS             results.push(query_result_json(
+//RS                 "reference",
+//RS                 &r.name,
+//RS                 &r.name,
+//RS                 &r.module_path,
+//RS                 r.span,
+//RS                 node_for_span(&projection, r.span).as_ref(),
+//RS                 src,
+//RS             ));
+//RS         }
+//RS     }
+//RS     for node in &projection.node_refs {
+//RS         if contains_ci(&node.title, needle) || contains_ci(&node.kind, needle) {
+//RS             results.push(query_result_json(
+//RS                 "graph",
+//RS                 &node.title,
+//RS                 &node.title,
+//RS                 "",
+//RS                 node.span,
+//RS                 Some(node),
+//RS                 src,
+//RS             ));
+//RS         }
+//RS     }
+//RS     for span in text_matches(src, needle) {
+//RS         results.push(query_result_json(
+//RS             "source",
+//RS             needle,
+//RS             needle,
+//RS             &path.display().to_string(),
+//RS             span,
+//RS             node_for_span(&projection, span).as_ref(),
+//RS             src,
+//RS         ));
+//RS     }
+//RS     dedupe_results(&mut results);
+//RS     Ok(query_ok(
+//RS         "find",
+//RS         src,
+//RS         &format!("[{}]", results.join(",")),
+//RS         "\"impact\":null,\"diff\":null",
+//RS     ))
+//RS }
+//RS 
+//RS pub(super) fn canvas_project_find(
+//RS     entry: &Path,
+//RS     selected_path: &Path,
+//RS     selected_src: &str,
+//RS     query: &str,
+//RS     expected_project_revision: Option<&str>,
+//RS ) -> Result<String, String> {
+//RS     jet_driver::run_compiler_work(|| {
+//RS         let context = open_project_query_context(
+//RS             entry,
+//RS             selected_path,
+//RS             selected_src,
+//RS             expected_project_revision,
+//RS         )?;
+//RS         let needle = query.trim();
+//RS         let projection =
+//RS             if needle.is_empty() {
+//RS                 None
+//RS             } else {
+//RS                 Some(project_file(selected_path).map_err(|diags| {
+//RS                     query_diagnostics_error(selected_path, selected_src, &diags)
+//RS                 })?)
+//RS             };
+//RS         let mut results = Vec::new();
+//RS         let mut seen = HashSet::new();
+//RS         if !needle.is_empty() {
+//RS             for source in &context.sources {
+//RS                 for def in source.index.definitions() {
+//RS                     if !module_belongs_to(&context.project_root, &source.path, &def.module_path)
+//RS                         || !contains_ci(&def.name, needle) && !contains_ci(&def.identity, needle)
+//RS                     {
+//RS                         continue;
+//RS                     }
+//RS                     let owner = context
+//RS                         .sources
+//RS                         .iter()
+//RS                         .find(|candidate| {
+//RS                             module_belongs_to(
+//RS                                 &context.project_root,
+//RS                                 &candidate.path,
+//RS                                 &def.module_path,
+//RS                             )
+//RS                         })
+//RS                         .unwrap_or(source);
+//RS                     push_project_result(
+//RS                         &mut results,
+//RS                         &mut seen,
+//RS                         "definition",
+//RS                         &def.name,
+//RS                         &def.name,
+//RS                         &def.module_path,
+//RS                         def.def_span,
+//RS                         owner,
+//RS                         projection.as_ref(),
+//RS                         &context.selected_path,
+//RS                     );
+//RS                 }
+//RS                 for reference in source.index.references() {
+//RS                     if !module_belongs_to(
+//RS                         &context.project_root,
+//RS                         &source.path,
+//RS                         &reference.module_path,
+//RS                     ) || !contains_ci(&reference.name, needle)
+//RS                     {
+//RS                         continue;
+//RS                     }
+//RS                     let owner = context
+//RS                         .sources
+//RS                         .iter()
+//RS                         .find(|candidate| {
+//RS                             module_belongs_to(
+//RS                                 &context.project_root,
+//RS                                 &candidate.path,
+//RS                                 &reference.module_path,
+//RS                             )
+//RS                         })
+//RS                         .unwrap_or(source);
+//RS                     push_project_result(
+//RS                         &mut results,
+//RS                         &mut seen,
+//RS                         "reference",
+//RS                         &reference.name,
+//RS                         &reference.name,
+//RS                         &reference.module_path,
+//RS                         reference.span,
+//RS                         owner,
+//RS                         projection.as_ref(),
+//RS                         &context.selected_path,
+//RS                     );
+//RS                 }
+//RS                 for span in text_matches(&source.source, needle) {
+//RS                     push_project_result(
+//RS                         &mut results,
+//RS                         &mut seen,
+//RS                         "source",
+//RS                         needle,
+//RS                         needle,
+//RS                         &source.source_id,
+//RS                         span,
+//RS                         source,
+//RS                         projection.as_ref(),
+//RS                         &context.selected_path,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             if let Some(projection) = projection.as_ref() {
+//RS                 for node in &projection.node_refs {
+//RS                     if contains_ci(&node.title, needle) || contains_ci(&node.kind, needle) {
+//RS                         let Some(selected_source) = context
+//RS                             .sources
+//RS                             .iter()
+//RS                             .find(|source| source.path == context.selected_path)
+//RS                         else {
+//RS                             return Err(query_error(
+//RS                                 "not_found",
+//RS                                 "Canvas query source is not in the projected project",
+//RS                             ));
+//RS                         };
+//RS                         push_project_result(
+//RS                             &mut results,
+//RS                             &mut seen,
+//RS                             "graph",
+//RS                             &node.title,
+//RS                             &node.title,
+//RS                             &context.selected_source_id,
+//RS                             node.span,
+//RS                             selected_source,
+//RS                             Some(projection),
+//RS                             &context.selected_path,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         let (results, truncated) = bounded_project_results(results);
+//RS         Ok(project_query_ok(
+//RS             "project_search",
+//RS             &context,
+//RS             &results,
+//RS             truncated,
+//RS             "\"impact\":null,\"diff\":null",
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn canvas_references(path: &Path, src: &str, symbol: &str) -> Result<String, String> {
+//RS     let (projection, index) = open_query_context(path, src)?;
+//RS     let mut results = Vec::new();
+//RS     for def in index.definitions().iter().filter(|d| d.name == symbol) {
+//RS         results.push(query_result_json(
+//RS             "definition",
+//RS             &def.name,
+//RS             &def.name,
+//RS             &def.module_path,
+//RS             def.def_span,
+//RS             node_for_span(&projection, def.def_span).as_ref(),
+//RS             src,
+//RS         ));
+//RS     }
+//RS     for r in index.references_to(symbol) {
+//RS         results.push(query_result_json(
+//RS             "reference",
+//RS             &r.name,
+//RS             &r.name,
+//RS             &r.module_path,
+//RS             r.span,
+//RS             node_for_span(&projection, r.span).as_ref(),
+//RS             src,
+//RS         ));
+//RS     }
+//RS     let impact = jet_impact::ImpactReport::analyze(&index, symbol, 3).to_json();
+//RS     Ok(query_ok(
+//RS         "references",
+//RS         src,
+//RS         &format!("[{}]", results.join(",")),
+//RS         &format!("\"impact\":{},\"diff\":null", impact),
+//RS     ))
+//RS }
+//RS 
+//RS pub(super) fn canvas_project_references(
+//RS     entry: &Path,
+//RS     selected_path: &Path,
+//RS     selected_src: &str,
+//RS     symbol: &str,
+//RS     expected_project_revision: Option<&str>,
+//RS ) -> Result<String, String> {
+//RS     jet_driver::run_compiler_work(|| {
+//RS         let context = open_project_query_context(
+//RS             entry,
+//RS             selected_path,
+//RS             selected_src,
+//RS             expected_project_revision,
+//RS         )?;
+//RS         let projection = project_file(selected_path)
+//RS             .map_err(|diags| query_diagnostics_error(selected_path, selected_src, &diags))?;
+//RS         let definitions = context
+//RS             .sources
+//RS             .iter()
+//RS             .flat_map(|source| {
+//RS                 source
+//RS                     .index
+//RS                     .definitions()
+//RS                     .iter()
+//RS                     .filter(|def| def.name == symbol)
+//RS                     .map(move |def| (source, def))
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let definitions = definitions
+//RS             .into_iter()
+//RS             .map(|(source, def)| {
+//RS                 let owner = context
+//RS                     .sources
+//RS                     .iter()
+//RS                     .find(|candidate| {
+//RS                         module_belongs_to(&context.project_root, &candidate.path, &def.module_path)
+//RS                     })
+//RS                     .unwrap_or(source);
+//RS                 (owner, def)
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let mut results = Vec::new();
+//RS         let mut seen = HashSet::new();
+//RS         for (source, def) in &definitions {
+//RS             push_project_result(
+//RS                 &mut results,
+//RS                 &mut seen,
+//RS                 "definition",
+//RS                 &def.name,
+//RS                 &def.name,
+//RS                 &def.module_path,
+//RS                 def.def_span,
+//RS                 source,
+//RS                 Some(&projection),
+//RS                 &context.selected_path,
+//RS             );
+//RS         }
+//RS         for source in &context.sources {
+//RS             for reference in source.index.references() {
+//RS                 if reference.name != symbol
+//RS                     || !module_belongs_to(
+//RS                         &context.project_root,
+//RS                         &source.path,
+//RS                         &reference.module_path,
+//RS                     )
+//RS                     || !reference_targets(reference, &definitions)
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 let owner = context
+//RS                     .sources
+//RS                     .iter()
+//RS                     .find(|candidate| {
+//RS                         module_belongs_to(
+//RS                             &context.project_root,
+//RS                             &candidate.path,
+//RS                             &reference.module_path,
+//RS                         )
+//RS                     })
+//RS                     .unwrap_or(source);
+//RS                 push_project_result(
+//RS                     &mut results,
+//RS                     &mut seen,
+//RS                     "reference",
+//RS                     &reference.name,
+//RS                     &reference.name,
+//RS                     &reference.module_path,
+//RS                     reference.span,
+//RS                     owner,
+//RS                     Some(&projection),
+//RS                     &context.selected_path,
+//RS                 );
+//RS             }
+//RS         }
+//RS         let impact = context
+//RS             .sources
+//RS             .iter()
+//RS             .find(|source| {
+//RS                 source
+//RS                     .index
+//RS                     .definitions()
+//RS                     .iter()
+//RS                     .any(|def| def.name == symbol)
+//RS             })
+//RS             .map(|source| jet_impact::ImpactReport::analyze(&source.index, symbol, 3).to_json())
+//RS             .unwrap_or_else(|| "null".to_string());
+//RS         let (results, truncated) = bounded_project_results(results);
+//RS         Ok(project_query_ok(
+//RS             "references",
+//RS             &context,
+//RS             &results,
+//RS             truncated,
+//RS             &format!("\"impact\":{},\"diff\":null", impact),
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn canvas_project_preview_rename(
+//RS     entry: &Path,
+//RS     selected_path: &Path,
+//RS     selected_src: &str,
+//RS     symbol: &str,
+//RS     to: &str,
+//RS     expected_project_revision: Option<&str>,
+//RS ) -> Result<String, String> {
+//RS     jet_driver::run_compiler_work(|| {
+//RS         let context = open_project_query_context(
+//RS             entry,
+//RS             selected_path,
+//RS             selected_src,
+//RS             expected_project_revision,
+//RS         )?;
+//RS         let project = project_context_for_entry(entry);
+//RS         if project.project_revision != context.project_revision {
+//RS             return Err(query_error(
+//RS                 "conflict",
+//RS                 "project changed while Canvas was preparing its rename",
+//RS             ));
+//RS         }
+//RS         let projection = project_file(selected_path)
+//RS             .map_err(|diags| query_diagnostics_error(selected_path, selected_src, &diags))?;
+//RS         let mut plan = prepare_project_rename(&project, selected_path, symbol, to, None)
+//RS             .map_err(|error| query_error(error.kind, &error.message))?;
+//RS         normalize_and_format_project_changes(&project, &mut plan.changes)
+//RS             .map_err(|error| query_error("check", &error))?;
+//RS         validate_project_rename_overlay(&project, &plan.changes)
+//RS             .map_err(|error| query_error("check", &error))?;
+//RS 
+//RS         let definitions = context
+//RS             .sources
+//RS             .iter()
+//RS             .flat_map(|source| {
+//RS                 source
+//RS                     .index
+//RS                     .definitions()
+//RS                     .iter()
+//RS                     .filter(|definition| definition.name == symbol)
+//RS                     .map(move |definition| (source, definition))
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let mut results = Vec::new();
+//RS         let mut seen = HashSet::new();
+//RS         for (source, definition) in &definitions {
+//RS             push_project_result(
+//RS                 &mut results,
+//RS                 &mut seen,
+//RS                 "definition",
+//RS                 &definition.name,
+//RS                 &definition.name,
+//RS                 &definition.module_path,
+//RS                 definition.def_span,
+//RS                 source,
+//RS                 Some(&projection),
+//RS                 &context.selected_path,
+//RS             );
+//RS         }
+//RS         for source in &context.sources {
+//RS             for reference in source.index.references() {
+//RS                 if reference.name != symbol
+//RS                     || !module_belongs_to(
+//RS                         &context.project_root,
+//RS                         &source.path,
+//RS                         &reference.module_path,
+//RS                     )
+//RS                     || !reference_targets(reference, &definitions)
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 let owner = context
+//RS                     .sources
+//RS                     .iter()
+//RS                     .find(|candidate| {
+//RS                         module_belongs_to(
+//RS                             &context.project_root,
+//RS                             &candidate.path,
+//RS                             &reference.module_path,
+//RS                         )
+//RS                     })
+//RS                     .unwrap_or(source);
+//RS                 push_project_result(
+//RS                     &mut results,
+//RS                     &mut seen,
+//RS                     "reference",
+//RS                     &reference.name,
+//RS                     &reference.name,
+//RS                     &reference.module_path,
+//RS                     reference.span,
+//RS                     owner,
+//RS                     Some(&projection),
+//RS                     &context.selected_path,
+//RS                 );
+//RS             }
+//RS         }
+//RS         let (results, truncated) = bounded_project_results(results);
+//RS         let files = plan
+//RS             .changes
+//RS             .iter()
+//RS             .map(|change| {
+//RS                 format!(
+//RS                     "{{\"path\":{},\"revision\":{},\"after_revision\":{},\"changed\":{}}}",
+//RS                     json_str(&change.rel),
+//RS                     json_str(&source_revision(&change.before)),
+//RS                     json_str(&source_revision(&change.after)),
+//RS                     if change.before != change.after {
+//RS                         "true"
+//RS                     } else {
+//RS                         "false"
+//RS                     },
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let diff_text = plan
+//RS             .changes
+//RS             .iter()
+//RS             .map(|change| {
+//RS                 format!(
+//RS                     "diff -- {}\n{}",
+//RS                     change.rel,
+//RS                     simple_diff(&change.before, &change.after)
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n");
+//RS         let after_project_revision = project_revision_after_changes(&project, &plan.changes);
+//RS         let selected_after_revision = plan
+//RS             .changes
+//RS             .iter()
+//RS             .find(|change| change.rel == context.selected_source_id)
+//RS             .map(|change| source_revision(&change.after));
+//RS         Ok(project_query_ok(
+//RS             "preview_rename",
+//RS             &context,
+//RS             &results,
+//RS             truncated,
+//RS             &format!(
+//RS                 "\"impact\":null,\"diff\":{{\"changed\":true,\"text\":{},\"after_revision\":{},\"after_project_revision\":{},\"files\":[{}]}}",
+//RS                 json_str(&diff_text),
+//RS                 selected_after_revision
+//RS                     .as_deref()
+//RS                     .map(json_str)
+//RS                     .unwrap_or_else(|| "null".to_string()),
+//RS                 json_str(&after_project_revision),
+//RS                 files,
+//RS             ),
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS fn open_project_query_context(
+//RS     entry: &Path,
+//RS     selected_path: &Path,
+//RS     selected_src: &str,
+//RS     expected_project_revision: Option<&str>,
+//RS ) -> Result<ProjectQueryContext, String> {
+//RS     let project = project_context_for_entry(entry);
+//RS     if let Some(diagnostic) = project.authority_diagnostic.as_ref() {
+//RS         return Err(query_error("stale", &diagnostic.what));
+//RS     }
+//RS     if let Some(expected) = expected_project_revision {
+//RS         if expected != project.project_revision {
+//RS             return Err(query_error(
+//RS                 "conflict",
+//RS                 "project changed since this Canvas query was drawn",
+//RS             ));
+//RS         }
+//RS     }
+//RS     let selected_source_id = rel_path(&project.project_root, selected_path);
+//RS     let selected_revision = source_revision(selected_src);
+//RS     let mut sources = Vec::new();
+//RS     for file in project.files.iter().filter(|file| file.kind == "source") {
+//RS         let path = project.project_root.join(&file.path);
+//RS         if !project.parts.should_index(&path) {
+//RS             continue;
+//RS         }
+//RS         let source = read_source_without_symlinks(&path).map_err(|error| {
+//RS             query_error(
+//RS                 "stale",
+//RS                 &format!("Canvas project source moved or unreadable: {error}"),
+//RS             )
+//RS         })?;
+//RS         let revision = source_revision(&source);
+//RS         if revision != file.revision {
+//RS             return Err(query_error(
+//RS                 "conflict",
+//RS                 "project source changed while Canvas was building its query",
+//RS             ));
+//RS         }
+//RS         let index =
+//RS             jet_semindex::open(&path).map_err(|error| query_error("check", &error.to_string()))?;
+//RS         sources.push(ProjectSourceIndex {
+//RS             path,
+//RS             source_id: file.path.trim_start_matches("./").to_string(),
+//RS             source,
+//RS             revision,
+//RS             index,
+//RS         });
+//RS     }
+//RS     let Some(selected) = sources
+//RS         .iter()
+//RS         .find(|source| source.source_id == selected_source_id)
+//RS     else {
+//RS         return Err(query_error(
+//RS             "not_found",
+//RS             "Canvas query source is not in the projected project",
+//RS         ));
+//RS     };
+//RS     if selected.revision != selected_revision {
+//RS         return Err(query_error(
+//RS             "conflict",
+//RS             "source changed since this Canvas graph was drawn",
+//RS         ));
+//RS     }
+//RS     let after = project_context_for_entry(entry);
+//RS     if after.project_revision != project.project_revision {
+//RS         return Err(query_error(
+//RS             "conflict",
+//RS             "project changed while Canvas was building its query",
+//RS         ));
+//RS     }
+//RS     Ok(ProjectQueryContext {
+//RS         project_root: project.project_root,
+//RS         project_revision: project.project_revision,
+//RS         selected_source_id,
+//RS         selected_path: selected_path.to_path_buf(),
+//RS         selected_source: selected_src.to_string(),
+//RS         sources,
+//RS     })
+//RS }
+//RS 
+//RS fn reference_targets<'a>(
+//RS     reference: &jet_semindex::SymbolRef,
+//RS     definitions: &[(&'a ProjectSourceIndex, &'a jet_semindex::SymbolDef)],
+//RS ) -> bool {
+//RS     let Some(target) = reference.target.as_ref() else {
+//RS         return definitions.is_empty();
+//RS     };
+//RS     definitions.iter().any(|(_, definition)| {
+//RS         target.semantic_identity.as_deref() == Some(definition.identity.as_str())
+//RS             || (target.module_path == definition.module_path
+//RS                 && target.def_span == definition.def_span)
+//RS     })
+//RS }
+//RS 
+//RS fn push_project_result(
+//RS     results: &mut Vec<String>,
+//RS     seen: &mut HashSet<String>,
+//RS     kind: &str,
+//RS     title: &str,
+//RS     symbol: &str,
+//RS     module_path: &str,
+//RS     span: SourceSpan,
+//RS     source: &ProjectSourceIndex,
+//RS     projection: Option<&Projection>,
+//RS     selected_path: &Path,
+//RS ) {
+//RS     let node = (source.path == selected_path)
+//RS         .then(|| projection.and_then(|value| node_for_span(value, span)))
+//RS         .flatten();
+//RS     let key = format!(
+//RS         "{kind}|{}|{}|{}|{title}",
+//RS         source.source_id, span.start, span.end
+//RS     );
+//RS     if !seen.insert(key) {
+//RS         return;
+//RS     }
+//RS     let mut result = query_result_json(
+//RS         kind,
+//RS         title,
+//RS         symbol,
+//RS         module_path,
+//RS         span,
+//RS         node.as_ref(),
+//RS         &source.source,
+//RS     );
+//RS     result.pop();
+//RS     result.push_str(&format!(
+//RS         ",\"source_id\":{},\"revision\":{}}}",
+//RS         json_str(&source.source_id),
+//RS         json_str(&source.revision),
+//RS     ));
+//RS     results.push(result);
+//RS }
+//RS 
+//RS fn bounded_project_results(mut results: Vec<String>) -> (Vec<String>, bool) {
+//RS     results.sort();
+//RS     let truncated = results.len() > PROJECT_QUERY_RESULT_LIMIT;
+//RS     results.truncate(PROJECT_QUERY_RESULT_LIMIT);
+//RS     (results, truncated)
+//RS }
+//RS 
+//RS fn project_query_ok(
+//RS     op: &str,
+//RS     context: &ProjectQueryContext,
+//RS     results: &[String],
+//RS     truncated: bool,
+//RS     extra_fields: &str,
+//RS ) -> String {
+//RS     format!(
+//RS         "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":true,\"op\":{},\"revision\":{},\"source_id\":{},\"project_revision\":{},\"results\":[{}],\"result_limit\":{},\"truncated\":{},{} }}",
+//RS         super::schema_api::QUERY_SCHEMA_VERSION,
+//RS         json_str(op),
+//RS         json_str(&source_revision(&context.selected_source)),
+//RS         json_str(&context.selected_source_id),
+//RS         json_str(&context.project_revision),
+//RS         results.join(","),
+//RS         PROJECT_QUERY_RESULT_LIMIT,
+//RS         if truncated { "true" } else { "false" },
+//RS         extra_fields,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn canvas_source_to_graph(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     span: SourceSpan,
+//RS ) -> Result<String, String> {
+//RS     let projection =
+//RS         project_file(path).map_err(|diags| query_diagnostics_error(path, src, &diags))?;
+//RS     let mut results = projection
+//RS         .node_refs
+//RS         .iter()
+//RS         .filter(|node| spans_overlap(node.span, span))
+//RS         .map(|node| {
+//RS             query_result_json(
+//RS                 "source_to_graph",
+//RS                 &node.title,
+//RS                 &node.title,
+//RS                 "",
+//RS                 node.span,
+//RS                 Some(node),
+//RS                 src,
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     if results.is_empty() {
+//RS         if let Some(node) = nearest_node(&projection, span.start) {
+//RS             results.push(query_result_json(
+//RS                 "source_to_graph",
+//RS                 &node.title,
+//RS                 &node.title,
+//RS                 "",
+//RS                 node.span,
+//RS                 Some(&node),
+//RS                 src,
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(query_ok(
+//RS         "source_to_graph",
+//RS         src,
+//RS         &format!("[{}]", results.join(",")),
+//RS         "\"impact\":null,\"diff\":null",
+//RS     ))
+//RS }
+//RS 
+//RS pub(super) fn canvas_preview_rename(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     symbol: &str,
+//RS     to: &str,
+//RS ) -> Result<String, String> {
+//RS     let (projection, index) = open_query_context(path, src)?;
+//RS     let mut edits = Vec::new();
+//RS     let mut results = Vec::new();
+//RS     for def in index.definitions().iter().filter(|d| d.name == symbol) {
+//RS         edits.push(edit(def.def_span, to));
+//RS         results.push(query_result_json(
+//RS             "definition",
+//RS             &def.name,
+//RS             &def.name,
+//RS             &def.module_path,
+//RS             def.def_span,
+//RS             node_for_span(&projection, def.def_span).as_ref(),
+//RS             src,
+//RS         ));
+//RS     }
+//RS     for r in index.references_to(symbol) {
+//RS         edits.push(edit(r.span, to));
+//RS         results.push(query_result_json(
+//RS             "reference",
+//RS             &r.name,
+//RS             &r.name,
+//RS             &r.module_path,
+//RS             r.span,
+//RS             node_for_span(&projection, r.span).as_ref(),
+//RS             src,
+//RS         ));
+//RS     }
+//RS     if edits.is_empty() {
+//RS         return Err(query_error(
+//RS             "not_found",
+//RS             "Canvas rename preview found no matching symbol",
+//RS         ));
+//RS     }
+//RS     let changed = FixEngine::apply_edits(src, &edits)
+//RS         .map_err(|_| query_error("overlap", "Canvas rename preview edits overlapped"))?;
+//RS     let diff = simple_diff(src, &changed);
+//RS     Ok(query_ok(
+//RS         "preview_rename",
+//RS         src,
+//RS         &format!("[{}]", results.join(",")),
+//RS         &format!(
+//RS             "\"impact\":null,\"diff\":{{\"changed\":{},\"text\":{},\"after_revision\":{}}}",
+//RS             if changed != src { "true" } else { "false" },
+//RS             json_str(&diff),
+//RS             json_str(&source_revision(&changed))
+//RS         ),
+//RS     ))
+//RS }
+//RS 
+//RS pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
+//RS     let (projection, index) = open_query_context(path, src)?;
+//RS     let authority = canvas_authority_context(path);
+//RS     let mut entries = Vec::new();
+//RS     let mut project_functions = Vec::new();
+//RS     for def in index.definitions() {
+//RS         let SymbolKind::Function { params, ret, .. } = &def.kind else {
+//RS             continue;
+//RS         };
+//RS         if def.module_path.starts_with("core.") {
+//RS             continue;
+//RS         }
+//RS         let Some(export) = projection
+//RS             .callable_exports
+//RS             .iter()
+//RS             .find(|export| export.module_path == def.module_path && export.span == def.def_span)
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         let pure = symbol_def_is_pure(def);
+//RS         project_functions.push(project_function_catalog_json(
+//RS             def,
+//RS             params,
+//RS             ret.as_deref(),
+//RS             &export.callee,
+//RS         ));
+//RS         if def.name == "run" {
+//RS             continue;
+//RS         }
+//RS         entries.push(canvas_action_json(
+//RS             def,
+//RS             params,
+//RS             ret.as_deref(),
+//RS             pure,
+//RS             &export.callee,
+//RS             &authority,
+//RS         ));
+//RS     }
+//RS     entries.push(canvas_builtin_action_json(
+//RS         "print",
+//RS         "Print",
+//RS         &[("value", "Any")],
+//RS         "Void",
+//RS         &["\"canvas\""],
+//RS         &authority,
+//RS     ));
+//RS     entries.extend(canvas_core_catalog_action_jsons(src, &authority));
+//RS     entries.extend(
+//RS         projection
+//RS             .game_facts
+//RS             .iter()
+//RS             .map(|fact| canvas_game_action_json(fact, &authority, &source_revision(src))),
+//RS     );
+//RS     entries.extend(canvas_structural_action_jsons(&authority));
+//RS     entries.extend(canvas_command_action_jsons(&authority));
+//RS     entries.sort();
+//RS     project_functions.sort();
+//RS     Ok(query_ok(
+//RS         "actions",
+//RS         src,
+//RS         "[]",
+//RS         &format!(
+//RS             "\"impact\":null,\"diff\":null,\"actions_schema_version\":{},\"project_functions\":[{}],\"actions\":[{}]",
+//RS             ACTION_SCHEMA_VERSION,
+//RS             project_functions.join(","),
+//RS             entries.join(",")
+//RS         ),
+//RS     ))
+//RS }
+//RS 
+//RS pub(super) fn canvas_core_catalog_query(
+//RS     path: &Path,
+//RS     src: &str,
+//RS     request: &str,
+//RS ) -> Result<String, String> {
+//RS     let query = json_string_field(request, "query").unwrap_or_default();
+//RS     canvas_core_catalog(path, src, &query)
+//RS }
+//RS 
+//RS pub(super) fn canvas_core_catalog(_path: &Path, src: &str, query: &str) -> Result<String, String> {
+//RS     let catalog = core_catalog_entries(query);
+//RS     let modules = catalog
+//RS         .iter()
+//RS         .map(|module| core_module_json(src, module))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     Ok(query_ok(
+//RS         "core_catalog",
+//RS         src,
+//RS         "[]",
+//RS         &format!(
+//RS             "\"impact\":null,\"diff\":null,\"catalog_schema_version\":{},\"authority\":[{}],\"writes\":\"none\",\"source\":{},\"modules\":[{}]",
+//RS             CORE_CATALOG_SCHEMA_VERSION,
+//RS             json_str("canvas.catalog:core.read"),
+//RS             json_str("Docs/spec/reference/core-library.md"),
+//RS             modules
+//RS         ),
+//RS     ))
+//RS }
+//RS 
+//RS fn canvas_core_catalog_action_jsons(src: &str, authority: &CanvasAuthority) -> Vec<String> {
+//RS     core_catalog_entries("")
+//RS         .into_iter()
+//RS         .flat_map(|module| {
+//RS             let module_path = module.path.clone();
+//RS             let source_callee = core_source_callee(src, &module_path);
+//RS             module.members.into_iter().map(move |member| {
+//RS                 core_catalog_action_json(&module_path, &source_callee, &member, authority)
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn core_catalog_action_json(
+//RS     module_path: &str,
+//RS     source_callee_prefix: &str,
+//RS     member: &CoreCatalogMember,
+//RS     authority: &CanvasAuthority,
+//RS ) -> String {
+//RS     let action_id = format!("canvas.core_catalog:{module_path}:{}", member.name);
+//RS     let callee = format!("{source_callee_prefix}.{}", member.name);
+//RS     let params = core_member_params(module_path, &member.name, &member.signature);
+//RS     let default_args = params
+//RS         .iter()
+//RS         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let receiver_type = (!member.receiver_type.is_empty()).then_some(member.receiver_type.as_str());
+//RS     let pins = core_member_pins_json(&params, receiver_type);
+//RS     let status = core_member_status_json(member);
+//RS     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
+//RS     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
+//RS     format!(
+//RS         "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",{}\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"ret\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+//RS         json_str(&action_id),
+//RS         json_str(descriptor_id),
+//RS         rank_fields,
+//RS         json_str(&format!("{} · {}", member.name, module_path)),
+//RS         json_str(module_path),
+//RS         json_str(&callee),
+//RS         json_str(&callee),
+//RS         status,
+//RS         json_str(&authority.grant),
+//RS         json_str(&authority.package_id),
+//RS         json_str(&authority.version),
+//RS         json_str(&authority.touched_file),
+//RS         json_str(&member.signature),
+//RS         json_str(&core_member_return_type(module_path, &member.name)),
+//RS         if member.pure { "true" } else { "false" },
+//RS         json_str(&member.summary),
+//RS         json_str(&member.source),
+//RS         pins,
+//RS         default_args
+//RS     )
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct CoreCatalogModule {
+//RS     path: String,
+//RS     title: String,
+//RS     summary: String,
+//RS     members: Vec<CoreCatalogMember>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct CoreCatalogMember {
+//RS     name: String,
+//RS     signature: String,
+//RS     summary: String,
+//RS     source: String,
+//RS     pure: bool,
+//RS     available: bool,
+//RS     stageable: bool,
+//RS     stage_reason_code: String,
+//RS     stage_reason: String,
+//RS     receiver_type: String,
+//RS     unavailable_reason_code: String,
+//RS     unavailable_reason: String,
+//RS }
+//RS 
+//RS fn core_catalog_entries(query: &str) -> Vec<CoreCatalogModule> {
+//RS     let needle = query.trim();
+//RS     let mut modules =
+//RS         parse_core_catalog_markdown(include_str!("../../../../Docs/spec/reference/core-library.md"));
+//RS     let exports = parse_sema_core_module_items(include_str!(
+//RS         "../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"
+//RS     ));
+//RS     merge_sema_core_registry(
+//RS         &mut modules,
+//RS         include_str!("../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
+//RS     );
+//RS     mark_core_catalog_availability(&mut modules, &exports);
+//RS     if !needle.is_empty() {
+//RS         modules = modules
+//RS             .into_iter()
+//RS             .filter_map(|mut module| {
+//RS                 module.members = module
+//RS                     .members
+//RS                     .into_iter()
+//RS                     .filter(|member| {
+//RS                         contains_ci(&member.name, needle)
+//RS                             || contains_ci(&member.signature, needle)
+//RS                             || contains_ci(&member.summary, needle)
+//RS                     })
+//RS                     .collect();
+//RS                 if contains_ci(&module.path, needle)
+//RS                     || contains_ci(&module.title, needle)
+//RS                     || contains_ci(&module.summary, needle)
+//RS                     || !module.members.is_empty()
+//RS                 {
+//RS                     Some(module)
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             })
+//RS             .collect();
+//RS     }
+//RS     modules.sort_by(|a, b| a.path.cmp(&b.path));
+//RS     for module in &mut modules {
+//RS         module.members.sort_by(|a, b| a.name.cmp(&b.name));
+//RS     }
+//RS     modules
+//RS }
+//RS 
+//RS fn merge_sema_core_registry(modules: &mut Vec<CoreCatalogModule>, registry: &str) {
+//RS     for (path, names) in parse_sema_core_module_items(registry) {
+//RS         let pos = modules
+//RS             .iter()
+//RS             .position(|module| module.path == path)
+//RS             .unwrap_or_else(|| {
+//RS                 modules.push(CoreCatalogModule {
+//RS                     title: path.clone(),
+//RS                     path: path.clone(),
+//RS                     summary: "Compiler-known Core module from the sema registry.".to_string(),
+//RS                     members: Vec::new(),
+//RS                 });
+//RS                 modules.len() - 1
+//RS             });
+//RS         let module = &mut modules[pos];
+//RS         if module.summary.is_empty() {
+//RS             module.summary = "Compiler-known Core module from the sema registry.".to_string();
+//RS         }
+//RS         for name in names {
+//RS             if module.members.iter().any(|member| member.name == name) {
+//RS                 continue;
+//RS             }
+//RS             module.members.push(CoreCatalogMember {
+//RS                 signature: format!("{path}.{name}"),
+//RS                 summary: "Compiler-known Core item from sema registry.".to_string(),
+//RS                 source: "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs".to_string(),
+//RS                 pure: core_member_pure(&path, &name),
+//RS                 name,
+//RS                 available: true,
+//RS                 stageable: false,
+//RS                 stage_reason_code: String::new(),
+//RS                 stage_reason: String::new(),
+//RS                 receiver_type: String::new(),
+//RS                 unavailable_reason_code: String::new(),
+//RS                 unavailable_reason: String::new(),
+//RS             });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn mark_core_catalog_availability(
+//RS     modules: &mut [CoreCatalogModule],
+//RS     exports: &[(String, Vec<String>)],
+//RS ) {
+//RS     for module in modules {
+//RS         for member in &mut module.members {
+//RS             if core_export_resolves(exports, &module.path, &member.name) {
+//RS                 if let Some((code, reason)) = core_member_direct_exclusion(&module.path, member) {
+//RS                     set_core_member_status(&module.path, member, code, reason);
+//RS                 } else {
+//RS                     set_core_member_status(&module.path, member, "", String::new());
+//RS                 }
+//RS             } else {
+//RS                 let (code, reason) = core_member_unavailable_reason(&module.path, member);
+//RS                 set_core_member_status(&module.path, member, code, reason);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn set_core_member_status(
+//RS     module_path: &str,
+//RS     member: &mut CoreCatalogMember,
+//RS     code: &str,
+//RS     reason: String,
+//RS ) {
+//RS     member.available = code.is_empty();
+//RS     member.stageable = matches!(code, "needs_canvas_defaults" | "method_only");
+//RS     member.stage_reason_code = if member.stageable {
+//RS         code.to_string()
+//RS     } else {
+//RS         String::new()
+//RS     };
+//RS     member.stage_reason = if member.stageable {
+//RS         reason.clone()
+//RS     } else {
+//RS         String::new()
+//RS     };
+//RS     member.receiver_type = if code == "method_only" {
+//RS         core_member_receiver_type(module_path, &member.name, &member.signature)
+//RS     } else {
+//RS         String::new()
+//RS     };
+//RS     member.unavailable_reason_code = if member.available {
+//RS         String::new()
+//RS     } else {
+//RS         code.to_string()
+//RS     };
+//RS     member.unavailable_reason = if member.available {
+//RS         String::new()
+//RS     } else {
+//RS         reason
+//RS     };
+//RS }
+//RS 
+//RS fn core_member_direct_exclusion(
+//RS     module_path: &str,
+//RS     member: &CoreCatalogMember,
+//RS ) -> Option<(&'static str, String)> {
+//RS     if member
+//RS         .name
+//RS         .chars()
+//RS         .next()
+//RS         .map_or(false, |c| c.is_ascii_uppercase())
+//RS     {
+//RS         return Some((
+//RS             "type_only",
+//RS             "Use this as a type or constructor surface, not a direct call.".to_string(),
+//RS         ));
+//RS     }
+//RS     if core_member_requires_unsafe(module_path, &member.name) {
+//RS         return Some((
+//RS             "needs_unsafe_region",
+//RS             "Needs an #Unsafe region before Canvas can insert it.".to_string(),
+//RS         ));
+//RS     }
+//RS     if module_path == "core.event"
+//RS         && matches!(
+//RS             member.name.as_str(),
+//RS             "new" | "with_policy" | "async_result" | "hook" | "decision_hook"
+//RS         )
+//RS     {
+//RS         return Some((
+//RS             "needs_signature",
+//RS             "Needs explicit event type arguments and constructor inputs before Canvas can insert it."
+//RS                 .to_string(),
+//RS         ));
+//RS     }
+//RS     let params = core_member_params(module_path, &member.name, &member.signature);
+//RS     let generated_signature = member.signature == format!("{module_path}.{}", member.name);
+//RS     if generated_signature && params.is_empty() {
+//RS         return Some((
+//RS             "needs_signature",
+//RS             "Needs parameter details before Canvas can insert it.".to_string(),
+//RS         ));
+//RS     }
+//RS     if !jet_driver::Sema::core_call_has_safe_defaults(module_path, &member.name) {
+//RS         if params.is_empty() {
+//RS             return None;
+//RS         }
+//RS         return Some((
+//RS             "needs_canvas_defaults",
+//RS             "Needs Canvas argument defaults before this entry can be inserted.".to_string(),
+//RS         ));
+//RS     }
+//RS     if !member.signature.contains('(') && params.is_empty() {
+//RS         return Some((
+//RS             "value_only",
+//RS             "Use this as a value, not a direct call.".to_string(),
+//RS         ));
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn core_member_requires_unsafe(module_path: &str, member: &str) -> bool {
+//RS     match module_path {
+//RS         "core.crypto.expert" => true,
+//RS         "core.crypto.vault" => member != "get",
+//RS         "core.mem" => matches!(member, "from_addr" | "volatile_read" | "volatile_write"),
+//RS         "core.sys" => matches!(
+//RS             member,
+//RS             "fork"
+//RS                 | "setuid"
+//RS                 | "setgid"
+//RS                 | "setpgid"
+//RS                 | "setpgrp"
+//RS                 | "setsid"
+//RS                 | "initgroups"
+//RS                 | "kill"
+//RS                 | "wait"
+//RS                 | "waitpid"
+//RS                 | "pipe"
+//RS                 | "close_fd"
+//RS                 | "mkfifo"
+//RS                 | "umask"
+//RS                 | "getpriority"
+//RS                 | "setpriority"
+//RS                 | "utime"
+//RS                 | "atexit"
+//RS                 | "stop"
+//RS         ),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn core_export_resolves(
+//RS     exports: &[(String, Vec<String>)],
+//RS     module_path: &str,
+//RS     member: &str,
+//RS ) -> bool {
+//RS     exports
+//RS         .iter()
+//RS         .any(|(path, names)| path == module_path && names.iter().any(|name| name == member))
+//RS }
+//RS 
+//RS fn core_member_unavailable_reason(
+//RS     module_path: &str,
+//RS     member: &CoreCatalogMember,
+//RS ) -> (&'static str, String) {
+//RS     let sig = member.signature.trim();
+//RS     if module_path == "core.args" && sig.starts_with('.') {
+//RS         return (
+//RS             "method_only",
+//RS             "Use this as a method on an ArgsSpec value.".to_string(),
+//RS         );
+//RS     }
+//RS     if sig.starts_with('.') || sig.contains(").") {
+//RS         return (
+//RS             "method_only",
+//RS             "Use this from the value shown in the signature.".to_string(),
+//RS         );
+//RS     }
+//RS     if sig.contains('.') && !sig.starts_with(module_path) {
+//RS         return (
+//RS             "type_member",
+//RS             "Use this from the type shown in the signature.".to_string(),
+//RS         );
+//RS     }
+//RS     (
+//RS         "not_direct_call",
+//RS         "This Core entry is documentation only; it has no direct module call.".to_string(),
+//RS     )
+//RS }
+//RS 
+//RS fn core_member_receiver_type(module_path: &str, member_name: &str, signature: &str) -> String {
+//RS     if module_path == "core.args" {
+//RS         let arity = core_member_params(module_path, member_name, signature).len();
+//RS         return match member_name {
+//RS             "flag" | "option" | "option_int" | "option_float" | "positional" if arity == 1 => {
+//RS                 "ParsedArgs".to_string()
+//RS             }
+//RS             "options" | "subcommand" if arity <= 1 => "ParsedArgs".to_string(),
+//RS             _ => "ArgsSpec".to_string(),
+//RS         };
+//RS     }
+//RS     match module_path {
+//RS         "core.mod" => "Option".to_string(),
+//RS         "core.reflect" if matches!(member_name, "name" | "value") => "Field".to_string(),
+//RS         "core.reflect" => "Value".to_string(),
+//RS         "core.net.tls" => "TLSClientConfig".to_string(),
+//RS         "core.http" => "HTTPClient".to_string(),
+//RS         // The ambient String rows sit under the preceding `core.perf` heading
+//RS         // in the reference document; their receiver remains a real String.
+//RS         "core.perf" => "String".to_string(),
+//RS         _ => String::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_sema_core_module_items(registry: &str) -> Vec<(String, Vec<String>)> {
+//RS     let mut out = Vec::new();
+//RS     let mut lines = registry.lines().peekable();
+//RS     while let Some(line) = lines.next() {
+//RS         let trimmed = line.trim();
+//RS         if !trimmed.starts_with('"') || !trimmed.contains("=> &[") {
+//RS             continue;
+//RS         }
+//RS         let Some(path) = parse_quoted(trimmed) else {
+//RS             continue;
+//RS         };
+//RS         if !(path == "core" || path.starts_with("core.") || path.starts_with("jet.")) {
+//RS             continue;
+//RS         }
+//RS         let path = user_core_module_path(&path);
+//RS         let mut names = Vec::new();
+//RS         let after_array = trimmed
+//RS             .split_once("&[")
+//RS             .map(|(_, rest)| rest)
+//RS             .unwrap_or_default();
+//RS         if let Some((same_line, _)) = after_array.split_once(']') {
+//RS             for name in quoted_strings(same_line) {
+//RS                 if !names.iter().any(|existing| existing == &name) {
+//RS                     names.push(name);
+//RS                 }
+//RS             }
+//RS             out.push((path, names));
+//RS             continue;
+//RS         }
+//RS         for body_line in lines.by_ref() {
+//RS             let body = body_line.trim();
+//RS             if body.starts_with("],") || body.starts_with("]") {
+//RS                 break;
+//RS             }
+//RS             for name in quoted_strings(body) {
+//RS                 if !names.iter().any(|existing| existing == &name) {
+//RS                     names.push(name);
+//RS                 }
+//RS             }
+//RS         }
+//RS         out.push((path, names));
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn user_core_module_path(path: &str) -> String {
+//RS     if let Some(ring) = path.strip_prefix("jet.") {
+//RS         format!("core.{ring}")
+//RS     } else {
+//RS         path.to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn quoted_strings(line: &str) -> Vec<String> {
+//RS     let mut out = Vec::new();
+//RS     let mut rest = line;
+//RS     while let Some(value) = parse_quoted(rest) {
+//RS         let skip = rest.find('"').map(|i| i + 1).unwrap_or(0);
+//RS         let after_open = &rest[skip..];
+//RS         let Some(end) = after_open.find('"') else {
+//RS             break;
+//RS         };
+//RS         out.push(value);
+//RS         rest = &after_open[end + 1..];
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn parse_quoted(text: &str) -> Option<String> {
+//RS     let first = text.find('"')?;
+//RS     let rest = &text[first + 1..];
+//RS     let end = rest.find('"')?;
+//RS     Some(rest[..end].to_string())
+//RS }
+//RS 
+//RS fn parse_core_catalog_markdown(markdown: &str) -> Vec<CoreCatalogModule> {
+//RS     let mut modules = Vec::new();
+//RS     let mut current: Option<CoreCatalogModule> = None;
+//RS     for line in markdown.lines() {
+//RS         if let Some(path) = core_heading_path(line) {
+//RS             if let Some(module) = current.take() {
+//RS                 modules.push(module);
+//RS             }
+//RS             current = Some(CoreCatalogModule {
+//RS                 path,
+//RS                 title: strip_markdown_heading(line),
+//RS                 summary: String::new(),
+//RS                 members: Vec::new(),
+//RS             });
+//RS             continue;
+//RS         }
+//RS         let Some(module) = current.as_mut() else {
+//RS             continue;
+//RS         };
+//RS         let trimmed = line.trim();
+//RS         if module.summary.is_empty()
+//RS             && !trimmed.is_empty()
+//RS             && !trimmed.starts_with('|')
+//RS             && !trimmed.starts_with("```")
+//RS             && !trimmed.starts_with('#')
+//RS         {
+//RS             module.summary = strip_markdown_inline(trimmed);
+//RS         }
+//RS         if let Some(member) = core_catalog_member_from_line(trimmed) {
+//RS             if !module
+//RS                 .members
+//RS                 .iter()
+//RS                 .any(|existing| existing.signature == member.signature)
+//RS             {
+//RS                 module.members.push(member);
+//RS             }
+//RS         }
+//RS     }
+//RS     if let Some(module) = current {
+//RS         modules.push(module);
+//RS     }
+//RS     for path in core_paths_in_markdown(markdown) {
+//RS         if !modules.iter().any(|module| module.path == path) {
+//RS             modules.push(CoreCatalogModule {
+//RS                 title: path.clone(),
+//RS                 path,
+//RS                 summary: "Listed in the canonical Core library reference.".to_string(),
+//RS                 members: Vec::new(),
+//RS             });
+//RS         }
+//RS     }
+//RS     modules
+//RS }
+//RS 
+//RS fn core_paths_in_markdown(markdown: &str) -> Vec<String> {
+//RS     let mut paths = Vec::new();
+//RS     for token in markdown.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.')) {
+//RS         if token == "core" || token.starts_with("core.") {
+//RS             let path = token.trim_matches('.');
+//RS             if !path.is_empty() && !paths.iter().any(|existing| existing == path) {
+//RS                 paths.push(path.to_string());
+//RS             }
+//RS         }
+//RS     }
+//RS     paths
+//RS }
+//RS 
+//RS fn core_heading_path(line: &str) -> Option<String> {
+//RS     let trimmed = line.trim_start();
+//RS     if !(trimmed.starts_with("## ") || trimmed.starts_with("### ")) {
+//RS         return None;
+//RS     }
+//RS     let first = trimmed.find('`')?;
+//RS     let rest = &trimmed[first + 1..];
+//RS     let end = rest.find('`')?;
+//RS     let path = &rest[..end];
+//RS     if path == "core" || path.starts_with("core.") {
+//RS         Some(path.to_string())
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS fn core_catalog_member_from_line(line: &str) -> Option<CoreCatalogMember> {
+//RS     if !line.starts_with('|') || !line.contains('`') || line.starts_with("| ---") {
+//RS         return None;
+//RS     }
+//RS     let first = line.find('`')?;
+//RS     let rest = &line[first + 1..];
+//RS     let end = rest.find('`')?;
+//RS     let signature = rest[..end].trim();
+//RS     if signature.is_empty() || signature == "Function/method" || signature == "Type" {
+//RS         return None;
+//RS     }
+//RS     let name_source = signature
+//RS         .split('/')
+//RS         .next()
+//RS         .unwrap_or(signature)
+//RS         .split('(')
+//RS         .next()
+//RS         .unwrap_or(signature)
+//RS         .trim();
+//RS     let name = name_source
+//RS         .rsplit('.')
+//RS         .next()
+//RS         .unwrap_or(name_source)
+//RS         .split_whitespace()
+//RS         .next()
+//RS         .unwrap_or(name_source)
+//RS         .trim_matches('`')
+//RS         .to_string();
+//RS     let summary = line
+//RS         .split('|')
+//RS         .nth(3)
+//RS         .map(strip_markdown_inline)
+//RS         .unwrap_or_default();
+//RS     Some(CoreCatalogMember {
+//RS         name,
+//RS         signature: signature.to_string(),
+//RS         summary,
+//RS         source: "Docs/spec/reference/core-library.md".to_string(),
+//RS         pure: core_member_pure_for_signature(signature),
+//RS         available: true,
+//RS         stageable: false,
+//RS         stage_reason_code: String::new(),
+//RS         stage_reason: String::new(),
+//RS         receiver_type: String::new(),
+//RS         unavailable_reason_code: String::new(),
+//RS         unavailable_reason: String::new(),
+//RS     })
+//RS }
+//RS 
+//RS fn core_source_callee(src: &str, module_path: &str) -> String {
+//RS     if let Some(alias) = imported_core_alias(src, module_path) {
+//RS         alias
+//RS     } else {
+//RS         module_path
+//RS             .rsplit('.')
+//RS             .next()
+//RS             .unwrap_or(module_path)
+//RS             .to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn imported_core_alias(src: &str, module_path: &str) -> Option<String> {
+//RS     let prefix = format!("use {module_path} as ");
+//RS     for line in src.lines() {
+//RS         let code = line.split("//").next().unwrap_or("").trim();
+//RS         let Some(rest) = code.strip_prefix(&prefix) else {
+//RS             continue;
+//RS         };
+//RS         let alias = rest
+//RS             .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+//RS             .next()
+//RS             .unwrap_or("")
+//RS             .trim();
+//RS         if !alias.is_empty() {
+//RS             return Some(alias.to_string());
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn core_member_pure_for_signature(signature: &str) -> bool {
+//RS     let head = signature
+//RS         .split('/')
+//RS         .next()
+//RS         .unwrap_or(signature)
+//RS         .split('(')
+//RS         .next()
+//RS         .unwrap_or(signature)
+//RS         .trim();
+//RS     let parts = head.split('.').collect::<Vec<_>>();
+//RS     if parts.len() >= 2 {
+//RS         let name = parts.last().copied().unwrap_or(head);
+//RS         let module = parts[..parts.len() - 1].join(".");
+//RS         return core_member_pure(&format!("core.{module}"), name);
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS fn core_member_pure(module_path: &str, name: &str) -> bool {
+//RS     if matches!(
+//RS         module_path,
+//RS         "core.math"
+//RS             | "core.text.fmt"
+//RS             | "core.text"
+//RS             | "core.encoding"
+//RS             | "core.encoding.json"
+//RS             | "core.encoding.jsonl"
+//RS             | "core.encoding.csv"
+//RS             | "core.encoding.toml"
+//RS             | "core.encoding.yaml"
+//RS             | "core.encoding.xml"
+//RS             | "core.encoding.cbor"
+//RS             | "core.encoding.hex"
+//RS             | "core.encoding.base64"
+//RS             | "core.encoding.base32"
+//RS             | "core.net.url"
+//RS             | "core.net.mime"
+//RS             | "core.reflect"
+//RS             | "core.compute.solve"
+//RS             | "core.data"
+//RS     ) {
+//RS         return true;
+//RS     }
+//RS     if module_path == "core.files" {
+//RS         return matches!(name, "exists" | "is_dir" | "absolute");
+//RS     }
+//RS     if module_path == "core.sys" {
+//RS         return matches!(name, "get" | "current_dir" | "home_dir");
+//RS     }
+//RS     if module_path == "core.sys" {
+//RS         return name != "set_current_dir" && name != "on_interrupt";
+//RS     }
+//RS     if module_path == "core.time" {
+//RS         return matches!(
+//RS             name,
+//RS             "ms" | "secs"
+//RS                 | "seconds"
+//RS                 | "minutes"
+//RS                 | "hours"
+//RS                 | "from_unix_ms"
+//RS                 | "period"
+//RS                 | "period_days"
+//RS                 | "period_months"
+//RS                 | "period_years"
+//RS                 | "zone"
+//RS                 | "utc"
+//RS                 | "zoned"
+//RS         );
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn project_function_catalog_json(
+//RS     def: &jet_semindex::SymbolDef,
+//RS     params: &[(String, String)],
+//RS     ret: Option<&str>,
+//RS     callee: &str,
+//RS ) -> String {
+//RS     let pure = symbol_def_is_pure(def);
+//RS     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", pure);
+//RS     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
+//RS     let default_args = params
+//RS         .iter()
+//RS         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let pins = params
+//RS         .iter()
+//RS         .map(|(name, ty)| {
+//RS             format!(
+//RS                 "{{\"name\":{},\"direction\":\"input\",\"type\":{}}}",
+//RS                 json_str(name),
+//RS                 json_str(ty)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"name\":{name},\"signature\":{signature},\"callee\":{callee},\"insert_callee\":{insert_callee},\"node_descriptor_id\":{descriptor}{rank_fields},\"module_path\":{module},\"pure\":{pure},\"ret\":{ret},\"pins\":[{pins}],\"default_args\":[{defaults}],\"available\":true,\"source_span\":{span},\"insert_op\":\"insert_call\"}}",
+//RS         name = json_str(&def.name),
+//RS         signature = json_str(&function_signature_from_parts(&def.name, params, ret)),
+//RS         callee = json_str(callee),
+//RS         insert_callee = json_str(callee),
+//RS         descriptor = json_str(descriptor_id),
+//RS         rank_fields = rank_fields,
+//RS         module = json_str(&def.module_path),
+//RS         pure = if pure { "true" } else { "false" },
+//RS         ret = json_str(ret.unwrap_or("Void")),
+//RS         pins = pins,
+//RS         defaults = default_args,
+//RS         span = span_json(def.def_span),
+//RS     )
+//RS }
+//RS 
+//RS fn symbol_def_is_pure(def: &SymbolDef) -> bool {
+//RS     let Some(signature) = def.callable_signature.as_ref() else {
+//RS         return false;
+//RS     };
+//RS     matches!(
+//RS         &signature.effects,
+//RS         jet_semindex::CallableEffectsFact::Checked(effects) if effects.is_empty()
+//RS     )
+//RS }
+//RS 
+//RS fn function_signature_from_parts(
+//RS     name: &str,
+//RS     params: &[(String, String)],
+//RS     ret: Option<&str>,
+//RS ) -> String {
+//RS     let params = params
+//RS         .iter()
+//RS         .map(|(name, ty)| format!("{name}: {ty}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let ret = ret
+//RS         .filter(|ty| *ty != "!")
+//RS         .map(|ty| format!(" {ty}"))
+//RS         .unwrap_or_default();
+//RS     format!("fn {name}({params}){ret}")
+//RS }
+//RS 
+//RS fn core_module_json(src: &str, module: &CoreCatalogModule) -> String {
+//RS     let members = module
+//RS         .members
+//RS         .iter()
+//RS         .map(|member| core_member_json(src, &module.path, member))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"path\":{},\"title\":{},\"summary\":{},\"source\":{},\"members\":[{}]}}",
+//RS         json_str(&module.path),
+//RS         json_str(&module.title),
+//RS         json_str(&module.summary),
+//RS         json_str("Docs/spec/reference/core-library.md"),
+//RS         members
+//RS     )
+//RS }
+//RS 
+//RS fn core_member_json(src: &str, module_path: &str, member: &CoreCatalogMember) -> String {
+//RS     let callee = format!("{}.{}", core_source_callee(src, module_path), member.name);
+//RS     let params = core_member_params(module_path, &member.name, &member.signature);
+//RS     let default_args = params
+//RS         .iter()
+//RS         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let receiver_type = (!member.receiver_type.is_empty()).then_some(member.receiver_type.as_str());
+//RS     let pins = core_member_pins_json(&params, receiver_type);
+//RS     let status = core_member_status_json(member);
+//RS     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
+//RS     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
+//RS     format!(
+//RS         "{{\"name\":{},\"callee\":{},\"insert_callee\":{},\"node_descriptor_id\":{}{},\"signature\":{},\"ret\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",{}\"pins\":[{}],\"default_args\":[{}]}}",
+//RS         json_str(&member.name),
+//RS         json_str(&callee),
+//RS         json_str(&callee),
+//RS         json_str(descriptor_id),
+//RS         rank_fields,
+//RS         json_str(&member.signature),
+//RS         json_str(&core_member_return_type(module_path, &member.name)),
+//RS         if member.pure { "true" } else { "false" },
+//RS         json_str(&member.summary),
+//RS         json_str(&member.source),
+//RS         status,
+//RS         pins,
+//RS         default_args
+//RS     )
+//RS }
+//RS 
+//RS fn core_member_status_json(member: &CoreCatalogMember) -> String {
+//RS     let receiver = if member.receiver_type.is_empty() {
+//RS         String::new()
+//RS     } else {
+//RS         format!("\"receiver_type\":{},", json_str(&member.receiver_type))
+//RS     };
+//RS     let unavailable = if member.available {
+//RS         String::new()
+//RS     } else {
+//RS         format!(
+//RS             "\"unavailable_reason_code\":{},\"denied_reason\":{},",
+//RS             json_str(&member.unavailable_reason_code),
+//RS             json_str(&member.unavailable_reason)
+//RS         )
+//RS     };
+//RS     format!(
+//RS         "\"available\":{},\"stageable\":{},\"stage_reason_code\":{},\"stage_reason\":{},{}{}",
+//RS         if member.available { "true" } else { "false" },
+//RS         if member.stageable { "true" } else { "false" },
+//RS         json_str(&member.stage_reason_code),
+//RS         json_str(&member.stage_reason),
+//RS         receiver,
+//RS         unavailable
+//RS     )
+//RS }
+//RS 
+//RS fn core_member_pins_json(params: &[(String, String)], receiver_type: Option<&str>) -> String {
+//RS     let mut pins = Vec::new();
+//RS     if let Some(receiver_type) = receiver_type.filter(|ty| !ty.is_empty()) {
+//RS         pins.push(format!(
+//RS             "{{\"name\":\"receiver\",\"direction\":\"input\",\"type\":{}}}",
+//RS             json_str(receiver_type)
+//RS         ));
+//RS     }
+//RS     pins.extend(params.iter().map(|(name, ty)| {
+//RS         format!(
+//RS             "{{\"name\":{},\"direction\":\"input\",\"type\":{}}}",
+//RS             json_str(name),
+//RS             json_str(ty)
+//RS         )
+//RS     }));
+//RS     pins.join(",")
+//RS }
+//RS 
+//RS fn strip_markdown_heading(line: &str) -> String {
+//RS     strip_markdown_inline(line.trim_start_matches('#').trim())
+//RS }
+//RS 
+//RS fn strip_markdown_inline(text: &str) -> String {
+//RS     text.replace('`', "")
+//RS         .replace("**", "")
+//RS         .replace("<br>", " ")
+//RS         .trim()
+//RS         .to_string()
+//RS }
+//RS 
+//RS fn canvas_action_json(
+//RS     def: &jet_semindex::SymbolDef,
+//RS     params: &[(String, String)],
+//RS     ret: Option<&str>,
+//RS     pure: bool,
+//RS     callee: &str,
+//RS     authority: &CanvasAuthority,
+//RS ) -> String {
+//RS     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", pure);
+//RS     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
+//RS     let action_id = format!("canvas.action:{}:{callee}", def.module_path);
+//RS     let default_args = params
+//RS         .iter()
+//RS         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let pins = params
+//RS         .iter()
+//RS         .map(|(name, ty)| {
+//RS             format!(
+//RS                 "{{\"name\":{},\"direction\":\"input\",\"type\":{}}}",
+//RS                 json_str(name),
+//RS                 json_str(ty)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.action\",\"title\":{},\"callee\":{},\"insert_callee\":{},\"module_path\":{},\"insert_op\":\"insert_call\",\"pure\":{},\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+//RS         json_str(&action_id),
+//RS         json_str(descriptor_id),
+//RS         rank_fields,
+//RS         json_str(&def.name),
+//RS         json_str(callee),
+//RS         json_str(callee),
+//RS         json_str(&def.module_path),
+//RS         if pure { "true" } else { "false" },
+//RS         json_str(&authority.grant),
+//RS         json_str(&authority.package_id),
+//RS         json_str(&authority.version),
+//RS         json_str(&authority.touched_file),
+//RS         span_json(def.def_span),
+//RS         json_str(ret.unwrap_or("Void")),
+//RS         pins,
+//RS         default_args
+//RS     )
+//RS }
+//RS 
+//RS fn canvas_builtin_action_json(
+//RS     callee: &str,
+//RS     title: &str,
+//RS     params: &[(&str, &str)],
+//RS     ret: &str,
+//RS     default_args: &[&str],
+//RS     authority: &CanvasAuthority,
+//RS ) -> String {
+//RS     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", false);
+//RS     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
+//RS     let action_id = format!("canvas.action:builtin:{callee}");
+//RS     let pins = params
+//RS         .iter()
+//RS         .map(|(name, ty)| {
+//RS             format!(
+//RS                 "{{\"name\":{},\"direction\":\"input\",\"type\":{}}}",
+//RS                 json_str(name),
+//RS                 json_str(ty)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let default_args = default_args
+//RS         .iter()
+//RS         .map(|arg| json_str(arg))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.builtin\",\"title\":{},\"callee\":{},\"insert_callee\":{},\"module_path\":\"builtin\",\"insert_op\":\"insert_call\",\"pure\":false,\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":null,\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+//RS         json_str(&action_id),
+//RS         json_str(descriptor_id),
+//RS         rank_fields,
+//RS         json_str(title),
+//RS         json_str(callee),
+//RS         json_str(callee),
+//RS         json_str(&authority.grant),
+//RS         json_str(&authority.package_id),
+//RS         json_str(&authority.version),
+//RS         json_str(&authority.touched_file),
+//RS         json_str(ret),
+//RS         pins,
+//RS         default_args
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn core_member_params(
+//RS     module_path: &str,
+//RS     member_name: &str,
+//RS     signature: &str,
+//RS ) -> Vec<(String, String)> {
+//RS     if let Some(params) = params_from_signature(signature) {
+//RS         return params;
+//RS     }
+//RS     jet_driver::Sema::core_call_surface_signature(module_path, member_name)
+//RS         .map(|(params, _)| {
+//RS             params
+//RS                 .into_iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, (_, ty))| (format!("arg{}", index + 1), ty.name()))
+//RS                 .collect()
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn core_member_return_type(module_path: &str, member_name: &str) -> String {
+//RS     jet_driver::Sema::core_call_surface_signature(module_path, member_name)
+//RS         .and_then(|(_, ret)| ret)
+//RS         .map(|ret| ret.name())
+//RS         .unwrap_or_else(|| "Void".to_string())
+//RS }
+//RS 
+//RS fn params_from_signature(signature: &str) -> Option<Vec<(String, String)>> {
+//RS     let start = signature.find('(')?;
+//RS     let end = signature[start + 1..].find(')')? + start + 1;
+//RS     let body = signature[start + 1..end].trim();
+//RS     if body.is_empty() {
+//RS         return Some(Vec::new());
+//RS     }
+//RS     let mut params = Vec::new();
+//RS     for (i, raw) in body.split(',').enumerate() {
+//RS         let part = raw.trim();
+//RS         if part.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let (name, ty) = if let Some((name, ty)) = part.split_once(':') {
+//RS             (name.trim(), normalize_param_type(ty.trim()))
+//RS         } else {
+//RS             let name = part
+//RS                 .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+//RS                 .next()
+//RS                 .unwrap_or("")
+//RS                 .trim();
+//RS             (name, type_for_param_name(name))
+//RS         };
+//RS         let name = if name.is_empty() {
+//RS             format!("arg{}", i + 1)
+//RS         } else {
+//RS             name.to_string()
+//RS         };
+//RS         params.push((name, ty));
+//RS     }
+//RS     Some(params)
+//RS }
+//RS 
+//RS fn normalize_param_type(ty: &str) -> String {
+//RS     ty.split('=')
+//RS         .next()
+//RS         .unwrap_or(ty)
+//RS         .trim()
+//RS         .trim_end_matches('?')
+//RS         .trim()
+//RS         .to_string()
+//RS }
+//RS 
+//RS fn type_for_param_name(name: &str) -> String {
+//RS     match name {
+//RS         "text" | "raw" | "body" | "path" | "name" | "url" | "host" | "scheme" | "query"
+//RS         | "fragment" | "delim" | "method" => "String",
+//RS         "ok" | "enabled" | "flag" => "Bool",
+//RS         _ => "Int",
+//RS     }
+//RS     .to_string()
+//RS }
+//RS 
+//RS pub(super) fn default_arg_for_type(ty: &str) -> String {
+//RS     let ty = ty.trim().trim_end_matches('?').trim();
+//RS     match ty {
+//RS         "Bool" => "true".to_string(),
+//RS         "String" | "Path" | "URL" => "\"canvas\"".to_string(),
+//RS 
+//RS         "Float" | "F32" | "F64" | "Decimal" => "1.0".to_string(),
+//RS         _ => "1".to_string(),
+//RS     }
+//RS }
+//RS fn canvas_game_action_json(
+//RS     fact: &CanvasGameFact,
+//RS     authority: &CanvasAuthority,
+//RS     revision: &str,
+//RS ) -> String {
+//RS     let resource_kind = if fact.kind == "asset" {
+//RS         "asset"
+//RS     } else {
+//RS         "component"
+//RS     };
+//RS     let title = if fact.kind == "asset" {
+//RS         format!("Edit {} asset", fact.operation.rsplit('.').next().unwrap_or("game"))
+//RS     } else {
+//RS         "Edit component".to_string()
+//RS     };
+//RS     let target = format!(
+//RS         "{{\"source_id\":{},\"revision\":{},\"authored_instance_id\":{},\"source_span\":{}}}",
+//RS         json_str(&fact.source_id),
+//RS         json_str(revision),
+//RS         json_str(&fact.authored_instance_id),
+//RS         span_json(fact.source_span),
+//RS     );
+//RS     let patch = format!(
+//RS         "{{\"field\":{},\"value\":{}}}",
+//RS         json_str(&fact.field),
+//RS         json_str(&canvas_game_patch_value(fact)),
+//RS     );
+//RS     format!(
+//RS         "{{\"action_id\":{},\"node_descriptor_id\":\"function_exec\",\"kind\":\"canvas.game\",\"resource_kind\":{},\"title\":{},\"op\":\"edit_game_selection\",\"engine\":\"source-transaction\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"targets\":[{}],\"field_patch\":{},\"source_truth\":\"ordinary_jet_source\",\"fact\":{}}}",
+//RS         json_str(&format!("canvas.game:{}", fact.authored_instance_id)),
+//RS         json_str(resource_kind),
+//RS         json_str(&title),
+//RS         json_str(&authority.grant),
+//RS         json_str(&authority.package_id),
+//RS         json_str(&authority.version),
+//RS         json_str(&fact.source_id),
+//RS         target,
+//RS         patch,
+//RS         canvas_game_fact_json(fact),
+//RS     )
+//RS }
+//RS 
+//RS fn canvas_game_patch_value(fact: &CanvasGameFact) -> String {
+//RS     let value = fact.value_source.trim();
+//RS     let Some(inner) = value
+//RS         .strip_prefix('"')
+//RS         .and_then(|value| value.strip_suffix('"'))
+//RS     else {
+//RS         return value.to_string();
+//RS     };
+//RS     let mut out = String::with_capacity(inner.len());
+//RS     let mut escaped = false;
+//RS     for character in inner.chars() {
+//RS         if escaped {
+//RS             match character {
+//RS                 'n' => out.push('\n'),
+//RS                 'r' => out.push('\r'),
+//RS                 't' => out.push('\t'),
+//RS                 '"' => out.push('"'),
+//RS                 '\\' => out.push('\\'),
+//RS                 other => {
+//RS                     out.push('\\');
+//RS                     out.push(other);
+//RS                 }
+//RS             }
+//RS             escaped = false;
+//RS         } else if character == '\\' {
+//RS             escaped = true;
+//RS         } else {
+//RS             out.push(character);
+//RS         }
+//RS     }
+//RS     if escaped {
+//RS         out.push('\\');
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn canvas_structural_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
+//RS     [
+//RS         ("branch", "Branch", "insert_branch"),
+//RS         ("dispatch", "Switch", "insert_switch"),
+//RS         ("loop", "Loop", "insert_loop"),
+//RS         ("fallible", "Failure rail", "insert_fallible_rail"),
+//RS     ]
+//RS     .into_iter()
+//RS     .map(|(name, title, transaction)| {
+//RS         let descriptor_id = node_catalog::insert_descriptor_id(transaction, false);
+//RS         let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
+//RS         format!(
+//RS             "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.structural\",\"title\":{},\"op\":{},\"engine\":\"source-transaction\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false}}",
+//RS             json_str(&format!("canvas.structural:{name}")),
+//RS             json_str(descriptor_id),
+//RS             rank_fields,
+//RS             json_str(title),
+//RS             json_str(transaction),
+//RS             json_str(&authority.grant),
+//RS             json_str(&authority.package_id),
+//RS             json_str(&authority.version),
+//RS             json_str(&authority.touched_file),
+//RS         )
+//RS     })
+//RS     .collect()
+//RS }
+//RS 
+//RS fn canvas_command_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
+//RS     let source = authority.touched_file.as_str();
+//RS     let mut actions = vec![
+//RS         canvas_command_action_json(
+//RS             "run",
+//RS             "Run program",
+//RS             &["jet", "run", source],
+//RS             "none",
+//RS             &["canvas.command:run", authority.grant.as_str()],
+//RS             true,
+//RS             None,
+//RS             authority,
+//RS         ),
+//RS         canvas_command_action_json(
+//RS             "check",
+//RS             "Check project",
+//RS             &["jet", "check", source],
+//RS             "none",
+//RS             &["canvas.command:check", authority.grant.as_str()],
+//RS             true,
+//RS             None,
+//RS             authority,
+//RS         ),
+//RS         canvas_command_action_json(
+//RS             "test",
+//RS             "Test project",
+//RS             &["jet", "test", source],
+//RS             "test_outputs",
+//RS             &[
+//RS                 "canvas.command:test",
+//RS                 "canvas.build_output:test",
+//RS                 authority.grant.as_str(),
+//RS             ],
+//RS             true,
+//RS             None,
+//RS             authority,
+//RS         ),
+//RS         canvas_command_action_json(
+//RS             "build",
+//RS             "Build project",
+//RS             &["jet", "build", source],
+//RS             "build_outputs",
+//RS             &[
+//RS                 "canvas.command:build",
+//RS                 "canvas.build_output:binary",
+//RS                 authority.grant.as_str(),
+//RS             ],
+//RS             true,
+//RS             None,
+//RS             authority,
+//RS         ),
+//RS     ];
+//RS     let services_available = env_project_json(&authority.project_root)
+//RS         .services
+//RS         .contains("\"enable\":true");
+//RS     actions.push(canvas_command_action_json(
+//RS         "service.start",
+//RS         "Start service",
+//RS         &["jet", "services", "up"],
+//RS         "service_process",
+//RS         &["canvas.service:start", "canvas.env:service"],
+//RS         services_available,
+//RS         if services_available {
+//RS             None
+//RS         } else {
+//RS             Some("no env service selected")
+//RS         },
+//RS         authority,
+//RS     ));
+//RS     actions
+//RS }
+//RS 
+//RS fn canvas_command_action_json(
+//RS     name: &str,
+//RS     title: &str,
+//RS     command: &[&str],
+//RS     writes: &str,
+//RS     grants: &[&str],
+//RS     available: bool,
+//RS     denied: Option<&str>,
+//RS     authority: &CanvasAuthority,
+//RS ) -> String {
+//RS     let command_json = command
+//RS         .iter()
+//RS         .map(|arg| json_str(arg))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let grants_json = grants
+//RS         .iter()
+//RS         .map(|grant| json_str(grant))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"action_id\":{},\"kind\":\"canvas.command\",\"title\":{},\"op\":\"command_authority\",\"engine\":\"jet-cli\",\"execution\":\"external_command\",\"available\":{},\"denied_reason\":{},\"command\":[{}],\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":{},\"requires_confirmation\":{},\"audit\":[\"package_id\",\"version\",\"command\",\"authority\",\"touched_files\",\"diagnostics\"]}}",
+//RS         json_str(&format!("canvas.command:{name}")),
+//RS         json_str(title),
+//RS         if available { "true" } else { "false" },
+//RS         json_optional_str(denied),
+//RS         command_json,
+//RS         grants_json,
+//RS         json_str(&authority.package_id),
+//RS         json_str(&authority.version),
+//RS         json_str(&authority.touched_file),
+//RS         json_str(writes),
+//RS         if writes == "none" { "false" } else { "true" },
+//RS     )
+//RS }
+//RS 
+//RS pub(super) struct CanvasAuthority {
+//RS     pub(super) grant: String,
+//RS     pub(super) package_id: String,
+//RS     pub(super) version: String,
+//RS     pub(super) touched_file: String,
+//RS     pub(super) project_root: PathBuf,
+//RS }
+//RS 
+//RS pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
+//RS     let dir = path.parent().unwrap_or_else(|| Path::new("."));
+//RS     if let Ok(Some(package)) = jet_semindex::package_facts_for_entry(path) {
+//RS         let root = jet_driver::Loader::find_manifest_root(dir)
+//RS             .unwrap_or_else(|| dir.to_path_buf());
+//RS         return CanvasAuthority {
+//RS             grant: "canvas.source_edit:package".to_string(),
+//RS             package_id: package.name,
+//RS             version: package.version.unwrap_or_else(|| "unversioned".to_string()),
+//RS             touched_file: rel_path(&root, path),
+//RS             project_root: root,
+//RS         };
+//RS     }
+//RS     CanvasAuthority {
+//RS         grant: "canvas.source_edit:single_file".to_string(),
+//RS         package_id: "single-file".to_string(),
+//RS         version: "unpackaged".to_string(),
+//RS         touched_file: path
+//RS             .file_name()
+//RS             .and_then(|n| n.to_str())
+//RS             .unwrap_or("current.jet")
+//RS             .to_string(),
+//RS         project_root: dir.to_path_buf(),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn event_member(name: &str) -> CoreCatalogMember {
+//RS         CoreCatalogMember {
+//RS             name: name.to_string(),
+//RS             signature: if name == "scope" {
+//RS                 "event.scope()".to_string()
+//RS             } else {
+//RS                 format!("core.event.{name}")
+//RS             },
+//RS             summary: String::new(),
+//RS             source: String::new(),
+//RS             pure: false,
+//RS             available: true,
+//RS             stageable: false,
+//RS             stage_reason_code: String::new(),
+//RS             stage_reason: String::new(),
+//RS             receiver_type: String::new(),
+//RS             unavailable_reason_code: String::new(),
+//RS             unavailable_reason: String::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn event_catalog_keeps_incomplete_constructors_recoverable() {
+//RS         for name in [
+//RS             "new",
+//RS             "with_policy",
+//RS             "async_result",
+//RS             "hook",
+//RS             "decision_hook",
+//RS         ] {
+//RS             let member = event_member(name);
+//RS             let (code, reason) = core_member_direct_exclusion("core.event", &member)
+//RS                 .expect("incomplete event constructor must be excluded");
+//RS             assert_eq!(code, "needs_signature", "wrong refusal for {name}");
+//RS             assert!(
+//RS                 reason.contains("explicit event type arguments"),
+//RS                 "{name}: {reason}"
+//RS             );
+//RS         }
+//RS         assert!(core_member_direct_exclusion("core.event", &event_member("scope")).is_none());
+//RS         let (code, _) = core_member_direct_exclusion("core.event", &event_member("policy_sync"))
+//RS             .expect("sema-only event policy constructor must remain excluded");
+//RS         assert_eq!(code, "needs_signature");
+//RS         assert_eq!(
+//RS             core_member_return_type("core.event", "policy_sync"),
+//RS             "EventPolicy"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0770 crates/jet-devserver/src/Canvas/query_actions.rs:1-2254
+

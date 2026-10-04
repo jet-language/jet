@@ -1,0 +1,31 @@
+// Jet Zed extension — language support only.
+// Rust: Tools/editors/zed/wasm-src/src/lib.rs:3
+use zed_extension_api as zed
+use zed_extension_api.[Command, Extension, LanguageServerId, Worktree]
+
+// Rust: Tools/editors/zed/wasm-src/src/lib.rs:5
+struct JetExtension {}
+
+// Rust: Tools/editors/zed/wasm-src/src/lib.rs:7
+impl Extension for JetExtension {
+    // Rust: Tools/editors/zed/wasm-src/src/lib.rs:8
+    fn new() -> JetExtension {
+        return JetExtension {}
+    }
+
+    // Rust: Tools/editors/zed/wasm-src/src/lib.rs:12
+    fn language_server_command(self: &JetExtension, _language_server_id: LanguageServerId, _worktree: Worktree) -> Command Err! {
+        // Zed's worktree-trust gate controls process startup. Literal identity
+        // prevents an opened worktree from selecting ./jet or a PATH entry.
+        return .Ok(Command {
+            command: "jet",
+            args: ["self", "lsp"],
+            env: Default.default()
+        })
+    }
+}
+
+// Rust: Tools/editors/zed/wasm-src/src/lib.rs:28
+// GATE #4494: real Jet Wasm-component/WIT Zed export registration; no Rust macro.
+zed.register_extension[JetExtension]()
+

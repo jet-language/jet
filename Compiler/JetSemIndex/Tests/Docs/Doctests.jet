@@ -1,0 +1,132 @@
+// Actual extraction algorithms only. These claims neither check Jet source nor
+// evaluate doctests; the CLI Doctest owner runs setup/expectations. Original
+// run.jet fixture extraction acceptance below requires the unchanged fixture
+// bytes from tests/fixtures/jetdoc/run.jet, not a filled DocGraph.
+
+#Test("doc_doctests_keep_setup_expectations_and_opening_source_anchor") {
+    source :: "/// Module.\n/// ```JeT\n/// value :: 40\n/// value + 2 // => 42\n/// ```\nfn run() {{}}\n"
+    tests :: doc_discover_doctests(doc_test_os_path("/project"), doc_test_os_path("/project/src/docs.jet"), "alias", source, "src/docs.jet")
+    assert_eq(tests.len(), 1)
+    assert_eq(tests[0].module_path, "src/docs.jet")
+    assert_eq(tests[0].line, 2)
+    assert_eq(tests[0].setup, [String]{"value :: 40"})
+    assert_eq(tests[0].expectations.len(), 1)
+    assert_eq(tests[0].expectations[0].expression, "value + 2")
+    assert_eq(tests[0].expectations[0].expected, "42")
+    assert_eq(tests[0].source.path, "src/docs.jet")
+    assert_eq(tests[0].source.start, 12)
+    assert_eq(tests[0].source.end, 19)
+    assert_eq(tests[0].source.line, 2)
+    assert_eq(tests[0].source.column, 1)
+    assert_eq(tests[0].source.link, "src/docs.jet#L2")
+}
+
+#Test("doc_doctests_reject_interrupted_and_unclosed_fences_without_leaking_setup") {
+    source :: "/// ```jet\n/// lost :: 1\nnot_a_doc_line\n/// ```\n/// kept :: 2\n/// kept // => 2\n/// ```\n/// ```jet\n/// unfinished // => 3"
+    tests :: doc_discover_doctests(doc_test_os_path("/project"), doc_test_os_path("/project/main.jet"), "main", source, "main.jet")
+    assert_eq(tests.len(), 1)
+    assert_eq(tests[0].line, 4)
+    assert_eq(tests[0].setup, [String]{"kept :: 2"})
+    assert_eq(tests[0].expectations[0].expression, "kept")
+    assert_eq(tests[0].expectations[0].expected, "2")
+    assert_eq(doc_discover_doctests(doc_test_os_path("/project"), doc_test_os_path("/project/main.jet"), "main", "/// ```jet\n/// 1 // => 1", "main.jet").len(), 0)
+}
+
+#Test("doc_doctests_keep_unicode_byte_spans_and_crlf_line_lengths") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return")
+    source :: "/// é{cr}\n  /// ```{cr}\n/// λ // => μ{cr}\n  /// ```{cr}\n"
+    tests :: doc_discover_doctests(doc_test_os_path("/one"), doc_test_os_path("/one/utf8.jet"), "display", source, "utf8.jet")
+    other :: doc_discover_doctests(doc_test_os_path("/two"), doc_test_os_path("/two/utf8.jet"), "display", source, "utf8.jet")
+    assert_eq(tests, other)
+    assert_eq(tests.len(), 1)
+    assert_eq(tests[0].line, 2)
+    assert_eq(tests[0].source.start, 8)
+    assert_eq(tests[0].source.end, 17)
+    assert_eq(tests[0].expectations[0].expression, "λ")
+    assert_eq(tests[0].expectations[0].expected, "μ")
+}
+
+#Test("doc_expect_marker_ignores_quoted_and_escaped_markers_and_counts_bytes") {
+    assert_eq(doc_find_doctest_expect_marker("\"// =>\""), None)
+    assert_eq(doc_find_doctest_expect_marker("\"a\\\" // => b\" // => result"), Val(14))
+    assert_eq(doc_find_doctest_expect_marker("é // => μ // => later"), Val(3))
+    assert_eq(doc_find_doctest_expect_marker("value //=> 1"), None)
+    source :: "/// ```\n/// \"// =>\"\n/// \"λ // =>\" // => \"μ\"\n/// // => empty\n/// ```"
+    tests :: doc_discover_doctests(doc_test_os_path("/project"), doc_test_os_path("/project/a.jet"), "a", source, "a.jet")
+    assert_eq(tests[0].setup, [String]{"\"// =>\""})
+    assert_eq(tests[0].expectations.len(), 2)
+    assert_eq(tests[0].expectations[0].expression, "\"λ // =>\"")
+    assert_eq(tests[0].expectations[0].expected, "\"μ\"")
+    assert_eq(tests[0].expectations[1].expression, "")
+    assert_eq(tests[0].expectations[1].expected, "empty")
+}
+
+#Test("doc_fence_languages_match_ascii_jet_or_empty_only") {
+    accepted :: [String]{"```", "```  ", "```jet", "```JeT", "````JET"}
+    rejected :: [String]{"```rust", "```jet ignore", "```jet,ignore", "```jét"}
+    loop fence in accepted -> assert(doc_doctest_fence_is_jet(fence))
+    loop fence in rejected -> assert(!doc_doctest_fence_is_jet(fence))
+}
+
+#Test("doc_source_comments_are_adjacent_ordered_and_do_not_inherit_parent_docs") {
+    source :: "/// Parent.\nstruct Outer {{\n    /// Nested summary.\n    /// Example: first\n    /// ```jet\n    /// second line\n    /// ```\n    /// Example: second\n    fn nested() {{}}\n}}\n"
+    summary := "old"
+    examples := [String]{"old"}
+    doc_source_docs(source, doc_line_offset(source, 9) + 4, &summary, &examples)
+    assert_eq(summary, "Nested summary.")
+    assert_eq(examples, [String]{"first", "second"})
+    gap :: "/// Detached.\n\nfn plain() {{}}"
+    doc_source_docs(gap, doc_line_offset(gap, 3), &summary, &examples)
+    // Rust source_docs skips the trailing newline in before_declaration.lines:
+    // one empty line is not a barrier; two empty lines are a barrier.
+    assert_eq(summary, "Detached.")
+    separated :: "/// Detached.\n\n\nfn plain() {{}}"
+    doc_source_docs(separated, doc_line_offset(separated, 4), &summary, &examples)
+    assert_eq(summary, "")
+    assert_eq(examples, [String]{})
+    doc_source_docs("fn first() {{}}", 0, &summary, &examples)
+    assert_eq(summary, "")
+}
+
+#Test("doc_source_docs_clip_byte_offset_and_keep_example_only_comments") {
+    source :: "/// é\n/// Example: α\nfn λ() {{}}"
+    summary := ""
+    examples := [String]{}
+    doc_source_docs(source, source.bytes().len() + 10, &summary, &examples)
+    assert_eq(summary, "é")
+    assert_eq(examples, [String]{"α"})
+    only_example :: "/// Example: 1 + 1\nfn answer() {{}}"
+    doc_source_docs(only_example, doc_line_offset(only_example, 2), &summary, &examples)
+    assert_eq(summary, "")
+    assert_eq(examples, [String]{"1 + 1"})
+}
+
+#Test("doc_leading_summary_stops_at_code_and_retains_first_nonfence_doc") {
+    assert_eq(doc_leading_summary("\n \n///\n/// ```jet\n/// First.\n/// Second.\nfn run() {{}}\n/// Later."), "First.")
+    assert_eq(doc_leading_summary("fn run() {{}}\n/// Later."), "")
+    assert_eq(doc_leading_summary("/// ```\nfn run() {{}}\n/// Later."), "")
+    assert_eq(doc_leading_summary("/// Example: visible summary\n"), "Example: visible summary")
+    assert_eq(doc_leading_summary(""), "")
+}
+
+// Original tests/jetdoc.rs:56–118 extraction slice. Unregistered until the
+// canonical fixture loader provides its actual source bytes. Existing source
+// fixture, stable JSON/HTML/Markdown goldens and execution expectations remain
+// owned by the original CLI/Graph tests; no copied fixtures/goldens/evaluator.
+fn doc_test_run_fixture_doctest_extraction(source: String, root: doc_os_path.OsPath?, file_path: doc_os_path.OsPath?) Never! {
+    tests :: doc_discover_doctests(root, file_path, "run.jet", source, "run.jet")
+    assert_eq(tests.len(), 1)
+    assert_eq(tests[0].line, 35)
+    assert_eq(tests[0].setup, [String]{})
+    assert_eq(tests[0].expectations.len(), 1)
+    assert_eq(tests[0].expectations[0].expression, "1 + 1")
+    assert_eq(tests[0].expectations[0].expected, "2")
+    assert_eq(tests[0].source.path, "run.jet")
+    assert_eq(tests[0].source.link, "run.jet#L35")
+    summary := ""
+    examples := [String]{}
+    doc_source_docs(source, doc_line_offset(source, 38), &summary, &examples)
+    assert_eq(summary, "Return the fixture answer.")
+    assert_eq(examples, [String]{"`answer()`"})
+    assert_eq(doc_leading_summary(source), "Jetdoc fixture module.")
+}

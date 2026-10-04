@@ -1,0 +1,191 @@
+// Source/LSP/Server.rs:1693–1941. Pending W38 Server ABI reconciliation.
+// Native identities stay OSPath; display spellings only join SemIndex facts.
+use core.encoding.[DataTree]
+use jet_foundation.[Span, foundation_json_quote]
+use core.files.runtime.kernel_path_components as lsp_symbol_path
+use core.text.runtime.kernel_unicode_string as lsp_symbol_text
+
+pub fn lsp_document_symbol_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        result :: permit.value.result
+        path :: lsp_symbol_path.display(doc.path)
+        target := ~path
+        if lsp_checked_module(result, path, doc.path.platform) == .Val(index) -> target = result.module_sources[index].display
+        db :: lsp_build_symbol_db(result)
+        defs := [(Int, Int)]{}
+        loop (index, def) in db.defs {
+            if def.module_path != target -> next
+            kind :: lsp_document_symbol_kind(def.kind) ?? next
+            &defs.push((index, kind))
+        }
+        &defs.sort_by((a: (Int, Int), b: (Int, Int)) -> db.defs[a.0].def_span.start <=> db.defs[b.0].def_span.start)
+        rows := [String]{}
+        loop entry in defs {
+            def :: db.defs[entry.0]
+            range :: lsp_range_json(lsp_byte_span_to_range(doc.text, def.def_span))
+            &rows.push("{{\"name\":{foundation_json_quote(def.name)},\"kind\":{entry.1},\"range\":{range},\"selectionRange\":{range}}}")
+        }
+        return Val(lsp_response(id, "[{rows.join(",")}]"))
+    }
+    None
+}
+
+pub fn lsp_workspace_symbol_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    query := ""
+    if params == .Val(value) {
+        if value.field("query") == .Val(field) {
+            if field == .Text(text) -> query = lsp_symbol_text.ascii_lower(text)
+        }
+    }
+    sources := lsp_workspace_sources(server, None)
+    &sources.sort_by((a, b) -> a.0.encoded <=> b.0.encoded)
+    rows := [String]{}
+    loop (path, source) in sources {
+        open := String?{None}
+        loop (uri, doc) in server.diagnostic_state.docs {
+            if lsp_symbol_path.equals(doc.path, path) { open = Val(uri); break }
+        }
+        owner :: if open == {
+            .Val(uri) -> server.check_with_bundle(server.diagnostic_state.docs[uri]).checked
+            None -> &server.queries.check_text_lsp(server.snapshot, path, source)
+        }
+        permit :: owner.guard_read()
+        result :: permit.value.result
+        db :: lsp_build_symbol_db(result)
+        display :: lsp_symbol_path.display(path)
+        defs := [(Int, Int)]{}
+        loop (index, def) in db.defs {
+            if def.module_path != display -> next
+            kind :: lsp_document_symbol_kind(def.kind) ?? next
+            if !query.is_empty() && !lsp_symbol_text.ascii_lower(def.name).contains(query) -> next
+            &defs.push((index, kind))
+        }
+        &defs.sort_by((a: (Int, Int), b: (Int, Int)) -> db.defs[a.0].def_span.start <=> db.defs[b.0].def_span.start)
+        uri :: lsp_path_to_uri(display)
+        loop entry in defs {
+            def :: db.defs[entry.0]
+            range :: lsp_range_json(lsp_byte_span_to_range(source, def.def_span))
+            &rows.push("{{\"name\":{foundation_json_quote(def.name)},\"kind\":{entry.1},\"location\":{{\"uri\":{foundation_json_quote(uri)},\"range\":{range}}}}}")
+        }
+    }
+    Val(lsp_response(id, "[{rows.join(",")}]"))
+}
+
+pub fn lsp_folding_range_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        rows := [String]{}
+        loop fold in lsp_compute_folding_ranges(doc.text) -> &rows.push(fold.to_json())
+        return Val(lsp_response(id, "[{rows.join(",")}]"))
+    }
+    None
+}
+
+pub fn lsp_document_highlight_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        position :: lsp_pos_from_json(value.field("position") ?? return None) ?? return None
+        offset :: lsp_pos_to_offset(doc.text, position)
+        token_owner :: server.lex(doc)
+        token_permit :: token_owner.guard_read()
+        tokens :: token_permit.value
+        name :: lsp_ident_at(tokens, offset) ?? return Val(lsp_response(id, "[]"))
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        db :: lsp_build_symbol_db(permit.value.result)
+        path :: lsp_symbol_path.display(doc.path)
+        spans := [(Span, Int)]{}
+        loop def in db.defs {
+            if def.module_path == path && def.name == name -> &spans.push((def.def_span, 3))
+        }
+        loop reference in db.refs {
+            if reference.module_path == path && reference.name == name -> &spans.push((reference.span, 2))
+        }
+        &spans.sort_by((a: (Span, Int), b: (Span, Int)) -> {
+            if a.0.start != b.0.start -> a.0.start <=> b.0.start else -> a.1 <=> b.1
+        })
+        rows := [String]{}
+        previous := (Span, Int)?{None}
+        loop entry in spans {
+            if previous == .Val(last) {
+                if last.0.start == entry.0.start && last.0.end == entry.0.end && last.1 == entry.1 -> next
+            }
+            previous = Val(entry)
+            &rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(doc.text, entry.0))},\"kind\":{entry.1}}}")
+        }
+        return Val(lsp_response(id, "[{rows.join(",")}]"))
+    }
+    None
+}
+
+pub fn lsp_selection_range_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        positions :: value.field("positions") ?? return Val(lsp_response(id, "[]"))
+        if positions == .Array(values) {
+            token_owner :: server.lex(doc)
+            token_permit :: token_owner.guard_read()
+            tokens :: token_permit.value
+            blocks :: lsp_brace_block_spans(doc.text)
+            // Preserve Rust's index-based comma placement even for malformed
+            // positions: do not silently repair a protocol-visible edge case.
+            parts := [String]{}
+            loop (index, pos) in values {
+                if index > 0 -> &parts.push(",")
+                position :: lsp_pos_from_json(pos) ?? next
+                offset :: lsp_pos_to_offset(doc.text, position)
+                ranges :: lsp_selection_ranges_for(doc.text, tokens, blocks, offset)
+                &parts.push(lsp_selection_range_json(ranges))
+            }
+            return Val(lsp_response(id, "[{parts.join("")}]"))
+        }
+        return Val(lsp_response(id, "[]"))
+    }
+    None
+}
+
+pub fn lsp_document_link_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        root :: lsp_workspace_root_for_path(server.workspace_roots, doc.path)
+        links :: lsp_document_links_for(doc.path, root, doc.text, server.repository_root)
+        return Val(lsp_response(id, "[{links.join(",")}]"))
+    }
+    None
+}
+
+pub fn lsp_code_lens_response(server: LSPServer, params: DataTree?, id: DataTree) -> String? {
+    value :: params ?? return None
+    td :: value.field("textDocument") ?? return None
+    uri_value :: td.field("uri") ?? return None
+    if uri_value == .Text(uri) {
+        doc :: server.diagnostic_state.docs.get(uri) ?? return None
+        lenses := lsp_code_lenses_for(uri, doc.text)
+        checked :: server.check_with_bundle(doc)
+        permit :: checked.checked.guard_read()
+        if permit.value.result.graph != None {
+            db :: lsp_build_symbol_db(permit.value.result)
+            loop lens in lsp_reasoning_code_lenses(uri, lsp_symbol_path.display(doc.path), doc.text, db) -> &lenses.push(lens)
+        }
+        return Val(lsp_response(id, "[{lenses.join(",")}]"))
+    }
+    None
+}

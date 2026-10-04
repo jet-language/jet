@@ -1,0 +1,267 @@
+use core.files as notebook_trust_test_files
+use core.testing as notebook_trust_test_testing
+use jet_foundation.[canonical_json_bytes, mir_sha256_hex, TEXT_NUL]
+
+fn notebook_trust_test_bundle() -> NotebookMIMEBundle Never! {
+    NotebookMIMEBundle{text_plain: "chart", mime: [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "application/javascript", payload: "1"}}, quarantined: false, widget_id: Val("sales.chart"), requested_origins: [String]{"https://data.example"}, requested_messages: [String]{"SelectionChanged"}}
+}
+fn notebook_trust_test_request(bundle: NotebookMIMEBundle) -> NotebookActiveRequest Never! {
+    NotebookActiveRequest{notebook_source_hash: "src", payload_hash: notebook_trust_payload_hash(bundle), renderer_hash: "rend", environment_hash: "env", policy_version: NOTEBOOK_TRUST_POLICY_VERSION, widget_id: bundle.widget_id ?? "", origins: ~bundle.requested_origins, messages: ~bundle.requested_messages}
+}
+fn notebook_trust_test_fallback(decision: NotebookRenderDecision) -> Bool Never! {
+    if decision == {
+        .FallbackPlain(_, _) -> true
+        else -> false
+    }
+}
+fn notebook_trust_test_active(decision: NotebookRenderDecision) -> Bool Never! {
+    if decision == {
+        .AllowActive(_, _) -> true
+        else -> false
+    }
+}
+
+// Original trust.rs:309,326,360: no interpreter/session/browser dependencies.
+#Test("zero_cap_widget_renders_without_grant") {
+    store :: NotebookTrustStore.default()
+    bundle :: NotebookMIMEBundle{text_plain: "chart", mime: [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "application/vnd.jet.widget", payload: "{{}}"}}, quarantined: false, widget_id: Val("sales.chart"), requested_origins: [String]{}, requested_messages: [String]{}}
+    decision :: notebook_decide_render(store, "src", "env", "rend", bundle)
+    assert(if decision == {
+        .AllowPassive(_, _) -> true
+        else -> false
+    })
+}
+#Test("capability_widget_needs_grant") {
+    store := NotebookTrustStore.default()
+    bundle :: notebook_trust_test_bundle()
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
+    _ :: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
+    assert(notebook_trust_test_active(notebook_decide_render(store, "src", "env", "rend", bundle)))
+}
+#Test("imported_output_quarantined") {
+    store :: NotebookTrustStore.default()
+    bundle := NotebookMIMEBundle{text_plain: "x", mime: [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/html", payload: "<b>x</b>"}}, quarantined: false, widget_id: None, requested_origins: [String]{}, requested_messages: [String]{}}
+    notebook_quarantine_outputs(&bundle)
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "s", "e", "r", bundle)))
+}
+
+#Test("notebook_trust_pins_canonical_payload_order_duplicates_and_widget_presence") {
+    bundle := notebook_trust_test_bundle()
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/plain", payload: "x"}, NotebookMIMEEntry{media_type: "text/plain", payload: "x"}}
+    bundle.widget_id = None
+    expected :: "{{\"mime\":[[\"text/plain\",\"x\"],[\"text/plain\",\"x\"]],\"widget_id\":null}}\n"
+    assert_eq(canonical_json_bytes(notebook_trust_payload_material(bundle)), expected.bytes())
+    assert_eq(notebook_trust_payload_hash(bundle), "5f51e1c57b18939e0284b3efe521f97e0e5997faa2691a22b20d7241327f0ccd")
+    duplicate_hash :: notebook_trust_payload_hash(bundle)
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/plain", payload: "x"}}
+    assert(notebook_trust_payload_hash(bundle) != duplicate_hash)
+    null_hash :: notebook_trust_payload_hash(bundle)
+    bundle.widget_id = Val("")
+    assert(notebook_trust_payload_hash(bundle) != null_hash)
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/plain", payload: "x"}, NotebookMIMEEntry{media_type: "image/png", payload: "é\n\""}}
+    ordered_hash :: notebook_trust_payload_hash(bundle)
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "image/png", payload: "é\n\""}, NotebookMIMEEntry{media_type: "text/plain", payload: "x"}}
+    assert(notebook_trust_payload_hash(bundle) != ordered_hash)
+    unchanged_hash :: notebook_trust_payload_hash(bundle)
+    bundle.text_plain = "not payload material"
+    bundle.quarantined = true
+    bundle.requested_origins = [String]{"new origin"}
+    bundle.requested_messages = [String]{"new message"}
+    assert_eq(notebook_trust_payload_hash(bundle), unchanged_hash)
+}
+#Test("notebook_grant_key_binds_the_same_five_nul_delimited_components") {
+    expected :: mir_sha256_hex("src{TEXT_NUL}payload{TEXT_NUL}rend{TEXT_NUL}env{TEXT_NUL}notebook-trust-2")
+    baseline :: notebook_trust_grant_key("src", "payload", "rend", "env", NOTEBOOK_TRUST_POLICY_VERSION)
+    assert_eq(baseline, expected)
+    assert(notebook_trust_grant_key("source2", "payload", "rend", "env", NOTEBOOK_TRUST_POLICY_VERSION) != baseline)
+    assert(notebook_trust_grant_key("src", "payload2", "rend", "env", NOTEBOOK_TRUST_POLICY_VERSION) != baseline)
+    assert(notebook_trust_grant_key("src", "payload", "renderer2", "env", NOTEBOOK_TRUST_POLICY_VERSION) != baseline)
+    assert(notebook_trust_grant_key("src", "payload", "rend", "environment2", NOTEBOOK_TRUST_POLICY_VERSION) != baseline)
+    assert(notebook_trust_grant_key("src", "payload", "rend", "env", "notebook-trust-1") != baseline)
+    assert(notebook_trust_grant_key("ab", "c", "r", "e", "p") != notebook_trust_grant_key("a", "bc", "r", "e", "p"))
+}
+#Test("notebook_capability_semantics_and_grant_records_are_unchanged") {
+    store := NotebookTrustStore.default()
+    bundle := notebook_trust_test_bundle()
+    request := notebook_trust_test_request(bundle)
+    assert(request.needs_capabilities())
+    grant :: notebook_trust_grant_active(&store, request)
+    assert_eq(grant.widget_id, request.widget_id)
+    assert_eq(grant.origins, request.origins)
+    assert_eq(grant.messages, request.messages)
+    assert_eq(grant.key, request.key())
+    assert(notebook_trust_is_granted(store, grant.key))
+    // The reference key does not bind capabilities separately from payload.
+    bundle.requested_origins = [String]{"https://other.example"}
+    bundle.requested_messages = [String]{"Other"}
+    assert(notebook_trust_test_active(notebook_decide_render(store, "src", "env", "rend", bundle)))
+    request.origins = [String]{}
+    assert(request.needs_capabilities())
+    request.messages = [String]{}
+    assert(!request.needs_capabilities())
+    request.origins = [String]{"https://data.example"}
+    assert(request.needs_capabilities())
+}
+#Test("notebook_grants_revoke_on_identity_change_and_source_edit") {
+    store := NotebookTrustStore.default()
+    bundle := notebook_trust_test_bundle()
+    grant :: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src2", "env", "rend", bundle)))
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env2", "rend", bundle)))
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend2", bundle)))
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "application/javascript", payload: "2"}}
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
+    bundle = notebook_trust_test_bundle()
+    bundle.widget_id = Val("other.widget")
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
+    notebook_trust_revoke_matching(&store, "unrelated argument still clears notebook store")
+    assert(!notebook_trust_is_granted(store, grant.key))
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", notebook_trust_test_bundle())))
+}
+#Test("notebook_render_filters_passive_mime_without_reordering_or_general_sanitizing") {
+    store :: NotebookTrustStore.default()
+    bundle := notebook_trust_test_bundle()
+    bundle.widget_id = None
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/plain", payload: "one"}, NotebookMIMEEntry{media_type: "application/octet-stream", payload: "drop"}, NotebookMIMEEntry{media_type: "image/svg+xml", payload: "<svg/>"}, NotebookMIMEEntry{media_type: "text/plain", payload: "two"}}
+    expected :: [NotebookMIMEEntry]{bundle.mime[0], bundle.mime[2], bundle.mime[3]}
+    if notebook_decide_render(store, "src", "env", "rend", bundle) == {
+        .AllowPassive(text, mime) -> {
+            assert_eq(text, "chart")
+            assert_eq(mime, expected)
+        }
+        else -> panic("non-active MIME must not request a grant")
+    }
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/html", payload: "<b>safe supplied bytes</b>"}, NotebookMIMEEntry{media_type: "application/javascript", payload: "drop"}}
+    bundle.requested_origins = [String]{}
+    bundle.requested_messages = [String]{}
+    if notebook_decide_render(store, "src", "env", "rend", bundle) == {
+        .AllowPassive(_, mime) -> assert_eq(mime, [NotebookMIMEEntry]{bundle.mime[0]})
+        else -> panic("zero-capability HTML is passive-equivalent")
+    }
+    bundle.requested_messages = [String]{"M"}
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "application/vnd.jet.widget.custom", payload: "x"}}
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "application/javascript", payload: "x"}}
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
+}
+#Test("notebook_render_quarantine_precedes_grants_and_preserves_exact_reasons") {
+    store := NotebookTrustStore.default()
+    bundle := notebook_trust_test_bundle()
+    _ :: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
+    bundle.text_plain = ""
+    notebook_quarantine_outputs(&bundle)
+    assert_eq(notebook_decide_render(store, "src", "env", "rend", bundle), NotebookRenderDecision.FallbackPlain{text_plain: "(no text/plain)", reason: "imported output is quarantined until re-run under local trust"})
+    bundle.quarantined = false
+    notebook_trust_revoke_matching(&store, "src")
+    assert_eq(notebook_decide_render(store, "src", "env", "rend", bundle), NotebookRenderDecision.FallbackPlain{text_plain: "(no text/plain)", reason: "active output blocked: widget `sales.chart` needs an explicit jet trust notebook grant"})
+}
+
+#Test("notebook_passive_whitelist_is_exact_and_active_grants_keep_every_row") {
+    store := NotebookTrustStore.default()
+    bundle := notebook_trust_test_bundle()
+    bundle.mime = [NotebookMIMEEntry]{
+        NotebookMIMEEntry{media_type: "text/plain", payload: "plain"},
+        NotebookMIMEEntry{media_type: "text/markdown", payload: "markdown"},
+        NotebookMIMEEntry{media_type: "image/png", payload: "png"},
+        NotebookMIMEEntry{media_type: "image/jpeg", payload: "jpeg"},
+        NotebookMIMEEntry{media_type: "image/svg+xml", payload: "svg"},
+        NotebookMIMEEntry{media_type: "text/html", payload: "html"},
+        NotebookMIMEEntry{media_type: "application/json", payload: "json"},
+    }
+    allowed :: ~bundle.mime
+    &bundle.mime.push(NotebookMIMEEntry{media_type: "TEXT/PLAIN", payload: "drop"})
+    bundle.requested_origins = [String]{}
+    bundle.requested_messages = [String]{}
+    if notebook_decide_render(store, "src", "env", "rend", bundle) == {
+        .AllowPassive(_, mime) -> assert_eq(mime, allowed)
+        else -> panic("zero-capability bundle is passive-equivalent")
+    }
+    bundle.requested_origins = [String]{"https://data.example"}
+    _ :: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
+    if notebook_decide_render(store, "src", "env", "rend", bundle) == {
+        .AllowActive(_, mime) -> assert_eq(mime, bundle.mime)
+        else -> panic("active grant preserves every MIME row")
+    }
+    notebook_trust_revoke_matching(&store, "src")
+    request := notebook_trust_test_request(bundle)
+    request.policy_version = "notebook-trust-1"
+    _ :: notebook_trust_grant_active(&store, request)
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
+    // A widget ID alone makes a non-active MIME type an active request.
+    bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "other", payload: "x"}}
+    assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
+}
+
+#Test("notebook_grant_subject_roundtrip_splitn_and_original_escape_order") {
+    grant :: NotebookTrustGrant{key: "key", widget_id: "界%7C|\nwidget", origins: [String]{"https://a.example", "https://b.example/path%|"}, messages: [String]{"A", "B|C"}}
+    encoded :: notebook_trust_encode_subject(grant)
+    assert_eq(encoded, "key|界%257C%7Cwidget|https://a.example,https://b.example/path%25%7C|A,B%7CC")
+    assert_eq(notebook_trust_parse_subject(encoded), Val(NotebookTrustGrant{key: "key", widget_id: "界%7C|widget", origins: ~grant.origins, messages: ~grant.messages}))
+    assert_eq(notebook_trust_parse_subject("key|widget|,a,|M|tail"), Val(NotebookTrustGrant{key: "key", widget_id: "widget", origins: [String]{"", "a", ""}, messages: [String]{"M|tail"}}))
+    assert_eq(notebook_trust_parse_subject("|||"), Val(NotebookTrustGrant{key: "", widget_id: "", origins: [String]{}, messages: [String]{}}))
+    assert_eq(notebook_trust_parse_subject("key|widget|origins"), None)
+    assert_eq(notebook_trust_unescape("%7c%0A%257C"), "%7c%0A%7C")
+    comma :: NotebookTrustGrant{key: "key", widget_id: "w", origins: [String]{"a,b"}, messages: [String]{}}
+    assert_eq(notebook_trust_parse_subject(notebook_trust_encode_subject(comma)), Val(NotebookTrustGrant{key: "key", widget_id: "w", origins: [String]{"a", "b"}, messages: [String]{}}))
+}
+#Test("notebook_store_persistence_preserves_other_grants_and_loaded_duplicates") {
+    root :: notebook_trust_test_testing.temp_dir("notebook-trust-persistence")
+    path :: notebook_trust_test_files.join(root, "trust")
+    native :: notebook_native_path(path)
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR")
+    notebook_trust_test_files.write(path, "grant:user:package:keep{cr}\n\ngrant:user:notebook:bad\ngrant:user:notebook:k|first||\ngrant:user:notebook:k|last|origin|Message\ngrant:user:other:final") ?? panic("seed trust store")
+    store := NotebookTrustStore.load(native)
+    assert(notebook_trust_is_granted(store, "k"))
+    store.save(native) ?? panic("save trust store")
+    expected :: "grant:user:package:keep\n\ngrant:user:other:final\ngrant:user:notebook:k|first||\ngrant:user:notebook:k|last|origin|Message\n"
+    assert_eq(notebook_trust_test_files.read(path) ?? panic("read trust store"), expected)
+    &store.insert(NotebookTrustGrant{key: "z", widget_id: "middle", origins: [String]{}, messages: [String]{}})
+    &store.insert(NotebookTrustGrant{key: "k", widget_id: "replacement", origins: [String]{"O"}, messages: [String]{"M"}})
+    store.save(native) ?? panic("save replaced trust store")
+    replaced :: "grant:user:package:keep\n\ngrant:user:other:final\ngrant:user:notebook:z|middle||\ngrant:user:notebook:k|replacement|O|M\n"
+    assert_eq(notebook_trust_test_files.read(path) ?? panic("read replaced trust store"), replaced)
+    reloaded := NotebookTrustStore.load(native)
+    assert(notebook_trust_is_granted(reloaded, "k"))
+    assert(notebook_trust_is_granted(reloaded, "z"))
+    notebook_trust_revoke_matching(&reloaded, "anything")
+    reloaded.save(native) ?? panic("save revocation")
+    assert_eq(notebook_trust_test_files.read(path) ?? panic("read revoked trust store"), "grant:user:package:keep\n\ngrant:user:other:final\n")
+    notebook_trust_test_files.remove_all(root) ?? panic("remove fixture")
+}
+#Test("notebook_store_missing_invalid_utf8_and_write_errors") {
+    root :: notebook_trust_test_testing.temp_dir("notebook-trust-io")
+    path :: notebook_trust_test_files.join(root, "nested/trust")
+    native :: notebook_native_path(path)
+    missing :: NotebookTrustStore.load(native)
+    assert(!notebook_trust_is_granted(missing, "k"))
+    store := NotebookTrustStore.default()
+    &store.insert(NotebookTrustGrant{key: "k", widget_id: "w", origins: [String]{}, messages: [String]{}})
+    store.save(native) ?? panic("create parents and trust file")
+    assert(notebook_trust_is_granted(NotebookTrustStore.load(native), "k"))
+    notebook_trust_test_files.write_bytes(path, [U8]{255}) ?? panic("invalid UTF-8 fixture")
+    assert(!notebook_trust_is_granted(NotebookTrustStore.load(native), "k"))
+    store.save(native) ?? panic("replace unreadable contents")
+    assert_eq(notebook_trust_test_files.read(path) ?? panic("read replacement"), "grant:user:notebook:k|w||\n")
+    directory_store :: NotebookTrustStore.load(notebook_native_path(root))
+    assert(!notebook_trust_is_granted(directory_store, "k"))
+    assert(if store.save(notebook_native_path(root)) == {
+        .Err(_) -> true
+        else -> false
+    })
+    blocked :: notebook_trust_test_files.join(path, "child")
+    assert(if store.save(notebook_native_path(blocked)) == {
+        .Err(_) -> true
+        else -> false
+    })
+    notebook_trust_test_files.remove_all(root) ?? panic("remove fixture")
+}
+// Canonical OSPath lexical push replaces the obsolete String-path gate.
+#Test("notebook_trust_native_path_preserves_dotdot_and_unix_backslash") {
+    first := notebook_trust_paths.from_text("/home/user/../user", notebook_trust_paths.PathPlatform.Unix)
+    notebook_trust_paths.push(&first, notebook_trust_paths.from_text(".jet", notebook_trust_paths.PathPlatform.Unix))
+    assert_eq(notebook_trust_paths.display(first), "/home/user/../user/.jet")
+    second := notebook_trust_paths.from_text("/home/user\\literal", notebook_trust_paths.PathPlatform.Unix)
+    notebook_trust_paths.push(&second, notebook_trust_paths.from_text(".jet", notebook_trust_paths.PathPlatform.Unix))
+    assert_eq(notebook_trust_paths.display(second), "/home/user\\literal/.jet")
+}

@@ -1,0 +1,287 @@
+// Rust Notebook/document.rs:1038-1423: merge and stated-loss projections.
+// Canonical Foundation JSON first; general Core DataTree fallback has seven
+// public variants (exact Int and Float), not Rust's typed-decoder-only tags.
+use core.encoding.[DataTree]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_object, canonical_json_parse, canonical_json_bytes, foundation_json_parse, mir_sha256_hex]
+
+pub struct NotebookImportResult { pub notebook: JetNotebook, pub loss: NotebookLossReport }
+pub struct NotebookExportResult { pub text: String, pub loss: NotebookLossReport }
+
+// Rust merge_by_id: last theirs row wins lookup, base layout/source survives.
+pub fn notebook_merge_by_id(base: JetNotebook, theirs: JetNotebook) -> JetNotebook Never! {
+    out := JetNotebook.new(base.environment_hash)
+    out.schema = if base.schema > theirs.schema -> base.schema else -> theirs.schema
+    out.merge_conflicts = ~base.merge_conflicts
+    conflicts := [String:Bool]{}
+    loop conflict in out.merge_conflicts -> conflicts[conflict.cell_id] = true
+    loop conflict in theirs.merge_conflicts {
+        if !conflicts.has_key(conflict.cell_id) {
+            &out.merge_conflicts.push(~conflict)
+            conflicts[conflict.cell_id] = true
+        }
+    }
+    their_map := [String:Int]{}
+    loop (index, cell) in theirs.cells -> their_map[cell.id] = index
+    seen := [String:Bool]{}
+    loop cell in base.cells {
+        seen[cell.id] = true
+        // Decide whether output survives before copying its MIME payload.
+        merged := NotebookCell{id: cell.id, kind: cell.kind, source: cell.source, output: None, depends_on: ~cell.depends_on}
+        if their_map.has_key(cell.id) {
+            other :: theirs.cells[their_map[cell.id]]
+            if notebook_interop_same_source(cell, other) {
+                base_key :: notebook_interop_output_key(cell.output)
+                their_key :: notebook_interop_output_key(other.output)
+                if !(base_key != None && their_key != None && base_key != their_key) {
+                    if cell.output == None -> merged.output = ~other.output
+                    else -> merged.output = ~cell.output
+                }
+            } else {
+                if !conflicts.has_key(cell.id) {
+                    &out.merge_conflicts.push(NotebookMergeConflict{cell_id: cell.id, ours_source: cell.source, theirs_source: other.source})
+                    conflicts[cell.id] = true
+                }
+            }
+        } else -> merged.output = ~cell.output
+        &out.cells.push(^merged)
+    }
+    loop cell in theirs.cells {
+        if !seen.has_key(cell.id) {
+            seen[cell.id] = true
+            &out.cells.push(~cell)
+        }
+    }
+    out.output_cache = ~base.output_cache
+    loop key in theirs.output_cache.keys() {
+        if !out.output_cache.has_key(key) -> out.output_cache[key] = ~theirs.output_cache[key]
+    }
+    // The reference intentionally ignores a failed refresh (including its
+    // partial earlier-cell updates); merge is not graph validation.
+    _ :: &out.refresh_dependencies()
+    out
+}
+fn notebook_interop_same_source(ours: NotebookCell, theirs: NotebookCell) -> Bool Never! {
+    ours.kind == theirs.kind && ours.source == theirs.source && ours.depends_on == theirs.depends_on
+}
+fn notebook_interop_output_key(output: NotebookCellOutput?) -> String? Never! {
+    if output == .Val(value) -> value.cache_key else -> None
+}
+
+pub fn notebook_import_ipynb(text: String) -[Rand]> NotebookImportResult NotebookError! {
+    json :: if canonical_json_parse(text.bytes()) == {
+        .Ok(value) -> value
+        .Err(_) -> {
+            tree :: foundation_json_parse(text) ?? return Err(notebook_codec_error("ipynb is not valid JSON; export a complete Jupyter notebook"))
+            notebook_interop_json_to_canonical(tree)
+        }
+    }
+    root :: if json == {
+        .Object(fields) -> fields
+        else -> { return Err(notebook_codec_error("ipynb root must be an object")) }
+    }
+    loss := NotebookLossReport.default()
+    format := 4
+    if notebook_codec_get(root, "nbformat") == .Val(field) {
+        if field[0].value == .Integer(number) {
+            format = notebook_codec_unsigned(number, 4294967295, "invalid nbformat") ?? 4
+        }
+    }
+    if format < 4 -> &loss.push("nbformat {format} upgraded to 4.5 semantics")
+    nb := JetNotebook.new(mir_sha256_hex("ipynb-import"))
+    cells_index :: notebook_codec_required_index(root, "cells", "ipynb missing cells array")
+    cells :: if root[cells_index].value == {
+        .Array(values) -> values
+        else -> { return Err(notebook_codec_error("ipynb missing cells array")) }
+    }
+    ids := [String:Bool]{}
+    loop cell in cells {
+        fields :: if cell == {
+            .Object(fields) -> fields
+            else -> { &loss.push("skipped non-object cell"); next }
+        }
+        cell_type :: notebook_text_field(fields, "cell_type") ?? "code"
+        kind :: if {
+            cell_type == "markdown" -> NotebookCellKind.Markdown
+            cell_type == "code" -> NotebookCellKind.Jet
+            cell_type == "raw" -> { &loss.push("raw cell imported as Markdown"); NotebookCellKind.Markdown }
+            else -> { &loss.push("unsupported cell type `{cell_type}` imported as Markdown"); NotebookCellKind.Markdown }
+        }
+        source := ""
+        if notebook_codec_get(fields, "source") == .Val(field) {
+            if field[0].value == .String(value) -> source = ~value
+            if field[0].value == .Array(values) -> source = notebook_interop_string_lines(values)
+        }
+        id := notebook_text_field(fields, "id") ?? ""
+        if id.is_empty() {
+            &loss.push("minted cell id — source cell lacked nbformat 4.5 id")
+            id = JetNotebook.mint_cell_id()
+        }
+        if ids.has_key(id) -> return Err(notebook_codec_error("ipynb has duplicate cell id `{id}`"))
+        ids[id] = true
+        output := NotebookCellOutput?{None}
+        if notebook_codec_get(fields, "outputs") == .Val(field) {
+            if field[0].value == .Array(outputs) {
+                if outputs.len() != 0 {
+                    &loss.push("cell `{id}`: imported outputs quarantined (no ambient execution)")
+                    bundle := notebook_interop_flatten_outputs(outputs)
+                    notebook_quarantine_outputs(&bundle)
+                    output = Val(NotebookCellOutput{bundle: ^bundle, execution_count: None, cache_key: None, turn_id: None})
+                }
+            }
+        }
+        if notebook_codec_get(fields, "metadata") != None -> &loss.push("cell `{id}`: non-Jet metadata dropped on import")
+        &nb.cells.push(NotebookCell{id: id, kind: kind, source: source, output: ^output, depends_on: [String]{}})
+    }
+    Ok(NotebookImportResult{notebook: ^nb, loss: ^loss})
+}
+// Rust json_value_to_canonical. Core JSON's exact Int is retained; Float
+// becomes text, just as Rust Float/Number did, never a rounded JSON integer.
+fn notebook_interop_json_to_canonical(value: DataTree) -> CanonicalJSON Never! {
+    if value == {
+        .Null -> CanonicalJSON.Null
+        .Bool(flag) -> CanonicalJSON.Bool(flag)
+        .Int(number) -> CanonicalJSON.Integer("{number}")
+        .Float(number) -> CanonicalJSON.String("{number}")
+        .Text(text) -> CanonicalJSON.String(~text)
+        .Array(values) -> {
+            rows := [CanonicalJSON]{}
+            loop row in values -> &rows.push(notebook_interop_json_to_canonical(row))
+            CanonicalJSON.Array(^rows)
+        }
+        .Object(fields) -> {
+            rows := [CanonicalJSONField]{}
+            loop (key, row) in fields -> &rows.push(notebook_codec_field(key, notebook_interop_json_to_canonical(row)))
+            // DataTree object maps have unique keys before canonical projection.
+            canonical_json_object(rows) ?? panic("parsed JSON has unique keys")
+        }
+    }
+}
+fn notebook_interop_string_lines(values: [CanonicalJSON]) -> String Never! {
+    lines := [String]{}
+    loop value in values { if value == .String(text) -> &lines.push(text) }
+    lines.join("")
+}
+// Rust flatten_ipynb_outputs: data fields precede stream text, preserve
+// duplicate MIME rows across outputs; only text/plain contributes plain text.
+fn notebook_interop_flatten_outputs(outputs: [CanonicalJSON]) -> NotebookMIMEBundle Never! {
+    parts := [String]{}
+    bundle := notebook_plain_bundle("")
+    loop output in outputs {
+        if output == .Object(fields) {
+            if notebook_codec_get(fields, "data") == .Val(field) {
+                if field[0].value == .Object(data) {
+                    loop row in data {
+                        text :: notebook_interop_ipynb_text(row.value)
+                        if row.key == "text/plain" -> &parts.push(text)
+                        &bundle.mime.push(NotebookMIMEEntry{media_type: row.key, payload: text})
+                    }
+                }
+            }
+            if notebook_codec_get(fields, "text") == .Val(field) {
+                text :: notebook_interop_ipynb_text(field[0].value)
+                &parts.push(text)
+                &bundle.mime.push(NotebookMIMEEntry{media_type: "text/plain", payload: text})
+            }
+        }
+    }
+    bundle.text_plain = parts.join("")
+    bundle
+}
+// Rust ipynb_text: arrays keep only strings; other values use A-canonical
+// bytes, removing only the trailing LF (not payload whitespace).
+fn notebook_interop_ipynb_text(value: CanonicalJSON) -> String Never! {
+    if value == {
+        .String(text) -> ~text
+        .Array(values) -> notebook_interop_string_lines(values)
+        else -> {
+            bytes :: canonical_json_bytes(value)
+            String.from_bytes(bytes[0..<bytes.len() - 1]) ?? panic("canonical JSON is UTF-8")
+        }
+    }
+}
+
+pub fn notebook_export_ipynb(nb: JetNotebook) -> NotebookExportResult NotebookError! {
+    loss := NotebookLossReport.default()
+    &loss.push("Jet-specific depends_on / closure cache omitted from ipynb")
+    &loss.push("Jet cell execution events are projected to ipynb results; stream/error distinctions are not retained")
+    cells := [CanonicalJSON]{}
+    loop cell in nb.cells {
+        fields := [CanonicalJSONField]{
+            notebook_codec_field("id", .String(cell.id)),
+            notebook_codec_field("cell_type", .String(if cell.kind == .Jet -> "code" else -> "markdown")),
+            notebook_codec_field("source", .Array([CanonicalJSON]{CanonicalJSON.String(cell.source)})),
+            notebook_codec_field("metadata", notebook_codec_object([CanonicalJSONField]{})),
+        }
+        if cell.kind == .Jet {
+            outputs := [CanonicalJSON]{}
+            if nb.visible_output(cell.id) == {
+                .Val(window) -> {
+                    if window[0].output == .Val(output) {
+                        data := [CanonicalJSONField]{notebook_codec_field("text/plain", .String(output.bundle.text_plain))}
+                        if !output.bundle.quarantined {
+                            loop row in output.bundle.mime {
+                                if row.media_type != "text/plain" -> &data.push(notebook_codec_field(row.media_type, .String(row.payload)))
+                            }
+                        } else -> &loss.push("cell `{cell.id}`: quarantined rich output exported as text/plain")
+                        count :: if output.execution_count == {
+                            .Val(value) -> notebook_codec_integer(value)
+                            .None -> CanonicalJSON.Null
+                        }
+                        &outputs.push(notebook_codec_object([CanonicalJSONField]{
+                            notebook_codec_field("output_type", .String("execute_result")),
+                            notebook_codec_field("data", notebook_codec_object(data)),
+                            notebook_codec_field("execution_count", count),
+                            notebook_codec_field("metadata", notebook_codec_object([CanonicalJSONField]{})),
+                        }))
+                        if output.bundle.quarantined -> &loss.push("cell `{cell.id}`: quarantined output exported as text only")
+                    }
+                }
+                .None -> {
+                    if cell.output == .Val(output) {
+                        if output.bundle.quarantined {
+                            &outputs.push(notebook_codec_object([CanonicalJSONField]{
+                                notebook_codec_field("output_type", .String("display_data")),
+                                notebook_codec_field("data", notebook_codec_object([CanonicalJSONField]{notebook_codec_field("text/plain", .String(output.bundle.text_plain))})),
+                                notebook_codec_field("metadata", notebook_codec_object([CanonicalJSONField]{})),
+                            }))
+                            &loss.push("cell `{cell.id}`: quarantined output exported as text/plain")
+                        } else -> &loss.push("cell `{cell.id}`: stale output omitted (closure key mismatch)")
+                    }
+                }
+            }
+            &fields.push(notebook_codec_field("outputs", .Array(^outputs)))
+            &fields.push(notebook_codec_field("execution_count", .Null))
+        }
+        &cells.push(notebook_codec_object(fields))
+    }
+    root :: notebook_codec_object([CanonicalJSONField]{
+        notebook_codec_field("nbformat", notebook_codec_integer(4)),
+        notebook_codec_field("nbformat_minor", notebook_codec_integer(5)),
+        notebook_codec_field("metadata", notebook_codec_object([CanonicalJSONField]{
+            notebook_codec_field("kernelspec", notebook_codec_object([CanonicalJSONField]{
+                notebook_codec_field("display_name", .String("Jet")),
+                notebook_codec_field("language", .String("jet")),
+                notebook_codec_field("name", .String("jet")),
+            })),
+        })),
+        notebook_codec_field("cells", .Array(^cells)),
+    })
+    Ok(NotebookExportResult{text: String.from_bytes(canonical_json_bytes(root)) ?? return Err(notebook_codec_error("{err}")), loss: ^loss})
+}
+
+pub fn notebook_export_jet(nb: JetNotebook) -> NotebookExportResult Never! {
+    loss := NotebookLossReport.default()
+    &loss.push("markdown cells omitted")
+    &loss.push("outputs / trust / cell ids omitted")
+    &loss.push("notebook environment identity omitted")
+    if nb.merge_conflicts.len() != 0 -> &loss.push("{nb.merge_conflicts.len()} unresolved merge conflict(s) retained; execution is blocked")
+    parts := [String]{"// generated from .jetnb — stated-loss projection (D-NOTEBOOK-DOC1=D)\n"}
+    loop cell in nb.cells {
+        if cell.kind == .Jet {
+            &parts.push(cell.source)
+            if !cell.source.ends_with("\n") -> &parts.push("\n")
+            &parts.push("\n")
+        }
+    }
+    NotebookExportResult{text: parts.join(""), loss: ^loss}
+}

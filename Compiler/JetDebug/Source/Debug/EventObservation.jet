@@ -1,0 +1,158 @@
+// crates/jet-debug/src/EventObservation.rs:1-150: debugger projection of the
+// runtime-owned Event observation sequence. Runtime records are payload-free;
+// this consumer accepts only the closed schema and preserves every numeric and
+// runtime enum fact exactly. The closed value lists below are Rust's own
+// consumer validators (EventObservation.rs:31-114); the runtime producer
+// (Observe/jet_event_observe) has no Jet owner yet, so no real feed runs here.
+use core.encoding.[DataTree]
+use jet_foundation.[foundation_parse_protocol_json]
+
+// Rust MAX_SNAPSHOT_BYTES / MAX_EVENTS.
+DEBUG_EVENT_MAX_SNAPSHOT_BYTES :: 1048576
+DEBUG_EVENT_MAX_EVENTS :: 256
+DEBUG_EVENT_FIELD_COUNT :: 15
+
+#Error
+pub struct DebugEventObservationError { pub message: String }
+
+fn debug_event_error(message: String) -> DebugEventObservationError Never! {
+    DebugEventObservationError{message: message}
+}
+
+// Rust `render`, public as lib.rs `render_event_observations`.
+pub fn render_event_observations(snapshot: String) -> String DebugEventObservationError! {
+    if snapshot.bytes().len() > DEBUG_EVENT_MAX_SNAPSHOT_BYTES {
+        return Err(debug_event_error("runtime observation exceeds the 1 MiB debugger limit"))
+    }
+    root :: foundation_parse_protocol_json(snapshot) ?? return Err(debug_event_error("runtime observation is not valid JSON"))
+    no_sequence :: "runtime observation has no event sequence"
+    if root == {
+        .Object(fields) -> {
+            if fields.get("event_observations") == {
+                .Val(sequence) -> {
+                    if sequence == {
+                        .Array(rows) -> {
+                            if rows.len() > DEBUG_EVENT_MAX_EVENTS {
+                                return Err(debug_event_error("runtime event observation exceeds the 256-record limit"))
+                            }
+                            return debug_render_event_rows(rows)
+                        }
+                        else -> return Err(debug_event_error(no_sequence))
+                    }
+                }
+                else -> return Err(debug_event_error(no_sequence))
+            }
+        }
+        else -> return Err(debug_event_error(no_sequence))
+    }
+}
+
+// Rust `render` record loop: rows are read in place, never copied out.
+fn debug_render_event_rows(events: [DataTree]) -> String DebugEventObservationError! {
+    previous := 0
+    lines := [String]{}
+    loop event in events {
+        if event == {
+            .Object(fields) -> {
+                if fields.len() != DEBUG_EVENT_FIELD_COUNT {
+                    return Err(debug_event_error("runtime event observation contains an unsafe or unknown field"))
+                }
+                loop key in fields.keys() {
+                    if !debug_event_known_field(key) {
+                        return Err(debug_event_error("runtime event observation contains an unsafe or unknown field"))
+                    }
+                }
+                sequence :: debug_event_unsigned(fields, "sequence") ?? return Err(err)
+                if sequence <= previous {
+                    return Err(debug_event_error("runtime event observation sequence is not strictly increasing"))
+                }
+                previous = sequence
+                source :: debug_event_closed(fields, "source") ?? return Err(err)
+                event_id :: debug_event_unsigned(fields, "event_id") ?? return Err(err)
+                owner_id :: debug_event_unsigned(fields, "owner_id") ?? return Err(err)
+                subscription_id :: debug_event_unsigned(fields, "subscription_id") ?? return Err(err)
+                dispatch_id :: debug_event_unsigned(fields, "dispatch_id") ?? return Err(err)
+                lifecycle :: debug_event_closed(fields, "lifecycle") ?? return Err(err)
+                queued :: debug_event_count(fields, "queued") ?? return Err(err)
+                blocked :: debug_event_count(fields, "blocked") ?? return Err(err)
+                running :: debug_event_count(fields, "running") ?? return Err(err)
+                capacity :: debug_event_unsigned(fields, "capacity") ?? return Err(err)
+                overflow :: debug_event_closed(fields, "overflow") ?? return Err(err)
+                priority :: debug_event_integer(fields, "priority") ?? return Err(err)
+                failure :: debug_event_closed(fields, "failure") ?? return Err(err)
+                terminal :: debug_event_closed(fields, "terminal") ?? return Err(err)
+                &lines.push("sequence={sequence} source={source} event={event_id} owner={owner_id} subscription={subscription_id} dispatch={dispatch_id} lifecycle={lifecycle} queued={queued} blocked={blocked} running={running} capacity={capacity} overflow={overflow} priority={priority} failure={failure} terminal={terminal}")
+            }
+            else -> return Err(debug_event_error("runtime event observation is not an object"))
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+// Rust KEYS: the exact fifteen payload-free observation fields.
+fn debug_event_known_field(key: String) -> Bool Never! {
+    if key == {
+        "sequence" | "source" | "event_id" | "owner_id" | "subscription_id" | "dispatch_id" | "lifecycle" | "queued" | "blocked" | "running" | "capacity" | "overflow" | "priority" | "failure" | "terminal" -> true
+        else -> false
+    }
+}
+
+// Rust `closed` allowed lists for source/lifecycle/overflow/failure/terminal.
+fn debug_event_allowed(key: String, value: String) -> Bool Never! {
+    if key == {
+        "source" -> if value == {
+            "Event" | "AsyncEvent" | "DecisionHook" -> true
+            else -> false
+        }
+        "lifecycle" -> if value == {
+            "Subscribed" | "Removed" | "DispatchStarted" | "Queued" | "Backpressured" | "Running" | "HandlerStarted" | "HandlerDelivered" | "HandlerFailed" | "HandlerContinue" | "HandlerTransform" | "HandlerCancel" | "HandlerFail" | "Terminal" -> true
+            else -> false
+        }
+        "overflow" -> if value == {
+            "None" | "Block" | "DropNewest" | "DropOldest" -> true
+            else -> false
+        }
+        "failure" -> if value == {
+            "None" | "Handler" | "Panic" -> true
+            else -> false
+        }
+        "terminal" -> if value == {
+            "None" | "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded" | "Continue" | "Cancel" | "Fail" -> true
+            else -> false
+        }
+        else -> false
+    }
+}
+
+// Rust `integer`: only a protocol Int (already i64-bounded by the parser).
+fn debug_event_integer(object: [String: DataTree], key: String) -> Int DebugEventObservationError! {
+    if object.get(key) == .Val(value) {
+        if value == .Int(number) -> return Ok(number)
+    }
+    Err(debug_event_error("runtime event observation has invalid `{key}`"))
+}
+
+// Rust `unsigned`.
+fn debug_event_unsigned(object: [String: DataTree], key: String) -> Int DebugEventObservationError! {
+    value :: debug_event_integer(object, key) ?? return Err(err)
+    if value < 0 -> return Err(debug_event_error("runtime event observation has negative `{key}`"))
+    Ok(value)
+}
+
+// Rust `count`: -1 is the published "unavailable" count.
+fn debug_event_count(object: [String: DataTree], key: String) -> Int DebugEventObservationError! {
+    value :: debug_event_integer(object, key) ?? return Err(err)
+    if value < -1 -> return Err(debug_event_error("runtime event observation has invalid `{key}`"))
+    Ok(value)
+}
+
+// Rust `closed`.
+fn debug_event_closed(object: [String: DataTree], key: String) -> String DebugEventObservationError! {
+    if object.get(key) == .Val(value) {
+        if value == .Text(text) {
+            if !debug_event_allowed(key, text) -> return Err(debug_event_error("runtime event observation has unknown `{key}` value"))
+            return Ok(text)
+        }
+    }
+    Err(debug_event_error("runtime event observation has invalid `{key}`"))
+}

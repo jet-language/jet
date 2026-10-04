@@ -1,0 +1,979 @@
+// PORT-PENDING 2120 crates-jet-repl-src-historyplatform: crates/jet-repl/src/HistoryPlatform.rs:1-975
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Platform-secure storage backend for REPL history.
+//RS 
+//RS #[cfg(any(unix, windows))]
+//RS use super::render;
+//RS use std::io;
+//RS #[cfg(windows)]
+//RS use std::path::PathBuf;
+//RS 
+//RS #[cfg(unix)]
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS struct UnixOpenFlags {
+//RS     read_only: i32,
+//RS     write_only: i32,
+//RS     directory: i32,
+//RS     nofollow: i32,
+//RS     cloexec: i32,
+//RS     create: i32,
+//RS     excl: i32,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn flags_for_target(os: &str, arch: &str) -> Option<UnixOpenFlags> {
+//RS     const LINUX_BASE: UnixOpenFlags = UnixOpenFlags {
+//RS         read_only: 0,
+//RS         write_only: 1,
+//RS         directory: 0x1_0000,
+//RS         nofollow: 0x2_0000,
+//RS         cloexec: 0x8_0000,
+//RS         create: 0x40,
+//RS         excl: 0x80,
+//RS     };
+//RS     const LINUX_ASM_GENERIC: UnixOpenFlags = UnixOpenFlags {
+//RS         directory: 0x4000,
+//RS         nofollow: 0x8000,
+//RS         ..LINUX_BASE
+//RS     };
+//RS     const LINUX_MIPS: UnixOpenFlags = UnixOpenFlags {
+//RS         create: 0x100,
+//RS         excl: 0x400,
+//RS         ..LINUX_BASE
+//RS     };
+//RS     const LINUX_SPARC: UnixOpenFlags = UnixOpenFlags {
+//RS         cloexec: 0x40_0000,
+//RS         create: 0x200,
+//RS         excl: 0x800,
+//RS         ..LINUX_BASE
+//RS     };
+//RS     const ANDROID_RISCV64: UnixOpenFlags = UnixOpenFlags {
+//RS         directory: 0x20_0000,
+//RS         nofollow: 0x40_0000,
+//RS         ..LINUX_BASE
+//RS     };
+//RS     const BSD_BASE: UnixOpenFlags = UnixOpenFlags {
+//RS         read_only: 0,
+//RS         write_only: 1,
+//RS         directory: 0,
+//RS         nofollow: 0x100,
+//RS         cloexec: 0,
+//RS         create: 0x200,
+//RS         excl: 0x800,
+//RS     };
+//RS     const APPLE: UnixOpenFlags = UnixOpenFlags {
+//RS         directory: 0x10_0000,
+//RS         cloexec: 0x100_0000,
+//RS         ..BSD_BASE
+//RS     };
+//RS     const FREEBSD: UnixOpenFlags = UnixOpenFlags {
+//RS         directory: 0x2_0000,
+//RS         cloexec: 0x10_0000,
+//RS         ..BSD_BASE
+//RS     };
+//RS     const DRAGONFLY: UnixOpenFlags = UnixOpenFlags {
+//RS         directory: 0x800_0000,
+//RS         cloexec: 0x2_0000,
+//RS         ..BSD_BASE
+//RS     };
+//RS     const NETBSD: UnixOpenFlags = UnixOpenFlags {
+//RS         directory: 0x20_0000,
+//RS         cloexec: 0x40_0000,
+//RS         ..BSD_BASE
+//RS     };
+//RS     const OPENBSD: UnixOpenFlags = UnixOpenFlags {
+//RS         directory: 0x2_0000,
+//RS         cloexec: 0x1_0000,
+//RS         ..BSD_BASE
+//RS     };
+//RS 
+//RS     match (os, arch) {
+//RS         (
+//RS             "linux",
+//RS             "x86" | "x86_64" | "s390x" | "riscv32" | "riscv64" | "loongarch64" | "csky" | "hexagon",
+//RS         ) => Some(LINUX_BASE),
+//RS         ("linux", "arm" | "aarch64" | "powerpc" | "powerpc64" | "m68k") => Some(LINUX_ASM_GENERIC),
+//RS         ("linux", "mips" | "mips64") => Some(LINUX_MIPS),
+//RS         ("linux", "sparc" | "sparc64") => Some(LINUX_SPARC),
+//RS         ("android", "x86" | "x86_64") => Some(LINUX_BASE),
+//RS         ("android", "arm" | "aarch64") => Some(LINUX_ASM_GENERIC),
+//RS         ("android", "riscv64") => Some(ANDROID_RISCV64),
+//RS         ("macos" | "ios" | "tvos" | "watchos" | "visionos", _) => Some(APPLE),
+//RS         ("freebsd", _) => Some(FREEBSD),
+//RS         ("dragonfly", _) => Some(DRAGONFLY),
+//RS         ("netbsd", _) => Some(NETBSD),
+//RS         ("openbsd", _) => Some(OPENBSD),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn unix_open_flags() -> io::Result<UnixOpenFlags> {
+//RS     flags_for_target(std::env::consts::OS, std::env::consts::ARCH).ok_or_else(|| {
+//RS         io::Error::new(
+//RS             io::ErrorKind::Unsupported,
+//RS             format!(
+//RS                 "secure history storage is unsupported on {} {}",
+//RS                 std::env::consts::OS,
+//RS                 std::env::consts::ARCH
+//RS             ),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(all(test, unix))]
+//RS mod unix_flag_tests {
+//RS     use super::{flags_for_target, unix_open_flags, UnixOpenFlags};
+//RS 
+//RS     fn flags(os: &str, arch: &str) -> UnixOpenFlags {
+//RS         flags_for_target(os, arch).unwrap_or_else(|| panic!("missing ABI table for {os}/{arch}"))
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn selected_unix_open_flags_match_current_target_table() {
+//RS         assert_eq!(
+//RS             unix_open_flags().unwrap(),
+//RS             flags(std::env::consts::OS, std::env::consts::ARCH)
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn linux_and_android_open_flag_tables_cover_supported_arches() {
+//RS         let linux_base = UnixOpenFlags {
+//RS             read_only: 0,
+//RS             write_only: 1,
+//RS             directory: 0x1_0000,
+//RS             nofollow: 0x2_0000,
+//RS             cloexec: 0x8_0000,
+//RS             create: 0x40,
+//RS             excl: 0x80,
+//RS         };
+//RS         for arch in [
+//RS             "x86",
+//RS             "x86_64",
+//RS             "s390x",
+//RS             "riscv32",
+//RS             "riscv64",
+//RS             "loongarch64",
+//RS             "csky",
+//RS             "hexagon",
+//RS         ] {
+//RS             assert_eq!(flags("linux", arch), linux_base, "linux/{arch}");
+//RS         }
+//RS         let linux_asm_generic = UnixOpenFlags {
+//RS             directory: 0x4000,
+//RS             nofollow: 0x8000,
+//RS             ..linux_base
+//RS         };
+//RS         for arch in ["arm", "aarch64", "powerpc", "powerpc64", "m68k"] {
+//RS             assert_eq!(flags("linux", arch), linux_asm_generic, "linux/{arch}");
+//RS         }
+//RS         let linux_mips = UnixOpenFlags {
+//RS             create: 0x100,
+//RS             excl: 0x400,
+//RS             ..linux_base
+//RS         };
+//RS         for arch in ["mips", "mips64"] {
+//RS             assert_eq!(flags("linux", arch), linux_mips, "linux/{arch}");
+//RS         }
+//RS         let linux_sparc = UnixOpenFlags {
+//RS             cloexec: 0x40_0000,
+//RS             create: 0x200,
+//RS             excl: 0x800,
+//RS             ..linux_base
+//RS         };
+//RS         for arch in ["sparc", "sparc64"] {
+//RS             assert_eq!(flags("linux", arch), linux_sparc, "linux/{arch}");
+//RS         }
+//RS         for arch in ["x86", "x86_64"] {
+//RS             assert_eq!(flags("android", arch), linux_base, "android/{arch}");
+//RS         }
+//RS         for arch in ["arm", "aarch64"] {
+//RS             assert_eq!(flags("android", arch), linux_asm_generic, "android/{arch}");
+//RS         }
+//RS         assert_eq!(
+//RS             flags("android", "riscv64"),
+//RS             UnixOpenFlags {
+//RS                 directory: 0x20_0000,
+//RS                 nofollow: 0x40_0000,
+//RS                 ..linux_base
+//RS             }
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn darwin_and_bsd_open_flag_tables_cover_supported_targets() {
+//RS         let bsd_base = UnixOpenFlags {
+//RS             read_only: 0,
+//RS             write_only: 1,
+//RS             directory: 0,
+//RS             nofollow: 0x100,
+//RS             cloexec: 0,
+//RS             create: 0x200,
+//RS             excl: 0x800,
+//RS         };
+//RS         let apple = UnixOpenFlags {
+//RS             directory: 0x10_0000,
+//RS             cloexec: 0x100_0000,
+//RS             ..bsd_base
+//RS         };
+//RS         for os in ["macos", "ios", "tvos", "watchos", "visionos"] {
+//RS             assert_eq!(flags(os, "aarch64"), apple, "{os}/aarch64");
+//RS             assert_eq!(flags(os, "x86_64"), apple, "{os}/x86_64");
+//RS         }
+//RS         assert_eq!(
+//RS             flags("freebsd", "x86_64"),
+//RS             UnixOpenFlags {
+//RS                 directory: 0x2_0000,
+//RS                 cloexec: 0x10_0000,
+//RS                 ..bsd_base
+//RS             }
+//RS         );
+//RS         assert_eq!(
+//RS             flags("dragonfly", "x86_64"),
+//RS             UnixOpenFlags {
+//RS                 directory: 0x800_0000,
+//RS                 cloexec: 0x2_0000,
+//RS                 ..bsd_base
+//RS             }
+//RS         );
+//RS         assert_eq!(
+//RS             flags("netbsd", "x86_64"),
+//RS             UnixOpenFlags {
+//RS                 directory: 0x20_0000,
+//RS                 cloexec: 0x40_0000,
+//RS                 ..bsd_base
+//RS             }
+//RS         );
+//RS         assert_eq!(
+//RS             flags("openbsd", "x86_64"),
+//RS             UnixOpenFlags {
+//RS                 directory: 0x2_0000,
+//RS                 cloexec: 0x1_0000,
+//RS                 ..bsd_base
+//RS             }
+//RS         );
+//RS         assert!(flags_for_target("solaris", "x86_64").is_none());
+//RS         assert!(flags_for_target("linux", "unsupported-cpu").is_none());
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub(super) struct Backend {
+//RS     dir: std::fs::File,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub(super) struct BackendLock {
+//RS     file: std::fs::File,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS impl Drop for BackendLock {
+//RS     fn drop(&mut self) {
+//RS         use std::os::fd::AsRawFd;
+//RS         unsafe extern "C" {
+//RS             fn flock(fd: i32, operation: i32) -> i32;
+//RS         }
+//RS         const LOCK_UN: i32 = 8;
+//RS         let _ = unsafe { flock(self.file.as_raw_fd(), LOCK_UN) };
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS impl Backend {
+//RS     pub(super) fn open(root: &std::path::Path) -> io::Result<Self> {
+//RS         use std::ffi::{CString, OsStr};
+//RS         use std::os::fd::{AsRawFd, FromRawFd};
+//RS         use std::os::unix::ffi::OsStrExt;
+//RS         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+//RS         use std::path::Component;
+//RS 
+//RS         unsafe extern "C" {
+//RS             fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+//RS             fn mkdirat(dirfd: i32, pathname: *const i8, mode: u32) -> i32;
+//RS         }
+//RS         fn name(value: &OsStr) -> io::Result<CString> {
+//RS             CString::new(value.as_bytes())
+//RS                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in state path"))
+//RS         }
+//RS         fn descend(
+//RS             parent: &std::fs::File,
+//RS             part: &OsStr,
+//RS             create: bool,
+//RS         ) -> io::Result<std::fs::File> {
+//RS             let part = name(part)?;
+//RS             let abi = unix_open_flags()?;
+//RS             let flags = abi.read_only | abi.directory | abi.nofollow | abi.cloexec;
+//RS             let mut fd = unsafe { openat(parent.as_raw_fd(), part.as_ptr(), flags, 0) };
+//RS             if fd < 0 && create && io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
+//RS                 if unsafe { mkdirat(parent.as_raw_fd(), part.as_ptr(), 0o700) } != 0 {
+//RS                     let error = io::Error::last_os_error();
+//RS                     if error.kind() != io::ErrorKind::AlreadyExists {
+//RS                         return Err(error);
+//RS                     }
+//RS                 }
+//RS                 fd = unsafe { openat(parent.as_raw_fd(), part.as_ptr(), flags, 0) };
+//RS             }
+//RS             if fd < 0 {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+//RS         }
+//RS 
+//RS         let abi = unix_open_flags()?;
+//RS         if !root.is_absolute() {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "platform state directory is not absolute",
+//RS             ));
+//RS         }
+//RS         let mut current = std::fs::OpenOptions::new()
+//RS             .read(true)
+//RS             .custom_flags(abi.read_only | abi.directory | abi.nofollow | abi.cloexec)
+//RS             .open("/")?;
+//RS         for component in root.components() {
+//RS             match component {
+//RS                 Component::RootDir => {}
+//RS                 Component::Normal(part) => current = descend(&current, part, true)?,
+//RS                 _ => {
+//RS                     return Err(io::Error::new(
+//RS                         io::ErrorKind::InvalidInput,
+//RS                         "platform state path has a non-normal component",
+//RS                     ))
+//RS                 }
+//RS             }
+//RS         }
+//RS         let dir = descend(&current, OsStr::new("jet"), true)?;
+//RS         dir.set_permissions(std::fs::Permissions::from_mode(0o700))?;
+//RS         Ok(Self { dir })
+//RS     }
+//RS 
+//RS     pub(super) fn lock(&self) -> io::Result<BackendLock> {
+//RS         use std::os::fd::AsRawFd;
+//RS         use std::time::{Duration, Instant};
+//RS         unsafe extern "C" {
+//RS             fn flock(fd: i32, operation: i32) -> i32;
+//RS         }
+//RS         const LOCK_EX: i32 = 2;
+//RS         const LOCK_NB: i32 = 4;
+//RS         let file = self.dir.try_clone()?;
+//RS         let deadline = Instant::now() + Duration::from_secs(2);
+//RS         loop {
+//RS             if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
+//RS                 return Ok(BackendLock { file });
+//RS             }
+//RS             if Instant::now() >= deadline {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::TimedOut,
+//RS                     "history transaction lock timed out after 2 seconds",
+//RS                 ));
+//RS             }
+//RS             std::thread::sleep(Duration::from_millis(10));
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn read(&self) -> io::Result<Option<Vec<u8>>> {
+//RS         use std::ffi::CString;
+//RS         use std::io::Read;
+//RS         use std::os::fd::{AsRawFd, FromRawFd};
+//RS         use std::os::unix::fs::{MetadataExt, PermissionsExt};
+//RS         unsafe extern "C" {
+//RS             fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+//RS         }
+//RS         let abi = unix_open_flags()?;
+//RS         let name = CString::new("repl-history").unwrap();
+//RS         let fd = unsafe {
+//RS             openat(
+//RS                 self.dir.as_raw_fd(),
+//RS                 name.as_ptr(),
+//RS                 abi.read_only | abi.nofollow | abi.cloexec,
+//RS                 0,
+//RS             )
+//RS         };
+//RS         if fd < 0 {
+//RS             let error = io::Error::last_os_error();
+//RS             return if error.kind() == io::ErrorKind::NotFound {
+//RS                 Ok(None)
+//RS             } else {
+//RS                 Err(error)
+//RS             };
+//RS         }
+//RS         let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+//RS         let metadata = file.metadata()?;
+//RS         if !metadata.is_file() || metadata.nlink() != 1 {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::PermissionDenied,
+//RS                 "history object is linked or not a regular file",
+//RS             ));
+//RS         }
+//RS         file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+//RS         let mut bytes = Vec::new();
+//RS         file.read_to_end(&mut bytes)?;
+//RS         Ok(Some(bytes))
+//RS     }
+//RS 
+//RS     pub(super) fn rewrite(&self, entries: &[String]) -> io::Result<()> {
+//RS         use std::ffi::CString;
+//RS         use std::io::Write;
+//RS         use std::os::fd::{AsRawFd, FromRawFd};
+//RS         use std::sync::atomic::{AtomicU64, Ordering};
+//RS         static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
+//RS         unsafe extern "C" {
+//RS             fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+//RS             fn renameat(olddirfd: i32, old: *const i8, newdirfd: i32, new: *const i8) -> i32;
+//RS             fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
+//RS             fn fsync(fd: i32) -> i32;
+//RS         }
+//RS         let abi = unix_open_flags()?;
+//RS         let temp = CString::new(format!(
+//RS             ".repl-history.{}.{}.tmp",
+//RS             std::process::id(),
+//RS             NEXT_TMP.fetch_add(1, Ordering::Relaxed)
+//RS         ))
+//RS         .unwrap();
+//RS         let destination = CString::new("repl-history").unwrap();
+//RS         let fd = unsafe {
+//RS             openat(
+//RS                 self.dir.as_raw_fd(),
+//RS                 temp.as_ptr(),
+//RS                 abi.write_only | abi.create | abi.excl | abi.nofollow | abi.cloexec,
+//RS                 0o600,
+//RS             )
+//RS         };
+//RS         if fd < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+//RS         let result = (|| {
+//RS             file.write_all(&render(entries))?;
+//RS             file.sync_all()?;
+//RS             if unsafe {
+//RS                 renameat(
+//RS                     self.dir.as_raw_fd(),
+//RS                     temp.as_ptr(),
+//RS                     self.dir.as_raw_fd(),
+//RS                     destination.as_ptr(),
+//RS                 )
+//RS             } != 0
+//RS             {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             if unsafe { fsync(self.dir.as_raw_fd()) } != 0 {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             Ok(())
+//RS         })();
+//RS         if result.is_err() {
+//RS             let _ = unsafe { unlinkat(self.dir.as_raw_fd(), temp.as_ptr(), 0) };
+//RS         }
+//RS         result
+//RS     }
+//RS 
+//RS     pub(super) fn clear(&self) -> io::Result<()> {
+//RS         use std::ffi::CString;
+//RS         use std::os::fd::AsRawFd;
+//RS         unsafe extern "C" {
+//RS             fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
+//RS             fn fsync(fd: i32) -> i32;
+//RS         }
+//RS         let name = CString::new("repl-history").unwrap();
+//RS         if unsafe { unlinkat(self.dir.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+//RS             let error = io::Error::last_os_error();
+//RS             if error.kind() != io::ErrorKind::NotFound {
+//RS                 return Err(error);
+//RS             }
+//RS         }
+//RS         if unsafe { fsync(self.dir.as_raw_fd()) } != 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS pub(super) struct Backend {
+//RS     dir: PathBuf,
+//RS     dir_file: std::fs::File,
+//RS     dir_final: String,
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS pub(super) struct BackendLock {
+//RS     file: std::fs::File,
+//RS     overlapped: WindowsOverlapped,
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS impl Drop for BackendLock {
+//RS     fn drop(&mut self) {
+//RS         use std::ffi::c_void;
+//RS         use std::os::windows::io::AsRawHandle;
+//RS         unsafe extern "system" {
+//RS             fn UnlockFileEx(
+//RS                 file: *mut c_void,
+//RS                 reserved: u32,
+//RS                 bytes_low: u32,
+//RS                 bytes_high: u32,
+//RS                 overlapped: *mut WindowsOverlapped,
+//RS             ) -> i32;
+//RS         }
+//RS         let _ = unsafe { UnlockFileEx(self.file.as_raw_handle(), 0, 1, 0, &mut self.overlapped) };
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS #[repr(C)]
+//RS struct WindowsOverlapped {
+//RS     internal: usize,
+//RS     internal_high: usize,
+//RS     offset: u32,
+//RS     offset_high: u32,
+//RS     event: *mut std::ffi::c_void,
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS impl WindowsOverlapped {
+//RS     fn zeroed() -> Self {
+//RS         Self {
+//RS             internal: 0,
+//RS             internal_high: 0,
+//RS             offset: 0,
+//RS             offset_high: 0,
+//RS             event: std::ptr::null_mut(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS impl Backend {
+//RS     pub(super) fn open(root: &std::path::Path) -> io::Result<Self> {
+//RS         use std::path::Component;
+//RS         if !root.is_absolute() {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "state path is not absolute",
+//RS             ));
+//RS         }
+//RS         let mut current = PathBuf::new();
+//RS         for component in root.components() {
+//RS             match component {
+//RS                 Component::Prefix(_) | Component::RootDir => current.push(component.as_os_str()),
+//RS                 Component::Normal(part) => {
+//RS                     current.push(part);
+//RS                     if current.exists() {
+//RS                         reject_windows_reparse(&current, true)?;
+//RS                     } else {
+//RS                         std::fs::create_dir(&current)?;
+//RS                         reject_windows_reparse(&current, true)?;
+//RS                     }
+//RS                 }
+//RS                 _ => {
+//RS                     return Err(io::Error::new(
+//RS                         io::ErrorKind::InvalidInput,
+//RS                         "non-normal state path",
+//RS                     ))
+//RS                 }
+//RS             }
+//RS         }
+//RS         current.push("jet");
+//RS         if current.exists() {
+//RS             reject_windows_reparse(&current, true)?;
+//RS         } else {
+//RS             std::fs::create_dir(&current)?;
+//RS             reject_windows_reparse(&current, true)?;
+//RS         }
+//RS         use std::os::windows::fs::OpenOptionsExt;
+//RS         const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+//RS         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+//RS         let dir_file = std::fs::OpenOptions::new()
+//RS             .read(true)
+//RS             .write(true)
+//RS             .access_mode(0x8000_0000 | 0x4000_0000)
+//RS             .share_mode(0x0000_0007)
+//RS             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+//RS             .open(&current)?;
+//RS         let dir_final = windows_final_path(&dir_file)?;
+//RS         Ok(Self {
+//RS             dir: current,
+//RS             dir_file,
+//RS             dir_final,
+//RS         })
+//RS     }
+//RS 
+//RS     fn verify(&self) -> io::Result<()> {
+//RS         use std::os::windows::fs::OpenOptionsExt;
+//RS         const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+//RS         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+//RS         reject_windows_reparse(&self.dir, true)?;
+//RS         let current = std::fs::OpenOptions::new()
+//RS             .read(true)
+//RS             .share_mode(0x0000_0007)
+//RS             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+//RS             .open(&self.dir)?;
+//RS         if windows_final_path(&current)? != self.dir_final {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::PermissionDenied,
+//RS                 "state directory identity changed",
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(super) fn lock(&self) -> io::Result<BackendLock> {
+//RS         use std::ffi::c_void;
+//RS         use std::os::windows::fs::OpenOptionsExt;
+//RS         use std::os::windows::io::AsRawHandle;
+//RS         use std::time::{Duration, Instant};
+//RS         unsafe extern "system" {
+//RS             fn LockFileEx(
+//RS                 file: *mut c_void,
+//RS                 flags: u32,
+//RS                 reserved: u32,
+//RS                 bytes_low: u32,
+//RS                 bytes_high: u32,
+//RS                 overlapped: *mut WindowsOverlapped,
+//RS             ) -> i32;
+//RS         }
+//RS         const LOCKFILE_FAIL_IMMEDIATELY: u32 = 1;
+//RS         const LOCKFILE_EXCLUSIVE_LOCK: u32 = 2;
+//RS         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+//RS         self.verify()?;
+//RS         let path = self.dir.join(".repl-history.lock");
+//RS         let file = std::fs::OpenOptions::new()
+//RS             .read(true)
+//RS             .write(true)
+//RS             .create(true)
+//RS             .share_mode(0x0000_0007)
+//RS             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+//RS             .open(&path)?;
+//RS         reject_windows_reparse(&path, false)?;
+//RS         self.verify_child(&file)?;
+//RS         let mut overlapped = WindowsOverlapped::zeroed();
+//RS         let deadline = Instant::now() + Duration::from_secs(2);
+//RS         loop {
+//RS             overlapped = WindowsOverlapped::zeroed();
+//RS             if unsafe {
+//RS                 LockFileEx(
+//RS                     file.as_raw_handle(),
+//RS                     LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+//RS                     0,
+//RS                     1,
+//RS                     0,
+//RS                     &mut overlapped,
+//RS                 )
+//RS             } != 0
+//RS             {
+//RS                 return Ok(BackendLock { file, overlapped });
+//RS             }
+//RS             if Instant::now() >= deadline {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::TimedOut,
+//RS                     "history transaction lock timed out after 2 seconds",
+//RS                 ));
+//RS             }
+//RS             std::thread::sleep(Duration::from_millis(10));
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn read(&self) -> io::Result<Option<Vec<u8>>> {
+//RS         use std::io::Read;
+//RS         use std::os::windows::fs::OpenOptionsExt;
+//RS         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+//RS         self.verify()?;
+//RS         let path = self.dir.join("repl-history");
+//RS         if !path.exists() {
+//RS             return Ok(None);
+//RS         }
+//RS         reject_windows_reparse(&path, false)?;
+//RS         let mut file = std::fs::OpenOptions::new()
+//RS             .read(true)
+//RS             .share_mode(0x0000_0007)
+//RS             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+//RS             .open(path)?;
+//RS         self.verify_child(&file)?;
+//RS         let mut bytes = Vec::new();
+//RS         file.read_to_end(&mut bytes)?;
+//RS         Ok(Some(bytes))
+//RS     }
+//RS 
+//RS     pub(super) fn rewrite(&self, entries: &[String]) -> io::Result<()> {
+//RS         use std::ffi::c_void;
+//RS         use std::io::Write;
+//RS         use std::os::windows::ffi::OsStrExt;
+//RS         use std::os::windows::fs::OpenOptionsExt;
+//RS         use std::os::windows::io::AsRawHandle;
+//RS         use std::sync::atomic::{AtomicU64, Ordering};
+//RS         static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
+//RS         self.verify()?;
+//RS         let temp = self.dir.join(format!(
+//RS             ".repl-history.{}.{}.tmp",
+//RS             std::process::id(),
+//RS             NEXT_TMP.fetch_add(1, Ordering::Relaxed)
+//RS         ));
+//RS         const GENERIC_WRITE: u32 = 0x4000_0000;
+//RS         const DELETE: u32 = 0x0001_0000;
+//RS         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+//RS         let mut file = std::fs::OpenOptions::new()
+//RS             .write(true)
+//RS             .create_new(true)
+//RS             .access_mode(GENERIC_WRITE | DELETE)
+//RS             .share_mode(0x0000_0007)
+//RS             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+//RS             .open(&temp)?;
+//RS         self.verify_child(&file)?;
+//RS         file.write_all(&render(entries))?;
+//RS         file.sync_all()?;
+//RS         reject_windows_reparse(&temp, false)?;
+//RS         const FILE_RENAME_INFO_CLASS: i32 = 3;
+//RS         #[repr(C)]
+//RS         struct FileRenameInfo {
+//RS             replace_if_exists: i32,
+//RS             root_directory: *mut c_void,
+//RS             file_name_length: u32,
+//RS             file_name: [u16; 1],
+//RS         }
+//RS         unsafe extern "system" {
+//RS             fn SetFileInformationByHandle(
+//RS                 file: *mut c_void,
+//RS                 class: i32,
+//RS                 info: *mut c_void,
+//RS                 size: u32,
+//RS             ) -> i32;
+//RS             fn FlushFileBuffers(file: *mut c_void) -> i32;
+//RS         }
+//RS         let file_name = std::ffi::OsStr::new("repl-history")
+//RS             .encode_wide()
+//RS             .collect::<Vec<_>>();
+//RS         let name_bytes = file_name.len() * std::mem::size_of::<u16>();
+//RS         let size = std::mem::size_of::<FileRenameInfo>() + name_bytes.saturating_sub(2);
+//RS         let mut buffer = vec![0u64; size.div_ceil(std::mem::size_of::<u64>())];
+//RS         let info = buffer.as_mut_ptr().cast::<FileRenameInfo>();
+//RS         unsafe {
+//RS             (*info).replace_if_exists = 1;
+//RS             (*info).root_directory = self.dir_file.as_raw_handle();
+//RS             (*info).file_name_length = name_bytes as u32;
+//RS             std::ptr::copy_nonoverlapping(
+//RS                 file_name.as_ptr(),
+//RS                 (*info).file_name.as_mut_ptr(),
+//RS                 file_name.len(),
+//RS             );
+//RS         }
+//RS         if unsafe {
+//RS             SetFileInformationByHandle(
+//RS                 file.as_raw_handle(),
+//RS                 FILE_RENAME_INFO_CLASS,
+//RS                 buffer.as_mut_ptr().cast(),
+//RS                 size as u32,
+//RS             )
+//RS         } == 0
+//RS         {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         if unsafe { FlushFileBuffers(self.dir_file.as_raw_handle()) } == 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(super) fn clear(&self) -> io::Result<()> {
+//RS         use std::ffi::c_void;
+//RS         use std::os::windows::fs::OpenOptionsExt;
+//RS         use std::os::windows::io::AsRawHandle;
+//RS         const DELETE: u32 = 0x0001_0000;
+//RS         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+//RS         const FILE_DISPOSITION_INFO_CLASS: i32 = 4;
+//RS         #[repr(C)]
+//RS         struct FileDispositionInfo {
+//RS             delete_file: u8,
+//RS         }
+//RS         unsafe extern "system" {
+//RS             fn SetFileInformationByHandle(
+//RS                 file: *mut c_void,
+//RS                 class: i32,
+//RS                 info: *mut c_void,
+//RS                 size: u32,
+//RS             ) -> i32;
+//RS         }
+//RS         self.verify()?;
+//RS         let path = self.dir.join("repl-history");
+//RS         let file = match std::fs::OpenOptions::new()
+//RS             .write(true)
+//RS             .access_mode(DELETE)
+//RS             .share_mode(0x0000_0007)
+//RS             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+//RS             .open(path)
+//RS         {
+//RS             Ok(file) => file,
+//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+//RS             Err(error) => return Err(error),
+//RS         };
+//RS         self.verify_child(&file)?;
+//RS         let mut disposition = FileDispositionInfo { delete_file: 1 };
+//RS         if unsafe {
+//RS             SetFileInformationByHandle(
+//RS                 file.as_raw_handle(),
+//RS                 FILE_DISPOSITION_INFO_CLASS,
+//RS                 (&mut disposition as *mut FileDispositionInfo).cast(),
+//RS                 std::mem::size_of::<FileDispositionInfo>() as u32,
+//RS             )
+//RS         } == 0
+//RS         {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn verify_child(&self, file: &std::fs::File) -> io::Result<()> {
+//RS         let child = windows_final_path(file)?;
+//RS         let parent = child
+//RS             .rsplit_once(['\\', '/'])
+//RS             .map(|(parent, _)| parent)
+//RS             .unwrap_or("");
+//RS         if parent.trim_end_matches(['\\', '/']) != self.dir_final.trim_end_matches(['\\', '/']) {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::PermissionDenied,
+//RS                 "history object escaped held state directory",
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS fn windows_final_path(file: &std::fs::File) -> io::Result<String> {
+//RS     use std::ffi::c_void;
+//RS     use std::os::windows::io::AsRawHandle;
+//RS     unsafe extern "system" {
+//RS         fn GetFinalPathNameByHandleW(
+//RS             file: *mut c_void,
+//RS             path: *mut u16,
+//RS             path_len: u32,
+//RS             flags: u32,
+//RS         ) -> u32;
+//RS     }
+//RS     let needed =
+//RS         unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0) };
+//RS     if needed == 0 {
+//RS         return Err(io::Error::last_os_error());
+//RS     }
+//RS     let mut buffer = vec![0u16; needed as usize];
+//RS     let written = unsafe {
+//RS         GetFinalPathNameByHandleW(
+//RS             file.as_raw_handle(),
+//RS             buffer.as_mut_ptr(),
+//RS             buffer.len() as u32,
+//RS             0,
+//RS         )
+//RS     };
+//RS     if written == 0 || written as usize >= buffer.len() {
+//RS         return Err(io::Error::last_os_error());
+//RS     }
+//RS     buffer.truncate(written as usize);
+//RS     Ok(String::from_utf16_lossy(&buffer).to_lowercase())
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS fn reject_windows_reparse(path: &std::path::Path, directory: bool) -> io::Result<()> {
+//RS     use std::ffi::c_void;
+//RS     use std::os::windows::ffi::OsStrExt;
+//RS     type Handle = *mut c_void;
+//RS     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+//RS     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+//RS     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+//RS     const INVALID_HANDLE_VALUE: Handle = -1isize as Handle;
+//RS     unsafe extern "system" {
+//RS         fn CreateFileW(
+//RS             name: *const u16,
+//RS             access: u32,
+//RS             share: u32,
+//RS             security: *mut c_void,
+//RS             creation: u32,
+//RS             flags: u32,
+//RS             template: Handle,
+//RS         ) -> Handle;
+//RS         fn GetFileAttributesW(name: *const u16) -> u32;
+//RS         fn CloseHandle(handle: Handle) -> i32;
+//RS     }
+//RS     let wide = path
+//RS         .as_os_str()
+//RS         .encode_wide()
+//RS         .chain(Some(0))
+//RS         .collect::<Vec<_>>();
+//RS     let attrs = unsafe { GetFileAttributesW(wide.as_ptr()) };
+//RS     if attrs == u32::MAX || attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::PermissionDenied,
+//RS             "state path contains a Windows reparse point",
+//RS         ));
+//RS     }
+//RS     let flags = FILE_FLAG_OPEN_REPARSE_POINT
+//RS         | if directory {
+//RS             FILE_FLAG_BACKUP_SEMANTICS
+//RS         } else {
+//RS             0
+//RS         };
+//RS     let handle = unsafe {
+//RS         CreateFileW(
+//RS             wide.as_ptr(),
+//RS             0x8000_0000,
+//RS             0x0000_0007,
+//RS             std::ptr::null_mut(),
+//RS             3,
+//RS             flags,
+//RS             std::ptr::null_mut(),
+//RS         )
+//RS     };
+//RS     if handle == INVALID_HANDLE_VALUE {
+//RS         return Err(io::Error::last_os_error());
+//RS     }
+//RS     let _ = unsafe { CloseHandle(handle) };
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(all(not(unix), not(windows)))]
+//RS pub(super) struct Backend;
+//RS 
+//RS #[cfg(all(not(unix), not(windows)))]
+//RS pub(super) struct BackendLock;
+//RS 
+//RS #[cfg(all(not(unix), not(windows)))]
+//RS impl Backend {
+//RS     pub(super) fn open(_root: &std::path::Path) -> io::Result<Self> {
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::Unsupported,
+//RS             "secure history storage is unsupported on this platform",
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn lock(&self) -> io::Result<BackendLock> {
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::Unsupported,
+//RS             "history unavailable",
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn read(&self) -> io::Result<Option<Vec<u8>>> {
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::Unsupported,
+//RS             "history unavailable",
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn rewrite(&self, _entries: &[String]) -> io::Result<()> {
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::Unsupported,
+//RS             "history unavailable",
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn clear(&self) -> io::Result<()> {
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::Unsupported,
+//RS             "history unavailable",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2120 crates/jet-repl/src/HistoryPlatform.rs:1-975
+

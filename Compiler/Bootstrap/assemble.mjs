@@ -32,6 +32,8 @@ const sourceRoots = [
   "Compiler/JetEval/Source",
   "Compiler/JetDriver/Source",
   "Compiler/JetCli/Source",
+  "Compiler/JetLSP/Source",
+  "Compiler/JetLSP/Tests",
   "Compiler/Bootstrap",
 ];
 const excludedSourceRoots = [
@@ -73,21 +75,22 @@ async function jetFilesUnder(directory) {
 // packages they depend on with `use <package>.[names]`. The aggregate unit is
 // one namespace, so those imports are blanked to spaces of the same length:
 // every byte offset and line in the source map still matches the original.
-// Files in different packages may also repeat one single-line Core import
-// (`use core.math as math`); inside one unit the repeat is a duplicate import
-// name (E0105), so every repeat after the first is blanked the same way.
-const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.\[[^\]]*\]/gm;
-const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
+// Files in different packages may repeat single-line Core aliases or selected
+// names. Inside one unit, an import whose bindings are already present is an
+// E0105 duplicate, so blank it without changing source-map bytes or lines.
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|jet_lsp|jet_repl|jet_semindex|jet_canvas|compiler_bootstrap)\.\[[^\]]*\]/gm;
+const CORE_IMPORT = /^use core\.(?:[^\[\n]*|[^\[\n]*\[[^\]\n]*\][ \t]*)$/gm;
 const seenCoreImports = new Set();
 const blank = (block) => block.replace(/[^\n]/g, " ");
 function blankPackageImports(text) {
   return text.replace(PACKAGE_IMPORT, blank).replace(CORE_IMPORT, (line) => {
-    const key = line.trimEnd();
-    if (!seenCoreImports.has(key)) {
-      seenCoreImports.add(key);
-      return line;
-    }
-    return blank(line);
+    const selected = /^use (core\.[A-Za-z0-9_.]+)\.\[([^\]]*)\]\s*$/.exec(line);
+    const keys = selected
+      ? selected[2].split(",").map((name) => name.trim()).filter(Boolean).map((name) => `${selected[1]}.${name}`)
+      : [line.trimEnd()];
+    const duplicate = keys.length > 0 && keys.every((key) => seenCoreImports.has(key));
+    for (const key of keys) seenCoreImports.add(key);
+    return duplicate ? blank(line) : line;
   });
 }
 
