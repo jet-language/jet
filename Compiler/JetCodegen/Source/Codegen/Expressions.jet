@@ -4988,7 +4988,14 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, expression: TExpr) -> MIR
             loop index < args.len() {
                 widen := false
                 if index < widen_to_vec.len() -> widen = widen_to_vec[index]
-                &lowered_args.push(jet_codegen_lower_core_call_arg(&builder, args[index], index, canonical_record, widen))
+                lowered := jet_codegen_lower_core_call_arg(&builder, args[index], index, canonical_record, widen)
+                // An owned exact Int crosses a Core runtime ABI as a checked
+                // I64 (`jet_std_math_ldexp(x: f64, exp: i64)`): passing the
+                // JetInt carrier is a rustc E0308.
+                if index < canonical_record.signature.borrow_mask.len() && !canonical_record.signature.borrow_mask[index] {
+                    lowered.value = jet_codegen_builtin_native_int(&builder, lowered.value, args[index].ty, args[index].span)
+                }
+                &lowered_args.push(lowered)
                 index += 1
             }
             lowered_types := [MIRType]{}
