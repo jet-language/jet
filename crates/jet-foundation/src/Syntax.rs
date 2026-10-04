@@ -299,9 +299,9 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // existing function surface. `--show-default` selects the stock behavior.
 // D-CMD-OVERRIDE1=C (card #1451) remains the older test-suite API detail.
 // D-JOB-NAME1=A (ratified 2026-08-05, card #1448) adds no token: the marker
-// and every command use `job`. Canonical CLI is `jet run <entry> -- <name>`
-// and `jet jobs`. Retired spellings have no alias or fallback. Help,
-// completions, diagnostics, docs, examples, and tests use the same word.
+// and every command use `job`. D-JET-VERBS1=A runs project jobs as `jet <name>`;
+// `jet run <entry> -- <name>` runs the explicit entry and `jet jobs` lists jobs.
+// Help, completions, diagnostics, docs, examples, and tests use the same word.
 // KW_JOB / JOB_SCOPE_VARIANTS live in math_layout and are re-exported here.
 // EFFECT_ARROW_OPEN/CLOSE (`-[` / `]>`) add effect ceilings. The unified
 // arrow selects dispatch/guard values, yields finite-loop items, and marks a

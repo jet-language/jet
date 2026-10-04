@@ -13,6 +13,8 @@ use jet_driver.[
     jet_driver_explain_code,
 ]
 use jet_foundation.[
+    JET_CLI_COMMANDS,
+    JET_CLI_HANDLERS,
     Diagnostic,
     diagnostic_explanation,
     diagnostic_from_registry,
@@ -488,6 +490,10 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         return jet_cli_fail("E2102", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2102"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)
     }
 
+    if command == "jobs" && args.len() > 1 && !jet_argv.contains("--graph") && !jet_argv.contains("--status") && !jet_argv.contains("--explain") && !jet_cli_has(jet_argv, "--watch") {
+        name :: args[1]
+        return jet_cli_fail("E2101", "`jet jobs {name}` no longer runs a job", jet_cli_why("E2101"), "run `jet {name}`; `jet jobs` lists jobs", color, JET_DRIVER_EXIT_USAGE)
+    }
     if command == {
         "help" -> {
             order :: jet_cli_help_order(jet_argv)

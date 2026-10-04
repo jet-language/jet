@@ -6652,15 +6652,14 @@ man pages, and completions advertise only canonical grouped spellings.
 **D-JPK-TASKRUN1=A — named entries are `#Job fn`**: a job is an ordinary Jet
 function marked `#Job`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-job dependency is a plain
-function call, no separate DAG syntax. Invoked canonically with
-`jet run <entry> -- <name>`; Jetpack has no code-execution bridge for named jobs;
-environment commands use `jetpack use`.
-`run`, `dev`, `build`, and `test` remain reserved lifecycle verb names a job
-cannot reuse.
+function call, no separate DAG syntax. Invoke with `jet <name>` in a project
+or `jet run <entry> -- <name>` for an explicit entry. Jetpack has no
+code-execution bridge for named jobs; environment commands use `jetpack use`.
+Every registered Jet command name is reserved against jobs (D-JET-VERBS1=A).
 
 **D-JOB-NAME1=A — one word for named auxiliary entries** *(ratified
 2026-08-05, card #1448)*: the marker and every command use `job`. The
-canonical CLI is `jet run <entry> -- <name>` and `jet jobs`; retired spellings
+canonical CLI is `jet <name>`, `jet run <entry> -- <name>`, and `jet jobs` for listing; retired spellings
 have no alias or fallback. Help, completions, diagnostics, docs, examples, and
 tests use the same vocabulary.
 
@@ -6670,29 +6669,35 @@ its `#Job` functions through one canonical subcommand table. Bare `#Job` and
 available in dev and release binaries; `#Job(.Internal)` jobs are dev-only.
 The first program word selects a job before the ordinary `fn run` CLI parser;
 `jet run <entry> -- <name> [args…]` uses the same selection. Job names are
-reserved only as D-JOB-NAMES1=A lists, and two jobs may not collide at one scope.
+reserved by the shared command registry (D-JET-VERBS1=A), and two jobs may not collide at one scope.
 `.Internal` jobs remain callable from code and schedulers, never from argv.
 There are no flag aliases, and a release binary reports non-shipped jobs as
 unknown commands.
 
-**D-JOB-ARGV1=A — the job owns every word after its name** *(ratified
-2026-09-28, card #3684; amends D-DX-JOBS-UX1=E)*: in `jet jobs [jet flags]
-<name> [job args…]` the first positional word after `jobs` is the job name,
-and every later word goes to the job unchanged, flags included. Jet's own
-flags (`--interpret`, `--release`, `--explain`, `-p <member>`) come before the
-name. A `--` written right after the name is the same separator and is
-accepted; any later `--` reaches the job verbatim. `jet run <entry> -- <name>
-…` is unchanged. The owner's note to spell the command `job` is an open
-question on card #3684; the command word is the one `JOBS_COMMAND` row in
-`crates/jet-cli/src/CLI.rs`.
+**D-JET-VERBS1=A — project jobs are top-level CLI verbs** *(ratified
+2026-10-04, card #4140; amends D-DX-JOBS-UX1=E, D-JOB-ARGV1=A, and
+D-JOB-NAMES1=A)*: `jet X` resolves a registered command, then a visible job
+from parsed project source, then a retired/moved spelling's teaching error,
+then a source path, then `jet-X` on PATH. An unknown word reports E2101
+with did-you-mean over commands and jobs. Outside a project the job step is
+skipped. A job beats a same-named folder or matching `X.jet`; `jet run X`
+still selects the path, and a word ending in `.jet` always selects a file.
+`.Internal` jobs never reach argv.
 
-**D-JOB-NAMES1=A — reserve only real collisions** *(ratified 2026-09-28, card
-#3684; amends D-JOB-SUBCMD1=C)*: a `#Job fn` may not be named `run`, `dev`,
-`build`, or `test` (the lifecycle entries) or `help` and `version` (answered
-by a built program's own parser). Every other name, including Jet command
-words such as `serve`, `lint`, `seed`, `fmt`, `clean`, `watch`, and `release`,
-is an ordinary job name. E0928 reports a reserved name and two jobs with one
-name in one scope.
+In `jet [jet flags] <name> [job args…]`, every word after the job name is
+forwarded unchanged, including flags. Jet flags such as `--interpret`,
+`--release`, and `-p <member>` precede the name. A `--` immediately after
+the name is the optional separator; a later `--` reaches the job verbatim.
+`jet run <entry> -- <name> …` and built-program job dispatch use the same
+checked namespace and arguments.
+
+`jet jobs` lists jobs. Its `--graph`, `--status`, `--explain`, and `--watch`
+views remain; `jet jobs <name>` without a view is a teaching error naming
+`jet <name>`, never an alias. E0928 rejects a job named like any registered
+Jet command or a duplicate job name in one scope. Sema reads the same
+command table as help; adding a command therefore diagnoses an existing
+same-named job on the next build. Retired words are not reserved.
+
 
 **D-JOB-ENV1=A — environment is set on each launched command** *(ratified
 2026-09-28, card #3684)*: no new syntax. A job sets a variable on the command

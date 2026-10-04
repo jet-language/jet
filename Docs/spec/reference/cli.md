@@ -9,12 +9,32 @@ target/debug/jet help
 ```
 
 and the command table in
-[`Compiler/JetCli/Source/Cli/Commands.jet`](../../../Compiler/JetCli/Source/Cli/Commands.jet).
-The Rust host's copy in
-[`crates/jet-cli/src/CLI.rs`](../../../crates/jet-cli/src/CLI.rs) is held
-equal to it by `node Compiler/Bootstrap/check-command-table.mjs`. Run
-`jet help <command>` for the complete options for one command; do not infer an
+[`Compiler/JetFoundation/Source/Registry/CLICommands.jet`](../../../Compiler/JetFoundation/Source/Registry/CLICommands.jet).
+The Rust host keeps commands in
+[`crates/jet-foundation/src/CLICommands.rs`](../../../crates/jet-foundation/src/CLICommands.rs)
+and flags in `crates/jet-cli/src/CLI.rs`; `node Compiler/Bootstrap/check-command-table.mjs` compares the assembled tables.
+Run `jet help <command>` for the complete options for one command; do not infer an
 option from an older guide.
+
+## Project jobs
+
+Write a named chore as `#Job fn deploy(region: String) { … }`, then run
+`jet deploy --region eu`. Jet flags come before the job name:
+`jet --interpret deploy --region eu`. Every word after the name belongs to
+the job; a separator immediately after the name is optional.
+
+Lookup is commands, visible project jobs, retired/moved spelling diagnostics,
+source paths, then `jet-X` on PATH. Jobs cannot reuse any command in the
+shared command table (E0928); retired words are not reserved. A job wins over
+a same-named folder, matching `.jet` file, or PATH program. A word ending in
+`.jet` always names a file, and `jet run deploy` explicitly runs a path.
+`.Internal` jobs cannot be selected from argv. Outside a project the job
+lookup is skipped. Unknown words report E2101 and suggest commands and jobs.
+
+`jet jobs` lists jobs; its `--graph`, `--status`, `--explain`, and `--watch`
+views remain available. `jet jobs deploy` is an error teaching `jet deploy`,
+not an alias. `jet run <entry> -- deploy` and `<built-program> deploy` use
+the same checked job dispatch.
 
 ## Root command index
 
@@ -48,7 +68,7 @@ jet image [args]                     Build a declared container image
 jet eval <file.jet|expression>       Evaluate pure Jet and print the value (`--json` for JSON)
 jet init [args]                      Create package settings in this directory
 jet repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
-jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]] List, inspect, watch, or run named project jobs
+jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>] List, inspect, or watch named project jobs
 jet budget [args]                    check performance limits or update baselines
 jet audit [args]                     Inspect implicit copies, exercised memory witnesses, or dependencies
 jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>] Create a desktop or game application bundle

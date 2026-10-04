@@ -13,7 +13,7 @@ commands=(
         'merge:Merge Jet programs without losing code structure'
         'review:Review meaning, authority, and proof changes'
         'run:Run a program or project'
-        'jobs:List, inspect, watch, or run named project jobs'
+        'jobs:List, inspect, or watch named project jobs'
         'generate:Run an explicit source generator with authority and a receipt'
         'check:Check code without creating a binary'
         'fill:Propose checked code for typed goals'
@@ -304,7 +304,6 @@ flags=(
     )
 if (( CURRENT == 2 )); then
 _describe -t commands 'command' commands
-elif (( CURRENT == 3 && $words[2] == jobs )); then
         local -a job_names
 job_names=("${(@f)$(jet --json jobs 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')}")
 _describe -t job_names 'job' job_names

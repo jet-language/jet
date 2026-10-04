@@ -881,7 +881,7 @@ fn lsp_mcp_environment_resources_are_read_only() {
 "#,
     )
     .unwrap();
-    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint_all() {}\n").unwrap();
 
     let root_uri = format!("file://{}", project.path.display());
     let mut child = Command::new(jet_bin())
@@ -934,7 +934,7 @@ fn lsp_mcp_environment_resources_are_read_only() {
     assert!(read.contains("fixture"), "read: {read}");
     assert!(read.contains("generated.txt"), "read: {read}");
     assert!(read.contains("HOME"), "read: {read}");
-    assert!(read.contains("lint"), "read: {read}");
+    assert!(read.contains("lint_all"), "read: {read}");
     assert!(
         !read.contains("/test/home"),
         "resource leaked a variable value: {read}"

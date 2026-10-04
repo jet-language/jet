@@ -10,8 +10,8 @@
 //! facts and writes one checked `EverySchedule` projection onto the marker.
 //! Runtime consumers read that projection; they never parse source suffixes.
 //!
-//! D-JOB-NAMES1=A also lives here: a `#Job fn` must not take a reserved name,
-//! `run`/`dev`/`build`/`test`/`help`/`version` (E0928).
+//! D-JET-VERBS1=A also lives here: a `#Job fn` must not take any name in
+//! the registered Jet command table (E0928).
 //!
 //! I3: this module only decides; codegen never reads `Func::every` at all —
 //! a `#Job`/`#Every` function generates as an ordinary fn.
@@ -172,14 +172,12 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
     )
 }
 
-/// E0928: `#Job fn` took a reserved name (D-JOB-NAMES1=A).
+/// E0928: a job clashes with a registered command (D-JET-VERBS1=A).
 fn e0928_reserved_job_name(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0928",
         format!("`{name}` is reserved by Jet's command line"),
-        "`run`, `dev`, `build`, and `test` name Jet's lifecycle entries, and a built program \
-         answers `help` and `version` itself"
-            .to_string(),
+        format!("`{name}` is a Jet command; top-level jobs must have distinct names"),
         format!("rename the job, e.g. `#Job fn {name}_all()`"),
         Some(span),
     )
@@ -194,19 +192,18 @@ fn e0928_job_collision(name: &str, scope: JobScope, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0928",
         format!("job `{name}` is declared more than once in scope .{scope}"),
-        format!("`jet jobs {name}` must select exactly one function"),
+        format!("`jet {name}` must select exactly one function"),
         "rename one of the jobs, or give the declarations different scopes".to_string(),
         Some(span),
     )
 }
 
-/// D-JOB-NAMES1=A: reject `#Job fn run|dev|build|test|help|version`. Called
-/// alongside the `#Every` value check during registration.
+/// D-JET-VERBS1=A: the same registry drives help and job-name reservation.
 pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
     if !f.is_job {
         return Vec::new();
     }
-    if Syntax::JOB_RESERVED_NAMES.contains(&f.name.as_str()) {
+    if jet_foundation::CLICommands::is_command_name(&f.name) {
         let span = f.job_span.unwrap_or(f.name_span);
         return vec![e0928_reserved_job_name(&f.name, span)];
     }
