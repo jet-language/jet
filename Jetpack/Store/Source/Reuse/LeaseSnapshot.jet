@@ -154,7 +154,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
         store_seal_local_output(snapshot_root)
         store_fsync_tree(lease_root)
         sealed_digest = pkg_try_output_hash_of(snapshot_root) ?? return Err(StoreError.Other(err.message()))
-        store_open_snapshot_files(snapshot_root, snapshot_root, &lease_files)
+        lease_files = store_open_snapshot_files(snapshot_root, snapshot_root)
     }
     snapshot_dir :: store_reuse_hold_directory(snapshot_root)
     projections :: if projection_index == {
@@ -272,16 +272,24 @@ fn store_reuse_binding_for(bindings: [NixProjectionBinding], source: String) -> 
     None
 }
 
-// Open every regular file of the snapshot below `path`. Links stay links
-// (the archive law already bounds them); a path outside `root` is refused
-// before it is inspected.
-pub fn store_open_snapshot_files(root: String, path: String, opened: &[SnapshotFile]) StoreError! {
+// Return opened handles for every regular file of the snapshot below `path`.
+// Links stay links (the archive law already bounds them); a path outside
+// `root` is refused before it is inspected.
+pub fn store_open_snapshot_files(root: String, path: String) -> [SnapshotFile] StoreError! {
+    opened := [SnapshotFile]{}
+    store_collect_snapshot_files(root, path, &opened)
+    Ok(opened)
+}
+
+// One traversal shares its handle accumulator; recursive nodes do not create
+// intermediate result lists.
+fn store_collect_snapshot_files(root: String, path: String, opened: &[SnapshotFile]) StoreError! {
     relative :: store_path_strip_prefix(path, root) ?? return Err(StoreError.InvalidInput("snapshot path `{path}` is outside snapshot root `{root}`"))
     info :: files.stat(path)
     if info.is_symlink -> return
     if info.is_dir {
         entries :: files.list_dir(path)
-        loop entry in entries -> store_open_snapshot_files(root, entry.path, &opened)
+        loop entry in entries -> store_collect_snapshot_files(root, entry.path, &opened)
         return
     }
     file :: files.open(path)

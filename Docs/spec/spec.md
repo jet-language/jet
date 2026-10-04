@@ -911,6 +911,17 @@ value entering an owning destination is materialized automatically. A bare
 `#Policy(copies: .Explicit)` require an explicit `~` copy or an owning `^`
 contract (D-MEM1, D-MEM-COPYSEM1).
 
+Public Jet APIs return newly computed answers (D-OUTPUT-RETURNS1=A). Use one
+value, tuple, or named struct for multiple results, including trait requirements
+and callback contracts. Do not make callers initialize a dummy `&T` merely to
+receive an answer. This is an API-review rule, not a syntax prohibition.
+Keep `&` for genuine edits, stateful handles, accumulation, reusable capacity,
+checked byte readers and fixed storage, streams/writers, and raw foreign
+signatures. A buffer's capacity can be an input even when its prior bytes are
+not. Private helpers and compiler-generated machine destinations remain internal
+choices; source returns do not guarantee copy elision or allocation avoidance.
+Those performance claims require exercised proof.
+
 ```jet
 fn bump(n: &Int) { n += 1 }
 fn archive(name: ^String) -> String { name }
