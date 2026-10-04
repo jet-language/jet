@@ -215,6 +215,10 @@ pub struct JetRustEmitContext {
     // Lowest `visiting` index a cycle assumption reached in the current
     // derive-capability frame; JET_RUST_EMIT_NO_CYCLE_FLOOR when none.
     pub derive_capability_cycle_floor: Int
+    // Keys ("trait:type id") of closed rows found capable only under a cycle
+    // assumption on a frame still open; each is cached once that frame
+    // settles capable, and dropped when it settles incapable.
+    pub derive_capability_pending: [String]
     // Function id keys of impl methods whose free function body is not
     // emitted: printed natively inside their impl (derived Equatable and
     // Comparable) or owned by an undemanded derived codec impl
@@ -1056,6 +1060,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         prelude_call_last: prelude_call_last,
         derive_capability_cache: [String:Bool]{},
         derive_capability_cycle_floor: JET_RUST_EMIT_NO_CYCLE_FLOOR,
+        derive_capability_pending: [String]{},
         skipped_methods: [String:Bool]{},
         move_facts: jet_rust_emit_empty_move_facts(),
         ref_bindings: jet_rust_emit_empty_ref_bindings(),

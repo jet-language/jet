@@ -975,13 +975,19 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             }
             // A closed row's answer depends on the row alone: `false` means an
             // incapable leaf is reachable, and `true` is final once no cycle
-            // assumption above this frame was used.
+            // assumption above this frame was used. A `true` that used such an
+            // assumption waits in `derive_capability_pending` until the frame
+            // it assumed settles: every frame between returned `true`, so a
+            // capable settled frame proves them all (a greatest fixed point);
+            // an incapable one drops them. Without this, every row of a
+            // recursive type family re-expanded the whole family per query.
             cacheable :: args.len() == 0 && ctx.program.types[row].generic_params.len() == 0 && bindings.len() == 0 && generic_params.len() == 0
             cache_key :: "{trait_name}:{jet_rust_emit_id_key(row_id.value)}"
             if cacheable {
                 if ctx.derive_capability_cache.get(cache_key) == .Val(cached) -> return cached
             }
             depth :: visiting.len()
+            pending_start :: ctx.derive_capability_pending.len()
             outer_floor :: ctx.derive_capability_cycle_floor
             ctx.derive_capability_cycle_floor = JET_RUST_EMIT_NO_CYCLE_FLOOR
             next_bindings := bindings
@@ -1027,6 +1033,17 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             floor :: ctx.derive_capability_cycle_floor
             if outer_floor < floor -> ctx.derive_capability_cycle_floor = outer_floor
             if cacheable && (!result || floor >= depth) -> ctx.derive_capability_cache[cache_key] = result
+            if !result {
+                loop ctx.derive_capability_pending.len() > pending_start -> _ := &ctx.derive_capability_pending.pop()
+            } else if floor >= depth {
+                loop ctx.derive_capability_pending.len() > pending_start {
+                    settled :: ctx.derive_capability_pending[ctx.derive_capability_pending.len() - 1]
+                    ctx.derive_capability_cache[settled] = true
+                    _ := &ctx.derive_capability_pending.pop()
+                }
+            } else if cacheable {
+                &ctx.derive_capability_pending.push(cache_key)
+            }
             result
         }
     }
@@ -1320,7 +1337,12 @@ fn jet_rust_emit_columnar_field_capability(ctx: &JetRustEmitContext, definition:
     generic_params := [String]{}
     loop parameter in definition.generic_params -> &generic_params.push(parameter.name)
     visiting := [MIRTypeID]{definition.id}
-    jet_rust_emit_type_derive_capability(&ctx, field.ty, trait_name, &visiting, [String:MIRType]{}, generic_params)
+    // The definition is assumed, never settled, by this query: a capability
+    // still waiting on that assumption is dropped, never cached.
+    pending_start :: ctx.derive_capability_pending.len()
+    capable :: jet_rust_emit_type_derive_capability(&ctx, field.ty, trait_name, &visiting, [String:MIRType]{}, generic_params)
+    loop ctx.derive_capability_pending.len() > pending_start -> _ := &ctx.derive_capability_pending.pop()
+    capable
 }
 
 fn jet_rust_emit_columnar_impl_generics(ctx: &JetRustEmitContext, params: [MIRGenericParam]) -> String Never! {

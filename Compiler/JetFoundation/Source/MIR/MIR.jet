@@ -75,7 +75,11 @@ pub struct MIRSiteID { pub value: U64 }
 // on process hash seeds, allocation order, or a backend's naming scheme.
 pub fn stable_id(namespace: String, identity: String) -> U64 Never! {
     prime :: U64{0x100000001b3}
-    hash := U64{0xcbf29ce484222325}
+    // The FNV-1a offset basis 0xcbf29ce484222325, built from two halves that
+    // each fit an Int literal: a wider literal is parsed from its decimal
+    // text on every call, which dominated this function.
+    high :: U64{0xcbf29ce4}
+    hash := high.wrapping_mul(U64{0x100000000}) ~| U64{0x84222325}
     loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
     hash = hash.wrapping_mul(prime)
     loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)

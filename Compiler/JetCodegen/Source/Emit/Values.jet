@@ -1130,7 +1130,11 @@ fn jet_rust_emit_inspected_transfer(ctx: &JetRustEmitContext, function: MIRFunct
     if jet_rust_emit_value_slot_read(ctx, function, value) -> return false
     used := false
     loop user in jet_rust_emit_value_users(ctx, function, value) {
-        if user.instruction < 0 -> return false
+        if user.instruction < 0 {
+            if !jet_rust_emit_switch_subject_use(function, user, value) -> return false
+            used = true
+            next
+        }
         operation :: function.blocks[user.block].instructions[user.instruction].operation
         inspects :: if operation == {
             .EnumIs(subject, _, _) -> subject == value
@@ -1148,6 +1152,21 @@ fn jet_rust_emit_inspected_transfer(ctx: &JetRustEmitContext, function: MIRFunct
         used = true
     }
     used && jet_rust_emit_immutable_read_place(&ctx, function, value) != None
+}
+
+// MIRRust emit_switch: a Switch terminator renders only its arm conditions;
+// its subject is carried for facts only, so naming the subject reads no slot.
+// A value that is an arm condition too is read there.
+fn jet_rust_emit_switch_subject_use(function: MIRFunction, user: JetRustEmitUse, value: MIRValueID) -> Bool Never! {
+    if user.instruction >= 0 -> return false
+    if function.blocks[user.block].terminator == .Switch(subject, arms, _) {
+        if subject != value -> return false
+        loop arm in arms {
+            if arm.condition == value -> return false
+        }
+        return true
+    }
+    false
 }
 
 // MIRRust STM_TYPE: the root transaction guard (`Stm`).
@@ -1890,7 +1909,11 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
     used := false
     place_receivers_only := true
     loop user in jet_rust_emit_value_users(ctx, function, value) {
-        if user.instruction < 0 -> return false
+        if user.instruction < 0 {
+            if !jet_rust_emit_switch_subject_use(function, user, value) -> return false
+            used = true
+            next
+        }
         operation :: function.blocks[user.block].instructions[user.instruction].operation
         used = true
         transfer :: function.blocks[user.block].instructions[user.instruction].result
