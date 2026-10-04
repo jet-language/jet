@@ -525,9 +525,7 @@ fn plan_eviction_inner<I: RecordIndexRetention>(
 
 /// The identity a consent and capture receipt are bound to.  A complete
 /// identity carries both the live lineage and the record-index key.  The
-/// three-field `new` constructor remains a compatibility shorthand for
-/// callers that only have a live lineage; adapters creating a receipt should
-/// use `exact`.
+/// seven-field `exact` constructor requires both identities explicitly.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CaptureIdentity {
     pub target_inputs_sha256: String,
@@ -540,22 +538,6 @@ pub struct CaptureIdentity {
 }
 
 impl CaptureIdentity {
-    pub fn new(
-        session_id: impl Into<String>,
-        source_id: impl Into<String>,
-        build_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            target_inputs_sha256: String::new(),
-            tool_version: String::new(),
-            engine: String::new(),
-            session_id: session_id.into(),
-            source_id: source_id.into(),
-            revision: String::new(),
-            build_id: build_id.into(),
-        }
-    }
-
     /// Construct the complete identity required by a recorded receipt.
     pub fn exact(
         target_inputs_sha256: impl Into<String>,
