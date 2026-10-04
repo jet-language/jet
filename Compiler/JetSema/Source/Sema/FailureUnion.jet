@@ -4,14 +4,18 @@
 // `solve_inferred_failure` (Sema/mod.rs).
 //
 // Every body check records what reaches the function's default `Err` route
-// (`SemaCheckContext.failure_union_*`). After the first check of the bundle,
+// (`SemaCheckContext.failure_union_*`). After the one check of the bundle,
 // the rows of the unannotated top-level functions are joined over their call
 // edges (least fixed point). Function-owned cases (`Err(.NotFound(n))`) are
 // minted into a closed `#Error enum` named after the function (`find` gives
 // `FindError`), and every function whose set holds a typed member is projected
 // onto `T (A | B)!` with no written span. Functions the #3708 solve proved
-// infallible are projected onto `T Never!`. The bundle is then checked again,
-// so the real check, every caller and lowering read the one projected contract.
+// infallible are projected onto `T Never!`. A union contract changes what its
+// callers check against, so the modules that declare or reference one are
+// checked again (`sema_failure_recheck_modules`); a `T Never!` projection is
+// reconciled onto the bodies already checked, as the Rust reference does
+// (`sema_failure_reconcile_infallible`; lowering reads a callee's plain return
+// against the `Result` carrier its call site names, #3740).
 use jet_foundation.[
     Call,
     CallLabel,
@@ -332,9 +336,9 @@ fn sema_failure_function_row(graph: SemaRegistrationGraph, module_index: Int, fu
 // type every later check and lowering read. Rows are replaced in place, and
 // the declaring modules and every import binding are walked once for the
 // whole batch (Rust `solve_inferred_failure` projection), not once per
-// function. Returns whether any contract was projected.
-fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [SemaFailureProjection]) -> Bool {
-    if projections.len() == 0 -> return false
+// function.
+fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [SemaFailureProjection]) {
+    if projections.len() == 0 -> return
     // Projected key -> its new symbol and item; "{module}|{key}" and
     // "{module}|{name}" -> the key, for the rows of its declaring module.
     symbols := [String:Symbol]{}
@@ -402,13 +406,22 @@ fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [Sem
             }
         }
     }
-    true
+}
+
+// The union contracts one bundle projected: their function keys, the
+// modules whose declarations changed (a projected function's or a minted
+// `#Error enum`'s declaring module), and whether any type was minted.
+pub struct SemaFailureUnionProjected {
+    pub keys: [String]
+    pub modules: [Int]
+    pub minted: Bool
 }
 
 // D-FAIL-INFER-UNION1=A: join the default-route rows of the unannotated
 // top-level functions, mint their own cases and project every set that holds
-// a typed member. Returns whether any contract was projected.
-pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool {
+// a typed member.
+pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> SemaFailureUnionProjected {
+    projected := SemaFailureUnionProjected{keys: [String]{}, modules: [Int]{}, minted: false}
     rows := [SemaFailureUnionRow]{}
     loop module_result in modules {
         module_index :: sema_registration_module_index(graph, module_result.module_identity) ?? next
@@ -418,10 +431,12 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
             &rows.push(SemaFailureUnionRow{key: ~facts.function_key, name: ~declaration.name, module_index: module_index, members: ~facts.union_members, general: facts.union_general, edges: ~facts.union_edges, cases: ~facts.union_cases, declaration: declaration})
         }
     }
-    if rows.len() == 0 -> return false
+    if rows.len() == 0 -> return projected
     loop row_index in 0..<rows.len() {
         minted :: sema_failure_union_mint(&graph, rows[row_index], &diagnostics) ?? next
         &rows[row_index].members.push(minted)
+        &projected.modules.push(rows[row_index].module_index)
+        projected.minted = true
     }
     // Edge targets resolve through one key -> row map (the last row of a key,
     // as the per-edge scan found), not a scan of every row per edge.
@@ -476,15 +491,19 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
         if row.general || !settled -> &members.push(Type.Named{name: "Err"})
         contract :: Type.Result{ok: sema_failure_union_success(row.declaration), err: sema_failure_union_canonical(members)}
         &projections.push(SemaFailureProjection{key: row.key, module_index: row.module_index, row: function_row, return_type: contract})
+        &projected.keys.push(row.key)
+        &projected.modules.push(row.module_index)
     }
     sema_failure_project_returns(&graph, projections)
+    projected
 }
 
 // #3708 (card item T1): every function the failure solve proved infallible is
 // projected onto the `T Never!` carrier with no written span, which every
 // tier lowers as a plain return. A function a compile-time evaluation already
-// checked keeps its carrier, so its cached callers stay consistent.
-pub fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], comptime_functions: [SemaComptimeFunctionResult]) -> Bool {
+// checked keeps its carrier, so its cached callers stay consistent. Returns
+// the projected keys.
+pub fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], comptime_functions: [SemaComptimeFunctionResult]) -> [String] {
     // The keys compile-time evaluation reached, collected once.
     comptime_reached := [String:Bool]{}
     loop result in comptime_functions {
@@ -501,4 +520,5 @@ pub fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [S
         }
     }
     sema_failure_project_returns(&graph, projections)
+    loop projection in projections -> projection.key
 }
