@@ -296,6 +296,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // error. Nameable so a query function can annotate its connection
         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.
         | "DBConnection" | "DBScope" | "DBPool" | "DBLease" | "DBPoolReceipt" | "DBError"
+        | "PluginFrame" | "PluginFault" | "PluginLimit" | "PluginError"
         | "DBValue"
         // only constructable part of the host grant value.
         | "Mod" | "ModGrant"
@@ -3751,6 +3752,16 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             "read".to_string(),
             Type::List(Box::new(Type::String)),
         )]),
+        "PluginFrame" => Some(vec![
+            ("function".to_string(), Type::String),
+            ("module".to_string(), Type::String),
+            ("offset".to_string(), Type::Int),
+        ]),
+        "PluginFault" => Some(vec![
+            ("export".to_string(), Type::String),
+            ("message".to_string(), Type::String),
+            ("frames".to_string(), Type::List(Box::new(Type::Named("PluginFrame".to_string())))),
+        ]),
         // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: explicit terminal
         // controls use named fields so misspellings fail in sema.
         "TerminalSize" => Some(vec![
@@ -4258,6 +4269,29 @@ pub(crate) fn core_generic_constructable_fields(
         }
         _ => None,
     }
+}
+
+pub(crate) fn core_plugin_variants(enum_name: &str) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    let span = Span::new(0, 0);
+    let mut variants = std::collections::HashMap::new();
+    match enum_name {
+        "PluginLimit" => {
+            for name in ["Fuel", "Memory", "Table", "Time", "Wire"] {
+                variants.insert(name.to_string(), (span, VariantPayload::Unit));
+            }
+        }
+        "PluginError" => {
+            for name in ["Guest", "Denied", "Defect"] {
+                variants.insert(name.to_string(), (span, VariantPayload::Single(Type::Named("PluginFault".to_string()), span)));
+            }
+            variants.insert("Budget".to_string(), (span, VariantPayload::Named(vec![
+                VariantField { name: "limit".to_string(), name_span: span, ty: Type::Named("PluginLimit".to_string()), ty_span: span },
+                VariantField { name: "fault".to_string(), name_span: span, ty: Type::Named("PluginFault".to_string()), ty_span: span },
+            ])));
+        }
+        _ => return None,
+    }
+    Some(variants)
 }
 
 /// D-EMAIL-SMTP-SURFACE1=A: closed ungated email policy and error enums.

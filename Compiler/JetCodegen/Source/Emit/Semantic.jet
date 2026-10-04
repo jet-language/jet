@@ -9,6 +9,10 @@ use jet_foundation.[
     MIRBinaryPatternPart,
     MIRCallArg,
     MIRCoreClosureKind,
+    MIRComponentSignatureDescriptor,
+    MIRComponentTypeDescriptor,
+    MIRComponentTypeField,
+    MIRField,
     MIRFunction,
     MIRGCEditKind,
     MIRGCEditSiteID,
@@ -908,4 +912,144 @@ fn jet_rust_emit_typed_text_interp(ctx: &JetRustEmitContext, function: MIRFuncti
     }
     symbol :: if kind == MIRTypedHeadKind.SQL -> "{jet_rust_emit_prelude_symbol(&ctx, call)}::<{ctx.config.root_prefix}jet_std::DBValue>" else -> jet_rust_emit_prelude_symbol(&ctx, call)
     "{symbol}({args.join(", ")})"
+}
+
+// D-PLUGIN-FAILURE1=A: marshal checked Component shapes; error policy stays
+// in the shared plugin_wire and Wasmtime host, not in this emitter.
+fn jet_rust_emit_plugin_type(ctx: &JetRustEmitContext, source: MIRType) -> MIRType Never! {
+    if source.kind == {
+        .InlineRange(inner, _, _) | .Tagged(_, inner) -> return jet_rust_emit_plugin_type(&ctx, inner)
+        .Apply(name, _) -> {
+            row :: jet_rust_emit_type_index(ctx, name.id) ?? return source
+            if ctx.program.types[row].kind == .Alias(target) -> return jet_rust_emit_plugin_type(&ctx, target)
+        }
+        else -> {}
+    }
+    source
+}
+
+fn jet_rust_emit_plugin_record_fields(ctx: &JetRustEmitContext, source: MIRType) -> [MIRField] Never! {
+    ty :: jet_rust_emit_plugin_type(&ctx, source)
+    if ty.kind == .Apply(name, _) {
+        row :: jet_rust_emit_type_index(ctx, name.id) ?? panic("checked plugin record has no MIR type row")
+        if ctx.program.types[row].kind == .Struct(fields, _) -> return fields
+    }
+    panic("checked plugin record has a non-record MIR carrier")
+}
+
+fn jet_rust_emit_plugin_field(fields: [MIRField], field: MIRComponentTypeField) -> MIRField Never! {
+    if field.index < 0 || field.index >= fields.len() -> panic("checked Component field index is outside its record")
+    fields[field.index]
+}
+
+fn jet_rust_emit_plugin_inner(ty: MIRType) -> MIRType Never! {
+    if ty.kind == {
+        .List(inner) | .FixedList(inner, _) | .Option(inner) -> return inner
+        else -> panic("checked Component aggregate has the wrong MIR carrier")
+    }
+}
+
+fn jet_rust_emit_plugin_encode(ctx: &JetRustEmitContext, descriptor: MIRComponentTypeDescriptor, source: MIRType, value: String, depth: Int) -> String Never! {
+    wire :: "{ctx.config.root_prefix}jet_std::plugin_wire::PluginValue"
+    ty :: jet_rust_emit_plugin_type(&ctx, source)
+    item :: "__jet_plugin_item_{depth}"
+    if descriptor == {
+        .Int -> return "{wire}::Int({ctx.config.root_prefix}jet_std::jet_int_owned_to_i64(&({value})).expect(\"plugin Int exceeds i64 wire range\"))"
+        .Float -> return "{wire}::Float(({value}) as f64)"
+        .Bool -> return "{wire}::Bool({value})"
+        .String -> return "{wire}::Text({value})"
+        .List(inner) -> {
+            child_ty :: jet_rust_emit_plugin_inner(ty)
+            child :: jet_rust_emit_plugin_encode(&ctx, inner, child_ty, item, depth + 1)
+            iterator :: if jet_rust_emit_is_columnar_type(&ctx, child_ty) -> "({value}).to_aos().into_iter()" else -> "({value}).into_iter()"
+            return "{wire}::List({iterator}.map(|{item}| {child}).collect())"
+        }
+        .Option(inner) -> {
+            child :: jet_rust_emit_plugin_encode(&ctx, inner, jet_rust_emit_plugin_inner(ty), item, depth + 1)
+            return "match ({value}) {{ Ok({item}) => {wire}::Option(Some(Box::new({child}))), Err(_) => {wire}::Option(None) }}"
+        }
+        .Result(ok, err) -> {
+            if ty.kind == .Result(ok_ty, err_ty) {
+                good :: jet_rust_emit_plugin_encode(&ctx, ok, ok_ty, item, depth + 1)
+                bad :: jet_rust_emit_plugin_encode(&ctx, err, err_ty, item, depth + 1)
+                return "match ({value}) {{ Ok({item}) => {wire}::ResultOk(Some(Box::new({good}))), Err({item}) => {wire}::ResultErr(Some(Box::new({bad}))) }}"
+            }
+        }
+        .Record(_, component_fields) -> {
+            declared :: jet_rust_emit_plugin_record_fields(&ctx, ty)
+            entries := [String]{}
+            loop component_field in component_fields {
+                field :: jet_rust_emit_plugin_field(declared, component_field)
+                child :: jet_rust_emit_plugin_encode(&ctx, component_field.ty, field.ty, "{item}.{jet_rust_emit_field_name(&ctx, field.id)}", depth + 1)
+                &entries.push("({jet_rust_emit_quote(component_field.name)}.to_string(), {child})")
+            }
+            return "{{ let {item} = ({value}); {wire}::Record(vec![{entries.join(", ")}]) }}"
+        }
+    }
+    panic("checked Component descriptor disagrees with its MIR carrier")
+}
+
+fn jet_rust_emit_plugin_decode(ctx: &JetRustEmitContext, descriptor: MIRComponentTypeDescriptor, source: MIRType, value: String, depth: Int) -> String Never! {
+    wire :: "{ctx.config.root_prefix}jet_std::plugin_wire::PluginValue"
+    ty :: jet_rust_emit_plugin_type(&ctx, source)
+    item :: "__jet_plugin_item_{depth}"
+    wrong :: "Err(\"plugin returned a value with the wrong Component shape\".to_string())"
+    if descriptor == {
+        .Int -> return "match ({value}) {{ {wire}::Int(value) => Ok({ctx.config.root_prefix}jet_std::jet_int_owned_from_i64(value)), _ => {wrong} }}"
+        .Float -> return "match ({value}) {{ {wire}::Float(value) => Ok(value), _ => {wrong} }}"
+        .Bool -> return "match ({value}) {{ {wire}::Bool(value) => Ok(value), _ => {wrong} }}"
+        .String -> return "match ({value}) {{ {wire}::Text(value) => Ok(value), _ => {wrong} }}"
+        .List(inner) -> {
+            child_ty :: jet_rust_emit_plugin_inner(ty)
+            child :: jet_rust_emit_plugin_decode(&ctx, inner, child_ty, item, depth + 1)
+            child_rust :: jet_rust_emit_type(&ctx, child_ty)
+            converted := "Ok(items)"
+            if ty.kind == .FixedList(_, _) -> converted = "items.try_into().map_err(|_| \"plugin returned a list with the wrong length\".to_string())"
+            if ty.kind == .List(element) && jet_rust_emit_is_columnar_type(&ctx, element) -> converted = "Ok(<{jet_rust_emit_type(&ctx, ty)}>::from_aos(items))"
+            return "match ({value}) {{ {wire}::List(values) => {{ let items: Result<Vec<{child_rust}>, String> = values.into_iter().map(|{item}| {child}).collect(); items.and_then(|items| {converted}) }}, _ => {wrong} }}"
+        }
+        .Option(inner) -> {
+            child :: jet_rust_emit_plugin_decode(&ctx, inner, jet_rust_emit_plugin_inner(ty), item, depth + 1)
+            return "match ({value}) {{ {wire}::Option(None) => Ok(Err({ctx.config.root_prefix}JetAbsent)), {wire}::Option(Some({item})) => ({child}).map(Ok), _ => {wrong} }}"
+        }
+        .Result(ok, err) -> {
+            if ty.kind == .Result(ok_ty, err_ty) {
+                good :: jet_rust_emit_plugin_decode(&ctx, ok, ok_ty, item, depth + 1)
+                bad :: jet_rust_emit_plugin_decode(&ctx, err, err_ty, item, depth + 1)
+                return "match ({value}) {{ {wire}::ResultOk(Some({item})) => ({good}).map(Ok), {wire}::ResultErr(Some({item})) => ({bad}).map(Err), _ => {wrong} }}"
+            }
+        }
+        .Record(_, component_fields) -> {
+            declared :: jet_rust_emit_plugin_record_fields(&ctx, ty)
+            statements := [String]{}
+            assignments := [String]{}
+            loop component_field in component_fields {
+                field :: jet_rust_emit_plugin_field(declared, component_field)
+                local :: "{item}_{component_field.index}"
+                name :: jet_rust_emit_quote(component_field.name)
+                child :: jet_rust_emit_plugin_decode(&ctx, component_field.ty, field.ty, local, depth + 1)
+                &statements.push("let {local} = match fields.iter().position(|(name, _)| name == {name}) {{ Some(index) => fields.swap_remove(index).1, None => return Err(\"plugin returned a record missing a field\".to_string()) }}; let {local} = ({child})?;")
+                &assignments.push("{jet_rust_emit_field_name(&ctx, field.id)}: {local}")
+            }
+            loop field in declared {
+                if field.skip && !field.computed -> &assignments.push("{jet_rust_emit_field_name(&ctx, field.id)}: Default::default()")
+            }
+            return "match ({value}) {{ {wire}::Record(mut fields) => {{ {statements.join(" ")} if !fields.is_empty() {{ return Err(\"plugin returned a record with unexpected fields\".to_string()); }} Ok({jet_rust_emit_type(&ctx, ty)} {{ {assignments.join(", ")} }}) }}, _ => {wrong} }}"
+        }
+    }
+    panic("checked Component descriptor disagrees with its MIR carrier")
+}
+
+fn jet_rust_emit_plugin_invoke(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, handle: MIRValueID, export_name: String, signature: MIRComponentSignatureDescriptor, args: [MIRValueID], result: MIRValueID?) -> String Never! {
+    if args.len() != signature.params.len() -> panic("checked plugin signature and arguments disagree")
+    result_id :: result ?? panic("checked plugin invocation has no result")
+    result_ty :: jet_rust_emit_value_type(ctx, function, result_id)
+    success :: if result_ty.kind == .Result(ok, _) -> ok else -> panic("checked plugin invocation is not a Result")
+    wire :: "{ctx.config.root_prefix}jet_std::plugin_wire::"
+    params := [String]{}
+    loop (index, arg) in args -> &params.push(jet_rust_emit_plugin_encode(&ctx, signature.params[index], jet_rust_emit_value_type(ctx, function, arg), jet_rust_emit_value_owned(ctx, function, arg), 0))
+    name :: jet_rust_emit_quote(export_name)
+    emitted :: jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{"({jet_rust_emit_value_owned(ctx, function, handle)}).handle", name, "&__jet_plugin_params_wire"})
+    decoded :: jet_rust_emit_plugin_decode(&ctx, signature.result, success, "__jet_plugin_value", 0)
+    "{{ let __jet_plugin_params = vec![{params.join(", ")}]; let __jet_plugin_params_wire = {wire}plugin_encode_params(&__jet_plugin_params); let __jet_plugin_wire = {emitted}; match {wire}plugin_decode_result(&__jet_plugin_wire) {{ Ok(__jet_plugin_value) => (|__jet_plugin_value: {wire}PluginValue| -> Result<{jet_rust_emit_type(&ctx, success)}, String> {{ {decoded} }})(__jet_plugin_value).map_err(|message| {wire}PluginError::defect({name}, message)), Err(error) => Err(error) }} }}"
 }

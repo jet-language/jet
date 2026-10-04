@@ -783,9 +783,15 @@ The failure envelope records which budget was actually consumed; a guest
 memory/table request is not relabeled as fuel exhaustion, and an oversized
 wire is rejected before an unbounded host encoding. A call trap is classified
 as user/guest failure, denied authority, budget exhaustion, or internal host
-defect from typed boundary state, not by parsing backend error text. The
-wire keeps the original Jet operation and exported call name and remains the
-transport envelope; no public `Plugin` error type is added.
+defect from typed boundary state, not by parsing backend error text.
+D-PLUGIN-FAILURE1=A carries that cause as `core.plugin.PluginError`, with the
+export name, original display message, and up to 32 innermost-first Wasm frames.
+Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. Frames
+locate the function by name (empty without a name section), module and offset;
+debug-file/line loading is intentionally outside this transport. Failures before
+guest execution carry no frames. A failed load leaves a handle whose first call
+returns the load fault with export `load`, without stopping unrelated host work.
+The existing failure journey records the host call site when the caller uses `?`.
 
 Handles and Wasmtime stores are owner-thread state. Cross-thread use and
 unload of an active call are rejected by the existing handle boundary, and

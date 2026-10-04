@@ -2846,6 +2846,31 @@ function rustIOVariantFamilies(source, constants) {
   ];
 }
 
+// D-PLUGIN-FAILURE1=A: read fault payloads from the Rust checker table.
+function rustPluginVariantFamilies(source, constants) {
+  const body = rustFunctionBody(source, "core_plugin_variants", CORE_TYPES_RS_PATH);
+  const families = [];
+  for (const arm of body.matchAll(/"(\w+)" => \{([\s\S]*?)\n        \}/g)) {
+    const rows = [];
+    const menu = /for name in \[([^\]]*)\] \{([\s\S]*?)\n            \}/.exec(arm[2]);
+    if (!menu) throw new Error(CORE_TYPES_RS_PATH + ": plugin variant menu changed shape");
+    const names = Array.from(menu[1].matchAll(/"([^"]*)"/g), (match) => match[1]);
+    const single = /VariantPayload::Single\(([\s\S]*?), span\)/.exec(menu[2]);
+    const payload = single ? [rustPayloadType(single[1], constants, CORE_TYPES_RS_PATH)] : [];
+    if (!single && !menu[2].includes("VariantPayload::Unit")) throw new Error(CORE_TYPES_RS_PATH + ": plugin payload changed shape");
+    for (const variant of names) rows.push({ variant, payload });
+    for (const named of arm[2].matchAll(/variants\.insert\("(\w+)"\.to_string\(\), \(span, VariantPayload::Named\(vec!\[([\s\S]*?)\]\)\)\);/g)) {
+      const fields = Array.from(named[2].matchAll(/VariantField \{[\s\S]*?ty: ([\s\S]*?), ty_span: span \}/g),
+        (field) => rustPayloadType(field[1], constants, CORE_TYPES_RS_PATH));
+      if (!fields.length) throw new Error(CORE_TYPES_RS_PATH + ": plugin named payload changed shape");
+      rows.push({ variant: named[1], payload: fields });
+    }
+    families.push({ name: arm[1], rows });
+  }
+  if (families.length !== 2) throw new Error(CORE_TYPES_RS_PATH + ": plugin enum families changed shape");
+  return families;
+}
+
 function coreEnumPayloadFamilies(declarations) {
   const constants = rustSyntaxConstants();
   const coreTypes = read(CORE_TYPES_RS_PATH);
@@ -2859,13 +2884,15 @@ function coreEnumPayloadFamilies(declarations) {
   }
   if (!/core_io_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_io_variants");
   families.push(...rustIOVariantFamilies(coreTypes, constants));
+  if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");
+  families.push(...rustPluginVariantFamilies(coreTypes, constants));
   const declared = new Set();
   for (const module of declarations.modules) {
     for (const type of module.types) {
       if (!type.genericArity && type.variants && type.variants.length) declared.add(type.name);
     }
   }
-  return families.filter((family) => !declared.has(family.name));
+  return families.filter((family) => !declared.has(family.name) || family.rows.some((row) => row.payload.length));
 }
 
 function generatedCoreEnumPayloadRows(declarations) {

@@ -25,7 +25,7 @@
 // `L<count>:<values>`, `R<count>:<field-name><value>`, `Q<count>:<values>`,
 // `N`/`P<value>` for none/some, `K`/`X<value>` for ok/error, `V<case><value>`
 // for variants, `E<len>:<case>` for enums, and `G<count>:<flag-names>` for
-// flags. A call result or error is `O:<value>` / `E:<kind>:<message>`. The
+// flags. A call result or error is `O:<value>` / the typed `E:` fault envelope.
 // wire is only a transport envelope; values are checked against the actual
 // Component Model `Type` before every call and after every return. Failure
 // kinds are user error, denied authority, budget exhaustion, and internal
@@ -40,10 +40,11 @@ use wasmtime::component::{
     Component, Linker, LinkerInstance, Type, Val,
 };
 use wasmtime::{
-    Config, Engine, ResourceLimiter, Store, StoreContextMut, Trap,
+    Config, Engine, ResourceLimiter, Store, StoreContextMut, Trap, WasmBacktrace, WasmBacktraceDetails,
 };
 use jet_foundation::PluginWire::{
-    plugin_decode_params, plugin_encode_value, PluginParamDecodeError, PluginValue,
+    plugin_decode_params, plugin_encode_value, plugin_encode_error, PluginParamDecodeError, PluginValue,
+    PluginError, PluginFault, PluginFrame, PluginLimit, PLUGIN_MAX_FRAMES,
 };
 use jet_foundation::Authority::{
     Authority as CanonicalAuthority, HostImportDecision, HostImportFact, Verdict,
@@ -66,20 +67,10 @@ enum PluginBudgetKind {
 enum PluginFailureKind {
     UserError,
     DeniedAuthority,
-    BudgetExhausted,
+    BudgetExhausted(PluginLimit),
     InternalDefect,
 }
 
-impl PluginFailureKind {
-    fn label(self) -> &'static str {
-        match self {
-            Self::UserError => "user-error",
-            Self::DeniedAuthority => "denied-authority",
-            Self::BudgetExhausted => "budget-exhausted",
-            Self::InternalDefect => "internal-defect",
-        }
-    }
-}
 
 #[derive(Debug)]
 struct PluginBoundaryError {
@@ -183,6 +174,8 @@ struct PluginHostState {
     authority_decision: HostImportDecision,
     /// Component import name to typed fact, populated before instantiation.
     imports: BTreeMap<String, HostImportFact>,
+    #[cfg(test)]
+    disabled_adapter: Option<String>,
 }
 
 struct PluginInstance {
@@ -196,6 +189,7 @@ struct PluginInstance {
 
 thread_local! {
     static PLUGINS: RefCell<HashMap<u64, PluginInstance>> = RefCell::new(HashMap::new());
+    static PLUGIN_LOAD_FAILURES: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
     // Component calls are synchronous and store-owned.  Nested entry would
     // borrow the same thread-local map while it is already mutably borrowed,
     // so reject it explicitly instead of allowing a host panic.
@@ -224,8 +218,24 @@ impl Drop for PluginCallGuard {
 
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 
+fn plugin_failure(kind: PluginFailureKind, export: &str, message: String, frames: Vec<PluginFrame>) -> String {
+    let fault = PluginFault { export: export.to_owned(), message, frames };
+    plugin_encode_error(&match kind {
+        PluginFailureKind::UserError => PluginError::Guest(fault),
+        PluginFailureKind::DeniedAuthority => PluginError::Denied(fault),
+        PluginFailureKind::BudgetExhausted(limit) => PluginError::Budget { limit, fault },
+        PluginFailureKind::InternalDefect => PluginError::Defect(fault),
+    })
+}
+
 fn plugin_error(kind: PluginFailureKind, message: impl Into<String>) -> String {
-    format!("E:{}:{}", kind.label(), message.into())
+    let prefix = match kind {
+        PluginFailureKind::UserError => "user-error",
+        PluginFailureKind::DeniedAuthority => "denied-authority",
+        PluginFailureKind::BudgetExhausted(_) => "budget-exhausted",
+        PluginFailureKind::InternalDefect => "internal-defect",
+    };
+    plugin_failure(kind, "load", format!("{prefix}:{}", message.into()), Vec::new())
 }
 
 fn plugin_call_error(
@@ -233,13 +243,20 @@ fn plugin_call_error(
     kind: PluginFailureKind,
     message: impl Into<String>,
 ) -> String {
-    plugin_error(kind, format!("plugin call `{name}`: {}", message.into()))
+    plugin_failure(kind, name, format!("{}:plugin call `{name}`: {}", match kind {
+        PluginFailureKind::UserError => "user-error",
+        PluginFailureKind::DeniedAuthority => "denied-authority",
+        PluginFailureKind::BudgetExhausted(_) => "budget-exhausted",
+        PluginFailureKind::InternalDefect => "internal-defect",
+    }, message.into()), Vec::new())
 }
 
 fn plugin_engine() -> Result<Engine, String> {
     let mut config = Config::new();
     config.consume_fuel(true);
     config.epoch_interruption(true);
+    config.wasm_backtrace(true);
+    config.wasm_backtrace_details(WasmBacktraceDetails::Disable);
     Engine::new(&config).map_err(|error| format!("plugin engine: {error}"))
 }
 
@@ -788,7 +805,7 @@ fn plugin_host_connect(
     );
     Err(PluginBoundaryError::new(
         if timed_out {
-            PluginFailureKind::BudgetExhausted
+            PluginFailureKind::BudgetExhausted(PluginLimit::Time)
         } else {
             PluginFailureKind::UserError
         },
@@ -854,7 +871,7 @@ fn plugin_host_exec(
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(PluginBoundaryError::new(
-                    PluginFailureKind::BudgetExhausted,
+                    PluginFailureKind::BudgetExhausted(PluginLimit::Time),
                     format!("execution of `{program}` exceeded the plugin time limit"),
                 ));
             }
@@ -898,6 +915,13 @@ fn plugin_host_import_call(
                 import.operation,
                 import.required_grant()
             ),
+        )));
+    }
+    #[cfg(test)]
+    if store.data().disabled_adapter.as_deref() == Some(import.operation.as_str()) {
+        return Err(wasmtime::Error::new(PluginBoundaryError::new(
+            PluginFailureKind::InternalDefect,
+            format!("plugin host import `{}` has no runtime adapter for `{}`", import.operation, import.required_grant()),
         )));
     }
     match import.required_grant() {
@@ -1107,7 +1131,18 @@ fn plugin_read_module(
 /// stored with the resulting handle. Every host import and export call reuses
 /// that decision; an omitted/empty wire is an explicit zero-grant scope, never
 /// an ambient fallback.
-pub fn jet_plugin_load_declared(
+pub fn jet_plugin_load_declared(path: &str, authority_wire: &str, declared_needs: &[String]) -> String {
+    let wire = plugin_load_declared(path, authority_wire, declared_needs);
+    if wire.starts_with("E:") {
+        let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
+        PLUGIN_LOAD_FAILURES.with(|failures| failures.borrow_mut().insert(handle, wire));
+        format!("O:{handle}")
+    } else {
+        wire
+    }
+}
+
+fn plugin_load_declared(
     path: &str,
     authority_wire: &str,
     declared_needs: &[String],
@@ -1184,6 +1219,8 @@ pub fn jet_plugin_load_declared(
             authority: authority.clone(),
             authority_decision: authority_decision.clone(),
             imports: imports.clone(),
+            #[cfg(test)]
+            disabled_adapter: None,
         },
     );
     store.limiter(|state| &mut state.limits);
@@ -1198,8 +1235,12 @@ pub fn jet_plugin_load_declared(
     let instance = match pre_instance.instantiate(&mut store) {
         Ok(i) => i,
         Err(error) => {
-            let kind = if store.data().limits.failure().is_some() {
-                PluginFailureKind::BudgetExhausted
+            let kind = if let Some(limit) = store.data().limits.failure() {
+                PluginFailureKind::BudgetExhausted(match limit {
+                    PluginBudgetKind::Fuel => PluginLimit::Fuel,
+                    PluginBudgetKind::Memory => PluginLimit::Memory,
+                    PluginBudgetKind::Table => PluginLimit::Table,
+                })
             } else {
                 PluginFailureKind::UserError
             };
@@ -1232,7 +1273,12 @@ pub fn jet_plugin_load_declared(
 pub fn jet_plugin_load(path: &str, authority_wire: &str) -> String {
     let declared_needs = match plugin_declared_authority_needs() {
         Ok(needs) => needs,
-        Err(error) => return plugin_error(PluginFailureKind::InternalDefect, error),
+        Err(error) => {
+            let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
+            PLUGIN_LOAD_FAILURES.with(|failures| failures.borrow_mut().insert(
+                handle, plugin_error(PluginFailureKind::InternalDefect, error)));
+            return format!("O:{handle}");
+        }
     };
     jet_plugin_load_declared(path, authority_wire, &declared_needs)
 }
@@ -1246,24 +1292,39 @@ pub fn jet_plugin_close(handle: u64) -> bool {
     if PLUGIN_CALL_DEPTH.with(|depth| depth.get()) != 0 {
         return false;
     }
-    PLUGINS.with(|m| m.borrow_mut().remove(&handle).is_some())
+    let failed = PLUGIN_LOAD_FAILURES.with(|m| m.borrow_mut().remove(&handle).is_some());
+    PLUGINS.with(|m| m.borrow_mut().remove(&handle).is_some()) || failed
+}
+
+// Internal fault injection: no source/CLI entry exists, and release hosts
+// contain neither the state nor the hook. The adapter menu is complete today.
+#[cfg(test)]
+pub(super) fn plugin_test_remove_adapter(handle: u64, operation: &str) {
+    PLUGINS.with(|plugins| {
+        plugins.borrow_mut().get_mut(&handle).expect("test plugin is loaded")
+            .store.data_mut().disabled_adapter = Some(operation.to_owned());
+    });
 }
 
 /// Call exported function `name` on `handle` with the wire-encoded
 /// `[PluginValue]` argument list `params_wire`. Returns `"O:"` + the
-/// wire-encoded `PluginValue` result, or `"E:<kind>:<message>"` retaining the
+/// wire-encoded `PluginValue` result, or a typed `"E:"` fault retaining the
 /// Jet operation and exported call boundary. Kinds distinguish user error,
 /// denied authority, budget exhaustion, and internal host defect. Every path
 /// is a `Result`; nothing here can panic the host program (I2).
 pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
     let _call_guard = match PluginCallGuard::enter() {
         Ok(guard) => guard,
-        Err(error) => return plugin_error(PluginFailureKind::InternalDefect, error),
+        Err(error) => return plugin_call_error(name, PluginFailureKind::InternalDefect, error),
     };
+    if let Some(failure) = PLUGIN_LOAD_FAILURES.with(|m| m.borrow_mut().remove(&handle)) {
+        return failure;
+    }
     PLUGINS.with(|m| {
         let mut map = m.borrow_mut();
         let Some(plugin) = map.get_mut(&handle) else {
-            return plugin_error(
+            return plugin_call_error(
+                name,
                 PluginFailureKind::UserError,
                 "no plugin loaded for this handle",
             );
@@ -1279,7 +1340,7 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
         if params_wire.len() > PLUGIN_MAX_WIRE_BYTES {
             return plugin_call_error(
                 name,
-                PluginFailureKind::BudgetExhausted,
+                PluginFailureKind::BudgetExhausted(PluginLimit::Wire),
                 "argument wire exceeds the 16 MiB resource budget",
             );
         }
@@ -1427,11 +1488,7 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
         // before the instance can be called again, even when host conversion
         // rejects the value.
         if let Err(error) = func.post_return(&mut plugin.store) {
-            return plugin_call_error(
-                name,
-                PluginFailureKind::InternalDefect,
-                format!("post-return failed: {error}"),
-            );
+            return plugin_call_trap_error(name, error, plugin.store.data().limits.failure());
         }
         match (wire_size, copied) {
             (Some(size), Some(value)) if size <= PLUGIN_MAX_WIRE_BYTES => {
@@ -1448,7 +1505,7 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
             }
             (Some(_), _) => plugin_call_error(
                 name,
-                PluginFailureKind::BudgetExhausted,
+                PluginFailureKind::BudgetExhausted(PluginLimit::Wire),
                 "result wire exceeds the 16 MiB resource budget",
             ),
             (None, _) => plugin_call_error(
@@ -1472,36 +1529,46 @@ fn plugin_call_trap_error(
         return plugin_call_error(name, failure.kind, &failure.message);
     }
     let trap = error.downcast_ref::<Trap>();
-    let trap_is_budget = trap.is_some_and(|trap| matches!(*trap, Trap::OutOfFuel | Trap::Interrupt));
-    if budget_failure.is_some() || trap_is_budget {
-        let budget = match budget_failure {
-            Some(PluginBudgetKind::Memory) => "memory",
-            Some(PluginBudgetKind::Table) => "table",
-            Some(PluginBudgetKind::Fuel) => "fuel",
-            None => match trap {
-                Some(Trap::Interrupt) => "call",
-                Some(Trap::OutOfFuel) => "fuel",
-                _ => "call",
-            },
+    let mut frames = error.downcast_ref::<WasmBacktrace>().map(|trace| {
+        trace.frames().iter().take(PLUGIN_MAX_FRAMES).map(|frame| PluginFrame {
+            function: frame.func_name().unwrap_or("").to_owned(),
+            module: frame.module().name().unwrap_or("").to_owned(),
+            offset: frame.module_offset().unwrap_or(0) as i64,
+        }).collect::<Vec<_>>()
+    }).unwrap_or_default();
+    let limit = match budget_failure {
+        Some(PluginBudgetKind::Memory) => Some(PluginLimit::Memory),
+        Some(PluginBudgetKind::Table) => Some(PluginLimit::Table),
+        Some(PluginBudgetKind::Fuel) => Some(PluginLimit::Fuel),
+        None => match trap {
+            Some(Trap::OutOfFuel) => Some(PluginLimit::Fuel),
+            Some(Trap::Interrupt) => Some(PluginLimit::Time),
+            _ => None,
+        },
+    };
+    let (kind, message) = if let Some(limit) = limit {
+        let budget = match limit {
+            PluginLimit::Fuel => "fuel", PluginLimit::Memory => "memory",
+            PluginLimit::Table => "table", PluginLimit::Time => "call", PluginLimit::Wire => "wire",
         };
-        return plugin_call_error(
-            name,
-            PluginFailureKind::BudgetExhausted,
-            format!("{budget} budget exhausted"),
-        );
+        (PluginFailureKind::BudgetExhausted(limit), format!("{budget} budget exhausted"))
+    } else if let Some(trap) = trap {
+        (PluginFailureKind::UserError, format!("guest trapped: {trap}"))
+    } else {
+        (PluginFailureKind::InternalDefect, "host/runtime failed while executing the guest".to_owned())
+    };
+    // Wasmtime normally supplies frames for every trap, including unnamed modules.
+    // A trap without a Wasm frame is a runtime defect, not a fabricated location.
+    if trap.is_some() && frames.is_empty() {
+        return plugin_call_error(name, PluginFailureKind::InternalDefect, "guest trap has no Wasm backtrace");
     }
-    if let Some(trap) = trap {
-        return plugin_call_error(
-            name,
-            PluginFailureKind::UserError,
-            format!("guest trapped: {trap}"),
-        );
-    }
-    plugin_call_error(
-        name,
-        PluginFailureKind::InternalDefect,
-        "host/runtime failed while executing the guest",
-    )
+    let prefix = match kind {
+        PluginFailureKind::UserError => "user-error",
+        PluginFailureKind::DeniedAuthority => "denied-authority",
+        PluginFailureKind::BudgetExhausted(_) => "budget-exhausted",
+        PluginFailureKind::InternalDefect => "internal-defect",
+    };
+    plugin_failure(kind, name, format!("{prefix}:plugin call `{name}`: {message}"), std::mem::take(&mut frames))
 }
 
 

@@ -277,6 +277,14 @@ fn run() {{
     hostile :: plugin.load("{plugin_path}", policy)
     _result :: hostile.{export}() ?? {{
         print("{failure_marker}")
+        if err == {{
+            .Budget(_, fault) -> {{
+                assert(fault.export == "{export}")
+                assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
+                print("Budget")
+            }}
+            else -> assert(false)
+        }}
         print(err)
         return
     }}
@@ -315,8 +323,8 @@ fn assert_plugin_failure_result(
         stdout.len()
     );
     assert!(
-        stdout.contains("trapped"),
-        "{tier} did not reach a guest trap through the plugin call seam: {stdout}"
+        stdout.contains("Budget"),
+        "{tier} did not preserve the typed plugin budget cause: {stdout}"
     );
     assert!(
         required_error_terms.is_empty()
@@ -603,6 +611,60 @@ fn plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers() {
         &path,
         &api,
     );
+}
+
+#[test]
+fn plugin_failure_question_mark_records_the_host_call_line_on_all_tiers() {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+        .join(".cache/jet-dev/scratch").join(format!("plugin-journey-{}-{stamp}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let scratch = common::Scratch { path: root };
+    let path = write_plugin_component(&scratch, "failure_guest.wasm",
+        include_str!("../Examples/features/packages/plugin_failure/failure_guest.wat"));
+    let source = include_str!("../Examples/features/packages/plugin_failure/journey.jet")
+        .replace("Examples/features/packages/plugin_failure/failure_guest.wat", &path.to_string_lossy())
+        .replace("FS.Read:Examples/features/packages/plugin_failure", &format!("FS.Read:{}", scratch.path.display()));
+    let api = include_str!("../Examples/features/packages/plugin_failure/fixture-state/cache/api/plugin__failure_guest.api");
+    let mut tiers = vec!["jit", "interpreter"];
+    if common::have_rustc() { tiers.push("release"); }
+    for tier in tiers {
+        let (code, stdout, stderr) = tir_support::run_plugin_tier("plugin_journey", &source, tier, &path, api);
+        assert_ne!(code, 0, "{tier} lost the guest failure");
+        assert_eq!(stdout, "", "{tier} entered the success path");
+        assert!(stderr.contains("guest trapped"), "{tier} lost the guest operation: {stderr}");
+        assert!(stderr.contains("failed here: fail") && stderr.contains(".jet:6"),
+            "{tier} lost the host plugin call line: {stderr}");
+        assert!(stderr.contains("Trail [E3002]") && stderr.contains("run ("), "{tier} lost the host failure journey: {stderr}");
+    }
+}
+
+#[test]
+fn plugin_guest_failure_reports_operation_boundary_and_kind_on_all_hosted_tiers() {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+        .join(".cache/jet-dev/scratch").join(format!("plugin-causes-{}-{stamp}", std::process::id()));
+    std::fs::create_dir_all(root.join("malformed")).unwrap();
+    let scratch = common::Scratch { path: root };
+    let path = write_plugin_component(&scratch, "failure_guest.wasm",
+        include_str!("../Examples/features/packages/plugin_failure/failure_guest.wat"));
+    // The same registered interface exercises a malformed Component load.
+    let malformed = scratch.join("malformed/failure_guest.wasm");
+    std::fs::write(&malformed, b"not a Component").unwrap();
+    let source = include_str!("../Examples/features/packages/plugin_failure/run.jet")
+        .replace("Examples/features/packages/plugin_failure/failure_guest.wat", &path.to_string_lossy())
+        .replace("Examples/features/packages/plugin_failure/malformed_guest.wasm", &malformed.to_string_lossy())
+        .replace("FS.Read:Examples/features/packages/plugin_failure", &format!("FS.Read:{}", scratch.path.display()));
+    let api = include_str!("../Examples/features/packages/plugin_failure/fixture-state/cache/api/plugin__failure_guest.api");
+    let expected = include_str!("../Examples/features/expected/packages/plugin_failure.out");
+    let mut tiers = vec!["jit", "interpreter"];
+    if common::have_rustc() { tiers.push("release"); }
+    for tier in tiers {
+        let (code, stdout, stderr) = tir_support::run_plugin_tier("plugin_causes", &source, tier, &path, api);
+        assert_eq!(code, 0, "{tier} failed the typed plugin witness: {stderr}");
+        assert_eq!(stderr, "", "{tier} unexpectedly propagated a handled failure");
+        assert_eq!(stdout, expected, "{tier} changed plugin cause, operation, or frame transport");
+    }
 }
 
 #[test]
