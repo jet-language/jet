@@ -190,7 +190,8 @@ One implementer owns each coherent patch. Concurrent writers need disjoint
 paths and one named close owner. Default to a single delivery stream, and add
 streams only when paths, integration, tests, and resources stay clean. Use only
 in-repository worktrees under `.claude/worktrees/<name>` or
-`.agent-worktrees/<name>`, share the bounded main `target/`, integrate
+`.agent-worktrees/<name>`, keep each checkout's Cargo target inside that
+checkout (`jet-env` rejects a `CARGO_TARGET_DIR` outside it), integrate
 promptly, and remove finished worktrees and temporary branches. Never overwrite
 another task's paths. Never run `git add -A`, a broad `git commit -a`,
 `git restore .`, or any equivalent broad operation. Never hand-edit
@@ -217,7 +218,8 @@ under `.agents/skills` and `Tools/tower/skills`.
 
 Run repository commands through `Tools/agent/jet-env`. Keep scratch and logs on
 disk under `~/.cache/jet-test-scratch` and `~/.cache/jet-luna`, never in
-`/tmp`, which is RAM-backed. Share one bounded Cargo target and respect the default
+`/tmp`, which is RAM-backed. Use the checkout's own bounded Cargo target
+(`<checkout>/target` by default) and respect the default
 `JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except in the
 orchestrator's lock-serialized build targets, which opt in with
 `JET_CARGO_INCREMENTAL=1` and are pruned between builds.
