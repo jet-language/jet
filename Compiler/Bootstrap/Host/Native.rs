@@ -2376,6 +2376,12 @@ fn emit_bootstrap_host_factory(
     let request_trace_sink = symbols.field_symbol("JetDriverCompileRequest", "trace_sink")?;
     let request_mir_lint_every_pass =
         symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
+    let request_compiler_threads =
+        symbols.field_symbol("JetDriverCompileRequest", "compiler_threads")?;
+    let threads_type = symbols.type_symbol("CompilerThreads")?;
+    let threads_cap = symbols.field_symbol("CompilerThreads", "cap")?;
+    let threads_cores = symbols.field_symbol("CompilerThreads", "cores")?;
+    let threads_memory = symbols.field_symbol("CompilerThreads", "memory_available")?;
     let request_core_sources = symbols.field_symbol("JetDriverCompileRequest", "core_sources")?;
     let core_source_type = symbols.type_symbol("JetDriverCoreSource")?;
     let core_source_module_name = symbols.field_symbol("JetDriverCoreSource", "module_name")?;
@@ -2488,6 +2494,14 @@ fn emit_bootstrap_host_factory(
             "        // Full verification (MIR Lint after every optimizer pass) is an\n",
             "        // explicit host opt-in for tests and verification runs.\n",
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
+            "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
+            "        // compiler admits threads automatically up to the reported cores\n",
+            "        // and within the memory Linux reports available.\n",
+            "        {request_compiler_threads}: {threads_type} {{\n",
+            "            {threads_cap}: Err(Default::default()),\n",
+            "            {threads_cores}: ::jet_foundation::Numeric::JetInt::from_i64(::std::thread::available_parallelism().map(|cores| cores.get() as i64).unwrap_or(1)),\n",
+            "            {threads_memory}: ::std::fs::read_to_string(\"/proc/meminfo\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"MemAvailable:\").and_then(|rest| rest.trim().trim_end_matches(\"kB\").trim().parse::<i64>().ok()))).map(|kilobytes| ::jet_foundation::Numeric::JetInt::from_i64(kilobytes.saturating_mul(1024))).ok_or_else(Default::default),\n",
+            "        }},\n",
             "    }};\n",
             "    Ok(__jet_request)\n",
             "}}\n",
@@ -2520,6 +2534,11 @@ fn emit_bootstrap_host_factory(
         request_record_store = request_record_store,
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
+        request_compiler_threads = request_compiler_threads,
+        threads_type = threads_type,
+        threads_cap = threads_cap,
+        threads_cores = threads_cores,
+        threads_memory = threads_memory,
         request_core_sources = request_core_sources,
         core_source_type = core_source_type,
         core_source_module_name = core_source_module_name,
