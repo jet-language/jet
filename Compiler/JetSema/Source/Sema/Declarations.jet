@@ -172,11 +172,15 @@ fn sema_function_call_metadata(func: Func, owner: SymbolID, fallback_source_file
     }
 }
 
+// An inline foreign (`#FFI`) function has no Jet body and no failure rail:
+// calls bind to its raw scalar ABI return, which codegen emits unwrapped (the
+// Rust reference's `checked_return_types(.., sig.is_extern)` with
+// `is_extern: f.inline_foreign.is_some()`).
 pub fn sema_function_symbol_type(func: Func, raw_protocol_return: Bool, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
     effect_bound :: if func.is_pure -> Val([EffectRowEntry]{}) else -> None
     Type.Fn{
         params: sema_function_param_types(func),
-        ret: Val(sema_checked_return_type(func.return_type, raw_protocol_return)),
+        ret: Val(sema_checked_return_type(func.return_type, raw_protocol_return || func.inline_foreign != None)),
         effect_bound: effect_bound,
         param_contract: sema_function_param_contract(func),
         call_metadata: Val(sema_function_call_metadata(func, owner, fallback_source_file, fallback_source_origin, source_segments)),
