@@ -17,6 +17,7 @@ use jet_foundation.[
     MIRType,
     MIRTypeID,
     MIRValueFact,
+    MIRViewProvenanceEntry,
     mir_type_same_checked_type,
 ]
 
@@ -29,7 +30,9 @@ fn jet_rust_emit_function_param(ctx: &JetRustEmitContext, function: MIRFunction,
         if parameter.ty.kind == .List(element) -> return "{name}: &mut [{jet_rust_emit_type(&ctx, element)}]"
     }
     binding :: if parameter.access == MIRAccess.Move -> "mut " else -> ""
-    "{binding}{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}"
+    rendered := jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+    if jet_rust_emit_parameter_owns_view(function, parameter) -> rendered = jet_rust_emit_reference_lifetime(rendered, "'__jet_view")
+    "{binding}{name}: {rendered}"
 }
 
 // MIRRust capture_parameter_type: a Read capture is always a shared borrow
@@ -1096,6 +1099,52 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
     compacted
 }
 
+// A direct view return carries one checked provenance slot. Its owner gets an
+// explicit Rust lifetime; unrelated borrowed parameters retain elision.
+fn jet_rust_emit_is_view_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Apply(name, _) -> name.name == "View" || name.name == "ViewMut"
+        .Tagged(_, inner) -> jet_rust_emit_is_view_type(inner)
+        else -> false
+    }
+}
+
+fn jet_rust_emit_return_view_lifetime(function: MIRFunction) -> String Never! {
+    if !jet_rust_emit_is_view_type(function.return_type) -> return ""
+    found := false
+    entries :: function.return_view_provenance ?? [MIRViewProvenanceEntry]{}
+    loop entry in entries {
+        if entry.slot.len() != 0 -> next
+        loop path in entry.provenance.sources {
+            found = true
+            if path.source == { .Static(_, _) -> {} else -> { return "'__jet_view" } }
+        }
+    }
+    if found -> "'static" else -> ""
+}
+
+fn jet_rust_emit_parameter_owns_view(function: MIRFunction, parameter: MIRParam) -> Bool Never! {
+    if !jet_rust_emit_is_view_type(function.return_type) -> return false
+    entries :: function.return_view_provenance ?? [MIRViewProvenanceEntry]{}
+    loop entry in entries {
+        if entry.slot.len() != 0 -> next
+        loop path in entry.provenance.sources {
+            if path.source == {
+                .Parameter(index) -> { if index == parameter.index -> return true }
+                .Receiver -> { if jet_rust_emit_is_receiver(function, parameter.index) -> return true }
+                else -> {}
+            }
+        }
+    }
+    false
+}
+
+fn jet_rust_emit_reference_lifetime(rendered: String, lifetime: String) -> String Never! {
+    assert(rendered.starts_with("&"))
+    bytes :: rendered.bytes()
+    "&{lifetime} {String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}"
+}
+
 fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
     params := [String]{}
     loop capture in function.capture_params -> &params.push(jet_rust_emit_capture_param(&ctx, capture))
@@ -1103,8 +1152,19 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
     unsafe_prefix :: if function.is_unsafe -> "unsafe " else -> ""
     visibility :: jet_rust_emit_function_visibility(function)
     generic_params :: ~ctx.current_generic_params
-    generics :: jet_rust_emit_generic_params(&ctx, generic_params)
-    "{visibility}{unsafe_prefix}fn {jet_rust_emit_function_name(&ctx, function.id)}{generics}({params.join(", ")}) -> {jet_rust_emit_callable_return(&ctx, function)} {{"
+    generics := jet_rust_emit_generic_params(&ctx, generic_params)
+    result := jet_rust_emit_callable_return(&ctx, function)
+    lifetime :: jet_rust_emit_return_view_lifetime(function)
+    if lifetime != "" {
+        result = jet_rust_emit_reference_lifetime(result, lifetime)
+        if lifetime == "'__jet_view" {
+            if generics == "" -> generics = "<'__jet_view>" else {
+                bytes :: generics.bytes()
+                generics = "<'__jet_view, {String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}"
+            }
+        }
+    }
+    "{visibility}{unsafe_prefix}fn {jet_rust_emit_function_name(&ctx, function.id)}{generics}({params.join(", ")}) -> {result} {{"
 }
 
 fn jet_rust_emit_function_has_sentry_scope(function: MIRFunction) -> Bool Never! {

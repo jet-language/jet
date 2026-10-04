@@ -240,8 +240,14 @@ pub fn jet_err_code(error: &JetErr) -> JetOutcome<String, JetAbsent> {
 }
 
 pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
-    error
-        .cause
+    jet_err_cause_projection(&error.cause)
+}
+
+/// Read a physical cause slot without exposing its recursive box in Jet.
+pub fn jet_err_cause_projection(
+    cause: &JetOutcome<Box<JetErr>, JetAbsent>,
+) -> JetOutcome<JetErr, JetAbsent> {
+    cause
         .as_ref()
         .map(|cause| (**cause).clone())
         .map_err(|_| JetAbsent)

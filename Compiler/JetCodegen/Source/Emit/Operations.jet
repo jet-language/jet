@@ -3366,6 +3366,15 @@ fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, bas
         }
     }
     field_name :: jet_rust_emit_field_name(&ctx, field)
+    // Err's cause is boxed only inside the runtime; its checked field is ?Err.
+    // Use the shared accessor so ordinary reads expose the semantic carrier.
+    if jet_rust_emit_default_err_cause_field(&ctx, field) {
+        source := jet_rust_emit_value_reference(ctx, base, false)
+        if jet_rust_emit_shared_guard_projection_only(&ctx, function, base) {
+            if jet_rust_emit_shared_guard_borrow_place(&ctx, function, base, MIRAccess.Read) == .Val(place) -> source = "&({place})"
+        }
+        return "{root}jet_err_cause({source})"
+    }
     unbox :: if boxed -> ".as_ref()" else -> ""
     // Borrow the base slot and copy only the projected field; never clone the
     // whole aggregate to read one of its fields.
@@ -4659,7 +4668,18 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         }
         &rendered.push(jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Write))
     } else if row.signature.borrow_mask[0] {
-        &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read))
+        reference := jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read)
+        if jet_rust_emit_is_view_type(jet_rust_emit_value_type(ctx, function, receiver)) {
+            place_origin := false
+            if jet_rust_emit_find_value_instruction(ctx, function, receiver) == .Val(instruction) {
+                if instruction.operation == {
+                    .AddressOf(_, _) | .ReadPlace(_) | .Parameter(_, _) | .Capture(_) -> { place_origin = true }
+                    else -> {}
+                }
+            }
+            if !place_origin -> reference = "&**({jet_rust_emit_value_reference(ctx, receiver, false)})"
+        }
+        &rendered.push(reference)
     } else {
         &rendered.push(jet_rust_emit_value_consume(ctx, function, receiver))
     }

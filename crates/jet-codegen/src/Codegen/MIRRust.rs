@@ -4963,6 +4963,11 @@ impl<'a> RustEmitter<'a> {
         self.type_def(id).key == jet_foundation::Syntax::TYPE_ERR
     }
 
+    fn is_default_err_cause_field(&self, id: MirFieldId) -> bool {
+        let row = &self.program.fields[self.field_positions[&id]];
+        self.is_default_err_type(row.owner) && row.field.name == "cause"
+    }
+
     fn named_struct_field_value(
         &self,
         type_id: MirTypeId,
@@ -13547,6 +13552,23 @@ impl<'a> RustEmitter<'a> {
         };
         let unsafe_prefix = if function.is_unsafe { "unsafe " } else { "" };
         let generics = self.generic_params(function);
+        // Rust cannot elide a returned view's owner when other parameters also
+        // borrow. Preserve the checked root-view provenance in the signature.
+        let view_provenance = if is_view_type(&function.return_type) {
+            function.return_view_provenance.as_ref().and_then(|slots| slots.get(&Vec::new()))
+        } else {
+            None
+        };
+        let view_lifetime = view_provenance.map(|view| {
+            if view.sources.iter().all(|path| matches!(path.source, MirViewSource::Static { .. })) {
+                "'static"
+            } else {
+                "'__jet_view"
+            }
+        });
+        let receiver_owns_view = view_provenance.is_some_and(|view| {
+            view.sources.iter().any(|path| matches!(path.source, MirViewSource::Receiver))
+        });
         let previous_lifetime = self.history_callback_lifetime.replace("'__jet_callback");
         let mut params = Vec::new();
         if let Some(form) = method_form {
@@ -13555,6 +13577,8 @@ impl<'a> RustEmitter<'a> {
                 | MirFunctionForm::TraitMethod { self_access, .. } => {
                     if let Some(access) = self_access {
                         params.push(match access {
+                            MirAccess::Read if receiver_owns_view => "&'__jet_view self".to_string(),
+                            MirAccess::Write if receiver_owns_view => "&'__jet_view mut self".to_string(),
                             MirAccess::Read => "&self".to_string(),
                             MirAccess::Write => "&mut self".to_string(),
                             MirAccess::Move => "mut self".to_string(),
@@ -13599,6 +13623,19 @@ impl<'a> RustEmitter<'a> {
             );
         }
         params.extend(declared.iter().map(|param| {
+            let parameter_type = self.function_parameter_type(function, param);
+            let owns_view = view_provenance.is_some_and(|view| {
+                view.sources.iter().any(|path| {
+                    matches!(path.source, MirViewSource::Parameter(index) if index == param.index)
+                })
+            });
+            let parameter_type = if owns_view {
+                let referent = parameter_type.strip_prefix('&')
+                    .expect("checked returned view owner must be a borrowed parameter");
+                format!("&'__jet_view {referent}")
+            } else {
+                parameter_type
+            };
             let name = mangle(&param.name);
             if serde_codec == Some(MirSerdeCodec::Decode) {
                 format!("{name}: &{}jet_std::DataTree", self.config.root_prefix)
@@ -13612,12 +13649,21 @@ impl<'a> RustEmitter<'a> {
                     } else {
                         ""
                     },
-                    self.function_parameter_type(function, param)
+                    parameter_type
                 )
             }
         }));
         let params = params.join(", ");
-        let ret = return_override.unwrap_or_else(|| self.rust_type(&function.return_type));
+        let ret = return_override.unwrap_or_else(|| {
+            let rendered = self.rust_type(&function.return_type);
+            if let Some(lifetime) = view_lifetime {
+                let referent = rendered.strip_prefix('&')
+                    .expect("checked returned view must have a Rust reference representation");
+                format!("&{lifetime} {referent}")
+            } else {
+                rendered
+            }
+        });
         self.history_callback_lifetime.set(previous_lifetime);
         // Forwarding or returning a callable preserves its capture lifetime.
         // Owned factories can instantiate this lifetime without borrowing.
@@ -13626,6 +13672,15 @@ impl<'a> RustEmitter<'a> {
                 "<'__jet_callback>".to_string()
             } else {
                 format!("<'__jet_callback, {}", &generics[1..])
+            }
+        } else {
+            generics
+        };
+        let generics = if view_lifetime == Some("'__jet_view") {
+            if generics.is_empty() {
+                "<'__jet_view>".to_string()
+            } else {
+                format!("<'__jet_view, {}", &generics[1..])
             }
         } else {
             generics
@@ -27795,6 +27850,13 @@ impl<'a> RustEmitter<'a> {
             return projected;
         }
         let field_name = self.field_name(field);
+        // Runtime Err stores a boxed cause, but the checked projection is ?Err.
+        if self.is_default_err_cause_field(field) {
+            let source = self.elided_shared_guard_base(function, base)
+                .map(|place| format!("&({place})"))
+                .unwrap_or_else(|| self.value_slot_reference(base, false));
+            return format!("{}jet_err_cause({source})", self.config.root_prefix);
+        }
         let value = if let Some(reference) = self.partial_projected_value(function, base, field) {
             if self.boxed_field(field) {
                 format!("({reference}).as_ref().clone()")
@@ -29473,7 +29535,19 @@ impl<'a> RustEmitter<'a> {
             }
             self.place_reference(function, place, MirAccess::Write)
         } else if row.signature.borrow_mask[0] {
-            self.borrowed_value_reference(function, receiver, MirAccess::Read)
+            if is_view_type(self.value_type(function, receiver_value))
+                && !matches!(
+                    self.value_definition(function, receiver_value),
+                    Some(MirOperation::AddressOf { .. } | MirOperation::ReadPlace(_)
+                        | MirOperation::Parameter { .. } | MirOperation::Capture { .. })
+                )
+            {
+                // A returned view's slot stores a reference already. Builtin
+                // container kernels borrow the referent, not that reference.
+                format!("&**({})", self.value_slot_reference(receiver_value, false))
+            } else {
+                self.borrowed_value_reference(function, receiver, MirAccess::Read)
+            }
         } else {
             self.value_move(receiver)
         };
@@ -29901,6 +29975,9 @@ impl<'a> RustEmitter<'a> {
         }
 
         let value = self.place_base(function, &place.base, false, &place.projections);
+        if matches!(place.projections.last(), Some(MirProjection::Field { field, .. }) if self.is_default_err_cause_field(*field)) {
+            return format!("{}jet_err_cause_projection(&({value}))", self.config.root_prefix);
+        }
         // A native host record's Int slot widens on every read, exactly as the
         // value-level field read does, including a payload projected out of
         // that slot (`limits.max_total_bytes` matched as `.Val(max)`).
