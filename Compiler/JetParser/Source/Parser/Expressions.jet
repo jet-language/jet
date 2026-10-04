@@ -1518,20 +1518,6 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                     &args.push(CallArg{convention: AccessConvention.Read, expr: pattern.expr, span: pattern.span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
                     parser_expect(&state, TOKEN_RPAREN, "`)` after the take_pattern literal")
                 }
-                // D-DYNARRAY1: `.view(a..b)` is the one spelling; its two
-                // ends become the constructor's two arguments.
-                method_name == "view" -> {
-                    parser_bump(&state)
-                    range :: parser_parse_expression(&state, 1, depth + 1)
-                    if range.expr == {
-                        .Range(start, end, _, _) -> {
-                            &args.push(CallArg{convention: AccessConvention.Read, expr: start, span: expr_span(start), flags: ast_empty_call_arg_flags(), label: None, spread: false})
-                            &args.push(CallArg{convention: AccessConvention.Read, expr: end, span: expr_span(end), flags: ast_empty_call_arg_flags(), label: None, spread: false})
-                        }
-                        else -> parser_add_error_here(&state, "expected a `..` between the view's start and end", "the structure here isn't what the compiler expected", "use `..` between the view's start and end")
-                    }
-                    parser_expect(&state, TOKEN_RPAREN, "`)` to finish the call")
-                }
                 else -> {
                     args = parser_parse_call_args(&state, depth + 1, false)
                 }

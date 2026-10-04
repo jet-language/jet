@@ -160,6 +160,12 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
 // the already checked receiver so builtin identity comes from its Type rather
 // than from a user spelling or a basename.
 pub fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    // The retired collection alias has no constructor or lookup route.
+    // Parse its arguments normally, then teach the bracket-place spelling.
+    if method == "view" {
+        &diagnostics.push(sema_error("E0214", Span{start: span.end - method.len(), end: span.end}, "`.view(a..b)` is now a bare range place", "place access follows the sigil reading rule", "replace `value.view(a..b)` with `value[a..b]`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     if method == "raw" {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         return sema_call_try_distinct_raw_value(receiver_value, args, span, expected, environment, &scopes, &diagnostics)
