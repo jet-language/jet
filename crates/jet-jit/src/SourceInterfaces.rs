@@ -11,8 +11,8 @@
 use jet_foundation::Diagnostics::Span;
 use jet_foundation::MIR::{
     MirAccess, MirArtifactId, MirExecutionIdentity, MirFailureCarrier, MirFieldId, MirNativeOwned,
-    MirParam, MirPreludeCallId, MirProgram, MirRuntimeValue, MirTraitId, MirTraitMethodId,
-    MirTraitRef, MirType, MirTypeId, MirTypeKind,
+    MirNominalRef, MirParam, MirPreludeCallId, MirProgram, MirRuntimeValue, MirTraitId,
+    MirTraitMethodId, MirTraitRef, MirType, MirTypeId, MirTypeKind,
 };
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
@@ -2417,11 +2417,9 @@ impl NativeInterfaceMethod {
                 "native interface receiver type is not a checked trait object".to_string(),
             ));
         };
-        let expected_bound_id =
-            MirTypeId(jet_foundation::MIR::stable_id("mir-trait", &trait_row.name));
         if !bounds
             .iter()
-            .any(|bound| bound.id == expected_bound_id && bound.name == trait_row.name)
+            .any(|bound| trait_bound_names(bound, trait_id, &trait_row.name))
         {
             return Err(NativeInterfaceError::InvalidMetadata(
                 "native interface receiver type does not carry the exact checked trait bound".to_string(),
@@ -3071,6 +3069,16 @@ pub fn dispatch_active_for_identity(
     )
 }
 
+/// Whether a trait-object bound names the checked trait `trait_id`. Rust MIR
+/// keeps unqualified trait keys, so its bound carries the declared name and
+/// that name's stable id; Jet MIR names the bound by the trait's canonical
+/// (module-qualified) key, whose stable id is the trait row's own identity.
+fn trait_bound_names(bound: &MirNominalRef, trait_id: MirTraitId, name: &str) -> bool {
+    bound.id.0 == trait_id.0
+        || (bound.name == name
+            && bound.id == MirTypeId(jet_foundation::MIR::stable_id("mir-trait", name)))
+}
+
 fn validate_call_shape(
     identity: &NativeInterfaceIdentity,
     signature: &NativeInterfaceSignature,
@@ -3091,11 +3099,9 @@ fn validate_call_shape(
     if !object.matches_root(carrier) {
         return Err(NativeInterfaceError::ReceiverMismatch);
     }
-    let expected_bound_id =
-        MirTypeId(jet_foundation::MIR::stable_id("mir-trait", &identity.trait_ref.name));
     if !matches!(identity.receiver_type.kind(), MirTypeKind::TraitObject(bounds)
         if bounds.iter().any(|bound| {
-            bound.id == expected_bound_id && bound.name == identity.trait_ref.name
+            trait_bound_names(bound, identity.trait_ref.id, &identity.trait_ref.name)
         }))
     {
         return Err(NativeInterfaceError::InvalidCall(
