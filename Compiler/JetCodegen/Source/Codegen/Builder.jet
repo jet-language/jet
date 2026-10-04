@@ -256,15 +256,16 @@ fn jet_codegen_qualified_function_key(module_identity: String, key: String) -> S
     "{module_identity.len()}:{module_identity}{key}"
 }
 
-// The index owns its function rows: callers retain their checked input, and
-// comptime sessions retain this index after the input call has returned.
-fn jet_codegen_function_index(functions: [TFunc]) -> JetCodegenFunctionIndex Never! {
+// The index owns its function rows, taken from the caller: program lowering
+// moves the checked rows in and back out (lower_functions), and a caller that
+// keeps its input, such as a comptime session, passes a copy (`~`).
+fn jet_codegen_function_index(functions: ^[TFunc]) -> JetCodegenFunctionIndex Never! {
     first_by_key := [String:Int]{}
     first_by_name := [String:Int]{}
     next_by_key := [Int]{}
     next_by_name := [Int]{}
     qualified_rows := [String:Int]{}
-    loop _ in functions {
+    loop _ in 0..<functions.len() {
         &next_by_key.push(-1)
         &next_by_name.push(-1)
     }
@@ -280,6 +281,20 @@ fn jet_codegen_function_index(functions: [TFunc]) -> JetCodegenFunctionIndex Nev
         row -= 1
     }
     JetCodegenFunctionIndex{rows: functions, first_by_key: first_by_key, first_by_name: first_by_name, next_by_key: next_by_key, next_by_name: next_by_name, qualified_rows: qualified_rows}
+}
+
+// Moves every row of `from` onto the end of `to` in order, leaving `from`
+// empty. Each pop moves one row, so the rows are never resident twice.
+pub fn jet_codegen_move_function_rows(to: &[TFunc], from: &[TFunc]) Never! {
+    reversed := [TFunc]{}
+    loop from.len() > 0 {
+        function := &from.pop() ?? { break }
+        &reversed.push(^function)
+    }
+    loop reversed.len() > 0 {
+        function := &reversed.pop() ?? { break }
+        &to.push(^function)
+    }
 }
 
 struct JetCodegenBuilder {

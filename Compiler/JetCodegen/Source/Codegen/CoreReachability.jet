@@ -80,25 +80,37 @@ fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
     keys
 }
 
-// The checked functions to lower, in their original order: every function
-// outside `core_module_identities` (user code and compiler-private Core parts)
-// is a root, and a top-level Core source function is kept only when a kept
-// body names it. Core methods stay rooted because Codegen resolves their
-// implicit uses (`close`, `display`, index hooks, trait dispatch) by owner
-// type rather than by a key in the caller's body.
-pub fn jet_codegen_reachable_core_functions(functions: ^[TFunc], core_module_identities: [String]) -> [TFunc] {
-    if core_module_identities.len() == 0 -> return functions
+// Which checked functions to lower: one flag per row of `functions`, read in
+// place (never copied). Only rows flagged in `candidates` take part: every
+// candidate outside `core_module_identities` (user code and compiler-private
+// Core parts) is a root, and a top-level Core source candidate is kept only
+// when a kept body names it. Authored Core methods stay rooted because Codegen
+// resolves their implicit uses (`close`, `display`, index hooks, trait
+// dispatch) by owner type rather than by a key in the caller's body. A
+// compiler-generated Core method (`TFunc.synthetic`: a Prelude/Derives.jet
+// `Equatable`/`Comparable` body) is not a root: as in
+// Rust `reachable_core_source_callables`, it is kept only when a kept body
+// names it (sema rewrites `==`/`<` on its owner into a keyed method call). An
+// unreached derive then loses its impl row (Rust `lower_impl_rows`), so no
+// impl is emitted for a runtime-backed Core carrier (`Cursor` -> `JetCursor`,
+// `URL`/`MIME` -> `jet_std`).
+pub fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core_module_identities: [String]) -> [Bool] {
+    if core_module_identities.len() == 0 -> return candidates
     by_key := [String:Int]{}
     reachable := [Bool]{}
     pending := [Int]{}
     loop (index, function) in functions {
+        if !candidates[index] {
+            &reachable.push(false)
+            next
+        }
         _ := &by_key.add(function.key, index)
-        rooted :: !core_module_identities.contains(function.module_identity) || !jet_codegen_core_reach_is_top_level(function.kind)
+        rooted :: !core_module_identities.contains(function.module_identity) || (!jet_codegen_core_reach_is_top_level(function.kind) && !function.synthetic)
         &reachable.push(rooted)
         if rooted -> &pending.push(index)
     }
     loop pending.len() > 0 {
-        caller :: &pending.pop() ?? return functions
+        caller :: &pending.pop() ?? { break }
         loop key in jet_codegen_core_reach_function_keys(functions[caller]) {
             target :: by_key.get(key) ?? next
             if !reachable[target] {
@@ -107,9 +119,5 @@ pub fn jet_codegen_reachable_core_functions(functions: ^[TFunc], core_module_ide
             }
         }
     }
-    kept := [TFunc]{}
-    loop (index, function) in functions {
-        if reachable[index] -> &kept.push(function)
-    }
-    kept
+    reachable
 }

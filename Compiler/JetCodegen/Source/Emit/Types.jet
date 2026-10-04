@@ -13,6 +13,7 @@ use jet_foundation.[
     MIRConstKey,
     MIRConstant,
     MIRField,
+    MIRFieldID,
     MIRForeignID,
     MIRFunction,
     MIRFunctionID,
@@ -641,7 +642,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
             head = "{ctx.config.root_prefix}jet_std::{jet_rust_emit_sanitize(name.name)}"
             }
             else -> {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR nominal type is missing from the emitter registry", "checked Apply types must resolve to a declared or canonical runtime type", None)
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR nominal type `{name.name}` is missing from the emitter registry", "checked Apply types must resolve to a declared or canonical runtime type", None)
             head = jet_rust_emit_generated_path(name.name)
             }
         }
@@ -1583,24 +1584,31 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
 
 fn jet_rust_emit_named_type(ctx: &JetRustEmitContext, raw: String) -> String Never! {
     if ctx.type_by_name.get(raw) == .Val(name) -> return name
-    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR constant names a missing nominal type", "constant declarations must resolve to one emitted type identity", None)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR constant names a missing nominal type `{raw}`", "constant declarations must resolve to one emitted type identity", None)
     "__jet_missing_type_{jet_rust_emit_sanitize(raw)}"
 }
 
+// The first row spelled `owner` (key or leaf name, program order) declaring
+// struct field `raw`. Rows come from the spelling index and are read in place.
 fn jet_rust_emit_named_field(ctx: &JetRustEmitContext, owner: String, raw: String) -> String Never! {
-    loop definition in ctx.program.types {
-        if definition.key == owner || definition.name == owner {
-            if definition.kind == {
-                .Struct(fields, _) -> {
-                    loop field in fields {
-                        if field.name == raw -> return jet_rust_emit_field_name(&ctx, field.id)
+    rows :: ~(ctx.type_rows_by_spelling.get(owner) ?? [Int]{})
+    field_id := MIRFieldID?{None}
+    loop row in rows {
+        if ctx.program.types[row].kind == {
+            .Struct(fields, _) -> {
+                loop field in fields {
+                    if field.name == raw {
+                        field_id = Val(field.id)
+                        break
                     }
                 }
-                else -> {}
             }
+            else -> {}
         }
+        if field_id != None -> break
     }
-    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR constant names a missing field", "constant struct fields must resolve to one emitted field identity", None)
+    if field_id == .Val(id) -> return jet_rust_emit_field_name(&ctx, id)
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR constant names a missing field `{owner}.{raw}`", "constant struct fields must resolve to one emitted field identity", None)
     "__jet_missing_field_{jet_rust_emit_sanitize(raw)}"
 }
 
@@ -1672,34 +1680,36 @@ fn jet_rust_emit_constant_type_definition(ctx: &JetRustEmitContext, type_name: S
         }
         else -> {}
     }
+    // Every row whose key or leaf name is `type_name`, in program order.
+    rows :: ~(ctx.type_rows_by_spelling.get(type_name) ?? [Int]{})
     loop candidate in candidates {
         if candidate.kind == .Apply(name, _) {
-            loop definition in ctx.program.types {
-                if definition.id != name.id && definition.key != name.name -> next
-                if definition.key == type_name || definition.name == type_name -> return Val(definition)
+            loop row in rows {
+                if ctx.program.types[row].id != name.id && ctx.program.types[row].key != name.name -> next
+                return Val(ctx.program.types[row])
             }
         }
     }
-    loop definition in ctx.program.types {
-        if definition.key == type_name -> return Val(definition)
-    }
-    found := MIRTypeDef?{None}
-    loop definition in ctx.program.types {
-        if definition.name == type_name {
+    if ctx.type_index_by_key.get(type_name) == .Val(keyed) -> return Val(ctx.program.types[keyed])
+    found := Int?{None}
+    loop row in rows {
+        if ctx.program.types[row].name == type_name {
             if found != None -> return None
-            found = Val(definition)
+            found = Val(row)
         }
     }
-    found
+    if found == .Val(named) -> return Val(ctx.program.types[named])
+    None
 }
 
 // The spelling a resolved constant renders through: its key when several
 // declarations share the display name, else the source spelling.
 fn jet_rust_emit_constant_owner(ctx: &JetRustEmitContext, type_name: String, definition: MIRTypeDef?) -> String Never! {
     resolved :: definition ?? return type_name
+    rows :: ~(ctx.type_rows_by_spelling.get(resolved.name) ?? [Int]{})
     shared := 0
-    loop candidate in ctx.program.types {
-        if candidate.name == resolved.name -> shared += 1
+    loop row in rows {
+        if ctx.program.types[row].name == resolved.name -> shared += 1
     }
     if shared > 1 -> resolved.key else -> type_name
 }

@@ -292,9 +292,30 @@ fn jet_rust_emit_program_header(ctx: &JetRustEmitContext, lines: &[String]) Neve
 
 pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitResult Never! {
     ctx := jet_rust_emit_context(program, config)
+    jet_rust_emit_program_items(&ctx, trace_sink)
+}
+
+// JET_KEEP_GOING: the program's emission with every failure kept beside the
+// function being printed. Past the emitter's own tables (whose failure still
+// stops it), a failure no longer stops emission: the result is the complete
+// text with each failed construct's placeholder, never a shippable artifact.
+pub struct JetRustEmitKeepGoing {
+    pub result: JetRustEmitResult
+    pub failures: [JetRustEmitKeptFailure]
+}
+
+pub fn jet_rust_emit_program_keep_going(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitKeepGoing Never! {
+    kept_config := config
+    kept_config.keep_going = true
+    ctx := jet_rust_emit_context(program, kept_config)
+    result := jet_rust_emit_program_items(&ctx, trace_sink)
+    JetRustEmitKeepGoing{result: result, failures: ctx.kept_failures}
+}
+
+fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTraceSink?) -> JetRustEmitResult Never! {
     if ctx.failure != None -> return jet_rust_emit_result(&ctx, "")
     jet_rust_emit_validate_program(&ctx)
-    if ctx.failure != None -> return jet_rust_emit_result(&ctx, "")
+    if ctx.failure != None && !ctx.config.keep_going -> return jet_rust_emit_result(&ctx, "")
     // Program items go to their build unit's section (jet_rust_emit_units);
     // `pieces` records the line range of each package-unit item.
     units :: jet_rust_emit_units(ctx.program)
@@ -416,7 +437,8 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, tra
     // The emit phase's end closes this span on every return below.
     if trace_sink == .Val(sink) -> sink.begin("emit.assemble", "", -1, -1)
     jet_rust_emit_artifact_assembly(&ctx, &lines)
-    if ctx.failure != None -> return jet_rust_emit_result(&ctx, "")
+    if ctx.failure != None && !ctx.config.keep_going -> return jet_rust_emit_result(&ctx, "")
+    if ctx.config.keep_going -> ctx.failure = None
     if units.split -> return jet_rust_emit_result(&ctx, jet_rust_emit_units_layout(pieces, lines, items_end).join("\n"))
     jet_rust_emit_result(&ctx, lines.join("\n"))
 }

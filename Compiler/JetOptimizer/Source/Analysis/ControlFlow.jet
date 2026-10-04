@@ -140,12 +140,20 @@ fn mir_pass_cfg_rows(function: MIRFunction) -> [MIROptimizationCFGRow] Never! {
     rows
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::reachable_blocks (the
+// entry and every failure/unwind cleanup target are roots).
 fn mir_pass_reachable(function: MIRFunction) -> [MIRBlockID] Never! {
     positions := [U64:Int]{}
     loop (position, block) in function.blocks {
         if positions.get(block.id.value) == None -> &positions.add(block.id.value, position).drop("checked absent above")
     }
     pending := [MIRBlockID]{function.entry}
+    loop drop in function.drops {
+        if drop.edge == {
+            .Failure(target) | .Unwind(target) -> &pending.push(target)
+            else -> {}
+        }
+    }
     reachable := [MIRBlockID]{}
     seen := [U64:Bool]{}
     index := 0

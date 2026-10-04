@@ -6,13 +6,38 @@
 // The native host installs callbacks once, then transfers the complete request.
 // The host ABI is infallible: a failure escaping the driver becomes the
 // result's internal problem instead of a Result the host cannot decode.
+//
+// `JET_KEEP_GOING=1` selects the compiler-internal all-phases diagnostic mode
+// (jet_driver_compile_keep_going): every phase runs past earlier failures and
+// each failure is a TSV row, written to `JET_KEEP_GOING_REPORT` when it is
+// set. `JET_KEEP_GOING_SKIP` lists, comma-separated, the `<phase>:<name>@<n>`
+// functions an earlier run crashed in, which this run traps instead. The
+// Core imports use the unit's shared spellings (JetCli's), which the
+// assembler keeps once.
+use core.sys as cli_sys
+use core.files as cli_files
 use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
+    JetDriverKeepGoing,
     jet_driver_compile,
     jet_driver_compile_escaped_failure,
+    jet_driver_compile_keep_going,
 ]
 
 fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
-    jet_driver_compile(^request) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
+    if cli_sys.get("JET_KEEP_GOING") != Val("1") {
+        return jet_driver_compile(^request) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
+    }
+    skip := [String]{}
+    loop entry in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
+        if entry.trim().len() > 0 -> &skip.push(entry.trim())
+    }
+    result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
+    report :: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return result
+    lines := [String]{"phase\titem\tcode\tmessage\tspan"}
+    loop row in result.keep_going_rows -> &lines.push(row)
+    &lines.push("")
+    cli_files.write(report, lines.join("\n")) ?? return result
+    result
 }

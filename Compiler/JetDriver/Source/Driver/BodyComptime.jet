@@ -216,7 +216,9 @@ fn jet_driver_comptime_body_pass(
         }
         return jet_driver_comptime_body_result(^current_graph, values, functions, trace, false, false)
     }
-    if jet_driver_has_errors(current_graph.diagnostics) {
+    // JET_KEEP_GOING: pending bodies still run past reported errors, so the
+    // functions whose bodies need their values still lower.
+    if jet_driver_has_errors(current_graph.diagnostics) && !graph.keep_going {
         return jet_driver_comptime_body_result(^current_graph, values, functions, trace, false, false)
     }
     pass :: completed_passes + 1

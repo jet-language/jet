@@ -41,6 +41,9 @@ pub struct JetRustEmitConfig {
     // The release devtools policy's local rail: persistent writes report to
     // the live value observer only while it is enabled.
     pub local_rail: Bool
+    // JET_KEEP_GOING (jet_rust_emit_program_keep_going): every failure is
+    // kept with the function being printed and emission runs to the end.
+    pub keep_going: Bool{false}
 }
 
 pub enum JetRustEmitFailureKind {
@@ -60,6 +63,13 @@ pub struct JetRustEmitFailure {
     pub message: String
     pub detail: String
     pub span: Span?
+}
+
+// One emission failure kept under `keep_going`, with the function being
+// printed when it happened (None outside a function body).
+pub struct JetRustEmitKeptFailure {
+    pub failure: JetRustEmitFailure
+    pub function: MIRFunctionID?
 }
 
 pub struct JetRustEmitCallableMetadata {
@@ -170,6 +180,10 @@ pub struct JetRustEmitContext {
     pub type_index_by_id: [String:Int]
     pub type_index_by_key: [String:Int]
     pub type_index_by_name: [String:Int]
+    // Indexes into program.types of every row whose canonical key or leaf
+    // name is the spelling, in program order (a row whose key is its name
+    // appears once), so constant spellings resolve without a whole-table scan.
+    pub type_rows_by_spelling: [String:[Int]]
     // Indexes into program.impls of every impl with a trait, per trait id key,
     // in program order.
     pub impls_by_trait: [String:[Int]]
@@ -223,6 +237,8 @@ pub struct JetRustEmitContext {
     // set by jet_rust_emit_program; every module is selected without a plan.
     pub selected_modules: [String:Bool]
     pub all_modules_selected: Bool
+    // Every failure, in order, under `config.keep_going`.
+    pub kept_failures: [JetRustEmitKeptFailure]{[JetRustEmitKeptFailure]{}}
 }
 
 pub struct JetRustEmitPayloadMember {
@@ -506,10 +522,21 @@ fn jet_rust_emit_failure(kind: JetRustEmitFailureKind, code: String, message: St
     JetRustEmitFailure{kind: kind, code: code, message: message, detail: detail, span: span}
 }
 
+// The reported (first) failure names the function being printed when it has
+// no source span, so a registry miss is traceable without a keep-going run.
 fn jet_rust_emit_fail(ctx: &JetRustEmitContext, kind: JetRustEmitFailureKind, code: String, message: String, detail: String, span: Span?) Never! {
+    if ctx.config.keep_going -> &ctx.kept_failures.push(JetRustEmitKeptFailure{failure: jet_rust_emit_failure(kind, code, message, detail, span), function: ctx.current_function})
     if ctx.failure == None {
-        ctx.failure = Val(jet_rust_emit_failure(kind, code, message, detail, span))
+        located :: if span == None -> "{message}{jet_rust_emit_current_function_label(ctx)}" else -> message
+        ctx.failure = Val(jet_rust_emit_failure(kind, code, located, detail, span))
     }
+}
+
+// ` in `<function key>`` for the function being printed, else empty.
+fn jet_rust_emit_current_function_label(ctx: JetRustEmitContext) -> String Never! {
+    id :: ctx.current_function ?? return ""
+    index :: ctx.function_index_by_id.get(jet_rust_emit_id_key(id.value)) ?? return ""
+    " in `{ctx.program.functions[index].key}`"
 }
 
 fn jet_rust_emit_function_name(ctx: &JetRustEmitContext, id: MIRFunctionID) -> String Never! {
@@ -860,11 +887,26 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     type_index_by_key := [String:Int]{}
     type_index_by_name := [String:Int]{}
     columnar_type_names := [String:Bool]{}
+    spelling_slots := [String:Int]{}
+    spelling_keys := [String]{}
+    spelling_rows := [[Int]]{}
     loop (index, definition) in program.types {
         id_key :: jet_rust_emit_id_key(definition.id.value)
         if type_index_by_id.get(id_key) == None -> type_index_by_id[id_key] = index
         if type_index_by_key.get(definition.key) == None -> type_index_by_key[definition.key] = index
         if type_index_by_name.get(definition.name) == None -> type_index_by_name[definition.name] = index
+        spellings := [String]{definition.key}
+        if definition.name != definition.key -> &spellings.push(definition.name)
+        loop spelling in spellings {
+            slot := spelling_slots.get(spelling) ?? -1
+            if slot < 0 {
+                slot = spelling_rows.len()
+                spelling_slots[spelling] = slot
+                &spelling_keys.push(spelling)
+                &spelling_rows.push([Int]{})
+            }
+            &spelling_rows[slot].push(index)
+        }
         if definition.layout == .Val(layout) {
             if layout == {
                 .Columnar -> {
@@ -875,6 +917,8 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             }
         }
     }
+    type_rows_by_spelling := [String:[Int]]{}
+    loop slot in 0..<spelling_rows.len() -> type_rows_by_spelling[spelling_keys[slot]] = spelling_rows[slot]
     function_index_by_id := [String:Int]{}
     loop (index, function) in program.functions {
         key :: jet_rust_emit_id_key(function.id.value)
@@ -983,6 +1027,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         type_index_by_id: type_index_by_id,
         type_index_by_key: type_index_by_key,
         type_index_by_name: type_index_by_name,
+        type_rows_by_spelling: type_rows_by_spelling,
         impls_by_trait: impls_by_trait,
         impls_by_trait_name: impls_by_trait_name,
         function_index_by_id: function_index_by_id,
@@ -1285,7 +1330,9 @@ fn jet_rust_emit_result(ctx: &JetRustEmitContext, source: String) -> JetRustEmit
     variant_metadata :: jet_rust_emit_variant_metadata(&ctx)
     trait_metadata :: jet_rust_emit_trait_metadata(&ctx)
     trait_method_metadata :: jet_rust_emit_trait_method_metadata(&ctx)
-    if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
+    if !ctx.config.keep_going {
+        if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
+    }
     manifest :: JetRustEmitManifest{
         schema_version: ctx.program.schema_version,
         target: ctx.config.target,

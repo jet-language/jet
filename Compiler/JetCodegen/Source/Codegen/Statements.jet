@@ -2279,6 +2279,9 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
                 builder.contract_scopes.len() > 0 -> {
                     jet_codegen_lower_contract_return(&builder, result, span)
                 } else -> {
+                    // A contract scope completes a bare return itself; a
+                    // carrier-kept `Unit Never!` body hands back `Ok(())`.
+                    if value == None -> result = jet_codegen_unit_never_return(&builder, span)
                     terminator := MIRTerminator.Return{value: result}
                     _ := jet_codegen_terminate_with_owned_cleanup(&builder, terminator, -1)
                 }

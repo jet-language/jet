@@ -256,6 +256,20 @@ pub struct JetDriverCompileResult {
     failed_stage: JetDriverStage?
     pub complete: Bool
     pub internal_problem: String?
+    // JET_KEEP_GOING (jet_driver_compile_keep_going): every failure the
+    // compile recorded, one TSV row each: phase, item, code, message, span.
+    pub keep_going_rows: [String]{[String]{}}
+}
+
+// The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
+// by the bootstrap entry). Its output is never shipped: a failed item is
+// recorded and replaced by a typed trap so every later phase still runs.
+pub struct JetDriverKeepGoing {
+    // Traps an earlier run asked for after it crashed inside one function,
+    // `<phase>:<name>@<position>`: `lower` positions index the lowering
+    // list, `emit` positions the optimized program's functions (the
+    // `index` of the trace's `lower.function`/`emit.function` spans).
+    pub skip: [String]
 }
 
 fn jet_driver_source_identity(package_identity: String, path: String) -> String Never! {

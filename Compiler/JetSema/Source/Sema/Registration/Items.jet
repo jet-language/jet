@@ -544,6 +544,11 @@ pub struct SemaRegistrationGraph {
     pub impl_trait_slots: [String:Int]{[String:Int]{}}
     pub impl_trait_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
     pub impl_traits_indexed: Bool{false}
+    // JET_KEEP_GOING, the compiler-internal diagnostic mode the driver sets
+    // (its output is never shipped): a function whose body check fails is
+    // kept as a typed trap of its declared signature instead of being left
+    // out, so its callers and every later phase still run.
+    pub keep_going: Bool{false}
 }
 
 pub struct SemaRegistrationRowRef {

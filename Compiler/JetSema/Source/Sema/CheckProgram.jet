@@ -4,6 +4,7 @@
 use jet_foundation.[
     AccessConvention,
     CompilerTraceSink,
+    ContractClause,
     DIAGNOSTIC_ERROR,
     Diagnostic,
     Expr,
@@ -109,6 +110,11 @@ pub struct SemaGraphModuleResult {
     // Why `complete` is false, one line per cause, so a no-diagnostic
     // incomplete module still names what stopped it.
     pub incomplete_reasons: [String]{[String]{}}
+    // D-FAIL-CONV2=A: keys of the Prelude error conversions sema injected
+    // into this module after its bodies. They have no registration row (the
+    // Rust reference pushes them as module items), so the driver's identity
+    // check admits exactly these keys beside the registered declarations.
+    pub injected_function_keys: [String]{[String]{}}
 }
 
 // #3708: what one checked function body propagates: the keys of the declared
@@ -1472,7 +1478,38 @@ fn sema_check_push_function_reasons(label: String, checked: SemaFunctionResult, 
     loop reason in checked.incomplete_reasons -> &reasons.push("{label}: {reason}")
 }
 
-fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], hardware_use: &MIRTargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String]) -> Bool {
+// JET_KEEP_GOING (SemaRegistrationGraph.keep_going): the typed trap that
+// stands in for a function whose check failed. It is `func` checked again
+// with its body replaced by one `todo` (a Never value of the return type that
+// lowers to an unreachable stop) and its contracts dropped, so its signature,
+// owner and generic parameters are the declared ones. The trap's own reports
+// are discarded: the real check's reports and reasons already name the
+// failure. None when even the signature does not check.
+fn sema_keep_going_stub(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable) -> SemaFunctionResult? {
+    stub := func
+    stub.pre = [ContractClause]{}
+    stub.post = [ContractClause]{}
+    stub.body = [Stmt]{Stmt.Expr{expr: Expr.Todo{span: func.span, expected_type: None}}}
+    discarded_diagnostics := [Diagnostic]{}
+    discarded_call_facts := [SemaCallSiteFact]{}
+    discarded_comptime_requests := [SemaComptimeRequest]{}
+    discarded_name_references := [SemaNameReferenceFact]{}
+    checked := sema_function_check(stub, owner_id, function_kind, raw_protocol_return, &environment, &scopes, &discarded_diagnostics, &discarded_call_facts, &discarded_comptime_requests, &discarded_name_references)
+    if !checked.complete || checked.value == None -> return None
+    Val(checked)
+}
+
+// Appends a keep-going trap; a trap that could not be built is one more
+// reason the module is incomplete.
+fn sema_keep_going_push_stub(stub: SemaFunctionResult?, label: String, functions: &[TFunc], reasons: &[String]) -> Bool Never! {
+    checked :: stub ?? {
+        &reasons.push("{label}: its keep-going trap did not check (the declared signature fails)")
+        return false
+    }
+    sema_append_function(&functions, checked)
+}
+
+fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[TFunc], call_facts: &[SemaCallSiteFact], hardware_use: &MIRTargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool) -> Bool {
     label :: "method `{type_name(owner_type)}.{registered.symbol.name}`"
     cached := sema_comptime_find_checked_function(comptime_functions, comptime_rows, source_module.module_identity, registered.symbol.id.key)
     if cached == {
@@ -1484,10 +1521,12 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
             &compute_facts.push(checked_function.compute_facts)
             if sema_comptime_append_checked_function(checked_function, &functions, &call_facts, &comptime_requests, &name_references) -> return true
             &reasons.push("{label}: comptime-checked body is incomplete")
+            if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_stub(registered.declaration, registered.symbol.id, sema_comptime_method_kind(registered.declaration, owner_type, trait_symbol), registered.raw_protocol_return, &environment, &scopes), label, &functions, &reasons)
             return false
         }
         .None -> {}
     }
+    function_diagnostic_start :: diagnostics.len()
     memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, sema_type_graph_base_name(owner_type) ?? "", registered.declaration.span)
     memory_func := registered.declaration
     memory_complete := true
@@ -1525,6 +1564,10 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
     function_kind := sema_comptime_method_kind(memory_func, normalized_owner_type, trait_symbol)
     environment.generic_params = method_generic_params
     checked := sema_function_check(memory_func, registered.symbol.id, function_kind, registered.raw_protocol_return, &environment, &scopes, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+    keep_going_stub := SemaFunctionResult?{None}
+    if keep_going && (!memory_complete || !owner_generic_complete || !checked.complete || sema_has_error_since(diagnostics, function_diagnostic_start)) {
+        keep_going_stub = sema_keep_going_stub(memory_func, registered.symbol.id, function_kind, registered.raw_protocol_return, &environment, &scopes)
+    }
     environment.generic_params = ~base_generic_params
     exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
     sema_hardware_use_merge(&hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
@@ -1536,11 +1579,16 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
     loop reference in function_name_references -> &name_references.push(reference)
     if !memory_complete && memory_row != None -> &reasons.push("{label}: memory plan is incomplete")
     if !owner_generic_complete -> &reasons.push("{label}: generic owner `{type_name(normalized_owner_type)}` could not be resolved to a registered nominal")
-    if !memory_complete || !owner_generic_complete -> return false
-    if !checked.complete {
-        sema_check_push_function_reasons(label, checked, &reasons)
+    if !memory_complete || !owner_generic_complete {
+        if keep_going -> _ := sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
         return false
     }
+    if !checked.complete {
+        sema_check_push_function_reasons(label, checked, &reasons)
+        if keep_going -> _ := sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
+        return false
+    }
+    if keep_going_stub != None -> return sema_keep_going_push_stub(keep_going_stub, label, &functions, &reasons)
     if sema_append_function(&functions, checked) -> return true
     &reasons.push("{label}: checked function could not be recorded")
     false
@@ -1659,6 +1707,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
     // Why this module is incomplete when no diagnostic says so, for the
     // driver's internal-problem report.
     incomplete_reasons := [String]{}
+    injected_function_keys := [String]{}
     if !graph.complete -> &incomplete_reasons.push("registration graph is incomplete")
     if !sema_registration_apply_graph_module(graph, source_module.module_identity, &scopes, &diagnostics) {
         complete = false
@@ -1816,6 +1865,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             if !sema_comptime_append_checked_function(checked_function, &functions, &call_facts, &comptime_requests, &name_references) {
                                 complete = false
                                 &incomplete_reasons.push("function `{func.name}`: comptime-checked body is incomplete")
+                                if graph.keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_stub(func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes), "function `{func.name}`", &functions, &incomplete_reasons)
                             }
                             loop source in checked_function.comptime_body_sources -> &comptime_body_sources.push(source)
                             &compute_facts.push(checked_function.compute_facts)
@@ -1824,6 +1874,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             function_call_facts := [SemaCallSiteFact]{}
                             function_comptime_requests := [SemaComptimeRequest]{}
                             function_name_references := [SemaNameReferenceFact]{}
+                            function_diagnostic_start :: diagnostics.len()
                             memory_row := sema_function_memory_find(memory_plan, source_module.module_identity, "", func.span)
                             memory_func := func
                             if memory_row == {
@@ -1863,6 +1914,9 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             if !checked.complete {
                                 complete = false
                                 sema_check_push_function_reasons("function `{func.name}`", checked, &incomplete_reasons)
+                                if graph.keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_stub(memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes), "function `{func.name}`", &functions, &incomplete_reasons)
+                            } else if graph.keep_going && sema_has_error_since(diagnostics, function_diagnostic_start) {
+                                if !sema_keep_going_push_stub(sema_keep_going_stub(memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes), "function `{func.name}`", &functions, &incomplete_reasons) -> complete = false
                             } else if !sema_append_function(&functions, checked) {
                                 complete = false
                                 &incomplete_reasons.push("function `{func.name}`: checked function could not be recorded")
@@ -1887,22 +1941,26 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
             loop method in nominal.methods {
                 if impl_method_keys.get(method.symbol.id.key) != None -> next
                 if !method.declaration.compiler_generated {
-                    if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, &scopes, &environment, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons) -> complete = false
+                    if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, &scopes, &environment, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons, graph.keep_going) -> complete = false
                     next
                 }
                 generated_diagnostics := [Diagnostic]{}
-                if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, &scopes, &environment, comptime_functions, comptime_rows, &generated_diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons) -> complete = false
+                if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, &scopes, &environment, comptime_functions, comptime_rows, &generated_diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons, graph.keep_going) -> complete = false
                 sema_author_facing_diagnostics(nominal.symbol.span, generated_diagnostics, &diagnostics)
             }
         }
         loop implementation in source_module.impls {
             loop method in implementation.methods {
-                if !sema_check_registration_method(source_module, memory_plan, method, implementation.target_type, implementation.trait_symbol, &scopes, &environment, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons) -> complete = false
+                if !sema_check_registration_method(source_module, memory_plan, method, implementation.target_type, implementation.trait_symbol, &scopes, &environment, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons, graph.keep_going) -> complete = false
             }
         }
         // D-FAIL-CONV2=A: the Core family conversions this module's bodies
-        // exercised, checked once every body has recorded its routes.
-        if !sema_inject_prelude_error_conversions(source_module.module_identity, &environment, &scopes, &functions, &diagnostics, &call_facts, &comptime_requests, &name_references, &incomplete_reasons) -> complete = false
+        // exercised, checked once every body has recorded its routes. Each
+        // routine the injection appends is recorded for the driver's identity
+        // check; the module's own functions stay registration rows.
+        injected_from := functions.len()
+        if !sema_inject_prelude_error_conversions(source_module.module_identity, &environment, &scopes, &functions, &diagnostics, &call_facts, &comptime_requests, &name_references, &incomplete_reasons, graph.keep_going) -> complete = false
+        loop index in injected_from..<functions.len() -> &injected_function_keys.push(functions[index].key)
     }
     foreign_diagnostic_count := diagnostics.len()
     foreign_provider_inputs := [SemaForeignProviderInput]{}
@@ -1983,6 +2041,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         complete: complete,
         failure_facts: failure_facts,
         incomplete_reasons: incomplete_reasons,
+        injected_function_keys: injected_function_keys,
     }
 }
 

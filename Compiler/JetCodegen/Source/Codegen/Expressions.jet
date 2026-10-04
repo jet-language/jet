@@ -2512,6 +2512,36 @@ fn jet_codegen_never_carrier_success(ty: Type) -> Type? Never! {
     None
 }
 
+// A body that keeps its `Unit Never!` carrier (a method, a contract scope, a
+// generated routine: anything but a plain return) has the infallible carrier,
+// so no `Result` failure carrier lets the backend complete a bare exit as
+// `Ok(())` the way a `Unit E!` body's does. The Rust reference carries
+// `Result<Unit, Never>` there and its backend emits that `Ok(())`; here the
+// bare exit hands back the explicit `Ok(())`. None for every other body.
+fn jet_codegen_unit_never_return(builder: &JetCodegenBuilder, span: Span) -> MIRValueID? {
+    if builder.function.failure_carrier == {
+        .Infallible -> {}
+        else -> return None
+    }
+    // A copy: lowering the `Ok(())` below writes the builder.
+    declared :: ~builder.function.ret
+    carrier :: declared ?? return None
+    success :: jet_codegen_never_carrier_success(carrier) ?? return None
+    if jet_codegen_unwrap_pattern_tags(success) != (Type.Named{name: "Unit"}) -> return None
+    unit :: TExpr{ty: success, kind: TExprKind.Unit, span: span, integer_bounds: None, cost: None}
+    Val(jet_codegen_lower_expr(&builder, TExpr{ty: carrier, kind: TExprKind.Ok{value: unit}, span: span, integer_bounds: None, cost: None}))
+}
+
+// Whether a bare exit completes `function`: its whole return is Unit, or its
+// `Result` failure carrier names a Unit success (the backend's `Ok(())`).
+fn jet_codegen_bare_return_completes(function: TFunc) -> Bool Never! {
+    if type_is_unit_callable_return(function.ret ?? Type.Named{name: "Unit"}) -> return true
+    if function.failure_carrier == {
+        .Result(success, _) -> jet_codegen_unwrap_pattern_tags(success) == (Type.Named{name: "Unit"})
+        else -> false
+    }
+}
+
 // An executable return that is neither a failure nor an absence carrier.
 fn jet_codegen_is_plain_return(ty: Type) -> Bool Never! {
     if jet_codegen_unwrap_pattern_tags(ty) == {

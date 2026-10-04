@@ -723,8 +723,12 @@ fn mir_pass_validate_call_args(
         if arg.box_as_trait == .Val(trait_type) {
             if !mir_pass_type_id_exists(tables, trait_type) -> return Val("trait boxing type is unknown")
         }
-        consumes_coercion :: arg.fn_coercion != None || arg.widen_to_union != None || arg.box_as_trait != None
         ownership :: mir_pass_value_ownership(function, definitions, arg.value) ?? return Val("call argument ownership metadata is missing")
+        source :: mir_pass_value_type(function, definitions, arg.value) ?? return Val("call argument type metadata is missing")
+        // Rust `verify_call_args`: `box_as_trait` on a value that already is
+        // a trait object is not a consuming coercion.
+        boxes_trait :: arg.box_as_trait != None && !mir_pass_type_is_trait_object(source)
+        consumes_coercion :: arg.fn_coercion != None || arg.widen_to_union != None || boxes_trait
         if consumes_coercion && ownership.mode != .Copy && arg.access != .Move && !arg.implicit_clone && !arg.shared_auto_clone && !arg.owned_last_use {
             return Val("coercion consumes a non-Copy call argument")
         }
@@ -877,7 +881,7 @@ fn mir_pass_validate_semantic_operation(
             if (condition != None) != requires_condition -> return Val("require-stop condition presence is inconsistent")
             if condition == .Val(value) {
                 type :: mir_pass_value_type(function, definitions, value) ?? return Val("require-stop condition type is missing")
-                if type.kind != .Bool -> return Val("require-stop condition is not Bool")
+                if !mir_pass_type_is_bool(type) -> return Val("require-stop condition is not Bool")
             }
             context_failure := mir_pass_validate_panic_context(context, function)
             if context_failure != None -> return context_failure
@@ -1039,6 +1043,23 @@ fn mir_pass_type_is_result(ty: MIRType) -> Bool Never! {
 fn mir_pass_type_is_callable(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .Fn(_) | .SendFn(_, _, _) -> true
+        else -> false
+    }
+}
+
+fn mir_pass_type_is_trait_object(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .TraitObject(_) -> true
+        else -> false
+    }
+}
+
+// Rust: crates/jet-foundation/src/MIR.rs::MirType::is_bool (a range or tag
+// over Bool is Bool).
+fn mir_pass_type_is_bool(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Bool -> true
+        .InlineRange(base, _, _) | .Tagged(_, base) -> mir_pass_type_is_bool(base)
         else -> false
     }
 }
@@ -1510,8 +1531,10 @@ struct MIRPassMoveEvent {
     pub span: Span
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::call_arg_consumes (a
+// clone or a FixedList-to-List widening does not consume the argument).
 fn mir_pass_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
-    if arg.implicit_clone || arg.shared_auto_clone -> false else -> arg.access == .Move || arg.owned_last_use
+    if arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list -> false else -> arg.access == .Move || arg.owned_last_use
 }
 
 fn mir_pass_consumed_values(operation: MIROperation) -> [MIRValueID] Never! {

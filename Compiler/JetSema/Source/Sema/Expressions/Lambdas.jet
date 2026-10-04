@@ -2041,7 +2041,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     host_param_conventions := [AccessConvention]?{None}
     if host_callback && host_write -> host_param_conventions = Val([AccessConvention]{AccessConvention.Write})
     lambda_value := TLambda{
-        executable: executable_value,
+        executable: if inline_loop -> executable_value else -> sema_expression_lambda_lift_returns(executable_value, ret_ty),
         source_span: lambda.span,
         frame_schedule: lambda_work.meta.frame_schedule,
         frame_schedule_derivation: lambda_work.meta.frame_schedule_derivation,
@@ -2102,4 +2102,203 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         context.failure_union_general = context.failure_union_general || lambda_context.failure_union_general
     }
     Val(checked)
+}
+
+// Rust `fallible_lambda_value` (codegen lower/lambdas.rs): a callback whose
+// return is a `Result` carrier (its fn slot's, its written error type's, or
+// its inferred one) had its body checked against the success type, so every
+// success route hands back `Ok(value)`. A value already in a carrier keeps
+// it; one in the default `Err` carrier with the same success type takes the
+// callback's carrier. A `Never` value stops before it returns anything.
+fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never! {
+    if carrier == .Result(carrier_ok, _) {
+        if value.ty == .Result(value_ok, value_err) {
+            if value_err == (Type.Named{name: "Err"}) && type_identity_equal(value_ok, carrier_ok) {
+                rehomed := value
+                rehomed.ty = carrier
+                return rehomed
+            }
+            return ~value
+        }
+        if value.ty == (Type.Named{name: "Never"}) -> return ~value
+        return sema_tir_expr(carrier, TExprKind.Ok{value: value}, value.span)
+    }
+    ~value
+}
+
+// Rust `lift_fallible_lambda_returns`: lift the expression body, or every
+// `return` of a block body (its tail is one), into the `Result` carrier. A
+// shared block body stays as checked, as Rust reuses it unlifted.
+fn sema_expression_lambda_lift_returns(executable: TLambdaBody, carrier: Type) -> TLambdaBody Never! {
+    if !sema_expression_lambda_type_is_result(carrier) -> return ~executable
+    if executable == {
+        .Expr(value) -> TLambdaBody.Expr{value: sema_expression_lambda_lift_value(value, carrier)}
+        .Block(body) -> {
+            lifted := body
+            sema_expression_lambda_lift_block(&lifted, carrier)
+            TLambdaBody.Block{body: lifted}
+        }
+        .SharedBlock(_) -> ~executable
+    }
+}
+
+// Nested lambdas and reactive bodies are their own callables and keep their
+// own returns; every other statement body belongs to this callback.
+fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never! {
+    loop index in 0..<statements.len() {
+        statement := statements[index]
+        if statement == {
+            .Return(value, span) -> {
+                if value == .Val(returned) -> statements[index] = TStmt.Return{value: Val(sema_expression_lambda_lift_value(returned, carrier)), span: span}
+            }
+            .ContractScope(pre, body, post, result, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.ContractScope{pre: pre, body: updated, post: post, result: result, span: span}
+            }
+            .RefutableBind(pattern, init, fallback, span) -> {
+                updated := fallback
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.RefutableBind{pattern: pattern, init: init, fallback: updated, span: span}
+            }
+            .CountedLoop(label, init, condition, step, vectorization, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.CountedLoop{label: label, init: init, condition: condition, step: step, vectorization: vectorization, body: updated, span: span}
+            }
+            .ForRange(label, variable, start, end, step, exclusive, body, vectorization, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.ForRange{label: label, local: variable, start: start, end: end, step: step, exclusive: exclusive, body: updated, vectorization: vectorization, span: span}
+            }
+            .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.Range{label: label, variable: variable, source: source, start: start, end: end, step: step, exclusive: exclusive, vectorization: vectorization, body: updated, span: span}
+            }
+            .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, source_stable, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.ForIn{label: label, variable: variable, variable_two: variable_two, source: source, collection: collection, step: step, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: source_stable, body: updated, span: span}
+            }
+            .While(label, condition, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.While{label: label, condition: condition, body: updated, span: span}
+            }
+            .Loop(label, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.Loop{label: label, body: updated, span: span}
+            }
+            .TaskGroup(group, limit, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.TaskGroup{group: group, limit: limit, body: updated, span: span}
+            }
+            .If(condition, then_body, else_body, else_is_elseif, span) -> {
+                updated_then := then_body
+                sema_expression_lambda_lift_block(&updated_then, carrier)
+                updated_else := else_body
+                if else_body == .Val(else_statements) {
+                    lifted := ~else_statements
+                    sema_expression_lambda_lift_block(&lifted, carrier)
+                    updated_else = Val(lifted)
+                }
+                statements[index] = TStmt.If{condition: condition, then_body: updated_then, else_body: updated_else, else_is_elseif: else_is_elseif, span: span}
+            }
+            .Match(subject, arms, exhaustive, span) -> {
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    sema_expression_lambda_lift_block(&arm_body, carrier)
+                    updated_arms[arm_index].body = arm_body
+                }
+                statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
+            }
+            .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    sema_expression_lambda_lift_block(&arm_body, carrier)
+                    updated_arms[arm_index].body = arm_body
+                }
+                updated_else := else_body
+                if else_body == .Val(else_statements) {
+                    lifted := ~else_statements
+                    sema_expression_lambda_lift_block(&lifted, carrier)
+                    updated_else = Val(lifted)
+                }
+                statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: updated_arms, else_body: updated_else, fallthrough: fallthrough, span: span}
+            }
+            .RangeSwitch(subject, arms, else_body, span) -> {
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    sema_expression_lambda_lift_block(&arm_body, carrier)
+                    updated_arms[arm_index].body = arm_body
+                }
+                updated_else := else_body
+                sema_expression_lambda_lift_block(&updated_else, carrier)
+                statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else, span: span}
+            }
+            .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
+                updated_arms := ~arms
+                loop arm_index in 0..<updated_arms.len() {
+                    arm_body := updated_arms[arm_index].body
+                    sema_expression_lambda_lift_block(&arm_body, carrier)
+                    updated_arms[arm_index].body = arm_body
+                }
+                updated_else := else_body
+                if else_body == .Val(else_statements) {
+                    lifted := ~else_statements
+                    sema_expression_lambda_lift_block(&lifted, carrier)
+                    updated_else = Val(lifted)
+                }
+                statements[index] = TStmt.MixedSwitch{subject: subject, class: branch_class, arms: updated_arms, else_body: updated_else, span: span}
+            }
+            .Layout(handle, label, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.Layout{handle: handle, label: label, body: updated, span: span}
+            }
+            .ContextBlock(guards, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.ContextBlock{guards: guards, body: updated, span: span}
+            }
+            .Transact(handle, snapshots, stm, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.Transact{handle: handle, snapshots: snapshots, stm: stm, body: updated, span: span}
+            }
+            .GCEdit(root, slot, edges, replace_all, index_temp, nested, span) -> {
+                updated := [TStmt]{nested}
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.GCEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: updated[0], span: span}
+            }
+            .Unsafe(gate, body) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                statements[index] = TStmt.Unsafe{gate: gate, body: updated}
+            }
+            .Inline(body, span) | .DebugOnly(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .ScopeMember(_, body, span) -> {
+                updated := body
+                sema_expression_lambda_lift_block(&updated, carrier)
+                if statement == {
+                    .Inline(_, _) -> statements[index] = TStmt.Inline{body: updated, span: span}
+                    .DebugOnly(_, _) -> statements[index] = TStmt.DebugOnly{body: updated, span: span}
+                    .UnsafeBlock(gate, _, _) -> statements[index] = TStmt.UnsafeBlock{gate: gate, body: updated, span: span}
+                    .SentryPolicy(enabled, _, _) -> statements[index] = TStmt.SentryPolicy{enabled: enabled, body: updated, span: span}
+                    .Impure(_, _) -> statements[index] = TStmt.Impure{body: updated, span: span}
+                    .Region(_, _) -> statements[index] = TStmt.Region{body: updated, span: span}
+                    .Live(_, _) -> statements[index] = TStmt.Live{body: updated, span: span}
+                    .Shield(_, _) -> statements[index] = TStmt.Shield{body: updated, span: span}
+                    .ScopeMember(kind, _, _) -> statements[index] = TStmt.ScopeMember{kind: kind, body: updated, span: span}
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+    }
 }

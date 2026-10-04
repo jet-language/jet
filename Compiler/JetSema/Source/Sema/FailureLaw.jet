@@ -241,9 +241,11 @@ pub fn sema_error_conversion_items(items: [Item], diagnostics: &[Diagnostic]) ->
 // declaration names the family leaf; the routine binds the exercised source
 // identity (`<corelib>/Core/files::Core/files/files.jet::IOError`), as the
 // Rust reference binds `from_ty` to the exercised source, so the routine key
-// is the one the propagation site recorded. The routine is anchored at the
-// propagation site that demanded it.
-fn sema_prelude_error_conversion(source: Type, site: Span, diagnostics: &[Diagnostic]) -> Func? {
+// is the one the propagation site recorded. The routine keeps the declaration's
+// own spans, as Rust keeps the Prelude/Errors.jet spans: its `self` parameter
+// is declared before every use in its body, so span-ordered name resolution
+// finds it.
+fn sema_prelude_error_conversion(source: Type, diagnostics: &[Diagnostic]) -> Func? {
     leaf :: sema_error_conversion_leaf(type_name(source))
     parsed :: parse_source("impl {leaf} -> Err {{\n    return Err(\"{{self}}\")\n}}\n".bytes()) ?? return None
     if parsed.diagnostics.len() != 0 {
@@ -252,7 +254,7 @@ fn sema_prelude_error_conversion(source: Type, site: Span, diagnostics: &[Diagno
     }
     if parsed.program.items.len() != 1 -> return None
     if parsed.program.items[0] == {
-        .ErrorConv(definition) -> Val(sema_error_conversion_function(definition.from_ty, site, definition.to_ty, site, source, definition.body, site))
+        .ErrorConv(definition) -> Val(sema_error_conversion_function(definition.from_ty, definition.from_span, definition.to_ty, definition.to_span, source, definition.body, definition.body_span))
         else -> None
     }
 }
@@ -304,8 +306,9 @@ fn sema_prelude_conversion_demands_expr(expression: TExpr, module_identity: Stri
 // `inject_exercised_error_conversions`): only the conversions this module's
 // propagation sites exercised are checked into routines, and a module that
 // declares its own conversion for a pair keeps it. Every conversion that cannot
-// be injected names its cause in `reasons`.
-pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String]) -> Bool {
+// be injected names its cause in `reasons`; with `keep_going` (JET_KEEP_GOING)
+// a conversion whose body fails to check is kept as its typed trap.
+pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
     demands := [SemaPreludeConversionDemand]{}
     loop function in functions {
         loop statement in function.body {
@@ -320,7 +323,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
         }
         if present -> next
         label :: "prelude error conversion `impl {type_name(demand.source)} -> Err`"
-        conversion :: sema_prelude_error_conversion(demand.source, demand.site, &diagnostics) ?? {
+        conversion :: sema_prelude_error_conversion(demand.source, &diagnostics) ?? {
             complete = false
             &reasons.push("{label}: its Prelude declaration did not parse into one conversion")
             next
@@ -347,6 +350,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
                 loop index in before..<diagnostics.len() -> &reported.push("{diagnostics[index].code} {diagnostics[index].what}")
                 if reported.len() == 0 -> &reasons.push("{label}: body checking is incomplete") else -> &reasons.push("{label}: body checking stopped on {reported.join("; ")}")
             }
+            if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes), label, &functions, &reasons)
             next
         }
         if !sema_append_function(&functions, checked) {
