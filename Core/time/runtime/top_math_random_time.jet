@@ -17,12 +17,11 @@ use core.tasks.runtime.task_group.[jet_task_deadline, jet_task_deadline_mark_pen
 use core.math.runtime.kernel_seeded_random.[jet_seeded_rng_next, jet_seeded_rng_int_checked, jet_seeded_rng_float,
     jet_seeded_rng_float_open, jet_seeded_rng_float_range, jet_seeded_rng_bool, jet_seeded_rng_bool_p,
     jet_seeded_rng_normal, jet_seeded_rng_exponential, jet_seeded_rng_split]
-use core.net.runtime.std_mime as mime_table
 use core.text.runtime.typed_text.[jet_typed_datetime_interpolate]
 // No Jet home yet: the Rust Core/Time.rs date family and RFC3339 parser
-// (kernel_civil/kernel_time hold part of it as Civil*), JetURL, and the
-// storage-backed seeded draws held on TANDEM-BATCH (kernel_seeded_random).
-use jet_std.[JetDate, JetLocalTime, JetPeriod, JetDateTime, JetZone, JetZonedDateTime, jet_time_parse_rfc3339, JetURL,
+// (kernel_civil/kernel_time hold part of it as Civil*) and the storage-backed
+// seeded draws held on TANDEM-BATCH (kernel_seeded_random).
+use jet_std.[JetDate, JetLocalTime, JetPeriod, JetDateTime, JetZone, JetZonedDateTime, jet_time_parse_rfc3339,
     jet_seeded_rng_bytes, jet_seeded_rng_pick, jet_seeded_rng_weighted_pick, jet_seeded_rng_sample, jet_seeded_rng_shuffle]
 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:4
@@ -447,61 +446,16 @@ impl JetZonedDateTime {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1227
     fn compare_value(self, other: JetZonedDateTime) -> Ordering { self <=> other }
 }
-use core.net.runtime.kernel_net.[JetURLParts, JetMIME]
-use core.net.runtime.std_url_mime as url
 use core.prelude.runtime.kernel_precise_numeric as precise
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1233
-fn jet_url_parse(s: String) -> JetURL Err! { Ok(JetURL.from_url_parts(JetURLParts.parse(s))) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1239
 // D-BOUND-HEAD1=A: sema already rejected holes that could make the head invalid.
 fn jet_typed_datetime_literal(literals: [String], holes: [String]) -> JetDateTime {
     text :: jet_typed_datetime_interpolate(literals, holes)
     jet_time_parse_rfc3339(text) ?? panic("sema accepted an invalid DateTime typed head: {err.message}")
 }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1247
-fn jet_url_from_parts(scheme: String, host: String, path: String, query: [[String]], fragment: String) -> JetURL Err! {
-    Ok(JetURL.from_url_parts(JetURLParts.from_parts(scheme, host, path, query, fragment)))
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1257
-fn jet_url_file(path: String) -> JetURL { JetURL.from_url_parts(JetURLParts.file(path)) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1260
-fn jet_url_data(mime: JetMIME, text: String) -> JetURL { JetURL.from_url_parts(JetURLParts.data(mime, text)) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1263,1297: the
-// query builder and urlencode are the same rows encoder.
-fn jet_url_query(pairs: [[String]]) -> String { url.jet_url_query_rows(pairs) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1285
-fn jet_url_percent_encode_component(s: String) -> String { url.jet_url_percent_encode(s, false) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1288
-fn jet_url_percent_decode_component(s: String) -> String Err! { url.jet_url_percent_decode_str(s) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1291
-fn jet_url_join(base: String, rel: String) -> String { url.jet_url_join_text(base, rel) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1294
-fn jet_url_parse_qsl(query: String) -> [[String]] { url.jet_url_parse_qsl_rows(query) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1297
-fn jet_url_urlencode(pairs: [[String]]) -> String { url.jet_url_query_rows(pairs) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1300,1325
-// (jet_url_split_fragment, jet_url_urldefrag): no port; core.net.url owns
-// split_fragment and urldefrag in source.
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1304
-fn jet_url_quote(text: String) -> String { url.jet_url_quote(text) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1307
-fn jet_url_quote_from_bytes(data: [U8]) -> String { url.jet_url_quote_from_bytes(data) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1310
-fn jet_url_quote_plus(text: String) -> String { url.jet_url_quote_plus(text) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1313
-fn jet_url_unquote(text: String) -> String Err! { url.jet_url_unquote(text) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1316
-fn jet_url_unquote_to_bytes(text: String) -> [U8] Err! { url.jet_url_unquote_to_bytes(text) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1319
-fn jet_url_unquote_plus(text: String) -> String Err! { url.jet_url_unquote_plus(text) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1322
-fn jet_url_to_string(value: JetURL) -> String { value.to_string_value() }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1329
-fn jet_mime_parse(s: String) -> JetMIME Err! { JetMIME.parse(s) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1332
-fn jet_mime_from_extension(ext: String) -> String? { mime_table.jet_mime_from_extension(ext) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1335
-fn jet_mime_extension(mime: String) -> String? { mime_table.jet_extension_from_mime(mime) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1233-1337 (jet_url_*,
+// jet_mime_*): no port. core.net.url and core.net.mime own every member those
+// dispatcher rows name, in source, on every tier.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1340
 fn jet_decimal_from_str(s: String) -> JetDecimal {
     jet_std_decimal_from_exact(precise.decimal_from_str(s) ?? jet_panic("", 0, precise.failure_message("Decimal", "from_str")))
@@ -620,153 +574,16 @@ fn jet_decimal_to_string(a: JetDecimal) -> String { precise.decimal_to_string(je
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1650
 fn jet_decimal_to_float(a: JetDecimal) -> F64 { precise.decimal_to_float(jet_std_decimal_to_exact(a)) }
 use core.encoding.runtime.std_data_tree as json
-use core.text.runtime.kernel_float_format as float_format
 use core.term as term
-use core.encoding.[DataTree, EncodingError, EncodingFormat]
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1660
-fn jet_std_json_parse(text: String) -> DataTree EncodingError! { json.parse_json_datatree(text) }
+use core.encoding.[DataTree, EncodingError]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1660,1669-1803
+// (jet_std_json_parse, jet_quote_json_local, jet_std_json_render_canonical,
+// jet_std_json_events, jet_std_jsonl_*): no port. core.encoding.json owns
+// parse/loads/events and core.encoding.jsonl owns every JSONL member, in source.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1663
 fn jet_std_json_render(d: DataTree) -> String { json.render_datatree_json(d, false, 0) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1666
 fn jet_std_json_render_pretty(d: DataTree) -> String { json.render_datatree_json(d, true, 0) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1669
-// Escapes `char::is_control` (C0, DEL, and the C1 range U+0080-U+009F, whose
-// UTF-8 form is C2 80-9F) as \u00xx; \b and \f stay \u0008/\u000c here.
-fn jet_quote_json_local(s: String) -> String {
-    raw :: s.bytes()
-    out := [U8]{34}
-    i := 0
-    loop i < raw.len() {
-        b :: raw[i]
-        // A C1 control is the two-byte sequence C2 80..C2 9F.
-        c1 :: b == 194 && i + 1 < raw.len() && c1_control(raw[i + 1])
-        if {
-            b == 34 -> push_ascii(&out, "\\\"")
-            b == 92 -> push_ascii(&out, "\\\\")
-            b == 10 -> push_ascii(&out, "\\n")
-            b == 13 -> push_ascii(&out, "\\r")
-            b == 9 -> push_ascii(&out, "\\t")
-            b < 32 || b == 127 -> push_ascii(&out, unicode_escape(b))
-            c1 -> {
-                push_ascii(&out, unicode_escape(raw[i + 1]))
-                i += 1
-            }
-            else -> &out.push(b)
-        }
-        i += 1
-    }
-    &out.push(U8{34})
-    String.from_bytes(out) ?? ~s
-}
-fn push_ascii(out: &[U8], text: String) { loop b in text.bytes() -> &out.push(b) }
-fn c1_control(second: U8) -> Bool { second >= 128 && second <= 159 }
-fn unicode_escape(code: U8) -> String {
-    digits :: "0123456789abcdef"
-    n :: Int.from_u8(code)
-    "\\u00{digits.slice(n /% 16, n /% 16 + 1)}{digits.slice(n %% 16, n %% 16 + 1)}"
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1685
-// Object keys sort by byte order; Float uses the Rust Debug spelling.
-fn jet_std_json_render_canonical(d: DataTree) -> String {
-    if d == {
-        .Null -> "null"
-        .Bool(b) -> "{b}"
-        .Int(n) -> "{n}"
-        .Float(f) -> float_format.debug(f)
-        .Number(_) | .TypedText(_) -> panic("internal JSON carrier escaped typed decode")
-        .Text(s) -> jet_quote_json_local(s)
-        .Bytes(bs) -> {
-            parts :: loop b in bs -> "{b}"
-            "[{parts.join(",")}]"
-        }
-        .Array(xs) -> {
-            parts :: loop x in xs -> jet_std_json_render_canonical(x)
-            "[{parts.join(",")}]"
-        }
-        .Object(entries) -> {
-            pairs :: loop pair in entries -> pair
-            sorted := pairs
-            &sorted.sort_by(pair -> pair.key)
-            parts :: loop pair in sorted -> "{jet_quote_json_local(pair.key)}:{jet_std_json_render_canonical(pair.value)}"
-            "{{{parts.join(",")}}}"
-        }
-    }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1715
-fn jet_std_json_events(d: DataTree) -> String {
-    out := [String]{}
-    json_event_walk("", d, &out)
-    out.join("\n")
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1716 (walk)
-fn json_event_walk(path: String, t: DataTree, out: &[String]) {
-    here :: if path == "" -> "$" else -> path
-    if t == {
-        .Object(entries) -> {
-            &out.push("object_start {here}")
-            loop pair in entries -> json_event_walk("{here}.{pair.key}", pair.value, &out)
-            &out.push("object_end {here}")
-        }
-        .Array(items) -> {
-            &out.push("array_start {here}")
-            loop i in 0..<items.len() -> json_event_walk("{here}[{i}]", items[i], &out)
-            &out.push("array_end {here}")
-        }
-        else -> &out.push("value {here} {jet_std_json_render_canonical(t)}")
-    }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1740
-// Lines are trimmed before parsing; a record error is re-labelled JSONL with
-// its line counted from the record's zero-based index, as in Rust.
-fn jet_std_jsonl_parse(text: String) -> [DataTree] EncodingError! {
-    out := [DataTree]{}
-    lines :: text.lines()
-    loop idx in 0..<lines.len() {
-        trimmed :: lines[idx].trim()
-        if trimmed == "" -> next
-        &out.push(jet_std_json_parse(trimmed) ?? return Err(jsonl_error(err, idx)))
-    }
-    Ok(out)
-}
-fn jsonl_error(error: EncodingError, index: Int) -> EncodingError {
-    failure := error
-    failure.format = EncodingFormat.JSONL
-    failure.line = if error.line == .Val(line) -> Val(index + line) else -> None
-    failure
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1758
-fn jet_std_jsonl_render(rows: [DataTree]) -> String {
-    out := ""
-    loop row in rows -> out = "{out}{jet_std_json_render_canonical(row)}\n"
-    out
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1769
-fn jet_std_jsonl_count_rows(text: String) -> Int {
-    count := 0
-    loop line in text.lines() {
-        if line.trim() != "" -> count += 1
-    }
-    count
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1774
-fn jet_std_jsonl_append_line(text: String, value: DataTree) -> String {
-    rendered :: jet_std_json_render_canonical(value)
-    if {
-        text == "" -> "{rendered}\n"
-        text.ends_with("\n") -> "{text}{rendered}\n"
-        else -> "{text}\n{rendered}\n"
-    }
-}
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1785
-fn jet_std_jsonl_first(text: String) -> DataTree? EncodingError! {
-    lines :: text.lines()
-    loop idx in 0..<lines.len() {
-        trimmed :: lines[idx].trim()
-        if trimmed == "" -> next
-        return Ok(Val(jet_std_json_parse(trimmed) ?? return Err(jsonl_error(err, idx))))
-    }
-    Ok(None)
-}
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1810
 // D-JSON1-decode + D-JSON3: the walk and audit-line shape live in
 // std_data_tree; this route supplies only the sink, the process stderr.
