@@ -283,7 +283,7 @@ impl<T, E> JetTaskSelectPolicy<T, E> {
     // Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:386
     pub fn new(mode: JetTaskSelectMode, count: USize) -> Self {
         if count == 0 { unreachable("sema must reject an empty task group combinator") }
-        Self{mode, pending: count, values: (0..count).map(fn(index) { None }).collect(), first_error: None}
+        Self{mode, pending: count, values: (0..<count).map(fn(index) { None }).collect(), first_error: None}
     }
     // Rust: crates/jet-codegen/src/Prelude/TaskGroup.rs:398
     pub fn settle(self: &Self, order: U128, index: USize, result: Result<T, E>) -> JetTaskDecision<T, E> {

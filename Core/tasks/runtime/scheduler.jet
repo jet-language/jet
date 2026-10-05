@@ -208,7 +208,7 @@ fn jet_scheduler_panic_message(payload: &(Any + Send)) -> String {
     reason := split.strip_prefix("panic: ").unwrap_or(first)
     message :: reason.to_string()
     if message.rsplit_once(" (at ") == Some((reason, location)) {
-        if location.ends_with(')') && location[..location.len()-1].contains(':') { return reason.to_string() }
+        if location.ends_with(')') && location[0..<location.len()-1].contains(':') { return reason.to_string() }
     }
     ^message
 }
@@ -621,7 +621,7 @@ impl JetDeterministicWorld {
         #Unsafe("bounded condition waits allow tasks to park or register their virtual timers") {
             state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
             budget :: state.budget
-            loop _ in 0..budget {
+            loop _ in 0..<budget {
                 if state.runnable_tasks == 0 || !state.timers.is_empty() { return }
                 (next, _) :: self.waiters.wait_timeout(^state, Duration.from_micros(50)).unwrap_or_else((error) -> error.into_inner())
                 state = ^next
@@ -634,7 +634,7 @@ impl JetDeterministicWorld {
         #Unsafe("bounded condition waits recheck predicate and report real world budget exhaustion") {
             state := self.state.lock().unwrap_or_else((error) -> error.into_inner())
             budget :: state.budget
-            loop _ in 0..budget {
+            loop _ in 0..<budget {
                 if ready(&state) { return }
                 (next, _) :: self.waiters.wait_timeout(^state, Duration.from_micros(50)).unwrap_or_else((error) -> error.into_inner())
                 state = ^next
