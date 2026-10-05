@@ -179,12 +179,12 @@ fn load() -> Api? {
     if selected_family() != "unix" -> return None // Rust:337 non-Unix arm.
     // Constant text retains static NUL-terminated bytes; never a temporary C loan.
     const LIBRARIES: [String] = ["libgtk-4.so.1" + TEXT_NUL, "libgtk-4.so" + TEXT_NUL, "libgtk-4.1.dylib" + TEXT_NUL, "libgtk-4.dylib" + TEXT_NUL]
-    for library in LIBRARIES {
+    loop library in LIBRARIES {
         // GATE #4565: kernel primitive
         handle :: #Unsafe("static library name; retain returned loader handle for the process") {
             dlopen(library.as_ptr().cast<I8>(), RTLD_NOW)
         }
-        if handle.is_null() -> continue
+        if handle.is_null() -> next
         // A missing symbol returns None immediately, as the Rust ? macro does.
         return Val(Api{
             _handle: handle,
@@ -564,7 +564,7 @@ fn gtk_file_model_paths(model: Ptr<GListModel>) -> [String] {
     #Unsafe("consume each retained GFile item then release its retained model") {
         count :: g_list_model_get_n_items(model)
         paths := [String].with_capacity(count as USize)
-        for index in 0..<count {
+        loop index in 0..<count {
             if gtk_file_path(g_list_model_get_item(model, index).cast<GFile>()) == .Val(path) { paths.push(^path) }
         }
         g_object_unref(model.cast<c_void>())
@@ -734,8 +734,8 @@ fn jet_gtk_shortcut_trampoline(_controller: Ptr<GtkWidget>, keyval: U32, _keycod
         }
         candidates :: [JetUiShortcutModifiers.from_bits(logical_bits), physical]
         handled_shortcut := None
-        for candidate_modifiers in candidates {
-            candidate :: try { JetUiShortcut.new(&key, candidate_modifiers) } catch { continue }
+        loop candidate_modifiers in candidates {
+            candidate :: try { JetUiShortcut.new(&key, candidate_modifiers) } catch { next }
             if !(state.shortcuts.dispatch(&candidate) == .Unhandled) {
                 handled_shortcut = Val(^candidate)
                 break

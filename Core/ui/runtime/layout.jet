@@ -56,7 +56,7 @@ impl LinExpr {
         n := self.n_terms as Int
         for (idx, coeff) in other.terms[0..<other.n_terms as Int] {
             slot := None as Int?
-            for i in 0..<n { if terms[i].0 == idx {
+            loop i in 0..<n { if terms[i].0 == idx {
                 slot = Val(i)
                 break
             } }
@@ -159,7 +159,7 @@ fn normalize_row(row: RowSpec) -> RowSpec {
     row := row
     if row.rhs < 0.0 {
         row.rhs = -row.rhs
-        for i in 0..<row.terms.len() { row.terms[i].1 = -row.terms[i].1 }
+        loop i in 0..<row.terms.len() { row.terms[i].1 = -row.terms[i].1 }
         row.op = match row.op { .Le -> .Ge, .Ge -> .Le, .Eq -> .Eq }
     }
     row
@@ -195,14 +195,14 @@ impl Tableau {
         m :: self.rows.len()
         obj := [Float].filled(n + 1, 0.0)
         for k in 0..n { obj[k] = cost[k] }
-        for i in 0..<m {
+        loop i in 0..<m {
             c :: cost[self.basis[i]]
             if c.abs() > EPS { for k in 0..(n + 1) { obj[k] -= c * self.rows[i][k] } }
         }
         loop {
             enter := None as Int?
             for j in 0..n {
-                if ineligible[j] -> continue
+                if ineligible[j] -> next
                 if obj[j] < -EPS {
                     enter = Val(j)
                     break
@@ -211,7 +211,7 @@ impl Tableau {
             j :: enter ?? break
             leave := None as Int?
             best_ratio := Float.INFINITY
-            for i in 0..<m {
+            loop i in 0..<m {
                 a :: self.rows[i][j]
                 if a > EPS {
                     ratio :: self.rows[i][n] / a
@@ -227,8 +227,8 @@ impl Tableau {
             i :: leave ?? break // Unbounded; not expected for the layout problem family.
             piv :: self.rows[i][j]
             for c in 0..(n + 1) { self.rows[i][c] /= piv }
-            for k in 0..<m {
-                if k == i -> continue
+            loop k in 0..<m {
+                if k == i -> next
                 factor :: self.rows[k][j]
                 if factor.abs() > EPS {
                     for c in 0..(n + 1) { self.rows[k][c] -= factor * self.rows[i][c] }
@@ -264,7 +264,7 @@ fn solve(inner: &Inner) -> {
     }
     next_col := n_vars
     extras := [Extra].with_capacity(specs.len())
-    for s in specs {
+    loop s in specs {
         extra :: if s.strength == .Required {
             match s.op {
                 .Le -> {
@@ -295,10 +295,10 @@ fn solve(inner: &Inner) -> {
     n_cols :: next_col
     m :: specs.len()
     rows := [[Float]].with_capacity(m)
-    for i in 0..<m { rows.push([Float].filled(n_cols + 1, 0.0)) }
+    loop i in 0..<m { rows.push([Float].filled(n_cols + 1, 0.0)) }
     basis := [Int].filled(m, 0)
     has_artificial := [Bool].filled(m, false)
-    for i in 0..<m {
+    loop i in 0..<m {
         s :: &specs[i]
         for (idx, coeff) in s.terms { rows[i][idx] += coeff }
         rows[i][n_cols] = s.rhs
@@ -329,8 +329,8 @@ fn solve(inner: &Inner) -> {
     // Phase 1: minimize required-row artificial values.
     if has_artificial.any(fn(b) { b }) {
         cost1 := [Float].filled(n_cols, 0.0)
-        for i in 0..<m {
-            if not has_artificial[i] -> continue
+        loop i in 0..<m {
+            if not has_artificial[i] -> next
             match extras[i] {
                 .SurplusArtificial(_, artificial) -> cost1[artificial] = 1.0
                 .Artificial(col) -> cost1[col] = 1.0
@@ -341,7 +341,7 @@ fn solve(inner: &Inner) -> {
         phase1_obj :: tab.minimize(cost1.view(), ineligible1.view())
         if phase1_obj > 1e-5 {
             names := [] as [String]
-            for i in 0..<m {
+            loop i in 0..<m {
                 art_col :: match extras[i] {
                     .SurplusArtificial(_, artificial) -> Val(artificial)
                     .Artificial(col) -> Val(col)
@@ -360,7 +360,7 @@ fn solve(inner: &Inner) -> {
     // Phase 2: artificials cannot re-enter; minimize weighted soft violations.
     cost2 := [Float].filled(n_cols, 0.0)
     ineligible2 := [Bool].filled(n_cols, false)
-    for i in 0..<m {
+    loop i in 0..<m {
         match extras[i] {
             .SurplusArtificial(_, artificial) -> ineligible2[artificial] = true
             .Artificial(col) -> ineligible2[col] = true
@@ -380,7 +380,7 @@ fn solve(inner: &Inner) -> {
     }
     _ :: tab.minimize(cost2.view(), ineligible2.view())
     solution := [Float].filled(n_vars, 0.0)
-    for i in 0..<m { if tab.basis[i] < n_vars { solution[tab.basis[i]] = tab.rows[i][n_cols] } }
+    loop i in 0..<m { if tab.basis[i] < n_vars { solution[tab.basis[i]] = tab.rows[i][n_cols] } }
     inner.infeasible = None
     inner.solution = solution
 }
