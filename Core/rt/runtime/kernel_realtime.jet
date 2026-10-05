@@ -218,7 +218,7 @@ pub fn jet_rt_callback_with_skip(rate_hz: I64, frames_per_buffer: I64,
     assert(rate_hz > 0, "real-time callback rate must be positive")
     jet_scheduler_world_reject_uncontrolled("foreign")
     assert(frames_per_buffer > 0, "real-time callback frame count must be positive")
-    frame_count :: Usize.try_from(frames_per_buffer).expect("real-time callback frame count is outside the platform range")
+    frame_count :: Usize.try_from(frames_per_buffer) ?? panic("real-time callback frame count is outside the platform range")
     buffer :: [F64].filled(frame_count, 0.0)
     start :: JetInstant.now()
     start_identity :: jet_time_monotonic_now_ns()
