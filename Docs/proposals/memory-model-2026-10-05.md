@@ -394,7 +394,7 @@ candidate binary.
 | C22 | Mutable chunks | `for c in v.chunks_mut(2)` | A / A | A, with a misleading L0501 "copies every time" lint on a write window | lint fixed (K7) |
 | C24 | Struct holding a borrow | `struct Parser<'a> { src: &'a str }` | A / A | A from a parameter; R (E2307) in the same scope (C24b) | `struct Parser { src: @String }` in both (K2, K10) |
 | C27/C28 | Return a borrow from one or either input | `fn longest<'a>(a: &'a str, b: &'a str) -> &'a str` | A / A | A: inferred, or `-> View<str> from a \| b` | `-> @String from a \| b` |
-| C30 | Self-referential struct | not safe (`Pin` + `unsafe`, or `ouroboros`/`self_cell`) | R / R | R: E2307 | A: `words: [@String in text]` (D-LINK-SIBLING1) |
+| C30 | Self-referential struct | not safe (`Pin` + `unsafe`, or `ouroboros`/`self_cell`) | R / R | R: E2307 | A: `keys: [@String] from text` (D-LINK-SIBLING1) |
 | C31 | Tree with parent IDs | `Vec` arena + `usize` or `slotmap` keys | A / A | A: `Pool<Node>` + `ID<Node>` | unchanged |
 | C32 | Tree with owning children and weak parents | `Rc<RefCell<Node>>` + `Weak` | A / A | `@` R (E0119); `Shared.Weak` works but locks (C32b) | `kids: [@Node]`, `parent: ?@Node` with a weak link (K1) |
 | C33 | Field that refers to another value, owner keeps writing | `Rc<RefCell<Player>>` | A only with `Rc<RefCell>` | R: E0107 | `captain: @Player`; `@p`; no count when `p` outlives `t` |
@@ -720,13 +720,22 @@ missing (Rust lowers `freeze` to a plain copy; the Jet compiler has no
 | Ballot | Question | Recommendation |
 |---|---|---|
 | D-LINK-ITEM1 | What happens when a list item that a long-lived link points at may move because the list grows? | A: short-lived item links freeze the list's shape (compile-checked, like Rust); a long-lived link must point at an object, so the list holds `[@Node]`; the error teaches the change |
-| D-METHOD-FOOTPRINT1 | May you call a method that changes one field while you hold a link to another field? | A: yes; the compiler records each method's field footprint; public methods publish it like provenance, and an expert can state it in the receiver |
-| D-LINK-SIBLING1 | May a record hold text and links into that same text? | A: yes, with an `in field` clause on the link field; checked so the text cannot change shape while the record lives |
+| D-METHOD-FOOTPRINT1 | May you call a method that changes one field while you hold a link to another field? | A: yes; the compiler records each method's field footprint, public methods publish it like provenance, and an expert may state it in the receiver with the ratified member spread (`fn reset(&self.[log, hits])`) |
+| D-LINK-SIBLING1 | May a record hold text and links into that same text? | A: yes, with a `from field` clause on the link field (`keys: [@String] from text`), reusing the provenance word; the named text field is frozen for the record's life |
 | D-MAP-SLOT1 | How do you read-or-create a map entry with one lookup? | A: `counts[w, or: 0] += 1`; the default runs only when the key is missing |
 
-Each ballot is drafted under `~/.cache/jet-dev/ballots/READY/` and attached to
-card #3645. D-MAP-SLOT1 is performance-motivated, so its paired
-candidate/plain cell must exist before ratification.
+Each ballot is a short-profile draft under `~/.cache/jet-dev/ballots/READY/`
+(`D-LINK-ITEM1.json`, `D-METHOD-FOOTPRINT1.json`, `D-LINK-SIBLING1.json`,
+`D-MAP-SLOT1.json`), attached to card #3645. All four pass the read-only
+validator (`node ~/.cache/jet-dev/ballots/READY/validate.mjs …`, exit 0, no
+gaps, dry-run `add`). No reader pass has run on them yet. D-MAP-SLOT1 is
+performance-motivated, so its paired candidate/plain cell must exist before
+ratification.
+
+One more owner spelling will be needed when the cutover (K2) starts:
+D-MEMREF-LIFE1=A names the weak back link `Shared.Weak<T>` (with `downgrade`
+and `upgrade`), while D-MEMREF1=A retires the `Shared<T>` spelling. Until a
+short ballot picks the weak link's `@` spelling, `Shared.Weak<T>` stays.
 
 ### 6.2 Questions this note treats as settled
 
@@ -743,6 +752,8 @@ candidate/plain cell must exist before ratification.
   rejection is a defect.
 - **Group children capturing `split_write` halves.** Settled by
   D-TASKBORROW1=A. C40's rejection is a defect.
+- **Copy on first write.** Ratified by D-COPY-DEFAULT1=A. The eager deep clone
+  in C46's emitted Rust is a defect, not a design choice.
 
 ## 7. Implementation consequences (card drafts)
 
