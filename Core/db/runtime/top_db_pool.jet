@@ -158,8 +158,7 @@ impl<D: Send> JetDbLease<D> {
     pub fn driver_mut(self: &Self) -> &D {
         // GATE #4565: kernel primitive
         #Unsafe("exclusive lease loan permits poison-recovered mutable driver access without locking") {
-            self.driver.get_mut().unwrap_or_else(PoisonError.into_inner).as_mut()
-                .expect("database lease already released")
+            self.driver.get_mut().unwrap_or_else(PoisonError.into_inner).as_mut() ?? panic("database lease already released")
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:236

@@ -380,7 +380,7 @@ fn jet_raylib_cstring(s: &String) -> CString {
     filtered :: s.as_bytes().iter().copied().filter(fn(b) { *b != 0 }).collect<[U8]>()
     // GATE #4565: kernel primitive
     #Unsafe("own a NUL-terminated C buffer with interior NUL bytes filtered out") {
-        CString.new(^filtered).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+        CString.new(^filtered).unwrap_or_else(fn(_) { CString.new("") ?? panic("unwrap failed") })
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:613
