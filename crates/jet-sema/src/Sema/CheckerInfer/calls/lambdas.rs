@@ -604,6 +604,7 @@ impl<'a> Checker<'a> {
         let saved_ret = self.ret.clone();
         let saved_failure_carrier_inference = self.failure_carrier_inference;
         let saved_failure_carrier = self.failure_carrier.clone();
+        let saved_failure_carrier_success = self.failure_carrier_success.clone();
         let saved_statement_expr_inference = self.statement_expr_inference;
         self.failure_carrier_inference = infer_failure_carrier;
         self.failure_carrier = None;
@@ -612,6 +613,17 @@ impl<'a> Checker<'a> {
             self.ret = None;
         } else if let Some(ret) = &effective_ret {
             self.ret = Some(ret.clone());
+        }
+        // An inferring callback leaves `ret` open for its carrier, but its
+        // explicit `return` still owes the expected success row. An inline
+        // loop body keeps the enclosing callback's row, as it keeps its
+        // `return` target.
+        if !inline_loop {
+            self.failure_carrier_success = if infer_failure_carrier {
+                effective_ret.clone()
+            } else {
+                None
+            };
         }
         let saved_in_lambda_body = self.in_lambda_body;
         let saved_inferred_mut_captures = std::mem::take(&mut self.inferred_lambda_mut_captures);
@@ -875,6 +887,7 @@ impl<'a> Checker<'a> {
         self.ret = saved_ret;
         self.expected_type = saved_expected;
         self.failure_carrier = saved_failure_carrier;
+        self.failure_carrier_success = saved_failure_carrier_success;
         self.failure_carrier_inference = saved_failure_carrier_inference;
         self.statement_expr_inference = saved_statement_expr_inference;
         self.txn_depth = saved_txn_depth;

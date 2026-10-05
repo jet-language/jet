@@ -205,6 +205,7 @@ pub(crate) fn checker_for_module<'a>(
         failure_union_probe: None,
         failure_carrier_inference: false,
         failure_carrier: None,
+        failure_carrier_success: None,
         statement_expr_inference: false,
         http_handler_depth: 0,
         interrupt_callback_depth: 0,

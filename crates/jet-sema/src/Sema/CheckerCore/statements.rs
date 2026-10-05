@@ -664,6 +664,10 @@ impl<'a> Checker<'a> {
         span: &crate::Diagnostics::Span,
         return_type: Option<Type>,
     ) {
+        // An open callback inferring its own failure carrier keeps `ret` for
+        // that carrier; its `return` value meets the callback's expected
+        // success row, which every check below treats as the written return.
+        let return_type = return_type.or_else(|| self.failure_carrier_success.clone());
         // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
         // (`JSON`/`TOML`/…); canonicalize it so it unifies with the returned value.
         let resolved_ret = return_type

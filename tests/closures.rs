@@ -366,3 +366,128 @@ fn run() {
         "windows should lower lazily"
     );
 }
+
+/// Check `src` as a one-file program and return its sema errors.
+fn sema_errors(tag: &str, src: &str) -> Vec<jet::Diagnostics::Diagnostic> {
+    let dir = common::unique_tmp(tag);
+    std::fs::create_dir_all(&dir).expect("create sema fixture directory");
+    let entry = dir.join("main.jet");
+    std::fs::write(&entry, src).expect("write sema fixture");
+    let mut bundle =
+        jet::Loader::load_entry(entry.to_str().unwrap()).expect("sema fixture should load");
+    jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .collect()
+}
+
+/// D-FAILURE-FOUNDATION1: a callback with a plain expected result infers its
+/// own failure carrier, so its `ret` row stays open for that carrier. An
+/// explicit `return` still owes the expected success row — before and after
+/// a fallible call widens the callback — exactly as the value tail does
+/// (Examples/features/memory/local_cache.jet).
+#[test]
+fn block_callback_return_meets_expected_success_row() {
+    let src = r#"
+struct Tree {
+    source: String
+    line_starts: Cell<[Int]?>
+}
+
+fn line_starts(tree: Tree) -> [Int] {
+    return tree.line_starts.get_or_set(() -> {
+        if tree.source.len() == 0 {
+            return [0]
+        }
+        print("index built")
+        return [0, tree.source.len()]
+    })
+}
+
+fn source_flag(value: Int) -> Bool {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value > 1
+}
+
+fn retain_flag(value: Bool) -> Bool { value }
+
+fn run() {
+    tree :: Tree{ source: "first\nsecond", line_starts: Cell.new(None) }
+    print(line_starts(tree))
+    kept :: [1, 2, 3].filter((value: Int) -> {
+        if value == 3 {
+            return true
+        }
+        if value == 2 {
+            return retain_flag(source_flag(value))
+        }
+        retain_flag(source_flag(value))
+    }) ?? []
+    print(kept.len())
+}
+"#;
+    let errors = sema_errors("callback_return_row", src);
+    assert!(errors.is_empty(), "valid callback returns were rejected: {errors:#?}");
+}
+
+#[test]
+fn block_callback_return_mismatch_names_expected_success_row() {
+    let cell = r#"
+struct Tree {
+    source: String
+    line_starts: Cell<[Int]?>
+}
+
+fn line_starts(tree: Tree) -> [Int] {
+    return tree.line_starts.get_or_set(() -> {
+        print("index built")
+        return "built"
+    })
+}
+
+fn run() {
+    tree :: Tree{ source: "first", line_starts: Cell.new(None) }
+    print(line_starts(tree))
+}
+"#;
+    let errors = sema_errors("callback_return_mismatch", cell);
+    assert!(
+        errors
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0113" && diagnostic.what.contains("String")),
+        "a wrong callback return must still be E0113: {errors:#?}"
+    );
+
+    let inferred = r#"
+fn source_flag(value: Int) -> Bool {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value > 1
+}
+
+fn retain_flag(value: Bool) -> Bool { value }
+
+fn run() {
+    kept :: [1, 2, 3].filter((value: Int) -> {
+        if value == 2 {
+            return retain_flag(source_flag(value))
+        }
+        if value == 3 {
+            return "kept"
+        }
+        retain_flag(source_flag(value))
+    }) ?? []
+    print(kept.len())
+}
+"#;
+    let errors = sema_errors("callback_return_carrier_mismatch", inferred);
+    assert!(
+        errors
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0113" && diagnostic.what.contains("String")),
+        "a wrong return after carrier inference must still be E0113: {errors:#?}"
+    );
+}
