@@ -29,8 +29,8 @@ impl JetRealtimeSampleRing {
         assert(frame_count > 0, "real-time sample ring needs a positive frame count")
         // GATE #4565: kernel primitive
         #Unsafe("initialize fixed SPSC atomic cells before either endpoint can publish") {
-            slots :: (0..JET_REALTIME_SAMPLE_RING_SLOTS).map(fn(_) {
-                JetRealtimeSampleSlot{values: (0..frame_count).map(fn(_) { AtomicU64.new(0) }).collect()}
+            slots :: (0..<JET_REALTIME_SAMPLE_RING_SLOTS).map(fn(_) {
+                JetRealtimeSampleSlot{values: (0..<frame_count).map(fn(_) { AtomicU64.new(0) }).collect()}
             }).collect()
             Self{slots: ^slots, read_sequence: AtomicU64.new(0), write_sequence: AtomicU64.new(0)}
         }
