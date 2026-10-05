@@ -286,7 +286,7 @@ fn comptime_http_stream(url: String,timeout: Duration) -> StreamResponse Foundat
     response :: if COMPTIME_HTTP_AGENT.get(url).timeout(timeout).set("Accept-Encoding","identity").call() == {
         .Ok(value) -> ^value
         .Err(.Status(_,value)) -> ^value
-        .Err(error) -> return Err(policy.foundation_fetch_http_error(url,error.to_string()))
+        .Err(error) -> { return Err(policy.foundation_fetch_http_error(url,error.to_string())) }
     }
     status :: response.status()
     content_length := None
@@ -378,7 +378,7 @@ fn get_stream_with_agent(url: String,timeout: Duration,agent: ^transport.Agent) 
     response :: if agent.get(url).timeout(timeout).set("Accept-Encoding","identity").call() == {
         .Ok(value) -> ^value
         .Err(.Status(_,value)) -> ^value
-        .Err(error) -> return Err(policy.foundation_fetch_http_error(url,error.to_string()))
+        .Err(error) -> { return Err(policy.foundation_fetch_http_error(url,error.to_string())) }
     }
     status :: response.status()
     content_length := None
