@@ -2016,7 +2016,7 @@ fn jet_rust_emit_native_record_decode(ctx: &JetRustEmitContext, definition: MIRT
         value :: if jet_rust_emit_equality_edge_boxed(definition, "{edge}{field.name}") -> "Box::new(__jet_field_{index})" else -> "__jet_field_{index}"
         &inits.push("{jet_rust_emit_field_name(&ctx, field.id)}: {value}")
     }
-    success :: "if __jet_errors.is_empty() {{ return Ok({head} {{ {inits.join(", ")} }}); }}"
+    success :: "if __jet_errors.is_empty() {{ return Ok({head} {{ {jet_rust_emit_record_phantom_initializer(&ctx, definition.id)}{inits.join(", ")} }}); }}"
     if fields.len() == 0 {
         &out.push(success)
     } else {

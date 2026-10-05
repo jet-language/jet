@@ -78,6 +78,12 @@ allocator or collection remains responsible for dropping its owned payload.
 A discarded root-place read likewise needs no owned SSA copy; projected
 accesses and retained context operands still keep their checked evaluation.
 
+An emitted record retains each declaration type parameter even when none of
+its stored fields uses it. Such parameters are carried by a zero-sized
+`PhantomData` field, initialized by every record construction path; the marker
+is not a source field or a serialized/displayed value. Native/runtime-owned
+records retain their existing layouts rather than receiving emitter fields.
+
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and

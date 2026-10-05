@@ -44,6 +44,7 @@ use jet_foundation.[
     mir_type_id,
     mir_type_is_scalar,
     mir_type_layout,
+    mir_type_nominal_names,
     mir_type_same_checked_type,
     core_enum_variants,
 ]
@@ -1394,6 +1395,7 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
     loop field in usable {
         &lines.push("    {jet_rust_emit_field_name(&ctx, field.id)}({jet_rust_emit_type(&ctx, field.ty)}),")
     }
+    if ctx.record_phantoms.get(definition.id.value) == .Val(marker) -> &lines.push("    __jet_generic_phantom({marker}),")
     &lines.push("}}")
     &lines.push("#[allow(dead_code, unreachable_patterns)]")
     &lines.push("impl{impl_generics} {cell_type} {{")
@@ -1436,6 +1438,7 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
         &lines.push("                _ => unreachable!(\"columnar row is narrower than its column set\"),")
         &lines.push("            }},")
     }
+    if ctx.record_phantoms.get(definition.id.value) != None -> &lines.push("            {jet_rust_emit_record_phantom_initializer(&ctx, definition.id)}")
     &lines.push("        }}")
     &lines.push("    }}")
     &lines.push("}}")
@@ -1491,6 +1494,45 @@ fn jet_rust_emit_runtime_declares_type(ctx: &JetRustEmitContext, definition: MIR
     definition.compiler_builtin != None || jet_rust_emit_handle_for_definition(&ctx, definition) != None || jet_rust_emit_compiler_owned_type(definition.key)
 }
 
+// Discover absent declaration parameters once, using the canonical MIR type
+// walker. Native/runtime records keep their existing externally-owned layout.
+fn jet_rust_emit_record_phantoms(ctx: &JetRustEmitContext) -> [U64:String] Never! {
+    markers := [U64:String]{}
+    loop definition in ctx.program.types {
+        if definition.generic_params.len() == 0 || !jet_rust_emit_declares_type_definition(&ctx, definition) || jet_rust_emit_has_native_type_projection(definition.key) -> next
+        if definition.kind == {
+            .Struct(fields, _) -> {
+                names := [String]{}
+                loop field in fields {
+                    if !field.computed -> mir_type_nominal_names(field.ty, &names)
+                }
+                absent := [String]{}
+                loop parameter in definition.generic_params {
+                    if !names.contains(parameter.name) -> &absent.push(jet_rust_emit_mangle(parameter.name))
+                }
+                if absent.len() > 0 -> &markers.add(definition.id.value, "core::marker::PhantomData<({absent.join(", ")},)>").drop("type identities are unique")
+            }
+            else -> {}
+        }
+    }
+    markers
+}
+
+fn jet_rust_emit_record_phantom_initializer(ctx: &JetRustEmitContext, id: MIRTypeID) -> String Never! {
+    if ctx.record_phantoms.get(id.value) != None -> "__jet_generic_phantom: core::marker::PhantomData, " else -> ""
+}
+
+fn jet_rust_emit_record_type_phantom_initializer(ctx: &JetRustEmitContext, ty: MIRType) -> String Never! {
+    definition :: jet_rust_emit_structural_type_def(&ctx, ty) ?? return ""
+    jet_rust_emit_record_phantom_initializer(&ctx, definition.id)
+}
+
+fn jet_rust_emit_record_named_phantom_initializer(ctx: &JetRustEmitContext, name: String) -> String Never! {
+    rows :: ctx.type_rows_by_spelling.get(name) ?? return ""
+    if rows.len() == 0 -> return ""
+    jet_rust_emit_record_phantom_initializer(&ctx, ctx.program.types[rows[0]].id)
+}
+
 // MIRRust declares_type_def: type rows whose Rust declaration this artifact
 // emits; canonical Core native carriers already have their Prelude spelling.
 fn jet_rust_emit_declares_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef) -> Bool Never! {
@@ -1533,6 +1575,7 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
                     &lines.push("    {jet_rust_emit_field_declaration(&ctx, field, boxed)},")
                 }
             }
+            if ctx.record_phantoms.get(definition.id.value) == .Val(marker) -> &lines.push("    pub __jet_generic_phantom: {marker},")
             &lines.push("}}")
             &lines.push("")
         }
@@ -1905,7 +1948,7 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
                 if jet_rust_emit_constant_edge_boxed(definition, field.name) -> value = "Box::new({value})"
                 &rendered.push("{jet_rust_emit_named_field(&ctx, owner, field.name)}: {value}")
             }
-            "{jet_rust_emit_named_type(&ctx, owner)} {{ {rendered.join(", ")} }}"
+            "{jet_rust_emit_named_type(&ctx, owner)} {{ {jet_rust_emit_record_named_phantom_initializer(&ctx, owner)}{rendered.join(", ")} }}"
         }
         // MIRRust typed_enum_constant: named payloads keep their field names,
         // positional payloads stay positional; boxed edges allocate.
@@ -1960,7 +2003,7 @@ fn jet_rust_emit_const_key(ctx: &JetRustEmitContext, key: MIRConstKey) -> String
             native :: jet_rust_emit_has_native_type_projection(type_name)
             values := [String]{}
             loop field in fields -> &values.push("{if native -> field.name else -> jet_rust_emit_mangle(field.name)}: {jet_rust_emit_const_key(&ctx, field.key)}")
-            "{jet_rust_emit_named_type(&ctx, type_name)} {{ {values.join(", ")} }}"
+            "{jet_rust_emit_named_type(&ctx, type_name)} {{ {jet_rust_emit_record_named_phantom_initializer(&ctx, type_name)}{values.join(", ")} }}"
         }
         .Enum(type_name, variant) -> "{jet_rust_emit_named_type(&ctx, type_name)}::{if jet_rust_emit_has_native_type_projection(type_name) -> variant else -> jet_rust_emit_mangle_variant(variant)}"
     }

@@ -156,6 +156,8 @@ pub struct JetRustEmitContext {
     pub config: JetRustEmitConfig
     pub function_names: [String:String]
     pub type_names: [String:String]
+    // Zero-sized carriers for record parameters absent from stored fields.
+    pub record_phantoms: [U64:String]{[U64:String]{}}
     pub type_by_name: [String:String]
     pub trait_names: [String:String]
     // Trait id keys of declared (not compiler-owned) traits used as a
@@ -1149,6 +1151,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             else -> {}
         }
     }
+    ctx.record_phantoms = jet_rust_emit_record_phantoms(&ctx)
     loop trait_row in ctx.program.traits {
         key :: jet_rust_emit_id_key(trait_row.id.value)
         if ctx.trait_names.get(key) != None {

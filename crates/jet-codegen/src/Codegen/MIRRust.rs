@@ -3387,6 +3387,8 @@ struct RustEmitter<'a> {
     type_def_by_id: BTreeMap<MirTypeId, usize>,
     type_def_by_key: BTreeMap<&'a str, usize>,
     type_def_by_name: BTreeMap<&'a str, usize>,
+    /// Zero-sized carriers for declaration parameters absent from stored fields.
+    record_phantoms: BTreeMap<MirTypeId, String>,
     /// Source-written (not compiler-generated) trait impls by trait name, in
     /// program order.
     user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>>,
@@ -3594,6 +3596,7 @@ impl<'a> RustEmitter<'a> {
             type_def_by_id,
             type_def_by_key,
             type_def_by_name,
+            record_phantoms: BTreeMap::new(),
             user_impls_by_trait,
             traits,
             traits_by_name,
@@ -3640,6 +3643,30 @@ impl<'a> RustEmitter<'a> {
             function_indexes: std::cell::RefCell::new(HashMap::new()),
             closure_parents: std::cell::OnceCell::new(),
         };
+        for definition in &program.types {
+            if !emitter.declares_type_def(definition) || definition.generic_params.is_empty() {
+                continue;
+            }
+            let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+                continue;
+            };
+            let mut names = Vec::new();
+            for field in fields.iter().filter(|field| !field.computed) {
+                mir_type_nominals(&field.ty, &mut names);
+            }
+            let mut marker = String::new();
+            for parameter in &definition.generic_params {
+                if !names.contains(&parameter.name.as_str()) {
+                    let _ = write!(marker, "{},", mangle(&parameter.name));
+                }
+            }
+            if !marker.is_empty() {
+                emitter.record_phantoms.insert(
+                    definition.id,
+                    format!("core::marker::PhantomData<({marker})>"),
+                );
+            }
+        }
         for function in &program.functions {
             let roots = emitter.plan_partial_moves(function);
             if !roots.is_empty() {
@@ -5058,6 +5085,24 @@ impl<'a> RustEmitter<'a> {
         format!("{root}jet_err({message}, {code}, {cause})")
     }
 
+    fn record_phantom_initializer(&self, id: MirTypeId) -> &'static str {
+        if self.record_phantoms.contains_key(&self.type_def(id).id) {
+            "__jet_generic_phantom: core::marker::PhantomData, "
+        } else {
+            ""
+        }
+    }
+
+    fn record_type_phantom_initializer(&self, ty: &MirType) -> &'static str {
+        self.structural_type_def_for(ty)
+            .map_or("", |definition| self.record_phantom_initializer(definition.id))
+    }
+
+    fn record_named_phantom_initializer(&self, name: &str) -> &'static str {
+        self.type_def_by_key.get(name).or_else(|| self.type_def_by_name.get(name))
+            .map_or("", |row| self.record_phantom_initializer(self.program.types[*row].id))
+    }
+
     fn rust_struct_literal(
         &self,
         type_id: MirTypeId,
@@ -5142,7 +5187,7 @@ impl<'a> RustEmitter<'a> {
         } else {
             ""
         };
-        format!("{} {{ {fields}{private_fields} }}", self.type_name(type_id))
+        format!("{} {{ {}{fields}{private_fields} }}", self.type_name(type_id), self.record_phantom_initializer(type_id))
     }
 
     fn prelude_row(&self, id: MirPreludeCallId) -> &MirPreludeCall {
@@ -8727,6 +8772,9 @@ impl<'a> RustEmitter<'a> {
                         self.rust_decl_type(def, &field.name, &field.ty)
                     );
                 }
+                if let Some(marker) = self.record_phantoms.get(&def.id) {
+                    let _ = writeln!(out, "    pub __jet_generic_phantom: {marker},");
+                }
                 let _ = writeln!(out, "}}\n");
             }
             MirTypeDefKind::Enum { variants, .. } => {
@@ -10098,6 +10146,9 @@ impl<'a> RustEmitter<'a> {
             let name = self.field_name(field.id);
             let _ = writeln!(out, "    {name}({}),", self.rust_type(&field.ty));
         }
+        if let Some(marker) = self.record_phantoms.get(&def.id) {
+            let _ = writeln!(out, "    __jet_generic_phantom({marker}),");
+        }
         let _ = writeln!(out, "}}\n");
         let _ = writeln!(
             out,
@@ -10146,6 +10197,9 @@ impl<'a> RustEmitter<'a> {
                 out,
                 "            {name}: match __cells.next() {{\n                Some({cell_ty}::{name}(__value)) => __value,\n                _ => unreachable!(\"columnar row is narrower than its column set\"),\n            }},"
             );
+        }
+        if !self.record_phantom_initializer(def.id).is_empty() {
+            let _ = writeln!(out, "            {}", self.record_phantom_initializer(def.id));
         }
         let _ = writeln!(out, "        }}\n    }}\n}}\n");
     }
@@ -10862,8 +10916,9 @@ impl<'a> RustEmitter<'a> {
                     }
                     let _ = writeln!(
                         decode,
-                        "    let mut {name} = {} {{ {} }};",
+                        "    let mut {name} = {} {{ {}{} }};",
                         self.rust_type(&reconstruction.ty),
+                        self.record_type_phantom_initializer(&reconstruction.ty),
                         fields.join(", "),
                     );
                 } else {
@@ -11288,8 +11343,9 @@ impl<'a> RustEmitter<'a> {
             })
             .collect::<Vec<_>>();
         let record = format!(
-            "{} {{ {} }}",
+            "{} {{ {}{} }}",
             self.rust_type(&function.params[0].ty),
+            self.record_type_phantom_initializer(&function.params[0].ty),
             values.join(", ")
         );
         match function.params[0].access {
@@ -18486,7 +18542,7 @@ impl<'a> RustEmitter<'a> {
         let value = if self.is_structural_tuple_type(node.owner) {
             format!("({},)", values.join(", "))
         } else {
-            format!("{} {{ {} }}", self.type_name(self.type_def(node.owner).id), values.join(", "))
+            format!("{} {{ {}{} }}", self.type_name(self.type_def(node.owner).id), self.record_phantom_initializer(node.owner), values.join(", "))
         };
         let value = if node.boxed { format!("Box::new({value})") } else { value };
         let _ = write!(out, "{} = Some({value}); }} ", node.slot);
@@ -20976,7 +21032,8 @@ impl<'a> RustEmitter<'a> {
             inits.push(format!("{}: {value}", self.field_name(field.id)));
         }
         let success = format!(
-            "if __jet_errors.is_empty() {{ return Ok({head} {{ {} }}); }}",
+            "if __jet_errors.is_empty() {{ return Ok({head} {{ {}{} }}); }}",
+            self.record_phantom_initializer(definition.id),
             inits.join(", ")
         );
         lines.push(if fields.is_empty() {
@@ -23000,7 +23057,7 @@ impl<'a> RustEmitter<'a> {
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
-                    return format!("{{ let __jet_c_value = {value}; {} {{ {fields} }} }}", self.rust_type(ty));
+                    return format!("{{ let __jet_c_value = {value}; {} {{ {}{fields} }} }}", self.rust_type(ty), self.record_phantom_initializer(record.id));
                 }
                 match &definition.kind {
                     MirTypeDefKind::Distinct { base, .. } => format!(
@@ -27954,11 +28011,12 @@ impl<'a> RustEmitter<'a> {
                      if !{record_name}.is_empty() {{ \
                      return Err(\"plugin returned a record with unexpected fields\".to_string()); \
                      }} \
-                     Ok({output} {{ {assignments} }}) \
+                     Ok({output} {{ {}{assignments} }}) \
                      }}, \
                      _ => Err(\"plugin returned a value with the wrong Record shape\".to_string()) \
                      }}",
-                    setup.join(" ")
+                    setup.join(" "),
+                    self.record_phantom_initializer(definition.id)
                 )
             }
         }
@@ -29671,8 +29729,9 @@ impl<'a> RustEmitter<'a> {
                     .find(|field| field.name == "max")
                     .expect("checked max field");
                 format!(
-                    "|min, max| {} {{ {}: min, {}: max }}",
+                    "|min, max| {} {{ {}{}: min, {}: max }}",
                     self.rust_type(result_type),
+                    self.record_phantom_initializer(definition.id),
                     self.field_name(min.id),
                     self.field_name(max.id),
                 )
@@ -31097,7 +31156,7 @@ impl<'a> RustEmitter<'a> {
                 .expect("checked generic struct constructor has type arguments");
             constructor.insert_str(start, "::");
         }
-        Some(format!("{} {{ {} }}", constructor, rendered.join(", "),))
+        Some(format!("{} {{ {}{} }}", constructor, self.record_phantom_initializer(definition.id), rendered.join(", ")))
     }
     fn typed_enum_constant(
         &self,
@@ -31446,8 +31505,9 @@ impl<'a> RustEmitter<'a> {
             MirConstant::Struct { type_name, fields } => {
                 let native = has_native_type_projection(type_name);
                 format!(
-                    "{} {{ {} }}",
+                    "{} {{ {}{} }}",
                     self.nominal_name(type_name),
+                    self.record_named_phantom_initializer(type_name),
                     fields
                         .iter()
                         .map(|(name, value)| {
@@ -31531,8 +31591,9 @@ impl<'a> RustEmitter<'a> {
             MirConstKey::Struct { type_name, fields } => {
                 let native = has_native_type_projection(type_name);
                 format!(
-                    "{} {{ {} }}",
+                    "{} {{ {}{} }}",
                     self.nominal_name(type_name),
+                    self.record_named_phantom_initializer(type_name),
                     fields
                         .iter()
                         .map(|(name, value)| {

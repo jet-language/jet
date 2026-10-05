@@ -1035,7 +1035,7 @@ fn jet_rust_emit_plugin_decode(ctx: &JetRustEmitContext, descriptor: MIRComponen
             loop field in declared {
                 if field.skip && !field.computed -> &assignments.push("{jet_rust_emit_field_name(&ctx, field.id)}: Default::default()")
             }
-            return "match ({value}) {{ {wire}::Record(mut fields) => {{ {statements.join(" ")} if !fields.is_empty() {{ return Err(\"plugin returned a record with unexpected fields\".to_string()); }} Ok({jet_rust_emit_type(&ctx, ty)} {{ {assignments.join(", ")} }}) }}, _ => {wrong} }}"
+            return "match ({value}) {{ {wire}::Record(mut fields) => {{ {statements.join(" ")} if !fields.is_empty() {{ return Err(\"plugin returned a record with unexpected fields\".to_string()); }} Ok({jet_rust_emit_type(&ctx, ty)} {{ {jet_rust_emit_record_type_phantom_initializer(&ctx, ty)}{assignments.join(", ")} }}) }}, _ => {wrong} }}"
         }
     }
     panic("checked Component descriptor disagrees with its MIR carrier")

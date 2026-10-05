@@ -1523,7 +1523,7 @@ fn jet_rust_emit_c_abi_decode(ctx: &JetRustEmitContext, source: String, ty: MIRT
                     }
                     _ := &visited.pop()
                     if !valid -> return None
-                    return Val("{semantic_type} {{ {rendered.join(", ")} }}")
+                    return Val("{semantic_type} {{ {jet_rust_emit_record_phantom_initializer(&ctx, row.id)}{rendered.join(", ")} }}")
                 }
                 .Enum(variants, _) -> {
                     layout_tag :: row.c_layout_tag ?? {
@@ -3361,7 +3361,7 @@ fn jet_rust_emit_struct_literal(ctx: &JetRustEmitContext, type_id: MIRTypeID, fi
         &rendered.push("{field_name}: {value}")
     }
     private_fields :: if form_field_spec -> ", parser: None" else -> ""
-    "{rust_type_name} {{ {rendered.join(", ")}{private_fields} }}"
+    "{rust_type_name} {{ {jet_rust_emit_record_phantom_initializer(&ctx, type_id)}{rendered.join(", ")}{private_fields} }}"
 }
 
 fn jet_rust_emit_field_row_type(ctx: &JetRustEmitContext, id: MIRFieldID) -> MIRType? {
@@ -4492,7 +4492,7 @@ fn jet_rust_emit_list_aggregate_builder(ctx: &JetRustEmitContext, function: MIRF
                                 if field.name == "max" -> max_field = Val(field.id)
                             }
                             if min_field == .Val(min_id) {
-                                if max_field == .Val(max_id) -> return "|min, max| {jet_rust_emit_type(&ctx, shape)} {{ {jet_rust_emit_field_name(&ctx, min_id)}: min, {jet_rust_emit_field_name(&ctx, max_id)}: max }}"
+                                if max_field == .Val(max_id) -> return "|min, max| {jet_rust_emit_type(&ctx, shape)} {{ {jet_rust_emit_record_phantom_initializer(&ctx, id)}{jet_rust_emit_field_name(&ctx, min_id)}: min, {jet_rust_emit_field_name(&ctx, max_id)}: max }}"
                             }
                         }
                     }
