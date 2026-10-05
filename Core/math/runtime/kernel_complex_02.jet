@@ -819,7 +819,7 @@ pub fn emit_trait_def(t: TraitDef, out: &String, render_view_return: fn(Type, Ha
 fn trait_assoc(items: [Item], type_name: String, trait_name: String, assoc: String) -> Type? Never! {
     loop item in items {
         match item {
-            .Impl(i) if i.type_name == type_name && i.trait_name == Val(trait_name) ->
+            .Impl(i) if i.type_name == type_name && i.trait_name == trait_name ->
                 return i.assoc_type_impls.iter().find(|(n, _, _)| n == assoc).map(|(_, _, t)| t.clone())
             .Struct(s) if s.name == type_name -> {
                 loop block in s.trait_impls {
