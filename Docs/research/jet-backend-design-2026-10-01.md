@@ -167,6 +167,10 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `View<str>` | an owned String handle holding the window's text: the `_view` kernels run their owned twins (`jet_string_after`, `jet_string_before`, `jet_unicode_trim`); costs one allocation the zero-copy `&str` avoids, otherwise unobservable (a window is only read) | `ptr` | `jet_rt_string_drop` |
 | `Distinct`/`Alias` types | as their base | — | — |
 
+Result boxes reserve at least one eight-byte payload word after the tag,
+including zero-sized payloads. Runtime marshaling uses the same minimum,
+alignment and size as native construction and drop glue.
+
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
 words; a member sits at the next multiple of its alignment, and a recursive

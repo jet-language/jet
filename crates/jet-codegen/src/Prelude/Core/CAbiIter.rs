@@ -120,7 +120,7 @@ pub(crate) mod jet_c_abi_iter {
             } else {
                 assert_eq!(kind, 8, "native failure carrier descriptor");
                 let ok = self.meta.first(); let err = self.meta.second();
-                let size = 8 + ((ok.payload_size().max(err.payload_size()) + 7) & !7);
+                let size = result_box_size(&ok, &err);
                 let tag = unsafe { ptr::read_unaligned(raw.cast::<u64>()) };
                 let meta = if tag != 0 { ok } else { err };
                 let value = unsafe { Self::moved(raw.add(8), meta) };
@@ -178,6 +178,11 @@ pub(crate) mod jet_c_abi_iter {
     }
     pub(crate) unsafe fn free(raw: *mut u8, size: usize) {
         if !raw.is_null() { std::alloc::dealloc(raw, std::alloc::Layout::from_size_align_unchecked(size.max(1), 8)); }
+    }
+    // Values.jet lower_result_box_size reserves at least one payload word,
+    // including when both checked payloads are zero-sized.
+    pub(crate) fn result_box_size(ok: &Meta, err: &Meta) -> usize {
+        8 + ((ok.payload_size().max(err.payload_size()).max(8) + 7) & !7)
     }
     struct NativeList { header: Header, at: usize, meta: Arc<Meta> }
     impl Iterator for NativeList {
@@ -445,7 +450,10 @@ pub(crate) mod jet_c_abi_iter {
                 Err(Failure::Error(_)) => unreachable!("checked Option failure carrier"),
             }
         } else {
-            let size = 8 + ((8usize.max(carrier.second().payload_size()) + 7) & !7);
+            let size = result_box_size(
+                carrier.child0.as_deref().expect("native child descriptor"),
+                carrier.child1.as_deref().expect("native error descriptor"),
+            );
             let raw = unsafe { allocate(size) };
             match result {
                 Ok(iter) => unsafe {
@@ -478,7 +486,7 @@ pub(crate) mod jet_c_abi_iter {
                 }
             } else {
                 let error = Meta::copy(error_meta);
-                let size = 8 + ((meta.payload_size().max(error.payload_size()) + 7) & !7);
+                let size = result_box_size(&meta, &error);
                 let raw = allocate(size);
                 match result {
                     Ok(values) => { ptr::write_unaligned(raw.cast::<u64>(), 1); list_value(values, meta).put(raw.add(8)); }
