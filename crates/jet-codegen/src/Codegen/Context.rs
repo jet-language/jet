@@ -4301,20 +4301,17 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     let source_path = bundle.name_ledger.module_path(module_idx);
     cx.checked_const_ref_sites = bundle
         .name_ledger
-        .references()
-        .iter()
-        .filter_map(|((source, start, end), reference)| {
-            if Some(source.as_str()) != source_path || reference.kind != "const" {
+        .module_references(source_path.unwrap_or_default())
+        .filter_map(|((_, start, end), reference)| {
+            if reference.kind != "const" {
                 return None;
             }
             let target_module = (0..bundle.modules.len()).find(|target_idx| {
                 bundle.name_ledger.module_path(*target_idx)
                     == Some(reference.module_path.as_str())
             })?;
-            let declaration = bundle.name_ledger.declarations().find(|declaration| {
-                declaration.module == target_module
-                    && declaration.span == reference.def_span
-                    && declaration.kind == "const"
+            let declaration = bundle.name_ledger.module_declarations(target_module).find(|declaration| {
+                declaration.span == reference.def_span && declaration.kind == "const"
             })?;
             let ty = bundle.modules[target_module]
                 .items
@@ -4337,8 +4334,8 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
             ))
         })
         .collect();
-    for alias in bundle.name_ledger.aliases() {
-        if alias.module != module_idx || cx.const_ref_keys.contains_key(&alias.name) {
+    for alias in bundle.name_ledger.module_aliases(module_idx) {
+        if cx.const_ref_keys.contains_key(&alias.name) {
             continue;
         }
         let Some(target_module) = alias.target_module else {

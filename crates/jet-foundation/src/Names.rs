@@ -177,6 +177,7 @@ pub struct NameLedger {
     /// target module text must not decide liveness.
     alias_uses: HashSet<(usize, Span)>,
     references: HashMap<(String, usize, usize), NameReference>,
+    reference_sites: HashMap<String, Vec<(String, usize, usize)>>,
     structure_facts: Vec<StructureFact>,
 }
 
@@ -187,12 +188,14 @@ struct NameTables {
     imports: HashMap<(usize, Span), usize>,
     modules: HashMap<usize, NameModule>,
     declarations: HashMap<(usize, String), NameDeclaration>,
+    module_declarations: HashMap<usize, Vec<(usize, String)>>,
     declaration_names: HashMap<String, Vec<(usize, String)>>,
     /// Source-facing paths for compiler-owned declarations. Generated
     /// generic-instance names remain semantic keys, but diagnostics and
     /// tooling project them back to the instance member path.
     display_paths: HashMap<(usize, String), String>,
     aliases: HashMap<(usize, String), NameAlias>,
+    module_aliases: HashMap<usize, Vec<(usize, String)>>,
     alias_names: HashMap<String, Vec<(usize, String)>>,
     /// Loader-owned roots, such as package manifest Output references, must
     /// survive sema's declaration/reference refresh.
@@ -201,6 +204,7 @@ struct NameTables {
     /// to (its package root). Files of one package see each other's
     /// top-level names without imports. Loose files have no entry.
     namespaces: HashMap<usize, String>,
+    namespace_members: HashMap<String, Vec<usize>>,
 }
 
 impl NameLedger {
@@ -244,7 +248,15 @@ impl NameLedger {
     /// D-MOD-CYCLE1=A: record that `module` is a member file of the package
     /// whose root is `package_root`. The loader writes this before sema.
     pub fn set_module_namespace(&mut self, module: usize, package_root: String) {
-        self.tables_mut().namespaces.insert(module, package_root);
+        let tables = self.tables_mut();
+        if let Some(previous) = tables.namespaces.insert(module, package_root.clone()) {
+            if let Some(members) = tables.namespace_members.get_mut(&previous) {
+                members.retain(|&member| member != module);
+            }
+        }
+        let members = tables.namespace_members.entry(package_root).or_default();
+        let position = members.binary_search(&module).unwrap_or_else(|position| position);
+        members.insert(position, module);
     }
 
     /// D-MOD-CYCLE1=A: true when `from` and `to` are the same file or member
@@ -261,19 +273,10 @@ impl NameLedger {
 
     /// D-MOD-CYCLE1=A: every other member file of `module`'s package, in
     /// module order. Empty for a loose file.
-    pub fn namespace_siblings(&self, module: usize) -> Vec<usize> {
-        let Some(root) = self.tables.namespaces.get(&module) else {
-            return Vec::new();
-        };
-        let mut siblings = self
-            .tables
-            .namespaces
-            .iter()
-            .filter(|(other, other_root)| **other != module && *other_root == root)
-            .map(|(other, _)| *other)
-            .collect::<Vec<_>>();
-        siblings.sort_unstable();
-        siblings
+    pub fn namespace_siblings(&self, module: usize) -> impl Iterator<Item = usize> + '_ {
+        self.tables.namespaces.get(&module)
+            .and_then(|root| self.tables.namespace_members.get(root))
+            .into_iter().flatten().copied().filter(move |&other| other != module)
     }
 
     /// D-MOD-CYCLE1=A: the package root `module` is a member file of, as the
@@ -340,6 +343,7 @@ impl NameLedger {
             },
         );
         if fresh {
+            tables.module_declarations.entry(module).or_default().push((module, name.clone()));
             tables
                 .declaration_names
                 .entry(name_leaf(&name).to_string())
@@ -354,6 +358,11 @@ impl NameLedger {
 
     pub fn declarations(&self) -> impl Iterator<Item = &NameDeclaration> {
         self.tables.declarations.values()
+    }
+
+    pub fn module_declarations(&self, module: usize) -> impl Iterator<Item = &NameDeclaration> {
+        self.tables.module_declarations.get(&module).into_iter().flatten()
+            .filter_map(|key| self.tables.declarations.get(key))
     }
 
     pub fn declaration_path(&self, module: usize, name: &str) -> Option<&str> {
@@ -409,7 +418,7 @@ impl NameLedger {
             }
         }
         let mut only = None;
-        for declaration in self.tables.declarations.values() {
+        for declaration in self.module_declarations(module) {
             if declaration.module != module
                 || declaration.span.start != start
                 || declaration.span.end != end
@@ -598,47 +607,32 @@ impl NameLedger {
     /// package/path-qualified key used for uniqueness.
     pub fn canonical_paths(&self, module: usize) -> Vec<(String, String)> {
         let mut paths = BTreeSet::new();
-        for ((owner, name), declaration) in &self.tables.declarations {
-            if *owner == module {
-                let path = declaration.path.clone();
-                paths.insert((name.clone(), path.clone()));
-                if declaration.kind == "type" {
-                    if let Some(identity) = self.nominal_identity(module, &declaration.name) {
-                        paths.insert((identity, path.clone()));
-                    }
-                }
-                // A qualified type name is itself a source key. Keep it in
-                // the same projection so consumers never reconstruct it from
-                // declaration storage.
-                if path.as_str() != name.as_str() {
-                    paths.insert((path.clone(), path));
+        for declaration in self.module_declarations(module) {
+            let name = &declaration.name;
+            let path = declaration.path.clone();
+            paths.insert((name.clone(), path.clone()));
+            if declaration.kind == "type" {
+                if let Some(identity) = self.nominal_identity(module, name) {
+                    paths.insert((identity, path.clone()));
                 }
             }
+            // Qualified source names and nominal identities are also keys.
+            if path.as_str() != name.as_str() {
+                paths.insert((path.clone(), path));
+            }
         }
-        for ((owner, name), alias) in &self.tables.aliases {
-            if *owner == module {
-                if let Some(path) = self.canonical_path(module, name) {
-                    paths.insert((name.clone(), path));
-                }
-                // A module import is also a source qualifier (`dep.Thing`).
-                // Publish those keys here so codegen can resolve qualified
-                // external types without rebuilding an import path.
-                if let Some(target_module) = alias.target_module {
-                    if !alias.target.contains('.') {
-                        if let Some(target_alias) = self.module_alias(target_module) {
-                            let prefix = format!("{target_alias}.");
-                            for declaration in self.tables.declarations.values() {
-                                if declaration.module != target_module {
-                                    continue;
-                                }
-                                let Some(suffix) = declaration.path.strip_prefix(prefix.as_str())
-                                else {
-                                    continue;
-                                };
-                                paths.insert((
-                                    format!("{}.{}", alias.name, suffix),
-                                    declaration.path.clone(),
-                                ));
+        for alias in self.module_aliases(module) {
+            if let Some(path) = self.canonical_path(module, &alias.name) {
+                paths.insert((alias.name.clone(), path));
+            }
+            // A module import is also a source qualifier (`dep.Thing`).
+            if let Some(target_module) = alias.target_module {
+                if !alias.target.contains('.') {
+                    if let Some(target_alias) = self.module_alias(target_module) {
+                        let prefix = format!("{target_alias}.");
+                        for declaration in self.module_declarations(target_module) {
+                            if let Some(suffix) = declaration.path.strip_prefix(prefix.as_str()) {
+                                paths.insert((format!("{}.{}", alias.name, suffix), declaration.path.clone()));
                             }
                         }
                     }
@@ -646,6 +640,34 @@ impl NameLedger {
             }
         }
         paths.into_iter().collect()
+    }
+
+    /// Lookup one key of `canonical_paths` without enumerating the package's
+    /// import projections. Comptime needs only keys actually used by types.
+    pub fn canonical_source_path(&self, module: usize, key: &str) -> Option<String> {
+        let mut path = self.canonical_path(module, key);
+        for declaration in self.module_declarations(module) {
+            if declaration.path == key
+                || (declaration.kind == "type" && self.nominal_identity(module, &declaration.name).as_deref() == Some(key))
+            {
+                if path.as_ref().is_none_or(|path| path < &declaration.path) {
+                    path = Some(declaration.path.clone());
+                }
+            }
+        }
+        for (position, _) in key.match_indices('.') {
+            let Some(alias) = self.alias(module, &key[..position]) else { continue };
+            if alias.target.contains('.') { continue }
+            let Some(target) = alias.target_module else { continue };
+            let Some(target_alias) = self.module_alias(target) else { continue };
+            let candidate = format!("{target_alias}.{}", &key[position + 1..]);
+            if self.module_declarations(target).any(|declaration| declaration.path == candidate)
+                && path.as_ref().is_none_or(|path| path < &candidate)
+            {
+                path = Some(candidate);
+            }
+        }
+        path
     }
 
     pub fn semantic_identity(&self, module: usize, name: &str) -> Option<String> {
@@ -676,6 +698,7 @@ impl NameLedger {
             },
         );
         if fresh {
+            tables.module_aliases.entry(module).or_default().push((module, name.clone()));
             tables
                 .alias_names
                 .entry(name_leaf(&name).to_string())
@@ -711,10 +734,8 @@ impl NameLedger {
     /// Stable identity for one import binding. The defining span is part of
     /// the identity so equal alias spellings in different scopes cannot join.
     pub fn alias_identity(&self, module: usize, span: Span) -> Option<String> {
-        self.tables
-            .aliases
-            .values()
-            .any(|alias| alias.module == module && alias.span == span)
+        self.module_aliases(module)
+            .any(|alias| alias.span == span)
             .then(|| {
                 format!(
                     "import:{}::{}..{}",
@@ -733,6 +754,11 @@ impl NameLedger {
         self.tables.aliases.values()
     }
 
+    pub fn module_aliases(&self, module: usize) -> impl Iterator<Item = &NameAlias> {
+        self.tables.module_aliases.get(&module).into_iter().flatten()
+            .filter_map(|key| self.tables.aliases.get(key))
+    }
+
     pub fn effective_alias(&self, module: usize, name: &str) -> Option<&NameAlias> {
         self.alias(module, name)
     }
@@ -748,9 +774,11 @@ impl NameLedger {
             .or_else(|| {
                 // D-MOD-CYCLE1=A: a method of a type may be declared by an
                 // `impl` in another file of the type's package.
-                self.namespace_siblings(target_module)
-                    .into_iter()
-                    .find_map(|sibling| self.declaration(sibling, name))
+                self.tables.declaration_names.get(name_leaf(name))
+                    .into_iter().flatten()
+                    .filter(|(module, candidate)| candidate == name && self.same_namespace(target_module, *module))
+                    .filter_map(|(module, candidate)| self.declaration(*module, candidate))
+                    .min_by_key(|declaration| declaration.module)
                     .map(|declaration| declaration.visibility)
             });
         let Some(visibility) = visibility else {
@@ -795,8 +823,11 @@ impl NameLedger {
         end: usize,
         reference: NameReference,
     ) {
-        self.references
-            .insert((source_module, start, end), reference);
+        let site = (source_module, start, end);
+        if !self.references.contains_key(&site) {
+            self.reference_sites.entry(site.0.clone()).or_default().push(site.clone());
+        }
+        self.references.insert(site, reference);
     }
 
     pub fn reference(&self, module_path: &str, start: usize, end: usize) -> Option<&NameReference> {
@@ -805,6 +836,11 @@ impl NameLedger {
 
     pub fn references(&self) -> &HashMap<(String, usize, usize), NameReference> {
         &self.references
+    }
+
+    pub fn module_references(&self, path: &str) -> impl Iterator<Item = (&(String, usize, usize), &NameReference)> {
+        self.reference_sites.get(path).into_iter().flatten()
+            .filter_map(|site| self.references.get(site).map(|reference| (site, reference)))
     }
 
     /// Record one structure fact in the same ledger as names and references.
@@ -828,12 +864,9 @@ impl NameLedger {
 
     pub fn merge_references(&mut self, other: &Self) {
         self.alias_uses.extend(other.alias_uses.iter().copied());
-        self.references.extend(
-            other
-                .references
-                .iter()
-                .map(|(site, reference)| (site.clone(), reference.clone())),
-        );
+        for ((source, start, end), reference) in &other.references {
+            self.record_reference(source.clone(), *start, *end, reference.clone());
+        }
     }
 
     /// Share lookup facts with an incremental body check without copying
@@ -844,6 +877,7 @@ impl NameLedger {
             tables: Arc::clone(&self.tables),
             alias_uses: self.tables.loader_alias_uses.clone(),
             references: HashMap::new(),
+            reference_sites: HashMap::new(),
             structure_facts: Vec::new(),
         }
     }
@@ -853,11 +887,14 @@ impl NameLedger {
         tables.modules.clear();
         tables.declarations.clear();
         tables.declaration_names.clear();
+        tables.module_declarations.clear();
         tables.display_paths.clear();
         tables.aliases.clear();
         tables.alias_names.clear();
+        tables.module_aliases.clear();
         self.alias_uses = self.tables.loader_alias_uses.clone();
         self.references.clear();
+        self.reference_sites.clear();
         // The loader owns import-edge observations and sema must not erase
         // them when it refreshes its declaration/reference facts. Liveness
         // and lifecycle rows are sema-owned and are rebuilt below.
@@ -1275,5 +1312,46 @@ mod tests {
             ledger.display_path_at(0, 20, 21, "x", Some("Point"), Some(0)),
             Some("Point.x".to_string())
         );
+    }
+
+    #[test]
+    fn module_indices_follow_replacement_snapshot_merge_and_refresh() {
+        let mut ledger = NameLedger::default();
+        for module in [2, 0, 1] {
+            ledger.set_module(module, format!("m{module}"), format!("m{module}.jet"), "pkg".into());
+            ledger.set_module_namespace(module, "pkg".into());
+        }
+        assert_eq!(ledger.namespace_siblings(1).collect::<Vec<_>>(), vec![0, 2]);
+        ledger.set_module_namespace(2, "other".into());
+        assert_eq!(ledger.namespace_siblings(1).collect::<Vec<_>>(), vec![0]);
+        for path in ["m0.Old", "m0.New"] {
+            ledger.declare(0, "T".into(), path.into(), "type".into(), span(), NameVisibility::Private);
+        }
+        ledger.record_alias(1, "dep".into(), "m0".into(), Some(0), span(), NameVisibility::Private);
+        ledger.record_alias(1, "dep".into(), "m0".into(), Some(0), span(), NameVisibility::Public);
+        assert_eq!(ledger.module_declarations(0).count(), 1);
+        assert_eq!(ledger.module_aliases(1).count(), 1);
+        for (key, path) in ledger.canonical_paths(1) {
+            assert_eq!(ledger.canonical_source_path(1, &key), Some(path));
+        }
+        assert!(ledger.visible(1, 1, "T"));
+        let snapshot = ledger.body_snapshot();
+        ledger.declare(0, "Later".into(), "m0.Later".into(), "type".into(), span(), NameVisibility::Private);
+        assert_eq!(snapshot.module_declarations(0).count(), 1);
+        let mut body = ledger.body_snapshot();
+        let reference = NameReference {
+            module_path: "m0.jet".into(), kind: "type".into(), def_span: span(), semantic_identity: None,
+        };
+        body.record_reference("m1.jet".into(), 10, 12, reference.clone());
+        body.record_reference("m1.jet".into(), 10, 12, reference);
+        ledger.merge_references(&body);
+        ledger.merge_references(&body);
+        assert_eq!(ledger.module_references("m1.jet").count(), 1);
+        assert_eq!(ledger.module_references("m0.jet").count(), 0);
+        ledger.clear_sema_facts();
+        assert_eq!(ledger.module_declarations(0).count(), 0);
+        assert_eq!(ledger.module_aliases(1).count(), 0);
+        assert_eq!(ledger.module_references("m1.jet").count(), 0);
+        assert_eq!(ledger.namespace_siblings(1).collect::<Vec<_>>(), vec![0]);
     }
 }
