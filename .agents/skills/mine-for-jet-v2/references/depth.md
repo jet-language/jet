@@ -12,6 +12,7 @@ Hand-in requires exit 0. Publication additionally requires `--audit` exit 0.
 Exit 1 lists every gap by rule (`--summary` lists three per rule, counts stay
 complete); exit 2 is a usage error. The output also prints per-source and
 per-segment ledger and claim densities; keep it with the report.
+
 ## 1. Bounded segments (`coverage.json`)
 
 Split every declared source into fixed segments before extraction. Each segment
