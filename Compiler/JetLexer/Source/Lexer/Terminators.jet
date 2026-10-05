@@ -168,8 +168,10 @@ K_HASH :: 106
 K_DOLLAR :: 107
 
 
+// Facts hold four ints per token, so `index * 4 < facts.len()` is the bound
+// check without a division on every call.
 fn kind_at(facts: [Int], index: Int) -> Int Never! {
-    if index < 0 || index >= facts.len() /% 4 -> return 0
+    if index < 0 || index * 4 >= facts.len() -> return 0
     return facts[index * 4]
 }
 
@@ -258,7 +260,7 @@ fn scope_member_starts_at(facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, cursor) == K_LBRACE -> return true
     if kind_at(facts, cursor) != K_LPAREN -> return false
     depth := 0
-    loop cursor < facts.len() /% 4 {
+    loop cursor * 4 < facts.len() {
         kind :: kind_at(facts, cursor)
         if kind == K_LPAREN -> depth += 1
         if kind == K_RPAREN {
@@ -294,7 +296,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
     cursor := skip_comment_tokens(facts, index + 1)
     if kind_at(facts, cursor) == K_LBRACE {
         depth := 0
-        loop cursor < facts.len() /% 4 {
+        loop cursor * 4 < facts.len() {
             kind :: kind_at(facts, cursor)
             if kind == K_LBRACE -> depth += 1
             if kind == K_RBRACE {
@@ -328,7 +330,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
         cursor = skip_comment_tokens(facts, cursor)
         if kind_at(facts, cursor) == K_LPAREN {
             depth := 0
-            loop cursor < facts.len() /% 4 {
+            loop cursor * 4 < facts.len() {
                 kind :: kind_at(facts, cursor)
                 if kind == K_LPAREN -> depth += 1
                 if kind == K_RPAREN {
@@ -365,7 +367,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
     if is_boolean_connector {
         guard_start :: facts[cursor * 4 + 1]
         depth := 0
-        loop cursor < facts.len() /% 4 {
+        loop cursor * 4 < facts.len() {
             kind :: kind_at(facts, cursor)
             is_open_delimiter :: if kind == {
                 K_LPAREN -> true
@@ -416,7 +418,7 @@ pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
     events := [Int]{}
     last_code := -1
     index := 0
-    loop index < facts.len() /% 4 {
+    loop index * 4 < facts.len() {
         kind :: kind_at(facts, index)
         is_comment :: if kind == {
             K_LINE_COMMENT -> true
@@ -498,8 +500,10 @@ fn lexed_with_terminators(facts: [Int], lexed: ^LexedTokens, events: [Int]) -> L
     event_index := 0
     token_index := 0
     raw_index := 0
-    loop raw_index < facts.len() /% 4 {
-        loop event_index < events.len() /% 3 && events[event_index * 3 + 1] == raw_index {
+    fact_count :: facts.len() /% 4
+    event_count :: events.len() /% 3
+    loop raw_index < fact_count {
+        loop event_index < event_count && events[event_index * 3 + 1] == raw_index {
             event :: events[event_index * 3]
             at :: events[event_index * 3 + 2]
             if {
