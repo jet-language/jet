@@ -171,6 +171,19 @@ mod jet_c_abi {
         guard(|| handle(text(ptr, len).into_owned()))
     }
 
+    /// Borrow UTF-8 bytes for compiler/host marshaling. The pointer remains
+    /// valid until the caller mutates or drops the owning String handle.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_string_data(value: JetCString) -> *const u8 {
+        guard(|| view(value).as_ptr())
+    }
+
+    /// Byte count paired with jet_rt_string_data, not Jet's character count.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_string_byte_len(value: JetCString) -> usize {
+        guard(|| view(value).len())
+    }
+
     #[no_mangle]
     pub extern "C" fn jet_rt_string_clone(value: JetCString) -> JetCString {
         guard(|| handle(view(value).to_owned()))
