@@ -1,1118 +1,399 @@
-// PORT-PENDING 2115 tools-ci-compiled-workload-peer-launcher: Tools/ci/compiled-workload-peer-launcher.rs:1-1114
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #![allow(clippy::missing_safety_doc)]
-//RS 
-//RS //! Native boundary for compiled-workload peer commands.
-//RS //!
-//RS //! The launcher deliberately has no ambient fallback. Linux uses Bubblewrap
-//RS //! mount and namespace isolation, macOS uses Seatbelt, and Windows uses the
-//RS //! repository's AppContainer backend plus temporary Firewall rules for the
-//RS //! loopback-only policy.
-//RS 
-//RS use std::env;
-//RS use std::fs;
-//RS use std::io;
-//RS #[cfg(target_os = "windows")]
-//RS use std::io::Write;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Command, ExitStatus, Stdio};
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS use std::sync::atomic::{AtomicI32, Ordering};
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS use std::time::Duration;
-//RS use std::time::{SystemTime, UNIX_EPOCH};
-//RS 
-//RS const CONTRACT: &str = "compiled-workload-peer-isolation-v1";
-//RS const EXIT_UNSUPPORTED: i32 = 78;
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS enum NetworkPolicy {
-//RS     Disabled,
-//RS     LoopbackOnly,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS struct Invocation {
-//RS     task_id: String,
-//RS     root: PathBuf,
-//RS     cwd: PathBuf,
-//RS     network: NetworkPolicy,
-//RS     command: String,
-//RS     args: Vec<String>,
-//RS }
-//RS 
-//RS fn main() {
-//RS     let args: Vec<String> = env::args().skip(1).collect();
-//RS     #[cfg(target_os = "linux")]
-//RS     if args.first().is_some_and(|arg| arg == "--internal-disabled") {
-//RS         run_internal_disabled(&args[1..]);
-//RS     }
-//RS     #[cfg(target_os = "linux")]
-//RS     if args.first().is_some_and(|arg| arg == "--internal-loopback") {
-//RS         run_internal_loopback(&args[1..]);
-//RS     }
-//RS     if args.as_slice() == ["--version"] {
-//RS         println!("{CONTRACT}");
-//RS         return;
-//RS     }
-//RS     if args.as_slice() == ["--contract"] {
-//RS         match capability_check() {
-//RS             Ok(()) => println!("{CONTRACT}"),
-//RS             Err(reason) => fail(&reason),
-//RS         }
-//RS         return;
-//RS     }
-//RS     match parse_invocation(&args).and_then(|invocation| {
-//RS         capability_check()?;
-//RS         run(invocation)
-//RS     }) {
-//RS         Ok(status) => finish_status(status),
-//RS         Err(reason) => fail(&reason),
-//RS     }
-//RS }
-//RS #[cfg(target_os = "linux")]
-//RS fn run_internal_status_file(args: &[String]) -> (Option<PathBuf>, &[String]) {
-//RS     if !args.first().is_some_and(|arg| arg == "--status-file") {
-//RS         return (None, args);
-//RS     }
-//RS     let Some(value) = args.get(1) else {
-//RS         fail("internal runner status file is missing");
-//RS     };
-//RS     if value.is_empty() || value.contains('\0') {
-//RS         fail("internal runner status file is invalid");
-//RS     }
-//RS     (Some(PathBuf::from(value)), &args[2..])
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn run_internal_disabled(args: &[String]) -> ! {
-//RS     // Bubblewrap removes every external interface. The extra filter denies
-//RS     // creation of network sockets while leaving pipe/socketpair primitives
-//RS     // available for compiler and linker subprocesses.
-//RS     if let Err(reason) = install_disabled_network_filter() {
-//RS         fail(&reason);
-//RS     }
-//RS     let (status_file, args) = run_internal_status_file(args);
-//RS     run_internal_supervisor(args, status_file);
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn run_internal_loopback(args: &[String]) -> ! {
-//RS     let (status_file, args) = run_internal_status_file(args);
-//RS     let Some(ip) = args.first() else {
-//RS         fail("loopback-only internal runner received no ip command");
-//RS     };
-//RS     if args.get(1).is_none() {
-//RS         fail("loopback-only internal runner received no command");
-//RS     }
-//RS     let status = Command::new(ip)
-//RS         .args(["link", "set", "lo", "up"])
-//RS         .stdout(Stdio::null())
-//RS         .stderr(Stdio::null())
-//RS         .status()
-//RS         .map_err(|error| format!("loopback-only internal runner could not start `{ip}`: {error}"));
-//RS     match status {
-//RS         Ok(status) if status.success() => {}
-//RS         Ok(status) => fail(&format!("loopback-only internal runner `{ip}` exited {status}")),
-//RS         Err(reason) => fail(&reason),
-//RS     }
-//RS     run_internal_supervisor(&args[1..], status_file);
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn run_internal_supervisor(args: &[String], status_file: Option<PathBuf>) -> ! {
-//RS     let Some(command) = args.first() else {
-//RS         fail("internal runner received no command");
-//RS     };
-//RS     let mut child_command = Command::new(command);
-//RS     child_command.args(&args[1..]);
-//RS     match run_linux_inner_child(child_command) {
-//RS         Ok(status) => {
-//RS             use std::os::unix::process::ExitStatusExt;
-//RS             if let (Some(path), Some(signal)) = (&status_file, status.signal()) {
-//RS                 fs::write(path, [signal as u8]).map_err(|error| {
-//RS                     format!("internal runner signal status could not propagate: {error}")
-//RS                 }).unwrap_or_else(|reason| fail(&reason));
-//RS             }
-//RS             finish_status(status)
-//RS         }
-//RS         Err(reason) => fail(&reason),
-//RS     }
-//RS }
-//RS 
-//RS fn fail(reason: &str) -> ! {
-//RS     eprintln!("compiled-workload-peer-launcher: {reason}");
-//RS     std::process::exit(EXIT_UNSUPPORTED);
-//RS }
-//RS 
-//RS fn parse_invocation(args: &[String]) -> Result<Invocation, String> {
-//RS     if args.is_empty() {
-//RS         return Err("missing execution arguments; use --contract for the capability probe".into());
-//RS     }
-//RS     let mut task_id = None;
-//RS     let mut root = None;
-//RS     let mut cwd = None;
-//RS     let mut network = None;
-//RS     let mut external_write = None;
-//RS     let mut host = None;
-//RS     let mut command = None;
-//RS     let mut command_args = Vec::new();
-//RS     let mut index = 0;
-//RS     let mut separator = false;
-//RS     while index < args.len() {
-//RS         let arg = &args[index];
-//RS         if separator {
-//RS             if command.is_none() {
-//RS                 command = Some(arg.clone());
-//RS             } else {
-//RS                 command_args.push(arg.clone());
-//RS             }
-//RS             index += 1;
-//RS             continue;
-//RS         }
-//RS         if arg == "--" {
-//RS             separator = true;
-//RS             index += 1;
-//RS             continue;
-//RS         }
-//RS         let option = arg
-//RS             .strip_prefix("--")
-//RS             .ok_or_else(|| format!("expected launcher option, found `{arg}`"))?;
-//RS         let (name, inline_value) = option
-//RS             .split_once('=')
-//RS             .map_or((option, None), |(name, value)| (name, Some(value)));
-//RS         let value = |name: &str, inline: Option<&str>, index: &mut usize| {
-//RS             if let Some(value) = inline {
-//RS                 return Ok(value.to_string());
-//RS             }
-//RS             *index += 1;
-//RS             args.get(*index)
-//RS                 .cloned()
-//RS                 .ok_or_else(|| format!("missing value for --{name}"))
-//RS         };
-//RS         match name {
-//RS             "contract" => {
-//RS                 let value = value("contract", inline_value, &mut index)?;
-//RS                 if value != CONTRACT {
-//RS                     return Err(format!("unsupported contract `{value}`"));
-//RS                 }
-//RS             }
-//RS             "task-id" => {
-//RS                 let value = value("task-id", inline_value, &mut index)?;
-//RS                 if value.is_empty()
-//RS                     || !value
-//RS                         .bytes()
-//RS                         .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-//RS                 {
-//RS                     return Err(format!("invalid task id `{value}`"));
-//RS                 }
-//RS                 task_id = Some(value);
-//RS             }
-//RS             "root" => root = Some(value("root", inline_value, &mut index)?),
-//RS             "cwd" => cwd = Some(value("cwd", inline_value, &mut index)?),
-//RS             "network" => {
-//RS                 let value = value("network", inline_value, &mut index)?;
-//RS                 network = Some(match value.as_str() {
-//RS                     "disabled" => NetworkPolicy::Disabled,
-//RS                     "loopback-only" => NetworkPolicy::LoopbackOnly,
-//RS                     other => return Err(format!("unsupported network authority `{other}`")),
-//RS                 });
-//RS             }
-//RS             "external-write" => {
-//RS                 let value = value("external-write", inline_value, &mut index)?;
-//RS                 if value != "disabled" {
-//RS                     return Err(format!("unsupported external-write authority `{value}`"));
-//RS                 }
-//RS                 external_write = Some(value);
-//RS             }
-//RS             "host" => {
-//RS                 let value = value("host", inline_value, &mut index)?;
-//RS                 if value != "ambient" {
-//RS                     return Err(format!("unsupported host authority `{value}`"));
-//RS                 }
-//RS                 host = Some(value);
-//RS             }
-//RS             other if other.starts_with("--") => {
-//RS                 return Err(format!("unsupported launcher option `{other}`"));
-//RS             }
-//RS             other => return Err(format!("expected `--` before command, found `{other}`")),
-//RS         }
-//RS         index += 1;
-//RS     }
-//RS     if !separator {
-//RS         return Err("missing `--` command separator".into());
-//RS     }
-//RS     let task_id = task_id.ok_or_else(|| "missing --task-id".to_string())?;
-//RS     let root = canonical_directory(
-//RS         "root",
-//RS         root.ok_or_else(|| "missing --root".to_string())?,
-//RS     )?;
-//RS     let cwd = canonical_directory("cwd", cwd.ok_or_else(|| "missing --cwd".to_string())?)?;
-//RS     if root.parent().is_none() || root == Path::new("/") {
-//RS         return Err("root must not be a filesystem root".into());
-//RS     }
-//RS     if !contained(&root, &cwd) {
-//RS         return Err(format!(
-//RS             "cwd `{}` escapes root `{}` after canonicalization",
-//RS             cwd.display(),
-//RS             root.display()
-//RS         ));
-//RS     }
-//RS     if external_write.is_none() {
-//RS         return Err("missing --external-write=disabled".into());
-//RS     }
-//RS     if host.is_none() {
-//RS         return Err("missing --host=ambient".into());
-//RS     }
-//RS     let network = network.ok_or_else(|| "missing --network authority".to_string())?;
-//RS     let command = command.ok_or_else(|| "missing command after `--`".to_string())?;
-//RS     if command.is_empty() || command.contains('\0') {
-//RS         return Err("command is empty or contains NUL".into());
-//RS     }
-//RS     if command_args.iter().any(|arg| arg.contains('\0')) {
-//RS         return Err("command argument contains NUL".into());
-//RS     }
-//RS     Ok(Invocation {
-//RS         task_id,
-//RS         root,
-//RS         cwd,
-//RS         network,
-//RS         command,
-//RS         args: command_args,
-//RS     })
-//RS }
-//RS 
-//RS fn canonical_directory(label: &str, value: String) -> Result<PathBuf, String> {
-//RS     if value.is_empty() || value.contains('\0') {
-//RS         return Err(format!("{label} is empty or contains NUL"));
-//RS     }
-//RS     let path = PathBuf::from(value);
-//RS     let metadata = fs::symlink_metadata(&path)
-//RS         .map_err(|error| format!("{label} `{}` is unavailable: {error}", path.display()))?;
-//RS     if !metadata.is_dir() {
-//RS         return Err(format!("{label} `{}` is not a directory", path.display()));
-//RS     }
-//RS     fs::canonicalize(&path)
-//RS         .map_err(|error| format!("{label} `{}` cannot be canonicalized: {error}", path.display()))
-//RS }
-//RS 
-//RS fn contained(root: &Path, child: &Path) -> bool {
-//RS     #[cfg(target_os = "windows")]
-//RS     {
-//RS         let root = root.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
-//RS         let child = child.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
-//RS         return child == root
-//RS             || child
-//RS                 .strip_prefix(&root)
-//RS                 .is_some_and(|rest| rest.starts_with('\\'));
-//RS     }
-//RS     #[cfg(not(target_os = "windows"))]
-//RS     {
-//RS         child.strip_prefix(root).is_ok()
-//RS     }
-//RS }
-//RS 
-//RS fn resolve_program(program: &str) -> Result<PathBuf, String> {
-//RS     let candidate = Path::new(program);
-//RS     if candidate.is_absolute() || program.contains(std::path::MAIN_SEPARATOR) {
-//RS         return fs::canonicalize(candidate)
-//RS             .map_err(|error| format!("command `{program}` is unavailable: {error}"));
-//RS     }
-//RS     let path = env::var_os("PATH").ok_or_else(|| "PATH is unavailable".to_string())?;
-//RS     for directory in env::split_paths(&path) {
-//RS         let direct = directory.join(program);
-//RS         if direct.is_file() {
-//RS             return fs::canonicalize(&direct)
-//RS                 .map_err(|error| format!("command `{program}` cannot be canonicalized: {error}"));
-//RS         }
-//RS         #[cfg(target_os = "windows")]
-//RS         for suffix in [".exe", ".cmd", ".bat", ".com"] {
-//RS             let with_suffix = directory.join(format!("{program}{suffix}"));
-//RS             if with_suffix.is_file() {
-//RS                 return fs::canonicalize(&with_suffix).map_err(|error| {
-//RS                     format!("command `{program}` cannot be canonicalized: {error}")
-//RS                 });
-//RS             }
-//RS         }
-//RS     }
-//RS     Err(format!("command `{program}` is unavailable on PATH"))
-//RS }
-//RS 
-//RS fn capability_check() -> Result<(), String> {
-//RS     #[cfg(target_os = "linux")]
-//RS     {
-//RS         return linux_capability_check();
-//RS     }
-//RS     #[cfg(target_os = "macos")]
-//RS     {
-//RS         return macos_capability_check();
-//RS     }
-//RS     #[cfg(target_os = "windows")]
-//RS     {
-//RS         return windows_capability_check();
-//RS     }
-//RS     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-//RS     {
-//RS         Err(format!(
-//RS             "unsupported host `{}`: native peer isolation is implemented only on Linux, macOS, and Windows",
-//RS             env::consts::OS
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn probe_root() -> Result<PathBuf, String> {
-//RS     let base = env::var_os("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT")
-//RS         .map(PathBuf::from)
-//RS         .or_else(|| {
-//RS             env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/jet-test-scratch"))
-//RS         })
-//RS         .ok_or_else(|| "cannot locate a disk-backed capability probe directory".to_string())?;
-//RS     fs::create_dir_all(&base).map_err(|error| {
-//RS         format!(
-//RS             "capability probe root `{}` cannot be created: {error}",
-//RS             base.display()
-//RS         )
-//RS     })?;
-//RS     let stamp = SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .map_err(|error| format!("capability probe clock failed: {error}"))?
-//RS         .as_nanos();
-//RS     let root = base.join(format!(
-//RS         "compiled-workload-peer-probe-{}-{stamp}",
-//RS         std::process::id()
-//RS     ));
-//RS     fs::create_dir(&root).map_err(|error| {
-//RS         format!(
-//RS             "capability probe root `{}` cannot be created: {error}",
-//RS             root.display()
-//RS         )
-//RS     })?;
-//RS     Ok(root)
-//RS }
-//RS #[cfg(target_os = "linux")]
-//RS #[repr(C)]
-//RS #[derive(Clone, Copy)]
-//RS struct SockFilter {
-//RS     code: u16,
-//RS     jt: u8,
-//RS     jf: u8,
-//RS     k: u32,
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS #[repr(C)]
-//RS struct SockFprog {
-//RS     len: u16,
-//RS     filter: *const SockFilter,
-//RS }
-//RS 
-//RS #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-//RS const SOCKET_SYSCALL: u32 = 41;
-//RS #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-//RS const SOCKET_SYSCALL: u32 = 198;
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn install_disabled_network_filter() -> Result<(), String> {
-//RS     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-//RS     return Err(format!(
-//RS         "Linux peer isolation unavailable: seccomp socket policy has no syscall table for `{}`",
-//RS         env::consts::ARCH
-//RS     ));
-//RS     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-//RS     {
-//RS         const BPF_LD_W_ABS: u16 = 0x20;
-//RS         const BPF_JMP_JEQ_K: u16 = 0x15;
-//RS         const BPF_RET_K: u16 = 0x06;
-//RS         const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
-//RS         const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
-//RS         const EPERM: u32 = 1;
-//RS         let filter = [
-//RS             SockFilter { code: BPF_LD_W_ABS, jt: 0, jf: 0, k: 0 },
-//RS             SockFilter { code: BPF_JMP_JEQ_K, jt: 0, jf: 1, k: SOCKET_SYSCALL },
-//RS             SockFilter { code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_ERRNO | EPERM },
-//RS             SockFilter { code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_ALLOW },
-//RS         ];
-//RS         let program = SockFprog { len: filter.len() as u16, filter: filter.as_ptr() };
-//RS         const PR_SET_NO_NEW_PRIVS: i32 = 38;
-//RS         const PR_SET_SECCOMP: i32 = 22;
-//RS         const SECCOMP_MODE_FILTER: i32 = 2;
-//RS         if unsafe { prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
-//RS             return Err(format!(
-//RS                 "Linux peer isolation unavailable: seccomp no_new_privs failed: {}",
-//RS                 io::Error::last_os_error()
-//RS             ));
-//RS         }
-//RS         if unsafe {
-//RS             prctl(
-//RS                 PR_SET_SECCOMP,
-//RS                 SECCOMP_MODE_FILTER,
-//RS                 &program as *const SockFprog,
-//RS             )
-//RS         } != 0
-//RS         {
-//RS             return Err(format!(
-//RS                 "Linux peer isolation unavailable: seccomp socket filter failed: {}",
-//RS                 io::Error::last_os_error()
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn linux_capability_check() -> Result<(), String> {
-//RS     let bwrap = find_on_path("bwrap").ok_or_else(|| {
-//RS         "Linux peer isolation unavailable: bubblewrap (`bwrap`) is not available on PATH".to_string()
-//RS     })?;
-//RS     let shell = find_on_path("sh").ok_or_else(|| {
-//RS         "Linux peer isolation unavailable: POSIX `sh` is not available on PATH".to_string()
-//RS     })?;
-//RS     let ip = find_on_path("ip").ok_or_else(|| {
-//RS         "Linux peer isolation unavailable: `ip` is required to enable loopback-only networking".to_string()
-//RS     })?;
-//RS     let launcher = env::current_exe()
-//RS         .and_then(|path| fs::canonicalize(path))
-//RS         .map_err(|error| {
-//RS             format!("Linux peer isolation unavailable: launcher path cannot be resolved: {error}")
-//RS         })?;
-//RS     let root = probe_root()?;
-//RS     for policy in [NetworkPolicy::Disabled, NetworkPolicy::LoopbackOnly] {
-//RS         let mut args = linux_base_args(&root, &root, policy);
-//RS         args.push("--".into());
-//RS         if policy == NetworkPolicy::LoopbackOnly {
-//RS             args.extend([
-//RS                 launcher.to_string_lossy().into_owned(),
-//RS                 "--internal-loopback".into(),
-//RS                 ip.to_string_lossy().into_owned(),
-//RS                 shell.to_string_lossy().into_owned(),
-//RS                 "-c".into(),
-//RS                 "exit 0".into(),
-//RS             ]);
-//RS         } else {
-//RS             args.push(launcher.to_string_lossy().into_owned());
-//RS             args.push("--internal-disabled".into());
-//RS             args.push(shell.to_string_lossy().into_owned());
-//RS             args.extend(["-c".into(), "exit 0".into()]);
-//RS         }
-//RS         let result = Command::new(&bwrap)
-//RS             .args(&args)
-//RS             .stdout(Stdio::null())
-//RS             .stderr(Stdio::piped())
-//RS             .output()
-//RS             .map_err(|error| {
-//RS                 format!(
-//RS                     "Linux peer isolation unavailable: bubblewrap {policy:?} probe failed: {error}"
-//RS                 )
-//RS             })?;
-//RS         if !result.status.success() {
-//RS             let _ = fs::remove_dir_all(&root);
-//RS             return Err(format!(
-//RS                 "Linux peer isolation unavailable: bubblewrap {policy:?} probe exited {}{}",
-//RS                 result.status,
-//RS                 clean_probe_stderr(&result.stderr)
-//RS             ));
-//RS         }
-//RS     }
-//RS     let _ = fs::remove_dir_all(root);
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn find_on_path(program: &str) -> Option<PathBuf> {
-//RS     let path = env::var_os("PATH")?;
-//RS     env::split_paths(&path)
-//RS         .map(|directory| directory.join(program))
-//RS         .find(|candidate| candidate.is_file())
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-//RS fn clean_probe_stderr(bytes: &[u8]) -> String {
-//RS     let text = String::from_utf8_lossy(bytes).replace('\r', " ").replace('\n', " ").replace('\t', " ");
-//RS     let text = text.trim();
-//RS     if text.is_empty() {
-//RS         String::new()
-//RS     } else {
-//RS         format!(": {text}")
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn linux_base_args(root: &Path, cwd: &Path, network: NetworkPolicy) -> Vec<String> {
-//RS     let mut args = vec![
-//RS         "--die-with-parent".into(),
-//RS         "--unshare-all".into(),
-//RS         "--ro-bind".into(),
-//RS         "/".into(),
-//RS         "/".into(),
-//RS         "--remount-ro".into(),
-//RS         "/".into(),
-//RS         "--bind".into(),
-//RS         root.to_string_lossy().into_owned(),
-//RS         root.to_string_lossy().into_owned(),
-//RS         "--proc".into(),
-//RS         "/proc".into(),
-//RS         "--dev".into(),
-//RS         "/dev".into(),
-//RS         "--tmpfs".into(),
-//RS         "/tmp".into(),
-//RS         "--chdir".into(),
-//RS         cwd.to_string_lossy().into_owned(),
-//RS     ];
-//RS     if network == NetworkPolicy::LoopbackOnly {
-//RS         // CAP_NET_ADMIN exists only inside bwrap's fresh user/network
-//RS         // namespaces and is used solely to bring up the private loopback
-//RS         // interface. Disabled networking receives no extra capability.
-//RS         args.extend([
-//RS             "--uid".into(),
-//RS             "0".into(),
-//RS             "--gid".into(),
-//RS             "0".into(),
-//RS             "--cap-add".into(),
-//RS             "CAP_NET_ADMIN".into(),
-//RS         ]);
-//RS     }
-//RS     args
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn run_linux(invocation: Invocation) -> Result<ExitStatus, String> {
-//RS     let bwrap = find_on_path("bwrap")
-//RS         .ok_or_else(|| "Linux peer isolation unavailable: bubblewrap disappeared from PATH".to_string())?;
-//RS     let ip = find_on_path("ip")
-//RS         .ok_or_else(|| "Linux peer isolation unavailable: `ip` disappeared from PATH".to_string())?;
-//RS     let launcher = env::current_exe()
-//RS         .and_then(|path| fs::canonicalize(path))
-//RS         .map_err(|error| {
-//RS             format!("Linux peer isolation unavailable: launcher path cannot be resolved: {error}")
-//RS         })?;
-//RS     let command = resolve_program(&invocation.command)?;
-//RS     let stamp = SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .map_err(|error| format!("Linux peer isolation clock failed: {error}"))?
-//RS         .as_nanos();
-//RS     let status_file = invocation.root.join(format!(
-//RS         ".compiled-workload-peer-status-{}-{stamp}",
-//RS         std::process::id()
-//RS     ));
-//RS     fs::OpenOptions::new()
-//RS         .write(true)
-//RS         .create_new(true)
-//RS         .open(&status_file)
-//RS         .map_err(|error| {
-//RS             format!(
-//RS                 "Linux peer isolation signal status cannot be created at `{}`: {error}",
-//RS                 status_file.display()
-//RS             )
-//RS         })?;
-//RS     let mut child_command = Command::new(&bwrap);
-//RS     child_command.args(linux_base_args(&invocation.root, &invocation.cwd, invocation.network));
-//RS     child_command.arg("--");
-//RS     child_command.arg(launcher);
-//RS     if invocation.network == NetworkPolicy::LoopbackOnly {
-//RS         child_command
-//RS             .arg("--internal-loopback")
-//RS             .arg("--status-file")
-//RS             .arg(&status_file)
-//RS             .arg(&ip)
-//RS             .arg(&command)
-//RS             .args(&invocation.args);
-//RS     } else {
-//RS         child_command
-//RS             .arg("--internal-disabled")
-//RS             .arg("--status-file")
-//RS             .arg(&status_file)
-//RS             .arg(&command)
-//RS             .args(&invocation.args);
-//RS     }
-//RS     let result = run_unix_child(child_command);
-//RS     let reported = read_linux_signal(&status_file);
-//RS     let cleanup = fs::remove_file(&status_file);
-//RS     if let Err(reason) = cleanup {
-//RS         return Err(format!(
-//RS             "Linux peer isolation signal status cannot be removed from `{}`: {reason}",
-//RS             status_file.display()
-//RS         ));
-//RS     }
-//RS     match reported {
-//RS         Ok(Some(signal)) => {
-//RS             unsafe {
-//RS                 signal_hook(signal, None);
-//RS                 raise_signal(signal);
-//RS             }
-//RS             Err(format!("Linux peer isolation signal {signal} could not propagate"))
-//RS         }
-//RS         Ok(None) => result,
-//RS         Err(reason) => Err(reason),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn read_linux_signal(path: &Path) -> Result<Option<i32>, String> {
-//RS     let bytes = fs::read(path).map_err(|error| {
-//RS         format!(
-//RS             "Linux peer isolation signal status cannot be read from `{}`: {error}",
-//RS             path.display()
-//RS         )
-//RS     })?;
-//RS     match bytes.as_slice() {
-//RS         [] => Ok(None),
-//RS         [signal] if (1..=64).contains(signal) => Ok(Some(*signal as i32)),
-//RS         _ => Err("Linux peer isolation signal status returned invalid data".into()),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn macos_capability_check() -> Result<(), String> {
-//RS     let sandbox = Path::new("/usr/bin/sandbox-exec");
-//RS     if !sandbox.is_file() {
-//RS         return Err(format!(
-//RS             "macOS peer isolation unavailable: native Seatbelt `{}` is unavailable",
-//RS             sandbox.display()
-//RS         ));
-//RS     }
-//RS     let root = probe_root()?;
-//RS     for policy in [NetworkPolicy::Disabled, NetworkPolicy::LoopbackOnly] {
-//RS         let profile = macos_profile(&root, policy);
-//RS         let result = Command::new(sandbox)
-//RS             .args(["-p", profile.as_str(), "/usr/bin/true"])
-//RS             .current_dir(&root)
-//RS             .stdout(Stdio::null())
-//RS             .stderr(Stdio::piped())
-//RS             .output()
-//RS             .map_err(|error| format!("macOS peer isolation unavailable: Seatbelt probe failed: {error}"))?;
-//RS         if !result.status.success() {
-//RS             let _ = fs::remove_dir_all(&root);
-//RS             return Err(format!(
-//RS                 "macOS peer isolation unavailable: Seatbelt probe for {} exited {}{}",
-//RS                 network_name(policy),
-//RS                 result.status,
-//RS                 clean_probe_stderr(&result.stderr)
-//RS             ));
-//RS         }
-//RS     }
-//RS     let _ = fs::remove_dir_all(root);
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn macos_profile(root: &Path, network: NetworkPolicy) -> String {
-//RS     let root = sbpl_quote(root);
-//RS     let network = match network {
-//RS         NetworkPolicy::Disabled => "(deny network*)".to_string(),
-//RS         NetworkPolicy::LoopbackOnly => concat!(
-//RS             "(allow network-outbound (remote tcp \"localhost:*\"))",
-//RS             " (allow network-outbound (remote udp \"localhost:*\"))",
-//RS             " (allow network-inbound (local tcp \"localhost:*\"))",
-//RS             " (allow network-inbound (local udp \"localhost:*\"))"
-//RS         )
-//RS         .to_string(),
-//RS     };
-//RS     format!(
-//RS         "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-exec)\n(allow process-fork)\n(allow process-signal)\n(allow file-read*)\n(allow file-write* (subpath \"{root}\"))\n{network}\n"
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn sbpl_quote(path: &Path) -> String {
-//RS     path.to_string_lossy()
-//RS         .replace('\\', "\\\\")
-//RS         .replace('"', "\\\"")
-//RS }
-//RS 
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS mod windows_native {
-//RS     include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs");
-//RS     include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs");
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS fn windows_capability_check() -> Result<(), String> {
-//RS     let status = windows_native::windows_status();
-//RS     if !status.available {
-//RS         return Err(format!(
-//RS             "Windows peer isolation unavailable: {}",
-//RS             status.reason
-//RS         ));
-//RS     }
-//RS     let netsh = resolve_program("netsh")?;
-//RS     let result = Command::new(netsh)
-//RS         .args(["advfirewall", "show", "allprofiles"])
-//RS         .stdout(Stdio::null())
-//RS         .stderr(Stdio::piped())
-//RS         .output()
-//RS         .map_err(|error| format!("Windows peer isolation unavailable: Firewall probe failed: {error}"))?;
-//RS     if !result.status.success() {
-//RS         return Err(format!(
-//RS             "Windows peer isolation unavailable: Firewall probe exited {}{}",
-//RS             result.status,
-//RS             clean_probe_stderr(&result.stderr)
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS struct FirewallGuard {
-//RS     netsh: PathBuf,
-//RS     names: Vec<String>,
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS impl FirewallGuard {
-//RS     fn install(executable: &Path, network: NetworkPolicy) -> Result<Option<Self>, String> {
-//RS         if network == NetworkPolicy::Disabled {
-//RS             return Ok(None);
-//RS         }
-//RS         let netsh = resolve_program("netsh")?;
-//RS         let stamp = SystemTime::now()
-//RS             .duration_since(UNIX_EPOCH)
-//RS             .map_err(|error| format!("Firewall rule clock failed: {error}"))?
-//RS             .as_nanos();
-//RS         let prefix = format!("JetCompiledPeer-{stamp}-{}", std::process::id());
-//RS         let mut guard = Self {
-//RS             netsh,
-//RS             names: Vec::new(),
-//RS         };
-//RS         let program = format!("program={}", executable.display());
-//RS         let v4 = "0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255";
-//RS         let v6 = "::0-::0,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
-//RS         for (direction, remote) in [("out", v4), ("in", v4), ("out", v6), ("in", v6)] {
-//RS             let name = format!("{prefix}-{direction}-{remote}");
-//RS             guard.add_rule(&name, direction, &program, Some(remote))?;
-//RS         }
-//RS         Ok(Some(guard))
-//RS     }
-//RS 
-//RS     fn add_rule(
-//RS         &mut self,
-//RS         name: &str,
-//RS         direction: &str,
-//RS         program: &str,
-//RS         remote: Option<&str>,
-//RS     ) -> Result<(), String> {
-//RS         let mut args = vec![
-//RS             "advfirewall".to_string(),
-//RS             "firewall".to_string(),
-//RS             "add".to_string(),
-//RS             "rule".to_string(),
-//RS             format!("name={name}"),
-//RS             format!("dir={direction}"),
-//RS             "action=block".to_string(),
-//RS             program.to_string(),
-//RS             "enable=yes".to_string(),
-//RS             "profile=any".to_string(),
-//RS             "protocol=any".to_string(),
-//RS         ];
-//RS         if let Some(remote) = remote {
-//RS             args.push(format!("remoteip={remote}"));
-//RS         }
-//RS         let result = Command::new(&self.netsh)
-//RS             .args(&args)
-//RS             .stdout(Stdio::null())
-//RS             .stderr(Stdio::piped())
-//RS             .status()
-//RS             .map_err(|error| format!("Firewall rule `{name}` could not be installed: {error}"))?;
-//RS         if !result.success() {
-//RS             return Err(format!("Firewall rule `{name}` could not be installed: {result}"));
-//RS         }
-//RS         self.names.push(name.to_string());
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn cleanup(&mut self) -> Result<(), String> {
-//RS         let mut failed = Vec::new();
-//RS         for name in self.names.iter().rev() {
-//RS             let result = Command::new(&self.netsh)
-//RS                 .args(["advfirewall", "firewall", "delete", "rule", &format!("name={name}")])
-//RS                 .stdout(Stdio::null())
-//RS                 .stderr(Stdio::null())
-//RS                 .status();
-//RS             if result.as_ref().map_or(true, |status| !status.success()) {
-//RS                 failed.push(name.clone());
-//RS             }
-//RS         }
-//RS         self.names = failed;
-//RS         if let Some(name) = self.names.first() {
-//RS             Err(format!("Firewall rule `{name}` could not be removed"))
-//RS         } else {
-//RS             Ok(())
-//RS         }
-//RS     }
-//RS }
-//RS #[cfg(target_os = "windows")]
-//RS impl Drop for FirewallGuard {
-//RS     fn drop(&mut self) {
-//RS         let _ = self.cleanup();
-//RS     }
-//RS }
-//RS 
-//RS fn run(invocation: Invocation) -> Result<ExitStatus, String> {
-//RS     let task_id = invocation.task_id.clone();
-//RS     let result = {
-//RS         #[cfg(target_os = "linux")]
-//RS         {
-//RS             run_linux(invocation)
-//RS         }
-//RS         #[cfg(target_os = "macos")]
-//RS         {
-//RS             run_macos(invocation)
-//RS         }
-//RS         #[cfg(target_os = "windows")]
-//RS         {
-//RS             run_windows(invocation)
-//RS         }
-//RS         #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-//RS         {
-//RS             let _ = invocation;
-//RS             Err("native peer isolation is unavailable on this host".into())
-//RS         }
-//RS     };
-//RS     result.map_err(|reason| format!("task `{task_id}`: {reason}"))
-//RS }
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn run_macos(invocation: Invocation) -> Result<ExitStatus, String> {
-//RS     let command = resolve_program(&invocation.command)?;
-//RS     let profile = macos_profile(&invocation.root, invocation.network);
-//RS     let mut child_command = Command::new("/usr/bin/sandbox-exec");
-//RS     child_command
-//RS         .args(["-p", profile.as_str()])
-//RS         .arg(&command)
-//RS         .args(&invocation.args)
-//RS         .current_dir(&invocation.cwd);
-//RS     run_unix_child(child_command)
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS fn run_windows(invocation: Invocation) -> Result<ExitStatus, String> {
-//RS     use std::collections::BTreeMap;
-//RS     let command = resolve_program(&invocation.command)?;
-//RS     let mut firewall = FirewallGuard::install(&command, invocation.network)?;
-//RS     let environment: BTreeMap<String, String> = env::vars().collect();
-//RS     let result = windows_native::windows_output_with_read_only_mounts(
-//RS         &command,
-//RS         &invocation.args,
-//RS         &invocation.root,
-//RS         None,
-//RS         &environment,
-//RS         invocation.network == NetworkPolicy::LoopbackOnly,
-//RS         true,
-//RS         true,
-//RS         &[],
-//RS         None,
-//RS         None,
-//RS     )
-//RS     .map_err(|error| format!("Windows peer isolation launch failed: {error:?}"));
-//RS     let cleanup = firewall.as_mut().map(|guard| guard.cleanup()).transpose();
-//RS     if let Err(error) = cleanup {
-//RS         return Err(error);
-//RS     }
-//RS     let result = result?;
-//RS     io::stdout()
-//RS         .write_all(&result.output.stdout)
-//RS         .map_err(|error| format!("stdout propagation failed: {error}"))?;
-//RS     io::stderr()
-//RS         .write_all(&result.output.stderr)
-//RS         .map_err(|error| format!("stderr propagation failed: {error}"))?;
-//RS     Ok(result.output.status)
-//RS }
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS static FORWARDED_SIGNAL: AtomicI32 = AtomicI32::new(0);
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS extern "C" fn forward_signal(signal: i32) {
-//RS     FORWARDED_SIGNAL.store(signal, Ordering::Release);
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn install_signal_handlers() {
-//RS     unsafe {
-//RS         signal_hook(2, Some(forward_signal));
-//RS         signal_hook(15, Some(forward_signal));
-//RS         signal_hook(1, Some(forward_signal));
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn run_unix_child(command: Command) -> Result<ExitStatus, String> {
-//RS     run_unix_child_inner(command, false)
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn run_linux_inner_child(command: Command) -> Result<ExitStatus, String> {
-//RS     run_unix_child_inner(command, true)
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn run_unix_child_inner(mut command: Command, cleanup_namespace: bool) -> Result<ExitStatus, String> {
-//RS     use std::os::unix::process::CommandExt;
-//RS     install_signal_handlers();
-//RS     command.process_group(0);
-//RS     command
-//RS         .stdin(Stdio::inherit())
-//RS         .stdout(Stdio::inherit())
-//RS         .stderr(Stdio::inherit());
-//RS     let mut child = command
-//RS         .spawn()
-//RS         .map_err(|error| format!("native peer isolation child could not start: {error}"))?;
-//RS     let process_group = child.id() as i32;
-//RS     loop {
-//RS         if let Some(signal) = take_signal() {
-//RS             kill_group(process_group, signal);
-//RS             let _ = cleanup_namespace_processes(signal, cleanup_namespace);
-//RS             let _ = child.wait();
-//RS             kill_group(process_group, 9);
-//RS             let _ = cleanup_namespace_processes(9, cleanup_namespace);
-//RS             unsafe {
-//RS                 signal_hook(signal, None);
-//RS                 raise_signal(signal);
-//RS             }
-//RS             return Err(format!("launcher interrupted by signal {signal}"));
-//RS         }
-//RS         match child.try_wait() {
-//RS             Ok(Some(status)) => {
-//RS                 // A leader may leave a background descendant. The private
-//RS                 // process group and, on Linux, PID namespace are closed before returning.
-//RS                 kill_group(process_group, 15);
-//RS                 let cleanup_error = cleanup_namespace_processes(15, cleanup_namespace).err();
-//RS                 std::thread::sleep(Duration::from_millis(25));
-//RS                 kill_group(process_group, 9);
-//RS                 let cleanup_error = cleanup_namespace_processes(9, cleanup_namespace)
-//RS                     .err()
-//RS                     .or(cleanup_error);
-//RS                 if let Some(reason) = cleanup_error {
-//RS                     return Err(reason);
-//RS                 }
-//RS                 return Ok(status);
-//RS             }
-//RS             Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-//RS             Err(error) => {
-//RS                 kill_group(process_group, 15);
-//RS                 let _ = cleanup_namespace_processes(15, cleanup_namespace);
-//RS                 let _ = child.wait();
-//RS                 kill_group(process_group, 9);
-//RS                 let _ = cleanup_namespace_processes(9, cleanup_namespace);
-//RS                 return Err(format!("native peer isolation wait failed: {error}"));
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn take_signal() -> Option<i32> {
-//RS     let signal = FORWARDED_SIGNAL.swap(0, Ordering::AcqRel);
-//RS     (signal != 0).then_some(signal)
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn cleanup_namespace_processes(signal: i32, enabled: bool) -> Result<(), String> {
-//RS     if !enabled {
-//RS         return Ok(());
-//RS     }
-//RS     #[cfg(target_os = "linux")]
-//RS     {
-//RS         let own = std::process::id() as i32;
-//RS         let entries = fs::read_dir("/proc")
-//RS             .map_err(|error| format!("Linux peer process tree cannot be enumerated: {error}"))?;
-//RS         for entry in entries {
-//RS             let entry = entry
-//RS                 .map_err(|error| format!("Linux peer process tree cannot be enumerated: {error}"))?;
-//RS             let name = entry.file_name();
-//RS             let Some(name) = name.to_str() else {
-//RS                 continue;
-//RS             };
-//RS             let Ok(pid) = name.parse::<i32>() else {
-//RS                 continue;
-//RS             };
-//RS             if pid <= 1 || pid == own {
-//RS                 continue;
-//RS             }
-//RS             let result = unsafe { kill(pid, signal) };
-//RS             if result == -1 {
-//RS                 let error = io::Error::last_os_error();
-//RS                 if error.raw_os_error() != Some(3) {
-//RS                     return Err(format!("Linux peer process tree signal failed for pid {pid}: {error}"));
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     #[cfg(not(target_os = "linux"))]
-//RS     let _ = signal;
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn kill_group(process_group: i32, signal: i32) {
-//RS     unsafe {
-//RS         let _ = kill_process_group(-process_group, signal);
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn finish_status(status: ExitStatus) -> ! {
-//RS     use std::os::unix::process::ExitStatusExt;
-//RS     if let Some(code) = status.code() {
-//RS         std::process::exit(code);
-//RS     }
-//RS     if let Some(signal) = status.signal() {
-//RS         unsafe {
-//RS             // SIG_DFL is represented by a null handler pointer in POSIX.
-//RS             signal_hook(signal, None);
-//RS             raise_signal(signal);
-//RS         }
-//RS         std::process::exit(128 + signal);
-//RS     }
-//RS     std::process::exit(EXIT_UNSUPPORTED);
-//RS }
-//RS 
-//RS #[cfg(target_os = "windows")]
-//RS fn finish_status(status: ExitStatus) -> ! {
-//RS     std::process::exit(status.code().unwrap_or(EXIT_UNSUPPORTED));
-//RS }
-//RS 
-//RS #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-//RS fn finish_status(_: ExitStatus) -> ! {
-//RS     std::process::exit(EXIT_UNSUPPORTED);
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS unsafe extern "C" {
-//RS     fn kill(pid: i32, signal: i32) -> i32;
-//RS     fn raise(signal: i32) -> i32;
-//RS     fn signal(
-//RS         signal: i32,
-//RS         handler: Option<extern "C" fn(i32)>,
-//RS     ) -> Option<extern "C" fn(i32)>;
-//RS     #[cfg(target_os = "linux")]
-//RS     fn prctl(option: i32, ...) -> i32;
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS unsafe fn kill_process_group(pid: i32, signal: i32) -> i32 {
-//RS     kill(pid, signal)
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS unsafe fn signal_hook(signal_number: i32, handler: Option<extern "C" fn(i32)>) {
-//RS     signal(signal_number, handler);
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS unsafe fn raise_signal(signal_number: i32) {
-//RS     raise(signal_number);
-//RS }
-//RS 
-//RS 
-//RS #[cfg(target_os = "macos")]
-//RS fn network_name(policy: NetworkPolicy) -> &'static str {
-//RS     match policy {
-//RS         NetworkPolicy::Disabled => "disabled",
-//RS         NetworkPolicy::LoopbackOnly => "loopback-only",
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2115 Tools/ci/compiled-workload-peer-launcher.rs:1-1114
+// Native execution half of the sole compiled-workload-peer-launcher owner.
+use Tools.ci.compiled_workload_peer_launcher.[PEER_ISOLATION_CONTRACT, PEER_EXIT_UNSUPPORTED, PeerNetworkPolicy, PeerInvocation, PeerFirewallGuard, peer_fail, peer_parse_invocation, peer_find_on_path, peer_resolve_program, peer_probe_root, peer_clean_probe_stderr, peer_linux_base_args, peer_internal_status_file, peer_read_linux_signal, peer_socket_syscall, peer_disabled_network_filter, peer_macos_profile, peer_network_name, peer_kill_group, peer_raise_signal, peer_prctl_no_new_privileges, peer_prctl_socket_filter]
+use std.[env, fs, io, process, thread]
+use std.process.[Command, ExitStatus, Stdio]
+use std.sync.atomic.[AtomicI32, Ordering]
+use std.time.[SystemTime, UNIX_EPOCH, Duration]
+use core.sys.target.[selected_os, selected_arch]
+use core.sys.host.linux_seccomp_imports.[SockFprog]
+use core.process.windows_sandbox as windows_native
+use c.c as peer_os
+// GATE #4494: actual process-group pre-exec ownership, native atomics, nullable
+// no-runtime-entry signal callbacks, synchronous seccomp borrowed C ABI and
+// AppContainer execution. No ambient fallback or Rust bridge.
+// GATE #4483: every original cfg arm dispatches using selected target facts.
 
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:23
+// CONTRACT -> peer owner PEER_ISOLATION_CONTRACT (launcher.jet:20).
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:24
+// EXIT_UNSUPPORTED -> peer owner PEER_EXIT_UNSUPPORTED (launcher.jet:21).
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:27
+// NetworkPolicy -> peer owner PeerNetworkPolicy (launcher.jet:23).
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:33
+// Invocation -> peer owner PeerInvocation (launcher.jet:25-32).
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:42
+fn run() -> {
+    args :: env.args().skip(1).collect<[String]>()
+    if selected_os() == "linux" {
+        if args.first().is_some_and(arg -> arg == "--internal-disabled") -> run_internal_disabled(args[1..])
+        if args.first().is_some_and(arg -> arg == "--internal-loopback") -> run_internal_loopback(args[1..])
+    }
+    if args == ["--version"] {
+        print(PEER_ISOLATION_CONTRACT)
+        return
+    }
+    if args == ["--contract"] {
+        match capability_check() { Ok(()) -> print(PEER_ISOLATION_CONTRACT); Err(reason) -> peer_fail(reason) }
+        return
+    }
+    result :: peer_parse_invocation(args).map_err(reason -> reason.message).and_then(invocation -> {
+        capability_check()?
+        run_invocation(^invocation)
+    })
+    match result { Ok(status) -> finish_status(status); Err(reason) -> peer_fail(reason) }
+}
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:72
+// run_internal_status_file is owned by peer_internal_status_file (305-311):
+// status_file and command_index represent the same borrowed tail without copies.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:86
+fn run_internal_disabled(args: &[String]) -> Never {
+    match install_disabled_network_filter() { Ok(()) -> {}; Err(reason) -> peer_fail(reason) }
+    parsed :: peer_internal_status_file(args).unwrap_or_else(reason -> peer_fail(reason.message))
+    run_internal_supervisor(args[parsed.command_index..], parsed.status_file.map(OSPath.from))
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:98
+fn run_internal_loopback(args: &[String]) -> Never {
+    parsed :: peer_internal_status_file(args).unwrap_or_else(reason -> peer_fail(reason.message))
+    tail := args[parsed.command_index..]
+    ip :: tail.first().unwrap_or_else(() -> peer_fail("loopback-only internal runner received no ip command"))
+    if tail.get(1).is_none() -> peer_fail("loopback-only internal runner received no command")
+    status :: Command.new(ip).args(["link", "set", "lo", "up"]).stdout(Stdio.null()).stderr(Stdio.null()).status()
+        .map_err(error -> "loopback-only internal runner could not start `{ip}`: {error}")
+    match status {
+        Ok(status) if status.success() -> {}
+        Ok(status) -> peer_fail("loopback-only internal runner `{ip}` exited {status}")
+        Err(reason) -> peer_fail(reason)
+    }
+    run_internal_supervisor(tail[1..], parsed.status_file.map(OSPath.from))
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:121
+fn run_internal_supervisor(args: &[String], status_file: OSPath?) -> Never {
+    command :: args.first().unwrap_or_else(() -> peer_fail("internal runner received no command"))
+    child_command := Command.new(command)
+    child_command.args(args[1..])
+    match run_linux_inner_child(^child_command) {
+        Ok(status) -> {
+            if (path, signal) :: (status_file, status.signal()) {
+                fs.write(path, [signal as U8]).map_err(error -> "internal runner signal status could not propagate: {error}")
+                    .unwrap_or_else(reason -> peer_fail(reason))
+            }
+            finish_status(status)
+        }
+        Err(reason) -> peer_fail(reason)
+    }
+}
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:141
+// fail -> peer_fail (54-57), exact diagnostic and unsupported exit.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:146
+// parse_invocation -> peer_parse_invocation (73-165), same precedence and validation.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:283
+// canonical_directory -> peer_canonical_directory (167-174), symlink_metadata first.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:297
+// contained -> peer_contained (197-206), Windows ASCII folding and path-component Unix containment.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:313
+// resolve_program -> peer_resolve_program (224-251), direct path and Windows suffix search.
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:339
+fn capability_check() -> Err! {
+    match selected_os() {
+        "linux" -> linux_capability_check()
+        "macos" -> macos_capability_check()
+        "windows" -> windows_capability_check()
+        host -> Err("unsupported host `{host}`: native peer isolation is implemented only on Linux, macOS, and Windows")
+    }
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:362
+// probe_root -> peer_probe_root (253-266), actual disk-backed unique probe directory.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:394
+// SockFilter -> core.sys.host.linux_seccomp_imports.SockFilter.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:403
+// SockFprog -> core.sys.host.linux_seccomp_imports.SockFprog, exact borrowed C layout.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:409
+// SOCKET_SYSCALL x86_64=41 / aarch64=198 -> peer_socket_syscall (326-330).
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:414
+fn install_disabled_network_filter() -> Err! {
+    socket :: peer_socket_syscall(selected_arch()).map_err(reason -> reason.message)?
+    filter :: peer_disabled_network_filter(socket)
+    #Unsafe("the stack filter and C SockFprog stay live until synchronous prctl copies all four rows") {
+        program :: SockFprog { len: filter.len() as U16, filter: filter.as_ptr() }
+        if peer_prctl_no_new_privileges() != 0 {
+            error :: io.Error.last_os_error()
+            return Err("Linux peer isolation unavailable: seccomp no_new_privs failed: {error}")
+        }
+        if peer_prctl_socket_filter(&program as *SockFprog) != 0 {
+            error :: io.Error.last_os_error()
+            return Err("Linux peer isolation unavailable: seccomp socket filter failed: {error}")
+        }
+    }
+    Ok()
+}
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:463
+fn linux_capability_check() -> Err! {
+    bwrap :: peer_find_on_path("bwrap", false).ok_or_else(() -> "Linux peer isolation unavailable: bubblewrap (`bwrap`) is not available on PATH")?
+    shell :: peer_find_on_path("sh", false).ok_or_else(() -> "Linux peer isolation unavailable: POSIX `sh` is not available on PATH")?
+    ip :: peer_find_on_path("ip", false).ok_or_else(() -> "Linux peer isolation unavailable: `ip` is required to enable loopback-only networking")?
+    launcher :: env.current_exe().and_then(path -> fs.canonicalize(path)).map_err(error -> "Linux peer isolation unavailable: launcher path cannot be resolved: {error}")?
+    root :: peer_probe_root().map_err(reason -> reason.message)?
+    loop policy in [PeerNetworkPolicy.Disabled, PeerNetworkPolicy.LoopbackOnly] {
+        args := peer_linux_base_args(root, root, policy)
+        args.push("--")
+        args.push(launcher.to_string_lossy().into_owned())
+        if policy == PeerNetworkPolicy.LoopbackOnly {
+            args.extend(["--internal-loopback", ip, shell, "-c", "exit 0"])
+        } else {
+            args.extend(["--internal-disabled", shell, "-c", "exit 0"])
+        }
+        result :: Command.new(bwrap).args(args).stdout(Stdio.null()).stderr(Stdio.piped()).output()
+            .map_err(error -> "Linux peer isolation unavailable: bubblewrap {policy:?} probe failed: {error}")?
+        if !result.status.success() {
+            _ :: fs.remove_dir_all(root)
+            stderr := String.from_utf8_lossy(result.stderr) // #4303
+            return Err("Linux peer isolation unavailable: bubblewrap {policy:?} probe exited {result.status}{peer_clean_probe_stderr(stderr)}")
+        }
+    }
+    _ :: fs.remove_dir_all(root)
+    Ok()
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:521
+// find_on_path -> peer_find_on_path (214-222).
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:529
+// clean_probe_stderr -> peer_clean_probe_stderr (274-278), after UTF8-lossy decoding.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:540
+// linux_base_args -> peer_linux_base_args (280-287), all namespaces, mounts and loopback capability rows.
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:578
+fn run_linux(invocation: PeerInvocation) -> ExitStatus Err! {
+    bwrap :: peer_find_on_path("bwrap", false).ok_or_else(() -> "Linux peer isolation unavailable: bubblewrap disappeared from PATH")?
+    ip :: peer_find_on_path("ip", false).ok_or_else(() -> "Linux peer isolation unavailable: `ip` disappeared from PATH")?
+    launcher :: env.current_exe().and_then(path -> fs.canonicalize(path)).map_err(error -> "Linux peer isolation unavailable: launcher path cannot be resolved: {error}")?
+    command :: peer_resolve_program(invocation.command, false).map_err(reason -> reason.message)?
+    stamp :: SystemTime.now().duration_since(UNIX_EPOCH).map_err(error -> "Linux peer isolation clock failed: {error}")?.as_nanos()
+    status_file :: OSPath.from(invocation.root).join(".compiled-workload-peer-status-{process.id()}-{stamp}")
+    fs.OpenOptions.new().write(true).create_new(true).open(status_file)
+        .map_err(error -> "Linux peer isolation signal status cannot be created at `{status_file.display()}`: {error}")?
+    child_command := Command.new(bwrap)
+    child_command.args(peer_linux_base_args(invocation.root, invocation.cwd, invocation.network)).arg("--").arg(launcher)
+    if invocation.network == PeerNetworkPolicy.LoopbackOnly {
+        child_command.arg("--internal-loopback").arg("--status-file").arg(status_file).arg(ip).arg(command).args(invocation.args)
+    } else {
+        child_command.arg("--internal-disabled").arg("--status-file").arg(status_file).arg(command).args(invocation.args)
+    }
+    result :: run_unix_child(^child_command)
+    reported :: peer_read_linux_signal(status_file.to_string_lossy()).map_err(reason -> reason.message)
+    cleanup :: fs.remove_file(status_file)
+    if Err(reason) :: cleanup -> return Err("Linux peer isolation signal status cannot be removed from `{status_file.display()}`: {reason}")
+    match reported {
+        Ok(signal) if signal.is_some() -> {
+            number :: signal.unwrap() as I32
+            signal_hook(number, none)
+            peer_raise_signal(number)
+            Err("Linux peer isolation signal {number} could not propagate")
+        }
+        Ok(_) -> result
+        Err(reason) -> Err(reason)
+    }
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:650
+// read_linux_signal -> peer_read_linux_signal/peer_decode_linux_signal (313-324).
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:665
+fn macos_capability_check() -> Err! {
+    sandbox :: OSPath.from("/usr/bin/sandbox-exec")
+    if !sandbox.is_file() -> return Err("macOS peer isolation unavailable: native Seatbelt `{sandbox.display()}` is unavailable")
+    root :: peer_probe_root().map_err(reason -> reason.message)?
+    loop policy in [PeerNetworkPolicy.Disabled, PeerNetworkPolicy.LoopbackOnly] {
+        profile :: peer_macos_profile(root, policy)
+        result :: Command.new(sandbox).args(["-p", profile, "/usr/bin/true"]).current_dir(root).stdout(Stdio.null()).stderr(Stdio.piped()).output()
+            .map_err(error -> "macOS peer isolation unavailable: Seatbelt probe failed: {error}")?
+        if !result.status.success() {
+            _ :: fs.remove_dir_all(root)
+            stderr := String.from_utf8_lossy(result.stderr) // #4303
+            return Err("macOS peer isolation unavailable: Seatbelt probe for {peer_network_name(policy)} exited {result.status}{peer_clean_probe_stderr(stderr)}")
+        }
+    }
+    _ :: fs.remove_dir_all(root)
+    Ok()
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:698
+// macos_profile -> peer_macos_profile (345-350).
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:716
+// sbpl_quote -> peer_sbpl_quote (344).
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:724
+// windows_native uses the canonical Core AppContainer owner, not included Rust.
+// GATE #4494: windows_status/windows_output_with_read_only_mounts exact native provider ABI.
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:730
+fn windows_capability_check() -> Err! {
+    status :: windows_native.windows_status()
+    if !status.available -> return Err("Windows peer isolation unavailable: {status.reason}")
+    netsh :: peer_resolve_program("netsh", true).map_err(reason -> reason.message)?
+    result :: Command.new(netsh).args(["advfirewall", "show", "allprofiles"]).stdout(Stdio.null()).stderr(Stdio.piped()).output()
+        .map_err(error -> "Windows peer isolation unavailable: Firewall probe failed: {error}")?
+    if !result.status.success() {
+        stderr := String.from_utf8_lossy(result.stderr) // #4303
+        return Err("Windows peer isolation unavailable: Firewall probe exited {result.status}{peer_clean_probe_stderr(stderr)}")
+    }
+    Ok()
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:756
+// FirewallGuard -> PeerFirewallGuard (370-423): install763, add_rule787,
+// cleanup823 and Drop845 map to install373/add_rule391/cleanup400/Close418.
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:850
+fn run_invocation(invocation: PeerInvocation) -> ExitStatus Err! {
+    task_id :: invocation.task_id
+    result :: match selected_os() {
+        "linux" -> run_linux(^invocation)
+        "macos" -> run_macos(^invocation)
+        "windows" -> run_windows(^invocation)
+        else -> Err("native peer isolation is unavailable on this host")
+    }
+    result.map_err(reason -> "task `{task_id}`: {reason}")
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:875
+fn run_macos(invocation: PeerInvocation) -> ExitStatus Err! {
+    command :: peer_resolve_program(invocation.command, false).map_err(reason -> reason.message)?
+    profile :: peer_macos_profile(invocation.root, invocation.network)
+    child_command := Command.new("/usr/bin/sandbox-exec")
+    child_command.args(["-p", profile]).arg(command).args(invocation.args).current_dir(invocation.cwd)
+    run_unix_child(^child_command)
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:888
+fn run_windows(invocation: PeerInvocation) -> ExitStatus Err! {
+    command :: peer_resolve_program(invocation.command, true).map_err(reason -> reason.message)?
+    firewall := PeerFirewallGuard.install(command, invocation.network).map_err(reason -> reason.message)?
+    environment :: env.vars().collect<[String:String]>()
+    result :: windows_native.windows_output_with_read_only_mounts(command, invocation.args, OSPath.from(invocation.root), none, environment,
+        invocation.network == PeerNetworkPolicy.LoopbackOnly, true, true, [], none, none)
+        .map_err(error -> "Windows peer isolation launch failed: {error:?}")
+    cleanup :: firewall.as_mut().map(guard -> guard.cleanup()).transpose()
+    if Err(error) :: cleanup -> return Err(error.message)
+    output :: result?
+    io.stdout().write_all(output.output.stdout).map_err(error -> "stdout propagation failed: {error}")?
+    io.stderr().write_all(output.output.stderr).map_err(error -> "stderr propagation failed: {error}")?
+    Ok(output.output.status)
+}
+
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:921
+static FORWARDED_SIGNAL :: AtomicI32.new(0)
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:924
+#FFI(c)
+fn forward_signal(signal: I32) -> {
+    // GATE #4494: no-runtime-entry callback, no allocation/locking/tagged Int conversion.
+    FORWARDED_SIGNAL.store(signal, Ordering.Release)
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:929
+fn install_signal_handlers() -> {
+    signal_hook(2, forward_signal)
+    signal_hook(15, forward_signal)
+    signal_hook(1, forward_signal)
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:938
+fn run_unix_child(command: Command) -> ExitStatus Err! { run_unix_child_inner(^command, false) }
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:943
+fn run_linux_inner_child(command: Command) -> ExitStatus Err! { run_unix_child_inner(^command, true) }
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:948
+fn run_unix_child_inner(command: Command, cleanup_namespace: Bool) -> ExitStatus Err! {
+    install_signal_handlers()
+    command.process_group(0)
+    command.stdin(Stdio.inherit()).stdout(Stdio.inherit()).stderr(Stdio.inherit())
+    child := command.spawn().map_err(error -> "native peer isolation child could not start: {error}")?
+    process_group :: child.id() as I32
+    loop {
+        if signal :: take_signal() {
+            peer_kill_group(process_group, signal)
+            _ :: cleanup_namespace_processes(signal, cleanup_namespace)
+            _ :: child.wait()
+            peer_kill_group(process_group, 9)
+            _ :: cleanup_namespace_processes(9, cleanup_namespace)
+            signal_hook(signal, none)
+            peer_raise_signal(signal)
+            return Err("launcher interrupted by signal {signal}")
+        }
+        match child.try_wait() {
+            Ok(status) if status.is_some() -> {
+                peer_kill_group(process_group, 15)
+                cleanup_error := cleanup_namespace_processes(15, cleanup_namespace).err()
+                thread.sleep(Duration.from_millis(25))
+                peer_kill_group(process_group, 9)
+                cleanup_error = cleanup_namespace_processes(9, cleanup_namespace).err().or(cleanup_error)
+                if reason :: cleanup_error -> return Err(reason)
+                return Ok(status.unwrap())
+            }
+            Ok(_) -> thread.sleep(Duration.from_millis(5))
+            Err(error) -> {
+                peer_kill_group(process_group, 15)
+                _ :: cleanup_namespace_processes(15, cleanup_namespace)
+                _ :: child.wait()
+                peer_kill_group(process_group, 9)
+                _ :: cleanup_namespace_processes(9, cleanup_namespace)
+                return Err("native peer isolation wait failed: {error}")
+            }
+        }
+    }
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1003
+fn take_signal() -> I32? {
+    signal :: FORWARDED_SIGNAL.swap(0, Ordering.AcqRel)
+    if signal != 0 -> signal else -> none
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1009
+fn cleanup_namespace_processes(signal: I32, enabled: Bool) -> Err! {
+    if !enabled -> return Ok()
+    if selected_os() == "linux" {
+        own :: process.id() as I32
+        entries :: fs.read_dir("/proc").map_err(error -> "Linux peer process tree cannot be enumerated: {error}")?
+        loop entry in entries {
+            entry :: entry.map_err(error -> "Linux peer process tree cannot be enumerated: {error}")?
+            name :: entry.file_name()
+            text :: name.to_str() ?? next
+            pid :: text.parse<I32>().ok() ?? next
+            if pid <= 1 || pid == own -> next
+            result :: #Unsafe("only other processes in this private Linux PID namespace are signalled; own supervisor and namespace init are excluded") {
+                peer_os.kill(pid, signal)
+            }
+            if result == -1 {
+                error :: io.Error.last_os_error()
+                if error.raw_os_error() != 3 -> return Err("Linux peer process tree signal failed for pid {pid}: {error}")
+            }
+        }
+    }
+    Ok()
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1046
+// kill_group -> peer_kill_group (443-447), negative private PGID raw native ABI.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1053
+fn finish_status(status: ExitStatus) -> Never {
+    os :: selected_os()
+    if os == "linux" || os == "macos" {
+        if code :: status.code() -> process.exit(code)
+        if signal :: status.signal() {
+            signal_hook(signal, none)
+            peer_raise_signal(signal)
+            process.exit(128 + signal)
+        }
+        process.exit(PEER_EXIT_UNSUPPORTED)
+    }
+    if os == "windows" -> process.exit(status.code().unwrap_or(PEER_EXIT_UNSUPPORTED))
+    process.exit(PEER_EXIT_UNSUPPORTED)
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1080
+// kill/raise/signal/prctl native declarations remain the sole c.c/libc ABI owner.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1092
+// kill_process_group reuses that same native kill leaf through peer_kill_group.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1097
+fn signal_hook(signal_number: I32, handler: (fn(I32) ->)?) -> {
+    #Unsafe("POSIX null handler is SIG_DFL; non-null handler is the no-runtime-entry atomic-only C callback") {
+        _ :: peer_os.signal(signal_number, handler)
+    }
+}
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1102
+// raise_signal -> peer_raise_signal (449-453), real POSIX signal propagation.
+// Rust: Tools/ci/compiled-workload-peer-launcher.rs:1108
+// network_name -> peer_network_name (59-62).
+// No Rust tests occur in this file.

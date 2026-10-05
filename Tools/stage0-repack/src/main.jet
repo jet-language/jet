@@ -1,329 +1,114 @@
-// PORT-PENDING 2155 tools-stage0-repack-src-main: Tools/stage0-repack/src/main.rs:1-325
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Offline stage-zero repackaging.
-//RS //!
-//RS //! `stage0-repack <keep-dir> [<compiler-project>]` reruns only the Host/Runner
-//RS //! packaging half of stage zero (`emit_stage_zero_source` after MIR Rust
-//RS //! emission) from what a `JET_STAGE_ZERO_KEEP=<keep-dir>` run retained:
-//RS //!
-//RS //! - `reference.rs`: the unpackaged emitted Rust of the compiler,
-//RS //! - `stage-zero.image`: the compiler image, which holds the canonical MIR
-//RS //!   program, the compiler artifact, the factory root and the source-authority
-//RS //!   digest,
-//RS //! - `stage-zero.ffi`: the FFI bridge crate the emitted Rust names,
-//RS //! - the authorized compiler sources, whose authority digest the image binds:
-//RS //!   the second argument, else `<keep-dir>/compiler-project` when the run
-//RS //!   retained it, else the shared assembly
-//RS //!   `~/.cache/jet-luna/compiler-bootstrap/project`.
-//RS //!
-//RS //! It writes the fresh packaged source to `<keep-dir>/stage-zero.rs` and into
-//RS //! the kept backend project `<keep-dir>/stage-zero/` (`generated.rs`,
-//RS //! `src/main.rs`, `src/compiler.image` when the image changed). The unit
-//RS //! crates are a function of `reference.rs` alone, so only the main crate
-//RS //! changes.
-//RS //!
-//RS //! The harness `main` appended after packaging is `GENERATED_ARTIFACT_MAIN`
-//RS //! of the generator sources' `Compiler/Bootstrap/Tests.rs`, task-root regions
-//RS //! stripped unless the kept `stage-zero.stamp` says `task_roots=true`; it is
-//RS //! also written to `artifact-main.rs`. The first run derives
-//RS //! `stage-zero/main.prefix.rs` (the main crate's text before the packaged
-//RS //! suffix) from the kept run's own output, which is only sound while the
-//RS //! generators still produce it. It keeps the kept run's source as
-//RS //! `stage-zero.base.rs` and reports whether the fresh source is
-//RS //! byte-identical to it.
-//RS 
-//RS #![allow(non_snake_case)]
-//RS 
-//RS pub(crate) use jet_driver::{Authority, Codegen, Comptime, SHA256};
-//RS 
-//RS include!(concat!(env!("OUT_DIR"), "/host_modules.rs"));
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::time::Instant;
-//RS 
-//RS use jet_foundation::Layout::TargetLayout;
-//RS use jet_foundation::MIR::MirArtifactId;
-//RS use Codegen::MIRRust::{MirRustConfig, MirRustExecutionConfig, MirRustTarget};
-//RS 
-//RS /// `BOOTSTRAP_ENTRY_RELATIVE` of the stage-zero harness.
-//RS const COMPILER_ENTRY_RELATIVE: &str = "src/compiler.jet";
-//RS 
-//RS type Failure = String;
-//RS 
-//RS fn main() {
-//RS     if let Err(error) = run() {
-//RS         eprintln!("stage0-repack: {error}");
-//RS         std::process::exit(1);
-//RS     }
-//RS }
-//RS 
-//RS fn read(path: &Path) -> Result<Vec<u8>, Failure> {
-//RS     fs::read(path).map_err(|error| format!("cannot read `{}`: {error}", path.display()))
-//RS }
-//RS 
-//RS fn read_text(path: &Path) -> Result<String, Failure> {
-//RS     fs::read_to_string(path).map_err(|error| format!("cannot read `{}`: {error}", path.display()))
-//RS }
-//RS 
-//RS fn write(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
-//RS     fs::write(path, bytes).map_err(|error| format!("cannot write `{}`: {error}", path.display()))
-//RS }
-//RS 
-//RS /// The fixed-layout head of a compiler image (`CompilerImage.rs`
-//RS /// `encode_archive`): artifact, source-authority digest and the canonical MIR
-//RS /// payload (the factory root is chosen again from the bindings). Packaging
-//RS /// re-archives the decoded program, and the caller compares that archive with
-//RS /// these bytes, which checks the whole round trip.
-//RS struct KeptImage<'a> {
-//RS     artifact: MirArtifactId,
-//RS     source_authority_digest: [u8; 32],
-//RS     payload: &'a [u8],
-//RS }
-//RS 
-//RS fn parse_image(bytes: &[u8]) -> Result<KeptImage<'_>, Failure> {
-//RS     let mut at = 0usize;
-//RS     let mut take = |len: usize| -> Result<&[u8], Failure> {
-//RS         let end = at.checked_add(len).filter(|end| *end <= bytes.len());
-//RS         let end = end.ok_or_else(|| "truncated compiler image".to_string())?;
-//RS         let slice = &bytes[at..end];
-//RS         at = end;
-//RS         Ok(slice)
-//RS     };
-//RS     let u64_at = |slice: &[u8]| u64::from_le_bytes(slice.try_into().expect("eight bytes"));
-//RS     if take(8)? != b"JETCIMG\0" {
-//RS         return Err("not a compiler image (bad magic)".into());
-//RS     }
-//RS     let format = u16::from_le_bytes(take(2)?.try_into().expect("two bytes"));
-//RS     if format != 3 {
-//RS         return Err(format!("compiler image format {format} is not the supported format 3"));
-//RS     }
-//RS     let _schema = take(2)?;
-//RS     let artifact = MirArtifactId(u64_at(take(8)?));
-//RS     let _entry_function = take(8)?;
-//RS     let source_authority_digest: [u8; 32] = take(32)?.try_into().expect("32 bytes");
-//RS     let identity_len = usize::try_from(u64_at(take(8)?)).map_err(|_| "identity length overflows")?;
-//RS     take(identity_len)?;
-//RS     let payload_len = usize::try_from(u64_at(take(8)?)).map_err(|_| "payload length overflows")?;
-//RS     let payload = take(payload_len)?;
-//RS     Ok(KeptImage {
-//RS         artifact,
-//RS         source_authority_digest,
-//RS         payload,
-//RS     })
-//RS }
-//RS 
-//RS fn hex(bytes: &[u8]) -> String {
-//RS     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-//RS }
-//RS 
-//RS fn first_difference(left: &[u8], right: &[u8]) -> usize {
-//RS     left.iter()
-//RS         .zip(right)
-//RS         .position(|(left, right)| left != right)
-//RS         .unwrap_or_else(|| left.len().min(right.len()))
-//RS }
-//RS 
-//RS fn line_of(text: &[u8], offset: usize) -> usize {
-//RS     text[..offset.min(text.len())].iter().filter(|byte| **byte == b'\n').count() + 1
-//RS }
-//RS 
-//RS /// The harness `main` `Tests.rs` `append_generated_artifact_main` appends:
-//RS /// `GENERATED_ARTIFACT_MAIN` of the generator sources, without the task-root
-//RS /// regions unless the kept run compiled that fixture in.
-//RS fn generated_artifact_main(task_roots: bool) -> Result<String, Failure> {
-//RS     const BEGIN: &str = "// bootstrap:task-roots-begin";
-//RS     const END: &str = "// bootstrap:task-roots-end";
-//RS     let tests_path = Path::new(crate::BOOTSTRAP_CANONICAL_SOURCE_ROOT).join("Compiler/Bootstrap/Tests.rs");
-//RS     let tests = read_text(&tests_path)?;
-//RS     let text = tests
-//RS         .split_once("const GENERATED_ARTIFACT_MAIN: &str = r#\"")
-//RS         .and_then(|(_, rest)| rest.split_once("\"#"))
-//RS         .map(|(text, _)| text)
-//RS         .ok_or_else(|| format!("`{}` has no `GENERATED_ARTIFACT_MAIN` raw string", tests_path.display()))?;
-//RS     if task_roots {
-//RS         return Ok(text.to_string());
-//RS     }
-//RS     let mut main = String::new();
-//RS     let mut rest = text;
-//RS     while let Some(begin) = rest.find(BEGIN) {
-//RS         main.push_str(&rest[..begin]);
-//RS         let end = rest[begin..]
-//RS             .find(END)
-//RS             .ok_or("`GENERATED_ARTIFACT_MAIN` has an unterminated task-root region")?;
-//RS         rest = &rest[begin + end + END.len()..];
-//RS     }
-//RS     main.push_str(rest);
-//RS     Ok(main)
-//RS }
-//RS 
-//RS fn run() -> Result<(), Failure> {
-//RS     let mut args = std::env::args_os().skip(1);
-//RS     let keep = PathBuf::from(args.next().ok_or("usage: stage0-repack <keep-dir> [<compiler-project>]")?);
-//RS     let compiler_project = match args.next() {
-//RS         Some(project) => PathBuf::from(project),
-//RS         None if keep.join("compiler-project").is_dir() => keep.join("compiler-project"),
-//RS         None => PathBuf::from(std::env::var_os("HOME").ok_or("HOME is unset")?)
-//RS             .join(".cache/jet-luna/compiler-bootstrap/project"),
-//RS     };
-//RS     let project = keep.join("stage-zero");
-//RS     let started = Instant::now();
-//RS     let lap = |what: &str| eprintln!("stage0-repack: {what} ({:.1}s)", started.elapsed().as_secs_f64());
-//RS     eprintln!("stage0-repack: Host/Runner sources from `{}`", crate::BOOTSTRAP_CANONICAL_SOURCE_ROOT);
-//RS 
-//RS     let image_bytes = read(&keep.join("stage-zero.image"))?;
-//RS     let kept = parse_image(&image_bytes)?;
-//RS     let program = jet_foundation::MIR::mir_program_from_image_bytes(kept.payload)
-//RS         .map_err(|error| format!("cannot decode the kept compiler MIR: {error}"))?;
-//RS     lap("decoded compiler MIR from stage-zero.image");
-//RS 
-//RS     let lease = crate::open_authorized_sources(&compiler_project, Path::new(COMPILER_ENTRY_RELATIVE))
-//RS         .map_err(|error| format!("cannot authorize `{}`: {error:?}", compiler_project.display()))?;
-//RS     let digest = crate::compiler_bootstrap_compiler_image::compiler_image_source_authority_digest(lease.snapshot());
-//RS     if digest != kept.source_authority_digest {
-//RS         return Err(format!(
-//RS             "the compiler sources in `{}` (authority {}) are not the ones the kept image was built from ({}); \
-//RS              reassemble them at the kept run's revision",
-//RS             compiler_project.display(),
-//RS             hex(&digest),
-//RS             hex(&kept.source_authority_digest),
-//RS         ));
-//RS     }
-//RS 
-//RS     // The bridge crate name is the only FFI fact MIR Rust emission and the
-//RS     // AOT metadata read (`stage-zero.ffi` keeps the crate name and directory).
-//RS     let ffi_record = read_text(&keep.join("stage-zero.ffi"))?;
-//RS     let ffi = ffi_record.split_once('\n').map(|(name, dir)| {
-//RS         let dir = PathBuf::from(dir.trim_end_matches('\n'));
-//RS         jet_foundation::AST::FfiLink {
-//RS             crate_name: name.to_string(),
-//RS             cache_identity: dir.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
-//RS             provenance_path: PathBuf::new(),
-//RS             rlib_path: PathBuf::new(),
-//RS             cdylib_path: PathBuf::new(),
-//RS             target_deps_dir: PathBuf::new(),
-//RS             host_deps_dir: PathBuf::new(),
-//RS             helper_bin_path: None,
-//RS             secrets_helper_bin_path: None,
-//RS             handle_facts: Vec::new(),
-//RS             link_closure: Default::default(),
-//RS         }
-//RS     });
-//RS 
-//RS     // The same configuration `emit_stage_zero_source` packages with.
-//RS     let mut execution = MirRustExecutionConfig::for_artifact(kept.artifact);
-//RS     execution.ffi = ffi.as_ref();
-//RS     execution.emit_types = true;
-//RS     execution.emit_foreign = true;
-//RS     execution.emit_metadata = false;
-//RS     execution.emit_runtime = true;
-//RS     execution.prune_unreachable_codecs = true;
-//RS     let metadata_config = MirRustConfig {
-//RS         target: TargetLayout::host(),
-//RS         target_kind: MirRustTarget::Native,
-//RS         root_prefix: String::new(),
-//RS         execution: execution.clone(),
-//RS     };
-//RS     let prepare_config = MirRustConfig {
-//RS         target: metadata_config.target.clone(),
-//RS         target_kind: MirRustTarget::Native,
-//RS         root_prefix: "crate::".to_string(),
-//RS         execution,
-//RS     };
-//RS     let reference = read_text(&keep.join("reference.rs"))?;
-//RS     let reference_len = reference.len();
-//RS     let snapshot = lease.snapshot();
-//RS     let (program, metadata_config, prepare_config) = (&program, &metadata_config, &prepare_config);
-//RS     let artifact = jet_driver::run_compiler_work(move || {
-//RS         let metadata = Codegen::MIRRust::mir_rust_aot_metadata(program, metadata_config);
-//RS         crate::prepare_bootstrap_artifact_from_aot(reference, program, snapshot, prepare_config, &metadata)
-//RS             .map_err(|error| format!("stage-zero Host/Runner packaging failed: {error}"))
-//RS     })?;
-//RS     lap("packaged");
-//RS     let packaged = artifact.source;
-//RS     let image = artifact
-//RS         .compiler_image
-//RS         .ok_or("stage-zero Host/Runner packaging embedded no compiler image")?;
-//RS 
-//RS     // Derive the main crate prefix only the kept run's own output carries.
-//RS     let base_path = keep.join("stage-zero.base.rs");
-//RS     if !base_path.is_file() {
-//RS         fs::copy(keep.join("stage-zero.rs"), &base_path)
-//RS             .map_err(|error| format!("cannot keep the base `stage-zero.rs`: {error}"))?;
-//RS     }
-//RS     let prefix_path = project.join("main.prefix.rs");
-//RS     if !prefix_path.is_file() {
-//RS         let base = read_text(&base_path)?;
-//RS         if !base.starts_with(&packaged) {
-//RS             let at = first_difference(base.as_bytes(), packaged.as_bytes());
-//RS             return Err(format!(
-//RS                 "first run: the packaged source differs from `{}` at line {}, so `stage-zero/main.prefix.rs` \
-//RS                  cannot be derived; run once with JET_REPACK_SOURCE_ROOT set to the generator sources of the \
-//RS                  kept run",
-//RS                 base_path.display(),
-//RS                 line_of(base.as_bytes(), at),
-//RS             ));
-//RS         }
-//RS         let old_tail = &base[reference_len..];
-//RS         let base_main_path = [project.join("main.rs.orig"), project.join("src/main.rs")]
-//RS             .into_iter()
-//RS             .find(|path| path.is_file())
-//RS             .ok_or("the kept backend project has no main crate source")?;
-//RS         let base_main = read_text(&base_main_path)?;
-//RS         let prefix = base_main.strip_suffix(old_tail).ok_or_else(|| {
-//RS             format!(
-//RS                 "`{}` does not end with the packaged suffix of the base source; restore the main crate the \
-//RS                  kept run wrote",
-//RS                 base_main_path.display()
-//RS             )
-//RS         })?;
-//RS         write(&prefix_path, prefix.as_bytes())?;
-//RS         lap("derived stage-zero/main.prefix.rs");
-//RS     }
-//RS 
-//RS     let stamp_path = keep.join("stage-zero.stamp");
-//RS     let task_roots = match read_text(&stamp_path)?.lines().find_map(|line| line.strip_prefix("task_roots=")) {
-//RS         Some("true") => true,
-//RS         Some("false") => false,
-//RS         _ => return Err(format!("`{}` has no `task_roots=true|false` line", stamp_path.display())),
-//RS     };
-//RS     let artifact_main = generated_artifact_main(task_roots)?;
-//RS     write(&keep.join("artifact-main.rs"), artifact_main.as_bytes())?;
-//RS     let mut source = packaged;
-//RS     source.push_str(&artifact_main);
-//RS 
-//RS     let base = read(&base_path)?;
-//RS     if source.as_bytes() == base.as_slice() {
-//RS         eprintln!("stage0-repack: stage-zero.rs is byte-identical to the base ({} bytes)", source.len());
-//RS     } else {
-//RS         let at = first_difference(source.as_bytes(), &base);
-//RS         eprintln!(
-//RS             "stage0-repack: stage-zero.rs differs from the base from line {} ({} bytes, base {})",
-//RS             line_of(source.as_bytes(), at),
-//RS             source.len(),
-//RS             base.len()
-//RS         );
-//RS     }
-//RS     drop(base);
-//RS     if image == image_bytes {
-//RS         eprintln!("stage0-repack: compiler image is byte-identical to stage-zero.image");
-//RS     } else {
-//RS         eprintln!("stage0-repack: compiler image changed; rewriting stage-zero.image");
-//RS         write(&keep.join("stage-zero.image"), &image)?;
-//RS         write(&project.join("src/compiler.image"), &image)?;
-//RS     }
-//RS 
-//RS     let tail = source
-//RS         .get(reference_len..)
-//RS         .ok_or("the packaged source does not extend reference.rs")?;
-//RS     let mut main_source = read_text(&prefix_path)?;
-//RS     main_source.push_str(tail);
-//RS     write(&keep.join("stage-zero.rs"), source.as_bytes())?;
-//RS     write(&project.join("generated.rs"), source.as_bytes())?;
-//RS     write(&project.join("src/main.rs"), main_source.as_bytes())?;
-//RS     lap("wrote stage-zero.rs, stage-zero/generated.rs and stage-zero/src/main.rs");
-//RS     Ok(())
-//RS }
-//RS 
-// END-PORT-PENDING 2155 Tools/stage0-repack/src/main.rs:1-325
+// Offline stage-zero repackaging of retained MIR, FFI and compiler authority.
+// Rust: Tools/stage0-repack/src/main.rs:35
+use jet_driver.[Authority, Codegen, Comptime, SHA256, run_compiler_work]
+use compiler_bootstrap.[BOOTSTRAP_CANONICAL_SOURCE_ROOT, open_authorized_sources, prepare_bootstrap_artifact_from_aot]
+use compiler_bootstrap_compiler_image.[compiler_image_source_authority_digest]
+use jet_foundation.Layout.[TargetLayout]
+use jet_foundation.MIR.[mir_program_from_image_bytes]
+use jet_foundation.AST.[FfiLink]
+use Codegen.MIRRust.[MirRustConfig, MirRustExecutionConfig, MirRustTarget, mir_rust_aot_metadata]
+use std.env as env // GATE #4494: OS argument/environment operations.
+use std.mem as mem // GATE #4494/#4483: host usize layout, not runtime OS inference.
+use std.process as process // GATE #4494: native exit.
+use std.io.[eprintln] // GATE #4494: stderr output.
+use core.time as time
 
+// Rust: Tools/stage0-repack/src/main.rs:48
+// COMPILER_ENTRY_RELATIVE is canonical REPACK_COMPILER_ENTRY_RELATIVE in ../main.jet.
+// Rust: Tools/stage0-repack/src/main.rs:51
+// Failure uses the canonical RepackError message carrier, without changed text.
+// Rust: Tools/stage0-repack/src/main.rs:53
+fn run() -[FS, Env, IO, Time]> {
+    repack() ?? {
+        eprintln("stage0-repack: {err.message}")
+        process.exit(1)
+    }
+}
+
+// Rust: Tools/stage0-repack/src/main.rs:60
+// read is canonical repack_read in ../main.jet32.
+// Rust: Tools/stage0-repack/src/main.rs:64
+// read_text is canonical repack_read_text in ../main.jet36.
+// Rust: Tools/stage0-repack/src/main.rs:68
+// write is canonical repack_write in ../main.jet40.
+// Rust: Tools/stage0-repack/src/main.rs:77
+// KeptImage is canonical RepackKeptImage in ../main.jet61 with borrowed payload.
+// Rust: Tools/stage0-repack/src/main.rs:83
+// parse_image is canonical repack_parse_image in ../main.jet92. It retains the
+// bad-magic/format/truncation/host-length branches and ignores trailing bytes.
+// Rust: Tools/stage0-repack/src/main.rs:115
+// hex is canonical repack_hex in ../main.jet113.
+// Rust: Tools/stage0-repack/src/main.rs:119
+// first_difference is canonical repack_first_difference in ../main.jet124.
+// Rust: Tools/stage0-repack/src/main.rs:126
+// line_of is canonical repack_line_of in ../main.jet132.
+// Rust: Tools/stage0-repack/src/main.rs:133
+// generated_artifact_main is canonical repack_generated_artifact_main181 and
+// repack_extract_artifact_main159 in ../main.jet, including marker errors.
+
+// Rust: Tools/stage0-repack/src/main.rs:159
+// Original internal run is repack; the sole program entry above is fn run().
+fn repack() -[FS, Env, IO, Time]> RepackError! {
+    // The canonical invocation policy consumes only the first two arguments.
+    args :: env.args_os().skip(1).take(2).map((arg) -> arg.to_string_lossy().to_string()).collect()
+    invocation :: repack_invocation(args)
+    keep :: invocation.keep
+    compiler_project :: OSPath.from(invocation.compiler_project)
+    started :: time.instant()
+    eprintln("stage0-repack: Host/Runner sources from `{BOOTSTRAP_CANONICAL_SOURCE_ROOT}`")
+    image_bytes :: repack_read(repack_files.join(keep, "stage-zero.image"))
+    kept :: repack_parse_image(image_bytes, mem.size_of<Usize>())
+    program :: mir_program_from_image_bytes(kept.payload)
+        ?? return Err(repack_error("cannot decode the kept compiler MIR: {err}"))
+    repack_lap(started, "decoded compiler MIR from stage-zero.image")
+    lease :: open_authorized_sources(compiler_project, OSPath.from(REPACK_COMPILER_ENTRY_RELATIVE))
+        ?? return Err(repack_error("cannot authorize `{compiler_project.display()}`: {err.debug()}"))
+    digest :: compiler_image_source_authority_digest(lease.snapshot())
+    repack_check_source_authority(invocation.compiler_project, digest, kept.source_authority_digest)
+
+    // Rust: Tools/stage0-repack/src/main.rs:194
+    ffi_record :: repack_read_text(repack_files.join(keep, "stage-zero.ffi"))
+    ffi :: repack_ffi_record(ffi_record).map((record) -> {
+        dir :: OSPath.from(record.directory)
+        FfiLink{
+            crate_name: ~record.crate_name,
+            cache_identity: dir.file_name().map((name) -> name.to_string_lossy().to_string()).unwrap_or(String.new()),
+            provenance_path: OSPath.new(), rlib_path: OSPath.new(), cdylib_path: OSPath.new(),
+            target_deps_dir: OSPath.new(), host_deps_dir: OSPath.new(),
+            helper_bin_path: None, secrets_helper_bin_path: None,
+            handle_facts: [], link_closure: Default.default()
+        }
+    })
+    // Rust: Tools/stage0-repack/src/main.rs:213
+    execution := MirRustExecutionConfig.for_artifact(kept.artifact)
+    execution.ffi = ffi
+    execution.emit_types = true
+    execution.emit_foreign = true
+    execution.emit_metadata = false
+    execution.emit_runtime = true
+    execution.prune_unreachable_codecs = true
+    metadata_config :: MirRustConfig{
+        target: TargetLayout.host(), target_kind: MirRustTarget.Native,
+        root_prefix: "", execution: ~execution
+    }
+    prepare_config :: MirRustConfig{
+        target: ~metadata_config.target, target_kind: MirRustTarget.Native,
+        root_prefix: "crate::", execution: ^execution
+    }
+    reference :: repack_read_text(repack_files.join(keep, "reference.rs"))
+    reference_len :: reference.bytes().len()
+    snapshot :: lease.snapshot()
+    artifact :: run_compiler_work(() -> {
+        metadata :: mir_rust_aot_metadata(program, metadata_config)
+        prepare_bootstrap_artifact_from_aot(^reference, program, snapshot, prepare_config, metadata)
+            ?? return Err(repack_error("stage-zero Host/Runner packaging failed: {err}"))
+    })
+    repack_lap(started, "packaged")
+    // Rust: Tools/stage0-repack/src/main.rs:242
+    // Complete canonical post-packaging policy ../main.jet251-298 owns the
+    // image-presence check, first-run base copy/prefix derivation, task_roots
+    // selection/stripping, byte/line comparisons, image-before-source publication,
+    // extent error, and all three final source writes in exact authored order.
+    repack_finish(keep, BOOTSTRAP_CANONICAL_SOURCE_ROOT, reference_len,
+        ^artifact.source, artifact.compiler_image, image_bytes, started)
+}

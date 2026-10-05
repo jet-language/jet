@@ -1,901 +1,108 @@
-// PORT-PENDING 2124 crates-jet-semindex-src-lib: crates/jet-semindex/src/lib.rs:1-897
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-SEMINDEX1: stable semantic-index query API over compiler facts.
-//RS 
-//RS #![allow(non_snake_case)]
-//RS #![deny(warnings)]
-//RS 
-//RS mod Build;
-//RS mod Docs;
-//RS mod JSON;
-//RS mod SemanticOps;
-//RS mod Symbols;
-//RS mod Types;
-//RS 
-//RS pub use jet_pkg_model::Package::PackageFacts;
-//RS pub use jet_pkg_model::EffectBudget::{
-//RS     render_effect_projection_line, render_effect_projection_object, EffectProjection,
-//RS };
-//RS pub use jet_sema::SemIndexEffectFacts;
-//RS pub use Build::{
-//RS     binder_active_parameter, build_index, build_symbol_db, function_parameter_parts,
-//RS     structural_nodes_from_parsed, HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
-//RS };
-//RS pub use Docs::{build_doc_graph, html_escape, DocExpectation, DocGraph, DocImpl, DocItem, DocModule,
-//RS     DocSource, DocTest, DOC_SCHEMA_VERSION};
-//RS pub use SemanticOps::{
-//RS     review_semantic_ops, review_semantic_ops_with_receipts, semantic_blame,
-//RS     semantic_blame_for_file, semantic_ops_for_file, semantic_rename_ops, ReviewAlignment,
-//RS     ReviewOpKind, ReviewSemanticOp, SemanticBlameEntry, SemanticOp, SemanticOpFile,
-//RS     SemanticOpTarget,
-//RS };
-//RS pub use Symbols::{
-//RS     build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
-//RS     SemanticSymbolKind, SemanticVisibilityAnchor,
-//RS };
-//RS pub use Types::{
-//RS     ArithmeticOperationFact, CallEdge, CallableDefaultFact, CallableEffectFact,
-//RS     CallableEffectsFact, CallableFactAvailability, CallableFactUnavailable, CallableParameterFact,
-//RS     CallableSignatureFact, CompilerFact, DefinitionAnchor, DefinitionFact, EffectFact,
-//RS     EffectProvenance, ExpandLens, ExpandProjection, ExpandValue, InstanceApplicationFact,
-//RS     InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex,
-//RS     SourceSpan, StructuralAudit, StructuralNode, StructuralSlotBoundary, StructuralSlotKind,
-//RS     SymbolDef, SymbolKind, SymbolRef, TraitContractFact, TypeDossier, ViewProjectionFact,
-//RS     ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact, StateGraphFact, StateNodeFact,
-//RS     StateTransitionFact, SCHEMA_VERSION,
-//RS };
-//RS pub use jet_foundation::Facts::{
-//RS     DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationObservation,
-//RS     DerivationPayload, DerivationRecord, DerivationRef,
-//RS };
-//RS pub use JSON::{package_facts_json, workspace_overlay_policy_json};
-//RS 
-//RS use jet_foundation::Diagnostics::Diagnostic;
-//RS use jet_foundation::AST::ProgramBundle;
-//RS use std::path::Path;
-//RS 
-//RS /// Structured errors for project loading / I/O only (compiler diagnostics stay
-//RS /// on the front-end check path).
-//RS #[derive(Debug)]
-//RS pub enum SemIndexError {
-//RS     Load(Vec<Diagnostic>),
-//RS }
-//RS 
-//RS impl std::fmt::Display for SemIndexError {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         match self {
-//RS             SemIndexError::Load(diags) => write!(f, "{} load/check diagnostic(s)", diags.len()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for SemIndexError {}
-//RS 
-//RS /// Build a semantic index from an already-checked bundle and captured effect facts.
-//RS pub fn from_checked(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemIndex {
-//RS     build_index(bundle, facts)
-//RS }
-//RS 
-//RS /// Load the canonical Package facts that own an entry. Standalone source has
-//RS /// no package projection. A package root is one typed authority: malformed or
-//RS /// ambiguous package sources are returned as errors instead of becoming an
-//RS /// empty projection.
-//RS pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, String> {
-//RS     jet_driver::Loader::package_facts_for_entry(entry).map_err(|diagnostics| {
-//RS         diagnostics
-//RS             .into_iter()
-//RS             .map(|diagnostic| {
-//RS                 format!(
-//RS                     "{}: {} — {}",
-//RS                     diagnostic.code, diagnostic.what, diagnostic.why
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join("; ")
-//RS     })
-//RS }
-//RS 
-//RS /// Render the registered package-shape diagnostic shared by semantic-index
-//RS /// and Canvas when a package projection cannot be loaded.
-//RS pub fn package_facts_diagnostic(entry: &Path, error: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E1206",
-//RS         format!("package facts for `{}` have a shape error", entry.display()),
-//RS         format!("one typed Package fact graph must own this projection; {error}"),
-//RS         "fix package.jet, the inline Package carrier, or its declared Config files before tooling uses package facts".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Find the nearest validated workspace lock for a source entry. Overlay
-//RS /// policy is deliberately read from the persisted lock so Canvas, the
-//RS /// semantic index, and Jetpack do not each reparse workspace policy. A lock
-//RS /// without a workspace source is not an authority boundary.
-//RS pub fn workspace_overlay_policy_for_entry(
-//RS     entry: &Path,
-//RS ) -> Result<Option<jet_pkg_model::Overlay::OverlayPolicy>, Diagnostic> {
-//RS     let Some(parent) = entry.parent() else {
-//RS         return Ok(None);
-//RS     };
-//RS     let mut dir = jet_pkg_model::Authority::AuthorityResolver::open(parent)
-//RS         .map_err(|error| error.diagnostic())?
-//RS         .root()
-//RS         .to_path_buf();
-//RS     loop {
-//RS         let resolver = jet_pkg_model::Authority::AuthorityResolver::open(&dir)
-//RS             .map_err(|error| error.diagnostic())?;
-//RS         match resolver.resolve_workspace_source() {
-//RS             Err(error) => return Err(error.workspace_diagnostic()),
-//RS             Ok(Some(_)) => {
-//RS                 return Ok(workspace_lock_at(&resolver)?.and_then(|plan| {
-//RS                     (!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy)
-//RS                 }))
-//RS             }
-//RS             Ok(None) => {}
-//RS         }
-//RS         let Some(next) = dir.parent() else {
-//RS             return Ok(None);
-//RS         };
-//RS         if next == dir {
-//RS             return Ok(None);
-//RS         }
-//RS         dir = next.to_path_buf();
-//RS     }
-//RS }
-//RS 
-//RS /// Read one lock candidate and preserve the existing E1202 stale/invalid
-//RS /// workspace-lock diagnostic. `Some(plan)` is also a boundary marker when the
-//RS /// policy itself is empty, so callers do not continue into an outer authority.
-//RS fn workspace_lock_at(
-//RS     resolver: &jet_pkg_model::Authority::AuthorityResolver,
-//RS ) -> Result<Option<jet_pkg_model::WorkspacePlan::WorkspacePlan>, Diagnostic> {
-//RS     let lock_file = match resolver.checked_file(Path::new(jet_pkg_model::Syntax::UNIFIED_LOCK_FILE))
-//RS     {
-//RS         Ok(file) => file,
-//RS         Err(error) if error.is_missing() => return Ok(None),
-//RS         Err(error) => return Err(error.diagnostic()),
-//RS     };
-//RS     let lock_path = lock_file.path.clone();
-//RS     let raw = lock_file.text().map_err(|error| error.diagnostic())?;
-//RS     if !jet_pkg_model::Lock::looks_like_workspace_lock(&raw) {
-//RS         return Ok(None);
-//RS     }
-//RS     match jet_pkg_model::WorkspaceLock::load_checked_file(resolver, lock_file) {
-//RS         Some(plan) => Ok(Some(plan)),
-//RS         None => Err(jet_pkg_model::Lock::e1202_workspace(
-//RS             &lock_path.display().to_string(),
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn attach_package_facts(index: &mut SemIndex, entry: &Path) -> Result<(), SemIndexError> {
-//RS     if let Some(facts) = package_facts_for_entry(entry)
-//RS         .map_err(|error| SemIndexError::Load(vec![package_facts_diagnostic(entry, &error)]))?
-//RS     {
-//RS         index.attach_package_facts(facts);
-//RS     }
-//RS     if let Some(policy) = workspace_overlay_policy_for_entry(entry)
-//RS         .map_err(|diagnostic| SemIndexError::Load(vec![diagnostic]))?
-//RS     {
-//RS         index.attach_workspace_overlay_policy(policy);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Load, check, and build the semantic index for an entry file (loader → parser → sema).
-//RS pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
-//RS     let entry_str = entry.to_string_lossy();
-//RS     let (diags, bundle, facts) =
-//RS         jet_driver::Driver::check_file_with_effect_facts(&entry_str, None, false);
-//RS     if !diags
-//RS         .iter()
-//RS         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
-//RS     {
-//RS         if let Some(bundle) = bundle {
-//RS             let mut index = build_index(&bundle, &facts);
-//RS             attach_package_facts(&mut index, entry)?;
-//RS             return Ok(index);
-//RS         }
-//RS     }
-//RS     Err(SemIndexError::Load(diags))
-//RS }
-//RS 
-//RS /// Load, check, and build consumer-neutral symbol facts for docs/completion/help.
-//RS pub fn open_symbols(entry: &Path) -> Result<SemanticSymbolIndex, SemIndexError> {
-//RS     let entry_str = entry.to_string_lossy();
-//RS     let (diags, bundle, facts) =
-//RS         jet_driver::Driver::check_file_with_effect_facts(&entry_str, None, false);
-//RS     if !diags
-//RS         .iter()
-//RS         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
-//RS     {
-//RS         if let Some(bundle) = bundle {
-//RS             return Ok(build_symbol_db(&bundle, &facts).symbols);
-//RS         }
-//RS     }
-//RS     Err(SemIndexError::Load(diags))
-//RS }
-//RS 
-//RS /// Build the index from the compiler's staged multi-file overlay path.
-//RS pub fn open_with_overlays(
-//RS     entry: &Path,
-//RS     overlays: &[(&Path, &str)],
-//RS ) -> Result<SemIndex, SemIndexError> {
-//RS     let entry_str = entry.to_string_lossy();
-//RS     let (diags, bundle, facts) =
-//RS         jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
-//RS     if !diags
-//RS         .iter()
-//RS         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
-//RS     {
-//RS         if let Some(bundle) = bundle {
-//RS             let mut index = build_index(&bundle, &facts);
-//RS             attach_package_facts(&mut index, entry)?;
-//RS             return Ok(index);
-//RS         }
-//RS     }
-//RS     Err(SemIndexError::Load(diags))
-//RS }
-//RS 
-//RS /// Structural diff/merge index: check against the candidate path's real
-//RS /// directory so adjacent semantic module imports resolve before output exists.
-//RS pub fn open_structural_with_overlays(
-//RS     entry: &Path,
-//RS     overlays: &[(&Path, &str)],
-//RS ) -> Result<SemIndex, SemIndexError> {
-//RS     let entry_str = entry.to_string_lossy();
-//RS     let (diags, bundle, facts) =
-//RS         jet_driver::Driver::check_file_with_overlays_and_import_root(&entry_str, overlays);
-//RS     if !diags
-//RS         .iter()
-//RS         .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
-//RS     {
-//RS         if let Some(bundle) = bundle {
-//RS             let mut index = build_index(&bundle, &facts);
-//RS             attach_package_facts(&mut index, entry)?;
-//RS             return Ok(index);
-//RS         }
-//RS     }
-//RS     Err(SemIndexError::Load(diags))
-//RS }
-//RS 
-//RS /// Index a staged fixture even when its deliberately expected diagnostics are
-//RS /// present. The returned facts still come from the real loader/sema pass; this
-//RS /// is not a syntax-only fallback.
-//RS pub fn open_with_overlays_and_diagnostics(
-//RS     entry: &Path,
-//RS     overlays: &[(&Path, &str)],
-//RS ) -> Result<(SemIndex, Vec<Diagnostic>), SemIndexError> {
-//RS     open_with_overlays_diagnostics_and_inputs(entry, overlays)
-//RS         .map(|(index, diagnostics, _)| (index, diagnostics))
-//RS }
-//RS 
-//RS /// The same staged compiler pass plus every physical module read by the
-//RS /// loader. Transactional tools fingerprint this complete input set, including
-//RS /// read-only imports that happen to define no symbols.
-//RS pub fn open_with_overlays_diagnostics_and_inputs(
-//RS     entry: &Path,
-//RS     overlays: &[(&Path, &str)],
-//RS ) -> Result<(SemIndex, Vec<Diagnostic>, Vec<std::path::PathBuf>), SemIndexError> {
-//RS     let entry_str = entry.to_string_lossy();
-//RS     let (diags, bundle, facts) =
-//RS         jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
-//RS     match bundle {
-//RS         Some(bundle) => {
-//RS             let inputs = bundle
-//RS                 .modules
-//RS                 .iter()
-//RS                 .map(|module| module.path.clone())
-//RS                 .collect();
-//RS             let mut index = build_index(&bundle, &facts);
-//RS             attach_package_facts(&mut index, entry)?;
-//RS             Ok((index, diags, inputs))
-//RS         }
-//RS         None => Err(SemIndexError::Load(diags)),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS     use std::path::PathBuf;
-//RS 
-//RS     fn fixture(name: &str) -> PathBuf {
-//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-//RS             .join("../../Examples/features")
-//RS             .join(name)
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn schema_version_constant() {
-//RS         assert_eq!(SCHEMA_VERSION, 20);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn callable_signature_facts_keep_typed_and_unavailable_states() {
-//RS         let scratch = PathBuf::from(
-//RS             std::env::var_os("HOME").expect("the semantic-index test needs a home directory"),
-//RS         )
-//RS         .join(".cache")
-//RS         .join("jet-test-scratch")
-//RS         .join(format!(
-//RS             "jet_semindex_typed_callable_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         std::fs::create_dir_all(&scratch).unwrap();
-//RS         let path = scratch.join("main.jet");
-//RS         std::fs::write(
-//RS             scratch.join("package.jet"),
-//RS             "name: \"jet-semindex-typed-callable\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [FFI] } }\n",
-//RS         )
-//RS         .unwrap();
-//RS         let source = concat!(
-//RS             "fn no_value() {}\n",
-//RS             "fn typed(label: String, value: Int{7}) -[]> Bool { return true }\n",
-//RS             "fn generic<T>(value: T) {}\n",
-//RS             "extern rust \"std\" {\n",
-//RS             "    fn external_drop(value: ^String) = \"std::mem::drop\"\n",
-//RS             "}\n",
-//RS             "fn run() {}\n",
-//RS         );
-//RS         std::fs::write(&path, source).unwrap();
-//RS         let index = open(&path).expect("typed callable fixture should index");
-//RS         let definition = |name: &str| {
-//RS             index
-//RS                 .definitions()
-//RS                 .iter()
-//RS                 .find(|definition| definition.name == name)
-//RS                 .expect("callable definition should be indexed")
-//RS         };
-//RS         let typed_definition = definition("typed");
-//RS         let typed = typed_definition
-//RS             .callable_signature
-//RS             .as_ref()
-//RS             .expect("typed callable signature should be present");
-//RS         assert_eq!(
-//RS             typed
-//RS                 .parameters
-//RS                 .iter()
-//RS                 .map(|parameter| parameter.name.as_str())
-//RS                 .collect::<Vec<_>>(),
-//RS             vec!["label", "value"]
-//RS         );
-//RS         assert!(typed.parameters[0].default.is_none());
-//RS         assert_eq!(typed.parameters[1].ty, jet_foundation::AST::Type::Int);
-//RS         assert_eq!(
-//RS             &source[typed.parameters[1].source.start..typed.parameters[1].source.end],
-//RS             "value"
-//RS         );
-//RS         let default = typed.parameters[1]
-//RS             .default
-//RS             .as_ref()
-//RS             .expect("declared default should be present");
-//RS         assert_eq!(&source[default.source.start..default.source.end], "7");
-//RS         assert_eq!(
-//RS             default.value_unavailable.required_stage,
-//RS             jet_foundation::AST::CompilerStage::Prepared
-//RS         );
-//RS         assert!(matches!(
-//RS             &typed.effects,
-//RS             CallableEffectsFact::Checked(effects) if effects.is_empty()
-//RS         ));
-//RS         assert_eq!(typed.return_type, Some(jet_foundation::AST::Type::Bool));
-//RS         assert_eq!(
-//RS             typed.metadata_producer_status,
-//RS             jet_foundation::AST::MetadataProducerStatus::ExistingCallableProducerNeedsExtension
-//RS         );
-//RS         assert_eq!(
-//RS             typed_definition
-//RS                 .declaration_identity_unavailable
-//RS                 .required_stage,
-//RS             jet_foundation::AST::CompilerStage::Resolved
-//RS         );
-//RS         assert!(typed_definition
-//RS             .declaration_identity_unavailable
-//RS             .reason
-//RS             .contains("checker-issued DeclarationHandle"));
-//RS         let stable_id = index
-//RS             .definition_facts()
-//RS             .iter()
-//RS             .find(|fact| fact.human_identity.as_str() == typed_definition.identity.as_str())
-//RS             .expect("typed declaration should have a stable semindex identity")
-//RS             .stable_id
-//RS             .clone();
-//RS         let repeated_index = open(&path).expect("same checked fixture should index again");
-//RS         assert_eq!(
-//RS             repeated_index
-//RS                 .definition_facts()
-//RS                 .iter()
-//RS                 .find(|fact| fact.human_identity.as_str() == typed_definition.identity.as_str())
-//RS                 .expect("typed declaration should retain its stable semindex identity")
-//RS                 .stable_id
-//RS                 .as_str(),
-//RS             stable_id.as_str()
-//RS         );
-//RS 
-//RS         let no_value = definition("no_value")
-//RS             .callable_signature
-//RS             .as_ref()
-//RS             .expect("no-value callable signature should be present");
-//RS         assert_eq!(no_value.return_type, None);
-//RS 
-//RS         let generic = definition("generic")
-//RS             .callable_signature
-//RS             .as_ref()
-//RS             .expect("generic callable signature should be present");
-//RS         match &generic.generic_parameters {
-//RS             CallableFactAvailability::Checked(parameters) => {
-//RS                 assert_eq!(
-//RS                     parameters
-//RS                         .iter()
-//RS                         .map(|parameter| parameter.name.as_str())
-//RS                         .collect::<Vec<_>>(),
-//RS                     vec!["T"]
-//RS                 );
-//RS             }
-//RS             CallableFactAvailability::Unavailable(_) => {
-//RS                 panic!("source generic parameter should be checked")
-//RS             }
-//RS         }
-//RS 
-//RS         let external = definition("external_drop")
-//RS             .callable_signature
-//RS             .as_ref()
-//RS             .expect("external callable signature should be present");
-//RS         assert!(matches!(
-//RS             &external.failure_contract,
-//RS             CallableFactAvailability::Unavailable(_)
-//RS         ));
-//RS         assert!(matches!(
-//RS             &external.effects,
-//RS             CallableEffectsFact::Unavailable(_)
-//RS         ));
-//RS         assert!(matches!(
-//RS             &external.generic_parameters,
-//RS             CallableFactAvailability::Unavailable(_)
-//RS         ));
-//RS         let json = index.to_json();
-//RS         assert!(json.contains("\"effects\":[],\"effect_status\":{\"status\":\"checked\"}"));
-//RS         assert!(json.contains(
-//RS             "\"effects\":null,\"effect_status\":{\"status\":\"unavailable\""
-//RS         ));
-//RS         assert!(json.contains(
-//RS             "\"metadata_declaration_identity\":{\"status\":\"unavailable\",\"required_stage\":\"Resolved\",\"reason\":\"the semindex producer does not receive a checker-issued DeclarationHandle\"}"
-//RS         ));
-//RS         std::fs::remove_file(&path).unwrap();
-//RS         std::fs::remove_file(scratch.join("package.jet")).unwrap();
-//RS         std::fs::remove_dir(&scratch).unwrap();
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn open_finds_definitions_and_calls() {
-//RS         let path = fixture("effects/effects.jet");
-//RS         let idx = open(&path).expect("effects example should index");
-//RS         assert_eq!(idx.schema_version(), SCHEMA_VERSION);
-//RS         assert!(idx.lookup("run").is_some());
-//RS         assert!(idx.lookup("report").is_some());
-//RS         assert!(
-//RS             !idx.call_edges().is_empty(),
-//RS             "expected call graph edges in effects example"
-//RS         );
-//RS         assert!(
-//RS             idx.effect_of("report").is_some(),
-//RS             "expected effect facts for report()"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn references_filter_by_name() {
-//RS         let path = fixture("basics/hello.jet");
-//RS         let idx = open(&path).expect("hello example should index");
-//RS         let refs = idx.references_to("print");
-//RS         assert!(!refs.is_empty());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn json_snapshot_shape() {
-//RS         let path = fixture("basics/hello.jet");
-//RS         let idx = open(&path).expect("hello example should index");
-//RS         let json = idx.to_json();
-//RS         assert!(json.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
-//RS         assert!(json.contains("\"outputs\""));
-//RS         assert!(json.contains("\"definitions\""));
-//RS         assert!(json.contains("\"identity\""));
-//RS         assert!(json.contains("\"references\""));
-//RS         assert!(json.contains("\"calls\""));
-//RS         assert!(json.contains("\"effects\""));
-//RS         assert!(json.contains("\"members\""));
-//RS         assert!(json.contains("\"instances\""));
-//RS         assert!(json.contains("\"run\""));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn package_config_facts_are_shared_with_the_index_json() {
-//RS         let root =
-//RS             std::env::temp_dir().join(format!("jet_semindex_package_facts_{}", std::process::id()));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         std::fs::write(
-//RS             root.join("package.jet"),
-//RS             "name: \"demo\"\nversion: \"0.1.0\"\njet: \"0.4\"\nauthority: { holds: { allow: [FS], deny: [Net] }, grants: { \"textkit\": [IO] } }\nservices: { cache: { enable: true, ports: [6379], ready: \"ping\" } }\nenvironments: { dev: Environment{ tools: [\"git\"], services: { cache: { enable: true, ports: [6379] } }, secrets: { token: \"x\" } } }\nconfigs: [\"release.jet\"]\ndefaults: { run: app }\ndev :: Config{ source: \"local\" }\n",
-//RS         )
-//RS         .unwrap();
-//RS         std::fs::write(
-//RS             root.join("release.jet"),
-//RS             "pub release :: Config{ outputs: { app: Executable{ entry: run } } }\n",
-//RS         )
-//RS         .unwrap();
-//RS         let entry = root.join("run.jet");
-//RS         std::fs::write(&entry, "fn run() {}\n").unwrap();
-//RS 
-//RS         let index = open(&entry).expect("package entry should index");
-//RS         let facts = index.package_facts().expect("package facts attached");
-//RS         assert_eq!(facts.name, "demo");
-//RS         assert!(facts.outputs.contains_key("app"));
-//RS         assert_eq!(facts.configs, vec!["release.jet"]);
-//RS         assert!(facts
-//RS             .field_provenance("outputs.app")
-//RS             .iter()
-//RS             .any(|origin| origin.ends_with("release.jet")));
-//RS         let json = index.to_json();
-//RS         assert!(json.contains("\"package_facts\""));
-//RS         assert!(json.contains("\"semantic_digest\":\""));
-//RS         for field in [
-//RS             "\"jet\":\"0.4\"",
-//RS             "\"services\":{\"cache\"",
-//RS             "\"environments\":{\"dev\"",
-//RS             "\"defaults\":{\"run\":\"app\"}",
-//RS             "\"resolved_config_paths\":[\"release.jet\"]",
-//RS             "\"inline_configs\":{\"dev\"",
-//RS             "\"kind\":\"executable\"",
-//RS             "\"authority\":{\"holds\":{\"allow\":[\"FS\"],\"deny\":[\"Net\"]},\"grants\":{\"textkit\":[\"IO\"]}",
-//RS             "\"required_effects\":[]",
-//RS             "\"granted_effects\":[\"FS\"]",
-//RS             "\"denied_effects\":[\"Net\"]",
-//RS             "\"authority\":\"package.jet authority.holds\"",
-//RS         ] {
-//RS             assert!(
-//RS                 json.contains(field),
-//RS                 "package projection omitted {field}: {json}"
-//RS             );
-//RS         }
-//RS         assert!(json.contains("release.jet"));
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn malformed_package_facts_are_not_dropped_from_projection() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet_semindex_ambiguous_package_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         std::fs::write(
-//RS             root.join("package.jet"),
-//RS             "name: \"canonical\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         std::fs::write(
-//RS             root.join("pkg.jet"),
-//RS             "name: \"legacy\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         let entry = root.join("run.jet");
-//RS         std::fs::write(&entry, "fn run() {}\n").unwrap();
-//RS 
-//RS         let error = package_facts_for_entry(&entry)
-//RS             .expect_err("ambiguous package roots must remain an error");
-//RS         assert!(
-//RS             error.contains("both `package.jet` and migration-era `pkg.jet`"),
-//RS             "{error}"
-//RS         );
-//RS         let diagnostic = package_facts_diagnostic(&entry, &error);
-//RS         assert_eq!(diagnostic.code, "E1206");
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn semantic_index_consumes_persisted_workspace_overlay_facts() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet_semindex_workspace_overlay_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         std::fs::create_dir_all(root.join(".jet")).unwrap();
-//RS         std::fs::write(
-//RS             root.join("workspace.jet"),
-//RS             "module workspace { members: [] }\n",
-//RS         )
-//RS         .unwrap();
-//RS         let workspace_digest = jet_pkg_model::SHA256::sha256_hex(
-//RS             std::fs::read(root.join("workspace.jet"))
-//RS                 .unwrap()
-//RS                 .as_slice(),
-//RS         );
-//RS         std::fs::write(
-//RS             root.join(".jet/lock"),
-//RS             format!(
-//RS                 "version = 1\nworkspace_source_digest = \"{workspace_digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n\n[[workspace_overlay]]\nname = \"beta\"\nprovider = \"nixpkgs\"\nchannel = \"plasma-beta\"\n\n[[workspace_overlay_package]]\noverlay = \"beta\"\npackage = \"discord\"\nallow_unfree = true\nfield_priorities = [\"version=7\"]\n"
-//RS             ),
-//RS         )
-//RS         .unwrap();
-//RS         let entry = root.join("run.jet");
-//RS         std::fs::write(&entry, "fn run() {}\n").unwrap();
-//RS 
-//RS         let index = open(&entry).expect("workspace source should index");
-//RS         let policy = index
-//RS             .workspace_overlay_policy()
-//RS             .expect("overlay facts must come from the lock");
-//RS         assert_eq!(policy.allow_unfree, vec!["discord"]);
-//RS         assert_eq!(policy.overlays[0].name, "beta");
-//RS         let json = index.to_json();
-//RS         assert!(json.contains("\"workspace_overlays\""));
-//RS         assert!(json.contains("plasma-beta"));
-//RS         assert!(json.contains("discord"));
-//RS         assert!(
-//RS             json.contains("\"field_priorities\":{\"version\":7}"),
-//RS             "{json}"
-//RS         );
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn stale_workspace_lock_returns_e1202_instead_of_empty_policy() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet_semindex_stale_workspace_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         std::fs::create_dir_all(root.join(".jet")).unwrap();
-//RS         std::fs::write(
-//RS             root.join("workspace.jet"),
-//RS             "module workspace { members: [] }\n",
-//RS         )
-//RS         .unwrap();
-//RS         std::fs::write(
-//RS             root.join(".jet/lock"),
-//RS             "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         let entry = root.join("run.jet");
-//RS         std::fs::write(&entry, "fn run() {}\n").unwrap();
-//RS 
-//RS         let diagnostic = workspace_overlay_policy_for_entry(&entry)
-//RS             .expect_err("stale workspace authority must remain visible");
-//RS         assert_eq!(diagnostic.code, "E1202");
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn outer_stale_workspace_lock_does_not_cross_inner_workspace_boundary() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet_semindex_nested_stale_workspace_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         let child = root.join("child");
-//RS         std::fs::create_dir_all(root.join(".jet")).unwrap();
-//RS         std::fs::create_dir_all(&child).unwrap();
-//RS         std::fs::write(
-//RS             root.join("workspace.jet"),
-//RS             "module workspace { members: [] }\n",
-//RS         )
-//RS         .unwrap();
-//RS         std::fs::write(
-//RS             root.join(".jet/lock"),
-//RS             "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         std::fs::write(
-//RS             child.join("inner-authority.jet"),
-//RS             "module workspace { members: [] }\n",
-//RS         )
-//RS         .unwrap();
-//RS         let entry = child.join("run.jet");
-//RS         std::fs::write(&entry, "fn run() {}\n").unwrap();
-//RS 
-//RS         assert!(workspace_overlay_policy_for_entry(&entry)
-//RS             .unwrap()
-//RS             .is_none());
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn ancestor_lock_scan_uses_an_arbitrary_workspace_source() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet_semindex_ancestor_workspace_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         let child = root.join("packages/app");
-//RS         std::fs::create_dir_all(root.join(".jet")).unwrap();
-//RS         std::fs::create_dir_all(&child).unwrap();
-//RS         let source = "module workspace { members: [] }\n";
-//RS         std::fs::write(root.join("authority.jet"), source).unwrap();
-//RS         let digest = jet_pkg_model::SHA256::sha256_hex(source.as_bytes());
-//RS         std::fs::write(
-//RS             root.join(".jet/lock"),
-//RS             format!(
-//RS                 "version = 1\nworkspace_source_digest = \"{digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n"
-//RS             ),
-//RS         )
-//RS         .unwrap();
-//RS         let entry = child.join("run.jet");
-//RS         std::fs::write(&entry, "fn run() {}\n").unwrap();
-//RS 
-//RS         let policy = workspace_overlay_policy_for_entry(&entry)
-//RS             .expect("ancestor workspace lock should load")
-//RS             .expect("persisted policy should be attached");
-//RS         assert_eq!(policy.allow_unfree, vec!["discord"]);
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn malformed_workspace_boundary_is_not_hidden_by_an_outer_lock() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet_semindex_ambiguous_workspace_boundary_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         let child = root.join("packages/app");
-//RS         std::fs::create_dir_all(root.join(".jet")).unwrap();
-//RS         std::fs::create_dir_all(&child).unwrap();
-//RS         let source = "module workspace { members: [] }\n";
-//RS         std::fs::write(root.join("authority.jet"), source).unwrap();
-//RS         let digest = jet_pkg_model::SHA256::sha256_hex(source.as_bytes());
-//RS         std::fs::write(
-//RS             root.join(".jet/lock"),
-//RS             format!("version = 1\nworkspace_source_digest = \"{digest}\"\n"),
-//RS         )
-//RS         .unwrap();
-//RS         std::fs::write(child.join("a.jet"), source).unwrap();
-//RS         std::fs::write(child.join("b.jet"), source).unwrap();
-//RS         let entry = child.join("run.jet");
-//RS         std::fs::write(&entry, "fn run() {}\n").unwrap();
-//RS 
-//RS         let diagnostic = workspace_overlay_policy_for_entry(&entry)
-//RS             .expect_err("ambiguous boundary must remain visible");
-//RS         assert_eq!(diagnostic.code, "E1239");
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn generic_instance_identity_reaches_index_and_symbol_database() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet_semindex_generic_instance_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         let main = root.join("main.jet");
-//RS         std::fs::write(
-//RS             &main,
-//RS             "module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {}\n",
-//RS         ).unwrap();
-//RS 
-//RS         let index = open(&main).expect("generic module should index");
-//RS         assert_eq!(
-//RS             index.instances().len(),
-//RS             1,
-//RS             "equivalent aliases share one instance"
-//RS         );
-//RS         let instance = &index.instances()[0];
-//RS         assert_eq!(instance.fingerprint.len(), 64);
-//RS         assert!(!instance.full_key_hex.is_empty());
-//RS         assert_eq!(
-//RS             instance
-//RS                 .applications
-//RS                 .iter()
-//RS                 .map(|application| application.name.as_str())
-//RS                 .collect::<Vec<_>>(),
-//RS             vec!["a", "b"]
-//RS         );
-//RS         assert!(instance.applications.iter().all(|application| {
-//RS             application.module_path == main.to_string_lossy()
-//RS                 && application.semantic_identity == format!("instance:{}", instance.fingerprint)
-//RS         }));
-//RS         assert_eq!(instance.arguments.len(), 2);
-//RS         assert_eq!(instance.exported_members, vec!["value"]);
-//RS         assert_eq!(instance.template_definition_id.len(), 64);
-//RS         let alias_defs: Vec<_> = index
-//RS             .definitions()
-//RS             .iter()
-//RS             .filter(|definition| {
-//RS                 definition.identity == format!("instance:{}", instance.fingerprint)
-//RS             })
-//RS             .map(|definition| definition.name.as_str())
-//RS             .collect();
-//RS         assert_eq!(alias_defs, vec!["a", "b"]);
-//RS         assert!(index.definitions().iter().any(|definition| {
-//RS             definition.identity == format!("instance:{}", instance.fingerprint)
-//RS         }));
-//RS         let json = index.to_json();
-//RS         assert!(json.contains(&instance.fingerprint));
-//RS         assert!(json.contains(&instance.full_key_hex));
-//RS         assert!(json.contains("\"applications\":[{\"name\":\"a\""));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn every_structural_child_has_explicit_slot() {
-//RS         let path = fixture("basics/default_refs.jet");
-//RS         let index = open(&path).expect("default-ref example should index");
-//RS         assert!(index
-//RS             .structural_nodes()
-//RS             .iter()
-//RS             .all(|node| { node.parent.is_none() || node.slot != "root" }));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn checked_reference_facts_cover_import_members_aliases_and_receivers() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet_semindex_reference_facts_{}",
-//RS             std::process::id()
-//RS         ));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         let library = root.join("library.jet");
-//RS         let main = root.join("main.jet");
-//RS         std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
-//RS         std::fs::write(
-//RS             &main,
-//RS             "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"worker\") }\n}\nstruct Other { value: Int }\nimpl Other {\n    fn step(self) { print(\"other\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker{value: 1}\n    worker.step()\n    other :: Other{value: 2}\n    other.step()\n}\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let index = open(&main).expect("multi-file reference fixture should index");
-//RS         let target_kind = |name: &str| {
-//RS             index
-//RS                 .references()
-//RS                 .iter()
-//RS                 .filter(|reference| reference.name == name)
-//RS                 .filter_map(|reference| {
-//RS                     reference.target.as_ref().map(|target| target.kind.as_str())
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS         };
-//RS         assert!(target_kind("api").contains(&"import_alias"));
-//RS         assert!(target_kind("report").contains(&"function"));
-//RS         assert!(target_kind("alias_report").contains(&"function"));
-//RS         assert!(target_kind("step").contains(&"function"));
-//RS         let alias_definition = index
-//RS             .definitions()
-//RS             .iter()
-//RS             .find(|definition| definition.name == "api")
-//RS             .expect("module alias definition");
-//RS         let alias_reference = index
-//RS             .references()
-//RS             .iter()
-//RS             .find(|reference| reference.name == "api")
-//RS             .and_then(|reference| reference.target.as_ref())
-//RS             .expect("module alias reference target");
-//RS         assert_eq!(alias_reference.def_span, alias_definition.def_span);
-//RS         assert_eq!(
-//RS             alias_reference.semantic_identity.as_deref(),
-//RS             Some(alias_definition.identity.as_str())
-//RS         );
-//RS         let step_targets = index
-//RS             .references()
-//RS             .iter()
-//RS             .filter(|reference| reference.name == "step")
-//RS             .filter_map(|reference| reference.target.as_ref())
-//RS             .map(|target| {
-//RS                 (
-//RS                     target.module_path.clone(),
-//RS                     target.def_span.start,
-//RS                     target.def_span.end,
-//RS                 )
-//RS             })
-//RS             .collect::<std::collections::BTreeSet<_>>();
-//RS         assert_eq!(
-//RS             step_targets.len(),
-//RS             2,
-//RS             "receiver type must select exact method definition"
-//RS         );
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2124 crates/jet-semindex/src/lib.rs:1-897
+// Stable semantic-index opening API. Canonical facts remain at their owners.
+// Rust: crates/jet-semindex/src/lib.rs:6
+// Build/Structure/Signatures own builder and binder queries; Docs owns doc graphs;
+// Receipts owns semantic operations; Symbols owns symbol facts; Facts and
+// CallableFacts own schema records; Foundation owns derivations; Codec owns JSON.
+// PackageModel owns PackageFacts and effect projections; Sema owns effect facts.
+use jet_driver.Driver.[check_file_with_effect_facts, check_file_with_overlays, check_file_with_overlays_and_import_root]
+use jet_semindex.Build.[build_index, build_symbol_db]
+use jet_pkg_model.[WorkspaceDeclarationCache]
 
+// Rust: crates/jet-semindex/src/lib.rs:57
+// SemIndexError::Load and its Display/Error contracts are canonical in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:74
+// from_checked is canonical as semindex_from_checked in Open.jet, using the
+// checked graph/source/effect inputs rather than copying a retained bundle.
+// Rust: crates/jet-semindex/src/lib.rs:82
+// package_facts_for_entry is canonical as semindex_package_facts_for_entry.
+// Its diagnostic join is semindex_package_facts_error_text, both in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:99
+// package_facts_diagnostic is semindex_package_facts_diagnostic in Open.jet.
+// Rust: crates/jet-semindex/src/lib.rs:113
+// workspace_overlay_policy_for_entry is semindex_workspace_overlay_policy_for_entry.
+// Rust: crates/jet-semindex/src/lib.rs:148
+// workspace_lock_at is semindex_workspace_lock_at in Open.jet: missing versus
+// stale/invalid lock and nearest workspace boundaries retain their own branches.
+// Rust: crates/jet-semindex/src/lib.rs:170
+// attach_package_facts is semindex_attach_package_facts in Open.jet.
+
+// Rust: crates/jet-semindex/src/lib.rs:185
+pub fn semindex_open(entry: OSPath) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_effect_facts(entry_str, None, false)
+    if !semindex_open_has_errors(diags) {
+        if bundle == .Val(checked_bundle) {
+            index := build_index(checked_bundle, facts)
+            cache := WorkspaceDeclarationCache.new()
+            semindex_attach_package_facts(&index, &cache, entry_str)
+            return Ok(^index)
+        }
+    }
+    Err(SemIndexError.Load{diagnostics: ^diags})
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:203
+pub fn semindex_open_symbols(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_effect_facts(entry_str, None, false)
+    if !semindex_open_has_errors(diags) {
+        if bundle == .Val(checked_bundle) {
+            return Ok(build_symbol_db(checked_bundle, facts).symbols)
+        }
+    }
+    Err(SemIndexError.Load{diagnostics: ^diags})
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:219
+pub fn semindex_open_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_overlays(entry_str, overlays, false)
+    if !semindex_open_has_errors(diags) {
+        if bundle == .Val(checked_bundle) {
+            index := build_index(checked_bundle, facts)
+            cache := WorkspaceDeclarationCache.new()
+            semindex_attach_package_facts(&index, &cache, entry_str)
+            return Ok(^index)
+        }
+    }
+    Err(SemIndexError.Load{diagnostics: ^diags})
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:241
+pub fn semindex_open_structural_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_overlays_and_import_root(entry_str, overlays)
+    if !semindex_open_has_errors(diags) {
+        if bundle == .Val(checked_bundle) {
+            index := build_index(checked_bundle, facts)
+            cache := WorkspaceDeclarationCache.new()
+            semindex_attach_package_facts(&index, &cache, entry_str)
+            return Ok(^index)
+        }
+    }
+    Err(SemIndexError.Load{diagnostics: ^diags})
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:264
+pub fn semindex_open_with_overlays_and_diagnostics(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic]) SemIndexError! {
+    (index, diagnostics, _) :: semindex_open_with_overlays_diagnostics_and_inputs(entry, overlays)
+    Ok((^index, ^diagnostics))
+}
+
+// Rust: crates/jet-semindex/src/lib.rs:275
+pub fn semindex_open_with_overlays_diagnostics_and_inputs(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic], [OSPath]) SemIndexError! {
+    entry_str :: entry.to_string_lossy()
+    (diags, bundle, facts) :: check_file_with_overlays(entry_str, overlays, false)
+    if bundle == {
+        .Val(checked_bundle) -> {
+            // Preserve physical loader membership and order, including modules
+            // with no definitions. Expected diagnostics do not reject a bundle.
+            inputs :: loop module in checked_bundle.modules -> ~module.path
+            index := build_index(checked_bundle, facts)
+            cache := WorkspaceDeclarationCache.new()
+            semindex_attach_package_facts(&index, &cache, entry_str)
+            Ok((^index, ^diags, ^inputs))
+        }
+        .None -> Err(SemIndexError.Load{diagnostics: ^diags})
+    }
+}
