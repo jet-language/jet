@@ -1,217 +1,145 @@
 // D-DISPLAYDBG1 / I9: one Display/Debug formatter at every execution seam.
 // Adapters marshal carriers; they do not choose container or clean/told shapes.
+// Main ruling A (#4588): the impls live on the Jet Core collection types, never
+// on the Rust containers they currently lower to (HashSet, BTreeSet, VecDeque,
+// BinaryHeap stay a backend detail).
 use core.prelude.runtime.kernel_values.[JetDisplay, JetDebug]
 use core.mem.runtime.portable_core.[JetAbsent, JetOutcome]
-use std.collections.[HashSet, BTreeSet, BinaryHeap, VecDeque, BTreeMap]
-use std.convert.Infallible
 use jet_std.JetTaskFailure
 
 // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:5
-fn jet_text_list<I: IntoIterator<Item=String>>(values: I) -> String {
-    out := String.from("[")
-    first := true
-    loop value in values {
-        if !first { out.push_str(", ") }
-        out.push_str(&value)
-        first = false
-    }
-    out.push(']')
-    out
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:22
-fn jet_text_map<I: IntoIterator<Item=(String, String)>>(entries: I) -> String {
-    out := String.from("[")
-    first := true
-    for (key, value) in entries {
-        if !first { out.push_str(", ") }
-        out.push_str(&key)
-        out.push_str(": ")
-        out.push_str(&value)
-        first = false
-    }
-    if first { "[:]" } else {
-        out.push(']')
-        out
-    }
+fn jet_text_list(values: [String]) -> String Never! { "[{values.join(", ")}]" }
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:22. An empty map renders `[:]`.
+fn jet_text_map(entries: [(key: String, value: String)]) -> String Never! {
+    if entries.len() == 0 -> return "[:]"
+    parts :: loop entry in entries -> "{entry.key}: {entry.value}"
+    jet_text_list(parts)
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:45
-fn jet_text_debug_optional(payload: String?) -> String {
-    match payload {
-        Val(payload) -> {
-            out := String.with_capacity(payload.len() + 5)
-            out.push_str("Val(")
-            out.push_str(&payload)
-            out.push(')')
-            out
-        }
-        None -> "None"
+fn jet_text_debug_optional(payload: String?) -> String Never! {
+    text :: payload ?? return "None"
+    "Val({text})"
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:59-66 (`&T` forwarding):
+// no port. Jet has no reference value type; a read parameter already renders
+// through the referent's own impl.
+
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:70-90. Lists, fixed
+// lists and views render elements in order.
+impl View<T>.JetDisplay {
+    fn jet_display(self) -> String Never! { jet_text_list(loop value in self -> value.jet_display()) }
+}
+impl View<T>.JetDebug {
+    fn jet_debug(self) -> String Never! { jet_text_list(loop value in self -> value.jet_debug()) }
+}
+impl [T].JetDisplay {
+    fn jet_display(self) -> String Never! { jet_text_list(loop value in self -> value.jet_display()) }
+}
+impl [T].JetDebug {
+    fn jet_debug(self) -> String Never! { jet_text_list(loop value in self -> value.jet_debug()) }
+}
+impl [T#N].JetDisplay {
+    fn jet_display(self) -> String Never! { jet_text_list(loop value in self -> value.jet_display()) }
+}
+impl [T#N].JetDebug {
+    fn jet_debug(self) -> String Never! { jet_text_list(loop value in self -> value.jet_debug()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:103-117 (HashSet). A
+// Set has no element order, so the rendered elements are sorted as text.
+impl Set<T>.JetDisplay {
+    fn jet_display(self) -> String Never! {
+        parts :: loop value in self.to_list() -> value.jet_display()
+        sorted := ~parts
+        &sorted.sort()
+        jet_text_list(sorted)
     }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:59
-// Unsized views must render too; the reference layer never allocates a copy.
-impl<T: JetDisplay + ?Sized> JetDisplay for &T {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:60
-    fn jet_display(self) -> String { self.deref().jet_display() }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:64
-impl<T: JetDebug + ?Sized> JetDebug for &T {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:65
-    fn jet_debug(self) -> String { self.deref().jet_debug() }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:70
-impl<T: JetDisplay> JetDisplay for View<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:71
-    fn jet_display(self) -> String { jet_text_list(self.iter().map(fn(value) { value.jet_display() })) }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:75
-impl<T: JetDebug> JetDebug for View<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:76
-    fn jet_debug(self) -> String { jet_text_list(self.iter().map(fn(value) { value.jet_debug() })) }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:81
-impl<T: JetDisplay> JetDisplay for [T] {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:82
-    fn jet_display(self) -> String { self.as_slice().jet_display() }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:86
-impl<T: JetDebug> JetDebug for [T] {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:87
-    fn jet_debug(self) -> String { self.as_slice().jet_debug() }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:92
-impl<T: JetDisplay, const N: Int> JetDisplay for [T#N] {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:93
-    fn jet_display(self) -> String { self.as_slice().jet_display() }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:97
-impl<T: JetDebug, const N: Int> JetDebug for [T#N] {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:98
-    fn jet_debug(self) -> String { self.as_slice().jet_debug() }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:103
-impl<T: JetDisplay> JetDisplay for HashSet<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:104
-    fn jet_display(self) -> String {
-        parts := self.iter().map(fn(value) { value.jet_display() }).collect<[String]>()
-        parts.sort()
-        jet_text_list(^parts)
+impl Set<T>.JetDebug {
+    fn jet_debug(self) -> String Never! {
+        parts :: loop value in self.to_list() -> value.jet_debug()
+        sorted := ~parts
+        &sorted.sort()
+        jet_text_list(sorted)
     }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:110
-impl<T: JetDebug> JetDebug for HashSet<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:111
-    fn jet_debug(self) -> String {
-        parts := self.iter().map(fn(value) { value.jet_debug() }).collect<[String]>()
-        parts.sort()
-        jet_text_list(^parts)
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:118-127 (BTreeSet): ascending order.
+impl Rank<T>.JetDisplay {
+    fn jet_display(self) -> String Never! { jet_text_list(loop value in self.to_list() -> value.jet_display()) }
+}
+impl Rank<T>.JetDebug {
+    fn jet_debug(self) -> String Never! { jet_text_list(loop value in self.to_list() -> value.jet_debug()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:129-150 (BinaryHeap):
+// greatest first, i.e. the ascending sorted list reversed.
+impl PriorityQueue<T>.JetDisplay {
+    fn jet_display(self) -> String Never! {
+        sorted :: self.to_sorted_list()
+        jet_text_list(loop i in 0..<sorted.len() -> sorted[sorted.len() - 1 - i].jet_display())
     }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:118
-impl<T: Ord + JetDisplay> JetDisplay for BTreeSet<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:119
-    fn jet_display(self) -> String { jet_text_list(self.iter().map(fn(value) { value.jet_display() })) }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:123
-impl<T: Ord + JetDebug> JetDebug for BTreeSet<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:124
-    fn jet_debug(self) -> String { jet_text_list(self.iter().map(fn(value) { value.jet_debug() })) }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:129
-impl<T: Ord + Clone + JetDisplay> JetDisplay for BinaryHeap<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:130
-    fn jet_display(self) -> String {
-        jet_text_list(self.clone().into_sorted_vec().into_iter().rev().map(fn(value) { value.jet_display() }))
+impl PriorityQueue<T>.JetDebug {
+    fn jet_debug(self) -> String Never! {
+        sorted :: self.to_sorted_list()
+        jet_text_list(loop i in 0..<sorted.len() -> sorted[sorted.len() - 1 - i].jet_debug())
     }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:140
-impl<T: Ord + Clone + JetDebug> JetDebug for BinaryHeap<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:141
-    fn jet_debug(self) -> String {
-        jet_text_list(self.clone().into_sorted_vec().into_iter().rev().map(fn(value) { value.jet_debug() }))
-    }
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:152-161 (VecDeque): front to back.
+impl Queue<T>.JetDisplay {
+    fn jet_display(self) -> String Never! { jet_text_list(loop value in self.to_list() -> value.jet_display()) }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:152
-impl<T: JetDisplay> JetDisplay for VecDeque<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:153
-    fn jet_display(self) -> String { jet_text_list(self.iter().map(fn(value) { value.jet_display() })) }
+impl Queue<T>.JetDebug {
+    fn jet_debug(self) -> String Never! { jet_text_list(loop value in self.to_list() -> value.jet_debug()) }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:157
-impl<T: JetDebug> JetDebug for VecDeque<T> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:158
-    fn jet_debug(self) -> String { jet_text_list(self.iter().map(fn(value) { value.jet_debug() })) }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:163
-impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for BTreeMap<K, V> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:164
-    fn jet_display(self) -> String {
-        jet_text_map(self.iter().map(fn((key, value)) { (key.jet_display(), value.jet_display()) }))
-    }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:171
-impl<K: Ord + JetDebug, V: JetDebug> JetDebug for BTreeMap<K, V> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:172
-    fn jet_debug(self) -> String {
-        jet_text_map(self.iter().map(fn((key, value)) { (key.jet_debug(), value.jet_debug()) }))
-    }
-}
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:163-178 (BTreeMap) and
+// 201-210 (Infallible): no port. No Jet type lowers to BTreeMap ([K:V] is the
+// ordered JetMap) and Jet has no uninhabited Infallible carrier.
+
 // D-FAIL-CARRIER1=A: only JetAbsent's rail is clean, all other errors are told.
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:182
-impl JetDisplay for JetAbsent {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:183
-    fn jet_display(self) -> String { "null" }
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:187
-    fn jet_report_is_clean() -> Bool { true }
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:182-199
+impl JetAbsent.JetDisplay {
+    fn jet_display(self) -> String Never! { "null" }
+    fn jet_report_is_clean() -> Bool Never! { true }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:191
-impl JetDebug for JetAbsent {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:192
-    fn jet_debug(self) -> String { "null" }
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:196
-    fn jet_report_is_clean() -> Bool { true }
+impl JetAbsent.JetDebug {
+    fn jet_debug(self) -> String Never! { "null" }
+    fn jet_report_is_clean() -> Bool Never! { true }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:201
-impl JetDisplay for Infallible {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:202
-    fn jet_display(self) -> String { match self {} }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:206
-impl JetDebug for Infallible {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:207
-    fn jet_debug(self) -> String { match self {} }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:212
-impl JetDisplay for JetTaskFailure {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:213
-    fn jet_display(self) -> String {
-        match self { .Cancelled -> "Cancelled", .DeadlineBlown -> "DeadlineBlown", .Panicked(reason) -> "Panicked({reason})" }
-    }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:221
-impl JetDebug for JetTaskFailure {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:222
-    fn jet_debug(self) -> String {
-        match self { .Cancelled -> "Cancelled", .DeadlineBlown -> "DeadlineBlown", .Panicked(reason) -> "Panicked({reason:?})" }
-    }
-}
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:231
-impl<T: JetDisplay, E: JetDisplay> JetDisplay for JetOutcome<T, E> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:232
-    fn jet_display(self) -> String {
-        clean :: E.jet_report_is_clean()
-        match self {
-            Ok(value) -> if clean { value.jet_display() } else { "Ok({value.jet_display()})" }
-            Err(error) -> if clean { error.jet_display() } else { "Err({error.jet_display()})" }
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:212-229
+impl JetTaskFailure.JetDisplay {
+    fn jet_display(self) -> String Never! {
+        if self == {
+            .Cancelled -> "Cancelled"
+            .DeadlineBlown -> "DeadlineBlown"
+            .Panicked(reason) -> "Panicked({reason})"
         }
     }
 }
-// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:242
-impl<T: JetDebug, E: JetDebug> JetDebug for JetOutcome<T, E> {
-    // Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:243
-    fn jet_debug(self) -> String {
+impl JetTaskFailure.JetDebug {
+    fn jet_debug(self) -> String Never! {
+        if self == {
+            .Cancelled -> "Cancelled"
+            .DeadlineBlown -> "DeadlineBlown"
+            .Panicked(reason) -> "Panicked({reason:Debug})"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TextValues.rs:231-252. A clean error
+// rail renders the bare payload (Debug: Val(..)/None); a told rail names Ok/Err.
+impl JetOutcome<T, E>.JetDisplay {
+    fn jet_display(self) -> String Never! {
         clean :: E.jet_report_is_clean()
-        match self {
-            Ok(value) -> if clean { jet_text_debug_optional(Val(value.jet_debug())) } else { "Ok({value.jet_debug()})" }
-            Err(error) -> if clean { jet_text_debug_optional(None) } else { "Err({error.jet_debug()})" }
+        if self == {
+            .Ok(value) -> if clean -> value.jet_display() else -> "Ok({value.jet_display()})"
+            .Err(error) -> if clean -> error.jet_display() else -> "Err({error.jet_display()})"
+        }
+    }
+}
+impl JetOutcome<T, E>.JetDebug {
+    fn jet_debug(self) -> String Never! {
+        clean :: E.jet_report_is_clean()
+        if self == {
+            .Ok(value) -> if clean -> jet_text_debug_optional(Val(value.jet_debug())) else -> "Ok({value.jet_debug()})"
+            .Err(error) -> if clean -> jet_text_debug_optional(None) else -> "Err({error.jet_debug()})"
         }
     }
 }
