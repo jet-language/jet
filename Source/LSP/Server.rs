@@ -2800,7 +2800,7 @@ fn signature_change_response(
 
 fn dyn_text(value: &Dyn) -> Option<&str> {
     match value {
-        Dyn::Text(value) | Dyn::TypedText(value) => Some(value),
+        Dyn::Text(value) => Some(value),
         _ => None,
     }
 }

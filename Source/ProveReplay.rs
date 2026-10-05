@@ -2020,7 +2020,7 @@ fn canonical_json_value(value: &Dyn) -> Result<String, String> {
         Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),
         Dyn::Float(_) => Err("JSON contains a non-finite number".into()),
         Dyn::Number(value) => Ok(value.clone()),
-        Dyn::TypedText(value) | Dyn::Text(value) => Ok(json_str(value)),
+        Dyn::Text(value) => Ok(json_str(value)),
         Dyn::Bytes(values) => Ok(json_str(&Dyn::bytes_text(values))),
         Dyn::DateTime(value) => Ok(json_str(&value.to_rfc3339())),
         Dyn::Array(values) => {

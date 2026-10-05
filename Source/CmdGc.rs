@@ -440,7 +440,7 @@ fn string_field<'a>(
     name: &str,
 ) -> Result<&'a str, TraceError> {
     match field(object, name)? {
-        Dyn::Text(value) | Dyn::TypedText(value) => Ok(value),
+        Dyn::Text(value) => Ok(value),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not text"),

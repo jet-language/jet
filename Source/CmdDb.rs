@@ -1691,8 +1691,7 @@ fn value_kind(value: &Value) -> Option<ColumnKind> {
             .or_else(|_| number.parse::<f64>().map(|_| ColumnKind::Float))
             .ok()
             .or(Some(ColumnKind::String)),
-        Value::TypedText(_)
-        | Value::Text(_)
+        Value::Text(_)
         | Value::Bytes(_)
         | Value::Array(_)
         | Value::Object(_) => Some(ColumnKind::String),
@@ -1779,7 +1778,7 @@ fn value_text(value: &Value) -> String {
         Value::Int(value) => value.to_string(),
         Value::Float(value) => render_float(*value),
         Value::Number(value) => value.clone(),
-        Value::TypedText(value) | Value::Text(value) => value.clone(),
+        Value::Text(value) => value.clone(),
         Value::Bytes(values) => format!(
             "[{}]",
             values
@@ -1810,7 +1809,7 @@ fn render_json_value(value: &Value) -> String {
         Value::Int(value) => value.to_string(),
         Value::Float(value) => render_float(*value),
         Value::Number(value) => value.clone(),
-        Value::TypedText(value) | Value::Text(value) => json_str(value),
+        Value::Text(value) => json_str(value),
         Value::Bytes(values) => format!(
             "[{}]",
             values.iter().map(ToString::to_string).collect::<Vec<_>>().join(",")
@@ -2499,7 +2498,7 @@ fn status_data_value(value: &Value) -> StatusValue {
             .parse::<i128>()
             .map(StatusValue::Integer)
             .unwrap_or_else(|_| StatusValue::Float(value.clone())),
-        Value::TypedText(value) | Value::Text(value) => StatusValue::from(value.as_str()),
+        Value::Text(value) => StatusValue::from(value.as_str()),
         Value::Bytes(values) => {
             StatusValue::array(values.iter().map(|value| StatusValue::from(*value as i128)))
         }

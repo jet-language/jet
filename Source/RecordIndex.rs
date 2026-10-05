@@ -1371,7 +1371,7 @@ fn field<'a>(fields: &'a [(String, Dyn)], name: &str) -> Option<&'a Dyn> {
 
 fn string_field(fields: &[(String, Dyn)], name: &str) -> Result<String, String> {
     match field(fields, name) {
-        Some(Dyn::Text(value) | Dyn::TypedText(value)) => Ok(value.clone()),
+        Some(Dyn::Text(value)) => Ok(value.clone()),
         Some(_) => Err(format!("record index field `{name}` must be a string")),
         None => Err(format!("record index is missing `{name}`")),
     }

@@ -447,7 +447,7 @@ fn object_keys(object: &[(String, Dyn)]) -> Vec<String> {
 
 fn take_string(object: &mut Vec<(String, Dyn)>, key: &str) -> String {
     match take_value(object, key) {
-        Some(Dyn::Text(value) | Dyn::TypedText(value)) => value,
+        Some(Dyn::Text(value)) => value,
         Some(_) => fail(&format!("`{key}` must be text")),
         None => fail(&format!("try plan is missing `{key}`")),
     }
@@ -455,7 +455,7 @@ fn take_string(object: &mut Vec<(String, Dyn)>, key: &str) -> String {
 
 fn take_string_opt(object: &mut Vec<(String, Dyn)>, key: &str) -> Option<String> {
     match take_value(object, key) {
-        Some(Dyn::Text(value) | Dyn::TypedText(value)) => Some(value),
+        Some(Dyn::Text(value)) => Some(value),
         Some(_) => fail(&format!("`{key}` must be text")),
         None => None,
     }

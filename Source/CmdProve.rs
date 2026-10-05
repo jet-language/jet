@@ -854,7 +854,7 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
     }
     let parse_u64 = |value: Option<&Dyn>| match value {
         Some(Dyn::Int(value)) if *value >= 0 => u64::try_from(*value).ok(),
-        Some(Dyn::Text(value)) | Some(Dyn::TypedText(value)) => value.parse().ok(),
+        Some(Dyn::Text(value)) => value.parse().ok(),
         _ => None,
     };
     let seed = parse_u64(field("seed"))?;

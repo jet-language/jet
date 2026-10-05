@@ -2157,7 +2157,7 @@ fn read_compile_phases(
             "explain-build record is not an object",
         ));
     };
-    let Some((_, Dyn::Text(schema) | Dyn::TypedText(schema))) =
+    let Some((_, Dyn::Text(schema))) =
         fields.iter().find(|(name, _)| name == "schema")
     else {
         return Err(ProviderFailure::malformed(
@@ -2171,7 +2171,7 @@ fn read_compile_phases(
     }
     if !matches!(
         fields.iter().find(|(name, _)| name == "program"),
-        Some((_, Dyn::Text(program) | Dyn::TypedText(program))) if !program.is_empty()
+        Some((_, Dyn::Text(program))) if !program.is_empty()
     ) {
         return Err(ProviderFailure::malformed(
             "explain-build record has no program",
@@ -2189,7 +2189,7 @@ fn read_compile_phases(
                 "explain-build node is not an object",
             ));
         };
-        let Some((_, Dyn::Text(kind) | Dyn::TypedText(kind))) =
+        let Some((_, Dyn::Text(kind))) =
             node.iter().find(|(name, _)| name == "kind")
         else {
             return Err(ProviderFailure::malformed(
@@ -2208,7 +2208,7 @@ fn read_compile_phases(
         for field in ["key", "subject", "why_ran"] {
             if !matches!(
                 node.iter().find(|(name, _)| name == field),
-                Some((_, Dyn::Text(value) | Dyn::TypedText(value))) if !value.is_empty()
+                Some((_, Dyn::Text(value))) if !value.is_empty()
             ) {
                 return Err(ProviderFailure::malformed(format!(
                     "explain-build node has no {field}"
@@ -2222,7 +2222,7 @@ fn read_compile_phases(
         };
         if inputs
             .iter()
-            .any(|value| !matches!(value, Dyn::Text(_) | Dyn::TypedText(_)))
+            .any(|value| !matches!(value, Dyn::Text(_)))
         {
             return Err(ProviderFailure::malformed(
                 "explain-build node inputs are not strings",

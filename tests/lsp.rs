@@ -179,7 +179,7 @@ fn json_values_equal(left: &Dyn, right: &Dyn) -> bool {
         (Dyn::Int(left), Dyn::Int(right)) => left == right,
         (Dyn::Float(left), Dyn::Float(right)) => left == right,
         (Dyn::Number(left), Dyn::Number(right)) => left == right,
-        (Dyn::Text(left) | Dyn::TypedText(left), Dyn::Text(right) | Dyn::TypedText(right)) => {
+        (Dyn::Text(left), Dyn::Text(right)) => {
             left == right
         }
         (Dyn::Bytes(left), Dyn::Bytes(right)) => left == right,
