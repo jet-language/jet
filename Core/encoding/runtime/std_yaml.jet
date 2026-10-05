@@ -437,7 +437,7 @@ fn strip_comment(s: String) -> String {
             '\'' if !in_d -> in_s = !in_s
             '"' if !in_s -> in_d = !in_d
             '#' if !in_s && !in_d && (i == 0 || chars[i - 1] == ' ' || chars[i - 1] == '\t') -> {
-                kept :: chars[..i].iter().collect<String>()
+                kept :: chars[0..<i].iter().collect<String>()
                 return kept.trim_end().to_string()
             }
             _ -> {}
@@ -475,7 +475,7 @@ fn top_level_colon(s: String) -> USize? {
 fn split_key(s: String) -> (String, String)? {
     idx :: top_level_colon(s)?
     chars :: s.chars().collect<[Char]>()
-    key_raw :: chars[..idx].iter().collect<String>()
+    key_raw :: chars[0..<idx].iter().collect<String>()
     rest_start :: idx.checked_add(1)?
     rest :: chars[rest_start..].iter().collect<String>()
     trimmed := key_raw.trim() // #4303

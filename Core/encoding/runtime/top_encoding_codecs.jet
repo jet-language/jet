@@ -40,8 +40,8 @@ fn jet_std_base32hex_decode(text: &String) -> [U8] Err! {
     canonical := String.with_capacity(text.len())
     for ch in text.chars() {
         mapped :: match ch {
-            '0'..='9' -> STANDARD[Int{U8{ch} - U8{'0'}}]
-            'A'..='V' -> STANDARD[Int{U8{ch} - U8{'A'} + U8{10}}]
+            '0'..'9' -> STANDARD[Int{U8{ch} - U8{'0'}}]
+            'A'..'V' -> STANDARD[Int{U8{ch} - U8{'A'} + U8{10}}]
             '=' -> U8{'='}
             _ -> return Err("invalid Base32hex character")
         }
@@ -350,7 +350,7 @@ fn jet_uuid_bytes(s: &String) -> [U8; 16] Err! {
     }
     bytes := [U8{0}; 16]
     for i in 0..16 {
-        bytes[i] = U8.from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(_ ->
+        bytes[i] = U8.from_str_radix(&hex[i * 2..<i * 2 + 2], 16).map_err(_ ->
             format("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)"))?
     }
     bytes
@@ -371,7 +371,7 @@ fn jet_uuid_sha1(data: &[U8]) -> [U8; 20] {
         for i in 0..16 {
             w[i] = U32.from_be_bytes([chunk[i * 4], chunk[i * 4 + 1], chunk[i * 4 + 2], chunk[i * 4 + 3]])
         }
-        for i in 16..80 { w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1) }
+        for i in 16..<80 { w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1) }
         a := h[0]
         b := h[1]
         c := h[2]
@@ -379,9 +379,9 @@ fn jet_uuid_sha1(data: &[U8]) -> [U8; 20] {
         e := h[4]
         for (i, word) in w.iter().enumerate() {
             (f, k) :: match i {
-                0..=19 -> ((b & c) | ((!b) & d), U32{0x5A827999})
-                20..=39 -> (b ^ c ^ d, U32{0x6ED9EBA1})
-                40..=59 -> ((b & c) | (b & d) | (c & d), U32{0x8F1BBCDC})
+                0..19 -> ((b & c) | ((!b) & d), U32{0x5A827999})
+                20..39 -> (b ^ c ^ d, U32{0x6ED9EBA1})
+                40..59 -> ((b & c) | (b & d) | (c & d), U32{0x8F1BBCDC})
                 _ -> (b ^ c ^ d, U32{0xCA62C1D6})
             }
             temp :: a.rotate_left(5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(word)
@@ -398,7 +398,7 @@ fn jet_uuid_sha1(data: &[U8]) -> [U8; 20] {
         h[4] = h[4].wrapping_add(e)
     }
     out := [U8{0}; 20]
-    for (i, word) in h.iter().enumerate() { out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes()) }
+    for (i, word) in h.iter().enumerate() { out[i * 4..<i * 4 + 4].copy_from_slice(&word.to_be_bytes()) }
     out
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:661
@@ -408,7 +408,7 @@ fn jet_std_uuid_v5(namespace: &String, name: &String) -> String Err! {
     input.extend_from_slice(name.as_bytes())
     digest :: jet_uuid_sha1(&input)
     bytes := [U8{0}; 16]
-    bytes.copy_from_slice(&digest[..16])
+    bytes.copy_from_slice(&digest[0..<16])
     bytes[6] = (bytes[6] & U8{0x0f}) | U8{0x50}
     bytes[8] = (bytes[8] & U8{0x3f}) | U8{0x80}
     jet_uuid_format(&bytes)

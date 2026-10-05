@@ -305,7 +305,7 @@ impl Parser {
             Val('[') -> self.array(depth)
             Val('{') -> self.inline_table(depth)
             Val('t' | 'f') -> self.boolean()
-            Val('+' | '-' | '0'..='9' | 'i' | 'n') -> self.number_or_datetime()
+            Val('+' | '-' | '0'..'9' | 'i' | 'n') -> self.number_or_datetime()
             Val(c) -> Err(self.err(errors.toml_invalid_value_start(c)))
             None -> Err(self.err(errors.TOML_EXPECTED_VALUE))
         }
@@ -559,7 +559,7 @@ impl Parser {
         is_float := false
         loop self.peek() == .Val(c) {
             match c {
-                '0'..='9' | '_' -> {
+                '0'..'9' | '_' -> {
                     tok.push(c)
                     self.pos += 1
                 }

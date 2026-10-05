@@ -150,7 +150,7 @@ fn jet_encoding_file_read(reader: &JetFileReader, buf: &[U8]) -> Int io.Error! {
     if jet_encoding_hostile_io_plan() is not Val(plan) {
         cap :: buf.len().min(JET_ENCODING_IO_CHUNK)
         // GATE #4565: kernel primitive — bounded buffered descriptor read.
-        return #Unsafe("reader owns the descriptor and borrows the bounded output span") { reader.inner.read(&buf[..cap]) }
+        return #Unsafe("reader owns the descriptor and borrows the bounded output span") { reader.inner.read(&buf[0..<cap]) }
     }
     jet_encoding_hostile_io_with(state -> {
         state.stats.read_calls += U64{1}
@@ -161,7 +161,7 @@ fn jet_encoding_file_read(reader: &JetFileReader, buf: &[U8]) -> Int io.Error! {
         want :: state.next_read_cap(plan, buf.len())
         // GATE #4565: kernel primitive — unbuffered descriptor read for hostile scheduling.
         count :: #Unsafe("read the owned descriptor into the scheduled borrowed output span") {
-            reader.inner.get_mut().read(&buf[..want])?
+            reader.inner.get_mut().read(&buf[0..<want])?
         }
         if count == 0 -> return 0
         state.read_total += U64{count}
@@ -192,7 +192,7 @@ fn jet_encoding_file_write_all(writer: &JetFileWriter, bytes: &[U8]) -> io.Error
         while offset < bytes.len() {
             chunk :: state.next_write_chunk(plan, bytes.len() - offset)
             end :: offset + chunk
-            slice :: &bytes[offset..end]
+            slice :: &bytes[offset..<end]
             if plan.fail_write_after == .Val(limit) {
                 next :: state.write_total.saturating_add(U64{slice.len()})
                 if next > limit {
@@ -200,7 +200,7 @@ fn jet_encoding_file_write_all(writer: &JetFileWriter, bytes: &[U8]) -> io.Error
                     if allowed == 0 -> return Err(jet_encoding_hostile_io_fail_io())
                     // GATE #4565: kernel primitive — partial native descriptor write.
                     #Unsafe("write only the allowed prefix to the owned unbuffered descriptor") {
-                        writer.inner.get_mut().write_all(&slice[..allowed])?
+                        writer.inner.get_mut().write_all(&slice[0..<allowed])?
                     }
                     state.write_total += U64{allowed}
                     state.stats.bytes_written += U64{allowed}

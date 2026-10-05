@@ -399,10 +399,10 @@ impl CSVReader {
         self.utf8[0] = first
         self.utf8_len = 1
         expected :: if first == {
-            0x00..=0x7f -> 1
-            0xc2..=0xdf -> 2
-            0xe0..=0xef -> 3
-            0xf0..=0xf4 -> 4
+            0x00..0x7f -> 1
+            0xc2..0xdf -> 2
+            0xe0..0xef -> 3
+            0xf0..0xf4 -> 4
             else -> return Err(jet_csv_error(.Syntax, self.offset.saturating_sub(1), self.line, self.column, jet_csv_path(self.record_index, field), "CSV input is not valid UTF-8"))
         }
         loop self.utf8_len < expected {
@@ -1005,7 +1005,7 @@ impl CBORReader {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:3458
     fn arg(self: &CBORReader, add: U8, start: I64) -> U64? EncodingError! {
         need :: if add == {
-            0..=23 -> return Ok(Val(U64.from_u8(add)))
+            0..23 -> return Ok(Val(U64.from_u8(add)))
             24 -> 1
             25 -> 2
             26 -> 4

@@ -147,7 +147,7 @@ fn jet_json_positive_big_cmp(left: &JetBigInt, right: &JetBigInt) -> cmp.Orderin
 fn jet_json_jcs_shortest(value: F64) -> String {
     shortest :: format!("{:?}", value)
     mantissa_end :: shortest.find('e').unwrap_or(shortest.len())
-    index :: shortest[..mantissa_end].rfind(fn(ch: Char) { ch.is_ascii_digit() }) ?? return shortest
+    index :: shortest[0..<mantissa_end].rfind(fn(ch: Char) { ch.is_ascii_digit() }) ?? return shortest
     digit :: shortest.as_bytes()[index] - U8{48}
     candidates := [(shortest.clone(), digit)]
     for replacement in [digit.checked_sub(1), digit.checked_add(1).filter(fn(next) { next < 10 })].into_iter().flatten() {
@@ -178,7 +178,7 @@ fn jet_json_jcs_number(value: F64) -> String {
     decimal :: mantissa.find('.').unwrap_or(mantissa.len()) as I32
     digits := mantissa.bytes().filter(fn(byte) { byte != U8{46} }).collect<[U8]>()
     leading :: digits.iter().take_while(fn(byte) { byte == U8{48} }).count()
-    _ :: digits.drain(..leading)
+    _ :: digits.drain(0..<leading)
     while digits.len() > 1 && digits.last() == Val(U8{48}) { _ :: digits.pop() }
     n :: decimal + exponent - leading as I32
     out := String.new()
@@ -189,7 +189,7 @@ fn jet_json_jcs_number(value: F64) -> String {
             out.extend(std.iter.repeat_n('0', n as USize - digits.len()))
         } else {
             split :: n as USize
-            out.extend(digits[..split].iter().map(fn(byte) { byte as Char }))
+            out.extend(digits[0..<split].iter().map(fn(byte) { byte as Char }))
             out.push('.')
             out.extend(digits[split..].iter().map(fn(byte) { byte as Char }))
         }
@@ -522,12 +522,12 @@ impl JSONReader {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:772
     fn read_hex4(self: &JSONReader) -> U16 EncodingError! {
         value := U16{0}
-        for _ in 0..4 {
+        for _ in 0..<4 {
             byte :: self.take()? ?? return Err(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "incomplete Unicode escape"))
             digit :: match byte {
-                48..=57 -> byte - 48,
-                97..=102 -> byte - 97 + 10,
-                65..=70 -> byte - 65 + 10,
+                48..57 -> byte - 48,
+                97..102 -> byte - 97 + 10,
+                65..70 -> byte - 65 + 10,
                 _ -> return Err(jet_encoding_error(.Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "Unicode escape contains a non-hex digit")),
             }
             value = value * 16 + digit as U16
@@ -543,7 +543,7 @@ impl JSONReader {
                 byte :: self.take()? ?? return Err(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "unterminated JSON string"))
                 match byte {
                     34 -> break,
-                    0..=31 -> return Err(jet_encoding_error(.Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "unescaped control byte in JSON string")),
+                    0..31 -> return Err(jet_encoding_error(.Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "unescaped control byte in JSON string")),
                     92 -> {
                         escaped :: self.take()? ?? return Err(jet_encoding_error(.Truncated, self.offset, self.line, self.column, "incomplete JSON escape"))
                         match escaped {
@@ -711,7 +711,7 @@ impl JSONReader {
                 self.frames.push(.ObjectKeyOrEnd(true))
                 Ok(.ObjectStart)
             },
-            45 | 48..=57 -> self.read_number(first),
+            45 | 48..57 -> self.read_number(first),
             _ -> Err(jet_encoding_error(.Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), format!("unexpected byte {:?} while reading a JSON value", first as Char))),
         }
     }
