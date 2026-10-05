@@ -262,6 +262,28 @@ fn map_word_keys_and_values_are_never_exact_int_pointers() {
 }
 
 #[test]
+fn map_float_values_are_never_exact_int_pointers() {
+    assert!(jet_jit::cranelift_host_supported(), "map Float values require the resident JIT");
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/map_float_values.jet");
+    let shown = file.to_string_lossy();
+    jet_jit::reset_jit_trace_for_test();
+    match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(exit_code, 0, "{stderr}");
+            assert_eq!(
+                stdout,
+                "index 16.0 add 1000.125\nliteral 2.5 3.75\ncopy 3 6.5 source 2\n\
+                 filter 1 1000.125\na 16.0\nb 1000.125\n"
+            );
+        }
+        RunOutcome::Problems(diags) => panic!("map_float_values: {diags:?}"),
+    }
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test());
+}
+
+#[test]
 fn struct_call_word_wrong_expectation_is_an_assertion_failure() {
     assert!(jet_jit::cranelift_host_supported(), "#4383 requires the resident JIT");
     let file = Path::new(env!("CARGO_MANIFEST_DIR"))
