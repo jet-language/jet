@@ -12028,6 +12028,14 @@ pub(crate) fn jit_error(rt: &JitRuntime, handle: i64) -> Option<jet_foundation::
             RuntimeValueKind::Record | RuntimeValueKind::Enum => {
                 rt.heap.record_set_record(record, index, raw)
             }
+            // A 64-bit fixed-width word uses every bit pattern: never an
+            // exact-integer pointer (#4576).
+            RuntimeValueKind::Int
+                if descriptor.integer_width.is_some_and(|width| width.bits == 64) =>
+            {
+                let unsigned = descriptor.integer_width.is_some_and(|width| !width.signed);
+                rt.heap.record_set_word(record, index, raw, unsigned)
+            }
             _ => rt.heap.record_set_int(record, index, raw),
         };
         written.ok_or_else(|| {

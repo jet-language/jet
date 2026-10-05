@@ -210,6 +210,28 @@ fn struct_call_word_preserves_bits_on_every_native_tier() {
 }
 
 #[test]
+fn map_word_keys_and_values_are_never_exact_int_pointers() {
+    assert!(jet_jit::cranelift_host_supported(), "#4576 requires the resident JIT");
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/map_word_cells.jet");
+    let shown = file.to_string_lossy();
+    jet_jit::reset_jit_trace_for_test();
+    match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(exit_code, 0, "{stderr}");
+            assert_eq!(
+                stdout,
+                "absent true\npresent 1 2\n4611686018427387912 2\n5846639821254430312 1\n\
+                 18446744073709551615 3\nsigned 4\nvalue 5846639821254430312\nliteral\n"
+            );
+        }
+        RunOutcome::Problems(diags) => panic!("map_word_cells: {diags:?}"),
+    }
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test());
+}
+
+#[test]
 fn struct_call_word_wrong_expectation_is_an_assertion_failure() {
     assert!(jet_jit::cranelift_host_supported(), "#4383 requires the resident JIT");
     let file = Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -237,9 +237,12 @@ pub struct JetArena {
     /// Roots for spilled exact words stored in erased i64 carriers. The
     /// arena owns these until reset; atomic cells clone before publication.
     exact_roots: Vec<jet_foundation::Numeric::JetInt>,
-    /// Cell kind per list handle, chosen from the checked element type when
-    /// the list is created; handles past the end are `IntCells::Exact`.
+    /// Cell kind per handle, chosen from the checked type when the carrier is
+    /// created or first used: a list's elements, or a map's keys. Handles past
+    /// the end are `IntCells::Exact`.
     int_cells: Vec<IntCells>,
+    /// Map handles whose values are fixed-width 64-bit words (#4576).
+    map_word_values: Vec<bool>,
 }
 
 impl Default for JetArena {
@@ -248,6 +251,7 @@ impl Default for JetArena {
             values: Vec::new(),
             exact_roots: Vec::new(),
             int_cells: Vec::new(),
+            map_word_values: Vec::new(),
         }
     }
 }
@@ -384,6 +388,7 @@ impl JetArena {
         self.values.clear();
         self.exact_roots.clear();
         self.int_cells.clear();
+        self.map_word_values.clear();
     }
 
     /// Indices of `String` values allocated during JIT lowering (baked into code as handles).
@@ -546,9 +551,12 @@ impl JetArena {
 
     pub fn map_insert(&mut self, map: i64, key_id: i64, value: i64) -> Option<()> {
         let key = self.clone_string(key_id)?;
+        let exact_values = !self.map_word_values(map);
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
-                Self::retain_exact_raw(&mut self.exact_roots, value);
+                if exact_values {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                }
                 entries.insert(JetMapKey::String(key), (key_id, value));
                 Some(())
             }
@@ -557,9 +565,12 @@ impl JetArena {
     }
 
     pub fn map_insert_bool(&mut self, map: i64, key: bool, value: i64) -> Option<()> {
+        let exact_values = !self.map_word_values(map);
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
-                Self::retain_exact_raw(&mut self.exact_roots, value);
+                if exact_values {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                }
                 entries.insert(JetMapKey::Bool(key), (i64::from(key), value));
                 Some(())
             }
@@ -587,12 +598,62 @@ impl JetArena {
         }
     }
 
+    /// Key `map` by fixed-width 64-bit words (`I64`, `U64`): its Int-family
+    /// routes then key raw words directly, never decoding or retaining them
+    /// as exact-integer pointers, and `U64` keys order unsigned (#4576).
+    pub fn set_map_word_keys(&mut self, map: i64, unsigned: bool) {
+        self.set_int_cells(map, IntCells::Word { unsigned });
+    }
+
+    /// Store `map`'s values as fixed-width 64-bit words, never retained as
+    /// exact-integer pointers (#4576).
+    pub fn set_map_word_values(&mut self, map: i64) {
+        let index = map as usize;
+        if self.map_word_values.len() <= index {
+            self.map_word_values.resize(index + 1, false);
+        }
+        self.map_word_values[index] = true;
+    }
+
+    fn map_word_values(&self, map: i64) -> bool {
+        usize::try_from(map)
+            .ok()
+            .and_then(|index| self.map_word_values.get(index))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Give map `target` the cell kinds of `source`: a map's key and value
+    /// cells, or a key list's cells as the map's key cells.
+    pub fn copy_map_cells(&mut self, source: i64, target: i64) {
+        let cells = self.int_cells(source);
+        self.set_int_cells(target, cells);
+        if self.map_word_values(source) {
+            self.set_map_word_values(target);
+        }
+    }
+
+    fn int_map_key(&self, map: i64, raw: i64) -> JetMapKey {
+        match self.int_cells(map) {
+            IntCells::Exact => exact_int_map_key(raw),
+            IntCells::Word { unsigned: false } => JetMapKey::Int(raw),
+            IntCells::Word { unsigned: true } => JetMapKey::UInt(raw as u64),
+        }
+    }
+
     pub fn map_insert_int(&mut self, map: i64, key: i64, value: i64) -> Option<()> {
+        let exact_keys = self.int_cells(map) == IntCells::Exact;
+        let exact_values = !self.map_word_values(map);
+        let map_key = self.int_map_key(map, key);
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
-                Self::retain_exact_raw(&mut self.exact_roots, key);
-                Self::retain_exact_raw(&mut self.exact_roots, value);
-                entries.insert(exact_int_map_key(key), (key, value));
+                if exact_keys {
+                    Self::retain_exact_raw(&mut self.exact_roots, key);
+                }
+                if exact_values {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                }
+                entries.insert(map_key, (key, value));
                 Some(())
             }
             _ => None,
@@ -602,16 +663,17 @@ impl JetArena {
     pub fn map_get_int(&self, map: i64, key: i64) -> Option<i64> {
         match self.values.get(map as usize) {
             Some(JetVal::Map(entries)) => entries
-                .get(&exact_int_map_key(key))
+                .get(&self.int_map_key(map, key))
                 .map(|(_, value)| *value),
             _ => None,
         }
     }
 
     pub fn map_remove_int(&mut self, map: i64, key: i64) -> Option<i64> {
+        let map_key = self.int_map_key(map, key);
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => entries
-                .remove(&exact_int_map_key(key))
+                .remove(&map_key)
                 .map(|(_, value)| value),
             _ => None,
         }
@@ -659,9 +721,12 @@ impl JetArena {
 
     pub fn map_insert_composite(&mut self, map: i64, key_id: i64, value: i64) -> Option<()> {
         let key = self.composite_key(key_id)?;
+        let exact_values = !self.map_word_values(map);
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
-                Self::retain_exact_raw(&mut self.exact_roots, value);
+                if exact_values {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
+                }
                 entries.insert(key, (key_id, value));
                 Some(())
             }
