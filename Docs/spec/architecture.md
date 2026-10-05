@@ -248,6 +248,16 @@ and #816 is the Jet-built compiler full-suite closeout. The policy-family
 homes #808–#813 and the boundary inventory #218 cannot substitute for those
 bootstrap and fixed-point proofs.
 
+The fixed-point output includes both the emitted source and its embedded
+compiler MIR image. [`BuildIdentity`](../../Compiler/Bootstrap/BuildIdentity.rs)
+separates `JET_COMPILER_SOURCE_ID` (canonical compiler source bytes, independent
+of the backend build profile) from `JET_COMPILER_BUILD_ID` (source bytes plus
+build facts and, for generated compiler binaries, generated inputs). The
+private HostFacts supplied to JetDriver use the source identity so changing
+the compiler binary's optimization profile does not change compiler-authored
+MIR. Build receipts and physical artifact/cache identities retain the build
+identity; source identity is not proof that two compiler binaries are identical.
+
 Behavioral parity between any two compiler binaries (#670) is a separate,
 reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-diff.mjs)
 runs the golden, UI and differential corpora through a pinned `--reference`

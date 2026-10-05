@@ -2885,17 +2885,11 @@ fn main() {{
     fs::write(manifest_dir.join(".bootstrap-artifact-id"), &identity)
         .expect("generated compiler identity receipt must be writable");
     println!("cargo:rustc-env=JET_COMPILER_BUILD_ID={{identity}}");
-    // The identity of the compiler *sources* (the root build.rs formula, no
-    // generated extras): every stage built from one source tree reports it as
-    // its compiler identity to the programs it compiles, so the compiler image
-    // a self-compile archives does not change from stage to stage.
-    let source_identity = BuildIdentity::semantic_id(
-        root,
-        BuildIdentity::COMPILER_DOMAIN,
-        BuildIdentity::COMPILER_SOURCES,
-        &facts,
-    )
-    .expect("generated compiler source identity must be computable");
+    // Compiler-authored MIR records the source identity, not this binary's
+    // backend profile, rustc flags, or generated extras. BUILD_ID above keeps
+    // all of those facts for artifact receipts and build/cache invalidation.
+    let source_identity = BuildIdentity::compiler_source_id(root)
+        .expect("generated compiler source identity must be computable");
     println!("cargo:rustc-env=JET_COMPILER_SOURCE_ID={{source_identity}}");
     println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
     println!("cargo:rustc-cfg=jet_bootstrap_compiler_artifact");
