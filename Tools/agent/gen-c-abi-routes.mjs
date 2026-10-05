@@ -653,7 +653,8 @@ const contextRs = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/Context.r
 const predicatesRs = readFileSync(`${repo}/crates/jet-foundation/src/Syntax/predicates.rs`, "utf8");
 const mirRustRs = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/MIRRust.rs`, "utf8");
 // MIRRust.rs `rust_apply_type`'s own argument-free spellings
-// (`if name.name == X { return <root path> }`), checked before every table.
+// (`if name.name == X { return <root path> }`), checked before every table
+// against the name as written (a canonical Core name never matches them).
 const explicitTable = new Map();
 for (const m of fnBody(mirRustRs, "rust_apply_type").matchAll(/if (?:args\.is_empty\(\) && )?name\.name == ([A-Za-z_:"]+)\s*\{\s*return (?:format!\(\s*"\{\}([A-Za-z_:]+)",\s*self\.config\.root_prefix\s*\)|self\.rust_root_prelude_type\("([A-Za-z_]+)",\s*args\))/g)) {
   const token = m[1];
@@ -694,7 +695,7 @@ const isSourceOwned = (name) => sourceOwned.some((rule) => name.startsWith(rule.
 const nativeType = (name) => {
   const canonical = name.startsWith("<corelib>/");
   const native = canonical && !isSourceOwned(name) ? coreLeaf(name) : name;
-  if (explicitTable.has(native)) return explicitTable.get(native);
+  if (explicitTable.has(name)) return explicitTable.get(name);
   const fileName = /^<corelib>\/Core\/(files|term)::Core\/\1\/\1\.jet::/.test(name) ? coreLeaf(name) : name;
   if (fileTable.has(fileName)) return fileTable.get(fileName);
   for (const table of leafTables) if (table.has(native)) return table.get(native);
