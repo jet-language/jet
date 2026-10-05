@@ -1862,7 +1862,7 @@ fn jet_rust_emit_native_derived_compare(ctx: &JetRustEmitContext, implementation
 fn jet_rust_emit_native_codec_type_def(ctx: &JetRustEmitContext, implementation: MIRImplDef) -> MIRTypeDef? {
     definition :: jet_rust_emit_equality_type_def(&ctx, implementation.self_type) ?? return None
     if definition.generic_params.len() > 0 || definition.compiler_builtin != None -> return None
-    if definition.key.starts_with("<corelib>/") || jet_rust_emit_has_native_type_projection(definition.key) -> return None
+    if definition.key.starts_with("<corelib>/") || jet_rust_emit_has_native_type_projection(ctx, definition.key) -> return None
     loop attribute in definition.serde {
         if attribute.kind != MIRSerdeAttributeKind.RenameAll -> return None
     }
