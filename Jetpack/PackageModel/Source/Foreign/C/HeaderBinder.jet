@@ -145,13 +145,13 @@ pub fn pkg_cbind_generate_with_descriptor_and_overlay(header_src: String, lib: S
                 &bound.push(proto.name)
                 &lines.push("    {line}\n")
                 if pkg_cbind_managed_callback_param_index(proto, catalog) != None {
-                    &lines.push("    fn {proto.name}(callback: fn(FfiCallbackEvent<I64>)) FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
+                    &lines.push("    fn {proto.name}(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
                 }
                 if proto.name == "unsubscribe" && pkg_cbind_native_void_pointer_proto(proto) {
                     &lines.push("    fn unsubscribe(subscription: ^FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
                 }
                 if proto.name == "emit_async" {
-                    &lines.push("    fn emit_async(value: I64) Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
+                    &lines.push("    fn emit_async(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
                 }
             }
             .Err(skip) -> &skipped.push((name: proto.name, reason: skip.reason))
