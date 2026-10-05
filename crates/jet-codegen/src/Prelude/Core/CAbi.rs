@@ -25,12 +25,18 @@ mod jet_c_abi {
 
     pub(crate) type JetCString = *mut String;
 
-    /// Run one export body; a caught unwind ends the process through the AOT
-    /// entry boundary's report carriers instead of entering generated frames.
+    /// No Rust unwind may leave an export. Compiler workers publish a typed
+    /// internal failure; ordinary calls keep the shared AOT stop boundary.
     #[inline(always)]
     pub(crate) fn guard<T>(run: impl FnOnce() -> T) -> T {
         match catch_unwind(AssertUnwindSafe(run)) {
             Ok(value) => value,
+            Err(payload) if super::jet_native_comptime_active() => {
+                let message = payload.downcast_ref::<String>().map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or("native compiler runtime carried an unknown panic payload");
+                super::jet_native_comptime_fail(4, message)
+            }
             Err(payload) => stop(payload),
         }
     }
@@ -101,6 +107,22 @@ mod jet_c_abi {
             0
         })
     }
+
+    // Installed by the isolated worker, never ordinary program entry.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_begin(fuel: u64, max_depth: u64) -> bool {
+        guard(|| super::jet_native_comptime_begin(fuel, max_depth))
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_step(owner: u64, start: u64, end: u64) { super::jet_native_comptime_step(owner, start, end); }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_work(units: u64) { super::jet_native_comptime_work(units); }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_enter(owner: u64, start: u64, end: u64) { super::jet_native_comptime_enter(owner, start, end); }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_leave() { super::jet_native_comptime_leave(); }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_end() { super::jet_native_comptime_end(); }
 
     // Entry error edge (MIRRust.rs entry_error_exit): a failing entry ends
     // the process with its report and exit status 1.

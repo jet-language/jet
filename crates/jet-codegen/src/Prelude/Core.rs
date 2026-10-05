@@ -916,6 +916,95 @@ fn jet_scheduler_panic_should_unwind() -> bool {
     jet_runtime_should_unwind()
 }
 
+// Installed only in the isolated persistent compiler worker. Ordinary runtime
+// execution never activates this context. Fuel is shared with native callbacks
+// on other threads; each actual native stack has its own depth and source site.
+static JET_NATIVE_COMPTIME_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static JET_NATIVE_COMPTIME_FUEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static JET_NATIVE_COMPTIME_DEPTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static JET_NATIVE_COMPTIME_STATUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+thread_local! {
+    static JET_NATIVE_COMPTIME_FRAME: std::cell::Cell<(u64, u64, u64, u64)> = const { std::cell::Cell::new((0, 0, 0, 0)) };
+}
+
+pub(crate) fn jet_native_comptime_active() -> bool {
+    JET_NATIVE_COMPTIME_ACTIVE.load(std::sync::atomic::Ordering::Acquire)
+}
+
+pub(crate) fn jet_native_comptime_begin(fuel: u64, max_depth: u64) -> bool {
+    // The worker serves one request at a time and joins native work before end.
+    if jet_native_comptime_active() { return false; }
+    JET_NATIVE_COMPTIME_FUEL.store(fuel, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_DEPTH.store(max_depth, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_STATUS.store(0, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| frame.set((0, 0, 0, 0)));
+    JET_NATIVE_COMPTIME_ACTIVE.store(true, std::sync::atomic::Ordering::Release);
+    true
+}
+
+pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
+    use std::io::Write;
+    use std::os::fd::{BorrowedFd, FromRawFd, IntoRawFd};
+    // Exactly one failing thread writes the private protocol envelope.
+    if JET_NATIVE_COMPTIME_STATUS.compare_exchange(0, status, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() {
+        loop { std::thread::park(); }
+    }
+    let (_, owner, start, end) = JET_NATIVE_COMPTIME_FRAME.with(std::cell::Cell::get);
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    // SAFETY: the compiler worker alone owns protocol descriptor 3. Duplicate
+    // it so constructing a File never closes the descriptor used by the server.
+    if let Ok(channel) = unsafe { BorrowedFd::borrow_raw(3) }.try_clone_to_owned() {
+        let mut channel = unsafe { std::fs::File::from_raw_fd(channel.into_raw_fd()) };
+        let header = format!("JCT1 {status} {owner} {start} {end} {}\n", message.len());
+        let _ = channel.write_all(header.as_bytes());
+        let _ = channel.write_all(message.as_bytes());
+        let _ = channel.flush();
+    }
+    std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
+}
+
+pub(crate) fn jet_native_comptime_work(units: u64) {
+    if !jet_native_comptime_active() { return; }
+    if JET_NATIVE_COMPTIME_FUEL.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |remaining| remaining.checked_sub(units)).is_err() {
+        jet_native_comptime_fail(2, "");
+    }
+}
+
+// owner is a dense row in the retained MIRProgram, never an exact-Int ID.
+pub(crate) fn jet_native_comptime_step(owner: u64, start: u64, end: u64) {
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, _, _, _) = frame.get();
+        frame.set((depth, owner, start, end));
+    });
+    jet_native_comptime_work(1);
+}
+
+pub(crate) fn jet_native_comptime_enter(owner: u64, start: u64, end: u64) {
+    if !jet_native_comptime_active() { return; }
+    let depth = JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, _, _, _) = frame.get();
+        let depth = depth.saturating_add(1);
+        frame.set((depth, owner, start, end));
+        depth
+    });
+    if depth > JET_NATIVE_COMPTIME_DEPTH.load(std::sync::atomic::Ordering::Relaxed) {
+        jet_native_comptime_fail(3, "");
+    }
+}
+
+pub(crate) fn jet_native_comptime_leave() {
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, owner, start, end) = frame.get();
+        frame.set((depth.saturating_sub(1), owner, start, end));
+    });
+}
+
+pub(crate) fn jet_native_comptime_end() {
+    JET_NATIVE_COMPTIME_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| frame.set((0, 0, 0, 0)));
+}
+
 struct JetRuntimeExit;
 
 struct JetRenderedRuntimeStop {
@@ -949,6 +1038,7 @@ struct JetRenderedRuntimeStop {
 /// so resuming a panic there aborts before `jet_runtime_boundary` can observe
 /// the report. End that path at the shared process boundary instead.
 fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
+    if jet_native_comptime_active() { jet_native_comptime_fail(1, message); }
     if jet_scheduler_in_task() {
         std::panic::resume_unwind(Box::new(message.to_string()));
     }
