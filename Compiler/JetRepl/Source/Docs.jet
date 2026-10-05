@@ -1,265 +1,84 @@
-// PORT-PENDING 0799 crates-jet-repl-src-consolehost-module-group: crates/jet-repl/src/Docs.rs:1-261
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-FE-REPL-DOCS1=B: `?name` docs over shared semantic symbol facts.
-//RS //!
-//RS //! `?name` remains REPL-only input classification. Identity, signatures,
-//RS //! summaries, examples, provenance, and completion names come exclusively
-//RS //! from `jet_semindex::SemanticSymbolIndex`.
-//RS 
-//RS use super::{write_unique_temp_file, Session};
-//RS 
-//RS pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolIndex {
-//RS     let mut index = jet_semindex::SemanticSymbolIndex::language();
-//RS     let src = format!("{}{}\n", session.import_src(), session.accumulated_src());
-//RS     if !src.trim().is_empty() {
-//RS         if let Ok(tmp_path) = write_unique_temp_file("docs", &src) {
-//RS             let path_str = tmp_path.to_string_lossy().to_string();
-//RS             let (_, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(
-//RS                 &path_str,
-//RS                 Some((&tmp_path, &src)),
-//RS                 true,
-//RS             );
-//RS             if let Some(bundle) = bundle {
-//RS                 let db = jet_semindex::build_symbol_db(&bundle, &facts);
-//RS                 index.extend(db.symbols.symbols().iter().cloned().map(|mut symbol| {
-//RS                     if matches!(
-//RS                         symbol.provenance,
-//RS                         jet_semindex::SemanticProvenance::Source { .. }
-//RS                     ) {
-//RS                         symbol.provenance = jet_semindex::SemanticProvenance::Session;
-//RS                     }
-//RS                     symbol
-//RS                 }));
-//RS             }
-//RS             let _ = std::fs::remove_file(&tmp_path);
-//RS         }
-//RS     }
-//RS     for (name, value) in &session.scope {
-//RS         // Docs keeps the type in the live symbol fact. The workspace renderer
-//RS         // intentionally uses the bare binding spelling after D-BIND-BARE1.
-//RS         let sigil = if session.mutable_names.contains(name) {
-//RS             ":="
-//RS         } else {
-//RS             "::"
-//RS         };
-//RS         index.push(jet_semindex::SemanticSymbol {
-//RS             identity: format!("session:binding:{name}"),
-//RS             name: name.clone(),
-//RS             qualified_name: name.clone(),
-//RS             owner: None,
-//RS             module_path: "this session".to_string(),
-//RS             kind: jet_semindex::SemanticSymbolKind::Local,
-//RS             signature: format!(
-//RS                 "{}: {} {} {}",
-//RS                 name,
-//RS                 super::type_name(value),
-//RS                 sigil,
-//RS                 value.jet_show()
-//RS             ),
-//RS             summary: String::new(),
-//RS             examples: Vec::new(),
-//RS             provenance: jet_semindex::SemanticProvenance::Session,
-//RS             span: None,
-//RS             lexical_scope: None,
-//RS         });
-//RS     }
-//RS     index
-//RS }
-//RS 
-//RS pub(crate) fn completion_candidates(
-//RS     session: &Session,
-//RS     prefix: &str,
-//RS     owner: Option<&str>,
-//RS ) -> Vec<jet_semindex::SemanticSymbol> {
-//RS     symbol_index(session)
-//RS         .complete_visible(prefix, owner)
-//RS         .into_iter()
-//RS         .filter(|symbol| {
-//RS             owner.is_some()
-//RS                 || !matches!(
-//RS                     symbol.kind,
-//RS                     jet_semindex::SemanticSymbolKind::Keyword
-//RS                         | jet_semindex::SemanticSymbolKind::Parameter
-//RS                 )
-//RS         })
-//RS         .cloned()
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Dotted Tab candidates: runtime receiver members first, else Core import alias.
-//RS pub(crate) fn dotted_completion_candidates(
-//RS     session: &Session,
-//RS     receiver: &str,
-//RS     partial: &str,
-//RS ) -> Vec<jet_semindex::SemanticSymbol> {
-//RS     if let Some(value) = session.scope.get(receiver) {
-//RS         return completion_candidates(session, partial, Some(super::type_name(value)));
-//RS     }
-//RS     if let Some(module) = session.core_imports.get(receiver) {
-//RS         return jet_semindex::SemanticSymbolIndex::complete_core_module(module, partial);
-//RS     }
-//RS     Vec::new()
-//RS }
-//RS 
-//RS fn render(symbol: &jet_semindex::SemanticSymbol) -> String {
-//RS     let mut out = format!("{}\n", symbol.signature);
-//RS     if !symbol.summary.is_empty() {
-//RS         out.push_str(&symbol.summary);
-//RS         out.push('\n');
-//RS     }
-//RS     for example in &symbol.examples {
-//RS         out.push_str("Example: ");
-//RS         out.push_str(example);
-//RS         out.push('\n');
-//RS     }
-//RS     let source = match &symbol.provenance {
-//RS         jet_semindex::SemanticProvenance::Source { module_path } => module_path.as_str(),
-//RS         jet_semindex::SemanticProvenance::Builtin { module } => module.as_str(),
-//RS         jet_semindex::SemanticProvenance::CommandRegistry => "command registry",
-//RS         jet_semindex::SemanticProvenance::Session => "this session",
-//RS     };
-//RS     out.push_str(&format!("Source: {source}\n"));
-//RS     out
-//RS }
-//RS 
-//RS pub fn lookup(session: &Session, name: &str) -> Option<String> {
-//RS     if let Some(row) = crate::Syntax::lookup(name) {
-//RS         return Some(format!(
-//RS             "{}\n{}",
-//RS             crate::Syntax::display(row),
-//RS             crate::Syntax::plain_text(row)
-//RS         ));
-//RS     }
-//RS     let index = symbol_index(session);
-//RS     if let Some(doc) = index.resolve_visible(name).map(render) {
-//RS         return Some(doc);
-//RS     }
-//RS     // `alias.member` after `use core.X as alias` — same catalog as Tab completion.
-//RS     if let Some((alias, member)) = name.split_once('.') {
-//RS         if let Some(module) = session.core_imports.get(alias) {
-//RS             return jet_semindex::SemanticSymbolIndex::lookup_core_module_member(module, member)
-//RS                 .as_ref()
-//RS                 .map(render);
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn builtin_list_filter_uses_shared_fact() {
-//RS         let session = Session::new();
-//RS         let doc = lookup(&session, "List.filter").expect("List.filter docs");
-//RS         assert!(doc.starts_with("List.filter(f: fn(T) -> Bool) -> List<T>\n"));
-//RS         assert!(doc.contains("Keeps items where f(item) is true."));
-//RS         assert!(doc.contains("Source: core.collections"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn session_binding_lookup_shows_live_value() {
-//RS         let mut session = Session::new();
-//RS         session
-//RS             .scope
-//RS             .insert("answer".to_string(), crate::AST::CtValue::Int(42));
-//RS         let doc = lookup(&session, "answer").expect("binding should resolve");
-//RS         assert!(doc.starts_with("answer: Int :: 42\n"));
-//RS         assert!(doc.contains("Source: this session"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn completion_dedups_shadowed_session_item() {
-//RS         let mut session = Session::new();
-//RS         session
-//RS             .item_srcs
-//RS             .push("fn answer() -> Int { return 1 }".to_string());
-//RS         session
-//RS             .scope
-//RS             .insert("answer".to_string(), crate::AST::CtValue::Int(42));
-//RS         let candidates = completion_candidates(&session, "ans", None);
-//RS         assert_eq!(candidates.len(), 1, "{candidates:?}");
-//RS         assert_eq!(candidates[0].identity, "session:binding:answer");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn core_import_alias_completes_module_members() {
-//RS         let mut session = Session::new();
-//RS         session
-//RS             .core_imports
-//RS             .insert("math".to_string(), "core.math".to_string());
-//RS         let candidates = dotted_completion_candidates(&session, "math", "sq");
-//RS         assert_eq!(candidates.len(), 1, "{candidates:?}");
-//RS         assert_eq!(candidates[0].name, "sqrt");
-//RS         assert_eq!(candidates[0].module_path, "core.math");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn runtime_receiver_beats_core_import_alias() {
-//RS         let mut session = Session::new();
-//RS         session
-//RS             .core_imports
-//RS             .insert("items".to_string(), "core.math".to_string());
-//RS         session.scope.insert(
-//RS             "items".to_string(),
-//RS             crate::AST::CtValue::List(vec![
-//RS                 crate::AST::CtValue::Int(1),
-//RS                 crate::AST::CtValue::Int(2),
-//RS             ]),
-//RS         );
-//RS         let candidates = dotted_completion_candidates(&session, "items", "f");
-//RS         assert!(
-//RS             candidates.iter().any(|c| c.name == "filter"),
-//RS             "expected List members, got {candidates:?}"
-//RS         );
-//RS         assert!(
-//RS             !candidates.iter().any(|c| c.name == "floor"),
-//RS             "core.math must not win over a live List binding: {candidates:?}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn core_import_alias_docs_resolve_member() {
-//RS         let mut session = Session::new();
-//RS         session
-//RS             .core_imports
-//RS             .insert("math".to_string(), "core.math".to_string());
-//RS         let doc = lookup(&session, "math.sqrt").expect("math.sqrt docs");
-//RS         assert!(doc.contains("core.math.sqrt"), "got: {doc:?}");
-//RS         assert!(doc.contains("Source: core.math"), "got: {doc:?}");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn syntax_docs_use_the_registry_dictionary() {
-//RS         let doc = lookup(&Session::new(), "^").expect("^ docs");
-//RS         assert!(
-//RS             doc.contains("Before a name (move)") && doc.contains("Between two numbers (power)"),
-//RS             "`?` must show every meaning: {doc:?}"
-//RS         );
-//RS         assert!(doc.contains("Afterwards:"), "got: {doc:?}");
-//RS         assert!(!doc.contains("SIGIL_MOVE") && !doc.contains("D-"), "got: {doc:?}");
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn docs_temp_writer_rejects_existing_symlink() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root =
-//RS             std::env::temp_dir().join(format!("jet-repl-docs-temp-symlink-{}", std::process::id()));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         let target = root.join("outside.txt");
-//RS         let link = root.join("docs.jet");
-//RS         std::fs::write(&target, "must survive\n").unwrap();
-//RS         symlink(&target, &link).unwrap();
-//RS 
-//RS         assert!(super::super::write_temp_file_at(&link, "attacker\n").is_err());
-//RS         assert_eq!(std::fs::read_to_string(&target).unwrap(), "must survive\n");
-//RS 
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS     }
-//RS }
-// END-PORT-PENDING 0799 crates/jet-repl/src/Docs.rs:1-261
+// D-FE-REPL-DOCS1=B: shared semantic facts own docs and completion identity.
+use jet_semindex.[SemanticSymbolIndex, SemanticSymbol, SemanticSymbolKind, SemanticProvenance, build_symbol_db]
+use jet_driver.[Driver]
+use core.files.host.retained_descriptor as repl_docs_files
 
+// Rust: crates/jet-repl/src/Docs.rs:9
+pub fn symbol_index(session: Session) -> SemanticSymbolIndex {
+    index := SemanticSymbolIndex.language()
+    src :: "{session.import_src()}{session.accumulated_src()}\n"
+    trimmed := src.trim() // #4303
+    if !trimmed.is_empty() {
+        if write_unique_temp_file("docs", src) == .Ok(tmp_path) {
+            path_str :: tmp_path.to_string_lossy()
+            (_, bundle, facts) :: Driver.check_file_with_effect_facts(path_str, Val((tmp_path, src)), true)
+            if bundle == .Val(checked) {
+                db :: build_symbol_db(checked, facts)
+                loop fact in db.symbols.symbols() {
+                    symbol := ~fact
+                    if symbol.provenance == .Source(_) -> symbol.provenance = SemanticProvenance.Session
+                    &index.push(^symbol)
+                }
+            }
+            _ :: repl_docs_files.remove_file(tmp_path) // GATE #4494: retained native file removal.
+        }
+    }
+    loop name in session.scope.keys() {
+        value :: session.scope[name]
+        sigil :: if session.mutable_names.contains(name) -> ":=" else -> "::"
+        &index.push(SemanticSymbol{
+            identity: "session:binding:{name}", name: name, qualified_name: name,
+            owner: None, module_path: "this session", kind: SemanticSymbolKind.Local,
+            signature: "{name}: {type_name(value)} {sigil} {value.jet_show()}",
+            summary: "", examples: [], provenance: SemanticProvenance.Session,
+            span: None, lexical_scope: None,
+        })
+    }
+    ^index
+}
+
+// Rust: crates/jet-repl/src/Docs.rs:67
+pub fn completion_candidates(session: Session, prefix: String, owner: String?) -> [SemanticSymbol] {
+    index :: symbol_index(session)
+    candidates := [SemanticSymbol]{}
+    loop symbol in index.complete_visible(prefix, owner) {
+        excluded :: if symbol.kind == { .Keyword | .Parameter -> true, _ -> false }
+        if owner != None || !excluded -> &candidates.push(~symbol)
+    }
+    ^candidates
+}
+
+// Rust: crates/jet-repl/src/Docs.rs:88
+pub fn dotted_completion_candidates(session: Session, receiver: String, partial: String) -> [SemanticSymbol] {
+    if session.scope.get(receiver) == .Val(value) -> return completion_candidates(session, partial, Val(type_name(value)))
+    if session.core_imports.get(receiver) == .Val(module) -> return SemanticSymbolIndex.complete_core_module(module, partial)
+    []
+}
+
+// Rust: crates/jet-repl/src/Docs.rs:102
+fn render(symbol: SemanticSymbol) -> String {
+    out := "{symbol.signature}\n"
+    if !symbol.summary.is_empty() -> &out.push_str("{symbol.summary}\n")
+    loop example in symbol.examples -> &out.push_str("Example: {example}\n")
+    source :: if symbol.provenance == {
+        .Source(module_path) -> module_path
+        .Builtin(module) -> module
+        .CommandRegistry -> "command registry"
+        .Session -> "this session"
+    }
+    &out.push_str("Source: {source}\n")
+    ^out
+}
+
+// Rust: crates/jet-repl/src/Docs.rs:123
+pub fn lookup(session: Session, name: String) -> String? {
+    if Syntax.lookup(name) == .Val(row) -> return Val("{Syntax.display(row)}\n{Syntax.plain_text(row)}")
+    index :: symbol_index(session)
+    if index.resolve_visible(name) == .Val(symbol) -> return Val(render(symbol))
+    if name.split_once(".") == .Val((alias, member)) {
+        if session.core_imports.get(alias) == .Val(module) {
+            if SemanticSymbolIndex.lookup_core_module_member(module, member) == .Val(symbol) -> return Val(render(symbol))
+        }
+    }
+    None
+}

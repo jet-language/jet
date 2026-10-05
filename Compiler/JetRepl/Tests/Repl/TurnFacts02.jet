@@ -1,0 +1,167 @@
+use jet_comptime.[ReplEffectRequest]
+use jet_foundation.[authority_parse_right, authority_answer, ApplicationAuthority, AuthorityVerdict, Span]
+use jetpack_foundation.[Holds]
+use jet_driver.Package as repl_turn_test_package
+use jet_driver.EffectBudget as repl_turn_test_budget
+use jet_sema.Effects as repl_turn_test_effects
+use core.files.host.retained_descriptor as repl_turn_test_files
+use core.files.runtime.kernel_path_components as repl_turn_test_paths
+use core.process.host.native_process as repl_turn_test_process
+use core.sys.target as repl_turn_test_target
+use std.os.unix.fs.[symlink] // GATE #4494: native symlink primitive.
+
+// Rust: crates/jet-repl/src/lib.rs:3937
+struct CountingPrompt { count: Int }
+// Rust: crates/jet-repl/src/lib.rs:3940
+impl CountingPrompt.EffectPrompt {
+    fn choose(&self, _: ReplEffectRequest, _: Bool) -> PromptChoice {
+        self.count = self.count + 1
+        PromptChoice.Once
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:3947
+#Test("unavailable_handle_backend_denies_before_prompt_or_operation") {
+    root := repl_turn_test_files.temp_dir()
+    repl_turn_test_paths.push(&root, repl_turn_test_paths.from_text("jet_repl_unavailable_backend_{repl_turn_test_process.id()}", root.platform))
+    repl_turn_test_files.create_dir_all(root) ?? panic("create root")
+    target := ~root
+    repl_turn_test_paths.push(&target, repl_turn_test_paths.from_text("must-not-exist.txt", root.platform))
+    policy := ReplPolicy.new(ReplFlags.default(), root)
+    policy.handles_available = false
+    prompt := CountingPrompt{count: 0}
+    request :: ReplEffectRequest{root: "FS", operation: "Write", resource: "must-not-exist.txt"}
+    {
+        authorization := &policy.authorizer(Val(&prompt))
+        result :: &authorization.preflight(request, Span.new(0, 1))
+        error :: if result == { .Err(error) -> error, .Ok(_) -> panic("unavailable confinement backend must fail closed") }
+        assert_eq(error.code, "E1803")
+        assert(error.why.contains("no runtime authority was offered"))
+    }
+    assert_eq(prompt.count, 0)
+    assert(!repl_turn_test_files.exists(target))
+    _ :: repl_turn_test_files.remove_dir_all(root)
+}
+// Rust: crates/jet-repl/src/lib.rs:3982
+#Test("authority_answer_matches_compile_build_session_and_repl") {
+    written :: "IO"
+    external_spelling :: "io"
+    expected :: authority_parse_right(written) ?? panic("known right")
+    assert_eq(expected, "IO")
+    compile :: repl_turn_test_effects.parse_effect_name(external_spelling) ?? panic("compile right")
+    assert_eq(compile, expected)
+    assert(repl_turn_test_effects.effect_covers(written, expected))
+    authority := repl_turn_test_package.PackageAuthority.default()
+    authority.holds = repl_turn_test_package.Blocks.AuthorityHolds{allow: Val([String]{external_spelling}), deny: None}
+    manifest := repl_turn_test_package.PackageFacts.default()
+    manifest.effects_enabled = true
+    manifest.authority = ^authority
+    entries :: [repl_turn_test_budget.PackageEffects]{repl_turn_test_budget.PackageEffects{
+        name: "dependency", effects: Holds.from([String]{expected}), effect_sites: [:], panic_sites: [], boundary_span: None,
+    }}
+    assert(repl_turn_test_budget.enforce(entries, manifest).is_empty())
+    assert_eq(repl_turn_test_budget.provenance_for(entries, "dependency"), [String]{expected})
+    session :: authority_answer(ApplicationAuthority{allowed: [String]{external_spelling}, denied: []}, written)
+    assert_eq(session, AuthorityVerdict.Allowed)
+    flags :: ReplFlags.new([String]{external_spelling}, [])
+    assert(flags.allow.contains(expected))
+    policy := ReplPolicy.new(flags, native_path("."))
+    request :: ReplEffectRequest{root: expected, operation: "Read", resource: "authority-substrate"}
+    authorization := &policy.authorizer(None)
+    &authorization.preflight(request, Span.new(0, 1)) ?? panic("repl preflight")
+    &authorization.authorize(request, Span.new(0, 1)) ?? panic("repl authority")
+}
+// Rust: crates/jet-repl/src/lib.rs:4049
+#Test("repl_temp_writer_rejects_existing_symlink") {
+    if repl_turn_test_target.selected_family() == .Unix {
+        root := repl_turn_test_files.temp_dir()
+        repl_turn_test_paths.push(&root, repl_turn_test_paths.from_text("jet-repl-temp-symlink-{repl_turn_test_process.id()}", root.platform))
+        _ :: repl_turn_test_files.remove_dir_all(root)
+        repl_turn_test_files.create_dir_all(root) ?? panic("create root")
+        target := ~root
+        repl_turn_test_paths.push(&target, repl_turn_test_paths.from_text("outside.txt", root.platform))
+        link := ~root
+        repl_turn_test_paths.push(&link, repl_turn_test_paths.from_text("session.jet", root.platform))
+        repl_turn_test_files.write(target, "must survive\n".bytes()) ?? panic("write target")
+        symlink(target, link) ?? panic("symlink")
+        assert(write_temp_file_at(link, "attacker\n").is_err())
+        assert_eq(repl_turn_test_files.read_to_string(target) ?? panic("read target"), "must survive\n")
+        _ :: repl_turn_test_files.remove_dir_all(root)
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:4069
+#Test("repl_nofollow_flag_uses_linux_family_value") {
+    if repl_turn_test_target.selected_os() == .Linux || repl_turn_test_target.selected_os() == .Android {
+        assert_eq(REPL_O_NOFOLLOW, U32{131072})
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:4075
+#Test("repl_nofollow_flag_uses_macos_family_value") {
+    if repl_turn_test_target.selected_os() == .MacOS || repl_turn_test_target.selected_os() == .IOS {
+        assert_eq(REPL_O_NOFOLLOW, U32{256})
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:4089
+#Test("repl_temp_writer_rejects_unsupported_unix") {
+    os :: repl_turn_test_target.selected_os()
+    if repl_turn_test_target.selected_family() == .Unix && os != .Linux && os != .Android && os != .MacOS && os != .IOS {
+        path := repl_turn_test_files.temp_dir()
+        repl_turn_test_paths.push(&path, repl_turn_test_paths.from_text("jet-repl-unsupported-{repl_turn_test_process.id()}.jet", path.platform))
+        result :: write_temp_file_at(path, "must not be written\n")
+        error :: if result == { .Err(error) -> error, .Ok(_) -> panic("unsupported Unix target must fail closed") }
+        assert_eq(error.kind(), .Unsupported) // GATE #4409: exact IO kind.
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:4099
+#Test("sigil_binding_is_classified_as_statement") {
+    kind :: classify("t :: s", 1) ?? panic("classify")
+    if kind == {
+        .Stmts(stmts, suppress, check_src) -> {
+            assert(!suppress)
+            assert_eq(check_src, "t :: s;")
+            assert_eq(stmts.len(), 1)
+            assert(if stmts[0] == { .Val(_) -> true, _ -> false })
+        }
+        _ -> panic("expected statement input")
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:4112
+#Test("sigil_binding_from_string_session_name_marks_move") {
+    kind :: classify("t :: s", 1) ?? panic("classify")
+    stmts :: if kind == { .Stmts(stmts, _, _) -> stmts, _ -> panic("expected statement input") }
+    names := Set<String>.new()
+    _ :: &names.insert("s")
+    scope := [String:CtValue]{}
+    scope["s"] = CtValue.Str("hello")
+    moved :: collect_moved_names(stmts, names, scope)
+    assert(moved.contains("s"))
+}
+// Rust: crates/jet-repl/src/lib.rs:4126
+#Test("bare_binding_is_preserved_as_an_exact_statement") {
+    kind :: classify("s :: \"\"", 1) ?? panic("classify")
+    if kind == {
+        .Stmts(stmts, _, check_src) -> {
+            assert_eq(check_src, "s :: \"\";")
+            assert_eq(stmts.len(), 1)
+            assert(if stmts[0] == { .Val(_) -> true, _ -> false })
+        }
+        _ -> panic("expected statement input")
+    }
+}
+// Rust: crates/jet-repl/src/lib.rs:4136
+#Test("notebook_item_classifier_uses_the_parser_item_plane") {
+    assert(is_item_input("@answer :: 42"))
+    assert(is_item_input("#Test(\"answer\") { assert(true) }"))
+    assert(!is_item_input("answer :: 42"))
+}
+// Rust: crates/jet-repl/src/lib.rs:4143
+#Test("raw_multiline_completeness_comes_from_repl_parser_shapes") {
+    assert(raw_input_is_complete("40 + 2"))
+    assert(raw_input_is_complete("answer :: = 42"))
+    assert(!raw_input_is_complete("40 +"))
+    assert(!raw_input_is_complete("answer ::"))
+    assert(!raw_input_is_complete("fn total(xs: [Int]) -> Int {"))
+    assert(!raw_input_is_complete("if true {\n    1"))
+    assert(!raw_input_is_complete("/* unfinished"))
+    assert(!raw_input_is_complete("\"\"\"\nunfinished"))
+    assert(raw_input_is_complete("\"single-line text\ncan't continue"))
+}

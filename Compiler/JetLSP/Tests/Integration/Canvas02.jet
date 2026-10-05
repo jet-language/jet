@@ -1,1779 +1,683 @@
-// PORT-PENDING 0983 tests-canvas-slice-1776: tests/canvas.rs:1776-3550
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn canvas_multi_input_transactions_guard_nested_pattern_scope_and_stale_edits() {
-//RS     let path = write_fixture(
-//RS         "nested_multi_input_tx",
-//RS         r#"fn choose(x: Int) -> Int {
-//RS     if x == {
-//RS         1 -> {
-//RS             values :: [1, 2]
-//RS             return values[0]
-//RS         }
-//RS         else -> { return 0 }
-//RS     }
-//RS }
-//RS 
-//RS fn run() { print(choose(1)) }
-//RS "#,
-//RS     );
-//RS     let graph_json = jet::Canvas::graph_json_for_file(&path).expect("nested multi-input graph");
-//RS     let graph = graph_object_for_title(&graph_json, "choose");
-//RS     let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
-//RS     let before = fs::read_to_string(&path).unwrap();
-//RS     let append = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"3\"}}",
-//RS         jet::Canvas::source_revision(&before),
-//RS         list_start,
-//RS         list_end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &append).expect("append pattern-bound list element");
-//RS     let appended = fs::read_to_string(&path).unwrap();
-//RS     assert!(appended.contains("values :: [1, 2, 3]"), "{appended}");
-//RS     assert_eq!(
-//RS         appended,
-//RS         before.replacen("[1, 2]", "[1, 2, 3]", 1),
-//RS         "nested append must preserve canonical source spelling"
-//RS     );
-//RS 
-//RS     let graph_json = jet::Canvas::graph_json_for_file(&path).expect("graph after nested append");
-//RS     let graph = graph_object_for_title(&graph_json, "choose");
-//RS     let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
-//RS     let (item_start, item_end) = source_span_near(&graph, "\"name\":\"item3\"");
-//RS     let remove = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"remove_multi_input_element\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element_start\":{},\"element_end\":{}}}",
-//RS         jet::Canvas::source_revision(&appended),
-//RS         list_start,
-//RS         list_end,
-//RS         item_start,
-//RS         item_end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &remove)
-//RS         .expect("remove nested list element after reprojection");
-//RS     let restored = fs::read_to_string(&path).unwrap();
-//RS     assert_eq!(
-//RS         restored, before,
-//RS         "nested append/remove must preserve source"
-//RS     );
-//RS 
-//RS     let graph_json = jet::Canvas::graph_json_for_file(&path).expect("graph before invalid append");
-//RS     let graph = graph_object_for_title(&graph_json, "choose");
-//RS     let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
-//RS     let invalid_before = fs::read_to_string(&path).unwrap();
-//RS     let invalid = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"true\"}}",
-//RS         jet::Canvas::source_revision(&invalid_before),
-//RS         list_start,
-//RS         list_end
-//RS     );
-//RS     let err = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
-//RS     assert!(err.contains("\"kind\":\"diagnostic\""), "{err}");
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), invalid_before);
-//RS 
-//RS     let stale = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"sha256-stale\",\"node_start\":{},\"node_end\":{},\"element\":\"3\"}}",
-//RS         list_start, list_end
-//RS     );
-//RS     let err = jet::Canvas::apply_transaction_json(&path, &stale).unwrap_err();
-//RS     assert!(err.contains("\"kind\":\"conflict\""), "{err}");
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), invalid_before);
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_statement_state_nodes_and_toggle_transaction() {
-//RS     let path = write_fixture(
-//RS         "statement_state",
-//RS         r#"fn run() {
-//RS     #Off print("off")
-//RS     #DebugOnly print("debug")
-//RS     print("on")
-//RS }
-//RS "#,
-//RS     );
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("state graph");
-//RS     for field in [
-//RS         "\"node_descriptor_id\":\"switched\"",
-//RS         "\"title\":\"#Off\"",
-//RS         "\"badges\":[\"#Off\"]",
-//RS         "\"title\":\"#DebugOnly\"",
-//RS         "\"badges\":[\"#DebugOnly\"]",
-//RS         "toggle_switch_state",
-//RS     ] {
-//RS         assert!(
-//RS             graph.contains(field),
-//RS             "statement-state graph missing {field}: {graph}"
-//RS         );
-//RS     }
-//RS 
-//RS     let graph_id = graph_id_for_title(&graph, "run");
-//RS     let (node_start, node_end) = source_span_near(&graph, "\"title\":\"#Off\"");
-//RS     let before = fs::read_to_string(&path).unwrap();
-//RS     let revision = jet::Canvas::source_revision(&before);
-//RS     let turn_on = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{}}}",
-//RS         revision, graph_id, node_start, node_end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &turn_on).expect("turn on state");
-//RS     let on = fs::read_to_string(&path).unwrap();
-//RS     assert!(!on.contains("#Off"), "{on}");
-//RS     assert!(on.contains("#DebugOnly print(\"debug\")"), "{on}");
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after turn on");
-//RS     let on_start = on.find("print(\"on\")").expect("plain on call");
-//RS     let (node_start, node_end) = source_span_at_or_after(&graph, "\"title\":\"print", on_start);
-//RS     let revision = jet::Canvas::source_revision(&on);
-//RS     let turn_off = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{}}}",
-//RS         revision, graph_id, node_start, node_end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &turn_off).expect("turn off state");
-//RS     let off = fs::read_to_string(&path).unwrap();
-//RS     assert!(!off.contains("#Off print(\"off\")"), "{off}");
-//RS     assert!(off.contains("#Off print(\"on\")"), "{off}");
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after turn off");
-//RS     let off_on_start = off.find("#Off print(\"on\")").expect("off plain on call");
-//RS     let (node_start, node_end) =
-//RS         source_span_at_or_after(&graph, "\"title\":\"#Off\"", off_on_start);
-//RS     let revision = jet::Canvas::source_revision(&off);
-//RS     let restore = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{}}}",
-//RS         revision, graph_id, node_start, node_end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &restore).expect("restore state");
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), on);
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_projects_typestate_diagram_facts() {
-//RS     let path = write_fixture(
-//RS         "typestate_diagram",
-//RS         r#"struct Door {
-//RS     state { Closed, Open, Orphan }
-//RS }
-//RS impl Door {
-//RS     #Transition(_, Closed) fn new() -[]> Door { return Door{} }
-//RS     #Transition(Closed, Open) fn open(self: ^Door) -[]> Door { return self }
-//RS }
-//RS fn run() {}
-//RS "#,
-//RS     );
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("typestate diagram");
-//RS     assert!(graph.contains("\"state_graphs\":[{"), "{graph}");
-//RS     assert!(
-//RS         graph.contains("\"name\":\"Open\",\"terminal\":true"),
-//RS         "{graph}"
-//RS     );
-//RS     assert!(
-//RS         graph.contains("\"name\":\"Orphan\",\"terminal\":true,\"reachable\":false"),
-//RS         "{graph}"
-//RS     );
-//RS     assert!(
-//RS         graph.contains("\"operation\":\"open\",\"from\":\"Closed\",\"to\":\"Open\""),
-//RS         "{graph}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_debug_only_execution_path_keeps_source_backed_incoming_wires() {
-//RS     let path = write_fixture(
-//RS         "debug_only_execution_flow",
-//RS         r#"fn run() {
-//RS     print("before")
-//RS     #DebugOnly print("debug")
-//RS     print("after")
-//RS }
-//RS "#,
-//RS     );
-//RS     let source = fs::read_to_string(&path).unwrap();
-//RS     let graph_json = jet::Canvas::graph_json_for_file(&path).expect("debug-only graph");
-//RS     let graph = graph_object_for_title(&graph_json, "run");
-//RS     let nodes = json_top_level_objects(json_array_field(graph, "nodes"));
-//RS     let node_for_call = |call: &str| {
-//RS         let start = source.find(call).expect("call source");
-//RS         nodes
-//RS             .iter()
-//RS             .find(|node| node.contains(&format!("\"source_span\":{{\"start\":{start},")))
-//RS             .map(|node| json_field(node, "node_id"))
-//RS             .unwrap_or_else(|| panic!("missing source-backed node for {call}"))
-//RS     };
-//RS     let before = node_for_call("print(\"before\")");
-//RS     let debug = node_for_call("print(\"debug\")");
-//RS     let after = node_for_call("print(\"after\")");
-//RS     let wires = json_top_level_objects(json_array_field(graph, "wires"));
-//RS     let control_wire = |from: &str, to: &str| {
-//RS         wires.iter().find(|wire| {
-//RS             wire.contains(&format!("\"from_pin\":\"{from}:output:then\""))
-//RS                 && wire.contains(&format!("\"to_pin\":\"{to}:input:exec\""))
-//RS                 && wire.contains("\"wire_kind\":\"control\"")
-//RS                 && wire.contains("\"from_source_span\":{")
-//RS                 && wire.contains("\"to_source_span\":{")
-//RS         })
-//RS     };
-//RS     assert!(
-//RS         control_wire(&before, &debug).is_some(),
-//RS         "missing before -> debug wire: {graph}"
-//RS     );
-//RS     assert!(
-//RS         control_wire(&debug, &after).is_some(),
-//RS         "missing debug -> after wire: {graph}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_projects_and_edits_subjectless_guard_arms() {
-//RS     let path = write_fixture(
-//RS         "subjectless_guards",
-//RS         r#"fn run() -> Int {
-//RS     ready :: true
-//RS     if {
-//RS         ready -> { return 1 }
-//RS         else -> { return 0 }
-//RS     }
-//RS }
-//RS "#,
-//RS     );
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas guard graph");
-//RS     assert!(graph.contains("\"title\":\"if guards\""), "{graph}");
-//RS     assert!(graph.contains("\"pattern_source\":\"ready\""), "{graph}");
-//RS     let graph_id = graph_id_for_title(&graph, "run");
-//RS     let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if guards\"");
-//RS     let source = fs::read_to_string(&path).unwrap();
-//RS     let add = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{},\"pattern\":\"false\"}}",
-//RS         jet::Canvas::source_revision(&source), graph_id, node_start, node_end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &add).expect("add guard arm");
-//RS     let edited = fs::read_to_string(&path).unwrap();
-//RS     assert!(edited.contains("false ->"), "{edited}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_classic_pattern_branch_transactions_use_canonical_switch() {
-//RS     let path = write_fixture(
-//RS         "classic_pattern_transactions",
-//RS         r#"fn choose(x: Int?) -> Int {
-//RS     if x == Val(_) { return 1 } else { return 0 }
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(choose(Val(1)))
-//RS }
-//RS "#,
-//RS     );
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("classic pattern graph");
-//RS     assert!(graph.contains("\"title\":\"if ==\""), "{graph}");
-//RS     assert!(!graph.contains("\"title\":\"if guards\""), "{graph}");
-//RS     let graph_id = graph_id_for_title(&graph, "choose");
-//RS     let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"== Val(_)\"");
-//RS     let before = fs::read_to_string(&path).unwrap();
-//RS     let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if ==\"");
-//RS     assert!(before[node_start..node_end].contains("else"));
-//RS     let remove_last = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{}}}",
-//RS         jet::Canvas::source_revision(&before), graph_id, pat_start, pat_end
-//RS     );
-//RS     let err = jet::Canvas::apply_transaction_json(&path, &remove_last).unwrap_err();
-//RS     assert!(err.contains("can't remove the last pattern arm"), "{err}");
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), before);
-//RS 
-//RS     let edit = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"edit_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{},\"pattern\":\"None\"}}",
-//RS         jet::Canvas::source_revision(&before), graph_id, pat_start, pat_end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &edit).expect("edit classic pattern");
-//RS     let edited = fs::read_to_string(&path).unwrap();
-//RS     assert!(edited.contains("if x == .None"), "{edited}");
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("edited classic pattern graph");
-//RS     let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if ==\"");
-//RS     let add = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{},\"pattern\":\"Val(_)\"}}",
-//RS         jet::Canvas::source_revision(&edited), graph_id, node_start, node_end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &add).expect("add classic pattern arm");
-//RS     let converted = fs::read_to_string(&path).unwrap();
-//RS     assert!(converted.contains("if x == {"), "{converted}");
-//RS     assert!(converted.contains(".None ->"), "{converted}");
-//RS     assert!(converted.contains(".Val(_) ->"), "{converted}");
-//RS     assert!(converted.contains("else ->"), "{converted}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_classic_if_ignores_braces_inside_leading_trivia() {
-//RS     let path = write_fixture(
-//RS         "classic_if_trivia",
-//RS         r#"fn run() {
-//RS     ready :: true
-//RS     if /* { trivia */ ready { print("ready") }
-//RS }
-//RS "#,
-//RS     );
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("commented classic graph");
-//RS     assert!(graph.contains("\"title\":\"if\""), "{graph}");
-//RS     assert!(!graph.contains("\"title\":\"if guards\""), "{graph}");
-//RS     assert!(graph.contains("/* { trivia */"), "{graph}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_wired_insert_transaction_writes_call_with_origin_value() {
-//RS     let path = write_fixture(
-//RS         "wired_insert",
-//RS         r#"fn use_int(n: Int) {
-//RS     print(n)
-//RS }
-//RS 
-//RS fn demo(x: Int) {
-//RS }
-//RS 
-//RS fn run() {
-//RS     demo(1)
-//RS }
-//RS "#,
-//RS     );
-//RS     let src = fs::read_to_string(&path).unwrap();
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
-//RS     let demo_graph_id = field_before(&graph, "\"title\":\"demo\"", "graph_id");
-//RS     let revision = jet::Canvas::source_revision(&src);
-//RS     let insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"use_int\",\"args\":[],\"wire_origin_pin_id\":\"local:x\",\"wire_target_pin\":\"n\",\"wire_expr\":\"x\"}}",
-//RS         revision, demo_graph_id
-//RS     );
-//RS     let out = jet::Canvas::apply_transaction_json(&path, &insert).expect("wired insert");
-//RS     assert!(out.contains("\"changed\":true"), "{out}");
-//RS     let changed = fs::read_to_string(&path).unwrap();
-//RS     assert!(changed.contains("use_int(x)"), "{changed}");
-//RS     let projected = jet::Canvas::graph_json_for_file(&path).expect("canvas graph after insert");
-//RS     assert!(projected.contains("\"title\":\"use_int\""), "{projected}");
-//RS     assert!(projected.contains("\"wire_kind\":\"data\""), "{projected}");
-//RS 
-//RS     let no_arg_path = write_fixture(
-//RS         "wired_insert_exec_no_arg",
-//RS         r#"fn helper() {
-//RS     print("ok")
-//RS }
-//RS 
-//RS fn run() {
-//RS     print("start")
-//RS }
-//RS "#,
-//RS     );
-//RS     let no_arg_src = fs::read_to_string(&no_arg_path).unwrap();
-//RS     let no_arg_graph = jet::Canvas::graph_json_for_file(&no_arg_path).expect("canvas graph");
-//RS     let run_graph_id = field_before(&no_arg_graph, "\"title\":\"run\"", "graph_id");
-//RS     let revision = jet::Canvas::source_revision(&no_arg_src);
-//RS     let exec_insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"helper\",\"args\":[],\"wire_origin_pin_id\":\"entry:output:then\",\"wire_target_pin\":\"exec\"}}",
-//RS         revision, run_graph_id
-//RS     );
-//RS     let out = jet::Canvas::apply_transaction_json(&no_arg_path, &exec_insert)
-//RS         .expect("exec-origin no-arg wired insert");
-//RS     assert!(out.contains("\"changed\":true"), "{out}");
-//RS     let changed = fs::read_to_string(&no_arg_path).unwrap();
-//RS     assert!(changed.contains("helper()"), "{changed}");
-//RS     assert!(!changed.contains("helper(1)"), "{changed}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_comment_regions_round_trip_through_source_comments() {
-//RS     let path = write_fixture("comment_region", CANVAS_COMMENT_FIXTURE);
-//RS     let src = fs::read_to_string(&path).unwrap();
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
-//RS     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-//RS     let start = src.find("print").expect("print call");
-//RS     let end = start + "print(\"damage\")".len();
-//RS     let revision = jet::Canvas::source_revision(&src);
-//RS     let create = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"create_comment_region\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"start\":{},\"end\":{},\"title\":\"Damage path\",\"color\":\"#2f80ed\",\"alpha\":\"0.25\",\"bounds\":\"10,20,320,140\"}}",
-//RS         revision, graph_id, start, end
-//RS     );
-//RS     let out = jet::Canvas::apply_transaction_json(&path, &create).expect("create comment region");
-//RS     assert!(out.contains("\"changed\":true"), "{out}");
-//RS     let commented = fs::read_to_string(&path).unwrap();
-//RS     assert!(commented.contains("// canvas:comment"), "{commented}");
-//RS     assert!(commented.contains("title=\"Damage path\""), "{commented}");
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("comment graph");
-//RS     for field in [
-//RS         "\"kind\":\"comment\"",
-//RS         "\"title\":\"Damage path\"",
-//RS         "\"color\":\"#2f80ed\"",
-//RS         "\"alpha\":\"0.25\"",
-//RS         "\"bounds\"",
-//RS     ] {
-//RS         assert!(
-//RS             graph.contains(field),
-//RS             "comment graph missing {field}: {graph}"
-//RS         );
-//RS     }
-//RS 
-//RS     let region_id = field_before(&graph, "\"title\":\"Damage path\"", "region_id");
-//RS     let revision = jet::Canvas::source_revision(&commented);
-//RS     let edit = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"edit_comment_region\",\"revision\":\"{}\",\"region_id\":\"{}\",\"title\":\"Validated damage\",\"color\":\"#22c55e\",\"alpha\":\"0.4\",\"bounds\":\"30,40,360,180\"}}",
-//RS         revision, region_id
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &edit).expect("edit comment region");
-//RS     let edited = fs::read_to_string(&path).unwrap();
-//RS     assert!(edited.contains("title=\"Validated damage\""), "{edited}");
-//RS     assert!(edited.contains("color=\"#22c55e\""), "{edited}");
-//RS     assert!(edited.contains("bounds=(30,40,360,180)"), "{edited}");
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("edited comment graph");
-//RS     assert!(graph.contains("\"title\":\"Validated damage\""), "{graph}");
-//RS     assert!(graph.contains("\"x\":30"), "{graph}");
-//RS 
-//RS     let revision = jet::Canvas::source_revision(&edited);
-//RS     let delete = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"delete_comment_region\",\"revision\":\"{}\",\"region_id\":\"{}\"}}",
-//RS         revision, region_id
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &delete).expect("delete comment region");
-//RS     let deleted = fs::read_to_string(&path).unwrap();
-//RS     assert!(!deleted.contains("canvas:comment"), "{deleted}");
-//RS     assert!(deleted.contains("print(\"damage\")"), "{deleted}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_collapse_extract_preview_and_inline_are_source_refactors() {
-//RS     let path = write_fixture("collapse_extract", CANVAS_COLLAPSE_FIXTURE);
-//RS     let src = fs::read_to_string(&path).unwrap();
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
-//RS     let graph_id = field_before(&graph, "\"title\":\"compute\"", "graph_id");
-//RS     let expr_id = field_before(&graph, "\"source\":\"limit + 1\"", "inline_expr_id");
-//RS     let start = src.find("return limit + 1").expect("return span");
-//RS     let end = start + "return limit + 1".len();
-//RS     let revision = jet::Canvas::source_revision(&src);
-//RS     let collapse = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"create_collapsed_region\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"start\":{},\"end\":{},\"title\":\"Compute body\"}}",
-//RS         revision, graph_id, start, end
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &collapse).expect("collapse region");
-//RS     let collapsed = fs::read_to_string(&path).unwrap();
-//RS     assert!(collapsed.contains("// canvas:collapse"), "{collapsed}");
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("collapse graph");
-//RS     assert!(graph.contains("\"kind\":\"collapse\""), "{graph}");
-//RS     let collapse_region = field_before(&graph, "\"title\":\"Compute body\"", "region_id");
-//RS     let revision = jet::Canvas::source_revision(&collapsed);
-//RS     let expand = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"expand_collapsed_region\",\"revision\":\"{}\",\"region_id\":\"{}\"}}",
-//RS         revision, collapse_region
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &expand).expect("expand collapse region");
-//RS     let expanded = fs::read_to_string(&path).unwrap();
-//RS     assert!(!expanded.contains("canvas:collapse"), "{expanded}");
-//RS 
-//RS     let revision = jet::Canvas::source_revision(&expanded);
-//RS     let preview = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"preview_extract_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"function\":\"inc_limit\",\"ret_type\":\"Int\"}}",
-//RS         revision, expr_id
-//RS     );
-//RS     let preview_out =
-//RS         jet::Canvas::apply_transaction_json(&path, &preview).expect("extract preview");
-//RS     assert!(
-//RS         preview_out.contains("\"protocol\":\"jet.canvas.preview\""),
-//RS         "{preview_out}"
-//RS     );
-//RS     assert!(
-//RS         preview_out.contains("+fn inc_limit(limit: Int) -> Int"),
-//RS         "{preview_out}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), expanded);
-//RS 
-//RS     let extract = preview.replace("preview_extract_inline_expr", "extract_inline_expr");
-//RS     jet::Canvas::apply_transaction_json(&path, &extract).expect("extract inline");
-//RS     let extracted = fs::read_to_string(&path).unwrap();
-//RS     assert!(
-//RS         extracted.contains("fn inc_limit(limit: Int) -> Int"),
-//RS         "{extracted}"
-//RS     );
-//RS     assert!(extracted.contains("return inc_limit(limit)"), "{extracted}");
-//RS 
-//RS     let revision = jet::Canvas::source_revision(&extracted);
-//RS     let call_start = extracted.find("inc_limit(limit)").expect("helper call");
-//RS     let inline = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"inline_helper_call\",\"revision\":\"{}\",\"start\":{},\"end\":{}}}",
-//RS         revision,
-//RS         call_start,
-//RS         call_start + "inc_limit(limit)".len()
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &inline).expect("inline helper");
-//RS     let inlined = fs::read_to_string(&path).unwrap();
-//RS     assert!(inlined.contains("return limit + 1"), "{inlined}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_structural_writes_insert_control_and_fallible_rails_with_undo_source() {
-//RS     let path = write_fixture("structural_writes", CANVAS_STRUCTURAL_WRITE_FIXTURE);
-//RS     let original = fs::read_to_string(&path).unwrap();
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
-//RS     assert!(graph.contains("\"source_text\""), "{graph}");
-//RS     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-//RS 
-//RS     for op in [
-//RS         "insert_branch",
-//RS         "insert_switch",
-//RS         "insert_loop",
-//RS         "insert_fallible_rail",
-//RS     ] {
-//RS         let revision = jet::Canvas::source_revision(&fs::read_to_string(&path).unwrap());
-//RS         let req = format!(
-//RS             "{{\"schema_version\":1,\"op\":\"{}\",\"revision\":\"{}\",\"graph_id\":\"{}\"}}",
-//RS             op, revision, graph_id
-//RS         );
-//RS         let out = jet::Canvas::apply_transaction_json(&path, &req).expect(op);
-//RS         assert!(out.contains("\"source_text\""), "{out}");
-//RS     }
-//RS 
-//RS     let written = fs::read_to_string(&path).unwrap();
-//RS     for field in [
-//RS         "if true",
-//RS         "if 0 ==",
-//RS         "loop {",
-//RS         "fallible_value :: Int.parse(\"1\")",
-//RS         "unwrapped :: fallible_value ?? 0",
-//RS     ] {
-//RS         assert!(written.contains(field), "missing {field}: {written}");
-//RS     }
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("structural graph");
-//RS     for field in [
-//RS         "\"kind\":\"branch\"",
-//RS         "\"kind\":\"function\"",
-//RS         "\"kind\":\"loop\"",
-//RS         "\"kind\":\"fallible\"",
-//RS         "\"fallible\"",
-//RS     ] {
-//RS         assert!(
-//RS             graph.contains(field),
-//RS             "structural graph missing {field}: {graph}"
-//RS         );
-//RS     }
-//RS 
-//RS     let revision = jet::Canvas::source_revision(&written);
-//RS     let escaped_original = original
-//RS         .replace('\\', "\\\\")
-//RS         .replace('"', "\\\"")
-//RS         .replace('\n', "\\n");
-//RS     let undo = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\"}}",
-//RS         revision, escaped_original
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &undo).expect("undo source replace");
-//RS     let expected = jet::Formatter::format_source(&original).expect("format original");
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), expected);
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_structural_insert_uses_exec_pin_target_and_refuses_stale_target() {
-//RS     let path = write_fixture(
-//RS         "structural_pin_target",
-//RS         r#"fn run() {
-//RS     print("before")
-//RS     print("target")
-//RS     print("after")
-//RS }
-//RS "#,
-//RS     );
-//RS     let before = fs::read_to_string(&path).unwrap();
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("target graph");
-//RS     let graph_id = graph_id_for_title(&graph, "run");
-//RS     let target_node_id = field_before(&graph, "\"source\":\"\\\"target\\\"\"", "node_id");
-//RS     let target_pin = format!("{target_node_id}:input:exec");
-//RS     let insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}\",\"wire_target_pin\":\"exec\"}}",
-//RS         jet::Canvas::source_revision(&before),
-//RS         graph_id,
-//RS         target_pin
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &insert).expect("targeted branch insert");
-//RS     let inserted = fs::read_to_string(&path).unwrap();
-//RS     let branch = inserted.find("if true").expect("branch source");
-//RS     assert!(branch > inserted.find("print(\"before\")").unwrap());
-//RS     assert!(branch < inserted.find("print(\"target\")").unwrap());
-//RS     assert!(inserted.contains("print(\"after\")"), "{inserted}");
-//RS     assert_eq!(
-//RS         jet::format_source(&inserted).expect("format targeted branch"),
-//RS         inserted
-//RS     );
-//RS 
-//RS     let graph_after = jet::Canvas::graph_json_for_file(&path).expect("reproject targeted branch");
-//RS     assert!(graph_after.contains("\"kind\":\"branch\""), "{graph_after}");
-//RS     let stale_target = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:input:exec\",\"wire_target_pin\":\"exec\"}}",
-//RS         jet::Canvas::source_revision(&inserted),
-//RS         graph_id,
-//RS         target_node_id
-//RS     );
-//RS     let err = jet::Canvas::apply_transaction_json(&path, &stale_target).unwrap_err();
-//RS     assert!(
-//RS         err.contains("Canvas insertion pin no longer exists"),
-//RS         "{err}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), inserted);
-//RS 
-//RS     let live_target_node_id =
-//RS         field_before(&graph_after, "\"source\":\"\\\"target\\\"\"", "node_id");
-//RS     let unknown_pin = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:input:not_a_pin\",\"wire_target_pin\":\"exec\"}}",
-//RS         jet::Canvas::source_revision(&inserted),
-//RS         graph_id,
-//RS         live_target_node_id
-//RS     );
-//RS     let err = jet::Canvas::apply_transaction_json(&path, &unknown_pin).unwrap_err();
-//RS     assert!(
-//RS         err.contains("Canvas insertion pin no longer exists"),
-//RS         "{err}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), inserted);
-//RS 
-//RS     let output_path = write_fixture(
-//RS         "structural_output_target",
-//RS         r#"fn run() {
-//RS     print("before")
-//RS     print("target")
-//RS }
-//RS "#,
-//RS     );
-//RS     let output_before = fs::read_to_string(&output_path).unwrap();
-//RS     let output_graph = jet::Canvas::graph_json_for_file(&output_path).expect("output target graph");
-//RS     let output_graph_id = graph_id_for_title(&output_graph, "run");
-//RS     let output_node_id = field_before(&output_graph, "\"source\":\"\\\"before\\\"\"", "node_id");
-//RS     let output_insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:output:then\",\"wire_target_pin\":\"exec\"}}",
-//RS         jet::Canvas::source_revision(&output_before),
-//RS         output_graph_id,
-//RS         output_node_id
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&output_path, &output_insert)
-//RS         .expect("output-targeted branch insert");
-//RS     let output_inserted = fs::read_to_string(&output_path).unwrap();
-//RS     assert!(
-//RS         output_inserted.find("if true").unwrap()
-//RS             > output_inserted.find("print(\"before\")").unwrap()
-//RS     );
-//RS     assert!(
-//RS         output_inserted.find("if true").unwrap()
-//RS             < output_inserted.find("print(\"target\")").unwrap()
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_structural_incomplete_wire_refuses_without_writing() {
-//RS     let path = write_fixture(
-//RS         "structural_incomplete_wire",
-//RS         "fn run() {\n    print(\"target\")\n}\n",
-//RS     );
-//RS     let before = fs::read_to_string(&path).unwrap();
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("incomplete wire graph");
-//RS     let graph_id = graph_id_for_title(&graph, "run");
-//RS     let target_node_id = field_before(&graph, "\"source\":\"\\\"target\\\"\"", "node_id");
-//RS     let request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:input:exec\"}}",
-//RS         jet::Canvas::source_revision(&before),
-//RS         graph_id,
-//RS         target_node_id,
-//RS     );
-//RS     let err = jet::Canvas::apply_transaction_json(&path, &request)
-//RS         .expect_err("incomplete structural wire must be rejected");
-//RS     assert!(
-//RS         err.contains("Canvas structural wire target is missing"),
-//RS         "{err}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), before);
-//RS 
-//RS     let target_only_request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_target_pin\":\"exec\"}}",
-//RS         jet::Canvas::source_revision(&before),
-//RS         graph_id,
-//RS     );
-//RS     let target_only_err = jet::Canvas::apply_transaction_json(&path, &target_only_request)
-//RS         .expect_err("structural wire without an origin must be rejected");
-//RS     assert!(
-//RS         target_only_err.contains("Canvas structural wire origin is missing"),
-//RS         "{target_only_err}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), before);
-//RS 
-//RS     let data_path = write_fixture("structural_data_wire", "fn run() {\n    doubled :: 1\n}\n");
-//RS     let data_before = fs::read_to_string(&data_path).unwrap();
-//RS     let data_graph = jet::Canvas::graph_json_for_file(&data_path).expect("data wire graph");
-//RS     let data_graph_id = graph_id_for_title(&data_graph, "run");
-//RS     let data_pin = data_graph
-//RS         .split("\"pin_id\":\"")
-//RS         .skip(1)
-//RS         .find_map(|chunk| {
-//RS             let pin_id = chunk.split('"').next()?;
-//RS             (pin_id.starts_with(&data_graph_id)
-//RS                 && chunk.contains("\"direction\":\"output\"")
-//RS                 && chunk.contains("\"type\":\"Int\""))
-//RS             .then(|| pin_id.to_string())
-//RS         })
-//RS         .expect("entry data pin");
-//RS     let data_request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}\",\"wire_target_pin\":\"exec\"}}",
-//RS         jet::Canvas::source_revision(&data_before),
-//RS         data_graph_id,
-//RS         data_pin,
-//RS     );
-//RS     let data_err = jet::Canvas::apply_transaction_json(&data_path, &data_request)
-//RS         .expect_err("data structural wire must be rejected");
-//RS     assert!(
-//RS         data_err.contains("Canvas structural nodes connect through the exec pin"),
-//RS         "{data_err}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&data_path).unwrap(), data_before);
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_fallible_rail_is_excluded_outside_fallible_function() {
-//RS     let path = write_fixture(
-//RS         "fallible_rail_nonfallible",
-//RS         "fn compute() {\n    print(1)\n}\n",
-//RS     );
-//RS     let before = fs::read_to_string(&path).unwrap();
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
-//RS     let graph_id = field_before(&graph, "\"title\":\"compute\"", "graph_id");
-//RS     let req = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_fallible_rail\",\"revision\":\"{}\",\"graph_id\":\"{}\"}}",
-//RS         jet::Canvas::source_revision(&before),
-//RS         graph_id
-//RS     );
-//RS     let err = jet::Canvas::apply_transaction_json(&path, &req).unwrap_err();
-//RS     assert!(err.contains("\"kind\":\"unavailable\""), "{err}");
-//RS     assert!(err.contains("needs a fallible function"), "{err}");
-//RS     assert!(!err.contains("E0403"), "{err}");
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), before);
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_stale_transaction_conflicts_without_writing() {
-//RS     let path = write_fixture("stale", CANVAS_FIXTURE);
-//RS     let stale = "{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"sha256-stale\",\"from\":\"total\",\"to\":\"score\"}";
-//RS     let err = jet::Canvas::apply_transaction_json(&path, stale).unwrap_err();
-//RS     assert!(err.contains("\"kind\":\"conflict\""), "{err}");
-//RS     assert!(fs::read_to_string(&path).unwrap().contains("total"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_concurrent_clients_get_one_winner_and_current_revision_conflict() {
-//RS     let path = write_fixture("concurrent_conflict", CANVAS_FIXTURE);
-//RS     let before = fs::read_to_string(&path).unwrap();
-//RS     let revision = jet::Canvas::source_revision(&before);
-//RS     let first_request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"first\",\"client_id\":\"client-a\"}}"
-//RS     );
-//RS     let second_request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"second\",\"client_id\":\"client-b\"}}"
-//RS     );
-//RS     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-//RS     let first_path = path.clone();
-//RS     let first_barrier = std::sync::Arc::clone(&barrier);
-//RS     let first = std::thread::spawn(move || {
-//RS         first_barrier.wait();
-//RS         jet::Canvas::apply_transaction_json(&first_path, &first_request)
-//RS     });
-//RS     let second_path = path.clone();
-//RS     let second_barrier = std::sync::Arc::clone(&barrier);
-//RS     let second = std::thread::spawn(move || {
-//RS         second_barrier.wait();
-//RS         jet::Canvas::apply_transaction_json(&second_path, &second_request)
-//RS     });
-//RS     let first = first.join().unwrap();
-//RS     let second = second.join().unwrap();
-//RS     assert!(
-//RS         first.is_ok() ^ second.is_ok(),
-//RS         "exactly one client must win"
-//RS     );
-//RS     let loser = first.err().or_else(|| second.err()).expect("one conflict");
-//RS     let current = fs::read_to_string(&path).unwrap();
-//RS     let current_revision = jet::Canvas::source_revision(&current);
-//RS     assert!(loser.contains("\"kind\":\"conflict\""), "{loser}");
-//RS     assert!(
-//RS         loser.contains(&format!("\"current_revision\":\"{current_revision}\"")),
-//RS         "{loser}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_code_lens_source_edit_uses_replace_source_transaction() {
-//RS     let path = write_fixture("code_lens_edit", "fn run() {\n    print(\"old\")\n}\n");
-//RS     let before = fs::read_to_string(&path).unwrap();
-//RS     let revision = jet::Canvas::source_revision(&before);
-//RS     let edit = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"fn run() {{\\n    print(\\\"new\\\")\\n}}\\n\",\"source_edit\":true}}",
-//RS         revision
-//RS     );
-//RS     let out = jet::Canvas::apply_transaction_json(&path, &edit).expect("source edit");
-//RS     assert!(out.contains("\"changed\":true"), "{out}");
-//RS     assert!(out.contains("print(\\\"new\\\")"), "{out}");
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after source edit");
-//RS     assert!(graph.contains("print(\\\"new\\\")"), "{graph}");
-//RS     assert!(fs::read_to_string(&path)
-//RS         .unwrap()
-//RS         .contains("print(\"new\")"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_query_search_references_source_jump_and_rename_preview() {
-//RS     let path = write_fixture("query", CANVAS_FIXTURE);
-//RS     let src = fs::read_to_string(&path).unwrap();
-//RS     let revision = jet::Canvas::source_revision(&src);
-//RS 
-//RS     let find = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"find\",\"revision\":\"{}\",\"query\":\"square\"}}",
-//RS         revision
-//RS     );
-//RS     let found = jet::Canvas::query_json_for_file(&path, &find).expect("find query");
-//RS     assert!(
-//RS         found.contains("\"protocol\":\"jet.canvas.query\""),
-//RS         "{found}"
-//RS     );
-//RS     assert!(found.contains("\"op\":\"find\""), "{found}");
-//RS     assert!(found.contains("\"kind\":\"definition\""), "{found}");
-//RS     assert!(found.contains("\"graph_id\":\"fn:"), "{found}");
-//RS     assert!(found.contains("\"node_id\""), "{found}");
-//RS 
-//RS     let refs = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"references\",\"revision\":\"{}\",\"symbol\":\"total\"}}",
-//RS         revision
-//RS     );
-//RS     let refs = jet::Canvas::query_json_for_file(&path, &refs).expect("references query");
-//RS     assert!(refs.contains("\"kind\":\"definition\""), "{refs}");
-//RS     assert!(refs.contains("\"kind\":\"reference\""), "{refs}");
-//RS     assert!(refs.contains("\"impact\""), "{refs}");
-//RS 
-//RS     let start = src.find("total := square").expect("total binding");
-//RS     let jump = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"source_to_graph\",\"revision\":\"{}\",\"start\":{},\"end\":{}}}",
-//RS         revision,
-//RS         start,
-//RS         start + "total".len()
-//RS     );
-//RS     let jump = jet::Canvas::query_json_for_file(&path, &jump).expect("source jump query");
-//RS     assert!(jump.contains("\"op\":\"source_to_graph\""), "{jump}");
-//RS     assert!(jump.contains(":binding"), "{jump}");
-//RS 
-//RS     let preview = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"preview_rename\",\"revision\":\"{}\",\"symbol\":\"total\",\"to\":\"score\"}}",
-//RS         revision
-//RS     );
-//RS     let preview = jet::Canvas::query_json_for_file(&path, &preview).expect("rename preview query");
-//RS     assert!(preview.contains("\"diff\""), "{preview}");
-//RS     assert!(preview.contains("-    total := square(limit)"), "{preview}");
-//RS     assert!(preview.contains("+    score := square(limit)"), "{preview}");
-//RS     assert!(
-//RS         fs::read_to_string(&path)
-//RS             .unwrap()
-//RS             .contains("total := square(limit)"),
-//RS         "preview must not write"
-//RS     );
-//RS 
-//RS     let stale =
-//RS         "{\"schema_version\":1,\"op\":\"find\",\"revision\":\"sha256-stale\",\"query\":\"total\"}";
-//RS     let err = jet::Canvas::query_json_for_file(&path, stale).unwrap_err();
-//RS     assert!(err.contains("\"kind\":\"conflict\""), "{err}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_project_search_and_references_share_project_revision() {
-//RS     let dir = temp_dir("project_query");
-//RS     fs::write(
-//RS         dir.join("package.jet"),
-//RS         "name: \"project_query\"\nversion: \"0.1.0\"\n",
-//RS     )
-//RS     .unwrap();
-//RS     let entry = dir.join("main.jet");
-//RS     fs::write(
-//RS         &entry,
-//RS         "fn helper() -> Int {\n    return 1\n}\n\nfn run() {\n    helper()\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let other = dir.join("helper.jet");
-//RS     fs::write(
-//RS         &other,
-//RS         "fn helper() -> Int {\n    return 2\n}\n\nfn use_helper() {\n    helper()\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let project_revision = json_field(
-//RS         &jet::Canvas::project_json_for_entry(&entry),
-//RS         "project_revision",
-//RS     );
-//RS     let entry_src = fs::read_to_string(&entry).unwrap();
-//RS     let entry_revision = jet::Canvas::source_revision(&entry_src);
-//RS     let search = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"project_search\",\"source_id\":\"main.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"query\":\"helper\"}}",
-//RS         entry_revision, project_revision
-//RS     );
-//RS     let found = jet::Canvas::query_json_for_entry(&entry, &search).expect("project search");
-//RS     for field in [
-//RS         "\"op\":\"project_search\"",
-//RS         "\"project_revision\":\"sha256-",
-//RS         "\"source_id\":\"main.jet\"",
-//RS         "\"source_id\":\"helper.jet\"",
-//RS         "\"kind\":\"definition\"",
-//RS     ] {
-//RS         assert!(
-//RS             found.contains(field),
-//RS             "project search missing {field}: {found}"
-//RS         );
-//RS     }
-//RS 
-//RS     let references = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"references\",\"source_id\":\"main.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"symbol\":\"helper\"}}",
-//RS         entry_revision, project_revision
-//RS     );
-//RS     let refs = jet::Canvas::query_json_for_entry(&entry, &references).expect("project references");
-//RS     assert!(refs.contains("\"op\":\"references\""), "{refs}");
-//RS     assert!(refs.contains("\"impact\""), "{refs}");
-//RS     assert!(
-//RS         refs.matches("\"kind\":\"definition\"").count() >= 2,
-//RS         "{refs}"
-//RS     );
-//RS     assert!(
-//RS         refs.matches("\"kind\":\"reference\"").count() >= 2,
-//RS         "{refs}"
-//RS     );
-//RS 
-//RS     fs::write(&other, "fn helper() -> Int {\n    return 3\n}\n").unwrap();
-//RS     let stale =
-//RS         jet::Canvas::query_json_for_entry(&entry, &search).expect_err("stale project query");
-//RS     assert!(stale.contains("\"kind\":\"conflict\""), "{stale}");
-//RS     assert!(fs::read_to_string(&other).unwrap().contains("return 3"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_project_rename_preview_and_atomic_commit_use_semantic_sites() {
-//RS     let dir = temp_dir("project_rename");
-//RS     fs::write(
-//RS         dir.join("package.jet"),
-//RS         "name: \"project_rename\"\nversion: \"0.1.0\"\n",
-//RS     )
-//RS     .unwrap();
-//RS     let entry = dir.join("main.jet");
-//RS     fs::write(
-//RS         &entry,
-//RS         "pub fn helper() -> Int {\n    return 1\n}\n\nfn run() {\n    print(helper())\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let other = dir.join("other.jet");
-//RS     fs::write(
-//RS         &other,
-//RS         "use \"./main\" as main\n\nfn use_helper() -> Int {\n    return main.helper()\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let unrelated = dir.join("unrelated.jet");
-//RS     fs::write(
-//RS         &unrelated,
-//RS         "fn helper() -> Int {\n    return 99\n}\n\nfn local() -> Int {\n    return helper()\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let project = jet::Canvas::project_json_for_entry(&entry);
-//RS     let project_revision = json_field(&project, "project_revision");
-//RS     let main_before = fs::read_to_string(&entry).unwrap();
-//RS     let other_before = fs::read_to_string(&other).unwrap();
-//RS     let unrelated_before = fs::read_to_string(&unrelated).unwrap();
-//RS     let main_revision = jet::Canvas::source_revision(&main_before);
-//RS     let request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"preview_rename\",\"source_id\":\"main.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"symbol\":\"helper\",\"to\":\"compute\"}}",
-//RS         main_revision, project_revision
-//RS     );
-//RS 
-//RS     let preview =
-//RS         jet::Canvas::query_json_for_entry(&entry, &request).expect("project rename preview");
-//RS     for field in [
-//RS         "\"op\":\"preview_rename\"",
-//RS         "\"project_revision\":\"sha256-",
-//RS         "\"source_id\":\"main.jet\"",
-//RS         "\"source_id\":\"other.jet\"",
-//RS         "\"source_id\":\"unrelated.jet\"",
-//RS         "\"files\"",
-//RS         "-pub fn helper()",
-//RS         "+pub fn compute()",
-//RS     ] {
-//RS         assert!(
-//RS             preview.contains(field),
-//RS             "rename preview missing {field}: {preview}"
-//RS         );
-//RS     }
-//RS     assert_eq!(fs::read_to_string(&entry).unwrap(), main_before);
-//RS     assert_eq!(fs::read_to_string(&other).unwrap(), other_before);
-//RS     assert_eq!(fs::read_to_string(&unrelated).unwrap(), unrelated_before);
-//RS 
-//RS     let touched = format!(
-//RS         "[{{\"path\":\"main.jet\",\"revision\":\"{}\"}},{{\"path\":\"other.jet\",\"revision\":\"{}\"}}]",
-//RS         main_revision,
-//RS         jet::Canvas::source_revision(&other_before)
-//RS     );
-//RS     let apply = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"rename_binding\",\"preview\":false,\"project_revision\":\"{}\",\"files\":{},\"source_id\":\"main.jet\",\"from\":\"helper\",\"to\":\"compute\"}}",
-//RS         project_revision, touched
-//RS     );
-//RS     let committed =
-//RS         jet::Canvas::apply_project_transaction_json(&entry, &apply).expect("project rename commit");
-//RS     assert!(
-//RS         committed.contains("\"writes\":\"source_transaction\""),
-//RS         "{committed}"
-//RS     );
-//RS     assert!(fs::read_to_string(&entry).unwrap().contains("compute()"));
-//RS     assert!(fs::read_to_string(&other).unwrap().contains("compute()"));
-//RS     let receipt = fs::read_dir(dir.join(".jet/codemods"))
-//RS         .unwrap()
-//RS         .filter_map(Result::ok)
-//RS         .map(|entry| entry.path())
-//RS         .find(|path| {
-//RS             path.file_name()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .is_some_and(|name| {
-//RS                     name.starts_with("CanvasProjectRename-") && name.ends_with(".log.json")
-//RS                 })
-//RS         })
-//RS         .expect("project rename receipt");
-//RS     let receipt = fs::read_to_string(receipt).unwrap();
-//RS     assert!(receipt.contains("\"kind\":\"rename\""), "{receipt}");
-//RS     assert!(receipt.contains("\"from\":\"helper\""), "{receipt}");
-//RS     assert!(receipt.contains("\"to\":\"compute\""), "{receipt}");
-//RS 
-//RS     let stale = jet::Canvas::apply_project_transaction_json(&entry, &apply)
-//RS         .expect_err("old project rename must be rejected");
-//RS     assert!(stale.contains("\"kind\":\"conflict\""), "{stale}");
-//RS     assert!(fs::read_to_string(&entry).unwrap().contains("compute()"));
-//RS     assert!(fs::read_to_string(&other).unwrap().contains("compute()"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions() {
-//RS     let path = write_fixture("actions", CANVAS_FIXTURE);
-//RS     let src = fs::read_to_string(&path).unwrap();
-//RS     let revision = jet::Canvas::source_revision(&src);
-//RS 
-//RS     let actions_req = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
-//RS         revision
-//RS     );
-//RS     let actions = jet::Canvas::query_json_for_file(&path, &actions_req).expect("actions query");
-//RS     for field in [
-//RS         "\"op\":\"actions\"",
-//RS         "\"actions_schema_version\":1",
-//RS         "\"kind\":\"canvas.action\"",
-//RS         "\"node_descriptor_id\":\"function_pure\"",
-//RS         "\"node_descriptor_id\":\"function_exec\"",
-//RS         "\"engine\":\"checked-tir+jit\"",
-//RS         "\"writes\":\"source_transaction_only\"",
-//RS         "\"authority\":[\"canvas.source_edit:single_file\"]",
-//RS         "\"package_id\":\"single-file\"",
-//RS         "\"version\":\"unpackaged\"",
-//RS         "\"project_functions\"",
-//RS         "\"name\":\"square\"",
-//RS         "\"signature\":\"fn square(n: Int) -> Int\"",
-//RS         "\"name\":\"summarize\"",
-//RS         "\"signature\":\"fn summarize(limit: Int) -> Int\"",
-//RS         "\"name\":\"run\"",
-//RS         "\"signature\":\"fn run()\"",
-//RS         "\"name\":\"run\",\"signature\":\"fn run()\",\"callee\":\"run\"",
-//RS         "\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"]",
-//RS         "\"callee\":\"square\"",
-//RS         "\"default_args\":[\"1\"]",
-//RS         "\"kind\":\"canvas.builtin\"",
-//RS         "\"title\":\"Print\"",
-//RS         "\"callee\":\"print\"",
-//RS         "\"insert_callee\":\"print\"",
-//RS         "\"module_path\":\"builtin\"",
-//RS         "\"ret\":\"Void\"",
-//RS         "\"pins\":[{\"name\":\"value\",\"direction\":\"input\",\"type\":\"Any\"}]",
-//RS         "\"default_args\":[\"\\\"canvas\\\"\"]",
-//RS         "\"kind\":\"canvas.core_catalog\"",
-//RS         "\"engine\":\"checked-tir+jit\"",
-//RS         "\"execution\":\"source_transaction\"",
-//RS         "\"writes\":\"source_transaction_only\"",
-//RS         "\"insert_callee\"",
-//RS         "\"insert_op\":\"insert_call\"",
-//RS         "\"pure\"",
-//RS         "\"source\":\"Docs/spec/reference/core-library.md\"",
-//RS         "\"kind\":\"canvas.command\"",
-//RS         "\"kind\":\"canvas.structural\"",
-//RS         "\"action_id\":\"canvas.structural:branch\"",
-//RS         "\"op\":\"insert_branch\"",
-//RS         "\"op\":\"command_authority\"",
-//RS         "\"engine\":\"jet-cli\"",
-//RS         "\"action_id\":\"canvas.command:run\"",
-//RS         "\"title\":\"Run program\"",
-//RS         "\"command\":[\"jet\",\"run\",\"main.jet\"]",
-//RS         "\"authority\":[\"canvas.command:run\",\"canvas.source_edit:single_file\"]",
-//RS         "\"action_id\":\"canvas.command:check\"",
-//RS         "\"command\":[\"jet\",\"check\",\"main.jet\"]",
-//RS         "\"writes\":\"none\"",
-//RS         "\"requires_confirmation\":false",
-//RS         "\"action_id\":\"canvas.command:test\"",
-//RS         "\"command\":[\"jet\",\"test\",\"main.jet\"]",
-//RS         "\"writes\":\"test_outputs\"",
-//RS         "\"requires_confirmation\":true",
-//RS         "\"action_id\":\"canvas.command:build\"",
-//RS         "\"authority\":[\"canvas.command:build\",\"canvas.build_output:binary\",\"canvas.source_edit:single_file\"]",
-//RS         "\"command\":[\"jet\",\"build\",\"main.jet\"]",
-//RS         "\"writes\":\"build_outputs\"",
-//RS         "\"action_id\":\"canvas.command:service.start\"",
-//RS         "\"command\":[\"jet\",\"services\",\"up\"]",
-//RS         "\"available\":false",
-//RS         "\"denied_reason\":\"no env service selected\"",
-//RS     ] {
-//RS         assert!(actions.contains(field), "actions missing {field}");
-//RS     }
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
-//RS     let run_graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-//RS     let preview = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"preview_canvas_action\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"action_id\":\"canvas.action:{}:square\",\"callee\":\"square\",\"args\":[\"1\"]}}",
-//RS         revision,
-//RS         run_graph_id,
-//RS         path.display()
-//RS     );
-//RS     let out = jet::Canvas::apply_transaction_json(&path, &preview).expect("action preview");
-//RS     for field in [
-//RS         "\"protocol\":\"jet.canvas.action\"",
-//RS         "\"engine\":\"checked-tir+jit\"",
-//RS         "\"execution\":\"preview\"",
-//RS         "\"writes\":\"source_transaction_only\"",
-//RS         "\"authority\":[\"canvas.source_edit:single_file\"]",
-//RS         "\"package_id\":\"single-file\"",
-//RS         "\"touched_files\":[\"main.jet\"]",
-//RS         "+    square(1)",
-//RS     ] {
-//RS         assert!(out.contains(field), "action preview missing {field}: {out}");
-//RS     }
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         src,
-//RS         "Canvas action preview must not write source"
-//RS     );
-//RS     let wrong_callee_preview = preview.replace("\"callee\":\"square\"", "\"callee\":\"print\"");
-//RS     let wrong_callee = jet::Canvas::apply_transaction_json(&path, &wrong_callee_preview)
-//RS         .expect_err("preview must reject a callee that disagrees with its descriptor");
-//RS     assert!(
-//RS         wrong_callee.contains("does not match its checked descriptor"),
-//RS         "{wrong_callee}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), src);
-//RS 
-//RS     let dir = temp_dir("actions_package");
-//RS     fs::write(
-//RS         dir.join("package.jet"),
-//RS         "name: \"canvas_actions\"\nversion: \"0.7.0\"\n",
-//RS     )
-//RS     .unwrap();
-//RS     let pkg_path = dir.join("main.jet");
-//RS     fs::write(&pkg_path, CANVAS_FIXTURE).unwrap();
-//RS     let pkg_src = fs::read_to_string(&pkg_path).unwrap();
-//RS     let pkg_actions_req = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
-//RS         jet::Canvas::source_revision(&pkg_src)
-//RS     );
-//RS     let pkg_actions =
-//RS         jet::Canvas::query_json_for_file(&pkg_path, &pkg_actions_req).expect("package actions");
-//RS     for field in [
-//RS         "\"authority\":[\"canvas.source_edit:package\"]",
-//RS         "\"package_id\":\"canvas_actions\"",
-//RS         "\"version\":\"0.7.0\"",
-//RS         "\"touched_files\":[\"main.jet\"]",
-//RS         "\"command\":[\"jet\",\"build\",\"main.jet\"]",
-//RS     ] {
-//RS         assert!(pkg_actions.contains(field), "package actions missing {field}: {pkg_actions}");
-//RS     }
-//RS 
-//RS     let builtin_preview = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"preview_canvas_action\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"action_id\":\"canvas.action:builtin:print\",\"callee\":\"print\",\"args\":[\"\\\"canvas\\\"\"]}}",
-//RS         revision, run_graph_id,
-//RS     );
-//RS     let out = jet::Canvas::apply_transaction_json(&path, &builtin_preview)
-//RS         .expect("built-in action preview");
-//RS     assert!(out.contains("\"callee\":\"print\""), "{out}");
-//RS     assert!(out.contains("+    print(\\\"canvas\\\")"), "{out}");
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         src,
-//RS         "Built-in Canvas action preview must not write source"
-//RS     );
-//RS 
-//RS     let project_insert_path = write_fixture("actions_project_insert", CANVAS_FIXTURE);
-//RS     let project_insert_src = fs::read_to_string(&project_insert_path).unwrap();
-//RS     let project_insert_graph =
-//RS         jet::Canvas::graph_json_for_file(&project_insert_path).expect("project insert graph");
-//RS     let project_run_graph_id = field_before(&project_insert_graph, "\"title\":\"run\"", "graph_id");
-//RS     let project_insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"square\",\"args\":[\"1\"]}}",
-//RS         jet::Canvas::source_revision(&project_insert_src),
-//RS         project_run_graph_id,
-//RS     );
-//RS     let project_insert_out =
-//RS         jet::Canvas::apply_transaction_json(&project_insert_path, &project_insert)
-//RS             .expect("project function insert_call");
-//RS     assert!(
-//RS         project_insert_out.contains("\"changed\":true"),
-//RS         "{project_insert_out}"
-//RS     );
-//RS     assert!(
-//RS         fs::read_to_string(&project_insert_path)
-//RS             .unwrap()
-//RS             .contains("square(1)"),
-//RS         "project function insert_call should write source"
-//RS     );
-//RS 
-//RS     let wired_path = write_fixture(
-//RS         "actions_wired_insert",
-//RS         "fn square(n: Int) -> Int {\n    return n * n\n}\n\nfn run() {\n    limit :: 4\n    print(limit)\n}\n",
-//RS     );
-//RS     let wired_src = fs::read_to_string(&wired_path).unwrap();
-//RS     let wired_graph = jet::Canvas::graph_json_for_file(&wired_path).expect("wired insert graph");
-//RS     let wired_run_graph_id = field_before(&wired_graph, "\"title\":\"run\"", "graph_id");
-//RS     let wired_insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"square\",\"args\":[\"limit\"],\"wire_origin_pin_id\":\"{}:stmt:1:binding:output:limit\",\"wire_target_pin\":\"n\",\"wire_expr\":\"limit\"}}",
-//RS         jet::Canvas::source_revision(&wired_src),
-//RS         wired_run_graph_id,
-//RS         wired_run_graph_id,
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&wired_path, &wired_insert)
-//RS         .expect("wired project function insert_call");
-//RS     let wired_after = fs::read_to_string(&wired_path).unwrap();
-//RS     assert!(
-//RS         wired_after.find("limit :: 4").unwrap() < wired_after.find("square(limit)").unwrap(),
-//RS         "{wired_after}"
-//RS     );
-//RS     assert_eq!(
-//RS         jet::Formatter::format_source(&wired_after).unwrap(),
-//RS         wired_after
-//RS     );
-//RS 
-//RS     let core_path = write_fixture(
-//RS         "actions_core_insert",
-//RS         "use core.math as math\n\nfn run() {\n    print(1)\n}\n",
-//RS     );
-//RS     let core_src = fs::read_to_string(&core_path).unwrap();
-//RS     let core_revision = jet::Canvas::source_revision(&core_src);
-//RS     let core_actions_req = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
-//RS         core_revision
-//RS     );
-//RS     let core_actions =
-//RS         jet::Canvas::query_json_for_file(&core_path, &core_actions_req).expect("core actions");
-//RS     assert!(
-//RS         core_actions.contains("\"action_id\":\"canvas.core_catalog:core.math:abs\""),
-//RS         "{core_actions}"
-//RS     );
-//RS     assert!(core_actions.contains("\"title\":\"abs "), "{core_actions}");
-//RS     assert!(
-//RS         core_actions.contains("\"insert_callee\":\"math.abs\""),
-//RS         "{core_actions}"
-//RS     );
-//RS     assert!(
-//RS         core_actions.contains("\"ret\":\"Int\""),
-//RS         "Core catalog action must expose its checked return type: {core_actions}"
-//RS     );
-//RS     let core_graph = jet::Canvas::graph_json_for_file(&core_path).expect("core graph");
-//RS     let core_run_graph_id = field_before(&core_graph, "\"title\":\"run\"", "graph_id");
-//RS     let core_insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"math.abs\",\"args\":[\"-3\"]}}",
-//RS         core_revision, core_run_graph_id,
-//RS     );
-//RS     let core_out =
-//RS         jet::Canvas::apply_transaction_json(&core_path, &core_insert).expect("core insert_call");
-//RS     assert!(core_out.contains("\"changed\":true"), "{core_out}");
-//RS     assert!(
-//RS         fs::read_to_string(&core_path)
-//RS             .unwrap()
-//RS             .contains("math.abs(-3)"),
-//RS         "Core catalog insert_call should write source"
-//RS     );
-//RS 
-//RS     let synth_path = write_fixture(
-//RS         "actions_core_insert_synth_import",
-//RS         "fn run() {\n    print(1)\n}\n",
-//RS     );
-//RS     let synth_src = fs::read_to_string(&synth_path).unwrap();
-//RS     let synth_revision = jet::Canvas::source_revision(&synth_src);
-//RS     let synth_graph = jet::Canvas::graph_json_for_file(&synth_path).expect("synth core graph");
-//RS     let synth_run_graph_id = field_before(&synth_graph, "\"title\":\"run\"", "graph_id");
-//RS     let synth_insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"core.encoding.decode\",\"args\":[\"\\\"canvas\\\"\"]}}",
-//RS         synth_revision, synth_run_graph_id,
-//RS     );
-//RS     let synth_out = jet::Canvas::apply_transaction_json(&synth_path, &synth_insert)
-//RS         .expect("core insert_call should synthesize import");
-//RS     assert!(synth_out.contains("\"changed\":true"), "{synth_out}");
-//RS     assert!(
-//RS         synth_out.contains("use core.encoding.json as json"),
-//RS         "transaction result should include synthesized Core import: {synth_out}"
-//RS     );
-//RS     let synth_after = fs::read_to_string(&synth_path).unwrap();
-//RS     assert!(
-//RS         synth_after.contains("use core.encoding.json as json"),
-//RS         "{synth_after}"
-//RS     );
-//RS     assert!(
-//RS         synth_after.contains("json.decode(\"canvas\") ?? panic(\"canvas\")"),
-//RS         "{synth_after}"
-//RS     );
-//RS     let synth_reproject = jet::Canvas::graph_json_for_file(&synth_path).expect("synth reproject");
-//RS     assert!(
-//RS         synth_reproject.contains("\"title\":\".decode\""),
-//RS         "reproject should show inserted Core function node: {synth_reproject}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
-//RS     let dir = temp_dir("actions_exports");
-//RS     fs::create_dir_all(dir.join(".jet/bindings/js")).unwrap();
-//RS     let descriptor = jet::AST::binder_descriptor(jet::AST::ForeignLanguage::JS)
-//RS         .expect("JavaScript binder descriptor")
-//RS         .stamp();
-//RS     fs::write(
-//RS         dir.join(".jet/bindings/js/plotly.jet"),
-//RS         format!(
-//RS             "// jet-ffi-descriptor={descriptor}\npub fn println() -> Int {{\n    return 1\n}}\n"
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         dir.join("helper.jet"),
-//RS         "fn hidden(n: Int) -> Int {\n    return n\n}\n\npub fn square(n: Int) -> Int {\n    return n * n\n}\n\npub fn noisy(n: Int) -[IO]> Int {\n    print(n)\n    return n\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let path = dir.join("main.jet");
-//RS     let src = "use \"./helper\" as h\nuse js.plotly as plot\n\nfn run() {\n    print(plot.println())\n    print(h.square(2))\n}\n";
-//RS     fs::write(&path, src).unwrap();
-//RS 
-//RS     let request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
-//RS         jet::Canvas::source_revision(src)
-//RS     );
-//RS     let actions = jet::Canvas::query_json_for_file(&path, &request).expect("actions query");
-//RS     assert!(
-//RS         actions.contains("\"callee\":\"h.square\"")
-//RS             && actions.contains("\"insert_callee\":\"h.square\""),
-//RS         "imported action must use the entry-facing callee: {actions}"
-//RS     );
-//RS     assert!(
-//RS         actions.contains("\"rank\":74")
-//RS             && actions.contains("\"rank_terms\":[\"call\",\"pure\",\"function\"]"),
-//RS         "project action must carry descriptor-owned ranking facts: {actions}"
-//RS     );
-//RS     let noisy = json_top_level_objects(json_array_field(&actions, "actions"))
-//RS         .into_iter()
-//RS         .find(|action| action.contains("\"callee\":\"h.noisy\""))
-//RS         .expect("effectful imported action");
-//RS     assert!(
-//RS         noisy.contains("\"node_descriptor_id\":\"function_exec\"")
-//RS             && noisy.contains("\"rank\":72")
-//RS             && noisy.contains("\"rank_terms\":[\"call\",\"function\"]"),
-//RS         "effectful imported action must keep its own descriptor ranking: {noisy}"
-//RS     );
-//RS     assert!(
-//RS         !actions.contains("\"module_path\":\"js.plotly\"")
-//RS             && !actions.contains("\"name\":\"println\"")
-//RS             && !actions.contains("\"name\":\"hidden\"")
-//RS             && !actions.contains("\"callee\":\"h.hidden\""),
-//RS         "foreign binding functions must not leak into the project palette: {actions}"
-//RS     );
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("actions graph");
-//RS     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-//RS     let insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"h.square\",\"args\":[\"1\"]}}",
-//RS         jet::Canvas::source_revision(src),
-//RS         graph_id
-//RS     );
-//RS     let inserted =
-//RS         jet::Canvas::apply_transaction_json(&path, &insert).expect("imported action insert");
-//RS     assert!(inserted.contains("\"changed\":true"), "{inserted}");
-//RS     let changed = fs::read_to_string(&path).unwrap();
-//RS     assert!(changed.contains("h.square(1)"), "{changed}");
-//RS     assert_eq!(
-//RS         jet::Formatter::format_source(&changed).unwrap(),
-//RS         changed,
-//RS         "insert_call must preserve canonical formatting"
-//RS     );
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after formatted insert");
-//RS     let square_node = json_top_level_objects(json_array_field(&graph, "nodes"))
-//RS         .into_iter()
-//RS         .find(|node| {
-//RS             node.contains(":method:square")
-//RS                 && node.contains("\"node_descriptor_id\":\"function_exec\"")
-//RS         })
-//RS         .expect("inserted imported call node");
-//RS     assert!(
-//RS         square_node.contains("\"source_span\":{\"start\":"),
-//RS         "inserted call must retain descriptor and source provenance: {square_node}"
-//RS     );
-//RS     let square_pin = json_top_level_objects(json_array_field(&graph, "pins"))
-//RS         .into_iter()
-//RS         .find(|pin| pin.contains(":method:square") && pin.contains("\"type\":\"Int\""))
-//RS         .expect("typed imported call pin");
-//RS     assert!(square_pin.contains("\"node_id\":\""), "{square_pin}");
-//RS     let inline_id = json_top_level_objects(json_array_field(&graph, "inline_exprs"))
-//RS         .into_iter()
-//RS         .find(|inline| inline.contains(":method:square") && inline.contains("\"source\":\"1\""))
-//RS         .map(|inline| json_field(inline, "inline_expr_id"))
-//RS         .expect("editable imported call argument");
-//RS     let edit = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"2\"}}",
-//RS         jet::Canvas::source_revision(&changed),
-//RS         inline_id
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &edit).expect("edit imported call argument");
-//RS     let edited = fs::read_to_string(&path).unwrap();
-//RS     assert!(edited.contains("h.square(2)"), "{edited}");
-//RS     assert_eq!(
-//RS         jet::Formatter::format_source(&edited).unwrap(),
-//RS         edited,
-//RS         "edit_inline_expr must preserve canonical formatting"
-//RS     );
-//RS 
-//RS     let reloaded = jet::Canvas::graph_json_for_file(&path).expect("reload edited imported call");
-//RS     let reloaded_square = json_top_level_objects(json_array_field(&reloaded, "nodes"))
-//RS         .into_iter()
-//RS         .find(|node| {
-//RS             node.contains(":method:square")
-//RS                 && node.contains("\"node_descriptor_id\":\"function_exec\"")
-//RS         })
-//RS         .expect("reloaded imported call node");
-//RS     assert!(
-//RS         reloaded_square.contains("\"source_span\":{\"start\":"),
-//RS         "reload must preserve imported call provenance: {reloaded_square}"
-//RS     );
-//RS     assert!(
-//RS         reloaded.contains("\"source\":\"2\""),
-//RS         "reload must preserve edited imported call spelling: {reloaded}"
-//RS     );
-//RS     let undo_source = src
-//RS         .replace('\\', "\\\\")
-//RS         .replace('"', "\\\"")
-//RS         .replace('\n', "\\n");
-//RS     let undo = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\",\"undo_restore\":\"Undo\"}}",
-//RS         jet::Canvas::source_revision(&edited),
-//RS         undo_source
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &undo).expect("undo imported call edits");
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         src,
-//RS         "undo must restore the original canonical source"
-//RS     );
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after undo");
-//RS     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-//RS     let before_invalid = fs::read_to_string(&path).unwrap();
-//RS     let invalid = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"println\",\"args\":[\"1\"]}}",
-//RS         jet::Canvas::source_revision(&before_invalid),
-//RS         graph_id
-//RS     );
-//RS     let error = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
-//RS     assert!(
-//RS         error.contains("diagnostic") || error.contains("E"),
-//RS         "{error}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), before_invalid);
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_actions_preserve_nested_imported_module_callee() {
-//RS     let dir = temp_dir("actions_nested_import");
-//RS     fs::write(
-//RS         dir.join("helper.jet"),
-//RS         "module tools {\n    pub fn square(n: Int) -> Int {\n        return n * n\n    }\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let path = dir.join("main.jet");
-//RS     let src = "use \"./helper\" as h\n\nfn run(limit: Int) {\n    print(limit)\n}\n";
-//RS     fs::write(&path, src).unwrap();
-//RS 
-//RS     let request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
-//RS         jet::Canvas::source_revision(src)
-//RS     );
-//RS     let actions = jet::Canvas::query_json_for_file(&path, &request).expect("nested actions query");
-//RS     let square = json_top_level_objects(json_array_field(&actions, "actions"))
-//RS         .into_iter()
-//RS         .find(|action| action.contains("\"title\":\"square\""))
-//RS         .expect("nested imported action");
-//RS     assert!(
-//RS         square.contains("\"callee\":\"h.tools.square\"")
-//RS             && square.contains("\"insert_callee\":\"h.tools.square\"")
-//RS             && square.contains("\"node_descriptor_id\":\"function_pure\""),
-//RS         "nested imported action must retain checked callee and descriptor: {square}"
-//RS     );
-//RS     assert!(
-//RS         !square.contains("\"callee\":\"h.square\"")
-//RS             && !square.contains("\"insert_callee\":\"h.square\""),
-//RS         "nested imported action must not flatten its checked scope: {square}"
-//RS     );
-//RS 
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("nested import graph");
-//RS     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-//RS     let insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"h.tools.square\",\"args\":[\"limit\"]}}",
-//RS         jet::Canvas::source_revision(src),
-//RS         graph_id
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &insert).expect("nested imported insert");
-//RS     let changed = fs::read_to_string(&path).unwrap();
-//RS     assert!(changed.contains("h.tools.square(limit)"), "{changed}");
-//RS     assert_eq!(
-//RS         jet::Formatter::format_source(&changed).unwrap(),
-//RS         changed,
-//RS         "nested imported insert must remain canonical"
-//RS     );
-//RS 
-//RS     let reloaded = jet::Canvas::graph_json_for_file(&path).expect("reload nested import graph");
-//RS     let square_node = json_top_level_objects(json_array_field(&reloaded, "nodes"))
-//RS         .into_iter()
-//RS         .find(|node| node.contains(":method:square"))
-//RS         .expect("reloaded nested imported call node");
-//RS     assert!(
-//RS         square_node.contains("\"node_descriptor_id\":\"function_pure\"")
-//RS             && square_node.contains("\"source_span\":{\"start\":"),
-//RS         "nested imported call must retain descriptor and provenance: {square_node}"
-//RS     );
-//RS 
-//RS     let stale = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"h.square\",\"args\":[\"limit\"]}}",
-//RS         jet::Canvas::source_revision(&changed),
-//RS         graph_id
-//RS     );
-//RS     let stale_error = jet::Canvas::apply_transaction_json(&path, &stale).unwrap_err();
-//RS     assert!(
-//RS         stale_error.contains("diagnostic") || stale_error.contains("E"),
-//RS         "flattened nested callee must fail sema: {stale_error}"
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), changed);
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() {
-//RS     let path = write_fixture(
-//RS         "core_catalog",
-//RS         "use core.math as m\n\nfn run() {\n    print(\"core\")\n}\n",
-//RS     );
-//RS     let src = fs::read_to_string(&path).unwrap();
-//RS     let revision = jet::Canvas::source_revision(&src);
-//RS     let query = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{}\",\"query\":\"\"}}",
-//RS         revision
-//RS     );
-//RS     let catalog =
-//RS         jet::Canvas::query_json_for_file(&path, &query).expect("Canvas core catalog query");
-//RS 
-//RS     for field in [
-//RS         "\"op\":\"core_catalog\"",
-//RS         "\"catalog_schema_version\":1",
-//RS         "\"authority\":[\"canvas.catalog:core.read\"]",
-//RS         "\"writes\":\"none\"",
-//RS         "\"source\":\"Docs/spec/reference/core-library.md\"",
-//RS         "\"path\":\"core.http\"",
-//RS         "\"path\":\"core.http.client\"",
-//RS         "\"path\":\"core.files\"",
-//RS         "\"path\":\"core.net.url\"",
-//RS         "\"path\":\"core.net.mime\"",
-//RS         "\"path\":\"core.crypto\"",
-//RS         "\"path\":\"core.event\"",
-//RS         "\"path\":\"core.web\"",
-//RS         "\"path\":\"core.mem\"",
-//RS         "\"signature\":\"client.request(method, url)\"",
-//RS         "\"name\":\"request\"",
-//RS         "\"pure\"",
-//RS         "\"insert_callee\":\"m.abs\"",
-//RS     ] {
-//RS         assert!(
-//RS             catalog.contains(field),
-//RS             "catalog missing {field}: {catalog}"
-//RS         );
-//RS     }
-//RS 
-//RS     let sema_query = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{}\",\"query\":\"window_open\"}}",
-//RS         revision
-//RS     );
-//RS     let sema_catalog =
-//RS         jet::Canvas::query_json_for_file(&path, &sema_query).expect("Canvas sema catalog query");
-//RS     for field in [
-//RS         "\"path\":\"core.game.raylib\"",
-//RS         "\"name\":\"window_open\"",
-//RS         "\"signature\":\"core.game.raylib.window_open\"",
-//RS         "\"source\":\"crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs\"",
-//RS     ] {
-//RS         assert!(
-//RS             sema_catalog.contains(field),
-//RS             "sema catalog missing {field}: {sema_catalog}"
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         src,
-//RS         "Core catalog browsing must not edit source"
-//RS     );
-//RS 
-//RS     let args_query = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{}\",\"query\":\"help\"}}",
-//RS         revision
-//RS     );
-//RS     let args_catalog =
-//RS         jet::Canvas::query_json_for_file(&path, &args_query).expect("Canvas args catalog query");
-//RS     assert!(
-//RS         args_catalog.contains("\"path\":\"core.args\""),
-//RS         "{args_catalog}"
-//RS     );
-//RS     assert!(args_catalog.contains("\"name\":\"help\""), "{args_catalog}");
-//RS     assert!(
-//RS         args_catalog.contains("\"available\":false"),
-//RS         "{args_catalog}"
-//RS     );
-//RS     assert!(
-//RS         args_catalog.contains("\"stageable\":true"),
-//RS         "{args_catalog}"
-//RS     );
-//RS     assert!(
-//RS         args_catalog.contains("\"stage_reason_code\":\"method_only\""),
-//RS         "{args_catalog}"
-//RS     );
-//RS     assert!(
-//RS         args_catalog.contains("\"receiver_type\":\"ArgsSpec\""),
-//RS         "{args_catalog}"
-//RS     );
-//RS     assert!(
-//RS         args_catalog
-//RS             .contains("\"name\":\"receiver\",\"direction\":\"input\",\"type\":\"ArgsSpec\""),
-//RS         "{args_catalog}"
-//RS     );
-//RS     assert!(
-//RS         args_catalog.contains("\"unavailable_reason_code\":\"method_only\""),
-//RS         "{args_catalog}"
-//RS     );
-//RS     assert!(
-//RS         args_catalog.contains("Use this as a method on an ArgsSpec value."),
-//RS         "{args_catalog}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_core_catalog_uses_default_alias_without_import() {
-//RS     let path = write_fixture(
-//RS         "core_catalog_default_alias",
-//RS         "fn run() {\n    print(\"core\")\n}\n",
-//RS     );
-//RS     let source = fs::read_to_string(&path).unwrap();
-//RS     let revision = jet::Canvas::source_revision(&source);
-//RS     let request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
-//RS         revision
-//RS     );
-//RS     let actions = jet::Canvas::query_json_for_file(&path, &request).expect("query core actions");
-//RS     assert!(
-//RS         actions.contains("\"insert_callee\":\"math.abs\""),
-//RS         "{actions}"
-//RS     );
-//RS     assert!(
-//RS         !actions.contains("\"insert_callee\":\"core.math.abs\""),
-//RS         "{actions}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_core_insert_synthesizes_default_alias_import_without_import() {
-//RS     let path = write_fixture("core_insert_default_alias", "fn run() {\n    print(1)\n}\n");
-//RS     let source = fs::read_to_string(&path).unwrap();
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("default alias graph");
-//RS     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-//RS     let insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"math.abs\",\"args\":[\"1\"]}}",
-//RS         jet::Canvas::source_revision(&source),
-//RS         graph_id,
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &insert)
-//RS         .expect("default alias insert should synthesize Core import");
-//RS     let after = fs::read_to_string(&path).unwrap();
-//RS     assert!(after.contains("use core.math as math"), "{after}");
-//RS     assert!(after.contains("math.abs(1)"), "{after}");
-//RS     assert_eq!(jet::Formatter::format_source(&after).unwrap(), after);
-//RS }
-//RS 
-//RS #[test]
-//RS fn canvas_library_action_preserves_events_example_source_and_refuses_bad_edits() {
-//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let example = fs::read_to_string(repo.join("Examples/features/ui/events.jet"))
-//RS         .expect("read events Canvas example");
-//RS     let path = write_fixture("library_events_example", &example);
-//RS     let graph = jet::Canvas::graph_json_for_file(&path).expect("project events example");
-//RS     let source = fs::read_to_string(&path).unwrap();
-//RS     let revision = jet::Canvas::source_revision(&source);
-//RS     let actions_request = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
-//RS         revision
-//RS     );
-//RS     let actions = jet::Canvas::query_json_for_file(&path, &actions_request)
-//RS         .expect("query library actions for events example");
-//RS     for field in [
-//RS         "\"action_id\":\"canvas.core_catalog:core.event:scope\"",
-//RS         "\"module_path\":\"core.event\"",
-//RS         "\"callee\":\"event.scope\"",
-//RS         "\"insert_op\":\"insert_call\"",
-//RS         "\"engine\":\"checked-tir+jit\"",
-//RS         "\"writes\":\"source_transaction_only\"",
-//RS         "\"source\":\"Docs/spec/reference/core-library.md\"",
-//RS     ] {
-//RS         assert!(
-//RS             actions.contains(field),
-//RS             "library action missing {field}: {actions}"
-//RS         );
-//RS     }
-//RS 
-//RS     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-//RS     let insert = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"event.scope\",\"args\":[],\"bind\":\"scope_from_library\"}}",
-//RS         revision, graph_id
-//RS     );
-//RS     jet::Canvas::apply_transaction_json(&path, &insert).expect("insert library action");
-//RS     let after = fs::read_to_string(&path).unwrap();
-//RS     assert!(
-//RS         after.contains("scope_from_library :: event.scope()"),
-//RS         "{after}"
-//RS     );
-//RS     assert_eq!(
-//RS         jet::format_source(&after).expect("format library edit"),
-//RS         after
-//RS     );
-//RS     let projected = jet::Canvas::graph_json_for_file(&path).expect("reproject library edit");
-//RS     assert!(projected.contains("scope_from_library"), "{projected}");
-//RS     assert!(
-//RS         projected.contains("\"source_span\""),
-//RS         "library node lost provenance: {projected}"
-//RS     );
-//RS 
-//RS     let bad_revision = jet::Canvas::source_revision(&after);
-//RS     let bad = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"event.scope\",\"args\":[\"1\"],\"bind\":\"bad_scope\"}}",
-//RS         bad_revision, graph_id
-//RS     );
-//RS     assert!(jet::Canvas::apply_transaction_json(&path, &bad).is_err());
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         after,
-//RS         "ill-typed library edit wrote source"
-//RS     );
-//RS 
-//RS     let stale = format!(
-//RS         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"sha256-stale\",\"graph_id\":\"{}\",\"callee\":\"event.scope\",\"args\":[],\"bind\":\"stale_scope\"}}",
-//RS         graph_id
-//RS     );
-//RS     assert!(jet::Canvas::apply_transaction_json(&path, &stale).is_err());
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         after,
-//RS         "stale library edit wrote source"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-// END-PORT-PENDING 0983 tests/canvas.rs:1776-3550
+// Private continuation of the Canvas integration suite; shared helpers/constants
+// are the sole declarations in Canvas.jet. No duplicate test filesystem provider.
+use jet.Canvas.[graph_json_for_file, project_json_for_entry, query_json_for_file, query_json_for_entry, apply_transaction_json, apply_project_transaction_json, source_revision]
+use jet.[format_source]
+use jet_foundation.[binder_descriptor, ForeignLanguage]
+use std.[fs, sync, thread, env]
+// GATE #4494: actual native filesystem, Barrier/Arc and thread providers.
 
+// Rust: tests/canvas.rs:1776
+#Test("canvas_multi_input_transactions_guard_nested_pattern_scope_and_stale_edits") {
+    path :: write_fixture("nested_multi_input_tx", "fn choose(x: Int) -> Int {{\n    if x == {{\n        1 -> {{\n            values :: [1, 2]\n            return values[0]\n        }}\n        else -> {{ return 0 }}\n    }}\n}}\n\nfn run() {{ print(choose(1)) }}\n")
+    graph_json :: graph_json_for_file(path).expect("nested multi-input graph")
+    graph :: graph_object_for_title(graph_json, "choose")
+    (list_start, list_end) :: source_span_near(graph, "\"title\":\"list\"")
+    before :: fs.read_to_string(path).unwrap()
+    append :: "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{source_revision(before)}\",\"node_start\":{list_start},\"node_end\":{list_end},\"element\":\"3\"}}"
+    apply_transaction_json(path, append).expect("append pattern-bound list element")
+    appended :: fs.read_to_string(path).unwrap()
+    assert(appended.contains("values :: [1, 2, 3]"), appended)
+    assert_eq(appended, before.replacen("[1, 2]", "[1, 2, 3]", 1), "nested append must preserve canonical source spelling")
+    graph_json :: graph_json_for_file(path).expect("graph after nested append")
+    graph :: graph_object_for_title(graph_json, "choose")
+    (list_start, list_end) :: source_span_near(graph, "\"title\":\"list\"")
+    (item_start, item_end) :: source_span_near(graph, "\"name\":\"item3\"")
+    remove :: "{{\"schema_version\":1,\"op\":\"remove_multi_input_element\",\"revision\":\"{source_revision(appended)}\",\"node_start\":{list_start},\"node_end\":{list_end},\"element_start\":{item_start},\"element_end\":{item_end}}}"
+    apply_transaction_json(path, remove).expect("remove nested list element after reprojection")
+    restored :: fs.read_to_string(path).unwrap()
+    assert_eq(restored, before, "nested append/remove must preserve source")
+    graph_json :: graph_json_for_file(path).expect("graph before invalid append")
+    graph :: graph_object_for_title(graph_json, "choose")
+    (list_start, list_end) :: source_span_near(graph, "\"title\":\"list\"")
+    invalid_before :: fs.read_to_string(path).unwrap()
+    invalid :: "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{source_revision(invalid_before)}\",\"node_start\":{list_start},\"node_end\":{list_end},\"element\":\"true\"}}"
+    err :: apply_transaction_json(path, invalid).unwrap_err()
+    assert(err.contains("\"kind\":\"diagnostic\""), err)
+    assert_eq(fs.read_to_string(path).unwrap(), invalid_before)
+    stale :: "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"sha256-stale\",\"node_start\":{list_start},\"node_end\":{list_end},\"element\":\"3\"}}"
+    err :: apply_transaction_json(path, stale).unwrap_err()
+    assert(err.contains("\"kind\":\"conflict\""), err)
+    assert_eq(fs.read_to_string(path).unwrap(), invalid_before)
+}
+// Rust: tests/canvas.rs:1855
+#Test("canvas_statement_state_nodes_and_toggle_transaction") {
+    path :: write_fixture("statement_state", "fn run() {{\n    #Off print(\"off\")\n    #DebugOnly print(\"debug\")\n    print(\"on\")\n}}\n")
+    graph :: graph_json_for_file(path).expect("state graph")
+    loop field in ["\"node_descriptor_id\":\"switched\"", "\"title\":\"#Off\"", "\"badges\":[\"#Off\"]", "\"title\":\"#DebugOnly\"", "\"badges\":[\"#DebugOnly\"]", "toggle_switch_state"] -> assert(graph.contains(field), "statement-state graph missing {field}: {graph}")
+    graph_id :: graph_id_for_title(graph, "run")
+    (node_start, node_end) :: source_span_near(graph, "\"title\":\"#Off\"")
+    before :: fs.read_to_string(path).unwrap()
+    turn_on :: "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{source_revision(before)}\",\"graph_id\":\"{graph_id}\",\"node_start\":{node_start},\"node_end\":{node_end}}}"
+    apply_transaction_json(path, turn_on).expect("turn on state")
+    on :: fs.read_to_string(path).unwrap()
+    assert(!on.contains("#Off"), on)
+    assert(on.contains("#DebugOnly print(\"debug\")"), on)
+    graph :: graph_json_for_file(path).expect("graph after turn on")
+    on_start :: on.find("print(\"on\")").expect("plain on call")
+    (node_start, node_end) :: source_span_at_or_after(graph, "\"title\":\"print", on_start)
+    turn_off :: "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{source_revision(on)}\",\"graph_id\":\"{graph_id}\",\"node_start\":{node_start},\"node_end\":{node_end}}}"
+    apply_transaction_json(path, turn_off).expect("turn off state")
+    off :: fs.read_to_string(path).unwrap()
+    assert(!off.contains("#Off print(\"off\")"), off)
+    assert(off.contains("#Off print(\"on\")"), off)
+    graph :: graph_json_for_file(path).expect("graph after turn off")
+    off_on_start :: off.find("#Off print(\"on\")").expect("off plain on call")
+    (node_start, node_end) :: source_span_at_or_after(graph, "\"title\":\"#Off\"", off_on_start)
+    restore :: "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{source_revision(off)}\",\"graph_id\":\"{graph_id}\",\"node_start\":{node_start},\"node_end\":{node_end}}}"
+    apply_transaction_json(path, restore).expect("restore state")
+    assert_eq(fs.read_to_string(path).unwrap(), on)
+}
+// Rust: tests/canvas.rs:1920
+#Test("canvas_projects_typestate_diagram_facts") {
+    path :: write_fixture("typestate_diagram", "struct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n")
+    graph :: graph_json_for_file(path).expect("typestate diagram")
+    loop field in ["\"state_graphs\":[{{", "\"name\":\"Open\",\"terminal\":true", "\"name\":\"Orphan\",\"terminal\":true,\"reachable\":false", "\"operation\":\"open\",\"from\":\"Closed\",\"to\":\"Open\""] -> assert(graph.contains(field), graph)
+}
+// Rust: tests/canvas.rs:1950
+#Test("canvas_debug_only_execution_path_keeps_source_backed_incoming_wires") {
+    path :: write_fixture("debug_only_execution_flow", "fn run() {{\n    print(\"before\")\n    #DebugOnly print(\"debug\")\n    print(\"after\")\n}}\n")
+    source :: fs.read_to_string(path).unwrap()
+    graph_json :: graph_json_for_file(path).expect("debug-only graph")
+    graph :: graph_object_for_title(graph_json, "run")
+    nodes :: json_top_level_objects(json_array_field(graph, "nodes"))
+    node_for_call :: (call: String) -> {
+        start :: source.find(call).expect("call source")
+        nodes.find((node) -> node.contains("\"source_span\":{{\"start\":{start},")).map((node) -> json_field(node, "node_id")).expect("missing source-backed node for {call}")
+    }
+    before :: node_for_call("print(\"before\")")
+    debug :: node_for_call("print(\"debug\")")
+    after :: node_for_call("print(\"after\")")
+    wires :: json_top_level_objects(json_array_field(graph, "wires"))
+    control_wire :: (from: String, to: String) -> wires.find((wire) -> wire.contains("\"from_pin\":\"{from}:output:then\"") && wire.contains("\"to_pin\":\"{to}:input:exec\"") && wire.contains("\"wire_kind\":\"control\"") && wire.contains("\"from_source_span\":{{") && wire.contains("\"to_source_span\":{{"))
+    assert(control_wire(before, debug) != None, "missing before -> debug wire: {graph}")
+    assert(control_wire(debug, after) != None, "missing debug -> after wire: {graph}")
+}
+// Rust: tests/canvas.rs:1996
+#Test("canvas_projects_and_edits_subjectless_guard_arms") {
+    path :: write_fixture("subjectless_guards", "fn run() -> Int {{\n    ready :: true\n    if {{\n        ready -> {{ return 1 }}\n        else -> {{ return 0 }}\n    }}\n}}\n")
+    graph :: graph_json_for_file(path).expect("canvas guard graph")
+    assert(graph.contains("\"title\":\"if guards\""), graph)
+    assert(graph.contains("\"pattern_source\":\"ready\""), graph)
+    graph_id :: graph_id_for_title(graph, "run")
+    (node_start, node_end) :: source_span_near(graph, "\"title\":\"if guards\"")
+    source :: fs.read_to_string(path).unwrap()
+    add :: "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{source_revision(source)}\",\"graph_id\":\"{graph_id}\",\"node_start\":{node_start},\"node_end\":{node_end},\"pattern\":\"false\"}}"
+    apply_transaction_json(path, add).expect("add guard arm")
+    edited :: fs.read_to_string(path).unwrap()
+    assert(edited.contains("false ->"), edited)
+}
+// Rust: tests/canvas.rs:2024
+#Test("canvas_classic_pattern_branch_transactions_use_canonical_switch") {
+    path :: write_fixture("classic_pattern_transactions", "fn choose(x: Int?) -> Int {{\n    if x == Val(_) {{ return 1 }} else {{ return 0 }}\n}}\n\nfn run() {{\n    print(choose(Val(1)))\n}}\n")
+    graph :: graph_json_for_file(path).expect("classic pattern graph")
+    assert(graph.contains("\"title\":\"if ==\""), graph)
+    assert(!graph.contains("\"title\":\"if guards\""), graph)
+    graph_id :: graph_id_for_title(graph, "choose")
+    (pat_start, pat_end) :: source_span_near(graph, "\"pattern_source\":\"== Val(_)\"")
+    before :: fs.read_to_string(path).unwrap()
+    (node_start, node_end) :: source_span_near(graph, "\"title\":\"if ==\"")
+    assert(before.slice(node_start, node_end).contains("else"))
+    remove_last :: "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{source_revision(before)}\",\"graph_id\":\"{graph_id}\",\"pattern_start\":{pat_start},\"pattern_end\":{pat_end}}}"
+    err :: apply_transaction_json(path, remove_last).unwrap_err()
+    assert(err.contains("can't remove the last pattern arm"), err)
+    assert_eq(fs.read_to_string(path).unwrap(), before)
+    edit :: "{{\"schema_version\":1,\"op\":\"edit_pattern_arm\",\"revision\":\"{source_revision(before)}\",\"graph_id\":\"{graph_id}\",\"pattern_start\":{pat_start},\"pattern_end\":{pat_end},\"pattern\":\"None\"}}"
+    apply_transaction_json(path, edit).expect("edit classic pattern")
+    edited :: fs.read_to_string(path).unwrap()
+    assert(edited.contains("if x == .None"), edited)
+    graph :: graph_json_for_file(path).expect("edited classic pattern graph")
+    (node_start, node_end) :: source_span_near(graph, "\"title\":\"if ==\"")
+    add :: "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{source_revision(edited)}\",\"graph_id\":\"{graph_id}\",\"node_start\":{node_start},\"node_end\":{node_end},\"pattern\":\"Val(_)\"}}"
+    apply_transaction_json(path, add).expect("add classic pattern arm")
+    converted :: fs.read_to_string(path).unwrap()
+    loop field in ["if x == {{", ".None ->", ".Val(_) ->", "else ->"] -> assert(converted.contains(field), converted)
+}
+// Rust: tests/canvas.rs:2075
+#Test("canvas_classic_if_ignores_braces_inside_leading_trivia") {
+    path :: write_fixture("classic_if_trivia", "fn run() {{\n    ready :: true\n    if /* {{ trivia */ ready {{ print(\"ready\") }}\n}}\n")
+    graph :: graph_json_for_file(path).expect("commented classic graph")
+    assert(graph.contains("\"title\":\"if\""), graph)
+    assert(!graph.contains("\"title\":\"if guards\""), graph)
+    assert(graph.contains("/* {{ trivia */"), graph)
+}
+// Rust: tests/canvas.rs:2091
+#Test("canvas_wired_insert_transaction_writes_call_with_origin_value") {
+    path :: write_fixture("wired_insert", "fn use_int(n: Int) {{\n    print(n)\n}}\n\nfn demo(x: Int) {{\n}}\n\nfn run() {{\n    demo(1)\n}}\n")
+    src :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    demo_graph_id :: field_before(graph, "\"title\":\"demo\"", "graph_id")
+    insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(src)}\",\"graph_id\":\"{demo_graph_id}\",\"callee\":\"use_int\",\"args\":[],\"wire_origin_pin_id\":\"local:x\",\"wire_target_pin\":\"n\",\"wire_expr\":\"x\"}}"
+    out :: apply_transaction_json(path, insert).expect("wired insert")
+    assert(out.contains("\"changed\":true"), out)
+    changed :: fs.read_to_string(path).unwrap()
+    assert(changed.contains("use_int(x)"), changed)
+    projected :: graph_json_for_file(path).expect("canvas graph after insert")
+    assert(projected.contains("\"title\":\"use_int\""), projected)
+    assert(projected.contains("\"wire_kind\":\"data\""), projected)
+    no_arg_path :: write_fixture("wired_insert_exec_no_arg", "fn helper() {{\n    print(\"ok\")\n}}\n\nfn run() {{\n    print(\"start\")\n}}\n")
+    no_arg_src :: fs.read_to_string(no_arg_path).unwrap()
+    no_arg_graph :: graph_json_for_file(no_arg_path).expect("canvas graph")
+    run_graph_id :: field_before(no_arg_graph, "\"title\":\"run\"", "graph_id")
+    exec_insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(no_arg_src)}\",\"graph_id\":\"{run_graph_id}\",\"callee\":\"helper\",\"args\":[],\"wire_origin_pin_id\":\"entry:output:then\",\"wire_target_pin\":\"exec\"}}"
+    out :: apply_transaction_json(no_arg_path, exec_insert).expect("exec-origin no-arg wired insert")
+    assert(out.contains("\"changed\":true"), out)
+    changed :: fs.read_to_string(no_arg_path).unwrap()
+    assert(changed.contains("helper()"), changed)
+    assert(!changed.contains("helper(1)"), changed)
+}
+// Rust: tests/canvas.rs:2150
+#Test("canvas_comment_regions_round_trip_through_source_comments") {
+    path :: write_fixture("comment_region", CANVAS_COMMENT_FIXTURE)
+    src :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    start :: src.find("print").expect("print call")
+    end :: start + "print(\"damage\")".bytes().len()
+    create :: "{{\"schema_version\":1,\"op\":\"create_comment_region\",\"revision\":\"{source_revision(src)}\",\"graph_id\":\"{graph_id}\",\"start\":{start},\"end\":{end},\"title\":\"Damage path\",\"color\":\"#2f80ed\",\"alpha\":\"0.25\",\"bounds\":\"10,20,320,140\"}}"
+    out :: apply_transaction_json(path, create).expect("create comment region")
+    assert(out.contains("\"changed\":true"), out)
+    commented :: fs.read_to_string(path).unwrap()
+    assert(commented.contains("// canvas:comment"), commented)
+    assert(commented.contains("title=\"Damage path\""), commented)
+    graph :: graph_json_for_file(path).expect("comment graph")
+    loop field in ["\"kind\":\"comment\"", "\"title\":\"Damage path\"", "\"color\":\"#2f80ed\"", "\"alpha\":\"0.25\"", "\"bounds\""] -> assert(graph.contains(field), "comment graph missing {field}: {graph}")
+    region_id :: field_before(graph, "\"title\":\"Damage path\"", "region_id")
+    edit :: "{{\"schema_version\":1,\"op\":\"edit_comment_region\",\"revision\":\"{source_revision(commented)}\",\"region_id\":\"{region_id}\",\"title\":\"Validated damage\",\"color\":\"#22c55e\",\"alpha\":\"0.4\",\"bounds\":\"30,40,360,180\"}}"
+    apply_transaction_json(path, edit).expect("edit comment region")
+    edited :: fs.read_to_string(path).unwrap()
+    loop field in ["title=\"Validated damage\"", "color=\"#22c55e\"", "bounds=(30,40,360,180)"] -> assert(edited.contains(field), edited)
+    graph :: graph_json_for_file(path).expect("edited comment graph")
+    assert(graph.contains("\"title\":\"Validated damage\""), graph)
+    assert(graph.contains("\"x\":30"), graph)
+    delete :: "{{\"schema_version\":1,\"op\":\"delete_comment_region\",\"revision\":\"{source_revision(edited)}\",\"region_id\":\"{region_id}\"}}"
+    apply_transaction_json(path, delete).expect("delete comment region")
+    deleted :: fs.read_to_string(path).unwrap()
+    assert(!deleted.contains("canvas:comment"), deleted)
+    assert(deleted.contains("print(\"damage\")"), deleted)
+}
+// Rust: tests/canvas.rs:2210
+#Test("canvas_collapse_extract_preview_and_inline_are_source_refactors") {
+    path :: write_fixture("collapse_extract", CANVAS_COLLAPSE_FIXTURE)
+    src :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    graph_id :: field_before(graph, "\"title\":\"compute\"", "graph_id")
+    expr_id :: field_before(graph, "\"source\":\"limit + 1\"", "inline_expr_id")
+    start :: src.find("return limit + 1").expect("return span")
+    end :: start + "return limit + 1".bytes().len()
+    collapse :: "{{\"schema_version\":1,\"op\":\"create_collapsed_region\",\"revision\":\"{source_revision(src)}\",\"graph_id\":\"{graph_id}\",\"start\":{start},\"end\":{end},\"title\":\"Compute body\"}}"
+    apply_transaction_json(path, collapse).expect("collapse region")
+    collapsed :: fs.read_to_string(path).unwrap()
+    assert(collapsed.contains("// canvas:collapse"), collapsed)
+    graph :: graph_json_for_file(path).expect("collapse graph")
+    assert(graph.contains("\"kind\":\"collapse\""), graph)
+    collapse_region :: field_before(graph, "\"title\":\"Compute body\"", "region_id")
+    expand :: "{{\"schema_version\":1,\"op\":\"expand_collapsed_region\",\"revision\":\"{source_revision(collapsed)}\",\"region_id\":\"{collapse_region}\"}}"
+    apply_transaction_json(path, expand).expect("expand collapse region")
+    expanded :: fs.read_to_string(path).unwrap()
+    assert(!expanded.contains("canvas:collapse"), expanded)
+    preview :: "{{\"schema_version\":1,\"op\":\"preview_extract_inline_expr\",\"revision\":\"{source_revision(expanded)}\",\"inline_expr_id\":\"{expr_id}\",\"function\":\"inc_limit\",\"ret_type\":\"Int\"}}"
+    preview_out :: apply_transaction_json(path, preview).expect("extract preview")
+    assert(preview_out.contains("\"protocol\":\"jet.canvas.preview\""), preview_out)
+    assert(preview_out.contains("+fn inc_limit(limit: Int) -> Int"), preview_out)
+    assert_eq(fs.read_to_string(path).unwrap(), expanded)
+    extract :: preview.replace("preview_extract_inline_expr", "extract_inline_expr")
+    apply_transaction_json(path, extract).expect("extract inline")
+    extracted :: fs.read_to_string(path).unwrap()
+    assert(extracted.contains("fn inc_limit(limit: Int) -> Int"), extracted)
+    assert(extracted.contains("return inc_limit(limit)"), extracted)
+    call_start :: extracted.find("inc_limit(limit)").expect("helper call")
+    inline :: "{{\"schema_version\":1,\"op\":\"inline_helper_call\",\"revision\":\"{source_revision(extracted)}\",\"start\":{call_start},\"end\":{call_start + "inc_limit(limit)".bytes().len()}}}"
+    apply_transaction_json(path, inline).expect("inline helper")
+    inlined :: fs.read_to_string(path).unwrap()
+    assert(inlined.contains("return limit + 1"), inlined)
+}
+// Rust: tests/canvas.rs:2278
+#Test("canvas_structural_writes_insert_control_and_fallible_rails_with_undo_source") {
+    path :: write_fixture("structural_writes", CANVAS_STRUCTURAL_WRITE_FIXTURE)
+    original :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    assert(graph.contains("\"source_text\""), graph)
+    graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    loop op in ["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"] {
+        revision :: source_revision(fs.read_to_string(path).unwrap())
+        req :: "{{\"schema_version\":1,\"op\":\"{op}\",\"revision\":\"{revision}\",\"graph_id\":\"{graph_id}\"}}"
+        out :: apply_transaction_json(path, req).expect(op)
+        assert(out.contains("\"source_text\""), out)
+    }
+    written :: fs.read_to_string(path).unwrap()
+    loop field in ["if true", "if 0 ==", "loop {{", "fallible_value :: Int.parse(\"1\")", "unwrapped :: fallible_value ?? 0"] -> assert(written.contains(field), "missing {field}: {written}")
+    graph :: graph_json_for_file(path).expect("structural graph")
+    loop field in ["\"kind\":\"branch\"", "\"kind\":\"function\"", "\"kind\":\"loop\"", "\"kind\":\"fallible\"", "\"fallible\""] -> assert(graph.contains(field), "structural graph missing {field}: {graph}")
+    escaped_original :: original.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    undo :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{source_revision(written)}\",\"source\":\"{escaped_original}\"}}"
+    apply_transaction_json(path, undo).expect("undo source replace")
+    expected :: format_source(original).expect("format original")
+    assert_eq(fs.read_to_string(path).unwrap(), expected)
+}
+// Rust: tests/canvas.rs:2339
+#Test("canvas_structural_insert_uses_exec_pin_target_and_refuses_stale_target") {
+    path :: write_fixture("structural_pin_target", "fn run() {{\n    print(\"before\")\n    print(\"target\")\n    print(\"after\")\n}}\n")
+    before :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("target graph")
+    graph_id :: graph_id_for_title(graph, "run")
+    target_node_id :: field_before(graph, "\"source\":\"\\\"target\\\"\"", "node_id")
+    target_pin :: "{target_node_id}:input:exec"
+    insert :: "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{source_revision(before)}\",\"graph_id\":\"{graph_id}\",\"wire_origin_pin_id\":\"{target_pin}\",\"wire_target_pin\":\"exec\"}}"
+    apply_transaction_json(path, insert).expect("targeted branch insert")
+    inserted :: fs.read_to_string(path).unwrap()
+    branch :: inserted.find("if true").expect("branch source")
+    assert(branch > inserted.find("print(\"before\")").unwrap())
+    assert(branch < inserted.find("print(\"target\")").unwrap())
+    assert(inserted.contains("print(\"after\")"), inserted)
+    assert_eq(format_source(inserted).expect("format targeted branch"), inserted)
+    graph_after :: graph_json_for_file(path).expect("reproject targeted branch")
+    assert(graph_after.contains("\"kind\":\"branch\""), graph_after)
+    stale_target :: "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{source_revision(inserted)}\",\"graph_id\":\"{graph_id}\",\"wire_origin_pin_id\":\"{target_node_id}:input:exec\",\"wire_target_pin\":\"exec\"}}"
+    err :: apply_transaction_json(path, stale_target).unwrap_err()
+    assert(err.contains("Canvas insertion pin no longer exists"), err)
+    assert_eq(fs.read_to_string(path).unwrap(), inserted)
+    live_target_node_id :: field_before(graph_after, "\"source\":\"\\\"target\\\"\"", "node_id")
+    unknown_pin :: "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{source_revision(inserted)}\",\"graph_id\":\"{graph_id}\",\"wire_origin_pin_id\":\"{live_target_node_id}:input:not_a_pin\",\"wire_target_pin\":\"exec\"}}"
+    err :: apply_transaction_json(path, unknown_pin).unwrap_err()
+    assert(err.contains("Canvas insertion pin no longer exists"), err)
+    assert_eq(fs.read_to_string(path).unwrap(), inserted)
+    output_path :: write_fixture("structural_output_target", "fn run() {{\n    print(\"before\")\n    print(\"target\")\n}}\n")
+    output_before :: fs.read_to_string(output_path).unwrap()
+    output_graph :: graph_json_for_file(output_path).expect("output target graph")
+    output_graph_id :: graph_id_for_title(output_graph, "run")
+    output_node_id :: field_before(output_graph, "\"source\":\"\\\"before\\\"\"", "node_id")
+    output_insert :: "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{source_revision(output_before)}\",\"graph_id\":\"{output_graph_id}\",\"wire_origin_pin_id\":\"{output_node_id}:output:then\",\"wire_target_pin\":\"exec\"}}"
+    apply_transaction_json(output_path, output_insert).expect("output-targeted branch insert")
+    output_inserted :: fs.read_to_string(output_path).unwrap()
+    assert(output_inserted.find("if true").unwrap() > output_inserted.find("print(\"before\")").unwrap())
+    assert(output_inserted.find("if true").unwrap() < output_inserted.find("print(\"target\")").unwrap())
+}
+// Rust: tests/canvas.rs:2433
+#Test("canvas_structural_incomplete_wire_refuses_without_writing") {
+    path :: write_fixture("structural_incomplete_wire", "fn run() {{\n    print(\"target\")\n}}\n")
+    before :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("incomplete wire graph")
+    graph_id :: graph_id_for_title(graph, "run")
+    target_node_id :: field_before(graph, "\"source\":\"\\\"target\\\"\"", "node_id")
+    request :: "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{source_revision(before)}\",\"graph_id\":\"{graph_id}\",\"wire_origin_pin_id\":\"{target_node_id}:input:exec\"}}"
+    err :: apply_transaction_json(path, request).expect_err("incomplete structural wire must be rejected")
+    assert(err.contains("Canvas structural wire target is missing"), err)
+    assert_eq(fs.read_to_string(path).unwrap(), before)
+    target_only_request :: "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{source_revision(before)}\",\"graph_id\":\"{graph_id}\",\"wire_target_pin\":\"exec\"}}"
+    target_only_err :: apply_transaction_json(path, target_only_request).expect_err("structural wire without an origin must be rejected")
+    assert(target_only_err.contains("Canvas structural wire origin is missing"), target_only_err)
+    assert_eq(fs.read_to_string(path).unwrap(), before)
+    data_path :: write_fixture("structural_data_wire", "fn run() {{\n    doubled :: 1\n}}\n")
+    data_before :: fs.read_to_string(data_path).unwrap()
+    data_graph :: graph_json_for_file(data_path).expect("data wire graph")
+    data_graph_id :: graph_id_for_title(data_graph, "run")
+    data_pin :: data_graph.split("\"pin_id\":\"").skip(1).find_map((chunk) -> {
+        pin_id :: chunk.split('"').first() ?? return None
+        if pin_id.starts_with(data_graph_id) && chunk.contains("\"direction\":\"output\"") && chunk.contains("\"type\":\"Int\"") -> Val(pin_id) else -> None
+    }).expect("entry data pin")
+    data_request :: "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{source_revision(data_before)}\",\"graph_id\":\"{data_graph_id}\",\"wire_origin_pin_id\":\"{data_pin}\",\"wire_target_pin\":\"exec\"}}"
+    data_err :: apply_transaction_json(data_path, data_request).expect_err("data structural wire must be rejected")
+    assert(data_err.contains("Canvas structural nodes connect through the exec pin"), data_err)
+    assert_eq(fs.read_to_string(data_path).unwrap(), data_before)
+}
+// Rust: tests/canvas.rs:2500
+#Test("canvas_fallible_rail_is_excluded_outside_fallible_function") {
+    path :: write_fixture("fallible_rail_nonfallible", "fn compute() {{\n    print(1)\n}}\n")
+    before :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    graph_id :: field_before(graph, "\"title\":\"compute\"", "graph_id")
+    req :: "{{\"schema_version\":1,\"op\":\"insert_fallible_rail\",\"revision\":\"{source_revision(before)}\",\"graph_id\":\"{graph_id}\"}}"
+    err :: apply_transaction_json(path, req).unwrap_err()
+    assert(err.contains("\"kind\":\"unavailable\""), err)
+    assert(err.contains("needs a fallible function"), err)
+    assert(!err.contains("E0403"), err)
+    assert_eq(fs.read_to_string(path).unwrap(), before)
+}
+// Rust: tests/canvas.rs:2521
+#Test("canvas_stale_transaction_conflicts_without_writing") {
+    path :: write_fixture("stale", CANVAS_FIXTURE)
+    stale :: "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"sha256-stale\",\"from\":\"total\",\"to\":\"score\"}}"
+    err :: apply_transaction_json(path, stale).unwrap_err()
+    assert(err.contains("\"kind\":\"conflict\""), err)
+    assert(fs.read_to_string(path).unwrap().contains("total"))
+}
+// Rust: tests/canvas.rs:2530
+#Test("canvas_concurrent_clients_get_one_winner_and_current_revision_conflict") {
+    path :: write_fixture("concurrent_conflict", CANVAS_FIXTURE)
+    before :: fs.read_to_string(path).unwrap()
+    revision :: source_revision(before)
+    first_request :: "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"first\",\"client_id\":\"client-a\"}}"
+    second_request :: "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"second\",\"client_id\":\"client-b\"}}"
+    barrier :: sync.Arc.new(sync.Barrier.new(2))
+    first_path :: ~path
+    first_barrier :: sync.Arc.clone(barrier)
+    first :: thread.spawn(() -> { first_barrier.wait(); apply_transaction_json(first_path, first_request) })
+    second_path :: ~path
+    second_barrier :: sync.Arc.clone(barrier)
+    second :: thread.spawn(() -> { second_barrier.wait(); apply_transaction_json(second_path, second_request) })
+    first :: first.join().unwrap()
+    second :: second.join().unwrap()
+    assert(first.is_ok() != second.is_ok(), "exactly one client must win")
+    loser :: first.err().or_else(() -> second.err()).expect("one conflict")
+    current :: fs.read_to_string(path).unwrap()
+    current_revision :: source_revision(current)
+    assert(loser.contains("\"kind\":\"conflict\""), loser)
+    assert(loser.contains("\"current_revision\":\"{current_revision}\""), loser)
+}
+// Rust: tests/canvas.rs:2570
+#Test("canvas_code_lens_source_edit_uses_replace_source_transaction") {
+    path :: write_fixture("code_lens_edit", "fn run() {{\n    print(\"old\")\n}}\n")
+    before :: fs.read_to_string(path).unwrap()
+    edit :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{source_revision(before)}\",\"source\":\"fn run() {{\\n    print(\\\"new\\\")\\n}}\\n\",\"source_edit\":true}}"
+    out :: apply_transaction_json(path, edit).expect("source edit")
+    assert(out.contains("\"changed\":true"), out)
+    assert(out.contains("print(\\\"new\\\")"), out)
+    graph :: graph_json_for_file(path).expect("graph after source edit")
+    assert(graph.contains("print(\\\"new\\\")"), graph)
+    assert(fs.read_to_string(path).unwrap().contains("print(\"new\")"))
+}
+// Rust: tests/canvas.rs:2589
+#Test("canvas_query_search_references_source_jump_and_rename_preview") {
+    path :: write_fixture("query", CANVAS_FIXTURE)
+    src :: fs.read_to_string(path).unwrap()
+    revision :: source_revision(src)
+    find :: "{{\"schema_version\":1,\"op\":\"find\",\"revision\":\"{revision}\",\"query\":\"square\"}}"
+    found :: query_json_for_file(path, find).expect("find query")
+    loop field in ["\"protocol\":\"jet.canvas.query\"", "\"op\":\"find\"", "\"kind\":\"definition\"", "\"graph_id\":\"fn:", "\"node_id\""] -> assert(found.contains(field), found)
+    refs :: "{{\"schema_version\":1,\"op\":\"references\",\"revision\":\"{revision}\",\"symbol\":\"total\"}}"
+    refs :: query_json_for_file(path, refs).expect("references query")
+    loop field in ["\"kind\":\"definition\"", "\"kind\":\"reference\"", "\"impact\""] -> assert(refs.contains(field), refs)
+    start :: src.find("total := square").expect("total binding")
+    jump :: "{{\"schema_version\":1,\"op\":\"source_to_graph\",\"revision\":\"{revision}\",\"start\":{start},\"end\":{start + 5}}}"
+    jump :: query_json_for_file(path, jump).expect("source jump query")
+    assert(jump.contains("\"op\":\"source_to_graph\""), jump)
+    assert(jump.contains(":binding"), jump)
+    preview :: "{{\"schema_version\":1,\"op\":\"preview_rename\",\"revision\":\"{revision}\",\"symbol\":\"total\",\"to\":\"score\"}}"
+    preview :: query_json_for_file(path, preview).expect("rename preview query")
+    loop field in ["\"diff\"", "-    total := square(limit)", "+    score := square(limit)"] -> assert(preview.contains(field), preview)
+    assert(fs.read_to_string(path).unwrap().contains("total := square(limit)"), "preview must not write")
+    stale :: "{{\"schema_version\":1,\"op\":\"find\",\"revision\":\"sha256-stale\",\"query\":\"total\"}}"
+    err :: query_json_for_file(path, stale).unwrap_err()
+    assert(err.contains("\"kind\":\"conflict\""), err)
+}
+// Rust: tests/canvas.rs:2650
+#Test("canvas_project_search_and_references_share_project_revision") {
+    dir :: temp_dir("project_query")
+    fs.write(dir.join("package.jet"), "name: \"project_query\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn helper() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    helper()\n}}\n").unwrap()
+    other :: dir.join("helper.jet")
+    fs.write(other, "fn helper() -> Int {{\n    return 2\n}}\n\nfn use_helper() {{\n    helper()\n}}\n").unwrap()
+    project_revision :: json_field(project_json_for_entry(entry), "project_revision")
+    entry_src :: fs.read_to_string(entry).unwrap()
+    entry_revision :: source_revision(entry_src)
+    search :: "{{\"schema_version\":1,\"op\":\"project_search\",\"source_id\":\"main.jet\",\"revision\":\"{entry_revision}\",\"project_revision\":\"{project_revision}\",\"query\":\"helper\"}}"
+    found :: query_json_for_entry(entry, search).expect("project search")
+    loop field in ["\"op\":\"project_search\"", "\"project_revision\":\"sha256-", "\"source_id\":\"main.jet\"", "\"source_id\":\"helper.jet\"", "\"kind\":\"definition\""] -> assert(found.contains(field), "project search missing {field}: {found}")
+    references :: "{{\"schema_version\":1,\"op\":\"references\",\"source_id\":\"main.jet\",\"revision\":\"{entry_revision}\",\"project_revision\":\"{project_revision}\",\"symbol\":\"helper\"}}"
+    refs :: query_json_for_entry(entry, references).expect("project references")
+    assert(refs.contains("\"op\":\"references\""), refs)
+    assert(refs.contains("\"impact\""), refs)
+    assert(refs.matches("\"kind\":\"definition\"").count() >= 2, refs)
+    assert(refs.matches("\"kind\":\"reference\"").count() >= 2, refs)
+    fs.write(other, "fn helper() -> Int {{\n    return 3\n}}\n").unwrap()
+    stale :: query_json_for_entry(entry, search).expect_err("stale project query")
+    assert(stale.contains("\"kind\":\"conflict\""), stale)
+    assert(fs.read_to_string(other).unwrap().contains("return 3"))
+}
+// Rust: tests/canvas.rs:2718
+#Test("canvas_project_rename_preview_and_atomic_commit_use_semantic_sites") {
+    dir :: temp_dir("project_rename")
+    fs.write(dir.join("package.jet"), "name: \"project_rename\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "pub fn helper() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    print(helper())\n}}\n").unwrap()
+    other :: dir.join("other.jet")
+    fs.write(other, "use \"./main\" as main\n\nfn use_helper() -> Int {{\n    return main.helper()\n}}\n").unwrap()
+    unrelated :: dir.join("unrelated.jet")
+    fs.write(unrelated, "fn helper() -> Int {{\n    return 99\n}}\n\nfn local() -> Int {{\n    return helper()\n}}\n").unwrap()
+    project :: project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    main_before :: fs.read_to_string(entry).unwrap()
+    other_before :: fs.read_to_string(other).unwrap()
+    unrelated_before :: fs.read_to_string(unrelated).unwrap()
+    main_revision :: source_revision(main_before)
+    request :: "{{\"schema_version\":1,\"op\":\"preview_rename\",\"source_id\":\"main.jet\",\"revision\":\"{main_revision}\",\"project_revision\":\"{project_revision}\",\"symbol\":\"helper\",\"to\":\"compute\"}}"
+    preview :: query_json_for_entry(entry, request).expect("project rename preview")
+    loop field in ["\"op\":\"preview_rename\"", "\"project_revision\":\"sha256-", "\"source_id\":\"main.jet\"", "\"source_id\":\"other.jet\"", "\"source_id\":\"unrelated.jet\"", "\"files\"", "-pub fn helper()", "+pub fn compute()"] -> assert(preview.contains(field), "rename preview missing {field}: {preview}")
+    assert_eq(fs.read_to_string(entry).unwrap(), main_before)
+    assert_eq(fs.read_to_string(other).unwrap(), other_before)
+    assert_eq(fs.read_to_string(unrelated).unwrap(), unrelated_before)
+    touched :: "[{{\"path\":\"main.jet\",\"revision\":\"{main_revision}\"}},{{\"path\":\"other.jet\",\"revision\":\"{source_revision(other_before)}\"}}]"
+    apply :: "{{\"schema_version\":1,\"op\":\"rename_binding\",\"preview\":false,\"project_revision\":\"{project_revision}\",\"files\":{touched},\"source_id\":\"main.jet\",\"from\":\"helper\",\"to\":\"compute\"}}"
+    committed :: apply_project_transaction_json(entry, apply).expect("project rename commit")
+    assert(committed.contains("\"writes\":\"source_transaction\""), committed)
+    assert(fs.read_to_string(entry).unwrap().contains("compute()"))
+    assert(fs.read_to_string(other).unwrap().contains("compute()"))
+    receipt :: fs.read_dir(dir.join(".jet/codemods")).unwrap().filter_map((entry) -> entry.ok()).map((entry) -> entry.path()).find((path) -> path.file_name().and_then((name) -> name.to_str()).is_some_and((name) -> name.starts_with("CanvasProjectRename-") && name.ends_with(".log.json"))).expect("project rename receipt")
+    receipt :: fs.read_to_string(receipt).unwrap()
+    loop field in ["\"kind\":\"rename\"", "\"from\":\"helper\"", "\"to\":\"compute\""] -> assert(receipt.contains(field), receipt)
+    stale :: apply_project_transaction_json(entry, apply).expect_err("old project rename must be rejected")
+    assert(stale.contains("\"kind\":\"conflict\""), stale)
+    assert(fs.read_to_string(entry).unwrap().contains("compute()"))
+    assert(fs.read_to_string(other).unwrap().contains("compute()"))
+}
+// Rust: tests/canvas.rs:2818
+#Test("canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions") {
+    path :: write_fixture("actions", CANVAS_FIXTURE)
+    src :: fs.read_to_string(path).unwrap()
+    revision :: source_revision(src)
+    actions_req :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{revision}\"}}"
+    actions :: query_json_for_file(path, actions_req).expect("actions query")
+    loop field in ["\"op\":\"actions\"", "\"actions_schema_version\":1", "\"kind\":\"canvas.action\"", "\"node_descriptor_id\":\"function_pure\"", "\"node_descriptor_id\":\"function_exec\"", "\"engine\":\"checked-tir+jit\"", "\"writes\":\"source_transaction_only\"", "\"authority\":[\"canvas.source_edit:single_file\"]", "\"package_id\":\"single-file\"", "\"version\":\"unpackaged\"", "\"project_functions\"", "\"name\":\"square\"", "\"signature\":\"fn square(n: Int) -> Int\"", "\"name\":\"summarize\"", "\"signature\":\"fn summarize(limit: Int) -> Int\"", "\"name\":\"run\"", "\"signature\":\"fn run()\"", "\"name\":\"run\",\"signature\":\"fn run()\",\"callee\":\"run\"", "\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"]", "\"callee\":\"square\"", "\"default_args\":[\"1\"]", "\"kind\":\"canvas.builtin\"", "\"title\":\"Print\"", "\"callee\":\"print\"", "\"insert_callee\":\"print\"", "\"module_path\":\"builtin\"", "\"ret\":\"Void\"", "\"pins\":[{{\"name\":\"value\",\"direction\":\"input\",\"type\":\"Any\"}}]", "\"default_args\":[\"\\\"canvas\\\"\"]", "\"kind\":\"canvas.core_catalog\"", "\"engine\":\"checked-tir+jit\"", "\"execution\":\"source_transaction\"", "\"writes\":\"source_transaction_only\"", "\"insert_callee\"", "\"insert_op\":\"insert_call\"", "\"pure\"", "\"source\":\"Docs/spec/reference/core-library.md\"", "\"kind\":\"canvas.command\"", "\"kind\":\"canvas.structural\"", "\"action_id\":\"canvas.structural:branch\"", "\"op\":\"insert_branch\"", "\"op\":\"command_authority\"", "\"engine\":\"jet-cli\"", "\"action_id\":\"canvas.command:run\"", "\"title\":\"Run program\"", "\"command\":[\"jet\",\"run\",\"main.jet\"]", "\"authority\":[\"canvas.command:run\",\"canvas.source_edit:single_file\"]", "\"action_id\":\"canvas.command:check\"", "\"command\":[\"jet\",\"check\",\"main.jet\"]", "\"writes\":\"none\"", "\"requires_confirmation\":false", "\"action_id\":\"canvas.command:test\"", "\"command\":[\"jet\",\"test\",\"main.jet\"]", "\"writes\":\"test_outputs\"", "\"requires_confirmation\":true", "\"action_id\":\"canvas.command:build\"", "\"authority\":[\"canvas.command:build\",\"canvas.build_output:binary\",\"canvas.source_edit:single_file\"]", "\"command\":[\"jet\",\"build\",\"main.jet\"]", "\"writes\":\"build_outputs\"", "\"action_id\":\"canvas.command:service.start\"", "\"command\":[\"jet\",\"services\",\"up\"]", "\"available\":false", "\"denied_reason\":\"no env service selected\""] -> assert(actions.contains(field), "actions missing {field}")
+    graph :: graph_json_for_file(path).expect("canvas graph")
+    run_graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    preview :: "{{\"schema_version\":1,\"op\":\"preview_canvas_action\",\"revision\":\"{revision}\",\"graph_id\":\"{run_graph_id}\",\"action_id\":\"canvas.action:{path.display()}:square\",\"callee\":\"square\",\"args\":[\"1\"]}}"
+    out :: apply_transaction_json(path, preview).expect("action preview")
+    loop field in ["\"protocol\":\"jet.canvas.action\"", "\"engine\":\"checked-tir+jit\"", "\"execution\":\"preview\"", "\"writes\":\"source_transaction_only\"", "\"authority\":[\"canvas.source_edit:single_file\"]", "\"package_id\":\"single-file\"", "\"touched_files\":[\"main.jet\"]", "+    square(1)"] -> assert(out.contains(field), "action preview missing {field}: {out}")
+    assert_eq(fs.read_to_string(path).unwrap(), src, "Canvas action preview must not write source")
+    wrong_callee_preview :: preview.replace("\"callee\":\"square\"", "\"callee\":\"print\"")
+    wrong_callee :: apply_transaction_json(path, wrong_callee_preview).expect_err("preview must reject a callee that disagrees with its descriptor")
+    assert(wrong_callee.contains("does not match its checked descriptor"), wrong_callee)
+    assert_eq(fs.read_to_string(path).unwrap(), src)
+    dir :: temp_dir("actions_package")
+    fs.write(dir.join("package.jet"), "name: \"canvas_actions\"\nversion: \"0.7.0\"\n").unwrap()
+    pkg_path :: dir.join("main.jet")
+    fs.write(pkg_path, CANVAS_FIXTURE).unwrap()
+    pkg_src :: fs.read_to_string(pkg_path).unwrap()
+    pkg_actions_req :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{source_revision(pkg_src)}\"}}"
+    pkg_actions :: query_json_for_file(pkg_path, pkg_actions_req).expect("package actions")
+    loop field in ["\"authority\":[\"canvas.source_edit:package\"]", "\"package_id\":\"canvas_actions\"", "\"version\":\"0.7.0\"", "\"touched_files\":[\"main.jet\"]", "\"command\":[\"jet\",\"build\",\"main.jet\"]"] -> assert(pkg_actions.contains(field), "package actions missing {field}: {pkg_actions}")
+    builtin_preview :: "{{\"schema_version\":1,\"op\":\"preview_canvas_action\",\"revision\":\"{revision}\",\"graph_id\":\"{run_graph_id}\",\"action_id\":\"canvas.action:builtin:print\",\"callee\":\"print\",\"args\":[\"\\\"canvas\\\"\"]}}"
+    out :: apply_transaction_json(path, builtin_preview).expect("built-in action preview")
+    assert(out.contains("\"callee\":\"print\""), out)
+    assert(out.contains("+    print(\\\"canvas\\\")"), out)
+    assert_eq(fs.read_to_string(path).unwrap(), src, "Built-in Canvas action preview must not write source")
+    project_insert_path :: write_fixture("actions_project_insert", CANVAS_FIXTURE)
+    project_insert_src :: fs.read_to_string(project_insert_path).unwrap()
+    project_insert_graph :: graph_json_for_file(project_insert_path).expect("project insert graph")
+    project_run_graph_id :: field_before(project_insert_graph, "\"title\":\"run\"", "graph_id")
+    project_insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(project_insert_src)}\",\"graph_id\":\"{project_run_graph_id}\",\"callee\":\"square\",\"args\":[\"1\"]}}"
+    project_insert_out :: apply_transaction_json(project_insert_path, project_insert).expect("project function insert_call")
+    assert(project_insert_out.contains("\"changed\":true"), project_insert_out)
+    assert(fs.read_to_string(project_insert_path).unwrap().contains("square(1)"), "project function insert_call should write source")
+    wired_path :: write_fixture("actions_wired_insert", "fn square(n: Int) -> Int {{\n    return n * n\n}}\n\nfn run() {{\n    limit :: 4\n    print(limit)\n}}\n")
+    wired_src :: fs.read_to_string(wired_path).unwrap()
+    wired_graph :: graph_json_for_file(wired_path).expect("wired insert graph")
+    wired_run_graph_id :: field_before(wired_graph, "\"title\":\"run\"", "graph_id")
+    wired_insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(wired_src)}\",\"graph_id\":\"{wired_run_graph_id}\",\"callee\":\"square\",\"args\":[\"limit\"],\"wire_origin_pin_id\":\"{wired_run_graph_id}:stmt:1:binding:output:limit\",\"wire_target_pin\":\"n\",\"wire_expr\":\"limit\"}}"
+    apply_transaction_json(wired_path, wired_insert).expect("wired project function insert_call")
+    wired_after :: fs.read_to_string(wired_path).unwrap()
+    assert(wired_after.find("limit :: 4").unwrap() < wired_after.find("square(limit)").unwrap(), wired_after)
+    assert_eq(format_source(wired_after).unwrap(), wired_after)
+    core_path :: write_fixture("actions_core_insert", "use core.math as math\n\nfn run() {{\n    print(1)\n}}\n")
+    core_src :: fs.read_to_string(core_path).unwrap()
+    core_revision :: source_revision(core_src)
+    core_actions_req :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{core_revision}\"}}"
+    core_actions :: query_json_for_file(core_path, core_actions_req).expect("core actions")
+    loop field in ["\"action_id\":\"canvas.core_catalog:core.math:abs\"", "\"title\":\"abs ", "\"insert_callee\":\"math.abs\"", "\"ret\":\"Int\""] -> assert(core_actions.contains(field), "Core catalog action must expose its checked return type: {core_actions}")
+    core_graph :: graph_json_for_file(core_path).expect("core graph")
+    core_run_graph_id :: field_before(core_graph, "\"title\":\"run\"", "graph_id")
+    core_insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{core_revision}\",\"graph_id\":\"{core_run_graph_id}\",\"callee\":\"math.abs\",\"args\":[\"-3\"]}}"
+    core_out :: apply_transaction_json(core_path, core_insert).expect("core insert_call")
+    assert(core_out.contains("\"changed\":true"), core_out)
+    assert(fs.read_to_string(core_path).unwrap().contains("math.abs(-3)"), "Core catalog insert_call should write source")
+    synth_path :: write_fixture("actions_core_insert_synth_import", "fn run() {{\n    print(1)\n}}\n")
+    synth_src :: fs.read_to_string(synth_path).unwrap()
+    synth_revision :: source_revision(synth_src)
+    synth_graph :: graph_json_for_file(synth_path).expect("synth core graph")
+    synth_run_graph_id :: field_before(synth_graph, "\"title\":\"run\"", "graph_id")
+    synth_insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{synth_revision}\",\"graph_id\":\"{synth_run_graph_id}\",\"callee\":\"core.encoding.decode\",\"args\":[\"\\\"canvas\\\"\"]}}"
+    synth_out :: apply_transaction_json(synth_path, synth_insert).expect("core insert_call should synthesize import")
+    assert(synth_out.contains("\"changed\":true"), synth_out)
+    assert(synth_out.contains("use core.encoding.json as json"), "transaction result should include synthesized Core import: {synth_out}")
+    synth_after :: fs.read_to_string(synth_path).unwrap()
+    assert(synth_after.contains("use core.encoding.json as json"), synth_after)
+    assert(synth_after.contains("json.decode(\"canvas\") ?? panic(\"canvas\")"), synth_after)
+    synth_reproject :: graph_json_for_file(synth_path).expect("synth reproject")
+    assert(synth_reproject.contains("\"title\":\".decode\""), "reproject should show inserted Core function node: {synth_reproject}")
+}
+// Rust: tests/canvas.rs:3096
+#Test("canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports") {
+    dir :: temp_dir("actions_exports")
+    fs.create_dir_all(dir.join(".jet/bindings/js")).unwrap()
+    descriptor :: binder_descriptor(ForeignLanguage.JS).expect("JavaScript binder descriptor").stamp()
+    fs.write(dir.join(".jet/bindings/js/plotly.jet"), "// jet-ffi-descriptor={descriptor}\npub fn println() -> Int {{\n    return 1\n}}\n").unwrap()
+    fs.write(dir.join("helper.jet"), "fn hidden(n: Int) -> Int {{\n    return n\n}}\n\npub fn square(n: Int) -> Int {{\n    return n * n\n}}\n\npub fn noisy(n: Int) -[IO]> Int {{\n    print(n)\n    return n\n}}\n").unwrap()
+    path :: dir.join("main.jet")
+    src :: "use \"./helper\" as h\nuse js.plotly as plot\n\nfn run() {{\n    print(plot.println())\n    print(h.square(2))\n}}\n"
+    fs.write(path, src).unwrap()
+    request :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{source_revision(src)}\"}}"
+    actions :: query_json_for_file(path, request).expect("actions query")
+    assert(actions.contains("\"callee\":\"h.square\"") && actions.contains("\"insert_callee\":\"h.square\""), "imported action must use the entry-facing callee: {actions}")
+    assert(actions.contains("\"rank\":74") && actions.contains("\"rank_terms\":[\"call\",\"pure\",\"function\"]"), "project action must carry descriptor-owned ranking facts: {actions}")
+    noisy :: json_top_level_objects(json_array_field(actions, "actions")).find((action) -> action.contains("\"callee\":\"h.noisy\"")).expect("effectful imported action")
+    assert(noisy.contains("\"node_descriptor_id\":\"function_exec\"") && noisy.contains("\"rank\":72") && noisy.contains("\"rank_terms\":[\"call\",\"function\"]"), "effectful imported action must keep its own descriptor ranking: {noisy}")
+    assert(!actions.contains("\"module_path\":\"js.plotly\"") && !actions.contains("\"name\":\"println\"") && !actions.contains("\"name\":\"hidden\"") && !actions.contains("\"callee\":\"h.hidden\""), "foreign binding functions must not leak into the project palette: {actions}")
+    graph :: graph_json_for_file(path).expect("actions graph")
+    graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(src)}\",\"graph_id\":\"{graph_id}\",\"callee\":\"h.square\",\"args\":[\"1\"]}}"
+    inserted :: apply_transaction_json(path, insert).expect("imported action insert")
+    assert(inserted.contains("\"changed\":true"), inserted)
+    changed :: fs.read_to_string(path).unwrap()
+    assert(changed.contains("h.square(1)"), changed)
+    assert_eq(format_source(changed).unwrap(), changed, "insert_call must preserve canonical formatting")
+    graph :: graph_json_for_file(path).expect("graph after formatted insert")
+    square_node :: json_top_level_objects(json_array_field(graph, "nodes")).find((node) -> node.contains(":method:square") && node.contains("\"node_descriptor_id\":\"function_exec\"")).expect("inserted imported call node")
+    assert(square_node.contains("\"source_span\":{{\"start\":"), "inserted call must retain descriptor and source provenance: {square_node}")
+    square_pin :: json_top_level_objects(json_array_field(graph, "pins")).find((pin) -> pin.contains(":method:square") && pin.contains("\"type\":\"Int\"")).expect("typed imported call pin")
+    assert(square_pin.contains("\"node_id\":\""), square_pin)
+    inline_id :: json_top_level_objects(json_array_field(graph, "inline_exprs")).find((inline) -> inline.contains(":method:square") && inline.contains("\"source\":\"1\"")).map((inline) -> json_field(inline, "inline_expr_id")).expect("editable imported call argument")
+    edit :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{source_revision(changed)}\",\"inline_expr_id\":\"{inline_id}\",\"new_expr\":\"2\"}}"
+    apply_transaction_json(path, edit).expect("edit imported call argument")
+    edited :: fs.read_to_string(path).unwrap()
+    assert(edited.contains("h.square(2)"), edited)
+    assert_eq(format_source(edited).unwrap(), edited, "edit_inline_expr must preserve canonical formatting")
+    reloaded :: graph_json_for_file(path).expect("reload edited imported call")
+    reloaded_square :: json_top_level_objects(json_array_field(reloaded, "nodes")).find((node) -> node.contains(":method:square") && node.contains("\"node_descriptor_id\":\"function_exec\"")).expect("reloaded imported call node")
+    assert(reloaded_square.contains("\"source_span\":{{\"start\":"), "reload must preserve imported call provenance: {reloaded_square}")
+    assert(reloaded.contains("\"source\":\"2\""), "reload must preserve edited imported call spelling: {reloaded}")
+    undo_source :: src.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    undo :: "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{source_revision(edited)}\",\"source\":\"{undo_source}\",\"undo_restore\":\"Undo\"}}"
+    apply_transaction_json(path, undo).expect("undo imported call edits")
+    assert_eq(fs.read_to_string(path).unwrap(), src, "undo must restore the original canonical source")
+    graph :: graph_json_for_file(path).expect("graph after undo")
+    graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    before_invalid :: fs.read_to_string(path).unwrap()
+    invalid :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(before_invalid)}\",\"graph_id\":\"{graph_id}\",\"callee\":\"println\",\"args\":[\"1\"]}}"
+    error :: apply_transaction_json(path, invalid).unwrap_err()
+    assert(error.contains("diagnostic") || error.contains("E"), error)
+    assert_eq(fs.read_to_string(path).unwrap(), before_invalid)
+}
+// Rust: tests/canvas.rs:3254
+#Test("canvas_actions_preserve_nested_imported_module_callee") {
+    dir :: temp_dir("actions_nested_import")
+    fs.write(dir.join("helper.jet"), "module tools {{\n    pub fn square(n: Int) -> Int {{\n        return n * n\n    }}\n}}\n").unwrap()
+    path :: dir.join("main.jet")
+    src :: "use \"./helper\" as h\n\nfn run(limit: Int) {{\n    print(limit)\n}}\n"
+    fs.write(path, src).unwrap()
+    request :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{source_revision(src)}\"}}"
+    actions :: query_json_for_file(path, request).expect("nested actions query")
+    square :: json_top_level_objects(json_array_field(actions, "actions")).find((action) -> action.contains("\"title\":\"square\"")).expect("nested imported action")
+    assert(square.contains("\"callee\":\"h.tools.square\"") && square.contains("\"insert_callee\":\"h.tools.square\"") && square.contains("\"node_descriptor_id\":\"function_pure\""), "nested imported action must retain checked callee and descriptor: {square}")
+    assert(!square.contains("\"callee\":\"h.square\"") && !square.contains("\"insert_callee\":\"h.square\""), "nested imported action must not flatten its checked scope: {square}")
+    graph :: graph_json_for_file(path).expect("nested import graph")
+    graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(src)}\",\"graph_id\":\"{graph_id}\",\"callee\":\"h.tools.square\",\"args\":[\"limit\"]}}"
+    apply_transaction_json(path, insert).expect("nested imported insert")
+    changed :: fs.read_to_string(path).unwrap()
+    assert(changed.contains("h.tools.square(limit)"), changed)
+    assert_eq(format_source(changed).unwrap(), changed, "nested imported insert must remain canonical")
+    reloaded :: graph_json_for_file(path).expect("reload nested import graph")
+    square_node :: json_top_level_objects(json_array_field(reloaded, "nodes")).find((node) -> node.contains(":method:square")).expect("reloaded nested imported call node")
+    assert(square_node.contains("\"node_descriptor_id\":\"function_pure\"") && square_node.contains("\"source_span\":{{\"start\":"), "nested imported call must retain descriptor and provenance: {square_node}")
+    stale :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(changed)}\",\"graph_id\":\"{graph_id}\",\"callee\":\"h.square\",\"args\":[\"limit\"]}}"
+    stale_error :: apply_transaction_json(path, stale).unwrap_err()
+    assert(stale_error.contains("diagnostic") || stale_error.contains("E"), "flattened nested callee must fail sema: {stale_error}")
+    assert_eq(fs.read_to_string(path).unwrap(), changed)
+}
+// Rust: tests/canvas.rs:3327
+#Test("canvas_core_catalog_browses_canonical_core_library_without_write_authority") {
+    path :: write_fixture("core_catalog", "use core.math as m\n\nfn run() {{\n    print(\"core\")\n}}\n")
+    src :: fs.read_to_string(path).unwrap()
+    revision :: source_revision(src)
+    query :: "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{revision}\",\"query\":\"\"}}"
+    catalog :: query_json_for_file(path, query).expect("Canvas core catalog query")
+    loop field in ["\"op\":\"core_catalog\"", "\"catalog_schema_version\":1", "\"authority\":[\"canvas.catalog:core.read\"]", "\"writes\":\"none\"", "\"source\":\"Docs/spec/reference/core-library.md\"", "\"path\":\"core.http\"", "\"path\":\"core.http.client\"", "\"path\":\"core.files\"", "\"path\":\"core.net.url\"", "\"path\":\"core.net.mime\"", "\"path\":\"core.crypto\"", "\"path\":\"core.event\"", "\"path\":\"core.web\"", "\"path\":\"core.mem\"", "\"signature\":\"client.request(method, url)\"", "\"name\":\"request\"", "\"pure\"", "\"insert_callee\":\"m.abs\""] -> assert(catalog.contains(field), "catalog missing {field}: {catalog}")
+    sema_query :: "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{revision}\",\"query\":\"window_open\"}}"
+    sema_catalog :: query_json_for_file(path, sema_query).expect("Canvas sema catalog query")
+    loop field in ["\"path\":\"core.game.raylib\"", "\"name\":\"window_open\"", "\"signature\":\"core.game.raylib.window_open\"", "\"source\":\"crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs\""] -> assert(sema_catalog.contains(field), "sema catalog missing {field}: {sema_catalog}")
+    assert_eq(fs.read_to_string(path).unwrap(), src, "Core catalog browsing must not edit source")
+    args_query :: "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{revision}\",\"query\":\"help\"}}"
+    args_catalog :: query_json_for_file(path, args_query).expect("Canvas args catalog query")
+    loop field in ["\"path\":\"core.args\"", "\"name\":\"help\"", "\"available\":false", "\"stageable\":true", "\"stage_reason_code\":\"method_only\"", "\"receiver_type\":\"ArgsSpec\"", "\"name\":\"receiver\",\"direction\":\"input\",\"type\":\"ArgsSpec\"", "\"unavailable_reason_code\":\"method_only\"", "Use this as a method on an ArgsSpec value."] -> assert(args_catalog.contains(field), args_catalog)
+}
+// Rust: tests/canvas.rs:3433
+#Test("canvas_core_catalog_uses_default_alias_without_import") {
+    path :: write_fixture("core_catalog_default_alias", "fn run() {{\n    print(\"core\")\n}}\n")
+    source :: fs.read_to_string(path).unwrap()
+    request :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{source_revision(source)}\"}}"
+    actions :: query_json_for_file(path, request).expect("query core actions")
+    assert(actions.contains("\"insert_callee\":\"math.abs\""), actions)
+    assert(!actions.contains("\"insert_callee\":\"core.math.abs\""), actions)
+}
+// Rust: tests/canvas.rs:3456
+#Test("canvas_core_insert_synthesizes_default_alias_import_without_import") {
+    path :: write_fixture("core_insert_default_alias", "fn run() {{\n    print(1)\n}}\n")
+    source :: fs.read_to_string(path).unwrap()
+    graph :: graph_json_for_file(path).expect("default alias graph")
+    graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(source)}\",\"graph_id\":\"{graph_id}\",\"callee\":\"math.abs\",\"args\":[\"1\"]}}"
+    apply_transaction_json(path, insert).expect("default alias insert should synthesize Core import")
+    after :: fs.read_to_string(path).unwrap()
+    assert(after.contains("use core.math as math"), after)
+    assert(after.contains("math.abs(1)"), after)
+    assert_eq(format_source(after).unwrap(), after)
+}
+// Rust: tests/canvas.rs:3475
+#Test("canvas_library_action_preserves_events_example_source_and_refuses_bad_edits") {
+    repo :: OSPath(env.manifest_dir())
+    example :: fs.read_to_string(repo.join("Examples/features/ui/events.jet")).expect("read events Canvas example")
+    path :: write_fixture("library_events_example", example)
+    graph :: graph_json_for_file(path).expect("project events example")
+    source :: fs.read_to_string(path).unwrap()
+    revision :: source_revision(source)
+    actions_request :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{revision}\"}}"
+    actions :: query_json_for_file(path, actions_request).expect("query library actions for events example")
+    loop field in ["\"action_id\":\"canvas.core_catalog:core.event:scope\"", "\"module_path\":\"core.event\"", "\"callee\":\"event.scope\"", "\"insert_op\":\"insert_call\"", "\"engine\":\"checked-tir+jit\"", "\"writes\":\"source_transaction_only\"", "\"source\":\"Docs/spec/reference/core-library.md\""] -> assert(actions.contains(field), "library action missing {field}: {actions}")
+    graph_id :: field_before(graph, "\"title\":\"run\"", "graph_id")
+    insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{revision}\",\"graph_id\":\"{graph_id}\",\"callee\":\"event.scope\",\"args\":[],\"bind\":\"scope_from_library\"}}"
+    apply_transaction_json(path, insert).expect("insert library action")
+    after :: fs.read_to_string(path).unwrap()
+    assert(after.contains("scope_from_library :: event.scope()"), after)
+    assert_eq(format_source(after).expect("format library edit"), after)
+    projected :: graph_json_for_file(path).expect("reproject library edit")
+    assert(projected.contains("scope_from_library"), projected)
+    assert(projected.contains("\"source_span\""), "library node lost provenance: {projected}")
+    bad_revision :: source_revision(after)
+    bad :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{bad_revision}\",\"graph_id\":\"{graph_id}\",\"callee\":\"event.scope\",\"args\":[\"1\"],\"bind\":\"bad_scope\"}}"
+    assert(apply_transaction_json(path, bad).is_err())
+    assert_eq(fs.read_to_string(path).unwrap(), after, "ill-typed library edit wrote source")
+    stale :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"sha256-stale\",\"graph_id\":\"{graph_id}\",\"callee\":\"event.scope\",\"args\":[],\"bind\":\"stale_scope\"}}"
+    assert(apply_transaction_json(path, stale).is_err())
+    assert_eq(fs.read_to_string(path).unwrap(), after, "stale library edit wrote source")
+}

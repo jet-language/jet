@@ -1,0 +1,22 @@
+use Compiler.JetRepl.Source.Repl.HistoryHost.[ReplHistoryUnixFlags, repl_history_flags_for_target, repl_history_unix_open_flags]
+use core.sys.target.[selected_os, selected_arch, selected_family]
+// GATE #4483: the test follows selected target facts, never workstation constants.
+
+// Rust: crates/jet-repl/src/HistoryPlatform.rs:126
+fn flags(os: String, arch: String) -> ReplHistoryUnixFlags {
+    repl_history_flags_for_target(os, arch) ?? panic("missing ABI table for {os}/{arch}")
+}
+
+// Rust: crates/jet-repl/src/HistoryPlatform.rs:131
+#Test("selected_unix_open_flags_match_current_target_table") {
+    if selected_family() != "unix" -> return
+    assert_eq(repl_history_unix_open_flags() ?? panic("selected Unix flags"), flags(selected_os(), selected_arch()))
+}
+
+// Rust: crates/jet-repl/src/HistoryPlatform.rs:139
+// linux_and_android_open_flag_tables_cover_supported_arches is already registered
+// in Tests/Repl/HistoryHost.jet13–41 with all original architectures and values.
+// Rust: crates/jet-repl/src/HistoryPlatform.rs:203
+// darwin_and_bsd_open_flag_tables_cover_supported_targets is already registered
+// in Tests/Repl/HistoryHost.jet43–56 with all original targets and refusals.
+// Do not register either canonical test a second time.

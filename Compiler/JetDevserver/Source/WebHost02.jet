@@ -1,1784 +1,1008 @@
-// PORT-PENDING 0790 crates-jet-devserver-src-webhost-slice-1809: crates/jet-devserver/src/WebHost.rs:1809-3588
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     fn bind_application_only_with_listener(
-//RS         file: &str,
-//RS         verbose: bool,
-//RS         static_root: PathBuf,
-//RS         release_policy: ReleaseDevtoolsPolicy,
-//RS         web_swap_enabled: bool,
-//RS         application_listener: TcpListener,
-//RS         session: Arc<crate::ResidentDevSession>,
-//RS     ) -> Result<Self, String> {
-//RS         let application_port = application_listener
-//RS             .local_addr()
-//RS             .map(|address| address.port())
-//RS             .unwrap_or(0);
-//RS         let status = Arc::new(DevStatus::new_with_root(file, verbose, &static_root));
-//RS         status.set_port(application_port);
-//RS         status.set_canvas_port(0);
-//RS         status.set_canvas_enabled(false);
-//RS         let session_secret = mint_session_secret()?;
-//RS         Ok(Self {
-//RS             listener: Mutex::new(None),
-//RS             application_listener: Mutex::new(Some(application_listener)),
-//RS             started: AtomicBool::new(false),
-//RS             shutdown: Arc::new(AtomicBool::new(false)),
-//RS             server_threads: Mutex::new(Vec::new()),
-//RS             poll_thread: Mutex::new(None),
-//RS             terminal_thread: Mutex::new(None),
-//RS             status,
-//RS             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
-//RS             session,
-//RS             canvas_file: file.to_string(),
-//RS             bind_host: "127.0.0.1".to_string(),
-//RS             session_secret,
-//RS             release_policy,
-//RS             static_root,
-//RS             browser_state: Arc::new(Mutex::new(None)),
-//RS             web_swap_enabled,
-//RS             hot_swap_decision: Mutex::new(None),
-//RS             paused_evaluate: Arc::new(Mutex::new(crate::PausedEvaluate::PausedEvaluateHost::new())),
-//RS             terminal_style: terminal_style_adapter(file)?,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn bind_web_with_canvas_options_and_policy(
-//RS         file: &str,
-//RS         static_root: &Path,
-//RS         verbose: bool,
-//RS         fallback_port: Option<u16>,
-//RS         options: &CanvasHostOptions,
-//RS         release_policy: ReleaseDevtoolsPolicy,
-//RS     ) -> Result<Self, String> {
-//RS         let host = validate_canvas_options(options)?;
-//RS         let (listener, application_listener) = if options.port.is_some() {
-//RS             let listener = bind_canvas_server(&host, options.port)?;
-//RS             let application_listener = bind_application_server(fallback_port)?;
-//RS             (listener, application_listener)
-//RS         } else {
-//RS             let application_listener = bind_application_server(fallback_port)?;
-//RS             let listener = bind_canvas_server(&host, None)?;
-//RS             (listener, application_listener)
-//RS         };
-//RS         let canvas_port = listener
-//RS             .local_addr()
-//RS             .map(|address| address.port())
-//RS             .unwrap_or(0);
-//RS         let application_port = application_listener
-//RS             .local_addr()
-//RS             .map(|address| address.port())
-//RS             .unwrap_or(0);
-//RS         let status = Arc::new(DevStatus::new_with_root(
-//RS             file,
-//RS             verbose || options.audit,
-//RS             static_root,
-//RS         ));
-//RS         status.set_port(application_port);
-//RS         status.set_canvas_port(canvas_port);
-//RS         let session_secret = mint_session_secret()?;
-//RS         let session = Arc::new(crate::ResidentDevSession::new_with_hosts(
-//RS             file,
-//RS             &host,
-//RS             canvas_port,
-//RS             "127.0.0.1",
-//RS             application_port,
-//RS         ));
-//RS         session.select_output_values(options.output.as_deref(), options.target.as_deref());
-//RS         Ok(Self {
-//RS             listener: Mutex::new(Some(listener)),
-//RS             application_listener: Mutex::new(Some(application_listener)),
-//RS             started: AtomicBool::new(false),
-//RS             shutdown: Arc::new(AtomicBool::new(false)),
-//RS             server_threads: Mutex::new(Vec::new()),
-//RS             poll_thread: Mutex::new(None),
-//RS             terminal_thread: Mutex::new(None),
-//RS             status,
-//RS             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
-//RS             session,
-//RS             canvas_file: file.to_string(),
-//RS             bind_host: host,
-//RS             session_secret,
-//RS             release_policy,
-//RS             static_root: static_root.to_path_buf(),
-//RS             browser_state: Arc::new(Mutex::new(None)),
-//RS             web_swap_enabled: true,
-//RS             hot_swap_decision: Mutex::new(None),
-//RS             paused_evaluate: Arc::new(Mutex::new(crate::PausedEvaluate::PausedEvaluateHost::new())),
-//RS             terminal_style: terminal_style_adapter(file)?,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn bind_canvas_with_options_and_policy(
-//RS         file: &str,
-//RS         static_root: &Path,
-//RS         verbose: bool,
-//RS         options: &CanvasHostOptions,
-//RS         release_policy: ReleaseDevtoolsPolicy,
-//RS     ) -> Result<Self, String> {
-//RS         let host = validate_canvas_options(options)?;
-//RS         let listener = bind_canvas_server(&host, options.port)?;
-//RS         let bound_port = listener
-//RS             .local_addr()
-//RS             .map(|address| address.port())
-//RS             .unwrap_or(0);
-//RS         let status = Arc::new(DevStatus::new_with_root(
-//RS             file,
-//RS             verbose || options.audit,
-//RS             static_root,
-//RS         ));
-//RS         status.set_port(bound_port);
-//RS         status.set_canvas_port(bound_port);
-//RS         let session_secret = mint_session_secret()?;
-//RS         let session = Arc::new(crate::ResidentDevSession::new_with_canvas_host(
-//RS             file, &host, bound_port, 0,
-//RS         ));
-//RS         Ok(Self {
-//RS             listener: Mutex::new(Some(listener)),
-//RS             application_listener: Mutex::new(None),
-//RS             started: AtomicBool::new(false),
-//RS             shutdown: Arc::new(AtomicBool::new(false)),
-//RS             server_threads: Mutex::new(Vec::new()),
-//RS             poll_thread: Mutex::new(None),
-//RS             terminal_thread: Mutex::new(None),
-//RS             status,
-//RS             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
-//RS             session,
-//RS             canvas_file: file.to_string(),
-//RS             bind_host: host,
-//RS             session_secret,
-//RS             release_policy,
-//RS             static_root: static_root.to_path_buf(),
-//RS             browser_state: Arc::new(Mutex::new(None)),
-//RS             web_swap_enabled: false,
-//RS             hot_swap_decision: Mutex::new(None),
-//RS             paused_evaluate: Arc::new(Mutex::new(crate::PausedEvaluate::PausedEvaluateHost::new())),
-//RS             terminal_style: terminal_style_adapter(file)?,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn start(&self) {
-//RS         self.start_inner(true);
-//RS     }
-//RS 
-//RS     /// Start the HTTP/Canvas plane without taking terminal input. The native
-//RS     /// `jet dev --canvas` watcher owns its stdin and Ctrl-C lifecycle; both
-//RS     /// surfaces still share this one resident session.
-//RS     pub fn start_canvas(&self) {
-//RS         self.start_inner(false);
-//RS     }
-//RS 
-//RS     pub fn lock_source_transaction(&self) -> std::sync::MutexGuard<'_, ()> {
-//RS         self.session.lock_source_transaction()
-//RS     }
-//RS 
-//RS     /// The one resident session shared by every surface of this host.  The
-//RS     /// driver registers its rebuild executor and consumes queued
-//RS     /// `ProjectRebuild` commands through it.
-//RS     pub fn resident_session(&self) -> Arc<crate::ResidentDevSession> {
-//RS         Arc::clone(&self.session)
-//RS     }
-//RS 
-//RS     pub fn publish_hot_swap_decision(&self, decision: &HotSwapDecision) -> Result<(), String> {
-//RS         self.session.publish_hot_swap_decision(decision)?;
-//RS         *self.hot_swap_decision.lock().unwrap() = Some(decision.clone());
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn canvas_url(&self) -> String {
-//RS         format!(
-//RS             "http://{}:{}/canvas?session={}",
-//RS             url_host(&self.bind_host),
-//RS             self.session.canvas_port(),
-//RS             self.session_secret
-//RS         )
-//RS     }
-//RS 
-//RS     fn start_inner(&self, terminal_controls: bool) {
-//RS         if self.started.swap(true, Ordering::SeqCst) {
-//RS             return;
-//RS         }
-//RS         let has_canvas = self.listener.lock().unwrap().is_some();
-//RS         let listener = self.listener.lock().unwrap().take();
-//RS         if let Some(listener) = listener {
-//RS             let status = Arc::clone(&self.status);
-//RS             let debug_sessions = Arc::clone(&self.debug_sessions);
-//RS             let session = Arc::clone(&self.session);
-//RS             let canvas_file = self.canvas_file.clone();
-//RS             let bind_host = self.bind_host.clone();
-//RS             let session_secret = self.session_secret.clone();
-//RS             let release_policy = self.release_policy.clone();
-//RS             let static_root = self.static_root.clone();
-//RS             let shutdown = Arc::clone(&self.shutdown);
-//RS             let browser_state = Arc::clone(&self.browser_state);
-//RS             let paused_evaluate = Arc::clone(&self.paused_evaluate);
-//RS             let terminal_style = Arc::clone(&self.terminal_style);
-//RS             let handle = thread::spawn(move || {
-//RS                 serve_forever(
-//RS                     listener,
-//RS                     status,
-//RS                     debug_sessions,
-//RS                     session,
-//RS                     canvas_file,
-//RS                     ListenerKind::Canvas,
-//RS                     bind_host,
-//RS                     session_secret,
-//RS                     shutdown,
-//RS                     static_root,
-//RS                     release_policy,
-//RS                     browser_state,
-//RS                     paused_evaluate,
-//RS                     terminal_style,
-//RS                 )
-//RS             });
-//RS             self.server_threads.lock().unwrap().push(handle);
-//RS         }
-//RS         if let Some(listener) = self.application_listener.lock().unwrap().take() {
-//RS             let status = Arc::clone(&self.status);
-//RS             let debug_sessions = Arc::clone(&self.debug_sessions);
-//RS             let session = Arc::clone(&self.session);
-//RS             let canvas_file = self.canvas_file.clone();
-//RS             let static_root = self.static_root.clone();
-//RS             let session_secret = self.session_secret.clone();
-//RS             let application_host = self.session.application_host().to_string();
-//RS             let release_policy = self.release_policy.clone();
-//RS             let browser_state = Arc::clone(&self.browser_state);
-//RS             let paused_evaluate = Arc::clone(&self.paused_evaluate);
-//RS             let terminal_style = Arc::clone(&self.terminal_style);
-//RS             let shutdown = Arc::clone(&self.shutdown);
-//RS             let handle = thread::spawn(move || {
-//RS                 serve_forever(
-//RS                     listener,
-//RS                     status,
-//RS                     debug_sessions,
-//RS                     session,
-//RS                     canvas_file,
-//RS                     ListenerKind::Application,
-//RS                     application_host,
-//RS                     session_secret,
-//RS                     shutdown,
-//RS                     static_root,
-//RS                     release_policy,
-//RS                     browser_state,
-//RS                     paused_evaluate,
-//RS                     terminal_style,
-//RS                 )
-//RS             });
-//RS             self.server_threads.lock().unwrap().push(handle);
-//RS         }
-//RS         {
-//RS             let status = Arc::clone(&self.status);
-//RS             let shutdown = Arc::clone(&self.shutdown);
-//RS             let handle = thread::spawn(move || {
-//RS                 while !wait_for_shutdown(&shutdown, Duration::from_millis(LIVE_RELOAD_POLL_MS)) {
-//RS                     status.activate_requested_browser_trace();
-//RS                     status.expire_clients();
-//RS                 }
-//RS             });
-//RS             *self.poll_thread.lock().unwrap() = Some(handle);
-//RS         }
-//RS         if self.session_application_port() != 0 {
-//RS             println!(
-//RS                 "App preview: http://{}:{}/",
-//RS                 url_host(self.session.application_host()),
-//RS                 self.session_application_port(),
-//RS             );
-//RS         }
-//RS         if has_canvas {
-//RS             println!("Canvas: {}", self.canvas_url());
-//RS         }
-//RS         let _ = std::io::stdout().flush();
-//RS         if terminal_controls {
-//RS             if let Some(handle) =
-//RS                 start_terminal_controls(Arc::clone(&self.status), Arc::clone(&self.shutdown))
-//RS             {
-//RS                 *self.terminal_thread.lock().unwrap() = Some(handle);
-//RS             }
-//RS         }
-//RS         self.status.activate();
-//RS     }
-//RS 
-//RS     pub fn mark_building(&self) {
-//RS         self.status.mark_building();
-//RS         self.session.mark_building();
-//RS     }
-//RS 
-//RS     pub fn mark_ready(&self, elapsed_ms: u128, is_rebuild: bool) {
-//RS         let decision = self.hot_swap_decision.lock().unwrap().take();
-//RS         if self.web_swap_enabled {
-//RS             let manifest = fs::read_to_string(self.static_root.join("web.manifest.json")).ok();
-//RS             let build_id = manifest.as_deref().and_then(|manifest| {
-//RS                 browser_web_adapter::manifest_artifact_identity(manifest).ok()
-//RS             });
-//RS             let mut source_revision = None;
-//RS             let mut browser_error = None;
-//RS             if let Ok(source) =
-//RS                 crate::Canvas::read_source_without_symlinks(Path::new(&self.canvas_file))
-//RS             {
-//RS                 let revision = crate::Canvas::source_revision(&source);
-//RS                 source_revision = Some(revision.clone());
-//RS                 if let Some(build_id) = build_id.as_deref() {
-//RS                     let _ = self.session.set_devtools_source_identity(
-//RS                         Some(self.canvas_file.clone()),
-//RS                         Some(build_id.to_string()),
-//RS                         Some(revision.clone()),
-//RS                         None,
-//RS                     );
-//RS                 }
-//RS                 self.session.observe_source(&revision);
-//RS                 if let (Some(manifest), Some(build_id)) = (manifest.as_deref(), build_id.as_deref())
-//RS                 {
-//RS                     match self.browser_state.lock() {
-//RS                         Ok(mut browser_state) => {
-//RS                             if let Err(error) = browser_web_adapter::apply_web_swap_from_manifest(
-//RS                                 &mut browser_state,
-//RS                                 self.session.id(),
-//RS                                 &revision,
-//RS                                 build_id,
-//RS                                 manifest,
-//RS                                 decision.as_ref(),
-//RS                             ) {
-//RS                                 browser_error = Some(error);
-//RS                             }
-//RS                         }
-//RS                         Err(_) => {
-//RS                             browser_error = Some(
-//RS                                 "browser swap state lock was poisoned; rebuild was rejected"
-//RS                                     .to_string(),
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             } else if decision.is_some() {
-//RS                 browser_error = Some(
-//RS                     "web rebuild has no readable source revision; compatibility application was rejected"
-//RS                         .to_string(),
-//RS                 );
-//RS             }
-//RS             if decision.is_some() && (manifest.is_none() || build_id.is_none()) {
-//RS                 browser_error.get_or_insert_with(|| {
-//RS                     "web rebuild has no published manifest/artifact identity; canonical HotSwapDecision was not applied"
-//RS                         .to_string()
-//RS                 });
-//RS             }
-//RS             if let Some(error) = browser_error {
-//RS                 self.status
-//RS                     .mark_error("E2210".to_string(), error.clone(), is_rebuild);
-//RS                 self.session.mark_error("E2210", &error);
-//RS                 return;
-//RS             }
-//RS             if let (Some(build_id), Some(revision)) =
-//RS                 (build_id.as_deref(), source_revision.as_deref())
-//RS             {
-//RS                 self.session.mark_last_good(revision, build_id);
-//RS             }
-//RS         }
-//RS         self.status.mark_ready(elapsed_ms, is_rebuild);
-//RS         self.session.mark_ready();
-//RS     }
-//RS 
-//RS     pub fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
-//RS         self.hot_swap_decision.lock().unwrap().take();
-//RS         self.status
-//RS             .mark_error(code.clone(), diagnostic.clone(), is_rebuild);
-//RS         if let Ok(source) =
-//RS             crate::Canvas::read_source_without_symlinks(Path::new(&self.canvas_file))
-//RS         {
-//RS             self.session
-//RS                 .observe_source(&crate::Canvas::source_revision(&source));
-//RS         }
-//RS         self.session.mark_error(&code, &diagnostic);
-//RS     }
-//RS 
-//RS     /// The revision facts `/__jet_dev_status` serves, for machine reports of
-//RS     /// the same build.
-//RS     pub fn revision_facts(&self) -> DevRevisionFacts {
-//RS         self.status.revision_facts()
-//RS     }
-//RS 
-//RS     pub fn exit_code(&self) -> Option<i32> {
-//RS         let code = self.status.exit_code.load(Ordering::SeqCst);
-//RS         (code != 0).then_some(code as i32)
-//RS     }
-//RS 
-//RS     fn session_application_port(&self) -> u16 {
-//RS         self.session.application_port()
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for WebHost {
-//RS     fn drop(&mut self) {
-//RS         self.session.mark_stopped();
-//RS         self.shutdown.store(true, Ordering::SeqCst);
-//RS         self.listener.lock().unwrap().take();
-//RS         self.application_listener.lock().unwrap().take();
-//RS 
-//RS         if let Some(handle) = self.terminal_thread.lock().unwrap().take() {
-//RS             let _ = handle.join();
-//RS         }
-//RS         if let Some(handle) = self.poll_thread.lock().unwrap().take() {
-//RS             let _ = handle.join();
-//RS         }
-//RS         let handles = self
-//RS             .server_threads
-//RS             .lock()
-//RS             .unwrap()
-//RS             .drain(..)
-//RS             .collect::<Vec<_>>();
-//RS         for handle in handles {
-//RS             let _ = handle.join();
-//RS         }
-//RS         if let Ok(mut paused_evaluate) = self.paused_evaluate.lock() {
-//RS             let _ = self
-//RS                 .debug_sessions
-//RS                 .cancel_all_paused_sessions(&mut paused_evaluate, "web host stopped");
-//RS         }
-//RS         self.status.active.store(false, Ordering::SeqCst);
-//RS     }
-//RS }
-//RS 
-//RS fn wait_for_shutdown(shutdown: &AtomicBool, duration: Duration) -> bool {
-//RS     let deadline = Instant::now() + duration;
-//RS     while !shutdown.load(Ordering::SeqCst) {
-//RS         let remaining = deadline.saturating_duration_since(Instant::now());
-//RS         if remaining.is_zero() {
-//RS             return false;
-//RS         }
-//RS         thread::sleep(remaining.min(Duration::from_millis(10)));
-//RS     }
-//RS     true
-//RS }
-//RS 
-//RS fn start_terminal_controls(
-//RS     status: Arc<DevStatus>,
-//RS     shutdown: Arc<AtomicBool>,
-//RS ) -> Option<thread::JoinHandle<()>> {
-//RS     if !status.pin {
-//RS         return None;
-//RS     }
-//RS     let Some(raw) = jet_repl::Term::RawGuard::enable() else {
-//RS         return None;
-//RS     };
-//RS     status.controls_ready.store(true, Ordering::SeqCst);
-//RS     Some(thread::spawn(move || {
-//RS         let mut keys = jet_repl::Term::KeyReader::new(std::io::stdin());
-//RS         loop {
-//RS             if shutdown.load(Ordering::SeqCst) {
-//RS                 status.disable_terminal_controls();
-//RS                 drop(raw);
-//RS                 return;
-//RS             }
-//RS             match keys.read_key() {
-//RS                 jet_repl::Term::Key::Char('v' | 'V') => status.toggle_verbose(),
-//RS                 jet_repl::Term::Key::Idle => {}
-//RS                 jet_repl::Term::Key::CtrlC => {
-//RS                     status.disable_terminal_controls();
-//RS                     drop(raw);
-//RS                     status.exit_code.store(130, Ordering::SeqCst);
-//RS                     return;
-//RS                 }
-//RS                 jet_repl::Term::Key::Eof => {
-//RS                     status.disable_terminal_controls();
-//RS                     drop(raw);
-//RS                     return;
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }))
-//RS }
-//RS 
-//RS /// Pure — the parity words shared verbatim by the terminal line and the
-//RS /// browser strip's `message` field (`(state_word, rest)`; callers join them
-//RS /// with " · "). No I/O, no locking: easy to unit test every state directly.
-//RS fn header_words(
-//RS     state: &str,
-//RS     file: &str,
-//RS     code: &str,
-//RS     port: u16,
-//RS     clients: u64,
-//RS     last_build_ms: u128,
-//RS ) -> (String, String) {
-//RS     let plural = if clients == 1 { "" } else { "s" };
-//RS     match state {
-//RS         "building" => (
-//RS             "building".to_string(),
-//RS             format!("{} · {} client{}", file, clients, plural),
-//RS         ),
-//RS         "error" => (
-//RS             "error".to_string(),
-//RS             format!("{} · {} client{}", code, clients, plural),
-//RS         ),
-//RS         _ => {
-//RS             let mut rest = format!("localhost:{} · {} client{}", port, clients, plural);
-//RS             if last_build_ms > 0 {
-//RS                 rest.push_str(&format!(" · built {}", format_build_time(last_build_ms)));
-//RS             }
-//RS             ("ready".to_string(), rest)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn format_build_time(ms: u128) -> String {
-//RS     format!("{:.1}s", ms as f64 / 1000.0)
-//RS }
-//RS 
-//RS fn format_line_colored(word: &str, rest: &str) -> String {
-//RS     let sgr = match word {
-//RS         "ready" => "32",
-//RS         "building" | "reconnecting" => "33",
-//RS         "error" => "31",
-//RS         _ => "37",
-//RS     };
-//RS     format!("jet dev  \x1b[{}m\u{25CF}\x1b[0m {} · {}", sgr, word, rest)
-//RS }
-//RS 
-//RS fn format_line_plain(word: &str, rest: &str) -> String {
-//RS     format!("jet dev  [{}] {}", word, rest)
-//RS }
-//RS 
-//RS /// Frame a verbatim diagnostic in a box for the pinned (TTY) terminal
-//RS /// surface — border/frame chars only, never a changed word or code (I4).
-//RS /// Off-TTY (`refresh`'s CI-floor branch) prints the same diagnostic
-//RS /// unframed instead of calling this at all.
-//RS fn frame_lines(code: &str, diagnostic: &str) -> Vec<String> {
-//RS     let lines: Vec<&str> = diagnostic.lines().collect();
-//RS     let content_width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-//RS     let width = content_width.max(code.len() + 2).clamp(20, 96);
-//RS     let dash_count = width.saturating_sub(code.len() + 3).max(1);
-//RS     let mut out = Vec::with_capacity(lines.len() + 2);
-//RS     out.push(format!("┌ {} {}", code, "─".repeat(dash_count)));
-//RS     for line in lines {
-//RS         out.push(format!("│ {}", line));
-//RS     }
-//RS     out.push(format!("└{}", "─".repeat(width + 2)));
-//RS     out
-//RS }
-//RS 
-//RS /// Wall-clock `HH:MM:SS` (UTC — std has no local-offset lookup without a
-//RS /// crate, I6) for verbose request/rebuild log lines. Cosmetic only, never
-//RS /// part of a diagnostic's verbatim text.
-//RS fn clock_time() -> String {
-//RS     let secs = std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_secs();
-//RS     let sod = secs % 86400;
-//RS     format!("{:02}:{:02}:{:02}", sod / 3600, (sod % 3600) / 60, sod % 60)
-//RS }
-//RS 
-//RS /// A held output directory used by both the compiler and the publication
-//RS /// transaction.  The path is retained for diagnostics only; every filesystem
-//RS /// operation below it goes through the held directory authority.
-//RS pub struct WebOutputAuthority {
-//RS     path: PathBuf,
-//RS     directory: secure_output::Directory,
-//RS }
-//RS 
-//RS /// A compiler-owned temporary output.  It is created exclusively below a held
-//RS /// output authority and removed by its descriptor-relative drop path.
-//RS pub struct WebOutputTempFile {
-//RS     path: PathBuf,
-//RS     inner: secure_output::TempFile,
-//RS }
-//RS 
-//RS impl WebOutputAuthority {
-//RS     /// Create the directory tree without following links, then pin the final
-//RS     /// output directory, which must stay below `root`.  Compiler-owned outputs
-//RS     /// such as `<project>/.jet/build` are anchored at their project root, so a
-//RS     /// command run from a project subdirectory still reaches them.
-//RS     pub fn open_or_create(path: &Path, root: &Path) -> std::io::Result<Self> {
-//RS         let real = ensure_real_output_dir(path, root)?;
-//RS         let directory = secure_output::open_root(&real, root)?;
-//RS         Ok(Self {
-//RS             path: real,
-//RS             directory,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Open an already-created directory below `root` and retain its
-//RS     /// descriptor/handle.
-//RS     pub fn open(path: &Path, root: &Path) -> std::io::Result<Self> {
-//RS         let real = ensure_real_output_dir(path, root)?;
-//RS         let directory = secure_output::open_root(&real, root)?;
-//RS         Ok(Self {
-//RS             path: real,
-//RS             directory,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn path(&self) -> &Path {
-//RS         &self.path
-//RS     }
-//RS 
-//RS     pub fn path_for(&self, name: &str) -> std::io::Result<PathBuf> {
-//RS         let name = normal_output_name(name)?;
-//RS         Ok(self.path.join(name))
-//RS     }
-//RS 
-//RS     pub fn replace_file(&self, name: &str, bytes: &[u8]) -> std::io::Result<()> {
-//RS         let name = normal_output_name(name)?;
-//RS         secure_output::replace_file(&self.directory, name, bytes)
-//RS     }
-//RS 
-//RS     pub fn open_file(&self, name: &str) -> std::io::Result<std::fs::File> {
-//RS         let name = normal_output_name(name)?;
-//RS         secure_output::open_file(&self.directory, name)
-//RS     }
-//RS 
-//RS     pub fn validate_file(&self, name: &str, required: bool) -> std::io::Result<bool> {
-//RS         let name = normal_output_name(name)?;
-//RS         match secure_output::open_file(&self.directory, name) {
-//RS             Ok(_) => Ok(true),
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => Ok(false),
-//RS             Err(error) => Err(error),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn remove_file_if_exists(&self, name: &str) -> std::io::Result<()> {
-//RS         let name = normal_output_name(name)?;
-//RS         match secure_output::remove_file(&self.directory, name) {
-//RS             Ok(()) => Ok(()),
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-//RS             Err(error) => Err(error),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn rename_file_to(&self, name: &str, destination: &Self) -> std::io::Result<()> {
-//RS         let name = normal_output_name(name)?;
-//RS         secure_output::rename_file(&self.directory, name, &destination.directory, name)
-//RS     }
-//RS     pub fn open_existing_child(&self, name: &str) -> std::io::Result<Self> {
-//RS         let name = normal_output_name(name)?;
-//RS         let directory = secure_output::open_child(&self.directory, name)?;
-//RS         Ok(Self {
-//RS             path: self.path.join(name),
-//RS             directory,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn create_child(&self, path: &Path) -> std::io::Result<Self> {
-//RS         let parent = path
-//RS             .parent()
-//RS             .filter(|parent| !parent.as_os_str().is_empty())
-//RS             .unwrap_or_else(|| Path::new("."));
-//RS         let real_parent = fs::canonicalize(parent)?;
-//RS         if real_parent != self.path {
-//RS             return Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::PermissionDenied,
-//RS                 "web child directory escapes its held output root",
-//RS             ));
-//RS         }
-//RS         let name =
-//RS             normal_output_name(path.file_name().and_then(|name| name.to_str()).ok_or_else(
-//RS                 || {
-//RS                     std::io::Error::new(
-//RS                         std::io::ErrorKind::InvalidInput,
-//RS                         "web child directory has no normal name",
-//RS                     )
-//RS                 },
-//RS             )?)?;
-//RS         let directory = secure_output::open_child(&self.directory, name)?;
-//RS         Ok(Self {
-//RS             path: self.path.join(name),
-//RS             directory,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn create_unique_child(&self, prefix: &str) -> std::io::Result<(String, Self)> {
-//RS         for _ in 0..100 {
-//RS             let name = format!(
-//RS                 "{prefix}-{}-{}",
-//RS                 std::process::id(),
-//RS                 PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed)
-//RS             );
-//RS             match secure_output::create_child(&self.directory, std::ffi::OsStr::new(&name)) {
-//RS                 Ok(directory) => {
-//RS                     return Ok((
-//RS                         name.clone(),
-//RS                         Self {
-//RS                             path: self.path.join(&name),
-//RS                             directory,
-//RS                         },
-//RS                     ))
-//RS                 }
-//RS                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-//RS                 Err(error) => return Err(error),
-//RS             }
-//RS         }
-//RS         Err(std::io::Error::new(
-//RS             std::io::ErrorKind::AlreadyExists,
-//RS             "could not allocate a web publication journal",
-//RS         ))
-//RS     }
-//RS 
-//RS     pub fn remove_child_directory(&self, name: &str) -> std::io::Result<()> {
-//RS         let name = normal_output_name(name)?;
-//RS         match secure_output::remove_directory(&self.directory, name) {
-//RS             Ok(()) => Ok(()),
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-//RS             Err(error) => Err(error),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Allocate a private file for a tool such as rustc.  The file is never
-//RS     /// opened by pathname by Jet again; its held descriptor remains the
-//RS     /// cleanup authority.
-//RS     pub fn create_temp_file(
-//RS         &self,
-//RS         prefix: &str,
-//RS         extension: &str,
-//RS     ) -> std::io::Result<WebOutputTempFile> {
-//RS         for _ in 0..100 {
-//RS             let name = format!(
-//RS                 ".{prefix}-{}-{}{}",
-//RS                 std::process::id(),
-//RS                 PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed),
-//RS                 extension
-//RS             );
-//RS             match secure_output::create_temp_file(&self.directory, std::ffi::OsStr::new(&name)) {
-//RS                 Ok(inner) => {
-//RS                     return Ok(WebOutputTempFile {
-//RS                         path: self.path.join(&name),
-//RS                         inner,
-//RS                     })
-//RS                 }
-//RS                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-//RS                 Err(error) => return Err(error),
-//RS             }
-//RS         }
-//RS         Err(std::io::Error::new(
-//RS             std::io::ErrorKind::AlreadyExists,
-//RS             "could not allocate a web compiler temporary",
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS impl WebOutputTempFile {
-//RS     pub fn path(&self) -> &Path {
-//RS         &self.path
-//RS     }
-//RS 
-//RS     pub fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-//RS         secure_output::write_temp(&mut self.inner, bytes)
-//RS     }
-//RS 
-//RS     pub fn read_all(&mut self) -> std::io::Result<Vec<u8>> {
-//RS         secure_output::read_temp(&mut self.inner)
-//RS     }
-//RS }
-//RS 
-//RS fn normal_output_name(value: &str) -> std::io::Result<&std::ffi::OsStr> {
-//RS     let path = Path::new(value);
-//RS     let mut components = path.components();
-//RS     let Some(Component::Normal(name)) = components.next() else {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::InvalidInput,
-//RS             "web output name is not a normal component",
-//RS         ));
-//RS     };
-//RS     if components.next().is_some() {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::InvalidInput,
-//RS             "web output name is not a single component",
-//RS         ));
-//RS     }
-//RS     Ok(name)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS mod secure_output {
-//RS     use std::ffi::{c_char, CString, OsStr};
-//RS     use std::fs::{File, OpenOptions};
-//RS     use std::io::{self, Read, Seek, SeekFrom, Write};
-//RS     use std::os::fd::{AsRawFd, FromRawFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-//RS     use std::path::{Component, Path, PathBuf};
-//RS     const O_RDONLY: i32 = 0;
-//RS     const O_WRONLY: i32 = 1;
-//RS     const O_RDWR: i32 = 2;
-//RS     const O_CREAT: i32 = 0o100;
-//RS     const O_EXCL: i32 = 0o200;
-//RS     const O_CLOEXEC: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-//RS         0o2000000
-//RS     } else {
-//RS         0x01000000
-//RS     };
-//RS     const O_DIRECTORY: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-//RS         0o200000
-//RS     } else {
-//RS         0x00100000
-//RS     };
-//RS     const O_NOFOLLOW: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
-//RS         0o400000
-//RS     } else {
-//RS         0x0100
-//RS     };
-//RS     const AT_REMOVEDIR: i32 = 0x200;
-//RS     const MODE_FILE: u32 = 0o600;
-//RS 
-//RS     unsafe extern "C" {
-//RS         fn mkdirat(directory: i32, path: *const c_char, mode: u32) -> i32;
-//RS         fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
-//RS         fn renameat(
-//RS             old_directory: i32,
-//RS             old_path: *const c_char,
-//RS             new_directory: i32,
-//RS             new_path: *const c_char,
-//RS         ) -> i32;
-//RS         fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
-//RS     }
-//RS 
-//RS     pub struct Directory {
-//RS         path: PathBuf,
-//RS         file: File,
-//RS     }
-//RS 
-//RS     pub struct TempFile {
-//RS         name: CString,
-//RS         file: File,
-//RS         parent: File,
-//RS     }
-//RS 
-//RS     fn c_name(value: &OsStr) -> io::Result<CString> {
-//RS         CString::new(value.as_bytes()).map_err(|_| {
-//RS             io::Error::new(io::ErrorKind::InvalidInput, "web output name contains NUL")
-//RS         })
-//RS     }
-//RS 
-//RS     fn permission(message: &str) -> io::Error {
-//RS         io::Error::new(io::ErrorKind::PermissionDenied, message)
-//RS     }
-//RS     fn unlink_at(parent: &File, name: &CString, flags: i32) -> io::Result<()> {
-//RS         if unsafe { unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) } != 0 {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn open_directory_at(parent: &File, name: &OsStr) -> io::Result<File> {
-//RS         let name = c_name(name)?;
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 parent.as_raw_fd(),
-//RS                 name.as_ptr(),
-//RS                 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
-//RS                 0,
-//RS             )
-//RS         };
-//RS         if fd < 0 {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         Ok(unsafe { File::from_raw_fd(fd) })
-//RS     }
-//RS 
-//RS     fn open_file_at(parent: &File, name: &OsStr) -> io::Result<File> {
-//RS         let name = c_name(name)?;
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 parent.as_raw_fd(),
-//RS                 name.as_ptr(),
-//RS                 O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
-//RS                 0,
-//RS             )
-//RS         };
-//RS         if fd < 0 {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         Ok(unsafe { File::from_raw_fd(fd) })
-//RS     }
-//RS 
-//RS     fn check_regular(file: &File) -> io::Result<(u64, u64)> {
-//RS         let metadata = file.metadata()?;
-//RS         if !metadata.is_file() || metadata.nlink() != 1 {
-//RS             return Err(permission(
-//RS                 "web output must be a singly-linked regular file",
-//RS             ));
-//RS         }
-//RS         Ok((metadata.dev(), metadata.ino()))
-//RS     }
-//RS 
-//RS     pub fn open_root(path: &Path, anchor: &Path) -> io::Result<Directory> {
-//RS         let anchor = std::fs::canonicalize(anchor)?;
-//RS         let path = std::fs::canonicalize(path)?;
-//RS         let relative = path
-//RS             .strip_prefix(&anchor)
-//RS             .map_err(|_| permission("web output root escapes its owning directory"))?;
-//RS         let mut file = OpenOptions::new()
-//RS             .read(true)
-//RS             .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-//RS             .open(&anchor)?;
-//RS         let mut walked = anchor.clone();
-//RS         for component in relative.components() {
-//RS             let Component::Normal(name) = component else {
-//RS                 return Err(permission("web output root is not a normal directory"));
-//RS             };
-//RS             let next = open_directory_at(&file, name)?;
-//RS             let expected = walked.join(name);
-//RS             let path_metadata = std::fs::symlink_metadata(&expected)?;
-//RS             let actual = next.metadata()?;
-//RS             if !path_metadata.is_dir()
-//RS                 || !actual.is_dir()
-//RS                 || path_metadata.dev() != actual.dev()
-//RS                 || path_metadata.ino() != actual.ino()
-//RS             {
-//RS                 return Err(permission("web output root changed during secure open"));
-//RS             }
-//RS             file = next;
-//RS             walked = expected;
-//RS         }
-//RS         let actual = file.metadata()?;
-//RS         if !actual.is_dir() {
-//RS             return Err(permission("web output root is not a directory"));
-//RS         }
-//RS         Ok(Directory { path, file })
-//RS     }
-//RS 
-//RS     pub fn open_child(parent: &Directory, name: &OsStr) -> io::Result<Directory> {
-//RS         let file = open_directory_at(&parent.file, name)?;
-//RS         let path = parent.path.join(name);
-//RS         let path_metadata = std::fs::symlink_metadata(&path)?;
-//RS         let actual = file.metadata()?;
-//RS         if !path_metadata.is_dir()
-//RS             || !actual.is_dir()
-//RS             || path_metadata.dev() != actual.dev()
-//RS             || path_metadata.ino() != actual.ino()
-//RS         {
-//RS             return Err(permission("web child directory changed during secure open"));
-//RS         }
-//RS         Ok(Directory { path, file })
-//RS     }
-//RS 
-//RS     pub fn create_child(parent: &Directory, name: &OsStr) -> io::Result<Directory> {
-//RS         let name_c = c_name(name)?;
-//RS         if unsafe { mkdirat(parent.file.as_raw_fd(), name_c.as_ptr(), 0o700) } != 0 {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         open_child(parent, name)
-//RS     }
-//RS 
-//RS     pub fn open_file(parent: &Directory, name: &OsStr) -> io::Result<File> {
-//RS         let file = open_file_at(&parent.file, name)?;
-//RS         check_regular(&file)?;
-//RS         Ok(file)
-//RS     }
-//RS 
-//RS     fn check_existing(parent: &Directory, name: &OsStr) -> io::Result<bool> {
-//RS         match open_file(parent, name) {
-//RS             Ok(_) => Ok(true),
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-//RS             Err(error) => Err(error),
-//RS         }
-//RS     }
-//RS 
-//RS     fn unique_temp_name(prefix: &OsStr) -> CString {
-//RS         let name = format!(
-//RS             ".{}-{}-{}",
-//RS             prefix.to_string_lossy(),
-//RS             std::process::id(),
-//RS             super::PUBLICATION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-//RS         );
-//RS         CString::new(name).expect("generated web temporary name has no NUL")
-//RS     }
-//RS 
-//RS     pub fn create_temp_file(parent: &Directory, name: &OsStr) -> io::Result<TempFile> {
-//RS         let name = c_name(name)?;
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 parent.file.as_raw_fd(),
-//RS                 name.as_ptr(),
-//RS                 O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-//RS                 MODE_FILE,
-//RS             )
-//RS         };
-//RS         if fd < 0 {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         let file = unsafe { File::from_raw_fd(fd) };
-//RS         let parent_file = match parent.file.try_clone() {
-//RS             Ok(parent_file) => parent_file,
-//RS             Err(error) => {
-//RS                 drop(file);
-//RS                 let _ = unlink_at(&parent.file, &name, 0);
-//RS                 return Err(error);
-//RS             }
-//RS         };
-//RS         Ok(TempFile {
-//RS             name,
-//RS             file,
-//RS             parent: parent_file,
-//RS         })
-//RS     }
-//RS     pub fn write_temp(temp: &mut TempFile, bytes: &[u8]) -> io::Result<()> {
-//RS         temp.file.write_all(bytes)?;
-//RS         temp.file.sync_all()
-//RS     }
-//RS 
-//RS     pub fn read_temp(temp: &mut TempFile) -> io::Result<Vec<u8>> {
-//RS         temp.file.seek(SeekFrom::Start(0))?;
-//RS         let mut bytes = Vec::new();
-//RS         temp.file.read_to_end(&mut bytes)?;
-//RS         Ok(bytes)
-//RS     }
-//RS 
-//RS     pub fn replace_file(parent: &Directory, name: &OsStr, bytes: &[u8]) -> io::Result<()> {
-//RS         let _ = check_existing(parent, name)?;
-//RS         let temporary = unique_temp_name(name);
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 parent.file.as_raw_fd(),
-//RS                 temporary.as_ptr(),
-//RS                 O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-//RS                 MODE_FILE,
-//RS             )
-//RS         };
-//RS         if fd < 0 {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         let mut file = unsafe { File::from_raw_fd(fd) };
-//RS         let result = (|| {
-//RS             file.write_all(bytes)?;
-//RS             file.sync_all()?;
-//RS             let temporary_id = check_regular(&file)?;
-//RS             let name_c = c_name(name)?;
-//RS             if unsafe {
-//RS                 renameat(
-//RS                     parent.file.as_raw_fd(),
-//RS                     temporary.as_ptr(),
-//RS                     parent.file.as_raw_fd(),
-//RS                     name_c.as_ptr(),
-//RS                 )
-//RS             } != 0
-//RS             {
-//RS                 return Err(io::Error::last_os_error());
-//RS             }
-//RS             let published = open_file(parent, name)?;
-//RS             if check_regular(&published)? != temporary_id {
-//RS                 return Err(permission("published web output identity changed"));
-//RS             }
-//RS             Ok(())
-//RS         })();
-//RS         if result.is_err() {
-//RS             let _ = unlink_at(&parent.file, &temporary, 0);
-//RS         }
-//RS         result
-//RS     }
-//RS 
-//RS     pub fn rename_file(
-//RS         source: &Directory,
-//RS         source_name: &OsStr,
-//RS         destination: &Directory,
-//RS         destination_name: &OsStr,
-//RS     ) -> io::Result<()> {
-//RS         let source_file = open_file(source, source_name)?;
-//RS         let source_id = check_regular(&source_file)?;
-//RS         let _ = check_existing(destination, destination_name)?;
-//RS         let source_name_c = c_name(source_name)?;
-//RS         let destination_name_c = c_name(destination_name)?;
-//RS         if unsafe {
-//RS             renameat(
-//RS                 source.file.as_raw_fd(),
-//RS                 source_name_c.as_ptr(),
-//RS                 destination.file.as_raw_fd(),
-//RS                 destination_name_c.as_ptr(),
-//RS             )
-//RS         } != 0
-//RS         {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         let published = open_file(destination, destination_name)?;
-//RS         if check_regular(&published)? != source_id {
-//RS             return Err(permission("published web output identity changed"));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn remove_file(parent: &Directory, name: &OsStr) -> io::Result<()> {
-//RS         let _ = open_file(parent, name)?;
-//RS         let name = c_name(name)?;
-//RS         unlink_at(&parent.file, &name, 0)
-//RS     }
-//RS 
-//RS     pub fn remove_directory(parent: &Directory, name: &OsStr) -> io::Result<()> {
-//RS         let name = c_name(name)?;
-//RS         unlink_at(&parent.file, &name, AT_REMOVEDIR)
-//RS     }
-//RS 
-//RS     impl Drop for TempFile {
-//RS         fn drop(&mut self) {
-//RS             let _ = unlink_at(&self.parent, &self.name, 0);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS mod secure_output {
-//RS     use std::ffi::{c_void, OsStr};
-//RS     use std::fs::{File, OpenOptions};
-//RS     use std::io::{self, Read, Seek, SeekFrom, Write};
-//RS     use std::os::windows::ffi::OsStrExt;
-//RS     use std::os::windows::fs::OpenOptionsExt;
-//RS     use std::os::windows::io::AsRawHandle;
-//RS     use std::path::{Path, PathBuf};
-//RS 
-//RS     type Handle = *mut c_void;
-//RS     const GENERIC_READ: u32 = 0x8000_0000;
-//RS     const GENERIC_WRITE: u32 = 0x4000_0000;
-//RS     const FILE_SHARE_READ: u32 = 0x0000_0001;
-//RS     const FILE_SHARE_WRITE: u32 = 0x0000_0002;
-//RS     const FILE_SHARE_DELETE: u32 = 0x0000_0004;
-//RS     const FILE_SHARE_ALL: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-//RS     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-//RS     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-//RS     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-//RS     const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
-//RS     const FILE_RENAME_INFO_CLASS: i32 = 3;
-//RS     const FILE_DISPOSITION_INFO_CLASS: i32 = 4;
-//RS 
-//RS     #[repr(C)]
-//RS     struct FileAttributeTagInfo {
-//RS         attributes: u32,
-//RS         reparse_tag: u32,
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct FileRenameInfo {
-//RS         replace_if_exists: i32,
-//RS         root_directory: Handle,
-//RS         file_name_length: u32,
-//RS         file_name: [u16; 1],
-//RS     }
-//RS 
-//RS     #[repr(C)]
-//RS     struct FileDispositionInfo {
-//RS         delete_file: u8,
-//RS     }
-//RS 
-//RS     unsafe extern "system" {
-//RS         fn GetFileInformationByHandleEx(
-//RS             file: Handle,
-//RS             class: i32,
-//RS             info: *mut c_void,
-//RS             size: u32,
-//RS         ) -> i32;
-//RS         fn GetFinalPathNameByHandleW(
-//RS             file: Handle,
-//RS             path: *mut u16,
-//RS             path_len: u32,
-//RS             flags: u32,
-//RS         ) -> u32;
-//RS         fn SetFileInformationByHandle(
-//RS             file: Handle,
-//RS             class: i32,
-//RS             info: *mut c_void,
-//RS             size: u32,
-//RS         ) -> i32;
-//RS 
-//RS     }
-//RS 
-//RS     pub struct Directory {
-//RS         path: PathBuf,
-//RS         file: File,
-//RS         final_path: String,
-//RS     }
-//RS 
-//RS     pub struct TempFile {
-//RS         path: PathBuf,
-//RS         file: File,
-//RS     }
-//RS 
-//RS     fn wide(value: &OsStr) -> Vec<u16> {
-//RS         value.encode_wide().chain(std::iter::once(0)).collect()
-//RS     }
-//RS 
-//RS     fn normalize(value: String) -> String {
-//RS         value
-//RS             .replace('/', "\\")
-//RS             .trim_end_matches(['\\', '/'])
-//RS             .to_ascii_lowercase()
-//RS     }
-//RS 
-//RS     fn final_path(file: &File) -> io::Result<String> {
-//RS         let needed =
-//RS             unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0) };
-//RS         if needed == 0 {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         let mut buffer = vec![0u16; needed as usize + 1];
-//RS         let written = unsafe {
-//RS             GetFinalPathNameByHandleW(
-//RS                 file.as_raw_handle(),
-//RS                 buffer.as_mut_ptr(),
-//RS                 buffer.len() as u32,
-//RS                 0,
-//RS             )
-//RS         };
-//RS         if written == 0 || written as usize >= buffer.len() {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         buffer.truncate(written as usize);
-//RS         Ok(normalize(String::from_utf16_lossy(&buffer)))
-//RS     }
-//RS 
-//RS     fn check_reparse(file: &File) -> io::Result<()> {
-//RS         let mut info = FileAttributeTagInfo {
-//RS             attributes: 0,
-//RS             reparse_tag: 0,
-//RS         };
-//RS         if unsafe {
-//RS             GetFileInformationByHandleEx(
-//RS                 file.as_raw_handle(),
-//RS                 FILE_ATTRIBUTE_TAG_INFO_CLASS,
-//RS                 (&mut info as *mut FileAttributeTagInfo).cast(),
-//RS                 std::mem::size_of::<FileAttributeTagInfo>() as u32,
-//RS             )
-//RS         } == 0
-//RS         {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         if info.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "web output contains a Windows reparse point",
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn open_directory(path: &Path) -> io::Result<File> {
-//RS         let file = OpenOptions::new()
-//RS             .read(true)
-//RS             .access_mode(GENERIC_READ | GENERIC_WRITE)
-//RS             .share_mode(FILE_SHARE_ALL)
-//RS             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-//RS             .open(path)?;
-//RS         check_reparse(&file)?;
-//RS         if !file.metadata()?.is_dir() {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "web output root is not a directory",
-//RS             ));
-//RS         }
-//RS         Ok(file)
-//RS     }
-//RS 
-//RS     fn open_file_path(path: &Path, write: bool, create_new: bool) -> io::Result<File> {
-//RS         let mut options = OpenOptions::new();
-//RS         options.read(true).write(write);
-//RS         if create_new {
-//RS             options.create_new(true);
-//RS         }
-//RS         options
-//RS             .access_mode(GENERIC_READ | if write { GENERIC_WRITE } else { 0 })
-//RS             .share_mode(FILE_SHARE_ALL)
-//RS             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-//RS             .open(path)
-//RS     }
-//RS 
-//RS     fn check_regular(file: &File) -> io::Result<()> {
-//RS         check_reparse(file)?;
-//RS         if !file.metadata()?.is_file() {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "web output is not a regular file",
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn open_root(path: &Path, _anchor: &Path) -> io::Result<Directory> {
-//RS         let file = open_directory(path)?;
-//RS         let expected = normalize(
-//RS             if path.is_absolute() {
-//RS                 path.to_path_buf()
-//RS             } else {
-//RS                 std::env::current_dir()?.join(path)
-//RS             }
-//RS             .to_string_lossy()
-//RS             .into_owned(),
-//RS         );
-//RS         let actual = final_path(&file)?;
-//RS         if actual != expected {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "web output root changed during secure open",
-//RS             ));
-//RS         }
-//RS         Ok(Directory {
-//RS             path: path.to_path_buf(),
-//RS             file,
-//RS             final_path: actual,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn open_child(parent: &Directory, name: &OsStr) -> io::Result<Directory> {
-//RS         let path = parent.path.join(name);
-//RS         let file = open_directory(&path)?;
-//RS         let actual = final_path(&file)?;
-//RS         let expected = normalize(path.to_string_lossy().into_owned());
-//RS         if actual != expected || !actual.starts_with(&format!("{}\\", parent.final_path)) {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "web child directory escaped its held output root",
-//RS             ));
-//RS         }
-//RS         Ok(Directory {
-//RS             path,
-//RS             file,
-//RS             final_path: actual,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn create_child(parent: &Directory, name: &OsStr) -> io::Result<Directory> {
-//RS         let path = parent.path.join(name);
-//RS         std::fs::create_dir(&path)?;
-//RS         open_child(parent, name)
-//RS     }
-//RS 
-//RS     pub fn open_file(parent: &Directory, name: &OsStr) -> io::Result<File> {
-//RS         let path = parent.path.join(name);
-//RS         let file = open_file_path(&path, false, false)?;
-//RS         check_regular(&file)?;
-//RS         if normalize(final_path(&file)?) != normalize(path.to_string_lossy().into_owned()) {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "web output file escaped its held directory",
-//RS             ));
-//RS         }
-//RS         Ok(file)
-//RS     }
-//RS 
-//RS     fn replace_handle(source: &File, destination: &File, name: &OsStr) -> io::Result<()> {
-//RS         let file_name = name.encode_wide().collect::<Vec<_>>();
-//RS         let offset = std::mem::offset_of!(FileRenameInfo, file_name);
-//RS         let size = offset + file_name.len() * std::mem::size_of::<u16>();
-//RS         let mut storage = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
-//RS         let info = storage.as_mut_ptr().cast::<FileRenameInfo>();
-//RS         unsafe {
-//RS             (*info).replace_if_exists = 1;
-//RS             (*info).root_directory = destination.as_raw_handle();
-//RS             (*info).file_name_length = (file_name.len() * 2) as u32;
-//RS             std::ptr::copy_nonoverlapping(
-//RS                 file_name.as_ptr(),
-//RS                 (*info).file_name.as_mut_ptr(),
-//RS                 file_name.len(),
-//RS             );
-//RS             if SetFileInformationByHandle(
-//RS                 source.as_raw_handle(),
-//RS                 FILE_RENAME_INFO_CLASS,
-//RS                 info.cast(),
-//RS                 size as u32,
-//RS             ) == 0
-//RS             {
-//RS                 return Err(io::Error::last_os_error());
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn delete_handle(file: &File) -> io::Result<()> {
-//RS         let mut info = FileDispositionInfo { delete_file: 1 };
-//RS         if unsafe {
-//RS             SetFileInformationByHandle(
-//RS                 file.as_raw_handle(),
-//RS                 FILE_DISPOSITION_INFO_CLASS,
-//RS                 (&mut info as *mut FileDispositionInfo).cast(),
-//RS                 std::mem::size_of::<FileDispositionInfo>() as u32,
-//RS             )
-//RS         } == 0
-//RS         {
-//RS             return Err(io::Error::last_os_error());
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn replace_file(parent: &Directory, name: &OsStr, bytes: &[u8]) -> io::Result<()> {
-//RS         if let Ok(existing) = open_file(parent, name) {
-//RS             check_regular(&existing)?;
-//RS         }
-//RS         let path = parent.path.join(format!(
-//RS             ".{}-{}-{}",
-//RS             name.to_string_lossy(),
-//RS             std::process::id(),
-//RS             super::PUBLICATION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-//RS         ));
-//RS         let mut temporary = open_file_path(&path, true, true)?;
-//RS         temporary.write_all(bytes)?;
-//RS         temporary.sync_all()?;
-//RS         check_regular(&temporary)?;
-//RS         replace_handle(&temporary, &parent.file, name)?;
-//RS         let published = open_file(parent, name)?;
-//RS         check_regular(&published)?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn rename_file(
-//RS         source: &Directory,
-//RS         source_name: &OsStr,
-//RS         destination: &Directory,
-//RS         destination_name: &OsStr,
-//RS     ) -> io::Result<()> {
-//RS         let source_path = source.path.join(source_name);
-//RS         let source_file = open_file_path(&source_path, true, false)?;
-//RS         check_regular(&source_file)?;
-//RS         if let Ok(existing) = open_file(destination, destination_name) {
-//RS             check_regular(&existing)?;
-//RS         }
-//RS         replace_handle(&source_file, &destination.file, destination_name)
-//RS     }
-//RS 
-//RS     pub fn remove_file(parent: &Directory, name: &OsStr) -> io::Result<()> {
-//RS         let path = parent.path.join(name);
-//RS         let file = open_file_path(&path, true, false)?;
-//RS         check_regular(&file)?;
-//RS         delete_handle(&file)
-//RS     }
-//RS 
-//RS     pub fn remove_directory(parent: &Directory, name: &OsStr) -> io::Result<()> {
-//RS         let path = parent.path.join(name);
-//RS         let file = open_directory(&path)?;
-//RS         delete_handle(&file)
-//RS     }
-//RS 
-//RS     pub fn create_temp_file(parent: &Directory, name: &OsStr) -> io::Result<TempFile> {
-//RS         let path = parent.path.join(name);
-//RS         let file = open_file_path(&path, true, true)?;
-//RS         check_regular(&file)?;
-//RS         Ok(TempFile { path, file })
-//RS     }
-//RS 
-//RS     pub fn write_temp(temp: &mut TempFile, bytes: &[u8]) -> io::Result<()> {
-//RS         temp.file.write_all(bytes)?;
-//RS         temp.file.sync_all()
-//RS     }
-//RS 
-//RS     pub fn read_temp(temp: &mut TempFile) -> io::Result<Vec<u8>> {
-//RS         temp.file.seek(SeekFrom::Start(0))?;
-//RS         let mut bytes = Vec::new();
-//RS         temp.file.read_to_end(&mut bytes)?;
-//RS         Ok(bytes)
-//RS     }
-//RS 
-//RS     impl Drop for TempFile {
-//RS         fn drop(&mut self) {
-//RS             let _ = delete_handle(&self.file);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(any(unix, windows)))]
-//RS mod secure_output {
-//RS     use std::ffi::OsStr;
-//RS     use std::fs::File;
-//RS     use std::io;
-//RS     use std::path::Path;
-//RS 
-//RS     pub struct Directory;
-//RS     pub struct TempFile;
-//RS 
-//RS     fn unsupported<T>() -> io::Result<T> {
-//RS         Err(io::Error::new(
-//RS             io::ErrorKind::Unsupported,
-//RS             "secure web output authority is unavailable on this platform",
-//RS         ))
-//RS     }
-//RS 
-//RS     pub fn open_root(_: &Path, _: &Path) -> io::Result<Directory> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn open_child(_: &Directory, _: &OsStr) -> io::Result<Directory> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn create_child(_: &Directory, _: &OsStr) -> io::Result<Directory> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn open_file(_: &Directory, _: &OsStr) -> io::Result<File> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn replace_file(_: &Directory, _: &OsStr, _: &[u8]) -> io::Result<()> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn rename_file(_: &Directory, _: &OsStr, _: &Directory, _: &OsStr) -> io::Result<()> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn remove_file(_: &Directory, _: &OsStr) -> io::Result<()> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn remove_directory(_: &Directory, _: &OsStr) -> io::Result<()> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn create_temp_file(_: &Directory, _: &OsStr) -> io::Result<TempFile> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn write_temp(_: &mut TempFile, _: &[u8]) -> io::Result<()> {
-//RS         unsupported()
-//RS     }
-//RS     pub fn read_temp(_: &mut TempFile) -> io::Result<Vec<u8>> {
-//RS         unsupported()
-//RS     }
-//RS }
-//RS 
-//RS /// Publish one completed web bundle under the same lock used by static
-//RS /// readers. Preflight every member, journal the old bundle, then roll back the
-//RS /// journal if any replacement fails. `out_dir` must stay below `root`, the
-//RS /// project that owns the output.
-//RS pub fn stage_and_swap(staging: &Path, out_dir: &Path, root: &Path) -> std::io::Result<()> {
-//RS     let _publication = crate::lock_static_publication()?;
-//RS     stage_and_swap_locked(staging, out_dir, root)
-//RS }
-//RS 
-//RS fn stage_and_swap_locked(staging: &Path, out_dir: &Path, root: &Path) -> std::io::Result<()> {
-//RS     const FILES: [&str; 6] = [
-//RS         "web.manifest.json",
-//RS         "jet_dom_runtime.js",
-//RS         "app.js",
-//RS         "app_wasm.rs",
-//RS         "app.wasm",
-//RS         "index.html",
-//RS     ];
-//RS     const MAP_FILES: [&str; 2] = ["app.js.map", "app.wasm.map"];
-//RS 
-//RS     let output_root = WebOutputAuthority::open(out_dir, root)?;
-//RS     let staging_name = staging
-//RS         .file_name()
-//RS         .and_then(|name| name.to_str())
-//RS         .ok_or_else(|| {
-//RS             std::io::Error::new(
-//RS                 std::io::ErrorKind::InvalidInput,
-//RS                 "web staging directory has no normal name",
-//RS             )
-//RS         })?;
-//RS     let staging_parent = staging
-//RS         .parent()
-//RS         .filter(|parent| !parent.as_os_str().is_empty())
-//RS         .unwrap_or_else(|| Path::new("."));
-//RS     if fs::canonicalize(staging_parent)? != output_root.path() {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "web staging directory escapes the output directory",
-//RS         ));
-//RS     }
-//RS     let staging_root = output_root.open_existing_child(staging_name)?;
-//RS 
-//RS     let mut names = Vec::with_capacity(FILES.len() + MAP_FILES.len());
-//RS     let mut staged_names = Vec::with_capacity(FILES.len() + MAP_FILES.len());
-//RS     for name in FILES {
-//RS         staging_root.validate_file(name, true)?;
-//RS         output_root.validate_file(name, false)?;
-//RS         names.push(name);
-//RS         staged_names.push(name);
-//RS     }
-//RS     for name in MAP_FILES {
-//RS         let staged = staging_root.validate_file(name, false)?;
-//RS         let current = output_root.validate_file(name, false)?;
-//RS         if staged || current {
-//RS             names.push(name);
-//RS         }
-//RS         if staged {
-//RS             staged_names.push(name);
-//RS         }
-//RS     }
-//RS 
-//RS     let (backup_name, backup) = output_root.create_unique_child(".jet-web-publication")?;
-//RS     let mut backed_up = Vec::new();
-//RS     let mut published = Vec::new();
-//RS     let result = (|| {
-//RS         for name in &names {
-//RS             if output_root.validate_file(name, false)? {
-//RS                 backed_up.push(*name);
-//RS                 output_root.rename_file_to(name, &backup)?;
-//RS             }
-//RS         }
-//RS         for name in &staged_names {
-//RS             published.push(*name);
-//RS             staging_root.rename_file_to(name, &output_root)?;
-//RS         }
-//RS         Ok::<(), std::io::Error>(())
-//RS     })();
-//RS 
-//RS     if let Err(error) = result {
-//RS         for name in published.iter().rev() {
-//RS             let _ = output_root.remove_file_if_exists(name);
-//RS         }
-//RS         for name in backed_up.iter().rev() {
-//RS             let _ = backup.rename_file_to(name, &output_root);
-//RS         }
-//RS         for name in &names {
-//RS             let _ = backup.remove_file_if_exists(name);
-//RS         }
-//RS         let _ = output_root.remove_child_directory(&backup_name);
-//RS         return Err(error);
-//RS     }
-//RS 
-//RS     for name in &names {
-//RS         let _ = backup.remove_file_if_exists(name);
-//RS     }
-//RS     let _ = output_root.remove_child_directory(&backup_name);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn ensure_real_output_dir(path: &Path, root: &Path) -> std::io::Result<PathBuf> {
-//RS     let root = fs::canonicalize(root)?;
-//RS     ensure_directory_without_symlinks(path)?;
-//RS     let real = fs::canonicalize(path)?;
-//RS     if !real.starts_with(&root) {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             format!("output directory escapes `{}`", root.display()),
-//RS         ));
-//RS     }
-//RS     Ok(real)
-//RS }
-//RS 
-//RS fn ensure_directory_without_symlinks(path: &Path) -> std::io::Result<()> {
-//RS     match fs::symlink_metadata(path) {
-//RS         Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             "web output directory must not be a symlink",
-//RS         )),
-//RS         Ok(metadata) if metadata.is_dir() => Ok(()),
-//RS         Ok(_) => Err(std::io::Error::new(
-//RS             std::io::ErrorKind::AlreadyExists,
-//RS             "web output path is not a directory",
-//RS         )),
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             if let Some(parent) = path
-//RS                 .parent()
-//RS                 .filter(|parent| !parent.as_os_str().is_empty())
-//RS             {
-//RS                 ensure_directory_without_symlinks(parent)?;
-//RS             }
-//RS             fs::create_dir(path)
-//RS         }
-//RS         Err(error) => Err(error),
-//RS     }
-//RS }
-//RS 
-//RS /// Bind the application preview listener. `Some(port)` (from `--port=<N>`)
-//RS /// binds that exact port and fails loud if it's taken — an explicit choice
-//RS /// isn't a hint. `None` scans the stable application range for a free port.
-//RS fn bind_application_server(port: Option<u16>) -> Result<TcpListener, String> {
-//RS     if let Some(port) = port {
-//RS         return match TcpListener::bind(("127.0.0.1", port)) {
-//RS             Ok(listener) => Ok(listener),
-//RS             Err(e) => {
-//RS                 let fix = if e.kind() == std::io::ErrorKind::AddrInUse {
-//RS                     format!(
-//RS                         "\n fix: stop whatever's using port {}, or pick another with --port=<N>",
-//RS                         port
-//RS                     )
-//RS                 } else {
-//RS                     String::new()
-//RS                 };
-//RS                 Err(format!(
-//RS                     "error: couldn't bind application preview to port {}: {}{}",
-//RS                     port, e, fix
-//RS                 ))
-//RS             }
-//RS         };
-//RS     }
-//RS     let mut last_err: Option<std::io::Error> = None;
-//RS     for port in APPLICATION_PORT_RANGE {
-//RS         match TcpListener::bind(("127.0.0.1", port)) {
-//RS             Ok(listener) => return Ok(listener),
-//RS             Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-//RS                 last_err = Some(e);
-//RS                 continue;
-//RS             }
-//RS             Err(e) => {
-//RS                 return Err(format!(
-//RS                     "error: couldn't start the application preview: {}",
-//RS                     e
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     Err(format!(
-//RS         "error: every application preview port from {} to {} is already in use{}\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>",
-//RS         APPLICATION_PORT_RANGE.start(),
-//RS         APPLICATION_PORT_RANGE.end(),
-//RS         last_err.map(|e| format!(" ({})", e)).unwrap_or_default()
-//RS     ))
-//RS }
-//RS 
-//RS fn bind_canvas_server(host: &str, port: Option<u16>) -> Result<TcpListener, String> {
-//RS     let requested = port.unwrap_or(0);
-//RS     match TcpListener::bind((host, requested)) {
-//RS         Ok(listener) => Ok(listener),
-//RS         Err(error) => {
-//RS             let fix = if error.kind() == std::io::ErrorKind::AddrInUse {
-//RS                 format!(
-//RS                     "\n fix: stop whatever's using port {}, or pick another with --canvas-port=<N>",
-//RS                     requested
-//RS                 )
-//RS             } else {
-//RS                 String::new()
-//RS             };
-//RS             Err(format!(
-//RS                 "error: couldn't bind Canvas host {}:{}: {}{}",
-//RS                 host, requested, error, fix
-//RS             ))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn validate_canvas_options(options: &CanvasHostOptions) -> Result<String, String> {
-//RS     if options.transport != "http" {
-//RS         return Err(format!(
-//RS             "error: Canvas transport `{}` is unsupported; use `http`",
-//RS             options.transport
-//RS         ));
-//RS     }
-//RS     if !matches!(options.authority.as_str(), "loopback" | "remote") {
-//RS         return Err(format!(
-//RS             "error: Canvas authority `{}` is invalid; use `loopback` or `remote`",
-//RS             options.authority
-//RS         ));
-//RS     }
-//RS     let host = normalize_bind_host(&options.host)?;
-//RS     if !is_loopback_host(&host) && options.authority != "remote" {
-//RS         return Err(format!(
-//RS             "error: Canvas host `{host}` is not loopback; set `authority = remote` explicitly"
-//RS         ));
-//RS     }
-//RS     Ok(host)
-//RS }
-//RS 
-//RS fn mint_session_secret() -> Result<String, String> {
-//RS     let mut bytes = [0u8; CANVAS_SESSION_BYTES];
-//RS     let mut source = fs::File::open("/dev/urandom")
-//RS         .map_err(|error| format!("could not open the system random source: {error}"))?;
-//RS     std::io::Read::read_exact(&mut source, &mut bytes)
-//RS         .map_err(|error| format!("could not read the system random source: {error}"))?;
-//RS     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-//RS }
-//RS 
-//RS fn normalize_bind_host(host: &str) -> Result<String, String> {
-//RS     let host = host.trim();
-//RS     let host = host
-//RS         .strip_prefix('[')
-//RS         .and_then(|host| host.strip_suffix(']'))
-//RS         .unwrap_or(host);
-//RS     if host.is_empty() || host.chars().any(char::is_whitespace) || host.contains('/') {
-//RS         return Err(format!("error: Canvas host `{host}` is invalid"));
-//RS     }
-//RS     Ok(host.to_string())
-//RS }
-//RS 
-//RS fn is_loopback_host(host: &str) -> bool {
-//RS     host.eq_ignore_ascii_case("localhost")
-//RS         || host
-//RS             .parse::<IpAddr>()
-//RS             .map(|address| address.is_loopback())
-//RS             .unwrap_or(false)
-//RS }
-//RS 
-//RS fn url_host(host: &str) -> String {
-//RS     match host.parse::<IpAddr>() {
-//RS         Ok(IpAddr::V6(_)) => format!("[{host}]"),
-//RS         _ => host.to_string(),
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 0790 crates/jet-devserver/src/WebHost.rs:1809-3588
+// Rust: crates/jet-devserver/src/WebHost.rs:1809
+use jet_devserver.WebHost.[WebHost, CanvasHostOptions, DevStatus, DevRevisionFacts, terminal_style_adapter, LIVE_RELOAD_POLL_MS, PUBLICATION_COUNTER, APPLICATION_PORT_RANGE, CANVAS_SESSION_BYTES]
+use jet_devserver.[ResidentDevSession, lock_static_publication]
+use jet_devserver.Canvas as Canvas
+use jet_devserver.BrowserWebAdapter as browser_web_adapter
+use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+use jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
+use jet_driver.Package.[ReleaseDevtoolsPolicy]
+use jet_foundation.HotSwap.[HotSwapDecision]
+use std.sync.[Arc, Mutex, MutexGuard]
+use std.sync.atomic.[AtomicBool, Ordering]
+use std.net.[TcpListener, IpAddr]
+use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+use std.thread as thread
+use std.fs as fs
+use std.fs.[File, OpenOptions]
+use std.io as io
+use std.io.[Read, Write, Seek, SeekFrom]
+use std.ffi.[OsStr, CString]
+use std.path.[Component]
+use core.files.[OSPath]
+use core.sys.target.[selected_os, selected_family]
+use jet_repl.Term.[RawGuard, KeyReader, Key]
+// GATE #4494: native threads, locks, retained handles, raw FFI and terminal IO.
+// GATE #4483: dispatch uses selected target facts, including native flag/layout widths.
+// GATE #4409: IO errors retain their source kinds.
+impl WebHost {
+    // Rust: crates/jet-devserver/src/WebHost.rs:1809
+    fn bind_application_only_with_listener(file: String, verbose: Bool, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool, application_listener: TcpListener, session: Arc[ResidentDevSession]) -> Self Err! {
+        application_port :: application_listener.local_addr().map((a) -> a.port()).unwrap_or(0)
+        status :: Arc.new(DevStatus.new_with_root(file, verbose, &static_root))
+        status.set_port(application_port)
+        status.set_canvas_port(0)
+        status.set_canvas_enabled(false)
+        session_secret :: mint_session_secret()?
+        return Self {
+            listener: Mutex.new(.None), application_listener: Mutex.new(.Val(^application_listener)),
+            started: AtomicBool.new(false), shutdown: Arc.new(AtomicBool.new(false)), server_threads: Mutex.new([]),
+            poll_thread: Mutex.new(.None), terminal_thread: Mutex.new(.None), status,
+            debug_sessions: Arc.new(Canvas.DebugSessions.default()), session, canvas_file: file.to_string(),
+            bind_host: "127.0.0.1", session_secret, release_policy, static_root,
+            browser_state: Arc.new(Mutex.new(.None)), web_swap_enabled, hot_swap_decision: Mutex.new(.None),
+            paused_evaluate: Arc.new(Mutex.new(PausedEvaluateHost.new())), terminal_style: terminal_style_adapter(file)?
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1851
+    pub fn bind_web_with_canvas_options_and_policy(file: String, static_root: &OSPath, verbose: Bool, fallback_port: U16?, options: &CanvasHostOptions, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
+        host :: validate_canvas_options(options)?
+        (listener, application_listener) :: if options.port.is_some() {
+            listener :: bind_canvas_server(host, options.port)?
+            application_listener :: bind_application_server(fallback_port)?
+            (listener, application_listener)
+        } else {
+            application_listener :: bind_application_server(fallback_port)?
+            listener :: bind_canvas_server(host, .None)?
+            (listener, application_listener)
+        }
+        canvas_port :: listener.local_addr().map((a) -> a.port()).unwrap_or(0)
+        application_port :: application_listener.local_addr().map((a) -> a.port()).unwrap_or(0)
+        status :: Arc.new(DevStatus.new_with_root(file, verbose || options.audit, static_root))
+        status.set_port(application_port)
+        status.set_canvas_port(canvas_port)
+        session_secret :: mint_session_secret()?
+        session :: Arc.new(ResidentDevSession.new_with_hosts(file, host, canvas_port, "127.0.0.1", application_port))
+        session.select_output_values(options.output.as_deref(), options.target.as_deref())
+        return Self {
+            listener: Mutex.new(.Val(^listener)), application_listener: Mutex.new(.Val(^application_listener)),
+            started: AtomicBool.new(false), shutdown: Arc.new(AtomicBool.new(false)), server_threads: Mutex.new([]),
+            poll_thread: Mutex.new(.None), terminal_thread: Mutex.new(.None), status,
+            debug_sessions: Arc.new(Canvas.DebugSessions.default()), session, canvas_file: file.to_string(),
+            bind_host: host, session_secret, release_policy, static_root: static_root.to_path_buf(),
+            browser_state: Arc.new(Mutex.new(.None)), web_swap_enabled: true, hot_swap_decision: Mutex.new(.None),
+            paused_evaluate: Arc.new(Mutex.new(PausedEvaluateHost.new())), terminal_style: terminal_style_adapter(file)?
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1917
+    pub fn bind_canvas_with_options_and_policy(file: String, static_root: &OSPath, verbose: Bool, options: &CanvasHostOptions, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
+        host :: validate_canvas_options(options)?
+        listener :: bind_canvas_server(host, options.port)?
+        bound_port :: listener.local_addr().map((a) -> a.port()).unwrap_or(0)
+        status :: Arc.new(DevStatus.new_with_root(file, verbose || options.audit, static_root))
+        status.set_port(bound_port)
+        status.set_canvas_port(bound_port)
+        session_secret :: mint_session_secret()?
+        session :: Arc.new(ResidentDevSession.new_with_canvas_host(file, host, bound_port, 0))
+        return Self {
+            listener: Mutex.new(.Val(^listener)), application_listener: Mutex.new(.None),
+            started: AtomicBool.new(false), shutdown: Arc.new(AtomicBool.new(false)), server_threads: Mutex.new([]),
+            poll_thread: Mutex.new(.None), terminal_thread: Mutex.new(.None), status,
+            debug_sessions: Arc.new(Canvas.DebugSessions.default()), session, canvas_file: file.to_string(),
+            bind_host: host, session_secret, release_policy, static_root: static_root.to_path_buf(),
+            browser_state: Arc.new(Mutex.new(.None)), web_swap_enabled: false, hot_swap_decision: Mutex.new(.None),
+            paused_evaluate: Arc.new(Mutex.new(PausedEvaluateHost.new())), terminal_style: terminal_style_adapter(file)?
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1965
+    pub fn start(self: &Self) -> Unit { self.start_inner(true) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1972
+    pub fn start_canvas(self: &Self) -> Unit { self.start_inner(false) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1976
+    pub fn lock_source_transaction(self: &Self) -> MutexGuard[Unit] { return self.session.lock_source_transaction() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1983
+    pub fn resident_session(self: &Self) -> Arc[ResidentDevSession] { return Arc.clone(&self.session) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1987
+    pub fn publish_hot_swap_decision(self: &Self, decision: &HotSwapDecision) -> Unit Err! {
+        self.session.publish_hot_swap_decision(decision)?
+        *self.hot_swap_decision.lock().unwrap() = .Val(decision.clone())
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1993
+    pub fn canvas_url(self: &Self) -> String { return "http://{url_host(self.bind_host)}:{self.session.canvas_port()}/canvas?session={self.session_secret}" }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2002
+    fn start_inner(self: &Self, terminal_controls: Bool) -> Unit {
+        if self.started.swap(true, .SeqCst) -> return
+        has_canvas :: self.listener.lock().unwrap().is_some()
+        listener :: self.listener.lock().unwrap().take()
+        if listener == .Val(listener) {
+            status :: Arc.clone(&self.status)
+            debug_sessions :: Arc.clone(&self.debug_sessions)
+            session :: Arc.clone(&self.session)
+            canvas_file :: self.canvas_file.clone()
+            bind_host :: self.bind_host.clone()
+            session_secret :: self.session_secret.clone()
+            release_policy :: self.release_policy.clone()
+            static_root :: self.static_root.clone()
+            shutdown :: Arc.clone(&self.shutdown)
+            browser_state :: Arc.clone(&self.browser_state)
+            paused_evaluate :: Arc.clone(&self.paused_evaluate)
+            terminal_style :: Arc.clone(&self.terminal_style)
+            handle :: thread.spawn(move () -> serve_forever(^listener, ^status, ^debug_sessions, ^session, ^canvas_file, .Canvas, ^bind_host, ^session_secret, ^shutdown, ^static_root, ^release_policy, ^browser_state, ^paused_evaluate, ^terminal_style))
+            self.server_threads.lock().unwrap().push(^handle)
+        }
+        if self.application_listener.lock().unwrap().take() == .Val(listener) {
+            status :: Arc.clone(&self.status)
+            debug_sessions :: Arc.clone(&self.debug_sessions)
+            session :: Arc.clone(&self.session)
+            canvas_file :: self.canvas_file.clone()
+            static_root :: self.static_root.clone()
+            session_secret :: self.session_secret.clone()
+            application_host :: self.session.application_host().to_string()
+            release_policy :: self.release_policy.clone()
+            browser_state :: Arc.clone(&self.browser_state)
+            paused_evaluate :: Arc.clone(&self.paused_evaluate)
+            terminal_style :: Arc.clone(&self.terminal_style)
+            shutdown :: Arc.clone(&self.shutdown)
+            handle :: thread.spawn(move () -> serve_forever(^listener, ^status, ^debug_sessions, ^session, ^canvas_file, .Application, ^application_host, ^session_secret, ^shutdown, ^static_root, ^release_policy, ^browser_state, ^paused_evaluate, ^terminal_style))
+            self.server_threads.lock().unwrap().push(^handle)
+        }
+        {
+            status :: Arc.clone(&self.status)
+            shutdown :: Arc.clone(&self.shutdown)
+            handle :: thread.spawn(move () -> {
+                while !wait_for_shutdown(&shutdown, Duration.from_millis(LIVE_RELOAD_POLL_MS)) {
+                    status.activate_requested_browser_trace()
+                    status.expire_clients()
+                }
+            })
+            *self.poll_thread.lock().unwrap() = .Val(^handle)
+        }
+        if self.session_application_port() != 0 -> println("App preview: http://{url_host(self.session.application_host())}:{self.session_application_port()}/")
+        if has_canvas -> println("Canvas: {self.canvas_url()}")
+        _ :: std.io.stdout().flush()
+        if terminal_controls {
+            if start_terminal_controls(Arc.clone(&self.status), Arc.clone(&self.shutdown)) == .Val(handle) -> *self.terminal_thread.lock().unwrap() = .Val(^handle)
+        }
+        self.status.activate()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2106
+    pub fn mark_building(self: &Self) -> Unit { self.status.mark_building(); self.session.mark_building() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2111
+    pub fn mark_ready(self: &Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
+        decision :: self.hot_swap_decision.lock().unwrap().take()
+        if self.web_swap_enabled {
+            manifest :: fs.read_to_string(self.static_root.join("web.manifest.json")).ok()
+            build_id :: manifest.as_deref().and_then((m) -> browser_web_adapter.manifest_artifact_identity(m).ok())
+            source_revision: String? := .None
+            browser_error: String? := .None
+            if Canvas.read_source_without_symlinks(&OSPath.from(self.canvas_file)) == .Ok(source) {
+                revision :: Canvas.source_revision(source)
+                source_revision = .Val(revision.clone())
+                if build_id.as_deref() == .Val(id) -> _ :: self.session.set_devtools_source_identity(.Val(self.canvas_file.clone()), .Val(id.to_string()), .Val(revision.clone()), .None)
+                self.session.observe_source(revision)
+                if (manifest.as_deref(), build_id.as_deref()) == (.Val(m), .Val(id)) {
+                    match self.browser_state.lock() {
+                        .Ok(state) -> {
+                            if browser_web_adapter.apply_web_swap_from_manifest(&state, self.session.id(), revision, id, m, decision.as_ref()) == .Err(error) -> browser_error = .Val(^error)
+                        }
+                        .Err(_) -> browser_error = .Val("browser swap state lock was poisoned; rebuild was rejected")
+                    }
+                }
+            } else if decision.is_some() -> browser_error = .Val("web rebuild has no readable source revision; compatibility application was rejected")
+            if decision.is_some() && (manifest.is_none() || build_id.is_none()) -> _ :: browser_error.get_or_insert_with(() -> "web rebuild has no published manifest/artifact identity; canonical HotSwapDecision was not applied")
+            if browser_error == .Val(error) {
+                self.status.mark_error("E2210", error.clone(), is_rebuild)
+                self.session.mark_error("E2210", error)
+                return
+            }
+            if (build_id.as_deref(), source_revision.as_deref()) == (.Val(id), .Val(revision)) -> self.session.mark_last_good(revision, id)
+        }
+        self.status.mark_ready(elapsed_ms, is_rebuild)
+        self.session.mark_ready()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2185
+    pub fn mark_error(self: &Self, code: String, diagnostic: String, is_rebuild: Bool) -> Unit {
+        _ :: self.hot_swap_decision.lock().unwrap().take()
+        self.status.mark_error(code.clone(), diagnostic.clone(), is_rebuild)
+        if Canvas.read_source_without_symlinks(&OSPath.from(self.canvas_file)) == .Ok(source) -> self.session.observe_source(Canvas.source_revision(source))
+        self.session.mark_error(code, diagnostic)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2200
+    pub fn revision_facts(self: &Self) -> DevRevisionFacts { return self.status.revision_facts() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2204
+    pub fn exit_code(self: &Self) -> I32? {
+        code :: self.status.exit_code.load(.SeqCst)
+        return if code != 0 -> .Val(code as I32) else -> .None
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2209
+    fn session_application_port(self: &Self) -> U16 { return self.session.application_port() }
+}
+impl Drop for WebHost {
+    // Rust: crates/jet-devserver/src/WebHost.rs:2215
+    fn drop(self: &Self) -> Unit {
+        self.session.mark_stopped()
+        self.shutdown.store(true, .SeqCst)
+        _ :: self.listener.lock().unwrap().take()
+        _ :: self.application_listener.lock().unwrap().take()
+        if self.terminal_thread.lock().unwrap().take() == .Val(handle) -> _ :: handle.join()
+        if self.poll_thread.lock().unwrap().take() == .Val(handle) -> _ :: handle.join()
+        handles :: self.server_threads.lock().unwrap().drain(..).collect[[thread.JoinHandle[Unit]]]()
+        for handle in handles -> _ :: handle.join()
+        if self.paused_evaluate.lock() == .Ok(paused_evaluate) -> _ :: self.debug_sessions.cancel_all_paused_sessions(&paused_evaluate, "web host stopped")
+        self.status.active.store(false, .SeqCst)
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2245
+fn wait_for_shutdown(shutdown: &AtomicBool, duration: Duration) -> Bool {
+    deadline :: Instant.now() + duration
+    while !shutdown.load(.SeqCst) {
+        remaining :: deadline.saturating_duration_since(Instant.now())
+        if remaining.is_zero() -> return false
+        thread.sleep(remaining.min(Duration.from_millis(10)))
+    }
+    return true
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2257
+fn start_terminal_controls(status: Arc[DevStatus], shutdown: Arc[AtomicBool]) -> thread.JoinHandle[Unit]? {
+    if !status.pin -> return .None
+    raw :: RawGuard.enable() ?? return .None
+    status.controls_ready.store(true, .SeqCst)
+    return .Val(thread.spawn(move () -> {
+        keys := KeyReader.new(std.io.stdin())
+        loop {
+            if shutdown.load(.SeqCst) { status.disable_terminal_controls(); drop(^raw); return }
+            match keys.read_key() {
+                .Char('v') | .Char('V') -> status.toggle_verbose()
+                .Idle -> {}
+                .CtrlC -> { status.disable_terminal_controls(); drop(^raw); status.exit_code.store(130, .SeqCst); return }
+                .Eof -> { status.disable_terminal_controls(); drop(^raw); return }
+                _ -> {}
+            }
+        }
+    }))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2299
+fn header_words(state: String, file: String, code: String, port: U16, clients: U64, last_build_ms: U128) -> (String, String) {
+    plural :: if clients == 1 -> "" else -> "s"
+    match state {
+        "building" -> return ("building", "{file} · {clients} client{plural}")
+        "error" -> return ("error", "{code} · {clients} client{plural}")
+        _ -> {
+            rest := "localhost:{port} · {clients} client{plural}"
+            if last_build_ms > 0 -> rest.push_str(" · built {format_build_time(last_build_ms)}")
+            return ("ready", rest)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2327
+fn format_build_time(ms: U128) -> String { return "{ms as F64 / 1000.0:.1}s" }
+// Rust: crates/jet-devserver/src/WebHost.rs:2331
+fn format_line_colored(word: String, rest: String) -> String {
+    sgr :: match word { "ready" -> "32"; "building" | "reconnecting" -> "33"; "error" -> "31"; _ -> "37" }
+    return "jet dev  \x1b[{sgr}m●\x1b[0m {word} · {rest}"
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2341
+fn format_line_plain(word: String, rest: String) -> String { return "jet dev  [{word}] {rest}" }
+// Rust: crates/jet-devserver/src/WebHost.rs:2349
+fn frame_lines(code: String, diagnostic: String) -> [String] {
+    lines :: diagnostic.lines().collect[[String]]()
+    content_width :: lines.iter().map((l) -> l.chars().count()).max().unwrap_or(0)
+    width :: content_width.max(code.len() + 2).clamp(20, 96)
+    dash_count :: width.saturating_sub(code.len() + 3).max(1)
+    out := [String].with_capacity(lines.len() + 2)
+    out.push("┌ {code} " + "─".repeat(dash_count))
+    for line in lines -> out.push("│ {line}")
+    out.push("└" + "─".repeat(width + 2))
+    return out
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2366
+fn clock_time() -> String {
+    secs :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    sod :: secs % 86400
+    return "{sod / 3600:02}:{(sod % 3600) / 60:02}:{sod % 60:02}"
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2378
+pub struct WebOutputAuthority { path: OSPath; directory: secure_output.Directory }
+// Rust: crates/jet-devserver/src/WebHost.rs:2385
+pub struct WebOutputTempFile { path: OSPath; inner: secure_output.TempFile }
+impl WebOutputAuthority {
+    // Rust: crates/jet-devserver/src/WebHost.rs:2395
+    pub fn open_or_create(path: &OSPath, root: &OSPath) -> Self io.Error! {
+        real :: ensure_real_output_dir(path, root)?
+        directory :: secure_output.open_root(&real, root)?
+        return Self { path: ^real, directory }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2406
+    pub fn open(path: &OSPath, root: &OSPath) -> Self io.Error! {
+        real :: ensure_real_output_dir(path, root)?
+        directory :: secure_output.open_root(&real, root)?
+        return Self { path: ^real, directory }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2415
+    pub fn path(self: &Self) -> &OSPath { return &self.path }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2419
+    pub fn path_for(self: &Self, name: String) -> OSPath io.Error! { return self.path.join(normal_output_name(name)?) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2424
+    pub fn replace_file(self: &Self, name: String, bytes: &[U8]) -> Unit io.Error! { return secure_output.replace_file(&self.directory, normal_output_name(name)?, bytes) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2429
+    pub fn open_file(self: &Self, name: String) -> File io.Error! { return secure_output.open_file(&self.directory, normal_output_name(name)?) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2434
+    pub fn validate_file(self: &Self, name: String, required: Bool) -> Bool io.Error! {
+        name :: normal_output_name(name)?
+        match secure_output.open_file(&self.directory, name) {
+            .Ok(_) -> return true
+            .Err(error) if error.kind() == .NotFound && !required -> return false
+            .Err(error) -> return .Err(^error)
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2443
+    pub fn remove_file_if_exists(self: &Self, name: String) -> Unit io.Error! {
+        name :: normal_output_name(name)?
+        match secure_output.remove_file(&self.directory, name) { .Ok(_) -> return; .Err(error) if error.kind() == .NotFound -> return; .Err(error) -> return .Err(^error) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2452
+    pub fn rename_file_to(self: &Self, name: String, destination: &Self) -> Unit io.Error! {
+        name :: normal_output_name(name)?
+        return secure_output.rename_file(&self.directory, name, &destination.directory, name)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2456
+    pub fn open_existing_child(self: &Self, name: String) -> Self io.Error! {
+        name :: normal_output_name(name)?
+        directory :: secure_output.open_child(&self.directory, name)?
+        return Self { path: self.path.join(name), directory }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2465
+    pub fn create_child(self: &Self, path: &OSPath) -> Self io.Error! {
+        parent :: path.parent().filter((p) -> !p.as_os_str().is_empty()).unwrap_or_else(() -> OSPath.from("."))
+        real_parent :: fs.canonicalize(parent)?
+        if real_parent != self.path -> return .Err(io.Error.new(.PermissionDenied, "web child directory escapes its held output root"))
+        name :: normal_output_name(path.file_name().and_then((n) -> n.to_str()) ?? return .Err(io.Error.new(.InvalidInput, "web child directory has no normal name")))?
+        directory :: secure_output.open_child(&self.directory, name)?
+        return Self { path: self.path.join(name), directory }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2493
+    pub fn create_unique_child(self: &Self, prefix: String) -> (String, Self) io.Error! {
+        for _ in 0..100 {
+            name :: "{prefix}-{std.process.id()}-{PUBLICATION_COUNTER.fetch_add(1, .Relaxed)}"
+            match secure_output.create_child(&self.directory, OsStr.new(name)) {
+                .Ok(directory) -> return (name.clone(), Self { path: self.path.join(name), directory })
+                .Err(error) if error.kind() == .AlreadyExists -> continue
+                .Err(error) -> return .Err(^error)
+            }
+        }
+        return .Err(io.Error.new(.AlreadyExists, "could not allocate a web publication journal"))
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2520
+    pub fn remove_child_directory(self: &Self, name: String) -> Unit io.Error! {
+        name :: normal_output_name(name)?
+        match secure_output.remove_directory(&self.directory, name) { .Ok(_) -> return; .Err(error) if error.kind() == .NotFound -> return; .Err(error) -> return .Err(^error) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2532
+    pub fn create_temp_file(self: &Self, prefix: String, extension: String) -> WebOutputTempFile io.Error! {
+        for _ in 0..100 {
+            name :: ".{prefix}-{std.process.id()}-{PUBLICATION_COUNTER.fetch_add(1, .Relaxed)}{extension}"
+            match secure_output.create_temp_file(&self.directory, OsStr.new(name)) {
+                .Ok(inner) -> return WebOutputTempFile { path: self.path.join(name), inner }
+                .Err(error) if error.kind() == .AlreadyExists -> continue
+                .Err(error) -> return .Err(^error)
+            }
+        }
+        return .Err(io.Error.new(.AlreadyExists, "could not allocate a web compiler temporary"))
+    }
+}
+impl WebOutputTempFile {
+    // Rust: crates/jet-devserver/src/WebHost.rs:2563
+    pub fn path(self: &Self) -> &OSPath { return &self.path }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2567
+    pub fn write_all(self: &Self, bytes: &[U8]) -> Unit io.Error! { return secure_output.write_temp(&self.inner, bytes) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2571
+    pub fn read_all(self: &Self) -> [U8] io.Error! { return secure_output.read_temp(&self.inner) }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2576
+fn normal_output_name(value: String) -> &OsStr io.Error! {
+    path :: OSPath.from(value)
+    components := path.components()
+    name :: match components.next() { .Val(.Normal(name)) -> name; _ -> return .Err(io.Error.new(.InvalidInput, "web output name is not a normal component")) }
+    if components.next().is_some() -> return .Err(io.Error.new(.InvalidInput, "web output name is not a single component"))
+    return name
+}
+
+// Rust: crates/jet-devserver/src/WebHost.rs:2594
+module secure_output_unix {
+    use std.os.fd.[AsRawFd, FromRawFd]
+    use std.os.unix.ffi.[OsStrExt]
+    use std.os.unix.fs.[MetadataExt, OpenOptionsExt]
+    // Rust: crates/jet-devserver/src/WebHost.rs:2603
+    O_RDONLY :: 0
+    // Rust: crates/jet-devserver/src/WebHost.rs:2604
+    O_WRONLY :: 1
+    // Rust: crates/jet-devserver/src/WebHost.rs:2605
+    O_RDWR :: 2
+    // Rust: crates/jet-devserver/src/WebHost.rs:2606
+    O_CREAT :: 0o100
+    // Rust: crates/jet-devserver/src/WebHost.rs:2607
+    O_EXCL :: 0o200
+    // Rust: crates/jet-devserver/src/WebHost.rs:2608
+    O_CLOEXEC :: if selected_os() == "linux" || selected_os() == "android" -> 0o2000000 else -> 0x01000000
+    // Rust: crates/jet-devserver/src/WebHost.rs:2613
+    O_DIRECTORY :: if selected_os() == "linux" || selected_os() == "android" -> 0o200000 else -> 0x00100000
+    // Rust: crates/jet-devserver/src/WebHost.rs:2618
+    O_NOFOLLOW :: if selected_os() == "linux" || selected_os() == "android" -> 0o400000 else -> 0x0100
+    // Rust: crates/jet-devserver/src/WebHost.rs:2623
+    AT_REMOVEDIR :: 0x200
+    // Rust: crates/jet-devserver/src/WebHost.rs:2624
+    MODE_FILE :: 0o600
+    // Rust: crates/jet-devserver/src/WebHost.rs:2627
+    #FFI(c) fn mkdirat(directory: I32, path: *I8, mode: U32) -> I32
+    // Rust: crates/jet-devserver/src/WebHost.rs:2628
+    #FFI(c) fn openat(directory: I32, path: *I8, flags: I32, ...) -> I32
+    // Rust: crates/jet-devserver/src/WebHost.rs:2629
+    #FFI(c) fn renameat(old_directory: I32, old_path: *I8, new_directory: I32, new_path: *I8) -> I32
+    // Rust: crates/jet-devserver/src/WebHost.rs:2635
+    #FFI(c) fn unlinkat(directory: I32, path: *I8, flags: I32) -> I32
+    // Rust: crates/jet-devserver/src/WebHost.rs:2638
+    pub struct Directory { path: OSPath; file: File }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2643
+    pub struct TempFile { name: CString; file: File; parent: File }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2649
+    fn c_name(value: &OsStr) -> CString io.Error! { return CString.new(value.as_bytes()) ?? return .Err(io.Error.new(.InvalidInput, "web output name contains NUL")) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2655
+    fn permission(message: String) -> io.Error { return io.Error.new(.PermissionDenied, message) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2658
+    #Unsafe("unlinkat borrows a held parent and CString")
+    fn unlink_at(parent: &File, name: &CString, flags: I32) -> Unit io.Error! {
+        if unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) != 0 -> return .Err(io.Error.last_os_error())
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2665
+    #Unsafe("adopt only a successful openat descriptor")
+    fn open_directory_at(parent: &File, name: &OsStr) -> File io.Error! {
+        name :: c_name(name)?
+        fd :: openat(parent.as_raw_fd(), name.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0)
+        if fd < 0 -> return .Err(io.Error.last_os_error())
+        return File.from_raw_fd(fd)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2681
+    #Unsafe("adopt only a successful openat descriptor")
+    fn open_file_at(parent: &File, name: &OsStr) -> File io.Error! {
+        name :: c_name(name)?
+        fd :: openat(parent.as_raw_fd(), name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0)
+        if fd < 0 -> return .Err(io.Error.last_os_error())
+        return File.from_raw_fd(fd)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2697
+    fn check_regular(file: &File) -> (U64, U64) io.Error! {
+        metadata :: file.metadata()?
+        if !metadata.is_file() || metadata.nlink() != 1 -> return .Err(permission("web output must be a singly-linked regular file"))
+        return (metadata.dev(), metadata.ino())
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2707
+    pub fn open_root(path: &OSPath, anchor: &OSPath) -> Directory io.Error! {
+        anchor :: fs.canonicalize(anchor)?
+        path :: fs.canonicalize(path)?
+        relative :: path.strip_prefix(&anchor) ?? return .Err(permission("web output root escapes its owning directory"))
+        file := OpenOptions.new().read(true).custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC).open(&anchor)?
+        walked := anchor.clone()
+        for component in relative.components() {
+            name :: match component { .Normal(name) -> name; _ -> return .Err(permission("web output root is not a normal directory")) }
+            next :: open_directory_at(&file, name)?
+            expected :: walked.join(name)
+            path_metadata :: fs.symlink_metadata(&expected)?
+            actual :: next.metadata()?
+            if !path_metadata.is_dir() || !actual.is_dir() || path_metadata.dev() != actual.dev() || path_metadata.ino() != actual.ino() -> return .Err(permission("web output root changed during secure open"))
+            file = ^next
+            walked = ^expected
+        }
+        if !file.metadata()?.is_dir() -> return .Err(permission("web output root is not a directory"))
+        return Directory { path, file }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2743
+    pub fn open_child(parent: &Directory, name: &OsStr) -> Directory io.Error! {
+        file :: open_directory_at(&parent.file, name)?
+        path :: parent.path.join(name)
+        path_metadata :: fs.symlink_metadata(&path)?
+        actual :: file.metadata()?
+        if !path_metadata.is_dir() || !actual.is_dir() || path_metadata.dev() != actual.dev() || path_metadata.ino() != actual.ino() -> return .Err(permission("web child directory changed during secure open"))
+        return Directory { path, file }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2758
+    #Unsafe("mkdirat borrows the retained directory and CString")
+    pub fn create_child(parent: &Directory, name: &OsStr) -> Directory io.Error! {
+        name_c :: c_name(name)?
+        if mkdirat(parent.file.as_raw_fd(), name_c.as_ptr(), 0o700) != 0 -> return .Err(io.Error.last_os_error())
+        return open_child(parent, name)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2766
+    pub fn open_file(parent: &Directory, name: &OsStr) -> File io.Error! { file :: open_file_at(&parent.file, name)?; _ :: check_regular(&file)?; return file }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2772
+    fn check_existing(parent: &Directory, name: &OsStr) -> Bool io.Error! {
+        match open_file(parent, name) { .Ok(_) -> return true; .Err(error) if error.kind() == .NotFound -> return false; .Err(error) -> return .Err(^error) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2780
+    fn unique_temp_name(prefix: &OsStr) -> CString { return CString.new(".{prefix.to_string_lossy()}-{std.process.id()}-{PUBLICATION_COUNTER.fetch_add(1, .Relaxed)}").expect("generated web temporary name has no NUL") }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2790
+    #Unsafe("exclusive openat descriptor transfers ownership exactly once")
+    pub fn create_temp_file(parent: &Directory, name: &OsStr) -> TempFile io.Error! {
+        name :: c_name(name)?
+        fd :: openat(parent.file.as_raw_fd(), name.as_ptr(), O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, MODE_FILE)
+        if fd < 0 -> return .Err(io.Error.last_os_error())
+        file :: File.from_raw_fd(fd)
+        parent_file :: match parent.file.try_clone() { .Ok(p) -> p; .Err(error) -> { drop(^file); _ :: unlink_at(&parent.file, &name, 0); return .Err(^error) } }
+        return TempFile { name, file, parent: parent_file }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2818
+    pub fn write_temp(temp: &TempFile, bytes: &[U8]) -> Unit io.Error! { temp.file.write_all(bytes)?; return temp.file.sync_all() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2823
+    pub fn read_temp(temp: &TempFile) -> [U8] io.Error! {
+        _ :: temp.file.seek(.Start(0))?
+        bytes: [U8] := []
+        _ :: temp.file.read_to_end(&bytes)?
+        return bytes
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2830
+    #Unsafe("exclusive temporary and renameat borrow retained parent and names")
+    pub fn replace_file(parent: &Directory, name: &OsStr, bytes: &[U8]) -> Unit io.Error! {
+        _ :: check_existing(parent, name)?
+        temporary :: unique_temp_name(name)
+        fd :: openat(parent.file.as_raw_fd(), temporary.as_ptr(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, MODE_FILE)
+        if fd < 0 -> return .Err(io.Error.last_os_error())
+        file := File.from_raw_fd(fd)
+        result :: (() -> Unit io.Error! {
+            file.write_all(bytes)?
+            file.sync_all()?
+            temporary_id :: check_regular(&file)?
+            name_c :: c_name(name)?
+            if renameat(parent.file.as_raw_fd(), temporary.as_ptr(), parent.file.as_raw_fd(), name_c.as_ptr()) != 0 -> return .Err(io.Error.last_os_error())
+            published :: open_file(parent, name)?
+            if check_regular(&published)? != temporary_id -> return .Err(permission("published web output identity changed"))
+        })()
+        if result.is_err() -> _ :: unlink_at(&parent.file, &temporary, 0)
+        return result
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2873
+    #Unsafe("renameat borrows both retained directory authorities")
+    pub fn rename_file(source: &Directory, source_name: &OsStr, destination: &Directory, destination_name: &OsStr) -> Unit io.Error! {
+        source_file :: open_file(source, source_name)?
+        source_id :: check_regular(&source_file)?
+        _ :: check_existing(destination, destination_name)?
+        source_name_c :: c_name(source_name)?
+        destination_name_c :: c_name(destination_name)?
+        if renameat(source.file.as_raw_fd(), source_name_c.as_ptr(), destination.file.as_raw_fd(), destination_name_c.as_ptr()) != 0 -> return .Err(io.Error.last_os_error())
+        published :: open_file(destination, destination_name)?
+        if check_regular(&published)? != source_id -> return .Err(permission("published web output identity changed"))
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2902
+    pub fn remove_file(parent: &Directory, name: &OsStr) -> Unit io.Error! { _ :: open_file(parent, name)?; name :: c_name(name)?; return unlink_at(&parent.file, &name, 0) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2908
+    pub fn remove_directory(parent: &Directory, name: &OsStr) -> Unit io.Error! { name :: c_name(name)?; return unlink_at(&parent.file, &name, AT_REMOVEDIR) }
+    impl Drop for TempFile {
+        // Rust: crates/jet-devserver/src/WebHost.rs:2914
+        fn drop(self: &Self) -> Unit { _ :: unlink_at(&self.parent, &self.name, 0) }
+    }
+}
+
+// Rust: crates/jet-devserver/src/WebHost.rs:2920
+module secure_output_windows {
+    use std.os.windows.ffi.[OsStrExt]
+    use std.os.windows.fs.[OpenOptionsExt]
+    use std.os.windows.io.[AsRawHandle]
+    // Rust: crates/jet-devserver/src/WebHost.rs:2930
+    type Handle = *U8
+    // Rust: crates/jet-devserver/src/WebHost.rs:2931
+    GENERIC_READ :: 0x80000000
+    // Rust: crates/jet-devserver/src/WebHost.rs:2932
+    GENERIC_WRITE :: 0x40000000
+    // Rust: crates/jet-devserver/src/WebHost.rs:2933
+    FILE_SHARE_READ :: 0x1
+    // Rust: crates/jet-devserver/src/WebHost.rs:2934
+    FILE_SHARE_WRITE :: 0x2
+    // Rust: crates/jet-devserver/src/WebHost.rs:2935
+    FILE_SHARE_DELETE :: 0x4
+    // Rust: crates/jet-devserver/src/WebHost.rs:2936
+    FILE_SHARE_ALL :: FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+    // Rust: crates/jet-devserver/src/WebHost.rs:2937
+    FILE_FLAG_BACKUP_SEMANTICS :: 0x02000000
+    // Rust: crates/jet-devserver/src/WebHost.rs:2938
+    FILE_FLAG_OPEN_REPARSE_POINT :: 0x00200000
+    // Rust: crates/jet-devserver/src/WebHost.rs:2939
+    FILE_ATTRIBUTE_REPARSE_POINT :: 0x400
+    // Rust: crates/jet-devserver/src/WebHost.rs:2940
+    FILE_ATTRIBUTE_TAG_INFO_CLASS :: 9
+    // Rust: crates/jet-devserver/src/WebHost.rs:2941
+    FILE_RENAME_INFO_CLASS :: 3
+    // Rust: crates/jet-devserver/src/WebHost.rs:2942
+    FILE_DISPOSITION_INFO_CLASS :: 4
+    // Rust: crates/jet-devserver/src/WebHost.rs:2945
+    #Repr(C)
+    struct FileAttributeTagInfo { attributes: U32; reparse_tag: U32 }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2951
+    #Repr(C)
+    struct FileRenameInfo { replace_if_exists: I32; root_directory: Handle; file_name_length: U32; file_name: [U16; 1] }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2959
+    #Repr(C)
+    struct FileDispositionInfo { delete_file: U8 }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2964
+    #FFI(system) fn GetFileInformationByHandleEx(file: Handle, class: I32, info: *U8, size: U32) -> I32
+    // Rust: crates/jet-devserver/src/WebHost.rs:2970
+    #FFI(system) fn GetFinalPathNameByHandleW(file: Handle, path: *U16, path_len: U32, flags: U32) -> U32
+    // Rust: crates/jet-devserver/src/WebHost.rs:2976
+    #FFI(system) fn SetFileInformationByHandle(file: Handle, class: I32, info: *U8, size: U32) -> I32
+    // Rust: crates/jet-devserver/src/WebHost.rs:2985
+    pub struct Directory { path: OSPath; file: File; final_path: String }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2991
+    pub struct TempFile { path: OSPath; file: File }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2996
+    fn wide(value: &OsStr) -> [U16] { return value.encode_wide().chain(std.iter.once(0)).collect() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3000
+    fn normalize(value: String) -> String {
+        value := value.replace('/', "\\").trim_end_matches(['\\', '/']) // #4303
+        return value.to_ascii_lowercase()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3007
+    #Unsafe("Win32 fills borrowed UTF16 buffer; handle remains owned")
+    fn final_path(file: &File) -> String io.Error! {
+        needed :: GetFinalPathNameByHandleW(file.as_raw_handle(), std.ptr.null_mut(), 0, 0)
+        if needed == 0 -> return .Err(io.Error.last_os_error())
+        buffer: [U16] := [0; needed as Usize + 1]
+        written :: GetFinalPathNameByHandleW(file.as_raw_handle(), buffer.as_mut_ptr(), buffer.len() as U32, 0)
+        if written == 0 || written as Usize >= buffer.len() -> return .Err(io.Error.last_os_error())
+        buffer.truncate(written as Usize)
+        return normalize(String.from_utf16_lossy(&buffer))
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3029
+    #Unsafe("Win32 writes exactly the C-layout attribute tag record")
+    fn check_reparse(file: &File) -> Unit io.Error! {
+        info := FileAttributeTagInfo { attributes: 0, reparse_tag: 0 }
+        if GetFileInformationByHandleEx(file.as_raw_handle(), FILE_ATTRIBUTE_TAG_INFO_CLASS, (&info as *FileAttributeTagInfo).cast(), std.mem.size_of[FileAttributeTagInfo]() as U32) == 0 -> return .Err(io.Error.last_os_error())
+        if info.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 -> return .Err(io.Error.new(.PermissionDenied, "web output contains a Windows reparse point"))
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3054
+    fn open_directory(path: &OSPath) -> File io.Error! {
+        file :: OpenOptions.new().read(true).access_mode(GENERIC_READ | GENERIC_WRITE).share_mode(FILE_SHARE_ALL).custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).open(path)?
+        check_reparse(&file)?
+        if !file.metadata()?.is_dir() -> return .Err(io.Error.new(.PermissionDenied, "web output root is not a directory"))
+        return file
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3071
+    fn open_file_path(path: &OSPath, write: Bool, create_new: Bool) -> File io.Error! {
+        options := OpenOptions.new()
+        options.read(true).write(write)
+        if create_new -> options.create_new(true)
+        return options.access_mode(GENERIC_READ | (if write -> GENERIC_WRITE else -> 0)).share_mode(FILE_SHARE_ALL).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(path)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3084
+    fn check_regular(file: &File) -> Unit io.Error! {
+        check_reparse(file)?
+        if !file.metadata()?.is_file() -> return .Err(io.Error.new(.PermissionDenied, "web output is not a regular file"))
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3095
+    pub fn open_root(path: &OSPath, _anchor: &OSPath) -> Directory io.Error! {
+        file :: open_directory(path)?
+        expected :: normalize((if path.is_absolute() -> path.to_path_buf() else -> std.env.current_dir()?.join(path)).to_string_lossy().into_owned())
+        actual :: final_path(&file)?
+        if actual != expected -> return .Err(io.Error.new(.PermissionDenied, "web output root changed during secure open"))
+        return Directory { path: path.to_path_buf(), file, final_path: actual }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3120
+    pub fn open_child(parent: &Directory, name: &OsStr) -> Directory io.Error! {
+        path :: parent.path.join(name)
+        file :: open_directory(&path)?
+        actual :: final_path(&file)?
+        expected :: normalize(path.to_string_lossy().into_owned())
+        if actual != expected || !actual.starts_with("{parent.final_path}\\") -> return .Err(io.Error.new(.PermissionDenied, "web child directory escaped its held output root"))
+        return Directory { path, file, final_path: actual }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3138
+    pub fn create_child(parent: &Directory, name: &OsStr) -> Directory io.Error! {
+        path :: parent.path.join(name)
+        fs.create_dir(&path)?
+        return open_child(parent, name)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3144
+    pub fn open_file(parent: &Directory, name: &OsStr) -> File io.Error! {
+        path :: parent.path.join(name)
+        file :: open_file_path(&path, false, false)?
+        check_regular(&file)?
+        if normalize(final_path(&file)?) != normalize(path.to_string_lossy().into_owned()) -> return .Err(io.Error.new(.PermissionDenied, "web output file escaped its held directory"))
+        return file
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3157
+    #Unsafe("aligned variable-sized FILE_RENAME_INFO uses selected C layout and live UTF16 loans")
+    fn replace_handle(source: &File, destination: &File, name: &OsStr) -> Unit io.Error! {
+        file_name :: name.encode_wide().collect[[U16]]()
+        offset :: std.mem.offset_of[FileRenameInfo]("file_name")
+        size :: offset + file_name.len() * std.mem.size_of[U16]()
+        storage: [Usize] := [0; size.div_ceil(std.mem.size_of[Usize]())]
+        info :: storage.as_mut_ptr().cast[FileRenameInfo]()
+        (*info).replace_if_exists = 1
+        (*info).root_directory = destination.as_raw_handle()
+        (*info).file_name_length = (file_name.len() * 2) as U32
+        std.ptr.copy_nonoverlapping(file_name.as_ptr(), (*info).file_name.as_mut_ptr(), file_name.len())
+        if SetFileInformationByHandle(source.as_raw_handle(), FILE_RENAME_INFO_CLASS, info.cast(), size as U32) == 0 -> return .Err(io.Error.last_os_error())
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3185
+    #Unsafe("Win32 consumes borrowed C-layout disposition record")
+    fn delete_handle(file: &File) -> Unit io.Error! {
+        info := FileDispositionInfo { delete_file: 1 }
+        if SetFileInformationByHandle(file.as_raw_handle(), FILE_DISPOSITION_INFO_CLASS, (&info as *FileDispositionInfo).cast(), std.mem.size_of[FileDispositionInfo]() as U32) == 0 -> return .Err(io.Error.last_os_error())
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3201
+    pub fn replace_file(parent: &Directory, name: &OsStr, bytes: &[U8]) -> Unit io.Error! {
+        if open_file(parent, name) == .Ok(existing) -> check_regular(&existing)?
+        path :: parent.path.join(".{name.to_string_lossy()}-{std.process.id()}-{PUBLICATION_COUNTER.fetch_add(1, .Relaxed)}")
+        temporary := open_file_path(&path, true, true)?
+        temporary.write_all(bytes)?
+        temporary.sync_all()?
+        check_regular(&temporary)?
+        replace_handle(&temporary, &parent.file, name)?
+        published :: open_file(parent, name)?
+        return check_regular(&published)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3221
+    pub fn rename_file(source: &Directory, source_name: &OsStr, destination: &Directory, destination_name: &OsStr) -> Unit io.Error! {
+        source_path :: source.path.join(source_name)
+        source_file :: open_file_path(&source_path, true, false)?
+        check_regular(&source_file)?
+        if open_file(destination, destination_name) == .Ok(existing) -> check_regular(&existing)?
+        return replace_handle(&source_file, &destination.file, destination_name)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3236
+    pub fn remove_file(parent: &Directory, name: &OsStr) -> Unit io.Error! {
+        path :: parent.path.join(name)
+        file :: open_file_path(&path, true, false)?
+        check_regular(&file)?
+        return delete_handle(&file)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3243
+    pub fn remove_directory(parent: &Directory, name: &OsStr) -> Unit io.Error! {
+        path :: parent.path.join(name)
+        file :: open_directory(&path)?
+        return delete_handle(&file)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3249
+    pub fn create_temp_file(parent: &Directory, name: &OsStr) -> TempFile io.Error! {
+        path :: parent.path.join(name)
+        file :: open_file_path(&path, true, true)?
+        check_regular(&file)?
+        return TempFile { path, file }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3256
+    pub fn write_temp(temp: &TempFile, bytes: &[U8]) -> Unit io.Error! { temp.file.write_all(bytes)?; return temp.file.sync_all() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3261
+    pub fn read_temp(temp: &TempFile) -> [U8] io.Error! {
+        _ :: temp.file.seek(.Start(0))?
+        bytes: [U8] := []
+        _ :: temp.file.read_to_end(&bytes)?
+        return bytes
+    }
+    impl Drop for TempFile {
+        // Rust: crates/jet-devserver/src/WebHost.rs:3269
+        fn drop(self: &Self) -> Unit { _ :: delete_handle(&self.file) }
+    }
+}
+
+// Rust: crates/jet-devserver/src/WebHost.rs:3275
+module secure_output_unsupported {
+    // Rust: crates/jet-devserver/src/WebHost.rs:3282
+    pub struct Directory {}
+    // Rust: crates/jet-devserver/src/WebHost.rs:3283
+    pub struct TempFile {}
+    // Rust: crates/jet-devserver/src/WebHost.rs:3285
+    fn unsupported[T]() -> T io.Error! { return .Err(io.Error.new(.Unsupported, "secure web output authority is unavailable on this platform")) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3292
+    pub fn open_root(path: &OSPath, anchor: &OSPath) -> Directory io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3295
+    pub fn open_child(parent: &Directory, name: &OsStr) -> Directory io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3298
+    pub fn create_child(parent: &Directory, name: &OsStr) -> Directory io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3301
+    pub fn open_file(parent: &Directory, name: &OsStr) -> File io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3304
+    pub fn replace_file(parent: &Directory, name: &OsStr, bytes: &[U8]) -> Unit io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3307
+    pub fn rename_file(source: &Directory, source_name: &OsStr, destination: &Directory, destination_name: &OsStr) -> Unit io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3310
+    pub fn remove_file(parent: &Directory, name: &OsStr) -> Unit io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3313
+    pub fn remove_directory(parent: &Directory, name: &OsStr) -> Unit io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3316
+    pub fn create_temp_file(parent: &Directory, name: &OsStr) -> TempFile io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3319
+    pub fn write_temp(temp: &TempFile, bytes: &[U8]) -> Unit io.Error! { return unsupported() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:3322
+    pub fn read_temp(temp: &TempFile) -> [U8] io.Error! { return unsupported() }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:2594,2920,3275
+// Selection replaces cfg-exclusive modules, preserving their native owners.
+module secure_output {
+    pub enum Directory { Unix(secure_output_unix.Directory), Windows(secure_output_windows.Directory), Other(secure_output_unsupported.Directory) }
+    pub enum TempFile { Unix(secure_output_unix.TempFile), Windows(secure_output_windows.TempFile), Other(secure_output_unsupported.TempFile) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2707,3095,3292
+    pub fn open_root(path: &OSPath, anchor: &OSPath) -> Directory io.Error! {
+        if selected_family() == "unix" -> return .Unix(secure_output_unix.open_root(path, anchor)?)
+        if selected_os() == "windows" -> return .Windows(secure_output_windows.open_root(path, anchor)?)
+        return .Other(secure_output_unsupported.open_root(path, anchor)?)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2743,3120,3295
+    pub fn open_child(parent: &Directory, name: &OsStr) -> Directory io.Error! {
+        return match parent { .Unix(p) -> .Unix(secure_output_unix.open_child(p, name)?); .Windows(p) -> .Windows(secure_output_windows.open_child(p, name)?); .Other(p) -> .Other(secure_output_unsupported.open_child(p, name)?) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2758,3138,3298
+    pub fn create_child(parent: &Directory, name: &OsStr) -> Directory io.Error! {
+        return match parent { .Unix(p) -> .Unix(secure_output_unix.create_child(p, name)?); .Windows(p) -> .Windows(secure_output_windows.create_child(p, name)?); .Other(p) -> .Other(secure_output_unsupported.create_child(p, name)?) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2766,3144,3301
+    pub fn open_file(parent: &Directory, name: &OsStr) -> File io.Error! {
+        return match parent { .Unix(p) -> secure_output_unix.open_file(p, name); .Windows(p) -> secure_output_windows.open_file(p, name); .Other(p) -> secure_output_unsupported.open_file(p, name) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2830,3201,3304
+    pub fn replace_file(parent: &Directory, name: &OsStr, bytes: &[U8]) -> Unit io.Error! {
+        return match parent { .Unix(p) -> secure_output_unix.replace_file(p, name, bytes); .Windows(p) -> secure_output_windows.replace_file(p, name, bytes); .Other(p) -> secure_output_unsupported.replace_file(p, name, bytes) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2873,3221,3307
+    pub fn rename_file(source: &Directory, source_name: &OsStr, destination: &Directory, destination_name: &OsStr) -> Unit io.Error! {
+        return match (source, destination) {
+            (.Unix(s), .Unix(d)) -> secure_output_unix.rename_file(s, source_name, d, destination_name)
+            (.Windows(s), .Windows(d)) -> secure_output_windows.rename_file(s, source_name, d, destination_name)
+            (.Other(s), .Other(d)) -> secure_output_unsupported.rename_file(s, source_name, d, destination_name)
+            _ -> .Err(io.Error.new(.Unsupported, "secure web output authority is unavailable on this platform"))
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2902,3236,3310
+    pub fn remove_file(parent: &Directory, name: &OsStr) -> Unit io.Error! {
+        return match parent { .Unix(p) -> secure_output_unix.remove_file(p, name); .Windows(p) -> secure_output_windows.remove_file(p, name); .Other(p) -> secure_output_unsupported.remove_file(p, name) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2908,3243,3313
+    pub fn remove_directory(parent: &Directory, name: &OsStr) -> Unit io.Error! {
+        return match parent { .Unix(p) -> secure_output_unix.remove_directory(p, name); .Windows(p) -> secure_output_windows.remove_directory(p, name); .Other(p) -> secure_output_unsupported.remove_directory(p, name) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2790,3249,3316
+    pub fn create_temp_file(parent: &Directory, name: &OsStr) -> TempFile io.Error! {
+        return match parent { .Unix(p) -> .Unix(secure_output_unix.create_temp_file(p, name)?); .Windows(p) -> .Windows(secure_output_windows.create_temp_file(p, name)?); .Other(p) -> .Other(secure_output_unsupported.create_temp_file(p, name)?) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2818,3256,3319
+    pub fn write_temp(temp: &TempFile, bytes: &[U8]) -> Unit io.Error! {
+        return match temp { .Unix(t) -> secure_output_unix.write_temp(t, bytes); .Windows(t) -> secure_output_windows.write_temp(t, bytes); .Other(t) -> secure_output_unsupported.write_temp(t, bytes) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:2823,3261,3322
+    pub fn read_temp(temp: &TempFile) -> [U8] io.Error! {
+        return match temp { .Unix(t) -> secure_output_unix.read_temp(t); .Windows(t) -> secure_output_windows.read_temp(t); .Other(t) -> secure_output_unsupported.read_temp(t) }
+    }
+}
+// Publish completed bundles under the static-reader lock, with preflight and rollback.
+// Rust: crates/jet-devserver/src/WebHost.rs:3331
+pub fn stage_and_swap(staging: &OSPath, out_dir: &OSPath, root: &OSPath) -> Unit io.Error! {
+    publication :: lock_static_publication()?
+    return stage_and_swap_locked(staging, out_dir, root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3336
+fn stage_and_swap_locked(staging: &OSPath, out_dir: &OSPath, root: &OSPath) -> Unit io.Error! {
+    // Rust: crates/jet-devserver/src/WebHost.rs:3337
+    FILES :: ["web.manifest.json", "jet_dom_runtime.js", "app.js", "app_wasm.rs", "app.wasm", "index.html"]
+    // Rust: crates/jet-devserver/src/WebHost.rs:3345
+    MAP_FILES :: ["app.js.map", "app.wasm.map"]
+    output_root :: WebOutputAuthority.open(out_dir, root)?
+    staging_name :: staging.file_name().and_then((n) -> n.to_str()) ?? return .Err(io.Error.new(.InvalidInput, "web staging directory has no normal name"))
+    staging_parent :: staging.parent().filter((p) -> !p.as_os_str().is_empty()).unwrap_or_else(() -> OSPath.from("."))
+    if fs.canonicalize(staging_parent)? != output_root.path() -> return .Err(io.Error.new(.PermissionDenied, "web staging directory escapes the output directory"))
+    staging_root :: output_root.open_existing_child(staging_name)?
+    names := [String].with_capacity(FILES.len() + MAP_FILES.len())
+    staged_names := [String].with_capacity(FILES.len() + MAP_FILES.len())
+    for name in FILES {
+        _ :: staging_root.validate_file(name, true)?
+        _ :: output_root.validate_file(name, false)?
+        names.push(name)
+        staged_names.push(name)
+    }
+    for name in MAP_FILES {
+        staged :: staging_root.validate_file(name, false)?
+        current :: output_root.validate_file(name, false)?
+        if staged || current -> names.push(name)
+        if staged -> staged_names.push(name)
+    }
+    (backup_name, backup) :: output_root.create_unique_child(".jet-web-publication")?
+    backed_up: [String] := []
+    published: [String] := []
+    result :: (() -> Unit io.Error! {
+        for name in &names {
+            if output_root.validate_file(name, false)? {
+                backed_up.push(name)
+                output_root.rename_file_to(name, &backup)?
+            }
+        }
+        for name in &staged_names {
+            published.push(name)
+            staging_root.rename_file_to(name, &output_root)?
+        }
+    })()
+    if result == .Err(error) {
+        for name in published.iter().rev() -> _ :: output_root.remove_file_if_exists(name)
+        for name in backed_up.iter().rev() -> _ :: backup.rename_file_to(name, &output_root)
+        for name in &names -> _ :: backup.remove_file_if_exists(name)
+        _ :: output_root.remove_child_directory(backup_name)
+        return .Err(^error)
+    }
+    for name in &names -> _ :: backup.remove_file_if_exists(name)
+    _ :: output_root.remove_child_directory(backup_name)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3426
+fn ensure_real_output_dir(path: &OSPath, root: &OSPath) -> OSPath io.Error! {
+    root :: fs.canonicalize(root)?
+    ensure_directory_without_symlinks(path)?
+    real :: fs.canonicalize(path)?
+    if !real.starts_with(&root) -> return .Err(io.Error.new(.PermissionDenied, "output directory escapes `{root.display()}`"))
+    return real
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3439
+fn ensure_directory_without_symlinks(path: &OSPath) -> Unit io.Error! {
+    match fs.symlink_metadata(path) {
+        .Ok(m) if m.file_type().is_symlink() -> return .Err(io.Error.new(.PermissionDenied, "web output directory must not be a symlink"))
+        .Ok(m) if m.is_dir() -> return
+        .Ok(_) -> return .Err(io.Error.new(.AlreadyExists, "web output path is not a directory"))
+        .Err(error) if error.kind() == .NotFound -> {
+            if path.parent().filter((p) -> !p.as_os_str().is_empty()) == .Val(parent) -> ensure_directory_without_symlinks(parent)?
+            return fs.create_dir(path)
+        }
+        .Err(error) -> return .Err(^error)
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3466
+fn bind_application_server(port: U16?) -> TcpListener Err! {
+    if port == .Val(port) {
+        match TcpListener.bind(("127.0.0.1", port)) {
+            .Ok(listener) -> return listener
+            .Err(e) -> {
+                fix :: if e.kind() == .AddrInUse -> "\n fix: stop whatever's using port {port}, or pick another with --port=<N>" else -> ""
+                return .Err("error: couldn't bind application preview to port {port}: {e}{fix}")
+            }
+        }
+    }
+    last_err: io.Error? := .None
+    for port in APPLICATION_PORT_RANGE {
+        match TcpListener.bind(("127.0.0.1", port)) {
+            .Ok(listener) -> return listener
+            .Err(e) if e.kind() == .AddrInUse -> { last_err = .Val(^e); continue }
+            .Err(e) -> return .Err("error: couldn't start the application preview: {e}")
+        }
+    }
+    detail :: last_err.map((e) -> " ({e})").unwrap_or_default()
+    return .Err("error: every application preview port from {APPLICATION_PORT_RANGE.start()} to {APPLICATION_PORT_RANGE.end()} is already in use{detail}\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3510
+fn bind_canvas_server(host: String, port: U16?) -> TcpListener Err! {
+    requested :: port.unwrap_or(0)
+    match TcpListener.bind((host, requested)) {
+        .Ok(listener) -> return listener
+        .Err(error) -> {
+            fix :: if error.kind() == .AddrInUse -> "\n fix: stop whatever's using port {requested}, or pick another with --canvas-port=<N>" else -> ""
+            return .Err("error: couldn't bind Canvas host {host}:{requested}: {error}{fix}")
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3531
+fn validate_canvas_options(options: &CanvasHostOptions) -> String Err! {
+    if options.transport != "http" -> return .Err("error: Canvas transport `{options.transport}` is unsupported; use `http`")
+    if options.authority != "loopback" && options.authority != "remote" -> return .Err("error: Canvas authority `{options.authority}` is invalid; use `loopback` or `remote`")
+    host :: normalize_bind_host(options.host)?
+    if !is_loopback_host(host) && options.authority != "remote" -> return .Err("error: Canvas host `{host}` is not loopback; set `authority = remote` explicitly")
+    return host
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3553
+fn mint_session_secret() -> String Err! {
+    bytes: [U8; CANVAS_SESSION_BYTES] := [0; CANVAS_SESSION_BYTES]
+    source := File.open(OSPath.from("/dev/urandom")) ?? return .Err("could not open the system random source: {err}")
+    source.read_exact(&bytes) ?? return .Err("could not read the system random source: {err}")
+    return bytes.iter().map((byte) -> "{byte:02x}").collect()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3562
+fn normalize_bind_host(host: String) -> String Err! {
+    host := host.trim() // #4303
+    host :: host.strip_prefix('[').and_then((h) -> h.strip_suffix(']')).unwrap_or(host)
+    if host.is_empty() || host.chars().any((c) -> c.is_whitespace()) || host.contains('/') -> return .Err("error: Canvas host `{host}` is invalid")
+    return host.to_string()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3574
+fn is_loopback_host(host: String) -> Bool {
+    return host.eq_ignore_ascii_case("localhost") || host.parse[IpAddr]().map((address) -> address.is_loopback()).unwrap_or(false)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3582
+fn url_host(host: String) -> String { return match host.parse[IpAddr]() { .Ok(.V6(_)) -> "[{host}]"; _ -> host.to_string() } }
 

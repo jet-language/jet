@@ -1,0 +1,867 @@
+use jet.Canvas as Canvas
+use jet.Formatter as Formatter
+use jetpack.SHA256.[sha256_hex]
+use jetpack.Transition as Transition
+use jetpack.Package.[PackageFacts]
+use std.[fs, env]
+use std.process.[Command]
+use core.sys.target.[selected_family]
+use std.os.unix.fs.[symlink]
+use Compiler.JetLSP.Tests.Integration.Canvas.[temp_dir, write_fixture, json_field, json_array_field, json_top_level_objects, graph_object_for_title, graph_id_for_title, field_before, CANVAS_FIXTURE, CANVAS_FUNCTION_EVENT_FIXTURE]
+
+// GATE #4494: real filesystem, symlink, process and git providers.
+// GATE #4483: Unix-only symlink test dispatches on selected target family.
+// Rust: tests/canvas.rs:3551
+#Test("canvas_core_catalog_classifies_every_action_for_palette_placement") {
+    path :: write_fixture("core_catalog_statuses", "fn run() {{\n    print(\"core\")\n}}\n")
+    source :: fs.read_to_string(path).unwrap()
+    revision :: Canvas.source_revision(source)
+    catalog_request :: "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{revision}\",\"query\":\"\"}}"
+    catalog :: Canvas.query_json_for_file(path, catalog_request).expect("core catalog")
+    catalog_ids := [String:Bool]{}
+    loop module in json_top_level_objects(json_array_field(catalog, "modules")) {
+        path :: json_field(module, "path")
+        loop member in json_top_level_objects(json_array_field(module, "members")) {
+            &catalog_ids.insert("canvas.core_catalog:{path}:{json_field(member, "name")}", true)
+        }
+    }
+    actions_request :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{revision}\"}}"
+    actions :: Canvas.query_json_for_file(path, actions_request).expect("core actions")
+    core_actions :: json_top_level_objects(json_array_field(actions, "actions"))
+        .filter((action) -> action.contains("\"kind\":\"canvas.core_catalog\"")).collect()
+    action_ids := [String:Bool]{}
+    loop action in core_actions -> &action_ids.insert(json_field(action, "action_id"), true)
+    assert_eq(catalog_ids, action_ids, "catalog/action coverage drift")
+    stageable_reasons :: ["needs_canvas_defaults", "method_only"]
+    excluded_reasons :: ["needs_unsafe_region", "type_member", "type_only", "value_only", "needs_signature", "not_direct_call"]
+    loop action in core_actions {
+        available :: action.contains("\"available\":true")
+        stageable :: action.contains("\"stageable\":true")
+        stage_reason :: json_field(action, "stage_reason_code")
+        if stageable {
+            assert(!available, "stageable action is available: {action}")
+            assert(stageable_reasons.contains(stage_reason), "unstable stage reason: {action}")
+            assert_eq(json_field(action, "unavailable_reason_code"), stage_reason, "stage status drift: {action}")
+            assert(!json_field(action, "denied_reason").is_empty(), "staged action lacks reason: {action}")
+            assert_eq(json_field(action, "insert_op"), "insert_call", "staged action lacks insertion path: {action}")
+            assert(!json_field(action, "insert_callee").is_empty(), "staged action lacks callee: {action}")
+            inputs :: json_top_level_objects(json_array_field(action, "pins"))
+                .filter((pin) -> pin.contains("\"direction\":\"input\"")).collect()
+            assert(!inputs.is_empty(), "staged action lacks inputs: {action}")
+            assert(inputs.all((pin) -> {
+                ty :: json_field(pin, "type")
+                !ty.is_empty() && (ty != "Value" || (stage_reason == "method_only" && pin.contains("\"name\":\"receiver\"")))
+            }), "staged action has untyped input: {action}")
+            if stage_reason == "method_only" {
+                receiver_type :: json_field(action, "receiver_type")
+                assert(inputs.any((pin) -> pin.contains("\"name\":\"receiver\"") && json_field(pin, "type") == receiver_type), "staged method lacks typed receiver: {action}")
+            }
+        } else if !available {
+            reason :: json_field(action, "unavailable_reason_code")
+            assert(excluded_reasons.contains(reason), "unstable exclusion: {action}")
+            assert(!json_field(action, "denied_reason").is_empty(), "excluded action lacks reason: {action}")
+            assert(stage_reason.is_empty(), "excluded action carries stage status: {action}")
+        } else {
+            assert(stage_reason.is_empty(), "available action carries stage status: {action}")
+        }
+    }
+}
+
+// Rust: tests/canvas.rs:3675
+#Test("canvas_projects_function_metadata_and_callback_event_views") {
+    path :: write_fixture("function_events", CANVAS_FUNCTION_EVENT_FIXTURE)
+    graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
+    loop field in [
+        "\"title\":\"on_start\"",
+        "\"function\":{{\"name\":\"on_start\"",
+        "\"signature\":\"pub fn on_start(limit: Int{{1}}) -> Int\"",
+        "\"visibility\":\"public\"",
+        "\"docs\":\"Starts the scene.\"",
+        "\"returns\":\"Int\"",
+        "\"params\":[{{\"name\":\"limit\",\"type\":\"Int\"",
+        "\"default\":true",
+        "\"default_source\":\"1\"",
+        "\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]",
+        "\"event_views\":[{{\"event_id\":\"fn:main.jet::on_start",
+        "\"kind\":\"callback_event\"",
+        "\"semantics\":\"ordinary_jet_function\"",
+        "\"pending_first_class_events\":\"#286\"",
+    ] {
+        assert(graph.contains(field), "graph missing {field}: {graph}")
+    }
+}
+
+// Rust: tests/canvas.rs:3699
+#Test("canvas_preserves_via_effect_row_for_signature_edits") {
+    path :: write_fixture("function_via_effect", "fn invoke(act: fn() -[IO]>) -[via act]> {{ act() }}\nfn run() {{}}\n")
+    graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
+    assert(graph.contains("\"signature\":\"fn invoke(act: fn() -[IO]>) -[via act]>\""), "{graph}")
+    assert(graph.contains("\"effect_via\":\"act\""), "{graph}")
+}
+
+// Rust: tests/canvas.rs:3713
+#Test("canvas_preserves_pure_effect_row_for_signature_edits") {
+    path :: write_fixture("function_pure_effect", "fn adjust(value: Int) -[]> Int {{ return value }}\nfn run() {{ print(adjust(1)) }}\n")
+    graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
+    adjust :: graph_object_for_title(graph, "adjust")
+    assert(adjust.contains("\"pure\":true"), "{adjust}")
+    assert(adjust.contains("\"signature\":\"fn adjust(value: Int) -[]> Int\""), "{adjust}")
+    before :: fs.read_to_string(path).unwrap()
+    edit :: "{{\"schema_version\":1,\"op\":\"edit_function_signature\",\"revision\":\"{Canvas.source_revision(before)}\",\"graph_id\":\"{graph_id_for_title(graph, "adjust")}\",\"signature\":\"fn adjust(next: Int) -[]> Int\"}}"
+    Canvas.apply_transaction_json(path, edit).expect("edit pure signature")
+    after :: fs.read_to_string(path).unwrap()
+    assert(after.contains("fn adjust(next: Int) -[]> Int"), "{after}")
+    assert(!after.contains("fn adjust(next: Int) -> Int ->"), "{after}")
+}
+
+// Rust: tests/canvas.rs:3739
+#Test("canvas_projects_meta_attribute_on_functions_and_bindings") {
+    path :: write_fixture("meta_attribute", "#Meta(category: \"Movement\", tunable)\nfn run() {{\n    #Meta(category: \"Movement\", tunable)\n    speed :: 3\n    print(\"{{speed}}\")\n}}\n")
+    graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
+    loop field in ["\"function\":{{\"name\":\"run\"", "\"meta\":{{\"category\":\"Movement\",\"tunable\":true}}", "\"kind\":\"binding\"", "\"title\":\"speed\""] {
+        assert(graph.contains(field), "graph missing {field}: {graph}")
+    }
+}
+
+// Rust: tests/canvas.rs:3762
+#Test("canvas_details_editor_facts_and_checked_value_edits") {
+    path :: write_fixture("details_editor_facts", "enum Mode {{\n    Fast\n    Slow\n}}\n\nfn edit() {{\n    #Meta(category: \"Tuning\", tunable)\n    amount :: 3\n    other :: 9\n    mode :: Mode.Fast\n    alias :: amount\n    needs_int(amount)\n    print(alias)\n}}\n\nfn needs_int(value: Int) {{}}\n\nfn run() {{\n    edit()\n}}\n")
+    graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
+    assert(graph.contains("\"enum_variants\":{{\"Mode\":[{{\"name\":\"Fast\",\"source\":\"Mode.Fast\"}},{{\"name\":\"Slow\",\"source\":\"Mode.Slow\"}}]}}"), "{graph}")
+    assert(graph.contains("\"title\":\"amount\""), "{graph}")
+    assert(graph.contains("\"meta\":{{\"category\":\"Tuning\",\"tunable\":true}}"), "{graph}")
+    before :: fs.read_to_string(path).unwrap()
+    revision :: Canvas.source_revision(before)
+    edit_graph :: graph_object_for_title(graph, "edit")
+    amount_id :: field_before(edit_graph, "\"source\":\"3\"", "inline_expr_id")
+    scalar :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{revision}\",\"inline_expr_id\":\"{amount_id}\",\"new_expr\":\"7\"}}"
+    Canvas.apply_transaction_json(path, scalar).expect("scalar Details edit")
+    after_scalar :: fs.read_to_string(path).unwrap()
+    assert(after_scalar.contains("amount :: 7"), "{after_scalar}")
+    assert(after_scalar.contains("other :: 9"), "{after_scalar}")
+    graph :: Canvas.graph_json_for_file(path).expect("reproject scalar edit")
+    revision :: Canvas.source_revision(after_scalar)
+    edit_graph :: graph_object_for_title(graph, "edit")
+    mode_id :: field_before(edit_graph, "\"source\":\"Mode.Fast\"", "inline_expr_id")
+    enum_edit :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{revision}\",\"inline_expr_id\":\"{mode_id}\",\"new_expr\":\"Mode.Slow\"}}"
+    Canvas.apply_transaction_json(path, enum_edit).expect("enum Details edit")
+    after_enum :: fs.read_to_string(path).unwrap()
+    assert(after_enum.contains("mode :: Mode.Slow"), "{after_enum}")
+    graph :: Canvas.graph_json_for_file(path).expect("reproject enum edit")
+    revision :: Canvas.source_revision(after_enum)
+    alias_id :: field_before(graph_object_for_title(graph, "edit"), "\"source\":\"amount\"", "inline_expr_id")
+    reference_edit :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{revision}\",\"inline_expr_id\":\"{alias_id}\",\"new_expr\":\"other\"}}"
+    Canvas.apply_transaction_json(path, reference_edit).expect("reference Details edit")
+    after_reference :: fs.read_to_string(path).unwrap()
+    assert(after_reference.contains("alias :: other"), "{after_reference}")
+    graph :: Canvas.graph_json_for_file(path).expect("reproject reference edit")
+    revision :: Canvas.source_revision(after_reference)
+    amount_id :: field_before(graph_object_for_title(graph, "edit"), "\"source\":\"7\"", "inline_expr_id")
+    invalid :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{revision}\",\"inline_expr_id\":\"{amount_id}\",\"new_expr\":\"Mode.Slow\"}}"
+    err :: Canvas.apply_transaction_json(path, invalid).unwrap_err()
+    assert(err.contains("E"), "invalid Details edit lost diagnostic: {err}")
+    assert_eq(fs.read_to_string(path).unwrap(), after_reference)
+    stale :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{Canvas.source_revision(after_scalar)}\",\"inline_expr_id\":\"{amount_id}\",\"new_expr\":\"8\"}}"
+    stale_err :: Canvas.apply_transaction_json(path, stale).unwrap_err()
+    assert(stale_err.contains("conflict"), "stale Details edit lost conflict: {stale_err}")
+    assert_eq(fs.read_to_string(path).unwrap(), after_reference)
+    assert(after_reference.contains("fn edit()"), "scope/provenance lost: {after_reference}")
+    assert(after_reference.contains("print(alias)"), "reference consumers lost: {after_reference}")
+}
+
+// Rust: tests/canvas.rs:3882
+#Test("canvas_details_collection_values_keep_inline_provenance_and_refuse_bad_nested_source") {
+    path :: write_fixture("details_collection_editor", "fn edit() {{\n    matrix :: [[1, 2], [3, 4]]\n    settings :: Point{{x: 4, y: [5, 6]}}\n    lookup :: [\"first\": 7, \"second\": 8]\n    print(matrix[0][0])\n}}\n\nstruct Point {{\n    x: Int\n    y: [Int]\n}}\n\nfn run() {{\n    edit()\n}}\n")
+    graph :: Canvas.graph_json_for_file(path).expect("collection Details graph")
+    edit_graph :: graph_object_for_title(graph, "edit")
+    loop source in ["[[1, 2], [3, 4]]", "Point{{x: 4, y: [5, 6]}}", "[\"first\": 7, \"second\": 8]"] {
+        encoded :: source.replace('\\', "\\\\").replace('"', "\\\"")
+        assert(edit_graph.contains("\"source\":\"{encoded}\""), "collection value lacks one source-backed Details anchor: {source}\n{edit_graph}")
+    }
+    before :: fs.read_to_string(path).unwrap()
+    matrix_id :: field_before(edit_graph, "\"source\":\"[[1, 2], [3, 4]]\"", "inline_expr_id")
+    edit :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{Canvas.source_revision(before)}\",\"inline_expr_id\":\"{matrix_id}\",\"new_expr\":\"[[1, 2], [9, 4]]\"}}"
+    Canvas.apply_transaction_json(path, edit).expect("nested collection edit")
+    changed :: fs.read_to_string(path).unwrap()
+    assert(changed.contains("matrix :: [[1, 2], [9, 4]]"), "{changed}")
+    graph :: Canvas.graph_json_for_file(path).expect("reproject nested collection")
+    matrix_id :: field_before(graph_object_for_title(graph, "edit"), "\"source\":\"[[1, 2], [9, 4]]\"", "inline_expr_id")
+    before_invalid :: fs.read_to_string(path).unwrap()
+    invalid :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{Canvas.source_revision(before_invalid)}\",\"inline_expr_id\":\"{matrix_id}\",\"new_expr\":\"[[1, 2], [true, 4]]\"}}"
+    error :: Canvas.apply_transaction_json(path, invalid).expect_err("bad nested type")
+    assert(error.contains("Error [") || error.contains("diagnostic"), "{error}")
+    assert_eq(fs.read_to_string(path).unwrap(), before_invalid)
+    stale :: "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"sha256-stale\",\"inline_expr_id\":\"{matrix_id}\",\"new_expr\":\"[[1, 2], [8, 4]]\"}}"
+    stale_error :: Canvas.apply_transaction_json(path, stale).expect_err("stale nested edit")
+    assert(stale_error.contains("conflict"), "{stale_error}")
+    assert_eq(fs.read_to_string(path).unwrap(), before_invalid)
+    assert_eq(Formatter.format_source(before_invalid).unwrap(), before_invalid, "nested collection edit must reload in canonical Jet spelling")
+}
+
+// Rust: tests/canvas.rs:3966
+#Test("canvas_function_transactions_write_source_and_reproject_calls") {
+    path :: write_fixture("function_transactions", CANVAS_FIXTURE)
+    graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
+    square_graph_id :: field_before(graph, "\"title\":\"square\"", "graph_id")
+    src :: fs.read_to_string(path).unwrap()
+    revision :: Canvas.source_revision(src)
+    edit_signature :: "{{\"schema_version\":1,\"op\":\"edit_function_signature\",\"revision\":\"{revision}\",\"graph_id\":\"{square_graph_id}\",\"signature\":\"fn square(n: Int{{1}}) -> Int\"}}"
+    Canvas.apply_transaction_json(path, edit_signature).expect("edit signature")
+    after_signature :: fs.read_to_string(path).unwrap()
+    assert(after_signature.contains("fn square(n: Int{{1}}) -> Int"), "{after_signature}")
+    revision :: Canvas.source_revision(after_signature)
+    rename :: "{{\"schema_version\":1,\"op\":\"rename_function\",\"revision\":\"{revision}\",\"from\":\"square\",\"to\":\"area\"}}"
+    Canvas.apply_transaction_json(path, rename).expect("rename function")
+    after_rename :: fs.read_to_string(path).unwrap()
+    assert(after_rename.contains("fn area(n: Int{{1}}) -> Int"), "{after_rename}")
+    assert(after_rename.contains("total := area(limit)"), "{after_rename}")
+    graph :: Canvas.graph_json_for_file(path).expect("reproject graph")
+    assert(graph.contains("\"title\":\"area\""), "{graph}")
+    assert(graph.contains("\"kind\":\"function\",\"archetype\":\"function_pure\",\"title\":\"area\""), "{graph}")
+    revision :: Canvas.source_revision(after_rename)
+    create :: "{{\"schema_version\":1,\"op\":\"create_function\",\"revision\":\"{revision}\",\"name\":\"helper\",\"params\":\"value: Int\",\"ret_type\":\"Int\"}}"
+    Canvas.apply_transaction_json(path, create).expect("create function")
+    after_create :: fs.read_to_string(path).unwrap()
+    assert(after_create.contains("fn helper(value: Int) -> Int"), "{after_create}")
+    assert(after_create.contains("return 1"), "{after_create}")
+    graph :: Canvas.graph_json_for_file(path).expect("created graph")
+    assert(graph.contains("\"title\":\"helper\""), "{graph}")
+}
+
+// Rust: tests/canvas.rs:4023
+#Test("canvas_source_control_reports_git_text_diff") {
+    dir :: temp_dir("source_control")
+    if Command.new("git").arg("--version").output().map((o) -> !o.status.success()).unwrap_or(true) {
+        eprintln("note: skipping canvas_source_control_reports_git_text_diff (need git)")
+        return
+    }
+    Command.new("git").args(["init"]).current_dir(dir).output().expect("git init")
+    Command.new("git").args(["config", "user.email", "canvas@example.invalid"]).current_dir(dir).output().expect("git config email")
+    Command.new("git").args(["config", "user.name", "Canvas Test"]).current_dir(dir).output().expect("git config name")
+    path :: dir.join("main.jet")
+    fs.write(path, "fn run() {{\n    print(\"old\")\n}}\n").unwrap()
+    Command.new("git").args(["add", "main.jet"]).current_dir(dir).output().expect("git add")
+    Command.new("git").args(["commit", "-m", "initial"]).current_dir(dir).output().expect("git commit")
+    fs.write(path, "fn run() {{\n    print(\"changed\")\n}}\n").unwrap()
+    scm :: Canvas.source_control_json_for_file(path)
+    assert(scm.contains("\"protocol\":\"jet.canvas.source_control\""), "{scm}")
+    assert(scm.contains("\"available\":true"), "{scm}")
+    assert(scm.contains("\"dirty\":true"), "{scm}")
+    assert(scm.contains("+    print(\\\"changed\\\")"), "{scm}")
+    assert(scm.contains("initial"), "{scm}")
+}
+
+// Rust: tests/canvas.rs:4075
+#Test("canvas_source_control_reports_project_file_set") {
+    dir :: temp_dir("source_control_project")
+    if Command.new("git").arg("--version").output().map((o) -> !o.status.success()).unwrap_or(true) {
+        eprintln("note: skipping canvas_source_control_reports_project_file_set (need git)")
+        return
+    }
+    Command.new("git").args(["init"]).current_dir(dir).output().expect("git init")
+    Command.new("git").args(["config", "user.email", "canvas@example.invalid"]).current_dir(dir).output().expect("git config email")
+    Command.new("git").args(["config", "user.name", "Canvas Test"]).current_dir(dir).output().expect("git config name")
+    fs.write(dir.join("package.jet"), "name: \"canvas_scm\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"old\")\n}}\n").unwrap()
+    Command.new("git").args(["add", "package.jet", "main.jet"]).current_dir(dir).output().expect("git add")
+    Command.new("git").args(["commit", "-m", "initial"]).current_dir(dir).output().expect("git commit")
+    fs.write(entry, "fn run() {{\n    print(\"changed\")\n}}\n").unwrap()
+    fs.write(dir.join("helper.jet"), "fn helper() -> Int {{\n    return 7\n}}\n").unwrap()
+    scm :: Canvas.source_control_json_for_entry(entry)
+    assert(scm.contains("\"protocol\":\"jet.canvas.source_control\""), "{scm}")
+    assert(scm.contains("\"project_revision\":\"sha256-"), "{scm}")
+    assert(scm.contains("\"available\":true"), "{scm}")
+    assert(scm.contains("\"dirty\":true"), "{scm}")
+    assert(scm.contains("\"dirty_files\":2"), "{scm}")
+    assert(scm.contains("\"files\":["), "{scm}")
+    assert(scm.contains("\"path\":\"main.jet\""), "{scm}")
+    assert(scm.contains("\"path\":\"helper.jet\""), "{scm}")
+    assert(scm.contains("+    print(\\\"changed\\\")"), "{scm}")
+    assert(scm.contains("?? helper.jet"), "{scm}")
+    assert(scm.contains("+fn helper() -> Int"), "{scm}")
+}
+
+// Rust: tests/canvas.rs:4143
+#Test("canvas_proof_lens_reports_revision_check_git_and_missing_receipts") {
+    dir :: temp_dir("proof_lens")
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"proof\")\n}}\n").unwrap()
+    proof :: Canvas.proof_json_for_entry(entry, None).expect("canvas proof")
+    src :: fs.read_to_string(entry).unwrap()
+    assert(proof.contains("\"protocol\":\"jet.canvas.proof\""), "{proof}")
+    assert(proof.contains("\"schema_version\":1"), "{proof}")
+    assert(proof.contains("\"revision\":\"{Canvas.source_revision(src)}\""))
+    assert(proof.contains("\"check\":{{\"state\":\"ok\""), "{proof}")
+    assert(proof.contains("\"source_control\":{{\"truth\":\"git-text\""), "{proof}")
+    assert(proof.contains("\"command_receipts\":{{\"state\":\"missing\""), "{proof}")
+    assert(proof.contains("no Canvas command authority receipt has run"), "{proof}")
+    assert(proof.contains("\"proof\":{{\"state\":\"missing\",\"stale\":true"), "{proof}")
+    if Command.new("git").arg("--version").output().map((o) -> !o.status.success()).unwrap_or(true) {
+        eprintln("note: skipping canvas proof dirty-git assertion (need git)")
+    } else {
+        Command.new("git").args(["init"]).current_dir(dir).output().expect("git init")
+        Command.new("git").args(["config", "user.email", "canvas@example.invalid"]).current_dir(dir).output().expect("git config email")
+        Command.new("git").args(["config", "user.name", "Canvas Test"]).current_dir(dir).output().expect("git config name")
+        Command.new("git").args(["add", "main.jet"]).current_dir(dir).output().expect("git add")
+        Command.new("git").args(["commit", "-m", "initial"]).current_dir(dir).output().expect("git commit")
+        fs.write(entry, "fn run() {{\n    print(\"proof dirty\")\n}}\n").unwrap()
+        dirty :: Canvas.proof_json_for_entry(entry, None).expect("dirty proof")
+        assert(dirty.contains("\"available\":true"), "{dirty}")
+        assert(dirty.contains("\"dirty\":true"), "{dirty}")
+    }
+    broken :: dir.join("broken.jet")
+    fs.write(broken, "fn run() {{\n    missing(\n}}\n").unwrap()
+    diagnostic :: Canvas.proof_json_for_entry(broken, None).expect("diagnostic proof")
+    assert(diagnostic.contains("\"check\":{{\"state\":\"diagnostic\""), "{diagnostic}")
+    assert(diagnostic.contains("\"diagnostics_count\":"), "{diagnostic}")
+}
+
+// Rust: tests/canvas.rs:4230
+#Test("canvas_proof_projects_canonical_budget_report_read_only") {
+    dir :: temp_dir("proof_budget_projection")
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    // Bare jet budget check resolves canonical run.jet (D-VERDICT-678-1).
+    entry :: dir.join("src/run.jet")
+    fs.write(entry, "module perf.package {{\n    budgets: [Budget{{\n        name: \"public-api\",\n        scope: .Package,\n        metric: .PublicApiItems,\n        comparison: .Absolute,\n        limit: .AtMost(10),\n    }}],\n}}\npub fn api() {{}}\nfn run() {{}}\n").unwrap()
+    out :: Command.new(OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())).current_dir(dir).args(["budget", "check", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), Val(0), "{String.from_utf8_lossy(out.stderr)}")
+    command :: String.from_utf8(out.stdout).unwrap()
+    report_id := command.split("\"report_id\":\"").nth(1).unwrap().split('"').first().unwrap() // #4303
+    before :: fs.read_dir(dir.join(".jet/perf/reports")).unwrap().count()
+    proof :: Canvas.proof_json_for_entry(entry, None).expect("canvas proof")
+    assert(proof.contains("\"budget_reports\":{{\"mode\":\"read_only\""), "{proof}")
+    assert(proof.contains("\"budget_id\":\"package:public-api\""), "{proof}")
+    assert(proof.contains("\"report_id\":\"{report_id}\""), "{proof}")
+    assert_eq(fs.read_dir(dir.join(".jet/perf/reports")).unwrap().count(), before, "Canvas measured or wrote a report")
+    fs.write(entry, "{fs.read_to_string(entry).unwrap()}\n// relevant source digest changed\n").unwrap()
+    stale :: Canvas.proof_json_for_entry(entry, None).expect("stale canvas proof")
+    assert(stale.contains("\"budget_reports\":{{\"mode\":\"read_only\",\"reports\":[]"), "{stale}")
+    assert_eq(fs.read_dir(dir.join(".jet/perf/reports")).unwrap().count(), before, "stale Canvas projection refreshed measurement")
+}
+
+// Rust: tests/canvas.rs:4316
+#Test("canvas_project_json_reports_single_file_without_manifest") {
+    path :: write_fixture("project_single", CANVAS_FIXTURE)
+    json :: Canvas.project_json_for_entry(path)
+    assert(json.contains("\"protocol\":\"jet.canvas.project\""), "{json}")
+    assert(json.contains("\"schema_version\":1"), "{json}")
+    assert(json.contains("\"mode\":\"single_file\""), "{json}")
+    assert(json.contains("\"workspace\":null"), "{json}")
+    assert(json.contains("\"packages\":[]"), "{json}")
+    assert(json.contains("\"kind\":\"source\""), "{json}")
+    assert(json.contains("\"state_policy\""), "{json}")
+    assert(json.contains("\"semantic\":\"source\""), "{json}")
+}
+
+// Rust: tests/canvas.rs:4333
+#Test("canvas_project_capabilities_follow_checked_package_target") {
+    dir :: temp_dir("project_capabilities")
+    fs.write(dir.join("package.jet"), "name: \"canvas_capabilities\"\nversion: \"0.1.0\"\ntarget: \"web\"\noutputs: {{ app: Executable{{ entry: run }} }}\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"canvas\")\n}}\n").unwrap()
+    json :: Canvas.project_json_for_entry(entry)
+    assert(json.contains("\"graph\":true"), "{json}")
+    assert(json.contains("\"code\":true"), "{json}")
+    assert(json.contains("\"diagnostics\":true"), "{json}")
+    assert(json.contains("\"runtime_output\":true"), "{json}")
+    assert(json.contains("\"preview\":true"), "{json}")
+    assert(!json.contains("\"designer\":"), "{json}")
+    assert(!json.contains("\"service\":"), "{json}")
+    assert(!json.contains("\"terminal\":"), "{json}")
+}
+
+// Rust: tests/canvas.rs:4355
+#Test("canvas_and_semindex_share_composed_package_facts") {
+    dir :: temp_dir("package_facts_parity")
+    entry :: dir.join("main.jet")
+    fs.create_dir_all(dir.join(".jet")).unwrap()
+    workspace :: "module workspace {{ members: [] }}\n"
+    fs.write(dir.join("workspace.jet"), workspace).unwrap()
+    workspace_digest :: sha256_hex(workspace.bytes())
+    fs.write(dir.join(".jet/lock"), "version = 1\nworkspace_source_digest = \"{workspace_digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n\n[[workspace_overlay]]\nname = \"beta\"\nprovider = \"nixpkgs\"\nchannel = \"plasma-beta\"\n\n[[workspace_overlay_package]]\noverlay = \"beta\"\npackage = \"discord\"\nallow_unfree = true\n").unwrap()
+    fs.write(dir.join("package.jet"), "name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [FS], deny: [Net] }} }}\nconfigs: [\"release.jet\"]\noutputs: {{ workstation: System{{ target: linux.x64 }}, prod: Fleet{{ hosts: {{ edge: \"system.workstation\" }} }} }}\n").unwrap()
+    fs.write(dir.join("release.jet"), "Config{{ outputs: {{ app: .Executable{{ entry: run }} }} }}\n").unwrap()
+    fs.write(entry, "fn run() {{}}\n").unwrap()
+    graph :: Canvas.graph_json_for_file(entry).expect("Canvas graph")
+    project :: Canvas.project_json_for_entry(entry)
+    // Rust: tests/canvas.rs:4383
+    digest :: (json: String) -> {
+        json.split_once("\"semantic_digest\":\"")
+            .and_then((pair) -> pair.1.split_once('"').map((parts) -> parts.0.to_string()))
+            .expect("shared package semantic digest")
+    }
+    assert_eq(digest(graph), digest(project))
+    loop json in [graph, project] {
+        assert(json.contains("\"package_facts\""), "{json}")
+        assert(json.contains("\"workspace_overlays\""), "{json}")
+        assert(json.contains("plasma-beta"), "{json}")
+        assert(json.contains("release.jet"), "{json}")
+        assert(json.contains("\"name\":\"demo\""), "{json}")
+        assert(json.contains("\"kind\":\"system\""), "{json}")
+        assert(json.contains("\"kind\":\"fleet\""), "{json}")
+        assert(json.contains("system.workstation"), "{json}")
+        assert(json.contains("\"target\":\"linux.x64\""), "{json}")
+        assert(json.contains("\"authority\":{{\"holds\":{{\"allow\":[\"FS\"],\"deny\":[\"Net\"]}}"), "Canvas package policy lost its authority source: {json}")
+        assert(!json.contains("\"kind\":\"grant\""), "{json}")
+    }
+    assert(graph.contains("\"required_effects\":[]") && graph.contains("\"granted_effects\":[\"FS\"]") && graph.contains("\"denied_effects\":[\"Net\"]") && graph.contains("\"authority\":\"package.jet authority.holds\""), "Canvas effect projection lost a role: {graph}")
+}
+
+// Rust: tests/canvas.rs:4415
+#Test("canvas_composes_discovered_config_and_rejects_ambiguous_config_before_projection") {
+    dir :: temp_dir("package_config_discovery_boundary")
+    entry :: dir.join("main.jet")
+    fs.write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap()
+    fs.write(dir.join("one.jet"), "pub dev :: Config{{ version: \"1\" }}\n").unwrap()
+    fs.write(entry, "fn run() {{}}\n").unwrap()
+    composed :: Canvas.project_json_for_entry(entry)
+    assert(composed.contains("\"name\":\"demo\""), "{composed}")
+    assert(composed.contains("\"version\":\"1\""), "{composed}")
+    assert(composed.contains("one.jet"), "{composed}")
+    fs.write(dir.join("two.jet"), "pub dev :: Config{{ version: \"2\" }}\n").unwrap()
+    ambiguous :: Canvas.project_json_for_entry(entry)
+    assert(ambiguous.contains("\"code\":\"E1206\""), "{ambiguous}")
+    assert(ambiguous.contains("Config `dev` is ambiguous"), "{ambiguous}")
+    assert(!ambiguous.contains("\"version\":\"1\""), "{ambiguous}")
+}
+
+// Rust: tests/canvas.rs:4438
+#Test("canvas_project_reports_and_filters_internal_parts") {
+    dir :: temp_dir("project_internal_parts")
+    entry :: dir.join("main.jet")
+    internal :: dir.join("bench.jet")
+    fs.write(entry, "fn run() {{}}\n").unwrap()
+    fs.write(internal, "module _bench {{ }}\nfn hidden_probe() {{}}\n").unwrap()
+    skipped :: Canvas.project_json_for_entry(entry)
+    assert(skipped.contains("\"name\":\"project._bench\""), "{skipped}")
+    assert(skipped.contains("\"state\":\"skipped\""), "{skipped}")
+    assert(skipped.contains("\"path\":\"bench.jet\""), "{skipped}")
+    assert(Canvas.project_path_for_source_id(entry, "bench.jet").is_none())
+    fs.write(internal, "module _bench {{ }}\nfn hidden_probe() {{}}\n// changed while skipped\n").unwrap()
+    changed :: Canvas.project_json_for_entry(entry)
+    assert_ne(changed, skipped, "skipped sources must stay in the watch revision")
+    fs.write(entry, "use project._bench\nfn run() {{}}\n").unwrap()
+    explicit :: Canvas.project_json_for_entry(entry)
+    assert(explicit.contains("\"state\":\"explicit\""), "{explicit}")
+    assert_eq(Canvas.project_path_for_source_id(entry, "bench.jet"), Val(internal))
+}
+
+// Rust: tests/canvas.rs:4472
+#Test("canvas_project_discovery_requires_declared_workspace_membership") {
+    dir :: temp_dir("project_workspace_membership_boundary")
+    member :: dir.join("packages/member")
+    unlisted :: dir.join("scratch")
+    loose :: dir.join("loose")
+    fs.create_dir_all(member).unwrap()
+    fs.create_dir_all(unlisted).unwrap()
+    fs.create_dir_all(loose).unwrap()
+    fs.create_dir_all(dir.join(".jet")).unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: [\"./packages/member\"]\n}}\n").unwrap()
+    fs.write(dir.join("env.jet"), "module env.dev {{\n    prompt: \"ancestor\"\n}}\n").unwrap()
+    fs.write(dir.join(".jet/lock"), "version = 1\n").unwrap()
+    fs.write(member.join("package.jet"), "name: \"member\"\nversion: \"0.1.0\"\n").unwrap()
+    member_entry :: member.join("main.jet")
+    fs.write(member_entry, "fn run() {{\n    print(\"member\")\n}}\n").unwrap()
+    fs.write(unlisted.join("package.jet"), "name: \"scratch\"\nversion: \"0.1.0\"\n").unwrap()
+    unlisted_entry :: unlisted.join("main.jet")
+    fs.write(unlisted_entry, "fn run() {{\n    print(\"scratch\")\n}}\n").unwrap()
+    fs.write(unlisted.join("helper.jet"), "fn helper() -> Int {{\n    return 1\n}}\n").unwrap()
+    loose_entry :: loose.join("main.jet")
+    fs.write(loose_entry, "fn run() {{\n    print(\"loose\")\n}}\n").unwrap()
+    unlisted_json :: Canvas.project_json_for_entry(unlisted_entry)
+    assert(unlisted_json.contains("\"mode\":\"package\""), "{unlisted_json}")
+    assert_eq(json_field(unlisted_json, "project_root"), unlisted.to_string_lossy())
+    assert(unlisted_json.contains("\"workspace\":null"), "{unlisted_json}")
+    assert(unlisted_json.contains("\"envs\":[]"), "{unlisted_json}")
+    assert(unlisted_json.contains("\"locks\":[]"), "{unlisted_json}")
+    assert(unlisted_json.contains("\"path\":\"helper.jet\""), "{unlisted_json}")
+    assert(!unlisted_json.contains("workspace.jet"), "{unlisted_json}")
+    loose_json :: Canvas.project_json_for_entry(loose_entry)
+    assert(loose_json.contains("\"mode\":\"single_file\""), "{loose_json}")
+    assert(loose_json.contains("\"workspace\":null"), "{loose_json}")
+    assert(loose_json.contains("\"envs\":[]"), "{loose_json}")
+    assert(loose_json.contains("\"locks\":[]"), "{loose_json}")
+    member_json :: Canvas.project_json_for_entry(member_entry)
+    assert(member_json.contains("\"mode\":\"workspace\""), "{member_json}")
+    assert(member_json.contains("\"workspace\":{{\"path\":\"workspace.jet\""), "{member_json}")
+    assert(member_json.contains("\"path\":\"env.jet\""), "{member_json}")
+    assert(member_json.contains("\"path\":\".jet/lock\""), "{member_json}")
+}
+
+// Rust: tests/canvas.rs:4564
+#Test("canvas_project_discovery_keeps_malformed_root_workspace_visible") {
+    no_pkg :: temp_dir("project_malformed_workspace_root")
+    fs.write(no_pkg.join("workspace.jet"), "").unwrap()
+    no_pkg_entry :: no_pkg.join("main.jet")
+    fs.write(no_pkg_entry, "fn run() {{\n    print(\"root\")\n}}\n").unwrap()
+    no_pkg_json :: Canvas.project_json_for_entry(no_pkg_entry)
+    assert_eq(json_field(no_pkg_json, "project_root"), no_pkg.to_string_lossy())
+    assert(no_pkg_json.contains("\"mode\":\"workspace\""), "{no_pkg_json}")
+    assert(no_pkg_json.contains("\"workspace\":{{\"path\":\"workspace.jet\""), "{no_pkg_json}")
+    assert(no_pkg_json.contains("\"code\":\"E0995\""), "{no_pkg_json}")
+    assert(no_pkg_json.contains("\"packages\":[]"), "{no_pkg_json}")
+    with_pkg :: temp_dir("project_malformed_workspace_root_pkg")
+    fs.write(with_pkg.join("workspace.jet"), "module workspace {{\n    members: 1\n}}\n").unwrap()
+    fs.write(with_pkg.join("package.jet"), "name: \"rootpkg\"\nversion: \"0.1.0\"\n").unwrap()
+    with_pkg_entry :: with_pkg.join("main.jet")
+    fs.write(with_pkg_entry, "fn run() {{\n    print(\"rootpkg\")\n}}\n").unwrap()
+    with_pkg_json :: Canvas.project_json_for_entry(with_pkg_entry)
+    assert_eq(json_field(with_pkg_json, "project_root"), with_pkg.to_string_lossy())
+    assert(with_pkg_json.contains("\"mode\":\"workspace\""), "{with_pkg_json}")
+    assert(with_pkg_json.contains("\"code\":\"E0996\""), "{with_pkg_json}")
+    assert(with_pkg_json.contains("\"name\":\"rootpkg\""), "{with_pkg_json}")
+    assert(with_pkg_json.contains("\"manifest\":\"package.jet\""), "{with_pkg_json}")
+}
+
+// Rust: tests/canvas.rs:4624
+#Test("canvas_project_discovery_preserves_malformed_ancestor_workspace") {
+    dir :: temp_dir("project_malformed_workspace_ancestor")
+    nested :: dir.join("scratch")
+    fs.create_dir_all(nested).unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: 1\n}}\n").unwrap()
+    fs.write(dir.join("env.jet"), "module env.dev {{\n    prompt: \"ancestor\"\n}}\n").unwrap()
+    fs.write(nested.join("package.jet"), "name: \"scratch\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: nested.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"scratch\")\n}}\n").unwrap()
+    json :: Canvas.project_json_for_entry(entry)
+    assert_eq(json_field(json, "project_root"), dir.to_string_lossy())
+    assert(json.contains("\"mode\":\"workspace\""), "{json}")
+    assert(json.contains("\"workspace\":{{\"path\":\"workspace.jet\""), "{json}")
+    assert(json.contains("\"code\":\"E0996\""), "{json}")
+    assert(json.contains("\"name\":\"scratch\""), "{json}")
+}
+
+// Rust: tests/canvas.rs:4658
+#Test("canvas_project_discovery_does_not_promote_lock_only_roots") {
+    populated :: temp_dir("project_lock_only_populated")
+    member :: populated.join("packages/app")
+    fs.create_dir_all(populated.join(".jet")).unwrap()
+    fs.create_dir_all(member).unwrap()
+    fs.write(populated.join(".jet/lock"), "version = 1\n\n[[workspace_member]]\nname = \"app\"\npath = \"packages/app\"\n").unwrap()
+    fs.write(populated.join("env.jet"), "module env.dev {{\n    prompt: \"lock-only\"\n}}\n").unwrap()
+    fs.write(member.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    member_entry :: member.join("main.jet")
+    fs.write(member_entry, "fn run() {{\n    print(\"app\")\n}}\n").unwrap()
+    populated_json :: Canvas.project_json_for_entry(member_entry)
+    assert_eq(json_field(populated_json, "project_root"), member.to_string_lossy())
+    assert(populated_json.contains("\"mode\":\"package\""), "{populated_json}")
+    assert(populated_json.contains("\"workspace\":null"), "{populated_json}")
+    assert(populated_json.contains("\"envs\":[]"), "{populated_json}")
+    assert(populated_json.contains("\"locks\":[]"), "{populated_json}")
+    assert(populated_json.contains("\"manifest\":\"package.jet\""), "{populated_json}")
+    assert(!populated_json.contains("workspace.jet"), "{populated_json}")
+    empty :: temp_dir("project_lock_only_empty")
+    fs.create_dir_all(empty.join(".jet")).unwrap()
+    fs.create_dir_all(empty.join("loose")).unwrap()
+    fs.write(empty.join(".jet/lock"), "version = 1\n").unwrap()
+    loose_entry :: empty.join("loose/main.jet")
+    fs.write(loose_entry, "fn run() {{\n    print(\"loose\")\n}}\n").unwrap()
+    empty_json :: Canvas.project_json_for_entry(loose_entry)
+    assert(empty_json.contains("\"mode\":\"single_file\""), "{empty_json}")
+    assert(empty_json.contains("\"workspace\":null"), "{empty_json}")
+    assert(empty_json.contains("\"locks\":[]"), "{empty_json}")
+}
+
+// Rust: tests/canvas.rs:4721
+#Test("canvas_project_discovery_accepts_workspace_root_member") {
+    dir :: temp_dir("project_workspace_root_member")
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: [\".\"]\n}}\n").unwrap()
+    fs.write(dir.join("package.jet"), "name: \"rootpkg\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"rootpkg\")\n}}\n").unwrap()
+    json :: Canvas.project_json_for_entry(entry)
+    assert(json.contains("\"mode\":\"workspace\""), "{json}")
+    assert(json.contains("\"path\":\".\""), "{json}")
+    assert(json.contains("\"manifest\":\"package.jet\""), "{json}")
+}
+
+// Rust: tests/canvas.rs:4742
+#Test("canvas_project_json_projects_workspace_packages_and_files") {
+    dir :: temp_dir("project_workspace")
+    hello :: dir.join("packages/hello")
+    ranker :: dir.join("packages/ranker")
+    fs.create_dir_all(hello).unwrap()
+    fs.create_dir_all(ranker).unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: find(\"./packages\")\n}}\n").unwrap()
+    fs.write(hello.join("package.jet"), "name: \"hello\",\nversion: \"0.1.0\",\ntarget: \"web\"\ndeps: {{\n    ranker: ranker#0.1.0,\n}}\npackages: {{\n    hello: executable,\n}}\n").unwrap()
+    fs.write(ranker.join("package.jet"), "name: \"ranker\",\nversion: \"0.1.0\"\npackages: {{\n    ranker: library,\n}}\n").unwrap()
+    entry :: hello.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"hi\")\n}}\n").unwrap()
+    fs.write(ranker.join("lib.jet"), "fn score() -> Int {{\n    return 1\n}}\n").unwrap()
+    json :: Canvas.project_json_for_entry(entry)
+    assert(json.contains("\"protocol\":\"jet.canvas.project\""), "{json}")
+    assert(json.contains("\"mode\":\"workspace\""), "{json}")
+    assert(json.contains("\"workspace\":{{\"path\":\"workspace.jet\""), "{json}")
+    assert(json.contains("\"name\":\"hello\""), "{json}")
+    assert(json.contains("\"path\":\"packages/hello\""), "{json}")
+    assert(json.contains("\"manifest\":\"packages/hello/package.jet\""), "{json}")
+    assert(json.contains("\"target\":\"web\""), "{json}")
+    assert(json.contains("\"name\":\"ranker\""), "{json}")
+    assert(json.contains("\"targets\":[{{\"package\":\"hello\""), "{json}")
+    assert(json.contains("\"package_path\":\"packages/hello\""), "{json}")
+    assert(json.contains("\"manifest\":\"packages/hello/package.jet\""), "{json}")
+    assert(json.contains("\"target\":\"executable\""), "{json}")
+    assert(json.contains("\"target\":\"library\""), "{json}")
+    assert(json.contains("\"version\":\"0.1.0\""), "{json}")
+    assert(json.contains("\"path\":\"packages/ranker/lib.jet\""), "{json}")
+    assert(json.contains("\"kind\":\"source\""), "{json}")
+}
+
+// Rust: tests/canvas.rs:4812
+#Test("canvas_projects_typed_member_after_package_transition") {
+    dir :: temp_dir("package_transition_canvas_member")
+    fs.write(dir.join("package.jet"), "name: \"workspace\"\napp :: Config{{ version: \"1\" }}\n").unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{ members: [\"./packages/app\"] }}\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"workspace\")\n}}\n").unwrap()
+    member_entry :: dir.join("packages/app/main.jet")
+    fs.create_dir_all(member_entry.parent().unwrap()).unwrap()
+    fs.write(member_entry, "fn run() {{\n    print(\"app\")\n}}\n").unwrap()
+    Transition.split(dir, Transition.SplitTarget.Package{name: "app"}, false).expect("package transition")
+    project :: Canvas.project_json_for_entry(entry)
+    assert(project.contains("\"mode\":\"workspace\""), "{project}")
+    assert(project.contains("\"name\":\"app\""), "{project}")
+    assert(project.contains("\"manifest\":\"packages/app/package.jet\""), "{project}")
+    Transition.fold(dir, OSPath("packages/app/package.jet"), false).expect("package fold")
+    assert(!dir.join("packages/app/package.jet").exists())
+    assert(fs.read_to_string(dir.join("package.jet")).unwrap().contains("app :: Config"))
+}
+
+// Rust: tests/canvas.rs:4860
+#Test("canvas_project_json_projects_env_services_and_diagnostics") {
+    dir :: temp_dir("project_env_services")
+    fs.write(dir.join("package.jet"), "name: \"svcapp\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("env.jet"), "module env.dev {{\n    prompt: \"svcapp\",\n    services: {{ redis: {{ ports: [6380], run: [\"redis-server\", \"--port\", \"6380\"], ready: \"redis-cli -p 6380 ping\" }} }},\n}}\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"svc\")\n}}\n").unwrap()
+    json :: Canvas.project_json_for_entry(entry)
+    assert(json.contains("\"envs\":[{{\"path\":\"env.jet\""), "{json}")
+    assert(json.contains("\"prompt\":\"svcapp\""), "{json}")
+    assert(json.contains("\"packages\":[]"), "{json}")
+    assert(json.contains("\"services\":[{{\"name\":\"redis\""), "{json}")
+    assert(json.contains("\"ports\":[6380]"), "{json}")
+    assert(json.contains("\"ready\":\"redis-cli -p 6380 ping\""), "{json}")
+    assert(json.contains("\"path\":\"env.jet\""), "{json}")
+    assert(json.contains("\"kind\":\"env\""), "{json}")
+    fs.write(dir.join("env.jet"), "module dev {{ env.dev: System{{}} }}\n").unwrap()
+    json :: Canvas.project_json_for_entry(entry)
+    assert(json.contains("\"diagnostics\":[{{\"code\":\"E0966\""), "{json}")
+}
+
+// Rust: tests/canvas.rs:4896
+#Test("canvas_project_transactions_preview_apply_and_conflict_on_touched_files") {
+    dir :: temp_dir("project_txn")
+    app :: dir.join("packages/app")
+    logging :: dir.join("packages/logging")
+    fs.create_dir_all(app).unwrap()
+    fs.create_dir_all(logging).unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: find(\"./packages\")\n}}\n").unwrap()
+    fs.write(app.join("package.jet"), "name: \"app\",\nversion: \"0.1.0\"\npackages: {{\n    app: executable,\n}}\n").unwrap()
+    fs.write(logging.join("package.jet"), "name: \"logging\"\nversion: \"0.1.0\"\npackages: {{ logging: library }}\n").unwrap()
+    entry :: app.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"hi\")\n}}\n").unwrap()
+    fs.write(app.join("helper.jet"), "fn helper() -> Int {{\n    return 1\n}}\n").unwrap()
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    manifest_revision :: Canvas.source_revision(fs.read_to_string(app.join("package.jet")).unwrap())
+    req :: "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{project_revision}\",\"files\":[{{\"path\":\"packages/app/package.jet\",\"revision\":\"{manifest_revision}\"}}],\"manifest\":\"packages/app/package.jet\",\"name\":\"logging\",\"spec\":\"../logging\"}}"
+    preview :: Canvas.apply_project_transaction_json(entry, req).expect("project transaction preview")
+    assert(preview.contains("\"protocol\":\"jet.canvas.project.edit\""), "{preview}")
+    assert(preview.contains("\"preview\":true"), "{preview}")
+    assert(preview.contains("\"writes\":\"preview_only\""), "{preview}")
+    assert(preview.contains("+deps: {{"), "{preview}")
+    assert(preview.contains("+    logging: ../logging,"), "{preview}")
+    before_apply :: fs.read_to_string(app.join("package.jet")).unwrap()
+    assert(!before_apply.contains("logging"), "{before_apply}")
+    stale_revision_request :: req.replace(project_revision, "sha256-stale-project")
+    stale_project_error :: Canvas.apply_project_transaction_json(entry, stale_revision_request).expect_err("stale project revision must conflict before any write")
+    assert(stale_project_error.contains("\"kind\":\"conflict\""), "{stale_project_error}")
+    assert_eq(fs.read_to_string(app.join("package.jet")).unwrap(), before_apply, "a stale project revision must not write the manifest")
+    fs.write(app.join("helper.jet"), "fn helper() -> Int {{\n    return 2\n}}\n").unwrap()
+    apply :: req.replace("\"preview\":true", "\"preview\":false")
+    stale_project :: Canvas.apply_project_transaction_json(entry, apply).expect_err("any changed projected file should conflict before writing")
+    assert(stale_project.contains("\"kind\":\"conflict\""), "{stale_project}")
+    after_stale :: fs.read_to_string(app.join("package.jet")).unwrap()
+    assert(!after_stale.contains("logging"), "{after_stale}")
+    fresh_project :: Canvas.project_json_for_entry(entry)
+    fresh_project_revision :: json_field(fresh_project, "project_revision")
+    fresh_manifest :: fs.read_to_string(app.join("package.jet")).unwrap()
+    fresh_manifest_revision :: Canvas.source_revision(fresh_manifest)
+    fresh_apply :: "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":false,\"project_revision\":\"{fresh_project_revision}\",\"files\":[{{\"path\":\"packages/app/package.jet\",\"revision\":\"{fresh_manifest_revision}\"}}],\"manifest\":\"packages/app/package.jet\",\"name\":\"logging\",\"spec\":\"../logging\"}}"
+    applied :: Canvas.apply_project_transaction_json(entry, fresh_apply).expect("fresh project revision should permit apply")
+    assert(applied.contains("\"preview\":false"), "{applied}")
+    assert(applied.contains("\"writes\":\"source_transaction\""), "{applied}")
+    after_apply :: fs.read_to_string(app.join("package.jet")).unwrap()
+    assert(after_apply.contains("logging: ../logging,"), "{after_apply}")
+    assert(PackageFacts.parse(after_apply, "test").is_ok(), "{after_apply}")
+    current_project :: Canvas.project_json_for_entry(entry)
+    current_project_revision :: json_field(current_project, "project_revision")
+    stale_touched :: "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":false,\"project_revision\":\"{current_project_revision}\",\"files\":[{{\"path\":\"packages/app/package.jet\",\"revision\":\"{manifest_revision}\"}}],\"manifest\":\"packages/app/package.jet\",\"name\":\"extra\",\"spec\":\"0.2.0\"}}"
+    err :: Canvas.apply_project_transaction_json(entry, stale_touched).expect_err("stale touched file should conflict")
+    assert(err.contains("\"kind\":\"conflict\""), "{err}")
+    assert(!fs.read_to_string(app.join("package.jet")).unwrap().contains("extra"))
+}
+
+// Rust: tests/canvas.rs:5015
+#Test("canvas_project_transactions_reject_reserved_create_package_path") {
+    dir :: temp_dir("project_reserved_path")
+    fs.create_dir_all(dir.join("packages/app")).unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: [\"./packages/app\"]\n}}\n").unwrap()
+    fs.write(dir.join("packages/app/package.jet"), "name: \"app\"\nversion: \"0.1.0\"\npackages: {{ app: executable }}\n").unwrap()
+    entry :: dir.join("packages/app/main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"app\")\n}}\n").unwrap()
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    req :: "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{project_revision}\",\"package_path\":\".git/hooks\",\"files\":[{{\"path\":\".git/hooks/package.jet\",\"revision\":\"missing\"}},{{\"path\":\".git/hooks/main.jet\",\"revision\":\"missing\"}}],\"name\":\"hooks\",\"target\":\"executable\"}}"
+    err :: Canvas.apply_project_transaction_json(entry, req).expect_err("reserved path should be rejected")
+    assert(err.contains("\"kind\":\"bad_request\""), "{err}")
+    assert(!dir.join(".git/hooks/package.jet").exists(), "reserved path write escaped source truth")
+}
+
+// Rust: tests/canvas.rs:5048
+#Test("canvas_project_transactions_reject_symlink_package_path") {
+    if selected_family() != "unix" -> return // GATE #4483: Rust #[cfg(unix)].
+    dir :: temp_dir("project_symlink_path")
+    fs.create_dir_all(dir.join("packages/app")).unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: [\"./packages/app\"]\n}}\n").unwrap()
+    fs.write(dir.join("packages/app/package.jet"), "name: \"app\"\nversion: \"0.1.0\"\npackages: {{ app: executable }}\n").unwrap()
+    entry :: dir.join("packages/app/main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"app\")\n}}\n").unwrap()
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    outside :: dir.join("outside")
+    fs.create_dir_all(outside).unwrap()
+    symlink(outside, dir.join("packages/escape")).unwrap() // GATE #4494.
+    req :: "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{project_revision}\",\"package_path\":\"packages/escape\",\"files\":[{{\"path\":\"packages/escape/package.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/escape/run.jet\",\"revision\":\"missing\"}}],\"name\":\"escape\",\"target\":\"executable\"}}"
+    err :: Canvas.apply_project_transaction_json(entry, req).expect_err("Canvas must not create a package through a symlink")
+    assert(err.contains("symlink"), "{err}")
+    assert(!outside.join("package.jet").exists())
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/canvas.rs:5084
+#Test("canvas_project_transactions_roll_back_when_later_write_fails") {
+    dir :: temp_dir("project_rollback")
+    fs.create_dir_all(dir.join("packages/app")).unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: [\"./packages/app\"]\n}}\n").unwrap()
+    fs.write(dir.join("packages/app/package.jet"), "name: \"app\"\nversion: \"0.1.0\"\npackages: {{ app: executable }}\n").unwrap()
+    entry :: dir.join("packages/app/main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"app\")\n}}\n").unwrap()
+    fs.create_dir_all(dir.join("packages/tools")).unwrap()
+    fs.write(dir.join("packages/tools/nested"), "not a directory").unwrap()
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    req :: "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{project_revision}\",\"package_path\":\"packages/tools\",\"entry\":\"packages/tools/nested/main.jet\",\"files\":[{{\"path\":\"packages/tools/package.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/nested/main.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}"
+    err :: Canvas.apply_project_transaction_json(entry, req).expect_err("second write should fail and rollback first write")
+    assert(err.contains("\"kind\":\"io\""), "{err}")
+    assert(!dir.join("packages/tools/package.jet").exists(), "first project write must be rolled back")
+    assert_eq(fs.read_to_string(dir.join("packages/tools/nested")).unwrap(), "not a directory")
+}
+
+// Rust: tests/canvas.rs:5122
+#Test("canvas_project_transactions_remove_dependency") {
+    dir :: temp_dir("project_remove_dep")
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{\n    logging: logging#0.1.0,\n    tools: ../tools,\n}}\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"app\")\n}}\n").unwrap()
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    manifest_revision :: Canvas.source_revision(fs.read_to_string(dir.join("package.jet")).unwrap())
+    req :: "{{\"schema_version\":1,\"op\":\"remove_dependency\",\"preview\":true,\"project_revision\":\"{project_revision}\",\"files\":[{{\"path\":\"package.jet\",\"revision\":\"{manifest_revision}\"}}],\"manifest\":\"package.jet\",\"name\":\"logging\"}}"
+    preview :: Canvas.apply_project_transaction_json(entry, req).expect("remove dependency preview")
+    assert(preview.contains("\"op\":\"remove_dependency\""), "{preview}")
+    assert(preview.contains("-    logging: logging#0.1.0,"), "{preview}")
+    assert(fs.read_to_string(dir.join("package.jet")).unwrap().contains("logging"))
+    apply :: req.replace("\"preview\":true", "\"preview\":false")
+    applied :: Canvas.apply_project_transaction_json(entry, apply).expect("remove dependency apply")
+    assert(applied.contains("\"writes\":\"source_transaction\""), "{applied}")
+    manifest :: fs.read_to_string(dir.join("package.jet")).unwrap()
+    assert(!manifest.contains("logging"), "{manifest}")
+    assert(manifest.contains("tools: ../tools"), "{manifest}")
+    assert(PackageFacts.parse(manifest, "test").is_ok(), "{manifest}")
+}
+
+// Rust: tests/canvas.rs:5170
+#Test("canvas_project_transactions_edit_pkg_field_and_add_target") {
+    dir :: temp_dir("project_pkg_fields")
+    fs.write(dir.join("package.jet"), "name: \"app\",\nversion: \"0.1.0\"\npackages: {{\n}}\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"app\")\n}}\n").unwrap()
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    manifest_revision :: Canvas.source_revision(fs.read_to_string(dir.join("package.jet")).unwrap())
+    edit_req :: "{{\"schema_version\":1,\"op\":\"edit_pkg_field\",\"preview\":false,\"project_revision\":\"{project_revision}\",\"files\":[{{\"path\":\"package.jet\",\"revision\":\"{manifest_revision}\"}}],\"manifest\":\"package.jet\",\"field\":\"version\",\"value\":\"0.2.0\"}}"
+    edited :: Canvas.apply_project_transaction_json(entry, edit_req).expect("edit pkg field apply")
+    assert(edited.contains("\"op\":\"edit_pkg_field\""), "{edited}")
+    manifest :: fs.read_to_string(dir.join("package.jet")).unwrap()
+    assert(manifest.contains("version: \"0.2.0\""), "{manifest}")
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    manifest_revision :: Canvas.source_revision(manifest)
+    target_req :: "{{\"schema_version\":1,\"op\":\"add_target\",\"preview\":false,\"project_revision\":\"{project_revision}\",\"files\":[{{\"path\":\"package.jet\",\"revision\":\"{manifest_revision}\"}}],\"manifest\":\"package.jet\",\"name\":\"app\",\"target\":\"executable\"}}"
+    targeted :: Canvas.apply_project_transaction_json(entry, target_req).expect("add target apply")
+    assert(targeted.contains("\"op\":\"add_target\""), "{targeted}")
+    manifest :: fs.read_to_string(dir.join("package.jet")).unwrap()
+    assert(manifest.contains("APP :: Output.Executable{{ name: \"app\", entry: run }}"), "{manifest}")
+    assert(PackageFacts.parse(manifest, "test").is_ok(), "{manifest}")
+}
+
+// Rust: tests/canvas.rs:5216
+#Test("canvas_project_transactions_add_env_service") {
+    dir :: temp_dir("project_add_env_service")
+    fs.write(dir.join("package.jet"), "name: \"svcapp\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"svc\")\n}}\n").unwrap()
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    req :: "{{\"schema_version\":1,\"op\":\"add_env_service\",\"preview\":true,\"project_revision\":\"{project_revision}\",\"files\":[{{\"path\":\"env.jet\",\"revision\":\"missing\"}}],\"env\":\"env.jet\",\"name\":\"redis\",\"port\":6380,\"run\":[\"redis-server\",\"--port\",\"6380\"],\"ready\":\"redis-cli -p 6380 ping\"}}"
+    preview :: Canvas.apply_project_transaction_json(entry, req).expect("add env service preview")
+    assert(preview.contains("\"op\":\"add_env_service\""), "{preview}")
+    assert(preview.contains("\"writes\":\"preview_only\""), "{preview}")
+    assert(preview.contains("run: [\\\"redis-server\\\", \\\"--port\\\", \\\"6380\\\"]"), "{preview}")
+    assert(!dir.join("env.jet").exists())
+    apply :: req.replace("\"preview\":true", "\"preview\":false")
+    applied :: Canvas.apply_project_transaction_json(entry, apply).expect("add env service apply")
+    assert(applied.contains("\"writes\":\"source_transaction\""), "{applied}")
+    env :: fs.read_to_string(dir.join("env.jet")).unwrap()
+    assert(env.contains("module env.dev"), "{env}")
+    assert(env.contains("redis:"), "{env}")
+    assert(env.contains("ports: [6380]"), "{env}")
+    assert(env.contains("run: [\"redis-server\", \"--port\", \"6380\"]"), "{env}")
+    project :: Canvas.project_json_for_entry(entry)
+    assert(project.contains("\"services\":[{{\"name\":\"redis\""), "{project}")
+    assert(project.contains("\"ports\":[6380]"), "{project}")
+}
+
+// Rust: tests/canvas.rs:5265
+#Test("canvas_project_transactions_create_package_from_workspace") {
+    dir :: temp_dir("project_create_package")
+    fs.create_dir_all(dir.join("packages/app")).unwrap()
+    fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: find(\"./packages\")\n}}\n").unwrap()
+    fs.write(dir.join("packages/app/package.jet"), "name: \"app\"\nversion: \"0.1.0\"\npackages: {{ app: executable }}\n").unwrap()
+    entry :: dir.join("packages/app/main.jet")
+    fs.write(entry, "fn run() {{\n    print(\"app\")\n}}\n").unwrap()
+    project :: Canvas.project_json_for_entry(entry)
+    project_revision :: json_field(project, "project_revision")
+    req :: "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":true,\"project_revision\":\"{project_revision}\",\"package_path\":\"packages/tools\",\"files\":[{{\"path\":\"packages/tools/package.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/run.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}"
+    preview :: Canvas.apply_project_transaction_json(entry, req).expect("create package preview")
+    assert(preview.contains("\"op\":\"create_package\""), "{preview}")
+    assert(preview.contains("\"writes\":\"preview_only\""), "{preview}")
+    assert(preview.contains("diff -- packages/tools/package.jet"), "{preview}")
+    assert(preview.contains("diff -- packages/tools/run.jet"), "{preview}")
+    assert(!dir.join("packages/tools/package.jet").exists())
+    apply :: req.replace("\"preview\":true", "\"preview\":false")
+    applied :: Canvas.apply_project_transaction_json(entry, apply).expect("create package apply")
+    assert(applied.contains("\"writes\":\"source_transaction\""), "{applied}")
+    manifest :: fs.read_to_string(dir.join("packages/tools/package.jet")).unwrap()
+    assert(manifest.contains("name: \"tools\""), "{manifest}")
+    assert(manifest.contains("TOOLS :: Output.Executable"), "{manifest}")
+    assert(jet.Package.PackageFacts.parse(manifest, "package.jet").is_ok(), "{manifest}")
+    main :: fs.read_to_string(dir.join("packages/tools/run.jet")).unwrap()
+    assert(main.contains("print(\"tools\")"), "{main}")
+    after_project :: Canvas.project_json_for_entry(entry)
+    assert(after_project.contains("\"name\":\"tools\""), "{after_project}")
+    assert(after_project.contains("\"path\":\"packages/tools/run.jet\""), "{after_project}")
+}

@@ -1,0 +1,84 @@
+// Docs.rs tests are mapped to this paired packet test file by Wave 0799.
+use jet_ast.[CtValue]
+use core.files.host.retained_descriptor as repl_docs_test_files
+use core.files.runtime.kernel_path_components as repl_docs_test_paths
+use core.sys.target as repl_docs_test_target
+use std.os.unix.fs.[symlink] // GATE #4494: native symlink creation.
+use std.process as repl_docs_test_process // GATE #4494: native process id.
+
+// Rust: crates/jet-repl/src/Docs.rs:151
+#Test("builtin_list_filter_uses_shared_fact") {
+    session :: Session.new()
+    doc :: lookup(session, "List.filter") ?? panic("List.filter docs")
+    assert(doc.starts_with("List.filter(f: fn(T) -> Bool) -> List<T>\n"))
+    assert(doc.contains("Keeps items where f(item) is true."))
+    assert(doc.contains("Source: core.collections"))
+}
+// Rust: crates/jet-repl/src/Docs.rs:160
+#Test("session_binding_lookup_shows_live_value") {
+    session := Session.new()
+    session.scope["answer"] = CtValue.Int(42)
+    doc :: lookup(session, "answer") ?? panic("binding should resolve")
+    assert(doc.starts_with("answer: Int :: 42\n"))
+    assert(doc.contains("Source: this session"))
+}
+// Rust: crates/jet-repl/src/Docs.rs:171
+#Test("completion_dedups_shadowed_session_item") {
+    session := Session.new()
+    &session.item_srcs.push("fn answer() -> Int { return 1 }")
+    session.scope["answer"] = CtValue.Int(42)
+    candidates :: completion_candidates(session, "ans", None)
+    assert_eq(candidates.len(), 1)
+    assert_eq(candidates[0].identity, "session:binding:answer")
+}
+// Rust: crates/jet-repl/src/Docs.rs:185
+#Test("core_import_alias_completes_module_members") {
+    session := Session.new()
+    session.core_imports["math"] = "core.math"
+    candidates :: dotted_completion_candidates(session, "math", "sq")
+    assert_eq(candidates.len(), 1)
+    assert_eq(candidates[0].name, "sqrt")
+    assert_eq(candidates[0].module_path, "core.math")
+}
+// Rust: crates/jet-repl/src/Docs.rs:197
+#Test("runtime_receiver_beats_core_import_alias") {
+    session := Session.new()
+    session.core_imports["items"] = "core.math"
+    session.scope["items"] = CtValue.List([CtValue]{CtValue.Int(1), CtValue.Int(2)})
+    candidates :: dotted_completion_candidates(session, "items", "f")
+    assert(candidates.any(fn(c) -> c.name == "filter"))
+    assert(!candidates.any(fn(c) -> c.name == "floor"))
+}
+// Rust: crates/jet-repl/src/Docs.rs:221
+#Test("core_import_alias_docs_resolve_member") {
+    session := Session.new()
+    session.core_imports["math"] = "core.math"
+    doc :: lookup(session, "math.sqrt") ?? panic("math.sqrt docs")
+    assert(doc.contains("core.math.sqrt"))
+    assert(doc.contains("Source: core.math"))
+}
+// Rust: crates/jet-repl/src/Docs.rs:232
+#Test("syntax_docs_use_the_registry_dictionary") {
+    doc :: lookup(Session.new(), "^") ?? panic("^ docs")
+    assert(doc.contains("Before a name (move)") && doc.contains("Between two numbers (power)"))
+    assert(doc.contains("Afterwards:"))
+    assert(!doc.contains("SIGIL_MOVE") && !doc.contains("D-"))
+}
+// Rust: crates/jet-repl/src/Docs.rs:244
+#Test("docs_temp_writer_rejects_existing_symlink") {
+    if repl_docs_test_target.selected_family() == .Unix {
+        root := repl_docs_test_files.temp_dir()
+        repl_docs_test_paths.push(&root, repl_docs_test_paths.from_text("jet-repl-docs-temp-symlink-{repl_docs_test_process.id()}", root.platform))
+        _ :: repl_docs_test_files.remove_dir_all(root)
+        repl_docs_test_files.create_dir_all(root) ?? panic("create temp root")
+        target := ~root
+        repl_docs_test_paths.push(&target, repl_docs_test_paths.from_text("outside.txt", root.platform))
+        link := ~root
+        repl_docs_test_paths.push(&link, repl_docs_test_paths.from_text("docs.jet", root.platform))
+        repl_docs_test_files.write(target, "must survive\n".bytes()) ?? panic("write target")
+        symlink(target, link) ?? panic("create symlink")
+        assert(write_temp_file_at(link, "attacker\n").is_err())
+        assert_eq(repl_docs_test_files.read_to_string(target) ?? panic("read target"), "must survive\n")
+        _ :: repl_docs_test_files.remove_dir_all(root)
+    }
+}

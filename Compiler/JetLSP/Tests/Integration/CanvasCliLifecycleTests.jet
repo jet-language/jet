@@ -1,0 +1,410 @@
+use std.[fs, env, process]
+use std.process.[Command, Stdio]
+use tests.common.[Scratch]
+use tests.common.corpus_policy.[CorpusPolicy]
+use tests.dev_parts.support.[assert_cranelift_three_way]
+use jet.TargetMachine.[ExecutionTier, TargetMachine, TargetMachineError]
+use jet.Driver.[compile_bundle_path_with_target_machine]
+use jet.Sema.[CompileMode]
+use jet_jit.Job.[JetJobClock, JetJobSchedule]
+use jet_foundation.MachineOutput.[read_machine_output, MachineRecord]
+use jet_foundation.PerformanceBudget.[CanonicalJson]
+use jet_foundation.SHA256.[sha256_hex]
+use jet_foundation.[TEXT_NUL]
+use jet.REPL.Notebook.[decide_render, export_ipynb, export_jet, import_ipynb, merge_by_id, quarantine_outputs, run_headless_script, save_jetnb, load_jetnb, grant_active, CellKind, ClientKind, JetNotebook, Kernel, MimeBundle, RenderDecision, RerunDecision, TrustStore, POLICY_VERSION, NotebookCell, ActiveRequest, CellExecResult]
+use jet.REPL.RerunPlan.[StepKind]
+use jet_semindex.[open, semantic_blame, semantic_rename_ops, SemanticOp, SemanticOpTarget]
+use Compiler.JetLSP.Tests.Integration.DevCorpusGate.[TOWER_DATATREE_POLICY_SITE]
+use Compiler.JetLSP.Tests.Integration.Notebook.[RunningNotebook, command_path, command_available, free_loopback_port, wait_for_notebook_server]
+use Compiler.JetLSP.Tests.Integration.SemanticOps.[fixture]
+
+// GATE #4494: all native subprocesses, filesystem, clocks and sockets remain real.
+// Rust: tests/canvas_cli_lifecycle.rs:9
+#Test("jet_dev_canvas_lifecycle_exit_reuse_and_cleanup") {
+    repo :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    node :: env.var_os("JET_CANVAS_NODE") ?? "node"
+    output :: Command.new(node).current_dir(repo)
+        .env("JET_BIN", env.var("CARGO_BIN_EXE_jet").unwrap())
+        .env("JET_SOURCE", "Examples/features/tooling/canvas_blueprint_demo.jet")
+        .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
+        .arg("Tools/canvas-test/native-lifecycle.mjs").output().expect("run native Canvas lifecycle probe")
+    assert(output.status.success(), "native Canvas lifecycle failed\n--- stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("PASS native jet dev --canvas lifecycle"), "{String.from_utf8_lossy(output.stdout)}")
+}
+
+// Rust: tests/dev_corpus.rs:9
+#Test("semantic_corpus_policy_runs_with_the_dev_corpus_gate") {
+    CorpusPolicy.load().expect("corpus manifest").check_gate("dev-corpus").expect("dev corpus semantic policy")
+}
+
+// Rust: tests/dev_corpus_gate.rs:13
+#Test("tower_datatree_policy_keeps_mechanical_ops_and_named_exceptions") {
+    policy :: CorpusPolicy.load().expect("corpus manifest")
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    source :: fs.read_to_string(root.join(TOWER_DATATREE_POLICY_SITE)).expect("Tower recipe source is readable")
+    violations :: policy.evaluate_source(TOWER_DATATREE_POLICY_SITE, source).expect("Tower recipe parses")
+    assert(violations.is_empty(), "Tower DataTree corpus policy failed:\n{violations.map((v) -> v.to_string()).collect().join("\n")}")
+}
+
+// Rust: tests/dev_corpus_gate.rs:33
+#Test("tower_datatree_policy_rejects_duplicate_generic_ladders") {
+    policy :: CorpusPolicy.load().expect("corpus manifest")
+    violations :: policy.evaluate_source(TOWER_DATATREE_POLICY_SITE, "\nfn duplicate_equal(left: DataTree, right: DataTree) -> Bool {{ return true }}\nfn arrays_semantically_equal(left: [DataTree], right: [DataTree]) -> Bool {{ return true }}\nfn truthy(value: DataTree) -> Bool {{ return true }}\nfn javascript_truthy_duplicate(value: DataTree) -> Bool {{ return true }}\n").expect("synthetic Tower source parses")
+    assert_eq(violations.len(), 4, "all duplicate generic helpers must be rejected once: {violations:?}")
+    assert(violations.all((violation) -> violation.rule == "datatree-domain-policy"), "one occurrence-scoped DataTree rule must own every rejection: {violations:?}")
+}
+
+// Rust: tests/dev_corpus_gate.rs:60
+#Test("semantic_corpus_policy_runs_after_dev_domain_checks") {
+    CorpusPolicy.load().expect("corpus manifest").check_gate("dev-corpus").expect("dev corpus semantic policy")
+}
+
+// Rust: tests/dev_corpus_gate.rs:68
+#Test("semantic_corpus_policy_runs_with_core_conformance") {
+    CorpusPolicy.load().expect("corpus manifest").check_gate("conformance").expect("Core conformance semantic policy")
+}
+
+// Rust: tests/dev_schedule_wave_a.rs:11
+#Test("local_schedule_restart_does_not_replay_a_missed_window") {
+    const DAY: U64 = 86400
+    const THREE_AM: U64 = 3 * 3600
+    schedule :: [("nightly", JetJobSchedule.WallClockTime{hour: 3, minute: 0})]
+    missed :: DAY + THREE_AM + 61
+    before_restart := JetJobClock.new()
+    assert((&before_restart.due_at(schedule, missed)).is_empty(), "a missed local schedule window must not be replayed before restart")
+    after_restart := JetJobClock.new()
+    assert((&after_restart.due_at(schedule, missed)).is_empty(), "a fresh local clock must not replay an earlier missed occurrence")
+    assert_eq(&after_restart.due_at(schedule, DAY * 2 + THREE_AM), ["nightly"])
+}
+
+// Rust: tests/dev_tier_parity.rs:10
+#Test("target_selected_prelude_parity") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    hosted :: root.join("tests/target_witness/hosted_default.jet")
+    assert_cranelift_three_way(hosted.to_string_lossy(), "target_selected_prelude_parity_hosted")
+    no_os :: TargetMachine.wasm_no_os()
+    assert(no_os.supports_execution_tier(ExecutionTier.Aot).is_ok())
+    loop tier in [ExecutionTier.Dev, ExecutionTier.Jit] {
+        assert(no_os.supports_execution_tier(tier) == { Err(TargetMachineError.ExecutionTierUnsupported{..}) -> true, else -> false })
+    }
+    source :: root.join("tests/target_witness/heap_free_core.jet").to_string_lossy().to_string()
+    loop machine in [no_os, TargetMachine.wasm_wasi(), TargetMachine.wasm_browser()] {
+        provider :: machine.provider_identity()
+        layer :: machine.max_runtime_layer().as_str()
+        environment :: machine.environment_identity()
+        output :: compile_bundle_path_with_target_machine(source, CompileMode.Run, machine)
+            .unwrap_or_else((error) -> panic("target-selected heap-free witness should compile for {machine.name}: {error:?}"))
+        if machine.is_browser_target() {
+            web :: output.web.expect("browser target must emit web artifacts")
+            assert(web.manifest_json.contains("\"providerIdentity\": \"{provider}\""), "browser manifest lost provider identity: {web.manifest_json}")
+            assert(web.manifest_json.contains("\"targetEnvironment\": \"{environment}\""), "browser manifest lost target environment: {web.manifest_json}")
+            assert(web.manifest_json.contains("\"preludeClosureIdentity\": \"prelude-closure-v1:"), "browser manifest lost Prelude closure identity: {web.manifest_json}")
+        } else {
+            marker :: "// jet:target-dossier layer={layer} provider={provider}"
+            assert(output.rust.contains(marker), "{machine.name} artifact lost target dossier marker {marker:?}")
+            assert(output.rust.contains("closure=prelude-closure-v1:"), "{machine.name} artifact lost Prelude closure identity")
+        }
+    }
+}
+
+// Rust: tests/impact.rs:8
+#Test("impact_report_upstream_run") {
+    bin :: OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())
+    path :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/effects/effects.jet")
+    out :: Command.new(bin).args(["inspect", "impact", path.to_str().unwrap(), "report", "--depth=3"]).output().expect("jet inspect impact")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    text :: String.from_utf8_lossy(out.stdout)
+    assert(text.contains("blast radius for `report`"))
+    assert(text.contains("upstream"))
+}
+
+// Rust: tests/impact.rs:33
+#Test("impact_json_output") {
+    bin :: OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())
+    path :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/effects/effects.jet")
+    out :: Command.new(bin).args(["inspect", "impact", path.to_str().unwrap(), "square", "--json", "--depth=2"]).output().expect("jet inspect impact --json")
+    assert(out.status.success())
+    text :: String.from_utf8_lossy(out.stdout)
+    assert_eq(read_machine_output(text).unwrap(), [MachineRecord.Status])
+    assert(text.starts_with("{{\"schema\":\"jet.status/v1\""))
+    assert(text.contains("\"symbol\":\"square\""))
+    assert(text.contains("\"found\":true"))
+    assert(text.contains("\"check\":{{\"status\":\"passed\""))
+}
+
+// Rust: tests/impact.rs:61
+#Test("impact_unknown_symbol_exits_error") {
+    bin :: OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())
+    path :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/effects/effects.jet")
+    out :: Command.new(bin).args(["inspect", "impact", path.to_str().unwrap(), "not_a_real_symbol_xyz"]).output().expect("jet inspect impact missing symbol")
+    assert(!out.status.success())
+}
+
+// Rust: tests/notebook.rs:18
+#Test("notebook_token_generation_has_no_zero_entropy_fallback") {
+    // Original source-level guard reads the reference peer, not a fake entropy provider.
+    source :: fs.read_to_string(OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Source/CmdNotebook.rs")).unwrap()
+    mint_token := source.split_once("fn mint_token()")
+        .and_then((pair) -> pair.1.split_once("fn is_loopback"))
+        .map((pair) -> pair.0).expect("notebook token minting must remain a distinct function") // #4303
+    assert(mint_token.contains("read_exact(&mut bytes)"))
+    assert(mint_token.contains("map_err(|error| error.to_string())"))
+    assert(!mint_token.contains("unwrap_or"), "entropy read errors must not become a deterministic token")
+    startup := source.split_once("let token = match explicit_token")
+        .and_then((pair) -> pair.1.split_once("let auto_open"))
+        .map((pair) -> pair.0).expect("notebook startup must handle token creation explicitly") // #4303
+    assert(startup.contains("exit(ExitCodes::ICE)"))
+    assert(!startup.contains("unwrap_or_default"), "token creation failure must stop startup")
+}
+
+// Rust: tests/notebook.rs:45
+#Test("notebook_declarations_are_file_wide_but_state_cells_stay_ordered") {
+    kernel := Kernel.open(None, "entry-order-test").expect("open entry-order notebook kernel")
+    comptime_reader :: &kernel.notebook.add_cell(CellKind.Jet, "fn comptime_reader() -> Int {{ return FUTURE_ANSWER }}").id.clone()
+    comptime_answer :: &kernel.notebook.add_cell(CellKind.Jet, "FUTURE_ANSWER :: prep {{ 42 }}").id.clone()
+    caller :: &kernel.notebook.add_cell(CellKind.Jet, "fn caller() -> Int {{ return helper().value }}").id.clone()
+    helper :: &kernel.notebook.add_cell(CellKind.Jet, "fn helper() -> Answer {{ return Answer{{ value: 42 }} }}").id.clone()
+    answer_type :: &kernel.notebook.add_cell(CellKind.Jet, "struct Answer {{ value: Int }}").id.clone()
+    binding :: &kernel.notebook.add_cell(CellKind.Jet, "answer :: 7").id.clone()
+    read :: &kernel.notebook.add_cell(CellKind.Jet, "print(answer)").id.clone()
+    assert((&kernel.execute_cell(ClientKind.FirstParty, comptime_reader)).unwrap().ok(), "function cells must see later comptime declarations")
+    assert((&kernel.execute_cell(ClientKind.FirstParty, comptime_answer)).unwrap().ok())
+    assert((&kernel.execute_cell(ClientKind.FirstParty, caller)).unwrap().ok(), "caller must see later helper/type declarations")
+    assert((&kernel.execute_cell(ClientKind.FirstParty, helper)).unwrap().ok())
+    assert((&kernel.execute_cell(ClientKind.FirstParty, answer_type)).unwrap().ok())
+    assert(!(&kernel.execute_cell(ClientKind.FirstParty, read)).unwrap().ok(), "state cells must not see a later binding")
+    assert((&kernel.execute_cell(ClientKind.FirstParty, binding)).unwrap().ok())
+    output :: &kernel.execute_cell(ClientKind.FirstParty, read).unwrap()
+    assert(output.ok())
+    assert(output.bundle.text_plain.contains('7'))
+}
+
+// Rust: tests/notebook.rs:134
+#Test("shared_session_identical_stale_rules_across_clients") {
+    kernel := Kernel.open(None, "env-test").expect("open shared-session notebook kernel")
+    a :: &kernel.notebook.add_cell(CellKind.Jet, "x :: 1").id.clone()
+    b :: &kernel.notebook.add_cell(CellKind.Jet, "print(\"fx\")").id.clone()
+    if &kernel.notebook.cells.find((c) -> c.id == b) == Val(cell) -> &cell.depends_on.push(a.clone())
+    // Rust: tests/notebook.rs:147
+    observable_success :: (result: CellExecResult) -> result.ok() && result.bundle.text_plain.contains("fx")
+    assert((&kernel.execute_cell(ClientKind.FirstParty, a)).unwrap().ok())
+    fx :: &kernel.execute_cell(ClientKind.JupyterAdapter, b).unwrap()
+    broken :: &kernel.notebook.add_cell(CellKind.Jet, "print(\"fx\") +").id.clone()
+    broken_result :: &kernel.execute_cell(ClientKind.JupyterAdapter, broken).unwrap()
+    assert(!observable_success(broken_result))
+    assert(observable_success(fx))
+    plan :: kernel.replay_plan(1, Val("x :: 2")).expect("plan")
+    assert(plan.steps.any((s) -> s.kind == StepKind.ConfirmEffect) || plan.steps.len() >= 1)
+    stale_jp :: &kernel.apply_rerun(ClientKind.JupyterAdapter, plan, [RerunDecision.SkipStale]).unwrap()
+    view_first :: kernel.view(ClientKind.FirstParty)
+    view_canvas :: kernel.view(ClientKind.CanvasLens)
+    view_jp :: kernel.view(ClientKind.JupyterAdapter)
+    assert_eq(view_first.stale_ids, view_canvas.stale_ids)
+    assert_eq(view_first.stale_ids, view_jp.stale_ids)
+    assert_eq(view_first.stale_ids, stale_jp)
+}
+
+// Rust: tests/notebook.rs:192
+#Test("jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss") {
+    nb := JetNotebook.new("env-doc")
+    c1 :: &nb.add_cell(CellKind.Jet, "answer :: 42").id.clone()
+    &nb.store_output(c1, MimeBundle{text_plain: "answer : Int :: 42", mime: [], quarantined: false, widget_id: None, requested_origins: [], requested_messages: []}, 1, None).unwrap()
+    assert(nb.visible_output(c1).is_some())
+    nb.cells[0].source = "answer :: 7"
+    assert(nb.visible_output(c1).is_none(), "stale output must not display")
+    theirs := JetNotebook.new("env-doc")
+    shared :: c1.clone()
+    &theirs.cells.push(NotebookCell{id: shared.clone(), kind: CellKind.Jet, source: "answer :: 7", output: None, depends_on: []})
+    &theirs.add_cell(CellKind.Markdown, "# hi")
+    merged :: merge_by_id(nb, theirs)
+    assert(merged.cells.any((c) -> c.kind == CellKind.Markdown))
+    assert_eq(merged.cells.find((c) -> c.id == shared).unwrap().source, "answer :: 7")
+    dir :: env.temp_dir().join("jetnb-442-{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("demo.jetnb")
+    nb.cells[0].source = "answer :: 42"
+    &nb.store_output(c1, MimeBundle{text_plain: "42", mime: [], quarantined: false, widget_id: None, requested_origins: [], requested_messages: []}, 2, None).unwrap()
+    save_jetnb(nb, path).unwrap()
+    loaded :: load_jetnb(path).unwrap()
+    assert_eq(loaded.cells.len(), 1)
+    (ipynb, loss) :: export_ipynb(loaded).unwrap()
+    assert(loss.render().contains("export loss") || loss.render().contains("omitted"))
+    assert(ipynb.contains("nbformat"))
+    assert(ipynb.contains(c1))
+    (jet_src, jet_loss) :: export_jet(loaded)
+    assert(jet_loss.render().contains("stated-loss") || jet_loss.items.len() >= 2)
+    assert(jet_src.contains("answer"))
+    ipynb_doc :: CanonicalJson.object([
+        ("nbformat", CanonicalJson.integer("4").unwrap()),
+        ("nbformat_minor", CanonicalJson.integer("5").unwrap()),
+        ("metadata", CanonicalJson.object([]).unwrap()),
+        ("cells", CanonicalJson.Array([CanonicalJson.object([
+            ("id", CanonicalJson.String("keep-me")),
+            ("cell_type", CanonicalJson.String("code")),
+            ("source", CanonicalJson.Array([CanonicalJson.String("1")])),
+            ("metadata", CanonicalJson.object([]).unwrap()),
+            ("outputs", CanonicalJson.Array([CanonicalJson.object([
+                ("output_type", CanonicalJson.String("execute_result")),
+                ("data", CanonicalJson.object([("text/plain", CanonicalJson.String("1"))]).unwrap()),
+                ("metadata", CanonicalJson.object([]).unwrap()),
+                ("execution_count", CanonicalJson.integer("1").unwrap()),
+            ]).unwrap()])),
+            ("execution_count", CanonicalJson.Null),
+        ]).unwrap()])),
+    ]).unwrap()
+    (imported, import_loss) :: import_ipynb(String.from_utf8(ipynb_doc.bytes()).unwrap()).unwrap()
+    assert(import_loss.items.any((i) -> i.contains("quarantined")))
+    cell :: imported.cells[0]
+    assert_eq(cell.id, "keep-me")
+    assert(cell.output.unwrap().bundle.quarantined)
+}
+
+// Rust: tests/notebook.rs:324
+#Test("rich_output_trust_quarantines_imports_and_binds_grants") {
+    store :: TrustStore.default()
+    bundle := MimeBundle{text_plain: "hi", mime: [("text/html", "<b>hi</b>")], quarantined: false, widget_id: Val("w1"), requested_origins: ["https://evil.example"], requested_messages: ["click"]}
+    quarantine_outputs(&bundle)
+    assert(decide_render(store, "src", "env", "rend", bundle) == { RenderDecision.FallbackPlain{..} -> true, else -> false })
+    live := MimeBundle{text_plain: "chart", mime: [("application/javascript", "1")], quarantined: false, widget_id: Val("sales"), requested_origins: ["https://data.example"], requested_messages: ["SelectionChanged"]}
+    assert(decide_render(store, "src", "env", "rend", live) == { RenderDecision.FallbackPlain{..} -> true, else -> false })
+    store := TrustStore.default()
+    payload_hash :: sha256_hex("{live.mime:?}{TEXT_NUL}{live.widget_id:?}".bytes())
+    req :: ActiveRequest{notebook_source_hash: "src", payload_hash: payload_hash, renderer_hash: "rend", environment_hash: "env", policy_version: POLICY_VERSION, widget_id: "sales", origins: live.requested_origins.clone(), messages: live.requested_messages.clone()}
+    grant_active(&store, req)
+    assert(decide_render(store, "src", "env", "rend", live) == { RenderDecision.AllowActive{..} -> true, else -> false })
+    &live.requested_origins.clear()
+    &live.requested_messages.clear()
+    live.mime = [("image/svg+xml", "<svg/>")]
+    assert(decide_render(store, "src", "env", "rend", live) == { RenderDecision.AllowPassive{..} -> true, else -> false })
+}
+
+// Rust: tests/notebook.rs:383
+#Test("headless_protocol_interrupt_stdin_debug_perf_and_clients") {
+    kernel := Kernel.open(None, "proto-env").expect("open headless-protocol notebook kernel")
+    out :: run_headless_script(&kernel, ["add-jet y :: 3", "exec first", "visible jupyter", "visible canvas", "visible first", "interrupt", "stdin hello", "debug", "perf", "complete y", "inspect", "export-jet", "export-ipynb"])
+    assert(out.contains("\"status\":\"ok\""), "{out}")
+    assert(out.contains("interrupt_requested"), "{out}")
+    assert(out.contains("stdin_queued=1"), "{out}")
+    assert(out.contains("debug_attached"), "{out}")
+    assert(out.contains("perf_attached"), "{out}")
+    assert(kernel.debug_attached() && kernel.perf_attached())
+}
+
+// Rust: tests/notebook.rs:413
+#Test("notebook_first_hour_uses_shared_prelude_ambients_and_path") {
+    scratch :: Scratch.new("notebook-first-hour")
+    document :: scratch.join("journey.jetnb")
+    source :: "#FX(authority: IO, FS) {{\n    eprint(\"ambient-eprint\")\n    name :: input(\"name: \") ?? \"fallback\"\n    assert(name == \"Ada\")\n    write_file(\"notes.txt\", name) ?? panic(\"write failed\")\n    assert(file_exists(\"notes.txt\"))\n    assert_eq(file_exists(\"notes.txt\"), true)\n    print(read_file(Path.from(\"notes.txt\")) ?? panic(\"read failed\"))\n}}"
+    environment :: Kernel.environment_hash(scratch.path)
+    kernel := Kernel.open(Val(document), environment.clone()).expect("open first-hour notebook document")
+    cell_id :: &kernel.notebook.add_cell(CellKind.Jet, source).id.clone()
+    &kernel.push_stdin("Ada")
+    result :: &kernel.execute_cell(ClientKind.FirstParty, cell_id).unwrap()
+    assert(result.ok(), "shared Prelude cell failed: {result.eval.text}")
+    assert(result.bundle.text_plain.contains("ambient-eprint"))
+    assert(result.bundle.text_plain.contains("Ada"))
+    assert_eq(fs.read_to_string(scratch.join("notes.txt")).unwrap(), "Ada")
+    &kernel.save_document(Val(document)).unwrap()
+    reopened :: Kernel.open(Val(document), environment).expect("reopen first-hour notebook document")
+    assert_eq(reopened.document_path, Val(document))
+    assert_eq(reopened.notebook.cells[0].source, source)
+}
+
+// Rust: tests/notebook.rs:454
+#Test("notebook_cli_headless_journey_uses_production_session") {
+    scratch :: Scratch.new("notebook-cli-headless")
+    document :: scratch.join("journey.jetnb")
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["notebook", "journey.jetnb", "--protocol"])
+        .current_dir(scratch.path).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped())
+        .spawn().expect("start production notebook protocol")
+    input := &child.stdin.take().expect("protocol stdin")
+    &input.write_all("add-jet answer :: 42\nexec first\ncomplete answer\nsave journey.jetnb\nreopen\nexport-ipynb\nexport-jet\nquit\n".bytes()).expect("write notebook protocol journey")
+    drop(^input)
+    output :: &child.wait_with_output().expect("finish production notebook protocol")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(output.status.success(), "protocol journey failed:\n{stdout}\n{stderr}")
+    assert(stdout.contains("\"status\":\"ok\""), "missing successful execution: {stdout}")
+    assert(stdout.contains("\"body\":\"answer\""), "missing completion response: {stdout}")
+    assert(stdout.contains("saved=journey.jetnb"), "missing save response: {stdout}")
+    assert(stdout.contains("reopened"), "missing reopen response: {stdout}")
+    assert(stdout.contains("ipynb_bytes=") && stdout.contains("jet_bytes="), "missing export responses: {stdout}")
+    assert(document.is_file(), "headless protocol did not save the notebook")
+}
+
+// Rust: tests/notebook.rs:561
+#Test("notebook_browser_matrix_uses_production_server") {
+    if !command_available("node", "NODE") {
+        eprintln("skipping notebook browser matrix: node is unavailable")
+        return
+    }
+    browsers :: [("chromium", command_available("chromium", "CHROMIUM")), ("firefox", command_available("firefox", "FIREFOX") && command_available("geckodriver", "GECKODRIVER"))]
+    if !browsers.any((pair) -> pair.1) {
+        eprintln("skipping notebook browser matrix: no supported browser is available")
+        return
+    }
+    scratch :: Scratch.new("notebook-browser")
+    ran := 0
+    loop (browser, available) in browsers {
+        if !available -> next
+        browser_root :: scratch.join(browser)
+        fs.create_dir_all(browser_root).unwrap()
+        document :: browser_root.join("journey.jetnb")
+        merge_document :: browser_root.join("merge.jetnb")
+        merge := JetNotebook.new(Kernel.environment_hash(browser_root))
+        &merge.add_cell(CellKind.Markdown, "# merged from another document")
+        save_jetnb(merge, merge_document).unwrap()
+        port :: free_loopback_port()
+        token :: "notebook-browser-test-token"
+        bind :: "127.0.0.1:{port}"
+        port_text :: port.to_string()
+        child :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).current_dir(browser_root)
+            .args(["notebook", document.to_str().unwrap(), "--bind", bind, "--token", token])
+            .stdin(Stdio.null()).stdout(Stdio.null()).stderr(Stdio.null()).spawn().unwrap()
+        server :: RunningNotebook{child: ^child}
+        defer -> drop(^server)
+        wait_for_notebook_server(port, token)
+        output :: Command.new(command_path("node", "NODE")).current_dir(env.var("CARGO_MANIFEST_DIR").unwrap())
+            .args(["Tools/notebook-test/acceptance.mjs", "--browser", browser, "--port", port_text, "--token", token, "--save-path", document.to_str().unwrap(), "--merge-path", merge_document.to_str().unwrap()])
+            .output().unwrap()
+        assert(output.status.success(), "{browser} notebook browser journey failed:\n{String.from_utf8_lossy(output.stdout)}\n{String.from_utf8_lossy(output.stderr)}")
+        ran += 1
+    }
+    assert(ran > 0)
+}
+
+// Rust: tests/semantic_ops.rs:16
+#Test("tool_fix_pairing_records_rename_and_blame_reads_the_receipt") {
+    (root, path) :: fixture("rename")
+    before :: "fn report() -[]> Int {{ return 1 }}\nfn run() {{ print(report()) }}\n"
+    after :: "fn summarize() -[]> Int {{ return 1 }}\nfn run() {{ print(summarize()) }}\n"
+    fs.write(path, before).unwrap()
+    before_index :: open(path).expect("before index")
+    fs.write(path, after).unwrap()
+    after_index :: open(path).expect("after index")
+    produced :: semantic_rename_ops(before_index, after_index)
+    assert_eq(produced.len(), 1)
+    assert_eq(produced[0].kind, "rename")
+    assert_eq(produced[0].from, Val("report"))
+    assert_eq(produced[0].to, Val("summarize"))
+    assert(!produced[0].targets[0].stable_id.is_empty())
+    rows :: semantic_blame(after_index, produced)
+    renamed :: rows.find((row) -> row.identity.ends_with("summarize")).expect("renamed definition")
+    assert_eq(renamed.operation.and_then((op) -> op.from), Val("report"))
+    hand_edit_rows :: semantic_blame(after_index, [])
+    assert(hand_edit_rows.all((row) -> row.operation.is_none()))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/semantic_ops.rs:48
+#Test("blame_matches_recorded_targets_without_text_inference") {
+    (root, path) :: fixture("receipt")
+    source :: "fn summarize() -[]> Int {{ return 1 }}\nfn run() {{ print(summarize()) }}\n"
+    fs.write(path, source).unwrap()
+    index :: open(path).expect("index")
+    op :: SemanticOp{kind: "rename", rule_id: Val("test"), from: Val("report"), to: Val("summarize"), node: None, match_template: None, replace_template: None, targets: [SemanticOpTarget{stable_id: "def:before", before: "report", after: "summarize", kind: "function", module_path: "run"}], files: []}
+    rows :: semantic_blame(index, [op])
+    assert(rows.find((row) -> row.identity.ends_with("summarize")).and_then((row) -> row.operation).is_some_and((operation) -> operation.kind == "rename"))
+    _ :: fs.remove_dir_all(root)
+}

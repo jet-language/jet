@@ -1,0 +1,50 @@
+// Rust: tests/dev_latency.rs:1-35
+// D-DEV3 wall-clock save-to-diagnostic budget. Run its sole test in an
+// isolated process: contention from sibling tests must not move the verdict.
+use std.[fs, env, process]
+use std.time.[Instant]
+use jet_devserver.[WatchSession, WATCH_COALESCE_MS, WATCH_POLL_INTERVAL_MS]
+
+// Rust: tests/dev_latency.rs:33
+const EXAMPLE: String = "Examples/features/collections/wordcount.jet"
+// Rust: tests/dev_latency.rs:38
+// Never widen the 200ms user promise to make a run pass.
+const BUDGET_MS: U128 = 200
+// Rust: tests/dev_latency.rs:42
+const ROUNDS: Int = 5
+// Rust: tests/dev_latency.rs:43
+const WATCH_LATENCY_MARGIN_MS: U128 = 20
+
+// Rust: tests/dev_latency.rs:48
+// GATE #4494: real filesystem/watch and monotonic clock primitives.
+fn measure_watch_latency_ms() -> U128 {
+    dir :: env.temp_dir().join("jet_dev_latency_watch_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("app.jet")
+    fs.write(file, "fn run() {{}}\n").unwrap()
+    watch := WatchSession.open(file).unwrap()
+    best := U128.MAX
+    loop round in 0..<ROUNDS {
+        source :: "fn run() {{ /* watch-round-{round} {"x".repeat(round + 1)} */ }}\n"
+        started :: Instant.now()
+        &watch.mark_edit_started()
+        fs.write(file, source).unwrap()
+        receipt :: &watch.poll().expect("watch edit")
+        elapsed :: started.elapsed().as_millis()
+        reported :: receipt.edit_to_visible_ms.expect("watch timing")
+        best = best.min(elapsed.max(reported))
+        &watch.acknowledge(receipt).unwrap()
+    }
+    _ :: fs.remove_dir_all(dir)
+    best
+}
+
+// Rust: tests/dev_latency.rs:79
+fn assert_watch_latency_contract() -> {
+    assert(WATCH_COALESCE_MS < 5, "watch coalescing must stay below 5ms, got {WATCH_COALESCE_MS}ms")
+    assert(WATCH_POLL_INTERVAL_MS <= 10, "idle watch polling must stay bounded, got {WATCH_POLL_INTERVAL_MS}ms")
+    best :: measure_watch_latency_ms()
+    budget :: (WATCH_COALESCE_MS as U128) + WATCH_LATENCY_MARGIN_MS
+    assert(best <= budget, "watch save observation {best}ms exceeds coalescing contract {budget}ms")
+}

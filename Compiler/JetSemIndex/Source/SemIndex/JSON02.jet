@@ -1,106 +1,19 @@
-// PORT-PENDING 2101 crates-jet-semindex-src-json-slice-1801: crates/jet-semindex/src/JSON.rs:1801-1902
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS                         ViewSourceProjection::Range => ViewProjectionFact::Range,
-//RS                     })
-//RS                     .collect(),
-//RS             })
-//RS             .collect(),
-//RS         mutable: provenance.mutable,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn convert_effects(facts: &jet_sema::SemIndexEffectFacts) -> Vec<EffectFact> {
-//RS     fn witness(
-//RS         function: &str,
-//RS         effect: &str,
-//RS         facts: &jet_sema::SemIndexEffectFacts,
-//RS         seen: &mut std::collections::BTreeSet<String>,
-//RS     ) -> Option<(Vec<String>, Vec<SourceSpan>)> {
-//RS         if !seen.insert(function.to_string()) {
-//RS             return None;
-//RS         }
-//RS         let summary = facts.summaries.get(function)?;
-//RS         if summary.direct.contains(effect) {
-//RS             let spans = summary
-//RS                 .direct_spans
-//RS                 .get(effect)
-//RS                 .copied()
-//RS                 .map(SourceSpan::from)
-//RS                 .into_iter()
-//RS                 .collect();
-//RS             return Some((vec![function.to_string()], spans));
-//RS         }
-//RS         if summary.maximal {
-//RS             let spans = summary
-//RS                 .maximal_span
-//RS                 .map(SourceSpan::from)
-//RS                 .into_iter()
-//RS                 .collect();
-//RS             return Some((vec![function.to_string()], spans));
-//RS         }
-//RS         for callee in &summary.edges {
-//RS             if !facts
-//RS                 .solved
-//RS                 .get(callee)
-//RS                 .is_some_and(|row| row.contains(effect))
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let mut branch_seen = seen.clone();
-//RS             if let Some((mut path, mut spans)) = witness(callee, effect, facts, &mut branch_seen) {
-//RS                 let call_span = summary
-//RS                     .memory
-//RS                     .calls
-//RS                     .iter()
-//RS                     .find(|call| call.callee == *callee)
-//RS                     .map(|call| SourceSpan::from(call.span));
-//RS                 path.insert(0, function.to_string());
-//RS                 if let Some(span) = call_span {
-//RS                     spans.insert(0, span);
-//RS                 }
-//RS                 return Some((path, spans));
-//RS             }
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     let mut out = Vec::new();
-//RS     for (function, summary) in &facts.summaries {
-//RS         let direct: Vec<String> = summary.direct.iter().cloned().collect();
-//RS         let callees: Vec<String> = summary.edges.iter().cloned().collect();
-//RS         let inferred: Vec<String> = facts
-//RS             .solved
-//RS             .get(function)
-//RS             .map(|s| s.iter().cloned().collect())
-//RS             .unwrap_or_default();
-//RS         let provenance = inferred
-//RS             .iter()
-//RS             .filter_map(|effect| {
-//RS                 witness(
-//RS                     function,
-//RS                     effect,
-//RS                     facts,
-//RS                     &mut std::collections::BTreeSet::new(),
-//RS                 )
-//RS                 .map(|(call_path, spans)| crate::Types::EffectProvenance {
-//RS                     effect: effect.clone(),
-//RS                     call_path,
-//RS                     spans,
-//RS                 })
-//RS             })
-//RS             .collect();
-//RS         out.push(EffectFact {
-//RS             function: function.clone(),
-//RS             direct,
-//RS             callees,
-//RS             inferred,
-//RS             maximal: summary.maximal,
-//RS             provenance,
-//RS         });
-//RS     }
-//RS     out.sort_by(|a, b| a.function.cmp(&b.function));
-//RS     out
-//RS }
-//RS 
-// END-PORT-PENDING 2101 crates/jet-semindex/src/JSON.rs:1801-1902
+// Rust: crates/jet-semindex/src/JSON.rs:1801-1808
+// Continuation of convert_view_provenance: the complete function is owned by
+// Compiler.JetSemIndex.Source.SemIndex.Convert.semindex_convert_view_provenance
+// (Convert.jet:244-264), mapped by packet 2100.
 
+// Rust: crates/jet-semindex/src/JSON.rs:1810
+// convert_effects is the existing canonical
+// Compiler.JetSemIndex.Source.SemIndex.Convert.semindex_convert_effects
+// (Convert.jet:310-323): direct/callee/inferred rows, maximal status,
+// deterministic provenance witnesses and function ordering stay there.
+
+// Rust: crates/jet-semindex/src/JSON.rs:1811
+// The nested witness is the same canonical owner's semindex_effect_witness
+// and semindex_effect_witness_entered (Convert.jet:270-309). Their ancestry
+// map restores each visited function before return, preserving Rust's
+// branch-local cycle detection without cloning a BTreeSet per outgoing edge.
+// Direct and maximal spans, first solved callee, call-path prepend and first
+// matching call span are preserved in those existing bodies.
+// No tests occur in this Rust range.

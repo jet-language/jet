@@ -1,0 +1,690 @@
+use Compiler.JetLSP.Tests.Integration.Semindex.[fixture, temp_fixture, fact]
+use jet_semindex.[build_symbol_db, open, open_symbols, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex, SemanticSymbolKind, SemanticVisibilityAnchor, SymbolKind, ViewProjectionFact, ViewSourceFact, SCHEMA_VERSION]
+use jet.Driver.[check_file_with_effect_facts]
+use jet.[check_document]
+use jet.CLI as CLI
+use jet_foundation.MachineOutput.[read_machine_output, MachineRecord]
+use std.[fs, env, process]
+use std.process.[Command]
+// GATE #4494: actual filesystem and CLI child-process providers.
+
+// Rust: tests/semindex.rs:52
+#Test("semantic_visibility_prefers_live_and_local_bindings") {
+    index :: SemanticSymbolIndex.new([
+        fact("builtin:keyword:answer", "answer", "answer", SemanticSymbolKind.Keyword, SemanticProvenance.Builtin { module: "syntax" }),
+        fact("import:test::api.answer::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Session),
+        fact("fn:session::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Session),
+        fact("session:binding:answer", "answer", "answer", SemanticSymbolKind.Local, SemanticProvenance.Session)
+    ])
+    assert_eq(index.resolve_visible("answer").expect("visible answer").identity, "session:binding:answer")
+    completions :: index.complete_visible("ans", none)
+    assert_eq(completions.len(), 1)
+    assert_eq(completions[0].identity, "session:binding:answer")
+}
+
+// Rust: tests/semindex.rs:98
+#Test("contextual_result_names_are_not_advertised_as_keywords") {
+    path :: temp_fixture("contextual_result_names.jet", "fn run() {{}}\n")
+    symbols :: open_symbols(path).expect("semantic symbols")
+    loop name in ["Ok", "Err"] {
+        assert(symbols.symbols().iter().all(symbol -> symbol.identity != "builtin:keyword:{name}" && !(symbol.name == name && symbol.kind == SemanticSymbolKind.Keyword)), "{name} must stay a contextual identifier, not a keyword")
+    }
+}
+
+// Rust: tests/semindex.rs:113
+#Test("numeric_destination_conversions_and_parse_are_cataloged") {
+    symbols :: SemanticSymbolIndex.language()
+    assert(symbols.lookup_qualified("Int.parse").is_some())
+    assert(symbols.lookup_qualified("Float.parse").is_some())
+    narrow :: symbols.lookup_qualified("F32.from_float").expect("F32 narrowing catalog entry")
+    assert(narrow.signature.ends_with("-> F32 !String"), "{narrow.signature}")
+    assert(symbols.lookup_qualified("U8.from_u64").is_some())
+    assert(symbols.lookup_qualified("Float.from_i8").is_some())
+    assert(symbols.lookup_qualified("I64.from_f32").is_some())
+    assert(symbols.lookup_qualified("F64.from_u32").is_some())
+}
+
+// Rust: tests/semindex.rs:132
+#Test("source_distinct_and_unit_conversion_members_are_cataloged") {
+    src :: "\n#Numeric UserID :: distinct Int\n#UnitFamily(Currency) {{ usd }}\n\nfn run() {{}}\n"
+    path :: temp_fixture("source_numeric_members.jet", src)
+    symbols :: open_symbols(path).expect("source semantic symbols")
+    user :: symbols.lookup_qualified("UserID.from_u8").expect("source distinct conversion member")
+    assert_eq(user.owner, "UserID")
+    assert_eq(user.signature, "UserID.from_u8(value: U8) -> UserID")
+    unit :: symbols.lookup_qualified("Usd.from_int").expect("unit-family conversion member")
+    assert_eq(unit.owner, "Usd")
+    user_offset :: src.find("#Numeric UserID").unwrap()
+    assert(symbols.complete_visible_at("from_u", "UserID", SemanticVisibilityAnchor { module_path: path.to_string_lossy(), offset: user_offset, session_top_level: false }).iter().any(symbol -> symbol.qualified_name == "UserID.from_u8"))
+}
+
+// Rust: tests/semindex.rs:169
+#Test("checked_text_contract_is_one_tooling_fact") {
+    src :: "\n#Error\nenum PatternError {{ Bad }}\n\nPattern :: distinct String\n\nimpl Pattern.CheckedText {{\n    type Error = PatternError\n\n    fn check(text: String) -[]> PatternError! {{\n        return\n    }}\n\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"\"\n    }}\n}}\n\nfn run() {{}}\n"
+    path :: temp_fixture("checked_text_contract.jet", src)
+    index :: open(path).expect("checked text semantic index")
+    definition :: index.definitions().iter().find(definition -> definition.name == "Pattern").expect("Pattern definition")
+    assert_eq(definition.nominal_base, "String")
+    contract :: definition.trait_contracts.iter().find(contract -> contract.trait_name == "CheckedText").expect("CheckedText contract")
+    assert_eq(contract.associated_types, [("Error", "PatternError")])
+    assert(contract.methods.iter().any(method -> method.contains("check")))
+    assert(contract.methods.iter().any(method -> method.contains("encode_hole")))
+    symbols :: open_symbols(path).expect("checked text semantic symbols")
+    symbol :: symbols.lookup_qualified("Pattern").expect("Pattern semantic symbol")
+    assert(symbol.signature.contains("type Pattern :: distinct String"))
+    assert(symbol.signature.contains("implements CheckedText"))
+    assert(symbol.signature.contains("type Error = PatternError"))
+    assert(symbol.signature.contains("encode_hole"))
+    json :: index.to_json()
+    assert(json.contains("\"nominal_base\":\"String\""))
+    assert(json.contains("\"trait\":\"CheckedText\""))
+    assert(json.contains("\"associated_types\":[{{\"name\":\"Error\""))
+    assert(index.dossier("Pattern").render_text().contains("trait contracts"))
+}
+
+// Rust: tests/semindex.rs:230
+#Test("affine_unit_point_and_delta_members_are_cataloged") {
+    src :: "\n#UnitFamily(Temperature, base: kelvin) {{\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}}\n\nfn run() {{}}\n"
+    path :: temp_fixture("source_affine_unit_members.jet", src)
+    symbols :: open_symbols(path).expect("source semantic symbols")
+    assert(symbols.lookup_qualified("CelsiusPoint.from_float").is_some())
+    assert(symbols.lookup_qualified("CelsiusDelta.from_float").is_some())
+    assert(symbols.lookup_qualified("Celsius.from_float").is_none())
+}
+
+// Rust: tests/semindex.rs:252
+#Test("semantic_visibility_orders_items_imports_and_builtins") {
+    builtin :: fact("builtin:keyword:answer", "answer", "answer", SemanticSymbolKind.Keyword, SemanticProvenance.Builtin { module: "syntax" })
+    import :: fact("import:test::api.answer::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Session)
+    item :: fact("fn:session::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Session)
+    assert_eq(SemanticSymbolIndex.new([builtin.clone(), import.clone()]).resolve_visible("answer").unwrap().identity, import.identity)
+    assert_eq(SemanticSymbolIndex.new([^builtin, ^import, item.clone()]).resolve_visible("answer").unwrap().identity, item.identity)
+}
+
+// Rust: tests/semindex.rs:293
+#Test("semantic_visibility_uses_current_module_context") {
+    current := fact("fn:current::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Source { module_path: "current.jet" })
+    current.module_path = "current.jet"
+    foreign_local := fact("local:other::answer", "answer", "answer", SemanticSymbolKind.Local, SemanticProvenance.Source { module_path: "other.jet" })
+    foreign_local.module_path = "other.jet"
+    index :: SemanticSymbolIndex.new([current.clone(), ^foreign_local])
+    assert_eq(index.resolve_visible_in("answer", "current.jet").unwrap().identity, current.identity)
+    assert_eq(index.complete_visible_in("ans", none, "current.jet").len(), 1)
+}
+
+// Rust: tests/semindex.rs:331
+#Test("semantic_visibility_retains_explicit_qualified_alternatives") {
+    index :: SemanticSymbolIndex.new([
+        fact("method:List.answer", "answer", "List.answer", SemanticSymbolKind.Member, SemanticProvenance.Builtin { module: "core" }),
+        fact("method:Map.answer", "answer", "Map.answer", SemanticSymbolKind.Member, SemanticProvenance.Builtin { module: "core" })
+    ])
+    assert_eq(index.resolve_visible("List.answer").unwrap().identity, "method:List.answer")
+    qualified :: index.complete_visible("", "List")
+    assert_eq(qualified.len(), 1)
+    assert_eq(qualified[0].identity, "method:List.answer")
+    assert(index.lookup_identity("method:Map.answer").is_some())
+}
+
+// Rust: tests/semindex.rs:363
+#Test("semindex_schema_version") {
+    // D-META-REFLECT2 adds availability states to callable facts.
+    assert_eq(SCHEMA_VERSION, 20)
+}
+
+// Rust: tests/semindex.rs:369
+#Test("semindex_projects_arithmetic_policy_and_exact_scope") {
+    path :: temp_fixture("arithmetic_policy.jet", "fn run() {{\n    #Arithmetic(.Wrapping) {{\n        value :: U8{{250}} + U8{{10}}\n    }}\n}}\n")
+    index :: open(path).expect("arithmetic policy indexes")
+    operation :: index.arithmetic().first().expect("arithmetic operation fact")
+    assert_eq(operation.operation, "add")
+    assert_eq(operation.policy, "Wrapping")
+    assert(operation.scope_span.start < operation.operation_span.start)
+    json :: index.to_json()
+    assert(json.contains("\"arithmetic\":[{{"))
+    assert(json.contains("\"policy\":\"Wrapping\""))
+    (diagnostics, bundle, facts) :: check_file_with_effect_facts(path.to_str().unwrap(), none, false)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    db :: build_symbol_db(bundle.expect("checked bundle"), facts)
+    hover :: db.hover_at(path.to_str().unwrap(), operation.operation_span.start).expect("arithmetic hover")
+    assert(hover.contains("fixed-width add: .Wrapping"), "{hover}")
+    assert(hover.contains("scope = "), "{hover}")
+}
+
+// Rust: tests/semindex.rs:403
+#Test("semindex_projects_terminal_and_reachability_graph") {
+    path :: temp_fixture("terminal_state_graph.jet", "\nstruct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn close() -> Door {{ Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -> Door {{ self }}\n    #Transition(Closed, Closed) fn hold(self: ^Door) -> Door {{ self }}\n}}\nfn run() {{}}\n")
+    index :: open(path).expect("state graph indexes")
+    graph :: index.state_graphs().iter().find(graph -> graph.owner == "Door").expect("Door graph")
+    closed :: graph.states.iter().find(state -> state.name == "Closed").unwrap()
+    open_state :: graph.states.iter().find(state -> state.name == "Open").unwrap()
+    orphan :: graph.states.iter().find(state -> state.name == "Orphan").unwrap()
+    assert(!closed.terminal)
+    assert(open_state.terminal)
+    assert_eq(closed.reachable, true)
+    assert_eq(open_state.reachable, true)
+    assert_eq(orphan.reachable, false)
+    assert(index.to_json().contains("\"state_graphs\":[{{"))
+    dossier :: index.dossier("Door")
+    assert_eq(dossier.state_graphs.len(), 1)
+    assert(dossier.render_text().contains("Open (terminal; reachable)"))
+    assert(dossier.to_json().contains("\"terminal\":true"))
+}
+
+// Rust: tests/semindex.rs:453
+#Test("semindex_hover_projects_terminal_and_reachability_facts") {
+    path :: temp_fixture("terminal_state_hover.jet", "struct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n")
+    (diagnostics, bundle, facts) :: check_file_with_effect_facts(path.to_str().unwrap(), none, false)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    checked :: bundle.expect("checked bundle")
+    db :: build_symbol_db(checked, facts)
+    closed :: db.hover.iter().find(hover -> hover.text.contains("Door.State.Closed")).expect("Closed hover")
+    assert(closed.text.contains("nonterminal; reachable"), "{closed:?}")
+    orphan :: db.hover.iter().find(hover -> hover.text.contains("Door.State.Orphan")).expect("Orphan hover")
+    assert(orphan.text.contains("terminal; unreachable"), "{orphan:?}")
+}
+
+// Rust: tests/semindex.rs:486
+#Test("semindex_state_symbols_keep_their_struct_owner") {
+    path :: temp_fixture("state_owner_symbols.jet", "\nstruct Door {{\n    state {{ Closed, Open }}\n}}\nimpl Door {{\n    #Transition(_, Door.State.Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n")
+    index :: open(path).expect("state symbols index")
+    closed :: index.definitions().iter().find(definition -> definition.qualified_name.ends_with("Door.State.Closed")).expect("owning struct state definition")
+    assert(match closed.kind { SymbolKind.EnumVariant { parent } -> parent == "Door.State"; else -> false })
+    closed_span :: closed.def_span
+    closed_qualified_name :: closed.qualified_name
+    marker_reference :: index.references_to("Closed").into_iter().find(reference -> reference.target.is_some_and(target -> target.def_span == closed_span)).expect("qualified marker reference resolves to the state section")
+    assert_eq(marker_reference.target.unwrap().def_span, closed_span)
+    source :: fs.read_to_string(path).expect("read state symbols fixture")
+    marker_text := source[marker_reference.span.start..marker_reference.span.end] // #4303
+    assert_eq(marker_text, "Closed")
+    assert(index.to_json().contains("\"name\":\"{closed_qualified_name}\""))
+}
+
+// Rust: tests/semindex.rs:537
+#Test("semindex_reconstructs_checked_output_callable") {
+    path :: fixture("tooling/output_callable.jet")
+    index :: open(path).expect("Output example indexes")
+    output :: index.outputs().first().expect("resolved Output fact")
+    assert_eq(output.binding, "app")
+    assert_eq(output.kind, "Executable")
+    assert_eq(output.name, "checked-output")
+    assert_eq(output.entry.name, "launch")
+    assert(output.entry.identity.ends_with("::launch"))
+    assert_eq(output.entry.failure_contract, "!Err")
+    assert_eq(output.entry.failure_source, "implicit default !Err")
+    assert_eq(output.entry.authority, "safe-jet")
+    assert_ne(output.entry.definition_span, output.entry.reference_span)
+    json :: index.to_json()
+    loop field in ["\"outputs\":[{{", "\"entry\":{{\"identity\"", "\"failure_contract\":\"!Err\"", "\"failure_source\":\"implicit default !Err\"", "\"authority\":\"safe-jet\"", "\"effects\":[\"IO\"]"] {
+        assert(json.contains(field), "semindex JSON missing {field}: {json}")
+    }
+}
+
+// Rust: tests/semindex.rs:567
+#Test("jet_inspect_semindex_reports_checked_output") {
+    output :: Command.new(OSPath.from(env.binary_path("jet"))).args(["inspect", "semindex", fixture("tooling/output_callable.jet").to_str().unwrap(), "--json"]).output().expect("jet inspect semindex")
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    json :: String.from_utf8_lossy(output.stdout)
+    assert(json.contains("\"outputs\":[{{\"binding\":\"app\""), "{json}")
+    assert(json.contains("\"identity\":\"output_callable::launch\""), "{json}")
+    assert(json.contains("\"failure_source\":\"implicit default !Err\""), "{json}")
+}
+
+// Rust: tests/semindex.rs:592
+#Test("jet_inspect_semindex_reports_explicit_failure_contract") {
+    path :: temp_fixture("inspect_explicit_failure.jet", "#Error\nenum Problem {{ Bad }}\nfn helper() -> Int Problem! {{ return Ok(1) }}\nfn run() {{}}\n")
+    output :: Command.new(OSPath.from(env.binary_path("jet"))).args(["inspect", "semindex", path.to_str().unwrap(), "--json"]).output().expect("jet inspect semindex")
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    json :: String.from_utf8_lossy(output.stdout)
+    assert(json.contains("\"failure_contract\":\"Int !Problem\""), "{json}")
+    assert(json.contains("\"failure_source\":\"explicit !Problem\""), "{json}")
+}
+
+// Rust: tests/semindex.rs:612
+#Test("semantic_symbols_carry_shared_docs_and_provenance") {
+    src :: "\n/// Scores one name.\n/// Example: score(\"Ada\")\nfn score(name: String) -> Int {{\n    return 1\n}}\n\nfn run() {{\n    local_total :: score(\"Ada\")\n    print(local_total)\n}}\n"
+    path :: temp_fixture("semantic_docs.jet", src)
+    symbols :: open_symbols(path).expect("semantic symbols")
+    // #1801: module identity is the sanitized stem, never the on-disk path.
+    score :: symbols.lookup_identity("fn:module:semantic_docs::score").expect("score identity")
+    assert_eq(score.signature, "fn score(name: String) -> Int\nfailure: Int (implicit default Err!)")
+    assert_eq(score.summary, "Scores one name.")
+    assert_eq(score.examples, ["score(\"Ada\")"])
+    assert(match score.provenance { SemanticProvenance.Source { module_path: _ } -> true; else -> false })
+    local :: symbols.lookup("local_total")
+    assert_eq(local.len(), 1)
+    assert_eq(local[0].kind, SemanticSymbolKind.Local)
+}
+
+// Rust: tests/semindex.rs:649
+#Test("tracked_float_symbol_exposes_its_binding_site") {
+    src :: "fn run() {{\n    #Track speed :: 3.5\n    origin :: prep {{ speed.$origin }}\n    print(origin?.source ?? \"missing\")\n}}\n"
+    path :: temp_fixture("tracked_float_binding.jet", src)
+    symbols :: open_symbols(path).expect("tracked-value semantic symbols")
+    speed :: symbols.lookup("speed").into_iter().find(symbol -> symbol.kind == SemanticSymbolKind.Local).expect("tracked local")
+    span :: speed.span.expect("tracked binding span")
+    binding_start :: src.find("speed ::").expect("binding name")
+    assert_eq(speed.signature, "speed: Float")
+    assert_eq(span.start, binding_start)
+    binding_text := src[span.start..span.end] // #4303
+    assert_eq(binding_text, "speed")
+    origin :: symbols.lookup("origin").into_iter().find(symbol -> symbol.kind == SemanticSymbolKind.Local).expect("origin fact binding")
+    assert_eq(origin.signature, "origin: OriginInfo?")
+    index :: open(path).expect("tracked-value semindex")
+    origin_read :: index.references_to("origin").into_iter().find_map(reference -> reference.fact).expect("typed origin semindex reference")
+    assert_eq(origin_read.name, "origin")
+    assert_eq(origin_read.kind, "Origin")
+    assert_eq(origin_read.type_name, "OriginInfo?")
+    assert(index.to_json().contains("\"fact\":{{\"name\":\"origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}}"))
+    fact_symbol :: symbols.lookup("origin").into_iter().find(symbol -> symbol.signature == "@origin: OriginInfo?").expect("typed origin semantic symbol")
+    assert_eq(fact_symbol.kind, SemanticSymbolKind.Member)
+}
+
+// Rust: tests/semindex.rs:693
+#Test("semantic_symbols_keep_module_and_member_collisions_distinct") {
+    src :: "\nmodule first {{\n    struct Item {{\n        value: Int\n    }}\n}}\n\nmodule second {{\n    struct Item {{\n        value: String\n    }}\n}}\n\nfn run() {{}}\n"
+    path :: temp_fixture("semantic_collisions.jet", src)
+    symbols :: open_symbols(path).expect("semantic symbols")
+    items :: symbols.lookup("Item")
+    assert_eq(items.len(), 2, "same spelling must retain module identity")
+    assert_ne(items[0].identity, items[1].identity)
+    values :: symbols.lookup_member("Item", "value")
+    assert_eq(values.len(), 2, "same member spelling must retain owner identity")
+    assert_ne(values[0].identity, values[1].identity)
+}
+
+// Rust: tests/semindex.rs:724
+#Test("semantic_symbols_include_language_builtins") {
+    path :: temp_fixture("semantic_builtins.jet", "fn run() {{}}\n")
+    symbols :: open_symbols(path).expect("semantic symbols")
+    filter :: symbols.lookup_qualified("List.filter").expect("List.filter")
+    assert_eq(filter.signature, "List.filter(f: fn(T) -> Bool) List<T>")
+    assert_eq(filter.summary, "Keeps items where f(item) is true.")
+    assert(match filter.provenance { SemanticProvenance.Builtin { module: _ } -> true; else -> false })
+    assert(symbols.complete("fil", "List").iter().any(s -> s.name == "filter"))
+}
+
+// Rust: tests/semindex.rs:743
+#Test("semantic_symbols_index_value_tail_callable") {
+    path :: temp_fixture("value_tail_callable.jet", "\nfn label(value: Int) -> String {{\n    if value == {{\n        1 -> {{ \"one\" }}\n        else -> {{ \"other\" }}\n    }}\n}}\n\nfn run() {{\n    print(label(1))\n}}\n")
+    symbols :: open_symbols(path).expect("value-tail callable should index")
+    label :: symbols.lookup("label").into_iter().find(symbol -> symbol.kind == SemanticSymbolKind.Function).expect("label function fact")
+    assert(label.signature.contains("value: Int"), "{label.signature}")
+    assert(label.signature.contains("String"), "{label.signature}")
+}
+
+// Rust: tests/semindex.rs:774
+#Test("semantic_symbols_include_module_and_selected_imports") {
+    root :: env.temp_dir().join("jet_semantic_imports_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("library.jet"), "pub fn score(name: String) -> Int {{ return 1 }}\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(main, "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() {{ print(imported_score(\"Ada\")) }}\n").unwrap()
+    symbols :: open_symbols(main).expect("import symbols")
+    assert_eq(symbols.lookup("api").len(), 1)
+    imported :: symbols.lookup("imported_score")
+    assert_eq(imported.len(), 1)
+    assert(imported[0].identity.starts_with("import:"))
+    assert(imported[0].signature.contains("score(name: String) Int"))
+    _ :: fs.remove_dir_all(root).ok()
+}
+
+// Rust: tests/semindex.rs:799
+#Test("semindex_hello_json_shape") {
+    idx :: open(fixture("basics/hello.jet")).expect("hello indexes")
+    json :: idx.to_json()
+    assert(json.starts_with('{'))
+    assert(json.contains("\"schema_version\":{SCHEMA_VERSION}"))
+    assert(json.contains("\"definition_facts\""))
+    assert(json.contains("\"definitions\""))
+    assert(json.contains("\"instances\""))
+    assert(json.contains("\"identity\""))
+    assert(json.contains("\"scope_identity\""))
+    assert(json.contains("\"members\""))
+    assert(json.contains("\"run\""))
+}
+
+// Rust: tests/semindex.rs:814
+#Test("semindex_identity_stable_across_reorder") {
+    a :: "\nmodule math {{\n    pub fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+    b :: "\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmodule math {{\n    pub fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+    path :: temp_fixture("identity_reorder.jet", a)
+    before :: open(path).expect("first fixture indexes")
+    fs.write(path, b).expect("rewrite semindex fixture")
+    after :: open(path).expect("reordered fixture indexes")
+    before_ids := before.definitions().iter().map(d -> d.identity.clone()).collect<[String]>()
+    after_ids := after.definitions().iter().map(d -> d.identity.clone()).collect<[String]>()
+    before_ids.sort()
+    after_ids.sort()
+    assert_eq(before_ids, after_ids)
+    assert(before_ids.iter().any(id -> id.contains("module:")))
+    assert(before_ids.iter().any(id -> id.contains("fn:")))
+    assert(before_ids.iter().any(id -> id.contains("type:") && id.contains("Point")))
+    assert(before_ids.iter().any(id -> id.contains("field:") && id.contains("Point.x")))
+    assert(before_ids.iter().any(id -> id.contains("variant:") && id.contains("Light.Red")))
+    assert(before_ids.iter().any(id -> id.contains("method:") && id.contains("Point.sum")))
+}
+
+// Rust: tests/semindex.rs:923
+#Test("returned_view_provenance_is_structured_and_changes_signature_id") {
+    path :: temp_fixture("view_provenance.jet", "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {{\n    if first {{ return left[0..1] }}\n    return right[0..1]\n}}\nfn run() {{}}\n")
+    union :: open(path).expect("multi-source view provenance indexes")
+    pick :: union.lookup("pick").expect("pick definition")
+    assert(match pick.kind { SymbolKind.Function { .. } -> true; else -> false })
+    assert_eq(pick.view_provenance.len(), 1)
+    provenance :: pick.view_provenance[0]
+    assert(provenance.output_path.is_empty())
+    assert_eq(provenance.sources.len(), 2)
+    assert_eq(provenance.sources[0].source, ViewSourceFact.Parameter(0))
+    assert_eq(provenance.sources[0].projections, [ViewProjectionFact.Range])
+    assert_eq(provenance.sources[1].source, ViewSourceFact.Parameter(1))
+    assert_eq(provenance.sources[1].projections, [ViewProjectionFact.Range])
+    assert(!provenance.mutable)
+    union_signature :: union.definition_facts().iter().find(fact -> fact.name == "pick").unwrap().signature_id
+    json :: union.to_json()
+    assert(json.contains("\"view_provenance\":[{{\"output_path\":[],\"sources\":[{{\"source\":{{\"kind\":\"parameter\",\"index\":0}}"))
+    assert(json.contains("\"source\":{{\"kind\":\"parameter\",\"index\":1}}"))
+    assert(json.contains("\"projections\":[{{\"kind\":\"range\"}}]"))
+    fs.write(path, "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {{ return right[0..1] }}\nfn run() {{}}\n").unwrap()
+    right :: open(path).expect("parameter-1 view provenance indexes")
+    right_pick :: right.lookup("pick").expect("pick definition")
+    assert_eq(right_pick.view_provenance[0].canonical(), "slot:$;parameter:1;access:read;path:range")
+    right_signature :: right.definition_facts().iter().find(fact -> fact.name == "pick").unwrap().signature_id
+    assert_ne(union_signature, right_signature)
+}
+
+// Rust: tests/semindex.rs:979
+#Test("aggregate_view_provenance_preserves_slots_and_changes_signature_id") {
+    source :: (right_owner: &String) -> "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\nfn pair(left: [Int], right: [Int]) -> Pair {{\n    left_view :: left[0..1]\n    right_view :: {right_owner}[0..1]\n    return Pair.{{ left: left_view, right: right_view }}\n}}\n\nfn run() {{}}\n"
+    path :: temp_fixture("aggregate_view_provenance.jet", source("right"))
+    distinct :: open(path).expect("aggregate view provenance indexes")
+    pair :: distinct.lookup("pair").expect("pair definition")
+    assert_eq(pair.view_provenance.len(), 2)
+    assert_eq(pair.view_provenance[0].output_path, ["left"])
+    assert_eq(pair.view_provenance[0].sources[0].source, ViewSourceFact.Parameter(0))
+    assert_eq(pair.view_provenance[1].output_path, ["right"])
+    assert_eq(pair.view_provenance[1].sources[0].source, ViewSourceFact.Parameter(1))
+    distinct_signature :: distinct.definition_facts().iter().find(fact -> fact.name == "pair").unwrap().signature_id
+    json :: distinct.to_json()
+    assert(json.contains("\"output_path\":[\"left\"],\"sources\":[{{\"source\":{{\"kind\":\"parameter\",\"index\":0}}"))
+    assert(json.contains("\"output_path\":[\"right\"],\"sources\":[{{\"source\":{{\"kind\":\"parameter\",\"index\":1}}"))
+    fs.write(path, source("left")).unwrap()
+    changed :: open(path).expect("changed aggregate view provenance indexes")
+    changed_signature :: changed.definition_facts().iter().find(fact -> fact.name == "pair").unwrap().signature_id
+    assert_ne(distinct_signature, changed_signature)
+}
+
+// Rust: tests/semindex.rs:1036
+#Test("semindex_structural_audit_reports_signature_change") {
+    a :: "\nstruct Point {{\n    x: Int\n}}\n\nfn run() {{}}\n"
+    b :: "\nstruct Point {{\n    x: Float\n}}\n\nfn run() {{}}\n"
+    path :: temp_fixture("audit_change.jet", a)
+    before :: open(path).expect("first fixture indexes")
+    fs.write(path, b).expect("rewrite semindex fixture")
+    after :: open(path).expect("changed fixture indexes")
+    audit :: before.structural_audit(after)
+    assert(audit.added.is_empty())
+    assert(audit.removed.is_empty())
+    assert(audit.changed.iter().any(id -> id.contains("Point")))
+}
+
+// Rust: tests/semindex.rs:1063
+#Test("semindex_structural_audit_tracks_callable_signature_changes") {
+    a :: "\nfn score(name: String) -> Int {{\n    return 1\n}}\n\nfn run() {{}}\n"
+    b :: "\nfn score(name: String, bonus: Int) -> Float {{\n    return 1.0\n}}\n\nfn run() {{}}\n"
+    path :: temp_fixture("audit_callable_change.jet", a)
+    before :: open(path).expect("first fixture indexes")
+    fs.write(path, b).expect("rewrite semindex fixture")
+    after :: open(path).expect("changed fixture indexes")
+    audit :: before.structural_audit(after)
+    assert(!audit.added.iter().any(id -> id.starts_with("fn:") && id.ends_with("::score")), "added: {audit.added:?}")
+    assert(!audit.removed.iter().any(id -> id.starts_with("fn:") && id.ends_with("::score")), "removed: {audit.removed:?}")
+    assert(audit.changed.iter().any(id -> id.starts_with("fn:") && id.ends_with("::score")))
+}
+
+// Rust: tests/semindex.rs:1107
+#Test("semindex_unified_loop_slots_and_state_scope_are_structural") {
+    src :: "fn run() {{\n    loop item in [1, 2, 3], 2 {{\n        print(item)\n    }}\n    loop cursor in 0..<1 {{\n        print(cursor)\n    }}\n}}\n"
+    path :: temp_fixture("unified_loop_slots.jet", src)
+    index :: open(path).expect("unified loops index")
+    slots :: index.structural_nodes().iter().map(node -> node.slot).collect<std.collections.BTreeSet<String>>()
+    loop slot in ["source", "stride", "init", "condition", "afterthought", "body"] {
+        assert(slots.contains(slot), "missing loop structural slot `{slot}`: {slots:?}")
+    }
+    inner_def :: index.definitions().iter().filter(def -> def.name == "cursor").max_by_key(def -> def.def_span.start).expect("inner state definition")
+    loop reference in index.references_to("cursor") {
+        assert_eq(reference.target.unwrap().def_span, inner_def.def_span)
+    }
+    out_of_scope :: check_document("state_scope.jet", "fn run() {{\n    loop cursor in 0..<1 {{}}\n    print(cursor)\n}}\n")
+    assert(out_of_scope.iter().any(diagnostic -> diagnostic.code == "E0107" && diagnostic.what.contains("cursor")), "state binding must end with the loop: {out_of_scope:?}")
+}
+
+// Rust: tests/semindex.rs:1164
+#Test("definition_ancestry_identity_ignores_signature_and_body_shape") {
+    path :: temp_fixture("ancestry_identity.jet", "fn score(n: Int) -> Int {{ return n + 1 }}\nfn run() {{ print(score(1)) }}\n")
+    before :: open(path).expect("first fixture indexes")
+    fs.write(path, "fn score(n: Float, bonus: Float) -> Float {{ return n * bonus }}\nfn run() {{ print(score(1.0, 2.0)) }}\n").unwrap()
+    after :: open(path).expect("changed fixture indexes")
+    before_score :: before.definition_facts().iter().find(f -> f.name == "score").unwrap()
+    after_score :: after.definition_facts().iter().find(f -> f.name == "score").unwrap()
+    assert_eq(before_score.stable_id, after_score.stable_id)
+    assert_ne(before_score.signature_id, after_score.signature_id)
+    assert_ne(before_score.content_id, after_score.content_id)
+}
+
+// Rust: tests/semindex.rs:1192
+#Test("semindex_effects_and_calls") {
+    idx :: open(fixture("effects/effects.jet")).expect("effects indexes")
+    assert(idx.lookup("report").is_some())
+    assert(!idx.call_edges().is_empty())
+    report_effects :: idx.effect_of("report").expect("report has effects")
+    assert(!report_effects.inferred.is_empty() || !report_effects.direct.is_empty())
+}
+
+// Rust: tests/semindex.rs:1201
+#Test("semindex_projects_omitted_inferred_effects") {
+    path :: temp_fixture("inferred_effect_signature.jet", "fn announce() {{ print(\"hello\") }}\nfn run() {{ announce() }}\n")
+    index :: open(path).expect("inferred effects index")
+    announce :: index.effect_of("announce").expect("announce effects")
+    assert_eq(announce.inferred, ["IO"])
+    assert(announce.callees.is_empty(), "direct effect has no call edge")
+    assert_eq(announce.provenance.len(), 1)
+    assert_eq(announce.provenance[0].effect, "IO")
+    assert_eq(announce.provenance[0].call_path, ["announce"])
+    assert_eq(announce.provenance[0].spans.len(), 1)
+    run :: index.effect_of("run").expect("run effects")
+    assert_eq(run.provenance[0].call_path, ["run", "inferred_effect_signature::announce"])
+    assert_eq(run.provenance[0].spans.len(), 2)
+}
+
+// Rust: tests/semindex.rs:1226
+#Test("semindex_projects_inline_module_inferred_effects") {
+    path :: temp_fixture("inline_inferred_effect_signature.jet", "module inner {{ pub fn announce() {{ print(\"hello\") }} }}\nfn run() {{ inner.announce() }}\n")
+    symbols :: open_symbols(path).expect("inline inferred effects index")
+    announce :: symbols.lookup("announce")
+    assert_eq(announce.len(), 1)
+    assert(announce[0].signature.contains("-[IO]>"), "{announce[0].signature}")
+}
+
+// Rust: tests/semindex.rs:1242
+#Test("semindex_effect_provenance_covers_open_and_trait_dispatch") {
+    path :: temp_fixture("effect_provenance_origins.jet", "trait Shape {{ fn area(self) -[IO]> Int }}\nfn dynamic(shape: Shape) -> Int {{ return shape.area() }}\nfn apply(f: fn() -> Int) -> Int {{ return f() }}\nfn stored(f: ^fn() -> Int) -> Int {{\n    g :: f\n    return g()\n}}\nfn run() {{}}\n")
+    index :: open(path).expect("effect provenance index")
+    apply :: index.effect_of("apply").expect("open callback effects")
+    assert(!apply.maximal)
+    assert(apply.inferred.is_empty())
+    assert(apply.provenance.is_empty())
+    stored :: index.effect_of("stored").expect("stored callback effects")
+    assert(stored.maximal)
+    assert_eq(stored.provenance.len(), stored.inferred.len())
+    assert(stored.provenance.iter().all(origin -> !origin.spans.is_empty()))
+    dynamic :: index.effect_of("dynamic").expect("trait dispatch effects")
+    io :: dynamic.provenance.iter().find(origin -> origin.effect == "IO").expect("IO provenance")
+    assert_eq(io.call_path.len(), 2)
+    assert_eq(io.spans.len(), 2)
+}
+
+// Rust: tests/semindex.rs:1273
+#Test("semindex_via_contracts_have_provenance_without_invocation") {
+    path :: temp_fixture("effect_via_provenance.jet", "fn bounded(act: fn() -[IO]>) -[via act]> {{}}\nfn open(act: fn()) -[via act]> {{}}\nfn run() {{}}\n")
+    index :: open(path).expect("via provenance index")
+    bounded :: index.effect_of("bounded").expect("bounded via effects")
+    assert_eq(bounded.inferred, ["IO"])
+    assert_eq(bounded.provenance.len(), 1)
+    assert_eq(bounded.provenance[0].spans.len(), 1)
+    unbounded :: index.effect_of("open").expect("unbounded via effects")
+    assert(unbounded.maximal)
+    assert_eq(unbounded.provenance.len(), unbounded.inferred.len())
+    assert(unbounded.provenance.iter().all(origin -> !origin.spans.is_empty()))
+}
+
+// Rust: tests/semindex.rs:1295
+#Test("semindex_preserves_via_effect_row_in_signatures") {
+    path :: temp_fixture("effect_via.jet", "fn invoke(act: fn() -[IO]>) -[via act]> {{ act() }}\nfn run() {{}}\n")
+    symbols :: open_symbols(path).expect("via function indexes")
+    invoke :: symbols.lookup("invoke").into_iter().next().expect("invoke symbol")
+    assert_eq(invoke.signature, "fn invoke(act: fn() -[IO]>) -[via act]>")
+}
+
+// Rust: tests/semindex.rs:1310
+#Test("semindex_references") {
+    idx :: open(fixture("basics/hello.jet")).expect("hello indexes")
+    assert(!idx.references_to("print").is_empty())
+}
+
+// Rust: tests/semindex.rs:1316
+#Test("semindex_rename_sites_keep_definition_identity_in_json") {
+    path :: temp_fixture("rename_anchor_identity.jet", "fn helper() -> Int {{ return 1 }}\nfn run() {{ print(helper()) }}\n")
+    index :: open(path).expect("rename anchor index")
+    definition :: index.definitions().iter().find(definition -> definition.name == "helper").expect("helper definition")
+    reference :: index.references().iter().find(reference -> reference.name == "helper").expect("helper reference")
+    target :: reference.target.expect("resolved helper target")
+    assert_eq(target.def_span, definition.def_span)
+    assert_eq(target.semantic_identity, definition.identity)
+    assert(index.to_json().contains("\"semantic_identity\":"))
+}
+
+// Rust: tests/semindex.rs:1342
+#Test("semindex_indexes_generated_fenced_range_names") {
+    path :: temp_fixture("fenced_range_names.jet", "fn run() {{\n    <: t1..t4 :> :: 1\n    print(<: t1, t2, t3, t4 :>)\n}}\n")
+    idx :: open(path).expect("fenced range fixture indexes")
+    generated :: idx.lookup("t4").expect("generated t4 definition")
+    assert(match generated.kind { SymbolKind.Local { mutable: false, ty } -> ty.is_some(); else -> false })
+    assert_eq(idx.references_to("t4").len(), 1)
+}
+
+// Rust: tests/semindex.rs:1360
+#Test("semindex_indexes_loop_label_definition_and_dot_exit_references") {
+    path :: temp_fixture("loop_label_refs.jet", "fn run() {{\n    outer :: loop {{\n        if true {{ next(outer) }}\n        break(outer)\n    }}\n}}\n")
+    idx :: open(path).expect("loop label fixture indexes")
+    outer :: idx.lookup("outer").expect("loop label definition")
+    assert(match outer.kind { SymbolKind.Local { mutable: false, ty } -> ty.is_none(); else -> false })
+    assert_eq(idx.references_to("outer").len(), 2)
+}
+
+// Rust: tests/semindex.rs:1378
+#Test("semindex_dossier_stitches_scattered_members") {
+    src :: "\ntrait DrawThing {{\n    fn render(self) -> String\n}}\n\nstruct Widget {{\n    title: String\n\n    fn label(self) -> String {{\n        return ~self.title\n    }}\n}}\n\nimpl Widget {{\n    fn size(self) -> Int {{\n        return 1\n    }}\n}}\n\nimpl Widget.DrawThing {{\n    fn render(self) -> String {{\n        return self.label()\n    }}\n}}\n\nfn run() {{\n    w :: Widget.{{title: \"ok\"}}\n    print(w.render())\n}}\n"
+    path :: temp_fixture("dossier_scattered.jet", src)
+    idx :: open(path).expect("dossier fixture indexes")
+    dossier :: idx.dossier("Widget")
+    signatures :: dossier.members.iter().map(m -> "{m.name}:{m.signature}").collect<[String]>()
+    assert(signatures.iter().any(s -> s == "title:title: String"))
+    assert(signatures.iter().any(s -> s.contains("label:fn label() -> String")), "{signatures:?}")
+    assert(signatures.iter().any(s -> s.contains("size:fn size() -> Int")))
+    assert(signatures.iter().any(s -> s.contains("render:fn render() -> String")))
+    json :: dossier.to_json()
+    assert(json.contains("\"target\":\"Widget\""))
+    assert(json.contains("\"trait_impl\""))
+    assert(json.contains("\"inherent_impl\""))
+}
+
+// Rust: tests/semindex.rs:1435
+#Test("semindex_dossier_preserves_method_call_contract") {
+    src :: "\nstruct Client {{\n    host: String\n}}\n\nimpl Client {{\n    fn connect(self, host: String, /, timeout seconds: Int{{30}}, *, tls enabled: Bool{{true}}, rest: ...String) -> String {{\n        return host\n    }}\n}}\n\nfn run() {{}}\n"
+    path :: temp_fixture("dossier_method_contract.jet", src)
+    dossier :: open(path).expect("method contract fixture indexes").dossier("Client")
+    connect :: dossier.members.iter().find(member -> member.name == "connect").expect("connect method fact")
+    assert(connect.signature.contains("timeout seconds: Int"), "{connect.signature}")
+    assert(connect.signature.contains("*, tls enabled: Bool"), "{connect.signature}")
+    assert(connect.signature.contains("rest: ...String"), "{connect.signature}")
+}
+
+// Rust: tests/semindex.rs:1476
+#Test("semindex_dossier_bypass_facts") {
+    // D-LINTPOLICY1=A: every spelled bypass surfaces in the program-wide dossier.
+    src :: "\nstruct Invoice {{\n    #allow(float_money)\n    price: Float,\n}}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {{\n    print(\"danger\")\n}}\n\nfn run() {{\n    #Unsafe(\"index checked against len\") {{\n        print(\"audited\")\n    }}\n    #Unsafe(\"risky_fn's contract is upheld here\") {{\n        risky_fn()\n    }}\n    fetch_it().drop(\"telemetry only\")\n}}\n\nfn fetch_it() -> Int {{\n    return 1\n}}\n"
+    path :: temp_fixture("dossier_bypass_facts.jet", src)
+    idx :: open(path).expect("bypass-fact fixture indexes")
+    dossier :: idx.dossier("run")
+    kinds :: dossier.bypass_facts.iter().map(b -> b.kind).collect<[String]>()
+    assert(kinds.contains("lint_allow"), "expected a lint_allow bypass fact, got: {kinds:?}")
+    assert(kinds.contains("unsafe_region"), "expected an unsafe_region bypass fact, got: {kinds:?}")
+    assert(kinds.contains("unsafe_fn"), "expected an unsafe_fn bypass fact, got: {kinds:?}")
+    assert(kinds.contains("explicit_drop"), "expected an explicit_drop bypass fact, got: {kinds:?}")
+    allow :: dossier.bypass_facts.iter().find(b -> b.kind == "lint_allow").expect("lint_allow fact present")
+    assert_eq(allow.site, "price")
+    assert_eq(allow.detail, "float_money")
+    dropped :: dossier.bypass_facts.iter().find(b -> b.kind == "explicit_drop").expect("explicit_drop fact present")
+    assert_eq(dropped.detail, "telemetry only")
+    json :: dossier.to_json()
+    assert(json.contains("\"bypass_facts\""))
+    assert(json.contains("\"lint_allow\""))
+    text :: dossier.render_text()
+    assert(text.contains("bypass facts"))
+    assert(text.contains("float_money"))
+}
+
+// Rust: tests/semindex.rs:1555
+#Test("jet_semindex_cli_json_smoke") {
+    bin :: OSPath.from(env.binary_path("jet"))
+    path :: fixture("basics/hello.jet")
+    out :: Command.new(bin).args(["inspect", "semindex", path.to_str().unwrap(), "--json"]).output().expect("jet inspect semindex")
+    assert(out.status.success(), "stderr: {String.from_utf8_lossy(out.stderr)}")
+    text :: String.from_utf8_lossy(out.stdout)
+    assert_eq(read_machine_output(text).unwrap(), [MachineRecord.Status])
+    assert(text.starts_with("{{\"schema\":\"jet.status/v1\""))
+    assert_eq(text.matches("\"schema\":\"jet.status/v1\"").count(), 1, "semindex must emit one status envelope, not nest a second one: {text}")
+    assert(text.contains("\"schema_version\":{SCHEMA_VERSION}"))
+}
+
+// Rust: tests/semindex.rs:1583
+#Test("shape6_inspect_routes_and_bare_snapshots") {
+    bin :: OSPath.from(env.binary_path("jet"))
+    help_output :: Command.new(bin).arg("help").output().unwrap()
+    assert(help_output.status.success())
+    help :: String.from_utf8(^help_output.stdout).unwrap()
+    loop group_name in ["inspect", "registry"] {
+        group :: CLI.command_group(group_name).unwrap()
+        group_label :: CLI.command_group_label(group_name)
+        expected_usage :: group.actions.iter().flat_map(action -> action.usage.lines().map(usage -> "  jet {group.name} {usage:<48} {action.summary}\n")).collect<String>()
+        assert(help.contains("{group_label} Commands:\n{expected_usage}"), "jet help did not render exact {group_name} usage")
+        group_help :: Command.new(bin).args([group_name, "help"]).output().unwrap()
+        assert(group_help.status.success())
+        assert_eq(String.from_utf8(^group_help.stdout).unwrap(), "jet {group_name} — {group.summary}\n{expected_usage}")
+        loop action in group.actions {
+            loop usage in action.usage.lines() {
+                command :: "jet {group.name} {usage}"
+                assert(help.contains(command), "jet help omitted {command}")
+            }
+        }
+    }
+    loop verb in ["build", "run", "test", "fmt", "search"] {
+        assert(CLI.is_canonical_top_level(verb), "jet {verb} must stay flat")
+        assert(CLI.moved_command(verb).is_none(), "jet {verb} must not redirect")
+    }
+    loop (verb, handler_text) in [
+        ("schema", "`jet inspect schema` needs a verb"),
+        ("expand", "`jet inspect expand` needs an entry file"),
+        ("live", "jet inspect live needs a process id"),
+        ("semindex", "`jet inspect semindex` needs an entry file")
+    ] {
+        grouped :: Command.new(bin).args(["inspect", verb]).output().unwrap()
+        assert(!grouped.status.success(), "jet inspect {verb} needs test input")
+        stderr :: String.from_utf8(^grouped.stderr).unwrap()
+        assert(stderr.contains(handler_text), "jet inspect {verb}: {stderr}")
+        bare :: Command.new(bin).args([verb, "sentinel"]).output().unwrap()
+        assert_eq(bare.status.code(), 2, "bare jet {verb}")
+        assert_eq(String.from_utf8(^bare.stderr).unwrap(), "Error [E2101]: `{verb}` moved under `jet inspect`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet inspect {verb} sentinel`.\n")
+    }
+}

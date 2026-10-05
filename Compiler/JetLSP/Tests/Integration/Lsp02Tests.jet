@@ -1,0 +1,614 @@
+use Compiler.JetLSP.Tests.Integration.Lsp.[jet_bin, lock_lsp_process, send_msg, read_msg, request_lsp, request_lsp_collect, published_diagnostics_for, error_count, json_string, json_object_field, assert_json_values_equal]
+use Compiler.JetLSP.Tests.Integration.Lsp02.[run_transcript, TranscriptStep, costly_source]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_get, parse_json]
+use jet.[check_document]
+use jet.LSP as LSP
+use jetpack.Discovery as Discovery
+use common.[Scratch]
+use std.[fs, env, process]
+use std.process.[Command, Stdio]
+// GATE #4494: real process/pipe/mutex/filesystem operations, no mock server.
+
+// Rust: tests/lsp.rs:1783
+#Test("lsp_on_type_formatting_returns_brace_edits") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    cases :: [
+        ("fn run() {{\n statement }}\n", 1, 0, "\"\\n\"", ["\"newText\":\"    \"", "\"newText\":\"\\n\""]),
+        ("fn run() {{\n}}\n", 1, 0, "\"\\n\"", ["\"newText\":\"    \""]),
+        ("fn run() {{\n    if ok {{\n value }}\n}}\n", 2, 0, "\"\\n\"", ["\"newText\":\"        \"", "\"newText\":\"\\n    \""]),
+        ("fn run() {{\n    value\n        }}\n", 2, 9, "\"}}\"", ["\"newText\":\"\""]),
+        ("fn run() {{\n value\n", 1, 0, "\"\\n\"", ["\"result\":[]"]),
+        ("fn run() {{\r\n café }}\r\n", 1, 0, "\"\\n\"", ["\"newText\":\"    \"", "\"newText\":\"\\r\\n\""]),
+        ("fn run() {{ /* {{\nvalue }} */ }}\n", 1, 0, "\"\\n\"", ["\"result\":[]"]),
+        ("fn run() {{ SQL{{\n\"value\"}} }}\n", 1, 0, "\"\\n\"", ["\"result\":[]"]),
+        ("// }}\n", 0, 4, "\"}}\"", ["\"result\":[]"])
+    ]
+    loop (index, (source, line, character, trigger, expected)) in cases.into_iter().enumerate() {
+        uri :: "file:///tmp/lsp_on_type_formatting_test_{index}.jet"
+        run_transcript(source, [
+            TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: if index == 0 -> ["documentOnTypeFormattingProvider", "moreTriggerCharacter"] else -> [] },
+            TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+            TranscriptStep.Open { uri: uri, expect_notification: true },
+            TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/onTypeFormatting\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{line},\"character\":{character}}},\"ch\":{trigger},\"options\":{{\"tabSize\":4,\"insertSpaces\":true}}}}}}", expect_contains: expected },
+            TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+        ])
+    }
+}
+
+// Rust: tests/lsp.rs:1889
+#Test("lsp_execute_command_impact_returns_report") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn add(a: Int, b: Int) -> Int {{\n    return a + b\n}}\nfn run() {{\n    print(add(1, 2))\n}}\n"
+    uri :: "file:///tmp/lsp_execute_impact_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["executeCommandProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/executeCommand\",\"params\":{{\"command\":\"jet.impact\",\"arguments\":[\"{uri}\",\"add\",2]}}}}", expect_contains: ["\"symbol\":\"add\"", "\"found\":true", "\"upstream_callers\""] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:1935
+#Test("lsp_budget_reports_projects_canonical_report_without_measuring") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    root :: env.temp_dir().join("lsp_budget_projection_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root.join("src")).unwrap()
+    fs.write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    source :: "module perf.package {{\n    budgets: [Budget{{ name: \"api\", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }}]\n}}\npub fn api() {{}}\nfn run() {{}}\n"
+    // D-VERDICT-678-1: budget discovery uses canonical run.jet, never main.jet.
+    path :: root.join("src/run.jet")
+    fs.write(path, source).unwrap()
+    measured :: Command.new(jet).args(["budget", "check", "--json"]).current_dir(root).output().unwrap()
+    assert_eq(measured.status.code(), 0, "{String.from_utf8_lossy(measured.stderr)}")
+    reports :: root.join(".jet/perf/reports")
+    before :: fs.read_dir(reports).unwrap().map(entry -> {
+        path :: entry.unwrap().path()
+        (path, fs.metadata(path).unwrap().modified().unwrap())
+    }).collect<[(OSPath, std.time.SystemTime)]>()
+    uri :: "file://{path.display()}"
+    child := Command.new(jet).args(["self", "lsp"]).current_dir(root).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().unwrap()
+    stdin := child.stdin.take().unwrap()
+    stdout := child.stdout.take().unwrap()
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    assert(read_msg(&stdout).contains("jet.budgetReports"))
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+    assert(read_msg(&stdout).contains("publishDiagnostics"))
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/executeCommand\",\"params\":{{\"command\":\"jet.budgetReports\",\"arguments\":[\"{uri}\"]}}}}")
+    response :: read_msg(&stdout)
+    assert(response.contains("\"mode\":\"read_only\""), "{response}")
+    assert(response.contains("\"budget_id\":\"package:api\""), "{response}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    drop(^stdin)
+    _ :: child.wait()
+    after :: fs.read_dir(reports).unwrap().map(entry -> {
+        path :: entry.unwrap().path()
+        (path, fs.metadata(path).unwrap().modified().unwrap())
+    }).collect<[(OSPath, std.time.SystemTime)]>()
+    assert_eq(before, after, "LSP projection must not rewrite reports")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/lsp.rs:2046
+#Test("lsp_c_style_snippet_autocorrects") {
+    src :: "fn greet() {{\n    println(\"ok\");\n}}\n\nfn run() {{\n    count :: 1\n    println(\"hi\");\n}}\n"
+    diags :: check_document("snippet.jet", src)
+    assert(diags.iter().any(d -> d.code == "E0037"), "println -> print")
+    assert(diags.iter().all(d -> d.code != "E0008"), "def/func teaching is paused under D-S14-PAUSE")
+    edits := diags.iter().filter_map(d -> d.edit.clone()).collect()
+    edits.sort_by_key(e -> std.cmp.Reverse(e.span.start))
+    fixed := src
+    loop edit in edits { fixed = LSP.apply_edit(fixed, edit) }
+    assert(!fixed.contains("val count"))
+    // E0037 is still a live single-token fix.
+    assert(fixed.contains("print("))
+    assert(!fixed.contains("println("))
+    assert(fixed.contains("fn greet"))
+}
+
+// Rust: tests/lsp.rs:2158
+#Test("lsp_completion_returns_items") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn greet(name: String) {{\n    print(name)\n}}\nfn connect(host: String, /, *, timeout seconds: Int{{30}}) -> String {{\n    return host\n}}\nfn run() {{\n    \n}}\n"
+    uri :: "file:///tmp/lsp_completion_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["completionProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":7,\"character\":4}}}}}}", expect_contains: ["items", "greet", "connect", "fn connect(host: String, /, *, timeout seconds: Int) -[]> String"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:2204
+#Test("lsp_builtin_member_completion_uses_shared_semantic_symbol_docs") {
+    src :: "fn run() {{\n    items :: [1, 2, 3]\n    items.f\n}}\n"
+    uri :: "file:///tmp/lsp_shared_symbols.jet"
+    run_transcript(src, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["completionProvider"] },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":2,\"character\":11}}}}}}", expect_contains: ["\"label\":\"filter\"", "Keeps items where f(item) is true.", "core.collections"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:2240
+#Test("lsp_completion_returns_snippets_and_auto_imports") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    root :: env.temp_dir().join("lsp_auto_import_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root.join("app")).expect("create LSP auto-import dirs")
+    fs.create_dir_all(root.join("src")).expect("create LSP source dirs")
+    fs.write(root.join("app/store.jet"), "fn ImportedHelper() -> Int {{\n    return 1\n}}\nfn run() {{}}\n").expect("write imported module")
+    path :: root.join("src/main.jet")
+    uri :: "file://{path.display()}"
+    root_uri :: "file://{root.display()}"
+    source :: "fn run() {{\n    \n}}\n"
+    fs.write(path, source).expect("write main module")
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":\"{root_uri}\",\"capabilities\":{{}}}}}}", expect_contains: ["completionProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":1,\"character\":4}}}}}}", expect_contains: ["\"label\":\"bind immut (inferred)\"", "\"insertTextFormat\":2", "\"label\":\"ImportedHelper\"", "\"additionalTextEdits\"", "use app.store\\n"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/lsp.rs:2302
+#Test("lsp_completion_uses_local_discovery_index_for_packages_and_options") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    root :: env.temp_dir().join("lsp_discovery_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create discovery fixture dir")
+    index := Discovery.Index.default()
+    index.add_package(Discovery.PackageRecord {
+        source: "default", name: "postgres_16", reference: "postgres_16@default", version: "16.4",
+        platforms: ["linux"], docs: "Postgres fixture from local discovery index", provenance: "test",
+        tier: "not-registry", gate_status: "not-applicable",
+        options: [
+            Discovery.OptionField { name: "ready", default: "process/port probe", docs: "Command polled until ready." },
+            Discovery.OptionField { name: "data_dir", default: ".jet/services/db/data", docs: "Persisted state directory." }
+        ]
+    })
+    Discovery.write(root, index).expect("write local discovery index")
+    path :: root.join("main.jet")
+    uri :: "file://{path.display()}"
+    source :: "module env.dev {{\n    env.dev: Env{{\n        packages: [default.postgres_16]\n        services: {{ db: Service{{ re }}, configured: Service{{ ready: false }} }}\n    }}\n}}\n"
+    fs.write(path, source).expect("write LSP source")
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    init :: read_msg(&stdout)
+    assert(init.contains("completionProvider"), "init: {init}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
+    send_msg(&stdin, open)
+    _ :: read_msg(&stdout)
+    package_offset :: source.find("default.post").unwrap() + "default.post".len()
+    package_pos :: LSP.byte_offset_to_lsp(source, package_offset)
+    package_req :: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{package_pos.line},\"character\":{package_pos.character}}}}}}}"
+    send_msg(&stdin, package_req)
+    package_resp :: read_msg(&stdout)
+    assert(package_resp.contains("postgres_16") && package_resp.contains("package from default"), "package discovery completion missing: {package_resp}")
+    option_offset :: source.find("Service{{ re").unwrap() + "Service{{ re".len()
+    option_pos :: LSP.byte_offset_to_lsp(source, option_offset)
+    option_req :: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{option_pos.line},\"character\":{option_pos.character}}}}}}}"
+    send_msg(&stdin, option_req)
+    option_resp :: read_msg(&stdout)
+    assert(option_resp.contains("\"ready\"") && option_resp.contains("Command polled until ready."), "option discovery completion missing: {option_resp}")
+    package_hover_offset :: source.find("default.postgres_16").unwrap() + "default.po".len()
+    package_hover_pos :: LSP.byte_offset_to_lsp(source, package_hover_offset)
+    package_hover_req :: "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{package_hover_pos.line},\"character\":{package_hover_pos.character}}}}}}}"
+    send_msg(&stdin, package_hover_req)
+    package_hover_resp :: read_msg(&stdout)
+    assert(package_hover_resp.contains("postgres_16") && package_hover_resp.contains("16.4") && package_hover_resp.contains("maintainer liveness: not-applicable"), "package discovery hover missing: {package_hover_resp}")
+    option_hover_offset :: source.find("ready: false").unwrap() + "rea".len()
+    option_hover_pos :: LSP.byte_offset_to_lsp(source, option_hover_offset)
+    option_hover_req :: "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{option_hover_pos.line},\"character\":{option_hover_pos.character}}}}}}}"
+    send_msg(&stdin, option_hover_req)
+    option_hover_resp :: read_msg(&stdout)
+    assert(option_hover_resp.contains("Environment option `ready`") && option_hover_resp.contains("Command polled until ready."), "option discovery hover missing: {option_hover_resp}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
+    drop(^stdin)
+    _ :: child.wait()
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/lsp.rs:2444
+#Test("lsp_document_links_and_code_lenses") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    root :: env.temp_dir().join("lsp_links_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root.join("app")).expect("create LSP link dirs")
+    fs.create_dir_all(root.join("src")).expect("create LSP source dirs")
+    fs.write(root.join("app/store.jet"), "fn run() {{}}\n").expect("write link target")
+    path :: root.join("src/main.jet")
+    uri :: "file://{path.display()}"
+    root_uri :: "file://{root.display()}"
+    target_uri :: "file://{root.join("app/store.jet").display()}"
+    source :: "use app.store\n\nfn run() {{\n    print(1)\n}}\n\n#Test(\"smoke\") {{\n    expect(1 == 1)\n}}\n"
+    fs.write(path, source).expect("write link source")
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":\"{root_uri}\",\"capabilities\":{{}}}}}}", expect_contains: ["documentLinkProvider", "codeLensProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentLink\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}", expect_contains: ["\"target\"", target_uri, "\"start\":{{\"line\":0,\"character\":4}}"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"workspace/symbol\",\"params\":{{\"query\":\"run\"}}}}", expect_contains: ["\"location\"", target_uri] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/codeLens\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}", expect_contains: ["\"title\":\"Run file\"", "\"command\":\"jet.runFile\"", "\"title\":\"Run test\"", "\"command\":\"jet.testFile\""] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/lsp.rs:2522
+#Test("lsp_signature_help_returns_active_parameter") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn connect(host: String, /, timeout seconds: Int{{30}}, *, tls enabled: Bool{{true}}, rest: ...String) -[IO]> String {{\n    return host\n}}\nfn run() {{\n    r :: connect(\"db\", tls: true, timeout: 5)\n}}\n"
+    uri :: "file:///tmp/lsp_signature_help_test.jet"
+    call_start :: source.find("connect(\"db\", tls: true, timeout: 5)").unwrap()
+    tls_end :: call_start + "connect(\"db\", tls: true".len()
+    timeout_end :: call_start + "connect(\"db\", tls: true, timeout: 5".len()
+    tls_position :: LSP.byte_offset_to_lsp(source, tls_end)
+    timeout_position :: LSP.byte_offset_to_lsp(source, timeout_end)
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["signatureHelpProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/signatureHelp\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{tls_position.line},\"character\":{tls_position.character}}}}}}}", expect_contains: ["fn connect(host: String, /, timeout seconds: Int, *, tls enabled: Bool, rest: ...String) -[IO]> String", "\"activeParameter\":2", "tls enabled: Bool"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/signatureHelp\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{timeout_position.line},\"character\":{timeout_position.character}}}}}}}", expect_contains: ["\"activeParameter\":1", "timeout seconds: Int"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:2585
+#Test("lsp_document_symbol_returns_checked_outline") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "struct Point {{ x: Int }}\nenum Color {{ Red Green }}\nfn add(a: Int, b: Int) -> Int {{\n    return a + b\n}}\n"
+    uri :: "file:///tmp/lsp_document_symbol_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["documentSymbolProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}", expect_contains: ["\"name\":\"Point\"", "\"kind\":23", "\"name\":\"Color\"", "\"kind\":10", "\"name\":\"add\"", "\"kind\":12"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:2633
+#Test("lsp_document_symbol_returns_symbols_for_imported_package_module") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    root :: Scratch.new("lsp-document-symbol-imported")
+    fs.create_dir_all(root.join("app")).expect("create imported symbol module directory")
+    fs.create_dir_all(root.join("src")).expect("create imported symbol root directory")
+    fs.write(root.join("package.jet"), "name: \"lsp-symbols\"\nversion: \"0.1.0\"\n").expect("write imported symbol package manifest")
+    main_path :: root.join("src/main.jet")
+    imported_path :: root.join("app/plan.jet")
+    main_source :: "use app.plan\nfn run() {{}}\n"
+    imported_source :: "struct ImportedPlan {{ value: Int }}\nfn imported_helper(value: Int) -> Int {{\n    return value\n}}\n"
+    fs.write(main_path, main_source).expect("write imported symbol root module")
+    fs.write(imported_path, imported_source).expect("write imported symbol module")
+    main_uri :: "file://{main_path.display()}"
+    imported_uri :: "file://{imported_path.display()}"
+    root_uri :: "file://{root.path.display()}"
+    child := Command.new(jet).args(["self", "lsp"]).current_dir(root.path).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp for imported symbols")
+    stdin := child.stdin.take().expect("imported symbols stdin")
+    stdout := child.stdout.take().expect("imported symbols stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":\"{root_uri}\",\"capabilities\":{{}}}}}}")
+    initialize :: read_msg(&stdout)
+    assert(initialize.contains("documentSymbolProvider"), "initialize must advertise document symbols: {initialize}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{main_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(main_source)}}}}}}}")
+    main_diagnostics :: read_msg(&stdout)
+    assert(main_diagnostics.contains("publishDiagnostics"), "main module open must publish diagnostics: {main_diagnostics}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{imported_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(imported_source)}}}}}}}")
+    imported_diagnostics :: read_msg(&stdout)
+    assert(imported_diagnostics.contains("publishDiagnostics"), "imported module open must publish diagnostics: {imported_diagnostics}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{imported_uri}\"}}}}}}")
+    symbols :: read_msg(&stdout)
+    assert(symbols.contains("\"result\":["), "documentSymbol must return an array: {symbols}")
+    assert(symbols.contains("\"name\":\"ImportedPlan\""), "imported module symbols must include ImportedPlan: {symbols}")
+    assert(symbols.contains("\"kind\":23"), "imported module symbols must classify structs: {symbols}")
+    assert(symbols.contains("\"name\":\"imported_helper\""), "imported module symbols must include imported_helper: {symbols}")
+    assert(symbols.contains("\"kind\":12"), "imported module symbols must classify functions: {symbols}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    shutdown :: read_msg(&stdout)
+    assert(shutdown.contains("\"result\""), "shutdown must return a result: {shutdown}")
+    drop(^stdin)
+    _ :: child.wait()
+}
+
+// Rust: tests/lsp.rs:2756
+#Test("lsp_wave2_navigation_features") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "// file note one\n// file note two\n\nfn add(a: Int, b: Int) -> Int {{\n    total :: a + b\n    return total\n}}\n\nfn run() {{\n    value :: add(1, 2)\n    print(value)\n}}\n"
+    uri :: "file:///tmp/lsp_wave2_nav_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["workspaceSymbolProvider", "foldingRangeProvider", "documentHighlightProvider", "selectionRangeProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/symbol\",\"params\":{{\"query\":\"add\"}}}}", expect_contains: ["\"name\":\"add\"", "\"kind\":12", "\"location\""] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/foldingRange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}", expect_contains: ["\"kind\":\"comment\"", "\"startLine\":0", "\"endLine\":1", "\"kind\":\"region\"", "\"startLine\":3", "\"endLine\":6"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/documentHighlight\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":9,\"character\":14}}}}}}", expect_contains: ["\"kind\":3", "\"kind\":2", "\"range\""] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/selectionRange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"positions\":[{{\"line\":9,\"character\":14}}]}}}}", expect_contains: ["\"parent\"", "\"start\":{{\"line\":9,\"character\":13}}", "\"end\":{{\"line\":9,\"character\":16}}"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:2840
+#Test("lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn add(a: Int, b: Int) -> Int {{\n    return a + b\n}}\n\nfn caller() {{\n    result :: add(1, 2)\n    print(result)\n}}\n\nfn run() {{\n    caller()\n}}\n"
+    uri :: "file:///tmp/lsp_wave3_power_test.jet"
+    add_item :: "{{\"name\":\"add\",\"kind\":12,\"uri\":\"{uri}\",\"range\":{{\"start\":{{\"line\":0,\"character\":3}},\"end\":{{\"line\":0,\"character\":6}}}},\"selectionRange\":{{\"start\":{{\"line\":0,\"character\":3}},\"end\":{{\"line\":0,\"character\":6}}}}}}"
+    caller_item :: "{{\"name\":\"caller\",\"kind\":12,\"uri\":\"{uri}\",\"range\":{{\"start\":{{\"line\":4,\"character\":3}},\"end\":{{\"line\":4,\"character\":9}}}},\"selectionRange\":{{\"start\":{{\"line\":4,\"character\":3}},\"end\":{{\"line\":4,\"character\":9}}}}}}"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["\"prepareProvider\": true", "\"range\": true", "\"callHierarchyProvider\": true"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/prepareRename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}}}}}}", expect_contains: ["\"placeholder\":\"add\"", "\"start\":{{\"line\":0,\"character\":3}}", "\"end\":{{\"line\":0,\"character\":6}}"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/prepareRename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":0}}}}}}", expect_contains: ["\"error\"", "`fn` is Jet syntax, not a name you can rename"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/semanticTokens/range\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":2,\"character\":1}}}}}}}}", expect_contains: ["\"data\":["] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/prepareCallHierarchy\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}}}}}}", expect_contains: ["\"name\":\"add\"", "\"kind\":12"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"callHierarchy/incomingCalls\",\"params\":{{\"item\":{add_item}}}}}", expect_contains: ["\"from\"", "\"name\":\"caller\"", "\"fromRanges\""] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"callHierarchy/outgoingCalls\",\"params\":{{\"item\":{caller_item}}}}}", expect_contains: ["\"to\"", "\"name\":\"add\"", "\"fromRanges\""] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:2946
+#Test("lsp_type_hierarchy_trait_impls") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "trait Renderable {{\n    fn render(self) -> String\n}}\n\nstruct Button {{\n    label: String\n    impl Renderable {{\n        fn render(self) -> String {{\n            return self.label\n        }}\n    }}\n}}\n\nfn run() {{\n    b :: Button{{label: \"ok\"}}\n    print(b.render())\n}}\n"
+    uri :: "file:///tmp/lsp_type_hierarchy_test.jet"
+    button_item :: "{{\"name\":\"Button\",\"kind\":23,\"uri\":\"{uri}\"}}"
+    trait_item :: "{{\"name\":\"Renderable\",\"kind\":11,\"uri\":\"{uri}\"}}"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["\"typeHierarchyProvider\": true"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/prepareTypeHierarchy\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":4,\"character\":7}}}}}}", expect_contains: ["\"name\":\"Button\"", "\"kind\":23"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"typeHierarchy/supertypes\",\"params\":{{\"item\":{button_item}}}}}", expect_contains: ["\"name\":\"Renderable\"", "\"kind\":11"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"typeHierarchy/subtypes\",\"params\":{{\"item\":{trait_item}}}}}", expect_contains: ["\"name\":\"Button\"", "\"kind\":23"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3012
+#Test("lsp_prepare_rename_accepts_paused_teaching_words") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn func() {{}}\n"
+    uri :: "file:///tmp/lsp_prepare_rename_foreign_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["prepareProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/prepareRename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}}}}}}", expect_contains: ["\"placeholder\":\"func\""] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3053
+#Test("lsp_semantic_tokens_delta_returns_full_fallback") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn run() {{\n    value :: 1\n    print(value)\n}}\n"
+    uri :: "file:///tmp/lsp_semantic_delta_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["\"full\": {{ \"delta\": true }}", "\"range\": true"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/semanticTokens/full/delta\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"previousResultId\":\"stale\"}}}}", expect_contains: ["\"resultId\"", "\"data\":["] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3097
+#Test("lsp_hover_returns_signature") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn add(a: Int, b: Int) -> Int {{\n    return a + b\n}}\nfn run() {{\n    r :: add(1, 2)\n}}\n"
+    uri :: "file:///tmp/lsp_hover_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["hoverProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}}}}}}", expect_contains: ["add"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3139
+#Test("lsp_hover_projects_typestate_graph_facts") {
+    source :: "struct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn close() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n"
+    uri :: "file:///tmp/lsp_typestate_graph_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["hoverProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":1,\"character\":13}}}}}}", expect_contains: ["state `Door.State.Closed` (nonterminal; reachable)"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":1,\"character\":27}}}}}}", expect_contains: ["state `Door.State.Orphan` (terminal; unreachable)"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3187
+#Test("lsp_late_cancel_does_not_poison_a_reused_request_id") {
+    source :: "fn add(a: Int, b: Int) -> Int {{ return a + b }}\n"
+    uri :: "file:///tmp/lsp_cancel_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["hoverProvider"] },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":2}}}}", expect_contains: none },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}}}}}}", expect_contains: ["add"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}}}}}}", expect_contains: ["add"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3230
+#Test("lsp_overlapping_edits_latest_checked_revision_wins") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    COSTLY_CALLERS :: 256
+    source_for :: (marker: &String) -> {
+        source := "fn target(value: Int) -> Int {{ return value }}\nfn {marker}() -> Int {{ return target(1) }}\n"
+        loop index in 0..COSTLY_CALLERS {
+            source.push_str("fn caller_{index}() Int {{ return target({index}) }}\n")
+        }
+        ^source
+    }
+    source_v1 :: source_for("marker_one")
+    uri :: "file:///tmp/lsp_overlapping_revision_test.jet"
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    initialize :: read_msg(&stdout)
+    assert(initialize.contains("documentSymbolProvider"), "document symbols are the costly existing request used by this fixture: {initialize}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":10,\"text\":{json_string(source_v1)}}}}}}}")
+    opened :: read_msg(&stdout)
+    assert(opened.contains("publishDiagnostics") && opened.contains("\"version\":10"), "open must publish the checked base revision: {opened}")
+    // Queue the checked/indexed request before overlapping edits; no timing assumption.
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    edit :: (version: I32, marker: &String) -> {
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":{version}}},\"contentChanges\":[{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":13}}}},\"rangeLength\":10,\"text\":\"{marker}\"}}]}}}}"
+    }
+    send_msg(&stdin, edit(11, "marker_two"))
+    send_msg(&stdin, edit(12, "marker_new"))
+    // Revision 11 must not roll back revision 12.
+    send_msg(&stdin, edit(11, "marker_stale"))
+    superseded :: read_msg(&stdout)
+    assert(superseded.contains("\"id\":2") && superseded.contains("marker_one") && !superseded.contains("marker_new"), "the costly request must describe only its checked base revision: {superseded}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    latest_diagnostics :: read_msg(&stdout)
+    assert(latest_diagnostics.contains("publishDiagnostics") && latest_diagnostics.contains("\"version\":12"), "latest diagnostics must identify the winning checked revision: {latest_diagnostics}")
+    latest_symbols :: read_msg(&stdout)
+    assert(latest_symbols.contains("\"id\":3") && latest_symbols.contains("marker_new") && !latest_symbols.contains("marker_two") && !latest_symbols.contains("marker_stale"), "stale work must be refused and the latest edit must win: {latest_symbols}")
+    // Late cancellation releases the completed request before id reuse.
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":3}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    reused :: read_msg(&stdout)
+    assert(reused.contains("\"id\":3") && reused.contains("marker_new") && !reused.contains("\"code\":-32800"), "late cancellation must be released before request-id reuse: {reused}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    shutdown :: read_msg(&stdout)
+    assert(shutdown.contains("\"id\":99") && shutdown.contains("result"))
+    drop(^stdin)
+    _ :: child.wait()
+}
+
+// Rust: tests/lsp.rs:3376
+// #3196: an imported sibling edit re-checks the importer, not unrelated documents.
+#Test("lsp_sibling_import_edit_never_publishes_stale_verdict") {
+    _guard :: lock_lsp_process()
+    root :: Scratch.new("lsp-sibling-import")
+    fs.write(root.join("package.jet"), "name: \"sibling\"\nversion: \"0.1.0\"\n").unwrap()
+    helper_int :: "pub fn value() -> Int {{ return 1 }}\n"
+    helper_text :: "pub fn value() -> String {{ return \"one\" }}\n"
+    main :: "use \"helper\"\nfn run() {{ print(helper.value() + 1) }}\n"
+    other :: "fn run() {{ print(2) }}\n"
+    fs.write(root.join("helper.jet"), helper_int).unwrap()
+    fs.write(root.join("run.jet"), main).unwrap()
+    fs.write(root.join("other.jet"), other).unwrap()
+    file_uri :: (name: &String) -> "file://{root.join(name).display()}".replace('%', "%25").replace(' ', "%20")
+    (helper_uri, main_uri, other_uri) :: (file_uri("helper.jet"), file_uri("run.jet"), file_uri("other.jet"))
+    child := Command.new(jet_bin()).args(["self", "lsp"]).current_dir(root.path).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    _ :: request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
+    loop (uri, source) in [(helper_uri, helper_int), (main_uri, main), (other_uri, other)] {
+        send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+    }
+    symbols :: (uri: &String) -> "{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}"
+    (_, opened) :: request_lsp_collect(&stdin, &stdout, 2, "textDocument/documentSymbol", symbols(other_uri))
+    main_opened :: published_diagnostics_for(opened, main_uri)
+    assert_eq(main_opened.len(), 1, "open publishes the importer once: {opened:?}")
+    assert_eq(error_count(main_opened[0]), 0, "Int helper checks clean: {opened:?}")
+    change :: (version: I32, text: &String) -> {
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{helper_uri}\",\"version\":{version}}},\"contentChanges\":[{{\"text\":{json_string(text)}}}]}}}}"
+    }
+    // Only the sibling changes; its importer must follow.
+    send_msg(&stdin, change(2, helper_text))
+    (_, broke) :: request_lsp_collect(&stdin, &stdout, 3, "textDocument/documentSymbol", symbols(helper_uri))
+    main_broke :: published_diagnostics_for(broke, main_uri)
+    assert_eq(main_broke.len(), 1, "a sibling edit re-checks its importer: {broke:?}")
+    assert(error_count(main_broke[0]) > 0, "`String + 1` through the edited sibling is an error: {broke:?}")
+    assert(published_diagnostics_for(broke, other_uri).is_empty(), "a document that reads nothing edited is not re-checked: {broke:?}")
+    // Rapid revisions 3 and 4 flush exactly one importer verdict for the newest.
+    send_msg(&stdin, change(3, helper_text))
+    send_msg(&stdin, change(4, helper_int))
+    (_, repaired) :: request_lsp_collect(&stdin, &stdout, 4, "textDocument/documentSymbol", symbols(helper_uri))
+    main_repaired :: published_diagnostics_for(repaired, main_uri)
+    assert_eq(main_repaired.len(), 1, "one importer verdict per flush: {repaired:?}")
+    assert_eq(error_count(main_repaired[0]), 0, "the importer verdict reflects sibling revision 4: {repaired:?}")
+    helper_published :: published_diagnostics_for(repaired, helper_uri)
+    assert(helper_published.iter().all(params -> json_get(params, "version") == DataTree.Int(4)), "sibling reports carry only its newest revision: {repaired:?}")
+    assert(published_diagnostics_for(repaired, other_uri).is_empty(), "{repaired:?}")
+    _ :: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")
+    drop(^stdin)
+    assert(child.wait().unwrap().success())
+}
+
+// Rust: tests/lsp.rs:3483
+// #3196: suppress the cancelled response without preempting computation.
+#Test("lsp_cancelled_costly_request_returns_32800_and_never_publishes") {
+    _guard :: lock_lsp_process()
+    child := Command.new(jet_bin()).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    uri :: "file:///tmp/lsp_cancelled_costly_request.jet"
+    _ :: request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(costly_source("marker_old", 1024))}}}}}}}")
+    opened :: read_msg(&stdout)
+    assert(opened.contains("publishDiagnostics") && opened.contains("\"version\":1"), "open publishes its base revision: {opened}")
+    // Full-text edit queues a costly re-check before the request and cancellation.
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[{{\"text\":{json_string(costly_source("marker_new", 1024))}}}]}}}}")
+    symbols :: "{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}"
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"textDocument/documentSymbol\",\"params\":{symbols}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":50}}}}")
+    before := [DataTree]()
+    cancelled :: loop {
+        message :: parse_json(read_msg(&stdout)).expect("valid LSP message")
+        if json_get(message, "id") == DataTree.Int(50) -> break ^message
+        before.push(^message)
+    }
+    error :: json_object_field(cancelled, "error")
+    assert_json_values_equal("cancel code", json_object_field(error, "code"), DataTree.Int(-32800))
+    assert(json_get(cancelled, "result").is_none(), "{cancelled:?}")
+    loop published in published_diagnostics_for(before, uri) {
+        assert_json_values_equal("flushed revision", json_object_field(published, "version"), DataTree.Int(2))
+    }
+    (current, after) :: request_lsp_collect(&stdin, &stdout, 51, "textDocument/documentSymbol", symbols)
+    assert(after.iter().all(message -> json_get(message, "id") != DataTree.Int(50)), "cancelled request 50 must never answer again: {after:?}")
+    current_text :: "{current:?}"
+    assert(current_text.contains("marker_new") && !current_text.contains("marker_old"), "the next request sees the newest revision: {current_text}")
+    _ :: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")
+    drop(^stdin)
+    assert(child.wait().unwrap().success())
+}

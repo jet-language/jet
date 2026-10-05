@@ -1,0 +1,24 @@
+use Compiler.JetLSP.Tests.Integration.DevLatency.[EXAMPLE, BUDGET_MS, ROUNDS, assert_watch_latency_contract]
+use std.[fs, env]
+use std.time.[Instant]
+use jet.[check_with_path]
+use jet.Diagnostics.[Severity]
+
+// Rust: tests/dev_latency.rs:100
+#Test("check_latency_under_budget_measured_alone") {
+    // Assemble the needle at runtime, so it cannot count itself.
+    attribute :: "{"#"}{"Test("}"
+    source :: fs.read_to_string(OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Compiler/JetLSP/Tests/Integration/DevLatencyTests.jet")).unwrap()
+    assert_eq(source.matches(attribute).count(), 1, "this target measures wall clock, so it must hold exactly one test (#2005)")
+    warm :: check_with_path(EXAMPLE)
+    errors :: warm.filter((d) -> d.severity == Severity.Error).count()
+    assert_eq(errors, 0, "{EXAMPLE} must check clean, or the timed round is not a real check: {warm:?}")
+    assert_watch_latency_contract()
+    best := U128.MAX
+    loop _ in 0..<ROUNDS {
+        started :: Instant.now()
+        _ :: check_with_path(EXAMPLE)
+        best = best.min(started.elapsed().as_millis())
+    }
+    assert(best < BUDGET_MS, "save-to-diagnostic latency {best} ms exceeds the {BUDGET_MS}ms budget (D-DEV3)")
+}

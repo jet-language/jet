@@ -1,100 +1,56 @@
-// PORT-PENDING 0799 crates-jet-repl-src-consolehost-module-group: crates/jet-repl/src/ConsoleHost.rs:1-96
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Host attachment for the transport-neutral project console.
-//RS //!
-//RS //! The application and development hosts own their existing HTTP mux and
-//RS //! database graph.  This module only moves those adapters into a console
-//RS //! session; it never creates a listener, client, copied database, or fallback
-//RS //! implementation.
-//RS 
-//RS use super::{
-//RS     ConsoleDataBackend, ConsoleError, ConsoleOptions, ConsoleOutput, ConsoleSession,
-//RS     InProcessRouter,
-//RS };
-//RS 
-//RS /// The two host-owned seams that a console session may use.
-//RS ///
-//RS /// A host can attach only the router, only the data backend, or both.  Missing
-//RS /// seams fail closed when their corresponding console command is used.
-//RS pub struct ConsoleHostAdapters {
-//RS     router: Option<Box<dyn InProcessRouter>>,
-//RS     data_backend: Option<Box<dyn ConsoleDataBackend>>,
-//RS }
-//RS 
-//RS impl ConsoleHostAdapters {
-//RS     pub fn new() -> Self {
-//RS         Self {
-//RS             router: None,
-//RS             data_backend: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_router<R>(mut self, router: R) -> Self
-//RS     where
-//RS         R: InProcessRouter + 'static,
-//RS     {
-//RS         self.router = Some(Box::new(router));
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_data_backend<B>(mut self, backend: B) -> Self
-//RS     where
-//RS         B: ConsoleDataBackend + 'static,
-//RS     {
-//RS         self.data_backend = Some(Box::new(backend));
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn set_router(&mut self, router: Box<dyn InProcessRouter>) {
-//RS         self.router = Some(router);
-//RS     }
-//RS 
-//RS     pub fn set_data_backend(&mut self, backend: Box<dyn ConsoleDataBackend>) {
-//RS         self.data_backend = Some(backend);
-//RS     }
-//RS 
-//RS     fn attach(self, session: &mut ConsoleSession) {
-//RS         if let Some(router) = self.router {
-//RS             session.set_router(router);
-//RS         }
-//RS         if let Some(backend) = self.data_backend {
-//RS             session.set_data_backend(backend);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Default for ConsoleHostAdapters {
-//RS     fn default() -> Self {
-//RS         Self::new()
-//RS     }
-//RS }
-//RS 
-//RS /// Open one session and inject the host-owned adapters before any command can
-//RS /// run.
-//RS pub fn open_attached(
-//RS     options: ConsoleOptions,
-//RS     adapters: ConsoleHostAdapters,
-//RS ) -> Result<ConsoleSession, ConsoleError> {
-//RS     let mut session = ConsoleSession::open(options)?;
-//RS     adapters.attach(&mut session);
-//RS     Ok(session)
-//RS }
-//RS 
-//RS /// Run a scripted session with host adapters attached, then roll back any
-//RS /// uncommitted transaction exactly as `ConsoleSession::run` does.
-//RS pub fn run_attached(
-//RS     options: ConsoleOptions,
-//RS     adapters: ConsoleHostAdapters,
-//RS ) -> Result<Vec<ConsoleOutput>, ConsoleError> {
-//RS     let script = options.script.clone();
-//RS     let mut session = open_attached(options, adapters)?;
-//RS     if let Some(script) = script {
-//RS         session.run_script(&script)?;
-//RS     }
-//RS     if !session.is_closed() && !session.is_cancelled() {
-//RS         session.close()?;
-//RS     }
-//RS     Ok(session.outputs().cloned().collect())
-//RS }
-// END-PORT-PENDING 0799 crates/jet-repl/src/ConsoleHost.rs:1-96
+// Host-owned seams for the transport-neutral project console.
+// No listener, client, database copy, or fallback is created here.
 
+// Rust: crates/jet-repl/src/ConsoleHost.rs:17
+pub struct ConsoleHostAdapters {
+    router: InProcessRouter?
+    data_backend: ConsoleDataBackend?
+
+    // Rust: crates/jet-repl/src/ConsoleHost.rs:23
+    pub fn new() -> ConsoleHostAdapters {
+        ConsoleHostAdapters{router: None, data_backend: None}
+    }
+    // Rust: crates/jet-repl/src/ConsoleHost.rs:30
+    pub fn with_router(^self, router: InProcessRouter) -> ConsoleHostAdapters {
+        adapters := ^self
+        adapters.router = Val(^router)
+        ^adapters
+    }
+    // Rust: crates/jet-repl/src/ConsoleHost.rs:38
+    pub fn with_data_backend(^self, backend: ConsoleDataBackend) -> ConsoleHostAdapters {
+        adapters := ^self
+        adapters.data_backend = Val(^backend)
+        ^adapters
+    }
+    // Rust: crates/jet-repl/src/ConsoleHost.rs:46
+    pub fn set_router(&self, router: InProcessRouter) {
+        self.router = Val(^router)
+    }
+    // Rust: crates/jet-repl/src/ConsoleHost.rs:50
+    pub fn set_data_backend(&self, backend: ConsoleDataBackend) {
+        self.data_backend = Val(^backend)
+    }
+    // Rust: crates/jet-repl/src/ConsoleHost.rs:54
+    fn attach(^self, session: &ConsoleSession) {
+        if self.router == .Val(router) -> &session.set_router(^router)
+        if self.data_backend == .Val(backend) -> &session.set_data_backend(^backend)
+    }
+    // Rust: crates/jet-repl/src/ConsoleHost.rs:65
+    pub fn default() -> ConsoleHostAdapters { ConsoleHostAdapters.new() }
+}
+
+// Rust: crates/jet-repl/src/ConsoleHost.rs:72
+pub fn open_attached(options: ConsoleOptions, adapters: ConsoleHostAdapters) -> ConsoleSession ConsoleError! {
+    session := ConsoleSession.open(^options) ?? return Err(err)
+    ^adapters.attach(&session)
+    ^session
+}
+
+// Rust: crates/jet-repl/src/ConsoleHost.rs:83
+pub fn run_attached(options: ConsoleOptions, adapters: ConsoleHostAdapters) -> [ConsoleOutput] ConsoleError! {
+    script :: ~options.script
+    session := open_attached(^options, ^adapters) ?? return Err(err)
+    if script == .Val(source) -> &session.run_script(source) ?? return Err(err)
+    if !session.is_closed() && !session.is_cancelled() -> &session.close() ?? return Err(err)
+    session.outputs().map(fn(output) -> ~output).collect()
+}

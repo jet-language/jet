@@ -1,2341 +1,962 @@
-// PORT-PENDING 0791 crates-jet-devserver-src-webhost-slice-3589: crates/jet-devserver/src/WebHost.rs:3589-5925
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn canvas_api_path(path: &str, target: &str) -> bool {
-//RS     matches!(
-//RS         path,
-//RS         "/__jet_canvas"
-//RS             | "/__jet_canvas/"
-//RS             | "/__jet_canvas/app.js"
-//RS             | "/__jet_canvas/session"
-//RS             | "/__jet_canvas/live"
-//RS             | "/__jet_canvas/graph"
-//RS             | "/__jet_canvas/project"
-//RS             | "/__jet_canvas/source-control"
-//RS             | "/__jet_canvas/core-catalog"
-//RS             | "/__jet_canvas/proof"
-//RS             | "/__jet_canvas/source"
-//RS             | "/__jet_canvas/command"
-//RS             | "/__jet_canvas/transaction"
-//RS             | "/__jet_canvas/project/transaction"
-//RS             | "/__jet_canvas/query"
-//RS             | "/__jet_canvas/debug"
-//RS             | "/canvas"
-//RS             | "/canvas/"
-//RS             | "/canvas/app.js"
-//RS             | "/canvas/session"
-//RS             | "/canvas/graph"
-//RS             | "/canvas/project"
-//RS             | "/canvas/source-control"
-//RS             | "/canvas/core-catalog"
-//RS             | "/canvas/proof"
-//RS             | "/canvas/source"
-//RS             | "/canvas/command"
-//RS             | "/canvas/transaction"
-//RS             | "/canvas/project/transaction"
-//RS             | "/canvas/query"
-//RS             | "/canvas/debug"
-//RS             | "/panel"
-//RS             | "/panel/"
-//RS             | "/panel/app.js"
-//RS             | "/panel/session"
-//RS             | "/panel/graph"
-//RS             | "/panel/project"
-//RS             | "/panel/source-control"
-//RS             | "/panel/core-catalog"
-//RS             | "/panel/proof"
-//RS             | "/panel/source"
-//RS             | "/panel/command"
-//RS             | "/panel/transaction"
-//RS             | "/panel/project/transaction"
-//RS             | "/panel/query"
-//RS             | "/panel/debug"
-//RS             | "/__jet_dev_version"
-//RS             | "/__jet_dev_status"
-//RS             | "/__jet_dev_disconnect"
-//RS             | "/__jet_perf_browser"
-//RS             | "/__jet_web/stream"
-//RS     ) || devtools_path(path)
-//RS         || (path == "/"
-//RS             && (query_param(target, "jet_panel").as_deref() == Some("1")
-//RS                 || query_param(target, "jet_panel_app").as_deref() == Some("1")
-//RS                 || query_param(target, "jet_panel_graph").as_deref() == Some("1")))
-//RS }
-//RS 
-//RS fn canvas_request_authorized(
-//RS     request: &Request,
-//RS     target: &str,
-//RS     bind_host: &str,
-//RS     port: u16,
-//RS     session_secret: &str,
-//RS ) -> bool {
-//RS     if session_secret.is_empty()
-//RS         || !matches!(request.method.as_str(), "GET" | "POST")
-//RS         || request.body.len() > MAX_REQUEST_BODY_BYTES
-//RS         || request.headers.contains_key("transfer-encoding")
-//RS         || (request.method == "POST" && !request.headers.contains_key("content-length"))
-//RS         || (request.method == "GET" && !request.body.is_empty())
-//RS     {
-//RS         return false;
-//RS     }
-//RS     let path = target.split('?').next().unwrap_or("");
-//RS     if !canvas_api_path(path, target) {
-//RS         return false;
-//RS     }
-//RS     let Some(host) = request.headers.get("host") else {
-//RS         return false;
-//RS     };
-//RS     if !host_header_allowed(host, bind_host, port) {
-//RS         return false;
-//RS     }
-//RS     let origin = request.headers.get("origin");
-//RS     let same_origin = request
-//RS         .headers
-//RS         .get("sec-fetch-site")
-//RS         .is_some_and(|site| site.eq_ignore_ascii_case("same-origin"));
-//RS     if let Some(origin) = origin {
-//RS         if !origin_allowed(origin, bind_host, port) {
-//RS             return false;
-//RS         }
-//RS     } else if !canvas_bootstrap_path(path, target) && !same_origin {
-//RS         return false;
-//RS     }
-//RS     let authorization = request.headers.get("authorization");
-//RS     let query_session = match unique_session_param(target) {
-//RS         Ok(session) => session,
-//RS         Err(()) => return false,
-//RS     };
-//RS     let session_valid = match (authorization, query_session.as_deref()) {
-//RS         (Some(authorization), Some(query_session)) => {
-//RS             authorization
-//RS                 .strip_prefix("Bearer ")
-//RS                 .is_some_and(|token| constant_time_equal(token, session_secret))
-//RS                 && constant_time_equal(query_session, session_secret)
-//RS         }
-//RS         (Some(authorization), None) => authorization
-//RS             .strip_prefix("Bearer ")
-//RS             .is_some_and(|token| constant_time_equal(token, session_secret)),
-//RS         (None, Some(query_session)) => constant_time_equal(query_session, session_secret),
-//RS         (None, None) => false,
-//RS     };
-//RS     session_valid && (origin.is_some() || canvas_bootstrap_path(path, target) || same_origin)
-//RS }
-//RS 
-//RS fn unique_session_param(target: &str) -> Result<Option<String>, ()> {
-//RS     let Some((_, query)) = target.split_once('?') else {
-//RS         return Ok(None);
-//RS     };
-//RS     let mut found = false;
-//RS     for part in query.split('&') {
-//RS         let name = part.split_once('=').map(|(name, _)| name).unwrap_or(part);
-//RS         if name == "session" {
-//RS             if found {
-//RS                 return Err(());
-//RS             }
-//RS             found = true;
-//RS         }
-//RS     }
-//RS     Ok(query_param(target, "session"))
-//RS }
-//RS 
-//RS fn canvas_bootstrap_path(path: &str, target: &str) -> bool {
-//RS     matches!(
-//RS         path,
-//RS         "/__jet_canvas"
-//RS             | "/__jet_canvas/"
-//RS             | "/__jet_canvas/app.js"
-//RS             | "/canvas"
-//RS             | "/canvas/"
-//RS             | "/canvas/app.js"
-//RS             | "/panel"
-//RS             | "/panel/"
-//RS             | "/panel/app.js"
-//RS             | "/__jet_devtools"
-//RS             | "/__jet_devtools/workbench"
-//RS     ) || matches!(target, "/?jet_panel=1" | "/?jet_panel_app=1")
-//RS }
-//RS 
-//RS fn requires_canvas_authorization(listener_kind: ListenerKind) -> bool {
-//RS     listener_kind == ListenerKind::Canvas
-//RS }
-//RS 
-//RS fn requires_session_authorization(listener_kind: ListenerKind, path: &str) -> bool {
-//RS     (path != "/__jet_dev_status" && requires_canvas_authorization(listener_kind))
-//RS         || (listener_kind == ListenerKind::Application
-//RS             && (devtools_path(path) || web_stream_path(path) || source_tool_path(path)))
-//RS }
-//RS 
-//RS fn host_header_allowed(value: &str, bind_host: &str, port: u16) -> bool {
-//RS     let value = value.trim().to_ascii_lowercase();
-//RS     if value == format!("{}:{}", url_host(bind_host), port).to_ascii_lowercase() {
-//RS         return true;
-//RS     }
-//RS     if !is_loopback_host(bind_host) {
-//RS         return false;
-//RS     }
-//RS     ["localhost", "127.0.0.1", "[::1]"]
-//RS         .iter()
-//RS         .any(|alias| value == format!("{alias}:{port}"))
-//RS }
-//RS 
-//RS fn origin_allowed(value: &str, bind_host: &str, port: u16) -> bool {
-//RS     let value = value.trim().to_ascii_lowercase();
-//RS     let expected = format!("http://{}:{}", url_host(bind_host), port).to_ascii_lowercase();
-//RS     if value == expected {
-//RS         return true;
-//RS     }
-//RS     is_loopback_host(bind_host)
-//RS         && ["localhost", "127.0.0.1", "[::1]"]
-//RS             .iter()
-//RS             .any(|alias| value == format!("http://{alias}:{port}"))
-//RS }
-//RS 
-//RS fn constant_time_equal(left: &str, right: &str) -> bool {
-//RS     let left = left.as_bytes();
-//RS     let right = right.as_bytes();
-//RS     let mut difference = left.len() ^ right.len();
-//RS     for index in 0..left.len().max(right.len()) {
-//RS         difference |= left.get(index).copied().unwrap_or(0) as usize
-//RS             ^ right.get(index).copied().unwrap_or(0) as usize;
-//RS     }
-//RS     difference == 0
-//RS }
-//RS 
-//RS #[allow(dead_code)]
-//RS mod web_stream_bridge {
-//RS     include!("../../jet-codegen/src/Prelude/Core/WebPending.rs");
-//RS }
-//RS 
-//RS fn web_stream_json_string(value: &str) -> String {
-//RS     format!("\"{}\"", json_escape(value))
-//RS }
-//RS 
-//RS fn web_stream_error(error: web_stream_bridge::JetWebPendingError) -> (String, String) {
-//RS     (error.code().to_string(), error.message())
-//RS }
-//RS 
-//RS fn web_stream_request_error(message: impl Into<String>) -> (String, String) {
-//RS     ("invalid_request".to_string(), message.into())
-//RS }
-//RS 
-//RS fn web_stream_required_string(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<String, (String, String)> {
-//RS     match object.get(key) {
-//RS         Some(DataTree::Text(value)) if !value.is_empty() => Ok(value.clone()),
-//RS         Some(DataTree::Text(_)) => Err(web_stream_request_error(format!(
-//RS             "web stream `{key}` must not be empty"
-//RS         ))),
-//RS         Some(_) => Err(web_stream_request_error(format!(
-//RS             "web stream `{key}` must be a string"
-//RS         ))),
-//RS         None => Err(web_stream_request_error(format!(
-//RS             "web stream request has no `{key}`"
-//RS         ))),
-//RS     }
-//RS }
-//RS fn web_stream_required_text(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<String, (String, String)> {
-//RS     match object.get(key) {
-//RS         Some(DataTree::Text(value)) => Ok(value.clone()),
-//RS         Some(_) => Err(web_stream_request_error(format!(
-//RS             "web stream `{key}` must be a string"
-//RS         ))),
-//RS         None => Err(web_stream_request_error(format!(
-//RS             "web stream request has no `{key}`"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn web_stream_required_u64(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<u64, (String, String)> {
-//RS     match object.get(key) {
-//RS         Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
-//RS         Some(DataTree::Int(_)) => Err(web_stream_request_error(format!(
-//RS             "web stream `{key}` must be non-negative"
-//RS         ))),
-//RS         Some(_) => Err(web_stream_request_error(format!(
-//RS             "web stream `{key}` must be an integer"
-//RS         ))),
-//RS         None => Err(web_stream_request_error(format!(
-//RS             "web stream request has no `{key}`"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn web_stream_required_bool(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<bool, (String, String)> {
-//RS     match object.get(key) {
-//RS         Some(DataTree::Bool(value)) => Ok(*value),
-//RS         Some(_) => Err(web_stream_request_error(format!(
-//RS             "web stream `{key}` must be a boolean"
-//RS         ))),
-//RS         None => Err(web_stream_request_error(format!(
-//RS             "web stream request has no `{key}`"
-//RS         ))),
-//RS     }
-//RS }
-//RS fn web_stream_required_usize(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<usize, (String, String)> {
-//RS     let value = web_stream_required_u64(object, key)?;
-//RS     usize::try_from(value)
-//RS         .map_err(|_| web_stream_request_error(format!("web stream `{key}` is too large")))
-//RS }
-//RS 
-//RS fn web_stream_object(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<std::collections::BTreeMap<String, DataTree>, (String, String)> {
-//RS     let value = object
-//RS         .get(key)
-//RS         .ok_or_else(|| web_stream_request_error(format!("web stream request has no `{key}`")))?;
-//RS     object_map(value)
-//RS         .ok_or_else(|| web_stream_request_error(format!("web stream `{key}` must be an object")))
-//RS }
-//RS 
-//RS fn web_stream_identity(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<web_stream_bridge::JetWebIslandIdentity, (String, String)> {
-//RS     let identity = web_stream_object(object, key)?;
-//RS     let island_id = web_stream_required_string(&identity, "island_id")?;
-//RS     let source_id = web_stream_required_string(&identity, "source_id")?;
-//RS     let build_id = web_stream_required_string(&identity, "build_id")?;
-//RS     let revision = web_stream_required_string(&identity, "revision")?;
-//RS     web_stream_bridge::JetWebIslandIdentity::new(island_id, source_id, build_id, revision)
-//RS         .map_err(web_stream_error)
-//RS }
-//RS 
-//RS fn web_stream_boundary_id(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<web_stream_bridge::JetWebBoundaryId, (String, String)> {
-//RS     web_stream_bridge::JetWebBoundaryId::new(web_stream_required_string(object, key)?)
-//RS         .map_err(web_stream_error)
-//RS }
-//RS 
-//RS fn web_stream_id(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<web_stream_bridge::JetWebStreamId, (String, String)> {
-//RS     let stream = web_stream_object(object, key)?;
-//RS     let boundary_id = web_stream_bridge::JetWebBoundaryId::new(web_stream_required_string(
-//RS         &stream,
-//RS         "boundary_id",
-//RS     )?)
-//RS     .map_err(web_stream_error)?;
-//RS     let generation = web_stream_required_u64(&stream, "generation")?;
-//RS     let identity = web_stream_identity(&stream, "identity")?;
-//RS     web_stream_bridge::JetWebStreamId::from_parts(boundary_id, generation, identity)
-//RS         .map_err(web_stream_error)
-//RS }
-//RS 
-//RS fn web_stream_trigger(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<web_stream_bridge::JetWebHydrationTrigger, (String, String)> {
-//RS     let value = web_stream_required_string(object, key)?;
-//RS     web_stream_bridge::JetWebHydrationTrigger::parse(&value).ok_or_else(|| {
-//RS         web_stream_request_error(format!(
-//RS             "web stream `{key}` has an unknown hydration trigger"
-//RS         ))
-//RS     })
-//RS }
-//RS 
-//RS fn web_stream_target(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<web_stream_bridge::JetWebPendingProjectionTarget, (String, String)> {
-//RS     match web_stream_required_string(object, key)?.as_str() {
-//RS         "server" => Ok(web_stream_bridge::JetWebPendingProjectionTarget::Server),
-//RS         "client" => Ok(web_stream_bridge::JetWebPendingProjectionTarget::Client),
-//RS         _ => Err(web_stream_request_error(format!(
-//RS             "web stream `{key}` must be `server` or `client`"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn web_stream_failure(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS ) -> Result<web_stream_bridge::JetWebPendingError, (String, String)> {
-//RS     let error = web_stream_object(object, "error")?;
-//RS     match web_stream_required_string(&error, "code")?.as_str() {
-//RS         "missing_final_chunk" => Ok(web_stream_bridge::JetWebPendingError::MissingFinalChunk),
-//RS         "invalid_lifecycle" => Ok(web_stream_bridge::JetWebPendingError::InvalidLifecycle {
-//RS             state: web_stream_bridge::JetWebPendingState::Pending,
-//RS             operation: "web_stream_fail",
-//RS         }),
-//RS         "content_too_large" => Ok(web_stream_bridge::JetWebPendingError::ContentTooLarge {
-//RS             limit: web_stream_required_usize(&error, "limit")?,
-//RS             actual: web_stream_required_usize(&error, "actual")?,
-//RS         }),
-//RS         code => Err(web_stream_request_error(format!(
-//RS             "web stream failure code `{code}` is not supported by the host bridge"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn web_stream_success(action: &str, payload: &str) -> String {
-//RS     format!(
-//RS         "{{\"ok\":true,\"action\":{},{} }}",
-//RS         web_stream_json_string(action),
-//RS         payload
-//RS     )
-//RS }
-//RS 
-//RS fn web_stream_failure_json(code: &str, message: &str) -> String {
-//RS     format!(
-//RS         "{{\"ok\":false,\"error\":{{\"code\":{},\"message\":{}}}}}",
-//RS         web_stream_json_string(code),
-//RS         web_stream_json_string(message)
-//RS     )
-//RS }
-//RS 
-//RS fn handle_web_stream_request(stream: &mut impl Write, request: &Request) -> std::io::Result<()> {
-//RS     if request.method != "POST" {
-//RS         return method_not_allowed(stream);
-//RS     }
-//RS     let text = match std::str::from_utf8(&request.body) {
-//RS         Ok(text) => text,
-//RS         Err(_) => {
-//RS             return write_response(
-//RS                 stream,
-//RS                 "400 Bad Request",
-//RS                 "application/json; charset=utf-8",
-//RS                 web_stream_failure_json("invalid_request", "web stream request must be UTF-8 JSON")
-//RS                     .as_bytes(),
-//RS             )
-//RS         }
-//RS     };
-//RS     let root = match parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) {
-//RS         Ok(root) => root,
-//RS         Err(_) => {
-//RS             return write_response(
-//RS                 stream,
-//RS                 "400 Bad Request",
-//RS                 "application/json; charset=utf-8",
-//RS                 web_stream_failure_json(
-//RS                     "invalid_request",
-//RS                     "web stream request is not bounded JSON",
-//RS                 )
-//RS                 .as_bytes(),
-//RS             )
-//RS         }
-//RS     };
-//RS     let object = match object_map(&root) {
-//RS         Some(object) => object,
-//RS         None => {
-//RS             return write_response(
-//RS                 stream,
-//RS                 "400 Bad Request",
-//RS                 "application/json; charset=utf-8",
-//RS                 web_stream_failure_json("invalid_request", "web stream request must be an object")
-//RS                     .as_bytes(),
-//RS             )
-//RS         }
-//RS     };
-//RS     let object = &object;
-//RS     let result: Result<String, (String, String)> = (|| {
-//RS         let action = web_stream_required_string(object, "action")?;
-//RS         match action.as_str() {
-//RS             "register" => {
-//RS                 let boundary_id = web_stream_required_string(object, "boundary_id")?;
-//RS                 let identity = web_stream_identity(object, "identity")?;
-//RS                 let boundary = web_stream_bridge::jet_web_stream_register(boundary_id, identity)
-//RS                     .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"boundary_id\":{}", boundary.render_json()),
-//RS                 ))
-//RS             }
-//RS             "begin" => {
-//RS                 let boundary_id = web_stream_boundary_id(object, "boundary_id")?;
-//RS                 let identity = web_stream_identity(object, "identity")?;
-//RS                 let at_ns = web_stream_required_u64(object, "at_ns")?;
-//RS                 let stream_id =
-//RS                     web_stream_bridge::jet_web_stream_begin(&boundary_id, identity, at_ns)
-//RS                         .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"stream_id\":{}", stream_id.render_json()),
-//RS                 ))
-//RS             }
-//RS             "chunk" => {
-//RS                 let stream_id = web_stream_id(object, "stream_id")?;
-//RS                 let sequence = web_stream_required_u64(object, "sequence")?;
-//RS                 let content = web_stream_required_text(object, "content")?;
-//RS                 let is_final = web_stream_required_bool(object, "is_final")?;
-//RS                 let at_ns = web_stream_required_u64(object, "at_ns")?;
-//RS                 let receipt = web_stream_bridge::jet_web_stream_chunk(
-//RS                     &stream_id, sequence, content, is_final, at_ns,
-//RS                 )
-//RS                 .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"receipt\":{}", receipt.render_json()),
-//RS                 ))
-//RS             }
-//RS             "commit" => {
-//RS                 let stream_id = web_stream_id(object, "stream_id")?;
-//RS                 let at_ns = web_stream_required_u64(object, "at_ns")?;
-//RS                 let receipt = web_stream_bridge::jet_web_stream_commit(&stream_id, at_ns)
-//RS                     .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"receipt\":{}", receipt.render_json()),
-//RS                 ))
-//RS             }
-//RS             "fail" => {
-//RS                 let stream_id = web_stream_id(object, "stream_id")?;
-//RS                 let error = web_stream_failure(object)?;
-//RS                 let at_ns = web_stream_required_u64(object, "at_ns")?;
-//RS                 let receipt = web_stream_bridge::jet_web_stream_fail(&stream_id, error, at_ns)
-//RS                     .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"receipt\":{}", receipt.render_json()),
-//RS                 ))
-//RS             }
-//RS             "cancel" => {
-//RS                 let stream_id = web_stream_id(object, "stream_id")?;
-//RS                 let at_ns = web_stream_required_u64(object, "at_ns")?;
-//RS                 let receipt = web_stream_bridge::jet_web_stream_cancel(&stream_id, at_ns)
-//RS                     .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"receipt\":{}", receipt.render_json()),
-//RS                 ))
-//RS             }
-//RS             "rollback" => {
-//RS                 let stream_id = web_stream_id(object, "stream_id")?;
-//RS                 let at_ns = web_stream_required_u64(object, "at_ns")?;
-//RS                 let receipt = web_stream_bridge::jet_web_stream_rollback(&stream_id, at_ns)
-//RS                     .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"receipt\":{}", receipt.render_json()),
-//RS                 ))
-//RS             }
-//RS             "hydration_start" => {
-//RS                 let stream_id = web_stream_id(object, "stream_id")?;
-//RS                 let trigger = web_stream_trigger(object, "trigger")?;
-//RS                 let started_at_ns = web_stream_required_u64(object, "started_at_ns")?;
-//RS                 let receipt = web_stream_bridge::jet_web_stream_hydration_start(
-//RS                     &stream_id,
-//RS                     trigger,
-//RS                     started_at_ns,
-//RS                 )
-//RS                 .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"receipt\":{}", receipt.render_json()),
-//RS                 ))
-//RS             }
-//RS             "hydration_complete" => {
-//RS                 let stream_id = web_stream_id(object, "stream_id")?;
-//RS                 let completed_at_ns = web_stream_required_u64(object, "completed_at_ns")?;
-//RS                 let receipt = web_stream_bridge::jet_web_stream_hydration_complete(
-//RS                     &stream_id,
-//RS                     completed_at_ns,
-//RS                 )
-//RS                 .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"receipt\":{}", receipt.render_json()),
-//RS                 ))
-//RS             }
-//RS             "receipt" => {
-//RS                 let boundary_id = web_stream_boundary_id(object, "boundary_id")?;
-//RS                 let receipt = web_stream_bridge::jet_web_stream_receipt_json(&boundary_id)
-//RS                     .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"receipt\":{receipt}"),
-//RS                 ))
-//RS             }
-//RS             "projection" => {
-//RS                 let boundary_id = web_stream_boundary_id(object, "boundary_id")?;
-//RS                 let target = web_stream_target(object, "target")?;
-//RS                 let projection =
-//RS                     web_stream_bridge::jet_web_stream_projection_json(&boundary_id, target)
-//RS                         .map_err(web_stream_error)?;
-//RS                 Ok(web_stream_success(
-//RS                     &action,
-//RS                     &format!("\"projection\":{projection}"),
-//RS                 ))
-//RS             }
-//RS             _ => Err(web_stream_request_error(format!(
-//RS                 "web stream action `{action}` is not recognized"
-//RS             ))),
-//RS         }
-//RS     })();
-//RS     match result {
-//RS         Ok(body) => write_response(
-//RS             stream,
-//RS             "200 OK",
-//RS             "application/json; charset=utf-8",
-//RS             body.as_bytes(),
-//RS         ),
-//RS         Err((code, message)) => write_response(
-//RS             stream,
-//RS             "400 Bad Request",
-//RS             "application/json; charset=utf-8",
-//RS             web_stream_failure_json(&code, &message).as_bytes(),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn unauthorized(stream: &mut impl Write) -> std::io::Result<()> {
-//RS     write_response(
-//RS         stream,
-//RS         "401 Unauthorized",
-//RS         "text/plain; charset=utf-8",
-//RS         b"devserver session, host, or origin rejected",
-//RS     )
-//RS }
-//RS fn handle_release_devtools_request(
-//RS     stream: &mut impl Write,
-//RS     request: &Request,
-//RS     path: &str,
-//RS     bind_host: &str,
-//RS     port: u16,
-//RS     peer_addr: SocketAddr,
-//RS     session: &crate::ResidentDevSession,
-//RS     policy: &ReleaseDevtoolsPolicy,
-//RS ) -> std::io::Result<()> {
-//RS     if path != "/__jet_devtools" || !policy.endpoint_enabled() {
-//RS         return write_response(
-//RS             stream,
-//RS             "404 Not Found",
-//RS             "text/plain; charset=utf-8",
-//RS             b"inspect endpoint absent",
-//RS         );
-//RS     }
-//RS     if request.method != "GET" {
-//RS         return method_not_allowed(stream);
-//RS     }
-//RS     if !policy.deployment_enabled() {
-//RS         return write_response(
-//RS             stream,
-//RS             "404 Not Found",
-//RS             "text/plain; charset=utf-8",
-//RS             b"inspect endpoint disabled",
-//RS         );
-//RS     }
-//RS     let Some(host) = request.headers.get("host") else {
-//RS         return write_response(
-//RS             stream,
-//RS             "403 Forbidden",
-//RS             "text/plain; charset=utf-8",
-//RS             b"inspect host rejected",
-//RS         );
-//RS     };
-//RS     if !host_header_allowed(host, bind_host, port) {
-//RS         return write_response(
-//RS             stream,
-//RS             "403 Forbidden",
-//RS             "text/plain; charset=utf-8",
-//RS             b"inspect host rejected",
-//RS         );
-//RS     }
-//RS     if request
-//RS         .headers
-//RS         .get("origin")
-//RS         .is_some_and(|origin| !origin_allowed(origin, bind_host, port))
-//RS     {
-//RS         return write_response(
-//RS             stream,
-//RS             "403 Forbidden",
-//RS             "text/plain; charset=utf-8",
-//RS             b"inspect origin rejected",
-//RS         );
-//RS     }
-//RS     let Some(expected_token) = policy.deployment.token() else {
-//RS         return write_response(
-//RS             stream,
-//RS             "401 Unauthorized",
-//RS             "application/json; charset=utf-8",
-//RS             br#"{"error":"JET_INSPECT_TOKEN required"}"#,
-//RS         );
-//RS     };
-//RS     let token_valid = request
-//RS         .headers
-//RS         .get("authorization")
-//RS         .and_then(|value| value.strip_prefix("Bearer "))
-//RS         .is_some_and(|token| constant_time_equal(token, expected_token));
-//RS     if !token_valid {
-//RS         return write_response(
-//RS             stream,
-//RS             "401 Unauthorized",
-//RS             "application/json; charset=utf-8",
-//RS             br#"{"error":"JET_INSPECT_TOKEN required"}"#,
-//RS         );
-//RS     }
-//RS     if !policy.peer_allowed(peer_addr.ip()) {
-//RS         return write_response(
-//RS             stream,
-//RS             "403 Forbidden",
-//RS             "application/json; charset=utf-8",
-//RS             br#"{"error":"inspect network address not allowed"}"#,
-//RS         );
-//RS     }
-//RS     if !request.body.is_empty() || request.headers.contains_key("transfer-encoding") {
-//RS         return write_response(
-//RS             stream,
-//RS             "400 Bad Request",
-//RS             "text/plain; charset=utf-8",
-//RS             b"inspect endpoint accepts GET without a request body",
-//RS         );
-//RS     }
-//RS     let projection = session.devtools_events_since(None);
-//RS     let panels = match session.devtools_panels(
-//RS         crate::Devtools::JetDevtoolsHostKind::BrowserInApp,
-//RS         &crate::Devtools::JetDevtoolsPanelCapability::ALL,
-//RS     ) {
-//RS         Ok(panels) => panels,
-//RS         Err(error) => {
-//RS             return write_response(
-//RS                 stream,
-//RS                 "500 Internal Server Error",
-//RS                 "text/plain; charset=utf-8",
-//RS                 error.to_string().as_bytes(),
-//RS             )
-//RS         }
-//RS     };
-//RS     let body = browser_web_adapter::release_json(&projection, &panels);
-//RS     write_response(
-//RS         stream,
-//RS         "200 OK",
-//RS         "application/json; charset=utf-8",
-//RS         body.as_bytes(),
-//RS     )
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS enum ListenerKind {
-//RS     Canvas,
-//RS     Application,
-//RS }
-//RS 
-//RS struct DeadlineStream {
-//RS     stream: TcpStream,
-//RS     deadline: Instant,
-//RS }
-//RS 
-//RS impl DeadlineStream {
-//RS     fn new(stream: TcpStream, deadline: Instant) -> Self {
-//RS         Self { stream, deadline }
-//RS     }
-//RS 
-//RS     fn try_clone(&self) -> std::io::Result<Self> {
-//RS         Ok(Self::new(self.stream.try_clone()?, self.deadline))
-//RS     }
-//RS 
-//RS     fn remaining(&self) -> std::io::Result<Duration> {
-//RS         let remaining = self.deadline.saturating_duration_since(Instant::now());
-//RS         if remaining.is_zero() {
-//RS             Err(std::io::Error::new(
-//RS                 std::io::ErrorKind::TimedOut,
-//RS                 "devserver request deadline exceeded",
-//RS             ))
-//RS         } else {
-//RS             Ok(remaining)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::io::Read for DeadlineStream {
-//RS     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-//RS         let remaining = self.remaining()?;
-//RS         self.stream.set_read_timeout(Some(remaining))?;
-//RS         self.stream.read(buffer)
-//RS     }
-//RS }
-//RS 
-//RS impl Write for DeadlineStream {
-//RS     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-//RS         let remaining = self.remaining()?;
-//RS         self.stream.set_write_timeout(Some(remaining))?;
-//RS         self.stream.write(buffer)
-//RS     }
-//RS 
-//RS     fn flush(&mut self) -> std::io::Result<()> {
-//RS         let remaining = self.remaining()?;
-//RS         self.stream.set_write_timeout(Some(remaining))?;
-//RS         self.stream.flush()
-//RS     }
-//RS }
-//RS 
-//RS /// Accept connections forever, one thread per connection (a dev tool serving
-//RS /// a handful of small files has no need for a worker pool).
-//RS fn serve_forever(
-//RS     listener: TcpListener,
-//RS     status: Arc<DevStatus>,
-//RS     debug_sessions: Arc<crate::Canvas::DebugSessions>,
-//RS     session: Arc<crate::ResidentDevSession>,
-//RS     canvas_file: String,
-//RS     listener_kind: ListenerKind,
-//RS     bind_host: String,
-//RS     session_secret: String,
-//RS     shutdown: Arc<AtomicBool>,
-//RS     static_root: PathBuf,
-//RS     release_policy: ReleaseDevtoolsPolicy,
-//RS     browser_state: Arc<Mutex<Option<browser_web_adapter::BrowserWebState>>>,
-//RS     paused_evaluate: Arc<Mutex<crate::PausedEvaluate::PausedEvaluateHost>>,
-//RS     terminal_style: Arc<crate::TerminalStyleReload::TerminalStyleHostAdapter>,
-//RS ) {
-//RS     if listener.set_nonblocking(true).is_err() {
-//RS         return;
-//RS     }
-//RS     let active_connections = Arc::new(AtomicUsize::new(0));
-//RS     while !shutdown.load(Ordering::SeqCst) {
-//RS         match listener.accept() {
-//RS             Ok((stream, peer_addr)) => {
-//RS                 if !try_acquire_connection(&active_connections) {
-//RS                     drop(stream);
-//RS                     continue;
-//RS                 }
-//RS                 let status = Arc::clone(&status);
-//RS                 let debug_sessions = Arc::clone(&debug_sessions);
-//RS                 let session = Arc::clone(&session);
-//RS                 let canvas_file = canvas_file.clone();
-//RS                 let bind_host = bind_host.clone();
-//RS                 let session_secret = session_secret.clone();
-//RS                 let static_root = static_root.clone();
-//RS                 let release_policy = release_policy.clone();
-//RS                 let browser_state = Arc::clone(&browser_state);
-//RS                 let paused_evaluate = Arc::clone(&paused_evaluate);
-//RS                 let terminal_style = Arc::clone(&terminal_style);
-//RS                 let active_connections = Arc::clone(&active_connections);
-//RS                 thread::spawn(move || {
-//RS                     let _ = handle_connection_with_root_and_policy(
-//RS                         stream,
-//RS                         &status,
-//RS                         &debug_sessions,
-//RS                         &session,
-//RS                         &canvas_file,
-//RS                         listener_kind,
-//RS                         &bind_host,
-//RS                         &session_secret,
-//RS                         &static_root,
-//RS                         &browser_state,
-//RS                         &paused_evaluate,
-//RS                         &terminal_style,
-//RS                         &release_policy,
-//RS                         peer_addr,
-//RS                     );
-//RS                     active_connections.fetch_sub(1, Ordering::AcqRel);
-//RS                 });
-//RS             }
-//RS             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-//RS                 let _ = wait_for_shutdown(&shutdown, Duration::from_millis(10));
-//RS             }
-//RS             Err(_) => return,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn try_acquire_connection(active: &AtomicUsize) -> bool {
-//RS     let mut current = active.load(Ordering::Acquire);
-//RS     loop {
-//RS         if current >= MAX_CONNECTION_THREADS {
-//RS             return false;
-//RS         }
-//RS         match active.compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire) {
-//RS             Ok(_) => return true,
-//RS             Err(next) => current = next,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Parse one GET request line + headers (no keep-alive, no request body —
-//RS /// this is a dev tool, not a production server) and serve a response.
-//RS #[cfg(test)]
-//RS fn handle_connection(
-//RS     stream: TcpStream,
-//RS     status: &DevStatus,
-//RS     debug_sessions: &crate::Canvas::DebugSessions,
-//RS     session: &crate::ResidentDevSession,
-//RS     canvas_file: &str,
-//RS     listener_kind: ListenerKind,
-//RS     bind_host: &str,
-//RS     session_secret: &str,
-//RS ) -> std::io::Result<()> {
-//RS     handle_connection_with_root(
-//RS         stream,
-//RS         status,
-//RS         debug_sessions,
-//RS         session,
-//RS         canvas_file,
-//RS         listener_kind,
-//RS         bind_host,
-//RS         session_secret,
-//RS         Path::new("build"),
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS fn handle_connection_with_root(
-//RS     stream: TcpStream,
-//RS     status: &DevStatus,
-//RS     debug_sessions: &crate::Canvas::DebugSessions,
-//RS     session: &crate::ResidentDevSession,
-//RS     canvas_file: &str,
-//RS     listener_kind: ListenerKind,
-//RS     bind_host: &str,
-//RS     session_secret: &str,
-//RS     static_root: &Path,
-//RS ) -> std::io::Result<()> {
-//RS     let browser_state = Arc::new(Mutex::new(None));
-//RS     let paused_evaluate = Arc::new(Mutex::new(crate::PausedEvaluate::PausedEvaluateHost::new()));
-//RS     let terminal_style = Arc::new(crate::TerminalStyleReload::TerminalStyleHostAdapter::new());
-//RS     handle_connection_with_root_and_policy(
-//RS         stream,
-//RS         status,
-//RS         debug_sessions,
-//RS         session,
-//RS         canvas_file,
-//RS         listener_kind,
-//RS         bind_host,
-//RS         session_secret,
-//RS         static_root,
-//RS         &browser_state,
-//RS         &paused_evaluate,
-//RS         &terminal_style,
-//RS         &ReleaseDevtoolsPolicy::development(),
-//RS         SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0),
-//RS     )
-//RS }
-//RS 
-//RS fn handle_connection_with_root_and_policy(
-//RS     stream: TcpStream,
-//RS     status: &DevStatus,
-//RS     debug_sessions: &crate::Canvas::DebugSessions,
-//RS     session: &crate::ResidentDevSession,
-//RS     canvas_file: &str,
-//RS     listener_kind: ListenerKind,
-//RS     bind_host: &str,
-//RS     session_secret: &str,
-//RS     static_root: &Path,
-//RS     browser_state: &Arc<Mutex<Option<browser_web_adapter::BrowserWebState>>>,
-//RS     paused_evaluate: &Arc<Mutex<crate::PausedEvaluate::PausedEvaluateHost>>,
-//RS     terminal_style: &Arc<crate::TerminalStyleReload::TerminalStyleHostAdapter>,
-//RS     release_policy: &ReleaseDevtoolsPolicy,
-//RS     peer_addr: SocketAddr,
-//RS ) -> std::io::Result<()> {
-//RS     let deadline = Instant::now() + REQUEST_DEADLINE;
-//RS     let mut stream = DeadlineStream::new(stream, deadline);
-//RS     let mut reader = BufReader::new(stream.try_clone()?);
-//RS     let Some(request) = Request::read(&mut reader)? else {
-//RS         return Ok(());
-//RS     };
-//RS 
-//RS     let method = request.method.as_str();
-//RS     let target = request.target.as_str();
-//RS     let body = request.body.as_slice();
-//RS     let path = target.split('?').next().unwrap_or("/");
-//RS     if listener_kind == ListenerKind::Application
-//RS         && release_policy.is_release()
-//RS         && devtools_path(path)
-//RS     {
-//RS         return handle_release_devtools_request(
-//RS             &mut stream,
-//RS             &request,
-//RS             path,
-//RS             bind_host,
-//RS             session.application_port(),
-//RS             peer_addr,
-//RS             session,
-//RS             release_policy,
-//RS         );
-//RS     }
-//RS     if requires_session_authorization(listener_kind, path)
-//RS         && !canvas_request_authorized(
-//RS             &request,
-//RS             target,
-//RS             bind_host,
-//RS             if listener_kind == ListenerKind::Canvas {
-//RS                 session.canvas_port()
-//RS             } else {
-//RS                 session.application_port()
-//RS             },
-//RS             session_secret,
-//RS         )
-//RS     {
-//RS         return unauthorized(&mut stream);
-//RS     }
-//RS 
-//RS     if method != "GET" && method != "POST" {
-//RS         return write_response(
-//RS             &mut stream,
-//RS             "405 Method Not Allowed",
-//RS             "text/plain; charset=utf-8",
-//RS             b"jet dev's web server only handles GET and Canvas POST requests",
-//RS         );
-//RS     }
-//RS 
-//RS     // The devtools page runs on the application origin.  Its source tools
-//RS     // reach the existing Canvas source/command/transaction handlers below
-//RS     // through the same session authorization, but only while this host has
-//RS     // Canvas source authority; release builds and application-only hosts get
-//RS     // one explicit reason instead of a silent static 404.
-//RS     if listener_kind == ListenerKind::Application && source_tool_path(path) {
-//RS         if release_policy.is_release() {
-//RS             return write_response(
-//RS                 &mut stream,
-//RS                 "404 Not Found",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"source tools are absent in release builds",
-//RS             );
-//RS         }
-//RS         if session.canvas_port() == 0 {
-//RS             return write_response(
-//RS                 &mut stream,
-//RS                 "404 Not Found",
-//RS                 "text/plain; charset=utf-8",
-//RS                 browser_web_adapter::SOURCE_TOOLS_OFF_REASON.as_bytes(),
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     if listener_kind == ListenerKind::Canvas {
-//RS         if let Some(client) = query_param(target, "client_id") {
-//RS             session.note_client(&client);
-//RS         }
-//RS     }
-//RS     if listener_kind == ListenerKind::Application && !is_application_control_path(path) {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let started = Instant::now();
-//RS         let nonce = status
-//RS             .browser_relay
-//RS             .lock()
-//RS             .unwrap()
-//RS             .as_ref()
-//RS             .map(|relay| relay.nonce().to_string())
-//RS             .unwrap_or_default();
-//RS         let code = serve_static_from_root(&mut stream, static_root, path, &nonce, session_secret)?;
-//RS         status.log_request(method, path, code, started.elapsed());
-//RS         return Ok(());
-//RS     }
-//RS     if listener_kind == ListenerKind::Application && web_stream_path(path) {
-//RS         return handle_web_stream_request(&mut stream, &request);
-//RS     }
-//RS     if devtools_path(path) {
-//RS         if let Some(client) = query_param(target, "client_id") {
-//RS             session.note_client(&client);
-//RS         }
-//RS         let placement = match path {
-//RS             "/__jet_devtools/workbench" => crate::BrowserHost::BrowserPlacement::Workbench,
-//RS             _ => crate::BrowserHost::BrowserPlacement::InApp,
-//RS         };
-//RS         if method == "GET"
-//RS             && listener_kind == ListenerKind::Application
-//RS             && matches!(path, "/__jet_devtools" | "/__jet_devtools/workbench")
-//RS         {
-//RS             let mut state = browser_state.lock().unwrap();
-//RS             return match browser_web_adapter::sync_session(&mut state, session) {
-//RS                 Ok(()) => {
-//RS                     let body = browser_web_adapter::render_page(
-//RS                         state.as_ref().expect("browser web state initialized"),
-//RS                         placement,
-//RS                     );
-//RS                     write_response(
-//RS                         &mut stream,
-//RS                         "200 OK",
-//RS                         "text/html; charset=utf-8",
-//RS                         body.as_bytes(),
-//RS                     )
-//RS                 }
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/reconnect" && method == "GET" {
-//RS             let cursor = match query_param(target, "cursor") {
-//RS                 Some(value) => match value.parse::<u64>() {
-//RS                     Ok(cursor) => Some(cursor),
-//RS                     Err(_) => {
-//RS                         return write_response(
-//RS                             &mut stream,
-//RS                             "400 Bad Request",
-//RS                             "text/plain; charset=utf-8",
-//RS                             b"cursor must be a non-negative integer",
-//RS                         )
-//RS                     }
-//RS                 },
-//RS                 None => None,
-//RS             };
-//RS             let mut state = browser_state.lock().unwrap();
-//RS             return match browser_web_adapter::sync_session(&mut state, session) {
-//RS                 Ok(()) => {
-//RS                     let projection = session.devtools_events_since(cursor);
-//RS                     let state = state.as_ref().expect("browser web state initialized");
-//RS                     match browser_web_adapter::reconnect_json(
-//RS                         state,
-//RS                         cursor,
-//RS                         projection.reset,
-//RS                         projection.truncation,
-//RS                     ) {
-//RS                         Ok(body) => write_response(
-//RS                             &mut stream,
-//RS                             "200 OK",
-//RS                             "application/json; charset=utf-8",
-//RS                             body.as_bytes(),
-//RS                         ),
-//RS                         Err(error) => write_response(
-//RS                             &mut stream,
-//RS                             "409 Conflict",
-//RS                             "text/plain; charset=utf-8",
-//RS                             error.as_bytes(),
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/state" && method == "GET" {
-//RS             let mut state = browser_state.lock().unwrap();
-//RS             return match browser_web_adapter::sync_session(&mut state, session) {
-//RS                 Ok(()) => {
-//RS                     let body = browser_web_adapter::view_json(
-//RS                         state.as_ref().expect("browser web state initialized"),
-//RS                         placement,
-//RS                     );
-//RS                     write_response(
-//RS                         &mut stream,
-//RS                         "200 OK",
-//RS                         "application/json; charset=utf-8",
-//RS                         body.as_bytes(),
-//RS                     )
-//RS                 }
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/swap" && method == "GET" {
-//RS             let mut state = browser_state.lock().unwrap();
-//RS             return match browser_web_adapter::sync_session(&mut state, session) {
-//RS                 Ok(()) => write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     browser_web_adapter::swap_json(
-//RS                         state.as_ref().expect("browser web state initialized"),
-//RS                     )
-//RS                     .as_bytes(),
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/swap" && method == "POST" {
-//RS             let mut state = browser_state.lock().unwrap();
-//RS             let result = browser_web_adapter::sync_session(&mut state, session).and_then(|()| {
-//RS                 browser_web_adapter::record_dom_snapshot(&mut state, session.id(), body)
-//RS             });
-//RS             return match result {
-//RS                 Ok(()) => write_response(
-//RS                     &mut stream,
-//RS                     "204 No Content",
-//RS                     "text/plain; charset=utf-8",
-//RS                     b"",
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "400 Bad Request",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/recording" && release_policy.is_release() {
-//RS             return write_response(
-//RS                 &mut stream,
-//RS                 "404 Not Found",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"recording endpoint absent in release builds",
-//RS             );
-//RS         }
-//RS         if path == "/__jet_devtools/recording" && method == "GET" {
-//RS             let body = if let Some(value) = query_param(target, "sequence") {
-//RS                 let sequence = match value.parse::<u64>() {
-//RS                     Ok(sequence) => sequence,
-//RS                     Err(_) => {
-//RS                         return write_response(
-//RS                             &mut stream,
-//RS                             "400 Bad Request",
-//RS                             "text/plain; charset=utf-8",
-//RS                             b"sequence must be a non-negative integer",
-//RS                         )
-//RS                     }
-//RS                 };
-//RS                 session.recording_control(&format!("{{\"op\":\"scrub\",\"sequence\":{sequence}}}"))
-//RS             } else if let Some(value) = query_param(target, "timestamp_ms") {
-//RS                 let timestamp_ms = match value.parse::<u64>() {
-//RS                     Ok(timestamp_ms) => timestamp_ms,
-//RS                     Err(_) => {
-//RS                         return write_response(
-//RS                             &mut stream,
-//RS                             "400 Bad Request",
-//RS                             "text/plain; charset=utf-8",
-//RS                             b"timestamp_ms must be a non-negative integer",
-//RS                         )
-//RS                     }
-//RS                 };
-//RS                 session.recording_control(&format!(
-//RS                     "{{\"op\":\"scrub_time\",\"timestamp_ms\":{timestamp_ms}}}"
-//RS                 ))
-//RS             } else {
-//RS                 Ok(session.recording_json())
-//RS             };
-//RS             return match body {
-//RS                 Ok(body) => write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     body.as_bytes(),
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "409 Conflict",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/recording" && method == "POST" {
-//RS             let payload = std::str::from_utf8(body).map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "recording control must be UTF-8 JSON",
-//RS                 )
-//RS             })?;
-//RS             return match session.recording_control(payload) {
-//RS                 Ok(body) => write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     body.as_bytes(),
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "409 Conflict",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/action" && method == "POST" {
-//RS             let action = match browser_web_adapter::parse_action(body, placement) {
-//RS                 Ok(action) => action,
-//RS                 Err(error) => {
-//RS                     return write_response(
-//RS                         &mut stream,
-//RS                         "400 Bad Request",
-//RS                         "text/plain; charset=utf-8",
-//RS                         error.as_bytes(),
-//RS                     )
-//RS                 }
-//RS             };
-//RS             let mut state = browser_state.lock().unwrap();
-//RS             return match browser_web_adapter::sync_session(&mut state, session) {
-//RS                 Ok(()) => match browser_web_adapter::dispatch_action(
-//RS                     state.as_mut().expect("browser web state initialized"),
-//RS                     action,
-//RS                 ) {
-//RS                     Ok(body) => write_response(
-//RS                         &mut stream,
-//RS                         "200 OK",
-//RS                         "application/json; charset=utf-8",
-//RS                         body.as_bytes(),
-//RS                     ),
-//RS                     Err(error) => write_response(
-//RS                         &mut stream,
-//RS                         "403 Forbidden",
-//RS                         "text/plain; charset=utf-8",
-//RS                         error.to_string().as_bytes(),
-//RS                     ),
-//RS                 },
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/commands" && method == "GET" {
-//RS             return match session.browser_game_control_frame() {
-//RS                 Ok(body) => write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     body.as_bytes(),
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS 
-//RS         if path == "/__jet_devtools/assets" && method == "GET" {
-//RS             return match session.browser_game_asset_frame() {
-//RS                 Ok(body) => write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     body.as_bytes(),
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS 
-//RS         if method == "GET"
-//RS             && matches!(
-//RS                 path,
-//RS                 "/__jet_devtools"
-//RS                     | "/__jet_canvas/devtools"
-//RS                     | "/canvas/devtools"
-//RS                     | "/panel/devtools"
-//RS             )
-//RS         {
-//RS             let mut state = browser_state.lock().unwrap();
-//RS             return match browser_web_adapter::sync_session(&mut state, session) {
-//RS                 Ok(()) => {
-//RS                     let body = browser_web_adapter::view_json(
-//RS                         state.as_ref().expect("browser web state initialized"),
-//RS                         placement,
-//RS                     );
-//RS                     write_response(
-//RS                         &mut stream,
-//RS                         "200 OK",
-//RS                         "application/json; charset=utf-8",
-//RS                         body.as_bytes(),
-//RS                     )
-//RS                 }
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools" && method == "POST" {
-//RS             let payload = std::str::from_utf8(body).map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "devtools event must be UTF-8",
-//RS                 )
-//RS             })?;
-//RS             return match decode_devtools_envelope(payload).and_then(|decoded| {
-//RS                 session.ingest_devtools_envelope(decoded)?;
-//RS                 session.dispatch_pending_database_explain().map(|_| ())
-//RS             }) {
-//RS                 Ok(()) => {
-//RS                     let mut state = browser_state.lock().unwrap();
-//RS                     match browser_web_adapter::sync_session(&mut state, session) {
-//RS                         Ok(()) => {
-//RS                             let body = browser_web_adapter::view_json(
-//RS                                 state.as_ref().expect("browser web state initialized"),
-//RS                                 placement,
-//RS                             );
-//RS                             write_response(
-//RS                                 &mut stream,
-//RS                                 "200 OK",
-//RS                                 "application/json; charset=utf-8",
-//RS                                 body.as_bytes(),
-//RS                             )
-//RS                         }
-//RS                         Err(error) => write_response(
-//RS                             &mut stream,
-//RS                             "500 Internal Server Error",
-//RS                             "text/plain; charset=utf-8",
-//RS                             error.as_bytes(),
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "400 Bad Request",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/selection" && method == "POST" {
-//RS             let selection = match browser_web_adapter::parse_selection(body) {
-//RS                 Ok(selection) => selection,
-//RS                 Err(error) => {
-//RS                     return write_response(
-//RS                         &mut stream,
-//RS                         "400 Bad Request",
-//RS                         "text/plain; charset=utf-8",
-//RS                         error.as_bytes(),
-//RS                     )
-//RS                 }
-//RS             };
-//RS             if let Some((panel_id, _)) = &selection {
-//RS                 let panels = match session.devtools_panels(
-//RS                     crate::Devtools::JetDevtoolsHostKind::BrowserInApp,
-//RS                     &crate::Devtools::JetDevtoolsPanelCapability::ALL,
-//RS                 ) {
-//RS                     Ok(panels) => panels,
-//RS                     Err(error) => {
-//RS                         let error = error.to_string();
-//RS                         return write_response(
-//RS                             &mut stream,
-//RS                             "500 Internal Server Error",
-//RS                             "text/plain; charset=utf-8",
-//RS                             error.as_bytes(),
-//RS                         );
-//RS                     }
-//RS                 };
-//RS                 if !panels
-//RS                     .iter()
-//RS                     .any(|panel| panel.availability.descriptor.id.as_str() == panel_id)
-//RS                 {
-//RS                     return write_response(
-//RS                         &mut stream,
-//RS                         "400 Bad Request",
-//RS                         "text/plain; charset=utf-8",
-//RS                         b"browser selection panel_id must match the canonical panel catalog",
-//RS                     );
-//RS                 }
-//RS             }
-//RS             let payload = std::str::from_utf8(body).map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "devtools selection must be UTF-8",
-//RS                 )
-//RS             })?;
-//RS             return match session.set_devtools_selection(payload) {
-//RS                 Ok(()) => {
-//RS                     let mut state = browser_state.lock().unwrap();
-//RS                     match browser_web_adapter::sync_session(&mut state, session) {
-//RS                         Ok(()) => {
-//RS                             let body = browser_web_adapter::view_json(
-//RS                                 state.as_ref().expect("browser web state initialized"),
-//RS                                 placement,
-//RS                             );
-//RS                             write_response(
-//RS                                 &mut stream,
-//RS                                 "200 OK",
-//RS                                 "application/json; charset=utf-8",
-//RS                                 body.as_bytes(),
-//RS                             )
-//RS                         }
-//RS                         Err(error) => write_response(
-//RS                             &mut stream,
-//RS                             "500 Internal Server Error",
-//RS                             "text/plain; charset=utf-8",
-//RS                             error.as_bytes(),
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "400 Bad Request",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/cursor" && method == "POST" {
-//RS             let payload = std::str::from_utf8(body).map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "devtools cursor must be UTF-8",
-//RS                 )
-//RS             })?;
-//RS             return match session.set_devtools_cursor(payload) {
-//RS                 Ok(()) => {
-//RS                     let mut state = browser_state.lock().unwrap();
-//RS                     match browser_web_adapter::sync_session(&mut state, session) {
-//RS                         Ok(()) => {
-//RS                             let body = browser_web_adapter::view_json(
-//RS                                 state.as_ref().expect("browser web state initialized"),
-//RS                                 placement,
-//RS                             );
-//RS                             write_response(
-//RS                                 &mut stream,
-//RS                                 "200 OK",
-//RS                                 "application/json; charset=utf-8",
-//RS                                 body.as_bytes(),
-//RS                             )
-//RS                         }
-//RS                         Err(error) => write_response(
-//RS                             &mut stream,
-//RS                             "500 Internal Server Error",
-//RS                             "text/plain; charset=utf-8",
-//RS                             error.as_bytes(),
-//RS                         ),
-//RS                     }
-//RS                 }
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "400 Bad Request",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/error" && method == "GET" {
-//RS             let facts = status.web_error_facts();
-//RS             let devtools_projection = session.devtools_events_since(None);
-//RS             let request_id = next_web_error_request_id();
-//RS             let source_id = devtools_projection
-//RS                 .source_id
-//RS                 .filter(|value| !value.is_empty())
-//RS                 .unwrap_or_else(|| canvas_file.to_string());
-//RS             let build_id = devtools_projection
-//RS                 .build_id
-//RS                 .filter(|value| !value.is_empty())
-//RS                 .or_else(|| {
-//RS                     fs::read_to_string(static_root.join("web.manifest.json"))
-//RS                         .ok()
-//RS                         .and_then(|manifest| {
-//RS                             browser_web_adapter::manifest_artifact_identity(&manifest).ok()
-//RS                         })
-//RS                 });
-//RS             let Some(build_id) = build_id else {
-//RS                 return write_response(
-//RS                     &mut stream,
-//RS                     "404 Not Found",
-//RS                     "text/plain; charset=utf-8",
-//RS                     b"error identity unavailable",
-//RS                 );
-//RS             };
-//RS             let accept = request
-//RS                 .headers
-//RS                 .get("accept")
-//RS                 .map(String::as_str)
-//RS                 .unwrap_or("*/*");
-//RS             let identity = crate::WebErrorPage::WebErrorPageIdentity::new(
-//RS                 request_id,
-//RS                 session.id(),
-//RS                 source_id.clone(),
-//RS                 build_id,
-//RS                 devtools_projection.revision.clone(),
-//RS             )
-//RS             .map_err(|error| {
-//RS                 std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
-//RS             })?;
-//RS             let rendered = if !facts.is_error() {
-//RS                 Ok(None)
-//RS             } else {
-//RS                 let source_excerpts =
-//RS                     crate::Canvas::read_source_without_symlinks(Path::new(canvas_file))
-//RS                         .ok()
-//RS                         .and_then(|source| {
-//RS                             let excerpt = source
-//RS                                 .chars()
-//RS                                 .take(crate::WebErrorPage::MAX_WEB_ERROR_SOURCE_BYTES)
-//RS                                 .collect::<String>();
-//RS                             crate::WebErrorPage::WebErrorSourceExcerpt::without_span(
-//RS                                 source_id.clone(),
-//RS                                 "failure source",
-//RS                                 Some(excerpt),
-//RS                             )
-//RS                             .ok()
-//RS                         })
-//RS                         .into_iter()
-//RS                         .collect::<Vec<_>>();
-//RS                 let action_links = [
-//RS                     ("Open devtools", "/__jet_devtools"),
-//RS                     ("Reconnect", "/__jet_devtools/reconnect"),
-//RS                     ("Open recording", "/__jet_devtools/recording"),
-//RS                 ]
-//RS                 .into_iter()
-//RS                 .filter_map(|(label, href)| {
-//RS                     crate::WebErrorPage::WebErrorActionLink::new(label, href).ok()
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS                 let page = if facts.is_internal_failure() {
-//RS                     crate::WebErrorPage::WebErrorPage::from_internal(
-//RS                         identity,
-//RS                         facts.code.clone(),
-//RS                         facts.diagnostic.clone(),
-//RS                         action_links,
-//RS                     )
-//RS                     .and_then(|page| page.with_source_excerpts(source_excerpts))
-//RS                 } else {
-//RS                     crate::WebErrorPage::WebErrorDiagnosticFact::from_dev_status(&facts).and_then(
-//RS                         |diagnostic| {
-//RS                             crate::WebErrorPage::WebErrorPage::new_with_status(
-//RS                                 500,
-//RS                                 identity,
-//RS                                 diagnostic,
-//RS                                 source_excerpts,
-//RS                                 None,
-//RS                                 action_links,
-//RS                             )
-//RS                         },
-//RS                     )
-//RS                 };
-//RS                 page.and_then(|page| {
-//RS                     page.project(accept, crate::WebErrorPage::WebErrorCapabilities::local())
-//RS                         .map(Some)
-//RS                 })
-//RS                 .map_err(|error| error.to_string())
-//RS             };
-//RS             return match rendered {
-//RS                 Ok(Some(projection)) => {
-//RS                     let status = match projection.status {
-//RS                         200 => "200 OK",
-//RS                         400 => "400 Bad Request",
-//RS                         401 => "401 Unauthorized",
-//RS                         403 => "403 Forbidden",
-//RS                         404 => "404 Not Found",
-//RS                         405 => "405 Method Not Allowed",
-//RS                         409 => "409 Conflict",
-//RS                         413 => "413 Payload Too Large",
-//RS                         415 => "415 Unsupported Media Type",
-//RS                         422 => "422 Unprocessable Content",
-//RS                         429 => "429 Too Many Requests",
-//RS                         500 => "500 Internal Server Error",
-//RS                         501 => "501 Not Implemented",
-//RS                         502 => "502 Bad Gateway",
-//RS                         503 => "503 Service Unavailable",
-//RS                         504 => "504 Gateway Timeout",
-//RS                         _ if projection.status >= 400 && projection.status < 500 => {
-//RS                             "400 Bad Request"
-//RS                         }
-//RS                         _ => "500 Internal Server Error",
-//RS                     };
-//RS                     write_response(
-//RS                         &mut stream,
-//RS                         status,
-//RS                         projection.content_type.as_str(),
-//RS                         projection.body.as_bytes(),
-//RS                     )
-//RS                 }
-//RS                 Ok(None) => write_response(
-//RS                     &mut stream,
-//RS                     "204 No Content",
-//RS                     "text/plain; charset=utf-8",
-//RS                     b"",
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     error.as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/paused/inspect" && method == "POST" {
-//RS             let payload = std::str::from_utf8(body).map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "paused inspect body must be UTF-8",
-//RS                 )
-//RS             })?;
-//RS             let request = match crate::PausedEvaluate::InspectRequest::from_json(payload) {
-//RS                 Ok(request) => request,
-//RS                 Err(error) => {
-//RS                     let error =
-//RS                         crate::PausedEvaluate::PausedEvaluateHostError::InvalidRequest(error);
-//RS                     return write_response(
-//RS                         &mut stream,
-//RS                         paused_evaluate_error_status(&error),
-//RS                         "application/json; charset=utf-8",
-//RS                         error.json().as_bytes(),
-//RS                     );
-//RS                 }
-//RS             };
-//RS             let mut host = paused_evaluate.lock().unwrap();
-//RS             let adapter = match debug_sessions.paused_adapter(&request.identity) {
-//RS                 Ok(adapter) => adapter,
-//RS                 Err(_) => {
-//RS                     host.clear_session();
-//RS                     let error = crate::PausedEvaluate::PausedEvaluateHostError::SessionUnavailable;
-//RS                     return write_response(
-//RS                         &mut stream,
-//RS                         paused_evaluate_error_status(&error),
-//RS                         "application/json; charset=utf-8",
-//RS                         error.json().as_bytes(),
-//RS                     );
-//RS                 }
-//RS             };
-//RS             if adapter.inject_into(&mut host).is_err() {
-//RS                 host.clear_session();
-//RS                 let error = crate::PausedEvaluate::PausedEvaluateHostError::SessionUnavailable;
-//RS                 return write_response(
-//RS                     &mut stream,
-//RS                     paused_evaluate_error_status(&error),
-//RS                     "application/json; charset=utf-8",
-//RS                     error.json().as_bytes(),
-//RS                 );
-//RS             }
-//RS             return match host.handle_inspect(payload) {
-//RS                 Ok(json) => write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     json.as_bytes(),
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     paused_evaluate_error_status(&error),
-//RS                     "application/json; charset=utf-8",
-//RS                     error.json().as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/paused/evaluate" && method == "POST" {
-//RS             let payload = std::str::from_utf8(body).map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "paused evaluate body must be UTF-8",
-//RS                 )
-//RS             })?;
-//RS             let request = match crate::PausedEvaluate::EvaluateRequest::from_json(payload) {
-//RS                 Ok(request) => request,
-//RS                 Err(error) => {
-//RS                     let error =
-//RS                         crate::PausedEvaluate::PausedEvaluateHostError::InvalidRequest(error);
-//RS                     return write_response(
-//RS                         &mut stream,
-//RS                         paused_evaluate_error_status(&error),
-//RS                         "application/json; charset=utf-8",
-//RS                         error.json().as_bytes(),
-//RS                     );
-//RS                 }
-//RS             };
-//RS             let mut host = paused_evaluate.lock().unwrap();
-//RS             let adapter = match debug_sessions.paused_adapter(&request.identity) {
-//RS                 Ok(adapter) => adapter,
-//RS                 Err(_) => {
-//RS                     host.clear_session();
-//RS                     let error = crate::PausedEvaluate::PausedEvaluateHostError::SessionUnavailable;
-//RS                     return write_response(
-//RS                         &mut stream,
-//RS                         paused_evaluate_error_status(&error),
-//RS                         "application/json; charset=utf-8",
-//RS                         error.json().as_bytes(),
-//RS                     );
-//RS                 }
-//RS             };
-//RS             if adapter.inject_into(&mut host).is_err() {
-//RS                 host.clear_session();
-//RS                 let error = crate::PausedEvaluate::PausedEvaluateHostError::SessionUnavailable;
-//RS                 return write_response(
-//RS                     &mut stream,
-//RS                     paused_evaluate_error_status(&error),
-//RS                     "application/json; charset=utf-8",
-//RS                     error.json().as_bytes(),
-//RS                 );
-//RS             }
-//RS             host.set_evaluator_result(adapter.evaluate(&request));
-//RS             return match host.handle_evaluate(payload) {
-//RS                 Ok(json) => write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     json.as_bytes(),
-//RS                 ),
-//RS                 Err(error) => write_response(
-//RS                     &mut stream,
-//RS                     paused_evaluate_error_status(&error),
-//RS                     "application/json; charset=utf-8",
-//RS                     error.json().as_bytes(),
-//RS                 ),
-//RS             };
-//RS         }
-//RS         if path == "/__jet_devtools/style" && method == "GET" {
-//RS             let (_, event) = terminal_style.current_json();
-//RS             return write_response(
-//RS                 &mut stream,
-//RS                 "200 OK",
-//RS                 "application/json; charset=utf-8",
-//RS                 event.as_bytes(),
-//RS             );
-//RS         }
-//RS         if path == "/__jet_devtools/style" && method == "POST" {
-//RS             let payload = std::str::from_utf8(body).map_err(|_| {
-//RS                 std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidData,
-//RS                     "style request must be UTF-8",
-//RS                 )
-//RS             })?;
-//RS             let (_, event) = terminal_style.apply_json(payload);
-//RS             return write_response(
-//RS                 &mut stream,
-//RS                 "200 OK",
-//RS                 "application/json; charset=utf-8",
-//RS                 event.as_bytes(),
-//RS             );
-//RS         }
-//RS         return method_not_allowed(&mut stream);
-//RS     }
-//RS     if path == "/__jet_canvas/session" || path == "/canvas/session" || path == "/panel/session" {
-//RS         let client = query_param(target, "client_id").unwrap_or_default();
-//RS         if !client.is_empty() {
-//RS             session.note_client(&client);
-//RS         }
-//RS         if method == "GET" {
-//RS             let body = session_response(session);
-//RS             return write_response(
-//RS                 &mut stream,
-//RS                 "200 OK",
-//RS                 "application/json; charset=utf-8",
-//RS                 body.as_bytes(),
-//RS             );
-//RS         }
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let body = session_response(session);
-//RS         return write_response(
-//RS             &mut stream,
-//RS             "200 OK",
-//RS             "application/json; charset=utf-8",
-//RS             body.as_bytes(),
-//RS         );
-//RS     }
-//RS     if path == "/__jet_canvas/live" {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let pid = query_param(target, "pid")
-//RS             .and_then(|value| value.parse::<u32>().ok())
-//RS             .ok_or_else(|| {
-//RS                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing live pid")
-//RS             })?;
-//RS         let source_id = query_param(target, "source_id").unwrap_or_default();
-//RS         return match crate::LiveInspect::read(pid) {
-//RS             Ok(snapshot) => {
-//RS                 let revision = current_revision_for_source_id(
-//RS                     canvas_file,
-//RS                     (!source_id.is_empty()).then_some(source_id.as_str()),
-//RS                 );
-//RS                 session.remember_last_good_view("runtime", &source_id, &revision, &snapshot);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     snapshot.as_bytes(),
-//RS                 )
-//RS             }
-//RS             Err(message) => match session.last_good_view("runtime", &source_id) {
-//RS                 Some((_revision, snapshot)) => write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     snapshot.as_bytes(),
-//RS                 ),
-//RS                 None => write_response(
-//RS                     &mut stream,
-//RS                     "404 Not Found",
-//RS                     "text/plain; charset=utf-8",
-//RS                     message.as_bytes(),
-//RS                 ),
-//RS             },
-//RS         };
-//RS     }
-//RS     if let Some(asset) = crate::canvas_asset(method, target, path) {
-//RS         let asset = inject_canvas_session(asset, session_secret);
-//RS         return write_response(
-//RS             &mut stream,
-//RS             asset.status,
-//RS             asset.content_type,
-//RS             asset.body.as_bytes(),
-//RS         );
-//RS     }
-//RS     if target == "/?jet_panel_graph=1" {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         return match crate::Canvas::graph_json_for_file(Path::new(canvas_file)) {
-//RS             Ok(body) => {
-//RS                 session.select_project_source_from_payload(&body);
-//RS                 let source_id = source_id_from_payload(&body);
-//RS                 let revision = current_revision_for_source_id(
-//RS                     canvas_file,
-//RS                     (!source_id.is_empty()).then_some(source_id.as_str()),
-//RS                 );
-//RS                 session.remember_last_good_view("graph", &source_id, &revision, &body);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     with_session(body, session).as_bytes(),
-//RS                 )
-//RS             }
-//RS             Err(diags) => {
-//RS                 let body = with_session(
-//RS                     crate::Canvas::graph_json_error_for_file(Path::new(canvas_file), &diags),
-//RS                     session,
-//RS                 );
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "409 Conflict",
-//RS                     "application/json; charset=utf-8",
-//RS                     body.as_bytes(),
-//RS                 )
-//RS             }
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/graph" || path == "/canvas/graph" || path == "/panel/graph" {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let source_id = query_param(target, "source_id");
-//RS         let graph = match query_param(target, "pid") {
-//RS             Some(pid) => crate::Canvas::graph_json_for_entry_source_with_live_pid(
-//RS                 Path::new(canvas_file),
-//RS                 source_id.as_deref(),
-//RS                 pid.parse().unwrap_or(0),
-//RS             ),
-//RS             None => crate::Canvas::graph_json_for_entry_source(
-//RS                 Path::new(canvas_file),
-//RS                 source_id.as_deref(),
-//RS             ),
-//RS         };
-//RS         if let Some(source_id) = source_id.as_deref() {
-//RS             session.select_project_source(source_id);
-//RS         }
-//RS         return match graph {
-//RS             Ok(body) => {
-//RS                 session.select_project_source_from_payload(&body);
-//RS                 let source_id = source_id
-//RS                     .clone()
-//RS                     .unwrap_or_else(|| source_id_from_payload(&body));
-//RS                 let revision = current_revision_for_source_id(
-//RS                     canvas_file,
-//RS                     (!source_id.is_empty()).then_some(source_id.as_str()),
-//RS                 );
-//RS                 session.remember_last_good_view("graph", &source_id, &revision, &body);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     with_session(body, session).as_bytes(),
-//RS                 )
-//RS             }
-//RS             Err(body) => write_response(
-//RS                 &mut stream,
-//RS                 "409 Conflict",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/project" || path == "/canvas/project" || path == "/panel/project" {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let body = with_session(
-//RS             crate::Canvas::project_json_for_entry(Path::new(canvas_file)),
-//RS             session,
-//RS         );
-//RS         return write_response(
-//RS             &mut stream,
-//RS             "200 OK",
-//RS             "application/json; charset=utf-8",
-//RS             body.as_bytes(),
-//RS         );
-//RS     }
-//RS     if path == "/__jet_canvas/source-control"
-//RS         || path == "/canvas/source-control"
-//RS         || path == "/panel/source-control"
-//RS     {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let body = with_session(
-//RS             crate::Canvas::source_control_json_for_entry(Path::new(canvas_file)),
-//RS             session,
-//RS         );
-//RS         return write_response(
-//RS             &mut stream,
-//RS             "200 OK",
-//RS             "application/json; charset=utf-8",
-//RS             body.as_bytes(),
-//RS         );
-//RS     }
-//RS     if path == "/__jet_canvas/core-catalog"
-//RS         || path == "/canvas/core-catalog"
-//RS         || path == "/panel/core-catalog"
-//RS     {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let query = query_param(target, "query").unwrap_or_default();
-//RS         return match crate::Canvas::core_catalog_json_for_entry(Path::new(canvas_file), &query) {
-//RS             Ok(body) => write_response(
-//RS                 &mut stream,
-//RS                 "200 OK",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS             Err(body) => write_response(
-//RS                 &mut stream,
-//RS                 "409 Conflict",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/proof" || path == "/canvas/proof" || path == "/panel/proof" {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let source_id = query_param(target, "source_id");
-//RS         let receipt = status.command_receipt();
-//RS         return match crate::Canvas::proof_json_for_entry_with_receipt(
-//RS             Path::new(canvas_file),
-//RS             source_id.as_deref(),
-//RS             receipt.as_deref(),
-//RS         ) {
-//RS             Ok(body) => write_response(
-//RS                 &mut stream,
-//RS                 "200 OK",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS             Err(body) => write_response(
-//RS                 &mut stream,
-//RS                 "409 Conflict",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/source" || path == "/canvas/source" || path == "/panel/source" {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let source_id = query_param(target, "source_id");
-//RS         let source_path = source_id
-//RS             .as_deref()
-//RS             .and_then(|id| crate::Canvas::project_path_for_source_id(Path::new(canvas_file), id))
-//RS             .unwrap_or_else(|| PathBuf::from(canvas_file));
-//RS         return match read_source_without_symlinks(&source_path) {
-//RS             Ok(source) => write_response(
-//RS                 &mut stream,
-//RS                 "200 OK",
-//RS                 "text/plain; charset=utf-8",
-//RS                 source.as_bytes(),
-//RS             ),
-//RS             Err(e) => write_response(
-//RS                 &mut stream,
-//RS                 "404 Not Found",
-//RS                 "text/plain; charset=utf-8",
-//RS                 format!("could not read Canvas source: {e}").as_bytes(),
-//RS             ),
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/command" || path == "/canvas/command" || path == "/panel/command" {
-//RS         if method != "POST" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let request = String::from_utf8_lossy(&body);
-//RS         let _transaction = session.lock_source_transaction();
-//RS         return match crate::Canvas::command_receipt_json_for_entry(Path::new(canvas_file), &request)
-//RS         {
-//RS             Ok(body) => {
-//RS                 status.record_command_receipt(body.clone());
-//RS                 session.record_command(&request);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     with_session(body, session).as_bytes(),
-//RS                 )
-//RS             }
-//RS             Err(body) => write_response(
-//RS                 &mut stream,
-//RS                 "409 Conflict",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/transaction"
-//RS         || path == "/canvas/transaction"
-//RS         || path == "/panel/transaction"
-//RS     {
-//RS         if method != "POST" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let request = String::from_utf8_lossy(&body);
-//RS         let _transaction = session.lock_source_transaction();
-//RS         return match crate::Canvas::apply_transaction_json(Path::new(canvas_file), &request) {
-//RS             Ok(body) => {
-//RS                 status.version.fetch_add(1, Ordering::SeqCst);
-//RS                 let revision = current_revision_for_request(canvas_file, &request);
-//RS                 session.accept_transaction(&request, &revision);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     with_session(body, session).as_bytes(),
-//RS                 )
-//RS             }
-//RS             Err(body) => {
-//RS                 let revision = current_revision_for_request(canvas_file, &request);
-//RS                 session.refuse_transaction(&request, &revision);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "409 Conflict",
-//RS                     "application/json; charset=utf-8",
-//RS                     with_session(body, session).as_bytes(),
-//RS                 )
-//RS             }
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/project/transaction"
-//RS         || path == "/canvas/project/transaction"
-//RS         || path == "/panel/project/transaction"
-//RS     {
-//RS         if method != "POST" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let request = String::from_utf8_lossy(&body);
-//RS         let _transaction = session.lock_source_transaction();
-//RS         return match crate::Canvas::apply_project_transaction_json(Path::new(canvas_file), &request)
-//RS         {
-//RS             Ok(body) => {
-//RS                 status.version.fetch_add(1, Ordering::SeqCst);
-//RS                 let revision = current_revision_for_request(canvas_file, &request);
-//RS                 session.accept_transaction(&request, &revision);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     with_session(body, session).as_bytes(),
-//RS                 )
-//RS             }
-//RS             Err(body) => {
-//RS                 let revision = current_revision_for_request(canvas_file, &request);
-//RS                 session.refuse_transaction(&request, &revision);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "409 Conflict",
-//RS                     "application/json; charset=utf-8",
-//RS                     with_session(body, session).as_bytes(),
-//RS                 )
-//RS             }
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/query" || path == "/canvas/query" || path == "/panel/query" {
-//RS         if method != "POST" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let request = String::from_utf8_lossy(&body);
-//RS         return match crate::Canvas::query_json_for_entry(Path::new(canvas_file), &request) {
-//RS             Ok(body) => write_response(
-//RS                 &mut stream,
-//RS                 "200 OK",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS             Err(body) => write_response(
-//RS                 &mut stream,
-//RS                 "409 Conflict",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS         };
-//RS     }
-//RS     if path == "/__jet_canvas/debug" || path == "/canvas/debug" || path == "/panel/debug" {
-//RS         if method != "POST" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let request = String::from_utf8_lossy(&body);
-//RS         let mut paused_evaluate = match paused_evaluate.lock() {
-//RS             Ok(host) => host,
-//RS             Err(_) => {
-//RS                 return write_response(
-//RS                     &mut stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     b"paused evaluate host unavailable",
-//RS                 );
-//RS             }
-//RS         };
-//RS         return match crate::Canvas::debug_session_json_for_entry_with_sessions_and_host(
-//RS             Path::new(canvas_file),
-//RS             &request,
-//RS             debug_sessions,
-//RS             &mut paused_evaluate,
-//RS         ) {
-//RS             Ok(body) => {
-//RS                 session.record_debug_response(&request, &body);
-//RS                 write_response(
-//RS                     &mut stream,
-//RS                     "200 OK",
-//RS                     "application/json; charset=utf-8",
-//RS                     with_session(body, session).as_bytes(),
-//RS                 )
-//RS             }
-//RS             Err(body) => write_response(
-//RS                 &mut stream,
-//RS                 "409 Conflict",
-//RS                 "application/json; charset=utf-8",
-//RS                 with_session(body, session).as_bytes(),
-//RS             ),
-//RS         };
-//RS     }
-//RS     if path == "/__jet_dev_version" {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let body = status.version.load(Ordering::SeqCst).to_string();
-//RS         return write_response(
-//RS             &mut stream,
-//RS             "200 OK",
-//RS             "text/plain; charset=utf-8",
-//RS             body.as_bytes(),
-//RS         );
-//RS     }
-//RS     if path == "/__jet_dev_status" {
-//RS         if method != "GET" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let status_authorized = canvas_request_authorized(
-//RS             &request,
-//RS             target,
-//RS             bind_host,
-//RS             if listener_kind == ListenerKind::Canvas {
-//RS                 session.canvas_port()
-//RS             } else {
-//RS                 session.application_port()
-//RS             },
-//RS             session_secret,
-//RS         );
-//RS         if status_authorized {
-//RS             if let Some(client) = query_param(target, "client") {
-//RS                 status.note_client(&client);
-//RS                 session.note_client(&client);
-//RS             }
-//RS         }
-//RS         let body = status.json();
-//RS         return write_response(
-//RS             &mut stream,
-//RS             "200 OK",
-//RS             "application/json; charset=utf-8",
-//RS             body.as_bytes(),
-//RS         );
-//RS     }
-//RS     if path == "/__jet_dev_disconnect" {
-//RS         if method != "POST" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         if let Some(client) = query_param(target, "client") {
-//RS             status.drop_client(&client);
-//RS             session.drop_client(&client);
-//RS         }
-//RS         return write_response(&mut stream, "200 OK", "text/plain; charset=utf-8", b"ok");
-//RS     }
-//RS     if path == "/__jet_perf_browser" {
-//RS         if method != "POST" {
-//RS             return method_not_allowed(&mut stream);
-//RS         }
-//RS         let relay = status.browser_relay.lock().unwrap();
-//RS         let Some(relay) = relay.as_ref() else {
-//RS             return write_response(
-//RS                 &mut stream,
-//RS                 "503 Service Unavailable",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"browser trace relay unavailable",
-//RS             );
-//RS         };
-//RS         if query_param(target, "nonce").as_deref() != Some(relay.nonce()) {
-//RS             return write_response(
-//RS                 &mut stream,
-//RS                 "403 Forbidden",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"stale or foreign browser trace session",
-//RS             );
-//RS         }
-//RS         return match relay.record(&body) {
-//RS             Ok(()) => write_response(
-//RS                 &mut stream,
-//RS                 "204 No Content",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"",
-//RS             ),
-//RS             Err(crate::BrowserTrace::RecordError::Oversized) => write_response(
-//RS                 &mut stream,
-//RS                 "413 Payload Too Large",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"browser trace envelope exceeds 512 bytes",
-//RS             ),
-//RS             Err(crate::BrowserTrace::RecordError::Malformed) => write_response(
-//RS                 &mut stream,
-//RS                 "400 Bad Request",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"browser trace envelope is malformed",
-//RS             ),
-//RS             Err(crate::BrowserTrace::RecordError::Unavailable) => write_response(
-//RS                 &mut stream,
-//RS                 "503 Service Unavailable",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"browser trace relay unavailable",
-//RS             ),
-//RS         };
-//RS     }
-//RS     if listener_kind == ListenerKind::Canvas {
-//RS         return write_response(
-//RS             &mut stream,
-//RS             "404 Not Found",
-//RS             "text/plain; charset=utf-8",
-//RS             b"Canvas control host does not serve program assets",
-//RS         );
-//RS     }
-//RS     // Only page/asset GETs are worth a request-log line (D-FE-DEVSRV1=D's
-//RS     // verbose log shows `GET / 200 2ms`, not the 400ms `/__jet_dev_version`
-//RS     // poll noise) — those are handled above and already returned.
-//RS     let started = Instant::now();
-//RS     let nonce = status
-//RS         .browser_relay
-//RS         .lock()
-//RS         .unwrap()
-//RS         .as_ref()
-//RS         .map(|relay| relay.nonce().to_string())
-//RS         .unwrap_or_default();
-//RS     let code = serve_static_from_root(&mut stream, static_root, path, &nonce, session_secret)?;
-//RS     status.log_request(method, path, code, started.elapsed());
-//RS     Ok(())
-//RS }
-//RS 
-// END-PORT-PENDING 0791 crates/jet-devserver/src/WebHost.rs:3589-5925
+// Private continuation of jet_devserver.WebHost.
+use jet_devserver.WebHost.*
+use std.io.[Read, Write, BufReader, Error, ErrorKind]
+use std.net.[TcpStream, TcpListener, SocketAddr, IpAddr, Ipv4Addr]
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use std.time.[Duration, Instant]
+use std.thread as thread
+use core.files.[OSPath]
+use jet_devserver.[Request, MAX_REQUEST_BODY_BYTES, ResidentDevSession, query_param, write_response]
+use jet_devserver.Canvas as Canvas
+use jet_devserver.BrowserWebAdapter as browser_web_adapter
+use jet_devserver.BrowserHost as BrowserHost
+use jet_devserver.Devtools as Devtools
+use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+use jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
+use jet_driver.Package.[ReleaseDevtoolsPolicy]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_escape, parse_json_with_limit]
+// Rust: crates/jet-devserver/src/WebHost.rs:3789
+// Canonical WebPending implementation, not the Rust include bridge.
+use jet_codegen.Prelude.Core.WebPending as web_stream_bridge
+// Rust: crates/jet-devserver/src/WebHost.rs:3589
+fn canvas_api_path(path: String, target: String) -> Bool {
+    return path is "/__jet_canvas" | "/__jet_canvas/" | "/__jet_canvas/app.js"
+        | "/__jet_canvas/session" | "/__jet_canvas/live" | "/__jet_canvas/graph"
+        | "/__jet_canvas/project" | "/__jet_canvas/source-control" | "/__jet_canvas/core-catalog"
+        | "/__jet_canvas/proof" | "/__jet_canvas/source" | "/__jet_canvas/command"
+        | "/__jet_canvas/transaction" | "/__jet_canvas/project/transaction" | "/__jet_canvas/query" | "/__jet_canvas/debug"
+        | "/canvas" | "/canvas/" | "/canvas/app.js" | "/canvas/session"
+        | "/canvas/graph" | "/canvas/project" | "/canvas/source-control" | "/canvas/core-catalog"
+        | "/canvas/proof" | "/canvas/source" | "/canvas/command" | "/canvas/transaction"
+        | "/canvas/project/transaction" | "/canvas/query" | "/canvas/debug"
+        | "/panel" | "/panel/" | "/panel/app.js" | "/panel/session" | "/panel/graph"
+        | "/panel/project" | "/panel/source-control" | "/panel/core-catalog" | "/panel/proof"
+        | "/panel/source" | "/panel/command" | "/panel/transaction" | "/panel/project/transaction"
+        | "/panel/query" | "/panel/debug" | "/__jet_dev_version" | "/__jet_dev_status"
+        | "/__jet_dev_disconnect" | "/__jet_perf_browser" | "/__jet_web/stream"
+        || devtools_path(path)
+        || (path == "/" && (query_param(target, "jet_panel") == .Val("1")
+            || query_param(target, "jet_panel_app") == .Val("1")
+            || query_param(target, "jet_panel_graph") == .Val("1")))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3650
+fn canvas_request_authorized(request: &Request, target: String, bind_host: String, port: U16, session_secret: String) -> Bool {
+    if session_secret.is_empty() || !(request.method is "GET" | "POST")
+        || request.body.len() > MAX_REQUEST_BODY_BYTES
+        || request.headers.contains_key("transfer-encoding")
+        || (request.method == "POST" && !request.headers.contains_key("content-length"))
+        || (request.method == "GET" && !request.body.is_empty()) -> return false
+    path :: target.split('?').next().unwrap_or("")
+    if !canvas_api_path(path, target) -> return false
+    host :: request.headers.get("host") ?? return false
+    if !host_header_allowed(host, bind_host, port) -> return false
+    origin :: request.headers.get("origin")
+    same_origin :: request.headers.get("sec-fetch-site").is_some_and((site) -> site.eq_ignore_ascii_case("same-origin"))
+    if origin == .Val(value) {
+        if !origin_allowed(value, bind_host, port) -> return false
+    } else if !canvas_bootstrap_path(path, target) && !same_origin -> return false
+    authorization :: request.headers.get("authorization")
+    query_session :: match unique_session_param(target) { .Ok(v) -> v; .Err(_) -> return false }
+    session_valid :: match (authorization, query_session) {
+        (.Val(auth), .Val(query)) -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret)) && constant_time_equal(query, session_secret)
+        (.Val(auth), .None) -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret))
+        (.None, .Val(query)) -> constant_time_equal(query, session_secret)
+        (.None, .None) -> false
+    }
+    return session_valid && (origin.is_some() || canvas_bootstrap_path(path, target) || same_origin)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3709
+fn unique_session_param(target: String) -> Result<String?, Unit> {
+    (_, query) :: target.split_once('?') ?? return .Ok(.None)
+    found := false
+    for part in query.split('&') {
+        name :: part.split_once('=').map(((name, _)) -> name).unwrap_or(part)
+        if name == "session" {
+            if found -> return .Err(())
+            found = true
+        }
+    }
+    return .Ok(query_param(target, "session"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3726
+fn canvas_bootstrap_path(path: String, target: String) -> Bool {
+    return path is "/__jet_canvas" | "/__jet_canvas/" | "/__jet_canvas/app.js"
+        | "/canvas" | "/canvas/" | "/canvas/app.js" | "/panel" | "/panel/" | "/panel/app.js"
+        | "/__jet_devtools" | "/__jet_devtools/workbench"
+        || target is "/?jet_panel=1" | "/?jet_panel_app=1"
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3743
+fn requires_canvas_authorization(listener_kind: ListenerKind) -> Bool { listener_kind == .Canvas }
+// Rust: crates/jet-devserver/src/WebHost.rs:3747
+fn requires_session_authorization(listener_kind: ListenerKind, path: String) -> Bool {
+    (path != "/__jet_dev_status" && requires_canvas_authorization(listener_kind))
+        || (listener_kind == .Application && (devtools_path(path) || web_stream_path(path) || source_tool_path(path)))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3753
+fn host_header_allowed(value: String, bind_host: String, port: U16) -> Bool {
+    trimmed := value.trim() // #4303
+    value :: trimmed.to_ascii_lowercase()
+    if value == format("{}:{}", url_host(bind_host), port).to_ascii_lowercase() -> return true
+    if !is_loopback_host(bind_host) -> return false
+    return ["localhost", "127.0.0.1", "[::1]"].iter().any((alias) -> value == format("{}:{}", alias, port))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3766
+fn origin_allowed(value: String, bind_host: String, port: U16) -> Bool {
+    trimmed := value.trim() // #4303
+    value :: trimmed.to_ascii_lowercase()
+    expected :: format("http://{}:{}", url_host(bind_host), port).to_ascii_lowercase()
+    if value == expected -> return true
+    return is_loopback_host(bind_host) && ["localhost", "127.0.0.1", "[::1]"].iter().any((alias) -> value == format("http://{}:{}", alias, port))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3778
+fn constant_time_equal(left: String, right: String) -> Bool {
+    left :: left.as_bytes()
+    right :: right.as_bytes()
+    difference := left.len() ^ right.len()
+    for index in 0..left.len().max(right.len()) {
+        difference |= (left.get(index).copied().unwrap_or(0) as USize) ^ (right.get(index).copied().unwrap_or(0) as USize)
+    }
+    return difference == 0
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3794
+fn web_stream_json_string(value: String) -> String { format("\"{}\"", json_escape(value)) }
+// Rust: crates/jet-devserver/src/WebHost.rs:3798
+fn web_stream_error(error: web_stream_bridge.JetWebPendingError) -> (String, String) { (error.code().to_string(), error.message()) }
+// Rust: crates/jet-devserver/src/WebHost.rs:3802
+fn web_stream_request_error(message: String) -> (String, String) { ("invalid_request", ^message) }
+// Rust: crates/jet-devserver/src/WebHost.rs:3806
+fn web_stream_required_string(object: &[String:DataTree], key: String) -> Result<String, (String, String)> {
+    return match object.get(key) {
+        .Val(.Text(value)) if !value.is_empty() -> .Ok(value.clone())
+        .Val(.Text(_)) -> .Err(web_stream_request_error(format("web stream `{}` must not be empty", key)))
+        .Val(_) -> .Err(web_stream_request_error(format("web stream `{}` must be a string", key)))
+        .None -> .Err(web_stream_request_error(format("web stream request has no `{}`", key)))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3823
+fn web_stream_required_text(object: &[String:DataTree], key: String) -> Result<String, (String, String)> {
+    return match object.get(key) {
+        .Val(.Text(value)) -> .Ok(value.clone())
+        .Val(_) -> .Err(web_stream_request_error(format("web stream `{}` must be a string", key)))
+        .None -> .Err(web_stream_request_error(format("web stream request has no `{}`", key)))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3838
+fn web_stream_required_u64(object: &[String:DataTree], key: String) -> Result<U64, (String, String)> {
+    return match object.get(key) {
+        .Val(.Int(value)) if value >= 0 -> .Ok(value as U64)
+        .Val(.Int(_)) -> .Err(web_stream_request_error(format("web stream `{}` must be non-negative", key)))
+        .Val(_) -> .Err(web_stream_request_error(format("web stream `{}` must be an integer", key)))
+        .None -> .Err(web_stream_request_error(format("web stream request has no `{}`", key)))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3856
+fn web_stream_required_bool(object: &[String:DataTree], key: String) -> Result<Bool, (String, String)> {
+    return match object.get(key) {
+        .Val(.Bool(value)) -> .Ok(value)
+        .Val(_) -> .Err(web_stream_request_error(format("web stream `{}` must be a boolean", key)))
+        .None -> .Err(web_stream_request_error(format("web stream request has no `{}`", key)))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3870
+fn web_stream_required_usize(object: &[String:DataTree], key: String) -> Result<USize, (String, String)> {
+    value :: web_stream_required_u64(object, key)?
+    return USize.try_from(value).map_err((_) -> web_stream_request_error(format("web stream `{}` is too large", key))) // GATE #4483: selected pointer width.
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3879
+fn web_stream_object(object: &[String:DataTree], key: String) -> Result<[String:DataTree], (String, String)> {
+    value :: object.get(key).ok_or_else(() -> web_stream_request_error(format("web stream request has no `{}`", key)))?
+    return object_map(value).ok_or_else(() -> web_stream_request_error(format("web stream `{}` must be an object", key)))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3890
+fn web_stream_identity(object: &[String:DataTree], key: String) -> Result<web_stream_bridge.JetWebIslandIdentity, (String, String)> {
+    identity :: web_stream_object(object, key)?
+    island_id :: web_stream_required_string(&identity, "island_id")?
+    source_id :: web_stream_required_string(&identity, "source_id")?
+    build_id :: web_stream_required_string(&identity, "build_id")?
+    revision :: web_stream_required_string(&identity, "revision")?
+    return web_stream_bridge.JetWebIslandIdentity.new(^island_id, ^source_id, ^build_id, ^revision).map_err(web_stream_error)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3903
+fn web_stream_boundary_id(object: &[String:DataTree], key: String) -> Result<web_stream_bridge.JetWebBoundaryId, (String, String)> {
+    return web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(object, key)?).map_err(web_stream_error)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3911
+fn web_stream_id(object: &[String:DataTree], key: String) -> Result<web_stream_bridge.JetWebStreamId, (String, String)> {
+    stream :: web_stream_object(object, key)?
+    boundary_id :: web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(&stream, "boundary_id")?).map_err(web_stream_error)?
+    generation :: web_stream_required_u64(&stream, "generation")?
+    identity :: web_stream_identity(&stream, "identity")?
+    return web_stream_bridge.JetWebStreamId.from_parts(^boundary_id, generation, ^identity).map_err(web_stream_error)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3927
+fn web_stream_trigger(object: &[String:DataTree], key: String) -> Result<web_stream_bridge.JetWebHydrationTrigger, (String, String)> {
+    value :: web_stream_required_string(object, key)?
+    return web_stream_bridge.JetWebHydrationTrigger.parse(value).ok_or_else(() -> web_stream_request_error(format("web stream `{}` has an unknown hydration trigger", key)))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3939
+fn web_stream_target(object: &[String:DataTree], key: String) -> Result<web_stream_bridge.JetWebPendingProjectionTarget, (String, String)> {
+    return match web_stream_required_string(object, key)? {
+        "server" -> .Ok(.Server)
+        "client" -> .Ok(.Client)
+        _ -> .Err(web_stream_request_error(format("web stream `{}` must be `server` or `client`", key)))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3952
+fn web_stream_failure(object: &[String:DataTree]) -> Result<web_stream_bridge.JetWebPendingError, (String, String)> {
+    error :: web_stream_object(object, "error")?
+    return match web_stream_required_string(&error, "code")? {
+        "missing_final_chunk" -> .Ok(.MissingFinalChunk)
+        "invalid_lifecycle" -> .Ok(.InvalidLifecycle(state: .Pending, operation: "web_stream_fail"))
+        "content_too_large" -> .Ok(.ContentTooLarge(limit: web_stream_required_usize(&error, "limit")?, actual: web_stream_required_usize(&error, "actual")?))
+        code -> .Err(web_stream_request_error(format("web stream failure code `{}` is not supported by the host bridge", code)))
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3972
+fn web_stream_success(action: String, payload: String) -> String { format("{{\"ok\":true,\"action\":{},{} }}", web_stream_json_string(action), payload) }
+// Rust: crates/jet-devserver/src/WebHost.rs:3980
+fn web_stream_failure_json(code: String, message: String) -> String {
+    format("{{\"ok\":false,\"error\":{{\"code\":{},\"message\":{}}}}}", web_stream_json_string(code), web_stream_json_string(message))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:3988
+fn handle_web_stream_request(stream: &impl Write, request: &Request) -> Result<Unit, Error> {
+    if request.method != "POST" -> return method_not_allowed(stream)
+    text :: match std.str.from_utf8(&request.body) { // GATE #4494: borrowed UTF-8 byte view.
+        .Ok(text) -> text
+        .Err(_) -> return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request must be UTF-8 JSON").as_bytes())
+    }
+    root :: match parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) {
+        .Ok(root) -> root
+        .Err(_) -> return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request is not bounded JSON").as_bytes())
+    }
+    object :: object_map(&root) ?? return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request must be an object").as_bytes())
+    result: Result<String, (String, String)> :: (() -> {
+        action :: web_stream_required_string(&object, "action")?
+        return match action {
+            "register" -> {
+                boundary_id :: web_stream_required_string(&object, "boundary_id")?
+                identity :: web_stream_identity(&object, "identity")?
+                boundary :: web_stream_bridge.jet_web_stream_register(^boundary_id, ^identity).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"boundary_id\":{}", boundary.render_json())))
+            }
+            "begin" -> {
+                boundary_id :: web_stream_boundary_id(&object, "boundary_id")?
+                identity :: web_stream_identity(&object, "identity")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                stream_id :: web_stream_bridge.jet_web_stream_begin(&boundary_id, ^identity, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"stream_id\":{}", stream_id.render_json())))
+            }
+            "chunk" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                sequence :: web_stream_required_u64(&object, "sequence")?
+                content :: web_stream_required_text(&object, "content")?
+                is_final :: web_stream_required_bool(&object, "is_final")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_chunk(&stream_id, sequence, ^content, is_final, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"receipt\":{}", receipt.render_json())))
+            }
+            "commit" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_commit(&stream_id, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"receipt\":{}", receipt.render_json())))
+            }
+            "fail" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                error :: web_stream_failure(&object)?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_fail(&stream_id, ^error, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"receipt\":{}", receipt.render_json())))
+            }
+            "cancel" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_cancel(&stream_id, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"receipt\":{}", receipt.render_json())))
+            }
+            "rollback" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                at_ns :: web_stream_required_u64(&object, "at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_rollback(&stream_id, at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"receipt\":{}", receipt.render_json())))
+            }
+            "hydration_start" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                trigger :: web_stream_trigger(&object, "trigger")?
+                started_at_ns :: web_stream_required_u64(&object, "started_at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_hydration_start(&stream_id, trigger, started_at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"receipt\":{}", receipt.render_json())))
+            }
+            "hydration_complete" -> {
+                stream_id :: web_stream_id(&object, "stream_id")?
+                completed_at_ns :: web_stream_required_u64(&object, "completed_at_ns")?
+                receipt :: web_stream_bridge.jet_web_stream_hydration_complete(&stream_id, completed_at_ns).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"receipt\":{}", receipt.render_json())))
+            }
+            "receipt" -> {
+                boundary_id :: web_stream_boundary_id(&object, "boundary_id")?
+                receipt :: web_stream_bridge.jet_web_stream_receipt_json(&boundary_id).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"receipt\":{}", receipt)))
+            }
+            "projection" -> {
+                boundary_id :: web_stream_boundary_id(&object, "boundary_id")?
+                target :: web_stream_target(&object, "target")?
+                projection :: web_stream_bridge.jet_web_stream_projection_json(&boundary_id, target).map_err(web_stream_error)?
+                .Ok(web_stream_success(action, format("\"projection\":{}", projection)))
+            }
+            _ -> .Err(web_stream_request_error(format("web stream action `{}` is not recognized", action)))
+        }
+    })()
+    return match result {
+        .Ok(body) -> write_response(stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+        .Err((code, message)) -> write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json(code, message).as_bytes())
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4182
+fn unauthorized(stream: &impl Write) -> Result<Unit, Error> {
+    write_response(stream, "401 Unauthorized", "text/plain; charset=utf-8", b"devserver session, host, or origin rejected")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4190
+fn handle_release_devtools_request(stream: &impl Write, request: &Request, path: String, bind_host: String, port: U16, peer_addr: SocketAddr, session: &ResidentDevSession, policy: &ReleaseDevtoolsPolicy) -> Result<Unit, Error> {
+    if path != "/__jet_devtools" || !policy.endpoint_enabled() -> return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", b"inspect endpoint absent")
+    if request.method != "GET" -> return method_not_allowed(stream)
+    if !policy.deployment_enabled() -> return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", b"inspect endpoint disabled")
+    host :: request.headers.get("host") ?? return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", b"inspect host rejected")
+    if !host_header_allowed(host, bind_host, port) -> return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", b"inspect host rejected")
+    if request.headers.get("origin").is_some_and((origin) -> !origin_allowed(origin, bind_host, port)) -> return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", b"inspect origin rejected")
+    expected_token :: policy.deployment.token() ?? return write_response(stream, "401 Unauthorized", "application/json; charset=utf-8", b"{\"error\":\"JET_INSPECT_TOKEN required\"}")
+    token_valid :: request.headers.get("authorization").and_then((value) -> value.strip_prefix("Bearer ")).is_some_and((token) -> constant_time_equal(token, expected_token))
+    if !token_valid -> return write_response(stream, "401 Unauthorized", "application/json; charset=utf-8", b"{\"error\":\"JET_INSPECT_TOKEN required\"}")
+    if !policy.peer_allowed(peer_addr.ip()) -> return write_response(stream, "403 Forbidden", "application/json; charset=utf-8", b"{\"error\":\"inspect network address not allowed\"}")
+    if !request.body.is_empty() || request.headers.contains_key("transfer-encoding") -> return write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", b"inspect endpoint accepts GET without a request body")
+    projection :: session.devtools_events_since(.None)
+    panels :: match session.devtools_panels(Devtools.JetDevtoolsHostKind.BrowserInApp, &Devtools.JetDevtoolsPanelCapability.ALL) {
+        .Ok(panels) -> panels
+        .Err(error) -> return write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.to_string().as_bytes())
+    }
+    body :: browser_web_adapter.release_json(&projection, &panels)
+    return write_response(stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4308
+enum ListenerKind { Canvas; Application }
+// Rust: crates/jet-devserver/src/WebHost.rs:4314
+struct DeadlineStream {
+    stream: TcpStream
+    deadline: Instant
+}
+impl DeadlineStream {
+    // Rust: crates/jet-devserver/src/WebHost.rs:4320
+    fn new(stream: TcpStream, deadline: Instant) -> Self { Self(stream: ^stream, deadline: deadline) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:4324
+    fn try_clone(self: &Self) -> Result<Self, Error> { .Ok(Self.new(self.stream.try_clone()?, self.deadline)) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:4328
+    fn remaining(self: &Self) -> Result<Duration, Error> {
+        remaining :: self.deadline.saturating_duration_since(Instant.now()) // GATE #4494: monotonic clock.
+        if remaining.is_zero() { .Err(Error.new(ErrorKind.TimedOut, "devserver request deadline exceeded")) } else { .Ok(remaining) }
+    }
+}
+impl DeadlineStream.Read {
+    // Rust: crates/jet-devserver/src/WebHost.rs:4342
+    fn read(self: &Self, buffer: &[U8]) -> Result<USize, Error> {
+        remaining :: self.remaining()?
+        self.stream.set_read_timeout(.Val(remaining))? // GATE #4494: retained native socket timeout.
+        return self.stream.read(buffer)
+    }
+}
+impl DeadlineStream.Write {
+    // Rust: crates/jet-devserver/src/WebHost.rs:4350
+    fn write(self: &Self, buffer: &[U8]) -> Result<USize, Error> {
+        remaining :: self.remaining()?
+        self.stream.set_write_timeout(.Val(remaining))? // GATE #4494
+        return self.stream.write(buffer)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:4356
+    fn flush(self: &Self) -> Result<Unit, Error> {
+        remaining :: self.remaining()?
+        self.stream.set_write_timeout(.Val(remaining))?
+        return self.stream.flush()
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4365
+// One thread per accepted connection, bounded by MAX_CONNECTION_THREADS.
+fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, debug_sessions: Arc<Canvas.DebugSessions>, session: Arc<ResidentDevSession>, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, shutdown: Arc<AtomicBool>, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, browser_state: Arc<Mutex<browser_web_adapter.BrowserWebState?>>, paused_evaluate: Arc<Mutex<PausedEvaluateHost>>, terminal_style: Arc<TerminalStyleHostAdapter>) -> Unit {
+    if listener.set_nonblocking(true).is_err() -> return
+    active_connections :: Arc.new(AtomicUsize.new(0)) // GATE #4494: native atomic and thread substrate.
+    while !shutdown.load(Ordering.SeqCst) {
+        match listener.accept() {
+            .Ok((stream, peer_addr)) -> {
+                if !try_acquire_connection(&active_connections) { drop(^stream); continue }
+                status :: Arc.clone(&status)
+                debug_sessions :: Arc.clone(&debug_sessions)
+                session :: Arc.clone(&session)
+                canvas_file :: canvas_file.clone()
+                bind_host :: bind_host.clone()
+                session_secret :: session_secret.clone()
+                static_root :: static_root.clone()
+                release_policy :: release_policy.clone()
+                browser_state :: Arc.clone(&browser_state)
+                paused_evaluate :: Arc.clone(&paused_evaluate)
+                terminal_style :: Arc.clone(&terminal_style)
+                active_connections :: Arc.clone(&active_connections)
+                _ :: thread.spawn(move () -> {
+                    _ :: handle_connection_with_root_and_policy(^stream, &status, &debug_sessions, &session, canvas_file, listener_kind, bind_host, session_secret, &static_root, &browser_state, &paused_evaluate, &terminal_style, &release_policy, peer_addr)
+                    _ :: active_connections.fetch_sub(1, Ordering.AcqRel)
+                })
+            }
+            .Err(error) if error.kind() == ErrorKind.WouldBlock -> { _ :: wait_for_shutdown(&shutdown, Duration.from_millis(10)) }
+            .Err(_) -> return
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4432
+fn try_acquire_connection(active: &AtomicUsize) -> Bool {
+    current := active.load(Ordering.Acquire) // GATE #4494
+    loop {
+        if current >= MAX_CONNECTION_THREADS -> return false
+        match active.compare_exchange(current, current + 1, Ordering.AcqRel, Ordering.Acquire) {
+            .Ok(_) -> return true
+            .Err(next) -> current = next
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4504
+fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus, debug_sessions: &Canvas.DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, static_root: &OSPath, browser_state: &Arc<Mutex<browser_web_adapter.BrowserWebState?>>, paused_evaluate: &Arc<Mutex<PausedEvaluateHost>>, terminal_style: &Arc<TerminalStyleHostAdapter>, release_policy: &ReleaseDevtoolsPolicy, peer_addr: SocketAddr) -> Result<Unit, Error> {
+    deadline :: Instant.now() + REQUEST_DEADLINE
+    stream := DeadlineStream.new(^stream, deadline)
+    reader := BufReader.new(stream.try_clone()?)
+    request :: Request.read(&reader)? ?? return .Ok(())
+    method :: request.method.as_str()
+    target :: request.target.as_str()
+    body :: request.body.as_slice()
+    path :: target.split('?').next().unwrap_or("/")
+    if listener_kind == .Application && release_policy.is_release() && devtools_path(path) {
+        return handle_release_devtools_request(&stream, &request, path, bind_host, session.application_port(), peer_addr, session, release_policy)
+    }
+    if requires_session_authorization(listener_kind, path) && !canvas_request_authorized(&request, target, bind_host, if listener_kind == .Canvas { session.canvas_port() } else { session.application_port() }, session_secret) -> return unauthorized(&stream)
+    if method != "GET" && method != "POST" -> return write_response(&stream, "405 Method Not Allowed", "text/plain; charset=utf-8", b"jet dev's web server only handles GET and Canvas POST requests")
+    // Source tools require Canvas authority even on the application origin.
+    if listener_kind == .Application && source_tool_path(path) {
+        if release_policy.is_release() -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", b"source tools are absent in release builds")
+        if session.canvas_port() == 0 -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", browser_web_adapter.SOURCE_TOOLS_OFF_REASON.as_bytes())
+    }
+    if listener_kind == .Canvas {
+        if query_param(target, "client_id") == .Val(client) -> session.note_client(client)
+    }
+    if listener_kind == .Application && !is_application_control_path(path) {
+        if method != "GET" -> return method_not_allowed(&stream)
+        started :: Instant.now()
+        nonce :: status.browser_relay.lock().unwrap().as_ref().map((relay) -> relay.nonce().to_string()).unwrap_or_default()
+        code :: serve_static_from_root(&stream, static_root, path, nonce, session_secret)?
+        status.log_request(method, path, code, started.elapsed())
+        return .Ok(())
+    }
+    if listener_kind == .Application && web_stream_path(path) -> return handle_web_stream_request(&stream, &request)
+    if devtools_path(path) {
+        if query_param(target, "client_id") == .Val(client) -> session.note_client(client)
+        placement :: match path { "/__jet_devtools/workbench" -> BrowserHost.BrowserPlacement.Workbench; _ -> BrowserHost.BrowserPlacement.InApp }
+        if method == "GET" && listener_kind == .Application && path is "/__jet_devtools" | "/__jet_devtools/workbench" {
+            state := browser_state.lock().unwrap()
+            return match browser_web_adapter.sync_session(&state, session) {
+                .Ok(()) -> {
+                    body :: browser_web_adapter.render_page(state.as_ref().expect("browser web state initialized"), placement)
+                    write_response(&stream, "200 OK", "text/html; charset=utf-8", body.as_bytes())
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/reconnect" && method == "GET" {
+            cursor :: match query_param(target, "cursor") {
+                .Val(value) -> match value.parse<U64>() {
+                    .Ok(cursor) -> .Val(cursor)
+                    .Err(_) -> return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", b"cursor must be a non-negative integer")
+                }
+                .None -> .None
+            }
+            state := browser_state.lock().unwrap()
+            return match browser_web_adapter.sync_session(&state, session) {
+                .Ok(()) -> {
+                    projection :: session.devtools_events_since(cursor)
+                    state :: state.as_ref().expect("browser web state initialized")
+                    match browser_web_adapter.reconnect_json(state, cursor, projection.reset, projection.truncation) {
+                        .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                        .Err(error) -> write_response(&stream, "409 Conflict", "text/plain; charset=utf-8", error.as_bytes())
+                    }
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/state" && method == "GET" {
+            state := browser_state.lock().unwrap()
+            return match browser_web_adapter.sync_session(&state, session) {
+                .Ok(()) -> {
+                    body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                    write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/swap" && method == "GET" {
+            state := browser_state.lock().unwrap()
+            return match browser_web_adapter.sync_session(&state, session) {
+                .Ok(()) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", browser_web_adapter.swap_json(state.as_ref().expect("browser web state initialized")).as_bytes())
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/swap" && method == "POST" {
+            state := browser_state.lock().unwrap()
+            result :: browser_web_adapter.sync_session(&state, session).and_then((()) -> browser_web_adapter.record_dom_snapshot(&state, session.id(), body))
+            return match result {
+                .Ok(()) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", b"")
+                .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/recording" && release_policy.is_release() -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", b"recording endpoint absent in release builds")
+        if path == "/__jet_devtools/recording" && method == "GET" {
+            body :: if query_param(target, "sequence") == .Val(value) {
+                sequence :: match value.parse<U64>() {
+                    .Ok(sequence) -> sequence
+                    .Err(_) -> return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", b"sequence must be a non-negative integer")
+                }
+                session.recording_control(format("{{\"op\":\"scrub\",\"sequence\":{}}}", sequence))
+            } else if query_param(target, "timestamp_ms") == .Val(value) {
+                timestamp_ms :: match value.parse<U64>() {
+                    .Ok(timestamp_ms) -> timestamp_ms
+                    .Err(_) -> return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", b"timestamp_ms must be a non-negative integer")
+                }
+                session.recording_control(format("{{\"op\":\"scrub_time\",\"timestamp_ms\":{}}}", timestamp_ms))
+            } else { .Ok(session.recording_json()) }
+            return match body {
+                .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                .Err(error) -> write_response(&stream, "409 Conflict", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/recording" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "recording control must be UTF-8 JSON"))? // GATE #4409
+            return match session.recording_control(payload) {
+                .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                .Err(error) -> write_response(&stream, "409 Conflict", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/action" && method == "POST" {
+            action :: match browser_web_adapter.parse_action(body, placement) {
+                .Ok(action) -> action
+                .Err(error) -> return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+            state := browser_state.lock().unwrap()
+            return match browser_web_adapter.sync_session(&state, session) {
+                .Ok(()) -> match browser_web_adapter.dispatch_action(state.as_mut().expect("browser web state initialized"), ^action) {
+                    .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                    .Err(error) -> write_response(&stream, "403 Forbidden", "text/plain; charset=utf-8", error.to_string().as_bytes())
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/commands" && method == "GET" {
+            return match session.browser_game_control_frame() {
+                .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/assets" && method == "GET" {
+            return match session.browser_game_asset_frame() {
+                .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if method == "GET" && path is "/__jet_devtools" | "/__jet_canvas/devtools" | "/canvas/devtools" | "/panel/devtools" {
+            state := browser_state.lock().unwrap()
+            return match browser_web_adapter.sync_session(&state, session) {
+                .Ok(()) -> {
+                    body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                    write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                }
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools event must be UTF-8"))?
+            return match decode_devtools_envelope(payload).and_then((decoded) -> {
+                session.ingest_devtools_envelope(^decoded)?
+                session.dispatch_pending_database_explain().map((_) -> ())
+            }) {
+                .Ok(()) -> {
+                    state := browser_state.lock().unwrap()
+                    match browser_web_adapter.sync_session(&state, session) {
+                        .Ok(()) -> {
+                            body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                            write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                        }
+                        .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+                    }
+                }
+                .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/selection" && method == "POST" {
+            selection :: match browser_web_adapter.parse_selection(body) {
+                .Ok(selection) -> selection
+                .Err(error) -> return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+            if selection == .Val((panel_id, _)) {
+                panels :: match session.devtools_panels(Devtools.JetDevtoolsHostKind.BrowserInApp, &Devtools.JetDevtoolsPanelCapability.ALL) {
+                    .Ok(panels) -> panels
+                    .Err(error) -> return write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.to_string().as_bytes())
+                }
+                if !panels.iter().any((panel) -> panel.availability.descriptor.id.as_str() == panel_id) -> return write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", b"browser selection panel_id must match the canonical panel catalog")
+            }
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools selection must be UTF-8"))?
+            return match session.set_devtools_selection(payload) {
+                .Ok(()) -> {
+                    state := browser_state.lock().unwrap()
+                    match browser_web_adapter.sync_session(&state, session) {
+                        .Ok(()) -> {
+                            body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                            write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                        }
+                        .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+                    }
+                }
+                .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/cursor" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools cursor must be UTF-8"))?
+            return match session.set_devtools_cursor(payload) {
+                .Ok(()) -> {
+                    state := browser_state.lock().unwrap()
+                    match browser_web_adapter.sync_session(&state, session) {
+                        .Ok(()) -> {
+                            body :: browser_web_adapter.view_json(state.as_ref().expect("browser web state initialized"), placement)
+                            write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+                        }
+                        .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+                    }
+                }
+                .Err(error) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/error" && method == "GET" {
+            facts :: status.web_error_facts()
+            devtools_projection :: session.devtools_events_since(.None)
+            request_id :: next_web_error_request_id()
+            source_id :: devtools_projection.source_id.filter((value) -> !value.is_empty()).unwrap_or_else(() -> canvas_file.to_string())
+            build_id :: devtools_projection.build_id.filter((value) -> !value.is_empty()).or_else(() -> {
+                std.fs.read_to_string(static_root.join("web.manifest.json")).ok().and_then((manifest) -> browser_web_adapter.manifest_artifact_identity(manifest).ok())
+            }) ?? return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", b"error identity unavailable")
+            accept :: request.headers.get("accept").map((v) -> v.as_str()).unwrap_or("*/*")
+            identity :: jet_devserver.WebErrorPage.WebErrorPageIdentity.new(^request_id, session.id(), source_id.clone(), ^build_id, devtools_projection.revision.clone()).map_err((error) -> Error.new(ErrorKind.InvalidData, error.to_string()))?
+            rendered :: if !facts.is_error() { .Ok(.None) } else {
+                source_excerpts :: Canvas.read_source_without_symlinks(OSPath.new(canvas_file)).ok().and_then((source) -> {
+                    excerpt :: source.chars().take(jet_devserver.WebErrorPage.MAX_WEB_ERROR_SOURCE_BYTES).collect<String>()
+                    jet_devserver.WebErrorPage.WebErrorSourceExcerpt.without_span(source_id.clone(), "failure source", .Val(^excerpt)).ok()
+                }).into_iter().collect<[_]>()
+                action_links :: [("Open devtools", "/__jet_devtools"), ("Reconnect", "/__jet_devtools/reconnect"), ("Open recording", "/__jet_devtools/recording")].into_iter().filter_map(((label, href)) -> jet_devserver.WebErrorPage.WebErrorActionLink.new(label, href).ok()).collect<[_]>()
+                page :: if facts.is_internal_failure() {
+                    jet_devserver.WebErrorPage.WebErrorPage.from_internal(^identity, facts.code.clone(), facts.diagnostic.clone(), ^action_links).and_then((page) -> page.with_source_excerpts(^source_excerpts))
+                } else {
+                    jet_devserver.WebErrorPage.WebErrorDiagnosticFact.from_dev_status(&facts).and_then((diagnostic) -> jet_devserver.WebErrorPage.WebErrorPage.new_with_status(500, ^identity, ^diagnostic, ^source_excerpts, .None, ^action_links))
+                }
+                page.and_then((page) -> page.project(accept, jet_devserver.WebErrorPage.WebErrorCapabilities.local()).map((p) -> .Val(^p))).map_err((error) -> error.to_string())
+            }
+            return match rendered {
+                .Ok(.Val(projection)) -> {
+                    status :: match projection.status {
+                        200 -> "200 OK"; 400 -> "400 Bad Request"; 401 -> "401 Unauthorized"
+                        403 -> "403 Forbidden"; 404 -> "404 Not Found"; 405 -> "405 Method Not Allowed"
+                        409 -> "409 Conflict"; 413 -> "413 Payload Too Large"; 415 -> "415 Unsupported Media Type"
+                        422 -> "422 Unprocessable Content"; 429 -> "429 Too Many Requests"
+                        500 -> "500 Internal Server Error"; 501 -> "501 Not Implemented"; 502 -> "502 Bad Gateway"
+                        503 -> "503 Service Unavailable"; 504 -> "504 Gateway Timeout"
+                        _ if projection.status >= 400 && projection.status < 500 -> "400 Bad Request"
+                        _ -> "500 Internal Server Error"
+                    }
+                    write_response(&stream, status, projection.content_type.as_str(), projection.body.as_bytes())
+                }
+                .Ok(.None) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", b"")
+                .Err(error) -> write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/paused/inspect" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused inspect body must be UTF-8"))?
+            request :: match jet_devserver.PausedEvaluate.InspectRequest.from_json(payload) {
+                .Ok(request) -> request
+                .Err(error) -> {
+                    error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.InvalidRequest(^error)
+                    return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+                }
+            }
+            host := paused_evaluate.lock().unwrap()
+            adapter :: match debug_sessions.paused_adapter(&request.identity) {
+                .Ok(adapter) -> adapter
+                .Err(_) -> {
+                    host.clear_session()
+                    error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.SessionUnavailable
+                    return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+                }
+            }
+            if adapter.inject_into(&host).is_err() {
+                host.clear_session()
+                error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.SessionUnavailable
+                return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+            }
+            return match host.handle_inspect(payload) {
+                .Ok(json) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", json.as_bytes())
+                .Err(error) -> write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/paused/evaluate" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused evaluate body must be UTF-8"))?
+            request :: match jet_devserver.PausedEvaluate.EvaluateRequest.from_json(payload) {
+                .Ok(request) -> request
+                .Err(error) -> {
+                    error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.InvalidRequest(^error)
+                    return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+                }
+            }
+            host := paused_evaluate.lock().unwrap()
+            adapter :: match debug_sessions.paused_adapter(&request.identity) {
+                .Ok(adapter) -> adapter
+                .Err(_) -> {
+                    host.clear_session()
+                    error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.SessionUnavailable
+                    return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+                }
+            }
+            if adapter.inject_into(&host).is_err() {
+                host.clear_session()
+                error :: jet_devserver.PausedEvaluate.PausedEvaluateHostError.SessionUnavailable
+                return write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+            }
+            host.set_evaluator_result(adapter.evaluate(&request))
+            return match host.handle_evaluate(payload) {
+                .Ok(json) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", json.as_bytes())
+                .Err(error) -> write_response(&stream, paused_evaluate_error_status(&error), "application/json; charset=utf-8", error.json().as_bytes())
+            }
+        }
+        if path == "/__jet_devtools/style" && method == "GET" {
+            (_, event) :: terminal_style.current_json()
+            return write_response(&stream, "200 OK", "application/json; charset=utf-8", event.as_bytes())
+        }
+        if path == "/__jet_devtools/style" && method == "POST" {
+            payload :: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "style request must be UTF-8"))?
+            (_, event) :: terminal_style.apply_json(payload)
+            return write_response(&stream, "200 OK", "application/json; charset=utf-8", event.as_bytes())
+        }
+        return method_not_allowed(&stream)
+    }
+    if path is "/__jet_canvas/session" | "/canvas/session" | "/panel/session" {
+        client :: query_param(target, "client_id").unwrap_or_default()
+        if !client.is_empty() -> session.note_client(client)
+        if method == "GET" {
+            body :: session_response(session)
+            return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+        }
+        if method != "GET" -> return method_not_allowed(&stream)
+        body :: session_response(session)
+        return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+    }
+    if path == "/__jet_canvas/live" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        pid :: query_param(target, "pid").and_then((value) -> value.parse<U32>().ok()).ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "missing live pid"))?
+        source_id :: query_param(target, "source_id").unwrap_or_default()
+        return match jet_devserver.LiveInspect.read(pid) {
+            .Ok(snapshot) -> {
+                revision :: current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+                session.remember_last_good_view("runtime", source_id, revision, snapshot)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", snapshot.as_bytes())
+            }
+            .Err(message) -> match session.last_good_view("runtime", source_id) {
+                .Val((_revision, snapshot)) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", snapshot.as_bytes())
+                .None -> write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", message.as_bytes())
+            }
+        }
+    }
+    if jet_devserver.canvas_asset(method, target, path) == .Val(asset) {
+        asset :: inject_canvas_session(^asset, session_secret)
+        return write_response(&stream, asset.status, asset.content_type, asset.body.as_bytes())
+    }
+    if target == "/?jet_panel_graph=1" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        return match Canvas.graph_json_for_file(OSPath.new(canvas_file)) {
+            .Ok(body) -> {
+                session.select_project_source_from_payload(body)
+                source_id :: source_id_from_payload(body)
+                revision :: current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+                session.remember_last_good_view("graph", source_id, revision, body)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(diags) -> {
+                body :: with_session(Canvas.graph_json_error_for_file(OSPath.new(canvas_file), &diags), session)
+                write_response(&stream, "409 Conflict", "application/json; charset=utf-8", body.as_bytes())
+            }
+        }
+    }
+    if path is "/__jet_canvas/graph" | "/canvas/graph" | "/panel/graph" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        source_id :: query_param(target, "source_id")
+        graph :: match query_param(target, "pid") {
+            .Val(pid) -> Canvas.graph_json_for_entry_source_with_live_pid(OSPath.new(canvas_file), source_id.as_ref(), pid.parse<U32>().unwrap_or(0))
+            .None -> Canvas.graph_json_for_entry_source(OSPath.new(canvas_file), source_id.as_ref())
+        }
+        if source_id == .Val(id) -> session.select_project_source(id)
+        return match graph {
+            .Ok(body) -> {
+                session.select_project_source_from_payload(body)
+                source_id :: source_id.clone().unwrap_or_else(() -> source_id_from_payload(body))
+                revision :: current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+                session.remember_last_good_view("graph", source_id, revision, body)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path is "/__jet_canvas/project" | "/canvas/project" | "/panel/project" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        body :: with_session(Canvas.project_json_for_entry(OSPath.new(canvas_file)), session)
+        return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+    }
+    if path is "/__jet_canvas/source-control" | "/canvas/source-control" | "/panel/source-control" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        body :: with_session(Canvas.source_control_json_for_entry(OSPath.new(canvas_file)), session)
+        return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+    }
+    if path is "/__jet_canvas/core-catalog" | "/canvas/core-catalog" | "/panel/core-catalog" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        query :: query_param(target, "query").unwrap_or_default()
+        return match Canvas.core_catalog_json_for_entry(OSPath.new(canvas_file), query) {
+            .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path is "/__jet_canvas/proof" | "/canvas/proof" | "/panel/proof" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        source_id :: query_param(target, "source_id")
+        receipt :: status.command_receipt()
+        return match Canvas.proof_json_for_entry_with_receipt(OSPath.new(canvas_file), source_id.as_ref(), receipt.as_ref()) {
+            .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path is "/__jet_canvas/source" | "/canvas/source" | "/panel/source" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        source_id :: query_param(target, "source_id")
+        source_path :: source_id.as_ref().and_then((id) -> Canvas.project_path_for_source_id(OSPath.new(canvas_file), id)).unwrap_or_else(() -> OSPath.new(canvas_file))
+        return match read_source_without_symlinks(&source_path) {
+            .Ok(source) -> write_response(&stream, "200 OK", "text/plain; charset=utf-8", source.as_bytes())
+            .Err(e) -> write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", format("could not read Canvas source: {}", e).as_bytes())
+        }
+    }
+    if path is "/__jet_canvas/command" | "/canvas/command" | "/panel/command" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        _transaction :: session.lock_source_transaction()
+        return match Canvas.command_receipt_json_for_entry(OSPath.new(canvas_file), request) {
+            .Ok(body) -> {
+                status.record_command_receipt(body.clone())
+                session.record_command(request)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path is "/__jet_canvas/transaction" | "/canvas/transaction" | "/panel/transaction" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        _transaction :: session.lock_source_transaction()
+        return match Canvas.apply_transaction_json(OSPath.new(canvas_file), request) {
+            .Ok(body) -> {
+                _ :: status.version.fetch_add(1, Ordering.SeqCst)
+                revision :: current_revision_for_request(canvas_file, request)
+                session.accept_transaction(request, revision)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> {
+                revision :: current_revision_for_request(canvas_file, request)
+                session.refuse_transaction(request, revision)
+                write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+        }
+    }
+    if path is "/__jet_canvas/project/transaction" | "/canvas/project/transaction" | "/panel/project/transaction" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        _transaction :: session.lock_source_transaction()
+        return match Canvas.apply_project_transaction_json(OSPath.new(canvas_file), request) {
+            .Ok(body) -> {
+                _ :: status.version.fetch_add(1, Ordering.SeqCst)
+                revision :: current_revision_for_request(canvas_file, request)
+                session.accept_transaction(request, revision)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> {
+                revision :: current_revision_for_request(canvas_file, request)
+                session.refuse_transaction(request, revision)
+                write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+        }
+    }
+    if path is "/__jet_canvas/query" | "/canvas/query" | "/panel/query" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        return match Canvas.query_json_for_entry(OSPath.new(canvas_file), request) {
+            .Ok(body) -> write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path is "/__jet_canvas/debug" | "/canvas/debug" | "/panel/debug" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        request :: String.from_utf8_lossy(body)
+        paused_evaluate := match paused_evaluate.lock() {
+            .Ok(host) -> host
+            .Err(_) -> return write_response(&stream, "500 Internal Server Error", "text/plain; charset=utf-8", b"paused evaluate host unavailable")
+        }
+        return match Canvas.debug_session_json_for_entry_with_sessions_and_host(OSPath.new(canvas_file), request, debug_sessions, &paused_evaluate) {
+            .Ok(body) -> {
+                session.record_debug_response(request, body)
+                write_response(&stream, "200 OK", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+            }
+            .Err(body) -> write_response(&stream, "409 Conflict", "application/json; charset=utf-8", with_session(^body, session).as_bytes())
+        }
+    }
+    if path == "/__jet_dev_version" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        body :: status.version.load(Ordering.SeqCst).to_string()
+        return write_response(&stream, "200 OK", "text/plain; charset=utf-8", body.as_bytes())
+    }
+    if path == "/__jet_dev_status" {
+        if method != "GET" -> return method_not_allowed(&stream)
+        status_authorized :: canvas_request_authorized(&request, target, bind_host, if listener_kind == .Canvas { session.canvas_port() } else { session.application_port() }, session_secret)
+        if status_authorized {
+            if query_param(target, "client") == .Val(client) { status.note_client(client); session.note_client(client) }
+        }
+        body :: status.json()
+        return write_response(&stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
+    }
+    if path == "/__jet_dev_disconnect" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        if query_param(target, "client") == .Val(client) { status.drop_client(client); session.drop_client(client) }
+        return write_response(&stream, "200 OK", "text/plain; charset=utf-8", b"ok")
+    }
+    if path == "/__jet_perf_browser" {
+        if method != "POST" -> return method_not_allowed(&stream)
+        relay :: status.browser_relay.lock().unwrap()
+        relay :: relay.as_ref() ?? return write_response(&stream, "503 Service Unavailable", "text/plain; charset=utf-8", b"browser trace relay unavailable")
+        if query_param(target, "nonce") != .Val(relay.nonce()) -> return write_response(&stream, "403 Forbidden", "text/plain; charset=utf-8", b"stale or foreign browser trace session")
+        return match relay.record(body) {
+            .Ok(()) -> write_response(&stream, "204 No Content", "text/plain; charset=utf-8", b"")
+            .Err(jet_devserver.BrowserTrace.RecordError.Oversized) -> write_response(&stream, "413 Payload Too Large", "text/plain; charset=utf-8", b"browser trace envelope exceeds 512 bytes")
+            .Err(jet_devserver.BrowserTrace.RecordError.Malformed) -> write_response(&stream, "400 Bad Request", "text/plain; charset=utf-8", b"browser trace envelope is malformed")
+            .Err(jet_devserver.BrowserTrace.RecordError.Unavailable) -> write_response(&stream, "503 Service Unavailable", "text/plain; charset=utf-8", b"browser trace relay unavailable")
+        }
+    }
+    if listener_kind == .Canvas -> return write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", b"Canvas control host does not serve program assets")
+    // Page/asset GETs alone get a request-log line; polling noise is excluded.
+    started :: Instant.now()
+    nonce :: status.browser_relay.lock().unwrap().as_ref().map((relay) -> relay.nonce().to_string()).unwrap_or_default()
+    code :: serve_static_from_root(&stream, static_root, path, nonce, session_secret)?
+    status.log_request(method, path, code, started.elapsed())
+    return .Ok(())
+}
 

@@ -1,0 +1,22 @@
+use jet_devserver.WebHost.*
+use std.net.[TcpStream, SocketAddr, IpAddr, Ipv4Addr]
+use std.io.[Error]
+use std.sync.[Arc, Mutex]
+use core.files.[OSPath]
+use jet_devserver.Canvas.[DebugSessions]
+use jet_devserver.[ResidentDevSession]
+use jet_devserver.BrowserWebAdapter.[BrowserWebState]
+use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+use jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
+use jet_driver.Package.[ReleaseDevtoolsPolicy]
+// Rust: crates/jet-devserver/src/WebHost.rs:4448
+fn handle_connection(stream: TcpStream, status: &DevStatus, debug_sessions: &DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String) -> Result<Unit, Error> {
+    handle_connection_with_root(^stream, status, debug_sessions, session, canvas_file, listener_kind, bind_host, session_secret, &OSPath.new("build"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:4472
+fn handle_connection_with_root(stream: TcpStream, status: &DevStatus, debug_sessions: &DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, static_root: &OSPath) -> Result<Unit, Error> {
+    browser_state :: Arc.new(Mutex.new(.None))
+    paused_evaluate :: Arc.new(Mutex.new(PausedEvaluateHost.new()))
+    terminal_style :: Arc.new(TerminalStyleHostAdapter.new())
+    return handle_connection_with_root_and_policy(^stream, status, debug_sessions, session, canvas_file, listener_kind, bind_host, session_secret, static_root, &browser_state, &paused_evaluate, &terminal_style, &ReleaseDevtoolsPolicy.development(), SocketAddr.new(IpAddr.V4(Ipv4Addr.LOCALHOST), 0))
+}

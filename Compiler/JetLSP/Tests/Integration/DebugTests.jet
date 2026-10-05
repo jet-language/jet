@@ -1,0 +1,725 @@
+use Compiler.JetLSP.Tests.Integration.Debug.[Fixture, fixture, canvas_source_id, LOOPS, CALLS, have, native_fixture, native_binary, dap_frame, dap_response, write_dap_request, read_dap_until, read_dap_response, dap_u32_after, dap_u32_before, linux_process_state, spawn_attachable_native_target, wait_for_target_binary]
+use jet.Debug as DebugEngine
+use jet.Canvas as Canvas
+use jet.[compile_for_debug, compile_with_path]
+use tests.common.[Scratch]
+use std.[fs, env, process, thread]
+use std.process.[Command, Stdio]
+use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+use std.sync.mpsc as mpsc
+use std.sync.mpsc.[RecvTimeoutError]
+use core.sys.target.[selected_os]
+
+// GATE #4494: actual filesystem/CLI/pipe/thread/channel/lldb providers.
+// Rust: tests/debug.rs:111
+#Test("structured_session_status_ignores_program_output") {
+    file :: fixture("structured_status", "fn run() {{\n    print(\"program finished\")\n}}\n")
+    result :: DebugEngine.run_session_result(file.path, ["c"])
+    assert_eq(result.status, DebugEngine.SessionStatus.Finished)
+    assert_eq(result.transcript.lines().filter((line) -> line == "program finished").count(), 2, "transcript must retain program output and the debugger completion marker")
+}
+
+// Rust: tests/debug.rs:131
+#Test("paused_session_stops_at_a_live_command_boundary") {
+    file :: fixture("paused_status", LOOPS)
+    result :: DebugEngine.run_session_result_paused(file.path, ["s"])
+    assert_eq(result.status, DebugEngine.SessionStatus.Running)
+    assert(result.transcript.contains("<- here"), "missing live stop: {result.transcript}")
+    assert(!result.transcript.contains("program finished"), "a paused session must not fabricate completion: {result.transcript}")
+    finished :: DebugEngine.run_session_result_paused(file.path, ["c"])
+    assert_eq(finished.status, DebugEngine.SessionStatus.Finished)
+    assert(finished.transcript.contains("program finished"))
+}
+
+// Rust: tests/debug.rs:153
+#Test("canvas_debug_session_replays_one_source_bound_session") {
+    file :: fixture("canvas_live_protocol", LOOPS)
+    path :: file.as_ref()
+    source :: fs.read_to_string(path).unwrap()
+    revision :: Canvas.source_revision(source)
+    source_id :: canvas_source_id(path)
+    sessions :: Canvas.DebugSessions.default()
+    first_request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"commands\":[\"s\"]}}"
+    first :: Canvas.debug_session_json_for_file_with_sessions(path, first_request, sessions).expect("Canvas should expose the first live stop")
+    assert(first.contains("\"state\":\"running\""), "{first}")
+    assert(first.contains("\"tier\":\"jet-dev-interpreter\""), "{first}")
+    assert(first.contains("\"revision\":\"{revision}\""), "{first}")
+    assert(first.contains("run()"), "Canvas must expose the Jet entry function, not its host wrapper: {first}")
+    marker :: "\"id\":\"canvas-debug-"
+    start :: first.find(marker).expect("live response session id") + 6
+    end :: start + first.slice(start, first.bytes().len()).find('"').expect("live response session id terminator")
+    session_id := first.slice(start, end) // #4303
+    next_request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"session_id\":\"{session_id}\",\"commands\":[\"s\"]}}"
+    next :: Canvas.debug_session_json_for_file_with_sessions(path, next_request, sessions).expect("Canvas should replay the same live session")
+    assert(next.contains("\"state\":\"running\""), "{next}")
+    assert(next.contains("\"id\":\"{session_id}\""), "{next}")
+    assert(next.contains("\"debug_overlay\":\"running\""), "{next}")
+    invalid_continuation :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"session_id\":\"{session_id}\",\"commands\":[\"teleport\"]}}"
+    invalid :: Canvas.debug_session_json_for_file_with_sessions(path, invalid_continuation, sessions).expect_err("Canvas must reject an unsupported continuation command")
+    assert(invalid.contains("\"kind\":\"unsupported\""), "{invalid}")
+    after_invalid :: Canvas.debug_session_json_for_file_with_sessions(path, next_request, sessions).expect("a rejected command must leave the live session usable")
+    assert(after_invalid.contains("\"id\":\"{session_id}\""), "{after_invalid}")
+    assert(after_invalid.contains("\"state\":\"running\""), "{after_invalid}")
+    stop_request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"session_id\":\"{session_id}\",\"stop\":true}}"
+    stopped :: Canvas.debug_session_json_for_file_with_sessions(path, stop_request, sessions).expect("Canvas should stop the live session without editing source")
+    assert(stopped.contains("\"state\":\"stopped\""), "{stopped}")
+    assert(stopped.contains("\"overlay\":null"), "{stopped}")
+    assert_eq(fs.read_to_string(path).unwrap(), source)
+    invalid_request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"commands\":[\"teleport\"]}}"
+    invalid :: Canvas.debug_session_json_for_file_with_sessions(path, invalid_request, sessions).expect_err("Canvas must reject commands outside the debugger vocabulary")
+    assert(invalid.contains("\"kind\":\"unsupported\""), "{invalid}")
+    assert_eq(fs.read_to_string(path).unwrap(), source)
+}
+
+// Rust: tests/debug.rs:248
+#Test("canvas_debug_stop_requires_matching_source_revision_and_tier") {
+    file :: fixture("canvas_stop_binding", LOOPS)
+    path :: file.as_ref()
+    source :: fs.read_to_string(path).unwrap()
+    revision :: Canvas.source_revision(source)
+    source_id :: canvas_source_id(path)
+    sessions :: Canvas.DebugSessions.default()
+    first_request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"tier\":\"jet-dev-interpreter\",\"commands\":[\"s\"]}}"
+    first :: Canvas.debug_session_json_for_file_with_sessions(path, first_request, sessions).expect("Canvas should start a stoppable session")
+    marker :: "\"id\":\"canvas-debug-"
+    start :: first.find(marker).expect("live response session id") + 6
+    end :: start + first.slice(start, first.bytes().len()).find('"').expect("live response session id terminator")
+    session_id := first.slice(start, end) // #4303
+    wrong_tier :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"tier\":\"native-lldb\",\"session_id\":\"{session_id}\",\"stop\":true}}"
+    error :: Canvas.debug_session_json_for_file_with_sessions(path, wrong_tier, sessions).expect_err("Canvas must not stop a session through another tier")
+    assert(error.contains("\"kind\":\"conflict\""), "{error}")
+    other_file :: fixture("canvas_stop_other_source", LOOPS)
+    other_revision :: Canvas.source_revision(fs.read_to_string(other_file.as_ref()).unwrap())
+    other_source_id :: canvas_source_id(other_file.as_ref())
+    wrong_source :: "{{\"schema_version\":1,\"source_id\":\"{other_source_id}\",\"revision\":\"{other_revision}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{session_id}\",\"stop\":true}}"
+    error :: Canvas.debug_session_json_for_file_with_sessions(other_file.as_ref(), wrong_source, sessions).expect_err("Canvas must not stop a session through another source")
+    assert(error.contains("\"kind\":\"conflict\""), "{error}")
+    next_request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{session_id}\",\"commands\":[\"s\"]}}"
+    Canvas.debug_session_json_for_file_with_sessions(path, next_request, sessions).expect("a mismatched stop must leave the live session intact")
+    stale_stop :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"sha256-stale\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{session_id}\",\"stop\":true}}"
+    error :: Canvas.debug_session_json_for_file_with_sessions(path, stale_stop, sessions).expect_err("Canvas must reject a stale stop request")
+    assert(error.contains("\"kind\":\"conflict\""), "{error}")
+    ended :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{session_id}\",\"stop\":true}}"
+    stopped :: Canvas.debug_session_json_for_file_with_sessions(path, ended, sessions).expect("a stale stop request must leave the current session intact")
+    assert(stopped.contains("\"state\":\"stopped\""), "{stopped}")
+    assert_eq(fs.read_to_string(path).unwrap(), source)
+}
+
+// Rust: tests/debug.rs:322
+#Test("canvas_debug_rejects_unbounded_breakpoint_spans_before_execution") {
+    file :: fixture("canvas_breakpoint_limit", LOOPS)
+    path :: file.as_ref()
+    source :: fs.read_to_string(path).unwrap()
+    revision :: Canvas.source_revision(source)
+    source_id :: canvas_source_id(path)
+    anchors :: (0..<129).map((_) -> "\"0:1\"").collect().join(",")
+    request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"breakpoint_spans\":[{anchors}],\"commands\":[\"s\"]}}"
+    error :: Canvas.debug_session_json_for_file(path, request).expect_err("Canvas must bound breakpoint span input")
+    assert(error.contains("\"kind\":\"limit\""), "{error}")
+    assert_eq(fs.read_to_string(path).unwrap(), source)
+}
+
+// Rust: tests/debug.rs:340
+#Test("canvas_debug_native_tier_never_falls_back_to_interpreter") {
+    file :: fixture("canvas_native_protocol", LOOPS)
+    path :: file.as_ref()
+    source :: fs.read_to_string(path).unwrap()
+    revision :: Canvas.source_revision(source)
+    source_id :: canvas_source_id(path)
+    sessions :: Canvas.DebugSessions.default()
+    request :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"tier\":\"native-lldb\",\"commands\":[\"s\"]}}"
+    if Canvas.debug_session_json_for_file_with_sessions(path, request, sessions) == {
+        Ok(body) -> {
+            assert(body.contains("\"tier\":\"native-lldb\""), "{body}")
+            assert(!body.contains("\"tier\":\"jet-dev-interpreter\""), "{body}")
+            assert(body.contains("\"state\":\"running\""), "{body}")
+            marker :: "\"id\":\"canvas-debug-"
+            start :: body.find(marker).expect("native session id") + 6
+            end :: start + body.slice(start, body.bytes().len()).find('"').expect("native session id terminator")
+            session_id := body.slice(start, end) // #4303
+            stop :: "{{\"schema_version\":1,\"source_id\":\"{source_id}\",\"revision\":\"{revision}\",\"tier\":\"native-lldb\",\"session_id\":\"{session_id}\",\"stop\":true}}"
+            stopped :: Canvas.debug_session_json_for_file_with_sessions(path, stop, sessions).expect("native session stop")
+            assert(stopped.contains("\"state\":\"stopped\""), "{stopped}")
+        }
+        Err(error) -> {
+            assert(error.contains("\"kind\":\"diagnostic\""), "{error}")
+            assert(!error.contains("rustc rejected"), "{error}")
+        }
+    }
+    assert_eq(fs.read_to_string(path).unwrap(), source)
+}
+
+// Rust: tests/debug.rs:381
+#Test("canvas_graph_source_id_stays_project_relative_for_relative_entries") {
+    graph :: Canvas.graph_json_for_file(OSPath("Examples/features/basics/hello.jet")).expect("relative Canvas entry should project")
+    assert(graph.contains("\"source_id\":\"hello.jet\""), "Canvas/debug source identity must match project file ids: {graph}")
+}
+
+// Rust: tests/debug.rs:393
+#Test("step_stops_at_first_line_with_caret_and_locals") {
+    file :: fixture("step", LOOPS)
+    out :: DebugEngine.run_session(file.path, ["s"])
+    assert(out.contains("breakpoint hit  jet_debug_step.jet:2  in main()"), "missing breakpoint banner; got:\n{out}")
+    assert(out.contains("<- here"), "missing `<- here` caret; got:\n{out}")
+    assert(out.contains("(jet) s"), "missing `(jet)` prompt echo; got:\n{out}")
+    assert(out.contains("locals:"), "missing locals dump; got:\n{out}")
+    assert(out.contains("total is 6"), "program output missing; got:\n{out}")
+    assert(out.contains("program finished"), "missing end marker; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:427
+#Test("locals_and_print_show_jet_values") {
+    file :: fixture("locals", LOOPS)
+    out :: DebugEngine.run_session(file.path, ["s", "s", "s", "locals", "p total"])
+    assert(out.contains("locals:  i = 1   n = 3   total = 0"), "locals dump should show all three in Jet terms; got:\n{out}")
+    assert(out.contains("total = 0"), "`print total` should show the value; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:445
+#Test("break_then_continue_stops_at_breakpoint") {
+    file :: fixture("brk", LOOPS)
+    out :: DebugEngine.run_session(file.path, ["break 7", "c"])
+    assert(out.contains("breakpoint set  jet_debug_brk.jet:7"), "break should confirm the line; got:\n{out}")
+    assert(out.contains("7 |") && out.contains("total = 6"), "continue should stop on line 7 with the final total; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:463
+#Test("step_into_call_and_backtrace") {
+    file :: fixture("calls", CALLS)
+    out :: DebugEngine.run_session(file.path, ["s", "s", "bt"])
+    assert(out.contains("y := x * 2"), "step should descend into the callee body; got:\n{out}")
+    assert(out.contains("#0  double()") && out.contains("#1  main()"), "backtrace should show both Jet frames; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:481
+#Test("finish_returns_to_caller") {
+    file :: fixture("finish", CALLS)
+    out :: DebugEngine.run_session(file.path, ["s", "s", "s", "finish"])
+    assert(out.contains("b := double(a)") || out.contains("print"), "finish should return control to the caller frame; got:\n{out}")
+    assert(out.contains("program finished"), "should run to the end; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:498
+#Test("quit_ends_session_with_e2204") {
+    file :: fixture("quit", LOOPS)
+    out :: DebugEngine.run_session(file.path, ["s", "q"])
+    assert(out.contains("E2204"), "quitting mid-session must surface E2204; got:\n{out}")
+    assert(!out.lines().any((l) -> l == "program finished"), "the program must NOT have finished after quit; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:515
+#Test("help_lists_the_verbs") {
+    file :: fixture("help", LOOPS)
+    out :: DebugEngine.run_session(file.path, ["help", "c"])
+    loop verb in ["step", "next", "continue", "finish", "break", "print", "backtrace", "quit"] {
+        assert(out.contains(verb), "help should mention `{verb}`; got:\n{out}")
+    }
+}
+
+// Rust: tests/debug.rs:539
+#Test("unsupported_feature_stops_at_e2203_boundary") {
+    file :: fixture("boundary", "use core.files as fs\nfn run() {{\n    print(\"hi\")\n}}\n")
+    out :: DebugEngine.run_session(file.path, ["c"])
+    assert(out.contains("E2203"), "an unsteppable feature must stop at E2203; got:\n{out}")
+    assert(out.contains("jet debug") && (out.contains("jet run") || out.contains("jet build")), "E2203 must name `jet debug` and point at the real build; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:557
+#Test("missing_run_is_registered_e0101") {
+    file :: fixture("no_run", "fn helper() {{ print(1) }}\n")
+    out :: DebugEngine.run_session(file.path, ["c"])
+    assert(out.contains("E0101") && out.contains("no `run` function"), "no-run must be registered E0101; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:569
+#Test("next_steps_over") {
+    file :: fixture("next", CALLS)
+    out :: DebugEngine.run_session(file.path, ["s", "n", "n"])
+    assert(out.contains("program finished"), "should run to the end; got:\n{out}")
+}
+
+// Rust: tests/debug.rs:582
+#Test("loop_next_edges_are_step_visible_and_line_mapped") {
+    src :: "fn run() {{\n    hits := 0\n    loop i in 0..<3 {{\n        if i == 1 {{\n            next\n        }}\n        hits += i\n    }}\n    outer_hits := 0\n    inner_hits := 0\n    outer :: loop i in 0..<3 {{\n        loop j in 0..<3 {{\n            if j == 1 {{\n                next(outer)\n            }}\n            inner_hits += 1\n        }}\n        outer_hits += 1\n    }}\n    print(\"{{hits}},{{inner_hits}},{{outer_hits}}\")\n}}\n"
+    file :: fixture("loop_next_edges", src)
+    plain :: DebugEngine.run_session(file.path, ["break 5", "c", "n", "p i", "n", "p i", "c"])
+    next_stop :: plain.find("5 |             next        <- here").expect("plain next stop")
+    step_stop :: next_stop + plain.slice(next_stop, plain.bytes().len()).find("3 |     loop i in 0..<3 {{        <- here").expect("plain next must stop on the loop afterthought")
+    assert(!plain.slice(next_stop, step_stop).contains("7 |         hits += i        <- here"), "plain next leaked into the skipped body before its afterthought:\n{plain}")
+    assert(plain.contains("i = 2"), "afterthought did not advance i:\n{plain}")
+    assert(plain.contains("2,3,0"), "wrong loop result:\n{plain}")
+    labeled :: DebugEngine.run_session(file.path, ["break 14", "c", "n", "p i", "n", "p i", "c"])
+    next_stop :: labeled.find("14 |                 next(outer)        <- here").expect("labeled next stop")
+    outer_step :: next_stop + labeled.slice(next_stop, labeled.bytes().len()).find("11 |     outer :: loop i in 0..<3 {{        <- here").expect("labeled next must target the outer afterthought")
+    assert(!labeled.slice(next_stop, outer_step).contains("12 |         loop j in 0..<3 {{        <- here"), "labeled next stepped through the inner loop edge first:\n{labeled}")
+    assert(labeled.contains("i = 1"), "outer afterthought did not advance i:\n{labeled}")
+    assert(labeled.contains("2,3,0"), "wrong labeled loop result:\n{labeled}")
+    generated :: compile_for_debug(file.path).expect("loop next fixture compiles for debug")
+    loop line in [5, 14] {
+        assert(generated.rust.contains("// jet:line {line}\n"), "missing line marker for loop next on Jet line {line}:\n{generated.rust}")
+    }
+}
+
+// Rust: tests/debug.rs:892
+#Test("dap_cli_exercises_the_production_wire_and_attach_failure") {
+    tag :: "dap_cli_failure_{process.id()}"
+    file :: native_fixture(tag, LOOPS)
+    input :: [
+        dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}}}"),
+        dap_frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"{file.path}\"}},\"breakpoints\":[{{\"line\":7}}]}}}}"),
+        dap_frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":0}}}}"),
+    ].join("")
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["debug", "--dap", file.path]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("start the production Jet DAP command")
+    &child.stdin.take().expect("DAP stdin").write_all(input.bytes()).expect("send framed DAP requests")
+    output :: &child.wait_with_output().expect("wait for the production Jet DAP command")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(output.status.success(), "DAP command failed:\n{stderr}")
+    initialize :: dap_response(stdout, 1, "initialize").expect("initialize response")
+    assert(initialize.contains("\"success\":true"), "{initialize}")
+    breakpoints :: dap_response(stdout, 2, "setBreakpoints").expect("breakpoint response")
+    assert(breakpoints.contains("\"verified\":true"), "{breakpoints}")
+    assert(breakpoints.contains("\"id\":1,\"verified\":true,\"line\":7"), "{breakpoints}")
+    attach :: dap_response(stdout, 3, "attach").expect("attach response")
+    assert(attach.contains("\"success\":false"), "{attach}")
+    assert(attach.contains("\"id\":22032"), "{attach}")
+    assert(attach.contains("\"code\":\"E2236\""), "{attach}")
+    assert(!stdout.contains("\"event\":\"stopped\""), "invalid attach must not start a target: {stdout}")
+    _ :: fs.remove_file(file.as_ref())
+}
+
+// Rust: tests/debug.rs:946
+#Test("dap_cli_rejects_a_cross_executable_attach_through_the_production_wire") {
+    if selected_os() != "linux" -> return // GATE #4483.
+    if !have("rustc") -> return
+    tag :: "dap_cli_attach_denied_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()}"
+    file :: native_fixture(tag, "fn run() {{\n    loop {{}}\n}}\n")
+    stem :: file.as_ref().file_stem().expect("attach fixture has a file stem").to_string_lossy()
+    binary :: OSPath("build").join("{stem}_dbg")
+    map :: binary.with_extension("jetmap")
+    adapter := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["debug", "--dap", file.path]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("start the production Jet DAP command")
+    input := &adapter.stdin.take().expect("DAP stdin")
+    &input.write_all(dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}}}").bytes()).expect("send initialize request")
+    &input.flush().expect("flush initialize request")
+    deadline :: Instant.now() + Duration.from_secs(30)
+    loop if !(binary.is_file() && map.is_file()) {
+        if (&adapter.try_wait()).expect("check production DAP process").is_some() -> panic("production DAP process exited before writing its debug map")
+        assert(Instant.now() < deadline, "production DAP process did not publish its debug map")
+        thread.sleep(Duration.from_millis(20))
+    }
+    target := Command.new("sleep").arg("30").spawn().expect("start mismatched native attach target")
+    attach :: dap_frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{target.id()},\"program\":\"{binary}\",\"map\":\"{map}\"}}}}")
+    &input.write_all(attach.bytes()).expect("send attach request")
+    &input.flush().expect("flush attach request")
+    drop(^input)
+    output :: &adapter.wait_with_output().expect("wait for the production Jet DAP command")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    stderr :: String.from_utf8_lossy(output.stderr)
+    target_alive :: (&target.try_wait()).expect("check denied target").is_none()
+    _ :: &target.kill()
+    _ :: &target.wait()
+    _ :: fs.remove_file(map)
+    _ :: fs.remove_file(binary)
+    _ :: fs.remove_file(OSPath("build").join("{stem}.rs"))
+    _ :: fs.remove_file(file.as_ref())
+    assert(output.status.success(), "DAP command failed:\n{stderr}")
+    assert(stdout.contains("\"command\":\"attach\""), "{stdout}")
+    assert(stdout.contains("\"request_seq\":2,\"success\":false,\"command\":\"attach\""), "{stdout}")
+    assert(stdout.contains("\"id\":22037"), "{stdout}")
+    assert(stdout.contains("\"code\":\"E2231\""), "{stdout}")
+    assert(!stdout.contains("\"event\":\"stopped\""), "{stdout}")
+    assert(target_alive, "denied attach must leave the target alive")
+}
+
+// Rust: tests/debug.rs:1041
+#Test("dap_cli_attaches_and_disconnects_through_the_production_wire") {
+    if selected_os() != "linux" -> return // GATE #4483.
+    if !have("rustc") || !have("lldb") -> return
+    tag :: "dap_cli_attach_success_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()}"
+    file :: native_fixture(tag, "fn run() {{\n    loop {{}}\n}}\n")
+    stem :: file.as_ref().file_stem().expect("attach fixture has a file stem").to_string_lossy()
+    binary :: OSPath("build").join("{stem}_dbg")
+    map :: binary.with_extension("jetmap")
+    adapter := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["debug", "--dap", file.path]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("start the production Jet DAP command")
+    input := &adapter.stdin.take().expect("DAP stdin")
+    &input.write_all(dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}}}").bytes()).expect("send initialize request")
+    &input.flush().expect("flush initialize request")
+    deadline :: Instant.now() + Duration.from_secs(30)
+    loop if !(binary.is_file() && map.is_file()) {
+        if (&adapter.try_wait()).expect("check production DAP process").is_some() -> panic("production DAP process exited before writing its debug map")
+        assert(Instant.now() < deadline, "production DAP process did not publish its debug map")
+        thread.sleep(Duration.from_millis(20))
+    }
+    target := spawn_attachable_native_target(binary, tag)
+    wait_for_target_binary(target.id(), binary)
+    attach :: dap_frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{target.id()},\"program\":\"{binary}\",\"map\":\"{map}\"}}}}")
+    &input.write_all(attach.bytes()).expect("send attach request")
+    &input.flush().expect("flush attach request")
+    attach_deadline :: Instant.now() + Duration.from_secs(30)
+    target_stopped := false
+    loop if Instant.now() < attach_deadline {
+        if (&adapter.try_wait()).expect("check production DAP process during attach").is_some() -> break
+        state :: linux_process_state(target.id())
+        if state == Val("T") || state == Val("t") { target_stopped = true; break }
+        thread.sleep(Duration.from_millis(20))
+    }
+    disconnect :: dap_frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{{}}}}")
+    _ :: &input.write_all(disconnect.bytes())
+    _ :: &input.flush()
+    drop(^input)
+    output :: &adapter.wait_with_output().expect("wait for the production Jet DAP command")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    stderr :: String.from_utf8_lossy(output.stderr)
+    target_alive :: (&target.try_wait()).expect("check detached target").is_none()
+    target_running := false
+    if target_alive {
+        deadline :: Instant.now() + Duration.from_secs(2)
+        loop {
+            state :: linux_process_state(target.id())
+            if state == Val("T") || state == Val("t") {
+                if Instant.now() < deadline -> thread.sleep(Duration.from_millis(20))
+                else -> break
+            } else if state.is_some() { target_running = true; break }
+            else -> break
+        }
+    }
+    if target_alive -> _ :: &target.kill()
+    _ :: &target.wait()
+    _ :: fs.remove_file(map)
+    _ :: fs.remove_file(binary)
+    _ :: fs.remove_file(OSPath("build").join("{stem}.rs"))
+    _ :: fs.remove_file(file.as_ref())
+    assert(output.status.success(), "DAP command failed:\n{stderr}")
+    assert(stdout.contains("\"command\":\"attach\""), "{stdout}")
+    assert(stdout.contains("\"request_seq\":2,\"success\":true,\"command\":\"attach\""), "{stdout}")
+    assert(stdout.contains("\"command\":\"disconnect\""), "{stdout}")
+    assert(stdout.contains("\"request_seq\":3,\"success\":true,\"command\":\"disconnect\""), "{stdout}")
+    assert(!stdout.contains("\"success\":false"), "{stdout}")
+    assert(target_alive, "production disconnect must leave an attached target alive")
+    assert(target_running, "production disconnect must resume the attached target")
+    assert(target_stopped, "production attach must stop the real target before disconnect")
+}
+
+// Rust: tests/debug.rs:1184
+#Test("dap_cli_launches_and_projects_a_live_target_in_jet_terms") {
+    if !have("rustc") || !have("lldb") -> return
+    tag :: "dap_cli_success_{process.id()}"
+    file :: native_fixture(tag, LOOPS)
+    input :: [
+        dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}}}"),
+        dap_frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"{file.path}\"}},\"breakpoints\":[{{\"line\":7}}]}}}}"),
+        dap_frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{{\"program\":\"{file.path}\",\"stopOnEntry\":true,\"args\":[],\"env\":{{}}}}}}"),
+        dap_frame("{{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{{}}}}"),
+        dap_frame("{{\"seq\":5,\"type\":\"request\",\"command\":\"threads\",\"arguments\":{{}}}}"),
+        dap_frame("{{\"seq\":6,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{\"threadId\":1}}}}"),
+        dap_frame("{{\"seq\":7,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{{\"threadId\":1}}}}"),
+        dap_frame("{{\"seq\":8,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{\"threadId\":1}}}}"),
+        dap_frame("{{\"seq\":9,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{{\"threadId\":1}}}}"),
+    ].join("")
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["debug", "--dap", file.path]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("start the production Jet DAP command")
+    &child.stdin.take().expect("DAP stdin").write_all(input.bytes()).expect("send framed DAP requests")
+    output :: &child.wait_with_output().expect("wait for the production Jet DAP command")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(output.status.success(), "DAP command failed:\n{stderr}")
+    breakpoints :: dap_response(stdout, 2, "setBreakpoints").expect("breakpoint response")
+    assert(breakpoints.contains("\"verified\":true"), "{breakpoints}")
+    assert(breakpoints.contains("\"id\":1,\"verified\":true,\"line\":7"), "{breakpoints}")
+    assert(stdout.contains("\"request_seq\":1,\"success\":true,\"command\":\"initialize\""), "{stdout}")
+    assert(stdout.contains("\"event\":\"stopped\""), "{stdout}")
+    assert(stdout.contains("\"reason\":\"breakpoint\""), "{stdout}")
+    assert(stdout.contains("\"hitBreakpointIds\":[1]"), "{stdout}")
+    assert(stdout.contains("\"command\":\"threads\""), "{stdout}")
+    assert(stdout.contains("\"command\":\"stackTrace\""), "{stdout}")
+    assert(stdout.contains("\"name\":\"run\""), "{stdout}")
+    assert(stdout.contains("\"line\":2"), "{stdout}")
+    breakpoint_stack :: dap_response(stdout, 8, "stackTrace").expect("breakpoint stack trace")
+    assert(breakpoint_stack.contains("\"line\":7"), "{breakpoint_stack}")
+    assert(stdout.contains("\"path\":\"{file.path}\""), "{stdout}")
+    assert(stdout.contains("\"event\":\"output\""), "{stdout}")
+    assert(stdout.contains("total is "), "{stdout}")
+    assert(!stdout.contains("__jet_"), "generated Rust leaked into Jet view: {stdout}")
+    assert(stdout.contains("\"event\":\"exited\""), "{stdout}")
+    assert(stdout.contains("\"event\":\"terminated\""), "{stdout}")
+    _ :: fs.remove_file(file.as_ref())
+}
+
+// Rust: tests/debug.rs:1271
+#Test("dap_cli_pauses_a_running_target_through_production_wire") {
+    if !have("rustc") || !have("lldb") -> return
+    tag :: "dap_cli_pause_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()}"
+    file :: native_fixture(tag, "fn run() {{\n    total := 0\n    loop i in 1..1000000000 {{\n        total += i\n    }}\n    print(\"{{total}}\")\n}}\n")
+    input :: [
+        dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}}}"),
+        dap_frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{{\"program\":\"{file.path}\",\"stopOnEntry\":false,\"args\":[],\"env\":{{}}}}}}"),
+        dap_frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{{}}}}"),
+        dap_frame("{{\"seq\":4,\"type\":\"request\",\"command\":\"pause\",\"arguments\":{{}}}}"),
+    ].join("")
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["debug", "--dap", file.path]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("start the production Jet DAP command")
+    input_pipe := &child.stdin.take().expect("DAP stdin")
+    &input_pipe.write_all(input.bytes()).expect("send initialize, launch, configuration, and pause")
+    &input_pipe.flush().expect("flush DAP requests")
+    stdout := &child.stdout.take().expect("DAP stdout")
+    (output_tx, output_rx) :: mpsc.channel<[U8]>()
+    // Rust: tests/debug.rs:1314
+    output_reader :: thread.spawn(() -> {
+        chunk := [U8;4096]{0}
+        loop {
+            if &stdout.read(&chunk) == {
+                Ok(0) | Err(_) -> break
+                Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
+            }
+        }
+    })
+    deadline :: Instant.now() + Duration.from_secs(30)
+    transcript := ""
+    paused := false
+    loop if Instant.now() < deadline && !paused {
+        if output_rx.recv_timeout(Duration.from_millis(100)) == {
+            Ok(chunk) -> {
+                &transcript.push_str(String.from_utf8_lossy(chunk))
+                paused = transcript.contains("\"request_seq\":4,\"success\":true,\"command\":\"pause\"") && transcript.contains("\"event\":\"stopped\"") && transcript.contains("\"reason\":\"pause\"")
+            }
+            Err(RecvTimeoutError.Timeout) -> {}
+            Err(RecvTimeoutError.Disconnected) -> break
+        }
+    }
+    threads_ok := false
+    if paused {
+        &input_pipe.write_all(dap_frame("{{\"seq\":5,\"type\":\"request\",\"command\":\"threads\",\"arguments\":{{}}}}").bytes()).expect("send threads after pause")
+        &input_pipe.flush().expect("flush threads request")
+        threads_deadline :: Instant.now() + Duration.from_secs(5)
+        loop if Instant.now() < threads_deadline && !threads_ok {
+            if output_rx.recv_timeout(Duration.from_millis(100)) == {
+                Ok(chunk) -> {
+                    &transcript.push_str(String.from_utf8_lossy(chunk))
+                    threads_ok = transcript.contains("\"request_seq\":5,\"success\":true,\"command\":\"threads\"")
+                }
+                Err(RecvTimeoutError.Timeout) -> {}
+                Err(RecvTimeoutError.Disconnected) -> break
+            }
+        }
+        &input_pipe.write_all(dap_frame("{{\"seq\":6,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{{}}}}").bytes()).expect("send disconnect after pause")
+        &input_pipe.flush().expect("flush disconnect")
+    }
+    drop(^input_pipe)
+    exit_deadline :: Instant.now() + Duration.from_secs(10)
+    status := None
+    loop if Instant.now() < exit_deadline {
+        if (&child.try_wait()).expect("check production DAP process") == Val(result) { status = Val(result); break }
+        thread.sleep(Duration.from_millis(20))
+    }
+    if status.is_none() { _ :: &child.kill(); status = (&child.wait()).ok() }
+    _ :: output_reader.join()
+    loop {
+        if output_rx.try_recv() == Ok(chunk) -> &transcript.push_str(String.from_utf8_lossy(chunk))
+        else -> break
+    }
+    _ :: fs.remove_file(file.as_ref())
+    assert(paused, "production DAP pause did not settle:\n{transcript}")
+    assert(threads_ok, "production DAP stopped state was not usable:\n{transcript}")
+    assert(status.is_some_and((status) -> status.success()), "production DAP pause session failed:\n{transcript}")
+}
+
+// Rust: tests/debug.rs:1404
+#Test("dap_cli_projects_raw_frames_only_when_requested_through_production_wire") {
+    if !have("rustc") || !have("lldb") -> return
+    tag :: "dap_cli_raw_frames_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()}"
+    file :: native_fixture(tag, LOOPS)
+    stem :: file.as_ref().file_stem().expect("raw-frame fixture has a file stem").to_string_lossy()
+    rust_file :: "{stem}.rs"
+    setup :: [
+        dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}}}"),
+        dap_frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{{\"program\":\"{file.path}\",\"stopOnEntry\":true,\"args\":[],\"env\":{{}}}}}}"),
+        dap_frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{{}}}}"),
+    ].join("")
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["debug", "--dap", file.path]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("start the production Jet DAP command")
+    input_pipe := &child.stdin.take().expect("DAP stdin")
+    write_dap_request(&input_pipe, setup)
+    stdout_pipe := &child.stdout.take().expect("DAP stdout")
+    (output_tx, output_rx) :: mpsc.channel<[U8]>()
+    // Rust: tests/debug.rs:1445
+    output_reader :: thread.spawn(() -> {
+        chunk := [U8;4096]{0}
+        loop {
+            if &stdout_pipe.read(&chunk) == {
+                Ok(0) | Err(_) -> break
+                Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
+            }
+        }
+    })
+    deadline :: Instant.now() + Duration.from_secs(30)
+    stdout := ""
+    stopped := false
+    loop if Instant.now() < deadline && !stopped {
+        if output_rx.recv_timeout(Duration.from_millis(100)) == {
+            Ok(chunk) -> { &stdout.push_str(String.from_utf8_lossy(chunk)); stopped = stdout.contains("\"event\":\"stopped\"") }
+            Err(RecvTimeoutError.Timeout) -> {}
+            Err(RecvTimeoutError.Disconnected) -> break
+        }
+    }
+    assert(stopped, "production DAP did not stop at entry:\n{stdout}")
+    if stopped -> write_dap_request(&input_pipe, dap_frame("{{\"seq\":4,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{\"threadId\":1,\"showRawFrames\":\"yes\"}}}}"))
+    rejected :: read_dap_response(output_rx, &stdout, 4, "stackTrace")
+    assert(rejected.contains("\"success\":false"), "{rejected}")
+    assert(rejected.contains("\"id\":22032"), "{rejected}")
+    assert(rejected.contains("\"code\":\"E2236\""), "{rejected}")
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{\"threadId\":1}}}}"))
+    safe :: read_dap_response(output_rx, &stdout, 5, "stackTrace")
+    assert(safe.contains("\"success\":true"), "{safe}")
+    assert(!safe.contains("__jet_"), "generated Rust leaked into Jet view: {safe}")
+    assert(!safe.contains(rust_file), "generated Rust source leaked into Jet view: {safe}")
+    safe_frame :: dap_u32_after(safe, "\"stackFrames\":[{{\"id\":")
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{safe_frame}}}}}"))
+    safe_scopes :: read_dap_response(output_rx, &stdout, 6, "scopes")
+    assert(safe_scopes.contains("\"success\":true"), "{safe_scopes}")
+    assert(safe_scopes.contains("\"name\":\"Locals\""), "{safe_scopes}")
+    assert(!safe_scopes.contains("[raw]"), "raw scope leaked into Jet view: {safe_scopes}")
+    safe_scope :: dap_u32_after(safe_scopes, "\"name\":\"Locals\",\"variablesReference\":")
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{{\"variablesReference\":{safe_scope}}}}}"))
+    safe_variables :: read_dap_response(output_rx, &stdout, 7, "variables")
+    assert(safe_variables.contains("\"success\":true"), "{safe_variables}")
+    assert(!safe_variables.contains("__jet_"), "generated Rust leaked into Jet locals: {safe_variables}")
+    assert(!safe_variables.contains(rust_file), "generated Rust source leaked into Jet locals: {safe_variables}")
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":8,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{\"threadId\":1,\"showRawFrames\":true}}}}"))
+    raw :: read_dap_response(output_rx, &stdout, 8, "stackTrace")
+    assert(raw.contains("\"success\":true"), "{raw}")
+    assert(raw.contains("\"name\":\"[raw]"), "{raw}")
+    assert(raw.contains("\"path\":\"{rust_file}\""), "raw stack must expose the generated frame source only in expert mode: {raw}")
+    raw_frame :: dap_u32_before(raw, "\"name\":\"[raw]")
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":9,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{raw_frame}}}}}"))
+    raw_scopes :: read_dap_response(output_rx, &stdout, 9, "scopes")
+    assert(raw_scopes.contains("\"success\":true"), "{raw_scopes}")
+    assert(raw_scopes.contains("\"name\":\"[raw] Locals\""), "{raw_scopes}")
+    raw_scope :: dap_u32_after(raw_scopes, "\"name\":\"[raw] Locals\",\"variablesReference\":")
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":10,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{{\"variablesReference\":{raw_scope}}}}}"))
+    raw_variables :: read_dap_response(output_rx, &stdout, 10, "variables")
+    assert(raw_variables.contains("\"success\":true"), "{raw_variables}")
+    stopped_count :: stdout.matches("\"event\":\"stopped\"").count()
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":11,\"type\":\"request\",\"command\":\"next\",\"arguments\":{{\"threadId\":1}}}}"))
+    next :: read_dap_response(output_rx, &stdout, 11, "next")
+    assert(next.contains("\"success\":true"), "{next}")
+    read_dap_until(output_rx, &stdout, (output) -> output.matches("\"event\":\"stopped\"").count() > stopped_count, "next stopped event")
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":12,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{{\"variablesReference\":{safe_scope}}}}}"))
+    stale :: read_dap_response(output_rx, &stdout, 12, "variables")
+    assert(stale.contains("\"success\":false"), "{stale}")
+    assert(stale.contains("\"id\":22036"), "{stale}")
+    assert(stale.contains("\"code\":\"E2238\""), "{stale}")
+    write_dap_request(&input_pipe, dap_frame("{{\"seq\":13,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{{\"terminateDebuggee\":true}}}}"))
+    disconnected :: read_dap_response(output_rx, &stdout, 13, "disconnect")
+    assert(disconnected.contains("\"success\":true"), "{disconnected}")
+    drop(^input_pipe)
+    status :: &child.wait().expect("wait for the production Jet DAP command")
+    output_reader.join().expect("join DAP output reader")
+    loop { if output_rx.try_recv() == Ok(chunk) -> &stdout.push_str(String.from_utf8_lossy(chunk)); else -> break }
+    _ :: fs.remove_file(file.as_ref())
+    assert(status.success(), "DAP command failed:\nstdout:\n{stdout}")
+}
+
+// Rust: tests/debug.rs:1628
+#Test("debug_build_carries_line_markers_a_normal_build_does_not") {
+    file :: native_fixture("markers", LOOPS)
+    debug_out :: compile_for_debug(file.path).expect("compiles for debug")
+    assert(debug_out.rust.contains("// jet:line "), "debug_linemap build should carry `// jet:line N` markers:\n{debug_out.rust}")
+    normal_out :: compile_with_path(fs.read_to_string(file.as_ref()).unwrap(), file.path).expect("compiles normally")
+    assert(!normal_out.rust.contains("// jet:line "), "a normal build must stay byte-identical to today's output — no markers leak in when debug_linemap is off (JIT tier + golden tests depend on this)")
+    if !have("rustc") || !have("lldb") -> return
+    jet_src :: fs.read_to_string(file.as_ref()).unwrap()
+    (debug_dir, debug_bin) :: native_binary("markers_debug", debug_out.rust)
+    debug_transcript :: DebugEngine.run_native_scripted(debug_bin, "prog.rs", debug_out.rust, file.path, jet_src, false, ["next"])
+    assert(debug_transcript.contains("2 |     n := 3") && debug_transcript.contains("3 |     total := 0"), "debug source map did not step through mapped statements:\n{debug_transcript}")
+    (normal_dir, normal_bin) :: native_binary("markers_normal", normal_out.rust)
+    normal_transcript :: DebugEngine.run_native_scripted(normal_bin, "prog.rs", normal_out.rust, file.path, jet_src, false, [])
+    assert(normal_transcript.contains("source-mapped entry statement"), "normal build unexpectedly supplied a debugger source map:\n{normal_transcript}")
+    _ :: fs.remove_dir_all(debug_dir.path)
+    _ :: fs.remove_dir_all(normal_dir.path)
+}
+
+// Rust: tests/debug.rs:1684
+#Test("line_markers_resolve_every_statement_to_its_source_line") {
+    file :: native_fixture("markers_line3", LOOPS)
+    out :: compile_for_debug(file.path).expect("compiles for debug")
+    if !have("rustc") || !have("lldb") -> return
+    jet_src :: fs.read_to_string(file.as_ref()).unwrap()
+    (dir, binary) :: native_binary("markers_line3", out.rust)
+    transcript :: DebugEngine.run_native_scripted(binary, "prog.rs", out.rust, file.path, jet_src, false, ["next", "next"])
+    assert(transcript.contains("2 |     n := 3") && transcript.contains("4 |     loop i in 1..n {{"), "debugger did not resolve mapped statements to Jet source lines:\n{transcript}")
+    _ :: fs.remove_dir_all(dir.path)
+}
+
+// Rust: tests/debug.rs:1713
+#Test("native_session_steps_and_shows_locals") {
+    if !have("rustc") || !have("lldb") -> return
+    file :: native_fixture("native_session", LOOPS)
+    out :: compile_for_debug(file.path).expect("compiles for debug")
+    scratch :: Scratch.new("jet_debug_native_build")
+    dir :: scratch.path
+    rs :: dir.join("prog.rs")
+    bin :: dir.join("prog")
+    fs.write(rs, out.rust).unwrap()
+    rustc :: Command.new("rustc").args(["--edition", "2021", "-C", "debuginfo=2", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()]).output().unwrap()
+    assert(rustc.status.success(), "rustc rejected the debug-linemap build (I2):\n{String.from_utf8_lossy(rustc.stderr)}")
+    jet_src :: fs.read_to_string(file.as_ref()).unwrap()
+    transcript :: DebugEngine.run_native_scripted(bin, "prog.rs", out.rust, file.path, jet_src, false, ["locals", "next", "next", "print total", "backtrace", "continue"])
+    assert(transcript.contains("breakpoint hit"), "expected an initial stop banner:\n{transcript}")
+    assert(transcript.contains("locals:"), "expected a locals dump:\n{transcript}")
+    assert(transcript.contains("total = 0"), "expected `print total` to show the local:\n{transcript}")
+    assert(transcript.contains("program finished"), "continuing to completion should print the same completion marker the interpreter backend uses:\n{transcript}")
+    assert(!transcript.contains("__jet_") && !transcript.contains("prog.rs:"), "default native projection leaked generated Rust details:\n{transcript}")
+    raw :: DebugEngine.run_native_scripted(bin, "prog.rs", out.rust, file.path, jet_src, true, ["locals", "backtrace", "continue"])
+    assert(raw.contains("breakpoint hit"), "raw native session did not stop at a Jet line:\n{raw}")
+    assert(raw.contains("[raw]"), "raw expert mode must mark generated frames and scopes:\n{raw}")
+}
+
+// Rust: tests/debug.rs:1808
+#Test("dap_cli_keeps_running_state_transitions_on_the_production_wire") {
+    if !have("rustc") || !have("lldb") -> return
+    tag :: "dap_cli_running_state_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()}"
+    file :: native_fixture(tag, "fn run() {{\n    total := 0\n    loop i in 1..1000000000 {{\n        total += i\n    }}\n}}\n")
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["debug", "--dap", file.path]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("start the production Jet DAP command")
+    input := &child.stdin.take().expect("DAP stdin")
+    stdout_pipe := &child.stdout.take().expect("DAP stdout")
+    (output_tx, output_rx) :: mpsc.channel<[U8]>()
+    // Rust: tests/debug.rs:1834
+    output_reader :: thread.spawn(() -> {
+        chunk := [U8;4096]{0}
+        loop {
+            if &stdout_pipe.read(&chunk) == {
+                Ok(0) | Err(_) -> break
+                Ok(size) -> { if output_tx.send(chunk.slice(0, size).to_vec()).is_err() -> break }
+            }
+        }
+    })
+    transcript := ""
+    write_dap_request(&input, [
+        dap_frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}}}"),
+        dap_frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{{\"program\":\"{file.path}\",\"stopOnEntry\":false,\"args\":[],\"env\":{{}}}}}}"),
+    ].join(""))
+    launch :: read_dap_response(output_rx, &transcript, 2, "launch")
+    assert(launch.contains("\"success\":true"), "{launch}")
+    // Restart while Configuring must not execute user code before the gate.
+    write_dap_request(&input, dap_frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{{}}}}"))
+    configuring_restart :: read_dap_response(output_rx, &transcript, 3, "restart")
+    assert(configuring_restart.contains("\"success\":true"), "{configuring_restart}")
+    write_dap_request(&input, dap_frame("{{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{{}}}}"))
+    configured :: read_dap_response(output_rx, &transcript, 4, "configurationDone")
+    assert(configured.contains("\"success\":true"), "{configured}")
+    // Restart/breakpoint replacement preempt an in-flight native resume.
+    write_dap_request(&input, dap_frame("{{\"seq\":5,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{{}}}}"))
+    running_restart :: read_dap_response(output_rx, &transcript, 5, "restart")
+    assert(running_restart.contains("\"success\":true"), "{running_restart}")
+    write_dap_request(&input, dap_frame("{{\"seq\":6,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"{file.path}\"}},\"breakpoints\":[{{\"line\":4}}]}}}}"))
+    breakpoints :: read_dap_response(output_rx, &transcript, 6, "setBreakpoints")
+    assert(breakpoints.contains("\"success\":true"), "{breakpoints}")
+    assert(breakpoints.contains("\"verified\":true"), "{breakpoints}")
+    read_dap_until(output_rx, &transcript, (output) -> output.contains("\"hitBreakpointIds\":[1]"), "replacement breakpoint stop")
+    write_dap_request(&input, dap_frame("{{\"seq\":7,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{{}}}}"))
+    disconnected :: read_dap_response(output_rx, &transcript, 7, "disconnect")
+    assert(disconnected.contains("\"success\":true"), "{disconnected}")
+    drop(^input)
+    status :: &child.wait().expect("wait for the production Jet DAP command")
+    output_reader.join().expect("join DAP output reader")
+    loop { if output_rx.try_recv() == Ok(chunk) -> &transcript.push_str(String.from_utf8_lossy(chunk)); else -> break }
+    _ :: fs.remove_file(file.as_ref())
+    assert(status.success(), "DAP command failed:\n{transcript}")
+}

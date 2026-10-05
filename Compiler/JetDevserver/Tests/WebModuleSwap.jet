@@ -1,0 +1,65 @@
+use jet_devserver.WebModuleSwap.*
+use jet_foundation.HotSwap.[HotSwapDecision, HotSwapCompatibility, StateRetentionFact]
+// Rust: crates/jet-devserver/src/WebModuleSwap.rs:1328
+fn snapshot(source_revision: String, build_revision: String, body: String, signal_value: String, island_identity: String) -> WebModuleSwapSnapshot {
+    WebModuleSwapSnapshot.new(WebModuleSwapIdentity.new("app", "/"), source_revision, build_revision, WebPageFact.new("/", format("page-{}", build_revision)), [WebModuleFact.new("app", "iface-1", body)], [
+        .Signal(WebSignalFact.new("count", "Int", signal_value)), .Store(WebStoreFact.new("session", "Session-v1", "store-value")),
+        .QueryCache(WebQueryCacheFact.new("todos", "TodoList-v1", "cached")), .FormDraft(WebFormDraftFact.new("profile", "ProfileForm-v1", "dirty-draft")),
+        .Scroll(WebScrollFact.new("main", "Scroll-v1", 42 as I64)), .Focus(WebFocusFact.new("email", "Focus-v1", true)), .Island(WebIslandFact.new("home", island_identity, "Island-v1", "island-state"))
+    ]).unwrap()
+}
+// Rust: crates/jet-devserver/src/WebModuleSwap.rs:1383
+fn decision_for(before: &WebModuleSwapSnapshot, candidate: &WebModuleSwapSnapshot, compatible: Bool, changed_functions: [String]) -> HotSwapDecision {
+    keys: [String:Bool] := [:]
+    for fact in &before.state -> keys.insert(fact.key().to_string(), true)
+    for fact in &candidate.state -> keys.insert(fact.key().to_string(), true)
+    sorted_keys :: keys.keys().sorted()
+    return HotSwapDecision(module: "app", compatibility: if compatible { .Compatible } else { .Incompatible(reason: "checked semantic surface changed") }, changed: if compatible { [] } else { ["checked semantic surface changed"] }, changed_functions: ^changed_functions, state: sorted_keys.into_iter().map((key) -> if compatible { StateRetentionFact.preserve(^key) } else { StateRetentionFact.fresh(^key, "checked state shape changed") }).collect<[_]>(), schema_migrations: [], rechecked_items: [], change_facts: [])
+}
+// Rust: crates/jet-devserver/src/WebModuleSwap.rs:1424
+#Test("compatible_body_swap_preserves_every_supported_state_family") {
+    before :: snapshot("source-1", "build-1", "body-1", "7", "island-a"); after :: snapshot("source-2", "build-2", "body-2", "0", "island-a")
+    decision :: decision_for(&before, &after, true, ["app::fn:main"]); plan :: WebModuleSwapPlan.from_hot_swap_decision(&before, &after, &decision).unwrap()
+    assert(plan.is_compatible()); assert_eq(plan.changed_module_set(), &["app"]); assert_eq(plan.preserved.len(), 7); assert(plan.reset.is_empty())
+    assert(plan.reason_codes.contains(&WebModuleSwapReasonCode.SourceRevisionChanged)); assert(plan.reason_codes.contains(&WebModuleSwapReasonCode.BuildRevisionChanged))
+    applied :: plan.applied_snapshot()
+    assert_eq(applied.state[0].value(), &WebStateValue.Text("7")); assert_eq(applied.state[1].value(), &WebStateValue.Text("store-value"))
+    assert_eq(applied.state[2].value(), &WebStateValue.Text("cached")); assert_eq(applied.state[3].value(), &WebStateValue.Text("dirty-draft"))
+    assert_eq(applied.state[4].value(), &WebStateValue.Integer(42)); assert_eq(applied.state[5].value(), &WebStateValue.Boolean(true)); assert_eq(applied.state[6].value(), &WebStateValue.Text("island-state"))
+}
+// Rust: crates/jet-devserver/src/WebModuleSwap.rs:1452
+#Test("identity_mismatch_is_rejected_before_state_mutation") {
+    before :: snapshot("source-1", "build-1", "body-1", "7", "island-a")
+    candidate :: WebModuleSwapSnapshot.new(WebModuleSwapIdentity.new("other-app", "/"), "source-2", "build-2", WebPageFact.new("/", "page-build-2"), [WebModuleFact.new("other-app", "iface-1", "body-2")], []).unwrap()
+    decision :: decision_for(&before, &candidate, true, []); plan :: WebModuleSwapPlan.from_hot_swap_decision(&before, &candidate, &decision).unwrap()
+    state := WebModuleSwapState.new(before.clone()).unwrap(); error :: state.pause(^plan).unwrap_err()
+    assert_eq(state.phase(), WebModuleSwapPhase.Committed); assert_eq(state.committed(), &before); assert(error is .IdentityMismatch(..))
+}
+// Rust: crates/jet-devserver/src/WebModuleSwap.rs:1475
+#Test("rollback_keeps_last_committed_page_after_apply") {
+    before :: snapshot("source-1", "build-1", "body-1", "7", "island-a"); after :: snapshot("source-2", "build-2", "body-2", "0", "island-a")
+    decision :: decision_for(&before, &after, true, ["app::fn:main"]); plan :: WebModuleSwapPlan.from_hot_swap_decision(&before, &after, &decision).unwrap()
+    state := WebModuleSwapState.new(before.clone()).unwrap(); paused :: state.pause(^plan).unwrap(); assert_eq(paused.status, WebModuleSwapReceiptStatus.Paused)
+    applied :: state.apply().unwrap(); assert_eq(applied.active_page.artifact, "page-build-2"); assert_eq(applied.committed_page.artifact, "page-build-1")
+    rolled_back :: state.rollback().unwrap(); assert_eq(rolled_back.status, WebModuleSwapReceiptStatus.RolledBack)
+    assert_eq(rolled_back.committed_page.artifact, "page-build-1"); assert_eq(rolled_back.active_page.artifact, "page-build-1")
+    assert_eq(state.active(), &before); assert_eq(state.committed(), &before)
+}
+// Rust: crates/jet-devserver/src/WebModuleSwap.rs:1496
+#Test("incompatible_interface_reports_changed_modules_and_resets") {
+    before :: snapshot("source-1", "build-1", "body-1", "7", "island-a"); after := snapshot("source-2", "build-2", "body-2", "0", "island-b")
+    after.modules[0].interface_fingerprint = "iface-2"; after.state[0] = .Signal(WebSignalFact.new("count", "Int-v2", "0"))
+    decision :: decision_for(&before, &after, false, ["app::fn:main"]); plan :: WebModuleSwapPlan.from_hot_swap_decision(&before, &after, &decision).unwrap()
+    assert(!plan.is_compatible()); assert_eq(plan.changed_module_set(), &["app"])
+    assert(plan.compatibility.reason_codes().contains(&WebModuleSwapReasonCode.SemanticIncompatible)); assert(plan.reason_codes.contains(&WebModuleSwapReasonCode.StateRetentionFresh))
+    assert(plan.reset.iter().any((fact) -> fact.state.kind() == WebStateKind.Signal && fact.reason == WebModuleSwapReasonCode.StateRetentionFresh))
+    state := WebModuleSwapState.new(before.clone()).unwrap(); assert(state.pause(^plan).is_err()); assert_eq(state.committed(), &before)
+}
+// Rust: crates/jet-devserver/src/WebModuleSwap.rs:1528
+#Test("receipt_audit_has_stable_order_and_all_preserved_facts") {
+    before :: snapshot("source-1", "build-1", "body-1", "7", "island-a"); after :: snapshot("source-2", "build-2", "body-2", "0", "island-a")
+    decision :: decision_for(&before, &after, true, ["app::fn:main"]); plan :: WebModuleSwapPlan.from_hot_swap_decision(&before, &after, &decision).unwrap()
+    state := WebModuleSwapState.new(^before).unwrap(); receipt :: state.pause(^plan).unwrap(); audit :: receipt.audit()
+    assert(audit.contains("preserved=[signal:count,store:session,query_cache:todos,form_draft:profile,scroll:main,focus:email,island:home]"))
+    assert(audit.contains("changed_modules=[app]")); assert(audit.contains("source_revision_changed")); assert(audit.contains("build_revision_changed"))
+}

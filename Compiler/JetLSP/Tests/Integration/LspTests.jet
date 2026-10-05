@@ -1,0 +1,388 @@
+use std.[fs, env, thread, process]
+use std.process.[Command, Stdio]
+use std.sync.[Arc, Mutex]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_get, json_str, parse_json]
+use jet.Diagnostics.[Severity, ReportPath]
+use jet.[check_document, render_all_json, compile_with_path]
+use common.[Scratch]
+// Helpers and transcript parser remain solely in Lsp.jet.
+// GATE #4494: real child processes, pipes, mutex/thread poisoning and filesystem.
+
+// Rust: tests/lsp.rs:42
+#Test("lsp_process_lock_recovers_from_poison") {
+    mutex :: Arc.new(Mutex.new(()))
+    poisoned_mutex :: Arc.clone(mutex)
+    poisoned :: thread.spawn(() -> {
+        _guard :: poisoned_mutex.lock().unwrap()
+        panic("intentional LSP lock poison")
+    })
+    assert(poisoned.join().is_err())
+    _guard :: lock_unpoisoned(mutex)
+}
+
+// Rust: tests/lsp.rs:788
+#Test("lsp_json_transcripts") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    transcript_dir :: OSPath.from(env.manifest_dir()).join("tests/lsp")
+    files := fs.read_dir(transcript_dir).expect("tests/lsp/ must exist").filter_map(e -> e.ok().map(e -> e.path()))
+        .filter(p -> p.extension().and_then(e -> e.to_str()) == "json").collect()
+    files.sort()
+    assert(!files.is_empty(), "no JSON transcripts found in tests/lsp/")
+    loop path in files -> run_json_transcript_file(jet, path)
+}
+
+// Rust: tests/lsp.rs:807
+#Test("lsp_initialize_capabilities_have_named_test_coverage") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    init :: read_msg(&stdout)
+    advertised :: advertised_capabilities(init)
+    assert(!advertised.is_empty(), "initialize response did not expose capabilities: {init}")
+    source :: fs.read_to_string(OSPath.from(env.manifest_dir()).join("tests/lsp.rs")).expect("read capability coverage reference")
+    loop cap in advertised {
+        marker :: LSP_CAPABILITY_COVERAGE.iter().find_map((covered, marker) -> if covered == cap -> marker else -> none)
+            .unwrap_or_else(() -> panic("advertised capability `{cap}` lacks coverage entry"))
+        assert(source.contains(marker), "coverage marker `{marker}` for `{cap}` is not present in tests/lsp.rs")
+    }
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
+    drop(^stdin)
+    _ :: child.wait()
+}
+
+// Rust: tests/lsp.rs:861
+#Test("lsp_mcp_environment_resources_are_read_only") {
+    _guard :: lock_lsp_process()
+    project :: Scratch.new("lsp-mcp-environment")
+    fs.write(project.join("env.jet"), "module env.dev {{\n    prompt: $HOME\n    services: {{\n        fixture: {{\n            enable: false,\n            ports: [8080],\n            run: [\"fixture\", \"--port\", \"8080\"],\n            ready: \"fixture --ready\",\n            watch: [\"src\"],\n            after: [\"database\"],\n            sockets: [\"run/fixture.sock\"]\n        }}\n    }}\n    files: [\"config/generated.txt\": File{{ content: \"generated\\n\", mode: .Copy }}]\n}}\n").unwrap()
+    fs.write(project.join("run.jet"), "#Job\nfn lint() {{}}\n").unwrap()
+    root_uri :: "file://{project.path.display()}"
+    child := Command.new(jet_bin()).args(["self", "lsp"]).current_dir(project.path).env("HOME", "/test/home")
+        .stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("LSP stdin")
+    stdout := child.stdout.take().expect("LSP stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":{json_string(root_uri)},\"capabilities\":{{}}}}}}")
+    init :: read_msg(&stdout)
+    loop term in ["\"protocolVersion\": \"2025-11-25\"", "\"resources\": {{", "\"subscribe\": false", "\"listChanged\": false"] -> assert(init.contains(term), "init: {init}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{{}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{{}}}}")
+    list :: read_msg(&stdout)
+    assert(list.contains("jet://environment"), "list: {list}")
+    assert(list.contains("application/json"), "list: {list}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/read\",\"params\":{{\"uri\":\"jet://environment\"}}}}")
+    read :: read_msg(&stdout)
+    loop term in ["\"contents\"", "active_environment", "fixture", "generated.txt", "HOME", "lint"] -> assert(read.contains(term), "read: {read}")
+    assert(!read.contains("/test/home"), "resource leaked a variable value: {read}")
+    resource :: parse_json(read).expect("MCP resource response must be JSON")
+    contents :: json_array_field(json_object_field(resource, "result"), "contents")
+    resource_text :: json_str(json_object_field(contents[0], "text")).expect("MCP resource content must be text")
+    direct :: Command.new(jet_bin()).args(["env", "info", "--json", "--no-color"]).current_dir(project.path).env("HOME", "/test/home").output().expect("run direct env info")
+    assert(direct.status.success(), "direct env info failed: {String.from_utf8_lossy(direct.stderr)}")
+    direct_text :: String.from_utf8(direct.stdout).expect("direct env info must be UTF-8")
+    direct_view := direct_text.trim() // #4303
+    assert_json_values_equal("MCP resource must use the env info production projection", parse_json(resource_text).expect("MCP resource text must be JSON"), parse_json(direct_view).expect("direct env info must be JSON"))
+    assert(!project.join(".jet/services").exists(), "resource discovery must not start services")
+    fs.write(project.join("env.jet"), "module env.dev {{\n    packages: [\n").unwrap()
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{{\"uri\":\"jet://environment\"}}}}")
+    unavailable :: read_msg(&stdout)
+    assert(unavailable.contains("\"error\""), "unavailable: {unavailable}")
+    assert(unavailable.contains("-32002"), "unavailable: {unavailable}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"resources/read\",\"params\":{{\"uri\":\"jet://missing\"}}}}")
+    missing :: read_msg(&stdout)
+    assert(missing.contains("\"error\""), "missing: {missing}")
+    assert(missing.contains("-32002"), "missing: {missing}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
+    drop(^stdin)
+    status :: child.wait().expect("wait for LSP")
+    assert(status.success(), "LSP exited unsuccessfully: {status}")
+}
+
+// Rust: tests/lsp.rs:1009
+#Test("lsp_teaching_autocorrect_let_to_val") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    init :: read_msg(&stdout)
+    assert(init.contains("textDocumentSync"), "init: {init}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    uri :: "file:///tmp/lsp_test_let.jet"
+    src :: "fn run() {{\n    let x = 1;\n}}\n"
+    open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(src)}}}}}}}"
+    send_msg(&stdin, open)
+    diag_msg :: read_msg(&stdout)
+    assert(diag_msg.contains("publishDiagnostics"), "expected publishDiagnostics, got: {diag_msg}")
+    assert(!diag_msg.contains("E0009") && !diag_msg.contains("E0985"), "old binding words must not produce migration diagnostics, got: {diag_msg}")
+    action_req :: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/codeAction\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":1,\"character\":4}},\"end\":{{\"line\":1,\"character\":7}}}},\"context\":{{\"diagnostics\":[]}}}}}}"
+    send_msg(&stdin, action_req)
+    actions :: read_msg(&stdout)
+    assert(!actions.contains("\"newText\":\"val\""), "the retired `val` token-swap quick-fix must be gone, got: {actions}")
+    assert(actions.contains("\"id\":2") && actions.contains("\"result\":[]"), "expected an empty codeAction result for old binding syntax, got: {actions}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
+    drop(^stdin)
+    _ :: child.wait()
+}
+
+// Rust: tests/lsp.rs:1091
+#Test("lsp_incremental_sync_range_edit_updates_document") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    init :: read_msg(&stdout)
+    assert(init.contains("\"textDocumentSync\": 2") || init.contains("\"textDocumentSync\":2"), "expected incremental sync, got: {init}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    uri :: "file:///tmp/lsp_incremental_test.jet"
+    src :: "fn run() {{\n    x :: 1\n}}\n"
+    open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(src)}}}}}}}"
+    send_msg(&stdin, open)
+    _ :: read_msg(&stdout)
+    change :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[{{\"range\":{{\"start\":{{\"line\":1,\"character\":4}},\"end\":{{\"line\":1,\"character\":10}}}},\"rangeLength\":6,\"text\":\"let x = 1\"}}]}}}}"
+    send_msg(&stdin, change)
+    req :: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/semanticTokens/full\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}"
+    send_msg(&stdin, req)
+    diag :: read_msg(&stdout)
+    assert(diag.contains("publishDiagnostics") && !diag.contains("E0009") && !diag.contains("E0985"), "expected range edit to trigger ordinary diagnostics, got: {diag}")
+    tokens :: read_msg(&stdout)
+    assert(tokens.contains("\"id\":2") && tokens.contains("\"data\""), "expected semantic token response after dirty flush, got: {tokens}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
+    drop(^stdin)
+    _ :: child.wait()
+}
+
+// Rust: tests/lsp.rs:1172
+#Test("lsp_incremental_sync_rejects_stale_and_malformed_edits") {
+    _guard :: lock_lsp_process()
+    child := Command.new(jet_bin()).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    uri :: "file:///tmp/lsp_validated_sync.jet"
+    source :: "// 😀\nfn kept() {{}}\n"
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":10,\"text\":{json_string(source)}}}}}}}")
+    _ :: read_msg(&stdout)
+    change :: (version: I32, body: String) -> "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":{version}}},\"contentChanges\":[{body}]}}}}"
+    send_msg(&stdin, change(11, "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":7}}}},\"rangeLength\":4,\"text\":\"fresh\"}}"))
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/formatting\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    first_diagnostics :: read_msg(&stdout)
+    assert(first_diagnostics.contains("\"version\":11"), "diagnostics must identify the document revision: {first_diagnostics}")
+    first :: read_msg(&stdout)
+    assert(first.contains("fn fresh"), "valid edit was not applied: {first}")
+    send_msg(&stdin, change(11, "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":5,\"text\":\"stale\"}}"))
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"textDocument/formatting\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    stale_probe :: read_msg(&stdout)
+    assert(stale_probe.contains("\"id\":20") && stale_probe.contains("fn fresh") && !stale_probe.contains("stale"), "stale revision changed the document: {stale_probe}")
+    loop invalid in [
+        change(12, "{{\"range\":{{\"start\":{{\"line\":0,\"character\":4}},\"end\":{{\"line\":0,\"character\":5}}}},\"rangeLength\":1,\"text\":\"X\"}}"),
+        change(12, "{{\"range\":{{\"start\":{{\"line\":1,\"character\":8}},\"end\":{{\"line\":1,\"character\":3}}}},\"rangeLength\":5,\"text\":\"backward\"}}"),
+        change(12, "{{\"range\":{{\"start\":{{\"line\":99,\"character\":0}},\"end\":{{\"line\":99,\"character\":0}}}},\"rangeLength\":0,\"text\":\"outside\"}}"),
+        change(12, "1"),
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":12.5}},\"contentChanges\":[{{\"text\":\"float\"}}]}}}}",
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2147483648}},\"contentChanges\":[{{\"text\":\"wide\"}}]}}}}",
+        change(12, "{{\"range\":{{\"start\":{{\"line\":1,\"character\":2147483648}},\"end\":{{\"line\":1,\"character\":2147483648}}}},\"rangeLength\":0,\"text\":\"wide_position\"}}"),
+        change(12, "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":2147483648,\"text\":\"wide_length\"}}"),
+        change(12, "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":\"5\",\"text\":\"bad_type\"}}"),
+        change(12, "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":4,\"text\":\"bad_length\"}}")
+    ] -> send_msg(&stdin, invalid)
+    send_msg(&stdin, change(12, "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":5,\"text\":\"final\"}}"))
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/formatting\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    final_diagnostics :: read_msg(&stdout)
+    assert(final_diagnostics.contains("\"version\":12"), "diagnostics must identify the accepted revision: {final_diagnostics}")
+    final_text :: read_msg(&stdout)
+    assert(final_text.contains("fn final") && final_text.contains('😀'), "invalid edits changed the document or consumed its version: {final_text}")
+    loop rejected in ["fresh", "stale", "backward", "outside", "float", "wide", "wide_position", "wide_length", "bad_type", "bad_length"] -> assert(!final_text.contains(rejected), "rejected edit leaked into document: {final_text}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    drop(^stdin)
+    _ :: child.wait()
+}
+
+// Rust: tests/lsp.rs:1347
+#Test("lsp_workspace_symbols_follow_all_roots_and_folder_changes") {
+    _guard :: lock_lsp_process()
+    root :: env.temp_dir().join("lsp multi root {process.id()}")
+    first :: root.join("first")
+    second :: root.join("second")
+    third :: root.join("third")
+    _ :: fs.remove_dir_all(root)
+    loop dir in [first, second, third] -> fs.create_dir_all(dir).expect("create workspace root")
+    fs.write(first.join("closed.jet"), "fn ClosedFirst() {{}}\n").unwrap()
+    fs.write(second.join("open.jet"), "fn DiskSecond() {{}}\n").unwrap()
+    fs.write(third.join("added.jet"), "fn AddedThird() {{}}\n").unwrap()
+    first_uri :: "file://{first.display()}".replace(' ', "%20")
+    second_uri :: "file://{second.display()}".replace(' ', "%20")
+    third_uri :: "file://{third.display()}".replace(' ', "%20")
+    open_uri :: "file://{second.join("open.jet").display()}".replace(' ', "%20")
+    child := Command.new(jet_bin()).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"workspaceFolders\":[{{\"uri\":\"{first_uri}\",\"name\":\"first\"}},{{\"uri\":\"{second_uri}\",\"name\":\"second\"}}],\"capabilities\":{{}}}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{open_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn OpenSecond() {{}}\\n\"}}}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/symbol\",\"params\":{{\"query\":\"\"}}}}")
+    before :: read_msg(&stdout)
+    assert(before.contains("ClosedFirst") && before.contains("OpenSecond"), "all initial roots and overlays must be indexed: {before}")
+    assert(!before.contains("DiskSecond") && !before.contains("AddedThird"), "closed disk text must not replace an overlay and unconfigured roots must stay out: {before}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{{\"event\":{{\"removed\":[{{\"uri\":\"{first_uri}\",\"name\":\"first\"}}],\"added\":[{{\"uri\":\"{third_uri}\",\"name\":\"third\"}}]}}}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"workspace/symbol\",\"params\":{{\"query\":\"\"}}}}")
+    after :: read_msg(&stdout)
+    assert(after.contains("OpenSecond") && after.contains("AddedThird"), "kept and added roots must be indexed: {after}")
+    assert(!after.contains("ClosedFirst"), "removed closed root remained indexed: {after}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{{\"event\":{{\"removed\":[{{\"uri\":\"{second_uri}\",\"name\":\"second\"}}],\"added\":[]}}}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"workspace/symbol\",\"params\":{{\"query\":\"\"}}}}")
+    removed_open :: read_msg(&stdout)
+    assert(removed_open.contains("AddedThird"), "remaining root disappeared: {removed_open}")
+    assert(!removed_open.contains("OpenSecond"), "open overlay from removed root remained indexed: {removed_open}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{{\"event\":{{\"removed\":[{{\"uri\":\"{third_uri}\",\"name\":\"third\"}}],\"added\":[]}}}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"workspace/symbol\",\"params\":{{\"query\":\"\"}}}}")
+    empty_workspace :: read_msg(&stdout)
+    assert(empty_workspace.contains("\"result\":[]"), "removing the final workspace root must not expose open overlays: {empty_workspace}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    drop(^stdin)
+    _ :: child.wait()
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/lsp.rs:1472
+#Test("lsp_check_json_matches_jet_check_json_for_diagnostic_fixture") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    path :: env.temp_dir().join("lsp_json_diff_{process.id()}_binding.jet")
+    src :: "fn run() {{\n    let x = 1\n}}\n"
+    fs.write(path, src).expect("write diagnostic fixture")
+    out :: Command.new(jet).arg("check").arg(path).arg("--json").output().expect("jet check --json")
+    assert(!out.status.success(), "diagnostic fixture should fail: status={out.status}")
+    cli_json :: String.from_utf8_lossy(out.stderr).to_string()
+    file :: path.to_string_lossy().into_owned()
+    lsp_diags :: check_document(file, src).into_iter().filter(d -> d.severity == Severity.Error).collect()
+    lsp_json :: render_all_json(ReportPath.from_process(file), src, lsp_diags)
+    assert_eq(cli_json, lsp_json)
+    _ :: fs.remove_file(path)
+}
+
+// Rust: tests/lsp.rs:1515
+#Test("lsp_diagnostic_and_code_action_match_all_tier_reports") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    source :: "fn run() {{\n    m :: [String:Int]{{}}\n    _ :: m.gett(\"a\")\n}}\n"
+    path :: OSPath.from("/tmp/lsp_report_test.jet")
+    path_string :: path.to_string_lossy().into_owned()
+    fs.write(path, source).expect("write tier-parity diagnostic fixture")
+    aot :: compile_with_path(source, path_string).expect_err("AOT front end must reject a missing method")
+    assert_eq(aot.len(), 1, "AOT must produce one canonical diagnostic")
+    assert_eq(aot[0].code, "E0311", "AOT diagnostic code drifted")
+    // Retired JIT/interpreter representations are replaced by real CLI journeys.
+    // Each failing front end must preserve the same report before code generation.
+    tier_reports := [(String, DataTree)]()
+    loop (tier, arguments) in [
+        ("O0", ["run", "--json"]),
+        ("O1", ["build", "--json"]),
+        ("O2", ["build", "--release", "--json"]),
+        ("Web", ["build", "--target=web", "--json"])
+    ] {
+        output :: Command.new(jet).args(arguments).arg(path).output().expect("run diagnostic tier")
+        assert(!output.status.success(), "{tier} must reject E0311")
+        rendered :: String.from_utf8(output.stderr).expect("tier diagnostic report must be UTF-8")
+        rendered_view := rendered.trim_end() // #4303
+        report :: parse_json(rendered_view).unwrap_or_else(_ -> panic("parse {tier} structured report"))
+        assert_eq(json_str(json_object_field(report, "code")), "E0311", "{tier} diagnostic code drifted")
+        tier_reports.push((tier, ^report))
+    }
+    report_path :: ReportPath.from_path(path)
+    uri :: "file:///tmp/lsp_report_test.jet"
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+    diagnostics :: read_msg(&stdout)
+    assert(diagnostics.contains("publishDiagnostics"), diagnostics)
+    notification :: parse_json(diagnostics).expect("parse publishDiagnostics notification")
+    editor_params :: json_object_field(notification, "params")
+    editor_diagnostics :: json_array_field(editor_params, "diagnostics")
+    assert_eq(editor_diagnostics.len(), 1, "editor must receive one canonical diagnostic")
+    editor_diagnostic :: editor_diagnostics[0]
+    editor_report :: json_object_field(editor_diagnostic, "data")
+    assert(json_get(editor_diagnostic, "relatedInformation") == none, "root report with empty cause must not gain related locations: {diagnostics}")
+    aot_rendered :: render_all_json(report_path, source, aot)
+    aot_view := aot_rendered.trim_end() // #4303
+    assert_json_values_equal("editor data drifted from AOT", editor_report, parse_json(aot_view).expect("parse AOT structured report"))
+    loop (tier, report) in tier_reports.iter() {
+        assert_json_values_equal("editor data drifted from {tier}", editor_report, report)
+        assert_json_values_equal("editor What drifted from {tier}", json_object_field(editor_diagnostic, "message"), json_object_field(report, "what"))
+    }
+    loop term in [
+        "\"message\":\"`gett` isn't a method on this value\"",
+        "\"codeDescription\":{{\"href\":\"jet://explain/E0311\"}}",
+        "\"data\":{{\"schema\":\"jet.report/v2\"",
+        "\"why\":\"this `Map` value has no instance method named `gett`\"",
+        "\"fix\":\"did you mean `get`?\"", "\"applicability\":\"suggested\"", "\"new_text\":\"get\"",
+        "\"moment\":\"compile\"", "\"severity\":\"error\"", "\"code\":\"E0311\"",
+        "\"fix_edits\":[{{\"file\":\"/tmp/lsp_report_test.jet\",\"span\":{{\"start\":47,\"end\":51}},\"new_text\":\"get\",\"safety\":\"needs-review\"}}]",
+        "\"cause\":[],\"clears\":0"
+    ] -> assert(diagnostics.contains(term), diagnostics)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/codeAction\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":2,\"character\":11}},\"end\":{{\"line\":2,\"character\":15}}}},\"context\":{{\"diagnostics\":[]}}}}}}")
+    actions :: read_msg(&stdout)
+    assert(actions.contains("\"kind\":\"quickfix\""), actions)
+    assert(actions.contains("\"title\":\"did you mean `get`?\""), actions)
+    assert(actions.contains("\"newText\":\"get\""), actions)
+    actions_value :: parse_json(actions).expect("parse code-action response")
+    actions :: json_array(json_object_field(actions_value, "result"), "code-action result")
+    quickfix :: actions.iter().find(action -> json_str(json_object_field(action, "kind")) == "quickfix").expect("registry fix code action")
+    document_changes :: json_array(json_object_field(json_object_field(quickfix, "edit"), "documentChanges"), "code-action documentChanges")
+    action_edits :: json_array(json_object_field(document_changes.first().expect("code-action document change"), "edits"), "code-action edits")
+    report_edits :: json_array_field(editor_report, "fix_edits")
+    assert_eq(report_edits.len(), 1, "canonical report must carry one recovery edit")
+    assert_eq(action_edits.len(), 1, "canonical code action must carry one recovery edit")
+    expected_action_range :: parse_json("{{\"start\":{{\"line\":2,\"character\":11}},\"end\":{{\"line\":2,\"character\":15}}}}").expect("parse expected suggested-edit range")
+    assert_json_values_equal("code action range drifted from source span", json_object_field(action_edits[0], "range"), expected_action_range)
+    assert_json_values_equal("code action edit drifted from report fix_edits", json_object_field(action_edits[0], "newText"), json_object_field(report_edits[0], "new_text"))
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
+    drop(^stdin)
+    _ :: child.wait()
+    _ :: fs.remove_file(path)
+}
+
+// Rust: tests/lsp.rs:1732
+#Test("lsp_formatting_and_range_formatting_return_edits") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn run(){{\nprint(1)\n}}\n"
+    uri :: "file:///tmp/lsp_formatting_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send{msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["documentFormattingProvider", "documentRangeFormattingProvider"]},
+        TranscriptStep.Send{msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none},
+        TranscriptStep.Open{uri: uri, expect_notification: true},
+        TranscriptStep.Send{msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/formatting\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"options\":{{\"tabSize\":4,\"insertSpaces\":true}}}}}}", expect_contains: ["\"newText\"", "\"range\""]},
+        TranscriptStep.Send{msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/rangeFormatting\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":3,\"character\":0}}}},\"options\":{{\"tabSize\":4,\"insertSpaces\":true}}}}}}", expect_contains: ["\"newText\"", "\"range\""]},
+        TranscriptStep.Send{msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"]}
+    ])
+}

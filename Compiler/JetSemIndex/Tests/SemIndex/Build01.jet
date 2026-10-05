@@ -1,0 +1,35 @@
+use jet_foundation.[Expr, Span, Call]
+
+// Rust: crates/jet-semindex/src/Build.rs:1212-1236 (no original inline tests).
+#Test("structural_expression_call_end_saturates_at_selected_pointer_max") {
+    maximum :: USize.MAX as Int // GATE #4483: same target-width offset law.
+    assert_eq(structural_span_add(maximum, 1), maximum)
+    assert_eq(structural_span_add(maximum - 1, 2), maximum)
+    assert_eq(structural_span_add(maximum - 2, 2), maximum)
+    assert_eq(structural_span_add(20, 2), 22)
+    call :: Call{name: "f", name_span: Span{start: 3, end: maximum - 1}, type_args: [], args: [], resolved_ret: None, range_checked: false, widen_approx: false}
+    span :: structural_expr_span(Expr.Call(call))
+    assert_eq(span.start, 3)
+    assert_eq(span.end, maximum)
+}
+#Test("structural_expression_method_retains_receiver_start_and_empty_call_end") {
+    receiver :: Expr.Ident("items", Span{start: 2, end: 7})
+    expr :: Expr.MethodCall(receiver, "size", Span{start: 8, end: 12}, [], [], [], None, None, None, false)
+    span :: structural_expr_span(expr)
+    assert_eq(span.start, 2)
+    assert_eq(span.end, 14)
+    plain :: structural_expr_span(Expr.Ident("name", Span{start: 4, end: 8}))
+    assert_eq(plain.start, 4)
+    assert_eq(plain.end, 8)
+}
+// Exercise reused exact public parameter/identity owners, not duplicate helpers.
+#Test("semindex_mapped_identity_and_lexical_slot_contracts") {
+    assert_eq(semindex_root_identity("main"), "module:main")
+    assert_eq(semindex_module_identity("main", "inner"), "module:main::inner")
+    assert_eq(semindex_callable_identity("main", None, "f"), "fn:main::f")
+    assert_eq(semindex_callable_identity("main", Val("Thing"), "f"), "method:main::Thing.f")
+    assert(semindex_is_lexical_structural_slot("body"))
+    assert(semindex_is_lexical_structural_slot("else_body"))
+    assert(semindex_is_lexical_structural_slot("arm_bodies"))
+    assert(!semindex_is_lexical_structural_slot("params"))
+}

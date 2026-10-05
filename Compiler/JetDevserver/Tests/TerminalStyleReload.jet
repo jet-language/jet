@@ -1,0 +1,114 @@
+use jet_devserver.TerminalStyleReload.*
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1696
+fn edit(source: String) -> TerminalStyleEdit { TerminalStyleEdit.new("app/style", source.to_string()) }
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1700
+#Test("capability_facts_are_deterministic_and_follow_explicit_policy") {
+    ansi256 :: TerminalCapabilityFacts.from_environment(.Val("xterm-256color"), None, true, false, .Auto)
+    assert_eq(ansi256.profile, TerminalColorProfile.Ansi256); assert(ansi256.color_enabled())
+    dumb :: TerminalCapabilityFacts.from_environment(.Val("dumb"), .Val("truecolor"), true, false, .Auto)
+    assert_eq(dumb.profile, TerminalColorProfile.Monochrome); assert(!dumb.color_enabled())
+    forced :: TerminalCapabilityFacts.from_environment(.Val("dumb"), None, false, true, .Always)
+    assert_eq(forced.profile, TerminalColorProfile.Ansi16); assert(forced.color_enabled())
+    assert_eq(ansi256.fingerprint(), ansi256.fingerprint())
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1732
+#Test("parser_produces_typed_roles_without_retaining_source") {
+    document :: TerminalStyleDocument.parse("# semantic roles\naccent=1;96\nsuccess=green\nerror=plain\n").expect("style parses")
+    assert_eq(document.value(.Accent).unwrap().sgr(), .Val("1;96"))
+    assert_eq(document.value(.Success).unwrap().sgr(), .Val("32"))
+    assert_eq(document.value(.Error), .Val(TerminalStyleValue.Plain))
+    assert(TerminalStyleDocument.parse("accent=1;;96").is_err())
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1744
+#Test("style_reload_is_atomic_and_keeps_last_valid_snapshot_on_failure") {
+    reload :: TerminalStyleReload.new(); subscriber :: reload.subscribe().expect("subscriber")
+    first :: reload.reload(edit("accent=red\nsuccess=green"))
+    assert(first.applied()); assert_eq(first.revision, 1)
+    prior :: reload.last_valid().expect("initial style"); state_outside_snapshot :: "focused:search cursor:3"
+    rejected :: reload.reload(edit("accent=1;;31"))
+    assert(rejected.rejected()); assert_eq(rejected.revision, 1)
+    assert_eq(reload.last_valid().unwrap().fingerprint(), prior.fingerprint())
+    assert_eq(reload.revision(), 1); assert_eq(state_outside_snapshot, "focused:search cursor:3")
+    error :: reload.error_fact().expect("one error fact")
+    assert_eq(error.code, TerminalStyleErrorCode.InvalidStyle); assert(error.is_bounded())
+    notifications :: reload.drain_notifications(subscriber)
+    assert_eq(notifications.len(), 2); assert_eq(notifications[0].revision, 1)
+    assert_eq(notifications[1].change, TerminalStyleChangeKind.Invalid); assert_eq(notifications[1].revision, 1)
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1769
+#Test("burst_coalescing_notifies_once_for_last_edit") {
+    reload :: TerminalStyleReload.new(); subscriber :: reload.subscribe().expect("subscriber")
+    _ :: reload.reload(edit("accent=red")); _ :: reload.drain_notifications(subscriber)
+    reload.enqueue(edit("accent=green")); reload.enqueue(edit("accent=blue")); reload.enqueue(edit("accent=yellow"))
+    assert(reload.has_pending()); receipt :: reload.flush().expect("coalesced edit")
+    assert_eq(receipt.change, TerminalStyleChangeKind.StyleOnly); assert_eq(receipt.revision, 2)
+    assert_eq(reload.drain_notifications(subscriber).len(), 1)
+    assert_eq(reload.last_valid().unwrap().value(.Accent).unwrap().sgr(), .Val("33"))
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1786
+#Test("capability_change_applies_but_layout_or_type_change_requires_restart") {
+    reload :: TerminalStyleReload.new()
+    base :: TerminalCapabilityFacts.from_environment(.Val("xterm-256color"), None, true, false, .Auto)
+    plain :: TerminalCapabilityFacts.from_environment(.Val("dumb"), None, true, false, .Auto)
+    first :: reload.reload(edit("accent=red").with_capabilities(base)); assert_eq(first.revision, 1)
+    capability :: reload.reload(edit("accent=red").with_capabilities(plain))
+    assert_eq(capability.change, TerminalStyleChangeKind.CapabilityOnly); assert_eq(capability.revision, 2)
+    layout :: reload.reload(edit("accent=green").with_capabilities(plain).with_layout_fingerprint("layout-v2"))
+    assert_eq(layout.change, TerminalStyleChangeKind.RestartRequired(.LayoutFingerprintChanged)); assert_eq(layout.revision, 2)
+    type_change :: reload.reload(edit("accent=green").with_capabilities(plain).with_type_fingerprint("type-v2"))
+    assert_eq(type_change.change, TerminalStyleChangeKind.RestartRequired(.TypeFingerprintChanged)); assert_eq(type_change.revision, 2)
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1834
+#Test("dependency_order_is_canonical") {
+    first :: TerminalStyleDependency.from_bytes(.Source, "z", "z".as_bytes()).unwrap()
+    second :: TerminalStyleDependency.from_bytes(.Source, "a", "a".as_bytes()).unwrap()
+    a :: TerminalStyleFingerprintFacts.new("style", "accent=red", [first.clone(), second.clone()], TerminalCapabilityFacts.default(), "", "").unwrap()
+    b :: TerminalStyleFingerprintFacts.new("style", "accent=red", [second, first], TerminalCapabilityFacts.default(), "", "").unwrap()
+    assert_eq(a.dependencies, b.dependencies); assert_eq(a.fingerprint, b.fingerprint)
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1870
+#Test("host_adapter_reports_unavailable_before_source_is_injected") {
+    adapter :: TerminalStyleHostAdapter.new(); assert(!adapter.is_injected())
+    (outcome, event) :: adapter.apply_json("{\"source\":\"accent=red\"}")
+    assert_eq(outcome, TerminalStyleHostOutcome.Unavailable(.SourceNotInjected))
+    assert(event.contains("\"outcome\":\"unavailable\"")); assert(event.contains("\"reason\":\"source_not_injected\""))
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1885
+#Test("host_adapter_applies_bounded_json_after_injection") {
+    adapter :: TerminalStyleHostAdapter.new()
+    adapter.inject(TerminalStyleHostSource.new("app/style", TerminalCapabilityFacts.default()).unwrap())
+    assert(adapter.is_injected())
+    (outcome, event) :: adapter.apply_json("{\"source\":\"accent=red\\nsuccess=green\"}")
+    assert_eq(outcome, TerminalStyleHostOutcome.Applied{revision: 1, change: .Initial})
+    assert(event.contains("\"outcome\":\"applied\"")); assert(event.contains("\"fingerprint\""))
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1905
+#Test("host_adapter_rejects_invalid_style_json") {
+    adapter :: TerminalStyleHostAdapter.new()
+    adapter.inject(TerminalStyleHostSource.new("app/style", TerminalCapabilityFacts.default()).unwrap())
+    (outcome, event) :: adapter.apply_json("{\"source\":\"accent=1;;96\"}")
+    if outcome == {
+        .Rejected(.Invalid(fact)) -> assert_eq(fact.code, TerminalStyleErrorCode.InvalidStyle)
+        else -> panic("expected a rejected invalid style, got {outcome}")
+    }
+    assert(event.contains("\"outcome\":\"rejected\""))
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1921
+#Test("host_adapter_rejects_restart_required_layout_change_without_reloading") {
+    adapter :: TerminalStyleHostAdapter.new()
+    adapter.inject(TerminalStyleHostSource.new("app/style", TerminalCapabilityFacts.default()).unwrap())
+    (first, _) :: adapter.apply_json("{\"source\":\"accent=red\"}")
+    assert(if first == { .Applied{..} -> true, else -> false })
+    (outcome, event) :: adapter.apply_json("{\"source\":\"accent=green\",\"layout_fingerprint\":\"layout-v2\"}")
+    assert_eq(outcome, TerminalStyleHostOutcome.Rejected(.RestartRequired(.LayoutFingerprintChanged)))
+    assert(event.contains("\"code\":\"layout_fingerprint_changed\""))
+}
+// Rust: crates/jet-devserver/src/TerminalStyleReload.rs:1941
+#Test("host_adapter_current_json_reports_unavailable_then_applied") {
+    adapter :: TerminalStyleHostAdapter.new(); (before, _) :: adapter.current_json()
+    assert_eq(before, TerminalStyleHostOutcome.Unavailable(.NoStyleApplied))
+    adapter.inject(TerminalStyleHostSource.new("app/style", TerminalCapabilityFacts.default()).unwrap())
+    _ :: adapter.apply_json("{\"source\":\"accent=red\"}")
+    (after, event) :: adapter.current_json()
+    assert_eq(after, TerminalStyleHostOutcome.Applied{revision: 1, change: .Unchanged}); assert(event.contains("\"fingerprint\""))
+}

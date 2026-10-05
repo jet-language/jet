@@ -1,0 +1,18 @@
+// Rust: crates/jet-semindex/src/Build.rs:1776
+// No inline Rust tests in this window; controls exercise the canonical body.
+#Test("normalize_definition_preserves_strings_and_removes_comments") {
+    assert_eq(semindex_normalize_definition(" fn f( ) { // omitted\n \"a // b\" } "), "fnf(){\"a // b\"}")
+    assert_eq(semindex_normalize_definition("\"a\\\" // b\" // tail"), "\"a\\\" // b\"")
+    assert_eq(semindex_normalize_definition("é \t +\n β // tail"), "é+β")
+    assert_eq(semindex_normalize_definition("\"unterminated\\"), "\"unterminated\\")
+    assert_eq(semindex_normalize_definition("// only comment"), "")
+}
+
+use jet_foundation.[ArithmeticPolicyFact, Span]
+// Rust: crates/jet-semindex/src/Build.rs:3638
+#Test("format_arithmetic_hover_preserves_policy_and_scope") {
+    fact :: ArithmeticPolicyFact{mode: .Wrapping, operation: .Val(.Add), operation_span: Span{start: 8, end: 9}, scope_span: Span{start: 2, end: 20}}
+    assert_eq(semindex_format_arithmetic_hover(fact, "a.jet"), "fixed-width add: .Wrapping; scope = a.jet:2..20")
+    fallback :: ArithmeticPolicyFact{mode: .Checked, operation: None, operation_span: Span{start: 8, end: 9}, scope_span: Span{start: 2, end: 20}}
+    assert_eq(semindex_format_arithmetic_hover(fallback, "a.jet"), "fixed-width operation: .Checked; scope = a.jet:2..20")
+}

@@ -1,0 +1,557 @@
+use jet_devserver.WebHost.*
+use jet_devserver.[Request, ResidentDevSession]
+use jet_devserver.Canvas as Canvas
+use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+use jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
+use jet_driver.Package.[ReleaseDevtoolsPolicy]
+use std.io.[Read, Write, BufReader, ErrorKind]
+use std.net.[TcpListener, TcpStream]
+use std.sync.[Arc, Barrier, Mutex]
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+use std.thread as thread
+use std.fs as fs
+use std.env as env
+use std.process as process
+use core.files.[OSPath]
+use core.sys.target.[selected_family]
+// Native tests use real sockets/threads/files/clock, GATE #4494; IO kind fidelity #4409.
+// Rust: crates/jet-devserver/src/WebHost.rs:6556
+fn inject_live_reload(html: String, nonce: String) -> String {
+    script := live_reload_script(nonce, "")
+    script.shrink_to_fit()
+    return inject_live_reload_with_script(html, script).unwrap_or_else(() -> { out := html.to_string(); out.push_str(script); ^out })
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6610
+fn bind_canvas_for_test(file: String, verbose: Bool, port: U16?) -> WebHost {
+    options := CanvasHostOptions.default()
+    options.port = port
+    return WebHost.bind_canvas_with_options_and_policy(file, OSPath.new("build"), verbose, &options, ReleaseDevtoolsPolicy.development()).unwrap()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6623
+fn bind_canvas_options_for_test(file: String, verbose: Bool, options: &CanvasHostOptions) -> WebHost Err! {
+    WebHost.bind_canvas_with_options_and_policy(file, OSPath.new("build"), verbose, options, ReleaseDevtoolsPolicy.development())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6637
+fn bind_web_canvas_options_for_test(file: String, verbose: Bool, fallback_port: U16?, options: &CanvasHostOptions) -> WebHost Err! {
+    WebHost.bind_web_with_canvas_options_and_policy(file, OSPath.new("build"), verbose, fallback_port, options, ReleaseDevtoolsPolicy.development())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6654
+#Test("slowloris_request_hits_the_absolute_deadline_without_exhausting_admission") {
+    active :: AtomicUsize.new(MAX_CONNECTION_THREADS)
+    assert(!try_acquire_connection(&active), "the connection cap must reject the next slow client")
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    address :: listener.local_addr().unwrap()
+    client :: thread.spawn(move () -> { stream := TcpStream.connect(address).unwrap(); _ :: stream.write_all(b"G"); thread.sleep(Duration.from_millis(100)) })
+    (stream, _) :: listener.accept().unwrap()
+    started :: Instant.now()
+    reader := BufReader.new(DeadlineStream.new(^stream, started + Duration.from_millis(40)))
+    error :: Request.read(&reader).expect_err("slow request must time out")
+    assert_eq(error.kind(), ErrorKind.TimedOut)
+    assert(started.elapsed() < Duration.from_millis(200))
+    client.join().unwrap()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6681
+#Test("live_server_admission_drops_connections_after_cap") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    address :: listener.local_addr().unwrap()
+    shutdown :: Arc.new(AtomicBool.new(false))
+    server_shutdown :: Arc.clone(&shutdown)
+    status :: Arc.new(DevStatus.new("admission.jet", false))
+    debug_sessions :: Arc.new(Canvas.DebugSessions.default())
+    session :: Arc.new(ResidentDevSession.new("admission.jet", 0, address.port()))
+    browser_state :: Arc.new(Mutex.new(.None))
+    paused_evaluate :: Arc.new(Mutex.new(PausedEvaluateHost.new()))
+    terminal_style :: Arc.new(TerminalStyleHostAdapter.new())
+    server :: thread.spawn(move () -> serve_forever(^listener, ^status, ^debug_sessions, ^session, "admission.jet", .Application, "127.0.0.1", "test-session", ^server_shutdown, OSPath.new("."), ReleaseDevtoolsPolicy.development(), ^browser_state, ^paused_evaluate, ^terminal_style))
+    clients := [TcpStream].with_capacity(MAX_CONNECTION_THREADS)
+    for _ in 0..MAX_CONNECTION_THREADS { client := TcpStream.connect(address).unwrap(); client.write_all(b"G").unwrap(); clients.push(^client) }
+    rejected := false
+    for _ in 0..100 {
+        candidate := TcpStream.connect(address).unwrap()
+        candidate.set_read_timeout(.Val(Duration.from_millis(20))).unwrap()
+        _ :: candidate.write_all(b"G")
+        byte: [U8] := [0]
+        match candidate.read(&byte) {
+            .Ok(0) -> { rejected = true; break }
+            .Err(error) if error.kind() is .TimedOut | .WouldBlock -> {}
+            .Err(_) -> { rejected = true; break }
+            .Ok(_) -> {}
+        }
+        thread.sleep(Duration.from_millis(5))
+    }
+    assert(rejected, "live server must enforce the connection cap")
+    drop(^clients)
+    shutdown.store(true, Ordering.SeqCst)
+    server.join().unwrap()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6757
+#Test("stage_and_swap_rejects_symlinked_destination") {
+    if selected_family() != "unix" -> return // GATE #4483
+    root :: env.current_dir().unwrap().join(format(".jet-webhost-symlink-{}", process.id()))
+    _ :: fs.remove_dir_all(&root)
+    output :: root.join("build"); staging :: output.join(".staging"); outside :: root.join("outside.js")
+    fs.create_dir_all(&staging).unwrap()
+    fs.write(staging.join("web.manifest.json"), "staged").unwrap()
+    fs.write(&outside, "must survive").unwrap()
+    std.os.unix.fs.symlink(&outside, output.join("web.manifest.json")).unwrap()
+    assert(stage_and_swap(&staging, &output, &root).is_err(), "web finalization must not replace a symlinked output")
+    assert_eq(fs.read_to_string(&outside).unwrap(), "must survive")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6783
+#Test("stage_and_swap_rejects_hardlinked_destination") {
+    if selected_family() != "unix" -> return // GATE #4483
+    root :: env.current_dir().unwrap().join(format(".jet-webhost-hardlink-{}", process.id()))
+    _ :: fs.remove_dir_all(&root)
+    output :: root.join("build"); staging :: output.join(".staging"); outside :: root.join("outside.js")
+    fs.create_dir_all(&staging).unwrap()
+    fs.write(staging.join("web.manifest.json"), "staged").unwrap()
+    fs.write(&outside, "must survive").unwrap()
+    fs.hard_link(&outside, output.join("web.manifest.json")).unwrap()
+    assert(stage_and_swap(&staging, &output, &root).is_err(), "web finalization must reject hard-linked output members")
+    assert_eq(fs.read_to_string(&outside).unwrap(), "must survive")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6807
+#Test("stage_and_swap_rejects_symlinked_staging_ancestor") {
+    if selected_family() != "unix" -> return
+    root :: env.current_dir().unwrap().join(format(".jet-webhost-staging-link-{}", process.id()))
+    _ :: fs.remove_dir_all(&root)
+    output :: root.join("build"); staging_target :: root.join("staging-target"); staging :: output.join(".staging"); outside :: root.join("outside.js")
+    fs.create_dir_all(&output).unwrap(); fs.create_dir_all(&staging_target).unwrap()
+    fs.write(staging_target.join("web.manifest.json"), "must not publish").unwrap()
+    fs.write(&outside, "must survive").unwrap()
+    std.os.unix.fs.symlink(&staging_target, &staging).unwrap()
+    assert(stage_and_swap(&staging, &output, &root).is_err(), "web finalization must reject a symlinked staging directory")
+    assert_eq(fs.read_to_string(&outside).unwrap(), "must survive")
+    assert_eq(fs.read_to_string(staging_target.join("web.manifest.json")).unwrap(), "must not publish")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6839
+#Test("stage_and_swap_rejects_symlinked_output_root") {
+    if selected_family() != "unix" -> return
+    root :: env.current_dir().unwrap().join(format(".jet-webhost-output-link-{}", process.id()))
+    _ :: fs.remove_dir_all(&root)
+    real_output :: root.join("real-build"); output :: root.join("build"); staging :: real_output.join(".staging")
+    fs.create_dir_all(&staging).unwrap(); fs.write(staging.join("web.manifest.json"), "must not publish").unwrap()
+    std.os.unix.fs.symlink(&real_output, &output).unwrap()
+    assert(stage_and_swap(&staging, &output, &root).is_err(), "web finalization must reject a symlinked output root")
+    assert(!real_output.join("web.manifest.json").exists(), "rejected output-root link must not receive bytes")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6867
+#Test("canvas_source_route_rejects_symlinked_entry") {
+    if selected_family() != "unix" -> return
+    root :: env.temp_dir().join(format("jet-devserver-canvas-source-symlink-{}-{}", process.id(), SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()))
+    fs.create_dir_all(&root).unwrap()
+    real :: root.join("real.jet"); alias :: root.join("alias.jet")
+    fs.write(&real, "fn run() { print(\"secret\") }\n").unwrap()
+    std.os.unix.fs.symlink(&real, &alias).unwrap()
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap(); port :: listener.local_addr().unwrap().port(); secret :: "canvas-source-secret"
+    client := TcpStream.connect(("127.0.0.1", port)).unwrap()
+    request :: format("GET /canvas/source?session={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: http://127.0.0.1:{}\r\nConnection: close\r\n\r\n", secret, port, port)
+    client.write_all(request.as_bytes()).unwrap()
+    (server, _) :: listener.accept().unwrap()
+    status :: DevStatus.new_with_terminal("alias.jet", false, false, false); status.set_port(port)
+    session :: ResidentDevSession.new("alias.jet", port, 0); debug_sessions :: Canvas.DebugSessions.default()
+    handle_connection(^server, &status, &debug_sessions, &session, alias.to_str().unwrap(), .Canvas, "127.0.0.1", secret).unwrap()
+    response := ""; client.read_to_string(&response).unwrap()
+    assert(response.starts_with("HTTP/1.1 404 Not Found"), response)
+    assert(!response.contains("secret"), "symlinked source was disclosed")
+    _ :: fs.remove_dir_all(^root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6920
+#Test("application_preview_does_not_serve_files_from_source_directory") {
+    root :: env.temp_dir().join(format("jet-devserver-source-disclosure-{}-{}", process.id(), SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()))
+    build :: root.join("build"); source_dir :: root.join("source"); source :: source_dir.join("app.jet")
+    fs.create_dir_all(&build).unwrap(); fs.create_dir_all(&source_dir).unwrap()
+    fs.write(&source, "fn main() {}\n").unwrap(); fs.write(source_dir.join("private.txt"), "must not be served").unwrap()
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap(); port :: listener.local_addr().unwrap().port()
+    client := TcpStream.connect(("127.0.0.1", port)).unwrap()
+    client.write_all(format("GET /private.txt HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", port).as_bytes()).unwrap()
+    (server, _) :: listener.accept().unwrap()
+    status :: DevStatus.new_with_terminal("app.jet", false, false, false); status.set_port(port)
+    debug_sessions :: Canvas.DebugSessions.default(); session :: ResidentDevSession.new("app.jet", port, port)
+    handle_connection_with_root(^server, &status, &debug_sessions, &session, source.to_str().unwrap(), .Application, "127.0.0.1", "", &build).unwrap()
+    response := ""; client.read_to_string(&response).unwrap()
+    assert(response.starts_with("HTTP/1.1 404 Not Found"), response)
+    assert(!response.contains("must not be served"), response)
+    _ :: fs.remove_dir_all(^root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6974
+#Test("invalid_utf8_html_fails_closed_without_lossy_replacement") {
+    root :: env.temp_dir().join(format("jet-devserver-invalid-html-{}-{}", process.id(), SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()))
+    fs.create_dir_all(&root).unwrap(); fs.write(root.join("index.html"), [0x3c as U8, 0xff, 0x3e]).unwrap()
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap(); port :: listener.local_addr().unwrap().port()
+    client := TcpStream.connect(("127.0.0.1", port)).unwrap()
+    client.write_all(format("GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", port).as_bytes()).unwrap()
+    (server, _) :: listener.accept().unwrap()
+    status :: DevStatus.new_with_terminal("app.jet", false, false, false); status.set_port(port)
+    debug_sessions :: Canvas.DebugSessions.default(); session :: ResidentDevSession.new("app.jet", port, port)
+    handle_connection_with_root(^server, &status, &debug_sessions, &session, "app.jet", .Application, "127.0.0.1", "", &root).unwrap()
+    response := ""; client.read_to_string(&response).unwrap()
+    assert(response.starts_with("HTTP/1.1 500 Internal Server Error"), response)
+    assert(!response.contains('�'), "invalid HTML was lossy-decoded")
+    assert(decode_html([0xff]).is_err())
+    _ :: fs.remove_dir_all(^root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7028
+#Test("transformed_html_uses_one_aggregate_response_budget") {
+    script_capacity :: 4096; raw_limit :: html_raw_response_limit(script_capacity)
+    assert(2 * raw_limit + 2 * script_capacity as U64 <= MAX_STATIC_RESPONSE_BYTES, "raw HTML plus transformed HTML exceeds the shared response budget")
+    assert(2 * (raw_limit + 1) + 2 * script_capacity as U64 > MAX_STATIC_RESPONSE_BYTES, "raw HTML limit leaves an unbounded transformed response")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7042
+#Test("oversized_html_is_rejected_before_transformation") {
+    root :: env.temp_dir().join(format("jet-devserver-oversized-html-{}-{}", process.id(), SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()))
+    fs.create_dir_all(&root).unwrap()
+    file :: fs.File.create(root.join("index.html")).unwrap(); file.set_len(MAX_STATIC_RESPONSE_BYTES).unwrap(); drop(^file)
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap(); port :: listener.local_addr().unwrap().port()
+    client := TcpStream.connect(("127.0.0.1", port)).unwrap()
+    client.write_all(format("GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", port).as_bytes()).unwrap()
+    (server, _) :: listener.accept().unwrap()
+    status :: DevStatus.new_with_terminal("app.jet", false, false, false); status.set_port(port)
+    debug_sessions :: Canvas.DebugSessions.default(); session :: ResidentDevSession.new("app.jet", port, port)
+    handle_connection_with_root(^server, &status, &debug_sessions, &session, "app.jet", .Application, "127.0.0.1", "", &root).unwrap()
+    response := ""; client.read_to_string(&response).unwrap()
+    assert(response.starts_with("HTTP/1.1 404 Not Found"), response)
+    _ :: fs.remove_dir_all(^root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7090
+#Test("injects_before_closing_body_tag") {
+    html :: "<html><body><p>hi</p></BODY></html>"; out :: inject_live_reload(html, "nonce")
+    assert(out.contains("<script>")); assert(out.find("<script>").unwrap() < out.find("</BODY>").unwrap())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7098
+#Test("appends_when_no_body_tag") {
+    html :: "<html><p>hi</p></html>"; out :: inject_live_reload(html, "nonce")
+    assert(out.starts_with(html)); assert(out.contains("<script>"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7106
+#Test("live_verbose_toggle_changes_depth_without_changing_status") {
+    status :: DevStatus.new("app.jet", false); assert(!status.verbose()); before :: status.json()
+    status.toggle_verbose(); assert(status.verbose()); assert_eq(status.json(), before)
+    status.toggle_verbose(); assert(!status.verbose()); assert_eq(status.json(), before)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7119
+#Test("dashboard_detail_keeps_watched_target_and_canvas_route_pinned") {
+    status :: DevStatus.new("app.jet", false); status.set_port(8123); status.set_canvas_port(8123)
+    assert_eq(status.dashboard_detail_line(), "         watching app.jet · Canvas http://localhost:8123/canvas · v verbose")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7130
+#Test("browser_client_registry_counts_tabs_not_poll_connections") {
+    status :: DevStatus.new("app.jet", false)
+    status.note_client("tab-a"); status.note_client("tab-a"); assert_eq(status.client_count(), 1)
+    status.note_client("tab-b"); assert_eq(status.client_count(), 2)
+    status.note_client(""); status.note_client("x".repeat(129)); assert_eq(status.client_count(), 2)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7143
+#Test("expired_browser_lease_drives_shared_reconnect_then_ready") {
+    status :: DevStatus.new("app.jet", false); status.set_port(8123); status.note_client("tab-a")
+    status.clients.lock().unwrap().insert("tab-a", Instant.now() - Duration.from_millis(CLIENT_TTL_MS + 1))
+    status.expire_clients()
+    reconnecting :: status.json()
+    assert(reconnecting.contains("\"state\":\"reconnecting\"")); assert(reconnecting.contains("reconnecting · waiting for connection"))
+    status.note_client("tab-a"); ready :: status.json()
+    assert(ready.contains("\"state\":\"ready\"")); assert(ready.contains("ready · localhost:8123 · 1 client"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7163
+#Test("failed_edit_revision_facts_agree") {
+    status :: DevStatus.new("app.jet", false); status.mark_building()
+    assert_eq(status.revision_facts(), DevRevisionFacts(accepted: .None, candidate: .Val(1), diagnostic: .None))
+    status.mark_ready(10, false); status.mark_building(); status.mark_ready(10, true)
+    assert_eq(status.version.load(Ordering.SeqCst), 2)
+    status.mark_building(); status.mark_error("E0003", "Error [E0003]: bad", true)
+    failed :: status.json()
+    assert(failed.contains("\"version\":2,"), failed); assert(failed.contains("\"candidate\":3,"), failed)
+    assert(failed.contains("\"diagnostic_revision\":3,"), failed); assert(failed.contains("\"accepted_revision\":2,"), failed)
+    assert(failed.contains("\"last_good_revision\":2}"), failed)
+    status.mark_building(); status.mark_error("E0003", "Error [E0003]: bad", true)
+    assert_eq(status.revision_facts(), DevRevisionFacts(accepted: .Val(2), candidate: .Val(3), diagnostic: .Val(3)))
+    status.mark_building(); status.mark_ready(10, true)
+    recovered :: status.json()
+    assert(recovered.contains("\"version\":3,"), recovered); assert(recovered.contains("\"candidate\":null,"), recovered)
+    assert(recovered.contains("\"diagnostic_revision\":null,"), recovered); assert(recovered.contains("\"accepted_revision\":3,"), recovered)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7205
+#Test("reconnect_overrides_ready_building_and_error_without_losing_snapshot") {
+    status :: DevStatus.new("app.jet", false); status.set_port(8123); status.mark_ready(425, false); status.reconnecting.store(true, Ordering.SeqCst)
+    ready :: status.json(); assert(ready.contains("\"state\":\"reconnecting\"")); assert(ready.contains("\"last_build_ms\":425"))
+    status.mark_building()
+    building :: status.json(); assert(building.contains("\"state\":\"reconnecting\"")); assert(building.contains("\"last_build_ms\":425"))
+    status.mark_error("E0102", "Error [E0102]: missing", true)
+    error :: status.json(); assert(error.contains("\"state\":\"reconnecting\"")); assert(error.contains("\"code\":\"E0102\""))
+    assert(error.contains("Error [E0102]: missing")); assert(error.contains("\"last_build_ms\":425"))
+    status.reconnecting.store(false, Ordering.SeqCst)
+    recovered :: status.json(); assert(recovered.contains("\"state\":\"error\"")); assert(recovered.contains("\"code\":\"E0102\""))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7238
+#Test("blocked_verbose_refresh_cannot_reinstall_region_after_disable") {
+    status :: Arc.new(DevStatus.new_with_terminal("app.jet", true, true, false))
+    status.controls_ready.store(true, Ordering.SeqCst)
+    terminal_guard :: status.term_lock.lock().unwrap()
+    waiter :: Arc.clone(&status)
+    (started_tx, started_rx) :: std.sync.mpsc.channel()
+    handle :: thread.spawn(move () -> { started_tx.send(()).unwrap(); waiter.write_header_verbose("jet dev  [ready] localhost:8123 · 1 client") })
+    started_rx.recv().unwrap()
+    status.controls_ready.store(false, Ordering.SeqCst)
+    *status.header_started.lock().unwrap() = false
+    drop(^terminal_guard); handle.join().unwrap()
+    assert(!status.controls_ready.load(Ordering.SeqCst)); assert(!*status.header_started.lock().unwrap())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7265
+#Test("header_words_ready_includes_port_clients_and_build_time") {
+    (word, rest) :: header_words("ready", "app.jet", "", 8080, 2, 420)
+    assert_eq(word, "ready"); assert_eq(rest, "localhost:8080 · 2 clients · built 0.4s")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7272
+#Test("header_words_ready_omits_build_time_before_first_build") {
+    (word, rest) :: header_words("ready", "app.jet", "", 8080, 0, 0)
+    assert_eq(word, "ready"); assert_eq(rest, "localhost:8080 · 0 clients")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7279
+#Test("header_words_building_shows_watched_file_not_port") {
+    (word, rest) :: header_words("building", "app.jet", "", 8080, 1, 0)
+    assert_eq(word, "building"); assert_eq(rest, "app.jet · 1 client")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7286
+#Test("header_words_error_shows_diagnostic_code_not_port") {
+    (word, rest) :: header_words("error", "app.jet", "E0102", 8080, 2, 0)
+    assert_eq(word, "error"); assert_eq(rest, "E0102 · 2 clients")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7293
+#Test("header_words_singular_client_count") {
+    (_, rest) :: header_words("ready", "app.jet", "", 8080, 1, 0)
+    assert(rest.ends_with("1 client"), rest); assert(!rest.contains("1 clients"), rest)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7300
+#Test("format_build_time_renders_seconds_with_one_decimal") {
+    assert_eq(format_build_time(420), "0.4s"); assert_eq(format_build_time(1500), "1.5s"); assert_eq(format_build_time(0), "0.0s")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7307
+#Test("format_line_colored_carries_a_dot_and_the_full_parity_words") {
+    line :: format_line_colored("ready", "localhost:8080 · 2 clients · built 0.4s")
+    assert(line.starts_with("jet dev  ")); assert(line.contains('●'), line); assert(line.contains("ready · localhost:8080 · 2 clients · built 0.4s"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7315
+#Test("format_line_plain_uses_bracketed_state_word_no_color") {
+    line :: format_line_plain("error", "E0102 · 2 clients")
+    assert_eq(line, "jet dev  [error] E0102 · 2 clients"); assert(!line.contains('\x1b'), format("NO_COLOR/CI floor must carry no ANSI: {}", line))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7325
+#Test("frame_lines_keeps_diagnostic_words_verbatim") {
+    diagnostic :: "Error [E0102]: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first"
+    framed :: frame_lines("E0102", diagnostic)
+    for line in diagnostic.lines() -> assert(framed.iter().any((f) -> f == format("│ {}", line)), format("missing verbatim line {:?} in {:#?}", line, framed))
+    assert(framed.first().unwrap().starts_with("┌ E0102 ")); assert(framed.last().unwrap().starts_with('└'))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7343
+#Test("frame_lines_top_border_names_the_diagnostic_code") { framed :: frame_lines("E0204", "one line"); assert(framed[0].contains("E0204")) }
+// Rust: crates/jet-devserver/src/WebHost.rs:7349
+#Test("canvas_default_is_loopback_ephemeral_and_session_bearing") {
+    options :: CanvasHostOptions.default()
+    assert_eq(options.host, "127.0.0.1"); assert_eq(options.port, .None); assert_eq(options.transport, "http"); assert_eq(options.authority, "loopback")
+    host :: bind_canvas_for_test("app.jet", false, .None); url :: host.canvas_url()
+    assert(url.starts_with("http://127.0.0.1:"), url); assert(url.contains("/canvas?session="), url)
+    assert(url.len() > 80, format("session secret should not be a short marker: {}", url))
+    address :: host.listener.lock().unwrap().as_ref().unwrap().local_addr().unwrap()
+    assert(address.ip().is_loopback(), format("default Canvas address: {}", address))
+    assert(!address.ip().is_unspecified(), format("default Canvas address: {}", address))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7382
+#Test("application_default_scans_stable_range_and_skips_held_port") {
+    first :: bind_application_server(.None).expect("first application preview port"); first_port :: first.local_addr().unwrap().port()
+    second :: bind_application_server(.None).expect("next application preview port"); second_port :: second.local_addr().unwrap().port()
+    assert(APPLICATION_PORT_RANGE.contains(&first_port)); assert(APPLICATION_PORT_RANGE.contains(&second_port))
+    assert(second_port > first_port, format("application port scan did not skip the held port: {}, {}", first_port, second_port))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7397
+#Test("canvas_sessions_get_distinct_ephemeral_ports_and_secrets") {
+    first :: bind_canvas_for_test("app.jet", false, .None); second :: bind_canvas_for_test("app.jet", false, .None)
+    assert_ne(first.status.port(), second.status.port()); assert_ne(first.session_secret, second.session_secret)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7406
+#Test("canvas_explicit_collision_and_invalid_overrides_fail_loudly") {
+    first :: bind_canvas_for_test("app.jet", false, .None); port :: first.status.port()
+    options := CanvasHostOptions.default(); options.port = .Val(port)
+    collision :: bind_canvas_options_for_test("app.jet", false, &options).err().expect("a held explicit port must collide")
+    assert(collision.contains("couldn't bind Canvas host"), collision)
+    options.transport = "udp"
+    transport :: bind_canvas_options_for_test("app.jet", false, &options).err().expect("unsupported transport must fail"); assert(transport.contains("transport"), transport)
+    options.transport = "http"; options.authority = "public"
+    authority :: bind_canvas_options_for_test("app.jet", false, &options).err().expect("unknown authority must fail"); assert(authority.contains("authority"), authority)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7434
+#Test("canvas_non_loopback_requires_explicit_remote_authority") {
+    options := CanvasHostOptions.default(); options.host = "0.0.0.0"
+    error :: bind_canvas_options_for_test("app.jet", false, &options).err().expect("non-loopback Canvas must require explicit authority"); assert(error.contains("authority = remote"), error)
+    options.authority = "remote"
+    host :: bind_canvas_options_for_test("app.jet", false, &options).expect("remote Canvas must bind only after explicit authority")
+    address :: host.listener.lock().unwrap().as_ref().unwrap().local_addr().unwrap()
+    assert(address.ip().is_unspecified(), format("remote Canvas address: {}", address))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7460
+#Test("started_canvas_session_releases_its_port_on_shutdown") {
+    host :: bind_canvas_for_test("app.jet", false, .None); port :: host.status.port()
+    host.start_canvas(); drop(^host); _ :: bind_canvas_for_test("app.jet", false, .Val(port))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7470
+#Test("concurrent_canvas_clients_share_checked_revision_boundary") {
+    root :: env.temp_dir().join(format("jet-devserver-concurrent-canvas-{}-{}", process.id(), SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()))
+    fs.create_dir_all(&root).unwrap(); path :: root.join("main.jet")
+    fs.write(&path, "fn run() {\n    total := 1\n    print(total)\n}\n").unwrap()
+    before :: fs.read_to_string(&path).unwrap(); revision :: Canvas.source_revision(before)
+    host :: bind_canvas_for_test(path.to_str().unwrap(), false, .None); port :: host.status.port(); secret :: host.session_secret.clone(); host.start_canvas()
+    barrier :: Arc.new(Barrier.new(3))
+    responses :: [("client-a", "first"), ("client-b", "second")].into_iter().map(((client, name)) -> {
+        barrier :: Arc.clone(&barrier); secret :: secret.clone()
+        body :: format("{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{}\",\"from\":\"total\",\"to\":\"{}\",\"client_id\":\"{}\"}}", revision, name, client)
+        thread.spawn(move () -> { barrier.wait(); post_canvas_transaction(port, secret, client, body) })
+    }).collect<[_]>()
+    barrier.wait()
+    responses :: responses.into_iter().map((thread) -> thread.join().unwrap()).collect<[_]>()
+    assert_eq(responses.iter().filter((response) -> response.starts_with("HTTP/1.1 200 OK")).count(), 1, "exactly one client must publish the shared revision")
+    loser :: responses.iter().find((response) -> response.starts_with("HTTP/1.1 409 Conflict")).expect("one client must receive a conflict")
+    current :: fs.read_to_string(&path).unwrap(); current_revision :: Canvas.source_revision(current)
+    assert(loser.contains("\"kind\":\"conflict\""), loser); assert(loser.contains(format("\"current_revision\":\"{}\"", current_revision)), loser)
+    session :: host.session.json()
+    assert(session.contains(format("\"accepted_revision\":\"{}\"", current_revision)), session)
+    assert(session.contains("\"status\":\"accepted\"")); assert(session.contains("\"status\":\"refused\""))
+    drop(^host); _ :: fs.remove_dir_all(^root)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7543
+fn post_canvas_transaction(port: U16, secret: String, client: String, body: String) -> String {
+    stream := TcpStream.connect(("127.0.0.1", port)).unwrap(); stream.set_read_timeout(.Val(Duration.from_secs(10))).unwrap()
+    request :: format("POST /canvas/transaction?client_id={} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: http://127.0.0.1:{}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", client, port, port, secret, body.len(), body)
+    stream.write_all(request.as_bytes()).unwrap(); response: [U8] := []; stream.read_to_end(&response).unwrap()
+    return String.from_utf8(^response).unwrap()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7559
+#Test("web_canvas_override_keeps_program_listener_separate") {
+    options := CanvasHostOptions.default(); options.output = .Val("service@local#debug"); options.target = .Val("board.browser"); options.audit = true
+    host :: bind_web_canvas_options_for_test("app.jet", false, .None, &options).expect("web Canvas host should bind independently")
+    assert(host.canvas_url().contains("/canvas?session=")); assert(host.status.verbose.load(Ordering.Relaxed))
+    session :: host.session.json()
+    assert(session.contains("\"run\":{\"output\":\"service@local#debug\",\"target\":\"board.browser\"}"))
+    assert(session.contains("\"canvas\":{\"host\":\"127.0.0.1\""))
+    assert(!session.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":0"))
+    assert_ne(host.session.canvas_port(), host.session.application_port())
+    assert(session.contains("\"listener\":\"canvas\"")); assert(session.contains("\"listener\":\"application\""))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7579
+#Test("app_only_bind_has_no_canvas_listener_or_session_alias") {
+    host :: WebHost.bind_with_policy("app.jet", OSPath.new("build"), false, .Val(0), ReleaseDevtoolsPolicy.development()).unwrap()
+    assert(host.listener.lock().unwrap().is_none()); assert(host.application_listener.lock().unwrap().is_some())
+    assert_eq(host.session.canvas_port(), 0); assert(!host.status.canvas_enabled.load(Ordering.Relaxed))
+    session :: host.session.json(); assert(session.contains("\"listeners\":{\"application\""))
+    assert(!session.contains("\"listeners\":{\"canvas\"")); assert(!session.contains("\"workbench\""))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7599
+#Test("canvas_session_post_cannot_change_program_selection") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap(); port :: listener.local_addr().unwrap().port()
+    status :: Arc.new(DevStatus.new_with_terminal("app.jet", false, false, false)); status.set_port(port)
+    debug_sessions :: Canvas.DebugSessions.default(); session :: Arc.new(ResidentDevSession.new("app.jet", port, 0))
+    session.select_output_values(.Val("cli-output"), .Val("cli-target")); secret :: mint_session_secret().unwrap()
+    server :: {
+        session :: Arc.clone(&session); secret :: secret.clone()
+        thread.spawn(move () -> {
+            (stream, _) :: listener.accept().unwrap()
+            handle_connection(^stream, &status, &debug_sessions, &session, "app.jet", .Canvas, "127.0.0.1", secret).unwrap()
+        })
+    }
+    client := TcpStream.connect(("127.0.0.1", port)).unwrap()
+    body :: "{\"op\":\"select_output\",\"output\":\"web\",\"target\":\"browser\"}"
+    request :: format("POST /canvas/session HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: http://127.0.0.1:{}\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", port, port, secret, body.len(), body)
+    client.write_all(request.as_bytes()).unwrap(); response := ""; client.read_to_string(&response).unwrap(); server.join().unwrap()
+    assert(response.starts_with("HTTP/1.1 405 Method Not Allowed"), response)
+    assert(session.json().contains("\"run\":{\"output\":\"cli-output\",\"target\":\"cli-target\"}"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7647
+#Test("canvas_request_gate_requires_secret_and_strict_request_context") {
+    secret :: mint_session_secret().unwrap(); headers: [String:String] := [:]
+    headers.insert("host", "localhost:8123"); headers.insert("origin", "http://localhost:8123"); headers.insert("authorization", format("Bearer {}", secret))
+    request := Request(method: "GET", target: "/canvas/graph", headers: ^headers, body: [])
+    assert(canvas_api_path("/canvas/graph", "/canvas/graph"))
+    for path in ["/__jet_devtools/workbench", "/__jet_devtools/recording", "/__jet_devtools/paused/inspect", "/__jet_devtools/style", "/__jet_canvas/devtools", "/canvas/devtools", "/panel/devtools"] {
+        assert(canvas_api_path(path, path), format("{} must be an authorized Canvas route", path))
+        assert(devtools_path(path), format("{} must enter the devtools dispatcher", path))
+    }
+    assert(canvas_api_path("/__jet_dev_status", "/__jet_dev_status"))
+    assert(canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.target = format("/canvas/graph?session={}&session=wrong", secret)
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.target = "/canvas/graph"; _ :: request.headers.remove("authorization")
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.headers.insert("authorization", format("Bearer {}", secret)); _ :: request.headers.remove("origin")
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.headers.insert("sec-fetch-site", "same-origin")
+    assert(canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.target = format("/canvas/graph?session={}", secret)
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.headers.insert("origin", "http://localhost:8123"); request.headers.insert("authorization", format("Basic {}", secret))
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.headers.insert("authorization", format("Bearer {}", secret)); request.method = "PUT"
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.method = "GET"; request.target = "/canvas/not-a-route"
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.target = "/canvas/graph"; request.body = [U8].repeat(0, jet_devserver.MAX_REQUEST_BODY_BYTES + 1)
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8123, secret))
+    request.body.clear()
+    assert(!canvas_request_authorized(&request, request.target, "127.0.0.1", 8124, secret))
+    assert(!host_header_allowed("evil.test:8123", "127.0.0.1", 8123))
+    assert(!origin_allowed("http://evil.test:8123", "127.0.0.1", 8123))
+    assert(!constant_time_equal(secret, "wrong"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7788
+#Test("canvas_page_and_bootstrap_reject_missing_session") {
+    secret :: "canvas-test-secret"
+    response :: canvas_response("/canvas", secret); assert(response.starts_with("HTTP/1.1 401 Unauthorized"), response)
+    response :: canvas_response("/canvas/app.js", secret); assert(response.starts_with("HTTP/1.1 401 Unauthorized"), response)
+    response :: canvas_response(format("/canvas?session={}", secret), secret)
+    assert(response.starts_with("HTTP/1.1 200 OK"), response); assert(response.contains(format("app.js?session={}&", secret)), response)
+    response :: canvas_response(format("/canvas/app.js?session={}", secret), secret); assert(response.starts_with("HTTP/1.1 200 OK"), response)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7813
+fn canvas_response(target: String, secret: String) -> String {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap(); port :: listener.local_addr().unwrap().port()
+    client := TcpStream.connect(listener.local_addr().unwrap()).unwrap(); (server, _) :: listener.accept().unwrap()
+    raw :: format("GET {} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", target, port)
+    client.write_all(raw.as_bytes()).unwrap()
+    status :: DevStatus.new_with_terminal("app.jet", false, false, false); status.set_port(port)
+    session :: ResidentDevSession.new_with_canvas_host("app.jet", "127.0.0.1", port, 0); debug_sessions :: Canvas.DebugSessions.default()
+    handle_connection(^server, &status, &debug_sessions, &session, "app.jet", .Canvas, "127.0.0.1", secret).unwrap()
+    response := ""; client.read_to_string(&response).unwrap(); return ^response
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7845
+#Test("canvas_session_injection_only_changes_html_bootstrap") {
+    html :: jet_devserver.canvas_asset("GET", "/canvas", "/canvas").unwrap(); html :: inject_canvas_session(^html, "secret")
+    assert(html.body.contains("app.js?session=secret&"))
+    js :: jet_devserver.canvas_asset("GET", "/canvas/app.js", "/canvas/app.js").unwrap(); js :: inject_canvas_session(^js, "secret")
+    assert(!js.body.contains("session=secret"))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7855
+#Test("release_devtools_route_is_read_only_and_token_gated") {
+    policy :: ReleaseDevtoolsPolicy.from_manifest_profile(jet_driver.Package.ReleaseInspect.ReadOnly).with_deployment(jet_driver.Package.ReleaseDevtoolsDeployment.with_values(true, .Val("release-token"), .default()))
+    unauthorized :: release_response(&policy, "GET", .None, "/__jet_devtools")
+    assert(unauthorized.starts_with("HTTP/1.1 401 Unauthorized"), unauthorized); assert(unauthorized.contains("JET_INSPECT_TOKEN required"), unauthorized)
+    writable :: release_response(&policy, "POST", .Val("Bearer release-token"), "/__jet_devtools")
+    assert(writable.starts_with("HTTP/1.1 405 Method Not Allowed"), writable); assert(!writable.contains("\"protocol\""), writable)
+    authorized :: release_response(&policy, "GET", .Val("Bearer release-token"), "/__jet_devtools")
+    assert(authorized.starts_with("HTTP/1.1 200 OK"), authorized); assert(authorized.contains("\"protocol\":\"jet.devtools.v1\""), authorized)
+    local :: ReleaseDevtoolsPolicy.from_manifest_profile(jet_driver.Package.ReleaseInspect.Local).with_deployment(jet_driver.Package.ReleaseDevtoolsDeployment.with_values(true, .Val("release-token"), .default()))
+    absent :: release_response(&local, "GET", .Val("Bearer release-token"), "/__jet_devtools"); assert(absent.starts_with("HTTP/1.1 404 Not Found"), absent)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:7915
+fn release_response(policy: &ReleaseDevtoolsPolicy, method: String, authorization: String?, target: String) -> String {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap(); address :: listener.local_addr().unwrap()
+    client := TcpStream.connect(address).unwrap(); (server, peer_addr) :: listener.accept().unwrap()
+    request := format("{} {} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n", method, target, address.port())
+    if authorization == .Val(value) -> request.push_str(format("Authorization: {}\r\n", value))
+    request.push_str("Connection: close\r\n\r\n"); client.write_all(request.as_bytes()).unwrap()
+    status :: DevStatus.new_with_terminal("release.jet", false, false, false); status.set_port(address.port())
+    session :: ResidentDevSession.new("release.jet", 0, address.port()); debug_sessions :: Canvas.DebugSessions.default()
+    browser_state :: Arc.new(Mutex.new(.None)); paused_evaluate :: Arc.new(Mutex.new(PausedEvaluateHost.new())); terminal_style :: Arc.new(TerminalStyleHostAdapter.new())
+    handle_connection_with_root_and_policy(^server, &status, &debug_sessions, &session, "release.jet", .Application, "127.0.0.1", "unused-session", &OSPath.new("."), &browser_state, &paused_evaluate, &terminal_style, policy, peer_addr).unwrap()
+    response := ""; client.read_to_string(&response).unwrap(); return ^response
+}

@@ -1,0 +1,12 @@
+// Rust: tests/semantic_ops.rs:1-15
+use std.[fs, env, process]
+use jet_semindex.[open, semantic_blame, semantic_rename_ops, SemanticOp, SemanticOpTarget]
+
+// Rust: tests/semantic_ops.rs:7
+// GATE #4494: native filesystem fixtures.
+fn fixture(name: String) -> (OSPath, OSPath) {
+    root :: env.temp_dir().join("jet_semantic_ops_{name}_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    (root, root.join("run.jet"))
+}

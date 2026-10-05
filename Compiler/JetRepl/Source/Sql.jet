@@ -1,229 +1,119 @@
-// PORT-PENDING 0799 crates-jet-repl-src-consolehost-module-group: crates/jet-repl/src/Sql.rs:1-225
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! SQL-console session seam (D-DX-SQLSHELL1=A).
-//RS //!
-//RS //! This module deliberately does not parse SQL or execute a second evaluator.
-//RS //! It owns only the typed REPL session lifetime and returns the same `CtValue`
-//RS //! plus diagnostics used by the ordinary `jet repl` path. `Source/CmdDb.rs`
-//RS //! marshals files, dot commands, and output modes around this seam.
-//RS 
-//RS use std::collections::{HashMap, HashSet};
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS use crate::Comptime::{CtValue, DevSink, REPL_FUEL_BUDGET};
-//RS use crate::Diagnostics::Diagnostic;
-//RS use crate::AST::{Func, StructDef};
-//RS 
-//RS /// One deterministic evaluation result from the shared REPL interpreter.
-//RS pub struct SqlEval {
-//RS     pub value: Option<CtValue>,
-//RS     pub stdout: String,
-//RS     pub stderr: String,
-//RS }
-//RS 
-//RS /// Stateful SQL-console evaluator. Imports, declarations, and bindings live in
-//RS /// one ordinary REPL `Session`; no SQL-specific value or execution model is
-//RS /// introduced here.
-//RS pub struct SqlSession {
-//RS     session: super::Session,
-//RS     policy: super::ReplPolicy,
-//RS     base_dir: PathBuf,
-//RS }
-//RS 
-//RS impl SqlSession {
-//RS     /// Create a console against `base_dir`. Effects remain fail-closed unless
-//RS     /// the supplied `ReplFlags` explicitly grant them.
-//RS     pub fn new(base_dir: impl AsRef<Path>, flags: super::ReplFlags) -> Self {
-//RS         let base_dir = base_dir.as_ref().to_path_buf();
-//RS         Self {
-//RS             session: super::Session::new(),
-//RS             policy: super::ReplPolicy::new(flags, &base_dir),
-//RS             base_dir,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Evaluate one already-complete Jet input through the ordinary REPL
-//RS     /// classifier, sema, and comptime tree-walker.
-//RS     pub fn execute(&mut self, input: &str) -> Result<SqlEval, Vec<Diagnostic>> {
-//RS         jet_driver::boot_mir_eval();
-//RS         let normalized = super::normalize_repl_input(input);
-//RS         let trimmed = normalized.trim();
-//RS         if trimmed.is_empty() {
-//RS             return Ok(SqlEval {
-//RS                 value: None,
-//RS                 stdout: String::new(),
-//RS                 stderr: String::new(),
-//RS             });
-//RS         }
-//RS 
-//RS         self.session.step += 1;
-//RS         let kind = super::classify(trimmed, self.session.step)?;
-//RS         match kind {
-//RS             super::InputKind::Empty => Ok(SqlEval {
-//RS                 value: None,
-//RS                 stdout: String::new(),
-//RS                 stderr: String::new(),
-//RS             }),
-//RS             super::InputKind::Reject(feature) => Err(vec![super::e1802(&feature)]),
-//RS             super::InputKind::Meta(command, _) => Err(vec![Diagnostic::error(
-//RS                 "E1802",
-//RS                 format!("SQL console does not accept REPL meta-command `:{command}`"),
-//RS                 "dot commands are handled by `jet db` before Jet source reaches the shared evaluator"
-//RS                     .to_string(),
-//RS                 "use `.help`, `.schema`, `.plan`, `.stats`, or `.quit` in the SQL console"
-//RS                     .to_string(),
-//RS                 None,
-//RS             )]),
-//RS             super::InputKind::Item(_) => Err(vec![Diagnostic::error(
-//RS                 "E1802",
-//RS                 "SQL console accepts query expressions, not top-level declarations".to_string(),
-//RS                 "declarations would change the shared session's program surface rather than query a typed source"
-//RS                     .to_string(),
-//RS                 "use `define_item` only for the console's generated typed source, then submit SELECT-backed expressions"
-//RS                     .to_string(),
-//RS                 None,
-//RS             )]),
-//RS             super::InputKind::Import(source) => self.execute_import(source),
-//RS             super::InputKind::Stmts(stmts, suppress, check_src) => {
-//RS                 self.execute_statements(trimmed, stmts, suppress, check_src)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Add one generated typed source item to this same session. The command
-//RS     /// host uses this only for its in-memory row struct; user SQL never exposes
-//RS     /// a second declaration evaluator.
-//RS     pub fn define_item(&mut self, source: &str) -> Result<(), Vec<Diagnostic>> {
-//RS         jet_driver::boot_mir_eval();
-//RS         let bundle = super::type_check_item(&self.session, source)?;
-//RS         self.session.item_srcs.push(source.to_string());
-//RS         super::rebuild_funcs(&mut self.session);
-//RS         super::update_core_imports_from_ledger(&bundle, &mut self.session.core_imports);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Reset the shared session and its effect grants, matching REPL reset
-//RS     /// semantics without leaving stale query bindings behind.
-//RS     pub fn reset(&mut self) {
-//RS         self.session.reset();
-//RS         self.policy.session.clear();
-//RS     }
-//RS 
-//RS     /// Read-only access for host projections that need session provenance.
-//RS     pub fn session(&self) -> &super::Session {
-//RS         &self.session
-//RS     }
-//RS 
-//RS     /// The authority root used by this console instance.
-//RS     pub fn base_dir(&self) -> &Path {
-//RS         &self.base_dir
-//RS     }
-//RS 
-//RS     fn execute_import(&mut self, source: String) -> Result<SqlEval, Vec<Diagnostic>> {
-//RS         self.session.import_srcs.push(source);
-//RS         let bundle = match super::type_check_item(&self.session, "") {
-//RS             Ok(bundle) => bundle,
-//RS             Err(errors) => {
-//RS                 self.session.import_srcs.pop();
-//RS                 return Err(errors);
-//RS             }
-//RS         };
-//RS         super::rebuild_funcs(&mut self.session);
-//RS         super::update_core_imports_from_ledger(&bundle, &mut self.session.core_imports);
-//RS         Ok(SqlEval {
-//RS             value: None,
-//RS             stdout: String::new(),
-//RS             stderr: String::new(),
-//RS         })
-//RS     }
-//RS 
-//RS     fn execute_statements(
-//RS         &mut self,
-//RS         input: &str,
-//RS         parsed: Vec<crate::AST::Stmt>,
-//RS         suppress: bool,
-//RS         check_src: String,
-//RS     ) -> Result<SqlEval, Vec<Diagnostic>> {
-//RS         let (checked_stmts, checked_core_imports) =
-//RS             super::type_check_stmts(&self.session, &parsed, self.session.step, &check_src)?;
-//RS         let session_binding_names: HashSet<String> = self.session.scope.keys().cloned().collect();
-//RS         let newly_moved = super::collect_moved_names(
-//RS             &parsed,
-//RS             &session_binding_names,
-//RS             &self.session.scope,
-//RS         );
-//RS         let executable = super::repl_executable_stmts(checked_stmts.clone());
-//RS         let mut core_imports = self.session.core_imports.clone();
-//RS         core_imports.extend(checked_core_imports);
-//RS         let funcs: HashMap<String, &Func> = self
-//RS             .session
-//RS             .func_defs
-//RS             .iter()
-//RS             .map(|(name, function)| (name.clone(), function))
-//RS             .collect();
-//RS         let structs: HashMap<String, &StructDef> = self
-//RS             .session
-//RS             .struct_defs
-//RS             .iter()
-//RS             .map(|(name, structure)| (name.clone(), structure))
-//RS             .collect();
-//RS         let mut sink = DevSink::new();
-//RS         let mut authorizer = self.policy.authorizer(None);
-//RS         let mut trial_scope = self.session.scope.clone();
-//RS         let result = crate::Comptime::run_repl_step(
-//RS             &executable,
-//RS             &funcs,
-//RS             &self.base_dir,
-//RS             &mut sink,
-//RS             &mut trial_scope,
-//RS             REPL_FUEL_BUDGET,
-//RS             suppress,
-//RS             &core_imports,
-//RS             &structs,
-//RS             &self.session.binding_types,
-//RS             &mut authorizer,
-//RS         );
-//RS         match result {
-//RS             Ok(value) => {
-//RS                 for name in &newly_moved {
-//RS                     trial_scope.remove(name);
-//RS                 }
-//RS                 self.session.scope = trial_scope;
-//RS                 self.session.moved_names.extend(newly_moved);
-//RS                 let raw = input.trim_end_matches(';').trim();
-//RS                 if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
-//RS                     self.session.stmt_srcs.push(format!("{raw};"));
-//RS                 }
-//RS                 self.session.record_stmts(&checked_stmts);
-//RS                 let summary = value
-//RS                     .as_ref()
-//RS                     .filter(|value| !matches!(**value, CtValue::Unit))
-//RS                     .map(super::display_value)
-//RS                     .unwrap_or_default();
-//RS                 self.session.record_turn_ex(
-//RS                     input,
-//RS                     super::ReplTurnStatus::Ok,
-//RS                     summary,
-//RS                     !sink.stdout.is_empty() || !sink.stderr.is_empty(),
-//RS                     None,
-//RS                 );
-//RS                 self.session.remember_success(input);
-//RS                 Ok(SqlEval {
-//RS                     value,
-//RS                     stdout: sink.stdout,
-//RS                     stderr: sink.stderr,
-//RS                 })
-//RS             }
-//RS             Err(diagnostic) => {
-//RS                 let diagnostic = super::restore_move_diagnostic(diagnostic, &self.session.moved_names);
-//RS                 Err(vec![if diagnostic.code == "E2202" {
-//RS                     super::e1801(REPL_FUEL_BUDGET)
-//RS                 } else {
-//RS                     diagnostic
-//RS                 }])
-//RS             }
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0799 crates/jet-repl/src/Sql.rs:1-225
+// D-DX-SQLSHELL1=A: SQL host uses the ordinary checked REPL session.
+// No SQL parser, second evaluator, or SQL-specific values live here.
+use jet_ast.[CtValue, Stmt]
+use jet_foundation.[Diagnostic]
+use jet_comptime.[DevSink, REPL_FUEL_BUDGET, run_repl_step]
+use jet_driver.[boot_mir_eval]
+use core.files.runtime.kernel_path_components.[OSPath]
 
+// Rust: crates/jet-repl/src/Sql.rs:16
+pub struct SqlEval { pub value: CtValue?, pub stdout: String, pub stderr: String }
+
+// Rust: crates/jet-repl/src/Sql.rs:25
+pub struct SqlSession {
+    session: Session
+    policy: ReplPolicy
+    base_dir: OSPath
+
+    // Rust: crates/jet-repl/src/Sql.rs:34
+    pub fn new(base_dir: OSPath, flags: ReplFlags) -> SqlSession {
+        SqlSession{session: Session.new(), policy: ReplPolicy.new(flags, base_dir), base_dir: base_dir}
+    }
+    // Rust: crates/jet-repl/src/Sql.rs:45
+    pub fn execute(&self, input: String) -> SqlEval [Diagnostic]! {
+        boot_mir_eval()
+        normalized :: normalize_repl_input(input)
+        trimmed := normalized.trim() // #4303
+        if trimmed.is_empty() -> return SqlEval{value: None, stdout: "", stderr: ""}
+        self.session.step = self.session.step + 1
+        kind :: classify(trimmed, self.session.step) ?? return Err(err)
+        if kind == {
+            .Empty -> SqlEval{value: None, stdout: "", stderr: ""}
+            .Reject(feature) -> Err([Diagnostic]{e1802(feature)})
+            .Meta(command, _) -> Err([Diagnostic]{Diagnostic.error(
+                "E1802",
+                "SQL console does not accept REPL meta-command `:{command}`",
+                "dot commands are handled by `jet db` before Jet source reaches the shared evaluator",
+                "use `.help`, `.schema`, `.plan`, `.stats`, or `.quit` in the SQL console",
+                None,
+            )})
+            .Item(_) -> Err([Diagnostic]{Diagnostic.error(
+                "E1802",
+                "SQL console accepts query expressions, not top-level declarations",
+                "declarations would change the shared session's program surface rather than query a typed source",
+                "use `define_item` only for the console's generated typed source, then submit SELECT-backed expressions",
+                None,
+            )})
+            .Import(source) -> &self.execute_import(^source)
+            .Stmts(stmts, suppress, check_src) -> &self.execute_statements(trimmed, ^stmts, suppress, ^check_src)
+        }
+    }
+    // Rust: crates/jet-repl/src/Sql.rs:94
+    pub fn define_item(&self, source: String) -> [Diagnostic]! {
+        boot_mir_eval()
+        bundle :: type_check_item(self.session, source) ?? return Err(err)
+        &self.session.item_srcs.push(source)
+        rebuild_funcs(&self.session)
+        update_core_imports_from_ledger(bundle, &self.session.core_imports)
+    }
+    // Rust: crates/jet-repl/src/Sql.rs:105
+    pub fn reset(&self) {
+        &self.session.reset()
+        &self.policy.session.clear()
+    }
+    // Rust: crates/jet-repl/src/Sql.rs:111
+    pub fn session(self) -> &Session { &self.session } // GATE #4500: returned read loan.
+    // Rust: crates/jet-repl/src/Sql.rs:116
+    pub fn base_dir(self) -> OSPath { self.base_dir }
+
+    // Rust: crates/jet-repl/src/Sql.rs:120
+    fn execute_import(&self, source: String) -> SqlEval [Diagnostic]! {
+        &self.session.import_srcs.push(^source)
+        bundle :: type_check_item(self.session, "") ?? {
+            _ :: &self.session.import_srcs.pop()
+            return Err(err)
+        }
+        rebuild_funcs(&self.session)
+        update_core_imports_from_ledger(bundle, &self.session.core_imports)
+        SqlEval{value: None, stdout: "", stderr: ""}
+    }
+    // Rust: crates/jet-repl/src/Sql.rs:138
+    fn execute_statements(&self, input: String, parsed: [Stmt], suppress: Bool, check_src: String) -> SqlEval [Diagnostic]! {
+        (checked_stmts, checked_core_imports) :: type_check_stmts(self.session, parsed, self.session.step, check_src) ?? return Err(err)
+        session_binding_names := Set<String>.new()
+        loop name in self.session.scope.keys() -> _ :: &session_binding_names.insert(name)
+        newly_moved :: collect_moved_names(parsed, session_binding_names, self.session.scope)
+        executable :: repl_executable_stmts(~checked_stmts)
+        core_imports := ~self.session.core_imports
+        loop name in checked_core_imports.keys() -> core_imports[name] = checked_core_imports[name]
+        // Ordinary read loans replace Rust maps of borrowed Func/StructDef.
+        sink := DevSink.new()
+        authorizer := &self.policy.authorizer(None)
+        trial_scope := ~self.session.scope
+        result :: run_repl_step(executable, self.session.func_defs, self.base_dir, &sink, &trial_scope,
+            REPL_FUEL_BUDGET, suppress, core_imports, self.session.struct_defs,
+            self.session.binding_types, &authorizer)
+        if result == {
+            .Ok(value) -> {
+                loop name in newly_moved.values() -> _ :: &trial_scope.remove(name)
+                self.session.scope = ^trial_scope
+                loop name in newly_moved.values() -> _ :: &self.session.moved_names.insert(name)
+                raw := input.trim_end_matches(";").trim() // #4303
+                if !raw.is_empty() && !raw.starts_with("__repl_echo__") -> &self.session.stmt_srcs.push("{raw};")
+                &self.session.record_stmts(checked_stmts)
+                summary :: if value == {
+                    .Val(live) -> if live != CtValue.Unit -> display_value(live) else -> ""
+                    .None -> ""
+                }
+                &self.session.record_turn_ex(input, ReplTurnStatus.Ok, summary,
+                    !sink.stdout.is_empty() || !sink.stderr.is_empty(), None)
+                &self.session.remember_success(input)
+                SqlEval{value: ^value, stdout: ^sink.stdout, stderr: ^sink.stderr}
+            }
+            .Err(diagnostic) -> {
+                restored :: restore_move_diagnostic(^diagnostic, self.session.moved_names)
+                Err([Diagnostic]{if restored.code == "E2202" -> e1801(REPL_FUEL_BUDGET) else -> ^restored})
+            }
+        }
+    }
+}

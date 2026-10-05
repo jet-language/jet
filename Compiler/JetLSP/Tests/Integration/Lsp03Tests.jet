@@ -1,0 +1,922 @@
+use Compiler.JetLSP.Tests.Integration.Lsp.[jet_bin, lock_lsp_process, send_msg, read_msg, request_lsp, request_lsp_collect, json_string, json_object_field, json_array, json_array_field, json_values_equal, assert_json_values_equal, decode_semantic_tokens, assert_semantic_token]
+use Compiler.JetLSP.Tests.Integration.Lsp02.[run_transcript, TranscriptStep, costly_source, percentile]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_get, json_str, parse_json]
+use std.[fs, env, process]
+use std.process.[Command, Stdio, ChildStdin, ChildStdout]
+use std.time.[Instant, Duration]
+use common.[Scratch]
+use jet.[check_document]
+use jet.Syntax as Syntax
+use jet_foundation.Prelude as CorePrelude
+use jet_foundation.Prelude.[Target]
+use jet.LSP as LSP
+use jet.SHA256.[sha256_hex]
+// GATE #4494: actual child processes, pipes, filesystem, clock and process mutex.
+
+// Rust: tests/lsp.rs:3569
+// Rust #[ignore]: measurement receipt; run explicitly with --ignored --nocapture.
+#Test("lsp_repeated_edit_stream_latency") {
+    EDITS :: 200i64
+    CALLERS :: 256usize
+    _guard :: lock_lsp_process()
+    binary :: fs.read(jet_bin()).expect("read jet binary")
+    child := Command.new(jet_bin()).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    uri :: "file:///tmp/lsp_repeated_edit_stream.jet"
+    base :: costly_source("marker_0", CALLERS)
+    _ :: request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(base)}}}}}}}")
+    symbols :: "{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}"
+    verdicts := [Duration]()
+    releases := [Duration]()
+    late_cancels := 0usize
+    peak_waiting := 0usize
+    loop edit in 1..=EDITS {
+        version :: edit + 1
+        marker :: "marker_{edit}"
+        started :: Instant.now()
+        send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":{version}}},\"contentChanges\":[{{\"text\":{json_string(costly_source(marker, CALLERS))}}}]}}}}")
+        request_id :: 1000 + edit
+        send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{request_id},\"method\":\"textDocument/documentSymbol\",\"params\":{symbols}}}")
+        waiting := 1usize
+        cancel_id :: 5000 + edit
+        cancel_sent := none as Instant?
+        if edit % 10 == 0 {
+            send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{cancel_id},\"method\":\"textDocument/documentSymbol\",\"params\":{symbols}}}")
+            send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":{cancel_id}}}}}")
+            cancel_sent = Instant.now()
+            waiting += 1
+        }
+        peak_waiting = peak_waiting.max(waiting)
+        verdict := none as Duration?
+        loop waiting > 0 {
+            message :: parse_json(read_msg(&stdout)).expect("valid LSP message")
+            params :: json_get(message, "params")
+            if verdict.is_none() && json_get(message, "method").and_then(json_str) == "textDocument/publishDiagnostics" && params.and_then(params -> json_get(params, "version")) == DataTree.Int(version) {
+                verdict = started.elapsed()
+            }
+            match json_get(message, "id") {
+                DataTree.Int(id) if id == request_id -> {
+                    assert("{message:?}".contains(marker), "stale symbols: {message:?}")
+                    waiting -= 1
+                }
+                DataTree.Int(id) if id == cancel_id -> {
+                    releases.push(cancel_sent.expect("cancel was sent").elapsed())
+                    if json_get(message, "error").is_none() -> late_cancels += 1
+                    waiting -= 1
+                }
+                else -> {}
+            }
+        }
+        verdicts.push(verdict.unwrap_or_else(() -> panic("no verdict published for revision {version}")))
+    }
+    _ :: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")
+    drop(^stdin)
+    assert(child.wait().unwrap().success())
+    print("binary: {jet_bin().display()} sha256={sha256_hex(binary)}")
+    print("input: {EDITS} full-text edits of a {CALLERS}-caller document ({base.len()} bytes, sha256={sha256_hex(base.as_bytes())}), one documentSymbol per edit, a cancelled documentSymbol every 10th edit")
+    print("edit-to-current-verdict: p50={percentile(&verdicts, 50):?} p95={percentile(&verdicts, 95):?}")
+    print("cancel-to-release: p50={percentile(&releases, 50):?} p95={percentile(&releases, 95):?} ({releases.len()} cancels, {late_cancels} completed before the cancel was seen)")
+    print("peak client requests awaiting an answer: {peak_waiting}; server loop checks one request at a time")
+}
+
+// Rust: tests/lsp.rs:3684
+#Test("lsp_accepts_hidden_generic_constructor_arguments") {
+    source :: "struct Box<T> {{\n    value: T\n}}\nimpl Box {{\n    fn new(value: ^T) -> Box<T> {{ return Box<T>{{ value: value }} }}\n}}\nfn run() {{\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n}}\n"
+    uri :: "file:///tmp/lsp_generic_constructor_infer.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["hoverProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":4,\"character\":7}}}}}}", expect_contains: ["new", "Box<T>"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3721
+#Test("lsp_hover_preserves_via_effect_row") {
+    source :: "fn invoke(act: fn() -[IO]>) -[via act]> {{ act() }}\nfn run() {{}}\n"
+    uri :: "file:///tmp/lsp_hover_effect_via.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["hoverProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}}}}}}", expect_contains: ["-[via act]>"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3758
+#Test("lsp_rename_produces_workspace_edit") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn greet() {{}}\nfn run() {{\n    greet()\n    greet()\n}}\n"
+    uri :: "file:///tmp/lsp_rename_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["renameProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/rename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}},\"newName\":\"hello\"}}}}", expect_contains: ["documentChanges", "hello", "semantic_ops", "\"kind\":\"rename\""] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:3804
+#Test("lsp_checked_identity_and_versioned_rename") {
+    _guard :: lock_lsp_process()
+    root :: Scratch.new("lsp-checked-rename")
+    fs.write(root.join("package.jet"), "name: \"rename\"\nversion: \"0.1.0\"\n").unwrap()
+    main :: "use scoring as grades\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn shadow(letter: Int) {{ print(letter) }}\n"
+    scoring :: "pub fn letter(score: Int) -> String -> \"A\"\n"
+    util :: "pub fn letter(score: Int) -> String -> \"unrelated\"\n"
+    sources :: [("run.jet", main), ("scoring.jet", scoring), ("util.jet", util)]
+    loop (name, source) in sources -> fs.write(root.join(name), source).unwrap()
+    file_uri :: (name: &String) -> "file://{root.join(name).display()}".replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29")
+    main_uri :: file_uri("run.jet")
+    scoring_uri :: file_uri("scoring.jet")
+    child := Command.new(jet_bin()).args(["self", "lsp"]).current_dir(root.path).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().unwrap()
+    stdin := child.stdin.take().unwrap()
+    stdout := child.stdout.take().unwrap()
+    request :: (stdin: &ChildStdin, stdout: &ChildStdout, method: &String, params: String) -> parse_json(request_lsp(stdin, stdout, 7, method, params)).unwrap()
+    _ :: request(&stdin, &stdout, "initialize", "{{\"capabilities\":{{\"workspace\":{{\"workspaceEdit\":{{\"documentChanges\":true}}}}}}}}")
+    loop (name, source) in sources {
+        uri :: file_uri(name)
+        send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+    }
+    overlay :: "// unsaved 🚀\n\n{scoring}"
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{scoring_uri}\",\"version\":2}},\"contentChanges\":[{{\"text\":{json_string(overlay)}}}]}}}}")
+    params :: (extra: &String) -> "{{\"textDocument\":{{\"uri\":\"{main_uri}\"}},\"position\":{{\"line\":3,\"character\":19}}{extra}}}"
+    definition :: request(&stdin, &stdout, "textDocument/definition", params(""))
+    definition_result :: json_object_field(definition, "result")
+    assert_eq(json_str(json_object_field(definition_result, "uri")), scoring_uri)
+    expected_definition_range :: parse_json("{{\"start\":{{\"line\":2,\"character\":7}},\"end\":{{\"line\":2,\"character\":13}}}}").unwrap()
+    assert_json_values_equal("definition", json_object_field(definition_result, "range"), expected_definition_range)
+    references :: request(&stdin, &stdout, "textDocument/references", params(",\"context\":{{\"includeDeclaration\":true}}"))
+    references_result :: json_array_field(references, "result")
+    assert_eq(references_result.len(), 2, "{references_result:?}")
+    expected_call_range :: parse_json("{{\"start\":{{\"line\":3,\"character\":17}},\"end\":{{\"line\":3,\"character\":23}}}}").unwrap()
+    loop reference in references_result {
+        uri :: json_str(json_object_field(reference, "uri")).unwrap()
+        expected :: if uri == main_uri -> &expected_call_range else -> {
+            assert_eq(uri, scoring_uri)
+            &expected_definition_range
+        }
+        assert_json_values_equal("reference", json_object_field(reference, "range"), expected)
+    }
+    prepared :: request(&stdin, &stdout, "textDocument/prepareRename", params(""))
+    assert_json_values_equal("prepare rename", json_object_field(json_object_field(prepared, "result"), "range"), expected_call_range)
+    renamed :: request(&stdin, &stdout, "textDocument/rename", params(",\"newName\":\"grade\""))
+    result :: json_object_field(renamed, "result")
+    changes :: json_array_field(result, "documentChanges")
+    assert_eq(changes.len(), 2, "{renamed:?}")
+    loop change in changes {
+        document :: json_object_field(change, "textDocument")
+        uri :: json_str(json_object_field(document, "uri")).unwrap()
+        (version, expected) :: if uri == main_uri -> (1, &expected_call_range) else -> {
+            assert_eq(uri, scoring_uri)
+            (2, &expected_definition_range)
+        }
+        assert_json_values_equal("checked document version", json_object_field(document, "version"), DataTree.Int(version))
+        edits :: json_array_field(change, "edits")
+        assert_eq(edits.len(), 1)
+        assert_json_values_equal("rename range", json_object_field(edits[0], "range"), expected)
+        assert_eq(json_str(json_object_field(edits[0], "newText")), "grade")
+    }
+    targets :: json_array_field(json_array_field(result, "semantic_ops")[0], "targets")
+    assert_eq(targets.len(), 1, "{targets:?}")
+    assert_eq(json_str(json_object_field(targets[0], "before")), "fn:module:scoring::letter")
+    assert_eq(json_str(json_object_field(targets[0], "after")), "fn:module:scoring::grade")
+    updated_main :: "// moved\n{main.replace("    print(grades", "    print(\"🚀\"); print(grades")}"
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{main_uri}\",\"version\":3}},\"contentChanges\":[{{\"text\":{json_string(updated_main)}}}]}}}}")
+    moved :: request(&stdin, &stdout, "textDocument/rename", "{{\"textDocument\":{{\"uri\":\"{main_uri}\"}},\"position\":{{\"line\":4,\"character\":31}},\"newName\":\"grade\"}}")
+    moved_changes :: json_array_field(json_object_field(moved, "result"), "documentChanges")
+    assert_eq(moved_changes.len(), 2, "{moved:?}")
+    moved_main :: moved_changes.iter().find(change -> json_str(json_object_field(json_object_field(change, "textDocument"), "uri")) == main_uri).unwrap()
+    assert_json_values_equal("new snapshot version", json_object_field(json_object_field(moved_main, "textDocument"), "version"), DataTree.Int(3))
+    moved_range :: parse_json("{{\"start\":{{\"line\":4,\"character\":30}},\"end\":{{\"line\":4,\"character\":36}}}}").unwrap()
+    assert_json_values_equal("shifted UTF-16 occurrence", json_object_field(json_array_field(moved_main, "edits")[0], "range"), moved_range)
+    _ :: request(&stdin, &stdout, "shutdown", "{{}}")
+    drop(^stdin)
+    assert(child.wait().unwrap().success())
+}
+
+// Rust: tests/lsp.rs:3934
+#Test("lsp_checked_imported_diagnostics_and_repairs") {
+    _guard :: lock_lsp_process()
+    root :: Scratch.new("lsp-imported-reports")
+    fs.write(root.join("package.jet"), "name: \"reports\"\nversion: \"0.1.0\"\n").unwrap()
+    main :: "use \"scoring\"\nfn run() {{ print(scoring.letter(91)) }}\n"
+    scoring :: "pub fn letter(score: Int, offset: Int) -> String {{\n    adjusted = score + offset\n    return if {{\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }}\n}}\nfn repair_probe() {{\n    m :: [String:Int]{{}}\n    _ :: m.gett(\"a\")\n}}\n"
+    file_uri :: (name: &String) -> "file://{root.join(name).display()}".replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29")
+    main_uri :: file_uri("run.jet")
+    scoring_uri :: file_uri("scoring.jet")
+    fs.write(root.join("run.jet"), main).unwrap()
+    fs.write(root.join("scoring.jet"), scoring).unwrap()
+    child := Command.new(jet_bin()).args(["self", "lsp"]).current_dir(root.path).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().unwrap()
+    stdin := child.stdin.take().unwrap()
+    stdout := child.stdout.take().unwrap()
+    request :: (stdin: &ChildStdin, stdout: &ChildStdout, method: &String, params: String) -> request_lsp_collect(stdin, stdout, 7, method, params)
+    _ :: request(&stdin, &stdout, "initialize", "{{\"capabilities\":{{}}}}")
+    loop (uri, source) in [(main_uri, main), (scoring_uri, scoring)] {
+        send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+    }
+    overlay :: "// unsaved \u{1f680}\n\n{scoring}"
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{scoring_uri}\",\"version\":2}},\"contentChanges\":[{{\"text\":{json_string(overlay)}}}]}}}}")
+    action_params :: (uri: &String) -> "{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":9,\"character\":0}}}},\"context\":{{\"diagnostics\":[]}}}}"
+    (main_actions, notifications) :: request(&stdin, &stdout, "textDocument/codeAction", action_params(main_uri))
+    reports :: (uri: &String) -> notifications.iter().rev().find_map(notification -> {
+        params :: json_get(notification, "params")?
+        if json_get(params, "uri").and_then(json_str) == uri -> params else -> none
+    }).unwrap()
+    imported :: reports(scoring_uri)
+    assert_json_values_equal("imported checked version", json_object_field(imported, "version"), DataTree.Int(2))
+    imported_errors :: json_array_field(imported, "diagnostics").iter().filter(diagnostic -> json_get(diagnostic, "code").and_then(json_str) == "E0107").collect()
+    assert_eq(imported_errors.len(), 3, "{imported:?}")
+    first :: json_object_field(json_object_field(imported_errors[0], "range"), "start")
+    assert_json_values_equal("imported body line", json_object_field(first, "line"), DataTree.Int(3))
+    caller :: reports(main_uri)
+    caller_errors :: json_array_field(caller, "diagnostics")
+    assert(caller_errors.iter().all(diagnostic -> json_get(diagnostic, "code").and_then(json_str) != "E0107"), "{caller:?}")
+    missing_arg :: caller_errors.iter().find(diagnostic -> json_get(diagnostic, "code").and_then(json_str) == "E0104").expect("missing argument remains a caller diagnostic")
+    caller_start :: json_object_field(json_object_field(missing_arg, "range"), "start")
+    assert_json_values_equal("caller line", json_object_field(caller_start, "line"), DataTree.Int(1))
+    assert(json_array(json_object_field(main_actions, "result"), "caller actions").iter()
+        .flat_map(action -> json_array_field(json_object_field(action, "edit"), "documentChanges"))
+        .flat_map(change -> json_array_field(change, "edits"))
+        .all(edit -> {
+            text :: json_get(edit, "newText").and_then(json_str)
+            text != "get" && text != "_repair_probe"
+        }), "imported method repair must not be offered against the caller: {main_actions:?}")
+    (scoring_actions, _) :: request(&stdin, &stdout, "textDocument/codeAction", action_params(scoring_uri))
+    actions :: json_array(json_object_field(scoring_actions, "result"), "imported actions")
+    method_edit :: actions.iter().flat_map(action -> json_array_field(json_object_field(action, "edit"), "documentChanges"))
+        .flat_map(change -> json_array_field(change, "edits"))
+        .find(edit -> json_get(edit, "newText").and_then(json_str) == "get").expect("registered method repair")
+    expected_range :: parse_json("{{\"start\":{{\"line\":12,\"character\":11}},\"end\":{{\"line\":12,\"character\":15}}}}").unwrap()
+    assert_json_values_equal("repair selects imported gett", json_object_field(method_edit, "range"), expected_range)
+    loop action in actions {
+        loop change in json_array_field(json_object_field(action, "edit"), "documentChanges") {
+            document :: json_object_field(change, "textDocument")
+            assert_eq(json_get(document, "uri").and_then(json_str), scoring_uri)
+            assert_json_values_equal("repair snapshot", json_object_field(document, "version"), DataTree.Int(2))
+        }
+    }
+    _ :: request(&stdin, &stdout, "shutdown", "{{}}")
+    drop(^stdin)
+    assert(child.wait().unwrap().success())
+}
+
+// Rust: tests/lsp.rs:4038
+#Test("lsp_definition_returns_location") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn greet() {{}}\nfn run() {{\n    greet()\n}}\n"
+    uri :: "file:///tmp/lsp_def_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["definitionProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":2,\"character\":4}}}}}}", expect_contains: ["uri", "range"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:4079
+#Test("lsp_checked_text_contract_survives_editor_navigation") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "#Error\nenum PatternError {{ Bad }}\nPattern :: distinct String\nimpl Pattern.CheckedText {{\n    type Error = PatternError\n    fn check(text: String) PatternError! -[]> {{\n        return\n    }}\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"\"\n    }}\n}}\nfn use_pattern(value: Pattern) {{\n    return\n}}\nfn run() {{\n    \n}}\n"
+    uri :: "file://{env.temp_dir().join("lsp_checked_text_test.jet").display()}"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["hoverProvider", "completionProvider", "definitionProvider", "referencesProvider", "renameProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":2,\"character\":1}}}}}}", expect_contains: ["type Pattern :: distinct String", "implements CheckedText", "type Error = PatternError", "encode_hole"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":15,\"character\":4}}}}}}", expect_contains: ["Pattern", "implements CheckedText", "encode_hole"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":12,\"character\":23}}}}}}", expect_contains: ["range", "nominal_base", "CheckedText", "encode_hole"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/references\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":2,\"character\":1}},\"context\":{{\"includeDeclaration\":true}}}}}}", expect_contains: ["nominal_base", "CheckedText", "Pattern"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"textDocument/rename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":2,\"character\":1}},\"newName\":\"Pattern2\"}}}}", expect_contains: ["documentChanges", "\"newText\":\"Pattern2\"", "nominal_base", "CheckedText"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:4200
+#Test("lsp_definition_foreign_declaration_uses_checked_jet_boundary") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "extern rust \"std\" {{\n    fn rust_max(a: Int, b: Int) -> Int = \"std::cmp::max\"\n}}\nfn run() {{\n    rust_max(1, 2)\n}}\n"
+    uri :: "file:///tmp/lsp_foreign_definition_test.jet"
+    _guard :: lock_lsp_process()
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp for foreign definition")
+    stdin := child.stdin.take().expect("foreign definition stdin")
+    stdout := child.stdout.take().expect("foreign definition stdout")
+    initialize :: request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
+    assert(initialize.contains("definitionProvider"), "{initialize}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+    diagnostics :: read_msg(&stdout)
+    assert(diagnostics.contains("publishDiagnostics"), "{diagnostics}")
+    response :: request_lsp(&stdin, &stdout, 2, "textDocument/definition", "{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":4,\"character\":7}}}}")
+    parsed :: parse_json(response).expect("foreign definition JSON")
+    result :: json_object_field(parsed, "result")
+    assert_eq(json_str(json_object_field(result, "uri")), uri)
+    expected_range :: parse_json("{{\"start\":{{\"line\":1,\"character\":7}},\"end\":{{\"line\":1,\"character\":15}}}}").unwrap()
+    assert_json_values_equal("foreign definition stays on Jet declaration", json_object_field(result, "range"), expected_range)
+    assert(!response.contains("std::cmp::max"), "foreign definition must not claim a Rust body: {response}")
+    _ :: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")
+    drop(^stdin)
+    assert(child.wait().unwrap().success())
+}
+
+// Rust: tests/lsp.rs:4286
+#Test("lsp_definition_imported_identity_collisions_are_exact") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    root :: Scratch.new("lsp-definition-identity-collisions")
+    fs.write(root.join("package.jet"), "name: \"definition-collisions\"\nversion: \"0.1.0\"\n").expect("write definition collision package manifest")
+    main_source :: "use scoring as grades\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn local(letter: Int) {{\n    print(letter)\n}}\n"
+    scoring_source :: "pub fn letter(score: Int) -> String {{ \"A\" }}\n"
+    util_source :: "pub fn letter(score: Int) -> String {{ \"unrelated\" }}\n"
+    fs.write(root.join("run.jet"), main_source).expect("write definition collision root")
+    fs.write(root.join("scoring.jet"), scoring_source).expect("write scoring module")
+    fs.write(root.join("util.jet"), util_source).expect("write util module")
+    uri :: (name: &String) -> "file://{root.join(name).display()}".replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29")
+    main_uri :: uri("run.jet")
+    scoring_uri :: uri("scoring.jet")
+    util_uri :: uri("util.jet")
+    _guard :: lock_lsp_process()
+    child := Command.new(jet).args(["self", "lsp"]).current_dir(root.path).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp for definition collisions")
+    stdin := child.stdin.take().expect("definition collision stdin")
+    stdout := child.stdout.take().expect("definition collision stdout")
+    initialize :: request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
+    assert(initialize.contains("definitionProvider"), "{initialize}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    loop (document_uri, source) in [(main_uri, main_source), (scoring_uri, scoring_source), (util_uri, util_source)] {
+        send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{document_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+        diagnostics :: read_msg(&stdout)
+        assert(diagnostics.contains("publishDiagnostics"), "{diagnostics}")
+    }
+    definition :: (id: I64, line: U32, character: U32) -> request_lsp(&stdin, &stdout, id, "textDocument/definition", "{{\"textDocument\":{{\"uri\":\"{main_uri}\"}},\"position\":{{\"line\":{line},\"character\":{character}}}}}")
+    scoring :: parse_json(definition(2, 3, 19)).expect("scoring definition JSON")
+    scoring_result :: json_object_field(scoring, "result")
+    assert_eq(json_str(json_object_field(scoring_result, "uri")), scoring_uri)
+    expected_scoring :: parse_json("{{\"start\":{{\"line\":0,\"character\":7}},\"end\":{{\"line\":0,\"character\":13}}}}").unwrap()
+    assert_json_values_equal("qualified scoring definition", json_object_field(scoring_result, "range"), expected_scoring)
+    util :: parse_json(definition(3, 4, 17)).expect("util definition JSON")
+    util_result :: json_object_field(util, "result")
+    assert_eq(json_str(json_object_field(util_result, "uri")), util_uri)
+    expected_util :: parse_json("{{\"start\":{{\"line\":0,\"character\":7}},\"end\":{{\"line\":0,\"character\":13}}}}").unwrap()
+    assert_json_values_equal("qualified util definition", json_object_field(util_result, "range"), expected_util)
+    local :: parse_json(definition(4, 7, 12)).expect("local definition JSON")
+    local_result :: json_object_field(local, "result")
+    assert_eq(json_str(json_object_field(local_result, "uri")), main_uri)
+    expected_local :: parse_json("{{\"start\":{{\"line\":6,\"character\":9}},\"end\":{{\"line\":6,\"character\":15}}}}").unwrap()
+    assert_json_values_equal("local definition wins over imported leaves", json_object_field(local_result, "range"), expected_local)
+    _ :: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")
+    drop(^stdin)
+    assert(child.wait().unwrap().success())
+}
+
+// Rust: tests/lsp.rs:4421
+#Test("lsp_definition_uses_build_graph_generated_source") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn build(b: BuildContext) -> BuildPlan {{\n    b.generate(\"made\") {{\n        fn generated_value() -> String {{ \"hi\" }}\n    }}\n    app :: b.add_executable(\"app\", [\"main.jet\", \".jet/generated/main/made.jet\"], [])\n    return b.plan(app)\n}}\nfn run() {{ print(generated_value()) }}\n"
+    root :: Scratch.new("lsp-generated-def")
+    fs.write(root.join("package.jet"), "name: \"main\"\nversion: \"0.1.0\"\n").expect("write generated definition package manifest")
+    fs.write(root.join("main.jet"), source).expect("write generated definition source")
+    uri :: "file://{root.join("main.jet").display()}"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["definitionProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":7,\"character\":20}}}}}}", expect_contains: [".jet/generated/main/made.jet", "range"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:4477
+#Test("lsp_generated_definition_uses_selected_buildplan_identity") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    root :: Scratch.new("lsp-generated-definition-identity")
+    fs.write(root.join("package.jet"), "name: \"main\"\nversion: \"0.1.0\"\n").expect("write generated identity package manifest")
+    fs.write(root.join("workspace.jet"), "module workspace {{ members: [] }}\n").expect("write generated identity workspace authority")
+    source_for :: (first: &String, second: &String, selected: &String) -> "fn build(b: BuildContext) -> BuildPlan {{\n    b.generate(\"{first}\") {{\n        fn generated_value() -> String {{ \"{first}\" }}\n    }}\n    b.generate(\"{second}\") {{\n        fn generated_value() -> String {{ \"{second}\" }}\n    }}\n    app :: b.add_executable(\"app\", [\"main.jet\", \".jet/generated/main/{selected}.jet\"], [])\n    return b.plan(app)\n}}\nfn run() {{\n    generated_value()\n}}\n"
+    run_case :: (source: String, selected: &String) -> {
+        fs.write(root.join("main.jet"), source).expect("write selected generated source")
+        uri :: "file://{root.join("main.jet").display()}"
+        run_transcript(source, [
+            TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["definitionProvider"] },
+            TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+            TranscriptStep.Open { uri: uri, expect_notification: true },
+            TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":11,\"character\":10}}}}}}", expect_contains: [
+                "\"identity\":\"fn:module:{selected}::generated_value\"", "\"generated\":true",
+                "\"artifact\":\".jet/generated/main/{selected}.jet\"", "\"status\":\"available\"",
+                "\"generator\":\"{selected}\"", "\"schema\":null", "\"source\":\".jet/generated/main/{selected}.jet\"",
+                "\"plugin\":null", "\"range\":{{\"start\":{{\"line\":0,\"character\":3}},\"end\":{{\"line\":0,\"character\":18}}}}"
+            ] },
+            TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+        ])
+    }
+    run_case(source_for("right", "left", "left"), "left")
+    run_case(source_for("left", "right", "right"), "right")
+}
+
+// Rust: tests/lsp.rs:4564
+#Test("lsp_semantic_tokens_returns_data") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn run() {{\n    x :: 1\n}}\n"
+    uri :: "file:///tmp/lsp_semtok_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["semanticTokensProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/semanticTokens/full\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}", expect_contains: ["data"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:4605
+#Test("lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    source :: "#Test(\"semantic\") {{\n}}\n#Unsafe(\"audit\") fn archive(name: ^String, slot: &Int) -> String {{\n    saved :: copy name\n    return saved\n}}\nfn clean(x: Int) -[]> Int {{ return x }}\nfn retain(window: View<Int>) -> View<Int> {{ return window }}\nfn run() {{\n    old :: 1\n    while :: 2\n    for :: 3\n    mut borrowed\n    take borrowed\n    view borrowed\n    borrowed.read()\n    text := \"view .view stays string content\"\n    // view and .view stay comment content\n    next()\n    cursor.next()\n    loop {{\n        value :: maybe() ?? next\n        nested :: (maybe() ?? next)\n        consume(maybe() ?? next, 1)\n        escaped :: maybe() ?? (next)\n        next\n    }}\n    outer :: loop {{ next(outer) }}\n}}\nfn next() -> Int {{ return 1 }}\n"
+    uri :: "file:///tmp/lsp_semantic_highlight_stage4.jet"
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    init :: read_msg(&stdout)
+    loop expected in ["ownership", "decorator", "move", "writeBorrow", "copy"] {
+        assert(init.contains(expected), "initialize response missing `{expected}`: {init}")
+    }
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
+    send_msg(&stdin, open)
+    _ :: read_msg(&stdout)
+    req :: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/semanticTokens/full\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}"
+    send_msg(&stdin, req)
+    response :: read_msg(&stdout)
+    assert(response.contains("\"id\":2") && response.contains("\"data\""), "expected semantic token response, got: {response}")
+    TOKEN_KEYWORD :: 0u32
+    TOKEN_OWNERSHIP :: 12u32
+    TOKEN_DECORATOR :: 13u32
+    TOKEN_TYPE :: 1u32
+    TOKEN_VARIABLE :: 3u32
+    MOD_MOVE :: 1u32 << 2
+    MOD_WRITE_BORROW :: 1u32 << 3
+    MOD_COPY :: 1u32 << 4
+    MOD_RULE :: 1u32 << 5
+    tokens :: decode_semantic_tokens(source, response)
+    assert_semantic_token(tokens, "copy", TOKEN_OWNERSHIP, MOD_COPY)
+    assert_semantic_token(tokens, "^", TOKEN_OWNERSHIP, MOD_MOVE)
+    assert_semantic_token(tokens, "&", TOKEN_OWNERSHIP, MOD_WRITE_BORROW)
+    assert_semantic_token(tokens, "Test", TOKEN_DECORATOR, MOD_RULE)
+    assert_semantic_token(tokens, "Unsafe", TOKEN_DECORATOR, MOD_RULE)
+    assert_semantic_token(tokens, "#", TOKEN_DECORATOR, MOD_RULE)
+    assert(tokens.iter().any(token -> token.text == "View" && token.token_type == TOKEN_TYPE), "public View<T> contracts should remain type tokens: {tokens:?}")
+    loop ordinary in ["while", "for"] {
+        assert(tokens.iter().any(t -> t.text == ordinary && t.token_type == TOKEN_VARIABLE), "paused retired spelling `{ordinary}` should emit an ordinary variable token: {tokens:?}")
+    }
+    assert(tokens.iter().filter(token -> token.text == "next" && token.token_type == TOKEN_KEYWORD).count() == 4, "standalone, nested, comma-delimited, and bare `?? next` should be contextual keyword tokens: {tokens:?}")
+    assert(tokens.iter().filter(token -> token.text == "next" && token.token_type == TOKEN_VARIABLE).count() == 5, "`fn next`, `.next` (including named loop exits), statement-start `next()`, and `?? (next)` must remain variables: {tokens:?}")
+    loop retired in ["val", "mut", "take", "view"] {
+        assert(!tokens.iter().any(t -> t.text == retired), "reserved ownership spelling `{retired}` should not emit semantic token: {tokens:?}")
+    }
+    edited_source :: source.replacen("borrowed.read()", "borrowed.view()", 1)
+    change :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[{{\"range\":{{\"start\":{{\"line\":15,\"character\":13}},\"end\":{{\"line\":15,\"character\":17}}}},\"rangeLength\":4,\"text\":\"view\"}}]}}}}"
+    send_msg(&stdin, change)
+    edited_req :: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/semanticTokens/full\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}"
+    send_msg(&stdin, edited_req)
+    edited_response :: loop {
+        message :: read_msg(&stdout)
+        if message.contains("\"id\":3") -> break ^message
+    }
+    edited_tokens :: decode_semantic_tokens(edited_source, edited_response)
+    assert(!edited_tokens.iter().any(token -> token.text == "view"), "incrementally introduced `.view` should stay retired: {edited_tokens:?}")
+    assert(edited_tokens.iter().any(token -> token.text == "View" && token.token_type == TOKEN_TYPE), "incremental classification should preserve public View<T>: {edited_tokens:?}")
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _ :: read_msg(&stdout)
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
+    drop(^stdin)
+    _ :: child.wait()
+}
+
+// Rust: tests/lsp.rs:4791
+#Test("lsp_inlay_hints_returns_type_labels") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn run() {{\n    x :: 42\n    count := 0\n}}\n"
+    uri :: "file:///tmp/lsp_inlay_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["inlayHintProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/inlayHint\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":10,\"character\":0}}}}}}}}", expect_contains: [": Int"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:4832
+#Test("lsp_inlay_hints_return_call_parameter_names") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn clamp(value: Int, low: Int, high: Int) -> Int {{ return value }}\nfn run() {{ print(clamp(12, 0, 10)) }}\n"
+    uri :: "file:///tmp/lsp_call_parameter_hints.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["inlayHintProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/inlayHint\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":10,\"character\":0}}}}}}}}", expect_contains: ["value: ", "low: ", "high: "] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:4877
+#Test("lsp_inlay_hints_include_scattered_method_breadcrumbs") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "trait DrawThing {{\n    fn render(self) -> String\n}}\n\nstruct Widget {{\n    title: String\n}}\n\nimpl Widget {{\n    fn size(self) -> Int {{\n        return 1\n    }}\n}}\n\nimpl Widget.DrawThing {{\n    fn render(self) -> String {{\n        return self.title\n    }}\n}}\n\nfn run() {{\n    w :: Widget{{title: \"ok\"}}\n    print(w.render())\n}}\n"
+    uri :: "file:///tmp/lsp_breadcrumb_hint_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["inlayHintProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/inlayHint\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":30,\"character\":0}}}}}}}}", expect_contains: ["+ fn size() -[]> Int", "+ fn render() -[]> String"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:4921
+#Test("lsp_references_finds_all_uses") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn greet() {{}}\nfn run() {{\n    greet()\n    greet()\n}}\n"
+    uri :: "file:///tmp/lsp_refs_test.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["referencesProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/references\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}},\"context\":{{\"includeDeclaration\":true}}}}}}", expect_contains: ["range"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:4962
+#Test("lsp_enum_variant_navigation_completion_and_rename") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    _guard :: lock_lsp_process()
+    source :: "enum Choice {{\n    #Rename(\"wire-ready\") Ready\n    Waiting\n}}\n\n\nfn dot_case(choice: Choice) {{\n    if choice == {{\n        .Ready -> {{\n            return\n        }}\n        .Waiting -> {{\n            return\n        }}\n        else -> {{\n            return\n        }}\n    }}\n}}\n\nfn bare_case(Ready) {{\n    return\n}}\n\n\nfn qualified_case() -> Choice {{\n    return Choice.Ready\n}}\n\n\nfn run() {{}}\n"
+    uri :: "file:///tmp/lsp_enum_variant_protocol_test.jet"
+    // The protocol boundary is one open document; sibling-module snapshots stay out.
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    initialize :: parse_json(request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")).expect("valid initialize response")
+    capabilities :: json_object_field(json_object_field(initialize, "result"), "capabilities")
+    loop capability in ["completionProvider", "definitionProvider", "referencesProvider", "renameProvider"] {
+        assert(json_get(capabilities, capability).is_some(), "initialize omitted {capability}: {initialize:?}")
+    }
+    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
+    send_msg(&stdin, open)
+    open_diagnostics :: parse_json(read_msg(&stdout)).expect("valid didOpen notification")
+    assert_eq(json_str(json_object_field(open_diagnostics, "method")), "textDocument/publishDiagnostics")
+    diagnostic_params :: json_object_field(open_diagnostics, "params")
+    assert_eq(json_str(json_object_field(diagnostic_params, "uri")), uri)
+    _ :: json_array_field(diagnostic_params, "diagnostics")
+    position :: (text: &String, offset: USize) -> {
+        prefix := text[..offset] // #4303
+        line :: prefix.bytes().filter(byte -> byte == b'\n').count()
+        character :: prefix.rsplit_once('\n').map_or(prefix.len(), (_, line_text) -> line_text.len())
+        (line, character)
+    }
+    range :: (text: &String, start: USize, end: USize) -> {
+        (start_line, start_character) :: position(text, start)
+        (end_line, end_character) :: position(text, end)
+        parse_json("{{\"start\":{{\"line\":{start_line},\"character\":{start_character}}},\"end\":{{\"line\":{end_line},\"character\":{end_character}}}}}").expect("valid expected LSP range")
+    }
+    variant_offsets :: (text: &String, variant: &String) -> {
+        declaration_marker :: "#Rename(\"wire-ready\") {variant}"
+        declaration :: text.find(declaration_marker).expect("variant declaration") + "#Rename(\"wire-ready\") ".len()
+        dot_marker :: "        .{variant} ->"
+        dot :: text.find(dot_marker).expect("dot variant arm") + "        .".len()
+        bare_marker :: "fn bare_case({variant})"
+        bare :: text.find(bare_marker).expect("bare variant head") + "fn bare_case(".len()
+        qualified_marker :: "Choice.{variant}"
+        qualified :: text.find(qualified_marker).expect("qualified variant use") + "Choice.".len()
+        [declaration, dot, bare, qualified]
+    }
+    next_id := 2i64
+    request := (method: &String, params: String) -> {
+        id :: next_id
+        next_id += 1
+        body :: request_lsp(&stdin, &stdout, id, method, params)
+        parse_json(body).unwrap_or_else(error -> panic("invalid {method} response: {error:?}: {body}"))
+    }
+    params_at :: (text: &String, offset: USize) -> {
+        (line, character) :: position(text, offset)
+        "{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{line},\"character\":{character}}}}}"
+    }
+    assert_completion :: (response: &DataTree, expected: &[String]) -> {
+        assert(json_get(response, "error").is_none(), "completion error: {response:?}")
+        result :: json_object_field(response, "result")
+        assert_json_values_equal("completion isIncomplete", json_object_field(result, "isIncomplete"), DataTree.Bool(false))
+        items :: json_array_field(result, "items")
+        labels :: items.iter().map(item -> json_str(json_object_field(item, "label")).expect("completion label")).collect()
+        assert_eq(labels.len(), expected.len(), "completion items: {items:?}")
+        loop wanted in expected {
+            assert_eq(labels.iter().filter(actual -> actual == wanted).count(), 1, "completion identity was duplicated or missing: {labels:?}")
+        }
+        assert(labels.iter().all(actual -> expected.iter().any(wanted -> wanted == actual)), "completion returned an unrelated enum arm: {labels:?}")
+        assert(!labels.iter().any(actual -> actual == "wire-ready"), "completion exposed the string wire name: {labels:?}")
+        loop wanted in expected {
+            item :: items.iter().find(item -> json_str(json_object_field(item, "label")) == wanted).expect("expected enum completion item")
+            assert_json_values_equal("enum completion kind", json_object_field(item, "kind"), DataTree.Int(20))
+            assert_eq(json_str(json_object_field(item, "detail")), "variant of Choice")
+            variant :: wanted.strip_prefix('.').expect("dot enum completion label")
+            expected_insert :: "{variant} -> {{}}"
+            assert_eq(json_str(json_object_field(item, "insertText")), expected_insert)
+            assert_json_values_equal("enum completion insert format", json_object_field(item, "insertTextFormat"), DataTree.Int(2))
+            assert(json_get(item, "additionalTextEdits").is_none(), "same-document enum completion unexpectedly imported a module: {item:?}")
+        }
+    }
+    assert_definition :: (response: &DataTree, expected_range: &DataTree) -> {
+        assert(json_get(response, "error").is_none(), "definition error: {response:?}")
+        result :: json_object_field(response, "result")
+        assert_eq(json_str(json_object_field(result, "uri")), uri)
+        assert_json_values_equal("enum definition range", json_object_field(result, "range"), expected_range)
+    }
+    assert_references :: (response: &DataTree, text: &String, offsets: &[USize], variant: &String) -> {
+        assert(json_get(response, "error").is_none(), "references error: {response:?}")
+        references :: json_array(json_object_field(response, "result"), "enum references")
+        expected_ranges :: offsets.iter().map(offset -> range(text, offset, offset + variant.len())).collect()
+        assert_eq(references.len(), expected_ranges.len(), "references included an unrelated enum identity: {references:?}")
+        loop reference in references {
+            assert_eq(json_str(json_object_field(reference, "uri")), uri)
+            actual_range :: json_object_field(reference, "range")
+            assert_eq(expected_ranges.iter().filter(expected -> json_values_equal(actual_range, expected)).count(), 1, "reference was not one of this enum's source occurrences: {reference:?}")
+        }
+        loop expected in expected_ranges {
+            assert_eq(references.iter().filter(reference -> json_values_equal(json_object_field(reference, "range"), expected)).count(), 1, "reference occurrence was duplicated or missing: {references:?}")
+        }
+    }
+    assert_rename :: (response: &DataTree, text: &String, offsets: &[USize], old_name: &String, new_name: &String, version: I64) -> {
+        assert(json_get(response, "error").is_none(), "rename error: {response:?}")
+        result :: json_object_field(response, "result")
+        changes :: json_array_field(result, "documentChanges")
+        assert_eq(changes.len(), 1, "rename crossed a document boundary: {result:?}")
+        change :: changes[0]
+        document :: json_object_field(change, "textDocument")
+        assert_eq(json_str(json_object_field(document, "uri")), uri)
+        assert_json_values_equal("rename checked document version", json_object_field(document, "version"), DataTree.Int(version))
+        edits :: json_array_field(change, "edits")
+        expected_ranges :: offsets.iter().map(offset -> range(text, offset, offset + old_name.len())).collect()
+        assert_eq(edits.len(), expected_ranges.len(), "rename lost or duplicated an enum occurrence: {edits:?}")
+        loop edit in edits {
+            assert_eq(json_str(json_object_field(edit, "newText")), new_name)
+            actual_range :: json_object_field(edit, "range")
+            assert_eq(expected_ranges.iter().filter(expected -> json_values_equal(actual_range, expected)).count(), 1, "rename edited an unrelated range: {edit:?}")
+        }
+        loop expected in expected_ranges {
+            assert_eq(edits.iter().filter(edit -> json_values_equal(json_object_field(edit, "range"), expected)).count(), 1, "rename occurrence was duplicated or missing: {edits:?}")
+        }
+        operations :: json_array_field(result, "semantic_ops")
+        assert_eq(operations.len(), 1)
+        operation :: operations[0]
+        assert_eq(json_str(json_object_field(operation, "kind")), "rename")
+        assert_eq(json_str(json_object_field(operation, "from")), old_name)
+        assert_eq(json_str(json_object_field(operation, "to")), new_name)
+        _ :: json_array_field(operation, "targets")
+    }
+    initial_offsets :: variant_offsets(source, "Ready")
+    initial_definition_range :: range(source, initial_offsets[0], initial_offsets[0] + "Ready".len())
+    completion :: request("textDocument/completion", params_at(source, initial_offsets[1]))
+    assert_completion(completion, [".Ready", ".Waiting"])
+    loop offset in initial_offsets {
+        definition :: request("textDocument/definition", params_at(source, offset))
+        assert_definition(definition, initial_definition_range)
+        params_prefix := params_at(source, offset).strip_suffix('}').expect("params object") // #4303
+        references :: request("textDocument/references", "{params_prefix},\"context\":{{\"includeDeclaration\":true}}}}")
+        assert_references(references, source, initial_offsets, "Ready")
+        prepare :: request("textDocument/prepareRename", params_at(source, offset))
+        assert(json_get(prepare, "error").is_none(), "prepare rename error: {prepare:?}")
+        prepare_result :: json_object_field(prepare, "result")
+        expected_prepare_range :: range(source, offset, offset + "Ready".len())
+        assert_json_values_equal("prepare rename range", json_object_field(prepare_result, "range"), expected_prepare_range)
+        assert_eq(json_str(json_object_field(prepare_result, "placeholder")), "Ready")
+    }
+    rename_prefix := params_at(source, initial_offsets[3]).strip_suffix('}').expect("params object") // #4303
+    renamed :: request("textDocument/rename", "{rename_prefix},\"newName\":\"Renamed\"}}")
+    assert_rename(renamed, source, initial_offsets, "Ready", "Renamed", 1)
+    drop(^request)
+    updated :: source.replacen("#Rename(\"wire-ready\") Ready", "#Rename(\"wire-ready\") Queued", 1)
+        .replacen("    Waiting\n}}\n", "}}\n", 1)
+        .replacen(".Ready ->", ".Queued ->", 1)
+        .replacen("fn bare_case(Ready)", "fn bare_case(Queued)", 1)
+        .replacen("Choice.Ready", "Choice.Queued", 1)
+    assert(updated.contains("#Rename(\"wire-ready\") Queued"))
+    initial_checked :: "{check_document("lsp_enum_variant_protocol_test.jet", source):?}"
+    updated_checked :: "{check_document("lsp_enum_variant_protocol_test.jet", updated):?}"
+    assert_ne(updated_checked, initial_checked, "changing the enum case set must refresh checked diagnostics")
+    assert(updated_checked.contains("Waiting"), "removing Waiting must retain a diagnostic for the stale case")
+    change :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[{{\"text\":{json_string(updated)}}}]}}}}"
+    send_msg(&stdin, change)
+    request := (method: &String, params: String) -> {
+        id :: next_id
+        next_id += 1
+        body :: request_lsp(&stdin, &stdout, id, method, params)
+        parse_json(body).unwrap_or_else(error -> panic("invalid {method} response: {error:?}: {body}"))
+    }
+    updated_offsets :: variant_offsets(updated, "Queued")
+    updated_definition_range :: range(updated, updated_offsets[0], updated_offsets[0] + "Queued".len())
+    updated_completion :: request("textDocument/completion", params_at(updated, updated_offsets[1]))
+    assert_completion(updated_completion, [".Queued"])
+    loop offset in updated_offsets {
+        definition :: request("textDocument/definition", params_at(updated, offset))
+        assert_definition(definition, updated_definition_range)
+        params_prefix := params_at(updated, offset).strip_suffix('}').expect("params object") // #4303
+        references :: request("textDocument/references", "{params_prefix},\"context\":{{\"includeDeclaration\":true}}}}")
+        assert_references(references, updated, updated_offsets, "Queued")
+    }
+    updated_prepare :: request("textDocument/prepareRename", params_at(updated, updated_offsets[2]))
+    assert(json_get(updated_prepare, "error").is_none())
+    updated_prepare_result :: json_object_field(updated_prepare, "result")
+    updated_prepare_range :: range(updated, updated_offsets[2], updated_offsets[2] + "Queued".len())
+    assert_json_values_equal("updated prepare rename range", json_object_field(updated_prepare_result, "range"), updated_prepare_range)
+    assert_eq(json_str(json_object_field(updated_prepare_result, "placeholder")), "Queued")
+    updated_rename_prefix := params_at(updated, updated_offsets[2]).strip_suffix('}').expect("params object") // #4303
+    updated_rename :: request("textDocument/rename", "{updated_rename_prefix},\"newName\":\"Finished\"}}")
+    assert_rename(updated_rename, updated, updated_offsets, "Queued", "Finished", 2)
+    shutdown :: request("shutdown", "{{}}")
+    assert_json_values_equal("shutdown result", json_object_field(shutdown, "result"), DataTree.Null)
+    drop(^request)
+    drop(^stdin)
+    assert(child.wait().expect("wait for jet self lsp").success())
+}
+
+// Rust: tests/lsp.rs:5461
+#Test("c40_is_keyword_retired_words_not_keywords") {
+    diags :: check_document("c40_retired.jet", "fn run() {{\n    switch_count :: 0\n    import_count :: 1\n}}\n")
+    assert(!diags.iter().any(d -> {
+        t :: "{d.what} {d.why} {d.fix}"
+        t.contains("switch_count") && t.contains("keyword")
+    }), "switch_count should not be rejected as a keyword: {diags:?}")
+}
+
+// Rust: tests/lsp.rs:5482
+#Test("c40_is_keyword_real_keywords_recognized") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn greet() {{}}\nfn run() {{\n    greet()\n}}\n"
+    uri :: "file:///tmp/c40_rename_keyword.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["renameProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/rename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}},\"newName\":\"if\"}}}}", expect_contains: ["error"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:5533
+#Test("c40_value_literal_is_not_a_keyword") {
+    assert_eq(Syntax.LIT_VALUE, "Val")
+    assert(!Syntax.JET_KEYWORD_LIST.contains(Syntax.LIT_VALUE))
+}
+
+// Rust: tests/lsp.rs:5542
+#Test("c40_is_keyword_switch_not_a_keyword") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn greet() {{}}\nfn run() {{\n    greet()\n}}\n"
+    uri :: "file:///tmp/c40_rename_switch.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["renameProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/rename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}},\"newName\":\"switch\"}}}}", expect_contains: ["result"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:5586
+#Test("c40_is_keyword_import_not_a_keyword") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn greet() {{}}\nfn run() {{\n    greet()\n}}\n"
+    uri :: "file:///tmp/c40_rename_import.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["renameProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/rename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}},\"newName\":\"import\"}}}}", expect_contains: ["result"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:5630
+#Test("c40_keyword_like_identifier_usable_as_variable") {
+    diags :: check_document("c40_kw_in_ident.jet", "fn run() {{\n    printer :: \"hp\"\n    in_count :: 3\n    sprint :: 9.8\n}}\n")
+    loop d in diags {
+        all_text :: "{d.what} {d.why} {d.fix}"
+        loop name in ["printer", "in_count", "sprint"] {
+            assert(!(all_text.contains(name) && all_text.to_lowercase().contains("keyword")), "identifier `{name}` containing keyword substring wrongly flagged as keyword: {d:?}")
+        }
+    }
+}
+
+// Rust: tests/lsp.rs:5654
+#Test("c40_drift_guard_foreign_words_not_blocked_in_rename") {
+    jet :: jet_bin()
+    if !jet.exists() -> return
+    source :: "fn greet() {{}}\nfn run() {{\n    greet()\n}}\n"
+    uri :: "file:///tmp/c40_drift_switch.jet"
+    run_transcript(source, [
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["renameProvider"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}", expect_contains: none },
+        TranscriptStep.Open { uri: uri, expect_notification: true },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/rename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}},\"newName\":\"switch\"}}}}", expect_contains: ["result"] },
+        TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
+    ])
+}
+
+// Rust: tests/lsp.rs:5715
+#Test("c44_lsp_keywords_derive_from_syntax") {
+    kw_ptr :: Syntax.JET_KEYWORD_LIST.as_ptr()
+    required :: [
+        Syntax.KW_FN, Syntax.KW_PUB, Syntax.KW_USE, Syntax.KW_IF, Syntax.KW_ELSE,
+        Syntax.KW_LOOP, Syntax.KW_RETURN, Syntax.KW_STRUCT, Syntax.KW_ENUM, Syntax.KW_IMPL,
+        Syntax.KW_UNSAFE, Syntax.KW_TEST, Syntax.KW_TODO, Syntax.LIT_TRUE,
+        Syntax.LIT_FALSE, Syntax.LIT_NULL, Syntax.KW_DISTINCT, Syntax.KW_MODULE
+    ]
+    loop kw in required {
+        assert(Syntax.JET_KEYWORD_LIST.contains(kw), "JET_KEYWORD_LIST missing required keyword: {kw:?}")
+    }
+    banned :: [
+        Syntax.FOREIGN_SWITCH, Syntax.FOREIGN_IMPORT, Syntax.FOREIGN_OR_FALLBACK,
+        Syntax.FOREIGN_WHILE, Syntax.FOREIGN_FOR, Syntax.FOREIGN_MATCH, Syntax.FOREIGN_CLASS
+    ]
+    loop word in banned {
+        assert(!Syntax.JET_KEYWORD_LIST.contains(word), "JET_KEYWORD_LIST contains banned FOREIGN_ word: {word:?}")
+    }
+    loop literal in [Syntax.LIT_VALUE, Syntax.LIT_OK, Syntax.LIT_ERR] {
+        assert(!Syntax.JET_KEYWORD_LIST.contains(literal), "contextual literal {literal:?} must not appear in JET_KEYWORD_LIST")
+    }
+    assert(Syntax.JET_KEYWORD_LIST.len() >= 20, "JET_KEYWORD_LIST suspiciously short: {Syntax.JET_KEYWORD_LIST.len()} entries")
+    _ :: kw_ptr
+}
+
+// Rust: tests/lsp.rs:5787
+#Test("c44_lsp_types_derive_from_syntax") {
+    required_types :: [
+        Syntax.TYPE_INT, Syntax.TYPE_FLOAT, Syntax.TYPE_BOOL, Syntax.TYPE_STRING, Syntax.TYPE_CHAR,
+        Syntax.TYPE_SHARED, Syntax.TYPE_HASH_MAP, Syntax.TYPE_BTREE_MAP, Syntax.TYPE_QUEUE, Syntax.TYPE_SET
+    ]
+    loop ty in required_types {
+        assert(Syntax.JET_TYPE_LIST.contains(ty), "JET_TYPE_LIST missing required type: {ty:?}")
+    }
+    assert(!Syntax.JET_TYPE_LIST.contains(Syntax.TYPE_RESULT), "JET_TYPE_LIST must not contain legacy TYPE_RESULT; use T !E syntax")
+}
+
+// Rust: tests/lsp.rs:5819
+#Test("c44_impure_builtins_complete") {
+    required :: [Syntax.BUILTIN_PRINT, Syntax.BUILTIN_INPUT, "eprint", "read_all_input"]
+    loop name in required {
+        assert(Syntax.IMPURE_BUILTINS.contains(name), "IMPURE_BUILTINS missing: {name:?}")
+    }
+}
+
+// Rust: tests/lsp.rs:5838
+#Test("c44_prelude_idents_canonical") {
+    names :: CorePrelude.names().collect()
+    assert_eq(names, ["print", "input", "panic", "assert", "assert_eq", "eprint",
+        "Clock", "Instant", "Date", "Duration", "Path", "read_file", "write_file",
+        "file_exists", "embed_file", "embed_bytes", "find", "fetch"])
+    loop name in ["print", "input", "panic"] {
+        assert_eq(CorePrelude.entry(name).map(entry -> entry.target), Target.Builtin, "always-ambient ident must stay a builtin: {name:?}")
+    }
+    comptime :: CorePrelude.entries().iter().filter(entry -> entry.target == Target.Comptime).map(entry -> entry.name).collect()
+    assert_eq(comptime, ["embed_file", "embed_bytes", "find", "fetch"])
+}
+
+// Rust: tests/lsp.rs:5883
+#Test("lsp_bench_reports_deterministic_cache_and_memory") {
+    src :: embed_file("Examples/features/collections/wordcount.jet")
+    report :: LSP.measure_bench(src, 10)
+    assert_eq(report.hits, 1, "unchanged warm request must hit once")
+    assert_eq(report.recomputes, 11, "cold check plus ten changed revisions")
+    assert_eq(report.live_inputs, 2, "source and external-closure fingerprints")
+    assert_eq(report.live_input_bytes, src.len() + "\n// lsp-bench-edit:1\n".len() + 16)
+    assert_eq(report.live_memos, 1, "only current checked revision stays live")
+    assert_eq(report.item_hits, 10, "comment edits must reuse the checked item")
+    assert_eq(report.item_recomputes, 1, "only the cold item check may recompute")
+    assert(report.live_items > 0)
+    assert(report.live_item_bytes >= src.len(), "retained item accounting must cover at least the checked source payload")
+}

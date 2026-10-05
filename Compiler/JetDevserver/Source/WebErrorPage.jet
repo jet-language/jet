@@ -1,1838 +1,852 @@
-// PORT-PENDING 0788 crates-jet-devserver-src-weberrorpage: crates/jet-devserver/src/WebErrorPage.rs:1-1834
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Typed, bounded projections for a local development-service failure.
-//RS //!
-//RS //! The page is an adapter at the web boundary.  It consumes facts that were
-//RS //! already recorded by the terminal/runtime error path; it never parses a
-//RS //! rendered diagnostic and it never changes failure classification or
-//RS //! lifecycle.  HTML and JSON are two renderings of one `WebErrorFacts` value,
-//RS //! so their identity and digest cannot drift.
-//RS 
-//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
-//RS use jet_foundation::JSON::quote as json_string;
-//RS use jet_foundation::Outcome::{JetErrorContextFrame, JetErrorJourneyFrame, JetErrorReport};
-//RS use jet_foundation::SHA256::sha256_hex;
-//RS use jet_semindex::html_escape;
-//RS use std::fmt;
-//RS 
-//RS pub const WEB_ERROR_PAGE_SCHEMA: &str = "jet.dev.error/v1";
-//RS pub const MAX_WEB_ERROR_ID_BYTES: usize = 256;
-//RS pub const MAX_WEB_ERROR_TEXT_BYTES: usize = 8 * 1024;
-//RS pub const MAX_WEB_ERROR_SOURCE_BYTES: usize = 16 * 1024;
-//RS pub const MAX_WEB_ERROR_LINK_BYTES: usize = 2 * 1024;
-//RS pub const MAX_WEB_ERROR_ACCEPT_BYTES: usize = 8 * 1024;
-//RS pub const MAX_WEB_ERROR_SOURCE_EXCERPTS: usize = 32;
-//RS pub const MAX_WEB_ERROR_ACTION_LINKS: usize = 16;
-//RS pub const MAX_WEB_ERROR_EDITS: usize = 64;
-//RS pub const MAX_WEB_ERROR_INPUT_BYTES: usize = 64 * 1024;
-//RS pub const MAX_WEB_ERROR_OUTPUT_BYTES: usize = 256 * 1024;
-//RS pub const MAX_WEB_ERROR_SPAN_BYTES: usize = 1024 * 1024;
-//RS 
-//RS /// Errors are rejected before rendering.  In particular, malformed identity,
-//RS /// source spans, and links never become a best-effort page.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum WebErrorPageError {
-//RS     EmptyField(&'static str),
-//RS     InvalidIdentity(&'static str),
-//RS     InvalidSpan,
-//RS     InvalidStatus,
-//RS     InvalidLink,
-//RS     InvalidAccept,
-//RS     ControlCharacter(&'static str),
-//RS     UnsafeContent(&'static str),
-//RS     TextTooLarge(&'static str),
-//RS     TooManyItems(&'static str),
-//RS     InputTooLarge,
-//RS     OutputTooLarge,
-//RS }
-//RS 
-//RS impl fmt::Display for WebErrorPageError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::EmptyField(field) => write!(formatter, "{field} must not be empty"),
-//RS             Self::InvalidIdentity(field) => write!(formatter, "invalid {field} identity"),
-//RS             Self::InvalidSpan => formatter.write_str("invalid source span"),
-//RS             Self::InvalidStatus => formatter.write_str("web error status must be between 400 and 599"),
-//RS             Self::InvalidLink => formatter.write_str("action link is not a safe local or HTTPS URL"),
-//RS             Self::InvalidAccept => formatter.write_str("invalid or oversized Accept header"),
-//RS             Self::ControlCharacter(field) => write!(formatter, "{field} contains a control character"),
-//RS             Self::UnsafeContent(field) => write!(formatter, "{field} contains unpublished sensitive content"),
-//RS             Self::TextTooLarge(field) => write!(formatter, "{field} exceeds its byte budget"),
-//RS             Self::TooManyItems(field) => write!(formatter, "too many {field}"),
-//RS             Self::InputTooLarge => formatter.write_str("web error facts exceed the input byte budget"),
-//RS             Self::OutputTooLarge => formatter.write_str("web error projection exceeds the output byte budget"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for WebErrorPageError {}
-//RS 
-//RS /// An HTTP representation selected from the request's `Accept` header.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum WebErrorContentType {
-//RS     Html,
-//RS     Json,
-//RS }
-//RS 
-//RS impl WebErrorContentType {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Html => "text/html; charset=utf-8",
-//RS             Self::Json => "application/json; charset=utf-8",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn media_type(self) -> &'static str {
-//RS         match self {
-//RS             Self::Html => "text/html",
-//RS             Self::Json => "application/json",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for WebErrorContentType {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         formatter.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS /// Capability input for [`WebErrorPage::project`].  A page is local only when
-//RS /// the caller explicitly grants local details and the build is not release.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorCapabilities {
-//RS     pub local: bool,
-//RS     pub release: bool,
-//RS }
-//RS 
-//RS impl WebErrorCapabilities {
-//RS     pub const fn new(local: bool, release: bool) -> Self {
-//RS         Self { local, release }
-//RS     }
-//RS 
-//RS     pub const fn local() -> Self {
-//RS         Self {
-//RS             local: true,
-//RS             release: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn redacted() -> Self {
-//RS         Self {
-//RS             local: false,
-//RS             release: true,
-//RS         }
-//RS     }
-//RS 
-//RS     fn permits_local_details(self) -> bool {
-//RS         self.local && !self.release
-//RS     }
-//RS }
-//RS 
-//RS impl Default for WebErrorCapabilities {
-//RS     fn default() -> Self {
-//RS         Self::redacted()
-//RS     }
-//RS }
-//RS 
-//RS /// Allows callers to pass capabilities by value, by reference, or the simple
-//RS /// `bool` local-development switch without making a second page API.
-//RS pub trait WebErrorCapabilityInput {
-//RS     fn local_details(&self) -> bool;
-//RS     fn release_build(&self) -> bool;
-//RS }
-//RS 
-//RS impl WebErrorCapabilityInput for WebErrorCapabilities {
-//RS     fn local_details(&self) -> bool {
-//RS         self.permits_local_details()
-//RS     }
-//RS 
-//RS     fn release_build(&self) -> bool {
-//RS         self.release
-//RS     }
-//RS }
-//RS 
-//RS impl<T: WebErrorCapabilityInput + ?Sized> WebErrorCapabilityInput for &T {
-//RS     fn local_details(&self) -> bool {
-//RS         (*self).local_details()
-//RS     }
-//RS 
-//RS     fn release_build(&self) -> bool {
-//RS         (*self).release_build()
-//RS     }
-//RS }
-//RS 
-//RS impl WebErrorCapabilityInput for bool {
-//RS     fn local_details(&self) -> bool {
-//RS         *self
-//RS     }
-//RS 
-//RS     fn release_build(&self) -> bool {
-//RS         false
-//RS     }
-//RS }
-//RS 
-//RS /// Stable correlation identity carried by every projection.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorPageIdentity {
-//RS     pub request_id: String,
-//RS     pub session_id: String,
-//RS     pub source_id: String,
-//RS     pub build_id: String,
-//RS     pub revision: String,
-//RS }
-//RS 
-//RS impl WebErrorPageIdentity {
-//RS     pub fn new(
-//RS         request_id: impl Into<String>,
-//RS         session_id: impl Into<String>,
-//RS         source_id: impl Into<String>,
-//RS         build_id: impl Into<String>,
-//RS         revision: impl Into<String>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let identity = Self {
-//RS             request_id: normalize_identity(request_id.into(), "request id")?,
-//RS             session_id: normalize_identity(session_id.into(), "session id")?,
-//RS             source_id: normalize_source_identity(source_id.into())?,
-//RS             build_id: normalize_identity(build_id.into(), "build id")?,
-//RS             revision: normalize_identity(revision.into(), "revision")?,
-//RS         };
-//RS         identity.validate()?;
-//RS         Ok(identity)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), WebErrorPageError> {
-//RS         validate_identity(&self.request_id, "request id")?;
-//RS         validate_identity(&self.session_id, "session id")?;
-//RS         validate_source_identity(&self.source_id)?;
-//RS         validate_identity(&self.build_id, "build id")?;
-//RS         validate_identity(&self.revision, "revision")?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"request_id\":{},\"session_id\":{},\"source_id\":{},\"build_id\":{},\"revision\":{}}}",
-//RS             json_string(&self.request_id),
-//RS             json_string(&self.session_id),
-//RS             json_string(&self.source_id),
-//RS             json_string(&self.build_id),
-//RS             json_string(&self.revision),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// A byte range into a source file.  Equal endpoints are allowed for an
-//RS /// insertion point; reversed or unbounded ranges fail closed.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorSpan {
-//RS     pub start: usize,
-//RS     pub end: usize,
-//RS }
-//RS 
-//RS impl WebErrorSpan {
-//RS     pub fn new(start: usize, end: usize) -> Result<Self, WebErrorPageError> {
-//RS         let span = Self { start, end };
-//RS         span.validate()?;
-//RS         Ok(span)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), WebErrorPageError> {
-//RS         if self.end < self.start
-//RS             || self.start > MAX_WEB_ERROR_SPAN_BYTES
-//RS             || self.end > MAX_WEB_ERROR_SPAN_BYTES
-//RS         {
-//RS             return Err(WebErrorPageError::InvalidSpan);
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn json(self) -> String {
-//RS         format!("{{\"start\":{},\"end\":{}}}", self.start, self.end)
-//RS     }
-//RS }
-//RS 
-//RS impl From<WebErrorSpan> for Span {
-//RS     fn from(span: WebErrorSpan) -> Self {
-//RS         Span::new(span.start, span.end)
-//RS     }
-//RS }
-//RS 
-//RS /// One source frame or excerpt.  An absent `span` or `excerpt` is an explicit
-//RS /// unavailable fact, not a guessed value.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorSourceExcerpt {
-//RS     pub source_id: String,
-//RS     pub label: String,
-//RS     pub span: Option<WebErrorSpan>,
-//RS     pub line: Option<u32>,
-//RS     pub column: Option<u32>,
-//RS     pub excerpt: Option<String>,
-//RS }
-//RS 
-//RS impl WebErrorSourceExcerpt {
-//RS     pub fn new(
-//RS         source_id: impl Into<String>,
-//RS         label: impl Into<String>,
-//RS         start: usize,
-//RS         end: usize,
-//RS         excerpt: Option<String>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let span = Some(WebErrorSpan::new(start, end)?);
-//RS         Self::with_parts(source_id.into(), label.into(), span, None, None, excerpt)
-//RS     }
-//RS 
-//RS     pub fn without_span(
-//RS         source_id: impl Into<String>,
-//RS         label: impl Into<String>,
-//RS         excerpt: Option<String>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         Self::with_parts(
-//RS             source_id.into(),
-//RS             label.into(),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             excerpt,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn with_location(
-//RS         mut self,
-//RS         line: Option<u32>,
-//RS         column: Option<u32>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         if line.is_some_and(|value| value == 0) || column.is_some_and(|value| value == 0) {
-//RS             return Err(WebErrorPageError::InvalidSpan);
-//RS         }
-//RS         self.line = line;
-//RS         self.column = column;
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), WebErrorPageError> {
-//RS         validate_source_identity(&self.source_id)?;
-//RS         validate_identity(&self.label, "source label")?;
-//RS         if let Some(span) = self.span {
-//RS             span.validate()?;
-//RS         }
-//RS         if self.line.is_some_and(|value| value == 0) || self.column.is_some_and(|value| value == 0) {
-//RS             return Err(WebErrorPageError::InvalidSpan);
-//RS         }
-//RS         validate_optional_text(&self.excerpt, "source excerpt", MAX_WEB_ERROR_SOURCE_BYTES)?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn with_parts(
-//RS         source_id: String,
-//RS         label: String,
-//RS         span: Option<WebErrorSpan>,
-//RS         line: Option<u32>,
-//RS         column: Option<u32>,
-//RS         excerpt: Option<String>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let item = Self {
-//RS             source_id: normalize_source_identity(source_id)?,
-//RS             label: normalize_identity(label, "source label")?,
-//RS             span,
-//RS             line,
-//RS             column,
-//RS             excerpt: normalize_optional_text(excerpt, "source excerpt", MAX_WEB_ERROR_SOURCE_BYTES)?,
-//RS         };
-//RS         item.validate()?;
-//RS         Ok(item)
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         let mut fields = vec![
-//RS             format!("\"source_id\":{}", json_string(&self.source_id)),
-//RS             format!("\"label\":{}", json_string(&self.label)),
-//RS         ];
-//RS         if let Some(span) = self.span {
-//RS             fields.push(format!("\"span\":{}", span.json()));
-//RS         }
-//RS         if let Some(line) = self.line {
-//RS             fields.push(format!("\"line\":{line}"));
-//RS         }
-//RS         if let Some(column) = self.column {
-//RS             fields.push(format!("\"column\":{column}"));
-//RS         }
-//RS         if let Some(excerpt) = &self.excerpt {
-//RS             fields.push(format!("\"excerpt\":{}", json_string(excerpt)));
-//RS         }
-//RS         format!("{{{}}}", fields.join(","))
-//RS     }
-//RS }
-//RS 
-//RS /// A safe action link.  Only local paths, HTTPS/HTTP, and the Jet inspection
-//RS /// scheme are accepted; script and credential-bearing URLs are rejected.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorActionLink {
-//RS     pub label: String,
-//RS     pub href: String,
-//RS }
-//RS 
-//RS impl WebErrorActionLink {
-//RS     pub fn new(
-//RS         label: impl Into<String>,
-//RS         href: impl Into<String>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let link = Self {
-//RS             label: normalize_identity(label.into(), "action label")?,
-//RS             href: normalize_href(href.into())?,
-//RS         };
-//RS         link.validate()?;
-//RS         Ok(link)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), WebErrorPageError> {
-//RS         validate_identity(&self.label, "action label")?;
-//RS         validate_href(&self.href)
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"label\":{},\"href\":{}}}",
-//RS             json_string(&self.label),
-//RS             json_string(&self.href),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// One typed source edit attached to a terminal diagnostic.
-//RS ///
-//RS /// The edit remains a fact owned by the diagnostic.  Its source identity and
-//RS /// grade are carried into the web projection without parsing terminal output.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorEdit {
-//RS     pub source_id: String,
-//RS     pub span: WebErrorSpan,
-//RS     pub new_text: String,
-//RS     pub applicability: Option<String>,
-//RS     pub safety: Option<String>,
-//RS }
-//RS 
-//RS impl WebErrorEdit {
-//RS     pub fn new(
-//RS         source_id: impl Into<String>,
-//RS         span: WebErrorSpan,
-//RS         new_text: impl Into<String>,
-//RS         applicability: Option<String>,
-//RS         safety: Option<String>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let edit = Self {
-//RS             source_id: normalize_source_identity(source_id.into())?,
-//RS             span,
-//RS             new_text: normalize_text(new_text.into(), "fix edit", MAX_WEB_ERROR_TEXT_BYTES)?,
-//RS             applicability: applicability
-//RS                 .map(|value| normalize_identity(value, "fix applicability"))
-//RS                 .transpose()?,
-//RS             safety: safety
-//RS                 .map(|value| normalize_identity(value, "fix safety"))
-//RS                 .transpose()?,
-//RS         };
-//RS         edit.validate()?;
-//RS         Ok(edit)
-//RS     }
-//RS 
-//RS     fn from_diagnostic(
-//RS         source_id: &str,
-//RS         edit: &jet_foundation::Diagnostics::TextEdit,
-//RS         applicability: Option<&str>,
-//RS         safety: Option<&str>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         Self::new(
-//RS             source_id,
-//RS             web_span_from_span(edit.span)?,
-//RS             edit.new_text.clone(),
-//RS             applicability.map(str::to_string),
-//RS             safety.map(str::to_string),
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), WebErrorPageError> {
-//RS         validate_source_identity(&self.source_id)?;
-//RS         self.span.validate()?;
-//RS         if self.new_text.len() > MAX_WEB_ERROR_TEXT_BYTES {
-//RS             return Err(WebErrorPageError::TextTooLarge("fix edit"));
-//RS         }
-//RS         if self.new_text.chars().any(|character| {
-//RS             character.is_control()
-//RS                 && !matches!(character, '\n' | '\r' | '\t')
-//RS         }) {
-//RS             return Err(WebErrorPageError::ControlCharacter("fix edit"));
-//RS         }
-//RS         if contains_sensitive_marker(&self.new_text) {
-//RS             return Err(WebErrorPageError::UnsafeContent("fix edit"));
-//RS         }
-//RS         if let Some(value) = &self.applicability {
-//RS             validate_identity(value, "fix applicability")?;
-//RS         }
-//RS         if let Some(value) = &self.safety {
-//RS             validate_identity(value, "fix safety")?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         let mut fields = vec![
-//RS             format!("\"source_id\":{}", json_string(&self.source_id)),
-//RS             format!("\"span\":{}", self.span.json()),
-//RS             format!("\"new_text\":{}", json_string(&self.new_text)),
-//RS         ];
-//RS         if let Some(value) = &self.applicability {
-//RS             fields.push(format!("\"applicability\":{}", json_string(value)));
-//RS         }
-//RS         if let Some(value) = &self.safety {
-//RS             fields.push(format!("\"safety\":{}", json_string(value)));
-//RS         }
-//RS         format!("{{{}}}", fields.join(","))
-//RS     }
-//RS }
-//RS 
-//RS /// A typed compiler or host failure that is not a user-authored diagnostic.
-//RS ///
-//RS /// Internal failures are rendered through the same bounded page, but retain a
-//RS /// separate wire kind so an ICE can never be mistaken for a registered
-//RS /// diagnostic row.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorInternalFact {
-//RS     pub code: String,
-//RS     pub message: String,
-//RS }
-//RS 
-//RS impl WebErrorInternalFact {
-//RS     pub fn new(
-//RS         code: impl Into<String>,
-//RS         message: impl Into<String>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let fact = Self {
-//RS             code: normalize_code(code.into())?,
-//RS             message: normalize_required_text(
-//RS                 message.into(),
-//RS                 "internal error message",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?,
-//RS         };
-//RS         fact.validate()?;
-//RS         Ok(fact)
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), WebErrorPageError> {
-//RS         validate_code(&self.code)?;
-//RS         if self.message.is_empty() {
-//RS             return Err(WebErrorPageError::EmptyField("internal error message"));
-//RS         }
-//RS         validate_optional_text(
-//RS             &Some(self.message.clone()),
-//RS             "internal error message",
-//RS             MAX_WEB_ERROR_TEXT_BYTES,
-//RS         )
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"code\":{},\"message\":{}}}",
-//RS             json_string(&self.code),
-//RS             json_string(&self.message)
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Real facts read from `DevStatus`'s live snapshot. `WebHost` owns
-//RS /// `DevStatus` privately, so this is the minimal typed handoff instead of a
-//RS /// visibility change or a module cycle. Fields mirror `DevStatusSnapshot`
-//RS /// exactly: `code`/`diagnostic` are empty for every state but `"error"`,
-//RS /// matching `DevStatus::mark_error`'s own invariant, and no rendered text is
-//RS /// re-parsed to recover them.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorDevStatusFacts {
-//RS     pub state: String,
-//RS     pub code: String,
-//RS     pub diagnostic: String,
-//RS }
-//RS 
-//RS /// The exact sentinel `CmdCompile`/`CmdDevTools` write as `DevStatus`'s
-//RS /// `code` for a compiler or host failure that is not a registered
-//RS /// diagnostic (`Source/CmdCompile.rs`'s `host.mark_error("ICE", ...)`
-//RS /// calls). Devstatus facts carrying this code must render through
-//RS /// [`WebErrorPage::from_internal`], never as a diagnostic row.
-//RS pub const DEV_STATUS_INTERNAL_ERROR_CODE: &str = "ICE";
-//RS 
-//RS impl WebErrorDevStatusFacts {
-//RS     pub fn new(
-//RS         state: impl Into<String>,
-//RS         code: impl Into<String>,
-//RS         diagnostic: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             state: state.into(),
-//RS             code: code.into(),
-//RS             diagnostic: diagnostic.into(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Whether this snapshot's `code` is the internal-failure sentinel
-//RS     /// rather than a registered diagnostic code. An ICE must never be
-//RS     /// mistaken for a diagnostic row, so the projection dispatches on this
-//RS     /// exact fact instead of guessing from message text.
-//RS     pub fn is_internal_failure(&self) -> bool {
-//RS         self.code == DEV_STATUS_INTERNAL_ERROR_CODE
-//RS     }
-//RS 
-//RS     /// Whether the snapshot names a live error. `"ready"`/`"building"`/
-//RS     /// `"reconnecting"` are explicit non-error facts, not an absent value to
-//RS     /// guess past.
-//RS     pub fn is_error(&self) -> bool {
-//RS         self.state == "error"
-//RS     }
-//RS }
-//RS 
-//RS /// One typed diagnostic fact.  Runtime reports may legitimately lack `why`
-//RS /// and `fix`; their absence is retained rather than reconstructed from text.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorDiagnosticFact {
-//RS     pub code: Option<String>,
-//RS     pub what: Option<String>,
-//RS     pub why: Option<String>,
-//RS     pub fix: Option<String>,
-//RS     pub severity: Option<String>,
-//RS     pub moment: Option<String>,
-//RS     pub typed_identity: Option<String>,
-//RS     pub span: Option<WebErrorSpan>,
-//RS }
-//RS 
-//RS impl WebErrorDiagnosticFact {
-//RS     /// Construct a complete terminal diagnostic from its four owned fields.
-//RS     pub fn new(
-//RS         code: impl Into<String>,
-//RS         what: impl Into<String>,
-//RS         why: impl Into<String>,
-//RS         fix: impl Into<String>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let fact = Self {
-//RS             code: Some(normalize_code(code.into())?),
-//RS             what: Some(normalize_required_text(
-//RS                 what.into(),
-//RS                 "diagnostic what",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?),
-//RS             why: Some(normalize_required_text(
-//RS                 why.into(),
-//RS                 "diagnostic why",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?),
-//RS             fix: Some(normalize_required_text(
-//RS                 fix.into(),
-//RS                 "diagnostic fix",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?),
-//RS             severity: None,
-//RS             moment: None,
-//RS             typed_identity: None,
-//RS             span: None,
-//RS         };
-//RS         fact.validate()?;
-//RS         Ok(fact)
-//RS     }
-//RS 
-//RS     /// Copy the terminal diagnostic's typed fields.  No rendered terminal
-//RS     /// string is parsed and an empty fix remains unavailable.
-//RS     pub fn from_diagnostic(diagnostic: &Diagnostic) -> Result<Self, WebErrorPageError> {
-//RS         let fact = Self {
-//RS             code: Some(normalize_code(diagnostic.code.clone())?),
-//RS             what: Some(normalize_required_text(
-//RS                 diagnostic.what.clone(),
-//RS                 "diagnostic what",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?),
-//RS             why: normalize_optional_text(
-//RS                 Some(diagnostic.why.clone()),
-//RS                 "diagnostic why",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?,
-//RS             fix: normalize_optional_text(
-//RS                 Some(diagnostic.fix.clone()),
-//RS                 "diagnostic fix",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?,
-//RS             severity: Some(match diagnostic.severity {
-//RS                 jet_foundation::Diagnostics::Severity::Error => "error".to_string(),
-//RS                 jet_foundation::Diagnostics::Severity::Lint => "lint".to_string(),
-//RS             }),
-//RS             moment: Some(diagnostic.moment.as_str().to_string()),
-//RS             typed_identity: None,
-//RS             span: diagnostic.span.map(web_span_from_span).transpose()?,
-//RS         };
-//RS         fact.validate()?;
-//RS         Ok(fact)
-//RS     }
-//RS 
-//RS     /// Project a normalized runtime report without using `Display` output.
-//RS     /// `JetErrorReport` has no authored why/fix fields, so those fields stay
-//RS     /// absent in the web fact.
-//RS     pub fn from_report(report: &JetErrorReport) -> Result<Self, WebErrorPageError> {
-//RS         let typed_identity = report
-//RS             .typed_identity
-//RS             .clone()
-//RS             .map(|value| normalize_identity(value, "typed error identity"))
-//RS             .transpose()?;
-//RS         let span = report
-//RS             .details
-//RS             .as_ref()
-//RS             .and_then(|details| details.source_span.clone())
-//RS             .map(|span| WebErrorSpan::new(span.start, span.end))
-//RS             .transpose()?;
-//RS         let fact = Self {
-//RS             code: report
-//RS                 .code
-//RS                 .clone()
-//RS                 .map(normalize_code)
-//RS                 .transpose()?,
-//RS             what: Some(normalize_required_text(
-//RS                 report.message.clone(),
-//RS                 "diagnostic what",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?),
-//RS             why: None,
-//RS             fix: None,
-//RS             severity: None,
-//RS             moment: None,
-//RS             typed_identity,
-//RS             span,
-//RS         };
-//RS         fact.validate()?;
-//RS         Ok(fact)
-//RS     }
-//RS 
-//RS     /// Copy the exact code/diagnostic strings `DevStatus` recorded for its
-//RS     /// current `"error"` snapshot. There is no why/fix in a dev-status fact,
-//RS     /// so those fields stay absent rather than reconstructed.
-//RS     pub fn from_dev_status(facts: &WebErrorDevStatusFacts) -> Result<Self, WebErrorPageError> {
-//RS         let code = if facts.code.is_empty() {
-//RS             None
-//RS         } else {
-//RS             Some(normalize_code(facts.code.clone())?)
-//RS         };
-//RS         let fact = Self {
-//RS             code,
-//RS             what: Some(normalize_required_text(
-//RS                 facts.diagnostic.clone(),
-//RS                 "diagnostic what",
-//RS                 MAX_WEB_ERROR_TEXT_BYTES,
-//RS             )?),
-//RS             why: None,
-//RS             fix: None,
-//RS             severity: None,
-//RS             moment: None,
-//RS             typed_identity: None,
-//RS             span: None,
-//RS         };
-//RS         fact.validate()?;
-//RS         Ok(fact)
-//RS     }
-//RS 
-//RS     pub fn with_span(mut self, span: Option<WebErrorSpan>) -> Result<Self, WebErrorPageError> {
-//RS         if let Some(value) = span {
-//RS             value.validate()?;
-//RS         }
-//RS         self.span = span;
-//RS         self.validate()?;
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), WebErrorPageError> {
-//RS         if let Some(code) = &self.code {
-//RS             validate_code(code)?;
-//RS         }
-//RS         if self.what.is_none() {
-//RS             return Err(WebErrorPageError::EmptyField("diagnostic what"));
-//RS         }
-//RS         validate_optional_text(&self.what, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?;
-//RS         validate_optional_text(&self.why, "diagnostic why", MAX_WEB_ERROR_TEXT_BYTES)?;
-//RS         validate_optional_text(&self.fix, "diagnostic fix", MAX_WEB_ERROR_TEXT_BYTES)?;
-//RS         if let Some(severity) = &self.severity {
-//RS             validate_identity(severity, "diagnostic severity")?;
-//RS         }
-//RS         if let Some(moment) = &self.moment {
-//RS             validate_identity(moment, "diagnostic moment")?;
-//RS         }
-//RS         if let Some(identity) = &self.typed_identity {
-//RS             validate_identity(identity, "typed error identity")?;
-//RS         }
-//RS         if let Some(span) = self.span {
-//RS             span.validate()?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         self.json_with_edits(&[])
-//RS     }
-//RS 
-//RS     fn json_with_edits(&self, edits: &[WebErrorEdit]) -> String {
-//RS         let mut fields = Vec::new();
-//RS         if let Some(code) = &self.code {
-//RS             fields.push(format!("\"code\":{}", json_string(code)));
-//RS         }
-//RS         if let Some(what) = &self.what {
-//RS             fields.push(format!("\"what\":{}", json_string(what)));
-//RS         }
-//RS         if let Some(why) = &self.why {
-//RS             fields.push(format!("\"why\":{}", json_string(why)));
-//RS         }
-//RS         if let Some(fix) = &self.fix {
-//RS             fields.push(format!("\"fix\":{}", json_string(fix)));
-//RS         }
-//RS         if let Some(severity) = &self.severity {
-//RS             fields.push(format!("\"severity\":{}", json_string(severity)));
-//RS         }
-//RS         if let Some(moment) = &self.moment {
-//RS             fields.push(format!("\"moment\":{}", json_string(moment)));
-//RS         }
-//RS         if let Some(identity) = &self.typed_identity {
-//RS             fields.push(format!("\"typed_identity\":{}", json_string(identity)));
-//RS         }
-//RS         if let Some(span) = self.span {
-//RS             fields.push(format!("\"span\":{}", span.json()));
-//RS         }
-//RS         if !edits.is_empty() {
-//RS             let edits = edits
-//RS                 .iter()
-//RS                 .map(WebErrorEdit::json)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             fields.push(format!("\"fix_edits\":[{edits}]"));
-//RS         }
-//RS         format!("{{{}}}", fields.join(","))
-//RS     }
-//RS 
-//RS     fn internal_placeholder() -> Self {
-//RS         Self {
-//RS             code: None,
-//RS             what: Some("Internal development-service failure".to_string()),
-//RS             why: None,
-//RS             fix: None,
-//RS             severity: None,
-//RS             moment: None,
-//RS             typed_identity: None,
-//RS             span: None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The completed web projection.  `fact_digest` is computed before either
-//RS /// renderer runs and is therefore identical for the HTML and JSON bodies.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorProjection {
-//RS     pub status: u16,
-//RS     pub content_type: WebErrorContentType,
-//RS     pub body: String,
-//RS     pub fact_digest: String,
-//RS     pub failure_id: String,
-//RS     pub redacted: bool,
-//RS }
-//RS 
-//RS /// A validated, source-backed failure page ready for content negotiation.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct WebErrorPage {
-//RS     identity: WebErrorPageIdentity,
-//RS     diagnostic: WebErrorDiagnosticFact,
-//RS     internal: Option<WebErrorInternalFact>,
-//RS     edits: Vec<WebErrorEdit>,
-//RS     source_excerpts: Vec<WebErrorSourceExcerpt>,
-//RS     related_cause: Option<WebErrorDiagnosticFact>,
-//RS     action_links: Vec<WebErrorActionLink>,
-//RS     status: u16,
-//RS     failure_id: String,
-//RS }
-//RS 
-//RS impl WebErrorPage {
-//RS     pub fn new(
-//RS         identity: WebErrorPageIdentity,
-//RS         diagnostic: WebErrorDiagnosticFact,
-//RS         source_excerpts: Vec<WebErrorSourceExcerpt>,
-//RS         related_cause: Option<WebErrorDiagnosticFact>,
-//RS         action_links: Vec<WebErrorActionLink>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         Self::new_with_status(
-//RS             500,
-//RS             identity,
-//RS             diagnostic,
-//RS             source_excerpts,
-//RS             related_cause,
-//RS             action_links,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn new_with_status(
-//RS         status: u16,
-//RS         identity: WebErrorPageIdentity,
-//RS         diagnostic: WebErrorDiagnosticFact,
-//RS         mut source_excerpts: Vec<WebErrorSourceExcerpt>,
-//RS         related_cause: Option<WebErrorDiagnosticFact>,
-//RS         mut action_links: Vec<WebErrorActionLink>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         validate_status(status)?;
-//RS         identity.validate()?;
-//RS         diagnostic.validate()?;
-//RS         if let Some(cause) = &related_cause {
-//RS             cause.validate()?;
-//RS         }
-//RS         if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS {
-//RS             return Err(WebErrorPageError::TooManyItems("source excerpts"));
-//RS         }
-//RS         if action_links.len() > MAX_WEB_ERROR_ACTION_LINKS {
-//RS             return Err(WebErrorPageError::TooManyItems("action links"));
-//RS         }
-//RS         for excerpt in &source_excerpts {
-//RS             excerpt.validate()?;
-//RS         }
-//RS         for link in &action_links {
-//RS             link.validate()?;
-//RS         }
-//RS         source_excerpts.sort_by(source_excerpt_order);
-//RS         action_links.sort_by(action_link_order);
-//RS         let page = Self {
-//RS             identity,
-//RS             diagnostic,
-//RS             internal: None,
-//RS             edits: Vec::new(),
-//RS             source_excerpts,
-//RS             related_cause,
-//RS             action_links,
-//RS             status,
-//RS             failure_id: String::new(),
-//RS         };
-//RS         page.validate_size()?;
-//RS         let failure_id = page.compute_failure_id();
-//RS         Ok(Self { failure_id, ..page })
-//RS     }
-//RS 
-//RS     /// Build a page directly from the normalized runtime report.  Context and
-//RS     /// journey frames remain typed facts; they are never recovered from prose.
-//RS     pub fn from_report(
-//RS         identity: WebErrorPageIdentity,
-//RS         report: &JetErrorReport,
-//RS         action_links: Vec<WebErrorActionLink>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let diagnostic = WebErrorDiagnosticFact::from_report(report)?;
-//RS         let source_excerpts = report_source_excerpts(report)?;
-//RS         let related_cause = report
-//RS             .causes
-//RS             .first()
-//RS             .map(WebErrorDiagnosticFact::from_report)
-//RS             .transpose()?;
-//RS         Self::new(
-//RS             identity,
-//RS             diagnostic,
-//RS             source_excerpts,
-//RS             related_cause,
-//RS             action_links,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Build a page from the terminal diagnostic facts and caller-supplied
-//RS     /// source excerpts.  This copies fields instead of parsing terminal text.
-//RS     pub fn from_diagnostic(
-//RS         identity: WebErrorPageIdentity,
-//RS         diagnostic: &Diagnostic,
-//RS         source_excerpts: Vec<WebErrorSourceExcerpt>,
-//RS         action_links: Vec<WebErrorActionLink>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let source_id = identity.source_id.clone();
-//RS         let applicability = diagnostic.applicability.map(|value| value.as_str());
-//RS         let safety = diagnostic.safety.map(|value| value.as_str());
-//RS         let edits = diagnostic
-//RS             .all_edits()
-//RS             .iter()
-//RS             .map(|edit| WebErrorEdit::from_diagnostic(&source_id, edit, applicability, safety))
-//RS             .collect::<Result<Vec<_>, _>>()?;
-//RS         Self::new(
-//RS             identity,
-//RS             WebErrorDiagnosticFact::from_diagnostic(diagnostic)?,
-//RS             source_excerpts,
-//RS             None,
-//RS             action_links,
-//RS         )?
-//RS         .with_edits(edits)
-//RS     }
-//RS 
-//RS     /// Build a page for a compiler or host failure that is not a user
-//RS     /// diagnostic.  The separate internal wire kind prevents an ICE message
-//RS     /// from entering the registered diagnostic-code surface.
-//RS     pub fn from_internal(
-//RS         identity: WebErrorPageIdentity,
-//RS         code: impl Into<String>,
-//RS         message: impl Into<String>,
-//RS         action_links: Vec<WebErrorActionLink>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         let internal = WebErrorInternalFact::new(code, message)?;
-//RS         let mut page = Self::new(
-//RS             identity,
-//RS             WebErrorDiagnosticFact::internal_placeholder(),
-//RS             Vec::new(),
-//RS             None,
-//RS             action_links,
-//RS         )?;
-//RS         page.internal = Some(internal);
-//RS         page.failure_id = page.compute_failure_id();
-//RS         page.validate_size()?;
-//RS         Ok(page)
-//RS     }
-//RS 
-//RS     /// Build a page directly from `DevStatus`'s live snapshot in one call.
-//RS     /// `Ok(None)` is the explicit "no error is live" fact: a `"ready"` or
-//RS     /// `"building"` snapshot must never become a placeholder failure page.
-//RS     /// A `DEV_STATUS_INTERNAL_ERROR_CODE` snapshot routes through
-//RS     /// [`Self::from_internal`] so an ICE keeps its separate wire kind
-//RS     /// instead of being copied into a diagnostic's `code` field.
-//RS     pub fn from_dev_status(
-//RS         identity: WebErrorPageIdentity,
-//RS         facts: &WebErrorDevStatusFacts,
-//RS         action_links: Vec<WebErrorActionLink>,
-//RS     ) -> Result<Option<Self>, WebErrorPageError> {
-//RS         if !facts.is_error() {
-//RS             return Ok(None);
-//RS         }
-//RS         if facts.is_internal_failure() {
-//RS             return Self::from_internal(
-//RS                 identity,
-//RS                 facts.code.clone(),
-//RS                 facts.diagnostic.clone(),
-//RS                 action_links,
-//RS             )
-//RS             .map(Some);
-//RS         }
-//RS         let diagnostic = WebErrorDiagnosticFact::from_dev_status(facts)?;
-//RS         Self::new(identity, diagnostic, Vec::new(), None, action_links).map(Some)
-//RS     }
-//RS 
-//RS     pub fn with_edits(mut self, mut edits: Vec<WebErrorEdit>) -> Result<Self, WebErrorPageError> {
-//RS         if edits.len() > MAX_WEB_ERROR_EDITS {
-//RS             return Err(WebErrorPageError::TooManyItems("fix edits"));
-//RS         }
-//RS         for edit in &edits {
-//RS             edit.validate()?;
-//RS         }
-//RS         edits.sort_by(web_error_edit_order);
-//RS         self.edits = edits;
-//RS         self.failure_id = self.compute_failure_id();
-//RS         self.validate_size()?;
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     pub fn with_status(mut self, status: u16) -> Result<Self, WebErrorPageError> {
-//RS         validate_status(status)?;
-//RS         self.status = status;
-//RS         self.failure_id = self.compute_failure_id();
-//RS         self.validate_size()?;
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     pub fn identity(&self) -> &WebErrorPageIdentity {
-//RS         &self.identity
-//RS     }
-//RS 
-//RS     pub fn diagnostic(&self) -> &WebErrorDiagnosticFact {
-//RS         &self.diagnostic
-//RS     }
-//RS     pub fn internal(&self) -> Option<&WebErrorInternalFact> {
-//RS         self.internal.as_ref()
-//RS     }
-//RS 
-//RS     pub fn is_internal(&self) -> bool {
-//RS         self.internal.is_some()
-//RS     }
-//RS 
-//RS     pub fn edits(&self) -> &[WebErrorEdit] {
-//RS         &self.edits
-//RS     }
-//RS 
-//RS     pub fn with_source_excerpts(
-//RS         mut self,
-//RS         mut source_excerpts: Vec<WebErrorSourceExcerpt>,
-//RS     ) -> Result<Self, WebErrorPageError> {
-//RS         if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS {
-//RS             return Err(WebErrorPageError::TooManyItems("source excerpts"));
-//RS         }
-//RS         for excerpt in &source_excerpts {
-//RS             excerpt.validate()?;
-//RS         }
-//RS         source_excerpts.sort_by(source_excerpt_order);
-//RS         self.source_excerpts = source_excerpts;
-//RS         self.failure_id = self.compute_failure_id();
-//RS         self.validate_size()?;
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS 
-//RS     pub fn source_excerpts(&self) -> &[WebErrorSourceExcerpt] {
-//RS         &self.source_excerpts
-//RS     }
-//RS 
-//RS     pub fn related_cause(&self) -> Option<&WebErrorDiagnosticFact> {
-//RS         self.related_cause.as_ref()
-//RS     }
-//RS 
-//RS     pub fn action_links(&self) -> &[WebErrorActionLink] {
-//RS         &self.action_links
-//RS     }
-//RS 
-//RS     pub const fn status(&self) -> u16 {
-//RS         self.status
-//RS     }
-//RS 
-//RS     pub fn failure_id(&self) -> &str {
-//RS         &self.failure_id
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), WebErrorPageError> {
-//RS         validate_status(self.status)?;
-//RS         self.identity.validate()?;
-//RS         self.diagnostic.validate()?;
-//RS         if let Some(internal) = &self.internal {
-//RS             internal.validate()?;
-//RS         }
-//RS         if let Some(cause) = &self.related_cause {
-//RS             cause.validate()?;
-//RS         }
-//RS         if self.source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS {
-//RS             return Err(WebErrorPageError::TooManyItems("source excerpts"));
-//RS         }
-//RS         if self.edits.len() > MAX_WEB_ERROR_EDITS {
-//RS             return Err(WebErrorPageError::TooManyItems("fix edits"));
-//RS         }
-//RS         if self.action_links.len() > MAX_WEB_ERROR_ACTION_LINKS {
-//RS             return Err(WebErrorPageError::TooManyItems("action links"));
-//RS         }
-//RS         for edit in &self.edits {
-//RS             edit.validate()?;
-//RS         }
-//RS         for excerpt in &self.source_excerpts {
-//RS             excerpt.validate()?;
-//RS         }
-//RS         for link in &self.action_links {
-//RS             link.validate()?;
-//RS         }
-//RS         self.validate_size()
-//RS     }
-//RS 
-//RS     /// Negotiate HTML or JSON and render the same validated facts in that
-//RS     /// media type.  `capabilities` defaults to redacted unless local details
-//RS     /// are explicitly granted and the build is not release.
-//RS     pub fn project<C: WebErrorCapabilityInput>(
-//RS         &self,
-//RS         accept: &str,
-//RS         capabilities: C,
-//RS     ) -> Result<WebErrorProjection, WebErrorPageError> {
-//RS         if accept.len() > MAX_WEB_ERROR_ACCEPT_BYTES || accept.chars().any(char::is_control) {
-//RS             return Err(WebErrorPageError::InvalidAccept);
-//RS         }
-//RS         self.validate()?;
-//RS         let local =
-//RS             cfg!(debug_assertions) && capabilities.local_details() && !capabilities.release_build();
-//RS         let facts = WebErrorFacts::from_page(self, local);
-//RS         let fact_digest = sha256_hex(facts.canonical_json().as_bytes());
-//RS         let content_type = negotiate_content_type(accept);
-//RS         let body = match content_type {
-//RS             WebErrorContentType::Html => facts.render_html(),
-//RS             WebErrorContentType::Json => facts.render_json(),
-//RS         };
-//RS         if body.len() > MAX_WEB_ERROR_OUTPUT_BYTES {
-//RS             return Err(WebErrorPageError::OutputTooLarge);
-//RS         }
-//RS         Ok(WebErrorProjection {
-//RS             status: self.status,
-//RS             content_type,
-//RS             body,
-//RS             fact_digest,
-//RS             failure_id: self.failure_id.clone(),
-//RS             redacted: facts.redacted,
-//RS         })
-//RS     }
-//RS 
-//RS     fn validate_size(&self) -> Result<(), WebErrorPageError> {
-//RS         let mut bytes = self.identity.request_id.len()
-//RS             + self.identity.session_id.len()
-//RS             + self.identity.source_id.len()
-//RS             + self.identity.build_id.len()
-//RS             + self.identity.revision.len()
-//RS             + diagnostic_bytes(&self.diagnostic);
-//RS         if let Some(internal) = &self.internal {
-//RS             bytes = bytes
-//RS                 .saturating_add(internal.code.len())
-//RS                 .saturating_add(internal.message.len());
-//RS         }
-//RS         for edit in &self.edits {
-//RS             bytes = bytes
-//RS                 .saturating_add(edit.source_id.len())
-//RS                 .saturating_add(edit.new_text.len())
-//RS                 .saturating_add(edit.applicability.as_ref().map_or(0, String::len))
-//RS                 .saturating_add(edit.safety.as_ref().map_or(0, String::len));
-//RS         }
-//RS         if let Some(cause) = &self.related_cause {
-//RS             bytes = bytes.saturating_add(diagnostic_bytes(cause));
-//RS         }
-//RS         for excerpt in &self.source_excerpts {
-//RS             bytes = bytes
-//RS                 .saturating_add(excerpt.source_id.len())
-//RS                 .saturating_add(excerpt.label.len())
-//RS                 .saturating_add(excerpt.excerpt.as_ref().map_or(0, String::len));
-//RS         }
-//RS         for link in &self.action_links {
-//RS             bytes = bytes.saturating_add(link.label.len()).saturating_add(link.href.len());
-//RS         }
-//RS         if bytes > MAX_WEB_ERROR_INPUT_BYTES {
-//RS             return Err(WebErrorPageError::InputTooLarge);
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn compute_failure_id(&self) -> String {
-//RS         let facts = WebErrorFacts::from_page(self, true);
-//RS         format!("fail-{}", sha256_hex(facts.canonical_json().as_bytes()))
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS struct WebErrorFacts {
-//RS     status: u16,
-//RS     failure_id: String,
-//RS     identity: WebErrorPageIdentity,
-//RS     diagnostic: WebErrorDiagnosticFact,
-//RS     internal: Option<WebErrorInternalFact>,
-//RS     edits: Vec<WebErrorEdit>,
-//RS     source_excerpts: Vec<WebErrorSourceExcerpt>,
-//RS     related_cause: Option<WebErrorDiagnosticFact>,
-//RS     action_links: Vec<WebErrorActionLink>,
-//RS     redacted: bool,
-//RS }
-//RS 
-//RS impl WebErrorFacts {
-//RS     fn from_page(page: &WebErrorPage, local: bool) -> Self {
-//RS         Self {
-//RS             status: page.status,
-//RS             failure_id: page.failure_id.clone(),
-//RS             identity: WebErrorPageIdentity {
-//RS                 request_id: redact_identity(&page.identity.request_id),
-//RS                 session_id: redact_identity(&page.identity.session_id),
-//RS                 source_id: redact_identity(&page.identity.source_id),
-//RS                 build_id: redact_identity(&page.identity.build_id),
-//RS                 revision: redact_identity(&page.identity.revision),
-//RS             },
-//RS             diagnostic: if local {
-//RS                 page.diagnostic.clone()
-//RS             } else {
-//RS                 let mut diagnostic = page.diagnostic.clone();
-//RS                 diagnostic.why = None;
-//RS                 diagnostic.fix = None;
-//RS                 diagnostic.typed_identity = None;
-//RS                 diagnostic.span = None;
-//RS                 diagnostic
-//RS             },
-//RS             internal: page.internal.as_ref().map(|internal| {
-//RS                 if local {
-//RS                     internal.clone()
-//RS                 } else {
-//RS                     WebErrorInternalFact {
-//RS                         code: internal.code.clone(),
-//RS                         message: "[redacted]".to_string(),
-//RS                     }
-//RS                 }
-//RS             }),
-//RS             edits: if local { page.edits.clone() } else { Vec::new() },
-//RS             source_excerpts: if local {
-//RS                 page.source_excerpts.clone()
-//RS             } else {
-//RS                 Vec::new()
-//RS             },
-//RS             related_cause: if local {
-//RS                 page.related_cause.clone()
-//RS             } else {
-//RS                 None
-//RS             },
-//RS             action_links: if local {
-//RS                 page.action_links.clone()
-//RS             } else {
-//RS                 Vec::new()
-//RS             },
-//RS             redacted: !local,
-//RS         }
-//RS     }
-//RS 
-//RS     fn canonical_json(&self) -> String {
-//RS         self.json(false)
-//RS     }
-//RS 
-//RS     fn render_json(&self) -> String {
-//RS         self.json(true)
-//RS     }
-//RS 
-//RS     fn json(&self, include_failure_id: bool) -> String {
-//RS         let source_excerpts = self
-//RS             .source_excerpts
-//RS             .iter()
-//RS             .map(WebErrorSourceExcerpt::json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let action_links = self
-//RS             .action_links
-//RS             .iter()
-//RS             .map(WebErrorActionLink::json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let mut fields = vec![
-//RS             format!("\"schema\":{}", json_string(WEB_ERROR_PAGE_SCHEMA)),
-//RS             format!("\"status\":{}", self.status),
-//RS         ];
-//RS         if include_failure_id {
-//RS             fields.push(format!("\"failure_id\":{}", json_string(&self.failure_id)));
-//RS         }
-//RS         fields.push(format!(
-//RS             "\"kind\":{}",
-//RS             json_string(if self.internal.is_some() {
-//RS                 "internal"
-//RS             } else {
-//RS                 "diagnostic"
-//RS             })
-//RS         ));
-//RS         fields.push(format!("\"redacted\":{}", if self.redacted { "true" } else { "false" }));
-//RS         fields.push(format!("\"identity\":{}", self.identity.json()));
-//RS         if let Some(internal) = &self.internal {
-//RS             fields.push(format!("\"internal\":{}", internal.json()));
-//RS             fields.push("\"diagnostic\":null".to_string());
-//RS         } else {
-//RS             fields.push(format!(
-//RS                 "\"diagnostic\":{}",
-//RS                 self.diagnostic.json_with_edits(&self.edits)
-//RS             ));
-//RS         }
-//RS         fields.push(format!(
-//RS             "\"related_cause\":{}",
-//RS             self.related_cause
-//RS                 .as_ref()
-//RS                 .map_or_else(|| "null".to_string(), WebErrorDiagnosticFact::json)
-//RS         ));
-//RS         fields.push(format!("\"source_excerpts\":[{source_excerpts}]"));
-//RS         fields.push(format!("\"action_links\":[{action_links}]"));
-//RS         format!("{{{}}}", fields.join(","))
-//RS     }
-//RS 
-//RS     fn render_html(&self) -> String {
-//RS         let mut html = String::with_capacity(4096);
-//RS         html.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>Jet development error</title><style>body{font:16px system-ui,sans-serif;max-width:58rem;margin:2rem auto;padding:0 1rem;color:#202124}main{border:1px solid #d0d7de;border-radius:.5rem;padding:1.5rem}h1{font-size:1.5rem;margin:.25rem 0 1rem}h2{font-size:1rem;margin:1.5rem 0 .5rem}dl{display:grid;grid-template-columns:max-content 1fr;gap:.35rem .9rem}dt{font-weight:600}dd{margin:0;overflow-wrap:anywhere}pre{background:#f6f8fa;padding:.75rem;overflow:auto;white-space:pre-wrap}a{display:inline-block;margin:.25rem .5rem .25rem 0}code{font-family:ui-monospace,monospace}.muted{color:#57606a}.redacted{background:#fff8c5;padding:.75rem}</style></head><body><main data-schema=\"jet.dev.error/v1\">");
-//RS         html.push_str("<p class=\"muted\">Jet local development error</p><h1>");
-//RS         if let Some(what) = &self.diagnostic.what {
-//RS             html.push_str(&html_escape(what));
-//RS         }
-//RS         html.push_str("</h1><p><code>");
-//RS         if let Some(code) = &self.diagnostic.code {
-//RS             html.push_str(&html_escape(code));
-//RS         } else {
-//RS             html.push_str("diagnostic code unavailable");
-//RS         }
-//RS         html.push_str("</code> · HTTP ");
-//RS         html.push_str(&self.status.to_string());
-//RS         html.push_str(" · <code data-failure-id=\"");
-//RS         html.push_str(&html_escape(&self.failure_id));
-//RS         html.push_str("\">");
-//RS         html.push_str(&html_escape(&self.failure_id));
-//RS         html.push_str("</code></p><h2>Request identity</h2><dl>");
-//RS         html.push_str(&html_pair("request id", &self.identity.request_id));
-//RS         html.push_str(&html_pair("session id", &self.identity.session_id));
-//RS         html.push_str(&html_pair("source id", &self.identity.source_id));
-//RS         html.push_str(&html_pair("build id", &self.identity.build_id));
-//RS         html.push_str(&html_pair("revision", &self.identity.revision));
-//RS         html.push_str("</dl><h2>Diagnostic</h2><dl>");
-//RS         if let Some(why) = &self.diagnostic.why {
-//RS             html.push_str(&html_pair("why", why));
-//RS         }
-//RS         if let Some(fix) = &self.diagnostic.fix {
-//RS             html.push_str(&html_pair("fix", fix));
-//RS         }
-//RS         if let Some(moment) = &self.diagnostic.moment {
-//RS             html.push_str(&html_pair("moment", moment));
-//RS         }
-//RS         if let Some(severity) = &self.diagnostic.severity {
-//RS             html.push_str(&html_pair("severity", severity));
-//RS         }
-//RS         if let Some(identity) = &self.diagnostic.typed_identity {
-//RS             html.push_str(&html_pair("typed identity", identity));
-//RS         }
-//RS         if let Some(span) = self.diagnostic.span {
-//RS             html.push_str(&html_pair("span", &format!("{}..{}", span.start, span.end)));
-//RS         }
-//RS         html.push_str("</dl>");
-//RS         if self.redacted {
-//RS             html.push_str("<p class=\"redacted\">Local source, cause, and action details are unavailable outside a local development capability.</p>");
-//RS         } else {
-//RS             render_source_html(&mut html, &self.source_excerpts);
-//RS             if let Some(cause) = &self.related_cause {
-//RS                 html.push_str("<h2>Related cause</h2><dl>");
-//RS                 if let Some(code) = &cause.code {
-//RS                     html.push_str(&html_pair("code", code));
-//RS                 }
-//RS                 if let Some(what) = &cause.what {
-//RS                     html.push_str(&html_pair("what", what));
-//RS                 }
-//RS                 if let Some(why) = &cause.why {
-//RS                     html.push_str(&html_pair("why", why));
-//RS                 }
-//RS                 if let Some(fix) = &cause.fix {
-//RS                     html.push_str(&html_pair("fix", fix));
-//RS                 }
-//RS                 html.push_str("</dl>");
-//RS             }
-//RS             if !self.action_links.is_empty() {
-//RS                 html.push_str("<h2>Actions</h2><p>");
-//RS                 for link in &self.action_links {
-//RS                     html.push_str("<a rel=\"noreferrer\" href=\"");
-//RS                     html.push_str(&html_escape(&link.href));
-//RS                     html.push_str("\">");
-//RS                     html.push_str(&html_escape(&link.label));
-//RS                     html.push_str("</a>");
-//RS                 }
-//RS                 html.push_str("</p>");
-//RS             }
-//RS         }
-//RS         html.push_str("</main></body></html>");
-//RS         html
-//RS     }
-//RS }
-//RS 
-//RS fn report_source_excerpts(
-//RS     report: &JetErrorReport,
-//RS ) -> Result<Vec<WebErrorSourceExcerpt>, WebErrorPageError> {
-//RS     let mut excerpts = Vec::new();
-//RS     for frame in report.origin.iter().chain(&report.source_journey) {
-//RS         excerpts.push(source_excerpt_from_journey(frame)?);
-//RS     }
-//RS     for frame in &report.context_frames {
-//RS         excerpts.push(source_excerpt_from_context(frame)?);
-//RS     }
-//RS     Ok(excerpts)
-//RS }
-//RS 
-//RS fn source_excerpt_from_journey(
-//RS     frame: &JetErrorJourneyFrame,
-//RS ) -> Result<WebErrorSourceExcerpt, WebErrorPageError> {
-//RS     let excerpt = (!frame.note.is_empty()).then(|| frame.note.clone());
-//RS     WebErrorSourceExcerpt::without_span(frame.file.clone(), frame.fn_name.clone(), excerpt)?
-//RS         .with_location(
-//RS             (frame.line > 0).then_some(frame.line),
-//RS             (frame.column > 0).then_some(frame.column),
-//RS         )
-//RS }
-//RS 
-//RS fn source_excerpt_from_context(
-//RS     frame: &JetErrorContextFrame,
-//RS ) -> Result<WebErrorSourceExcerpt, WebErrorPageError> {
-//RS     WebErrorSourceExcerpt::without_span(
-//RS         frame.file.clone(),
-//RS         "context".to_string(),
-//RS         Some(frame.text.clone()),
-//RS     )?
-//RS     .with_location((frame.line > 0).then_some(frame.line), None)
-//RS }
-//RS 
-//RS fn web_span_from_span(span: Span) -> Result<WebErrorSpan, WebErrorPageError> {
-//RS     WebErrorSpan::new(span.start, span.end)
-//RS }
-//RS 
-//RS fn diagnostic_bytes(fact: &WebErrorDiagnosticFact) -> usize {
-//RS     fact.code.as_ref().map_or(0, String::len)
-//RS         + fact.what.as_ref().map_or(0, String::len)
-//RS         + fact.why.as_ref().map_or(0, String::len)
-//RS         + fact.fix.as_ref().map_or(0, String::len)
-//RS         + fact.severity.as_ref().map_or(0, String::len)
-//RS         + fact.moment.as_ref().map_or(0, String::len)
-//RS         + fact.typed_identity.as_ref().map_or(0, String::len)
-//RS }
-//RS 
-//RS fn normalize_identity(value: String, field: &'static str) -> Result<String, WebErrorPageError> {
-//RS     validate_identity(&value, field)?;
-//RS     Ok(redact_identity(&value))
-//RS }
-//RS 
-//RS fn normalize_source_identity(value: String) -> Result<String, WebErrorPageError> {
-//RS     validate_source_identity(&value)?;
-//RS     Ok(redact_identity(&value))
-//RS }
-//RS 
-//RS fn redact_identity(value: &str) -> String {
-//RS     if contains_sensitive_marker(value) {
-//RS         "[redacted]".to_string()
-//RS     } else {
-//RS         value.to_string()
-//RS     }
-//RS }
-//RS 
-//RS fn validate_identity(value: &str, field: &'static str) -> Result<(), WebErrorPageError> {
-//RS     if value.is_empty() {
-//RS         return Err(WebErrorPageError::EmptyField(field));
-//RS     }
-//RS     if value.len() > MAX_WEB_ERROR_ID_BYTES {
-//RS         return Err(WebErrorPageError::TextTooLarge(field));
-//RS     }
-//RS     if value.chars().any(char::is_control) {
-//RS         return Err(WebErrorPageError::ControlCharacter(field));
-//RS     }
-//RS     if value.chars().any(|character| {
-//RS         character.is_whitespace()
-//RS             || matches!(character, '<' | '>' | '"' | '\'' | '`' | '\\')
-//RS     }) {
-//RS         return Err(WebErrorPageError::InvalidIdentity(field));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_source_identity(value: &str) -> Result<(), WebErrorPageError> {
-//RS     validate_identity(value, "source id")?;
-//RS     if value.split('/').any(|part| part == "..") || value.starts_with("//") {
-//RS         return Err(WebErrorPageError::InvalidIdentity("source id"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn normalize_code(value: String) -> Result<String, WebErrorPageError> {
-//RS     validate_code(&value)?;
-//RS     Ok(value)
-//RS }
-//RS 
-//RS fn validate_code(value: &str) -> Result<(), WebErrorPageError> {
-//RS     validate_identity(value, "diagnostic code")
-//RS }
-//RS 
-//RS fn normalize_required_text(
-//RS     value: String,
-//RS     field: &'static str,
-//RS     limit: usize,
-//RS ) -> Result<String, WebErrorPageError> {
-//RS     if value.is_empty() {
-//RS         return Err(WebErrorPageError::EmptyField(field));
-//RS     }
-//RS     let mut normalized = normalize_text(value, field, limit)?;
-//RS     if contains_sensitive_marker(&normalized) {
-//RS         normalized = "[redacted]".to_string();
-//RS     }
-//RS     Ok(normalized)
-//RS }
-//RS 
-//RS fn normalize_optional_text(
-//RS     value: Option<String>,
-//RS     field: &'static str,
-//RS     limit: usize,
-//RS ) -> Result<Option<String>, WebErrorPageError> {
-//RS     let Some(value) = value else {
-//RS         return Ok(None);
-//RS     };
-//RS     if value.is_empty() {
-//RS         return Ok(None);
-//RS     }
-//RS     let normalized = normalize_text(value, field, limit)?;
-//RS     if contains_sensitive_marker(&normalized) {
-//RS         return Ok(None);
-//RS     }
-//RS     Ok(Some(normalized))
-//RS }
-//RS 
-//RS fn normalize_text(
-//RS     value: String,
-//RS     field: &'static str,
-//RS     limit: usize,
-//RS ) -> Result<String, WebErrorPageError> {
-//RS     if value.len() > limit {
-//RS         return Err(WebErrorPageError::TextTooLarge(field));
-//RS     }
-//RS     let mut normalized = String::with_capacity(value.len());
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '\n' | '\r' | '\t' => normalized.push(character),
-//RS             character if character.is_control() => normalized.push('�'),
-//RS             character => normalized.push(character),
-//RS         }
-//RS     }
-//RS     Ok(normalized)
-//RS }
-//RS 
-//RS fn validate_optional_text(
-//RS     value: &Option<String>,
-//RS     field: &'static str,
-//RS     limit: usize,
-//RS ) -> Result<(), WebErrorPageError> {
-//RS     let Some(value) = value else {
-//RS         return Ok(());
-//RS     };
-//RS     if value.is_empty() {
-//RS         return Err(WebErrorPageError::EmptyField(field));
-//RS     }
-//RS     if value.len() > limit {
-//RS         return Err(WebErrorPageError::TextTooLarge(field));
-//RS     }
-//RS     if value.chars().any(char::is_control) && value.chars().any(|character| {
-//RS         !matches!(character, '\n' | '\r' | '\t') && character.is_control()
-//RS     }) {
-//RS         return Err(WebErrorPageError::ControlCharacter(field));
-//RS     }
-//RS     if contains_sensitive_marker(value) {
-//RS         return Err(WebErrorPageError::UnsafeContent(field));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn contains_sensitive_marker(value: &str) -> bool {
-//RS     let lower = value.to_ascii_lowercase();
-//RS     [
-//RS         "password=",
-//RS         "password:",
-//RS         "secret=",
-//RS         "secret:",
-//RS         "authorization:",
-//RS         "authorization=",
-//RS         "bearer ",
-//RS         "api_key",
-//RS         "apikey",
-//RS         "access_token",
-//RS         "client_secret",
-//RS         "private_key",
-//RS         "set-cookie",
-//RS         "cookie:",
-//RS         "sk_live_",
-//RS         "ghp_",
-//RS         "xoxb-",
-//RS     ]
-//RS     .iter()
-//RS     .any(|marker| lower.contains(marker))
-//RS }
-//RS 
-//RS fn normalize_href(value: String) -> Result<String, WebErrorPageError> {
-//RS     validate_href(&value)?;
-//RS     Ok(value)
-//RS }
-//RS 
-//RS fn validate_href(value: &str) -> Result<(), WebErrorPageError> {
-//RS     if value.is_empty() || value.len() > MAX_WEB_ERROR_LINK_BYTES {
-//RS         return Err(if value.is_empty() {
-//RS             WebErrorPageError::EmptyField("action href")
-//RS         } else {
-//RS             WebErrorPageError::TextTooLarge("action href")
-//RS         });
-//RS     }
-//RS     if value.chars().any(char::is_control) || value.chars().any(char::is_whitespace) {
-//RS         return Err(WebErrorPageError::InvalidLink);
-//RS     }
-//RS     if contains_sensitive_marker(value) || value.contains('@') {
-//RS         return Err(WebErrorPageError::InvalidLink);
-//RS     }
-//RS     let lower = value.to_ascii_lowercase();
-//RS     let allowed = (value.starts_with('/') && !value.starts_with("//"))
-//RS         || lower.starts_with("http://")
-//RS         || lower.starts_with("https://")
-//RS         || lower.starts_with("jet://");
-//RS     if !allowed
-//RS         || lower.starts_with("javascript:")
-//RS         || lower.starts_with("data:")
-//RS         || lower.starts_with("vbscript:")
-//RS         || lower.starts_with("file:")
-//RS     {
-//RS         return Err(WebErrorPageError::InvalidLink);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_status(status: u16) -> Result<(), WebErrorPageError> {
-//RS     if (400..=599).contains(&status) {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(WebErrorPageError::InvalidStatus)
-//RS     }
-//RS }
-//RS 
-//RS fn source_excerpt_order(left: &WebErrorSourceExcerpt, right: &WebErrorSourceExcerpt) -> std::cmp::Ordering {
-//RS     left.source_id
-//RS         .cmp(&right.source_id)
-//RS         .then_with(|| left.label.cmp(&right.label))
-//RS         .then_with(|| {
-//RS             left.span
-//RS                 .map(|span| (span.start, span.end))
-//RS                 .cmp(&right.span.map(|span| (span.start, span.end)))
-//RS         })
-//RS         .then_with(|| left.line.cmp(&right.line))
-//RS         .then_with(|| left.column.cmp(&right.column))
-//RS         .then_with(|| left.excerpt.cmp(&right.excerpt))
-//RS }
-//RS 
-//RS fn action_link_order(left: &WebErrorActionLink, right: &WebErrorActionLink) -> std::cmp::Ordering {
-//RS     left.label.cmp(&right.label).then_with(|| left.href.cmp(&right.href))
-//RS }
-//RS fn web_error_edit_order(left: &WebErrorEdit, right: &WebErrorEdit) -> std::cmp::Ordering {
-//RS     left.source_id
-//RS         .cmp(&right.source_id)
-//RS         .then_with(|| {
-//RS             left.span
-//RS                 .start
-//RS                 .cmp(&right.span.start)
-//RS                 .then_with(|| left.span.end.cmp(&right.span.end))
-//RS         })
-//RS         .then_with(|| left.new_text.cmp(&right.new_text))
-//RS         .then_with(|| left.applicability.cmp(&right.applicability))
-//RS         .then_with(|| left.safety.cmp(&right.safety))
-//RS }
-//RS 
-//RS fn html_pair(label: &str, value: &str) -> String {
-//RS     format!(
-//RS         "<dt>{}</dt><dd>{}</dd>",
-//RS         html_escape(label),
-//RS         html_escape(value)
-//RS     )
-//RS }
-//RS 
-//RS fn render_source_html(html: &mut String, excerpts: &[WebErrorSourceExcerpt]) {
-//RS     if excerpts.is_empty() {
-//RS         return;
-//RS     }
-//RS     html.push_str("<h2>Source</h2>");
-//RS     for excerpt in excerpts {
-//RS         html.push_str("<section><h3>");
-//RS         html.push_str(&html_escape(&excerpt.label));
-//RS         html.push_str("</h3><p><code>");
-//RS         html.push_str(&html_escape(&excerpt.source_id));
-//RS         if let Some(line) = excerpt.line {
-//RS             html.push(':');
-//RS             html.push_str(&line.to_string());
-//RS             if let Some(column) = excerpt.column {
-//RS                 html.push(':');
-//RS                 html.push_str(&column.to_string());
-//RS             }
-//RS         }
-//RS         if let Some(span) = excerpt.span {
-//RS             html.push_str(" bytes ");
-//RS             html.push_str(&span.start.to_string());
-//RS             html.push_str("..");
-//RS             html.push_str(&span.end.to_string());
-//RS         }
-//RS         html.push_str("</code></p>");
-//RS         if let Some(text) = &excerpt.excerpt {
-//RS             html.push_str("<pre>");
-//RS             html.push_str(&html_escape(text));
-//RS             html.push_str("</pre>");
-//RS         }
-//RS         html.push_str("</section>");
-//RS     }
-//RS }
-//RS 
-//RS fn accept_candidate_better(
-//RS     candidate: (u16, u8, usize),
-//RS     current: Option<(u16, u8, usize)>,
-//RS ) -> bool {
-//RS     current.is_none_or(|current| {
-//RS         candidate.1 > current.1
-//RS             || (candidate.1 == current.1 && candidate.2 < current.2)
-//RS     })
-//RS }
-//RS 
-//RS fn negotiate_content_type(accept: &str) -> WebErrorContentType {
-//RS     // Select the most specific matching range for each representation first.
-//RS     // A high-quality wildcard must not override a lower-quality exact range:
-//RS     // `application/json;q=0.4, */*;q=1` still makes JSON 0.4, while HTML
-//RS     // inherits the wildcard's 1.0.
-//RS     let mut html = None;
-//RS     let mut json = None;
-//RS     for (index, item) in accept.split(',').enumerate() {
-//RS         let mut pieces = item.split(';');
-//RS         let media = pieces.next().unwrap_or("").trim();
-//RS         if media.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let mut quality = 1000;
-//RS         let mut valid = true;
-//RS         for parameter in pieces {
-//RS             let Some((name, value)) = parameter.trim().split_once('=') else {
-//RS                 continue;
-//RS             };
-//RS             if name.trim().eq_ignore_ascii_case("q") {
-//RS                 match parse_quality(value.trim()) {
-//RS                     Some(value) => quality = value,
-//RS                     None => valid = false,
-//RS                 }
-//RS             }
-//RS         }
-//RS         if !valid {
-//RS             continue;
-//RS         }
-//RS         let (content_type, specificity) = if media.eq_ignore_ascii_case("text/html") {
-//RS             (Some(WebErrorContentType::Html), 2)
-//RS         } else if media.eq_ignore_ascii_case("application/json") {
-//RS             (Some(WebErrorContentType::Json), 2)
-//RS         } else if media.eq_ignore_ascii_case("text/*") {
-//RS             (Some(WebErrorContentType::Html), 1)
-//RS         } else if media.eq_ignore_ascii_case("application/*") {
-//RS             (Some(WebErrorContentType::Json), 1)
-//RS         } else if media == "*/*" || media == "*" {
-//RS             (None, 0)
-//RS         } else {
-//RS             continue;
-//RS         };
-//RS         let candidate = (quality, specificity, index);
-//RS         match content_type {
-//RS             Some(WebErrorContentType::Html) => {
-//RS                 if accept_candidate_better(candidate, html) {
-//RS                     html = Some(candidate);
-//RS                 }
-//RS             }
-//RS             Some(WebErrorContentType::Json) => {
-//RS                 if accept_candidate_better(candidate, json) {
-//RS                     json = Some(candidate);
-//RS                 }
-//RS             }
-//RS             None => {
-//RS                 if accept_candidate_better(candidate, html) {
-//RS                     html = Some(candidate);
-//RS                 }
-//RS                 if accept_candidate_better(candidate, json) {
-//RS                     json = Some(candidate);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     match (html, json) {
-//RS         (Some(html), Some(json))
-//RS             if json.0 > html.0
-//RS                 || (json.0 == html.0
-//RS                     && (json.1 > html.1 || (json.1 == html.1 && json.2 < html.2))) =>
-//RS         {
-//RS             WebErrorContentType::Json
-//RS         }
-//RS         (Some(_), _) | (None, None) => WebErrorContentType::Html,
-//RS         (None, Some(_)) => WebErrorContentType::Json,
-//RS     }
-//RS }
-//RS 
-//RS fn parse_quality(value: &str) -> Option<u16> {
-//RS     if value == "0" {
-//RS         return Some(0);
-//RS     }
-//RS     if value == "1" {
-//RS         return Some(1000);
-//RS     }
-//RS     let (whole, fraction) = value.split_once('.')?;
-//RS     if whole != "0" && whole != "1" {
-//RS         return None;
-//RS     }
-//RS     if fraction.is_empty() || fraction.len() > 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
-//RS         return None;
-//RS     }
-//RS     let mut padded = fraction.to_string();
-//RS     while padded.len() < 3 {
-//RS         padded.push('0');
-//RS     }
-//RS     let fractional = padded.parse::<u16>().ok()?;
-//RS     if whole == "1" && fractional != 0 {
-//RS         None
-//RS     } else {
-//RS         Some(if whole == "1" { 1000 } else { fractional })
-//RS     }
-//RS }
-// END-PORT-PENDING 0788 crates/jet-devserver/src/WebErrorPage.rs:1-1834
+// Typed, bounded projections of recorded local development-service failures.
+// HTML and JSON render the same facts; no terminal output is parsed.
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:9
+use jet_foundation.Diagnostics.[Diagnostic, Span, TextEdit, Severity]
+use jet_foundation.JSON.[quote as json_string]
+use jet_foundation.Outcome.[JetErrorContextFrame, JetErrorJourneyFrame, JetErrorReport]
+use jet_foundation.SHA256.[sha256_hex]
+use jet_semindex.[html_escape]
+use std.cmp.[Ordering]
 
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:16
+pub WEB_ERROR_PAGE_SCHEMA :: "jet.dev.error/v1"
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:17
+pub MAX_WEB_ERROR_ID_BYTES :: 256
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:18
+pub MAX_WEB_ERROR_TEXT_BYTES :: 8 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:19
+pub MAX_WEB_ERROR_SOURCE_BYTES :: 16 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:20
+pub MAX_WEB_ERROR_LINK_BYTES :: 2 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:21
+pub MAX_WEB_ERROR_ACCEPT_BYTES :: 8 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:22
+pub MAX_WEB_ERROR_SOURCE_EXCERPTS :: 32
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:23
+pub MAX_WEB_ERROR_ACTION_LINKS :: 16
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:24
+pub MAX_WEB_ERROR_EDITS :: 64
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:25
+pub MAX_WEB_ERROR_INPUT_BYTES :: 64 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:26
+pub MAX_WEB_ERROR_OUTPUT_BYTES :: 256 * 1024
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:27
+pub MAX_WEB_ERROR_SPAN_BYTES :: 1024 * 1024
+
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:32
+#Error
+pub enum WebErrorPageError {
+    EmptyField(String), InvalidIdentity(String), InvalidSpan, InvalidStatus,
+    InvalidLink, InvalidAccept, ControlCharacter(String), UnsafeContent(String),
+    TextTooLarge(String), TooManyItems(String), InputTooLarge, OutputTooLarge
+}
+impl WebErrorPageError {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:48
+    fn fmt(self: &Self) -> String {
+        return match self {
+            .EmptyField(field) -> "{field} must not be empty"
+            .InvalidIdentity(field) -> "invalid {field} identity"
+            .InvalidSpan -> "invalid source span"
+            .InvalidStatus -> "web error status must be between 400 and 599"
+            .InvalidLink -> "action link is not a safe local or HTTPS URL"
+            .InvalidAccept -> "invalid or oversized Accept header"
+            .ControlCharacter(field) -> "{field} contains a control character"
+            .UnsafeContent(field) -> "{field} contains unpublished sensitive content"
+            .TextTooLarge(field) -> "{field} exceeds its byte budget"
+            .TooManyItems(field) -> "too many {field}"
+            .InputTooLarge -> "web error facts exceed the input byte budget"
+            .OutputTooLarge -> "web error projection exceeds the output byte budget"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:70
+pub enum WebErrorContentType { Html, Json }
+impl WebErrorContentType {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:76
+    pub fn as_str(self: Self) -> String {
+        return match self { .Html -> "text/html; charset=utf-8"; .Json -> "application/json; charset=utf-8" }
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:83
+    pub fn media_type(self: Self) -> String {
+        return match self { .Html -> "text/html"; .Json -> "application/json" }
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:92
+    fn fmt(self: &Self) -> String { return self.as_str() }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:100
+pub struct WebErrorCapabilities { pub local: Bool; pub release: Bool }
+impl WebErrorCapabilities {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:106
+    pub fn new(local: Bool, release: Bool) -> Self { return Self { local, release } }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:110
+    pub fn local() -> Self { return Self { local: true, release: false } }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:117
+    pub fn redacted() -> Self { return Self { local: false, release: true } }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:124
+    fn permits_local_details(self: Self) -> Bool { return self.local && !self.release }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:130
+    fn default() -> Self { return Self.redacted() }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:137
+pub trait WebErrorCapabilityInput {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:138
+    fn local_details(self: &Self) -> Bool
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:139
+    fn release_build(self: &Self) -> Bool
+}
+impl WebErrorCapabilityInput for WebErrorCapabilities {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:143
+    fn local_details(self: &Self) -> Bool { return self.permits_local_details() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:147
+    fn release_build(self: &Self) -> Bool { return self.release }
+}
+impl[T: WebErrorCapabilityInput] WebErrorCapabilityInput for &T {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:153
+    fn local_details(self: &Self) -> Bool { return (*self).local_details() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:157
+    fn release_build(self: &Self) -> Bool { return (*self).release_build() }
+}
+impl WebErrorCapabilityInput for Bool {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:163
+    fn local_details(self: &Self) -> Bool { return *self }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:167
+    fn release_build(self: &Self) -> Bool { return false }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:174
+pub struct WebErrorPageIdentity {
+    pub request_id: String; pub session_id: String; pub source_id: String
+    pub build_id: String; pub revision: String
+}
+impl WebErrorPageIdentity {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:183
+    pub fn new(request_id: String, session_id: String, source_id: String, build_id: String, revision: String) -> Self WebErrorPageError! {
+        identity :: Self {
+            request_id: normalize_identity(^request_id, "request id")?,
+            session_id: normalize_identity(^session_id, "session id")?,
+            source_id: normalize_source_identity(^source_id)?,
+            build_id: normalize_identity(^build_id, "build id")?,
+            revision: normalize_identity(^revision, "revision")?
+        }
+        identity.validate()?
+        return identity
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:201
+    pub fn validate(self: &Self) -> Unit WebErrorPageError! {
+        validate_identity(self.request_id, "request id")?
+        validate_identity(self.session_id, "session id")?
+        validate_source_identity(self.source_id)?
+        validate_identity(self.build_id, "build id")?
+        validate_identity(self.revision, "revision")?
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:210
+    fn json(self: &Self) -> String {
+        return "{" + "\"request_id\":" + json_string(self.request_id) + ",\"session_id\":" + json_string(self.session_id) + ",\"source_id\":" + json_string(self.source_id) + ",\"build_id\":" + json_string(self.build_id) + ",\"revision\":" + json_string(self.revision) + "}"
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:225
+pub struct WebErrorSpan { pub start: Usize; pub end: Usize }
+impl WebErrorSpan {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:231
+    pub fn new(start: Usize, end: Usize) -> Self WebErrorPageError! {
+        span :: Self { start, end }
+        span.validate()?
+        return span
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:237
+    pub fn validate(self: &Self) -> Unit WebErrorPageError! {
+        if self.end < self.start || self.start > MAX_WEB_ERROR_SPAN_BYTES || self.end > MAX_WEB_ERROR_SPAN_BYTES -> return .Err(.InvalidSpan)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:247
+    fn json(self: Self) -> String { return "{\"start\":" + self.start.to_string() + ",\"end\":" + self.end.to_string() + "}" }
+}
+impl From[WebErrorSpan] for Span {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:253
+    fn from(span: WebErrorSpan) -> Self { return Span.new(span.start, span.end) }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:261
+pub struct WebErrorSourceExcerpt {
+    pub source_id: String; pub label: String; pub span: WebErrorSpan?
+    pub line: U32?; pub column: U32?; pub excerpt: String?
+}
+impl WebErrorSourceExcerpt {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:271
+    pub fn new(source_id: String, label: String, start: Usize, end: Usize, excerpt: String?) -> Self WebErrorPageError! {
+        return Self.with_parts(^source_id, ^label, .Val(WebErrorSpan.new(start, end)?), .None, .None, ^excerpt)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:282
+    pub fn without_span(source_id: String, label: String, excerpt: String?) -> Self WebErrorPageError! {
+        return Self.with_parts(^source_id, ^label, .None, .None, .None, ^excerpt)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:297
+    pub fn with_location(self: Self, line: U32?, column: U32?) -> Self WebErrorPageError! {
+        if line.is_some_and((v) -> v == 0) || column.is_some_and((v) -> v == 0) -> return .Err(.InvalidSpan)
+        self.line = line
+        self.column = column
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:310
+    pub fn validate(self: &Self) -> Unit WebErrorPageError! {
+        validate_source_identity(self.source_id)?
+        validate_identity(self.label, "source label")?
+        if self.span == .Val(span) -> span.validate()?
+        if self.line.is_some_and((v) -> v == 0) || self.column.is_some_and((v) -> v == 0) -> return .Err(.InvalidSpan)
+        validate_optional_text(&self.excerpt, "source excerpt", MAX_WEB_ERROR_SOURCE_BYTES)?
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:323
+    fn with_parts(source_id: String, label: String, span: WebErrorSpan?, line: U32?, column: U32?, excerpt: String?) -> Self WebErrorPageError! {
+        item :: Self { source_id: normalize_source_identity(^source_id)?, label: normalize_identity(^label, "source label")?, span, line, column, excerpt: normalize_optional_text(^excerpt, "source excerpt", MAX_WEB_ERROR_SOURCE_BYTES)? }
+        item.validate()?
+        return item
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:343
+    fn json(self: &Self) -> String {
+        fields := ["\"source_id\":" + json_string(self.source_id), "\"label\":" + json_string(self.label)]
+        if self.span == .Val(span) -> fields.push("\"span\":" + span.json())
+        if self.line == .Val(line) -> fields.push("\"line\":" + line.to_string())
+        if self.column == .Val(column) -> fields.push("\"column\":" + column.to_string())
+        if self.excerpt.as_ref() == .Val(excerpt) -> fields.push("\"excerpt\":" + json_string(excerpt))
+        return "{" + fields.join(",") + "}"
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:367
+pub struct WebErrorActionLink { pub label: String; pub href: String }
+impl WebErrorActionLink {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:373
+    pub fn new(label: String, href: String) -> Self WebErrorPageError! {
+        link :: Self { label: normalize_identity(^label, "action label")?, href: normalize_href(^href)? }
+        link.validate()?
+        return link
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:385
+    pub fn validate(self: &Self) -> Unit WebErrorPageError! {
+        validate_identity(self.label, "action label")?
+        return validate_href(self.href)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:390
+    fn json(self: &Self) -> String { return "{\"label\":" + json_string(self.label) + ",\"href\":" + json_string(self.href) + "}" }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:404
+pub struct WebErrorEdit {
+    pub source_id: String; pub span: WebErrorSpan; pub new_text: String
+    pub applicability: String?; pub safety: String?
+}
+impl WebErrorEdit {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:413
+    pub fn new(source_id: String, span: WebErrorSpan, new_text: String, applicability: String?, safety: String?) -> Self WebErrorPageError! {
+        edit :: Self {
+            source_id: normalize_source_identity(^source_id)?, span,
+            new_text: normalize_text(^new_text, "fix edit", MAX_WEB_ERROR_TEXT_BYTES)?,
+            applicability: applicability.map((value) -> normalize_identity(value, "fix applicability")).transpose()?,
+            safety: safety.map((value) -> normalize_identity(value, "fix safety")).transpose()?
+        }
+        edit.validate()?
+        return edit
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:435
+    fn from_diagnostic(source_id: String, edit: &TextEdit, applicability: String?, safety: String?) -> Self WebErrorPageError! {
+        return Self.new(source_id, web_span_from_span(edit.span)?, edit.new_text.clone(), applicability.map((v) -> v.to_string()), safety.map((v) -> v.to_string()))
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:450
+    pub fn validate(self: &Self) -> Unit WebErrorPageError! {
+        validate_source_identity(self.source_id)?
+        self.span.validate()?
+        if self.new_text.len() > MAX_WEB_ERROR_TEXT_BYTES -> return .Err(.TextTooLarge("fix edit"))
+        if self.new_text.chars().any((c) -> c.is_control() && c != '\n' && c != '\r' && c != '\t') -> return .Err(.ControlCharacter("fix edit"))
+        if contains_sensitive_marker(self.new_text) -> return .Err(.UnsafeContent("fix edit"))
+        if self.applicability.as_ref() == .Val(v) -> validate_identity(v, "fix applicability")?
+        if self.safety.as_ref() == .Val(v) -> validate_identity(v, "fix safety")?
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:474
+    fn json(self: &Self) -> String {
+        fields := ["\"source_id\":" + json_string(self.source_id), "\"span\":" + self.span.json(), "\"new_text\":" + json_string(self.new_text)]
+        if self.applicability.as_ref() == .Val(v) -> fields.push("\"applicability\":" + json_string(v))
+        if self.safety.as_ref() == .Val(v) -> fields.push("\"safety\":" + json_string(v))
+        return "{" + fields.join(",") + "}"
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:496
+pub struct WebErrorInternalFact { pub code: String; pub message: String }
+impl WebErrorInternalFact {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:502
+    pub fn new(code: String, message: String) -> Self WebErrorPageError! {
+        fact :: Self { code: normalize_code(^code)?, message: normalize_required_text(^message, "internal error message", MAX_WEB_ERROR_TEXT_BYTES)? }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:518
+    fn validate(self: &Self) -> Unit WebErrorPageError! {
+        validate_code(self.code)?
+        if self.message.is_empty() -> return .Err(.EmptyField("internal error message"))
+        return validate_optional_text(&.Val(self.message.clone()), "internal error message", MAX_WEB_ERROR_TEXT_BYTES)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:530
+    fn json(self: &Self) -> String { return "{\"code\":" + json_string(self.code) + ",\"message\":" + json_string(self.message) + "}" }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:546
+pub struct WebErrorDevStatusFacts { pub state: String; pub code: String; pub diagnostic: String }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:557
+pub DEV_STATUS_INTERNAL_ERROR_CODE :: "ICE"
+impl WebErrorDevStatusFacts {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:560
+    pub fn new(state: String, code: String, diagnostic: String) -> Self { return Self { state, code, diagnostic } }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:576
+    pub fn is_internal_failure(self: &Self) -> Bool { return self.code == DEV_STATUS_INTERNAL_ERROR_CODE }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:583
+    pub fn is_error(self: &Self) -> Bool { return self.state == "error" }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:591
+pub struct WebErrorDiagnosticFact {
+    pub code: String?; pub what: String?; pub why: String?; pub fix: String?
+    pub severity: String?; pub moment: String?; pub typed_identity: String?; pub span: WebErrorSpan?
+}
+impl WebErrorDiagnosticFact {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:604
+    pub fn new(code: String, what: String, why: String, fix: String) -> Self WebErrorPageError! {
+        fact :: Self {
+            code: .Val(normalize_code(^code)?),
+            what: .Val(normalize_required_text(^what, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?),
+            why: .Val(normalize_required_text(^why, "diagnostic why", MAX_WEB_ERROR_TEXT_BYTES)?),
+            fix: .Val(normalize_required_text(^fix, "diagnostic fix", MAX_WEB_ERROR_TEXT_BYTES)?),
+            severity: .None, moment: .None, typed_identity: .None, span: .None
+        }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:638
+    pub fn from_diagnostic(diagnostic: &Diagnostic) -> Self WebErrorPageError! {
+        fact :: Self {
+            code: .Val(normalize_code(diagnostic.code.clone())?),
+            what: .Val(normalize_required_text(diagnostic.what.clone(), "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?),
+            why: normalize_optional_text(.Val(diagnostic.why.clone()), "diagnostic why", MAX_WEB_ERROR_TEXT_BYTES)?,
+            fix: normalize_optional_text(.Val(diagnostic.fix.clone()), "diagnostic fix", MAX_WEB_ERROR_TEXT_BYTES)?,
+            severity: .Val(match diagnostic.severity { .Error -> "error"; .Lint -> "lint" }),
+            moment: .Val(diagnostic.moment.as_str().to_string()), typed_identity: .None,
+            span: diagnostic.span.map(web_span_from_span).transpose()?
+        }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:671
+    pub fn from_report(report: &JetErrorReport) -> Self WebErrorPageError! {
+        typed_identity :: report.typed_identity.clone().map((v) -> normalize_identity(v, "typed error identity")).transpose()?
+        span :: report.details.as_ref().and_then((d) -> d.source_span.clone()).map((s) -> WebErrorSpan.new(s.start, s.end)).transpose()?
+        fact :: Self {
+            code: report.code.clone().map(normalize_code).transpose()?,
+            what: .Val(normalize_required_text(report.message.clone(), "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?),
+            why: .None, fix: .None, severity: .None, moment: .None, typed_identity, span
+        }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:708
+    pub fn from_dev_status(facts: &WebErrorDevStatusFacts) -> Self WebErrorPageError! {
+        code :: if facts.code.is_empty() -> .None else -> .Val(normalize_code(facts.code.clone())?)
+        fact :: Self { code, what: .Val(normalize_required_text(facts.diagnostic.clone(), "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?), why: .None, fix: .None, severity: .None, moment: .None, typed_identity: .None, span: .None }
+        fact.validate()?
+        return fact
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:732
+    pub fn with_span(self: Self, span: WebErrorSpan?) -> Self WebErrorPageError! {
+        if span == .Val(v) -> v.validate()?
+        self.span = span
+        self.validate()?
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:741
+    pub fn validate(self: &Self) -> Unit WebErrorPageError! {
+        if self.code.as_ref() == .Val(v) -> validate_code(v)?
+        if self.what.is_none() -> return .Err(.EmptyField("diagnostic what"))
+        validate_optional_text(&self.what, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)?
+        validate_optional_text(&self.why, "diagnostic why", MAX_WEB_ERROR_TEXT_BYTES)?
+        validate_optional_text(&self.fix, "diagnostic fix", MAX_WEB_ERROR_TEXT_BYTES)?
+        if self.severity.as_ref() == .Val(v) -> validate_identity(v, "diagnostic severity")?
+        if self.moment.as_ref() == .Val(v) -> validate_identity(v, "diagnostic moment")?
+        if self.typed_identity.as_ref() == .Val(v) -> validate_identity(v, "typed error identity")?
+        if self.span == .Val(v) -> v.validate()?
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:766
+    fn json(self: &Self) -> String { return self.json_with_edits(&[]) }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:770
+    fn json_with_edits(self: &Self, edits: &[WebErrorEdit]) -> String {
+        fields: [String] := []
+        if self.code.as_ref() == .Val(v) -> fields.push("\"code\":" + json_string(v))
+        if self.what.as_ref() == .Val(v) -> fields.push("\"what\":" + json_string(v))
+        if self.why.as_ref() == .Val(v) -> fields.push("\"why\":" + json_string(v))
+        if self.fix.as_ref() == .Val(v) -> fields.push("\"fix\":" + json_string(v))
+        if self.severity.as_ref() == .Val(v) -> fields.push("\"severity\":" + json_string(v))
+        if self.moment.as_ref() == .Val(v) -> fields.push("\"moment\":" + json_string(v))
+        if self.typed_identity.as_ref() == .Val(v) -> fields.push("\"typed_identity\":" + json_string(v))
+        if self.span == .Val(v) -> fields.push("\"span\":" + v.json())
+        if !edits.is_empty() -> fields.push("\"fix_edits\":[" + edits.iter().map(WebErrorEdit.json).collect[[String]]().join(",") + "]")
+        return "{" + fields.join(",") + "}"
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:807
+    fn internal_placeholder() -> Self {
+        return Self { code: .None, what: .Val("Internal development-service failure"), why: .None, fix: .None, severity: .None, moment: .None, typed_identity: .None, span: .None }
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:824
+pub struct WebErrorProjection {
+    pub status: U16; pub content_type: WebErrorContentType; pub body: String
+    pub fact_digest: String; pub failure_id: String; pub redacted: Bool
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:835
+pub struct WebErrorPage {
+    identity: WebErrorPageIdentity; diagnostic: WebErrorDiagnosticFact; internal: WebErrorInternalFact?
+    edits: [WebErrorEdit]; source_excerpts: [WebErrorSourceExcerpt]; related_cause: WebErrorDiagnosticFact?
+    action_links: [WebErrorActionLink]; status: U16; failure_id: String
+}
+impl WebErrorPage {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:848
+    pub fn new(identity: WebErrorPageIdentity, diagnostic: WebErrorDiagnosticFact, source_excerpts: [WebErrorSourceExcerpt], related_cause: WebErrorDiagnosticFact?, action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        return Self.new_with_status(500, ^identity, ^diagnostic, ^source_excerpts, ^related_cause, ^action_links)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:865
+    pub fn new_with_status(status: U16, identity: WebErrorPageIdentity, diagnostic: WebErrorDiagnosticFact, source_excerpts: [WebErrorSourceExcerpt], related_cause: WebErrorDiagnosticFact?, action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        validate_status(status)?
+        identity.validate()?
+        diagnostic.validate()?
+        if related_cause.as_ref() == .Val(cause) -> cause.validate()?
+        if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return .Err(.TooManyItems("source excerpts"))
+        if action_links.len() > MAX_WEB_ERROR_ACTION_LINKS -> return .Err(.TooManyItems("action links"))
+        for excerpt in &source_excerpts -> excerpt.validate()?
+        for link in &action_links -> link.validate()?
+        source_excerpts.sort_by(source_excerpt_order)
+        action_links.sort_by(action_link_order)
+        page := Self { identity: ^identity, diagnostic: ^diagnostic, internal: .None, edits: [], source_excerpts: ^source_excerpts, related_cause: ^related_cause, action_links: ^action_links, status, failure_id: "" }
+        page.validate_size()?
+        page.failure_id = page.compute_failure_id()
+        return page
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:911
+    pub fn from_report(identity: WebErrorPageIdentity, report: &JetErrorReport, action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        diagnostic :: WebErrorDiagnosticFact.from_report(report)?
+        source_excerpts :: report_source_excerpts(report)?
+        related_cause :: report.causes.first().map(WebErrorDiagnosticFact.from_report).transpose()?
+        return Self.new(^identity, ^diagnostic, ^source_excerpts, ^related_cause, ^action_links)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:934
+    pub fn from_diagnostic(identity: WebErrorPageIdentity, diagnostic: &Diagnostic, source_excerpts: [WebErrorSourceExcerpt], action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        source_id :: identity.source_id.clone()
+        applicability :: diagnostic.applicability.map((v) -> v.as_str())
+        safety :: diagnostic.safety.map((v) -> v.as_str())
+        edits: [WebErrorEdit] := []
+        for edit in diagnostic.all_edits().iter() -> edits.push(WebErrorEdit.from_diagnostic(source_id, edit, applicability, safety)?)
+        return Self.new(^identity, WebErrorDiagnosticFact.from_diagnostic(diagnostic)?, ^source_excerpts, .None, ^action_links)?.with_edits(^edits)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:961
+    pub fn from_internal(identity: WebErrorPageIdentity, code: String, message: String, action_links: [WebErrorActionLink]) -> Self WebErrorPageError! {
+        internal :: WebErrorInternalFact.new(^code, ^message)?
+        page := Self.new(^identity, WebErrorDiagnosticFact.internal_placeholder(), [], .None, ^action_links)?
+        page.internal = .Val(^internal)
+        page.failure_id = page.compute_failure_id()
+        page.validate_size()?
+        return page
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:987
+    pub fn from_dev_status(identity: WebErrorPageIdentity, facts: &WebErrorDevStatusFacts, action_links: [WebErrorActionLink]) -> Self? WebErrorPageError! {
+        if !facts.is_error() -> return .None
+        if facts.is_internal_failure() -> return .Val(Self.from_internal(^identity, facts.code.clone(), facts.diagnostic.clone(), ^action_links)?)
+        diagnostic :: WebErrorDiagnosticFact.from_dev_status(facts)?
+        return .Val(Self.new(^identity, ^diagnostic, [], .None, ^action_links)?)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1008
+    pub fn with_edits(self: Self, edits: [WebErrorEdit]) -> Self WebErrorPageError! {
+        if edits.len() > MAX_WEB_ERROR_EDITS -> return .Err(.TooManyItems("fix edits"))
+        for edit in &edits -> edit.validate()?
+        edits.sort_by(web_error_edit_order)
+        self.edits = ^edits
+        self.failure_id = self.compute_failure_id()
+        self.validate_size()?
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1022
+    pub fn with_status(self: Self, status: U16) -> Self WebErrorPageError! {
+        validate_status(status)?
+        self.status = status
+        self.failure_id = self.compute_failure_id()
+        self.validate_size()?
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1030
+    pub fn identity(self: &Self) -> &WebErrorPageIdentity { return &self.identity }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1034
+    pub fn diagnostic(self: &Self) -> &WebErrorDiagnosticFact { return &self.diagnostic }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1037
+    pub fn internal(self: &Self) -> &WebErrorInternalFact? { return self.internal.as_ref() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1041
+    pub fn is_internal(self: &Self) -> Bool { return self.internal.is_some() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1045
+    pub fn edits(self: &Self) -> &[WebErrorEdit] { return &self.edits }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1049
+    pub fn with_source_excerpts(self: Self, source_excerpts: [WebErrorSourceExcerpt]) -> Self WebErrorPageError! {
+        if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return .Err(.TooManyItems("source excerpts"))
+        for excerpt in &source_excerpts -> excerpt.validate()?
+        source_excerpts.sort_by(source_excerpt_order)
+        self.source_excerpts = ^source_excerpts
+        self.failure_id = self.compute_failure_id()
+        self.validate_size()?
+        return self
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1067
+    pub fn source_excerpts(self: &Self) -> &[WebErrorSourceExcerpt] { return &self.source_excerpts }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1071
+    pub fn related_cause(self: &Self) -> &WebErrorDiagnosticFact? { return self.related_cause.as_ref() }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1075
+    pub fn action_links(self: &Self) -> &[WebErrorActionLink] { return &self.action_links }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1079
+    pub fn status(self: &Self) -> U16 { return self.status }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1083
+    pub fn failure_id(self: &Self) -> String { return self.failure_id }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1087
+    pub fn validate(self: &Self) -> Unit WebErrorPageError! {
+        validate_status(self.status)?
+        self.identity.validate()?
+        self.diagnostic.validate()?
+        if self.internal.as_ref() == .Val(v) -> v.validate()?
+        if self.related_cause.as_ref() == .Val(v) -> v.validate()?
+        if self.source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return .Err(.TooManyItems("source excerpts"))
+        if self.edits.len() > MAX_WEB_ERROR_EDITS -> return .Err(.TooManyItems("fix edits"))
+        if self.action_links.len() > MAX_WEB_ERROR_ACTION_LINKS -> return .Err(.TooManyItems("action links"))
+        for edit in &self.edits -> edit.validate()?
+        for excerpt in &self.source_excerpts -> excerpt.validate()?
+        for link in &self.action_links -> link.validate()?
+        return self.validate_size()
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1121
+    pub fn project[C: WebErrorCapabilityInput](self: &Self, accept: String, capabilities: C) -> WebErrorProjection WebErrorPageError! {
+        if accept.len() > MAX_WEB_ERROR_ACCEPT_BYTES || accept.chars().any((c) -> c.is_control()) -> return .Err(.InvalidAccept)
+        self.validate()?
+        // GATE #4483: selected build's debug assertions, not the porting host's.
+        local :: core.sys.target.debug_assertions() && capabilities.local_details() && !capabilities.release_build()
+        facts :: WebErrorFacts.from_page(self, local)
+        fact_digest :: sha256_hex(facts.canonical_json().as_bytes())
+        content_type :: negotiate_content_type(accept)
+        body :: match content_type { .Html -> facts.render_html(); .Json -> facts.render_json() }
+        if body.len() > MAX_WEB_ERROR_OUTPUT_BYTES -> return .Err(.OutputTooLarge)
+        return WebErrorProjection { status: self.status, content_type, body: ^body, fact_digest: ^fact_digest, failure_id: self.failure_id.clone(), redacted: facts.redacted }
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1152
+    fn validate_size(self: &Self) -> Unit WebErrorPageError! {
+        bytes := self.identity.request_id.len() + self.identity.session_id.len() + self.identity.source_id.len() + self.identity.build_id.len() + self.identity.revision.len() + diagnostic_bytes(&self.diagnostic)
+        if self.internal.as_ref() == .Val(v) -> bytes = bytes.saturating_add(v.code.len()).saturating_add(v.message.len())
+        for edit in &self.edits -> bytes = bytes.saturating_add(edit.source_id.len()).saturating_add(edit.new_text.len()).saturating_add(edit.applicability.as_ref().map_or(0, (v) -> v.len())).saturating_add(edit.safety.as_ref().map_or(0, (v) -> v.len()))
+        if self.related_cause.as_ref() == .Val(v) -> bytes = bytes.saturating_add(diagnostic_bytes(v))
+        for excerpt in &self.source_excerpts -> bytes = bytes.saturating_add(excerpt.source_id.len()).saturating_add(excerpt.label.len()).saturating_add(excerpt.excerpt.as_ref().map_or(0, (v) -> v.len()))
+        for link in &self.action_links -> bytes = bytes.saturating_add(link.label.len()).saturating_add(link.href.len())
+        if bytes > MAX_WEB_ERROR_INPUT_BYTES -> return .Err(.InputTooLarge)
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1189
+    fn compute_failure_id(self: &Self) -> String {
+        facts :: WebErrorFacts.from_page(self, true)
+        return "fail-" + sha256_hex(facts.canonical_json().as_bytes())
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1196
+struct WebErrorFacts {
+    status: U16; failure_id: String; identity: WebErrorPageIdentity; diagnostic: WebErrorDiagnosticFact
+    internal: WebErrorInternalFact?; edits: [WebErrorEdit]; source_excerpts: [WebErrorSourceExcerpt]
+    related_cause: WebErrorDiagnosticFact?; action_links: [WebErrorActionLink]; redacted: Bool
+}
+impl WebErrorFacts {
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1210
+    fn from_page(page: &WebErrorPage, local: Bool) -> Self {
+        diagnostic := page.diagnostic.clone()
+        if !local {
+            diagnostic.why = .None
+            diagnostic.fix = .None
+            diagnostic.typed_identity = .None
+            diagnostic.span = .None
+        }
+        return Self {
+            status: page.status, failure_id: page.failure_id.clone(),
+            identity: WebErrorPageIdentity { request_id: redact_identity(page.identity.request_id), session_id: redact_identity(page.identity.session_id), source_id: redact_identity(page.identity.source_id), build_id: redact_identity(page.identity.build_id), revision: redact_identity(page.identity.revision) },
+            diagnostic: ^diagnostic,
+            internal: page.internal.as_ref().map((v) -> if local -> v.clone() else -> WebErrorInternalFact { code: v.code.clone(), message: "[redacted]" }),
+            edits: if local -> page.edits.clone() else -> [],
+            source_excerpts: if local -> page.source_excerpts.clone() else -> [],
+            related_cause: if local -> page.related_cause.clone() else -> .None,
+            action_links: if local -> page.action_links.clone() else -> [], redacted: !local
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1261
+    fn canonical_json(self: &Self) -> String { return self.json(false) }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1265
+    fn render_json(self: &Self) -> String { return self.json(true) }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1269
+    fn json(self: &Self, include_failure_id: Bool) -> String {
+        source_excerpts :: self.source_excerpts.iter().map(WebErrorSourceExcerpt.json).collect[[String]]().join(",")
+        action_links :: self.action_links.iter().map(WebErrorActionLink.json).collect[[String]]().join(",")
+        fields := ["\"schema\":" + json_string(WEB_ERROR_PAGE_SCHEMA), "\"status\":" + self.status.to_string()]
+        if include_failure_id -> fields.push("\"failure_id\":" + json_string(self.failure_id))
+        fields.push("\"kind\":" + json_string(if self.internal.is_some() -> "internal" else -> "diagnostic"))
+        fields.push("\"redacted\":" + (if self.redacted -> "true" else -> "false"))
+        fields.push("\"identity\":" + self.identity.json())
+        if self.internal.as_ref() == .Val(internal) {
+            fields.push("\"internal\":" + internal.json())
+            fields.push("\"diagnostic\":null")
+        } else -> fields.push("\"diagnostic\":" + self.diagnostic.json_with_edits(&self.edits))
+        fields.push("\"related_cause\":" + self.related_cause.as_ref().map_or_else(() -> "null", WebErrorDiagnosticFact.json))
+        fields.push("\"source_excerpts\":[" + source_excerpts + "]")
+        fields.push("\"action_links\":[" + action_links + "]")
+        return "{" + fields.join(",") + "}"
+    }
+    // Rust: crates/jet-devserver/src/WebErrorPage.rs:1319
+    fn render_html(self: &Self) -> String {
+        html := String.with_capacity(4096)
+        html.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>Jet development error</title><style>body{font:16px system-ui,sans-serif;max-width:58rem;margin:2rem auto;padding:0 1rem;color:#202124}main{border:1px solid #d0d7de;border-radius:.5rem;padding:1.5rem}h1{font-size:1.5rem;margin:.25rem 0 1rem}h2{font-size:1rem;margin:1.5rem 0 .5rem}dl{display:grid;grid-template-columns:max-content 1fr;gap:.35rem .9rem}dt{font-weight:600}dd{margin:0;overflow-wrap:anywhere}pre{background:#f6f8fa;padding:.75rem;overflow:auto;white-space:pre-wrap}a{display:inline-block;margin:.25rem .5rem .25rem 0}code{font-family:ui-monospace,monospace}.muted{color:#57606a}.redacted{background:#fff8c5;padding:.75rem}</style></head><body><main data-schema=\"jet.dev.error/v1\">")
+        html.push_str("<p class=\"muted\">Jet local development error</p><h1>")
+        if self.diagnostic.what.as_ref() == .Val(v) -> html.push_str(html_escape(v))
+        html.push_str("</h1><p><code>")
+        if self.diagnostic.code.as_ref() == .Val(v) -> html.push_str(html_escape(v)) else -> html.push_str("diagnostic code unavailable")
+        html.push_str("</code> · HTTP ")
+        html.push_str(self.status.to_string())
+        html.push_str(" · <code data-failure-id=\"")
+        html.push_str(html_escape(self.failure_id))
+        html.push_str("\">")
+        html.push_str(html_escape(self.failure_id))
+        html.push_str("</code></p><h2>Request identity</h2><dl>")
+        html.push_str(html_pair("request id", self.identity.request_id))
+        html.push_str(html_pair("session id", self.identity.session_id))
+        html.push_str(html_pair("source id", self.identity.source_id))
+        html.push_str(html_pair("build id", self.identity.build_id))
+        html.push_str(html_pair("revision", self.identity.revision))
+        html.push_str("</dl><h2>Diagnostic</h2><dl>")
+        if self.diagnostic.why.as_ref() == .Val(v) -> html.push_str(html_pair("why", v))
+        if self.diagnostic.fix.as_ref() == .Val(v) -> html.push_str(html_pair("fix", v))
+        if self.diagnostic.moment.as_ref() == .Val(v) -> html.push_str(html_pair("moment", v))
+        if self.diagnostic.severity.as_ref() == .Val(v) -> html.push_str(html_pair("severity", v))
+        if self.diagnostic.typed_identity.as_ref() == .Val(v) -> html.push_str(html_pair("typed identity", v))
+        if self.diagnostic.span == .Val(v) -> html.push_str(html_pair("span", "{v.start}..{v.end}"))
+        html.push_str("</dl>")
+        if self.redacted -> html.push_str("<p class=\"redacted\">Local source, cause, and action details are unavailable outside a local development capability.</p>") else {
+            render_source_html(&html, &self.source_excerpts)
+            if self.related_cause.as_ref() == .Val(cause) {
+                html.push_str("<h2>Related cause</h2><dl>")
+                if cause.code.as_ref() == .Val(v) -> html.push_str(html_pair("code", v))
+                if cause.what.as_ref() == .Val(v) -> html.push_str(html_pair("what", v))
+                if cause.why.as_ref() == .Val(v) -> html.push_str(html_pair("why", v))
+                if cause.fix.as_ref() == .Val(v) -> html.push_str(html_pair("fix", v))
+                html.push_str("</dl>")
+            }
+            if !self.action_links.is_empty() {
+                html.push_str("<h2>Actions</h2><p>")
+                for link in &self.action_links {
+                    html.push_str("<a rel=\"noreferrer\" href=\"")
+                    html.push_str(html_escape(link.href))
+                    html.push_str("\">")
+                    html.push_str(html_escape(link.label))
+                    html.push_str("</a>")
+                }
+                html.push_str("</p>")
+            }
+        }
+        html.push_str("</main></body></html>")
+        return html
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1401
+fn report_source_excerpts(report: &JetErrorReport) -> [WebErrorSourceExcerpt] WebErrorPageError! {
+    excerpts: [WebErrorSourceExcerpt] := []
+    for frame in report.origin.iter().chain(&report.source_journey) -> excerpts.push(source_excerpt_from_journey(frame)?)
+    for frame in &report.context_frames -> excerpts.push(source_excerpt_from_context(frame)?)
+    return excerpts
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1414
+fn source_excerpt_from_journey(frame: &JetErrorJourneyFrame) -> WebErrorSourceExcerpt WebErrorPageError! {
+    excerpt :: if frame.note.is_empty() -> .None else -> .Val(frame.note.clone())
+    return WebErrorSourceExcerpt.without_span(frame.file.clone(), frame.fn_name.clone(), ^excerpt)?.with_location(if frame.line > 0 -> .Val(frame.line) else -> .None, if frame.column > 0 -> .Val(frame.column) else -> .None)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1425
+fn source_excerpt_from_context(frame: &JetErrorContextFrame) -> WebErrorSourceExcerpt WebErrorPageError! {
+    return WebErrorSourceExcerpt.without_span(frame.file.clone(), "context", .Val(frame.text.clone()))?.with_location(if frame.line > 0 -> .Val(frame.line) else -> .None, .None)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1436
+fn web_span_from_span(span: Span) -> WebErrorSpan WebErrorPageError! { return WebErrorSpan.new(span.start, span.end) }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1440
+fn diagnostic_bytes(fact: &WebErrorDiagnosticFact) -> Usize {
+    return fact.code.as_ref().map_or(0, (v) -> v.len()) + fact.what.as_ref().map_or(0, (v) -> v.len()) + fact.why.as_ref().map_or(0, (v) -> v.len()) + fact.fix.as_ref().map_or(0, (v) -> v.len()) + fact.severity.as_ref().map_or(0, (v) -> v.len()) + fact.moment.as_ref().map_or(0, (v) -> v.len()) + fact.typed_identity.as_ref().map_or(0, (v) -> v.len())
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1450
+fn normalize_identity(value: String, field: String) -> String WebErrorPageError! {
+    validate_identity(value, field)?
+    return redact_identity(value)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1455
+fn normalize_source_identity(value: String) -> String WebErrorPageError! {
+    validate_source_identity(value)?
+    return redact_identity(value)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1460
+fn redact_identity(value: String) -> String { return if contains_sensitive_marker(value) -> "[redacted]" else -> value.to_string() }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1468
+fn validate_identity(value: String, field: String) -> Unit WebErrorPageError! {
+    if value.is_empty() -> return .Err(.EmptyField(field))
+    if value.len() > MAX_WEB_ERROR_ID_BYTES -> return .Err(.TextTooLarge(field))
+    if value.chars().any((c) -> c.is_control()) -> return .Err(.ControlCharacter(field))
+    if value.chars().any((c) -> c.is_whitespace() || c == '<' || c == '>' || c == '"' || c == '\'' || c == '`' || c == '\\') -> return .Err(.InvalidIdentity(field))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1487
+fn validate_source_identity(value: String) -> Unit WebErrorPageError! {
+    validate_identity(value, "source id")?
+    if value.split('/').any((part) -> part == "..") || value.starts_with("//") -> return .Err(.InvalidIdentity("source id"))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1495
+fn normalize_code(value: String) -> String WebErrorPageError! { validate_code(value)?; return value }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1500
+fn validate_code(value: String) -> Unit WebErrorPageError! { return validate_identity(value, "diagnostic code") }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1504
+fn normalize_required_text(value: String, field: String, limit: Usize) -> String WebErrorPageError! {
+    if value.is_empty() -> return .Err(.EmptyField(field))
+    normalized := normalize_text(^value, field, limit)?
+    if contains_sensitive_marker(normalized) -> normalized = "[redacted]"
+    return normalized
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1519
+fn normalize_optional_text(value: String?, field: String, limit: Usize) -> String? WebErrorPageError! {
+    value :: value ?? return .None
+    if value.is_empty() -> return .None
+    normalized :: normalize_text(^value, field, limit)?
+    if contains_sensitive_marker(normalized) -> return .None
+    return .Val(normalized)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1537
+fn normalize_text(value: String, field: String, limit: Usize) -> String WebErrorPageError! {
+    if value.len() > limit -> return .Err(.TextTooLarge(field))
+    normalized := String.with_capacity(value.len())
+    for c in value.chars() {
+        if c == '\n' || c == '\r' || c == '\t' -> normalized.push(c)
+        else if c.is_control() -> normalized.push('�')
+        else -> normalized.push(c)
+    }
+    return normalized
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1556
+fn validate_optional_text(value: &String?, field: String, limit: Usize) -> Unit WebErrorPageError! {
+    value :: value.as_ref() ?? return ()
+    if value.is_empty() -> return .Err(.EmptyField(field))
+    if value.len() > limit -> return .Err(.TextTooLarge(field))
+    if value.chars().any((c) -> c.is_control()) && value.chars().any((c) -> c != '\n' && c != '\r' && c != '\t' && c.is_control()) -> return .Err(.ControlCharacter(field))
+    if contains_sensitive_marker(value) -> return .Err(.UnsafeContent(field))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1581
+fn contains_sensitive_marker(value: String) -> Bool {
+    lower :: value.to_ascii_lowercase()
+    return ["password=", "password:", "secret=", "secret:", "authorization:", "authorization=", "bearer ", "api_key", "apikey", "access_token", "client_secret", "private_key", "set-cookie", "cookie:", "sk_live_", "ghp_", "xoxb-"].iter().any((marker) -> lower.contains(marker))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1606
+fn normalize_href(value: String) -> String WebErrorPageError! { validate_href(value)?; return value }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1611
+fn validate_href(value: String) -> Unit WebErrorPageError! {
+    if value.is_empty() -> return .Err(.EmptyField("action href"))
+    if value.len() > MAX_WEB_ERROR_LINK_BYTES -> return .Err(.TextTooLarge("action href"))
+    if value.chars().any((c) -> c.is_control()) || value.chars().any((c) -> c.is_whitespace()) -> return .Err(.InvalidLink)
+    if contains_sensitive_marker(value) || value.contains('@') -> return .Err(.InvalidLink)
+    lower :: value.to_ascii_lowercase()
+    allowed :: (value.starts_with('/') && !value.starts_with("//")) || lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("jet://")
+    if !allowed || lower.starts_with("javascript:") || lower.starts_with("data:") || lower.starts_with("vbscript:") || lower.starts_with("file:") -> return .Err(.InvalidLink)
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1641
+fn validate_status(status: U16) -> Unit WebErrorPageError! { if status < 400 || status > 599 -> return .Err(.InvalidStatus) }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1649
+fn source_excerpt_order(left: &WebErrorSourceExcerpt, right: &WebErrorSourceExcerpt) -> Ordering {
+    return left.source_id.cmp(right.source_id).then_with(() -> left.label.cmp(right.label)).then_with(() -> left.span.map((s) -> (s.start, s.end)).cmp(right.span.map((s) -> (s.start, s.end)))).then_with(() -> left.line.cmp(right.line)).then_with(() -> left.column.cmp(right.column)).then_with(() -> left.excerpt.cmp(right.excerpt))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1663
+fn action_link_order(left: &WebErrorActionLink, right: &WebErrorActionLink) -> Ordering { return left.label.cmp(right.label).then_with(() -> left.href.cmp(right.href)) }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1666
+fn web_error_edit_order(left: &WebErrorEdit, right: &WebErrorEdit) -> Ordering {
+    return left.source_id.cmp(right.source_id).then_with(() -> left.span.start.cmp(right.span.start).then_with(() -> left.span.end.cmp(right.span.end))).then_with(() -> left.new_text.cmp(right.new_text)).then_with(() -> left.applicability.cmp(right.applicability)).then_with(() -> left.safety.cmp(right.safety))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1680
+fn html_pair(label: String, value: String) -> String { return "<dt>" + html_escape(label) + "</dt><dd>" + html_escape(value) + "</dd>" }
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1688
+fn render_source_html(html: &String, excerpts: &[WebErrorSourceExcerpt]) -> Unit {
+    if excerpts.is_empty() -> return
+    html.push_str("<h2>Source</h2>")
+    for excerpt in excerpts {
+        html.push_str("<section><h3>")
+        html.push_str(html_escape(excerpt.label))
+        html.push_str("</h3><p><code>")
+        html.push_str(html_escape(excerpt.source_id))
+        if excerpt.line == .Val(line) {
+            html.push(':')
+            html.push_str(line.to_string())
+            if excerpt.column == .Val(column) { html.push(':'); html.push_str(column.to_string()) }
+        }
+        if excerpt.span == .Val(span) {
+            html.push_str(" bytes ")
+            html.push_str(span.start.to_string())
+            html.push_str("..")
+            html.push_str(span.end.to_string())
+        }
+        html.push_str("</code></p>")
+        if excerpt.excerpt.as_ref() == .Val(text) { html.push_str("<pre>"); html.push_str(html_escape(text)); html.push_str("</pre>") }
+        html.push_str("</section>")
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1722
+fn accept_candidate_better(candidate: (U16, U8, Usize), current: (U16, U8, Usize)?) -> Bool {
+    return current.is_none_or((v) -> candidate.1 > v.1 || (candidate.1 == v.1 && candidate.2 < v.2))
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1732
+fn negotiate_content_type(accept: String) -> WebErrorContentType {
+    // Specificity wins within a representation before comparing qualities.
+    html: (U16, U8, Usize)? := .None
+    json: (U16, U8, Usize)? := .None
+    for (index, item) in accept.split(',').enumerate() {
+        pieces := item.split(';')
+        media := pieces.next().unwrap_or("").trim() // #4303
+        if media.is_empty() -> continue
+        quality: U16 := 1000
+        valid := true
+        for parameter in pieces {
+            parameter := parameter.trim() // #4303
+            (name, value) :: parameter.split_once('=') ?? continue
+            name := name.trim() // #4303
+            if name.eq_ignore_ascii_case("q") {
+                value := value.trim() // #4303
+                match parse_quality(value) { .Val(v) -> quality = v; .None -> valid = false }
+            }
+        }
+        if !valid -> continue
+        content_type: WebErrorContentType? := .None
+        specificity: U8 := 0
+        if media.eq_ignore_ascii_case("text/html") { content_type = .Val(.Html); specificity = 2 }
+        else if media.eq_ignore_ascii_case("application/json") { content_type = .Val(.Json); specificity = 2 }
+        else if media.eq_ignore_ascii_case("text/*") { content_type = .Val(.Html); specificity = 1 }
+        else if media.eq_ignore_ascii_case("application/*") { content_type = .Val(.Json); specificity = 1 }
+        else if media != "*/*" && media != "*" -> continue
+        candidate :: (quality, specificity, index)
+        match content_type {
+            .Val(.Html) -> { if accept_candidate_better(candidate, html) -> html = .Val(candidate) }
+            .Val(.Json) -> { if accept_candidate_better(candidate, json) -> json = .Val(candidate) }
+            .None -> {
+                if accept_candidate_better(candidate, html) -> html = .Val(candidate)
+                if accept_candidate_better(candidate, json) -> json = .Val(candidate)
+            }
+        }
+    }
+    match (html, json) {
+        (.Val(h), .Val(j)) -> {
+            if j.0 > h.0 || (j.0 == h.0 && (j.1 > h.1 || (j.1 == h.1 && j.2 < h.2))) -> return .Json
+            return .Html
+        }
+        (.Val(_), _) -> return .Html
+        (.None, .None) -> return .Html
+        (.None, .Val(_)) -> return .Json
+    }
+}
+// Rust: crates/jet-devserver/src/WebErrorPage.rs:1810
+fn parse_quality(value: String) -> U16? {
+    if value == "0" -> return .Val(0)
+    if value == "1" -> return .Val(1000)
+    (whole, fraction) :: value.split_once('.') ?? return .None
+    if whole != "0" && whole != "1" -> return .None
+    if fraction.is_empty() || fraction.len() > 3 || !fraction.bytes().all((b) -> b.is_ascii_digit()) -> return .None
+    padded := fraction.to_string()
+    while padded.len() < 3 -> padded.push('0')
+    fractional :: padded.parse[U16]().ok() ?? return .None
+    if whole == "1" && fractional != 0 -> return .None
+    return .Val(if whole == "1" -> 1000 else -> fractional)
+}

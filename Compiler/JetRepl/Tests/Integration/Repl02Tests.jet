@@ -1,0 +1,798 @@
+use Compiler.JetRepl.Tests.Integration.Repl.[run_repl_process, run_raw_multiline_pty]
+use Compiler.JetRepl.Tests.Integration.Repl02.[fixture_turn]
+use jet.REPL.[run_transcript, run_transcript_with_flags, Docs, Render, ReplTurn, ReplTurnStatus, RerunPlan, Session]
+use jet.AST.[CtValue]
+use jet.SemanticSymbols as SemanticSymbols
+use std.[fs, env, process, thread]
+use std.process.[Command, Stdio]
+use std.io.[Read, Write]
+use std.sync.[mpsc]
+use std.time.[Instant, Duration]
+use core.sys.target.[selected_os, selected_family]
+// GATE #4494: real child processes, PTYs, channels, clocks and files.
+// GATE #4483: original cfg arms dispatch from selected target facts.
+
+// Rust: tests/repl.rs:1801
+#Test("repl_tty_compute_interrupt_returns_within_100ms") {
+    if selected_os() != "linux" -> return
+    child := Command.new("script").args(["-qec", "\"$JET_REPL_BIN\" repl", "/dev/null"]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_HISTORY", "off").env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).spawn().expect("spawn timed raw REPL")
+    stdin := child.stdin.take().unwrap()
+    stdout := child.stdout.take().unwrap()
+    (tx, rx) :: mpsc.channel<[U8]>()
+    reader :: thread.spawn(() -> {
+        bytes := [U8].repeat(0, 4096)
+        loop {
+            count :: match stdout.read(&bytes) { Ok(count) -> count; Err(_) -> break }
+            if count == 0 -> break
+            if tx.send(bytes[..count].to_vec()).is_err() -> break
+        }
+    })
+    transcript := String.new()
+    startup_deadline :: Instant.now() + Duration.from_secs(2)
+    loop !transcript.contains("1 user>") && Instant.now() < startup_deadline {
+        if Ok(chunk) :: rx.recv_timeout(Duration.from_millis(50)) -> transcript.push_str(String.from_utf8_lossy(chunk))
+    }
+    stdin.write_all(b"loop {{ }}\r").unwrap()
+    stdin.flush().unwrap()
+    thread.sleep(Duration.from_millis(20))
+    interrupted_at :: Instant.now()
+    stdin.write_all(b"\x03").unwrap()
+    stdin.flush().unwrap()
+    latency := none as Duration?
+    loop interrupted_at.elapsed() <= Duration.from_millis(100) {
+        if Ok(chunk) :: rx.recv_timeout(Duration.from_millis(5)) {
+            transcript.push_str(String.from_utf8_lossy(chunk))
+            if transcript.contains("Interrupted. External effects already performed were not rolled back.") {
+                latency = interrupted_at.elapsed()
+                break
+            }
+        }
+    }
+    if latency.is_some() {
+        _ :: stdin.write_all(b":quit\r")
+        _ :: child.wait()
+    } else {
+        _ :: child.kill()
+        _ :: child.wait()
+    }
+    drop(^rx)
+    _ :: reader.join().ok()
+    assert(latency.is_some(), "prompt missed 100ms interrupt bound: {transcript}")
+}
+
+// Rust: tests/repl.rs:1872
+#Test("repl_tty_ctrl_c_warns_while_blocking_child_stops") {
+    if selected_os() != "linux" -> return
+    root :: env.temp_dir().join("jet_repl_interrupt_warning_{process.id()}")
+    fs.create_dir_all(root).unwrap()
+    shell :: "\n{{\n  sleep 0.2\n  printf 'use core.process as process\\r'\n  sleep 0.15\n  printf '#FX(authority: Exec) {{ process.run([\"sh\", \"-c\", \"trap '\\''sleep 0.4; exit 130'\\'' INT; while :; do :; done\"]) ?? panic(\"run failed\") }}\\r'\n  sleep 0.6\n  printf '\\003'\n  sleep 0.8\n  printf ':quit\\r'\n}} | timeout 6s script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\" --allow-exec' /dev/null\n"
+    output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_ROOT", root).env("JET_REPL_HISTORY", "off").env("NO_COLOR", "1").output().unwrap()
+    transcript := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY blocking interrupt failed: {transcript}")
+    assert(transcript.contains("waiting for active external I/O to stop"), "blocking warning missing: {transcript}")
+    _ :: fs.remove_dir_all(root).ok()
+}
+
+// Rust: tests/repl.rs:1912
+#Test("repl_tty_second_ctrl_c_during_turn_exits_session") {
+    if selected_os() != "linux" -> return
+    shell :: "\n{{\n  sleep 0.2\n  printf 'loop {{ }}\\r'\n  sleep 0.3\n  printf '\\003'\n  sleep 0.03\n  printf '\\003'\n  sleep 0.3\n  printf '40 + 2\\r'\n}} | timeout 4s script -qec '\"$JET_REPL_BIN\" repl' /dev/null\n"
+    output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_HISTORY", "off").env("NO_COLOR", "1").output().unwrap()
+    transcript := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "second Ctrl-C did not exit: {transcript}")
+    assert(!transcript.contains("42 : Int"), "REPL accepted input after double interrupt: {transcript}")
+}
+
+// Rust: tests/repl.rs:1947
+#Test("repl_raw_completion_menu_selects_shared_symbol") {
+    if selected_os() != "linux" -> return
+    shell :: "\n{{\n  sleep 0.2\n  printf 'alpha :: 1\\r'\n  sleep 0.1\n  printf 'alpine :: 2\\r'\n  sleep 0.1\n  printf 'al\\t\\033[B\\r\\r'\n  sleep 0.2\n  printf ':quit\\r'\n}} | timeout 5s script -qec '\"$JET_REPL_BIN\" repl' /dev/null\n"
+    output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_HISTORY", "off").env("NO_COLOR", "1").output().unwrap()
+    transcript := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "completion PTY failed: {transcript}")
+    assert(transcript.contains("completion —"), "selection menu missing: {transcript}")
+    assert(transcript.contains("> alpha") && transcript.contains("> alpine"), "selection did not move: {transcript}")
+    assert(transcript.contains("2 : Int"), "selected symbol was not inserted: {transcript}")
+    assert(!transcript.contains("\x1b[7m"), "NO_COLOR completion used color: {transcript:?}")
+}
+
+// Rust: tests/repl.rs:1993
+#Test("repl_non_tty_denies_ungranted_files_before_execution") {
+    root :: env.temp_dir().join("jet_repl_deny_{process.id()}")
+    fs.create_dir_all(root).expect("create root")
+    target :: root.join("must-not-exist.txt")
+    input :: "#FX(authority: FS) {{ fs.write(\"must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }}"
+    out :: run_transcript(["use core.files as fs", input], root.to_str())
+    assert(out.contains("E1803") && out.contains("FS.Write"), "missing deterministic deny: {out}")
+    assert(!target.exists(), "denied effect executed")
+    _ :: fs.remove_dir_all(root).ok()
+}
+
+// Rust: tests/repl.rs:2008
+#Test("repl_allow_and_deny_flags_work_in_transcript_mode") {
+    root :: env.temp_dir().join("jet_repl_flags_{process.id()}")
+    fs.create_dir_all(root).expect("create root")
+    input :: "#FX(authority: FS) {{ fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }}"
+    allowed :: run_transcript_with_flags(["use core.files as fs", input], root.to_str(), ["fs"], [])
+    assert(!allowed.contains("E1803"), "--allow-fs rejected: {allowed}")
+    assert_eq(fs.read_to_string(root.join("flag.txt")).unwrap(), "allowed")
+    fs.remove_file(root.join("flag.txt")).unwrap()
+    denied :: run_transcript_with_flags(["use core.files as fs", input], root.to_str(), ["fs"], ["fs"])
+    assert(denied.contains("E1803"), "--deny-fs must override allow: {denied}")
+    assert(!root.join("flag.txt").exists(), "explicitly denied effect executed")
+    _ :: fs.remove_dir_all(root).ok()
+}
+
+// Rust: tests/repl.rs:2044
+#Test("repl_cli_allow_and_deny_flags_control_non_tty_execution") {
+    root :: env.temp_dir().join("jet_repl_cli_flags_{process.id()}")
+    fs.create_dir_all(root).unwrap()
+    input :: b"use core.files as fs\n#FX(authority: FS) {{ fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }}\n:quit\n"
+    run :: (extra: &[String]) -> {
+        cmd := Command.new(env.binary_path("jet"))
+        cmd.arg("repl").arg("--project").arg(root).args(extra).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped())
+        child := cmd.spawn().unwrap()
+        child.stdin.as_mut().unwrap().write_all(input).unwrap()
+        child.wait_with_output().unwrap()
+    }
+    allowed :: run(["--allow-fs"])
+    assert(allowed.status.success(), "allow status: {allowed.status:?}")
+    assert_eq(fs.read_to_string(root.join("cli.txt")).unwrap(), "yes")
+    fs.remove_file(root.join("cli.txt")).unwrap()
+    denied :: run(["--allow-fs", "--deny-fs"])
+    stderr := String.from_utf8_lossy(denied.stderr) // #4303
+    assert(stderr.contains("E1803"), "missing deny diagnostic: {stderr}")
+    assert(!root.join("cli.txt").exists(), "CLI-denied write executed")
+    _ :: fs.remove_dir_all(root).ok()
+}
+
+// Rust: tests/repl.rs:2089
+#Test("repl_effect_needs_lexical_grant_even_with_allow_flag") {
+    root :: env.temp_dir().join("jet_repl_missing_grant_{process.id()}")
+    fs.create_dir_all(root).unwrap()
+    out :: run_transcript_with_flags(["use core.files as fs", "fs.write(\"no.txt\", \"bad\") ?? panic(\"write failed\")"], root.to_str(), ["fs"], [])
+    assert(out.contains("E1803") && out.contains("no REPL runtime authority"), "missing lexical denial: {out}")
+    assert(!root.join("no.txt").exists(), "operation without #FX executed")
+    _ :: fs.remove_dir_all(root).ok()
+}
+
+// Rust: tests/repl.rs:2113
+#Test("repl_allow_fs_still_rejects_paths_outside_project_root") {
+    root :: env.temp_dir().join("jet_repl_confined_{process.id()}")
+    outside :: env.temp_dir().join("jet_repl_escape_{process.id()}.txt")
+    fs.create_dir_all(root).unwrap()
+    _ :: fs.remove_file(outside).ok()
+    escaped :: outside.to_string_lossy().replace('\\', "\\\\")
+    input :: "#FX(authority: FS) {{ fs.write(\"{escaped}\", \"bad\") ?? panic(\"write failed\") }}"
+    out :: run_transcript_with_flags(["use core.files as fs", input], root.to_str(), ["fs"], [])
+    assert(out.contains("E1803") && out.contains("FS.Write") && out.contains(escaped), "absolute escape was not rejected before execution: {out}")
+    assert(!outside.exists(), "confined REPL wrote outside project root")
+    _ :: fs.remove_dir_all(root).ok()
+}
+
+// Rust: tests/repl.rs:2141
+#Test("repl_allow_fs_rejects_symlink_components_before_open") {
+    if selected_family() != "unix" -> return
+    root :: env.temp_dir().join("jet_repl_symlink_root_{process.id()}")
+    outside :: env.temp_dir().join("jet_repl_symlink_out_{process.id()}")
+    fs.create_dir_all(root).unwrap()
+    fs.create_dir_all(outside).unwrap()
+    std.os.unix.fs.symlink(outside, root.join("escape")).unwrap()
+    input :: "#FX(authority: FS) {{ fs.write(\"escape/must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }}"
+    out :: run_transcript_with_flags(["use core.files as fs", input], root.to_str(), ["fs"], [])
+    assert(out.contains("E1803"), "symlink traversal was not denied: {out}")
+    assert(!outside.join("must-not-exist.txt").exists(), "symlink escape executed")
+    _ :: fs.remove_file(root.join("escape")).ok()
+    _ :: fs.remove_dir_all(root).ok()
+    _ :: fs.remove_dir_all(outside).ok()
+}
+
+// Rust: tests/repl.rs:2170
+#Test("repl_tty_prompts_and_reuses_exact_session_tuple") {
+    root :: env.temp_dir().join("jet_repl_tty_auth_{process.id()}")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("value.txt"), "ok").unwrap()
+    shell :: "\n{{\n  sleep 0.2\n  printf 'use core.files as fs\\r'\n  sleep 0.2\n  printf '#FX(authority: FS) {{ fs.read(\"value.txt\") ?? panic(\"read failed\") }}\\r'\n  sleep 0.2\n  printf 's'\n  sleep 0.2\n  printf '#FX(authority: FS) {{ fs.read(\"value.txt\") ?? panic(\"read failed\") }}\\r'\n  sleep 0.2\n  printf 'c'\n  sleep 0.2\n  printf ':quit\\r'\n}} | script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\"' /dev/null\n"
+    output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_ROOT", root).env("NO_COLOR", "1").output().expect("run REPL under PTY")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY status: {output.status:?}\n{out}")
+    assert(out.contains("Core effect FS requests runtime authority"), "missing prompt: {out}")
+    assert(out.contains("Using session FS.Read authority for `value.txt`"), "missing exact tuple reuse: {out}")
+    assert(!out.contains("E1803"), "approved tuple denied: {out}")
+    _ :: fs.remove_dir_all(root).ok()
+}
+
+// Rust: tests/repl.rs:2218
+#Test("repl_http_client_import_hard_rejected") {
+    out :: run_transcript(["use core.http.client as client"], none)
+    assert(out.contains("E1802"), "HTTP client import should hard-reject, got: {out:?}")
+}
+// Rust: tests/repl.rs:2228
+#Test("repl_mut_binding_allows_reassign") {
+    out :: run_transcript(["hi := 2", "hi = hi * 2", "hi"], none)
+    assert(!out.contains("E0111") && !out.contains("made with"), "mutable REPL binding should allow `=`, got: {out:?}")
+    assert(out.contains("4"), "hi * 2 should be 4, got: {out:?}")
+}
+// Rust: tests/repl.rs:2240
+#Test("repl_immut_binding_rejects_reassign") {
+    out :: run_transcript(["hi :: 2", "hi = hi * 2"], none)
+    assert(out.contains("E0111"), "immutable `::` binding should reject `=`, got: {out:?}")
+}
+
+// Rust: tests/repl.rs:2263
+#Test("banner_wording_matches_hybrid_ratification") {
+    banner :: Render.render_banner("1.0.0", false)
+    assert_eq(banner, "Jet 1.0.0 — Interactive REPL  (:quit, :help, ^B bindings)")
+}
+// Rust: tests/repl.rs:2274
+#Test("interactive_prompt_carries_a_turn_gutter") {
+    assert_eq(Render.render_prompt(1, false), "1 user> ")
+    assert_eq(Render.render_prompt(2, false), "2 user> ")
+    assert_ne(Render.render_prompt(1, false), "user> ")
+}
+// Rust: tests/repl.rs:2284
+#Test("long_list_folds_past_threshold_short_list_does_not") {
+    short :: CtValue.List((0..5).map(CtValue.Int).collect())
+    assert(Render.fold_decision_for_value(short).is_none(), "a short list must print plainly, not fold")
+    long :: CtValue.List((0..42).map(CtValue.Int).collect())
+    (count, elem_ty) :: Render.fold_decision_for_value(long).expect("long list should fold")
+    assert_eq(count, 42)
+    marker :: Render.render_fold_marker(count, elem_ty, false)
+    assert_eq(marker, "⋯ 42 rows folded · [Int] · unfold ⏎")
+}
+// Rust: tests/repl.rs:2299
+#Test("pin_rail_renders_binding_name_type_value_and_unpin_hint") {
+    rail :: Render.render_pin_rail("total: Int :: 15", 3, 62, false)
+    head :: rail.lines().next().unwrap()
+    assert(head.contains("total: Int :: 15"), "got: {head:?}")
+    assert(head.contains("turn 3"), "got: {head:?}")
+    assert(head.contains("unpin"), "got: {head:?}")
+    assert(head.contains("^P"), "got: {head:?}")
+}
+// Rust: tests/repl.rs:2309
+#Test("docs_lookup_builtin_list_filter_matches_ratified_mock") {
+    session :: Session.new()
+    doc :: Docs.lookup(session, "List.filter").expect("List.filter has builtin docs")
+    assert(doc.starts_with("List.filter(f: fn(T) -> Bool) -> List<T>"), "got: {doc:?}")
+    assert(doc.contains("Keeps items where f(item) is true."), "got: {doc:?}")
+    assert(doc.contains("Source:"), "got: {doc:?}")
+    assert(doc.contains("Example:"), "shared symbol example missing: {doc:?}")
+}
+// Rust: tests/repl.rs:2329
+#Test("shared_semantic_symbol_has_complete_identity_and_docs") {
+    symbol :: SemanticSymbols.lookup("List.filter").expect("shared List.filter symbol")
+    assert_eq(symbol.module, "core.collections")
+    assert_eq(symbol.owner, "List")
+    assert_eq(symbol.member, "filter")
+    assert(symbol.signature.contains("fn(T) -> Bool"))
+    assert(!symbol.summary.is_empty())
+    assert(!symbol.example.is_empty())
+    assert_eq(symbol.provenance, "builtin")
+}
+// Rust: tests/repl.rs:2341
+#Test("shared_semantic_symbols_catalog_numeric_conversions_and_parse") {
+    parse :: SemanticSymbols.lookup("Int.parse").expect("Int.parse symbol")
+    assert_eq(parse.signature, "Int.parse(text: String) -> Int ParseError!")
+    narrow :: SemanticSymbols.lookup("F32.from_float").expect("F32.from_float symbol")
+    assert_eq(narrow.module, "core.numeric")
+    assert(narrow.signature.ends_with("-> F32 !String"))
+    assert(SemanticSymbols.lookup("I64.from_f32").is_some())
+    assert(SemanticSymbols.lookup("F64.from_u32").is_some())
+}
+// Rust: tests/repl.rs:2356
+#Test("repl_raw_member_completion_menu_is_selectable") {
+    if selected_os() != "linux" -> return
+    output :: run_raw_multiline_pty("printf 'items :: [1, 2, 3]\\r'; sleep 0.12; printf 'items.f\\t'; sleep 0.15; printf '\\033[B\\033[B\\r'; sleep 0.15; printf '\\003'")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "selectable completion PTY failed: {out}")
+    assert(out.contains("filter") && out.contains("filter_map"), "shared candidates missing: {out:?}")
+    assert(out.contains("items.find"), "two Down keys did not select the third completion: {out:?}")
+}
+// Rust: tests/repl.rs:2377
+#Test("repl_raw_core_module_member_completion_inserts_sqrt") {
+    if selected_os() != "linux" -> return
+    output :: run_raw_multiline_pty("printf 'use core.math as math\\r'; sleep 0.15; printf 'math.sq\\t'; sleep 0.12; printf '(16.0)\\r'")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "module completion PTY failed: {out}")
+    assert(out.contains("4") && (out.contains("Float") || out.contains("4.0")), "math.sq<Tab> did not become math.sqrt(16.0): {out:?}")
+}
+// Rust: tests/repl.rs:2396
+#Test("repl_raw_f1_shows_cursor_docs_for_core_import_member") {
+    if selected_os() != "linux" -> return
+    output :: run_raw_multiline_pty("printf 'use core.math as math\\r'; sleep 0.15; printf 'math.sqrt\\033OP'; sleep 0.15; printf '\\003'")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "F1 cursor docs PTY failed: {out}")
+    assert(out.contains("core.math.sqrt"), "F1 did not show module member docs: {out:?}")
+}
+// Rust: tests/repl.rs:2409
+#Test("repl_docs_resolve_imported_core_module_member") {
+    out :: run_transcript(["use core.math as math", "?math.sqrt"], none)
+    assert(out.contains("core.math.sqrt") && out.contains("Source: core.math"), "imported module member docs missing: {out:?}")
+}
+// Rust: tests/repl.rs:2418
+#Test("docs_lookup_local_binding_shows_live_value") {
+    session := Session.new()
+    session.scope.insert("answer", CtValue.Int(42))
+    doc :: Docs.lookup(session, "answer").expect("bound name should resolve")
+    assert(doc.starts_with("answer: Int :: 42\n"))
+    assert(doc.contains("Source: this session"))
+    session.mutable_names.insert("answer")
+    mutable_doc :: Docs.lookup(session, "answer").expect("bound name should resolve")
+    assert(mutable_doc.starts_with("answer: Int := 42\n"))
+}
+// Rust: tests/repl.rs:2432
+#Test("bare_question_name_is_the_primary_docs_spelling") {
+    bare :: run_transcript(["answer :: 42", "?answer"], none)
+    colon :: run_transcript(["answer :: 42", ":? answer"], none)
+    assert(bare.contains("answer: Int :: 42"), "got: {bare:?}")
+    assert(colon.contains("answer: Int :: 42"), "got: {colon:?}")
+}
+// Rust: tests/repl.rs:2442
+#Test("live_binding_shadows_same_name_session_item_in_docs_and_completion") {
+    out :: run_transcript(["fn answer() -[]> Int {{ return 1 }}", "answer :: 42", "?answer"], none)
+    assert(out.contains("answer: Int :: 42"), "got: {out:?}")
+}
+// Rust: tests/repl.rs:2455
+#Test("bare_question_mark_alone_shows_help_like_colon_form") {
+    out :: run_transcript(["?"], none)
+    assert(out.contains("REPL meta-commands"), "got: {out:?}")
+}
+// Rust: tests/repl.rs:2476
+#Test("rerun_plan_gates_effectful_turns_and_lets_pure_turns_auto_replay") {
+    turns :: [
+        fixture_turn(1, "rate :: 0.07", false, "rate"),
+        fixture_turn(2, "invoice_total :: subtotal * (1.0 + rate)", false, "invoice_total"),
+        fixture_turn(3, "write_file(\"out.txt\", invoice_total)", true, none)
+    ]
+    plan :: RerunPlan.build_replay_plan(turns, 1, "rate :: 0.08").expect("plan")
+    assert_eq(plan.steps.len(), 3)
+    assert_eq(plan.steps[0].input, "rate :: 0.08", "edited turn's text is substituted")
+    assert(RerunPlan.plan_needs_confirmation(plan), "the write_file step needs confirmation")
+    rendered :: RerunPlan.render_replay_plan(plan, false)
+    assert(rendered.starts_with("Replay plan:\n"), "got: {rendered:?}")
+    assert(rendered.contains("auto"), "got: {rendered:?}")
+    assert(rendered.contains("confirm effect"), "got: {rendered:?}")
+    assert(rendered.trim_end().ends_with("Apply? [y/N]"), "got: {rendered:?}")
+    pure_only :: RerunPlan.build_replay_plan(turns, 1, none).map(p -> {
+        p.steps.truncate(2)
+        ^p
+    })
+    assert(!RerunPlan.plan_needs_confirmation(pure_only.unwrap()))
+}
+// Rust: tests/repl.rs:2520
+#Test("rerun_plan_keeps_interrupted_turn_addressable") {
+    interrupted := fixture_turn(1, "loop {{ }}", false, none)
+    interrupted.status = ReplTurnStatus.Interrupted
+    plan :: RerunPlan.build_replay_plan([interrupted], 1, none).expect("interrupted turn reruns")
+    assert_eq(plan.steps.len(), 1)
+    assert_eq(plan.steps[0].input, "loop {{ }}")
+}
+// Rust: tests/repl.rs:2530
+#Test("rerun_plan_rejects_unknown_turn_id") {
+    turns :: [fixture_turn(1, "x :: 1", false, "x")]
+    assert(RerunPlan.build_replay_plan(turns, 99, none).is_err())
+}
+// Rust: tests/repl.rs:2536
+#Test("textual_rerun_fallback_still_previews_a_turn") {
+    out :: run_transcript(["1 + 2", ":rerun 1"], none)
+    assert(out.contains("rerun #1: 1 + 2"), "got: {out:?}")
+    assert(out.matches("3 : Int").count() >= 2, "got: {out:?}")
+}
+// Rust: tests/repl.rs:2551
+#Test("repl_raw_rerun_selects_edits_and_replays_downstream_state") {
+    if selected_family() != "unix" -> return
+    output :: run_raw_multiline_pty("printf 'rate := 7\\r'; sleep 0.12; printf 'total :: rate * 2\\r'; sleep 0.12; printf '\\022'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\1778\\r'; sleep 0.2; printf 'total\\r'")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY status: {output.status:?}\n{out}")
+    assert(out.contains("select turn to edit"), "arbitrary-turn selector missing: {out:?}")
+    assert(out.contains("rerun #2: total :: rate * 2"), "downstream turn not replayed: {out:?}")
+    assert(out.contains("16 : Int"), "edited state did not reach downstream binding: {out:?}")
+}
+// Rust: tests/repl.rs:2577
+#Test("repl_raw_rerun_effect_skip_marks_turn_and_downstream_stale_without_execution") {
+    if selected_family() != "unix" -> return
+    output :: run_raw_multiline_pty("printf 'x := 1\\r'; sleep 0.12; printf 'print(\"EFFECT_ONCE\")\\r'; sleep 0.12; printf 'y :: x + 1\\r'; sleep 0.12; printf '\\022'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\r'; sleep 0.12; printf 's'; sleep 0.15; printf ':turns\\r'")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY status: {output.status:?}\n{out}")
+    normalized :: out.replace('\r', "")
+    assert_eq(normalized.lines().filter(line -> line == "EFFECT_ONCE").count(), 1, "skipped effect replayed: {out:?}")
+    assert(out.contains("skip and mark stale"), "per-effect skip prompt missing: {out:?}")
+    assert(out.contains("stale"), "skipped/downstream turns not stale-marked: {out:?}")
+}
+// Rust: tests/repl.rs:2607
+#Test("repl_cooked_rerun_edits_and_applies_downstream_state") {
+    state :: env.temp_dir().join("jet_repl_rerun_cooked_{process.id()}")
+    _ :: fs.remove_dir_all(state).ok()
+    output :: run_repl_process(state, b"x := 1\ny :: x + 1\n:rerun 1\nx := 8\ny\n:quit\n", none)
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "cooked rerun failed: {out}")
+    assert(out.contains("Edit turn 1 [x := 1]"), "cooked edit prompt missing: {out}")
+    assert(out.contains("rerun #2: y :: x + 1"), "cooked downstream replay missing: {out}")
+    assert(out.contains("9 : Int"), "cooked edited state not live: {out}")
+    _ :: fs.remove_dir_all(state).ok()
+}
+// Rust: tests/repl.rs:2633
+#Test("repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream") {
+    state :: env.temp_dir().join("jet_repl_rerun_cooked_effect_{process.id()}")
+    _ :: fs.remove_dir_all(state).ok()
+    output :: run_repl_process(state, b"x := 1\nprint(\"COOKED_EFFECT\")\ny :: x + 1\n:rerun 1\n\ns\n:turns\n:quit\n", none)
+    out :: String.from_utf8_lossy(output.stdout).replace('\r', "")
+    assert(output.status.success(), "cooked effect rerun failed: {out}")
+    assert_eq(out.lines().filter(line -> line == "COOKED_EFFECT").count(), 1, "skipped cooked effect replayed: {out}")
+    assert(out.contains("Replay effect turn 2?"), "per-effect cooked prompt missing: {out}")
+    assert(out.contains("#2 ok stale") && out.contains("#3 ok stale"), "cooked stale marking missing: {out}")
+    _ :: fs.remove_dir_all(state).ok()
+}
+// Rust: tests/repl.rs:2664
+#Test("repl_raw_project_baseline_survives_downstream_replay") {
+    if selected_family() != "unix" -> return
+    root :: env.temp_dir().join("jet_repl_rerun_project_{process.id()}")
+    _ :: fs.remove_dir_all(root).ok()
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("helper.jet"), "fn add_three(x: Int) -[]> Int {{ return x + 3 }}\n").unwrap()
+    shell :: "\n{{\n  sleep 0.2\n  printf 'x := add_three(1)\\r'\n  sleep 0.15\n  printf 'y :: add_three(x)\\r'\n  sleep 0.15\n  printf '\\022'\n  sleep 0.12\n  printf '1\\r'\n  sleep 0.12\n  printf '\\033[D\\1772\\r'\n  sleep 0.2\n  printf 'y\\r'\n  sleep 0.15\n  printf ':quit\\r'\n}} | timeout 8s script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\"' /dev/null\n"
+    output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_ROOT", root).env("JET_REPL_HISTORY", "off").env("NO_COLOR", "1").output().unwrap()
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "project replay PTY failed: {out}")
+    assert(out.contains("rerun #2: y :: add_three(x)"), "project downstream replay missing: {out}")
+    assert(out.contains("8 : Int"), "project function baseline was lost: {out}")
+    assert(!out.contains("E0102"), "project function became unknown: {out}")
+    _ :: fs.remove_dir_all(root).ok()
+}
+// Rust: tests/repl.rs:2719
+#Test("repl_raw_pin_and_fold_select_arbitrary_turns") {
+    if selected_family() != "unix" -> return
+    output :: run_raw_multiline_pty("printf 'first :: 1\\r'; sleep 0.12; printf 'second :: 2\\r'; sleep 0.12; printf '\\020'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\006'; sleep 0.12; printf '1\\r'; sleep 0.12; printf ':turns\\r'")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY status: {output.status:?}\n{out}")
+    assert(out.contains("select turn to pin"), "^P arbitrary selector missing: {out:?}")
+    assert(out.contains("select turn to fold"), "^F arbitrary selector missing: {out:?}")
+    assert(out.contains("#1 ok pinned folded"), "selected turn state missing: {out:?}")
+    assert(!out.contains("#2 ok pinned") && !out.contains("#2 ok folded"), "latest turn was changed instead: {out:?}")
+}
+
+// Rust: tests/repl.rs:2748
+#Test("repl_cooked_prompt_keeps_truthful_turn_digits") {
+    state :: env.temp_dir().join("jet_repl_cooked_ids_{process.id()}")
+    _ :: fs.remove_dir_all(state).ok()
+    output :: run_repl_process(state, b"1 + 1\n2 + 2\n:quit\n", none)
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "cooked REPL failed: {out}")
+    assert(out.contains("1 user> ") && out.contains("2 user> ") && out.contains("3 user> "), "cooked turn ids missing: {out:?}")
+    _ :: fs.remove_dir_all(state).ok()
+}
+// Rust: tests/repl.rs:2763
+#Test("repl_raw_long_list_unfold_opens_indexed_pager") {
+    if selected_family() != "unix" -> return
+    values :: (0..25).map(n -> n.to_string()).collect<[String]>().join(", ")
+    script :: "printf '[{values}]\\r'; sleep 0.2; printf '\\r'; sleep 0.15; printf 'j'; sleep 0.12; printf 'q'; sleep 0.12; printf ':quit\\r'"
+    output :: run_raw_multiline_pty(script)
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY status: {output.status:?}\n{out}")
+    assert(out.contains("25 rows folded"), "long collection did not fold: {out:?}")
+    assert(out.contains("idx") && out.contains("value"), "indexed table missing: {out:?}")
+    assert(out.contains("j/k") && out.contains("q"), "pager controls missing: {out:?}")
+    assert(out.contains(" 10 │ 10"), "pager did not advance to second page: {out:?}")
+}
+// Rust: tests/repl.rs:2799
+#Test("repl_raw_bindings_are_live_in_side_pane") {
+    if selected_family() != "unix" -> return
+    output :: run_raw_multiline_pty("printf '\\002'; sleep 0.12; printf 'score := 7\\r'; sleep 0.2; printf ':quit\\r'")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY status: {output.status:?}\n{out}")
+    assert(out.contains("session") && out.contains("bindings"), "workspace headers missing: {out:?}")
+    assert(out.contains("│ score: Int := 7"), "binding not in side column: {out:?}")
+    assert(out.contains("new this step"), "live changed marker missing: {out:?}")
+}
+// Rust: tests/repl.rs:2825
+#Test("repl_raw_no_color_never_renders_history_ghost_as_real_text") {
+    if selected_family() != "unix" -> return
+    output :: run_raw_multiline_pty("printf 'alphabet := 1\\r'; sleep 0.12; printf 'a'; sleep 0.15; printf '\\003'")
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY status: {output.status:?}\n{out}")
+    second :: out.rsplit("2 user> ").next().unwrap_or(out)
+    assert(!second.contains("alphabet := 1"), "NO_COLOR ghost became fake typed text: {second:?}")
+}
+// Rust: tests/repl.rs:2844
+#Test("repl_raw_color_highlights_live_input") {
+    if selected_family() != "unix" -> return
+    shell :: "\n{{\n  sleep 0.2\n  printf 'value :: \"hi\"'\n  sleep 0.15\n  printf '\\003'\n}} | timeout 8s script -qec '\"$JET_REPL_BIN\" repl' /dev/null\n"
+    output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_HISTORY", "off").env("FORCE_COLOR", "1").env_remove("NO_COLOR").output().unwrap()
+    out := String.from_utf8_lossy(output.stdout) // #4303
+    assert(output.status.success(), "PTY status: {output.status:?}\n{out}")
+    assert(out.contains("\u{1b}["), "live editor emitted no ANSI highlighting: {out:?}")
+    assert(out.contains("\u{1b}[1;96m") || out.contains("\u{1b}[32m"), "input tokens were not colorized: {out:?}")
+}
+// Rust: tests/repl.rs:2880
+#Test("repl_terminal_matrix_raw_width_color_eof_and_ctrl_d") {
+    if selected_os() != "linux" -> return
+    loop cols in [20, 120] {
+        loop (name, flag, no_color, force_color, expect_color) in [
+            ("auto", "", false, false, true),
+            ("always", "--color=always", true, false, true),
+            ("never", "--color=never", false, true, false),
+            ("empty-NO_COLOR", "", true, true, false),
+            ("FORCE_COLOR", "", false, true, true)
+        ] {
+            shell :: "{{ sleep 0.2; printf '1 + 1\\r'; sleep 0.12; printf '\\004'; }} | timeout 8s script -qec 'stty cols {cols}; \"$JET_REPL_BIN\" repl {flag}' /dev/null"
+            command := Command.new("sh")
+            command.args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_HISTORY", "off").env_remove("NO_COLOR").env_remove("FORCE_COLOR")
+            if no_color -> command.env("NO_COLOR", "")
+            if force_color -> command.env("FORCE_COLOR", "1")
+            output :: command.output().unwrap()
+            out := String.from_utf8_lossy(output.stdout) // #4303
+            assert(output.status.success(), "raw {name}/{cols}-column Ctrl-D row failed: {out}")
+            assert(out.contains("Tab") && out.contains("F3") && !out.contains("interactive keys require a TTY"), "raw mode not reached for {name} at width {cols}: {out:?}")
+            assert(out.contains("2 : Int"), "raw evaluation failed for {name} at width {cols}: {out:?}")
+            assert_eq(out.contains("\u{1b}[1;96m"), expect_color, "wrong color policy for {name} at width {cols}: {out:?}")
+        }
+    }
+    eof :: Command.new("sh").args(["-c", "timeout 8s script -qec '\"$JET_REPL_BIN\" repl < /dev/null' /dev/null"]).env("JET_REPL_BIN", env.binary_path("jet")).env("NO_COLOR", "1").env("JET_REPL_HISTORY", "off").output().unwrap()
+    assert(eof.status.success(), "PTY EOF row hung or failed: {String.from_utf8_lossy(eof.stdout)}")
+}
+// Rust: tests/repl.rs:2949
+#Test("repl_terminal_matrix_cooked_stdio_and_missing_stty_are_truthful") {
+    if selected_os() != "linux" -> return
+    cases :: [
+        ("stdin-pipe/stdout-pty", "printf \"1 + 1\\n:quit\\n\" | \"$JET_REPL_BIN\" repl"),
+        ("missing-stty", "PATH=/definitely-missing \"$JET_REPL_BIN\" repl")
+    ]
+    loop (name, inner) in cases {
+        shell :: if name == "missing-stty" -> "{{ sleep 0.2; printf '1 + 1\\r:quit\\r'; }} | timeout 8s script -qec '{inner}' /dev/null" else -> "timeout 8s script -qec '{inner}' /dev/null"
+        output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("NO_COLOR", "1").env("JET_REPL_HISTORY", "off").output().unwrap()
+        out := String.from_utf8_lossy(output.stdout) // #4303
+        assert(output.status.success(), "{name} row failed: {out}")
+        assert(out.contains("interactive keys require a TTY"), "{name} falsely claimed raw mode: {out:?}")
+        assert(!out.contains("Tab complete"), "{name} advertised unavailable keys: {out:?}")
+        assert(out.contains("1 user> ") && out.contains("2 : Int"), "{name} cooked behavior missing: {out:?}")
+    }
+    root :: env.temp_dir().join("jet_repl_stdout_mode_{process.id()}")
+    fs.create_dir_all(root).unwrap()
+    captured :: root.join("stdout.txt")
+    shell :: "{{ sleep 0.2; printf '3 + 4\\r:quit\\r'; }} | timeout 8s script -qec '\"$JET_REPL_BIN\" repl > \"{captured.display()}\"' /dev/null"
+    output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("NO_COLOR", "1").env("JET_REPL_HISTORY", "off").output().unwrap()
+    stderr_side := String.from_utf8_lossy(output.stdout) // #4303
+    stdout_side :: fs.read_to_string(captured).unwrap()
+    assert(output.status.success(), "stdin-pty/stdout-file row failed: {stderr_side}")
+    assert(stderr_side.contains("interactive keys require a TTY"), "redirected stdout falsely entered raw mode: {stderr_side:?}")
+    assert(stdout_side.contains("1 user> ") && stdout_side.contains("7 : Int"), "redirected cooked stdout missing: {stdout_side:?}")
+    _ :: fs.remove_dir_all(root).ok()
+}
+// Rust: tests/repl.rs:3023
+#Test("repl_terminal_matrix_keyboard_and_text_fallbacks_are_reachable") {
+    if selected_os() != "linux" -> return
+    raw :: run_raw_multiline_pty("printf 'alpha := 1\\r'; sleep 0.12; printf '\\002'; sleep 0.12; printf '\\0201\\r'; sleep 0.12; printf '\\0061\\r'; sleep 0.12; printf '\\0221\\r\\r'; sleep 0.18; printf 'alp\\t\\r'; sleep 0.12; printf '\\033ORa\\r\\r'; sleep 0.15; printf ':quit\\r'")
+    raw_out := String.from_utf8_lossy(raw.stdout) // #4303
+    assert(raw.status.success(), "raw key matrix failed: {raw_out}")
+    loop marker in ["bindings", "select turn to pin", "select turn to fold", "select turn to edit", "history search>"] {
+        assert(raw_out.contains(marker), "raw key `{marker}` unreachable: {raw_out:?}")
+    }
+    assert(raw_out.contains("1 : Int"), "Tab completion did not resolve live binding: {raw_out:?}")
+    state :: env.temp_dir().join("jet_repl_text_matrix_{process.id()}")
+    _ :: fs.remove_dir_all(state).ok()
+    cooked :: run_repl_process(state, b"alpha := 1\n?alpha\n:pin 1\n:fold 1\n:unfold 1\n:rerun 1\n\n:history search alpha\n:turns\n:quit\n", none)
+    cooked_out := String.from_utf8_lossy(cooked.stdout) // #4303
+    assert(cooked.status.success(), "text fallback matrix failed: {cooked_out}")
+    loop marker in ["alpha: Int := 1", "turn pinned", "turn folded", "turn unfolded", "rerun #1", "#1 ok"] {
+        assert(cooked_out.contains(marker), "text fallback `{marker}` unreachable: {cooked_out:?}")
+    }
+    _ :: fs.remove_dir_all(state).ok()
+}
+
+// Rust: tests/repl.rs:3081
+#Test("repl_exact_int_construct_and_show") {
+    out :: run_transcript(["100"], none)
+    assert(out.trim().ends_with("100 : Int"), "got: {out:?}")
+    assert(!out.contains("E0956"), "got: {out:?}")
+}
+// Rust: tests/repl.rs:3088
+#Test("repl_exact_int_add_beyond_i64_max") {
+    inputs :: ["max_i64 :: 9223372036854775807", "one :: 1", "sum :: max_i64 + one", "sum.to_string()"]
+    out :: run_transcript(inputs, none)
+    assert(out.contains("\"9223372036854775808\" : String"), "got: {out:?}")
+}
+// Rust: tests/repl.rs:3104
+#Test("repl_exact_int_from_literal_add") {
+    inputs :: ["huge :: 999999999999999999999999999999", "doubled :: huge + huge", "doubled.to_string()"]
+    out :: run_transcript(inputs, none)
+    assert(out.contains("\"1999999999999999999999999999998\" : String"), "got: {out:?}")
+}
+// Rust: tests/repl.rs:3118
+#Test("repl_exact_int_mul_massive") {
+    inputs :: [
+        "massive :: 239238749287396287369263958629386592683596293856293659263596235962935869236592863592635962395862935629368592635926359623956293659236592635986239562936592635962395629365926359863892659826398568639269856",
+        "massdoub :: massive * massive", "massdoub.to_string()"
+    ]
+    out :: run_transcript(inputs, none)
+    assert(out.contains("\"57235179160597657597531047020200956544362763118771376009314169310643907927975523987347975666104048258728304782749129351109033383492052353630602575371754435856735360169485983219218233794801194422942999175714144363822988057872537938863053251946320370964445676871073768260912400343608038289822197795736070764739253602318976703277723078277315814109217255310422643607649043148897685808219536598364790260736\" : String"), "got: {out:?}")
+}
+// Rust: tests/repl.rs:3134
+#Test("repl_exact_int_sub_and_neg") {
+    inputs :: ["a :: 5", "b :: 3", "(a - b).to_string()", "(-b).to_string()"]
+    out :: run_transcript(inputs, none)
+    assert(out.contains("\"2\" : String"), "got: {out:?}")
+    assert(out.contains("\"-3\" : String"), "got: {out:?}")
+}
+// Rust: tests/repl.rs:3147
+#Test("repl_exact_int_equality_is_numeric") {
+    inputs :: ["left :: -999999999999999999999999999999", "same :: -999999999999999999999999999999",
+        "other :: 999999999999999999999999999999", "left == same", "left != same", "left != other"]
+    out :: run_transcript(inputs, none)
+    bools :: out.lines().filter(line -> line.ends_with(" : Bool")).collect<[String]>()
+    assert_eq(bools, ["true : Bool", "false : Bool", "true : Bool"], "got: {out:?}")
+    assert(!out.contains("E0956"), "got: {out:?}")
+}
+// Rust: tests/repl.rs:3175
+#Test("repl_core_random_widened_draws_dispatch") {
+    calls :: [
+        "#FX(authority: Rand) {{ random.seed(1) }}",
+        "#FX(authority: Rand) {{ random.bool(0.5) }}",
+        "#FX(authority: Rand) {{ random.float_range(1.0, 2.0) }}",
+        "#FX(authority: Rand) {{ random.normal(0.0, 1.0) }}",
+        "#FX(authority: Rand) {{ random.exponential(1.0) }}",
+        "#FX(authority: Rand) {{ random.bytes(3) }}",
+        "#FX(authority: Rand) {{ random.pick([1, 2, 3, 4, 5]) ?? 0 }}",
+        "#FX(authority: Rand) {{ random.sample([1, 2, 3, 4, 5], 2) }}",
+        "#FX(authority: Rand) {{ random.weighted_pick([1, 2, 3, 4, 5], [1.0, 1.0, 1.0, 1.0, 1.0]) ?? 0 }}",
+        "#FX(authority: Rand) {{ random.split(7) }}"
+    ]
+    loop call in calls {
+        out :: run_transcript_with_flags(["use core.math.random as random", call], none, ["rand"], [])
+        assert(!out.contains("error ["), "authorized call failed: {call}: {out}")
+    }
+    shuffle :: run_transcript_with_flags(["use core.math.random as random", "ys := [1, 2, 3, 4, 5]", "#FX(authority: Rand) {{ random.shuffle(&ys) }}"], none, ["rand"], [])
+    assert(!shuffle.contains("error ["), "authorized shuffle failed: {shuffle}")
+}
+// Rust: tests/repl.rs:3220
+#Test("repl_core_fmt_dispatch") {
+    inputs :: ["use core.text.fmt as fmt", "fmt.number(1234567)", "fmt.decimal(Float{{3.14159}}, 2)",
+        "fmt.decimal(Float{{1234.5678}}, 2)", "fmt.grouped(Float{{1234.5678}}, 2)", "fmt.percent(0.4567, 1)",
+        "fmt.bytes(1500000)", "fmt.duration(93784000)", "fmt.ordinal(23)", "fmt.plural(1, \"item\", \"items\")",
+        "fmt.plural(3, \"item\", \"items\")", "fmt.pad_left(\"7\", 3, \"0\")",
+        "fmt.pad_right(\"ab\", 5, \".\")", "fmt.pad_center(\"hi\", 6, \"*\")"]
+    out :: run_transcript(inputs, none)
+    assert(!out.contains("E0956"), "core.text.fmt should dispatch at comptime, got: {out}")
+    loop expected in ["\"1,234,567\" : String", "\"3.14\" : String", "\"1234.57\" : String",
+        "\"1,234.57\" : String", "\"45.7%\" : String", "\"1.5 MB\" : String", "\"1d 2h 3m\" : String",
+        "\"23rd\" : String", "\"1 item\" : String", "\"3 items\" : String", "\"007\" : String",
+        "\"ab...\" : String", "\"**hi**\" : String"] -> assert(out.contains(expected), "got: {out}")
+}
+// Rust: tests/repl.rs:3262
+#Test("repl_core_encoding_base32_and_base64url_dispatch") {
+    inputs :: ["use core.encoding.base32 as base32", "use core.encoding.base64 as base64",
+        "base32.encode([104, 101, 108, 108, 111])", "base32.decode(\"NBSWY3DP\")", "base64.encode_url([251, 239, 190])"]
+    out :: run_transcript(inputs, none)
+    assert(!out.contains("E0956"), "core.encoding.base32/base64 url variant should dispatch at comptime, got: {out}")
+    assert(out.contains("\"NBSWY3DP\" : String"), "got: {out}")
+    assert(out.contains("[104, 101, 108, 108, 111] : Result"), "got: {out}")
+    assert(out.contains("\"----\" : String"), "got: {out}")
+}
+// Rust: tests/repl.rs:3289
+#Test("repl_core_url_dispatch") {
+    inputs :: ["use core.net.url as url", "url.percent_encode(\"a b/c\")", "url.percent_decode(\"a%20b\")",
+        "url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])", "url.parse(\"https://ex.com/a/../b?x=1#f\")",
+        "url.parse(\"not a url\")", "url.from_parts(\"https\", \"ex.com\", \"/p\", [[\"k\", \"v\"]], \"\")", "url.file(\"/tmp/x.txt\")"]
+    out :: run_transcript(inputs, none)
+    assert(!out.contains("E0956"), "core.net.url should dispatch at comptime, got: {out}")
+    assert(out.contains("\"a%20b%2Fc\" : String"), "got: {out}")
+    assert(out.contains("a b : Result"), "got: {out}")
+    assert(out.contains("\"a=1&b=2%20c\" : String"), "got: {out}")
+    assert(out.contains("https://ex.com/b?x=1#f"), "got: {out}")
+    assert(out.contains("err : Result"), "got: {out}")
+    assert(out.contains("file:///tmp/x.txt"), "got: {out}")
+}
+// Rust: tests/repl.rs:3329
+#Test("repl_core_data_dispatch") {
+    inputs :: ["use core.data as data", "data.status()"]
+    out :: run_transcript(inputs, none)
+    assert(!out.contains("E0956"), "core.data status surface should dispatch at comptime, got: {out}")
+    assert(out.contains("core.data.csv") && out.contains("path: \"native\""), "native status missing: {out}")
+    assert(out.contains("py.*") && out.contains("unavailable") && out.contains("owned-copy") && out.contains("python-sidecar"), "py bridge status missing: {out}")
+    assert(!out.contains("bridge-ready"), "must not claim bridge-ready facade: {out}")
+}
+// Rust: tests/repl.rs:3354
+#Test("repl_zstd_compress_is_resident") {
+    out :: run_transcript(["use core.archive.zstd as zstd",
+        "frame :: zstd.compress([72, 101, 108, 108, 111]) ?? panic(\"zstd compress\")", "frame.len() > 9",
+        "frame[0] == (U8.from_int(40) ?? 0) && frame[1] == (U8.from_int(181) ?? 0) && frame[2] == (U8.from_int(47) ?? 0) && frame[3] == (U8.from_int(253) ?? 0)"], none)
+    assert(!out.contains("E0956"), "zstd compressor hit comptime fallback: {out}")
+    assert_eq(out.matches("true : Bool").count(), 2, "got: {out}")
+}
+// Rust: tests/repl.rs:3372
+#Test("repl_zstd_decompress_is_resident_and_typed") {
+    out :: run_transcript(["use core.archive.zstd as zstd",
+        "zstd.decompress([40, 181, 47, 253, 0, 88, 41, 0, 0, 104, 101, 108, 108, 111]) ?? []",
+        "zstd.decompress([40, 181, 47]) ?? [255]"], none)
+    assert(!out.contains("E0956"), "resident decoder hit fallback: {out}")
+    assert(out.contains("[104, 101, 108, 108, 111]"), "got: {out}")
+    assert(out.contains("[255]"), "malformed frame was not a typed Err: {out}")
+}
+// Rust: tests/repl.rs:3393
+#Test("repl_core_data_query_plans_and_typed_joins") {
+    inputs :: ["use core.data as data", "rows :: [Int]{{3, 1, 2}}", "query :: data.query(rows)",
+        "deferred :: query.filter((x) -> x > 10)", "deferred.plan()",
+        "planned :: data.query(rows).filter((x) -> x > 1).sort_by((x) -> \"{{x}}\")", "planned.collect() ?? panic(\"collect\")",
+        "data.inner_join([1, 2, 1], [1, 1], (x) -> \"{{x}}\", (x) -> \"{{x}}\")",
+        "data.left_join([1, 2], [1], (x) -> \"{{x}}\", (x) -> \"{{x}}\")"]
+    out :: run_transcript(inputs, none)
+    assert(out.contains("[table, filter]"), "deferred query plan missing: {out}")
+    assert(out.contains("[2, 3]"), "materialized filter/sort result missing: {out}")
+    assert(out.lines().any(line -> line.matches("DataJoin(left: 1, right: 1)").count() == 4), "inner join multiplicity lost: {out}")
+    assert(out.contains("DataJoin(left: 2, right: null)"), "left join unmatched row missing: {out}")
+}
+// Rust: tests/repl.rs:3426
+#Test("repl_core_data_schema_empty_lists_and_row_law") {
+    inputs :: ["use core.data as data", "struct Ticket {{ team: String minutes: Float }}",
+        "empty_rows: [Ticket] := []", "data.schema(empty_rows)", "data.schema([1.0, 2.0])",
+        "t :: Ticket{{team: \"Core\", minutes: 4.0}}", "data.schema([t])",
+        "empty_tickets: [Ticket] := []", "data.schema(empty_tickets)", "struct Empty {{}}",
+        "empty_units: [Empty] := []", "data.schema(empty_units)", "struct Box<T> {{ value: T }}",
+        "boxed: [Box<Int>] := []", "data.schema(boxed)"]
+    out :: run_transcript(inputs, none)
+    assert(!out.contains("E0956"), "core.data schema should dispatch at comptime, got: {out}")
+    assert(out.contains("DataColumn(name: team, type_name: String)") && out.contains("DataColumn(name: minutes, type_name: Float)"), "empty list of Ticket must keep static columns: {out}")
+    assert(out.contains("DataColumn(name: value, type_name: Float)"), "scalar Float list must have one value column: {out}")
+    assert(out.contains("[] : List"), "zero-field row must have zero columns: {out}")
+    assert(out.contains("DataColumn(name: value, type_name: Int)"), "generic row fields must substitute concrete type arguments: {out}")
+}
+// Rust: tests/repl.rs:3469
+#Test("repl_core_data_list_query_echo_hides_comptime_metadata") {
+    inputs :: ["use core.data as data", "struct Ticket {{ team: String minutes: Float }}",
+        "empty_rows: [Ticket] := []", "empty_rows", "data.query(empty_rows)", "data.schema(empty_rows)"]
+    out :: run_transcript(inputs, none)
+    assert(!out.contains("E0956"), "core.data list/query calls should dispatch at comptime, got: {out}")
+    assert(out.contains("Query("), "expected a typed Query echo: {out}")
+    assert(out.contains("[] : List"), "ordinary list echo missing: {out}")
+    assert(!out.contains("elem_type:"), "comptime-only metadata must not leak into REPL echo: {out}")
+}
+// Rust: tests/repl.rs:3498
+#Test("repl_core_data_json_ingest_and_select") {
+    fixture :: env.temp_dir().join("jet_repl_data_json_{process.id()}")
+    fs.create_dir_all(fixture).unwrap()
+    fs.write(fixture.join("model.jet"), "#Codable\nstruct Ticket {{ team: String minutes: Float }}\n").unwrap()
+    project_dir :: fixture.to_string_lossy().to_string()
+    inputs :: ["use core.data as data",
+        "raw :: \"[{{{{\\\"team\\\":\\\"Core\\\",\\\"minutes\\\":4.0}}}},{{{{\\\"team\\\":\\\"Tools\\\",\\\"minutes\\\":5.0}}}},{{{{\\\"team\\\":\\\"Core\\\",\\\"minutes\\\":8.0}}}}]\"",
+        "rows :: data.json<Ticket>(raw) ?? panic(\"bad json\")", "data.schema(rows)",
+        "selected :: data.query(rows).filter((t) -> t.minutes >= 5.0).collect() ?? panic(\"filter\")",
+        "data.count(selected)", "data.status()[6]"]
+    out :: run_transcript(inputs, project_dir)
+    _ :: fs.remove_dir_all(fixture).ok()
+    assert(!out.contains("E0956"), "core.data json should dispatch at comptime, got: {out}")
+    assert(out.contains("DataColumn(name: team, type_name: String)") && out.contains("DataColumn(name: minutes, type_name: Float)"), "json list schema missing: {out}")
+    assert(out.contains("2 : Int"), "selected count missing: {out}")
+    assert(out.contains("DataStatus(step: core.data.json") && out.contains("path: native"), "json status row missing: {out}")
+}
+// Rust: tests/repl.rs:3542
+#Test("repl_file_argument_loads_definitions_without_running_entry") {
+    fixture :: env.temp_dir().join("jet_repl_preload_{process.id()}")
+    fs.create_dir_all(fixture).unwrap()
+    source :: fixture.join("defs.jet")
+    fs.write(source, "fn triple(n: Int) -[]> Int {{ return n * 3 }}\nfn run() {{ print(\"entry ran\") }}\n").unwrap()
+    out :: jet.REPL.run_transcript_with_preload(["triple(4)"], none, source.to_string_lossy())
+    _ :: fs.remove_dir_all(fixture).ok()
+    assert(out.contains("loaded 2 items"), "preload should report what it loaded, got: {out}")
+    assert(out.contains("12 : Int"), "a definition from the file should be callable in turn 1, got: {out}")
+    assert(!out.contains("entry ran"), "`fn run` must NOT be invoked by a command-line preload, got: {out}")
+}
+// Rust: tests/repl.rs:3574
+#Test("repl_missing_file_argument_is_refused_before_the_banner") {
+    missing :: env.temp_dir().join("jet_repl_absent_{process.id()}.jet")
+    _ :: fs.remove_file(missing).ok()
+    out :: Command.new(env.binary_path("jet")).arg("repl").arg(missing).env("NO_COLOR", "1").output().expect("run repl")
+    stderr := String.from_utf8_lossy(out.stderr) // #4303
+    stdout := String.from_utf8_lossy(out.stdout) // #4303
+    assert_eq(out.status.code(), 1, "stderr: {stderr}")
+    assert(stderr.contains("E2105"), "expected E2105, got: {stderr}")
+    assert(!stdout.contains("Welcome"), "a refused preload must not print the banner, got: {stdout}")
+}
+// Rust: tests/repl.rs:3600
+#Test("repl_project_flag_value_is_not_read_as_the_preload_file") {
+    project :: env.temp_dir().join("jet_repl_proj_arg_{process.id()}")
+    fs.create_dir_all(project).unwrap()
+    fs.write(project.join("helper.jet"), "fn helper() -[]> Int {{ return 7 }}\n").unwrap()
+    out :: Command.new(env.binary_path("jet")).arg("repl").arg("--project").arg(project).env("NO_COLOR", "1").output().expect("run repl")
+    _ :: fs.remove_dir_all(project).ok()
+    stderr := String.from_utf8_lossy(out.stderr) // #4303
+    assert(!stderr.contains("E2105"), "`--project <dir>` must not be mistaken for a preload file: {stderr}")
+}

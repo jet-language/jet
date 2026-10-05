@@ -1,1812 +1,775 @@
-// PORT-PENDING 0789 crates-jet-devserver-src-webhost-slice-1: crates/jet-devserver/src/WebHost.rs:1-1808
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Web dev-server state, terminal/browser parity UI, routes, live reload, and
-//RS //! last-good artifact swapping — std-only (I6: no `notify`, HTTP-server, or
-//RS //! WebSocket crate).
-//RS //!
-//RS //! This is a different execution model from native `jet dev`, which
-//RS //! interprets/hot-swaps the program in process. Compiling to JS/WASM still
-//RS //! requires a rebuild, but the browser receives a typed module-swap receipt
-//RS //! after each accepted build so its runtime can preserve module-owned state
-//RS //! without a host-forced page restart. The mtime-poll watch pattern (and the
-//RS //! `file_mtime` helper itself) is shared with `run_dev`, not its interpreter or
-//RS //! JIT machinery.
-//RS 
-//RS use std::collections::HashMap;
-//RS use std::fs;
-//RS use std::io::{BufReader, IsTerminal, Write};
-//RS use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
-//RS use std::path::{Component, Path, PathBuf};
-//RS use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-//RS use std::sync::{Arc, Mutex};
-//RS use std::thread;
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS use crate::TerminalStyleReload::{
-//RS     TerminalCapabilityFacts, TerminalColorMode, TerminalStyleHostAdapter, TerminalStyleHostSource,
-//RS };
-//RS use jet_driver::Diagnostics::ColorChoice;
-//RS use jet_driver::Package::ReleaseDevtoolsPolicy;
-//RS use jet_foundation::DataTree::DataTree;
-//RS use jet_foundation::Devtools::{
-//RS     JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventBody, JetDevtoolsFormState,
-//RS     JetDevtoolsFreshnessFact, JetDevtoolsFreshnessState, JetDevtoolsFunctionIdentity,
-//RS     JetDevtoolsGameLaunchPhase, JetDevtoolsLifecycleState, JetDevtoolsMutationLifecycle,
-//RS     JetDevtoolsPrivacy, JetDevtoolsQueryState, JetDevtoolsSourceIdentityFact,
-//RS     JetDevtoolsSourceSpan, JetDevtoolsTraceKind, JET_DEVTOOLS_MAX_ENVELOPE_BYTES,
-//RS     JET_DEVTOOLS_MAX_EVENTS,
-//RS };
-//RS use jet_foundation::DevtoolsControl::{
-//RS     JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsDatabaseExplainRequest,
-//RS     JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlKind, JetDevtoolsGameControlRequest,
-//RS     JetDevtoolsProjectRebuildRequest,
-//RS };
-//RS use jet_foundation::HotSwap::HotSwapDecision;
-//RS use jet_foundation::JSON::{json_escape, parse_json_with_limit};
-//RS 
-//RS use crate::{
-//RS     content_type_for, query_param, read_static_file_bounded, static_relative_path, write_response,
-//RS     Request, MAX_REQUEST_BODY_BYTES,
-//RS };
-//RS #[path = "BrowserWebAdapter.rs"]
-//RS mod browser_web_adapter;
-//RS 
-//RS /// Application preview ports tried, in order, before giving up. 8080 is the
-//RS /// conventional static-dev-server port; a small bounded scan upward covers
-//RS /// "something else is already on 8080" without hunting indefinitely.
-//RS const APPLICATION_PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
-//RS const CANVAS_SESSION_BYTES: usize = 32;
-//RS const MAX_CONNECTION_THREADS: usize = 64;
-//RS 
-//RS /// How often the live-reload script in the browser polls `/__jet_dev_status`.
-//RS /// The watcher and in-process rebuild already fit inside the warm budget; this
-//RS /// short poll closes the remaining edit-to-visible gap without a refresh.
-//RS const LIVE_RELOAD_POLL_MS: u64 = 40;
-//RS const CLIENT_TTL_MS: u64 = crate::Session::CLIENT_TTL_MS;
-//RS const MAX_CLIENTS: usize = crate::Session::MAX_CLIENTS;
-//RS const REQUEST_DEADLINE: Duration = Duration::from_secs(10);
-//RS const MAX_STATIC_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
-//RS static PUBLICATION_COUNTER: AtomicU64 = AtomicU64::new(0);
-//RS pub(crate) fn decode_devtools_envelope(
-//RS     payload: &str,
-//RS ) -> Result<JetDevtoolsDecodedEnvelope, String> {
-//RS     let root = parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES)
-//RS         .map_err(|_| "devtools envelope is not valid bounded JSON".to_string())?;
-//RS     let object =
-//RS         object_map(&root).ok_or_else(|| "devtools envelope must be an object".to_string())?;
-//RS     let protocol = devtools_required_string(&object, "protocol")?;
-//RS     if protocol != jet_foundation::Devtools::JET_DEVTOOLS_PROTOCOL {
-//RS         return Err("devtools envelope protocol does not match jet.devtools.v1".to_string());
-//RS     }
-//RS     if object.contains_key("history") {
-//RS         return Err("devtools envelope must use the single `events` stream".to_string());
-//RS     }
-//RS     let session_id = devtools_required_string(&object, "session_id")?;
-//RS     let started_at_ms = devtools_required_u64(&object, "started_at_ms")?;
-//RS     match object.get("direction") {
-//RS         Some(direction) => match devtools_required_value_string(direction, "direction")?.as_str() {
-//RS             "host_to_runtime" => {
-//RS                 if object.contains_key("events") {
-//RS                     return Err(
-//RS                         "devtools command envelope cannot contain an events stream".to_string()
-//RS                     );
-//RS                 }
-//RS                 Ok(JetDevtoolsDecodedEnvelope::Commands(
-//RS                     decode_devtools_command_envelope(&object, &session_id, started_at_ms)?,
-//RS                 ))
-//RS             }
-//RS             "runtime_to_host" => {
-//RS                 if object.contains_key("commands") {
-//RS                     return Err(
-//RS                         "devtools event envelope cannot contain a commands stream".to_string()
-//RS                     );
-//RS                 }
-//RS                 Ok(JetDevtoolsDecodedEnvelope::Events(decode_devtools_events(
-//RS                     &object,
-//RS                     &session_id,
-//RS                     started_at_ms,
-//RS                 )?))
-//RS             }
-//RS             _ => Err("devtools envelope direction is not recognized".to_string()),
-//RS         },
-//RS         None => {
-//RS             if object.contains_key("commands") {
-//RS                 return Err("devtools command envelope requires direction".to_string());
-//RS             }
-//RS             Ok(JetDevtoolsDecodedEnvelope::Events(decode_devtools_events(
-//RS                 &object,
-//RS                 &session_id,
-//RS                 started_at_ms,
-//RS             )?))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn decode_devtools_events(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     session_id: &str,
-//RS     started_at_ms: u64,
-//RS ) -> Result<JetDevtoolsEnvelope, String> {
-//RS     let events = match object.get("events") {
-//RS         Some(DataTree::Array(events)) => events,
-//RS         _ => return Err("devtools envelope `events` must be an array".to_string()),
-//RS     };
-//RS     if events.len() > JET_DEVTOOLS_MAX_EVENTS {
-//RS         return Err("devtools envelope exceeds the retained event limit".to_string());
-//RS     }
-//RS     let mut envelope = JetDevtoolsEnvelope::new(session_id.to_string(), started_at_ms);
-//RS     for value in events {
-//RS         let event = object_map(value)
-//RS             .ok_or_else(|| "devtools envelope event must be an object".to_string())?;
-//RS         let sequence = devtools_required_u64(&event, "sequence")?;
-//RS         if sequence == 0 {
-//RS             return Err("devtools envelope event sequence must be positive".to_string());
-//RS         }
-//RS         let timestamp_ms = devtools_required_u64(&event, "timestamp_ms")?;
-//RS         let source = devtools_required_string(&event, "source")?;
-//RS         let kind = devtools_required_string(&event, "kind")?;
-//RS         let entity = devtools_required_string(&event, "entity")?;
-//RS         let fields_value = event
-//RS             .get("fields")
-//RS             .ok_or_else(|| "devtools envelope missing `fields`".to_string())?;
-//RS         object_map(fields_value)
-//RS             .ok_or_else(|| "devtools envelope `fields` must be an object".to_string())?;
-//RS         let fields = crate::Session::render_json(fields_value);
-//RS         let payload = match event.get("payload") {
-//RS             None | Some(DataTree::Null) => None,
-//RS             Some(DataTree::Object(_)) => Some(devtools_required_object_json(&event, "payload")?),
-//RS             Some(_) => return Err("devtools event payload must be an object or null".to_string()),
-//RS         };
-//RS         let event = match decode_devtools_body(&kind, &entity, fields_value)? {
-//RS             Some(body) => {
-//RS                 let typed = JetDevtoolsEvent::from_wire(
-//RS                     sequence,
-//RS                     timestamp_ms,
-//RS                     source,
-//RS                     body,
-//RS                     fields,
-//RS                     payload,
-//RS                 )?;
-//RS                 if typed.kind() != kind || typed.entity() != entity {
-//RS                     return Err("devtools event identity does not match its typed body".to_string());
-//RS                 }
-//RS                 typed
-//RS             }
-//RS             None => JetDevtoolsEvent::from_parts_with_payload(
-//RS                 timestamp_ms,
-//RS                 source,
-//RS                 kind,
-//RS                 entity,
-//RS                 fields,
-//RS                 payload,
-//RS             )?,
-//RS         };
-//RS         envelope.push(event);
-//RS     }
-//RS     if let Some(selection) = object.get("selection") {
-//RS         match selection {
-//RS             DataTree::Null => envelope.set_selection(None),
-//RS             DataTree::Object(selection) => {
-//RS                 let selection = object_map_entries(selection);
-//RS                 let panel_id = devtools_required_string(&selection, "panel_id")?;
-//RS                 let item_key = devtools_optional_string(&selection, "item_key")?;
-//RS                 envelope.set_selection(Some(jet_foundation::Devtools::JetDevtoolsSelection::new(
-//RS                     panel_id, item_key,
-//RS                 )));
-//RS             }
-//RS             _ => return Err("devtools envelope selection must be an object or null".to_string()),
-//RS         }
-//RS     }
-//RS     if let Some(cursor) = object.get("cursor") {
-//RS         envelope.set_cursor(match cursor {
-//RS             DataTree::Null => None,
-//RS             DataTree::Int(value) if *value >= 0 => Some(*value as u64),
-//RS             DataTree::Float(value)
-//RS                 if value.fract() == 0.0 && *value >= 0.0 && *value <= u64::MAX as f64 =>
-//RS             {
-//RS                 Some(*value as u64)
-//RS             }
-//RS             _ => return Err("devtools envelope cursor must be a sequence".to_string()),
-//RS         });
-//RS     }
-//RS     if let Some(lifecycle) = object.get("lifecycle") {
-//RS         let lifecycle = devtools_required_value_string(lifecycle, "lifecycle")?;
-//RS         envelope.set_lifecycle(devtools_lifecycle(&lifecycle)?);
-//RS     }
-//RS     if let Some(freshness) = object.get("freshness") {
-//RS         let freshness = object_map(freshness)
-//RS             .ok_or_else(|| "devtools envelope freshness must be an object".to_string())?;
-//RS         let state = devtools_required_string(&freshness, "state")?;
-//RS         let observed_at_ms = devtools_required_u64(&freshness, "observed_at_ms")?;
-//RS         envelope.set_freshness(JetDevtoolsFreshnessFact {
-//RS             state: devtools_freshness_state(&state)?,
-//RS             observed_at_ms,
-//RS         });
-//RS     }
-//RS     if let Some(privacy) = object.get("privacy") {
-//RS         let privacy = object_map(privacy)
-//RS             .ok_or_else(|| "devtools envelope privacy must be an object".to_string())?;
-//RS         envelope.privacy = JetDevtoolsPrivacy {
-//RS             loopback_only: devtools_required_bool(&privacy, "loopback_only")?,
-//RS             payload_free_by_default: devtools_required_bool(&privacy, "payload_free_by_default")?,
-//RS             published_payloads: devtools_required_bool(&privacy, "published_payloads")?,
-//RS         };
-//RS     }
-//RS     if let Some(identity) = object.get("source_identity") {
-//RS         envelope.source_identity = match identity {
-//RS             DataTree::Null => None,
-//RS             DataTree::Object(identity) => {
-//RS                 let identity = object_map_entries(identity);
-//RS                 Some(JetDevtoolsSourceIdentityFact::new(
-//RS                     devtools_optional_string(&identity, "source_id")?,
-//RS                     devtools_optional_string(&identity, "build_id")?,
-//RS                     devtools_optional_string(&identity, "revision")?,
-//RS                     devtools_optional_string(&identity, "world_id")?,
-//RS                 ))
-//RS             }
-//RS             _ => {
-//RS                 return Err(
-//RS                     "devtools envelope source_identity must be an object or null".to_string(),
-//RS                 )
-//RS             }
-//RS         };
-//RS     }
-//RS     if object.contains_key("reset") {
-//RS         envelope.reset = devtools_required_bool(object, "reset")?;
-//RS     }
-//RS     if object.contains_key("truncated") {
-//RS         envelope.truncated = devtools_required_bool(object, "truncated")?;
-//RS     }
-//RS     Ok(envelope)
-//RS }
-//RS 
-//RS fn decode_devtools_command_envelope(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     session_id: &str,
-//RS     started_at_ms: u64,
-//RS ) -> Result<JetDevtoolsCommandEnvelope, String> {
-//RS     let expected = [
-//RS         "protocol",
-//RS         "session_id",
-//RS         "started_at_ms",
-//RS         "direction",
-//RS         "commands",
-//RS     ];
-//RS     if object.len() != expected.len()
-//RS         || !object
-//RS             .keys()
-//RS             .all(|key| expected.iter().any(|expected_key| key == expected_key))
-//RS     {
-//RS         return Err("devtools command envelope has unexpected top-level fields".to_string());
-//RS     }
-//RS     let direction = devtools_required_value_string(
-//RS         object
-//RS             .get("direction")
-//RS             .ok_or_else(|| "devtools command envelope requires direction".to_string())?,
-//RS         "direction",
-//RS     )?;
-//RS     if direction != "host_to_runtime" {
-//RS         return Err("devtools command envelope direction must be host_to_runtime".to_string());
-//RS     }
-//RS     let commands = match object.get("commands") {
-//RS         Some(DataTree::Array(commands)) => commands,
-//RS         _ => return Err("devtools envelope `commands` must be an array".to_string()),
-//RS     };
-//RS     if commands.len() > jet_foundation::DevtoolsControl::JET_DEVTOOLS_MAX_COMMANDS {
-//RS         return Err("devtools envelope exceeds the retained command limit".to_string());
-//RS     }
-//RS     let mut envelope = JetDevtoolsCommandEnvelope::new(session_id.to_string(), started_at_ms);
-//RS     for value in commands {
-//RS         let command = object_map(value)
-//RS             .ok_or_else(|| "devtools envelope command must be an object".to_string())?;
-//RS         if command.len() != 2 || !command.contains_key("kind") || !command.contains_key("payload") {
-//RS             return Err("devtools envelope command must contain only kind and payload".to_string());
-//RS         }
-//RS         let kind = devtools_required_string(&command, "kind")?;
-//RS         let payload = command
-//RS             .get("payload")
-//RS             .and_then(object_map)
-//RS             .ok_or_else(|| "devtools envelope command payload must be an object".to_string())?;
-//RS         let payload = &payload;
-//RS         match kind.as_str() {
-//RS             "DatabaseExplain" => {
-//RS                 let expected = [
-//RS                     "session_id",
-//RS                     "request_id",
-//RS                     "statement_identity",
-//RS                     "timeout_ms",
-//RS                     "max_rows",
-//RS                 ];
-//RS                 if payload.len() != expected.len()
-//RS                     || !payload
-//RS                         .keys()
-//RS                         .all(|key| expected.iter().any(|expected_key| key == expected_key))
-//RS                 {
-//RS                     return Err(
-//RS                         "devtools envelope database command payload has unexpected fields"
-//RS                             .to_string(),
-//RS                     );
-//RS                 }
-//RS                 let request = JetDevtoolsDatabaseExplainRequest::new(
-//RS                     devtools_required_string(payload, "session_id")?,
-//RS                     devtools_required_string(payload, "request_id")?,
-//RS                     devtools_required_string(payload, "statement_identity")?,
-//RS                     devtools_required_u64(payload, "timeout_ms")?,
-//RS                     devtools_required_u64(payload, "max_rows")?,
-//RS                 )?;
-//RS                 envelope.enqueue_command(JetDevtoolsCommand::DatabaseExplain(request))?;
-//RS             }
-//RS             "GameControl" => {
-//RS                 let expected = [
-//RS                     "session_id",
-//RS                     "request_id",
-//RS                     "kind",
-//RS                     "source_id",
-//RS                     "revision",
-//RS                     "world_id",
-//RS                     "actor_id",
-//RS                     "component_id",
-//RS                     "authored_instance_id",
-//RS                     "source_span_start",
-//RS                     "source_span_end",
-//RS                     "field",
-//RS                     "value",
-//RS                     "category",
-//RS                     "expression",
-//RS                     "required_authority",
-//RS                     "frame_id",
-//RS                     "budget",
-//RS                 ];
-//RS                 if payload.len() != expected.len()
-//RS                     || !payload
-//RS                         .keys()
-//RS                         .all(|key| expected.iter().any(|expected_key| key == expected_key))
-//RS                 {
-//RS                     return Err(
-//RS                         "devtools envelope game control payload has unexpected fields".to_string(),
-//RS                     );
-//RS                 }
-//RS                 let request = JetDevtoolsGameControlRequest {
-//RS                     session_id: devtools_required_string(payload, "session_id")?,
-//RS                     request_id: devtools_required_string(payload, "request_id")?,
-//RS                     kind: JetDevtoolsGameControlKind::from_str(&devtools_required_string(
-//RS                         payload, "kind",
-//RS                     )?)?,
-//RS                     source_id: devtools_optional_string(payload, "source_id")?,
-//RS                     revision: devtools_optional_string(payload, "revision")?,
-//RS                     world_id: devtools_optional_string(payload, "world_id")?,
-//RS                     actor_id: devtools_optional_string(payload, "actor_id")?,
-//RS                     component_id: devtools_optional_string(payload, "component_id")?,
-//RS                     authored_instance_id: devtools_optional_string(
-//RS                         payload,
-//RS                         "authored_instance_id",
-//RS                     )?,
-//RS                     source_span_start: devtools_optional_u64(payload, "source_span_start")?,
-//RS                     source_span_end: devtools_optional_u64(payload, "source_span_end")?,
-//RS                     field: devtools_optional_string(payload, "field")?,
-//RS                     value: devtools_optional_string(payload, "value")?,
-//RS                     category: devtools_optional_string(payload, "category")?,
-//RS                     expression: devtools_optional_string(payload, "expression")?,
-//RS                     required_authority: devtools_optional_string(payload, "required_authority")?,
-//RS                     frame_id: devtools_optional_u64(payload, "frame_id")?,
-//RS                     budget: devtools_optional_u64(payload, "budget")?,
-//RS                 };
-//RS                 request.validate()?;
-//RS                 envelope.enqueue_command(JetDevtoolsCommand::GameControl(request))?;
-//RS             }
-//RS             "ProjectRebuild" => {
-//RS                 let expected = ["session_id", "request_id", "expected_revision"];
-//RS                 if payload.len() != expected.len()
-//RS                     || !payload
-//RS                         .keys()
-//RS                         .all(|key| expected.iter().any(|expected_key| key == expected_key))
-//RS                 {
-//RS                     return Err(
-//RS                         "devtools envelope project rebuild payload has unexpected fields"
-//RS                             .to_string(),
-//RS                     );
-//RS                 }
-//RS                 let request = JetDevtoolsProjectRebuildRequest::new(
-//RS                     devtools_required_string(payload, "session_id")?,
-//RS                     devtools_required_string(payload, "request_id")?,
-//RS                     devtools_required_string(payload, "expected_revision")?,
-//RS                 )?;
-//RS                 envelope.enqueue_command(JetDevtoolsCommand::ProjectRebuild(request))?;
-//RS             }
-//RS             _ => {
-//RS                 return Err("devtools envelope contains an unsupported command kind".to_string());
-//RS             }
-//RS         }
-//RS     }
-//RS     envelope.validate()?;
-//RS     Ok(envelope)
-//RS }
-//RS 
-//RS fn decode_devtools_body(
-//RS     kind: &str,
-//RS     _entity: &str,
-//RS     fields: &DataTree,
-//RS ) -> Result<Option<JetDevtoolsEventBody>, String> {
-//RS     let object =
-//RS         object_map(fields).ok_or_else(|| "devtools event fields must be an object".to_string())?;
-//RS     let object = &object;
-//RS     if let Some(expected) = devtools_expected_fields(kind) {
-//RS         if !devtools_has_exact_fields(object, expected) {
-//RS             return Ok(None);
-//RS         }
-//RS     }
-//RS     let body = match kind {
-//RS         "Build" => {
-//RS             devtools_exact_fields(object, &["status", "tier", "diagnostics", "kept", "reset"])?;
-//RS             JetDevtoolsEventBody::Build {
-//RS                 status: devtools_required_string(object, "status")?,
-//RS                 tier: devtools_required_string(object, "tier")?,
-//RS                 diagnostics: devtools_required_string_array(object, "diagnostics")?,
-//RS                 kept: devtools_required_u64(object, "kept")?,
-//RS                 reset: devtools_required_u64(object, "reset")?,
-//RS             }
-//RS         }
-//RS         "Route" => {
-//RS             devtools_exact_fields(object, &["path", "matched", "render_mode", "reason"])?;
-//RS             JetDevtoolsEventBody::Route {
-//RS                 path: devtools_required_string(object, "path")?,
-//RS                 matched: devtools_required_bool(object, "matched")?,
-//RS                 render_mode: devtools_required_string(object, "render_mode")?,
-//RS                 reason: devtools_required_string(object, "reason")?,
-//RS             }
-//RS         }
-//RS         "Query" => {
-//RS             devtools_exact_fields(object, &["name", "state", "footprint"])?;
-//RS             let state = devtools_required_string(object, "state")?;
-//RS             JetDevtoolsEventBody::Query {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 state: match state.as_str() {
-//RS                     "fetching" => JetDevtoolsQueryState::Fetching,
-//RS                     "fresh" => JetDevtoolsQueryState::Fresh,
-//RS                     "stale" => JetDevtoolsQueryState::Stale,
-//RS                     "invalidated" => JetDevtoolsQueryState::Invalidated,
-//RS                     _ => return Err("devtools Query state is not recognized".to_string()),
-//RS                 },
-//RS                 footprint: devtools_required_u64(object, "footprint")?,
-//RS             }
-//RS         }
-//RS         "Mutation" => {
-//RS             devtools_exact_fields(object, &["name", "lifecycle", "rollback"])?;
-//RS             let lifecycle = devtools_required_string(object, "lifecycle")?;
-//RS             JetDevtoolsEventBody::Mutation {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 lifecycle: match lifecycle.as_str() {
-//RS                     "started" => JetDevtoolsMutationLifecycle::Started,
-//RS                     "committed" => JetDevtoolsMutationLifecycle::Committed,
-//RS                     "failed" => JetDevtoolsMutationLifecycle::Failed,
-//RS                     "rolled_back" => JetDevtoolsMutationLifecycle::RolledBack,
-//RS                     _ => return Err("devtools Mutation lifecycle is not recognized".to_string()),
-//RS                 },
-//RS                 rollback: devtools_required_bool(object, "rollback")?,
-//RS             }
-//RS         }
-//RS         "Form" => {
-//RS             devtools_exact_fields(object, &["name", "field", "state", "validation"])?;
-//RS             let state = devtools_required_string(object, "state")?;
-//RS             JetDevtoolsEventBody::Form {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 field: devtools_required_string(object, "field")?,
-//RS                 state: match state.as_str() {
-//RS                     "pristine" => JetDevtoolsFormState::Pristine,
-//RS                     "dirty" => JetDevtoolsFormState::Dirty,
-//RS                     "valid" => JetDevtoolsFormState::Valid,
-//RS                     "invalid" => JetDevtoolsFormState::Invalid,
-//RS                     _ => return Err("devtools Form state is not recognized".to_string()),
-//RS                 },
-//RS                 validation: devtools_required_string(object, "validation")?,
-//RS             }
-//RS         }
-//RS         "Table" => {
-//RS             devtools_exact_fields(object, &["name", "viewport", "sort", "filter"])?;
-//RS             JetDevtoolsEventBody::Table {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 viewport: devtools_required_u64(object, "viewport")?,
-//RS                 sort: devtools_required_string(object, "sort")?,
-//RS                 filter: devtools_required_string(object, "filter")?,
-//RS             }
-//RS         }
-//RS         "Store" => {
-//RS             devtools_exact_fields(object, &["name", "transaction", "diff", "cursor"])?;
-//RS             JetDevtoolsEventBody::Store {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 transaction: devtools_required_string(object, "transaction")?,
-//RS                 diff: devtools_required_string(object, "diff")?,
-//RS                 cursor: devtools_required_u64(object, "cursor")?,
-//RS             }
-//RS         }
-//RS         "Trace" => {
-//RS             devtools_exact_fields(
-//RS                 object,
-//RS                 &["name", "kind", "request", "duration_ms", "status"],
-//RS             )?;
-//RS             let trace_kind = devtools_required_string(object, "kind")?;
-//RS             JetDevtoolsEventBody::Trace {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 kind: match trace_kind.as_str() {
-//RS                     "request" => JetDevtoolsTraceKind::Request,
-//RS                     "render" => JetDevtoolsTraceKind::Render,
-//RS                     "job" => JetDevtoolsTraceKind::Job,
-//RS                     "reload" => JetDevtoolsTraceKind::Reload,
-//RS                     "frame" => JetDevtoolsTraceKind::Frame,
-//RS                     _ => return Err("devtools Trace kind is not recognized".to_string()),
-//RS                 },
-//RS                 request: devtools_required_string(object, "request")?,
-//RS                 duration_ms: devtools_required_u64(object, "duration_ms")?,
-//RS                 status: devtools_required_string(object, "status")?,
-//RS             }
-//RS         }
-//RS         "Cost" => {
-//RS             devtools_exact_fields(object, &["name", "rule", "bytes", "allocations"])?;
-//RS             JetDevtoolsEventBody::Cost {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 rule: devtools_required_string(object, "rule")?,
-//RS                 bytes: devtools_required_u64(object, "bytes")?,
-//RS                 allocations: devtools_required_u64(object, "allocations")?,
-//RS             }
-//RS         }
-//RS         "Gate" => {
-//RS             devtools_exact_fields(object, &["name", "status", "detail"])?;
-//RS             JetDevtoolsEventBody::Gate {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 status: devtools_required_string(object, "status")?,
-//RS                 detail: devtools_required_string(object, "detail")?,
-//RS             }
-//RS         }
-//RS         "Structure" => {
-//RS             devtools_exact_fields(object, &["name", "kind", "status"])?;
-//RS             JetDevtoolsEventBody::Structure {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 kind: devtools_required_string(object, "kind")?,
-//RS                 status: devtools_required_string(object, "status")?,
-//RS             }
-//RS         }
-//RS         "Test" => {
-//RS             devtools_exact_fields(object, &["name", "status", "duration_ms", "diagnostics"])?;
-//RS             JetDevtoolsEventBody::Test {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 status: devtools_required_string(object, "status")?,
-//RS                 duration_ms: devtools_required_u64(object, "duration_ms")?,
-//RS                 diagnostics: devtools_required_string(object, "diagnostics")?,
-//RS             }
-//RS         }
-//RS         "Job" => {
-//RS             devtools_exact_fields(object, &["name", "status", "duration_ms", "diagnostics"])?;
-//RS             JetDevtoolsEventBody::Job {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 status: devtools_required_string(object, "status")?,
-//RS                 duration_ms: devtools_required_u64(object, "duration_ms")?,
-//RS                 diagnostics: devtools_required_string(object, "diagnostics")?,
-//RS             }
-//RS         }
-//RS         "Frame" => {
-//RS             devtools_exact_fields(object, &["name", "status", "duration_ms"])?;
-//RS             JetDevtoolsEventBody::Frame {
-//RS                 name: devtools_required_string(object, "name")?,
-//RS                 status: devtools_required_string(object, "status")?,
-//RS                 duration_ms: devtools_required_u64(object, "duration_ms")?,
-//RS             }
-//RS         }
-//RS         "GameFrameSample" => {
-//RS             devtools_exact_fields(
-//RS                 object,
-//RS                 &[
-//RS                     "sequence",
-//RS                     "frame_id",
-//RS                     "scene",
-//RS                     "frame_index",
-//RS                     "build",
-//RS                     "revision",
-//RS                     "trace_id",
-//RS                     "start_ns",
-//RS                     "cpu_ns",
-//RS                     "gpu_ns",
-//RS                     "responsible_function",
-//RS                 ],
-//RS             )?;
-//RS             JetDevtoolsEventBody::GameFrameSample {
-//RS                 sequence: devtools_required_u64(object, "sequence")?,
-//RS                 frame_id: devtools_required_u64(object, "frame_id")?,
-//RS                 scene: devtools_required_string(object, "scene")?,
-//RS                 frame_index: devtools_required_u64(object, "frame_index")?,
-//RS                 build: devtools_required_string(object, "build")?,
-//RS                 revision: devtools_required_string(object, "revision")?,
-//RS                 trace_id: devtools_required_string(object, "trace_id")?,
-//RS                 start_ns: devtools_required_u64(object, "start_ns")?,
-//RS                 cpu_ns: devtools_required_u64(object, "cpu_ns")?,
-//RS                 gpu_ns: devtools_optional_u64(object, "gpu_ns")?,
-//RS                 responsible_function: devtools_optional_function(object, "responsible_function")?,
-//RS             }
-//RS         }
-//RS         "GameDrawEvent" => {
-//RS             devtools_exact_fields(
-//RS                 object,
-//RS                 &[
-//RS                     "sequence",
-//RS                     "frame_id",
-//RS                     "scene",
-//RS                     "frame_index",
-//RS                     "build",
-//RS                     "revision",
-//RS                     "trace_id",
-//RS                     "event_index",
-//RS                     "event_id",
-//RS                     "function",
-//RS                     "phase",
-//RS                     "domain",
-//RS                     "start_ns",
-//RS                     "duration_ns",
-//RS                     "object_id",
-//RS                     "resource_id",
-//RS                 ],
-//RS             )?;
-//RS             JetDevtoolsEventBody::GameDrawEvent {
-//RS                 sequence: devtools_required_u64(object, "sequence")?,
-//RS                 frame_id: devtools_required_u64(object, "frame_id")?,
-//RS                 scene: devtools_required_string(object, "scene")?,
-//RS                 frame_index: devtools_required_u64(object, "frame_index")?,
-//RS                 build: devtools_required_string(object, "build")?,
-//RS                 revision: devtools_required_string(object, "revision")?,
-//RS                 trace_id: devtools_required_string(object, "trace_id")?,
-//RS                 event_index: devtools_required_u64(object, "event_index")?,
-//RS                 event_id: devtools_required_u64(object, "event_id")?,
-//RS                 function: devtools_required_function(object, "function")?,
-//RS                 phase: devtools_required_string(object, "phase")?,
-//RS                 domain: devtools_required_string(object, "domain")?,
-//RS                 start_ns: devtools_required_u64(object, "start_ns")?,
-//RS                 duration_ns: devtools_required_u64(object, "duration_ns")?,
-//RS                 object_id: devtools_optional_string(object, "object_id")?,
-//RS                 resource_id: devtools_optional_string(object, "resource_id")?,
-//RS             }
-//RS         }
-//RS         "GameLaunchProfile" => {
-//RS             devtools_exact_fields(
-//RS                 object,
-//RS                 &["target", "run_mode", "headless_compatible", "phases"],
-//RS             )?;
-//RS             JetDevtoolsEventBody::GameLaunchProfile {
-//RS                 target: devtools_required_string(object, "target")?,
-//RS                 run_mode: devtools_required_string(object, "run_mode")?,
-//RS                 headless_compatible: devtools_required_bool(object, "headless_compatible")?,
-//RS                 phases: devtools_required_game_launch_phases(object, "phases")?,
-//RS             }
-//RS         }
-//RS         "GameSwap" => {
-//RS             devtools_exact_fields(
-//RS                 object,
-//RS                 &[
-//RS                     "sequence",
-//RS                     "path",
-//RS                     "kind",
-//RS                     "status",
-//RS                     "old_schema_id",
-//RS                     "new_schema_id",
-//RS                     "migration",
-//RS                     "reason",
-//RS                 ],
-//RS             )?;
-//RS             let kind = devtools_required_string(object, "kind")?;
-//RS             if !matches!(kind.as_str(), "asset" | "script" | "world") {
-//RS                 return Err("devtools GameSwap kind is not recognized".to_string());
-//RS             }
-//RS             let status = devtools_required_string(object, "status")?;
-//RS             if !matches!(status.as_str(), "applied" | "rejected") {
-//RS                 return Err("devtools GameSwap status is not recognized".to_string());
-//RS             }
-//RS             let migration = devtools_required_string(object, "migration")?;
-//RS             if !matches!(
-//RS                 migration.as_str(),
-//RS                 "preserve" | "migrate" | "reset" | "reject"
-//RS             ) {
-//RS                 return Err("devtools GameSwap migration is not recognized".to_string());
-//RS             }
-//RS             JetDevtoolsEventBody::GameSwap {
-//RS                 sequence: devtools_required_u64(object, "sequence")?,
-//RS                 path: devtools_required_string(object, "path")?,
-//RS                 kind,
-//RS                 status,
-//RS                 old_schema_id: devtools_optional_string(object, "old_schema_id")?,
-//RS                 new_schema_id: devtools_optional_string(object, "new_schema_id")?,
-//RS                 migration,
-//RS                 reason: devtools_required_string(object, "reason")?,
-//RS             }
-//RS         }
-//RS         "Request" => {
-//RS             devtools_exact_fields(object, &["id", "method", "path", "status"])?;
-//RS             JetDevtoolsEventBody::Request {
-//RS                 id: devtools_required_string(object, "id")?,
-//RS                 method: devtools_required_string(object, "method")?,
-//RS                 path: devtools_required_string(object, "path")?,
-//RS                 status: devtools_required_u16(object, "status")?,
-//RS             }
-//RS         }
-//RS         "Response" => {
-//RS             devtools_exact_fields(object, &["id", "status", "bytes"])?;
-//RS             JetDevtoolsEventBody::Response {
-//RS                 id: devtools_required_string(object, "id")?,
-//RS                 status: devtools_required_u16(object, "status")?,
-//RS                 bytes: devtools_required_u64(object, "bytes")?,
-//RS             }
-//RS         }
-//RS         _ => return Ok(None),
-//RS     };
-//RS     Ok(Some(body))
-//RS }
-//RS 
-//RS fn devtools_expected_fields(kind: &str) -> Option<&'static [&'static str]> {
-//RS     match kind {
-//RS         "Build" => Some(&["status", "tier", "diagnostics", "kept", "reset"]),
-//RS         "Route" => Some(&["path", "matched", "render_mode", "reason"]),
-//RS         "Query" => Some(&["name", "state", "footprint"]),
-//RS         "GameSwap" => Some(&[
-//RS             "sequence",
-//RS             "path",
-//RS             "kind",
-//RS             "status",
-//RS             "old_schema_id",
-//RS             "new_schema_id",
-//RS             "migration",
-//RS             "reason",
-//RS         ]),
-//RS         "Request" => Some(&["id", "method", "path", "status"]),
-//RS         "Store" => Some(&["name", "transaction", "diff", "cursor"]),
-//RS         "Trace" => Some(&["name", "kind", "request", "duration_ms", "status"]),
-//RS         "Cost" => Some(&["name", "rule", "bytes", "allocations"]),
-//RS         "Gate" => Some(&["name", "status", "detail"]),
-//RS         "Structure" => Some(&["name", "kind", "status"]),
-//RS         "Test" | "Job" => Some(&["name", "status", "duration_ms", "diagnostics"]),
-//RS         "Frame" => Some(&["name", "status", "duration_ms"]),
-//RS         "GameFrameSample" => Some(&[
-//RS             "sequence",
-//RS             "frame_id",
-//RS             "scene",
-//RS             "frame_index",
-//RS             "build",
-//RS             "revision",
-//RS             "trace_id",
-//RS             "start_ns",
-//RS             "cpu_ns",
-//RS             "gpu_ns",
-//RS             "responsible_function",
-//RS         ]),
-//RS         "GameDrawEvent" => Some(&[
-//RS             "sequence",
-//RS             "frame_id",
-//RS             "scene",
-//RS             "frame_index",
-//RS             "build",
-//RS             "revision",
-//RS             "trace_id",
-//RS             "event_index",
-//RS             "event_id",
-//RS             "function",
-//RS             "phase",
-//RS             "domain",
-//RS             "start_ns",
-//RS             "duration_ns",
-//RS             "object_id",
-//RS             "resource_id",
-//RS         ]),
-//RS         "GameLaunchProfile" => Some(&["target", "run_mode", "headless_compatible", "phases"]),
-//RS         "Response" => Some(&["id", "status", "bytes"]),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn object_map(value: &DataTree) -> Option<std::collections::BTreeMap<String, DataTree>> {
-//RS     match value {
-//RS         DataTree::Object(fields) => Some(fields.iter().cloned().collect()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn object_map_entries(
-//RS     fields: &[(String, DataTree)],
-//RS ) -> std::collections::BTreeMap<String, DataTree> {
-//RS     fields.iter().cloned().collect()
-//RS }
-//RS 
-//RS fn devtools_has_exact_fields(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     expected: &[&str],
-//RS ) -> bool {
-//RS     object.len() == expected.len()
-//RS         && object
-//RS             .keys()
-//RS             .all(|key| expected.iter().any(|name| *name == key))
-//RS }
-//RS 
-//RS fn devtools_exact_fields(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     expected: &[&str],
-//RS ) -> Result<(), String> {
-//RS     if !devtools_has_exact_fields(object, expected) {
-//RS         return Err("devtools event fields do not match the typed body".to_string());
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn devtools_required_game_launch_phases(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<Vec<JetDevtoolsGameLaunchPhase>, String> {
-//RS     let values = match object.get(key) {
-//RS         Some(DataTree::Array(values)) => values,
-//RS         _ => return Err(format!("devtools event `{key}` must be an array")),
-//RS     };
-//RS     if values.len() > 256 {
-//RS         return Err(format!("devtools event `{key}` exceeds 256 entries"));
-//RS     }
-//RS     values
-//RS         .iter()
-//RS         .map(|value| {
-//RS             let phase = object_map(value)
-//RS                 .ok_or_else(|| format!("devtools event `{key}` must contain objects"))?;
-//RS             let phase = &phase;
-//RS             devtools_exact_fields(phase, &["phase", "status", "detail"])?;
-//RS             Ok(JetDevtoolsGameLaunchPhase::new(
-//RS                 devtools_required_string(phase, "phase")?,
-//RS                 devtools_required_string(phase, "status")?,
-//RS                 devtools_required_string(phase, "detail")?,
-//RS             ))
-//RS         })
-//RS         .collect()
-//RS }
-//RS fn devtools_required_string_array(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<Vec<String>, String> {
-//RS     let values = match object.get(key) {
-//RS         Some(DataTree::Array(values)) => values,
-//RS         _ => return Err(format!("devtools event `{key}` must be an array")),
-//RS     };
-//RS     values
-//RS         .iter()
-//RS         .map(|value| match value {
-//RS             DataTree::Text(value) if !value.is_empty() => Ok(value.clone()),
-//RS             DataTree::Text(_) => Err(format!("devtools event `{key}` has an empty string")),
-//RS             _ => Err(format!("devtools event `{key}` must contain strings")),
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn devtools_required_u16(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<u16, String> {
-//RS     u16::try_from(devtools_required_u64(object, key)?)
-//RS         .map_err(|_| format!("devtools event `{key}` is outside the u16 range"))
-//RS }
-//RS 
-//RS fn devtools_optional_u64(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<Option<u64>, String> {
-//RS     match object.get(key) {
-//RS         Some(DataTree::Null) | None => Ok(None),
-//RS         Some(DataTree::Int(value)) if *value >= 0 => u64::try_from(*value)
-//RS             .map(Some)
-//RS             .map_err(|_| format!("devtools event `{key}` must be non-negative")),
-//RS         Some(DataTree::Int(_)) => Err(format!("devtools event `{key}` must be non-negative")),
-//RS         Some(_) => Err(format!("devtools event `{key}` must be an integer or null")),
-//RS     }
-//RS }
-//RS 
-//RS fn devtools_required_function(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<JetDevtoolsFunctionIdentity, String> {
-//RS     let function = object
-//RS         .get(key)
-//RS         .and_then(object_map)
-//RS         .ok_or_else(|| format!("devtools event `{key}` must be an object"))?;
-//RS     let source = function
-//RS         .get("source")
-//RS         .and_then(object_map)
-//RS         .ok_or_else(|| format!("devtools event `{key}.source` must be an object"))?;
-//RS     Ok(JetDevtoolsFunctionIdentity::new(
-//RS         devtools_required_string(&function, "function_id")?,
-//RS         devtools_required_string(&function, "name")?,
-//RS         JetDevtoolsSourceSpan::new(
-//RS             devtools_required_string(&source, "source_id")?,
-//RS             devtools_required_string(&source, "file")?,
-//RS             devtools_required_u32(&source, "start_line")?,
-//RS             devtools_required_u32(&source, "start_column")?,
-//RS             devtools_required_u32(&source, "end_line")?,
-//RS             devtools_required_u32(&source, "end_column")?,
-//RS         ),
-//RS     ))
-//RS }
-//RS 
-//RS fn devtools_optional_function(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<Option<JetDevtoolsFunctionIdentity>, String> {
-//RS     match object.get(key) {
-//RS         None | Some(DataTree::Null) => Ok(None),
-//RS         Some(DataTree::Object(_)) => devtools_required_function(object, key).map(Some),
-//RS         Some(_) => Err(format!("devtools event `{key}` must be an object or null")),
-//RS     }
-//RS }
-//RS 
-//RS fn devtools_required_u32(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<u32, String> {
-//RS     u32::try_from(devtools_required_u64(object, key)?)
-//RS         .map_err(|_| format!("devtools event `{key}` is outside the u32 range"))
-//RS }
-//RS 
-//RS fn devtools_required_string(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<String, String> {
-//RS     let value = object
-//RS         .get(key)
-//RS         .ok_or_else(|| format!("devtools envelope missing `{key}`"))?;
-//RS     let DataTree::Text(value) = value else {
-//RS         return Err(format!("devtools envelope `{key}` must be a string"));
-//RS     };
-//RS     if value.is_empty() {
-//RS         return Err(format!("devtools envelope `{key}` must not be empty"));
-//RS     }
-//RS     Ok(value.clone())
-//RS }
-//RS 
-//RS fn devtools_required_value_string(value: &DataTree, key: &str) -> Result<String, String> {
-//RS     let DataTree::Text(value) = value else {
-//RS         return Err(format!("devtools envelope `{key}` must be a string"));
-//RS     };
-//RS     if value.is_empty() {
-//RS         return Err(format!("devtools envelope `{key}` must not be empty"));
-//RS     }
-//RS     Ok(value.clone())
-//RS }
-//RS 
-//RS fn devtools_optional_string(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<Option<String>, String> {
-//RS     match object.get(key) {
-//RS         None | Some(DataTree::Null) => Ok(None),
-//RS         Some(DataTree::Text(value)) if !value.is_empty() => Ok(Some(value.clone())),
-//RS         Some(DataTree::Text(_)) => Err(format!("devtools envelope `{key}` must not be empty")),
-//RS         Some(_) => Err(format!(
-//RS             "devtools envelope `{key}` must be a string or null"
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS fn devtools_required_u64(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<u64, String> {
-//RS     let value = object
-//RS         .get(key)
-//RS         .ok_or_else(|| format!("devtools envelope missing `{key}`"))?;
-//RS     match value {
-//RS         DataTree::Int(value) => u64::try_from(*value)
-//RS             .map_err(|_| format!("devtools envelope `{key}` must be non-negative")),
-//RS         _ => Err(format!("devtools envelope `{key}` must be an integer")),
-//RS     }
-//RS }
-//RS 
-//RS fn devtools_required_bool(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<bool, String> {
-//RS     match object.get(key) {
-//RS         Some(DataTree::Bool(value)) => Ok(*value),
-//RS         Some(_) => Err(format!("devtools envelope `{key}` must be a boolean")),
-//RS         None => Err(format!("devtools envelope missing `{key}`")),
-//RS     }
-//RS }
-//RS 
-//RS fn devtools_required_object_json(
-//RS     object: &std::collections::BTreeMap<String, DataTree>,
-//RS     key: &str,
-//RS ) -> Result<String, String> {
-//RS     let value = object
-//RS         .get(key)
-//RS         .ok_or_else(|| format!("devtools envelope missing `{key}`"))?;
-//RS     if !matches!(value, DataTree::Object(_)) {
-//RS         return Err(format!("devtools envelope `{key}` must be an object"));
-//RS     }
-//RS     Ok(crate::Session::render_json(value))
-//RS }
-//RS 
-//RS fn devtools_lifecycle(value: &str) -> Result<JetDevtoolsLifecycleState, String> {
-//RS     match value {
-//RS         "starting" => Ok(JetDevtoolsLifecycleState::Starting),
-//RS         "building" => Ok(JetDevtoolsLifecycleState::Building),
-//RS         "ready" => Ok(JetDevtoolsLifecycleState::Ready),
-//RS         "error" => Ok(JetDevtoolsLifecycleState::Error),
-//RS         "unavailable" => Ok(JetDevtoolsLifecycleState::Unavailable),
-//RS         "stopped" => Ok(JetDevtoolsLifecycleState::Stopped),
-//RS         _ => Err("devtools envelope lifecycle is not recognized".to_string()),
-//RS     }
-//RS }
-//RS 
-//RS fn devtools_freshness_state(value: &str) -> Result<JetDevtoolsFreshnessState, String> {
-//RS     match value {
-//RS         "fresh" => Ok(JetDevtoolsFreshnessState::Fresh),
-//RS         "stale" => Ok(JetDevtoolsFreshnessState::Stale),
-//RS         "unknown" => Ok(JetDevtoolsFreshnessState::Unknown),
-//RS         _ => Err("devtools envelope freshness state is not recognized".to_string()),
-//RS     }
-//RS }
-//RS 
-//RS fn terminal_style_adapter(file: &str) -> Result<Arc<TerminalStyleHostAdapter>, String> {
-//RS     let is_tty = std::io::stderr().is_terminal();
-//RS     let capabilities = TerminalCapabilityFacts::from_environment(
-//RS         std::env::var("TERM").ok().as_deref(),
-//RS         std::env::var("COLORTERM").ok().as_deref(),
-//RS         is_tty,
-//RS         std::env::var_os("NO_COLOR").is_some(),
-//RS         TerminalColorMode::Auto,
-//RS     );
-//RS     let source = TerminalStyleHostSource::new(file, capabilities)
-//RS         .map_err(|error| format!("could not inject terminal style source: {error}"))?;
-//RS     let adapter = Arc::new(TerminalStyleHostAdapter::new());
-//RS     adapter.inject(source);
-//RS     Ok(adapter)
-//RS }
-//RS 
-//RS /// Revision identity shared by `/__jet_dev_status` and `jet dev --json`.
-//RS /// `accepted` is the revision `/__jet_dev_version` serves (the web host only
-//RS /// publishes accepted builds, so it is also the last-good revision);
-//RS /// `candidate` is the revision an in-flight or rejected build would publish;
-//RS /// `diagnostic` is that candidate while its diagnostic is pending.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub struct DevRevisionFacts {
-//RS     pub accepted: Option<u64>,
-//RS     pub candidate: Option<u64>,
-//RS     pub diagnostic: Option<u64>,
-//RS }
-//RS 
-//RS /// D-FE-DEVSRV1 outcome D (hybrid, owner-modified 2026-07-08: pinned parity
-//RS /// header required as the terminal anchor): a one-line terminal status and a
-//RS /// browser corner strip mirror the exact same words from one shared status
-//RS /// (`header_words`/`json`'s `message` field) — they cannot drift because both
-//RS /// read the same source. On error both sides show the identical verbatim
-//RS /// diagnostic (I4): terminal frames it in a box (TTY) or prints it plain (CI
-//RS /// floor); the browser expands its strip into a full overlay. `--verbose`
-//RS /// (or `-v`) adds a request/rebuild log under the still-pinned header.
-//RS #[derive(Clone)]
-//RS struct DevStatusSnapshot {
-//RS     state: String,
-//RS     code: String,
-//RS     diagnostic: String,
-//RS     last_build_ms: u128,
-//RS     /// Revision the in-flight or last rejected build would publish; `None`
-//RS     /// once that build is accepted.
-//RS     candidate: Option<u64>,
-//RS }
-//RS 
-//RS struct DevStatus {
-//RS     version: AtomicU64,
-//RS     clients: Mutex<HashMap<String, Instant>>,
-//RS     state: Mutex<DevStatusSnapshot>,
-//RS     browser_relay: Mutex<Option<crate::BrowserTrace::Relay>>,
-//RS     browser_trace_enabled: AtomicBool,
-//RS     command_receipt: Mutex<Option<String>>,
-//RS     /// The file `jet dev` is watching — used in the `building` parity line
-//RS     /// and the `save <file> → …` verbose log lines.
-//RS     watched_file: String,
-//RS     /// Selected project build root used for browser manifests and traces.
-//RS     web_root: PathBuf,
-//RS     /// Port shown in status surfaces: application preview for hybrid web
-//RS     /// sessions, or Canvas control for Canvas-only sessions.
-//RS     port: AtomicU64,
-//RS     /// Canvas control port shown in the terminal detail line.
-//RS     canvas_port: AtomicU64,
-//RS     /// Static generator previews use the application listener only and must
-//RS     /// not advertise a Canvas URL that is not bound.
-//RS     canvas_enabled: AtomicBool,
-//RS     /// `--verbose`/`-v`: opt-in request/rebuild log under the parity header
-//RS     /// (dashboard's depth, D-FE-DEVSRV1=D "on-demand depth").
-//RS     verbose: AtomicBool,
-//RS     active: AtomicBool,
-//RS     exit_code: AtomicU64,
-//RS     /// Set by the first accepted build: until then `version` names no
-//RS     /// published revision and the first candidate is `version` itself.
-//RS     published: AtomicBool,
-//RS     /// Set only after raw-mode input succeeds. Verbose DECSTBM pinning must
-//RS     /// not start before its Ctrl-C/EOF cleanup guard exists.
-//RS     controls_ready: AtomicBool,
-//RS     /// Losing every leased browser after at least one was connected is a
-//RS     /// shared reconnect state until the next lease renewal.
-//RS     reconnecting: AtomicBool,
-//RS     /// Color and cursor control are separate capabilities. `NO_COLOR`
-//RS     /// changes the dot into a bracketed state word, but a real TTY still
-//RS     /// gets the pinned dashboard and live `v` control.
-//RS     color: bool,
-//RS     /// Redraw the parity line in place instead of appending a new one each
-//RS     /// time. This depends only on stderr being a real TTY; color is cosmetic.
-//RS     /// Non-TTY pipes use the plain append-only CI floor.
-//RS     pin: bool,
-//RS     /// Serializes every write to stderr from the status/log renderer so
-//RS     /// concurrent request threads and the rebuild-watch thread never
-//RS     /// interleave partial ANSI escape sequences.
-//RS     term_lock: Mutex<()>,
-//RS     /// How many lines the last pinned (non-verbose) redraw occupied — lets
-//RS     /// the next redraw move the cursor up and erase exactly that block
-//RS     /// (parity line, or parity line + framed diagnostic).
-//RS     last_block_lines: Mutex<usize>,
-//RS     /// Whether the verbose pinned header's scroll region has been set up yet
-//RS     /// (`\x1b[3r`, cursor parked in the scrolling log area below two pinned
-//RS     /// dashboard rows).
-//RS     header_started: Mutex<bool>,
-//RS }
-//RS 
-//RS impl DevStatus {
-//RS     fn new(file: &str, verbose: bool) -> DevStatus {
-//RS         let is_tty = std::io::stderr().is_terminal();
-//RS         // `NO_COLOR`/`FORCE_COLOR` resolution — the same one every other jet
-//RS         // command uses. Pinning (cursor redraw) additionally requires a real
-//RS         // TTY: `FORCE_COLOR` off-TTY still can't redraw in place.
-//RS         let color = ColorChoice::Auto.resolve(is_tty);
-//RS         DevStatus::new_with_terminal(file, verbose, is_tty, color)
-//RS     }
-//RS 
-//RS     fn new_with_root(file: &str, verbose: bool, web_root: &Path) -> DevStatus {
-//RS         let mut status = Self::new(file, verbose);
-//RS         status.web_root = web_root.to_path_buf();
-//RS         status
-//RS     }
-//RS 
-//RS     fn new_with_terminal(file: &str, verbose: bool, is_tty: bool, color: bool) -> DevStatus {
-//RS         DevStatus {
-//RS             version: AtomicU64::new(1),
-//RS             clients: Mutex::new(HashMap::new()),
-//RS             state: Mutex::new(DevStatusSnapshot {
-//RS                 state: "ready".to_string(),
-//RS                 code: String::new(),
-//RS                 diagnostic: String::new(),
-//RS                 last_build_ms: 0,
-//RS                 candidate: None,
-//RS             }),
-//RS             browser_relay: Mutex::new(None),
-//RS             browser_trace_enabled: AtomicBool::new(false),
-//RS             command_receipt: Mutex::new(None),
-//RS             watched_file: file.to_string(),
-//RS             web_root: PathBuf::from("build"),
-//RS             port: AtomicU64::new(0),
-//RS             canvas_port: AtomicU64::new(0),
-//RS             canvas_enabled: AtomicBool::new(true),
-//RS             verbose: AtomicBool::new(verbose),
-//RS             active: AtomicBool::new(false),
-//RS             exit_code: AtomicU64::new(0),
-//RS             published: AtomicBool::new(false),
-//RS             controls_ready: AtomicBool::new(false),
-//RS             reconnecting: AtomicBool::new(false),
-//RS             color,
-//RS             pin: is_tty,
-//RS             term_lock: Mutex::new(()),
-//RS             last_block_lines: Mutex::new(0),
-//RS             header_started: Mutex::new(false),
-//RS         }
-//RS     }
-//RS 
-//RS     fn set_port(&self, port: u16) {
-//RS         self.port.store(port as u64, Ordering::SeqCst);
-//RS     }
-//RS 
-//RS     fn set_canvas_port(&self, port: u16) {
-//RS         self.canvas_port.store(port as u64, Ordering::SeqCst);
-//RS     }
-//RS 
-//RS     fn set_canvas_enabled(&self, enabled: bool) {
-//RS         self.canvas_enabled.store(enabled, Ordering::SeqCst);
-//RS     }
-//RS 
-//RS     fn port(&self) -> u16 {
-//RS         self.port.load(Ordering::SeqCst) as u16
-//RS     }
-//RS 
-//RS     fn canvas_port(&self) -> u16 {
-//RS         self.canvas_port.load(Ordering::SeqCst) as u16
-//RS     }
-//RS 
-//RS     fn header_text_for(&self, snap: &DevStatusSnapshot) -> (String, String) {
-//RS         if self.reconnecting.load(Ordering::SeqCst) {
-//RS             return (
-//RS                 "reconnecting".to_string(),
-//RS                 "waiting for connection".to_string(),
-//RS             );
-//RS         }
-//RS         header_words(
-//RS             &snap.state,
-//RS             &self.watched_file,
-//RS             &snap.code,
-//RS             self.port(),
-//RS             self.client_count(),
-//RS             snap.last_build_ms,
-//RS         )
-//RS     }
-//RS 
-//RS     fn format_line(&self, word: &str, rest: &str) -> String {
-//RS         if self.color {
-//RS             format_line_colored(word, rest)
-//RS         } else {
-//RS             format_line_plain(word, rest)
-//RS         }
-//RS     }
-//RS 
-//RS     fn dashboard_detail_line(&self) -> String {
-//RS         if self.canvas_enabled.load(Ordering::SeqCst) {
-//RS             format!(
-//RS                 "         watching {} · Canvas http://localhost:{}/canvas · v verbose",
-//RS                 self.watched_file,
-//RS                 self.canvas_port()
-//RS             )
-//RS         } else {
-//RS             format!("         watching {} · v verbose", self.watched_file)
-//RS         }
-//RS     }
-//RS 
-//RS     /// Recompute the parity words from current state and redraw the
-//RS     /// terminal's live region (single source shared with `json()`'s
-//RS     /// `message` field — the browser strip renders that exact string).
-//RS     fn refresh(&self) {
-//RS         if !self.active.load(Ordering::SeqCst) {
-//RS             return;
-//RS         }
-//RS         let snap = self.state.lock().unwrap().clone();
-//RS         let (word, rest) = self.header_text_for(&snap);
-//RS         let line = self.format_line(&word, &rest);
-//RS 
-//RS         if self.verbose() {
-//RS             if self.pin {
-//RS                 self.write_header_verbose(&line);
-//RS             } else {
-//RS                 let _g = self.term_lock.lock().unwrap();
-//RS                 let mut out = std::io::stderr();
-//RS                 let _ = writeln!(out, "{}", line);
-//RS                 let _ = out.flush();
-//RS             }
-//RS             return;
-//RS         }
-//RS 
-//RS         if self.pin {
-//RS             let mut lines = vec![line, self.dashboard_detail_line()];
-//RS             if snap.state == "error" {
-//RS                 lines.extend(frame_lines(&snap.code, &snap.diagnostic));
-//RS             }
-//RS             self.write_block(&lines);
-//RS             return;
-//RS         }
-//RS 
-//RS         // CI floor: append-only, plain, no framing — the diagnostic prints
-//RS         // byte-for-byte what `render_diagnostics` produced (I4).
-//RS         let _g = self.term_lock.lock().unwrap();
-//RS         let mut out = std::io::stderr();
-//RS         let _ = writeln!(out, "{}", line);
-//RS         if snap.state == "error" {
-//RS             let _ = writeln!(out, "{}", snap.diagnostic);
-//RS         }
-//RS         let _ = out.flush();
-//RS     }
-//RS 
-//RS     /// Redraw a pinned (non-verbose) block in place: move the cursor up to
-//RS     /// the top of the previous block, erase to end of screen, print the new
-//RS     /// block. Cursor ends on the block's last line, no trailing newline —
-//RS     /// every caller (including the next redraw) relies on that invariant.
-//RS     fn write_block(&self, lines: &[String]) {
-//RS         let _g = self.term_lock.lock().unwrap();
-//RS         let mut out = std::io::stderr();
-//RS         let mut prev = self.last_block_lines.lock().unwrap();
-//RS         if *prev > 0 {
-//RS             if *prev > 1 {
-//RS                 let _ = write!(out, "\x1b[{}A", *prev - 1);
-//RS             }
-//RS             let _ = write!(out, "\r\x1b[0J");
-//RS         }
-//RS         let _ = write!(out, "{}", lines.join("\n"));
-//RS         let _ = out.flush();
-//RS         *prev = lines.len();
-//RS     }
-//RS 
-//RS     /// Pin the two-row dashboard to terminal rows 1–2 via a DECSTBM scroll
-//RS     /// region (`\x1b[3r`) so `log_line` can print request/rebuild lines below
-//RS     /// it forever without touching the shared parity row or watched-target
-//RS     /// row. Std ANSI only (I6) — no terminal-
-//RS     /// size query, which is why the region's bottom is left at the display
-//RS     /// default instead of being computed.
-//RS     fn write_header_verbose(&self, line: &str) {
-//RS         let _g = self.term_lock.lock().unwrap();
-//RS         let mut out = std::io::stderr();
-//RS         // Ability check belongs inside the terminal lock. A refresh that
-//RS         // waited behind EOF/Ctrl-C must not reinstall DECSTBM after cleanup.
-//RS         if !self.controls_ready.load(Ordering::SeqCst) {
-//RS             let _ = writeln!(out, "{}", line);
-//RS             let _ = out.flush();
-//RS             return;
-//RS         }
-//RS         let mut started = self.header_started.lock().unwrap();
-//RS         let detail = self.dashboard_detail_line();
-//RS         if !*started {
-//RS             let _ = write!(out, "\x1b[2J\x1b[H{}\n{}\n\x1b[3r\x1b[3;1H", line, detail);
-//RS             *started = true;
-//RS         } else {
-//RS             // DECSC/DECRC save+restore the log cursor across the jump to row 1.
-//RS             let _ = write!(out, "\x1b7\x1b[1;1H\x1b[2K{}\n\x1b[2K{}\x1b8", line, detail);
-//RS         }
-//RS         let _ = out.flush();
-//RS     }
-//RS 
-//RS     /// One line in the verbose request/rebuild log, printed under the pinned
-//RS     /// header. No-op unless `--verbose`/`-v` was passed.
-//RS     fn log_line(&self, text: &str) {
-//RS         if !self.active.load(Ordering::SeqCst) || !self.verbose() {
-//RS             return;
-//RS         }
-//RS         let _g = self.term_lock.lock().unwrap();
-//RS         let mut out = std::io::stderr();
-//RS         if self.pin && self.controls_ready.load(Ordering::SeqCst) {
-//RS             let _ = write!(out, "{}\r\n", text);
-//RS         } else {
-//RS             let _ = writeln!(out, "{}", text);
-//RS         }
-//RS         let _ = out.flush();
-//RS     }
-//RS 
-//RS     fn log_rebuild(&self, ok: bool, detail: &str) {
-//RS         let arrow = if ok { "rebuilt" } else { "error" };
-//RS         self.log_line(&format!(
-//RS             "{}  save {}  →  {} {}",
-//RS             clock_time(),
-//RS             self.watched_file,
-//RS             arrow,
-//RS             detail
-//RS         ));
-//RS     }
-//RS 
-//RS     fn log_request(&self, method: &str, path: &str, code: u16, elapsed: Duration) {
-//RS         self.log_line(&format!(
-//RS             "{}  {}  {:<20} {}  {}ms",
-//RS             clock_time(),
-//RS             method,
-//RS             path,
-//RS             code,
-//RS             elapsed.as_millis()
-//RS         ));
-//RS     }
-//RS 
-//RS     fn log_diagnostic(&self, code: &str, diagnostic: &str) {
-//RS         if !self.active.load(Ordering::SeqCst) || !self.verbose() {
-//RS             return;
-//RS         }
-//RS         let _g = self.term_lock.lock().unwrap();
-//RS         let mut out = std::io::stderr();
-//RS         if self.pin && self.controls_ready.load(Ordering::SeqCst) {
-//RS             for line in frame_lines(code, diagnostic) {
-//RS                 let _ = write!(out, "{}\r\n", line);
-//RS             }
-//RS         } else {
-//RS             let _ = writeln!(out, "{}", diagnostic);
-//RS         }
-//RS         let _ = out.flush();
-//RS     }
-//RS 
-//RS     fn verbose(&self) -> bool {
-//RS         self.verbose.load(Ordering::SeqCst)
-//RS     }
-//RS 
-//RS     /// Toggle terminal depth without changing shared parity state. Transition
-//RS     /// between redraw strategies explicitly so stale pinned blocks/scroll
-//RS     /// regions never survive a `v` keypress.
-//RS     fn toggle_verbose(&self) {
-//RS         let verbose = !self.verbose.fetch_xor(true, Ordering::SeqCst);
-//RS         if self.pin {
-//RS             let _g = self.term_lock.lock().unwrap();
-//RS             let mut out = std::io::stderr();
-//RS             if verbose {
-//RS                 let mut prev = self.last_block_lines.lock().unwrap();
-//RS                 if *prev > 1 {
-//RS                     let _ = write!(out, "\x1b[{}A", *prev - 1);
-//RS                 }
-//RS                 let _ = write!(out, "\r\x1b[0J");
-//RS                 *prev = 0;
-//RS             } else {
-//RS                 let _ = write!(out, "\x1b[r\x1b[2J\x1b[H");
-//RS                 *self.header_started.lock().unwrap() = false;
-//RS             }
-//RS             let _ = out.flush();
-//RS         }
-//RS         self.refresh();
-//RS         self.log_line(if verbose {
-//RS             "verbose request/rebuild log enabled · press v to collapse"
-//RS         } else {
-//RS             ""
-//RS         });
-//RS     }
-//RS 
-//RS     fn disable_terminal_controls(&self) {
-//RS         if !self.pin {
-//RS             self.controls_ready.store(false, Ordering::SeqCst);
-//RS             return;
-//RS         }
-//RS         let _g = self.term_lock.lock().unwrap();
-//RS         // Disable and restore in one critical section. Any renderer already
-//RS         // waiting for this lock observes false before it can write.
-//RS         self.controls_ready.store(false, Ordering::SeqCst);
-//RS         let mut out = std::io::stderr();
-//RS         let mut started = self.header_started.lock().unwrap();
-//RS         if *started {
-//RS             let _ = write!(out, "\x1b[r\x1b[999;1H\r\n");
-//RS         } else {
-//RS             let _ = writeln!(out);
-//RS         }
-//RS         *started = false;
-//RS         let _ = out.flush();
-//RS     }
-//RS 
-//RS     fn mark_building(&self) {
-//RS         self.browser_relay.lock().unwrap().take();
-//RS         let mut state = self.state.lock().unwrap();
-//RS         let last_build_ms = state.last_build_ms;
-//RS         *state = DevStatusSnapshot {
-//RS             state: "building".to_string(),
-//RS             code: String::new(),
-//RS             diagnostic: String::new(),
-//RS             last_build_ms,
-//RS             candidate: Some(self.next_candidate()),
-//RS         };
-//RS         drop(state);
-//RS         self.refresh();
-//RS     }
-//RS 
-//RS     fn mark_ready(&self, elapsed_ms: u128, is_rebuild: bool) {
-//RS         let mut browser_relay = self.browser_relay.lock().unwrap();
-//RS         if self.browser_trace_enabled.load(Ordering::SeqCst) {
-//RS             browser_relay.take();
-//RS             *browser_relay = read_web_manifest(&self.web_root)
-//RS                 .and_then(|manifest| crate::BrowserTrace::Relay::new(&manifest).ok());
-//RS         }
-//RS         drop(browser_relay);
-//RS         let mut state = self.state.lock().unwrap();
-//RS         if is_rebuild {
-//RS             self.version.fetch_add(1, Ordering::SeqCst);
-//RS         }
-//RS         self.published.store(true, Ordering::SeqCst);
-//RS         *state = DevStatusSnapshot {
-//RS             state: "ready".to_string(),
-//RS             code: String::new(),
-//RS             diagnostic: String::new(),
-//RS             last_build_ms: elapsed_ms,
-//RS             candidate: None,
-//RS         };
-//RS         drop(state);
-//RS         self.refresh();
-//RS         if is_rebuild {
-//RS             self.log_rebuild(true, &format_build_time(elapsed_ms));
-//RS         }
-//RS     }
-//RS 
-//RS     fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
-//RS         let diagnostic_for_log = diagnostic.clone();
-//RS         let mut state = self.state.lock().unwrap();
-//RS         let last_build_ms = state.last_build_ms;
-//RS         // The rejected build keeps the candidate revision it was building;
-//RS         // `version` still names the last accepted build.
-//RS         let candidate = state.candidate.unwrap_or_else(|| self.next_candidate());
-//RS         *state = DevStatusSnapshot {
-//RS             state: "error".to_string(),
-//RS             code: code.clone(),
-//RS             diagnostic,
-//RS             last_build_ms,
-//RS             candidate: Some(candidate),
-//RS         };
-//RS         drop(state);
-//RS         self.refresh();
-//RS         if is_rebuild {
-//RS             self.log_rebuild(false, &code);
-//RS             self.log_diagnostic(&code, &diagnostic_for_log);
-//RS         }
-//RS     }
-//RS 
-//RS     /// The revision the next build would publish: the first build publishes
-//RS     /// `version` itself, every later accepted rebuild bumps it by one.
-//RS     fn next_candidate(&self) -> u64 {
-//RS         let version = self.version.load(Ordering::SeqCst);
-//RS         if self.published.load(Ordering::SeqCst) {
-//RS             version + 1
-//RS         } else {
-//RS             version
-//RS         }
-//RS     }
-//RS 
-//RS     fn revision_facts_for(&self, snap: &DevStatusSnapshot) -> DevRevisionFacts {
-//RS         DevRevisionFacts {
-//RS             accepted: self
-//RS                 .published
-//RS                 .load(Ordering::SeqCst)
-//RS                 .then(|| self.version.load(Ordering::SeqCst)),
-//RS             candidate: snap.candidate,
-//RS             diagnostic: if snap.state == "error" {
-//RS                 snap.candidate
-//RS             } else {
-//RS                 None
-//RS             },
-//RS         }
-//RS     }
-//RS 
-//RS     fn revision_facts(&self) -> DevRevisionFacts {
-//RS         let snap = self.state.lock().unwrap();
-//RS         self.revision_facts_for(&snap)
-//RS     }
-//RS 
-//RS     /// Typed handoff of the live error snapshot for
-//RS     /// `/__jet_devtools/error` — copies the exact `state`/`code`/
-//RS     /// `diagnostic` fields `mark_error` recorded, matching the parity
-//RS     /// terminal/browser strip (D-FE-DEVSRV1) instead of re-deriving them.
-//RS     fn web_error_facts(&self) -> crate::WebErrorPage::WebErrorDevStatusFacts {
-//RS         let snap = self.state.lock().unwrap().clone();
-//RS         crate::WebErrorPage::WebErrorDevStatusFacts::new(snap.state, snap.code, snap.diagnostic)
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         let snap = self.state.lock().unwrap().clone();
-//RS         let revisions = self.revision_facts_for(&snap);
-//RS         let (word, rest) = self.header_text_for(&snap);
-//RS         let message = format!("{} · {}", word, rest);
-//RS         let number = |value: Option<u64>| value.map_or_else(|| "null".to_string(), |n| n.to_string());
-//RS         format!(
-//RS             "{{\"version\":{},\"state\":\"{}\",\"message\":\"{}\",\"file\":\"{}\",\"code\":\"{}\",\"diagnostic\":\"{}\",\"clients\":{},\"last_build_ms\":{},\"candidate\":{},\"diagnostic_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{}}}",
-//RS             self.version.load(Ordering::SeqCst),
-//RS             json_escape(&word),
-//RS             json_escape(&message),
-//RS             json_escape(&self.watched_file),
-//RS             json_escape(&snap.code),
-//RS             json_escape(&snap.diagnostic),
-//RS             self.client_count(),
-//RS             snap.last_build_ms,
-//RS             number(revisions.candidate),
-//RS             number(revisions.diagnostic),
-//RS             number(revisions.accepted),
-//RS             number(revisions.accepted),
-//RS         )
-//RS     }
-//RS 
-//RS     fn activate(&self) {
-//RS         self.active.store(true, Ordering::SeqCst);
-//RS         self.refresh();
-//RS     }
-//RS 
-//RS     fn client_count(&self) -> u64 {
-//RS         self.prune_expired_clients();
-//RS         self.clients.lock().unwrap().len() as u64
-//RS     }
-//RS 
-//RS     fn note_client(&self, id: &str) {
-//RS         if !crate::Session::client_id_is_valid(id) {
-//RS             return;
-//RS         }
-//RS         let pruned = self.prune_expired_clients();
-//RS         let mut clients = self.clients.lock().unwrap();
-//RS         let is_new = !clients.contains_key(id);
-//RS         if is_new && clients.len() >= MAX_CLIENTS {
-//RS             return;
-//RS         }
-//RS         let changed = clients.insert(id.to_string(), Instant::now()).is_none();
-//RS         drop(clients);
-//RS         let recovered = self.reconnecting.swap(false, Ordering::SeqCst);
-//RS         if pruned || changed || recovered {
-//RS             self.refresh();
-//RS         }
-//RS     }
-//RS 
-//RS     fn expire_clients(&self) {
-//RS         let changed = self.prune_expired_clients();
-//RS         if changed {
-//RS             self.refresh();
-//RS         }
-//RS     }
-//RS 
-//RS     fn prune_expired_clients(&self) -> bool {
-//RS         let cutoff = Duration::from_millis(CLIENT_TTL_MS);
-//RS         let now = Instant::now();
-//RS         let mut clients = self.clients.lock().unwrap();
-//RS         let before = clients.len();
-//RS         clients.retain(|_, seen| now.saturating_duration_since(*seen) <= cutoff);
-//RS         let changed = clients.len() != before;
-//RS         let disconnected = before > 0 && clients.is_empty();
-//RS         drop(clients);
-//RS         if disconnected {
-//RS             self.reconnecting.store(true, Ordering::SeqCst);
-//RS         }
-//RS         changed
-//RS     }
-//RS 
-//RS     fn drop_client(&self, id: &str) {
-//RS         if !crate::Session::client_id_is_valid(id) {
-//RS             return;
-//RS         }
-//RS         let mut clients = self.clients.lock().unwrap();
-//RS         let changed = clients.remove(id).is_some();
-//RS         drop(clients);
-//RS         if changed {
-//RS             // A pagehide beacon is a clean close/reload, not a broken poll.
-//RS             self.reconnecting.store(false, Ordering::SeqCst);
-//RS             self.refresh();
-//RS         }
-//RS     }
-//RS 
-//RS     fn record_command_receipt(&self, receipt: String) {
-//RS         *self.command_receipt.lock().unwrap() = Some(receipt);
-//RS     }
-//RS 
-//RS     fn command_receipt(&self) -> Option<String> {
-//RS         self.command_receipt.lock().unwrap().clone()
-//RS     }
-//RS 
-//RS     fn activate_browser_trace(&self, manifest: &str) -> Result<(), String> {
-//RS         let relay = crate::BrowserTrace::Relay::new(manifest)?;
-//RS         *self.browser_relay.lock().unwrap() = Some(relay);
-//RS         self.browser_trace_enabled.store(true, Ordering::SeqCst);
-//RS         self.version.fetch_add(1, Ordering::SeqCst);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn activate_requested_browser_trace(&self) {
-//RS         if !matches!(crate::BrowserTrace::take_request(), Ok(true)) {
-//RS             return;
-//RS         }
-//RS         if let Some(manifest) = read_web_manifest(&self.web_root) {
-//RS             let _ = self.activate_browser_trace(&manifest);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct CanvasHostOptions {
-//RS     pub host: String,
-//RS     pub port: Option<u16>,
-//RS     pub transport: String,
-//RS     pub authority: String,
-//RS     pub audit: bool,
-//RS     pub output: Option<String>,
-//RS     pub target: Option<String>,
-//RS }
-//RS 
-//RS impl Default for CanvasHostOptions {
-//RS     fn default() -> Self {
-//RS         Self {
-//RS             host: "127.0.0.1".to_string(),
-//RS             port: None,
-//RS             transport: "http".to_string(),
-//RS             authority: "loopback".to_string(),
-//RS             audit: false,
-//RS             output: None,
-//RS             target: None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub struct WebHost {
-//RS     listener: Mutex<Option<TcpListener>>,
-//RS     application_listener: Mutex<Option<TcpListener>>,
-//RS     started: AtomicBool,
-//RS     shutdown: Arc<AtomicBool>,
-//RS     server_threads: Mutex<Vec<thread::JoinHandle<()>>>,
-//RS     poll_thread: Mutex<Option<thread::JoinHandle<()>>>,
-//RS     terminal_thread: Mutex<Option<thread::JoinHandle<()>>>,
-//RS     status: Arc<DevStatus>,
-//RS     debug_sessions: Arc<crate::Canvas::DebugSessions>,
-//RS     session: Arc<crate::ResidentDevSession>,
-//RS     canvas_file: String,
-//RS     bind_host: String,
-//RS     session_secret: String,
-//RS     release_policy: ReleaseDevtoolsPolicy,
-//RS     static_root: PathBuf,
-//RS     browser_state: Arc<Mutex<Option<browser_web_adapter::BrowserWebState>>>,
-//RS     /// Whether this host owns the web application swap stream. Canvas/static
-//RS     /// native hosts still share the session but do not consume web manifests.
-//RS     web_swap_enabled: bool,
-//RS     /// The latest sema verdict is consumed by the next successful rebuild.
-//RS     hot_swap_decision: Mutex<Option<HotSwapDecision>>,
-//RS     paused_evaluate: Arc<Mutex<crate::PausedEvaluate::PausedEvaluateHost>>,
-//RS     terminal_style: Arc<crate::TerminalStyleReload::TerminalStyleHostAdapter>,
-//RS }
-//RS 
-//RS impl WebHost {
-//RS     /// Bind an application preview with a folded release-devtools policy.
-//RS     ///
-//RS     /// `static_root` is selected by the owning CLI from the entry's project
-//RS     /// root, so nested invocations never fall back to cwd-relative `build/`.
-//RS     pub fn bind_with_policy(
-//RS         file: &str,
-//RS         static_root: &Path,
-//RS         verbose: bool,
-//RS         port: Option<u16>,
-//RS         release_policy: ReleaseDevtoolsPolicy,
-//RS     ) -> Result<Self, String> {
-//RS         Self::bind_application_only_with_policy(
-//RS             file,
-//RS             verbose,
-//RS             port,
-//RS             static_root.to_path_buf(),
-//RS             release_policy,
-//RS             true,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Bind a static preview around a caller-owned resident session.
-//RS     ///
-//RS     /// The caller binds the application listener first so the session can
-//RS     /// carry the exact listener port. Every host attached to that program can
-//RS     /// then project the same event, selection, and cursor state.
-//RS     pub fn bind_static_with_policy(
-//RS         file: &str,
-//RS         root: &Path,
-//RS         verbose: bool,
-//RS         application_listener: TcpListener,
-//RS         session: Arc<crate::ResidentDevSession>,
-//RS         release_policy: ReleaseDevtoolsPolicy,
-//RS     ) -> Result<Self, String> {
-//RS         let static_root = fs::canonicalize(root).map_err(|error| {
-//RS             format!(
-//RS                 "error: couldn't open static output `{}`: {}",
-//RS                 root.display(),
-//RS                 error
-//RS             )
-//RS         })?;
-//RS         let application_port = application_listener
-//RS             .local_addr()
-//RS             .map(|address| address.port())
-//RS             .unwrap_or(0);
-//RS         if session.application_port() != application_port {
-//RS             return Err(format!(
-//RS                 "error: shared devtools session application port {} does not match static preview port {}",
-//RS                 session.application_port(),
-//RS                 application_port
-//RS             ));
-//RS         }
-//RS         Self::bind_application_only_with_listener(
-//RS             file,
-//RS             verbose,
-//RS             static_root,
-//RS             release_policy,
-//RS             false,
-//RS             application_listener,
-//RS             session,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Bind an application listener before constructing the shared session.
-//RS     pub fn bind_application_preview_listener(port: Option<u16>) -> Result<TcpListener, String> {
-//RS         bind_application_server(port)
-//RS     }
-//RS 
-//RS     fn bind_application_only_with_policy(
-//RS         file: &str,
-//RS         verbose: bool,
-//RS         port: Option<u16>,
-//RS         static_root: PathBuf,
-//RS         release_policy: ReleaseDevtoolsPolicy,
-//RS         web_swap_enabled: bool,
-//RS     ) -> Result<Self, String> {
-//RS         let application_listener = bind_application_server(port)?;
-//RS         let application_port = application_listener
-//RS             .local_addr()
-//RS             .map(|address| address.port())
-//RS             .unwrap_or(0);
-//RS         let session = Arc::new(crate::ResidentDevSession::new(file, 0, application_port));
-//RS         Self::bind_application_only_with_listener(
-//RS             file,
-//RS             verbose,
-//RS             static_root,
-//RS             release_policy,
-//RS             web_swap_enabled,
-//RS             application_listener,
-//RS             session,
-//RS         )
-//RS     }
-//RS 
-// END-PORT-PENDING 0789 crates/jet-devserver/src/WebHost.rs:1-1808
-
+// Web dev-server state and terminal/browser parity. Browser swaps preserve module-owned state.
+// Rust: crates/jet-devserver/src/WebHost.rs:13
+use std.fs as fs
+use std.io.[BufReader, IsTerminal, Write]
+use std.net.[IpAddr, SocketAddr, TcpListener, TcpStream]
+use core.files.[OSPath]
+use std.sync.atomic.[AtomicBool, AtomicU64, AtomicUsize, Ordering]
+use std.sync.[Arc, Mutex]
+use std.thread as thread
+use std.time.[Duration, Instant]
+use jet_devserver.TerminalStyleReload.[TerminalCapabilityFacts, TerminalColorMode, TerminalStyleHostAdapter, TerminalStyleHostSource]
+use jet_driver.Diagnostics.[ColorChoice]
+use jet_driver.Package.[ReleaseDevtoolsPolicy]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFreshnessFact, JetDevtoolsFreshnessState, JetDevtoolsFunctionIdentity, JetDevtoolsGameLaunchPhase, JetDevtoolsLifecycleState, JetDevtoolsMutationLifecycle, JetDevtoolsPrivacy, JetDevtoolsQueryState, JetDevtoolsSourceIdentityFact, JetDevtoolsSourceSpan, JetDevtoolsTraceKind, JetDevtoolsSelection, JET_DEVTOOLS_PROTOCOL, JET_DEVTOOLS_MAX_ENVELOPE_BYTES, JET_DEVTOOLS_MAX_EVENTS]
+use jet_foundation.DevtoolsControl.[JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsDatabaseExplainRequest, JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlKind, JetDevtoolsGameControlRequest, JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS]
+use jet_foundation.HotSwap.[HotSwapDecision]
+use jet_foundation.JSON.[json_escape, parse_json_with_limit]
+use jet_devserver.[content_type_for, query_param, read_static_file_bounded, static_relative_path, write_response, Request, MAX_REQUEST_BODY_BYTES, ResidentDevSession]
+use jet_devserver.Session as Session
+use jet_devserver.BrowserTrace as BrowserTrace
+use jet_devserver.BrowserWebAdapter.[BrowserWebState]
+use jet_devserver.WebErrorPage.[WebErrorDevStatusFacts]
+use jet_devserver.Canvas.[DebugSessions]
+use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+// Rust: crates/jet-devserver/src/WebHost.rs:55
+APPLICATION_PORT_RANGE :: 8080..=8089
+// Rust: crates/jet-devserver/src/WebHost.rs:56
+CANVAS_SESSION_BYTES :: 32
+// Rust: crates/jet-devserver/src/WebHost.rs:57
+MAX_CONNECTION_THREADS :: 64
+// Rust: crates/jet-devserver/src/WebHost.rs:62
+LIVE_RELOAD_POLL_MS :: 40
+// Rust: crates/jet-devserver/src/WebHost.rs:63
+CLIENT_TTL_MS :: Session.CLIENT_TTL_MS
+// Rust: crates/jet-devserver/src/WebHost.rs:64
+MAX_CLIENTS :: Session.MAX_CLIENTS
+// Rust: crates/jet-devserver/src/WebHost.rs:65
+REQUEST_DEADLINE :: Duration.from_secs(10)
+// Rust: crates/jet-devserver/src/WebHost.rs:66
+MAX_STATIC_RESPONSE_BYTES :: 64 * 1024 * 1024
+// Rust: crates/jet-devserver/src/WebHost.rs:67
+// GATE #4494: native atomics, locks, terminal IO, clock and listener ownership.
+PUBLICATION_COUNTER :: AtomicU64.new(0)
+// Rust: crates/jet-devserver/src/WebHost.rs:68
+pub fn decode_devtools_envelope(payload: String) -> JetDevtoolsDecodedEnvelope Err! {
+    root :: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("devtools envelope is not valid bounded JSON")
+    object :: object_map(&root) ?? return .Err("devtools envelope must be an object")
+    protocol :: devtools_required_string(&object, "protocol")?
+    if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("devtools envelope protocol does not match jet.devtools.v1")
+    if object.contains_key("history") -> return .Err("devtools envelope must use the single `events` stream")
+    session_id :: devtools_required_string(&object, "session_id")?
+    started_at_ms :: devtools_required_u64(&object, "started_at_ms")?
+    if object.get("direction") == .Val(direction) {
+        match devtools_required_value_string(direction, "direction")? {
+            "host_to_runtime" -> {
+                if object.contains_key("events") -> return .Err("devtools command envelope cannot contain an events stream")
+                return .Commands(decode_devtools_command_envelope(&object, session_id, started_at_ms)?)
+            }
+            "runtime_to_host" -> {
+                if object.contains_key("commands") -> return .Err("devtools event envelope cannot contain a commands stream")
+                return .Events(decode_devtools_events(&object, session_id, started_at_ms)?)
+            }
+            _ -> return .Err("devtools envelope direction is not recognized")
+        }
+    }
+    if object.contains_key("commands") -> return .Err("devtools command envelope requires direction")
+    return .Events(decode_devtools_events(&object, session_id, started_at_ms)?)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:123
+fn decode_devtools_events(object: &[String:DataTree], session_id: String, started_at_ms: U64) -> JetDevtoolsEnvelope Err! {
+    events :: match object.get("events") { .Val(.Array(v)) -> v; _ -> return .Err("devtools envelope `events` must be an array") }
+    if events.len() > JET_DEVTOOLS_MAX_EVENTS -> return .Err("devtools envelope exceeds the retained event limit")
+    envelope := JetDevtoolsEnvelope.new(session_id.to_string(), started_at_ms)
+    for value in events {
+        event :: object_map(value) ?? return .Err("devtools envelope event must be an object")
+        sequence :: devtools_required_u64(&event, "sequence")?
+        if sequence == 0 -> return .Err("devtools envelope event sequence must be positive")
+        timestamp_ms :: devtools_required_u64(&event, "timestamp_ms")?
+        source :: devtools_required_string(&event, "source")?
+        kind :: devtools_required_string(&event, "kind")?
+        entity :: devtools_required_string(&event, "entity")?
+        fields_value :: event.get("fields") ?? return .Err("devtools envelope missing `fields`")
+        _ :: object_map(fields_value) ?? return .Err("devtools envelope `fields` must be an object")
+        fields :: Session.render_json(fields_value)
+        payload :: match event.get("payload") {
+            .None | .Val(.Null) -> .None
+            .Val(.Object(_)) -> .Val(devtools_required_object_json(&event, "payload")?)
+            _ -> return .Err("devtools event payload must be an object or null")
+        }
+        decoded :: decode_devtools_body(kind, entity, fields_value)?
+        typed :: match decoded {
+            .Val(body) -> {
+                typed :: JetDevtoolsEvent.from_wire(sequence, timestamp_ms, ^source, ^body, ^fields, ^payload)?
+                if typed.kind() != kind || typed.entity() != entity -> return .Err("devtools event identity does not match its typed body")
+                typed
+            }
+            .None -> JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, ^source, ^kind, ^entity, ^fields, ^payload)?
+        }
+        envelope.push(^typed)
+    }
+    if object.get("selection") == .Val(selection) {
+        match selection {
+            .Null -> envelope.set_selection(.None)
+            .Object(v) -> {
+                selection :: object_map_entries(v)
+                envelope.set_selection(.Val(JetDevtoolsSelection.new(devtools_required_string(&selection, "panel_id")?, devtools_optional_string(&selection, "item_key")?)))
+            }
+            _ -> return .Err("devtools envelope selection must be an object or null")
+        }
+    }
+    if object.get("cursor") == .Val(cursor) {
+        envelope.set_cursor(match cursor {
+            .Null -> .None
+            .Int(v) if v >= 0 -> .Val(v as U64)
+            .Float(v) if v.fract() == 0.0 && v >= 0.0 && v <= U64.MAX as F64 -> .Val(v as U64)
+            _ -> return .Err("devtools envelope cursor must be a sequence")
+        })
+    }
+    if object.get("lifecycle") == .Val(v) -> envelope.set_lifecycle(devtools_lifecycle(devtools_required_value_string(v, "lifecycle")?)?)
+    if object.get("freshness") == .Val(v) {
+        freshness :: object_map(v) ?? return .Err("devtools envelope freshness must be an object")
+        envelope.set_freshness(JetDevtoolsFreshnessFact { state: devtools_freshness_state(devtools_required_string(&freshness, "state")?)?, observed_at_ms: devtools_required_u64(&freshness, "observed_at_ms")? })
+    }
+    if object.get("privacy") == .Val(v) {
+        privacy :: object_map(v) ?? return .Err("devtools envelope privacy must be an object")
+        envelope.privacy = JetDevtoolsPrivacy { loopback_only: devtools_required_bool(&privacy, "loopback_only")?, payload_free_by_default: devtools_required_bool(&privacy, "payload_free_by_default")?, published_payloads: devtools_required_bool(&privacy, "published_payloads")? }
+    }
+    if object.get("source_identity") == .Val(v) {
+        envelope.source_identity = match v {
+            .Null -> .None
+            .Object(v) -> {
+                identity :: object_map_entries(v)
+                .Val(JetDevtoolsSourceIdentityFact.new(devtools_optional_string(&identity, "source_id")?, devtools_optional_string(&identity, "build_id")?, devtools_optional_string(&identity, "revision")?, devtools_optional_string(&identity, "world_id")?))
+            }
+            _ -> return .Err("devtools envelope source_identity must be an object or null")
+        }
+    }
+    if object.contains_key("reset") -> envelope.reset = devtools_required_bool(object, "reset")?
+    if object.contains_key("truncated") -> envelope.truncated = devtools_required_bool(object, "truncated")?
+    return envelope
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:261
+fn decode_devtools_command_envelope(object: &[String:DataTree], session_id: String, started_at_ms: U64) -> JetDevtoolsCommandEnvelope Err! {
+    expected :: ["protocol", "session_id", "started_at_ms", "direction", "commands"]
+    if !devtools_has_exact_fields(object, &expected) -> return .Err("devtools command envelope has unexpected top-level fields")
+    direction :: devtools_required_value_string(object.get("direction") ?? return .Err("devtools command envelope requires direction"), "direction")?
+    if direction != "host_to_runtime" -> return .Err("devtools command envelope direction must be host_to_runtime")
+    commands :: match object.get("commands") { .Val(.Array(v)) -> v; _ -> return .Err("devtools envelope `commands` must be an array") }
+    if commands.len() > JET_DEVTOOLS_MAX_COMMANDS -> return .Err("devtools envelope exceeds the retained command limit")
+    envelope := JetDevtoolsCommandEnvelope.new(session_id.to_string(), started_at_ms)
+    for value in commands {
+        command :: object_map(value) ?? return .Err("devtools envelope command must be an object")
+        if command.len() != 2 || !command.contains_key("kind") || !command.contains_key("payload") -> return .Err("devtools envelope command must contain only kind and payload")
+        kind :: devtools_required_string(&command, "kind")?
+        payload :: command.get("payload").and_then(object_map) ?? return .Err("devtools envelope command payload must be an object")
+        match kind {
+            "DatabaseExplain" -> {
+                if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "statement_identity", "timeout_ms", "max_rows"]) -> return .Err("devtools envelope database command payload has unexpected fields")
+                request :: JetDevtoolsDatabaseExplainRequest.new(devtools_required_string(&payload, "session_id")?, devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "statement_identity")?, devtools_required_u64(&payload, "timeout_ms")?, devtools_required_u64(&payload, "max_rows")?)?
+                envelope.enqueue_command(.DatabaseExplain(^request))?
+            }
+            "GameControl" -> {
+                if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "kind", "source_id", "revision", "world_id", "actor_id", "component_id", "authored_instance_id", "source_span_start", "source_span_end", "field", "value", "category", "expression", "required_authority", "frame_id", "budget"]) -> return .Err("devtools envelope game control payload has unexpected fields")
+                request :: JetDevtoolsGameControlRequest {
+                    session_id: devtools_required_string(&payload, "session_id")?, request_id: devtools_required_string(&payload, "request_id")?,
+                    kind: JetDevtoolsGameControlKind.from_str(devtools_required_string(&payload, "kind")?)?,
+                    source_id: devtools_optional_string(&payload, "source_id")?, revision: devtools_optional_string(&payload, "revision")?,
+                    world_id: devtools_optional_string(&payload, "world_id")?, actor_id: devtools_optional_string(&payload, "actor_id")?,
+                    component_id: devtools_optional_string(&payload, "component_id")?, authored_instance_id: devtools_optional_string(&payload, "authored_instance_id")?,
+                    source_span_start: devtools_optional_u64(&payload, "source_span_start")?, source_span_end: devtools_optional_u64(&payload, "source_span_end")?,
+                    field: devtools_optional_string(&payload, "field")?, value: devtools_optional_string(&payload, "value")?,
+                    category: devtools_optional_string(&payload, "category")?, expression: devtools_optional_string(&payload, "expression")?,
+                    required_authority: devtools_optional_string(&payload, "required_authority")?, frame_id: devtools_optional_u64(&payload, "frame_id")?, budget: devtools_optional_u64(&payload, "budget")?
+                }
+                request.validate()?
+                envelope.enqueue_command(.GameControl(^request))?
+            }
+            "ProjectRebuild" -> {
+                if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "expected_revision"]) -> return .Err("devtools envelope project rebuild payload has unexpected fields")
+                request :: JetDevtoolsProjectRebuildRequest.new(devtools_required_string(&payload, "session_id")?, devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "expected_revision")?)?
+                envelope.enqueue_command(.ProjectRebuild(^request))?
+            }
+            _ -> return .Err("devtools envelope contains an unsupported command kind")
+        }
+    }
+    envelope.validate()?
+    return envelope
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:423
+fn decode_devtools_body(kind: String, _entity: String, fields: &DataTree) -> JetDevtoolsEventBody? Err! {
+    object :: object_map(fields) ?? return .Err("devtools event fields must be an object")
+    if devtools_expected_fields(kind) == .Val(expected) {
+        if !devtools_has_exact_fields(&object, &expected) -> return .None
+    }
+    body :: match kind {
+        "Build" -> {
+            devtools_exact_fields(&object, &["status", "tier", "diagnostics", "kept", "reset"])?
+            JetDevtoolsEventBody.Build { status: devtools_required_string(&object, "status")?, tier: devtools_required_string(&object, "tier")?, diagnostics: devtools_required_string_array(&object, "diagnostics")?, kept: devtools_required_u64(&object, "kept")?, reset: devtools_required_u64(&object, "reset")? }
+        }
+        "Route" -> {
+            devtools_exact_fields(&object, &["path", "matched", "render_mode", "reason"])?
+            JetDevtoolsEventBody.Route { path: devtools_required_string(&object, "path")?, matched: devtools_required_bool(&object, "matched")?, render_mode: devtools_required_string(&object, "render_mode")?, reason: devtools_required_string(&object, "reason")? }
+        }
+        "Query" -> {
+            devtools_exact_fields(&object, &["name", "state", "footprint"])?
+            state: JetDevtoolsQueryState :: match devtools_required_string(&object, "state")? { "fetching" -> .Fetching; "fresh" -> .Fresh; "stale" -> .Stale; "invalidated" -> .Invalidated; _ -> return .Err("devtools Query state is not recognized") }
+            JetDevtoolsEventBody.Query { name: devtools_required_string(&object, "name")?, state, footprint: devtools_required_u64(&object, "footprint")? }
+        }
+        "Mutation" -> {
+            devtools_exact_fields(&object, &["name", "lifecycle", "rollback"])?
+            lifecycle: JetDevtoolsMutationLifecycle :: match devtools_required_string(&object, "lifecycle")? { "started" -> .Started; "committed" -> .Committed; "failed" -> .Failed; "rolled_back" -> .RolledBack; _ -> return .Err("devtools Mutation lifecycle is not recognized") }
+            JetDevtoolsEventBody.Mutation { name: devtools_required_string(&object, "name")?, lifecycle, rollback: devtools_required_bool(&object, "rollback")? }
+        }
+        "Form" -> {
+            devtools_exact_fields(&object, &["name", "field", "state", "validation"])?
+            state: JetDevtoolsFormState :: match devtools_required_string(&object, "state")? { "pristine" -> .Pristine; "dirty" -> .Dirty; "valid" -> .Valid; "invalid" -> .Invalid; _ -> return .Err("devtools Form state is not recognized") }
+            JetDevtoolsEventBody.Form { name: devtools_required_string(&object, "name")?, field: devtools_required_string(&object, "field")?, state, validation: devtools_required_string(&object, "validation")? }
+        }
+        "Table" -> {
+            devtools_exact_fields(&object, &["name", "viewport", "sort", "filter"])?
+            JetDevtoolsEventBody.Table { name: devtools_required_string(&object, "name")?, viewport: devtools_required_u64(&object, "viewport")?, sort: devtools_required_string(&object, "sort")?, filter: devtools_required_string(&object, "filter")? }
+        }
+        "Store" -> {
+            devtools_exact_fields(&object, &["name", "transaction", "diff", "cursor"])?
+            JetDevtoolsEventBody.Store { name: devtools_required_string(&object, "name")?, transaction: devtools_required_string(&object, "transaction")?, diff: devtools_required_string(&object, "diff")?, cursor: devtools_required_u64(&object, "cursor")? }
+        }
+        "Trace" -> {
+            devtools_exact_fields(&object, &["name", "kind", "request", "duration_ms", "status"])?
+            trace_kind: JetDevtoolsTraceKind :: match devtools_required_string(&object, "kind")? { "request" -> .Request; "render" -> .Render; "job" -> .Job; "reload" -> .Reload; "frame" -> .Frame; _ -> return .Err("devtools Trace kind is not recognized") }
+            JetDevtoolsEventBody.Trace { name: devtools_required_string(&object, "name")?, kind: trace_kind, request: devtools_required_string(&object, "request")?, duration_ms: devtools_required_u64(&object, "duration_ms")?, status: devtools_required_string(&object, "status")? }
+        }
+        "Cost" -> {
+            devtools_exact_fields(&object, &["name", "rule", "bytes", "allocations"])?
+            JetDevtoolsEventBody.Cost { name: devtools_required_string(&object, "name")?, rule: devtools_required_string(&object, "rule")?, bytes: devtools_required_u64(&object, "bytes")?, allocations: devtools_required_u64(&object, "allocations")? }
+        }
+        "Gate" -> {
+            devtools_exact_fields(&object, &["name", "status", "detail"])?
+            JetDevtoolsEventBody.Gate { name: devtools_required_string(&object, "name")?, status: devtools_required_string(&object, "status")?, detail: devtools_required_string(&object, "detail")? }
+        }
+        "Structure" -> {
+            devtools_exact_fields(&object, &["name", "kind", "status"])?
+            JetDevtoolsEventBody.Structure { name: devtools_required_string(&object, "name")?, kind: devtools_required_string(&object, "kind")?, status: devtools_required_string(&object, "status")? }
+        }
+        "Test" -> {
+            devtools_exact_fields(&object, &["name", "status", "duration_ms", "diagnostics"])?
+            JetDevtoolsEventBody.Test { name: devtools_required_string(&object, "name")?, status: devtools_required_string(&object, "status")?, duration_ms: devtools_required_u64(&object, "duration_ms")?, diagnostics: devtools_required_string(&object, "diagnostics")? }
+        }
+        "Job" -> {
+            devtools_exact_fields(&object, &["name", "status", "duration_ms", "diagnostics"])?
+            JetDevtoolsEventBody.Job { name: devtools_required_string(&object, "name")?, status: devtools_required_string(&object, "status")?, duration_ms: devtools_required_u64(&object, "duration_ms")?, diagnostics: devtools_required_string(&object, "diagnostics")? }
+        }
+        "Frame" -> {
+            devtools_exact_fields(&object, &["name", "status", "duration_ms"])?
+            JetDevtoolsEventBody.Frame { name: devtools_required_string(&object, "name")?, status: devtools_required_string(&object, "status")?, duration_ms: devtools_required_u64(&object, "duration_ms")? }
+        }
+        "GameFrameSample" -> {
+            devtools_exact_fields(&object, &["sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "start_ns", "cpu_ns", "gpu_ns", "responsible_function"])?
+            JetDevtoolsEventBody.GameFrameSample { sequence: devtools_required_u64(&object, "sequence")?, frame_id: devtools_required_u64(&object, "frame_id")?, scene: devtools_required_string(&object, "scene")?, frame_index: devtools_required_u64(&object, "frame_index")?, build: devtools_required_string(&object, "build")?, revision: devtools_required_string(&object, "revision")?, trace_id: devtools_required_string(&object, "trace_id")?, start_ns: devtools_required_u64(&object, "start_ns")?, cpu_ns: devtools_required_u64(&object, "cpu_ns")?, gpu_ns: devtools_optional_u64(&object, "gpu_ns")?, responsible_function: devtools_optional_function(&object, "responsible_function")? }
+        }
+        "GameDrawEvent" -> {
+            devtools_exact_fields(&object, &["sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "event_index", "event_id", "function", "phase", "domain", "start_ns", "duration_ns", "object_id", "resource_id"])?
+            JetDevtoolsEventBody.GameDrawEvent { sequence: devtools_required_u64(&object, "sequence")?, frame_id: devtools_required_u64(&object, "frame_id")?, scene: devtools_required_string(&object, "scene")?, frame_index: devtools_required_u64(&object, "frame_index")?, build: devtools_required_string(&object, "build")?, revision: devtools_required_string(&object, "revision")?, trace_id: devtools_required_string(&object, "trace_id")?, event_index: devtools_required_u64(&object, "event_index")?, event_id: devtools_required_u64(&object, "event_id")?, function: devtools_required_function(&object, "function")?, phase: devtools_required_string(&object, "phase")?, domain: devtools_required_string(&object, "domain")?, start_ns: devtools_required_u64(&object, "start_ns")?, duration_ns: devtools_required_u64(&object, "duration_ns")?, object_id: devtools_optional_string(&object, "object_id")?, resource_id: devtools_optional_string(&object, "resource_id")? }
+        }
+        "GameLaunchProfile" -> {
+            devtools_exact_fields(&object, &["target", "run_mode", "headless_compatible", "phases"])?
+            JetDevtoolsEventBody.GameLaunchProfile { target: devtools_required_string(&object, "target")?, run_mode: devtools_required_string(&object, "run_mode")?, headless_compatible: devtools_required_bool(&object, "headless_compatible")?, phases: devtools_required_game_launch_phases(&object, "phases")? }
+        }
+        "GameSwap" -> {
+            devtools_exact_fields(&object, &["sequence", "path", "kind", "status", "old_schema_id", "new_schema_id", "migration", "reason"])?
+            kind :: devtools_required_string(&object, "kind")?
+            if kind != "asset" && kind != "script" && kind != "world" -> return .Err("devtools GameSwap kind is not recognized")
+            status :: devtools_required_string(&object, "status")?
+            if status != "applied" && status != "rejected" -> return .Err("devtools GameSwap status is not recognized")
+            migration :: devtools_required_string(&object, "migration")?
+            if migration != "preserve" && migration != "migrate" && migration != "reset" && migration != "reject" -> return .Err("devtools GameSwap migration is not recognized")
+            JetDevtoolsEventBody.GameSwap { sequence: devtools_required_u64(&object, "sequence")?, path: devtools_required_string(&object, "path")?, kind, status, old_schema_id: devtools_optional_string(&object, "old_schema_id")?, new_schema_id: devtools_optional_string(&object, "new_schema_id")?, migration, reason: devtools_required_string(&object, "reason")? }
+        }
+        "Request" -> {
+            devtools_exact_fields(&object, &["id", "method", "path", "status"])?
+            JetDevtoolsEventBody.Request { id: devtools_required_string(&object, "id")?, method: devtools_required_string(&object, "method")?, path: devtools_required_string(&object, "path")?, status: devtools_required_u16(&object, "status")? }
+        }
+        "Response" -> {
+            devtools_exact_fields(&object, &["id", "status", "bytes"])?
+            JetDevtoolsEventBody.Response { id: devtools_required_string(&object, "id")?, status: devtools_required_u16(&object, "status")?, bytes: devtools_required_u64(&object, "bytes")? }
+        }
+        _ -> return .None
+    }
+    return .Val(body)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:738
+fn devtools_expected_fields(kind: String) -> [String]? {
+    return match kind {
+        "Build" -> .Val(["status", "tier", "diagnostics", "kept", "reset"])
+        "Route" -> .Val(["path", "matched", "render_mode", "reason"])
+        "Query" -> .Val(["name", "state", "footprint"])
+        "GameSwap" -> .Val(["sequence", "path", "kind", "status", "old_schema_id", "new_schema_id", "migration", "reason"])
+        "Request" -> .Val(["id", "method", "path", "status"])
+        "Store" -> .Val(["name", "transaction", "diff", "cursor"])
+        "Trace" -> .Val(["name", "kind", "request", "duration_ms", "status"])
+        "Cost" -> .Val(["name", "rule", "bytes", "allocations"])
+        "Gate" -> .Val(["name", "status", "detail"])
+        "Structure" -> .Val(["name", "kind", "status"])
+        "Test" | "Job" -> .Val(["name", "status", "duration_ms", "diagnostics"])
+        "Frame" -> .Val(["name", "status", "duration_ms"])
+        "GameFrameSample" -> .Val(["sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "start_ns", "cpu_ns", "gpu_ns", "responsible_function"])
+        "GameDrawEvent" -> .Val(["sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "event_index", "event_id", "function", "phase", "domain", "start_ns", "duration_ns", "object_id", "resource_id"])
+        "GameLaunchProfile" -> .Val(["target", "run_mode", "headless_compatible", "phases"])
+        "Response" -> .Val(["id", "status", "bytes"])
+        _ -> .None
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:798
+fn object_map(value: &DataTree) -> [String:DataTree]? {
+    return match value { .Object(fields) -> .Val(fields.iter().cloned().collect()); _ -> .None }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:805
+fn object_map_entries(fields: &[(String, DataTree)]) -> [String:DataTree] { return fields.iter().cloned().collect() }
+// Rust: crates/jet-devserver/src/WebHost.rs:811
+fn devtools_has_exact_fields(object: &[String:DataTree], expected: &[String]) -> Bool {
+    return object.len() == expected.len() && object.keys().all((key) -> expected.iter().any((name) -> name == key))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:821
+fn devtools_exact_fields(object: &[String:DataTree], expected: &[String]) -> Unit Err! {
+    if !devtools_has_exact_fields(object, expected) -> return .Err("devtools event fields do not match the typed body")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:831
+fn devtools_required_game_launch_phases(object: &[String:DataTree], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
+    values :: match object.get(key) { .Val(.Array(v)) -> v; _ -> return .Err("devtools event `{key}` must be an array") }
+    if values.len() > 256 -> return .Err("devtools event `{key}` exceeds 256 entries")
+    phases: [JetDevtoolsGameLaunchPhase] := []
+    for value in values {
+        phase :: object_map(value) ?? return .Err("devtools event `{key}` must contain objects")
+        devtools_exact_fields(&phase, &["phase", "status", "detail"])?
+        phases.push(JetDevtoolsGameLaunchPhase.new(devtools_required_string(&phase, "phase")?, devtools_required_string(&phase, "status")?, devtools_required_string(&phase, "detail")?))
+    }
+    return phases
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:857
+fn devtools_required_string_array(object: &[String:DataTree], key: String) -> [String] Err! {
+    values :: match object.get(key) { .Val(.Array(v)) -> v; _ -> return .Err("devtools event `{key}` must be an array") }
+    strings: [String] := []
+    for value in values {
+        match value {
+            .Text(v) if !v.is_empty() -> strings.push(v.clone())
+            .Text(_) -> return .Err("devtools event `{key}` has an empty string")
+            _ -> return .Err("devtools event `{key}` must contain strings")
+        }
+    }
+    return strings
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:875
+fn devtools_required_u16(object: &[String:DataTree], key: String) -> U16 Err! {
+    return U16.try_from(devtools_required_u64(object, key)?) ?? return .Err("devtools event `{key}` is outside the u16 range")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:883
+fn devtools_optional_u64(object: &[String:DataTree], key: String) -> U64? Err! {
+    match object.get(key) {
+        .None | .Val(.Null) -> return .None
+        .Val(.Int(v)) if v >= 0 -> return .Val(U64.try_from(v) ?? return .Err("devtools event `{key}` must be non-negative"))
+        .Val(.Int(_)) -> return .Err("devtools event `{key}` must be non-negative")
+        _ -> return .Err("devtools event `{key}` must be an integer or null")
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:897
+fn devtools_required_function(object: &[String:DataTree], key: String) -> JetDevtoolsFunctionIdentity Err! {
+    function :: object.get(key).and_then(object_map) ?? return .Err("devtools event `{key}` must be an object")
+    source :: function.get("source").and_then(object_map) ?? return .Err("devtools event `{key}.source` must be an object")
+    return JetDevtoolsFunctionIdentity.new(devtools_required_string(&function, "function_id")?, devtools_required_string(&function, "name")?, JetDevtoolsSourceSpan.new(devtools_required_string(&source, "source_id")?, devtools_required_string(&source, "file")?, devtools_required_u32(&source, "start_line")?, devtools_required_u32(&source, "start_column")?, devtools_required_u32(&source, "end_line")?, devtools_required_u32(&source, "end_column")?))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:923
+fn devtools_optional_function(object: &[String:DataTree], key: String) -> JetDevtoolsFunctionIdentity? Err! {
+    match object.get(key) { .None | .Val(.Null) -> return .None; .Val(.Object(_)) -> return .Val(devtools_required_function(object, key)?); _ -> return .Err("devtools event `{key}` must be an object or null") }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:934
+fn devtools_required_u32(object: &[String:DataTree], key: String) -> U32 Err! {
+    return U32.try_from(devtools_required_u64(object, key)?) ?? return .Err("devtools event `{key}` is outside the u32 range")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:942
+fn devtools_required_string(object: &[String:DataTree], key: String) -> String Err! {
+    value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
+    return devtools_required_value_string(value, key)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:958
+fn devtools_required_value_string(value: &DataTree, key: String) -> String Err! {
+    match value {
+        .Text(v) -> { if v.is_empty() -> return .Err("devtools envelope `{key}` must not be empty"); return v.clone() }
+        _ -> return .Err("devtools envelope `{key}` must be a string")
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:968
+fn devtools_optional_string(object: &[String:DataTree], key: String) -> String? Err! {
+    match object.get(key) {
+        .None | .Val(.Null) -> return .None
+        .Val(.Text(v)) if !v.is_empty() -> return .Val(v.clone())
+        .Val(.Text(_)) -> return .Err("devtools envelope `{key}` must not be empty")
+        _ -> return .Err("devtools envelope `{key}` must be a string or null")
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:982
+fn devtools_required_u64(object: &[String:DataTree], key: String) -> U64 Err! {
+    value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
+    match value { .Int(v) -> return U64.try_from(v) ?? return .Err("devtools envelope `{key}` must be non-negative"); _ -> return .Err("devtools envelope `{key}` must be an integer") }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:996
+fn devtools_required_bool(object: &[String:DataTree], key: String) -> Bool Err! {
+    match object.get(key) { .Val(.Bool(v)) -> return v; .Val(_) -> return .Err("devtools envelope `{key}` must be a boolean"); .None -> return .Err("devtools envelope missing `{key}`") }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:1007
+fn devtools_required_object_json(object: &[String:DataTree], key: String) -> String Err! {
+    value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
+    match value { .Object(_) -> return Session.render_json(value); _ -> return .Err("devtools envelope `{key}` must be an object") }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:1020
+fn devtools_lifecycle(value: String) -> JetDevtoolsLifecycleState Err! {
+    return match value { "starting" -> .Starting; "building" -> .Building; "ready" -> .Ready; "error" -> .Error; "unavailable" -> .Unavailable; "stopped" -> .Stopped; _ -> return .Err("devtools envelope lifecycle is not recognized") }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:1032
+fn devtools_freshness_state(value: String) -> JetDevtoolsFreshnessState Err! {
+    return match value { "fresh" -> .Fresh; "stale" -> .Stale; "unknown" -> .Unknown; _ -> return .Err("devtools envelope freshness state is not recognized") }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:1041
+fn terminal_style_adapter(file: String) -> Arc[TerminalStyleHostAdapter] Err! {
+    is_tty :: std.io.stderr().is_terminal()
+    capabilities :: TerminalCapabilityFacts.from_environment(std.env.var("TERM").ok().as_deref(), std.env.var("COLORTERM").ok().as_deref(), is_tty, std.env.var_os("NO_COLOR").is_some(), .Auto)
+    source :: TerminalStyleHostSource.new(file, capabilities) ?? return .Err("could not inject terminal style source: {err}")
+    adapter :: Arc.new(TerminalStyleHostAdapter.new())
+    adapter.inject(^source)
+    return adapter
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:1063
+pub struct DevRevisionFacts { pub accepted: U64?; pub candidate: U64?; pub diagnostic: U64? }
+// Rust: crates/jet-devserver/src/WebHost.rs:1078
+struct DevStatusSnapshot { state: String; code: String; diagnostic: String; last_build_ms: U128; candidate: U64? }
+// Rust: crates/jet-devserver/src/WebHost.rs:1088
+struct DevStatus {
+    version: AtomicU64; clients: Mutex[[String:Instant]]; state: Mutex[DevStatusSnapshot]
+    browser_relay: Mutex[BrowserTrace.Relay?]; browser_trace_enabled: AtomicBool; command_receipt: Mutex[String?]
+    watched_file: String; web_root: OSPath; port: AtomicU64; canvas_port: AtomicU64; canvas_enabled: AtomicBool
+    verbose: AtomicBool; active: AtomicBool; exit_code: AtomicU64; published: AtomicBool
+    controls_ready: AtomicBool; reconnecting: AtomicBool; color: Bool; pin: Bool
+    term_lock: Mutex[Unit]; last_block_lines: Mutex[Usize]; header_started: Mutex[Bool]
+}
+impl DevStatus {
+    // Rust: crates/jet-devserver/src/WebHost.rs:1145
+    fn new(file: String, verbose: Bool) -> Self {
+        is_tty :: std.io.stderr().is_terminal()
+        color :: ColorChoice.Auto.resolve(is_tty)
+        return Self.new_with_terminal(file, verbose, is_tty, color)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1154
+    fn new_with_root(file: String, verbose: Bool, web_root: &OSPath) -> Self {
+        status := Self.new(file, verbose)
+        status.web_root = web_root.to_path_buf()
+        return status
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1160
+    fn new_with_terminal(file: String, verbose: Bool, is_tty: Bool, color: Bool) -> Self {
+        return Self {
+            version: AtomicU64.new(1), clients: Mutex.new([:]),
+            state: Mutex.new(DevStatusSnapshot { state: "ready", code: "", diagnostic: "", last_build_ms: 0, candidate: .None }),
+            browser_relay: Mutex.new(.None), browser_trace_enabled: AtomicBool.new(false), command_receipt: Mutex.new(.None),
+            watched_file: file.to_string(), web_root: OSPath.from("build"), port: AtomicU64.new(0), canvas_port: AtomicU64.new(0),
+            canvas_enabled: AtomicBool.new(true), verbose: AtomicBool.new(verbose), active: AtomicBool.new(false), exit_code: AtomicU64.new(0),
+            published: AtomicBool.new(false), controls_ready: AtomicBool.new(false), reconnecting: AtomicBool.new(false), color, pin: is_tty,
+            term_lock: Mutex.new(()), last_block_lines: Mutex.new(0), header_started: Mutex.new(false)
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1193
+    fn set_port(self: &Self, port: U16) -> Unit { self.port.store(port as U64, .SeqCst) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1197
+    fn set_canvas_port(self: &Self, port: U16) -> Unit { self.canvas_port.store(port as U64, .SeqCst) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1201
+    fn set_canvas_enabled(self: &Self, enabled: Bool) -> Unit { self.canvas_enabled.store(enabled, .SeqCst) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1205
+    fn port(self: &Self) -> U16 { return self.port.load(.SeqCst) as U16 }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1209
+    fn canvas_port(self: &Self) -> U16 { return self.canvas_port.load(.SeqCst) as U16 }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1213
+    fn header_text_for(self: &Self, snap: &DevStatusSnapshot) -> (String, String) {
+        if self.reconnecting.load(.SeqCst) -> return ("reconnecting", "waiting for connection")
+        return header_words(snap.state, self.watched_file, snap.code, self.port(), self.client_count(), snap.last_build_ms)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1230
+    fn format_line(self: &Self, word: String, rest: String) -> String { return if self.color -> format_line_colored(word, rest) else -> format_line_plain(word, rest) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1238
+    fn dashboard_detail_line(self: &Self) -> String {
+        if self.canvas_enabled.load(.SeqCst) -> return "         watching {self.watched_file} · Canvas http://localhost:{self.canvas_port()}/canvas · v verbose"
+        return "         watching {self.watched_file} · v verbose"
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1253
+    fn refresh(self: &Self) -> Unit {
+        if !self.active.load(.SeqCst) -> return
+        snap :: self.state.lock().unwrap().clone()
+        (word, rest) :: self.header_text_for(&snap)
+        line :: self.format_line(word, rest)
+        if self.verbose() {
+            if self.pin -> self.write_header_verbose(line) else {
+                guard :: self.term_lock.lock().unwrap()
+                out := std.io.stderr()
+                _ :: out.write_all("{line}\n".as_bytes())
+                _ :: out.flush()
+            }
+            return
+        }
+        if self.pin {
+            lines := [line, self.dashboard_detail_line()]
+            if snap.state == "error" -> lines.extend(frame_lines(snap.code, snap.diagnostic))
+            self.write_block(&lines)
+            return
+        }
+        // CI floor prints the owned diagnostic verbatim, without a frame.
+        guard :: self.term_lock.lock().unwrap()
+        out := std.io.stderr()
+        _ :: out.write_all("{line}\n".as_bytes())
+        if snap.state == "error" -> _ :: out.write_all("{snap.diagnostic}\n".as_bytes())
+        _ :: out.flush()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1297
+    fn write_block(self: &Self, lines: &[String]) -> Unit {
+        guard :: self.term_lock.lock().unwrap()
+        out := std.io.stderr()
+        prev := self.last_block_lines.lock().unwrap()
+        if *prev > 0 {
+            if *prev > 1 -> _ :: out.write_all("\x1b[{*prev - 1}A".as_bytes())
+            _ :: out.write_all("\r\x1b[0J".as_bytes())
+        }
+        _ :: out.write_all(lines.join("\n").as_bytes())
+        _ :: out.flush()
+        *prev = lines.len()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1318
+    fn write_header_verbose(self: &Self, line: String) -> Unit {
+        guard :: self.term_lock.lock().unwrap()
+        out := std.io.stderr()
+        // Check within the lock: never reinstall DECSTBM after EOF/Ctrl-C cleanup.
+        if !self.controls_ready.load(.SeqCst) {
+            _ :: out.write_all("{line}\n".as_bytes())
+            _ :: out.flush()
+            return
+        }
+        started := self.header_started.lock().unwrap()
+        detail :: self.dashboard_detail_line()
+        if !*started {
+            _ :: out.write_all("\x1b[2J\x1b[H{line}\n{detail}\n\x1b[3r\x1b[3;1H".as_bytes())
+            *started = true
+        } else -> _ :: out.write_all("\x1b7\x1b[1;1H\x1b[2K{line}\n\x1b[2K{detail}\x1b8".as_bytes())
+        _ :: out.flush()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1342
+    fn log_line(self: &Self, text: String) -> Unit {
+        if !self.active.load(.SeqCst) || !self.verbose() -> return
+        guard :: self.term_lock.lock().unwrap()
+        out := std.io.stderr()
+        if self.pin && self.controls_ready.load(.SeqCst) -> _ :: out.write_all("{text}\r\n".as_bytes()) else -> _ :: out.write_all("{text}\n".as_bytes())
+        _ :: out.flush()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1356
+    fn log_rebuild(self: &Self, ok: Bool, detail: String) -> Unit {
+        arrow :: if ok -> "rebuilt" else -> "error"
+        self.log_line("{clock_time()}  save {self.watched_file}  →  {arrow} {detail}")
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1367
+    fn log_request(self: &Self, method: String, path: String, code: U16, elapsed: Duration) -> Unit {
+        self.log_line("{clock_time()}  {method}  {path:<20} {code}  {elapsed.as_millis()}ms")
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1378
+    fn log_diagnostic(self: &Self, code: String, diagnostic: String) -> Unit {
+        if !self.active.load(.SeqCst) || !self.verbose() -> return
+        guard :: self.term_lock.lock().unwrap()
+        out := std.io.stderr()
+        if self.pin && self.controls_ready.load(.SeqCst) {
+            for line in frame_lines(code, diagnostic) -> _ :: out.write_all("{line}\r\n".as_bytes())
+        } else -> _ :: out.write_all("{diagnostic}\n".as_bytes())
+        _ :: out.flush()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1394
+    fn verbose(self: &Self) -> Bool { return self.verbose.load(.SeqCst) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1401
+    fn toggle_verbose(self: &Self) -> Unit {
+        verbose :: !self.verbose.fetch_xor(true, .SeqCst)
+        if self.pin {
+            guard :: self.term_lock.lock().unwrap()
+            out := std.io.stderr()
+            if verbose {
+                prev := self.last_block_lines.lock().unwrap()
+                if *prev > 1 -> _ :: out.write_all("\x1b[{*prev - 1}A".as_bytes())
+                _ :: out.write_all("\r\x1b[0J".as_bytes())
+                *prev = 0
+            } else {
+                _ :: out.write_all("\x1b[r\x1b[2J\x1b[H".as_bytes())
+                *self.header_started.lock().unwrap() = false
+            }
+            _ :: out.flush()
+        }
+        self.refresh()
+        self.log_line(if verbose -> "verbose request/rebuild log enabled · press v to collapse" else -> "")
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1427
+    fn disable_terminal_controls(self: &Self) -> Unit {
+        if !self.pin { self.controls_ready.store(false, .SeqCst); return }
+        guard :: self.term_lock.lock().unwrap()
+        self.controls_ready.store(false, .SeqCst)
+        out := std.io.stderr()
+        started := self.header_started.lock().unwrap()
+        if *started -> _ :: out.write_all("\x1b[r\x1b[999;1H\r\n".as_bytes()) else -> _ :: out.write_all("\n".as_bytes())
+        *started = false
+        _ :: out.flush()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1447
+    fn mark_building(self: &Self) -> Unit {
+        _ :: self.browser_relay.lock().unwrap().take()
+        state := self.state.lock().unwrap()
+        last_build_ms :: state.last_build_ms
+        *state = DevStatusSnapshot { state: "building", code: "", diagnostic: "", last_build_ms, candidate: .Val(self.next_candidate()) }
+        drop(^state)
+        self.refresh()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1462
+    fn mark_ready(self: &Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
+        browser_relay := self.browser_relay.lock().unwrap()
+        if self.browser_trace_enabled.load(.SeqCst) {
+            _ :: browser_relay.take()
+            *browser_relay = read_web_manifest(&self.web_root).and_then((manifest) -> BrowserTrace.Relay.new(manifest).ok())
+        }
+        drop(^browser_relay)
+        state := self.state.lock().unwrap()
+        if is_rebuild -> _ :: self.version.fetch_add(1, .SeqCst)
+        self.published.store(true, .SeqCst)
+        *state = DevStatusSnapshot { state: "ready", code: "", diagnostic: "", last_build_ms: elapsed_ms, candidate: .None }
+        drop(^state)
+        self.refresh()
+        if is_rebuild -> self.log_rebuild(true, format_build_time(elapsed_ms))
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1489
+    fn mark_error(self: &Self, code: String, diagnostic: String, is_rebuild: Bool) -> Unit {
+        diagnostic_for_log :: diagnostic.clone()
+        state := self.state.lock().unwrap()
+        last_build_ms :: state.last_build_ms
+        candidate :: state.candidate.unwrap_or_else(() -> self.next_candidate())
+        *state = DevStatusSnapshot { state: "error", code: code.clone(), diagnostic: ^diagnostic, last_build_ms, candidate: .Val(candidate) }
+        drop(^state)
+        self.refresh()
+        if is_rebuild { self.log_rebuild(false, code); self.log_diagnostic(code, diagnostic_for_log) }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1513
+    fn next_candidate(self: &Self) -> U64 {
+        version :: self.version.load(.SeqCst)
+        return if self.published.load(.SeqCst) -> version + 1 else -> version
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1522
+    fn revision_facts_for(self: &Self, snap: &DevStatusSnapshot) -> DevRevisionFacts {
+        return DevRevisionFacts { accepted: if self.published.load(.SeqCst) -> .Val(self.version.load(.SeqCst)) else -> .None, candidate: snap.candidate, diagnostic: if snap.state == "error" -> snap.candidate else -> .None }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1537
+    fn revision_facts(self: &Self) -> DevRevisionFacts {
+        snap :: self.state.lock().unwrap()
+        return self.revision_facts_for(&snap)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1546
+    fn web_error_facts(self: &Self) -> WebErrorDevStatusFacts {
+        snap :: self.state.lock().unwrap().clone()
+        return WebErrorDevStatusFacts.new(^snap.state, ^snap.code, ^snap.diagnostic)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1551
+    fn json(self: &Self) -> String {
+        snap :: self.state.lock().unwrap().clone()
+        revisions :: self.revision_facts_for(&snap)
+        (word, rest) :: self.header_text_for(&snap)
+        message :: "{word} · {rest}"
+        number :: (value: U64?) -> value.map_or_else(() -> "null", (n) -> n.to_string())
+        return "{" + "\"version\":" + self.version.load(.SeqCst).to_string() + ",\"state\":\"" + json_escape(word) + "\",\"message\":\"" + json_escape(message) + "\",\"file\":\"" + json_escape(self.watched_file) + "\",\"code\":\"" + json_escape(snap.code) + "\",\"diagnostic\":\"" + json_escape(snap.diagnostic) + "\",\"clients\":" + self.client_count().to_string() + ",\"last_build_ms\":" + snap.last_build_ms.to_string() + ",\"candidate\":" + number(revisions.candidate) + ",\"diagnostic_revision\":" + number(revisions.diagnostic) + ",\"accepted_revision\":" + number(revisions.accepted) + ",\"last_good_revision\":" + number(revisions.accepted) + "}"
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1574
+    fn activate(self: &Self) -> Unit { self.active.store(true, .SeqCst); self.refresh() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1579
+    fn client_count(self: &Self) -> U64 { _ :: self.prune_expired_clients(); return self.clients.lock().unwrap().len() as U64 }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1584
+    fn note_client(self: &Self, id: String) -> Unit {
+        if !Session.client_id_is_valid(id) -> return
+        pruned :: self.prune_expired_clients()
+        clients := self.clients.lock().unwrap()
+        is_new :: !clients.contains_key(id)
+        if is_new && clients.len() >= MAX_CLIENTS -> return
+        changed :: clients.insert(id.to_string(), Instant.now()).is_none()
+        drop(^clients)
+        recovered :: self.reconnecting.swap(false, .SeqCst)
+        if pruned || changed || recovered -> self.refresh()
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1602
+    fn expire_clients(self: &Self) -> Unit { if self.prune_expired_clients() -> self.refresh() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1609
+    fn prune_expired_clients(self: &Self) -> Bool {
+        cutoff :: Duration.from_millis(CLIENT_TTL_MS)
+        now :: Instant.now()
+        clients := self.clients.lock().unwrap()
+        before :: clients.len()
+        clients.retain((_, seen) -> now.saturating_duration_since(*seen) <= cutoff)
+        changed :: clients.len() != before
+        disconnected :: before > 0 && clients.is_empty()
+        drop(^clients)
+        if disconnected -> self.reconnecting.store(true, .SeqCst)
+        return changed
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1624
+    fn drop_client(self: &Self, id: String) -> Unit {
+        if !Session.client_id_is_valid(id) -> return
+        clients := self.clients.lock().unwrap()
+        changed :: clients.remove(id).is_some()
+        drop(^clients)
+        if changed {
+            // pagehide is a clean close/reload, not a broken lease.
+            self.reconnecting.store(false, .SeqCst)
+            self.refresh()
+        }
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1638
+    fn record_command_receipt(self: &Self, receipt: String) -> Unit { *self.command_receipt.lock().unwrap() = .Val(^receipt) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1642
+    fn command_receipt(self: &Self) -> String? { return self.command_receipt.lock().unwrap().clone() }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1646
+    fn activate_browser_trace(self: &Self, manifest: String) -> Unit Err! {
+        relay :: BrowserTrace.Relay.new(manifest)?
+        *self.browser_relay.lock().unwrap() = .Val(^relay)
+        self.browser_trace_enabled.store(true, .SeqCst)
+        _ :: self.version.fetch_add(1, .SeqCst)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1654
+    fn activate_requested_browser_trace(self: &Self) -> Unit {
+        if BrowserTrace.take_request() != .Ok(true) -> return
+        if read_web_manifest(&self.web_root) == .Val(manifest) -> _ :: self.activate_browser_trace(manifest)
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:1665
+pub struct CanvasHostOptions {
+    pub host: String; pub port: U16?; pub transport: String; pub authority: String
+    pub audit: Bool; pub output: String?; pub target: String?
+}
+impl Default for CanvasHostOptions {
+    // Rust: crates/jet-devserver/src/WebHost.rs:1676
+    fn default() -> Self { return Self { host: "127.0.0.1", port: .None, transport: "http", authority: "loopback", audit: false, output: .None, target: .None } }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:1689
+pub struct WebHost {
+    listener: Mutex[TcpListener?]; application_listener: Mutex[TcpListener?]; started: AtomicBool
+    shutdown: Arc[AtomicBool]; server_threads: Mutex[[thread.JoinHandle[Unit]]]
+    poll_thread: Mutex[thread.JoinHandle[Unit]?]; terminal_thread: Mutex[thread.JoinHandle[Unit]?]
+    status: Arc[DevStatus]; debug_sessions: Arc[DebugSessions]; session: Arc[ResidentDevSession]
+    canvas_file: String; bind_host: String; session_secret: String; release_policy: ReleaseDevtoolsPolicy
+    static_root: OSPath; browser_state: Arc[Mutex[BrowserWebState?]]; web_swap_enabled: Bool
+    hot_swap_decision: Mutex[HotSwapDecision?]; paused_evaluate: Arc[Mutex[PausedEvaluateHost]]
+    terminal_style: Arc[TerminalStyleHostAdapter]
+}
+impl WebHost {
+    // Rust: crates/jet-devserver/src/WebHost.rs:1720
+    pub fn bind_with_policy(file: String, static_root: &OSPath, verbose: Bool, port: U16?, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
+        return Self.bind_application_only_with_policy(file, verbose, port, static_root.to_path_buf(), release_policy, true)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1742
+    pub fn bind_static_with_policy(file: String, root: &OSPath, verbose: Bool, application_listener: TcpListener, session: Arc[ResidentDevSession], release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
+        static_root :: fs.canonicalize(root) ?? return .Err("error: couldn't open static output `{root.display()}`: {err}")
+        application_port :: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
+        if session.application_port() != application_port -> return .Err("error: shared devtools session application port {session.application_port()} does not match static preview port {application_port}")
+        return Self.bind_application_only_with_listener(file, verbose, ^static_root, release_policy, false, ^application_listener, ^session)
+    }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1780
+    pub fn bind_application_preview_listener(port: U16?) -> TcpListener Err! { return bind_application_server(port) }
+    // Rust: crates/jet-devserver/src/WebHost.rs:1784
+    fn bind_application_only_with_policy(file: String, verbose: Bool, port: U16?, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool) -> Self Err! {
+        application_listener :: bind_application_server(port)?
+        application_port :: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
+        session :: Arc.new(ResidentDevSession.new(file, 0, application_port))
+        return Self.bind_application_only_with_listener(file, verbose, ^static_root, release_policy, web_swap_enabled, ^application_listener, ^session)
+    }
+}

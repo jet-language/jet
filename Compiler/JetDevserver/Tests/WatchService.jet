@@ -1,0 +1,132 @@
+use jet_devserver.WatchService.*
+use std.fs as fs
+use std.env as env
+use std.thread as thread
+use std.time.[Duration, SystemTime, UNIX_EPOCH]
+use jet_foundation.Persist.[PersistStore, PersistEntry, PersistOutcome]
+use jet_foundation.Persist as Persist
+use jet_foundation.SHA256 as SHA256
+// GATE #4494: real filesystem, thread, clock and process primitives in the reference tests.
+// Rust: crates/jet-devserver/src/WatchService.rs:2157
+fn tmp_dir(name: String) -> OSPath {
+    dir :: env.temp_dir().join("jet_watch_{name}_{std.process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()}")
+    fs.create_dir_all(dir).unwrap(); dir
+}
+// Rust: crates/jet-devserver/src/WatchService.rs:2170
+#Test("typed_graph_records_kinds_reverse_edges_and_receipts") {
+    dir :: tmp_dir("graph"); entry :: dir.join("app.jet"); lib :: dir.join("lib.jet"); css :: dir.join("app.css")
+    html :: dir.join("app.html"); manifest :: dir.join("package.jet"); lock :: dir.join(".jet")
+    fs.create_dir_all(lock).unwrap(); lock_file :: lock.join("lock")
+    loop (path, body) in [(entry, "use lib\nfn run() {}\n"), (lib, "fn helper() {}\n"), (css, "body{}\n"),
+        (html, "<html></html>\n"), (manifest, "name: \"app\"\n"), (lock_file, "lock = 1\n")] { fs.write(path, body).unwrap() }
+    graph := WatchGraph.from_entry(entry, [lib.clone()]).unwrap()
+    &graph.upsert(css.clone(), .Style); &graph.link(entry.clone(), css.clone())
+    &graph.upsert(html.clone(), .HTML); &graph.link(entry.clone(), html.clone())
+    &graph.upsert(dir.join("logo.png"), .Asset); &graph.upsert(dir.join("generated/out.jet"), .Generated)
+    &graph.upsert(dir.join("input.json"), .BuildInput); &graph.upsert(dir.join("target.fact"), .TargetFact)
+    assert(graph.node_count() >= 8)
+    kinds :: graph.nodes().map(fn(n) -> (n.kind, true)).collect()
+    assert(kinds.contains_key(RootKind.Import)); assert(kinds.contains_key(RootKind.Manifest)); assert(kinds.contains_key(RootKind.Lock))
+    assert(kinds.contains_key(RootKind.Style)); assert(kinds.contains_key(RootKind.HTML)); assert(kinds.contains_key(RootKind.Asset))
+    assert(kinds.contains_key(RootKind.Generated)); assert(kinds.contains_key(RootKind.BuildInput)); assert(kinds.contains_key(RootKind.TargetFact))
+    closure :: graph.closure_of([lib.clone()]); assert(closure.contains(lib)); assert(closure.contains(canonicalize_loose(entry)))
+    session := WatchSession.from_graph(^graph); thread.sleep(Duration.from_millis(20))
+    f := fs.OpenOptions.new().append(true).open(lib).unwrap(); &f.write_all("// touch\n".as_bytes()).unwrap(); drop(^f)
+    &session.mark_edit_started(); receipt :: &session.poll().expect("lib change")
+    assert(!receipt.closure.is_empty()); assert(receipt.render().contains("\"generation\":")); assert(within_budget(receipt))
+    &session.acknowledge(receipt).unwrap(); _ :: fs.remove_dir_all(dir)
+}
+// Rust: crates/jet-devserver/src/WatchService.rs:2231
+#Test("html_shell_tracks_local_assets_and_future_creates") {
+    dir :: tmp_dir("html_assets"); entry :: dir.join("app.jet"); shell :: dir.join("shell.html")
+    stylesheet :: dir.join("theme.css"); image :: dir.join("logo.png")
+    fs.write(entry, "fn run() {}\n").unwrap()
+    fs.write(shell, "<html><head><link href=\"theme.css\"></head><body><img src=\"logo.png\"></body></html>").unwrap()
+    fs.write(stylesheet, "body { color: white; }\n").unwrap()
+    graph :: WatchGraph.from_entry(entry, [shell.clone()]).unwrap()
+    shell :: canonicalize_loose(shell); stylesheet :: canonicalize_loose(stylesheet); image :: canonicalize_loose(image); entry :: canonicalize_loose(entry)
+    assert(graph.nodes.contains_key(shell)); assert(graph.nodes.contains_key(stylesheet)); assert(graph.nodes.contains_key(image))
+    assert(!graph.nodes.get(image).unwrap().stamp.exists)
+    assert(graph.reverse_edges().get(stylesheet).unwrap().contains_key(entry)); assert(graph.reverse_edges().get(image).unwrap().contains_key(entry))
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: crates/jet-devserver/src/WatchService.rs:2261
+#Test("runtime_file_inputs_track_generator_directories_and_files") {
+    dir :: tmp_dir("runtime_inputs"); entry :: dir.join("generate.jet"); assets :: dir.join("assets"); image :: assets.join("logo.png")
+    fs.create_dir_all(assets).unwrap(); fs.write(image, "asset").unwrap()
+    fs.write(entry, "use core.files as fs\nfn run() {\n    fs.copy_dir(\"assets\", \"dist/assets\")\n}\n").unwrap()
+    graph :: WatchGraph.from_entry(entry, []).unwrap()
+    entry :: canonicalize_loose(entry); assets :: canonicalize_loose(assets); image :: canonicalize_loose(image)
+    assert(graph.nodes.contains_key(assets)); assert(graph.nodes.contains_key(image))
+    assert(graph.reverse_edges().get(assets).unwrap().contains_key(entry)); assert(graph.reverse_edges().get(image).unwrap().contains_key(entry))
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: crates/jet-devserver/src/WatchService.rs:2287
+#Test("rename_delete_atomic_and_stale_events") {
+    dir :: tmp_dir("events"); entry :: dir.join("main.jet"); a :: dir.join("a.jet"); b :: dir.join("b.jet")
+    fs.write(entry, "fn run() {}\n").unwrap(); fs.write(a, "fn a() {}\n").unwrap()
+    graph := WatchGraph.from_entry(entry, [a.clone()]).unwrap()
+    &graph.upsert(a.clone(), .Import); &graph.link(canonicalize_loose(entry), a.clone())
+    session := WatchSession.from_graph(^graph)
+    thread.sleep(Duration.from_millis(20)); tmp :: dir.join("a.jet.tmp")
+    fs.write(tmp, "fn a() { /* new */ }\n").unwrap(); fs.rename(tmp, a).unwrap()
+    receipt :: &session.poll().expect("atomic save")
+    assert(receipt.change_kinds.iter().any(fn(k) -> k == "modified" || k == "created")); &session.acknowledge(receipt).unwrap()
+    &session.graph_mut().upsert(a.clone(), .Import); &session.graph_mut().link(canonicalize_loose(entry), a.clone()); &session.graph_mut().refresh_stamps()
+    thread.sleep(Duration.from_millis(20)); fs.remove_file(a).unwrap()
+    receipt :: &session.poll().expect("delete")
+    assert(receipt.change_kinds.contains("deleted") || receipt.changed.iter().any(fn(p) -> p == a)); &session.acknowledge(receipt).unwrap()
+    fs.write(b, "fn b() {}\n").unwrap(); &session.graph_mut().upsert(b.clone(), .Import)
+    &session.graph_mut().link(canonicalize_loose(entry), b.clone()); &session.graph_mut().refresh_stamps()
+    thread.sleep(Duration.from_millis(20)); c :: dir.join("c.jet"); fs.rename(b, c).unwrap(); &session.graph_mut().upsert(c.clone(), .Import)
+    if &session.graph_mut().nodes.get_mut(b) == .Val(node) -> node.stamp.exists = true
+    receipt :: &session.poll(); assert(receipt.is_some())
+    if receipt == .Val(r) -> &session.acknowledge(r).unwrap()
+    session.applied_generation = session.generation + 10
+    thread.sleep(Duration.from_millis(20)); fs.write(entry, "fn run() { /* x */ }\n").unwrap()
+    if &session.poll() == .Val(r) -> assert(r.change_kinds.contains("stale") || r.closure.is_empty())
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: crates/jet-devserver/src/WatchService.rs:2359
+#Test("persist_migration_and_hot_replace_transaction") {
+    Persist.shared_clear(); store := PersistStore.new()
+    &store.put(PersistEntry{module: "app", name: "counter", shape: "Int", payload: "{\"shape\":\"Int\",\"value\":7}"})
+    if &store.migrate("app", "counter", "Int", "0") == { .Kept(e) -> assert(e.payload.contains('7')), else -> panic("expected Kept") }
+    if &store.migrate("app", "counter", "Int+", "0") == { .Migrated(e) -> assert(e.payload.contains('7')), else -> panic("expected Migrated") }
+    if &store.migrate("app", "counter", "String", "\"\"") == {
+        .Rejected{reason, prior} -> { assert(reason.message().contains("migration unavailable")); assert_eq(prior.key(), "app::counter") }
+        else -> panic("expected Rejected")
+    }
+    prior :: SessionSnapshot.new(3, "gen-3", ^store).with_lineage("app", "build-3", "rev-3", "world-1")
+    incomplete :: HotReplaceTxn.begin(prior.clone()); err :: incomplete.commit().expect_err("incomplete")
+    assert_eq(err.0.generation, 3); assert(err.1.contains("not staged"))
+    candidate :: prior.clone().with_lineage("app", "build-4", "rev-4", "world-1")
+    rejected := HotReplaceTxn.begin(prior.clone()); &rejected.pause().unwrap()
+    replacement := PersistStore.new(); &replacement.put(PersistEntry{module: "app", name: "counter", shape: "String", payload: "\"\""})
+    changed :: candidate.clone().with_persist(^replacement)
+    assert(&rejected.preflight(changed).is_err()); assert_eq(&rejected.rollback("type surface changed").generation, 3)
+    txn := HotReplaceTxn.begin(^prior); &txn.pause().unwrap(); &txn.preflight(candidate).unwrap(); &txn.stage().unwrap()
+    next :: txn.commit().expect("commit")
+    assert_eq(next.generation, 4); assert_eq(next.artifact_token, "gen-4"); assert_eq(next.revision, "rev-4")
+}
+// Rust: crates/jet-devserver/src/WatchService.rs:2424
+#Test("crash_reconnect_recovers_stamps") {
+    dir :: tmp_dir("recover"); entry :: dir.join("app.jet"); fs.write(entry, "fn run() {}\n").unwrap()
+    session := WatchSession.open(entry).unwrap(); thread.sleep(Duration.from_millis(20))
+    fs.write(entry, "fn run() { /* edited offline */ }\n").unwrap(); &session.recover(); assert(&session.poll().is_none())
+    thread.sleep(Duration.from_millis(20)); fs.write(entry, "fn run() { /* again */ }\n").unwrap()
+    &session.mark_edit_started(); receipt :: &session.poll().expect("post-reconnect edit"); assert(within_budget(receipt))
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: crates/jet-devserver/src/WatchService.rs:2444
+#Test("in_place_save_settles_past_truncation") {
+    dir :: tmp_dir("truncate"); entry :: dir.join("app.jet"); fs.write(entry, "fn run() {}\n").unwrap()
+    session := WatchSession.open(entry).unwrap(); thread.sleep(Duration.from_millis(20))
+    saved :: "fn run() { print(\"saved\") }\n"; file := fs.File.create(entry).unwrap()
+    writer :: thread.spawn(fn() -> { thread.sleep(Duration.from_millis(40)); &file.write_all(saved.as_bytes()).unwrap() })
+    receipt :: &session.poll().expect("in-place save"); writer.join().unwrap()
+    expected :: "sha256-{SHA256.sha256_file_hex(entry).unwrap()}"
+    assert_eq(fs.read_to_string(entry).unwrap(), saved); assert_eq(receipt.content_digests, [.Val(expected)])
+    assert(&session.poll().is_none(), "settled save must not rebuild twice")
+    _ :: fs.remove_dir_all(dir)
+}

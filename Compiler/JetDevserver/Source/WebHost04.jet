@@ -1,2044 +1,482 @@
-// PORT-PENDING 0792 crates-jet-devserver-src-webhost-slice-5926: crates/jet-devserver/src/WebHost.rs:5926-7965
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn inject_canvas_session(
-//RS     mut asset: crate::CanvasAsset,
-//RS     session_secret: &str,
-//RS ) -> crate::CanvasAsset {
-//RS     if asset.content_type == "text/html; charset=utf-8" {
-//RS         if let Some(index) = asset.body.find("app.js?") {
-//RS             let insert_at = index + "app.js?".len();
-//RS             asset
-//RS                 .body
-//RS                 .insert_str(insert_at, &format!("session={session_secret}&"));
-//RS         }
-//RS     }
-//RS     asset
-//RS }
-//RS 
-//RS fn method_not_allowed(stream: &mut impl Write) -> std::io::Result<()> {
-//RS     write_response(
-//RS         stream,
-//RS         "405 Method Not Allowed",
-//RS         "text/plain; charset=utf-8",
-//RS         b"method not allowed",
-//RS     )
-//RS }
-//RS 
-//RS fn web_stream_path(path: &str) -> bool {
-//RS     path == "/__jet_web/stream"
-//RS }
-//RS 
-//RS /// The existing Canvas source endpoints the devtools page uses as its source
-//RS /// tools (inspect, checked preview, revision-bound apply).  They are served by
-//RS /// the same handlers as the Canvas listener; nothing here is a second editor.
-//RS fn source_tool_path(path: &str) -> bool {
-//RS     matches!(
-//RS         path,
-//RS         "/__jet_canvas/project"
-//RS             | "/__jet_canvas/source"
-//RS             | "/__jet_canvas/command"
-//RS             | "/__jet_canvas/transaction"
-//RS     )
-//RS }
-//RS 
-//RS fn devtools_path(path: &str) -> bool {
-//RS     matches!(
-//RS         path,
-//RS         "/__jet_devtools"
-//RS             | "/__jet_devtools/workbench"
-//RS             | "/__jet_devtools/commands"
-//RS             | "/__jet_devtools/assets"
-//RS             | "/__jet_devtools/state"
-//RS             | "/__jet_devtools/reconnect"
-//RS             | "/__jet_devtools/action"
-//RS             | "/__jet_devtools/selection"
-//RS             | "/__jet_devtools/cursor"
-//RS             | "/__jet_devtools/swap"
-//RS             | "/__jet_devtools/recording"
-//RS             | "/__jet_devtools/error"
-//RS             | "/__jet_devtools/paused/inspect"
-//RS             | "/__jet_devtools/paused/evaluate"
-//RS             | "/__jet_devtools/style"
-//RS             | "/__jet_canvas/devtools"
-//RS             | "/canvas/devtools"
-//RS             | "/panel/devtools"
-//RS     )
-//RS }
-//RS 
-//RS fn is_application_control_path(path: &str) -> bool {
-//RS     devtools_path(path)
-//RS         || web_stream_path(path)
-//RS         || source_tool_path(path)
-//RS         || matches!(
-//RS             path,
-//RS             "/__jet_dev_status"
-//RS                 | "/__jet_dev_version"
-//RS                 | "/__jet_dev_disconnect"
-//RS                 | "/__jet_perf_browser"
-//RS         )
-//RS }
-//RS 
-//RS static WEB_ERROR_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
-//RS 
-//RS /// A stable per-request identity for `/__jet_devtools/error` projections.
-//RS /// The counter is process-local and monotonic; it never reuses or derives
-//RS /// an id from request content.
-//RS fn next_web_error_request_id() -> String {
-//RS     format!(
-//RS         "werr-{}",
-//RS         WEB_ERROR_REQUEST_COUNTER.fetch_add(1, Ordering::SeqCst)
-//RS     )
-//RS }
-//RS 
-//RS /// Map one typed `/paused/*` host failure to its HTTP status line. The JSON
-//RS /// body itself always carries the authoritative `error` fact; this only
-//RS /// selects the transport-level status around it.
-//RS fn paused_evaluate_error_status(
-//RS     error: &crate::PausedEvaluate::PausedEvaluateHostError,
-//RS ) -> &'static str {
-//RS     match error {
-//RS         crate::PausedEvaluate::PausedEvaluateHostError::SessionUnavailable
-//RS         | crate::PausedEvaluate::PausedEvaluateHostError::EvaluatorUnavailable => "409 Conflict",
-//RS         crate::PausedEvaluate::PausedEvaluateHostError::InvalidRequest(_) => "400 Bad Request",
-//RS         crate::PausedEvaluate::PausedEvaluateHostError::Rejected(_) => "403 Forbidden",
-//RS     }
-//RS }
-//RS 
-//RS fn session_response(session: &crate::ResidentDevSession) -> String {
-//RS     format!(
-//RS         "{{\"protocol\":\"jet.canvas.session\",\"schema_version\":1,\"session\":{}}}",
-//RS         session.json()
-//RS     )
-//RS }
-//RS 
-//RS fn with_session(body: String, session: &crate::ResidentDevSession) -> String {
-//RS     let marker = "\"canvas\":{";
-//RS     let Some(index) = body.find(marker) else {
-//RS         return body;
-//RS     };
-//RS     let insert_at = index + marker.len();
-//RS     let mut decorated = String::with_capacity(body.len() + session.json().len() + 16);
-//RS     decorated.push_str(&body[..insert_at]);
-//RS     decorated.push_str("\"session\":");
-//RS     decorated.push_str(&session.json());
-//RS     decorated.push(',');
-//RS     decorated.push_str(&body[insert_at..]);
-//RS     decorated
-//RS }
-//RS 
-//RS fn current_revision_for_request(canvas_file: &str, request: &str) -> String {
-//RS     let source_id = jet_foundation::JSON::parse_json(request)
-//RS         .ok()
-//RS         .and_then(|value| match value {
-//RS             DataTree::Object(object) => object.into_iter().find_map(|(name, value)| {
-//RS                 (name == "source_id")
-//RS                     .then_some(value)
-//RS                     .and_then(|value| match value {
-//RS                         DataTree::Text(source_id) | DataTree::TypedText(source_id) => {
-//RS                             Some(source_id)
-//RS                         }
-//RS                         _ => None,
-//RS                     })
-//RS             }),
-//RS             _ => None,
-//RS         })
-//RS         .unwrap_or_default();
-//RS     current_revision_for_source_id(
-//RS         canvas_file,
-//RS         (!source_id.is_empty()).then_some(source_id.as_str()),
-//RS     )
-//RS }
-//RS 
-//RS fn source_id_from_payload(payload: &str) -> String {
-//RS     let Ok(value) = jet_foundation::JSON::parse_json(payload) else {
-//RS         return String::new();
-//RS     };
-//RS 
-//RS     fn find(value: &DataTree) -> Option<String> {
-//RS         match value {
-//RS             DataTree::Object(object) => {
-//RS                 if let Some(source_id) = object.iter().find_map(|(name, value)| {
-//RS                     (name == "source_id")
-//RS                         .then_some(value)
-//RS                         .and_then(|value| match value {
-//RS                             DataTree::Text(source_id) | DataTree::TypedText(source_id) => {
-//RS                                 Some(source_id.clone())
-//RS                             }
-//RS                             _ => None,
-//RS                         })
-//RS                 }) {
-//RS                     return Some(source_id);
-//RS                 }
-//RS                 object.iter().find_map(|(_, value)| find(value))
-//RS             }
-//RS             DataTree::Array(values) => values.iter().find_map(find),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     find(&value).unwrap_or_default()
-//RS }
-//RS 
-//RS fn current_revision_for_source_id(canvas_file: &str, source_id: Option<&str>) -> String {
-//RS     let source_path = source_id
-//RS         .and_then(|source_id| {
-//RS             crate::Canvas::project_path_for_source_id(Path::new(canvas_file), source_id)
-//RS         })
-//RS         .unwrap_or_else(|| PathBuf::from(canvas_file));
-//RS     crate::Canvas::read_source_without_symlinks(&source_path)
-//RS         .map(|source| crate::Canvas::source_revision(&source))
-//RS         .unwrap_or_default()
-//RS }
-//RS 
-//RS fn serve_static_from_root(
-//RS     stream: &mut impl Write,
-//RS     root: &Path,
-//RS     path: &str,
-//RS     nonce: &str,
-//RS     session_secret: &str,
-//RS ) -> std::io::Result<u16> {
-//RS     // The generated output root is the complete application preview boundary.
-//RS     // Never fall back to the watched source directory: this listener has no
-//RS     // Canvas capability gate for ordinary application assets.
-//RS     let relative = match static_relative_path(path) {
-//RS         Ok(path) => path,
-//RS         Err(()) => {
-//RS             write_response(
-//RS                 stream,
-//RS                 "400 Bad Request",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"bad path",
-//RS             )?;
-//RS             return Ok(400);
-//RS         }
-//RS     };
-//RS     let content_type = content_type_for(&relative);
-//RS     let is_html = relative
-//RS         .extension()
-//RS         .and_then(|extension| extension.to_str())
-//RS         .is_some_and(|extension| extension.eq_ignore_ascii_case("html"));
-//RS     let mut reload_script = is_html.then(|| live_reload_script(nonce, session_secret));
-//RS     let raw_limit = match reload_script.as_mut() {
-//RS         Some(script) => {
-//RS             script.shrink_to_fit();
-//RS             if !html_script_fits_budget(script.capacity()) {
-//RS                 write_response(
-//RS                     stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     b"live-reload script exceeds the response budget",
-//RS                 )?;
-//RS                 return Ok(500);
-//RS             }
-//RS             html_raw_response_limit(script.capacity())
-//RS         }
-//RS         None => MAX_STATIC_RESPONSE_BYTES,
-//RS     };
-//RS     let bytes = read_static_file_bounded(root, &relative, raw_limit);
-//RS     let bytes = match bytes {
-//RS         Ok(b) => b,
-//RS         Err(error) => {
-//RS             let (status, code, body) = match error.kind() {
-//RS                 std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData => {
-//RS                     ("404 Not Found", 404, format!("not found: {}", path))
-//RS                 }
-//RS                 _ => ("400 Bad Request", 400, "bad path".to_owned()),
-//RS             };
-//RS             write_response(stream, status, "text/plain; charset=utf-8", body.as_bytes())?;
-//RS             return Ok(code);
-//RS         }
-//RS     };
-//RS 
-//RS     if let Some(script) = reload_script {
-//RS         let html = match decode_html(bytes) {
-//RS             Ok(html) => html,
-//RS             Err(_) => {
-//RS                 write_response(
-//RS                     stream,
-//RS                     "500 Internal Server Error",
-//RS                     "text/plain; charset=utf-8",
-//RS                     b"static HTML is not valid UTF-8",
-//RS                 )?;
-//RS                 return Ok(500);
-//RS             }
-//RS         };
-//RS         let Some(injected) = inject_live_reload_with_script(&html, &script) else {
-//RS             write_response(
-//RS                 stream,
-//RS                 "500 Internal Server Error",
-//RS                 "text/plain; charset=utf-8",
-//RS                 b"static HTML response is too large",
-//RS             )?;
-//RS             return Ok(500);
-//RS         };
-//RS         write_response(stream, "200 OK", content_type, injected.as_bytes())?;
-//RS         return Ok(200);
-//RS     }
-//RS     write_response(stream, "200 OK", content_type, &bytes)?;
-//RS     Ok(200)
-//RS }
-//RS fn read_source_without_symlinks(path: &Path) -> std::io::Result<String> {
-//RS     crate::Canvas::read_source_without_symlinks(path)
-//RS }
-//RS 
-//RS fn read_web_manifest(root: &Path) -> Option<String> {
-//RS     let bytes = read_static_file_bounded(
-//RS         root,
-//RS         Path::new("web.manifest.json"),
-//RS         MAX_STATIC_RESPONSE_BYTES,
-//RS     )
-//RS     .ok()?;
-//RS     String::from_utf8(bytes).ok()
-//RS }
-//RS 
-//RS fn decode_html(bytes: Vec<u8>) -> std::io::Result<String> {
-//RS     String::from_utf8(bytes).map_err(|_| {
-//RS         std::io::Error::new(
-//RS             std::io::ErrorKind::InvalidData,
-//RS             "static HTML is not valid UTF-8",
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn html_raw_response_limit(script_capacity: usize) -> u64 {
-//RS     let script_bytes = u64::try_from(script_capacity).unwrap_or(u64::MAX);
-//RS     MAX_STATIC_RESPONSE_BYTES.saturating_sub(script_bytes.saturating_mul(2)) / 2
-//RS }
-//RS 
-//RS fn html_script_fits_budget(script_capacity: usize) -> bool {
-//RS     let script_bytes = u64::try_from(script_capacity).unwrap_or(u64::MAX);
-//RS     script_bytes.saturating_mul(2) <= MAX_STATIC_RESPONSE_BYTES
-//RS }
-//RS 
-//RS /// Plain polling live-reload (no WebSocket/SSE — I6 + correct scoping for a
-//RS /// dev tool): fetch `/__jet_dev_status` on an interval, then request the
-//RS /// module-swap receipt and dispatch `jet:web-swap` without restarting the page.
-//RS ///
-//RS /// D-FE-DEVSRV1=D (hybrid): the corner control mirrors the exact same
-//RS /// `message` string the terminal's parity line renders — same poll, same words,
-//RS /// cannot drift.  The closed state is a compact equal-sided squircle containing
-//RS /// only the canonical Jet mark; ready/building/error/reconnecting are carried
-//RS /// by distinct glowing ring patterns and a full accessible status name.  The
-//RS /// same container grows into lens, then workbench, around the real devtools
-//RS /// routes.  On `state:"error"` the lens opens by itself with the verbatim
-//RS /// diagnostic as its face while the page underneath stays visible as the
-//RS /// last-good page (I4 — `s.diagnostic` is written via `textContent`, never
-//RS /// re-escaped or reworded).  The face offers the real source tool and a
-//RS /// canonical ProjectRebuild command; a clean rebuild returns it to the pill.
-//RS fn live_reload_script(nonce: &str, session_secret: &str) -> String {
-//RS     let perf_script = if nonce.is_empty() {
-//RS         String::new()
-//RS     } else {
-//RS         format!(
-//RS             r#"  var jetPerfNonce = "{nonce}";
-//RS   self.__jetPerfNow = function () {{ return performance.now(); }};
-//RS   self.__jetPerfRecord = function (symbol, eventClass, startMs) {{
-//RS     if (!symbol || typeof performance === "undefined") return;
-//RS     var endMs = performance.now();
-//RS     var body = new URLSearchParams({{
-//RS       class: String(eventClass), symbol: String(symbol),
-//RS       start_ns: String(Math.max(0, Math.floor(startMs * 1000000))),
-//RS       duration_ns: String(Math.max(0, Math.floor((endMs - startMs) * 1000000))),
-//RS       clock_ns: String(Math.max(0, Math.floor(endMs * 1000000)))
-//RS     }});
-//RS     try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce + "&session=" + encodeURIComponent(jetDevSession), body); }} catch (_) {{}}
-//RS   }};
-//RS "#
-//RS         )
-//RS     };
-//RS     format!(
-//RS         r##"<script>
-//RS (function () {{
-//RS   var jetDevSession = "{session_secret}";
-//RS   self.__jetDevSession = jetDevSession;
-//RS {perf_script}
-//RS   var jetDevVersion = null, reconnectAttempt = 0;
-//RS   var ui = null, lastStatus = null;
-//RS   var dismissedDiagnostic = null, errorFace = false, autoOpened = false;
-//RS   var jetDevClient = null;
-//RS   try {{ jetDevClient = sessionStorage.getItem("jet-dev-client"); }} catch (_) {{}}
-//RS   if (!jetDevClient) {{
-//RS     jetDevClient = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() :
-//RS       String(Date.now()) + "-" + Math.random().toString(16).slice(2);
-//RS     try {{ sessionStorage.setItem("jet-dev-client", jetDevClient); }} catch (_) {{}}
-//RS   }}
-//RS   addEventListener("pagehide", function () {{
-//RS     try {{ navigator.sendBeacon("/__jet_dev_disconnect?client=" + encodeURIComponent(jetDevClient) + "&session=" + encodeURIComponent(jetDevSession)); }} catch (_) {{}}
-//RS   }});
-//RS   // One container, three depths.  The closed state is a square Jet mark with
-//RS   // no status bar: the ring pattern, accessible name, and live status carry
-//RS   // the state.  Lens and workbench are the same container grown in place.
-//RS   function devtoolsUrl(route) {{ return route + "?session=" + encodeURIComponent(jetDevSession); }}
-//RS   function ensureUi() {{
-//RS     if (ui) return;
-//RS     var style = document.createElement("style");
-//RS     style.textContent =
-//RS       "#jet-dev-lens{{position:fixed;left:16px;bottom:max(16px,env(safe-area-inset-bottom));z-index:2147483647;display:flex;flex-direction:column;width:76px;height:76px;aspect-ratio:1/1;max-width:calc(100vw - 32px);color:#F6F5F2;font:13px/1.4 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;background:#101114;border:2px solid var(--ring);border-radius:26px;box-shadow:0 0 0 1px rgba(255,255,255,.05),0 0 24px var(--glow),0 12px 30px rgba(0,0,0,.44);overflow:hidden;box-sizing:border-box;--ring:#56C271;--glow:rgba(86,194,113,.34)}}" +
-//RS       "#jet-dev-lens::after{{content:'';position:absolute;inset:5px;border:1px solid transparent;border-radius:20px;pointer-events:none}}" +
-//RS       "#jet-dev-lens[data-state=building]{{--ring:#E3A43B;--glow:rgba(227,164,59,.36);border-style:dashed}}" +
-//RS       "#jet-dev-lens[data-state=building]::after{{border-color:rgba(227,164,59,.56);border-style:dashed}}" +
-//RS       "#jet-dev-lens[data-state=error],#jet-dev-lens[data-state=unavailable],#jet-dev-lens[data-state=stopped]{{--ring:#E8232A;--glow:rgba(232,35,42,.42);border-style:double}}" +
-//RS       "#jet-dev-lens[data-state=error]::after,#jet-dev-lens[data-state=unavailable]::after,#jet-dev-lens[data-state=stopped]::after{{border-color:rgba(232,35,42,.65)}}" +
-//RS       "#jet-dev-lens[data-state=reconnecting],#jet-dev-lens[data-state=starting]{{--ring:#9B9EA8;--glow:rgba(155,158,168,.25);border-style:dotted}}" +
-//RS       "#jet-dev-lens[data-state=reconnecting]::after,#jet-dev-lens[data-state=starting]::after{{border-color:rgba(155,158,168,.48);border-style:dotted}}" +
-//RS       "#jet-dev-lens[data-depth=lens]{{width:min(560px,calc(100vw - 32px));height:auto;aspect-ratio:auto;max-height:min(78vh,720px);border-radius:24px}}" +
-//RS       "#jet-dev-lens[data-depth=workbench]{{inset:16px;left:16px;right:16px;top:16px;bottom:16px;width:auto;height:auto;max-width:none;max-height:none;aspect-ratio:auto;border-radius:24px}}" +
-//RS       "#jet-dev-pill{{display:flex;align-items:stretch;flex:none;position:relative;z-index:1}}" +
-//RS       "#jet-dev-pill .head{{display:flex;align-items:center;justify-content:center;width:100%;height:72px;margin:0;padding:0;border:0;border-radius:22px;background:none;color:inherit;font:inherit;cursor:pointer}}" +
-//RS       "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .head{{flex:1 1 auto;justify-content:flex-start;gap:11px;width:auto;height:52px;padding:0 16px;min-width:0}}" +
-//RS       "#jet-dev-pill .logo{{display:flex;flex:none;width:49px;height:28px;align-items:center;justify-content:center}}" +
-//RS       "#jet-dev-pill .logo svg{{display:block;width:49px;height:27px}}" +
-//RS       "#jet-dev-pill .word{{display:none;font-size:13px;font-weight:650;letter-spacing:.01em;line-height:1}}" +
-//RS       "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .word{{display:inline}}" +
-//RS       "#jet-dev-pill .read{{display:none;font:11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#9B9EA8}}" +
-//RS       "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .read:not(:empty){{display:inline}}" +
-//RS       "#jet-dev-lens .sr{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}" +
-//RS       "#jet-dev-pill .tools{{display:none;align-items:center;gap:2px;padding-right:8px;flex:none;position:relative;z-index:1}}" +
-//RS       "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .tools{{display:flex}}" +
-//RS       "#jet-dev-pill .tool{{margin:0;padding:6px 9px;border:1px solid transparent;border-radius:8px;background:none;color:#9B9EA8;font:inherit;font-size:12px;line-height:1.2;cursor:pointer;text-decoration:none;white-space:nowrap}}" +
-//RS       "#jet-dev-pill .tool:hover{{color:#F6F5F2;background:#1D2026}}" +
-//RS       "#jet-dev-lens[data-depth=lens] .tool[data-depth=lens],#jet-dev-lens[data-depth=workbench] .tool[data-depth=workbench]{{display:none}}" +
-//RS       "#jet-dev-lens :focus-visible{{outline:2px solid #E8232A;outline-offset:-2px}}" +
-//RS       "#jet-dev-body{{display:none;flex:1 1 auto;min-height:0;flex-direction:column;border-top:1px solid #30343C;background:#101114;position:relative;z-index:1}}" +
-//RS       "#jet-dev-lens:not([data-depth=pill]) #jet-dev-body{{display:flex}}" +
-//RS       "#jet-dev-overlay{{display:none;flex:1 1 auto;min-height:0;flex-direction:column;overflow:auto}}" +
-//RS       "#jet-dev-overlay h3{{margin:0;padding:17px 18px 8px;font-family:inherit;font-size:14px;font-weight:650;line-height:1.3;color:#F6F5F2}}" +
-//RS       "#jet-dev-overlay h3::before{{content:'';display:inline-block;width:9px;height:9px;border:2px solid #E8232A;border-radius:3px;margin-right:9px;vertical-align:0}}" +
-//RS       "#jet-dev-overlay pre{{flex:0 1 auto;margin:0 18px;padding:13px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#F6F5F2;background:#0A0B0D;border:1px solid #30343C;border-radius:10px}}" +
-//RS       "#jet-dev-overlay footer{{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:13px 18px;color:#9B9EA8;font-size:11px}}" +
-//RS       "#jet-dev-overlay footer .parity{{flex:1 1 100%;overflow-wrap:anywhere}}" +
-//RS       "#jet-dev-overlay footer .act{{margin:0;padding:7px 12px;border:1px solid #30343C;border-radius:9px;background:#17191D;color:#F6F5F2;font:inherit;font-size:12px;cursor:pointer;text-decoration:none}}" +
-//RS       "#jet-dev-overlay footer .act.primary{{border-color:#E8232A}}#jet-dev-overlay footer .act:hover{{background:#1D2026}}#jet-dev-overlay footer .act[disabled]{{opacity:.5;cursor:default}}" +
-//RS       "#jet-dev-overlay footer .result{{flex:1 1 100%;min-height:1.4em;overflow-wrap:anywhere}}" +
-//RS       "#jet-dev-panels{{flex:1 1 auto;min-height:0;height:min(62vh,640px);width:100%;border:0;background:#101114}}" +
-//RS       "#jet-dev-panels[hidden]{{display:none}}" +
-//RS       "#jet-dev-shade{{position:fixed;inset:0;z-index:2147483645;display:none;pointer-events:none;background:rgba(16,17,20,.32)}}" +
-//RS       "@media(max-width:560px){{#jet-dev-lens[data-depth=lens]{{left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom));width:auto;max-width:none;max-height:82vh;border-radius:22px}}#jet-dev-lens[data-depth=lens] #jet-dev-panels{{height:68vh}}#jet-dev-lens[data-depth=workbench]{{inset:0;max-width:none;border-radius:0}}#jet-dev-lens[data-depth=workbench] #jet-dev-panels{{height:auto}}}}" +
-//RS       "@media(prefers-reduced-motion:no-preference){{#jet-dev-lens{{transition:width .22s cubic-bezier(.2,.7,.2,1),height .22s cubic-bezier(.2,.7,.2,1),border-radius .22s,box-shadow .22s}}#jet-dev-body{{animation:jet-dev-in .18s ease}}@keyframes jet-dev-in{{from{{opacity:0}}to{{opacity:1}}}}#jet-dev-lens[data-state=building]::after{{animation:jet-dev-ring 1.2s ease-in-out infinite alternate}}@keyframes jet-dev-ring{{to{{opacity:.35}}}}}}" +
-//RS       "@media(prefers-reduced-motion:reduce){{#jet-dev-lens,#jet-dev-body{{transition:none!important;animation:none!important}}}}";
-//RS     document.head.appendChild(style);
-//RS     var root = document.createElement("div");
-//RS     root.id = "jet-dev-lens";
-//RS     root.setAttribute("data-depth", "pill");
-//RS     root.setAttribute("data-state", "ready");
-//RS     root.innerHTML =
-//RS       "<div id=\"jet-dev-pill\">" +
-//RS         "<button class=\"head\" type=\"button\" aria-expanded=\"false\" aria-controls=\"jet-dev-body\" title=\"Open Jet development status (Alt+J)\">" +
-//RS           "<span class=\"logo\" aria-hidden=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 120 64\" focusable=\"false\"><path fill=\"#E8232A\" d=\"M112 32 L52 6 L66 32 L52 58 Z\"></path><rect fill=\"#E8232A\" x=\"26\" y=\"14\" width=\"18\" height=\"6\" rx=\"3\"></rect><rect fill=\"#E8232A\" x=\"4\" y=\"29\" width=\"36\" height=\"6\" rx=\"3\"></rect><rect fill=\"#E8232A\" x=\"16\" y=\"44\" width=\"24\" height=\"6\" rx=\"3\"></rect></svg></span>" +
-//RS           "<span class=\"word\" aria-hidden=\"true\"></span><span class=\"read\" aria-hidden=\"true\"></span>" +
-//RS         "</button>" +
-//RS         "<span class=\"tools\">" +
-//RS           "<button class=\"tool\" type=\"button\" data-depth=\"workbench\">Open workbench</button>" +
-//RS           "<button class=\"tool\" type=\"button\" data-depth=\"lens\">Lens</button>" +
-//RS           "<button class=\"tool\" type=\"button\" data-depth=\"pill\" aria-label=\"Close Jet development status (Escape)\" title=\"Close (Escape)\">&#215;</button>" +
-//RS         "</span>" +
-//RS       "</div>" +
-//RS       "<span class=\"sr\" id=\"jet-dev-status\" role=\"status\" aria-live=\"polite\"></span>" +
-//RS       "<div id=\"jet-dev-body\">" +
-//RS         "<div id=\"jet-dev-overlay\"><h3></h3><pre></pre><footer><span class=\"parity\"></span>" +
-//RS           "<button class=\"act primary\" type=\"button\" data-act=\"source\">Fix in source</button>" +
-//RS           "<button class=\"act\" type=\"button\" data-act=\"rebuild\">Rebuild</button>" +
-//RS           "<a class=\"act\" target=\"_blank\" rel=\"noopener\">Open error details</a><span class=\"result\" role=\"status\"></span></footer></div>" +
-//RS         "<iframe id=\"jet-dev-panels\" title=\"Jet devtools\" hidden></iframe>" +
-//RS       "</div>";
-//RS     document.body.appendChild(root);
-//RS     var shade = document.createElement("div");
-//RS     shade.id = "jet-dev-shade";
-//RS     shade.setAttribute("aria-hidden", "true");
-//RS     document.body.appendChild(shade);
-//RS     ui = {{
-//RS       root: root, shade: shade,
-//RS       head: root.querySelector(".head"), word: root.querySelector(".word"), read: root.querySelector(".read"),
-//RS       status: root.querySelector("#jet-dev-status"), overlay: root.querySelector("#jet-dev-overlay"), frame: root.querySelector("#jet-dev-panels")
-//RS     }};
-//RS     ui.overlayTitle = ui.overlay.querySelector("h3");
-//RS     ui.overlayBody = ui.overlay.querySelector("pre");
-//RS     ui.overlayFooter = ui.overlay.querySelector("footer .parity");
-//RS     ui.overlayResult = ui.overlay.querySelector("footer .result");
-//RS     ui.overlay.querySelector("footer a").href = devtoolsUrl("/__jet_devtools/error");
-//RS     ui.head.addEventListener("click", toggleLens);
-//RS     root.querySelectorAll(".tool[data-depth]").forEach(function (button) {{
-//RS       button.addEventListener("click", function () {{
-//RS         if (button.dataset.depth === "pill") back(true, true); else setDepth(button.dataset.depth, true);
-//RS       }});
-//RS     }});
-//RS     ui.overlay.querySelector("[data-act=source]").addEventListener("click", openSourceTool);
-//RS     ui.overlay.querySelector("[data-act=rebuild]").addEventListener("click", function (event) {{ rebuild(event.currentTarget); }});
-//RS     document.addEventListener("keydown", onKey);
-//RS     addEventListener("message", function (event) {{
-//RS       if (event.origin === location.origin && event.data && event.data.jet === "devtools") onKey(event.data);
-//RS     }});
-//RS   }}
-//RS   function onKey(event) {{
-//RS     if (event.key === "Escape") {{ back(true); return; }}
-//RS     if (event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "j" || event.key === "J")) {{
-//RS       if (event.preventDefault) event.preventDefault();
-//RS       toggleLens();
-//RS     }}
-//RS   }}
-//RS   function depth() {{ return ui ? ui.root.getAttribute("data-depth") : "pill"; }}
-//RS   function toggleLens() {{
-//RS     if (depth() !== "pill") {{ back(true, true); return; }}
-//RS     dismissedDiagnostic = null;
-//RS     errorFace = !!lastStatus && lastStatus.state === "error";
-//RS     setDepth("lens", true);
-//RS   }}
-//RS   function back(byUser, toPill) {{
-//RS     var current = depth();
-//RS     if (current === "pill") return;
-//RS     if (current === "workbench" && !toPill) {{ setDepth("lens", byUser); return; }}
-//RS     if (errorFace) dismissedDiagnostic = ui.overlayBody.textContent;
-//RS     errorFace = false;
-//RS     autoOpened = false;
-//RS     setDepth("pill", byUser);
-//RS   }}
-//RS   function frameRoute(next, extra) {{
-//RS     var route = next === "workbench" ? "/__jet_devtools/workbench" : "/__jet_devtools";
-//RS     if (extra || ui.frame.getAttribute("data-route") !== route) {{
-//RS       ui.frame.setAttribute("data-route", route);
-//RS       ui.frame.src = devtoolsUrl(route) + (extra || "");
-//RS     }}
-//RS   }}
-//RS   function setDepth(next, byUser) {{
-//RS     ensureUi();
-//RS     var current = depth();
-//RS     if (next === current) return;
-//RS     ui.root.setAttribute("data-depth", next);
-//RS     ui.head.setAttribute("aria-expanded", next === "pill" ? "false" : "true");
-//RS     if (next === "pill") {{
-//RS       ui.frame.removeAttribute("data-route");
-//RS       ui.frame.src = "about:blank";
-//RS     }} else frameRoute(next);
-//RS     renderFaces();
-//RS     if (byUser) {{
-//RS       if (next === "pill") ui.head.focus();
-//RS       else ui.root.querySelector(".tool[data-depth=pill]").focus();
-//RS     }}
-//RS   }}
-//RS   function openSourceTool() {{
-//RS     dismissedDiagnostic = ui.overlayBody.textContent;
-//RS     errorFace = false;
-//RS     autoOpened = false;
-//RS     frameRoute(depth() === "workbench" ? "workbench" : "lens", "&tool=source");
-//RS     renderFaces();
-//RS     ui.frame.focus();
-//RS   }}
-//RS   function rebuild(button) {{
-//RS     button.disabled = true;
-//RS     ui.overlayResult.textContent = "Requesting rebuild…";
-//RS     fetch(devtoolsUrl("/__jet_devtools/state"), {{ cache: "no-store" }})
-//RS       .then(function (r) {{ if (!r.ok) throw new Error("devtools state unavailable (HTTP " + r.status + ")"); return r.json(); }})
-//RS       .then(function (st) {{
-//RS         if (st.tools && st.tools.rebuild && !st.tools.rebuild.available) throw new Error(st.tools.rebuild.reason || "rebuild is not available on this host");
-//RS         var id = "rebuild-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-//RS         return fetch(devtoolsUrl("/__jet_devtools"), {{
-//RS           method: "POST", cache: "no-store", headers: {{ "content-type": "application/json" }},
-//RS           body: JSON.stringify({{ protocol: "jet.devtools.v1", session_id: st.session_id, started_at_ms: Date.now(), direction: "host_to_runtime",
-//RS             commands: [{{ kind: "ProjectRebuild", payload: {{ session_id: st.session_id, request_id: id, expected_revision: st.revision }} }}] }})
-//RS         }});
-//RS       }})
-//RS       .then(function (r) {{
-//RS         if (!r.ok) return r.text().then(function (t) {{ throw new Error(t || ("rebuild refused (HTTP " + r.status + ")")); }});
-//RS         ui.overlayResult.textContent = "Rebuild queued — this tile follows the build";
-//RS       }})
-//RS       .catch(function (e) {{ ui.overlayResult.textContent = String(e.message || e); }})
-//RS       .finally(function () {{ button.disabled = false; }});
-//RS   }}
-//RS   function renderFaces() {{
-//RS     var open = depth() !== "pill";
-//RS     ui.overlay.style.display = open && errorFace ? "flex" : "none";
-//RS     ui.frame.hidden = !(open && !errorFace);
-//RS   }}
-//RS   function renderStatus(s) {{
-//RS     ensureUi();
-//RS     lastStatus = s;
-//RS     var state = s.state || "ready";
-//RS     ui.root.setAttribute("data-state", state);
-//RS     // The hidden status is the non-color equivalent of the ring.  The
-//RS     // diagnostic itself remains byte-for-byte in the visible error face.
-//RS     ui.head.setAttribute("aria-label", "Jet development status: " + (s.message || state));
-//RS     ui.status.textContent = (s.message || state) + (s.diagnostic ? "\n" + s.diagnostic : "");
-//RS     ui.word.textContent = state;
-//RS     ui.read.textContent = state === "error" ? (s.code || "") :
-//RS       (state === "ready" && s.last_build_ms > 0 ? (s.last_build_ms / 1000).toFixed(1) + "s" : "");
-//RS     var stale = state === "building" || state === "reconnecting" || state === "error";
-//RS     ui.shade.style.display = stale ? "block" : "none";
-//RS     if (state === "error") {{
-//RS       var diagnostic = s.diagnostic || "";
-//RS       ui.overlayBody.textContent = diagnostic;
-//RS       ui.overlayTitle.textContent = "Build failed — " + (s.file || "Jet source");
-//RS       ui.overlayFooter.textContent = (s.message || state) + " — clears on the next clean build";
-//RS       if (diagnostic !== dismissedDiagnostic) {{
-//RS         if (depth() === "pill") {{ errorFace = true; autoOpened = true; setDepth("lens", false); }}
-//RS         else if (errorFace) {{ ui.overlayResult.textContent = ""; }}
-//RS         else dismissedDiagnostic = diagnostic;
-//RS       }}
-//RS     }} else {{
-//RS       errorFace = false;
-//RS       dismissedDiagnostic = null;
-//RS       if (autoOpened) {{ autoOpened = false; setDepth("pill", false); }}
-//RS     }}
-//RS     renderFaces();
-//RS   }}
-//RS   function notifyWebSwap() {{
-//RS     var snapshot = typeof globalThis.__jetWebSwapSnapshot === "function"
-//RS       ? globalThis.__jetWebSwapSnapshot() : null;
-//RS     var publish = snapshot
-//RS       ? fetch("/__jet_devtools/swap?session=" + encodeURIComponent(jetDevSession), {{
-//RS           method: "POST", cache: "no-store", headers: {{"content-type":"application/json"}}, body: JSON.stringify(snapshot)
-//RS         }})
-//RS       : Promise.resolve(null);
-//RS     publish
-//RS       .then(function (r) {{ if (r && !r.ok) throw new Error("web DOM snapshot rejected"); }})
-//RS       .then(function () {{ return fetch("/__jet_devtools/swap?session=" + encodeURIComponent(jetDevSession), {{ cache: "no-store" }}); }})
-//RS       .then(function (r) {{ if (!r.ok) throw new Error("web swap rejected"); return r.json(); }})
-//RS       .then(function (swap) {{
-//RS         dispatchEvent(new CustomEvent("jet:web-swap", {{ detail: swap }}));
-//RS         document.dispatchEvent(new CustomEvent("jet:web-swap", {{ detail: swap }}));
-//RS       }})
-//RS       .catch(function () {{}});
-//RS   }}
-//RS   function poll() {{
-//RS     fetch("/__jet_dev_status?client=" + encodeURIComponent(jetDevClient) + "&session=" + encodeURIComponent(jetDevSession), {{ cache: "no-store" }})
-//RS       .then(function (r) {{ return r.json(); }})
-//RS       .then(function (s) {{
-//RS         var recoveredConnection = reconnectAttempt > 0;
-//RS         reconnectAttempt = 0;
-//RS         renderStatus(s);
-//RS         var v = String(s.version || "");
-//RS         if (jetDevVersion === null) {{
-//RS           jetDevVersion = v;
-//RS           if (recoveredConnection) notifyWebSwap();
-//RS           return;
-//RS         }}
-//RS         if (recoveredConnection || v !== jetDevVersion) {{ jetDevVersion = v; notifyWebSwap(); }}
-//RS       }})
-//RS       .catch(function () {{
-//RS         reconnectAttempt += 1;
-//RS         renderStatus({{ state: "reconnecting", message: "reconnecting · waiting for connection" }});
-//RS       }})
-//RS       .finally(function () {{ setTimeout(poll, {poll_ms}); }});
-//RS   }}
-//RS   setTimeout(poll, 0);
-//RS }})();
-//RS </script>
-//RS "##,
-//RS         poll_ms = LIVE_RELOAD_POLL_MS,
-//RS         perf_script = perf_script,
-//RS         session_secret = json_escape(session_secret)
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS fn inject_live_reload(html: &str, nonce: &str) -> String {
-//RS     let mut script = live_reload_script(nonce, "");
-//RS     script.shrink_to_fit();
-//RS     inject_live_reload_with_script(html, &script).unwrap_or_else(|| {
-//RS         let mut out = html.to_string();
-//RS         out.push_str(&script);
-//RS         out
-//RS     })
-//RS }
-//RS 
-//RS fn inject_live_reload_with_script(html: &str, script: &str) -> Option<String> {
-//RS     let output_len = html.len().checked_add(script.len())?;
-//RS     // Find the insertion point case-insensitively without allocating a
-//RS     // lowercase copy. HTML tags are ASCII, so the original byte offset stays
-//RS     // valid for the splice.
-//RS     let insertion = html.as_bytes().windows(b"</body>".len()).position(|tag| {
-//RS         tag.iter()
-//RS             .zip(b"</body>")
-//RS             .all(|(left, right)| left.eq_ignore_ascii_case(right))
-//RS     });
-//RS     let mut out = String::with_capacity(output_len);
-//RS     if let Some(index) = insertion {
-//RS         out.push_str(&html[..index]);
-//RS         out.push_str(script);
-//RS         out.push_str(&html[index..]);
-//RS     } else {
-//RS         out.push_str(html);
-//RS         out.push_str(script);
-//RS     }
-//RS     Some(out)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{
-//RS         bind_application_server, canvas_api_path, canvas_request_authorized, constant_time_equal,
-//RS         decode_html, devtools_path, format_build_time, format_line_colored, format_line_plain,
-//RS         frame_lines, handle_connection, handle_connection_with_root,
-//RS         handle_connection_with_root_and_policy, header_words, host_header_allowed,
-//RS         html_raw_response_limit, inject_canvas_session, inject_live_reload, mint_session_secret,
-//RS         origin_allowed, serve_forever, stage_and_swap, try_acquire_connection, CanvasHostOptions,
-//RS         DeadlineStream, DevRevisionFacts, DevStatus, ListenerKind, Ordering, ReleaseDevtoolsPolicy,
-//RS         WebHost,
-//RS         APPLICATION_PORT_RANGE, MAX_CONNECTION_THREADS, MAX_STATIC_RESPONSE_BYTES,
-//RS     };
-//RS 
-//RS     use crate::Request;
-//RS     use std::collections::HashMap;
-//RS     use std::io::{Read, Write};
-//RS     use std::net::{TcpListener, TcpStream};
-//RS     use std::sync::{Arc, Barrier, Mutex};
-//RS     use std::thread;
-//RS     use std::time::{Duration, Instant};
-//RS 
-//RS     fn bind_canvas_for_test(file: &str, verbose: bool, port: Option<u16>) -> WebHost {
-//RS         let mut options = CanvasHostOptions::default();
-//RS         options.port = port;
-//RS         WebHost::bind_canvas_with_options_and_policy(
-//RS             file,
-//RS             std::path::Path::new("build"),
-//RS             verbose,
-//RS             &options,
-//RS             ReleaseDevtoolsPolicy::development(),
-//RS         )
-//RS         .unwrap()
-//RS     }
-//RS 
-//RS     fn bind_canvas_options_for_test(
-//RS         file: &str,
-//RS         verbose: bool,
-//RS         options: &CanvasHostOptions,
-//RS     ) -> Result<WebHost, String> {
-//RS         WebHost::bind_canvas_with_options_and_policy(
-//RS             file,
-//RS             std::path::Path::new("build"),
-//RS             verbose,
-//RS             options,
-//RS             ReleaseDevtoolsPolicy::development(),
-//RS         )
-//RS     }
-//RS 
-//RS     fn bind_web_canvas_options_for_test(
-//RS         file: &str,
-//RS         verbose: bool,
-//RS         fallback_port: Option<u16>,
-//RS         options: &CanvasHostOptions,
-//RS     ) -> Result<WebHost, String> {
-//RS         WebHost::bind_web_with_canvas_options_and_policy(
-//RS             file,
-//RS             std::path::Path::new("build"),
-//RS             verbose,
-//RS             fallback_port,
-//RS             options,
-//RS             ReleaseDevtoolsPolicy::development(),
-//RS         )
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn slowloris_request_hits_the_absolute_deadline_without_exhausting_admission() {
-//RS         let active = std::sync::atomic::AtomicUsize::new(MAX_CONNECTION_THREADS);
-//RS         assert!(
-//RS             !try_acquire_connection(&active),
-//RS             "the connection cap must reject the next slow client"
-//RS         );
-//RS 
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let address = listener.local_addr().unwrap();
-//RS         let client = thread::spawn(move || {
-//RS             let mut stream = TcpStream::connect(address).unwrap();
-//RS             let _ = stream.write_all(b"G");
-//RS             thread::sleep(Duration::from_millis(100));
-//RS         });
-//RS         let (stream, _) = listener.accept().unwrap();
-//RS         let started = Instant::now();
-//RS         let mut reader = std::io::BufReader::new(DeadlineStream::new(
-//RS             stream,
-//RS             started + Duration::from_millis(40),
-//RS         ));
-//RS         let error = Request::read(&mut reader).expect_err("slow request must time out");
-//RS         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
-//RS         assert!(started.elapsed() < Duration::from_millis(200));
-//RS         client.join().unwrap();
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn live_server_admission_drops_connections_after_cap() {
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let address = listener.local_addr().unwrap();
-//RS         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS         let server_shutdown = Arc::clone(&shutdown);
-//RS         let status = Arc::new(DevStatus::new("admission.jet", false));
-//RS         let debug_sessions = Arc::new(crate::Canvas::DebugSessions::default());
-//RS         let session = Arc::new(crate::ResidentDevSession::new(
-//RS             "admission.jet",
-//RS             0,
-//RS             address.port(),
-//RS         ));
-//RS         let browser_state = Arc::new(Mutex::new(None));
-//RS         let paused_evaluate =
-//RS             Arc::new(Mutex::new(crate::PausedEvaluate::PausedEvaluateHost::new()));
-//RS         let terminal_style = Arc::new(crate::TerminalStyleReload::TerminalStyleHostAdapter::new());
-//RS         let server = thread::spawn(move || {
-//RS             serve_forever(
-//RS                 listener,
-//RS                 status,
-//RS                 debug_sessions,
-//RS                 session,
-//RS                 "admission.jet".to_string(),
-//RS                 ListenerKind::Application,
-//RS                 "127.0.0.1".to_string(),
-//RS                 "test-session".to_string(),
-//RS                 server_shutdown,
-//RS                 std::path::PathBuf::from("."),
-//RS                 ReleaseDevtoolsPolicy::development(),
-//RS                 browser_state,
-//RS                 paused_evaluate,
-//RS                 terminal_style,
-//RS             );
-//RS         });
-//RS 
-//RS         let mut clients = Vec::with_capacity(MAX_CONNECTION_THREADS);
-//RS         for _ in 0..MAX_CONNECTION_THREADS {
-//RS             let mut client = TcpStream::connect(address).unwrap();
-//RS             client.write_all(b"G").unwrap();
-//RS             clients.push(client);
-//RS         }
-//RS 
-//RS         let mut rejected = false;
-//RS         for _ in 0..100 {
-//RS             let mut candidate = TcpStream::connect(address).unwrap();
-//RS             candidate
-//RS                 .set_read_timeout(Some(Duration::from_millis(20)))
-//RS                 .unwrap();
-//RS             let _ = candidate.write_all(b"G");
-//RS             let mut byte = [0u8; 1];
-//RS             match candidate.read(&mut byte) {
-//RS                 Ok(0) => {
-//RS                     rejected = true;
-//RS                     break;
-//RS                 }
-//RS                 Err(error)
-//RS                     if matches!(
-//RS                         error.kind(),
-//RS                         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-//RS                     ) => {}
-//RS                 Err(_) => {
-//RS                     rejected = true;
-//RS                     break;
-//RS                 }
-//RS                 Ok(_) => {}
-//RS             }
-//RS             thread::sleep(Duration::from_millis(5));
-//RS         }
-//RS         assert!(rejected, "live server must enforce the connection cap");
-//RS         drop(clients);
-//RS         shutdown.store(true, Ordering::SeqCst);
-//RS         server.join().unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn stage_and_swap_rejects_symlinked_destination() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root = std::env::current_dir()
-//RS             .unwrap()
-//RS             .join(format!(".jet-webhost-symlink-{}", std::process::id()));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         let output = root.join("build");
-//RS         let staging = output.join(".staging");
-//RS         let outside = root.join("outside.js");
-//RS         std::fs::create_dir_all(&staging).unwrap();
-//RS         std::fs::write(&staging.join("web.manifest.json"), "staged").unwrap();
-//RS         std::fs::write(&outside, "must survive").unwrap();
-//RS         symlink(&outside, output.join("web.manifest.json")).unwrap();
-//RS 
-//RS         assert!(
-//RS             stage_and_swap(&staging, &output, &root).is_err(),
-//RS             "web finalization must not replace a symlinked output"
-//RS         );
-//RS         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
-//RS 
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn stage_and_swap_rejects_hardlinked_destination() {
-//RS         let root = std::env::current_dir()
-//RS             .unwrap()
-//RS             .join(format!(".jet-webhost-hardlink-{}", std::process::id()));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         let output = root.join("build");
-//RS         let staging = output.join(".staging");
-//RS         let outside = root.join("outside.js");
-//RS         std::fs::create_dir_all(&staging).unwrap();
-//RS         std::fs::write(&staging.join("web.manifest.json"), "staged").unwrap();
-//RS         std::fs::write(&outside, "must survive").unwrap();
-//RS         std::fs::hard_link(&outside, output.join("web.manifest.json")).unwrap();
-//RS 
-//RS         assert!(
-//RS             stage_and_swap(&staging, &output, &root).is_err(),
-//RS             "web finalization must reject hard-linked output members"
-//RS         );
-//RS         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
-//RS 
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn stage_and_swap_rejects_symlinked_staging_ancestor() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root = std::env::current_dir()
-//RS             .unwrap()
-//RS             .join(format!(".jet-webhost-staging-link-{}", std::process::id()));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         let output = root.join("build");
-//RS         let staging_target = root.join("staging-target");
-//RS         let staging = output.join(".staging");
-//RS         let outside = root.join("outside.js");
-//RS         std::fs::create_dir_all(&output).unwrap();
-//RS         std::fs::create_dir_all(&staging_target).unwrap();
-//RS         std::fs::write(staging_target.join("web.manifest.json"), "must not publish").unwrap();
-//RS         std::fs::write(&outside, "must survive").unwrap();
-//RS         symlink(&staging_target, &staging).unwrap();
-//RS 
-//RS         assert!(
-//RS             stage_and_swap(&staging, &output, &root).is_err(),
-//RS             "web finalization must reject a symlinked staging directory"
-//RS         );
-//RS         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
-//RS         assert_eq!(
-//RS             std::fs::read_to_string(staging_target.join("web.manifest.json")).unwrap(),
-//RS             "must not publish"
-//RS         );
-//RS 
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn stage_and_swap_rejects_symlinked_output_root() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root = std::env::current_dir()
-//RS             .unwrap()
-//RS             .join(format!(".jet-webhost-output-link-{}", std::process::id()));
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS         let real_output = root.join("real-build");
-//RS         let output = root.join("build");
-//RS         let staging = real_output.join(".staging");
-//RS         std::fs::create_dir_all(&staging).unwrap();
-//RS         std::fs::write(staging.join("web.manifest.json"), "must not publish").unwrap();
-//RS         symlink(&real_output, &output).unwrap();
-//RS 
-//RS         assert!(
-//RS             stage_and_swap(&staging, &output, &root).is_err(),
-//RS             "web finalization must reject a symlinked output root"
-//RS         );
-//RS         assert!(
-//RS             !real_output.join("web.manifest.json").exists(),
-//RS             "rejected output-root link must not receive bytes"
-//RS         );
-//RS 
-//RS         let _ = std::fs::remove_dir_all(&root);
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn canvas_source_route_rejects_symlinked_entry() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet-devserver-canvas-source-symlink-{}-{}",
-//RS             std::process::id(),
-//RS             std::time::SystemTime::now()
-//RS                 .duration_since(std::time::UNIX_EPOCH)
-//RS                 .unwrap()
-//RS                 .as_nanos()
-//RS         ));
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         let real = root.join("real.jet");
-//RS         let alias = root.join("alias.jet");
-//RS         std::fs::write(&real, "fn run() { print(\"secret\") }\n").unwrap();
-//RS         symlink(&real, &alias).unwrap();
-//RS 
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let port = listener.local_addr().unwrap().port();
-//RS         let secret = "canvas-source-secret";
-//RS         let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-//RS         let request = format!(
-//RS             "GET /canvas/source?session={secret} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-//RS         );
-//RS         client.write_all(request.as_bytes()).unwrap();
-//RS         let (server, _) = listener.accept().unwrap();
-//RS         let status = DevStatus::new_with_terminal("alias.jet", false, false, false);
-//RS         status.set_port(port);
-//RS         let session = crate::ResidentDevSession::new("alias.jet", port, 0);
-//RS         let debug_sessions = crate::Canvas::DebugSessions::default();
-//RS         handle_connection(
-//RS             server,
-//RS             &status,
-//RS             &debug_sessions,
-//RS             &session,
-//RS             alias.to_str().unwrap(),
-//RS             ListenerKind::Canvas,
-//RS             "127.0.0.1",
-//RS             secret,
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let mut response = String::new();
-//RS         client.read_to_string(&mut response).unwrap();
-//RS         assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
-//RS         assert!(
-//RS             !response.contains("secret"),
-//RS             "symlinked source was disclosed"
-//RS         );
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn application_preview_does_not_serve_files_from_source_directory() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet-devserver-source-disclosure-{}-{}",
-//RS             std::process::id(),
-//RS             std::time::SystemTime::now()
-//RS                 .duration_since(std::time::UNIX_EPOCH)
-//RS                 .unwrap()
-//RS                 .as_nanos()
-//RS         ));
-//RS         let build = root.join("build");
-//RS         let source_dir = root.join("source");
-//RS         let source = source_dir.join("app.jet");
-//RS         std::fs::create_dir_all(&build).unwrap();
-//RS         std::fs::create_dir_all(&source_dir).unwrap();
-//RS         std::fs::write(&source, "fn main() {}\n").unwrap();
-//RS         std::fs::write(source_dir.join("private.txt"), "must not be served").unwrap();
-//RS 
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let port = listener.local_addr().unwrap().port();
-//RS         let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-//RS         client
-//RS             .write_all(
-//RS                 format!(
-//RS                     "GET /private.txt HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-//RS                 )
-//RS                 .as_bytes(),
-//RS             )
-//RS             .unwrap();
-//RS         let (server, _) = listener.accept().unwrap();
-//RS         let status = DevStatus::new_with_terminal("app.jet", false, false, false);
-//RS         status.set_port(port);
-//RS         let debug_sessions = crate::Canvas::DebugSessions::default();
-//RS         let session = crate::ResidentDevSession::new("app.jet", port, port);
-//RS         handle_connection_with_root(
-//RS             server,
-//RS             &status,
-//RS             &debug_sessions,
-//RS             &session,
-//RS             source.to_str().unwrap(),
-//RS             ListenerKind::Application,
-//RS             "127.0.0.1",
-//RS             "",
-//RS             &build,
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let mut response = String::new();
-//RS         client.read_to_string(&mut response).unwrap();
-//RS         assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
-//RS         assert!(!response.contains("must not be served"), "{response}");
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn invalid_utf8_html_fails_closed_without_lossy_replacement() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet-devserver-invalid-html-{}-{}",
-//RS             std::process::id(),
-//RS             std::time::SystemTime::now()
-//RS                 .duration_since(std::time::UNIX_EPOCH)
-//RS                 .unwrap()
-//RS                 .as_nanos()
-//RS         ));
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         std::fs::write(root.join("index.html"), [b'<', 0xff, b'>']).unwrap();
-//RS 
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let port = listener.local_addr().unwrap().port();
-//RS         let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-//RS         client
-//RS             .write_all(
-//RS                 format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
-//RS                     .as_bytes(),
-//RS             )
-//RS             .unwrap();
-//RS         let (server, _) = listener.accept().unwrap();
-//RS         let status = DevStatus::new_with_terminal("app.jet", false, false, false);
-//RS         status.set_port(port);
-//RS         let debug_sessions = crate::Canvas::DebugSessions::default();
-//RS         let session = crate::ResidentDevSession::new("app.jet", port, port);
-//RS         handle_connection_with_root(
-//RS             server,
-//RS             &status,
-//RS             &debug_sessions,
-//RS             &session,
-//RS             "app.jet",
-//RS             ListenerKind::Application,
-//RS             "127.0.0.1",
-//RS             "",
-//RS             &root,
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let mut response = String::new();
-//RS         client.read_to_string(&mut response).unwrap();
-//RS         assert!(
-//RS             response.starts_with("HTTP/1.1 500 Internal Server Error"),
-//RS             "{response}"
-//RS         );
-//RS         assert!(
-//RS             !response.contains('\u{fffd}'),
-//RS             "invalid HTML was lossy-decoded"
-//RS         );
-//RS         assert!(decode_html(vec![0xff]).is_err());
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn transformed_html_uses_one_aggregate_response_budget() {
-//RS         let script_capacity = 4096;
-//RS         let raw_limit = html_raw_response_limit(script_capacity);
-//RS         assert!(
-//RS             2 * raw_limit + 2 * script_capacity as u64 <= MAX_STATIC_RESPONSE_BYTES,
-//RS             "raw HTML plus transformed HTML exceeds the shared response budget"
-//RS         );
-//RS         assert!(
-//RS             2 * (raw_limit + 1) + 2 * script_capacity as u64 > MAX_STATIC_RESPONSE_BYTES,
-//RS             "raw HTML limit leaves an unbounded transformed response"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn oversized_html_is_rejected_before_transformation() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet-devserver-oversized-html-{}-{}",
-//RS             std::process::id(),
-//RS             std::time::SystemTime::now()
-//RS                 .duration_since(std::time::UNIX_EPOCH)
-//RS                 .unwrap()
-//RS                 .as_nanos()
-//RS         ));
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         let file = std::fs::File::create(root.join("index.html")).unwrap();
-//RS         file.set_len(MAX_STATIC_RESPONSE_BYTES).unwrap();
-//RS         drop(file);
-//RS 
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let port = listener.local_addr().unwrap().port();
-//RS         let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-//RS         client
-//RS             .write_all(
-//RS                 format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
-//RS                     .as_bytes(),
-//RS             )
-//RS             .unwrap();
-//RS         let (server, _) = listener.accept().unwrap();
-//RS         let status = DevStatus::new_with_terminal("app.jet", false, false, false);
-//RS         status.set_port(port);
-//RS         let debug_sessions = crate::Canvas::DebugSessions::default();
-//RS         let session = crate::ResidentDevSession::new("app.jet", port, port);
-//RS         handle_connection_with_root(
-//RS             server,
-//RS             &status,
-//RS             &debug_sessions,
-//RS             &session,
-//RS             "app.jet",
-//RS             ListenerKind::Application,
-//RS             "127.0.0.1",
-//RS             "",
-//RS             &root,
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let mut response = String::new();
-//RS         client.read_to_string(&mut response).unwrap();
-//RS         assert!(response.starts_with("HTTP/1.1 404 Not Found"), "{response}");
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn injects_before_closing_body_tag() {
-//RS         let html = "<html><body><p>hi</p></BODY></html>";
-//RS         let out = inject_live_reload(html, "nonce");
-//RS         assert!(out.contains("<script>"));
-//RS         assert!(out.find("<script>").unwrap() < out.find("</BODY>").unwrap());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn appends_when_no_body_tag() {
-//RS         let html = "<html><p>hi</p></html>";
-//RS         let out = inject_live_reload(html, "nonce");
-//RS         assert!(out.starts_with(html));
-//RS         assert!(out.contains("<script>"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn live_verbose_toggle_changes_depth_without_changing_status() {
-//RS         let status = DevStatus::new("app.jet", false);
-//RS         assert!(!status.verbose());
-//RS         let before = status.json();
-//RS         status.toggle_verbose();
-//RS         assert!(status.verbose());
-//RS         assert_eq!(status.json(), before);
-//RS         status.toggle_verbose();
-//RS         assert!(!status.verbose());
-//RS         assert_eq!(status.json(), before);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn dashboard_detail_keeps_watched_target_and_canvas_route_pinned() {
-//RS         let status = DevStatus::new("app.jet", false);
-//RS         status.set_port(8123);
-//RS         status.set_canvas_port(8123);
-//RS         assert_eq!(
-//RS             status.dashboard_detail_line(),
-//RS             "         watching app.jet · Canvas http://localhost:8123/canvas · v verbose"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn browser_client_registry_counts_tabs_not_poll_connections() {
-//RS         let status = DevStatus::new("app.jet", false);
-//RS         status.note_client("tab-a");
-//RS         status.note_client("tab-a");
-//RS         assert_eq!(status.client_count(), 1);
-//RS         status.note_client("tab-b");
-//RS         assert_eq!(status.client_count(), 2);
-//RS         status.note_client("");
-//RS         status.note_client(&"x".repeat(129));
-//RS         assert_eq!(status.client_count(), 2);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn expired_browser_lease_drives_shared_reconnect_then_ready() {
-//RS         let status = DevStatus::new("app.jet", false);
-//RS         status.set_port(8123);
-//RS         status.note_client("tab-a");
-//RS         status.clients.lock().unwrap().insert(
-//RS             "tab-a".to_string(),
-//RS             std::time::Instant::now() - std::time::Duration::from_millis(super::CLIENT_TTL_MS + 1),
-//RS         );
-//RS         status.expire_clients();
-//RS         let reconnecting = status.json();
-//RS         assert!(reconnecting.contains("\"state\":\"reconnecting\""));
-//RS         assert!(reconnecting.contains("reconnecting · waiting for connection"));
-//RS 
-//RS         status.note_client("tab-a");
-//RS         let ready = status.json();
-//RS         assert!(ready.contains("\"state\":\"ready\""));
-//RS         assert!(ready.contains("ready · localhost:8123 · 1 client"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn failed_edit_revision_facts_agree() {
-//RS         let status = DevStatus::new("app.jet", false);
-//RS         status.mark_building();
-//RS         assert_eq!(
-//RS             status.revision_facts(),
-//RS             DevRevisionFacts { accepted: None, candidate: Some(1), diagnostic: None }
-//RS         );
-//RS         status.mark_ready(10, false);
-//RS         status.mark_building();
-//RS         status.mark_ready(10, true);
-//RS         assert_eq!(status.version.load(Ordering::SeqCst), 2);
-//RS 
-//RS         // A rejected edit names its own candidate; the served revision stays
-//RS         // the last accepted one.
-//RS         status.mark_building();
-//RS         status.mark_error("E0003".to_string(), "Error [E0003]: bad".to_string(), true);
-//RS         let failed = status.json();
-//RS         assert!(failed.contains("\"version\":2,"), "{failed}");
-//RS         assert!(failed.contains("\"candidate\":3,"), "{failed}");
-//RS         assert!(failed.contains("\"diagnostic_revision\":3,"), "{failed}");
-//RS         assert!(failed.contains("\"accepted_revision\":2,"), "{failed}");
-//RS         assert!(failed.contains("\"last_good_revision\":2}"), "{failed}");
-//RS 
-//RS         // A second rejected edit reuses the unpublished candidate.
-//RS         status.mark_building();
-//RS         status.mark_error("E0003".to_string(), "Error [E0003]: bad".to_string(), true);
-//RS         assert_eq!(
-//RS             status.revision_facts(),
-//RS             DevRevisionFacts { accepted: Some(2), candidate: Some(3), diagnostic: Some(3) }
-//RS         );
-//RS 
-//RS         // Recovery publishes exactly that candidate and clears the diagnostic.
-//RS         status.mark_building();
-//RS         status.mark_ready(10, true);
-//RS         let recovered = status.json();
-//RS         assert!(recovered.contains("\"version\":3,"), "{recovered}");
-//RS         assert!(recovered.contains("\"candidate\":null,"), "{recovered}");
-//RS         assert!(recovered.contains("\"diagnostic_revision\":null,"), "{recovered}");
-//RS         assert!(recovered.contains("\"accepted_revision\":3,"), "{recovered}");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn reconnect_overrides_ready_building_and_error_without_losing_snapshot() {
-//RS         let status = DevStatus::new("app.jet", false);
-//RS         status.set_port(8123);
-//RS         status.mark_ready(425, false);
-//RS         status.reconnecting.store(true, Ordering::SeqCst);
-//RS 
-//RS         let ready = status.json();
-//RS         assert!(ready.contains("\"state\":\"reconnecting\""));
-//RS         assert!(ready.contains("\"last_build_ms\":425"));
-//RS 
-//RS         status.mark_building();
-//RS         let building = status.json();
-//RS         assert!(building.contains("\"state\":\"reconnecting\""));
-//RS         assert!(building.contains("\"last_build_ms\":425"));
-//RS 
-//RS         status.mark_error(
-//RS             "E0102".to_string(),
-//RS             "Error [E0102]: missing".to_string(),
-//RS             true,
-//RS         );
-//RS         let error = status.json();
-//RS         assert!(error.contains("\"state\":\"reconnecting\""));
-//RS         assert!(error.contains("\"code\":\"E0102\""));
-//RS         assert!(error.contains("Error [E0102]: missing"));
-//RS         assert!(error.contains("\"last_build_ms\":425"));
-//RS 
-//RS         status.reconnecting.store(false, Ordering::SeqCst);
-//RS         let recovered = status.json();
-//RS         assert!(recovered.contains("\"state\":\"error\""));
-//RS         assert!(recovered.contains("\"code\":\"E0102\""));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn blocked_verbose_refresh_cannot_reinstall_region_after_disable() {
-//RS         let status =
-//RS             std::sync::Arc::new(DevStatus::new_with_terminal("app.jet", true, true, false));
-//RS         status.controls_ready.store(true, Ordering::SeqCst);
-//RS         let terminal_guard = status.term_lock.lock().unwrap();
-//RS         let waiter = std::sync::Arc::clone(&status);
-//RS         let (started_tx, started_rx) = std::sync::mpsc::channel();
-//RS         let handle = std::thread::spawn(move || {
-//RS             started_tx.send(()).unwrap();
-//RS             waiter.write_header_verbose("jet dev  [ready] localhost:8123 · 1 client");
-//RS         });
-//RS         started_rx.recv().unwrap();
-//RS 
-//RS         // This is the disable+restore critical section: capability flips
-//RS         // while the stale renderer is blocked on the same terminal lock.
-//RS         status.controls_ready.store(false, Ordering::SeqCst);
-//RS         *status.header_started.lock().unwrap() = false;
-//RS         drop(terminal_guard);
-//RS         handle.join().unwrap();
-//RS 
-//RS         assert!(!status.controls_ready.load(Ordering::SeqCst));
-//RS         assert!(!*status.header_started.lock().unwrap());
-//RS     }
-//RS 
-//RS     // --- D-FE-DEVSRV1=D: parity words shared verbatim by terminal + browser ---
-//RS 
-//RS     #[test]
-//RS     fn header_words_ready_includes_port_clients_and_build_time() {
-//RS         let (word, rest) = header_words("ready", "app.jet", "", 8080, 2, 420);
-//RS         assert_eq!(word, "ready");
-//RS         assert_eq!(rest, "localhost:8080 · 2 clients · built 0.4s");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn header_words_ready_omits_build_time_before_first_build() {
-//RS         let (word, rest) = header_words("ready", "app.jet", "", 8080, 0, 0);
-//RS         assert_eq!(word, "ready");
-//RS         assert_eq!(rest, "localhost:8080 · 0 clients");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn header_words_building_shows_watched_file_not_port() {
-//RS         let (word, rest) = header_words("building", "app.jet", "", 8080, 1, 0);
-//RS         assert_eq!(word, "building");
-//RS         assert_eq!(rest, "app.jet · 1 client");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn header_words_error_shows_diagnostic_code_not_port() {
-//RS         let (word, rest) = header_words("error", "app.jet", "E0102", 8080, 2, 0);
-//RS         assert_eq!(word, "error");
-//RS         assert_eq!(rest, "E0102 · 2 clients");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn header_words_singular_client_count() {
-//RS         let (_, rest) = header_words("ready", "app.jet", "", 8080, 1, 0);
-//RS         assert!(rest.ends_with("1 client"), "{rest}");
-//RS         assert!(!rest.contains("1 clients"), "{rest}");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn format_build_time_renders_seconds_with_one_decimal() {
-//RS         assert_eq!(format_build_time(420), "0.4s");
-//RS         assert_eq!(format_build_time(1500), "1.5s");
-//RS         assert_eq!(format_build_time(0), "0.0s");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn format_line_colored_carries_a_dot_and_the_full_parity_words() {
-//RS         let line = format_line_colored("ready", "localhost:8080 · 2 clients · built 0.4s");
-//RS         assert!(line.starts_with("jet dev  "));
-//RS         assert!(line.contains('\u{25CF}'), "{line}");
-//RS         assert!(line.contains("ready · localhost:8080 · 2 clients · built 0.4s"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn format_line_plain_uses_bracketed_state_word_no_color() {
-//RS         let line = format_line_plain("error", "E0102 · 2 clients");
-//RS         assert_eq!(line, "jet dev  [error] E0102 · 2 clients");
-//RS         assert!(
-//RS             !line.contains('\x1b'),
-//RS             "NO_COLOR/CI floor must carry no ANSI: {line}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn frame_lines_keeps_diagnostic_words_verbatim() {
-//RS         let diagnostic = "Error [E0102]: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first";
-//RS         let framed = frame_lines("E0102", diagnostic);
-//RS         // Every diagnostic line survives byte-for-byte inside the frame —
-//RS         // only a "│ " border is added, never a reworded/retruncated line (I4).
-//RS         for line in diagnostic.lines() {
-//RS             assert!(
-//RS                 framed.iter().any(|f| f == &format!("│ {}", line)),
-//RS                 "missing verbatim line {:?} in {:#?}",
-//RS                 line,
-//RS                 framed
-//RS             );
-//RS         }
-//RS         assert!(framed.first().unwrap().starts_with("┌ E0102 "));
-//RS         assert!(framed.last().unwrap().starts_with('└'));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn frame_lines_top_border_names_the_diagnostic_code() {
-//RS         let framed = frame_lines("E0204", "one line");
-//RS         assert!(framed[0].contains("E0204"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_default_is_loopback_ephemeral_and_session_bearing() {
-//RS         let options = CanvasHostOptions::default();
-//RS         assert_eq!(options.host, "127.0.0.1");
-//RS         assert_eq!(options.port, None);
-//RS         assert_eq!(options.transport, "http");
-//RS         assert_eq!(options.authority, "loopback");
-//RS         let host = bind_canvas_for_test("app.jet", false, None);
-//RS         let url = host.canvas_url();
-//RS         assert!(url.starts_with("http://127.0.0.1:"), "{url}");
-//RS         assert!(url.contains("/canvas?session="), "{url}");
-//RS         assert!(
-//RS             url.len() > 80,
-//RS             "session secret should not be a short marker: {url}"
-//RS         );
-//RS         let address = host
-//RS             .listener
-//RS             .lock()
-//RS             .unwrap()
-//RS             .as_ref()
-//RS             .unwrap()
-//RS             .local_addr()
-//RS             .unwrap();
-//RS         assert!(
-//RS             address.ip().is_loopback(),
-//RS             "default Canvas address: {address}"
-//RS         );
-//RS         assert!(
-//RS             !address.ip().is_unspecified(),
-//RS             "default Canvas address: {address}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn application_default_scans_stable_range_and_skips_held_port() {
-//RS         let first = bind_application_server(None).expect("first application preview port");
-//RS         let first_port = first.local_addr().unwrap().port();
-//RS         let second = bind_application_server(None).expect("next application preview port");
-//RS         let second_port = second.local_addr().unwrap().port();
-//RS 
-//RS         assert!(APPLICATION_PORT_RANGE.contains(&first_port));
-//RS         assert!(APPLICATION_PORT_RANGE.contains(&second_port));
-//RS         assert!(
-//RS             second_port > first_port,
-//RS             "application port scan did not skip the held port: {first_port}, {second_port}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_sessions_get_distinct_ephemeral_ports_and_secrets() {
-//RS         let first = bind_canvas_for_test("app.jet", false, None);
-//RS         let second = bind_canvas_for_test("app.jet", false, None);
-//RS 
-//RS         assert_ne!(first.status.port(), second.status.port());
-//RS         assert_ne!(first.session_secret, second.session_secret);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_explicit_collision_and_invalid_overrides_fail_loudly() {
-//RS         let first = bind_canvas_for_test("app.jet", false, None);
-//RS         let port = first.status.port();
-//RS         let mut options = CanvasHostOptions::default();
-//RS         options.port = Some(port);
-//RS         let collision = bind_canvas_options_for_test("app.jet", false, &options)
-//RS             .err()
-//RS             .expect("a held explicit port must collide");
-//RS         assert!(
-//RS             collision.contains("couldn't bind Canvas host"),
-//RS             "{collision}"
-//RS         );
-//RS 
-//RS         options.transport = "udp".to_string();
-//RS         let transport = bind_canvas_options_for_test("app.jet", false, &options)
-//RS             .err()
-//RS             .expect("unsupported transport must fail");
-//RS         assert!(transport.contains("transport"), "{transport}");
-//RS 
-//RS         options.transport = "http".to_string();
-//RS         options.authority = "public".to_string();
-//RS         let authority = bind_canvas_options_for_test("app.jet", false, &options)
-//RS             .err()
-//RS             .expect("unknown authority must fail");
-//RS         assert!(authority.contains("authority"), "{authority}");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_non_loopback_requires_explicit_remote_authority() {
-//RS         let mut options = CanvasHostOptions::default();
-//RS         options.host = "0.0.0.0".to_string();
-//RS         let error = bind_canvas_options_for_test("app.jet", false, &options)
-//RS             .err()
-//RS             .expect("non-loopback Canvas must require explicit authority");
-//RS         assert!(error.contains("authority = remote"), "{error}");
-//RS 
-//RS         options.authority = "remote".to_string();
-//RS         let host = bind_canvas_options_for_test("app.jet", false, &options)
-//RS             .expect("remote Canvas must bind only after explicit authority");
-//RS         let address = host
-//RS             .listener
-//RS             .lock()
-//RS             .unwrap()
-//RS             .as_ref()
-//RS             .unwrap()
-//RS             .local_addr()
-//RS             .unwrap();
-//RS         assert!(
-//RS             address.ip().is_unspecified(),
-//RS             "remote Canvas address: {address}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn started_canvas_session_releases_its_port_on_shutdown() {
-//RS         let host = bind_canvas_for_test("app.jet", false, None);
-//RS         let port = host.status.port();
-//RS         host.start_canvas();
-//RS         drop(host);
-//RS 
-//RS         bind_canvas_for_test("app.jet", false, Some(port));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn concurrent_canvas_clients_share_checked_revision_boundary() {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet-devserver-concurrent-canvas-{}-{}",
-//RS             std::process::id(),
-//RS             std::time::SystemTime::now()
-//RS                 .duration_since(std::time::UNIX_EPOCH)
-//RS                 .unwrap()
-//RS                 .as_nanos()
-//RS         ));
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         let path = root.join("main.jet");
-//RS         std::fs::write(&path, "fn run() {\n    total := 1\n    print(total)\n}\n").unwrap();
-//RS         let before = std::fs::read_to_string(&path).unwrap();
-//RS         let revision = crate::Canvas::source_revision(&before);
-//RS         let host = bind_canvas_for_test(path.to_str().unwrap(), false, None);
-//RS         let port = host.status.port();
-//RS         let secret = host.session_secret.clone();
-//RS         host.start_canvas();
-//RS 
-//RS         let barrier = Arc::new(Barrier::new(3));
-//RS         let responses = [
-//RS             ("client-a", "first"),
-//RS             ("client-b", "second"),
-//RS         ]
-//RS         .into_iter()
-//RS         .map(|(client, name)| {
-//RS             let barrier = Arc::clone(&barrier);
-//RS             let secret = secret.clone();
-//RS             let body = format!(
-//RS                 "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"{name}\",\"client_id\":\"{client}\"}}"
-//RS             );
-//RS             thread::spawn(move || {
-//RS                 barrier.wait();
-//RS                 post_canvas_transaction(port, &secret, client, &body)
-//RS             })
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS         barrier.wait();
-//RS         let responses = responses
-//RS             .into_iter()
-//RS             .map(|thread| thread.join().unwrap())
-//RS             .collect::<Vec<_>>();
-//RS 
-//RS         assert_eq!(
-//RS             responses
-//RS                 .iter()
-//RS                 .filter(|response| response.starts_with("HTTP/1.1 200 OK"))
-//RS                 .count(),
-//RS             1,
-//RS             "exactly one client must publish the shared revision"
-//RS         );
-//RS         let loser = responses
-//RS             .iter()
-//RS             .find(|response| response.starts_with("HTTP/1.1 409 Conflict"))
-//RS             .expect("one client must receive a conflict");
-//RS         let current = std::fs::read_to_string(&path).unwrap();
-//RS         let current_revision = crate::Canvas::source_revision(&current);
-//RS         assert!(loser.contains("\"kind\":\"conflict\""), "{loser}");
-//RS         assert!(
-//RS             loser.contains(&format!("\"current_revision\":\"{current_revision}\"")),
-//RS             "{loser}"
-//RS         );
-//RS         let session = host.session.json();
-//RS         assert!(
-//RS             session.contains(&format!("\"accepted_revision\":\"{current_revision}\"")),
-//RS             "{session}"
-//RS         );
-//RS         assert!(session.contains("\"status\":\"accepted\""));
-//RS         assert!(session.contains("\"status\":\"refused\""));
-//RS         drop(host);
-//RS         let _ = std::fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     fn post_canvas_transaction(port: u16, secret: &str, client: &str, body: &str) -> String {
-//RS         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-//RS         stream
-//RS             .set_read_timeout(Some(Duration::from_secs(10)))
-//RS             .unwrap();
-//RS         let request = format!(
-//RS             "POST /canvas/transaction?client_id={client} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nAuthorization: Bearer {secret}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-//RS             body.len()
-//RS         );
-//RS         stream.write_all(request.as_bytes()).unwrap();
-//RS         let mut response = Vec::new();
-//RS         stream.read_to_end(&mut response).unwrap();
-//RS         String::from_utf8(response).unwrap()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn web_canvas_override_keeps_program_listener_separate() {
-//RS         let mut options = CanvasHostOptions::default();
-//RS         options.output = Some("service@local#debug".to_string());
-//RS         options.target = Some("board.browser".to_string());
-//RS         options.audit = true;
-//RS         let host = bind_web_canvas_options_for_test("app.jet", false, None, &options)
-//RS             .expect("web Canvas host should bind independently");
-//RS         assert!(host.canvas_url().contains("/canvas?session="));
-//RS         assert!(host.status.verbose.load(Ordering::Relaxed));
-//RS         let session = host.session.json();
-//RS         assert!(session
-//RS             .contains("\"run\":{\"output\":\"service@local#debug\",\"target\":\"board.browser\"}"));
-//RS         assert!(session.contains("\"canvas\":{\"host\":\"127.0.0.1\""));
-//RS         assert!(!session.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":0"));
-//RS         assert_ne!(host.session.canvas_port(), host.session.application_port());
-//RS         assert!(session.contains("\"listener\":\"canvas\""));
-//RS         assert!(session.contains("\"listener\":\"application\""));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn app_only_bind_has_no_canvas_listener_or_session_alias() {
-//RS         let host = WebHost::bind_with_policy(
-//RS             "app.jet",
-//RS             std::path::Path::new("build"),
-//RS             false,
-//RS             Some(0),
-//RS             ReleaseDevtoolsPolicy::development(),
-//RS         )
-//RS         .unwrap();
-//RS         assert!(host.listener.lock().unwrap().is_none());
-//RS         assert!(host.application_listener.lock().unwrap().is_some());
-//RS         assert_eq!(host.session.canvas_port(), 0);
-//RS         assert!(!host.status.canvas_enabled.load(Ordering::Relaxed));
-//RS         let session = host.session.json();
-//RS         assert!(session.contains("\"listeners\":{\"application\""));
-//RS         assert!(!session.contains("\"listeners\":{\"canvas\""));
-//RS         assert!(!session.contains("\"workbench\""));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_session_post_cannot_change_program_selection() {
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let port = listener.local_addr().unwrap().port();
-//RS         let status = Arc::new(DevStatus::new_with_terminal("app.jet", false, false, false));
-//RS         status.set_port(port);
-//RS         let debug_sessions = crate::Canvas::DebugSessions::default();
-//RS         let session = Arc::new(crate::ResidentDevSession::new("app.jet", port, 0));
-//RS         session.select_output_values(Some("cli-output"), Some("cli-target"));
-//RS         let secret = mint_session_secret().unwrap();
-//RS         let server = thread::spawn({
-//RS             let session = Arc::clone(&session);
-//RS             let secret = secret.clone();
-//RS             move || {
-//RS                 let (stream, _) = listener.accept().unwrap();
-//RS                 handle_connection(
-//RS                     stream,
-//RS                     &status,
-//RS                     &debug_sessions,
-//RS                     &session,
-//RS                     "app.jet",
-//RS                     ListenerKind::Canvas,
-//RS                     "127.0.0.1",
-//RS                     &secret,
-//RS                 )
-//RS                 .unwrap();
-//RS             }
-//RS         });
-//RS         let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-//RS         let body = r#"{"op":"select_output","output":"web","target":"browser"}"#;
-//RS         let request = format!(
-//RS             "POST /canvas/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nAuthorization: Bearer {secret}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-//RS             body.len()
-//RS         );
-//RS         std::io::Write::write_all(&mut client, request.as_bytes()).unwrap();
-//RS         let mut response = String::new();
-//RS         client.read_to_string(&mut response).unwrap();
-//RS         server.join().unwrap();
-//RS 
-//RS         assert!(
-//RS             response.starts_with("HTTP/1.1 405 Method Not Allowed"),
-//RS             "{response}"
-//RS         );
-//RS         assert!(session
-//RS             .json()
-//RS             .contains("\"run\":{\"output\":\"cli-output\",\"target\":\"cli-target\"}"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_request_gate_requires_secret_and_strict_request_context() {
-//RS         let secret = mint_session_secret().unwrap();
-//RS         let mut headers = HashMap::new();
-//RS         headers.insert("host".to_string(), "localhost:8123".to_string());
-//RS         headers.insert("origin".to_string(), "http://localhost:8123".to_string());
-//RS         headers.insert("authorization".to_string(), format!("Bearer {secret}"));
-//RS         let mut request = Request {
-//RS             method: "GET".to_string(),
-//RS             target: "/canvas/graph".to_string(),
-//RS             headers,
-//RS             body: Vec::new(),
-//RS         };
-//RS         assert!(canvas_api_path("/canvas/graph", "/canvas/graph"));
-//RS         for path in [
-//RS             "/__jet_devtools/workbench",
-//RS             "/__jet_devtools/recording",
-//RS             "/__jet_devtools/paused/inspect",
-//RS             "/__jet_devtools/style",
-//RS             "/__jet_canvas/devtools",
-//RS             "/canvas/devtools",
-//RS             "/panel/devtools",
-//RS         ] {
-//RS             assert!(
-//RS                 canvas_api_path(path, path),
-//RS                 "{path} must be an authorized Canvas route"
-//RS             );
-//RS             assert!(
-//RS                 devtools_path(path),
-//RS                 "{path} must enter the devtools dispatcher"
-//RS             );
-//RS         }
-//RS         assert!(canvas_api_path("/__jet_dev_status", "/__jet_dev_status"));
-//RS         assert!(canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request.target = format!("/canvas/graph?session={secret}&session=wrong");
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request.target = "/canvas/graph".to_string();
-//RS         request.headers.remove("authorization");
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request
-//RS             .headers
-//RS             .insert("authorization".to_string(), format!("Bearer {secret}"));
-//RS         request.headers.remove("origin");
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request
-//RS             .headers
-//RS             .insert("sec-fetch-site".to_string(), "same-origin".to_string());
-//RS         assert!(canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request.target = format!("/canvas/graph?session={secret}");
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request
-//RS             .headers
-//RS             .insert("origin".to_string(), "http://localhost:8123".to_string());
-//RS         request
-//RS             .headers
-//RS             .insert("authorization".to_string(), format!("Basic {secret}"));
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request
-//RS             .headers
-//RS             .insert("authorization".to_string(), format!("Bearer {secret}"));
-//RS         request.method = "PUT".to_string();
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request.method = "GET".to_string();
-//RS         request.target = "/canvas/not-a-route".to_string();
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request.target = "/canvas/graph".to_string();
-//RS         request.body = vec![0; crate::MAX_REQUEST_BODY_BYTES + 1];
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8123,
-//RS             &secret
-//RS         ));
-//RS         request.body.clear();
-//RS         assert!(!canvas_request_authorized(
-//RS             &request,
-//RS             &request.target,
-//RS             "127.0.0.1",
-//RS             8124,
-//RS             &secret
-//RS         ));
-//RS         assert!(!host_header_allowed("evil.test:8123", "127.0.0.1", 8123));
-//RS         assert!(!origin_allowed("http://evil.test:8123", "127.0.0.1", 8123));
-//RS         assert!(!constant_time_equal(&secret, "wrong"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_page_and_bootstrap_reject_missing_session() {
-//RS         let secret = "canvas-test-secret";
-//RS         let response = canvas_response("/canvas", secret);
-//RS         assert!(
-//RS             response.starts_with("HTTP/1.1 401 Unauthorized"),
-//RS             "{response}"
-//RS         );
-//RS 
-//RS         let response = canvas_response("/canvas/app.js", secret);
-//RS         assert!(
-//RS             response.starts_with("HTTP/1.1 401 Unauthorized"),
-//RS             "{response}"
-//RS         );
-//RS 
-//RS         let response = canvas_response(&format!("/canvas?session={secret}"), secret);
-//RS         assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
-//RS         assert!(
-//RS             response.contains(&format!("app.js?session={secret}&")),
-//RS             "{response}"
-//RS         );
-//RS 
-//RS         let response = canvas_response(&format!("/canvas/app.js?session={secret}"), secret);
-//RS         assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
-//RS     }
-//RS 
-//RS     fn canvas_response(target: &str, secret: &str) -> String {
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let port = listener.local_addr().unwrap().port();
-//RS         let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-//RS         let (server, _) = listener.accept().unwrap();
-//RS         let raw =
-//RS             format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-//RS         std::io::Write::write_all(&mut client, raw.as_bytes()).unwrap();
-//RS 
-//RS         let status = DevStatus::new_with_terminal("app.jet", false, false, false);
-//RS         status.set_port(port);
-//RS         let session =
-//RS             crate::ResidentDevSession::new_with_canvas_host("app.jet", "127.0.0.1", port, 0);
-//RS         let debug_sessions = crate::Canvas::DebugSessions::default();
-//RS         handle_connection(
-//RS             server,
-//RS             &status,
-//RS             &debug_sessions,
-//RS             &session,
-//RS             "app.jet",
-//RS             ListenerKind::Canvas,
-//RS             "127.0.0.1",
-//RS             secret,
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let mut response = String::new();
-//RS         client.read_to_string(&mut response).unwrap();
-//RS         response
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_session_injection_only_changes_html_bootstrap() {
-//RS         let html = crate::canvas_asset("GET", "/canvas", "/canvas").unwrap();
-//RS         let html = inject_canvas_session(html, "secret");
-//RS         assert!(html.body.contains("app.js?session=secret&"));
-//RS 
-//RS         let js = crate::canvas_asset("GET", "/canvas/app.js", "/canvas/app.js").unwrap();
-//RS         let js = inject_canvas_session(js, "secret");
-//RS         assert!(!js.body.contains("session=secret"));
-//RS     }
-//RS     #[test]
-//RS     fn release_devtools_route_is_read_only_and_token_gated() {
-//RS         use jet_driver::Package::{
-//RS             ReleaseDevtoolsDeployment, ReleaseDevtoolsPolicy, ReleaseInspect,
-//RS         };
-//RS 
-//RS         let policy = ReleaseDevtoolsPolicy::from_manifest_profile(ReleaseInspect::ReadOnly)
-//RS             .with_deployment(ReleaseDevtoolsDeployment::with_values(
-//RS                 true,
-//RS                 Some("release-token".to_string()),
-//RS                 Default::default(),
-//RS             ));
-//RS         let unauthorized = release_response(&policy, "GET", None, "/__jet_devtools");
-//RS         assert!(
-//RS             unauthorized.starts_with("HTTP/1.1 401 Unauthorized"),
-//RS             "{unauthorized}"
-//RS         );
-//RS         assert!(
-//RS             unauthorized.contains("JET_INSPECT_TOKEN required"),
-//RS             "{unauthorized}"
-//RS         );
-//RS 
-//RS         let writable = release_response(
-//RS             &policy,
-//RS             "POST",
-//RS             Some("Bearer release-token"),
-//RS             "/__jet_devtools",
-//RS         );
-//RS         assert!(
-//RS             writable.starts_with("HTTP/1.1 405 Method Not Allowed"),
-//RS             "{writable}"
-//RS         );
-//RS         assert!(!writable.contains("\"protocol\""), "{writable}");
-//RS 
-//RS         let authorized = release_response(
-//RS             &policy,
-//RS             "GET",
-//RS             Some("Bearer release-token"),
-//RS             "/__jet_devtools",
-//RS         );
-//RS         assert!(authorized.starts_with("HTTP/1.1 200 OK"), "{authorized}");
-//RS         assert!(
-//RS             authorized.contains("\"protocol\":\"jet.devtools.v1\""),
-//RS             "{authorized}"
-//RS         );
-//RS 
-//RS         let local = ReleaseDevtoolsPolicy::from_manifest_profile(ReleaseInspect::Local)
-//RS             .with_deployment(ReleaseDevtoolsDeployment::with_values(
-//RS                 true,
-//RS                 Some("release-token".to_string()),
-//RS                 Default::default(),
-//RS             ));
-//RS         let absent = release_response(
-//RS             &local,
-//RS             "GET",
-//RS             Some("Bearer release-token"),
-//RS             "/__jet_devtools",
-//RS         );
-//RS         assert!(absent.starts_with("HTTP/1.1 404 Not Found"), "{absent}");
-//RS     }
-//RS 
-//RS     fn release_response(
-//RS         policy: &jet_driver::Package::ReleaseDevtoolsPolicy,
-//RS         method: &str,
-//RS         authorization: Option<&str>,
-//RS         target: &str,
-//RS     ) -> String {
-//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS         let address = listener.local_addr().unwrap();
-//RS         let mut client = TcpStream::connect(address).unwrap();
-//RS         let (server, peer_addr) = listener.accept().unwrap();
-//RS         let mut request = format!(
-//RS             "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n",
-//RS             port = address.port()
-//RS         );
-//RS         if let Some(authorization) = authorization {
-//RS             request.push_str(&format!("Authorization: {authorization}\r\n"));
-//RS         }
-//RS         request.push_str("Connection: close\r\n\r\n");
-//RS         client.write_all(request.as_bytes()).unwrap();
-//RS 
-//RS         let status = DevStatus::new_with_terminal("release.jet", false, false, false);
-//RS         status.set_port(address.port());
-//RS         let session = crate::ResidentDevSession::new("release.jet", 0, address.port());
-//RS         let debug_sessions = crate::Canvas::DebugSessions::default();
-//RS         let browser_state = Arc::new(Mutex::new(None));
-//RS         let paused_evaluate =
-//RS             Arc::new(Mutex::new(crate::PausedEvaluate::PausedEvaluateHost::new()));
-//RS         let terminal_style = Arc::new(crate::TerminalStyleReload::TerminalStyleHostAdapter::new());
-//RS         handle_connection_with_root_and_policy(
-//RS             server,
-//RS             &status,
-//RS             &debug_sessions,
-//RS             &session,
-//RS             "release.jet",
-//RS             ListenerKind::Application,
-//RS             "127.0.0.1",
-//RS             "unused-session",
-//RS             std::path::Path::new("."),
-//RS             &browser_state,
-//RS             &paused_evaluate,
-//RS             &terminal_style,
-//RS             policy,
-//RS             peer_addr,
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let mut response = String::new();
-//RS         client.read_to_string(&mut response).unwrap();
-//RS         response
-//RS     }
-//RS }
-// END-PORT-PENDING 0792 crates/jet-devserver/src/WebHost.rs:5926-7965
+// Private continuation of jet_devserver.WebHost.
+use jet_devserver.WebHost.*
+use jet_devserver.[CanvasAsset, ResidentDevSession, static_relative_path, content_type_for, read_static_file_bounded, write_response]
+use jet_devserver.Canvas as Canvas
+use jet_devserver.PausedEvaluate.[PausedEvaluateHostError]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[parse_json]
+use std.io.[Write, Error, ErrorKind]
+use std.sync.atomic.[AtomicU64, Ordering]
+use core.files.[OSPath]
+// Rust: crates/jet-devserver/src/WebHost.rs:5926
+fn inject_canvas_session(asset: CanvasAsset, session_secret: String) -> CanvasAsset {
+    asset := ^asset
+    if asset.content_type == "text/html; charset=utf-8" {
+        if asset.body.find("app.js?") == .Val(index) {
+            insert_at :: index + "app.js?".len()
+            asset.body.insert_str(insert_at, format("session={}&", session_secret))
+        }
+    }
+    return ^asset
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:5941
+fn method_not_allowed(stream: &impl Write) -> Result<Unit, Error> {
+    write_response(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", b"method not allowed")
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:5950
+fn web_stream_path(path: String) -> Bool { path == "/__jet_web/stream" }
+// Rust: crates/jet-devserver/src/WebHost.rs:5957
+// Same Canvas handlers, not a second editor.
+fn source_tool_path(path: String) -> Bool {
+    path is "/__jet_canvas/project" | "/__jet_canvas/source" | "/__jet_canvas/command" | "/__jet_canvas/transaction"
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:5967
+fn devtools_path(path: String) -> Bool {
+    path is "/__jet_devtools" | "/__jet_devtools/workbench" | "/__jet_devtools/commands"
+        | "/__jet_devtools/assets" | "/__jet_devtools/state" | "/__jet_devtools/reconnect"
+        | "/__jet_devtools/action" | "/__jet_devtools/selection" | "/__jet_devtools/cursor"
+        | "/__jet_devtools/swap" | "/__jet_devtools/recording" | "/__jet_devtools/error"
+        | "/__jet_devtools/paused/inspect" | "/__jet_devtools/paused/evaluate"
+        | "/__jet_devtools/style" | "/__jet_canvas/devtools" | "/canvas/devtools" | "/panel/devtools"
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:5991
+fn is_application_control_path(path: String) -> Bool {
+    devtools_path(path) || web_stream_path(path) || source_tool_path(path)
+        || path is "/__jet_dev_status" | "/__jet_dev_version" | "/__jet_dev_disconnect" | "/__jet_perf_browser"
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6004
+WEB_ERROR_REQUEST_COUNTER :: AtomicU64.new(1) // GATE #4494: process-local atomic.
+// Rust: crates/jet-devserver/src/WebHost.rs:6009
+fn next_web_error_request_id() -> String { format("werr-{}", WEB_ERROR_REQUEST_COUNTER.fetch_add(1, Ordering.SeqCst)) }
+// Rust: crates/jet-devserver/src/WebHost.rs:6019
+fn paused_evaluate_error_status(error: &PausedEvaluateHostError) -> String {
+    match error {
+        .SessionUnavailable | .EvaluatorUnavailable -> "409 Conflict"
+        .InvalidRequest(_) -> "400 Bad Request"
+        .Rejected(_) -> "403 Forbidden"
+    }
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6030
+fn session_response(session: &ResidentDevSession) -> String {
+    format("{{\"protocol\":\"jet.canvas.session\",\"schema_version\":1,\"session\":{}}}", session.json())
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6037
+fn with_session(body: String, session: &ResidentDevSession) -> String {
+    marker :: "\"canvas\":{"
+    index :: body.find(marker) ?? return ^body
+    insert_at :: index + marker.len()
+    decorated := String.with_capacity(body.len() + session.json().len() + 16)
+    decorated.push_str(body[..insert_at])
+    decorated.push_str("\"session\":")
+    decorated.push_str(session.json())
+    decorated.push(',')
+    decorated.push_str(body[insert_at..])
+    return ^decorated
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6052
+fn current_revision_for_request(canvas_file: String, request: String) -> String {
+    source_id :: parse_json(request).ok().and_then((value) -> match value {
+        .Object(object) -> object.into_iter().find_map(((name, value)) -> {
+            if name != "source_id" -> return .None
+            match value { .Text(id) | .TypedText(id) -> .Val(^id); _ -> .None }
+        })
+        _ -> .None
+    }).unwrap_or_default()
+    return current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6075
+fn source_id_from_payload(payload: String) -> String {
+    value :: match parse_json(payload) { .Ok(value) -> value; .Err(_) -> return "" }
+    // Rust: crates/jet-devserver/src/WebHost.rs:6080
+    fn find(value: &DataTree) -> String? {
+        return match value {
+            .Object(object) -> {
+                if object.iter().find_map(((name, value)) -> {
+                    if name != "source_id" -> return .None
+                    match value { .Text(id) | .TypedText(id) -> .Val(id.clone()); _ -> .None }
+                }) == .Val(source_id) -> return .Val(^source_id)
+                object.iter().find_map(((_, value)) -> find(value))
+            }
+            .Array(values) -> values.iter().find_map(find)
+            _ -> .None
+        }
+    }
+    return find(&value).unwrap_or_default()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6105
+fn current_revision_for_source_id(canvas_file: String, source_id: String?) -> String {
+    source_path :: source_id.and_then((id) -> Canvas.project_path_for_source_id(OSPath.new(canvas_file), id)).unwrap_or_else(() -> OSPath.new(canvas_file))
+    return Canvas.read_source_without_symlinks(&source_path).map((source) -> Canvas.source_revision(source)).unwrap_or_default()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6116
+fn serve_static_from_root(stream: &impl Write, root: &OSPath, path: String, nonce: String, session_secret: String) -> Result<U16, Error> {
+    // The generated output root is the complete preview boundary. No source fallback.
+    relative :: match static_relative_path(path) {
+        .Ok(path) -> path
+        .Err(()) -> { write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", b"bad path")?; return .Ok(400) }
+    }
+    content_type :: content_type_for(&relative)
+    is_html :: relative.extension().and_then((extension) -> extension.to_str()).is_some_and((extension) -> extension.eq_ignore_ascii_case("html"))
+    reload_script := is_html.then(() -> live_reload_script(nonce, session_secret))
+    raw_limit :: match reload_script.as_mut() {
+        .Val(script) -> {
+            script.shrink_to_fit()
+            if !html_script_fits_budget(script.capacity()) {
+                write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", b"live-reload script exceeds the response budget")?
+                return .Ok(500)
+            }
+            html_raw_response_limit(script.capacity())
+        }
+        .None -> MAX_STATIC_RESPONSE_BYTES
+    }
+    bytes :: match read_static_file_bounded(root, &relative, raw_limit) {
+        .Ok(b) -> b
+        .Err(error) -> {
+            (status, code, body) :: match error.kind() {
+                .NotFound | .InvalidData -> ("404 Not Found", 404, format("not found: {}", path))
+                _ -> ("400 Bad Request", 400, "bad path")
+            }
+            write_response(stream, status, "text/plain; charset=utf-8", body.as_bytes())?
+            return .Ok(code)
+        }
+    }
+    if reload_script == .Val(script) {
+        html :: match decode_html(^bytes) {
+            .Ok(html) -> html
+            .Err(_) -> { write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", b"static HTML is not valid UTF-8")?; return .Ok(500) }
+        }
+        injected :: inject_live_reload_with_script(html, script) ?? {
+            write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", b"static HTML response is too large")?
+            return .Ok(500)
+        }
+        write_response(stream, "200 OK", content_type, injected.as_bytes())?
+        return .Ok(200)
+    }
+    write_response(stream, "200 OK", content_type, &bytes)?
+    return .Ok(200)
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6203
+fn read_source_without_symlinks(path: &OSPath) -> Result<String, Error> { Canvas.read_source_without_symlinks(path) }
+// Rust: crates/jet-devserver/src/WebHost.rs:6207
+fn read_web_manifest(root: &OSPath) -> String? {
+    bytes :: read_static_file_bounded(root, &OSPath.new("web.manifest.json"), MAX_STATIC_RESPONSE_BYTES).ok()?
+    return String.from_utf8(^bytes).ok()
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6217
+fn decode_html(bytes: [U8]) -> Result<String, Error> {
+    String.from_utf8(^bytes).map_err((_) -> Error.new(ErrorKind.InvalidData, "static HTML is not valid UTF-8")) // GATE #4409
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6226
+fn html_raw_response_limit(script_capacity: USize) -> U64 {
+    script_bytes :: U64.try_from(script_capacity).unwrap_or(U64.MAX)
+    MAX_STATIC_RESPONSE_BYTES.saturating_sub(script_bytes.saturating_mul(2)) / 2
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6231
+fn html_script_fits_budget(script_capacity: USize) -> Bool {
+    script_bytes :: U64.try_from(script_capacity).unwrap_or(U64.MAX)
+    script_bytes.saturating_mul(2) <= MAX_STATIC_RESPONSE_BYTES
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6251
+fn live_reload_script(nonce: String, session_secret: String) -> String {
+    perf_script :: if nonce.is_empty() { "" } else {
+        format("""  var jetPerfNonce = "{}";
+  self.__jetPerfNow = function () {{ return performance.now(); }};
+  self.__jetPerfRecord = function (symbol, eventClass, startMs) {{
+    if (!symbol || typeof performance === "undefined") return;
+    var endMs = performance.now();
+    var body = new URLSearchParams({{
+      class: String(eventClass), symbol: String(symbol),
+      start_ns: String(Math.max(0, Math.floor(startMs * 1000000))),
+      duration_ns: String(Math.max(0, Math.floor((endMs - startMs) * 1000000))),
+      clock_ns: String(Math.max(0, Math.floor(endMs * 1000000)))
+    }});
+    try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce + "&session=" + encodeURIComponent(jetDevSession), body); }} catch (_) {{}}
+  }};
+""", nonce)
+    }
+    return format("""<script>
+(function () {{
+  var jetDevSession = "{session_secret}";
+  self.__jetDevSession = jetDevSession;
+{perf_script}
+  var jetDevVersion = null, reconnectAttempt = 0;
+  var ui = null, lastStatus = null;
+  var dismissedDiagnostic = null, errorFace = false, autoOpened = false;
+  var jetDevClient = null;
+  try {{ jetDevClient = sessionStorage.getItem("jet-dev-client"); }} catch (_) {{}}
+  if (!jetDevClient) {{
+    jetDevClient = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() :
+      String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+    try {{ sessionStorage.setItem("jet-dev-client", jetDevClient); }} catch (_) {{}}
+  }}
+  addEventListener("pagehide", function () {{
+    try {{ navigator.sendBeacon("/__jet_dev_disconnect?client=" + encodeURIComponent(jetDevClient) + "&session=" + encodeURIComponent(jetDevSession)); }} catch (_) {{}}
+  }});
+  // One container, three depths. The ring pattern and accessible name carry state.
+  function devtoolsUrl(route) {{ return route + "?session=" + encodeURIComponent(jetDevSession); }}
+  function ensureUi() {{
+    if (ui) return;
+    var style = document.createElement("style");
+    style.textContent =
+      "#jet-dev-lens{{position:fixed;left:16px;bottom:max(16px,env(safe-area-inset-bottom));z-index:2147483647;display:flex;flex-direction:column;width:76px;height:76px;aspect-ratio:1/1;max-width:calc(100vw - 32px);color:#F6F5F2;font:13px/1.4 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;background:#101114;border:2px solid var(--ring);border-radius:26px;box-shadow:0 0 0 1px rgba(255,255,255,.05),0 0 24px var(--glow),0 12px 30px rgba(0,0,0,.44);overflow:hidden;box-sizing:border-box;--ring:#56C271;--glow:rgba(86,194,113,.34)}}" +
+      "#jet-dev-lens::after{{content:'';position:absolute;inset:5px;border:1px solid transparent;border-radius:20px;pointer-events:none}}" +
+      "#jet-dev-lens[data-state=building]{{--ring:#E3A43B;--glow:rgba(227,164,59,.36);border-style:dashed}}" +
+      "#jet-dev-lens[data-state=building]::after{{border-color:rgba(227,164,59,.56);border-style:dashed}}" +
+      "#jet-dev-lens[data-state=error],#jet-dev-lens[data-state=unavailable],#jet-dev-lens[data-state=stopped]{{--ring:#E8232A;--glow:rgba(232,35,42,.42);border-style:double}}" +
+      "#jet-dev-lens[data-state=error]::after,#jet-dev-lens[data-state=unavailable]::after,#jet-dev-lens[data-state=stopped]::after{{border-color:rgba(232,35,42,.65)}}" +
+      "#jet-dev-lens[data-state=reconnecting],#jet-dev-lens[data-state=starting]{{--ring:#9B9EA8;--glow:rgba(155,158,168,.25);border-style:dotted}}" +
+      "#jet-dev-lens[data-state=reconnecting]::after,#jet-dev-lens[data-state=starting]::after{{border-color:rgba(155,158,168,.48);border-style:dotted}}" +
+      "#jet-dev-lens[data-depth=lens]{{width:min(560px,calc(100vw - 32px));height:auto;aspect-ratio:auto;max-height:min(78vh,720px);border-radius:24px}}" +
+      "#jet-dev-lens[data-depth=workbench]{{inset:16px;left:16px;right:16px;top:16px;bottom:16px;width:auto;height:auto;max-width:none;max-height:none;aspect-ratio:auto;border-radius:24px}}" +
+      "#jet-dev-pill{{display:flex;align-items:stretch;flex:none;position:relative;z-index:1}}" +
+      "#jet-dev-pill .head{{display:flex;align-items:center;justify-content:center;width:100%;height:72px;margin:0;padding:0;border:0;border-radius:22px;background:none;color:inherit;font:inherit;cursor:pointer}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .head{{flex:1 1 auto;justify-content:flex-start;gap:11px;width:auto;height:52px;padding:0 16px;min-width:0}}" +
+      "#jet-dev-pill .logo{{display:flex;flex:none;width:49px;height:28px;align-items:center;justify-content:center}}" +
+      "#jet-dev-pill .logo svg{{display:block;width:49px;height:27px}}" +
+      "#jet-dev-pill .word{{display:none;font-size:13px;font-weight:650;letter-spacing:.01em;line-height:1}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .word{{display:inline}}" +
+      "#jet-dev-pill .read{{display:none;font:11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#9B9EA8}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .read:not(:empty){{display:inline}}" +
+      "#jet-dev-lens .sr{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}" +
+      "#jet-dev-pill .tools{{display:none;align-items:center;gap:2px;padding-right:8px;flex:none;position:relative;z-index:1}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-pill .tools{{display:flex}}" +
+      "#jet-dev-pill .tool{{margin:0;padding:6px 9px;border:1px solid transparent;border-radius:8px;background:none;color:#9B9EA8;font:inherit;font-size:12px;line-height:1.2;cursor:pointer;text-decoration:none;white-space:nowrap}}" +
+      "#jet-dev-pill .tool:hover{{color:#F6F5F2;background:#1D2026}}" +
+      "#jet-dev-lens[data-depth=lens] .tool[data-depth=lens],#jet-dev-lens[data-depth=workbench] .tool[data-depth=workbench]{{display:none}}" +
+      "#jet-dev-lens :focus-visible{{outline:2px solid #E8232A;outline-offset:-2px}}" +
+      "#jet-dev-body{{display:none;flex:1 1 auto;min-height:0;flex-direction:column;border-top:1px solid #30343C;background:#101114;position:relative;z-index:1}}" +
+      "#jet-dev-lens:not([data-depth=pill]) #jet-dev-body{{display:flex}}" +
+      "#jet-dev-overlay{{display:none;flex:1 1 auto;min-height:0;flex-direction:column;overflow:auto}}" +
+      "#jet-dev-overlay h3{{margin:0;padding:17px 18px 8px;font-family:inherit;font-size:14px;font-weight:650;line-height:1.3;color:#F6F5F2}}" +
+      "#jet-dev-overlay h3::before{{content:'';display:inline-block;width:9px;height:9px;border:2px solid #E8232A;border-radius:3px;margin-right:9px;vertical-align:0}}" +
+      "#jet-dev-overlay pre{{flex:0 1 auto;margin:0 18px;padding:13px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#F6F5F2;background:#0A0B0D;border:1px solid #30343C;border-radius:10px}}" +
+      "#jet-dev-overlay footer{{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:13px 18px;color:#9B9EA8;font-size:11px}}" +
+      "#jet-dev-overlay footer .parity{{flex:1 1 100%;overflow-wrap:anywhere}}" +
+      "#jet-dev-overlay footer .act{{margin:0;padding:7px 12px;border:1px solid #30343C;border-radius:9px;background:#17191D;color:#F6F5F2;font:inherit;font-size:12px;cursor:pointer;text-decoration:none}}" +
+      "#jet-dev-overlay footer .act.primary{{border-color:#E8232A}}#jet-dev-overlay footer .act:hover{{background:#1D2026}}#jet-dev-overlay footer .act[disabled]{{opacity:.5;cursor:default}}" +
+      "#jet-dev-overlay footer .result{{flex:1 1 100%;min-height:1.4em;overflow-wrap:anywhere}}" +
+      "#jet-dev-panels{{flex:1 1 auto;min-height:0;height:min(62vh,640px);width:100%;border:0;background:#101114}}" +
+      "#jet-dev-panels[hidden]{{display:none}}" +
+      "#jet-dev-shade{{position:fixed;inset:0;z-index:2147483645;display:none;pointer-events:none;background:rgba(16,17,20,.32)}}" +
+      "@media(max-width:560px){{#jet-dev-lens[data-depth=lens]{{left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom));width:auto;max-width:none;max-height:82vh;border-radius:22px}}#jet-dev-lens[data-depth=lens] #jet-dev-panels{{height:68vh}}#jet-dev-lens[data-depth=workbench]{{inset:0;max-width:none;border-radius:0}}#jet-dev-lens[data-depth=workbench] #jet-dev-panels{{height:auto}}}}" +
+      "@media(prefers-reduced-motion:no-preference){{#jet-dev-lens{{transition:width .22s cubic-bezier(.2,.7,.2,1),height .22s cubic-bezier(.2,.7,.2,1),border-radius .22s,box-shadow .22s}}#jet-dev-body{{animation:jet-dev-in .18s ease}}@keyframes jet-dev-in{{from{{opacity:0}}to{{opacity:1}}}}#jet-dev-lens[data-state=building]::after{{animation:jet-dev-ring 1.2s ease-in-out infinite alternate}}@keyframes jet-dev-ring{{to{{opacity:.35}}}}}}" +
+      "@media(prefers-reduced-motion:reduce){{#jet-dev-lens,#jet-dev-body{{transition:none!important;animation:none!important}}}}";
+    document.head.appendChild(style);
+    var root = document.createElement("div");
+    root.id = "jet-dev-lens";
+    root.setAttribute("data-depth", "pill");
+    root.setAttribute("data-state", "ready");
+    root.innerHTML =
+      "<div id=\\"jet-dev-pill\\">" +
+        "<button class=\\"head\\" type=\\"button\\" aria-expanded=\\"false\\" aria-controls=\\"jet-dev-body\\" title=\\"Open Jet development status (Alt+J)\\">" +
+          "<span class=\\"logo\\" aria-hidden=\\"true\\"><svg xmlns=\\"http://www.w3.org/2000/svg\\" viewBox=\\"0 0 120 64\\" focusable=\\"false\\"><path fill=\\"#E8232A\\" d=\\"M112 32 L52 6 L66 32 L52 58 Z\\"></path><rect fill=\\"#E8232A\\" x=\\"26\\" y=\\"14\\" width=\\"18\\" height=\\"6\\" rx=\\"3\\"></rect><rect fill=\\"#E8232A\\" x=\\"4\\" y=\\"29\\" width=\\"36\\" height=\\"6\\" rx=\\"3\\"></rect><rect fill=\\"#E8232A\\" x=\\"16\\" y=\\"44\\" width=\\"24\\" height=\\"6\\" rx=\\"3\\"></rect></svg></span>" +
+          "<span class=\\"word\\" aria-hidden=\\"true\\"></span><span class=\\"read\\" aria-hidden=\\"true\\"></span>" +
+        "</button>" +
+        "<span class=\\"tools\\">" +
+          "<button class=\\"tool\\" type=\\"button\\" data-depth=\\"workbench\\">Open workbench</button>" +
+          "<button class=\\"tool\\" type=\\"button\\" data-depth=\\"lens\\">Lens</button>" +
+          "<button class=\\"tool\\" type=\\"button\\" data-depth=\\"pill\\" aria-label=\\"Close Jet development status (Escape)\\" title=\\"Close (Escape)\\">&#215;</button>" +
+        "</span>" +
+      "</div>" +
+      "<span class=\\"sr\\" id=\\"jet-dev-status\\" role=\\"status\\" aria-live=\\"polite\\"></span>" +
+      "<div id=\\"jet-dev-body\\">" +
+        "<div id=\\"jet-dev-overlay\\"><h3></h3><pre></pre><footer><span class=\\"parity\\"></span>" +
+          "<button class=\\"act primary\\" type=\\"button\\" data-act=\\"source\\">Fix in source</button>" +
+          "<button class=\\"act\\" type=\\"button\\" data-act=\\"rebuild\\">Rebuild</button>" +
+          "<a class=\\"act\\" target=\\"_blank\\" rel=\\"noopener\\">Open error details</a><span class=\\"result\\" role=\\"status\\"></span></footer></div>" +
+        "<iframe id=\\"jet-dev-panels\\" title=\\"Jet devtools\\" hidden></iframe>" +
+      "</div>";
+    document.body.appendChild(root);
+    var shade = document.createElement("div");
+    shade.id = "jet-dev-shade";
+    shade.setAttribute("aria-hidden", "true");
+    document.body.appendChild(shade);
+    ui = {{
+      root: root, shade: shade,
+      head: root.querySelector(".head"), word: root.querySelector(".word"), read: root.querySelector(".read"),
+      status: root.querySelector("#jet-dev-status"), overlay: root.querySelector("#jet-dev-overlay"), frame: root.querySelector("#jet-dev-panels")
+    }};
+    ui.overlayTitle = ui.overlay.querySelector("h3");
+    ui.overlayBody = ui.overlay.querySelector("pre");
+    ui.overlayFooter = ui.overlay.querySelector("footer .parity");
+    ui.overlayResult = ui.overlay.querySelector("footer .result");
+    ui.overlay.querySelector("footer a").href = devtoolsUrl("/__jet_devtools/error");
+    ui.head.addEventListener("click", toggleLens);
+    root.querySelectorAll(".tool[data-depth]").forEach(function (button) {{
+      button.addEventListener("click", function () {{
+        if (button.dataset.depth === "pill") back(true, true); else setDepth(button.dataset.depth, true);
+      }});
+    }});
+    ui.overlay.querySelector("[data-act=source]").addEventListener("click", openSourceTool);
+    ui.overlay.querySelector("[data-act=rebuild]").addEventListener("click", function (event) {{ rebuild(event.currentTarget); }});
+    document.addEventListener("keydown", onKey);
+    addEventListener("message", function (event) {{
+      if (event.origin === location.origin && event.data && event.data.jet === "devtools") onKey(event.data);
+    }});
+  }}
+  function onKey(event) {{
+    if (event.key === "Escape") {{ back(true); return; }}
+    if (event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "j" || event.key === "J")) {{
+      if (event.preventDefault) event.preventDefault();
+      toggleLens();
+    }}
+  }}
+  function depth() {{ return ui ? ui.root.getAttribute("data-depth") : "pill"; }}
+  function toggleLens() {{
+    if (depth() !== "pill") {{ back(true, true); return; }}
+    dismissedDiagnostic = null;
+    errorFace = !!lastStatus && lastStatus.state === "error";
+    setDepth("lens", true);
+  }}
+  function back(byUser, toPill) {{
+    var current = depth();
+    if (current === "pill") return;
+    if (current === "workbench" && !toPill) {{ setDepth("lens", byUser); return; }}
+    if (errorFace) dismissedDiagnostic = ui.overlayBody.textContent;
+    errorFace = false;
+    autoOpened = false;
+    setDepth("pill", byUser);
+  }}
+  function frameRoute(next, extra) {{
+    var route = next === "workbench" ? "/__jet_devtools/workbench" : "/__jet_devtools";
+    if (extra || ui.frame.getAttribute("data-route") !== route) {{
+      ui.frame.setAttribute("data-route", route);
+      ui.frame.src = devtoolsUrl(route) + (extra || "");
+    }}
+  }}
+  function setDepth(next, byUser) {{
+    ensureUi();
+    var current = depth();
+    if (next === current) return;
+    ui.root.setAttribute("data-depth", next);
+    ui.head.setAttribute("aria-expanded", next === "pill" ? "false" : "true");
+    if (next === "pill") {{
+      ui.frame.removeAttribute("data-route");
+      ui.frame.src = "about:blank";
+    }} else frameRoute(next);
+    renderFaces();
+    if (byUser) {{
+      if (next === "pill") ui.head.focus();
+      else ui.root.querySelector(".tool[data-depth=pill]").focus();
+    }}
+  }}
+  function openSourceTool() {{
+    dismissedDiagnostic = ui.overlayBody.textContent;
+    errorFace = false;
+    autoOpened = false;
+    frameRoute(depth() === "workbench" ? "workbench" : "lens", "&tool=source");
+    renderFaces();
+    ui.frame.focus();
+  }}
+  function rebuild(button) {{
+    button.disabled = true;
+    ui.overlayResult.textContent = "Requesting rebuild…";
+    fetch(devtoolsUrl("/__jet_devtools/state"), {{ cache: "no-store" }})
+      .then(function (r) {{ if (!r.ok) throw new Error("devtools state unavailable (HTTP " + r.status + ")"); return r.json(); }})
+      .then(function (st) {{
+        if (st.tools && st.tools.rebuild && !st.tools.rebuild.available) throw new Error(st.tools.rebuild.reason || "rebuild is not available on this host");
+        var id = "rebuild-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+        return fetch(devtoolsUrl("/__jet_devtools"), {{
+          method: "POST", cache: "no-store", headers: {{ "content-type": "application/json" }},
+          body: JSON.stringify({{ protocol: "jet.devtools.v1", session_id: st.session_id, started_at_ms: Date.now(), direction: "host_to_runtime",
+            commands: [{{ kind: "ProjectRebuild", payload: {{ session_id: st.session_id, request_id: id, expected_revision: st.revision }} }}] }})
+        }});
+      }})
+      .then(function (r) {{
+        if (!r.ok) return r.text().then(function (t) {{ throw new Error(t || ("rebuild refused (HTTP " + r.status + ")")); }});
+        ui.overlayResult.textContent = "Rebuild queued — this tile follows the build";
+      }})
+      .catch(function (e) {{ ui.overlayResult.textContent = String(e.message || e); }})
+      .finally(function () {{ button.disabled = false; }});
+  }}
+  function renderFaces() {{
+    var open = depth() !== "pill";
+    ui.overlay.style.display = open && errorFace ? "flex" : "none";
+    ui.frame.hidden = !(open && !errorFace);
+  }}
+  function renderStatus(s) {{
+    ensureUi();
+    lastStatus = s;
+    var state = s.state || "ready";
+    ui.root.setAttribute("data-state", state);
+    // The hidden status is the non-color equivalent of the ring.
+    ui.head.setAttribute("aria-label", "Jet development status: " + (s.message || state));
+    ui.status.textContent = (s.message || state) + (s.diagnostic ? "\\n" + s.diagnostic : "");
+    ui.word.textContent = state;
+    ui.read.textContent = state === "error" ? (s.code || "") :
+      (state === "ready" && s.last_build_ms > 0 ? (s.last_build_ms / 1000).toFixed(1) + "s" : "");
+    var stale = state === "building" || state === "reconnecting" || state === "error";
+    ui.shade.style.display = stale ? "block" : "none";
+    if (state === "error") {{
+      var diagnostic = s.diagnostic || "";
+      ui.overlayBody.textContent = diagnostic;
+      ui.overlayTitle.textContent = "Build failed — " + (s.file || "Jet source");
+      ui.overlayFooter.textContent = (s.message || state) + " — clears on the next clean build";
+      if (diagnostic !== dismissedDiagnostic) {{
+        if (depth() === "pill") {{ errorFace = true; autoOpened = true; setDepth("lens", false); }}
+        else if (errorFace) {{ ui.overlayResult.textContent = ""; }}
+        else dismissedDiagnostic = diagnostic;
+      }}
+    }} else {{
+      errorFace = false;
+      dismissedDiagnostic = null;
+      if (autoOpened) {{ autoOpened = false; setDepth("pill", false); }}
+    }}
+    renderFaces();
+  }}
+  function notifyWebSwap() {{
+    var snapshot = typeof globalThis.__jetWebSwapSnapshot === "function"
+      ? globalThis.__jetWebSwapSnapshot() : null;
+    var publish = snapshot
+      ? fetch("/__jet_devtools/swap?session=" + encodeURIComponent(jetDevSession), {{
+          method: "POST", cache: "no-store", headers: {{"content-type":"application/json"}}, body: JSON.stringify(snapshot)
+        }})
+      : Promise.resolve(null);
+    publish
+      .then(function (r) {{ if (r && !r.ok) throw new Error("web DOM snapshot rejected"); }})
+      .then(function () {{ return fetch("/__jet_devtools/swap?session=" + encodeURIComponent(jetDevSession), {{ cache: "no-store" }}); }})
+      .then(function (r) {{ if (!r.ok) throw new Error("web swap rejected"); return r.json(); }})
+      .then(function (swap) {{
+        dispatchEvent(new CustomEvent("jet:web-swap", {{ detail: swap }}));
+        document.dispatchEvent(new CustomEvent("jet:web-swap", {{ detail: swap }}));
+      }})
+      .catch(function () {{}});
+  }}
+  function poll() {{
+    fetch("/__jet_dev_status?client=" + encodeURIComponent(jetDevClient) + "&session=" + encodeURIComponent(jetDevSession), {{ cache: "no-store" }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (s) {{
+        var recoveredConnection = reconnectAttempt > 0;
+        reconnectAttempt = 0;
+        renderStatus(s);
+        var v = String(s.version || "");
+        if (jetDevVersion === null) {{
+          jetDevVersion = v;
+          if (recoveredConnection) notifyWebSwap();
+          return;
+        }}
+        if (recoveredConnection || v !== jetDevVersion) {{ jetDevVersion = v; notifyWebSwap(); }}
+      }})
+      .catch(function () {{
+        reconnectAttempt += 1;
+        renderStatus({{ state: "reconnecting", message: "reconnecting · waiting for connection" }});
+      }})
+      .finally(function () {{ setTimeout(poll, {poll_ms}); }});
+  }}
+  setTimeout(poll, 0);
+}})();
+</script>
+""", poll_ms: LIVE_RELOAD_POLL_MS, perf_script: perf_script, session_secret: jet_foundation.JSON.json_escape(session_secret))
+}
+// Rust: crates/jet-devserver/src/WebHost.rs:6566
+fn inject_live_reload_with_script(html: String, script: String) -> String? {
+    output_len :: html.len().checked_add(script.len())?
+    // ASCII case-insensitive scan preserves byte offsets without a lowercase allocation.
+    insertion :: html.as_bytes().windows(b"</body>".len()).position((tag) -> tag.iter().zip(b"</body>").all(((left, right)) -> left.eq_ignore_ascii_case(right)))
+    out := String.with_capacity(output_len)
+    if insertion == .Val(index) {
+        out.push_str(html[..index]); out.push_str(script); out.push_str(html[index..])
+    } else { out.push_str(html); out.push_str(script) }
+    return .Val(^out)
+}
 

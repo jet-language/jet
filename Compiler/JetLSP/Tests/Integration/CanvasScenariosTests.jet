@@ -1,0 +1,338 @@
+use std.[fs, env, process, thread]
+use std.process.[Command]
+// Helpers and fixtures are owned solely by CanvasScenarios.jet.
+// GATE #4494: real browser/CLI processes, threads and filesystem providers.
+// GATE #4483: Unix permissions tests dispatch on the selected target family.
+
+// Rust: tests/canvas_scenarios.rs:47
+#Test("full_verification_uses_clean_short_external_tmpdir") {
+    repo :: OSPath.from(env.manifest_dir())
+    probe :: (mode: String, parent: OSPath?) -> {
+        command := Command.new("bash")
+        command.current_dir(repo).arg("Tools/agent/verify-full.sh").arg(mode).env("JET_NIX_TMP_CLEANED", "1").env_remove("JET_VERIFY_TMPDIR")
+        if parent != none -> command.env("JET_VERIFY_TMPDIR", parent.unwrap())
+        output :: command.output().expect("probe full-verification temp root")
+        roots :: String.from_utf8(output.stdout).unwrap().lines().map(value -> OSPath.from(value)).collect()
+        assert_eq(roots.len(), 4, "temp probe must report every exported temp root")
+        assert(roots.iter().all(path -> path == roots[0]))
+        assert(roots[0].file_name().is_some_and(name -> name.to_string_lossy().starts_with("jet-verify.")))
+        assert(!roots[0].exists(), "verification temp root must be removed on exit")
+        (output.status, roots[0].clone())
+    }
+    (status, root) :: probe("--probe-temp-root", none)
+    assert(status.success())
+    assert_eq(root.parent(), OSPath.from("/tmp"))
+    override_parent :: env.temp_dir().join("jet-verify-parent-{process.id()}-{thread.current().id():?}")
+    fs.create_dir_all(override_parent).unwrap()
+    (status, root) :: probe("--probe-temp-root", override_parent)
+    assert(status.success())
+    assert_eq(root.parent(), override_parent.as_path())
+    (status, root) :: probe("--probe-temp-root-signal", override_parent)
+    assert_eq(status.code(), 143)
+    assert_eq(root.parent(), override_parent.as_path())
+    fs.remove_dir(override_parent).unwrap()
+}
+
+// Rust: tests/canvas_scenarios.rs:103
+#Test("strict_full_verification_rejects_each_missing_canvas_tool_once") {
+    if core.sys.target.selected_family() == "unix" {
+        repo :: OSPath.from(env.manifest_dir())
+        tools :: env.temp_dir().join("jet-canvas-preflight-tools-{process.id()}-{thread.current().id():?}")
+        fs.create_dir_all(tools).unwrap()
+        chromium :: tools.join("chromium")
+        firefox :: tools.join("firefox")
+        geckodriver :: tools.join("geckodriver")
+        node :: tools.join("node")
+        fs.write(chromium, "#!/bin/sh\necho 'Chromium 1'\n").unwrap()
+        fs.write(firefox, "#!/bin/sh\necho 'Mozilla Firefox 1'\n").unwrap()
+        fs.write(geckodriver, "#!/bin/sh\necho 'geckodriver 1'\n").unwrap()
+        fs.write(node, "#!/bin/sh\necho 'v1.0.0'\n").unwrap()
+        loop path in [chromium, firefox, geckodriver, node] -> fs.set_permissions(path, fs.Permissions.from_mode(0o755)).unwrap()
+        loop (missing, chromium, firefox, geckodriver, node) in [
+            ("chromium", tools.join("missing-chromium"), firefox.clone(), geckodriver.clone(), node.clone()),
+            ("firefox", chromium.clone(), tools.join("missing-firefox"), geckodriver.clone(), node.clone()),
+            ("geckodriver", chromium.clone(), firefox.clone(), tools.join("missing-geckodriver"), node.clone()),
+            ("node", chromium, firefox, geckodriver, tools.join("missing-node"))
+        ] {
+            output :: Command.new("bash").current_dir(repo).arg("Tools/agent/verify-full.sh")
+                .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1").env("JET_VERIFY_TEMP_PROBE_ONLY", "1").env("JET_NIX_TMP_CLEANED", "1")
+                .env("JET_CANVAS_CHROMIUM", chromium).env("JET_CANVAS_FIREFOX", firefox).env("JET_CANVAS_GECKODRIVER", geckodriver).env("JET_CANVAS_NODE", node)
+                .output().expect("run strict Canvas prerequisite preflight")
+            assert(!output.status.success(), "missing {missing} must fail")
+            stderr :: String.from_utf8_lossy(output.stderr)
+            expected :: "error: Canvas interaction tests require Chromium, Firefox/geckodriver, and Node; missing: {missing}. Run Tools/agent/jet-env full Tools/agent/verify-full.sh."
+            assert_eq(stderr.matches(expected).count(), 1, stderr)
+            assert(!stderr.contains("ignored:"), stderr)
+        }
+        fs.remove_dir_all(tools).unwrap()
+    }
+}
+
+// Rust: tests/canvas_scenarios.rs:179
+#Test("strict_full_verification_rejects_executable_impostors") {
+    repo :: OSPath.from(env.manifest_dir())
+    output :: Command.new("bash").current_dir(repo).arg("Tools/agent/verify-full.sh")
+        .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1").env("JET_NIX_TMP_CLEANED", "1")
+        .env("JET_CANVAS_CHROMIUM", "true").env("JET_CANVAS_FIREFOX", "true").env("JET_CANVAS_GECKODRIVER", "true").env("JET_CANVAS_NODE", "true")
+        .output().expect("run strict Canvas prerequisite preflight")
+    assert(!output.status.success(), "arbitrary executables must fail identity checks")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert_eq(stderr.matches("Canvas interaction tests require").count(), 1, stderr)
+    assert(stderr.contains("missing: chromium,firefox,geckodriver,node"), stderr)
+}
+
+// Rust: tests/canvas_scenarios.rs:209
+#Test("strict_full_verification_accepts_canvas_tools_in_dev_shell") {
+    repo :: OSPath.from(env.manifest_dir())
+    chromium :: resolve_executable(OSPath.from("chromium")).expect("dev-shell chromium path")
+    firefox :: resolve_executable(OSPath.from("firefox")).expect("dev-shell firefox path")
+    geckodriver :: resolve_executable(OSPath.from("geckodriver")).expect("dev-shell geckodriver path")
+    node :: resolve_executable(OSPath.from("node")).expect("dev-shell node path")
+    output :: Command.new("bash").current_dir(repo).arg("Tools/agent/verify-full.sh")
+        .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1").env("JET_NIX_TMP_CLEANED", "1")
+        .env("JET_CANVAS_CHROMIUM", chromium).env("JET_CANVAS_FIREFOX", firefox).env("JET_CANVAS_GECKODRIVER", geckodriver).env("JET_CANVAS_NODE", node)
+        .output().expect("run strict Canvas prerequisite preflight")
+    assert(output.status.success(), "dev-shell Canvas prerequisite preflight failed: {String.from_utf8_lossy(output.stderr)}")
+}
+
+// Rust: tests/canvas_scenarios.rs:234
+#Test("cdp_driver_owns_parallel_browsers_under_long_tmpdir") {
+    tools :: canvas_tools()
+    if tools == none {
+        eprintln("ignored: CDP lifecycle regression needs dev-shell Chromium and Node")
+        return
+    }
+    _permits :: (0..MAX_CANVAS_BROWSERS).map(_ -> CanvasBrowserPermit.acquire()).collect()
+    repo :: OSPath.from(env.manifest_dir())
+    repeated :: "x".repeat(120)
+    long_tmp :: env.temp_dir().join("canvas-driver-lifecycle-{repeated}-{process.id()}")
+    fs.create_dir_all(long_tmp).expect("create long Canvas driver temp root")
+    output :: Command.new(tools.unwrap().node).current_dir(repo).env("CHROMIUM", tools.unwrap().chromium).env("TMPDIR", long_tmp)
+        .arg("Tools/canvas-test/driver-lifecycle.mjs").arg(MAX_CANVAS_BROWSERS.to_string()).output().expect("run Canvas CDP lifecycle regression")
+    fs.remove_dir_all(long_tmp).expect("remove long Canvas driver temp root")
+    assert(output.status.success(), "parallel CDP lifecycle failed\n--- stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("PASS 4 isolated Chromium lifecycles"))
+}
+
+// Rust: tests/canvas_scenarios.rs:511
+#Test("canvas_onboarding_tour") { run_canvas_scenario("canvas-onboarding-tour") }
+// Rust: tests/canvas_scenarios.rs:516
+#Test("keyboard_cheat_sheet_accessibility_states") { run_canvas_scenario("keyboard-cheat-sheet-accessibility-states") }
+// Rust: tests/canvas_scenarios.rs:521
+#Test("open_and_render") { run_canvas_scenario("open-and-render") }
+// Rust: tests/canvas_scenarios.rs:526
+#Test("canvas_real_client_loads_projection_and_keeps_devserver_alive") { run_canvas_scenario(DEVSERVER_REAL_CLIENT_SCENARIO) }
+// Rust: tests/canvas_scenarios.rs:531
+#Test("resident_session_ide_state_matrix") { run_canvas_scenario("resident-session-ide-state-matrix") }
+// Rust: tests/canvas_scenarios.rs:536
+#Test("canvas_workbench_e2e") {
+    assert(canvas_tools() != none, "Canvas workbench E2E needs dev-shell Chromium and Node; run Tools/agent/jet-env full")
+    run_canvas_scenario(WORKBENCH_E2E_SCENARIO)
+}
+// Rust: tests/canvas_scenarios.rs:545
+#Test("session_surface_matrix") {
+    run_target_independent_scenario(SESSION_SURFACE_MATRIX_SCENARIO)
+    run_target_independent_scenario_for_target(SESSION_SURFACE_MATRIX_SCENARIO, EXPLICIT_WEB_TARGET)
+}
+// Rust: tests/canvas_scenarios.rs:554
+#Test("review_diff_overlays") { run_canvas_scenario("review-diff-overlays") }
+// Rust: tests/canvas_scenarios.rs:559
+#Test("pan_zoom_fit") { run_canvas_scenario("pan-zoom-fit") }
+// Rust: tests/canvas_scenarios.rs:564
+#Test("click_select_details") { run_canvas_scenario("click-select-details") }
+// Rust: tests/canvas_scenarios.rs:569
+#Test("node_drag_persists_without_source_change") { run_canvas_scenario("node-drag-persists-without-source-change") }
+// Rust: tests/canvas_scenarios.rs:574
+#Test("selection_marquee_modifiers_local_move") {
+    assert(canvas_tools() != none, "selection/marquee/local-move proof requires Chromium and Node; run Tools/agent/jet-env full")
+    run_canvas_scenario("selection-marquee-modifiers-local-move")
+}
+// Rust: tests/canvas_scenarios.rs:583
+#Test("clipboard_copy_paste") { run_canvas_scenario("clipboard-copy-paste") }
+// Rust: tests/canvas_scenarios.rs:588
+#Test("clipboard_paste_as_staged") { run_canvas_scenario("clipboard-paste-as-staged") }
+// Rust: tests/canvas_scenarios.rs:593
+#Test("clipboard_mixed_selection_staged_fallback") { run_canvas_scenario("clipboard-mixed-selection-staged-fallback") }
+// Rust: tests/canvas_scenarios.rs:598
+#Test("clipboard_duplicate_undo_redo") { run_canvas_scenario("clipboard-duplicate-undo-redo") }
+// Rust: tests/canvas_scenarios.rs:603
+#Test("clipboard_stale_selection_refusal") { run_canvas_scenario("clipboard-stale-selection-refusal") }
+// Rust: tests/canvas_scenarios.rs:608
+#Test("clipboard_refuses_entry_selection") { run_canvas_scenario("clipboard-refuses-entry-selection") }
+// Rust: tests/canvas_scenarios.rs:613
+#Test("read_graph_overview") { run_canvas_scenario("read-graph-overview") }
+// Rust: tests/canvas_scenarios.rs:618
+#Test("component_tree_and_palette") { run_canvas_scenario("component-tree-and-palette") }
+// Rust: tests/canvas_scenarios.rs:623
+#Test("canvas_rad_callback_creation") { run_canvas_scenario("canvas-rad-callback-creation") }
+// Rust: tests/canvas_scenarios.rs:628
+#Test("canvas_rad_callback_undo") { run_canvas_scenario("canvas-rad-callback-undo") }
+// Rust: tests/canvas_scenarios.rs:633
+#Test("canvas_rad_callback_redo") { run_canvas_scenario("canvas-rad-callback-redo") }
+// Rust: tests/canvas_scenarios.rs:638
+#Test("canvas_rad_callback_escape") { run_canvas_scenario("canvas-rad-callback-escape") }
+// Rust: tests/canvas_scenarios.rs:643
+#Test("canvas_rad_callback_focus") { run_canvas_scenario("canvas-rad-callback-focus") }
+// Rust: tests/canvas_scenarios.rs:648
+#Test("canvas_rad_callback_fresh_projection") { run_canvas_scenario("canvas-rad-callback-fresh-projection") }
+// Rust: tests/canvas_scenarios.rs:653
+#Test("canvas_rad_callback_failure") { run_canvas_scenario("canvas-rad-callback-failure") }
+// Rust: tests/canvas_scenarios.rs:658
+#Test("canvas_rad_handler_navigation") { run_canvas_scenario("canvas-rad-handler-navigation") }
+// Rust: tests/canvas_scenarios.rs:663
+#Test("palette_insert_core_fn") { run_canvas_scenario("palette-insert-core-fn") }
+// Rust: tests/canvas_scenarios.rs:668
+#Test("palette_insert_imported_alias_function") { run_canvas_scenario("palette-insert-imported-alias-function") }
+// Rust: tests/canvas_scenarios.rs:673
+#Test("library_panel") { run_canvas_scenario("library-panel") }
+// Rust: tests/canvas_scenarios.rs:678
+#Test("library_panel_events_example") { run_canvas_scenario("library-panel-events") }
+// Rust: tests/canvas_scenarios.rs:683
+#Test("palette_insert_catalog_sweep") { run_canvas_scenario("palette-insert-catalog-sweep") }
+// Rust: tests/canvas_scenarios.rs:688
+#Test("palette_insert_flow_variable_project_core") { run_canvas_scenario("palette-insert-flow-variable-project-core") }
+// Rust: tests/canvas_scenarios.rs:693
+#Test("wire_data_and_exec") { run_canvas_scenario("wire-data-and-exec") }
+// Rust: tests/canvas_scenarios.rs:698
+#Test("data_pin_drag_to_wire") { run_canvas_scenario("data-pin-drag-to-wire") }
+// Rust: tests/canvas_scenarios.rs:703
+#Test("data_pin_type_gate") { run_canvas_scenario("data-pin-type-gate") }
+// Rust: tests/canvas_scenarios.rs:708
+#Test("exec_rewire_reorders_statements") { run_canvas_scenario("exec-rewire-reorders-statements") }
+// Rust: tests/canvas_scenarios.rs:713
+#Test("exec_rewire_refuses_cross_block") { run_canvas_scenario("exec-rewire-refuses-cross-block") }
+// Rust: tests/canvas_scenarios.rs:718
+#Test("exec_rewire_binding_order_diagnostic") { run_canvas_scenario("exec-rewire-binding-order-diagnostic") }
+// Rust: tests/canvas_scenarios.rs:723
+#Test("exec_convergence_preview") { run_canvas_scenario("exec-convergence-preview") }
+// Rust: tests/canvas_scenarios.rs:728
+#Test("exec_convergence_structured_join") { run_canvas_scenario("exec-convergence-structured-join") }
+// Rust: tests/canvas_scenarios.rs:733
+#Test("exec_convergence_apply") { run_canvas_scenario("exec-convergence-apply") }
+// Rust: tests/canvas_scenarios.rs:738
+#Test("exec_convergence_selected_span") { run_canvas_scenario("exec-convergence-selected-span") }
+// Rust: tests/canvas_scenarios.rs:743
+#Test("exec_convergence_refuses_out_of_scope") { run_canvas_scenario("exec-convergence-refuses-out-of-scope") }
+// Rust: tests/canvas_scenarios.rs:748
+#Test("exec_convergence_explicit_strategies") { run_canvas_scenario("exec-convergence-explicit-strategies") }
+// Rust: tests/canvas_scenarios.rs:753
+#Test("exec_convergence_escape") { run_canvas_scenario("exec-convergence-escape") }
+// Rust: tests/canvas_scenarios.rs:758
+#Test("exec_convergence_stale") { run_canvas_scenario("exec-convergence-stale") }
+// Rust: tests/canvas_scenarios.rs:763
+#Test("branch_insertion_targets") { run_canvas_scenario("branch-insertion-targets") }
+// Rust: tests/canvas_scenarios.rs:768
+#Test("pattern_arm_add_edit_remove") { run_canvas_scenario("pattern-arm-add-edit-remove") }
+// Rust: tests/canvas_scenarios.rs:773
+#Test("pattern_arm_invalid_refused") { run_canvas_scenario("pattern-arm-invalid-refused") }
+// Rust: tests/canvas_scenarios.rs:778
+#Test("node_state_off_toggle") { run_canvas_scenario("node-state-off-toggle") }
+// Rust: tests/canvas_scenarios.rs:783
+#Test("node_state_debug_only_toggle") { run_canvas_scenario("node-state-debug-only-toggle") }
+// Rust: tests/canvas_scenarios.rs:788
+#Test("multi_input_append_remove") { run_canvas_scenario("multi-input-append-remove") }
+// Rust: tests/canvas_scenarios.rs:793
+#Test("inline_edit_values") { run_canvas_scenario("inline-edit-values") }
+// Rust: tests/canvas_scenarios.rs:798
+#Test("promote_pin_keyboard_gesture") { run_canvas_scenario("promote-pin-keyboard-gesture") }
+// Rust: tests/canvas_scenarios.rs:803
+#Test("conversion_keyboard_gesture") { run_canvas_scenario("conversion-keyboard-gesture") }
+// Rust: tests/canvas_scenarios.rs:808
+#Test("math_expression_keyboard_edit") { run_canvas_scenario("math-expression-keyboard-edit") }
+// Rust: tests/canvas_scenarios.rs:813
+#Test("collapse_expand_keyboard_gesture") { run_canvas_scenario("collapse-expand-keyboard-gesture") }
+// Rust: tests/canvas_scenarios.rs:818
+#Test("source_comment_keyboard_reload") { run_canvas_scenario("source-comment-keyboard-reload") }
+// Rust: tests/canvas_scenarios.rs:823
+#Test("workspace_keyboard_view_state") { run_canvas_scenario("workspace-keyboard-view-state") }
+// Rust: tests/canvas_scenarios.rs:828
+#Test("node_docs_pointer_hover") { run_canvas_scenario("node-docs-pointer-hover") }
+// Rust: tests/canvas_scenarios.rs:833
+#Test("canvas_teaching_empty_states") { run_canvas_scenario("canvas-teaching-empty-states") }
+// Rust: tests/canvas_scenarios.rs:838
+#Test("harness_checked_doc_empty_noop_selftest") { run_canvas_scenario("harness-checked-doc-empty-noop-selftest") }
+// Rust: tests/canvas_scenarios.rs:843
+#Test("rename_variable_sidebar") { run_canvas_scenario("rename-variable-sidebar") }
+// Rust: tests/canvas_scenarios.rs:848
+#Test("project_rename_preview_commit") {
+    assert(canvas_tools() != none, "checked cross-file edit proof requires Chromium and Node; run Tools/agent/jet-env full")
+    run_canvas_scenario("project-rename-preview-commit")
+}
+// Rust: tests/canvas_scenarios.rs:857
+#Test("details_scalar_enum_reference_editors") { run_canvas_scenario("details-scalar-enum-reference-editors") }
+// Rust: tests/canvas_scenarios.rs:862
+#Test("details_collection_nested_editors") { run_canvas_scenario("details-collection-nested-editors") }
+// Rust: tests/canvas_scenarios.rs:867
+#Test("traits_panel_authoring") { run_canvas_scenario("traits-panel-authoring") }
+// Rust: tests/canvas_scenarios.rs:872
+#Test("events_panel_authoring") { run_canvas_scenario("events-panel-authoring") }
+// Rust: tests/canvas_scenarios.rs:877
+#Test("fallible_context") { run_canvas_scenario("fallible-context") }
+// Rust: tests/canvas_scenarios.rs:882
+#Test("excluded_entry_rendering") { run_canvas_scenario("excluded-entry-rendering") }
+// Rust: tests/canvas_scenarios.rs:887
+#Test("no_dead_end_ad_hoc_insert") { run_canvas_scenario("no-dead-end-ad-hoc-insert") }
+// Rust: tests/canvas_scenarios.rs:892
+#Test("failed_insert_shows_panel") { run_canvas_scenario("failed-insert-shows-panel") }
+// Rust: tests/canvas_scenarios.rs:897
+#Test("check_button_populates_panel") { run_canvas_scenario("check-button-populates-panel") }
+// Rust: tests/canvas_scenarios.rs:902
+#Test("bubble_appears_and_clears") { run_canvas_scenario("bubble-appears-and-clears") }
+// Rust: tests/canvas_scenarios.rs:907
+#Test("undo_restores_source") { run_canvas_scenario("undo-restores-source") }
+// Rust: tests/canvas_scenarios.rs:912
+#Test("undo_failure_preserves_history") { run_canvas_scenario("undo-failure-preserves-history") }
+// Rust: tests/canvas_scenarios.rs:917
+#Test("undo_depth_20_mixed_run") { run_canvas_scenario("undo-depth-20-mixed-run") }
+// Rust: tests/canvas_scenarios.rs:922
+#Test("run_button_output_visible") { run_canvas_scenario("run-button-output-visible") }
+// Rust: tests/canvas_scenarios.rs:927
+#Test("debug_live_session") {
+    assert(canvas_tools() != none, "debug live-session proof requires Chromium and Node; run Tools/agent/jet-env full")
+    run_canvas_scenario("debug-live-session")
+}
+// Rust: tests/canvas_scenarios.rs:936
+#Test("debug_runtime_values_staleness_liveness") {
+    assert(canvas_tools() != none, "debug staleness/liveness proof requires Chromium and Node; run Tools/agent/jet-env full")
+    run_canvas_scenario("debug-runtime-values-staleness-liveness")
+}
+// Rust: tests/canvas_scenarios.rs:945
+#Test("debug_breakpoints_run_control_gestures") { run_canvas_scenario("debug-breakpoints-run-control-gestures") }
+// Rust: tests/canvas_scenarios.rs:950
+#Test("graph_source_toggle_preserves_selection") { run_canvas_scenario("graph-source-toggle-preserves-selection") }
+// Rust: tests/canvas_scenarios.rs:955
+#Test("canvas_rad_two_way_round_trip") {
+    assert(canvas_tools() != none, "Canvas RAD round-trip proof requires Chromium and Node; run Tools/agent/jet-env full")
+    run_canvas_scenario("canvas-rad-two-way-round-trip")
+}
+// Rust: tests/canvas_scenarios.rs:964
+#Test("random_ops_source_sync") { run_canvas_scenario("random-ops-source-sync") }
+// Rust: tests/canvas_scenarios.rs:969
+#Test("harness_click_noop_selftest") { run_canvas_scenario("harness-click-noop-selftest") }
+// Rust: tests/canvas_scenarios.rs:974
+#Test("big_project_perf_budget") {
+    tools :: canvas_tools().unwrap_or_else(() -> panic("big-project-perf needs dev-shell Chromium and Node; no skipped sample path"))
+    loop clean_run in 1..=2 {
+        eprintln("BIG_PROJECT_PERF clean_run={clean_run}/2")
+        run_browser_scenario(BIG_PROJECT_SCENARIO, "chromium", tools.node, [("CHROMIUM", tools.chromium)])
+    }
+}
+// Rust: tests/canvas_scenarios.rs:990
+#Test("gecko_smoke") {
+    if env.var_os("JET_CANVAS_GECKO_SMOKE").as_deref() != "1" {
+        eprintln("ignored: Gecko smoke lane not selected")
+        return
+    }
+    tools :: gecko_tools().unwrap_or_else(error -> panic("{error}"))
+    run_gecko_cleanup_probe(tools)
+    loop name in ["open-and-render", "pan-zoom-fit", "click-select-details", "palette-insert-core-fn", "wire-data-and-exec", "undo-restores-source", "check-button-populates-panel", "random-ops-source-sync"] {
+        run_browser_scenario(name, "firefox", tools.node, [("FIREFOX", tools.firefox), ("GECKODRIVER", tools.geckodriver)])
+    }
+}
+// Rust: tests/canvas_scenarios.rs:1385
+#Test("canvas_cases_same_name_get_distinct_directories") {
+    repo :: OSPath.from(env.manifest_dir())
+    first :: CanvasCase.new(repo, "undo-restores-source")
+    second :: CanvasCase.new(repo, "undo-restores-source")
+    assert_ne(first.dir, second.dir)
+}

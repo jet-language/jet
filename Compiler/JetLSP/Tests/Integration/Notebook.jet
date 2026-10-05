@@ -1,0 +1,51 @@
+// Rust: tests/notebook.rs:1-16
+use tests.common
+use jet.REPL.Notebook.[decide_render, export_ipynb, export_jet, import_ipynb, merge_by_id, quarantine_outputs, run_headless_script, save_jetnb, CellKind, ClientKind, JetNotebook, Kernel, MimeBundle, RenderDecision, RerunDecision, TrustStore, POLICY_VERSION]
+use std.[env, thread]
+use std.process.[Child, Command]
+use std.net.[TcpListener, TcpStream]
+use std.time.[Duration, Instant]
+
+// Rust: tests/notebook.rs:509
+struct RunningNotebook {
+    child: Child
+    // Rust: tests/notebook.rs:512
+    // GATE #4494: destructor must kill and reap the real child even on panic.
+    fn drop(&self) -> {
+        _ :: &self.child.kill()
+        _ :: &self.child.wait()
+    }
+}
+
+// Rust: tests/notebook.rs:518
+fn command_path(name: String, environment_name: String) -> OSPath {
+    env.var_os(environment_name).map((value) -> OSPath(value)) ?? OSPath(name)
+}
+
+// Rust: tests/notebook.rs:522
+fn command_available(name: String, environment_name: String) -> Bool {
+    Command.new(command_path(name, environment_name)).arg("--version").output().is_ok()
+}
+
+// Rust: tests/notebook.rs:529
+fn free_loopback_port() -> U16 {
+    TcpListener.bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
+}
+
+// Rust: tests/notebook.rs:537
+// GATE #4494: actual TCP readiness handshake and timed reads.
+fn wait_for_notebook_server(port: U16, token: String) -> {
+    deadline :: Instant.now() + Duration.from_secs(10)
+    loop {
+        assert(Instant.now() < deadline, "notebook server did not become ready")
+        if TcpStream.connect(("127.0.0.1", port)) == Ok(stream) {
+            _ :: &stream.set_read_timeout(Val(Duration.from_millis(250)))
+            request :: "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+            _ :: &stream.write_all(request.bytes())
+            response := ""
+            _ :: &stream.read_to_string(&response)
+            if response.starts_with("HTTP/1.1 200") && response.contains("\"ok\":true") -> return
+        }
+        thread.sleep(Duration.from_millis(25))
+    }
+}

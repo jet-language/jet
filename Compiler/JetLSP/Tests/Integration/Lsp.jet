@@ -1,1786 +1,438 @@
-// PORT-PENDING 1108 tests-lsp-slice-1: tests/lsp.rs:1-1782
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! M13 LSP integration tests: scripted JSON transcripts + latency bench.
-//RS //!
-//RS //! Each test in tests/lsp/*.json is replayed against a live `jet self lsp` process.
-//RS //! The transcript runner:
-//RS //!   - Sends each step's `send` message (or opens a document for `open` steps)
-//RS //!   - Reads the next server message
-//RS //!   - Asserts that `expect_contains` strings all appear in the response
-//RS //!   - Skips null `expect_notification` steps (just sends, reads nothing)
-//RS //!
-//RS //! Tests skip gracefully if the `jet` binary is not built.
-//RS 
-//RS mod common;
-//RS 
-//RS use jet_foundation::DataTree::DataTree;
-//RS use jet_foundation::JSON::{json_get, json_str, parse_json};
-//RS use std::fs;
-//RS use std::io::{Read, Write};
-//RS use std::path::PathBuf;
-//RS use std::process::{Command, Stdio};
-//RS use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-//RS 
-//RS fn jet_bin() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
-//RS }
-//RS 
-//RS fn lsp_process_lock() -> &'static Mutex<()> {
-//RS     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-//RS     LOCK.get_or_init(|| Mutex::new(()))
-//RS }
-//RS 
-//RS fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-//RS     mutex
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS }
-//RS 
-//RS fn lock_lsp_process() -> MutexGuard<'static, ()> {
-//RS     lock_unpoisoned(lsp_process_lock())
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_process_lock_recovers_from_poison() {
-//RS     let mutex = Arc::new(Mutex::new(()));
-//RS     let poisoned_mutex = Arc::clone(&mutex);
-//RS     let poisoned = std::thread::spawn(move || {
-//RS         let _guard = poisoned_mutex.lock().unwrap();
-//RS         panic!("intentional LSP lock poison");
-//RS     });
-//RS     assert!(poisoned.join().is_err());
-//RS     let _guard = lock_unpoisoned(&mutex);
-//RS }
-//RS 
-//RS fn send_msg(stdin: &mut impl Write, json: &str) {
-//RS     write!(stdin, "Content-Length: {}\r\n\r\n{}", json.len(), json).unwrap();
-//RS     stdin.flush().unwrap();
-//RS }
-//RS 
-//RS fn read_msg(stdout: &mut impl Read) -> String {
-//RS     let mut header = String::new();
-//RS     let mut buf = [0u8; 1];
-//RS     loop {
-//RS         stdout.read_exact(&mut buf).unwrap();
-//RS         header.push(buf[0] as char);
-//RS         if header.ends_with("\r\n\r\n") {
-//RS             break;
-//RS         }
-//RS     }
-//RS     let len: usize = header
-//RS         .lines()
-//RS         .find_map(|l| l.strip_prefix("Content-Length:").map(|n| n.trim()))
-//RS         .expect("Content-Length")
-//RS         .parse()
-//RS         .unwrap();
-//RS     let mut body = vec![0u8; len];
-//RS     stdout.read_exact(&mut body).unwrap();
-//RS     String::from_utf8(body).unwrap()
-//RS }
-//RS 
-//RS fn request_lsp(
-//RS     stdin: &mut impl Write,
-//RS     stdout: &mut impl Read,
-//RS     id: i64,
-//RS     method: &str,
-//RS     params: &str,
-//RS ) -> String {
-//RS     send_msg(
-//RS         stdin,
-//RS         &format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{params}}}"#),
-//RS     );
-//RS     loop {
-//RS         let body = read_msg(stdout);
-//RS         let parsed = parse_json(&body).expect("valid LSP response");
-//RS         if matches!(json_get(&parsed, "id"), Some(DataTree::Int(response_id)) if *response_id == id) {
-//RS             return body;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Send one request and keep every message the server writes before its
-//RS /// response, so a test can see exactly which documents a flush republished.
-//RS fn request_lsp_collect(
-//RS     stdin: &mut impl Write,
-//RS     stdout: &mut impl Read,
-//RS     id: i64,
-//RS     method: &str,
-//RS     params: &str,
-//RS ) -> (DataTree, Vec<DataTree>) {
-//RS     send_msg(
-//RS         stdin,
-//RS         &format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{params}}}"#),
-//RS     );
-//RS     let mut before = Vec::new();
-//RS     loop {
-//RS         let parsed = parse_json(&read_msg(stdout)).expect("valid LSP message");
-//RS         if matches!(json_get(&parsed, "id"), Some(DataTree::Int(response_id)) if *response_id == id) {
-//RS             return (parsed, before);
-//RS         }
-//RS         before.push(parsed);
-//RS     }
-//RS }
-//RS 
-//RS /// The `publishDiagnostics` params addressed to `uri`, in arrival order.
-//RS fn published_diagnostics_for<'a>(messages: &'a [DataTree], uri: &str) -> Vec<&'a DataTree> {
-//RS     messages
-//RS         .iter()
-//RS         .filter(|message| {
-//RS             json_get(message, "method").and_then(json_str) == Some("textDocument/publishDiagnostics")
-//RS         })
-//RS         .filter_map(|message| json_get(message, "params"))
-//RS         .filter(|params| json_get(params, "uri").and_then(json_str) == Some(uri))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn error_count(published: &DataTree) -> usize {
-//RS     json_array_field(published, "diagnostics")
-//RS         .iter()
-//RS         .filter(|diagnostic| matches!(json_get(diagnostic, "severity"), Some(DataTree::Int(1))))
-//RS         .count()
-//RS }
-//RS 
-//RS fn json_string(s: &str) -> String {
-//RS     let mut out = String::from("\"");
-//RS     for c in s.chars() {
-//RS         match c {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             c => out.push(c),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS 
-//RS fn json_object_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
-//RS     json_get(value, key).unwrap_or_else(|| panic!("missing JSON field `{key}`"))
-//RS }
-//RS 
-//RS fn json_array<'a>(value: &'a DataTree, context: &str) -> &'a [DataTree] {
-//RS     match value {
-//RS         DataTree::Array(values) => values,
-//RS         other => panic!("{context} is not an array: {other:?}"),
-//RS     }
-//RS }
-//RS 
-//RS fn json_array_field<'a>(value: &'a DataTree, key: &str) -> &'a [DataTree] {
-//RS     json_array(
-//RS         json_object_field(value, key),
-//RS         &format!("JSON field `{key}`"),
-//RS     )
-//RS }
-//RS 
-//RS fn json_values_equal(left: &DataTree, right: &DataTree) -> bool {
-//RS     match (left, right) {
-//RS         (DataTree::Null, DataTree::Null) => true,
-//RS         (DataTree::Bool(left), DataTree::Bool(right)) => left == right,
-//RS         (DataTree::Int(left), DataTree::Int(right)) => left == right,
-//RS         (DataTree::Float(left), DataTree::Float(right)) => left == right,
-//RS         (DataTree::Number(left), DataTree::Number(right)) => left == right,
-//RS         (DataTree::Text(left) | DataTree::TypedText(left), DataTree::Text(right) | DataTree::TypedText(right)) => {
-//RS             left == right
-//RS         }
-//RS         (DataTree::Bytes(left), DataTree::Bytes(right)) => left == right,
-//RS         (DataTree::Array(left), DataTree::Array(right)) => {
-//RS             left.len() == right.len()
-//RS                 && left
-//RS                     .iter()
-//RS                     .zip(right)
-//RS                     .all(|(left, right)| json_values_equal(left, right))
-//RS         }
-//RS         (DataTree::Object(left), DataTree::Object(right)) => {
-//RS             left.len() == right.len()
-//RS                 && left.iter().all(|(key, left)| {
-//RS                     right
-//RS                         .iter()
-//RS                         .find_map(|(right_key, right)| (right_key == key).then_some(right))
-//RS                         .is_some_and(|right| json_values_equal(left, right))
-//RS                 })
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn assert_json_values_equal(label: &str, actual: &DataTree, expected: &DataTree) {
-//RS     assert!(
-//RS         json_values_equal(actual, expected),
-//RS         "{label}: actual={actual:?}, expected={expected:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS struct DecodedSemanticToken {
-//RS     text: String,
-//RS     token_type: u32,
-//RS     modifiers: u32,
-//RS }
-//RS 
-//RS fn semantic_data_from_response(resp: &str) -> Vec<u32> {
-//RS     let data_key = "\"data\"";
-//RS     let start = resp.find(data_key).expect("semantic token data");
-//RS     let after_key = &resp[start + data_key.len()..];
-//RS     let array_start = after_key.find('[').expect("data array");
-//RS     let after_array = &after_key[array_start + 1..];
-//RS     let array_end = after_array.find(']').expect("data array end");
-//RS     after_array[..array_end]
-//RS         .split(',')
-//RS         .filter_map(|n| n.trim().parse::<u32>().ok())
-//RS         .collect()
-//RS }
-//RS 
-//RS fn decode_semantic_tokens(src: &str, resp: &str) -> Vec<DecodedSemanticToken> {
-//RS     let data = semantic_data_from_response(resp);
-//RS     let lines: Vec<&str> = src.lines().collect();
-//RS     let mut out = Vec::new();
-//RS     let mut line = 0u32;
-//RS     let mut start = 0u32;
-//RS 
-//RS     for chunk in data.chunks_exact(5) {
-//RS         line += chunk[0];
-//RS         start = if chunk[0] == 0 {
-//RS             start + chunk[1]
-//RS         } else {
-//RS             chunk[1]
-//RS         };
-//RS         let len = chunk[2];
-//RS         let text = lines
-//RS             .get(line as usize)
-//RS             .and_then(|line_text| {
-//RS                 let s = start as usize;
-//RS                 let e = s + len as usize;
-//RS                 line_text.get(s..e)
-//RS             })
-//RS             .unwrap_or("")
-//RS             .to_string();
-//RS         out.push(DecodedSemanticToken {
-//RS             text,
-//RS             token_type: chunk[3],
-//RS             modifiers: chunk[4],
-//RS         });
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn assert_semantic_token(
-//RS     tokens: &[DecodedSemanticToken],
-//RS     text: &str,
-//RS     token_type: u32,
-//RS     modifier: u32,
-//RS ) {
-//RS     assert!(
-//RS         tokens.iter().any(|t| {
-//RS             t.text == text && t.token_type == token_type && (t.modifiers & modifier) != 0
-//RS         }),
-//RS         "missing semantic token `{}` type {} modifier {}; got {:?}",
-//RS         text,
-//RS         token_type,
-//RS         modifier,
-//RS         tokens
-//RS     );
-//RS }
-//RS 
-//RS const LSP_CAPABILITY_COVERAGE: &[(&str, &str)] = &[
-//RS     (
-//RS         "textDocumentSync",
-//RS         "lsp_incremental_sync_range_edit_updates_document",
-//RS     ),
-//RS     (
-//RS         "documentFormattingProvider",
-//RS         "lsp_formatting_and_range_formatting_return_edits",
-//RS     ),
-//RS     (
-//RS         "documentRangeFormattingProvider",
-//RS         "lsp_formatting_and_range_formatting_return_edits",
-//RS     ),
-//RS     (
-//RS         "documentOnTypeFormattingProvider",
-//RS         "lsp_on_type_formatting_returns_brace_edits",
-//RS     ),
-//RS     ("codeActionProvider", "lsp_teaching_autocorrect_let_to_val"),
-//RS     ("completionProvider", "lsp_completion_returns_items"),
-//RS     (
-//RS         "signatureHelpProvider",
-//RS         "lsp_signature_help_returns_active_parameter",
-//RS     ),
-//RS     (
-//RS         "documentSymbolProvider",
-//RS         "lsp_document_symbol_returns_checked_outline",
-//RS     ),
-//RS     ("workspaceSymbolProvider", "lsp_wave2_navigation_features"),
-//RS     ("foldingRangeProvider", "lsp_wave2_navigation_features"),
-//RS     ("documentHighlightProvider", "lsp_wave2_navigation_features"),
-//RS     ("selectionRangeProvider", "lsp_wave2_navigation_features"),
-//RS     ("documentLinkProvider", "lsp_document_links_and_code_lenses"),
-//RS     ("codeLensProvider", "lsp_document_links_and_code_lenses"),
-//RS     ("hoverProvider", "lsp_hover_returns_signature"),
-//RS     ("definitionProvider", "lsp_definition_returns_location"),
-//RS     ("referencesProvider", "lsp_references_finds_all_uses"),
-//RS     ("renameProvider", "lsp_rename_produces_workspace_edit"),
-//RS     (
-//RS         "renameProvider.prepare",
-//RS         "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy",
-//RS     ),
-//RS     ("semanticTokensProvider", "lsp_semantic_tokens_returns_data"),
-//RS     (
-//RS         "semanticTokensProvider.full",
-//RS         "lsp_semantic_tokens_returns_data",
-//RS     ),
-//RS     (
-//RS         "semanticTokensProvider.range",
-//RS         "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy",
-//RS     ),
-//RS     (
-//RS         "semanticTokensProvider.delta",
-//RS         "lsp_semantic_tokens_delta_returns_full_fallback",
-//RS     ),
-//RS     ("inlayHintProvider", "lsp_inlay_hints_returns_type_labels"),
-//RS     (
-//RS         "callHierarchyProvider",
-//RS         "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy",
-//RS     ),
-//RS     ("typeHierarchyProvider", "lsp_type_hierarchy_trait_impls"),
-//RS     (
-//RS         "workspace",
-//RS         "lsp_workspace_symbols_follow_all_roots_and_folder_changes",
-//RS     ),
-//RS     (
-//RS         "executeCommandProvider",
-//RS         "lsp_execute_command_impact_returns_report",
-//RS     ),
-//RS     ("resources", "lsp_mcp_environment_resources_are_read_only"),
-//RS ];
-//RS 
-//RS fn advertised_capabilities(init: &str) -> Vec<String> {
-//RS     let Some(cap_start) = init.find("\"capabilities\"") else {
-//RS         return Vec::new();
-//RS     };
-//RS     let Some(open_rel) = init[cap_start..].find('{') else {
-//RS         return Vec::new();
-//RS     };
-//RS     let mut out = Vec::new();
-//RS     let mut depth = 0usize;
-//RS     let mut in_string = false;
-//RS     let mut escape = false;
-//RS     let mut string_start = 0usize;
-//RS     let mut last_string: Option<String> = None;
-//RS     let bytes = init.as_bytes();
-//RS     let mut i = cap_start + open_rel;
-//RS     while i < bytes.len() {
-//RS         let b = bytes[i];
-//RS         if in_string {
-//RS             if escape {
-//RS                 escape = false;
-//RS             } else if b == b'\\' {
-//RS                 escape = true;
-//RS             } else if b == b'"' {
-//RS                 last_string = Some(init[string_start..i].to_string());
-//RS                 in_string = false;
-//RS             }
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         match b {
-//RS             b'"' => {
-//RS                 in_string = true;
-//RS                 string_start = i + 1;
-//RS             }
-//RS             b'{' => depth += 1,
-//RS             b'}' => {
-//RS                 depth = depth.saturating_sub(1);
-//RS                 if depth == 0 {
-//RS                     break;
-//RS                 }
-//RS             }
-//RS             b':' if depth == 1 => {
-//RS                 if let Some(key) = last_string.take() {
-//RS                     out.push(key);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS 
-//RS     if init.contains("\"renameProvider\"") && init.contains("\"prepareProvider\": true") {
-//RS         out.push("renameProvider.prepare".to_string());
-//RS     }
-//RS     if init.contains("\"semanticTokensProvider\"") {
-//RS         if init.contains("\"full\"") {
-//RS             out.push("semanticTokensProvider.full".to_string());
-//RS         }
-//RS         if init.contains("\"range\": true") {
-//RS             out.push("semanticTokensProvider.range".to_string());
-//RS         }
-//RS         if init.contains("\"delta\": true") {
-//RS             out.push("semanticTokensProvider.delta".to_string());
-//RS         }
-//RS     }
-//RS     out.sort();
-//RS     out.dedup();
-//RS     out
-//RS }
-//RS 
-//RS // ── JSON transcript runner (A1) ──────────────────────────────────────────────
-//RS //
-//RS // Loads every tests/lsp/*.json file and replays it against a live server.
-//RS // This is the canonical source of truth for per-capability coverage.
-//RS 
-//RS /// Minimal JSON extractor for transcript files (no external crates — I6).
-//RS /// Returns (source, steps) or panics on malformed transcript.
-//RS mod transcript_parser {
-//RS     /// A parsed step from a JSON transcript file.
-//RS     pub struct Step {
-//RS         /// Raw JSON object to forward to the server, or None for open steps.
-//RS         pub send_raw: Option<String>,
-//RS         /// URI to open (for open steps).
-//RS         pub open_uri: Option<String>,
-//RS         /// Strings that must appear in the server response.
-//RS         pub expect_contains: Vec<String>,
-//RS         /// For open steps: whether to expect a publishDiagnostics notification.
-//RS         pub expect_notification: bool,
-//RS     }
-//RS 
-//RS     pub struct Transcript {
-//RS         #[allow(dead_code)] // parsed from JSON; used for test output context if needed
-//RS         pub description: String,
-//RS         pub source: String,
-//RS         pub steps: Vec<Step>,
-//RS     }
-//RS 
-//RS     /// Unescape a JSON string value (already stripped of surrounding `"`).
-//RS     fn unescape(s: &str) -> String {
-//RS         let mut out = String::with_capacity(s.len());
-//RS         let mut chars = s.chars();
-//RS         while let Some(c) = chars.next() {
-//RS             if c != '\\' {
-//RS                 out.push(c);
-//RS                 continue;
-//RS             }
-//RS             match chars.next() {
-//RS                 Some('"') => out.push('"'),
-//RS                 Some('\\') => out.push('\\'),
-//RS                 Some('/') => out.push('/'),
-//RS                 Some('n') => out.push('\n'),
-//RS                 Some('r') => out.push('\r'),
-//RS                 Some('t') => out.push('\t'),
-//RS                 Some('b') => out.push('\x08'),
-//RS                 Some('f') => out.push('\x0c'),
-//RS                 Some('u') => {
-//RS                     let hex: String = chars.by_ref().take(4).collect();
-//RS                     if let Ok(n) = u32::from_str_radix(&hex, 16) {
-//RS                         if let Some(c) = char::from_u32(n) {
-//RS                             out.push(c);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Some(other) => {
-//RS                     out.push('\\');
-//RS                     out.push(other);
-//RS                 }
-//RS                 None => break,
-//RS             }
-//RS         }
-//RS         out
-//RS     }
-//RS 
-//RS     /// Extract the value of a top-level JSON string key.
-//RS     fn extract_string_field<'a>(json: &'a str, key: &str) -> Option<String> {
-//RS         let needle = format!("\"{}\"", key);
-//RS         let pos = json.find(&needle)?;
-//RS         let after = json[pos + needle.len()..].trim_start();
-//RS         let after = after.strip_prefix(':')?.trim_start();
-//RS         let after = after.strip_prefix('"')?;
-//RS         // Find unescaped closing quote.
-//RS         let mut end = 0;
-//RS         let bytes = after.as_bytes();
-//RS         loop {
-//RS             if end >= bytes.len() {
-//RS                 return None;
-//RS             }
-//RS             if bytes[end] == b'\\' {
-//RS                 end += 2;
-//RS                 continue;
-//RS             }
-//RS             if bytes[end] == b'"' {
-//RS                 break;
-//RS             }
-//RS             end += 1;
-//RS         }
-//RS         Some(unescape(&after[..end]))
-//RS     }
-//RS 
-//RS     /// Skip whitespace and return remaining.
-//RS     fn skip_ws(s: &str) -> &str {
-//RS         s.trim_start_matches(|c: char| c.is_ascii_whitespace())
-//RS     }
-//RS 
-//RS     /// Find the matching closing bracket/brace for a JSON collection starting at `s[0]`.
-//RS     fn find_matching_close(s: &str, open: char, close: char) -> Option<usize> {
-//RS         let mut depth = 0usize;
-//RS         let mut in_str = false;
-//RS         let bytes = s.as_bytes();
-//RS         let mut i = 0;
-//RS         while i < bytes.len() {
-//RS             let b = bytes[i];
-//RS             if in_str {
-//RS                 if b == b'\\' {
-//RS                     i += 2;
-//RS                     continue;
-//RS                 }
-//RS                 if b == b'"' {
-//RS                     in_str = false;
-//RS                 }
-//RS             } else {
-//RS                 let c = s[i..].chars().next().unwrap();
-//RS                 if c == '"' {
-//RS                     in_str = true;
-//RS                 } else if c == open {
-//RS                     depth += 1;
-//RS                 } else if c == close {
-//RS                     depth -= 1;
-//RS                     if depth == 0 {
-//RS                         return Some(i);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             i += c_len(bytes, i);
-//RS         }
-//RS         None
-//RS     }
-//RS 
-//RS     fn c_len(bytes: &[u8], i: usize) -> usize {
-//RS         let b = bytes[i];
-//RS         if b < 0x80 {
-//RS             1
-//RS         } else if b < 0xE0 {
-//RS             2
-//RS         } else if b < 0xF0 {
-//RS             3
-//RS         } else {
-//RS             4
-//RS         }
-//RS     }
-//RS 
-//RS     /// Extract a JSON array of strings.
-//RS     fn extract_string_array(s: &str) -> Vec<String> {
-//RS         let s = skip_ws(s);
-//RS         if !s.starts_with('[') {
-//RS             return Vec::new();
-//RS         }
-//RS         let close = match find_matching_close(s, '[', ']') {
-//RS             Some(i) => i,
-//RS             None => return Vec::new(),
-//RS         };
-//RS         let inner = &s[1..close];
-//RS         let mut result = Vec::new();
-//RS         let mut remaining = skip_ws(inner);
-//RS         while !remaining.is_empty() {
-//RS             remaining = skip_ws(remaining);
-//RS             if remaining.starts_with(']') || remaining.is_empty() {
-//RS                 break;
-//RS             }
-//RS             if remaining.starts_with('"') {
-//RS                 let rest = &remaining[1..];
-//RS                 let mut end = 0;
-//RS                 let bytes = rest.as_bytes();
-//RS                 loop {
-//RS                     if end >= bytes.len() {
-//RS                         break;
-//RS                     }
-//RS                     if bytes[end] == b'\\' {
-//RS                         end += 2;
-//RS                         continue;
-//RS                     }
-//RS                     if bytes[end] == b'"' {
-//RS                         break;
-//RS                     }
-//RS                     end += 1;
-//RS                 }
-//RS                 result.push(unescape(&rest[..end]));
-//RS                 remaining = skip_ws(&rest[end + 1..]);
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS             remaining = skip_ws(remaining.trim_start_matches(','));
-//RS         }
-//RS         result
-//RS     }
-//RS 
-//RS     /// Extract a raw JSON object starting at the current position.
-//RS     fn extract_object(s: &str) -> Option<(String, &str)> {
-//RS         let s = skip_ws(s);
-//RS         if !s.starts_with('{') {
-//RS             return None;
-//RS         }
-//RS         let close = find_matching_close(s, '{', '}')?;
-//RS         Some((s[..=close].to_string(), &s[close + 1..]))
-//RS     }
-//RS 
-//RS     pub fn parse(content: &str) -> Transcript {
-//RS         let description = extract_string_field(content, "description").unwrap_or_default();
-//RS         let source =
-//RS             extract_string_field(content, "source").expect("transcript must have 'source'");
-//RS 
-//RS         // Find the "steps" array.
-//RS         let steps_needle = "\"steps\"";
-//RS         let steps_pos = content
-//RS             .find(steps_needle)
-//RS             .expect("transcript must have 'steps'");
-//RS         let after_steps = content[steps_pos + steps_needle.len()..].trim_start();
-//RS         let after_colon = after_steps.strip_prefix(':').unwrap().trim_start();
-//RS         // after_colon starts with '['
-//RS         let close_bracket =
-//RS             find_matching_close(after_colon, '[', ']').expect("steps array must close");
-//RS         let steps_inner = &after_colon[1..close_bracket];
-//RS 
-//RS         let mut steps = Vec::new();
-//RS         let mut remaining = skip_ws(steps_inner);
-//RS         while !remaining.is_empty() {
-//RS             remaining = skip_ws(remaining);
-//RS             if remaining.is_empty() {
-//RS                 break;
-//RS             }
-//RS             // Each step is a JSON object.
-//RS             let (step_obj, rest) = match extract_object(remaining) {
-//RS                 Some(r) => r,
-//RS                 None => break,
-//RS             };
-//RS             remaining = skip_ws(rest.trim_start_matches(','));
-//RS 
-//RS             // Parse the step object.
-//RS             let step = parse_step(&step_obj);
-//RS             steps.push(step);
-//RS         }
-//RS 
-//RS         Transcript {
-//RS             description,
-//RS             source,
-//RS             steps,
-//RS         }
-//RS     }
-//RS 
-//RS     fn parse_step(obj: &str) -> Step {
-//RS         // Check for "send" key.
-//RS         let send_needle = "\"send\"";
-//RS         let open_needle = "\"open\"";
-//RS         let ec_needle = "\"expect_contains\"";
-//RS         let en_needle = "\"expect_notification\"";
-//RS 
-//RS         let send_raw = if let Some(pos) = obj.find(send_needle) {
-//RS             let after = skip_ws(&obj[pos + send_needle.len()..]);
-//RS             let after = after.strip_prefix(':').unwrap_or(after).trim_start();
-//RS             extract_object(after).map(|(o, _)| o)
-//RS         } else {
-//RS             None
-//RS         };
-//RS 
-//RS         let open_uri = if send_raw.is_none() {
-//RS             if let Some(pos) = obj.find(open_needle) {
-//RS                 let after = skip_ws(&obj[pos + open_needle.len()..]);
-//RS                 let after = after.strip_prefix(':').unwrap_or(after).trim_start();
-//RS                 if let Some((open_obj, _)) = extract_object(after) {
-//RS                     extract_string_field(&open_obj, "uri")
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         } else {
-//RS             None
-//RS         };
-//RS 
-//RS         let expect_contains = if let Some(pos) = obj.find(ec_needle) {
-//RS             let after = skip_ws(&obj[pos + ec_needle.len()..]);
-//RS             let after = after.strip_prefix(':').unwrap_or(after).trim_start();
-//RS             extract_string_array(after)
-//RS         } else {
-//RS             Vec::new()
-//RS         };
-//RS 
-//RS         let expect_notification = if let Some(pos) = obj.find(en_needle) {
-//RS             let after = skip_ws(&obj[pos + en_needle.len()..]);
-//RS             let after = after.strip_prefix(':').unwrap_or(after).trim_start();
-//RS             // Not null = expect a notification.
-//RS             !after.starts_with("null")
-//RS         } else {
-//RS             false
-//RS         };
-//RS 
-//RS         Step {
-//RS             send_raw,
-//RS             open_uri,
-//RS             expect_contains,
-//RS             expect_notification,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Execute one JSON transcript file against a live `jet self lsp` process.
-//RS fn run_json_transcript_file(jet: &std::path::Path, path: &std::path::Path) {
-//RS     let _guard = lock_lsp_process();
-//RS     let content =
-//RS         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
-//RS     let transcript = transcript_parser::parse(&content);
-//RS 
-//RS     let mut child = Command::new(jet)
-//RS         .args(["self", "lsp"])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .expect("spawn jet self lsp");
-//RS 
-//RS     let mut stdin = child.stdin.take().expect("stdin");
-//RS     let mut stdout = child.stdout.take().expect("stdout");
-//RS 
-//RS     for step in &transcript.steps {
-//RS         if let Some(uri) = &step.open_uri {
-//RS             // Open-document step.
-//RS             let open = format!(
-//RS                 r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
-//RS                 uri,
-//RS                 json_string(&transcript.source)
-//RS             );
-//RS             send_msg(&mut stdin, &open);
-//RS             if step.expect_notification {
-//RS                 let notif = read_msg(&mut stdout);
-//RS                 assert!(
-//RS                     notif.contains("publishDiagnostics"),
-//RS                     "[{}] open step: expected publishDiagnostics, got: {}",
-//RS                     path.display(),
-//RS                     notif
-//RS                 );
-//RS                 for expect in &step.expect_contains {
-//RS                     assert!(
-//RS                         notif.contains(expect.as_str()),
-//RS                         "[{}] expected {:?} in notification, got:\n{}",
-//RS                         path.display(),
-//RS                         expect,
-//RS                         notif
-//RS                     );
-//RS                 }
-//RS             }
-//RS         } else if let Some(raw) = &step.send_raw {
-//RS             send_msg(&mut stdin, raw);
-//RS             if !step.expect_contains.is_empty() {
-//RS                 let resp = read_msg(&mut stdout);
-//RS                 for expect in &step.expect_contains {
-//RS                     assert!(
-//RS                         resp.contains(expect.as_str()),
-//RS                         "[{}] expected {:?} in response, got:\n{}",
-//RS                         path.display(),
-//RS                         expect,
-//RS                         resp
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     drop(stdin);
-//RS     let _ = child.wait();
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_json_transcripts() {
-//RS     let jet = jet_bin();
-//RS     if !jet.exists() {
-//RS         return;
-//RS     }
-//RS     let transcript_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/lsp");
-//RS     let mut files: Vec<_> = std::fs::read_dir(&transcript_dir)
-//RS         .expect("tests/lsp/ must exist")
-//RS         .filter_map(|e| e.ok().map(|e| e.path()))
-//RS         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
-//RS         .collect();
-//RS     files.sort();
-//RS     assert!(!files.is_empty(), "no JSON transcripts found in tests/lsp/");
-//RS     for path in files {
-//RS         run_json_transcript_file(&jet, &path);
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_initialize_capabilities_have_named_test_coverage() {
-//RS     let jet = jet_bin();
-//RS     if !jet.exists() {
-//RS         return;
-//RS     }
-//RS     let _guard = lock_lsp_process();
-//RS 
-//RS     let mut child = Command::new(&jet)
-//RS         .args(["self", "lsp"])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .expect("spawn jet self lsp");
-//RS     let mut stdin = child.stdin.take().expect("stdin");
-//RS     let mut stdout = child.stdout.take().expect("stdout");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
-//RS     );
-//RS     let init = read_msg(&mut stdout);
-//RS     let advertised = advertised_capabilities(&init);
-//RS     assert!(
-//RS         !advertised.is_empty(),
-//RS         "initialize response did not expose capabilities: {init}"
-//RS     );
-//RS 
-//RS     let source = include_str!("lsp.rs");
-//RS     for cap in advertised {
-//RS         let marker = LSP_CAPABILITY_COVERAGE
-//RS             .iter()
-//RS             .find_map(|(covered, marker)| (*covered == cap).then_some(*marker))
-//RS             .unwrap_or_else(|| panic!("advertised capability `{cap}` lacks coverage entry"));
-//RS         assert!(
-//RS             source.contains(marker),
-//RS             "coverage marker `{marker}` for `{cap}` is not present in tests/lsp.rs"
-//RS         );
-//RS     }
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
-//RS     );
-//RS     drop(stdin);
-//RS     let _ = child.wait();
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_mcp_environment_resources_are_read_only() {
-//RS     let _guard = lock_lsp_process();
-//RS     let project = common::Scratch::new("lsp-mcp-environment");
-//RS     fs::write(
-//RS         project.join("env.jet"),
-//RS         r#"module env.dev {
-//RS     prompt: $HOME
-//RS     services: {
-//RS         fixture: {
-//RS             enable: false,
-//RS             ports: [8080],
-//RS             run: ["fixture", "--port", "8080"],
-//RS             ready: "fixture --ready",
-//RS             watch: ["src"],
-//RS             after: ["database"],
-//RS             sockets: ["run/fixture.sock"]
-//RS         }
-//RS     }
-//RS     files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
-//RS 
-//RS     let root_uri = format!("file://{}", project.path.display());
-//RS     let mut child = Command::new(jet_bin())
-//RS         .args(["self", "lsp"])
-//RS         .current_dir(&project.path)
-//RS         .env("HOME", "/test/home")
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .expect("spawn jet self lsp");
-//RS     let mut stdin = child.stdin.take().expect("LSP stdin");
-//RS     let mut stdout = child.stdout.take().expect("LSP stdout");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":{},"capabilities":{{}}}}}}"#,
-//RS             json_string(&root_uri)
-//RS         ),
-//RS     );
-//RS     let init = read_msg(&mut stdout);
-//RS     assert!(
-//RS         init.contains(r#""protocolVersion": "2025-11-25""#),
-//RS         "init: {init}"
-//RS     );
-//RS     assert!(init.contains(r#""resources": {"#), "init: {init}");
-//RS     assert!(init.contains(r#""subscribe": false"#), "init: {init}");
-//RS     assert!(init.contains(r#""listChanged": false"#), "init: {init}");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}"#,
-//RS     );
-//RS     let list = read_msg(&mut stdout);
-//RS     assert!(list.contains("jet://environment"), "list: {list}");
-//RS     assert!(list.contains("application/json"), "list: {list}");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"jet://environment"}}"#,
-//RS     );
-//RS     let read = read_msg(&mut stdout);
-//RS     assert!(read.contains("\"contents\""), "read: {read}");
-//RS     assert!(read.contains("active_environment"), "read: {read}");
-//RS     assert!(read.contains("fixture"), "read: {read}");
-//RS     assert!(read.contains("generated.txt"), "read: {read}");
-//RS     assert!(read.contains("HOME"), "read: {read}");
-//RS     assert!(read.contains("lint"), "read: {read}");
-//RS     assert!(
-//RS         !read.contains("/test/home"),
-//RS         "resource leaked a variable value: {read}"
-//RS     );
-//RS     let resource = parse_json(&read).expect("MCP resource response must be JSON");
-//RS     let contents = json_array_field(json_object_field(&resource, "result"), "contents");
-//RS     let resource_text = json_str(json_object_field(&contents[0], "text"))
-//RS         .expect("MCP resource content must be text");
-//RS     let direct = Command::new(jet_bin())
-//RS         .args(["env", "info", "--json", "--no-color"])
-//RS         .current_dir(&project.path)
-//RS         .env("HOME", "/test/home")
-//RS         .output()
-//RS         .expect("run direct env info");
-//RS     assert!(
-//RS         direct.status.success(),
-//RS         "direct env info failed: {}",
-//RS         String::from_utf8_lossy(&direct.stderr)
-//RS     );
-//RS     let direct_text = String::from_utf8(direct.stdout).expect("direct env info must be UTF-8");
-//RS     assert_json_values_equal(
-//RS         "MCP resource must use the env info production projection",
-//RS         &parse_json(resource_text).expect("MCP resource text must be JSON"),
-//RS         &parse_json(direct_text.trim()).expect("direct env info must be JSON"),
-//RS     );
-//RS     assert!(
-//RS         !project.join(".jet/services").exists(),
-//RS         "resource discovery must not start services"
-//RS     );
-//RS 
-//RS     fs::write(
-//RS         project.join("env.jet"),
-//RS         "module env.dev {\n    packages: [\n",
-//RS     )
-//RS     .unwrap();
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"jet://environment"}}"#,
-//RS     );
-//RS     let unavailable = read_msg(&mut stdout);
-//RS     assert!(
-//RS         unavailable.contains("\"error\""),
-//RS         "unavailable: {unavailable}"
-//RS     );
-//RS     assert!(unavailable.contains("-32002"), "unavailable: {unavailable}");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"jet://missing"}}"#,
-//RS     );
-//RS     let missing = read_msg(&mut stdout);
-//RS     assert!(missing.contains("\"error\""), "missing: {missing}");
-//RS     assert!(missing.contains("-32002"), "missing: {missing}");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":6,"method":"shutdown","params":{}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
-//RS     );
-//RS     drop(stdin);
-//RS     let status = child.wait().expect("wait for LSP");
-//RS     assert!(status.success(), "LSP exited unsuccessfully: {status}");
-//RS }
-//RS 
-//RS // ── M6 v0 regression tests (must keep working) ───────────────────────────────
-//RS 
-//RS #[test]
-//RS fn lsp_teaching_autocorrect_let_to_val() {
-//RS     let jet = jet_bin();
-//RS     if !jet.exists() {
-//RS         return;
-//RS     }
-//RS     let _guard = lock_lsp_process();
-//RS 
-//RS     let mut child = Command::new(&jet)
-//RS         .args(["self", "lsp"])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .expect("spawn jet self lsp");
-//RS 
-//RS     let mut stdin = child.stdin.take().expect("stdin");
-//RS     let mut stdout = child.stdout.take().expect("stdout");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
-//RS     );
-//RS     let init = read_msg(&mut stdout);
-//RS     assert!(init.contains("textDocumentSync"), "init: {}", init);
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
-//RS     );
-//RS 
-//RS     let uri = "file:///tmp/lsp_test_let.jet";
-//RS     let src = "fn run() {\n    let x = 1;\n}\n";
-//RS     let open = format!(
-//RS         r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
-//RS         uri,
-//RS         json_string(src)
-//RS     );
-//RS     send_msg(&mut stdin, &open);
-//RS 
-//RS     let diag_msg = read_msg(&mut stdout);
-//RS     assert!(
-//RS         diag_msg.contains("publishDiagnostics"),
-//RS         "expected publishDiagnostics, got: {}",
-//RS         diag_msg
-//RS     );
-//RS     assert!(
-//RS         !diag_msg.contains("E0009") && !diag_msg.contains("E0985"),
-//RS         "old binding words must not produce migration diagnostics, got: {}",
-//RS         diag_msg
-//RS     );
-//RS 
-//RS     let action_req = format!(
-//RS         r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":1,"character":4}},"end":{{"line":1,"character":7}}}},"context":{{"diagnostics":[]}}}}}}"#,
-//RS         uri
-//RS     );
-//RS     send_msg(&mut stdin, &action_req);
-//RS     let actions = read_msg(&mut stdout);
-//RS     assert!(
-//RS         !actions.contains(r#""newText":"val""#),
-//RS         "the retired `val` token-swap quick-fix must be gone, got: {}",
-//RS         actions
-//RS     );
-//RS     assert!(
-//RS         actions.contains(r#""id":2"#) && actions.contains(r#""result":[]"#),
-//RS         "expected an empty codeAction result for old binding syntax, got: {}",
-//RS         actions
-//RS     );
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":3,"method":"shutdown","params":{}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
-//RS     );
-//RS     drop(stdin);
-//RS     let _ = child.wait();
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_incremental_sync_range_edit_updates_document() {
-//RS     let jet = jet_bin();
-//RS     if !jet.exists() {
-//RS         return;
-//RS     }
-//RS     let _guard = lock_lsp_process();
-//RS 
-//RS     let mut child = Command::new(&jet)
-//RS         .args(["self", "lsp"])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .expect("spawn jet self lsp");
-//RS 
-//RS     let mut stdin = child.stdin.take().expect("stdin");
-//RS     let mut stdout = child.stdout.take().expect("stdout");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
-//RS     );
-//RS     let init = read_msg(&mut stdout);
-//RS     assert!(
-//RS         init.contains(r#""textDocumentSync": 2"#) || init.contains(r#""textDocumentSync":2"#),
-//RS         "expected incremental sync, got: {}",
-//RS         init
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
-//RS     );
-//RS 
-//RS     let uri = "file:///tmp/lsp_incremental_test.jet";
-//RS     let src = "fn run() {\n    x :: 1\n}\n";
-//RS     let open = format!(
-//RS         r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
-//RS         uri,
-//RS         json_string(src)
-//RS     );
-//RS     send_msg(&mut stdin, &open);
-//RS     let _ = read_msg(&mut stdout);
-//RS 
-//RS     let change = format!(
-//RS         r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2}},"contentChanges":[{{"range":{{"start":{{"line":1,"character":4}},"end":{{"line":1,"character":10}}}},"rangeLength":6,"text":"let x = 1"}}]}}}}"#,
-//RS         uri
-//RS     );
-//RS     send_msg(&mut stdin, &change);
-//RS 
-//RS     let req = format!(
-//RS         r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens/full","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
-//RS         uri
-//RS     );
-//RS     send_msg(&mut stdin, &req);
-//RS     let diag = read_msg(&mut stdout);
-//RS     assert!(
-//RS         diag.contains("publishDiagnostics") && !diag.contains("E0009") && !diag.contains("E0985"),
-//RS         "expected range edit to trigger ordinary diagnostics, got: {}",
-//RS         diag
-//RS     );
-//RS     let tokens = read_msg(&mut stdout);
-//RS     assert!(
-//RS         tokens.contains(r#""id":2"#) && tokens.contains(r#""data""#),
-//RS         "expected semantic token response after dirty flush, got: {}",
-//RS         tokens
-//RS     );
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":3,"method":"shutdown","params":{}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
-//RS     );
-//RS     drop(stdin);
-//RS     let _ = child.wait();
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_incremental_sync_rejects_stale_and_malformed_edits() {
-//RS     let _guard = lock_lsp_process();
-//RS     let mut child = Command::new(jet_bin())
-//RS         .args(["self", "lsp"])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .expect("spawn jet self lsp");
-//RS     let mut stdin = child.stdin.take().expect("stdin");
-//RS     let mut stdout = child.stdout.take().expect("stdout");
-//RS     let uri = "file:///tmp/lsp_validated_sync.jet";
-//RS     let source = "// 😀\nfn kept() {}\n";
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":10,"text":{}}}}}}}"#,
-//RS             uri,
-//RS             json_string(source)
-//RS         ),
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS 
-//RS     let change = |version: i32, body: &str| {
-//RS         format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":{}}},"contentChanges":[{}]}}}}"#,
-//RS             uri, version, body
-//RS         )
-//RS     };
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &change(
-//RS             11,
-//RS             r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":7}},"rangeLength":4,"text":"fresh"}"#,
-//RS         ),
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
-//RS             uri
-//RS         ),
-//RS     );
-//RS     let first_diagnostics = read_msg(&mut stdout);
-//RS     assert!(
-//RS         first_diagnostics.contains(r#""version":11"#),
-//RS         "diagnostics must identify the document revision: {first_diagnostics}"
-//RS     );
-//RS     let first = read_msg(&mut stdout);
-//RS     assert!(
-//RS         first.contains("fn fresh"),
-//RS         "valid edit was not applied: {first}"
-//RS     );
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &change(
-//RS             11,
-//RS             r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":5,"text":"stale"}"#,
-//RS         ),
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","id":20,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
-//RS             uri
-//RS         ),
-//RS     );
-//RS     let stale_probe = read_msg(&mut stdout);
-//RS     assert!(
-//RS         stale_probe.contains(r#""id":20"#)
-//RS             && stale_probe.contains("fn fresh")
-//RS             && !stale_probe.contains("stale"),
-//RS         "stale revision changed the document: {stale_probe}"
-//RS     );
-//RS 
-//RS     for invalid in [
-//RS         change(
-//RS             12,
-//RS             r#"{"range":{"start":{"line":0,"character":4},"end":{"line":0,"character":5}},"rangeLength":1,"text":"X"}"#,
-//RS         ),
-//RS         change(
-//RS             12,
-//RS             r#"{"range":{"start":{"line":1,"character":8},"end":{"line":1,"character":3}},"rangeLength":5,"text":"backward"}"#,
-//RS         ),
-//RS         change(
-//RS             12,
-//RS             r#"{"range":{"start":{"line":99,"character":0},"end":{"line":99,"character":0}},"rangeLength":0,"text":"outside"}"#,
-//RS         ),
-//RS         change(12, "1"),
-//RS         format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":12.5}},"contentChanges":[{{"text":"float"}}]}}}}"#,
-//RS             uri
-//RS         ),
-//RS         format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2147483648}},"contentChanges":[{{"text":"wide"}}]}}}}"#,
-//RS             uri
-//RS         ),
-//RS         change(
-//RS             12,
-//RS             r#"{"range":{"start":{"line":1,"character":2147483648},"end":{"line":1,"character":2147483648}},"rangeLength":0,"text":"wide_position"}"#,
-//RS         ),
-//RS         change(
-//RS             12,
-//RS             r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":2147483648,"text":"wide_length"}"#,
-//RS         ),
-//RS         change(
-//RS             12,
-//RS             r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":"5","text":"bad_type"}"#,
-//RS         ),
-//RS         change(
-//RS             12,
-//RS             r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":4,"text":"bad_length"}"#,
-//RS         ),
-//RS     ] {
-//RS         send_msg(&mut stdin, &invalid);
-//RS     }
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &change(
-//RS             12,
-//RS             r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":5,"text":"final"}"#,
-//RS         ),
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
-//RS             uri
-//RS         ),
-//RS     );
-//RS     let final_diagnostics = read_msg(&mut stdout);
-//RS     assert!(
-//RS         final_diagnostics.contains(r#""version":12"#),
-//RS         "diagnostics must identify the accepted revision: {final_diagnostics}"
-//RS     );
-//RS     let final_text = read_msg(&mut stdout);
-//RS     assert!(
-//RS         final_text.contains("fn final") && final_text.contains('😀'),
-//RS         "invalid edits changed the document or consumed its version: {final_text}"
-//RS     );
-//RS     for rejected in [
-//RS         "fresh",
-//RS         "stale",
-//RS         "backward",
-//RS         "outside",
-//RS         "float",
-//RS         "wide",
-//RS         "wide_position",
-//RS         "wide_length",
-//RS         "bad_type",
-//RS         "bad_length",
-//RS     ] {
-//RS         assert!(
-//RS             !final_text.contains(rejected),
-//RS             "rejected edit leaked into document: {final_text}"
-//RS         );
-//RS     }
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     drop(stdin);
-//RS     let _ = child.wait();
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_workspace_symbols_follow_all_roots_and_folder_changes() {
-//RS     let _guard = lock_lsp_process();
-//RS     let root = std::env::temp_dir().join(format!("lsp multi root {}", std::process::id()));
-//RS     let first = root.join("first");
-//RS     let second = root.join("second");
-//RS     let third = root.join("third");
-//RS     let _ = std::fs::remove_dir_all(&root);
-//RS     for dir in [&first, &second, &third] {
-//RS         std::fs::create_dir_all(dir).expect("create workspace root");
-//RS     }
-//RS     std::fs::write(first.join("closed.jet"), "fn ClosedFirst() {}\n").unwrap();
-//RS     std::fs::write(second.join("open.jet"), "fn DiskSecond() {}\n").unwrap();
-//RS     std::fs::write(third.join("added.jet"), "fn AddedThird() {}\n").unwrap();
-//RS 
-//RS     let first_uri = format!("file://{}", first.display()).replace(' ', "%20");
-//RS     let second_uri = format!("file://{}", second.display()).replace(' ', "%20");
-//RS     let third_uri = format!("file://{}", third.display()).replace(' ', "%20");
-//RS     let open_uri = format!("file://{}", second.join("open.jet").display()).replace(' ', "%20");
-//RS     let mut child = Command::new(jet_bin())
-//RS         .args(["self", "lsp"])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .expect("spawn jet self lsp");
-//RS     let mut stdin = child.stdin.take().expect("stdin");
-//RS     let mut stdout = child.stdout.take().expect("stdout");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"workspaceFolders":[{{"uri":"{}","name":"first"}},{{"uri":"{}","name":"second"}}],"capabilities":{{}}}}}}"#,
-//RS             first_uri, second_uri
-//RS         ),
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":"fn OpenSecond() {{}}\n"}}}}}}"#,
-//RS             open_uri
-//RS         ),
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":2,"method":"workspace/symbol","params":{"query":""}}"#,
-//RS     );
-//RS     let before = read_msg(&mut stdout);
-//RS     assert!(
-//RS         before.contains("ClosedFirst") && before.contains("OpenSecond"),
-//RS         "all initial roots and overlays must be indexed: {before}"
-//RS     );
-//RS     assert!(!before.contains("DiskSecond") && !before.contains("AddedThird"), "closed disk text must not replace an overlay and unconfigured roots must stay out: {before}");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{{"event":{{"removed":[{{"uri":"{}","name":"first"}}],"added":[{{"uri":"{}","name":"third"}}]}}}}}}"#,
-//RS             first_uri, third_uri
-//RS         ),
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":3,"method":"workspace/symbol","params":{"query":""}}"#,
-//RS     );
-//RS     let after = read_msg(&mut stdout);
-//RS     assert!(
-//RS         after.contains("OpenSecond") && after.contains("AddedThird"),
-//RS         "kept and added roots must be indexed: {after}"
-//RS     );
-//RS     assert!(
-//RS         !after.contains("ClosedFirst"),
-//RS         "removed closed root remained indexed: {after}"
-//RS     );
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{{"event":{{"removed":[{{"uri":"{}","name":"second"}}],"added":[]}}}}}}"#,
-//RS             second_uri
-//RS         ),
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":4,"method":"workspace/symbol","params":{"query":""}}"#,
-//RS     );
-//RS     let removed_open = read_msg(&mut stdout);
-//RS     assert!(
-//RS         removed_open.contains("AddedThird"),
-//RS         "remaining root disappeared: {removed_open}"
-//RS     );
-//RS     assert!(
-//RS         !removed_open.contains("OpenSecond"),
-//RS         "open overlay from removed root remained indexed: {removed_open}"
-//RS     );
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders","params":{{"event":{{"removed":[{{"uri":"{}","name":"third"}}],"added":[]}}}}}}"#,
-//RS             third_uri
-//RS         ),
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":5,"method":"workspace/symbol","params":{"query":""}}"#,
-//RS     );
-//RS     let empty_workspace = read_msg(&mut stdout);
-//RS     assert!(
-//RS         empty_workspace.contains(r#""result":[]"#),
-//RS         "removing the final workspace root must not expose open overlays: {empty_workspace}"
-//RS     );
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     drop(stdin);
-//RS     let _ = child.wait();
-//RS     let _ = std::fs::remove_dir_all(root);
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_check_json_matches_jet_check_json_for_diagnostic_fixture() {
-//RS     let jet = jet_bin();
-//RS     if !jet.exists() {
-//RS         return;
-//RS     }
-//RS 
-//RS     let path = std::env::temp_dir().join(format!(
-//RS         "lsp_json_diff_{}_{}.jet",
-//RS         std::process::id(),
-//RS         "binding"
-//RS     ));
-//RS     let src = "fn run() {\n    let x = 1\n}\n";
-//RS     std::fs::write(&path, src).expect("write diagnostic fixture");
-//RS 
-//RS     let out = Command::new(&jet)
-//RS         .arg("check")
-//RS         .arg(&path)
-//RS         .arg("--json")
-//RS         .output()
-//RS         .expect("jet check --json");
-//RS     assert!(
-//RS         !out.status.success(),
-//RS         "diagnostic fixture should fail: status={}",
-//RS         out.status
-//RS     );
-//RS     let cli_json = String::from_utf8_lossy(&out.stderr).to_string();
-//RS 
-//RS     let file = path.to_string_lossy().into_owned();
-//RS     let lsp_diags: Vec<_> = jet::check_document(&file, src)
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     let lsp_json = jet::render_all_json(
-//RS         &jet::Diagnostics::ReportPath::from_process(&file),
-//RS         src,
-//RS         &lsp_diags,
-//RS     );
-//RS 
-//RS     assert_eq!(cli_json, lsp_json);
-//RS     let _ = std::fs::remove_file(path);
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
-//RS     let jet = jet_bin();
-//RS     if !jet.exists() {
-//RS         return;
-//RS     }
-//RS     let _guard = lock_lsp_process();
-//RS 
-//RS     let source = "fn run() {\n    m :: [String:Int]{}\n    _ :: m.gett(\"a\")\n}\n";
-//RS     let path = PathBuf::from("/tmp/lsp_report_test.jet");
-//RS     let path_string = path.to_string_lossy().into_owned();
-//RS     std::fs::write(&path, source).expect("write tier-parity diagnostic fixture");
-//RS     let aot = jet::compile_with_path(source, &path_string)
-//RS         .expect_err("AOT front end must reject a missing method");
-//RS     let run = match jet::Interpreter::run_jit_once(&path_string) {
-//RS         jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
-//RS         other => panic!("default resident JIT must reject E0311: {other:?}"),
-//RS     };
-//RS     let interpreter = match jet::Interpreter::dev_iteration(&path_string, false, true) {
-//RS         jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
-//RS         other => panic!("interpreter must reject E0311: {other:?}"),
-//RS     };
-//RS     let tiers = [
-//RS         ("AOT", aot.as_slice()),
-//RS         ("default resident JIT", run.as_slice()),
-//RS         ("interpreter", interpreter.as_slice()),
-//RS     ];
-//RS     for (tier, diags) in tiers.iter().copied() {
-//RS         assert_eq!(
-//RS             diags.len(),
-//RS             1,
-//RS             "{tier} must produce one canonical diagnostic"
-//RS         );
-//RS         assert_eq!(diags[0].code, "E0311", "{tier} diagnostic code drifted");
-//RS     }
-//RS     let report_path = jet::Diagnostics::ReportPath::from_path(&path);
-//RS     let uri = "file:///tmp/lsp_report_test.jet";
-//RS     let mut child = Command::new(&jet)
-//RS         .args(["self", "lsp"])
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .expect("spawn jet self lsp");
-//RS     let mut stdin = child.stdin.take().expect("stdin");
-//RS     let mut stdout = child.stdout.take().expect("stdout");
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
-//RS     );
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
-//RS             uri,
-//RS             json_string(source)
-//RS         ),
-//RS     );
-//RS     let diagnostics = read_msg(&mut stdout);
-//RS     assert!(diagnostics.contains("publishDiagnostics"), "{diagnostics}");
-//RS     let notification = parse_json(&diagnostics).expect("parse publishDiagnostics notification");
-//RS     let editor_params = json_object_field(&notification, "params");
-//RS     let editor_diagnostics = json_array_field(editor_params, "diagnostics");
-//RS     assert_eq!(
-//RS         editor_diagnostics.len(),
-//RS         1,
-//RS         "editor must receive one canonical diagnostic"
-//RS     );
-//RS     let editor_diagnostic = &editor_diagnostics[0];
-//RS     let editor_report = json_object_field(editor_diagnostic, "data");
-//RS     assert!(
-//RS         json_get(editor_diagnostic, "relatedInformation").is_none(),
-//RS         "root report with empty cause must not gain related locations: {diagnostics}"
-//RS     );
-//RS     for (tier, diags) in tiers.iter().copied() {
-//RS         let report = parse_json(jet::render_all_json(&report_path, source, diags).trim_end())
-//RS             .unwrap_or_else(|_| panic!("parse {tier} structured report"));
-//RS         assert_json_values_equal(
-//RS             &format!("editor data drifted from {tier}"),
-//RS             editor_report,
-//RS             &report,
-//RS         );
-//RS         assert_json_values_equal(
-//RS             &format!("editor What drifted from {tier}"),
-//RS             json_object_field(editor_diagnostic, "message"),
-//RS             json_object_field(&report, "what"),
-//RS         );
-//RS     }
-//RS     assert!(
-//RS         diagnostics.contains(r#""message":"`gett` isn't a method on this value""#),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r#""codeDescription":{"href":"jet://explain/E0311"}"#),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r#""data":{"schema":"jet.report/v2""#),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r#""why":"this `Map` value has no instance method named `gett`""#),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r#""fix":"did you mean `get`?""#),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r#""applicability":"suggested""#),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r##""new_text":"get""##),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r#""moment":"compile""#),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r#""severity":"error""#),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(diagnostics.contains(r#""code":"E0311""#), "{diagnostics}");
-//RS     assert!(
-//RS         diagnostics.contains(
-//RS             r##""fix_edits":[{"file":"/tmp/lsp_report_test.jet","span":{"start":47,"end":51},"new_text":"get","safety":"needs-review"}]"##
-//RS         ),
-//RS         "{diagnostics}"
-//RS     );
-//RS     assert!(
-//RS         diagnostics.contains(r#""cause":[],"clears":0"#),
-//RS         "{diagnostics}"
-//RS     );
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         &format!(
-//RS             r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":2,"character":11}},"end":{{"line":2,"character":15}}}},"context":{{"diagnostics":[]}}}}}}"#,
-//RS             uri
-//RS         ),
-//RS     );
-//RS     let actions = read_msg(&mut stdout);
-//RS     assert!(actions.contains(r#""kind":"quickfix""#), "{actions}");
-//RS     assert!(
-//RS         actions.contains(r#""title":"did you mean `get`?""#),
-//RS         "{actions}"
-//RS     );
-//RS     assert!(actions.contains(r##""newText":"get""##), "{actions}");
-//RS     let actions_value = parse_json(&actions).expect("parse code-action response");
-//RS     let actions = json_array(
-//RS         json_object_field(&actions_value, "result"),
-//RS         "code-action result",
-//RS     );
-//RS     let quickfix = actions
-//RS         .iter()
-//RS         .find(|action| json_str(json_object_field(action, "kind")) == Some("quickfix"))
-//RS         .expect("registry fix code action");
-//RS     let document_changes = json_array(
-//RS         json_object_field(json_object_field(quickfix, "edit"), "documentChanges"),
-//RS         "code-action documentChanges",
-//RS     );
-//RS     let action_edits = json_array(
-//RS         json_object_field(
-//RS             document_changes
-//RS                 .first()
-//RS                 .expect("code-action document change"),
-//RS             "edits",
-//RS         ),
-//RS         "code-action edits",
-//RS     );
-//RS     let report_edits = json_array_field(editor_report, "fix_edits");
-//RS     assert_eq!(
-//RS         report_edits.len(),
-//RS         1,
-//RS         "canonical report must carry one recovery edit"
-//RS     );
-//RS     assert_eq!(
-//RS         action_edits.len(),
-//RS         1,
-//RS         "canonical code action must carry one recovery edit"
-//RS     );
-//RS     let expected_action_range =
-//RS         parse_json(r#"{"start":{"line":2,"character":11},"end":{"line":2,"character":15}}"#)
-//RS             .expect("parse expected suggested-edit range");
-//RS     assert_json_values_equal(
-//RS         "code action range drifted from source span",
-//RS         json_object_field(&action_edits[0], "range"),
-//RS         &expected_action_range,
-//RS     );
-//RS     assert_json_values_equal(
-//RS         "code action edit drifted from report fix_edits",
-//RS         json_object_field(&action_edits[0], "newText"),
-//RS         json_object_field(&report_edits[0], "new_text"),
-//RS     );
-//RS 
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
-//RS     );
-//RS     let _ = read_msg(&mut stdout);
-//RS     send_msg(
-//RS         &mut stdin,
-//RS         r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
-//RS     );
-//RS     drop(stdin);
-//RS     let _ = child.wait();
-//RS     let _ = std::fs::remove_file(path);
-//RS }
-//RS 
-//RS #[test]
-//RS fn lsp_formatting_and_range_formatting_return_edits() {
-//RS     let jet = jet_bin();
-//RS     if !jet.exists() {
-//RS         return;
-//RS     }
-//RS     let source = "fn run(){\nprint(1)\n}\n";
-//RS     let uri = "file:///tmp/lsp_formatting_test.jet";
-//RS 
-//RS     run_transcript(
-//RS         source,
-//RS         &[
-//RS             TranscriptStep::Send {
-//RS                 msg:
-//RS                     r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
-//RS                         .to_string(),
-//RS                 expect_contains: Some(vec![
-//RS                     "documentFormattingProvider".to_string(),
-//RS                     "documentRangeFormattingProvider".to_string(),
-//RS                 ]),
-//RS             },
-//RS             TranscriptStep::Send {
-//RS                 msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
-//RS                 expect_contains: None,
-//RS             },
-//RS             TranscriptStep::Open {
-//RS                 uri: uri.to_string(),
-//RS                 expect_notification: true,
-//RS             },
-//RS             TranscriptStep::Send {
-//RS                 msg: format!(
-//RS                     r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}},"options":{{"tabSize":4,"insertSpaces":true}}}}}}"#,
-//RS                     uri
-//RS                 ),
-//RS                 expect_contains: Some(vec!["\"newText\"".to_string(), "\"range\"".to_string()]),
-//RS             },
-//RS             TranscriptStep::Send {
-//RS                 msg: format!(
-//RS                     r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/rangeFormatting","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":3,"character":0}}}},"options":{{"tabSize":4,"insertSpaces":true}}}}}}"#,
-//RS                     uri
-//RS                 ),
-//RS                 expect_contains: Some(vec!["\"newText\"".to_string(), "\"range\"".to_string()]),
-//RS             },
-//RS             TranscriptStep::Send {
-//RS                 msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
-//RS                 expect_contains: Some(vec!["result".to_string()]),
-//RS             },
-//RS         ],
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-// END-PORT-PENDING 1108 tests/lsp.rs:1-1782
+// Rust: tests/lsp.rs:1
+// M13 LSP integration suite: scripted JSON transcripts and latency bench.
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_get, json_str, parse_json]
+use std.[fs, env, thread]
+use std.process.[Command, Stdio]
+use std.io.[Read, Write]
+use std.sync.[Arc, Mutex, MutexGuard, OnceLock]
+use common.[Scratch]
+// GATE #4494: actual native child-process pipes, mutexes, threads and filesystem.
 
+// Rust: tests/lsp.rs:22
+fn jet_bin() -> OSPath { OSPath.from(env.binary_path("jet")) }
+// Rust: tests/lsp.rs:26
+fn lsp_process_lock() -> &Mutex<()> {
+    static LOCK :: OnceLock<Mutex<()>>.new()
+    LOCK.get_or_init(() -> Mutex.new(()))
+}
+// Rust: tests/lsp.rs:31
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<T> {
+    mutex.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
+}
+// Rust: tests/lsp.rs:37
+fn lock_lsp_process() -> MutexGuard<()> { lock_unpoisoned(lsp_process_lock()) }
+// Rust: tests/lsp.rs:53
+fn send_msg(stdin: &Write, json: &String) -> {
+    stdin.write_all("Content-Length: {json.len()}\r\n\r\n{json}".as_bytes()).unwrap()
+    stdin.flush().unwrap()
+}
+// Rust: tests/lsp.rs:58
+fn read_msg(stdout: &Read) -> String {
+    header := String.new()
+    buf := [0u8]
+    loop {
+        stdout.read_exact(&buf).unwrap()
+        header.push(buf[0] as Char)
+        if header.ends_with("\r\n\r\n") -> break
+    }
+    len :: header.lines().find_map(line -> line.strip_prefix("Content-Length:").map(n -> n.trim()))
+        .expect("Content-Length").parse<USize>().unwrap()
+    body := [U8].repeat(0, len)
+    stdout.read_exact(&body).unwrap()
+    String.from_utf8(^body).unwrap()
+}
+// Rust: tests/lsp.rs:79
+fn request_lsp(stdin: &Write, stdout: &Read, id: I64, method: &String, params: &String) -> String {
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
+    loop {
+        body :: read_msg(stdout)
+        parsed :: parse_json(body).expect("valid LSP response")
+        if json_get(parsed, "id") == DataTree.Int(id) -> return ^body
+    }
+}
+// Rust: tests/lsp.rs:101
+// Keep every message preceding the matching response, preserving arrival order.
+fn request_lsp_collect(stdin: &Write, stdout: &Read, id: I64, method: &String, params: &String) -> (DataTree, [DataTree]) {
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
+    before := [DataTree]()
+    loop {
+        parsed :: parse_json(read_msg(stdout)).expect("valid LSP message")
+        if json_get(parsed, "id") == DataTree.Int(id) -> return (^parsed, ^before)
+        before.push(^parsed)
+    }
+}
+// Rust: tests/lsp.rs:123
+fn published_diagnostics_for(messages: &[DataTree], uri: &String) -> [&DataTree] {
+    messages.iter().filter(message -> json_get(message, "method").and_then(json_str) == "textDocument/publishDiagnostics")
+        .filter_map(message -> json_get(message, "params"))
+        .filter(params -> json_get(params, "uri").and_then(json_str) == uri).collect()
+}
+// Rust: tests/lsp.rs:134
+fn error_count(published: &DataTree) -> USize {
+    json_array_field(published, "diagnostics").iter().filter(diagnostic -> json_get(diagnostic, "severity") == DataTree.Int(1)).count()
+}
+// Rust: tests/lsp.rs:141
+fn json_string(s: &String) -> String {
+    out := String.from("\"")
+    loop c in s.chars() {
+        match c {
+            '"' -> out.push_str("\\\"")
+            '\\' -> out.push_str("\\\\")
+            '\n' -> out.push_str("\\n")
+            '\r' -> out.push_str("\\r")
+            '\t' -> out.push_str("\\t")
+            else -> out.push(c)
+        }
+    }
+    out.push('"')
+    ^out
+}
+// Rust: tests/lsp.rs:157
+fn json_object_field(value: &DataTree, key: &String) -> &DataTree {
+    json_get(value, key).unwrap_or_else(() -> panic("missing JSON field `{key}`"))
+}
+// Rust: tests/lsp.rs:161
+fn json_array(value: &DataTree, context: &String) -> &[DataTree] {
+    match value { DataTree.Array(values) -> values; else -> panic("{context} is not an array: {value:?}") }
+}
+// Rust: tests/lsp.rs:168
+fn json_array_field(value: &DataTree, key: &String) -> &[DataTree] { json_array(json_object_field(value, key), "JSON field `{key}`") }
+// Rust: tests/lsp.rs:175
+fn json_values_equal(left: &DataTree, right: &DataTree) -> Bool {
+    match (left, right) {
+        (DataTree.Null, DataTree.Null) -> true
+        (DataTree.Bool(left), DataTree.Bool(right)) -> left == right
+        (DataTree.Int(left), DataTree.Int(right)) -> left == right
+        (DataTree.Float(left), DataTree.Float(right)) -> left == right
+        (DataTree.Number(left), DataTree.Number(right)) -> left == right
+        (DataTree.Text(left) | DataTree.TypedText(left), DataTree.Text(right) | DataTree.TypedText(right)) -> left == right
+        (DataTree.Bytes(left), DataTree.Bytes(right)) -> left == right
+        (DataTree.Array(left), DataTree.Array(right)) -> left.len() == right.len() && left.iter().zip(right).all((left, right) -> json_values_equal(left, right))
+        (DataTree.Object(left), DataTree.Object(right)) -> left.len() == right.len() && left.iter().all((key, left) -> right.iter().find_map((right_key, right) -> if right_key == key -> right else -> none).is_some_and(right -> json_values_equal(left, right)))
+        else -> false
+    }
+}
+// Rust: tests/lsp.rs:206
+fn assert_json_values_equal(label: &String, actual: &DataTree, expected: &DataTree) -> {
+    assert(json_values_equal(actual, expected), "{label}: actual={actual:?}, expected={expected:?}")
+}
+// Rust: tests/lsp.rs:214
+struct DecodedSemanticToken { text: String, token_type: U32, modifiers: U32 }
+// Rust: tests/lsp.rs:220
+fn semantic_data_from_response(resp: &String) -> [U32] {
+    data_key :: "\"data\""
+    start :: resp.find(data_key).expect("semantic token data")
+    after_key := resp[start + data_key.len()..] // #4303
+    array_start :: after_key.find('[').expect("data array")
+    after_array := after_key[array_start + 1..] // #4303
+    array_end :: after_array.find(']').expect("data array end")
+    after_array[..array_end].split(',').filter_map(n -> n.trim().parse<U32>().ok()).collect()
+}
+// Rust: tests/lsp.rs:233
+fn decode_semantic_tokens(src: &String, resp: &String) -> [DecodedSemanticToken] {
+    data :: semantic_data_from_response(resp)
+    lines :: src.lines().collect()
+    out := [DecodedSemanticToken]()
+    line := 0u32
+    start := 0u32
+    loop chunk in data.chunks_exact(5) {
+        line += chunk[0]
+        start = if chunk[0] == 0 -> start + chunk[1] else -> chunk[1]
+        len :: chunk[2]
+        text :: lines.get(line as USize).and_then(line_text -> {
+            s :: start as USize
+            e :: s + len as USize
+            line_text.get(s..e)
+        }).unwrap_or("").to_string()
+        out.push(DecodedSemanticToken{text: ^text, token_type: chunk[3], modifiers: chunk[4]})
+    }
+    ^out
+}
+// Rust: tests/lsp.rs:266
+fn assert_semantic_token(tokens: &[DecodedSemanticToken], text: &String, token_type: U32, modifier: U32) -> {
+    assert(tokens.iter().any(t -> t.text == text && t.token_type == token_type && (t.modifiers & modifier) != 0), "missing semantic token `{text}` type {token_type} modifier {modifier}; got {tokens:?}")
+}
+// Rust: tests/lsp.rs:284
+LSP_CAPABILITY_COVERAGE :: [
+    ("textDocumentSync", "lsp_incremental_sync_range_edit_updates_document"),
+    ("documentFormattingProvider", "lsp_formatting_and_range_formatting_return_edits"),
+    ("documentRangeFormattingProvider", "lsp_formatting_and_range_formatting_return_edits"),
+    ("documentOnTypeFormattingProvider", "lsp_on_type_formatting_returns_brace_edits"),
+    ("codeActionProvider", "lsp_teaching_autocorrect_let_to_val"),
+    ("completionProvider", "lsp_completion_returns_items"),
+    ("signatureHelpProvider", "lsp_signature_help_returns_active_parameter"),
+    ("documentSymbolProvider", "lsp_document_symbol_returns_checked_outline"),
+    ("workspaceSymbolProvider", "lsp_wave2_navigation_features"),
+    ("foldingRangeProvider", "lsp_wave2_navigation_features"),
+    ("documentHighlightProvider", "lsp_wave2_navigation_features"),
+    ("selectionRangeProvider", "lsp_wave2_navigation_features"),
+    ("documentLinkProvider", "lsp_document_links_and_code_lenses"),
+    ("codeLensProvider", "lsp_document_links_and_code_lenses"),
+    ("hoverProvider", "lsp_hover_returns_signature"),
+    ("definitionProvider", "lsp_definition_returns_location"),
+    ("referencesProvider", "lsp_references_finds_all_uses"),
+    ("renameProvider", "lsp_rename_produces_workspace_edit"),
+    ("renameProvider.prepare", "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy"),
+    ("semanticTokensProvider", "lsp_semantic_tokens_returns_data"),
+    ("semanticTokensProvider.full", "lsp_semantic_tokens_returns_data"),
+    ("semanticTokensProvider.range", "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy"),
+    ("semanticTokensProvider.delta", "lsp_semantic_tokens_delta_returns_full_fallback"),
+    ("inlayHintProvider", "lsp_inlay_hints_returns_type_labels"),
+    ("callHierarchyProvider", "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy"),
+    ("typeHierarchyProvider", "lsp_type_hierarchy_trait_impls"),
+    ("workspace", "lsp_workspace_symbols_follow_all_roots_and_folder_changes"),
+    ("executeCommandProvider", "lsp_execute_command_impact_returns_report"),
+    ("resources", "lsp_mcp_environment_resources_are_read_only")
+]
+// Rust: tests/lsp.rs:355
+fn advertised_capabilities(init: &String) -> [String] {
+    cap_start :: init.find("\"capabilities\"")
+    if cap_start == none -> return []
+    open_rel :: init[cap_start.unwrap()..].find('{')
+    if open_rel == none -> return []
+    out := [String]()
+    depth := 0usize
+    in_string := false
+    escape := false
+    string_start := 0usize
+    last_string := none as String?
+    bytes :: init.as_bytes()
+    i := cap_start.unwrap() + open_rel.unwrap()
+    loop i < bytes.len() {
+        b :: bytes[i]
+        if in_string {
+            if escape -> escape = false
+            else if b == b'\\' -> escape = true
+            else if b == b'"' {
+                last_string = init[string_start..i].to_string()
+                in_string = false
+            }
+            i += 1
+            continue
+        }
+        match b {
+            b'"' -> { in_string = true; string_start = i + 1 }
+            b'{' -> depth += 1
+            b'}' -> { depth = depth.saturating_sub(1); if depth == 0 -> break }
+            b':' -> if depth == 1 { key :: last_string.take(); if key != none -> out.push(^key.unwrap()) }
+            else -> {}
+        }
+        i += 1
+    }
+    if init.contains("\"renameProvider\"") && init.contains("\"prepareProvider\": true") -> out.push("renameProvider.prepare")
+    if init.contains("\"semanticTokensProvider\"") {
+        if init.contains("\"full\"") -> out.push("semanticTokensProvider.full")
+        if init.contains("\"range\": true") -> out.push("semanticTokensProvider.range")
+        if init.contains("\"delta\": true") -> out.push("semanticTokensProvider.delta")
+    }
+    out.sort()
+    out.dedup()
+    ^out
+}
+
+// Rust: tests/lsp.rs:432
+// Minimal transcript JSON extractor; all byte offsets and original malformed-input behavior retained.
+module transcript_parser {
+    // Rust: tests/lsp.rs:434
+    pub struct Step { send_raw: String?, open_uri: String?, expect_contains: [String], expect_notification: Bool }
+    // Rust: tests/lsp.rs:445
+    pub struct Transcript { description: String, source: String, steps: [Step] }
+    // Rust: tests/lsp.rs:453
+    fn unescape(s: &String) -> String {
+        out := String.with_capacity(s.len())
+        chars := s.chars()
+        loop {
+            c :: chars.next()
+            if c == none -> break
+            if c.unwrap() != '\\' { out.push(c.unwrap()); continue }
+            match chars.next() {
+                some('"') -> out.push('"')
+                some('\\') -> out.push('\\')
+                some('/') -> out.push('/')
+                some('n') -> out.push('\n')
+                some('r') -> out.push('\r')
+                some('t') -> out.push('\t')
+                some('b') -> out.push('\x08')
+                some('f') -> out.push('\x0c')
+                some('u') -> {
+                    hex :: chars.by_ref().take(4).collect<String>()
+                    match U32.from_str_radix(hex, 16) {
+                        Ok(n) -> { c :: Char.from_u32(n); if c != none -> out.push(c.unwrap()) }
+                        Err(_) -> {}
+                    }
+                }
+                some(other) -> { out.push('\\'); out.push(other) }
+                none -> break
+            }
+        }
+        ^out
+    }
+    // Rust: tests/lsp.rs:489
+    fn extract_string_field(json: &String, key: &String) -> String? {
+        needle :: "\"{key}\""
+        pos :: json.find(needle)?
+        after := json[pos + needle.len()..].trim_start() // #4303
+        after := after.strip_prefix(':')?.trim_start() // #4303
+        after := after.strip_prefix('"')? // #4303
+        end := 0usize
+        bytes :: after.as_bytes()
+        loop {
+            if end >= bytes.len() -> return none
+            if bytes[end] == b'\\' { end += 2; continue }
+            if bytes[end] == b'"' -> break
+            end += 1
+        }
+        unescape(after[..end])
+    }
+    // Rust: tests/lsp.rs:515
+    fn skip_ws(s: &String) -> &String { s.trim_start_matches(c -> c.is_ascii_whitespace()) }
+    // Rust: tests/lsp.rs:520
+    fn find_matching_close(s: &String, open: Char, close: Char) -> USize? {
+        depth := 0usize
+        in_str := false
+        bytes :: s.as_bytes()
+        i := 0usize
+        loop i < bytes.len() {
+            b :: bytes[i]
+            if in_str {
+                if b == b'\\' { i += 2; continue }
+                if b == b'"' -> in_str = false
+            } else {
+                c :: s[i..].chars().next().unwrap()
+                if c == '"' -> in_str = true
+                else if c == open -> depth += 1
+                else if c == close { depth -= 1; if depth == 0 -> return i }
+            }
+            i += c_len(bytes, i)
+        }
+        none
+    }
+    // Rust: tests/lsp.rs:553
+    fn c_len(bytes: &[U8], i: USize) -> USize {
+        b :: bytes[i]
+        if b < 0x80 -> 1 else if b < 0xE0 -> 2 else if b < 0xF0 -> 3 else -> 4
+    }
+    // Rust: tests/lsp.rs:567
+    fn extract_string_array(s: &String) -> [String] {
+        s := skip_ws(s) // #4303
+        if !s.starts_with('[') -> return []
+        close :: find_matching_close(s, '[', ']')
+        if close == none -> return []
+        inner := s[1..close.unwrap()] // #4303
+        result := [String]()
+        remaining := skip_ws(inner) // #4303
+        loop !remaining.is_empty() {
+            remaining = skip_ws(remaining)
+            if remaining.starts_with(']') || remaining.is_empty() -> break
+            if remaining.starts_with('"') {
+                rest := remaining[1..] // #4303
+                end := 0usize
+                bytes :: rest.as_bytes()
+                loop {
+                    if end >= bytes.len() -> break
+                    if bytes[end] == b'\\' { end += 2; continue }
+                    if bytes[end] == b'"' -> break
+                    end += 1
+                }
+                result.push(unescape(rest[..end]))
+                remaining = skip_ws(rest[end + 1..])
+            } else -> break
+            remaining = skip_ws(remaining.trim_start_matches(','))
+        }
+        ^result
+    }
+    // Rust: tests/lsp.rs:612
+    fn extract_object(s: &String) -> (String, &String)? {
+        s := skip_ws(s) // #4303
+        if !s.starts_with('{') -> return none
+        close :: find_matching_close(s, '{', '}')?
+        (s[..close + 1].to_string(), s[close + 1..])
+    }
+    // Rust: tests/lsp.rs:621
+    pub fn parse(content: &String) -> Transcript {
+        description :: extract_string_field(content, "description").unwrap_or_default()
+        source :: extract_string_field(content, "source").expect("transcript must have 'source'")
+        steps_needle :: "\"steps\""
+        steps_pos :: content.find(steps_needle).expect("transcript must have 'steps'")
+        after_steps := content[steps_pos + steps_needle.len()..].trim_start() // #4303
+        after_colon := after_steps.strip_prefix(':').unwrap().trim_start() // #4303
+        close_bracket :: find_matching_close(after_colon, '[', ']').expect("steps array must close")
+        steps_inner := after_colon[1..close_bracket] // #4303
+        steps := [Step]()
+        remaining := skip_ws(steps_inner) // #4303
+        loop !remaining.is_empty() {
+            remaining = skip_ws(remaining)
+            if remaining.is_empty() -> break
+            extracted :: extract_object(remaining)
+            if extracted == none -> break
+            (step_obj, rest) :: extracted.unwrap()
+            remaining = skip_ws(rest.trim_start_matches(','))
+            steps.push(parse_step(step_obj))
+        }
+        Transcript{description: ^description, source: ^source, steps: ^steps}
+    }
+    // Rust: tests/lsp.rs:664
+    fn parse_step(obj: &String) -> Step {
+        send_needle :: "\"send\""
+        open_needle :: "\"open\""
+        ec_needle :: "\"expect_contains\""
+        en_needle :: "\"expect_notification\""
+        send_pos :: obj.find(send_needle)
+        send_raw :: if send_pos != none {
+            after := skip_ws(obj[send_pos.unwrap() + send_needle.len()..]) // #4303
+            after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
+            extract_object(after).map((o, _) -> ^o)
+        } else -> none
+        open_uri :: if send_raw == none {
+            open_pos :: obj.find(open_needle)
+            if open_pos != none {
+                after := skip_ws(obj[open_pos.unwrap() + open_needle.len()..]) // #4303
+                after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
+                extract_object(after).and_then((open_obj, _) -> extract_string_field(open_obj, "uri"))
+            } else -> none
+        } else -> none
+        ec_pos :: obj.find(ec_needle)
+        expect_contains :: if ec_pos != none {
+            after := skip_ws(obj[ec_pos.unwrap() + ec_needle.len()..]) // #4303
+            after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
+            extract_string_array(after)
+        } else -> []
+        en_pos :: obj.find(en_needle)
+        expect_notification :: if en_pos != none {
+            after := skip_ws(obj[en_pos.unwrap() + en_needle.len()..]) // #4303
+            after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
+            !after.starts_with("null")
+        } else -> false
+        Step{send_raw: ^send_raw, open_uri: ^open_uri, expect_contains: ^expect_contains, expect_notification: expect_notification}
+    }
+}
+// Rust: tests/lsp.rs:722
+fn run_json_transcript_file(jet: &OSPath, path: &OSPath) -> {
+    _guard :: lock_lsp_process()
+    content :: fs.read_to_string(path).unwrap_or_else(e -> panic("read {path:?}: {e}"))
+    transcript :: transcript_parser.parse(content)
+    child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
+    stdin := child.stdin.take().expect("stdin")
+    stdout := child.stdout.take().expect("stdout")
+    loop step in transcript.steps {
+        if step.open_uri != none {
+            uri :: step.open_uri.unwrap()
+            open :: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(transcript.source)}}}}}}}"
+            send_msg(&stdin, open)
+            if step.expect_notification {
+                notif :: read_msg(&stdout)
+                assert(notif.contains("publishDiagnostics"), "[{path.display()}] open step: expected publishDiagnostics, got: {notif}")
+                loop expect in step.expect_contains -> assert(notif.contains(expect.as_str()), "[{path.display()}] expected {expect:?} in notification, got:\n{notif}")
+            }
+        } else if step.send_raw != none {
+            send_msg(&stdin, step.send_raw.unwrap())
+            if !step.expect_contains.is_empty() {
+                resp :: read_msg(&stdout)
+                loop expect in step.expect_contains -> assert(resp.contains(expect.as_str()), "[{path.display()}] expected {expect:?} in response, got:\n{resp}")
+            }
+        }
+    }
+    drop(^stdin)
+    _ :: child.wait()
+}
