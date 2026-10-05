@@ -16,9 +16,10 @@ pub fn uint(bytes: View<U8>, at: Int, width: Int) -> Int Never! {
 pub fn valid(asset: [U8], kind: Int, stride: Int) -> Bool Never! {
     if asset.len() < 40 || stride <= 0 -> return false
     bytes :: asset[0..<asset.len()]
-    if bytes[0] != (U8{74}) || bytes[1] != (U8{85}) || bytes[2] != (U8{67}) || bytes[3] != (U8{68}) -> return false
+    // "JUCD", schema 1.0, Unicode 17.0.0.
+    if bytes[0] != 74 || bytes[1] != 85 || bytes[2] != 67 || bytes[3] != 68 -> return false
     if uint(bytes, 4, 2) != 1 || uint(bytes, 6, 2) != 0 -> return false
-    if uint(bytes, 8, 3) != 17 || bytes[11] != (U8{0}) -> return false
+    if uint(bytes, 8, 3) != 17 || bytes[11] != 0 -> return false
     if uint(bytes, 12, 4) != kind || uint(bytes, 20, 4) != stride -> return false
     count :: uint(bytes, 16, 4)
     records :: uint(bytes, 24, 4)
@@ -28,16 +29,20 @@ pub fn valid(asset: [U8], kind: Int, stride: Int) -> Bool Never! {
     records == 40 && pool == records + count * stride && total == asset.len() && pool <= total && pool_bytes == total - pool
 }
 
+// Header word 28 is the pool offset: records end there and the pool begins.
+fn pool_offset(asset: [U8]) -> Int Never! {
+    bytes :: asset[0..<asset.len()]
+    uint(bytes, 28, 4)
+}
+
 pub fn records(asset: [U8], kind: Int, stride: Int) -> View<U8> from asset {
     assert(valid(asset, kind, stride), "invalid Unicode asset schema/version/extent")
-    bytes :: asset[0..<asset.len()]
-    asset[40..<uint(bytes, 28, 4)]
+    asset[40..<pool_offset(asset)]
 }
 
 pub fn pool(asset: [U8], kind: Int, stride: Int) -> View<U8> from asset {
     assert(valid(asset, kind, stride), "invalid Unicode asset schema/version/extent")
-    bytes :: asset[0..<asset.len()]
-    asset[uint(bytes, 28, 4)..<asset.len()]
+    asset[pool_offset(asset)..<asset.len()]
 }
 
 // Rust UnicodeString.rs:18-30 jet_unicode_contains; shared range/tag lookup.
@@ -60,30 +65,26 @@ pub fn range_row(table: View<U8>, cp: Int, stride: Int) -> Int? {
     None
 }
 
-pub fn contains(table: View<U8>, cp: Int) -> Bool Never! {
-    if range_row(table, cp, 6) == .Val(_) -> return true
-    false
-}
+pub fn contains(table: View<U8>, cp: Int) -> Bool Never! { range_row(table, cp, 6) != None }
 
-pub fn tag(table: View<U8>, cp: Int, fallback: Int) -> Int Never! {
-    if range_row(table, cp, 7) == .Val(row) -> return uint(table, row + 6, 1)
-    fallback
+// A tagged range row carries its one-byte tag after the two 3-byte bounds.
+pub fn range_tag(table: View<U8>, cp: Int, fallback: Int) -> Int Never! {
+    row :: range_row(table, cp, 7) ?? return fallback
+    uint(table, row + 6, 1)
 }
 
 // Scalar-only lookup keeps the borrowed record extent inside the asset scope.
-// Unlike records/tag composition, no borrowed result crosses the #4392 gate.
+// Unlike records/range_tag composition, no borrowed result crosses the #4392 gate.
 pub fn asset_contains(asset: [U8], cp: Int) -> Bool Never! {
     assert(valid(asset, 2, 6), "invalid Unicode asset schema/version/extent")
-    bytes :: asset[0..<asset.len()]
-    table :: asset[40..<uint(bytes, 28, 4)]
+    table :: asset[40..<pool_offset(asset)]
     contains(table, cp)
 }
 
 pub fn asset_tag(asset: [U8], cp: Int, fallback: Int) -> Int Never! {
     assert(valid(asset, 3, 7), "invalid Unicode asset schema/version/extent")
-    bytes :: asset[0..<asset.len()]
-    table :: asset[40..<uint(bytes, 28, 4)]
-    tag(table, cp, fallback)
+    table :: asset[40..<pool_offset(asset)]
+    range_tag(table, cp, fallback)
 }
 
 // Rust UnicodeString.rs:32-40 jet_unicode_mapping; return only an index extent.
