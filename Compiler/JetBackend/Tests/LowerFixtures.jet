@@ -687,7 +687,7 @@ fn fx_report_image(name: String, program: LIRModule, entry: Int) -> Bool {
     if memory.errors.len() > 0 -> return false
     image_path :: "{name}.image"
     files.write_bytes(image_path, memory.text) ?? panic("cannot write {image_path}")
-    manifest := "align {memory.align}\nentry {memory.entry}\n"
+    manifest := "align {memory.align}\nentry {memory.entry}\ndata {memory.data_offset}\n"
     loop (index, symbol) in memory.imports -> manifest = "{manifest}import {memory.slots[index]} {symbol}\n"
     loop reloc in memory.relocs -> manifest = "{manifest}reloc {reloc.at} {reloc.target}\n"
     files.write("{name}.mem", manifest) ?? panic("cannot write {name}.mem")

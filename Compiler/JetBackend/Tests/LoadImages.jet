@@ -17,13 +17,14 @@ use core.process as process
 fn li_image(name: String) -> X64MemoryImage? {
     text :: files.read_bytes("{name}.image") ?? return None
     manifest :: files.read("{name}.mem") ?? return None
-    image := X64MemoryImage{text: text, align: 0, entry: -1, imports: [String]{}, slots: [Int]{}, relocs: [X64ImageDataReloc]{}, errors: [String]{}}
+    image := X64MemoryImage{text: text, align: 0, entry: -1, data_offset: -1, imports: [String]{}, slots: [Int]{}, relocs: [X64ImageDataReloc]{}, errors: [String]{}}
     loop line in manifest.split("\n").to_list() {
         if line.len() == 0 -> next
         words :: line.split(" ").to_list()
         if {
             words[0] == "align" && words.len() == 2 -> image.align = Int.parse(words[1]) ?? return None
             words[0] == "entry" && words.len() == 2 -> image.entry = Int.parse(words[1]) ?? return None
+            words[0] == "data" && words.len() == 2 -> image.data_offset = Int.parse(words[1]) ?? return None
             words[0] == "import" && words.len() == 3 -> {
                 &image.slots.push(Int.parse(words[1]) ?? return None)
                 &image.imports.push(words[2])
