@@ -6462,7 +6462,7 @@ impl TBuiltinOp {
             ),
             MapSliceKeys { .. } => b(
                 "map_slice",
-                "jet_map_slice",
+                "jet_map_slice_keys_kernel",
                 2,
                 2,
                 &[true, false],

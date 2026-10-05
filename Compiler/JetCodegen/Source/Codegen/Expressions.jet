@@ -6390,6 +6390,16 @@ fn jet_codegen_lower_math_swizzle_read(builder: &JetCodegenBuilder, expression: 
         .Named(name) -> name
         else -> panic("checked multi-lane swizzle has no vector result type")
     }
+    // D-SWIZZLE1: a partial swizzle of an `F32x4` reads `F32` lanes into a
+    // `VecN`, whose lanes are `Float`. Widen each lane to the result's scalar
+    // so the constructor sees its own component type.
+    result_scalar :: jet_codegen_math_scalar_type(result_name)
+    if type_identity_key(result_scalar) != type_identity_key(scalar) {
+        target :: jet_codegen_lower_type_for_function(result_scalar, builder)
+        widened := [MIRValueID]{}
+        loop value in values -> &widened.push(jet_codegen_emit_value(&builder, expression.span, result_scalar, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: target, conversion: MIRConversion.NumericCast}))
+        values = widened
+    }
     jet_codegen_emit_math_builtin(&builder, expression, result_name, "new", values)
 }
 

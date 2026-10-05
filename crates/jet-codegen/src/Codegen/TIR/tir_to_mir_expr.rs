@@ -1295,6 +1295,25 @@ fn lower_math_swizzle_read(
             ));
         }
     };
+    // D-SWIZZLE1: a partial swizzle of an `F32x4` reads `F32` lanes into a
+    // `VecN`, whose lanes are `Float` (`swizzle_read_type`). Widen each lane
+    // to the result's scalar so the constructor sees its own component type.
+    let result_scalar = crate::Sema::math_scalar_ty(result_type);
+    if result_scalar != scalar_ty {
+        let target = ctx.mir_type(&result_scalar)?;
+        for value in &mut values {
+            *value = ctx.emit(
+                "math-swizzle-lane-widen",
+                Some(result_scalar.clone()),
+                MirOperation::Convert {
+                    value: *value,
+                    parameters: Vec::new(),
+                    target: target.clone(),
+                    conversion: MirConversion::NumericCast,
+                },
+            )?;
+        }
+    }
     let type_id = math_builtin_type_id(ctx, result_type)?;
     let route = super::math_builtin_route(result_type, "new", values.len(), &expr.ty, carrier)?;
     let call = ctx.intern_prelude_route(route)?;

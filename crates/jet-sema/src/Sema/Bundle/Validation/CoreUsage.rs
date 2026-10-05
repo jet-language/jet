@@ -1431,6 +1431,20 @@ pub(crate) fn collect_core_expr(
                     Some(c.name_span),
                 );
             }
+            // D-DBG1=A: checking renamed a `debug(value)` trace to the internal
+            // trace call. Lowering writes its Debug-form line through the shared
+            // `core.term.eprint` row, so the trace reaches that row's Prelude
+            // part (`jet_std_io_eprint`) and the formatter even when the
+            // program never imports `core.term`.
+            if c.name == Syntax::INTERNAL_DEBUG_TRACE {
+                note_core_usage(
+                    used,
+                    spans,
+                    "core.text.fmt::interpolation",
+                    Some(c.name_span),
+                );
+                note_core_usage(used, spans, "core.term::eprint", Some(c.name_span));
+            }
             for arg in &c.args {
                 // D-CABI-CALLBACK1: sema proved this named function is passed as
                 // a stable C callback; retain its canonical declaration identity.

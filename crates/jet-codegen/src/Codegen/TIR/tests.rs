@@ -2380,6 +2380,118 @@ fn mir_is_finite_selects_math_runtime_part() {
 }
 
 #[test]
+fn mir_debug_trace_selects_eprint_runtime_part() {
+    // D-DBG1=A: `debug(value)` writes through the shared `core.term.eprint`
+    // row without a `core.term` import. The trace must still select the
+    // runtime part that defines `jet_std_io_eprint`, or AOT names a Prelude
+    // function it never emitted (rustc E0425).
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn run() {\n x :: debug(1)\n print(x)\n}\n";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("debug trace failed to lower to MIR: {err:?}"));
+        assert!(
+            mir.artifacts.iter().any(|artifact| artifact
+                .runtime_parts
+                .contains(&jet_foundation::MIR::MirRuntimePartId::FsRuntime)),
+            "debug(value) must select the FsRuntime part so AOT emits jet_std_io_eprint"
+        );
+    });
+}
+
+#[test]
+fn mir_map_slice_routes_to_the_prelude_kernel() {
+    // `Map.slice(keys)` must name a function the Rust Prelude defines.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn run() {\n m :: [String:Int]{\"a\": 1, \"b\": 2}\n s :: m.slice([\"a\"])\n print(s.len())\n}\n";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("Map.slice failed to lower to MIR: {err:?}"));
+        let symbol = "jet_map_slice_keys_kernel";
+        assert!(
+            mir.prelude_calls.iter().any(|row| row.symbol.name() == symbol),
+            "Map.slice must intern the Prelude symbol {symbol}"
+        );
+        let collections = include_str!("../../Prelude/Core/Collections.rs");
+        assert!(
+            collections.contains(format!("fn {symbol}<").as_str()),
+            "the Rust Prelude must define {symbol}"
+        );
+    });
+}
+
+#[test]
+fn mir_partial_f32_swizzle_widens_lanes_and_writes_have_setters() {
+    // D-SWIZZLE1: `F32x4.xy` is a `Vec2`, whose lanes are `Float`; each `F32`
+    // lane read is widened before the `Vec2` constructor. A write swizzle
+    // stores through `jet_math_<Type>_lane_set`, which LinalgFns must define
+    // for every swizzleable type.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn run() {\n lanes :: F32x4(1.0, 2.0, 3.0, 4.0)\n pair :: Vec2{lanes.xy}\n print(pair.to_array())\n pos := Vec3(10.0, 20.0, 30.0)\n pos.xy = Vec2(0.0, 0.0)\n print(pos.to_array())\n}\n";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("swizzle failed to lower to MIR: {err:?}"));
+        let run = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "run" || function.name.ends_with("::run"))
+            .expect("run lowers to MIR");
+        let widened = run
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .filter(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::Convert {
+                        conversion: jet_foundation::MIR::MirConversion::NumericCast,
+                        target,
+                        ..
+                    } if target.is_float()
+                )
+            })
+            .count();
+        assert!(
+            widened >= 2,
+            "each F32 lane of `lanes.xy` widens to the Vec2 scalar (found {widened})"
+        );
+        assert!(
+            mir.prelude_calls
+                .iter()
+                .any(|row| row.symbol.name() == "jet_math_Vec3_lane_set"),
+            "a Vec3 write swizzle stores through jet_math_Vec3_lane_set"
+        );
+        let linalg = include_str!("../../Prelude/CoreLib/Top/LinalgFns.rs");
+        for name in crate::Syntax::SIMD_LANE_TYPE_NAMES
+            .iter()
+            .copied()
+            .chain(["Vec2", "Vec3", "Vec4"])
+            .filter(|name| crate::Sema::is_swizzleable_math_type(name))
+        {
+            assert!(
+                linalg.contains(format!("jet_math_{name}_lane_set").as_str()),
+                "LinalgFns is missing the lane setter for swizzleable {name}"
+            );
+        }
+    });
+}
+
+#[test]
 fn mir_lowers_user_struct_and_instance_method() {
     // Compiler-generated Display/Equatable bodies and user getters all name
     // the TIR local `self`. Binding it as MIR parameter 0 is what lets a

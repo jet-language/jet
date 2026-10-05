@@ -11716,7 +11716,7 @@ host_fns! {
     map_intersection: "jet_jit_map_intersection" => jet_jit_map_intersection: sig_get_opt;
     checked_map_intersection: "jet_map_intersection" => jet_jit_map_intersection: sig_get_opt;
     map_slice: "jet_jit_map_slice" => jet_jit_map_slice: sig_get_opt;
-    checked_map_slice: "jet_map_slice" => jet_jit_map_slice: sig_get_opt;
+    checked_map_slice: "jet_map_slice_keys_kernel" => jet_jit_map_slice: sig_get_opt;
     map_from_keys_kernel: "jet_map_from_keys_kernel" => jet_jit_map_from_keys: sig_get_opt;
     map_from_keys_int: "jet_map_from_keys_int" => jet_jit_map_from_keys_int: sig_get_opt;
     map_from_keys_composite: "jet_map_from_keys_composite" => jet_jit_map_from_keys_composite: sig_get_opt;
