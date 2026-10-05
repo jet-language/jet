@@ -1133,7 +1133,7 @@ fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
         if parts.len() == 1 && parts[0] == .Lit(text) -> symbol = text
     }
     if symbol == "" {
-        parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) Return = \"c_symbol\"`")
+        parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) -> Return = \"c_symbol\"`")
         return
     }
     loop index in 0..<func.markers.len() {
@@ -1408,7 +1408,7 @@ fn parser_parse_function_body_marker(state: &JetParserState, guest_import: Bool)
     if token.kind == TOKEN_UNIFIED_ARROW {
         parser_bump(&state)
         if guest_import {
-            parser_add_error_code(&state, "E3261", token.span, "`#Import(c)` function uses a non-canonical body marker", "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol", "write `#Import(c) fn name(args) Return = \"symbol\"`")
+            parser_add_error_code(&state, "E3261", token.span, "`#Import(c)` function uses a non-canonical body marker", "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol", "write `#Import(c) fn name(args) -> Return = \"symbol\"`")
         }
         return true
     }
