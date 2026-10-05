@@ -1045,13 +1045,17 @@ compares stdout with the golden; each verdict names its leg (`static` or
 `hosted`). `--stage` and `--until` bound the stages that run.
 `<outdir>/summary.txt` counts pass, wrong, unsupported and harness verdicts and
 ranks the blockers by how many goldens each one stops.
+Set `JET_MIR_EMIT=1` to regenerate checked MIR with the current reference
+compiler's `emit --rust` seam without compiling or executing its Rust output.
+The native executable still runs against the golden; the dump receipt is
+explicitly an emission receipt, not a reference-execution pass.
 
 An interrupted lowering batch can resume with `JET_LOWER_RESUME=1`: its original
 `lower/unit.jet` is required and kept frozen; completed `.o` files and nonempty
 issue reports are retained rather than lowered again. Replay runtime linking for
 any object interrupted before its executable/link report was written, then run
-the comparison over fresh working directories. The harness refuses new driver
-builds and shard processes while `~/.cache/jet-dev/proofq/PAUSE` exists; queue the
+the comparison over fresh working directories. The harness refuses new MIR
+emissions, driver builds and shard processes while `~/.cache/jet-dev/proofq/PAUSE` exists; queue the
 continuation through proofq after the compile gate, not as a direct heavy run.
 
 ### Comparing the two front-end feeds

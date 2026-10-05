@@ -27,6 +27,7 @@
 //
 // usage: [JET_RUNTIME_PACK=<jet_runtime.pack.o> | JET_RUNTIME_C_LIB=<libjet_runtime_c.a>] [JET=<jet binary>]
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
+//        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
 //        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
 // Writes <outdir>/results.tsv and <outdir>/summary.txt.
@@ -96,18 +97,22 @@ function stage(c) {
 
 if (from <= 0 && until >= 0) {
   for (const c of open()) {
+    requireProofUnpaused();
     const dump = join(dirs.mir, `${c.slug}.mir`);
     rmSync(dump, { force: true });
     const cwd = stage(c);
-    const run = spawnSync(safeJet, ["run", c.entry.shown], {
+    const emit = process.env.JET_MIR_EMIT === "1";
+    const command = emit ? ["emit", "--rust", c.entry.shown] : ["run", c.entry.shown];
+    const run = spawnSync(safeJet, command, {
       cwd,
       input: c.stdin ?? "",
       encoding: "utf8",
+      stdio: ["pipe", emit ? "ignore" : "pipe", "pipe"],
       env: { ...process.env, JET_DUMP_MIR: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
       maxBuffer: 1 << 28,
     });
-    writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ status: run.status, stdout: run.stdout, stderr: run.stderr }));
-    console.log(`mir ${c.slug}: ${existsSync(dump) ? "dumped" : "no dump"} (jet run exit ${run.status})`);
+    writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ mode: emit ? "emit" : "run", status: run.status, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }));
+    console.log(`mir ${c.slug}: ${existsSync(dump) ? "dumped" : "no dump"} (jet ${emit ? "emit" : "run"} exit ${run.status})`);
   }
 }
 
@@ -239,7 +244,10 @@ for (const c of open()) {
   if (!existsSync(join(dirs.mir, `${c.slug}.mir`))) {
     c.verdict = "no-mir";
     const ref = join(dirs.mir, `${c.slug}.ref`);
-    if (existsSync(ref)) c.detail = `jet run exit ${JSON.parse(readFileSync(ref, "utf8")).status}`;
+    if (existsSync(ref)) {
+      const reference = JSON.parse(readFileSync(ref, "utf8"));
+      c.detail = `jet ${reference.mode ?? "run"} exit ${reference.status}`;
+    }
   } else if (existsSync(join(dirs.lower, `${c.slug}.convert-error`))) {
     c.verdict = "convert-error";
     c.detail = readFileSync(join(dirs.lower, `${c.slug}.convert-error`), "utf8").split("\n")[0];
