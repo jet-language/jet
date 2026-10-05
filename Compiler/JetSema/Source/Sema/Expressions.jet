@@ -2699,6 +2699,8 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     if concurrency.handled -> return concurrency
     task_group := sema_taskgroup_check_group_method(receiver, receiver_value.ty, method, args, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if task_group.handled -> return task_group
+    task_handle := sema_taskgroup_check_task_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &context, &diagnostics)
+    if task_handle.handled -> return task_handle
 
     value_method := sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if value_method.handled -> return value_method
