@@ -712,6 +712,12 @@ function becomes a value only when every parameter can be called with that read
 access; parameters requiring `&` or `^` keep the function direct-call-only
 (S47, D-MEM-PARAM1).
 
+The same structural callable-value comparison applies inside collection and
+aggregate slots: a named function's declaration call metadata does not make
+`[String:fn(String) -> String]` a different value type. Required public labels,
+parameter zones, effects, and returned-view provenance remain directional
+obligations at every container depth; storage never erases those requirements.
+
 Direct named and method calls keep their ordinary syntax. A function-valued
 expression is invoked with `.call(...)`; a struct field or method actually
 named `call` shadows that built-in projection. Direct calls on names, fields,

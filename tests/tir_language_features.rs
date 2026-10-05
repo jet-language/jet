@@ -404,6 +404,36 @@ fn run() { _ :: invoke(factory, (value: Bool) -> 1) }
     );
 }
 
+#[test]
+fn nested_callable_containers_ignore_declaration_call_metadata() {
+    let src = r#"
+fn lower(value: String) -> String { ~value }
+fn run() {
+    handlers :: [String:fn(String) -> String]{"lower": lower}
+    nested :: [[String:fn(String) -> String]]{^handlers}
+    handler :: nested[0].get("lower").or_err("missing handler")
+    _ :: handler("HI")
+}
+"#;
+    jet::compile(src).expect("named function metadata must not distinguish nested value slots");
+}
+
+#[test]
+fn nested_callable_containers_keep_required_public_labels() {
+    let src = r#"
+fn plain(value: Bool) -> Int { 1 }
+fn run() {
+    handlers :: [String:fn(*, force: Bool) -> Int]{"plain": plain}
+}
+"#;
+    let diagnostics = jet::compile(src)
+        .expect_err("container storage must not erase required callable labels");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0108"),
+        "expected E0108 for the nested callable-contract mismatch: {diagnostics:#?}"
+    );
+}
+
 /// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Destination conversion
 /// `Name.from_kind(x)` → newtype
 /// `__jet_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native

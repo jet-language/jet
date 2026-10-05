@@ -858,6 +858,34 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
                         Type::Apply { name: got_name, .. },
                     ) => want_name == got_name,
                     (Type::Fn { .. }, Type::Fn { .. }) => fn_types_compatible(want, got),
+                    (Type::Shared(want), Type::Shared(got)) => carrier_compatible(want, got),
+                    (
+                        Type::Map { key: want_key, value: want_value, .. },
+                        Type::Map { key: got_key, value: got_value, .. },
+                    ) => carrier_compatible(want_key, got_key)
+                        && carrier_compatible(want_value, got_value),
+                    (
+                        Type::FixedList { elem: want, len: want_len, .. },
+                        Type::FixedList { elem: got, len: got_len, .. },
+                    ) => want_len == got_len && carrier_compatible(want, got),
+                    (Type::Tuple(want), Type::Tuple(got)) => {
+                        want.len() == got.len()
+                            && want.iter().zip(got).all(|((want_name, want), (got_name, got))| {
+                                want_name == got_name && carrier_compatible(want, got)
+                            })
+                    }
+                    (Type::Union(want), Type::Union(got)) => {
+                        want.len() == got.len()
+                            && want.iter().zip(got).all(|(want, got)| carrier_compatible(want, got))
+                    }
+                    (
+                        Type::Tagged { marker: want_marker, inner: want },
+                        Type::Tagged { marker: got_marker, inner: got },
+                    ) => want_marker == got_marker && carrier_compatible(want, got),
+                    (
+                        Type::Quantity { base: want, dimension: want_dimension },
+                        Type::Quantity { base: got, dimension: got_dimension },
+                    ) => want_dimension == got_dimension && carrier_compatible(want, got),
                     _ => want == got,
                 };
             }
