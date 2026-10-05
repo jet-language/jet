@@ -22,8 +22,10 @@ archived Rust bootstrap compiler does not carry the lint.
 - A failure is an internal compiler error. The report names the pass that
   produced the program, the rule family, the function, and the offending
   operation.
-- The lint is linear in the size of the program. Ownership uses one forward
-  dataflow over flat bit rows per function, with no per-block copies of maps.
+- The lint is linear in the size of the program. Ownership and the safety
+  families share one forward dataflow over flat bit rows per function, with no
+  per-block copies of maps. The safety families add work proportional to a
+  function's views, writing closures, and task-group loans, which are a handful.
 
 ## Type compatibility
 
@@ -69,6 +71,61 @@ Every rule belongs to one family. The family name is part of the ICE text.
 | `terminator.typing` | Each of the 8 terminators satisfies its rule below. |
 | `ownership.move` | No value or place is used after it was moved on every path to the use, a value is consumed at most once, and only owned values are consumed. A write to a moved place or its parent restores it. A Bool local that is provably false (or true) on every path removes the branch edge it guards, and the same Bool facts are followed along each path out of a move: a place use is a second move only when some feasible path reaches it from the move without a restoring write (a cleanup move guarded by the drop flag the move cleared runs only where the place was refilled). Failure and unwind drop edges are entry points. |
 | `effect.row` | Every effect in a direct callee's solved row is in the caller's solved row, itself or through a parent effect (`FS` covers `FS.Write`), unless the caller's row is maximal. |
+| `alias.exclusive` | A place that one operation's argument writes, directly or through a closure argument that writes a captured place, overlaps no other argument, receiver, or captured place of that operation. A closure that writes a captured place is not used after another access reached that place while the closure was live. A place lent to a task-group child does not overlap another live child's loan when either writes, and the parent does not read a place a live child writes. |
+| `view.valid` | A view is not used after a path containing its owner was moved, written, or resized. A place lent to a task-group child does not change before the group's scope exits or the child's handle is joined. A returned view points only into a parameter the caller keeps (inside the declared `from` sources, when there are any), a capture, or a static, never into a local, an owned parameter, or a temporary. |
+| `send.boundary` | A sendable closure (`SendFn`) captures no value or place whose type holds a `Cell`, a `View`/`ViewMut`, or a non-sendable `Fn`. Its place captures are allowed only for a task-group child, or for reading in a parallel worker. A write capture, or a non-Copy value read straight out of a place, is allowed only for a task-group child. A channel send carries no such value. |
+
+## Safety families
+
+`alias.exclusive`, `view.valid`, and `send.boundary` are Jet's independent
+second proof of exclusivity, view validity, and sendability. On the Rust path,
+rustc's borrow checker and `Send` checks re-prove them for the generated code.
+The native backend has no such re-check. These families use only facts the
+MIR already carries, never sema's alias graph:
+
+- **Places.** Two places overlap when they share a root and no projection
+  separates them. Different fields are disjoint, and so are index projections
+  that name two distinct `Int` constants. Every other index, range, payload, or
+  dereference may overlap.
+- **Views.** A view origin is an instruction whose result is a `View`,
+  `ViewMut`, or `ComputeViewMut` and whose operand reads or borrows an owner
+  place. Moves, joins, plain reads, and copies carry or materialize a view; they
+  do not make one. A local written with a view holds it. A view goes stale when
+  a path containing its owner is moved, written, resized (a builtin receiver
+  place or a write or move argument), or opened as a write window. A fresh
+  evaluation of the origin is valid again.
+- **Writing closures.** A closure that is not sendable and captures a place
+  through a write capture parameter keeps a write of that place live. Any other
+  read or write of an overlapping place makes it stale, and a later use of the
+  closure, or of a local holding it, is an `alias.exclusive` failure.
+- **Tasks.** A spawn is a `CoreClosureCall` of kind `Spawn`. It is a task-group
+  child when its values carry the group (three values: group, site, label).
+  Each place the child captures, or reads straight out of as a non-Copy value,
+  is lent until a `TaskGroup` scope exits or a `core.tasks.join` takes the
+  child's handle. A parallel worker is a sendable closure passed to a `para_*`
+  route; it is joined inside the call.
+- **Copy facts.** A value whose ownership mode is `Copy`, or whose layout is a
+  scalar ABI, is copied out of its place and aliases nothing.
+
+The fixtures in `LintFixtures.jet` model each sema check it backs, deleted in
+turn: the MIR that lowering emits for a `tests/ui` program once its check is
+gone must fail the lint. The programs are `projected_write_window_overlap`
+(E0204), `view_owner_changed` (E0212), `ownership_call_consume_provenance`
+(E0121), `task_capture`, `taskgroup_overlapping_write_borrows`, and
+`taskgroup_lent_owner_moved` (E1101), `local_cell_crossing`,
+`string_view_task_capture`, and `unsendable_send` (E1102), and
+`view_outlives_owner` (E2305). The fixtures also cover the closure-laundered
+mutations of #4621.
+
+Two sema rules have no MIR counterpart, so the lint cannot back them:
+
+- E1113 (a write through a frozen value). `freeze(x)` lowers to an ordinary
+  owned copy, and every capture of it copies again, so a later write races with
+  nothing in the MIR. The lint needs a frozen fact, such as a `Freeze` copy
+  fact, before it can prove the rule.
+- E0204 on a scalar. In `both(&x, x)` with an `Int`, the read argument is
+  copied out before the call. The MIR is memory-safe, and sema's rule is
+  stricter than that.
 
 Shared-guard `map` and `split` consume their source guard. Lowering a
 named guard therefore emits the same owned-place move as task consumption;

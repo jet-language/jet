@@ -140,6 +140,30 @@ Rust-free proof. The Rust-removal gate remains open until native tier producers,
 the instrumented Jet runtime and the missing instrumentation/self-build proofs
 exist.
 
+## The post-Rust safety argument
+
+Safe Jet's memory and data-race safety is proved twice before code is
+generated. Sema owns every user-facing check (I3) and reports each violation
+as a registered diagnostic. MIR Lint ([mir-lint.md](mir-lint.md)) then re-proves
+the result independently over the canonical MIR on every compile; a failure is
+an internal compiler error. On the Rust path rustc's borrow checker and `Send`
+checks are a third check (I2). The native backend has no rustc, so MIR Lint is
+the second proof it relies on:
+
+- `ownership.move` backs use-after-move (E0121);
+- `alias.exclusive` backs in-call aliasing (E0204), closures that keep a write
+  live, and overlapping task-group loans (E1101);
+- `view.valid` backs views whose owner changed (E0212), owners changed while
+  lent to a task (E1101), and views that escape their owners (E2305);
+- `send.boundary` backs mutable or borrowed captures that cross a task or
+  parallel boundary (E1101) and Cell, view, or function values that cross one
+  (E1102).
+
+The MIR Lint fixtures prove each pairing: lowering's output for the matching
+`tests/ui` program, with that sema check deleted, is an internal compiler error.
+Writing through a frozen value (E1113) is not backed yet, because the MIR has no
+frozen fact. Until it does, the native backend relies on sema alone for that
+rule.
 ## Unsafe-region ratchet
 
 The repository records every user-written semantic unsafe region in the
