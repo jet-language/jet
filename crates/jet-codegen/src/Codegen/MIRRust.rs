@@ -4975,9 +4975,14 @@ impl<'a> RustEmitter<'a> {
         self.type_def(id).key == jet_foundation::Syntax::TYPE_ERR
     }
 
+    /// `Err.cause`: a field named `cause` on the default `Err` row. A field of
+    /// a structural tuple (or any owner with no definition row) is never it.
     fn is_default_err_cause_field(&self, id: MirFieldId) -> bool {
         let row = &self.program.fields[self.field_positions[&id]];
-        self.is_default_err_type(row.owner) && row.field.name == "cause"
+        row.field.name == "cause"
+            && self
+                .try_type_def(row.owner)
+                .is_some_and(|definition| definition.key == jet_foundation::Syntax::TYPE_ERR)
     }
 
     fn named_struct_field_value(
