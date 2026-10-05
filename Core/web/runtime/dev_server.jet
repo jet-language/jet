@@ -15,7 +15,7 @@ use core.web.runtime.dev_server_02.[jet_devserver_open_output_root, jet_devserve
 // The standalone dev entry rebuilds through the real jet subprocess. Native
 // authority, sockets, pipes, threads and atomics stay at audited kernel leaves.
 // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:32
-JET_DEVSERVER_PORT_RANGE :: U16{8080}..=U16{8089}
+JET_DEVSERVER_PORT_RANGE :: U16{8080}..U16{8089}
 // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:36
 JET_DEVSERVER_LIVE_RELOAD_POLL_MS :: U64{400}
 // Rust: crates/jet-codegen/src/Prelude/DevServer.rs:37
@@ -87,7 +87,7 @@ impl JetDevServer {
     // GATE #4565: kernel primitive
     #Unsafe("invalid ports fail the actual dev process rather than narrowing into another port")
     pub fn port(self, n: I64) -> JetDevServer {
-        if !(I64{1}..=I64{65535}).contains(n) {
+        if !(I64{1}..I64{65535}).contains(n) {
             eprintln("error: `.port({n})` isn't a valid port number")
             eprintln(" fix: use a number from 1 to 65535")
             process.exit(1)
@@ -512,7 +512,7 @@ module jet_devserver_unix_output {
     // GATE #4565: kernel primitive
     #Unsafe("allocate a private journal with exclusive mkdirat and remove it if secure open fails")
     fn create_publication_journal(parent: File) -> (String, File) Error! {
-        for _ in 0..100 {
+        for _ in 0..<100 {
             value :: ".jet-devserver-publication-{process.id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(U64{1}, Ordering.Relaxed)}"
             cname :: name(OsStr.new(value))?
             if mkdirat(parent.as_raw_fd(), cname.as_ptr(), U32{0o700}) == 0 {
@@ -584,7 +584,7 @@ module jet_devserver_unix_output {
         current := ^current
         components :: relative.components().collect::<[_]>()
         if components.is_empty() -> return Err(Error.new(ErrorKind.InvalidInput, "empty relative path"))
-        for component in components[..components.len() - 1] {
+        for component in components[0..<components.len() - 1] {
             value :: match component {
                 .Normal(value) -> value
                 _ -> return Err(Error.new(ErrorKind.InvalidInput, "devserver path is not relative"))
@@ -891,7 +891,7 @@ fn jet_devserver_serve_static<W: Write>(stream: &W, path: String, output_root: J
             return jet_devserver_write_response(&stream, "404 Not Found", "text/plain; charset=utf-8", body.as_bytes())
         }
         if jet_devserver_find_body_end(bytes) == .Val(index) {
-            parts :: [bytes[..index], script.as_bytes(), bytes[index..]]
+            parts :: [bytes[0..<index], script.as_bytes(), bytes[index..]]
             return jet_devserver_write_response_parts(&stream, "200 OK", content_type, parts)
         }
         parts :: [bytes[..], script.as_bytes()]

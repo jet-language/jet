@@ -422,7 +422,7 @@ fn jet_browser_test_capture_text_snapshot(session: &JetBrowserTestSession, kind:
     full_hash :: jet_browser_fact_hash(value)
     bytes :: value.len()
     retained :: if bytes > JET_BROWSER_TEST_MAX_SNAPSHOT_BYTES {
-        String.from_utf8_lossy(value.as_bytes()[..JET_BROWSER_TEST_MAX_SNAPSHOT_BYTES]).into_owned()
+        String.from_utf8_lossy(value.as_bytes()[0..<JET_BROWSER_TEST_MAX_SNAPSHOT_BYTES]).into_owned()
     } else -> value
     artifact_path := String.new()
     if path == .Val(target) {
@@ -505,7 +505,7 @@ fn jet_browser_test_run_case(config: &JetBrowserTestConfig, name: &String, sourc
     }
     attempts: [JetBrowserTestAttempt] := []
     for engine in &config.engines {
-        for attempt in 0..=config.retries {
+        for attempt in 0..config.retries {
             attempt_result :: if jet_browser_test_begin(config, name, engine, attempt, source.clone()) == {
                 .Ok(session) -> {
                     result :: body(&session.page)
@@ -812,7 +812,7 @@ fn jet_browser_test_server_capture<R: Read + Send>(reader: R, logs: Arc<Mutex<[U
             bytes.truncate(JET_BROWSER_TEST_MAX_SERVER_LOG_BYTES)
             if logs.lock() == .Ok(output) {
                 available :: JET_BROWSER_TEST_MAX_SERVER_LOG_BYTES.saturating_sub(output.len())
-                output.extend_from_slice(bytes[..bytes.len().min(available)])
+                output.extend_from_slice(bytes[0..<bytes.len().min(available)])
             }
         })
     }

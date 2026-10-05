@@ -697,7 +697,7 @@ impl JetWebServerFunction {
         idempotent :: match self.spec.retry { .Idempotent{..} -> true, _ -> false }
         if self.spec.mutating() && idempotent && (idempotency_key.is_none() || !self.spec.idempotency_declared) -> return Err(.InvalidDefinition("idempotent retries require a declared idempotency key"))
         last_error: JetWebServerFnError? := None
-        loop attempt in 1..=self.spec.retry.bounded_attempts() {
+        loop attempt in 1..self.spec.retry.bounded_attempts() {
             request :: self.synthetic_client_request(body.clone(), idempotency_key.clone())?
             request_id :: request.context.request_id.clone()
             self.set_state(fn(state) {
@@ -810,9 +810,9 @@ impl JetWebServerFnCsrfPolicy {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1338
 fn jet_web_server_fn_hex(value: U8) -> U8? {
     match value {
-        48..=57 -> Val(value - 48)
-        97..=102 -> Val(value - 97 + 10)
-        65..=70 -> Val(value - 65 + 10)
+        48..57 -> Val(value - 48)
+        97..102 -> Val(value - 97 + 10)
+        65..70 -> Val(value - 65 + 10)
         _ -> None
     }
 }

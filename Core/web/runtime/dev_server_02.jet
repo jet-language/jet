@@ -93,7 +93,7 @@ fn create_publication_journal(root_path: &OSPath, root_final: String, root: &Fil
     -> (OSPath, String, File, String) io.Error! {
     // GATE #4565: kernel primitive
     #Unsafe("journal creation retries collisions only and retains a checked directory handle beneath the root") {
-        for _ in 0..100 {
+        for _ in 0..<100 {
             value :: ".jet-devserver-publication-{process_id()}-{JET_DEVSERVER_STAGING_COUNTER.fetch_add(1, Ordering.Relaxed)}"
             path :: root_path.join(value)
             match create_dir(&path) {
@@ -251,7 +251,7 @@ fn open_relative(current: File, current_path: OSPath, relative: &OSPath) -> File
     current_final := normalize(final_path(&current)?)
     components :: relative.components().collect<[Component]>()
     if components.is_empty() -> return Err(io.Error.new(.InvalidInput, "empty relative path"))
-    for component in &components[..components.len() - 1] {
+    for component in &components[0..<components.len() - 1] {
         value :: match component {
             .Normal(value) -> value
             _ -> return Err(io.Error.new(.InvalidInput, "devserver path is not relative"))
