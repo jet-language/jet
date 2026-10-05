@@ -819,7 +819,7 @@ fn jet_unpack_vec<T: Clone>(xs: View<T>, want: Int, i: Int, file: String, line: 
 fn jet_slice_vec<T: Clone>(xs: View<T>, a: I64, b: I64, file: String, line: U32) -> [T] {
     len :: xs.len() as I64
     if a < I64{0} || b < I64{0} || a > b || b >= len -> jet_panic(file, line, "can't slice {len} items from {a} to {b} (inclusive)")
-    xs[a as Int..=b as Int].to_vec()
+    xs[a as Int..b as Int].to_vec()
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2404
 fn jet_checked_range_bounds(len: I64, range: JetRange, action: String, file: String, line: U32) -> Range<Int> {
@@ -1269,7 +1269,7 @@ fn jet_string_after(s: String, sep: String) -> String {
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:3358
 fn jet_string_before(s: String, sep: String) -> String {
-    match s.find(sep) { .Val(i) -> s[..i].to_string(), .None -> s.to_string() }
+    match s.find(sep) { .Val(i) -> s[0..<i].to_string(), .None -> s.to_string() }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:3371
 fn jet_string_after_view(s: View<str>, sep: View<str>) -> View<str> from s {
@@ -1277,7 +1277,7 @@ fn jet_string_after_view(s: View<str>, sep: View<str>) -> View<str> from s {
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:3377
 fn jet_string_before_view(s: View<str>, sep: View<str>) -> View<str> from s {
-    match s.find(sep) { .Val(i) -> s[..i], .None -> s }
+    match s.find(sep) { .Val(i) -> s[0..<i], .None -> s }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:3383
 fn jet_string_trim_view(s: View<str>) -> View<str> from s { jet_unicode_trim_view(s) }

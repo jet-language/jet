@@ -424,7 +424,7 @@ impl DataQueryCursor<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2616
     fn next_batch_with_sort_limit(self, batch_size: Int, max_sort_rows: I64?) -> [T] DataQueryPlanLimit! {
         batch := [T].with_capacity(batch_size)
-        for _ in 0..batch_size {
+        for _ in 0..<batch_size {
             row :: self.next_with_sort_limit(max_sort_rows)?
             match row { .Val(row) => batch.push(row), None => break }
         }
@@ -642,7 +642,7 @@ fn jet_limb_decimal_prefix_f64(limbs: View<U32>, digits: Int) -> Float Never! {
     }
     prefix := 0.0
     consumed := 0
-    for index in (0..=top_index).rev() {
+    for index in (0..top_index).rev() {
         if consumed == take -> break
         limb :: limbs[index]
         width :: if index == top_index { top_width } else { 9 }
@@ -664,7 +664,7 @@ fn jet_limb_cmp(left: View<U32>, right: View<U32>) -> Ordering Never! {
     right_len :: jet_limb_len(right)
     match left_len.cmp(right_len) {
         .Equal => {
-            for index in (0..left_len).rev() {
+            for index in (0..<left_len).rev() {
                 match left[index].cmp(right[index]) { .Equal => {}, ordering => return ordering }
             }
             .Equal
@@ -675,7 +675,7 @@ fn jet_limb_cmp(left: View<U32>, right: View<U32>) -> Ordering Never! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2987
 fn jet_limb_shift_left(limbs: &[U32], bits: Int) Never! {
     limbs.reserve(bits.saturating_div(28).saturating_add(1))
-    for _ in 0..bits {
+    for _ in 0..<bits {
         carry: U64 := 0
         for limb in &limbs {
             value :: limb as U64 * 2 + carry
@@ -699,7 +699,7 @@ fn jet_limb_double(limbs: &[U32]) Never! {
 fn jet_limb_sub_assign(left: &[U32], right: View<U32>) Never! {
     assert(jet_limb_cmp(left, right) != .Less)
     borrow: I64 := 0
-    for index in 0..left.len() {
+    for index in 0..<left.len() {
         subtrahend :: right.get(index).copied().unwrap_or(0) as I64 + borrow
         difference :: left[index] as I64 - subtrahend
         if difference < 0 {
@@ -782,7 +782,7 @@ fn jet_ratio_limbs_to_f64(numerator: View<U32>, denominator: View<U32>, negative
     divisor :: if exponent > 0 { &divisor_storage } else { denominator }
     jet_limb_sub_assign(&remainder, divisor)
     significand: U64 := U64(1) << 52
-    for shift in (0..52).rev() {
+    for shift in (0..<52).rev() {
         jet_limb_double(&remainder)
         if jet_limb_cmp(&remainder, divisor) != .Less {
             jet_limb_sub_assign(&remainder, divisor)
@@ -890,7 +890,7 @@ impl JetBigInt {
             carry: U64 := 0
             len :: self.limbs.len().max(other.limbs.len())
             limbs := [U32].with_capacity(len + 1)
-            for i in 0..len {
+            for i in 0..<len {
                 a :: self.limbs.get(i).unwrap_or(0) as U64
                 b :: other.limbs.get(i).unwrap_or(0) as U64
                 sum :: a + b + carry
@@ -919,7 +919,7 @@ impl JetBigInt {
         borrow: I64 := 0
         len :: self.limbs.len()
         limbs := [U32].with_capacity(len)
-        for i in 0..len {
+        for i in 0..<len {
             a :: self.limbs[i] as I64
             b :: other.limbs.get(i).unwrap_or(0) as I64
             cur := a - b - borrow
@@ -950,7 +950,7 @@ impl JetBigInt {
         for (i, limb) in other.limbs.iter().enumerate() {
             if limb == 0 -> continue
             part := self.mul_small(limb)
-            for _ in 0..i -> part = part.mul_small(BI_BASE as U32)
+            for _ in 0..<i -> part = part.mul_small(BI_BASE as U32)
             out = out.add(part)
         }
         Self{negative: self.negative != other.negative, limbs: out.limbs}.normalize()
@@ -965,7 +965,7 @@ impl JetBigInt {
         divisor :: divisor as U64
         remainder: U64 := 0
         limbs := [U32].repeat(0, self.limbs.len())
-        for index in (0..self.limbs.len()).rev() {
+        for index in (0..<self.limbs.len()).rev() {
             current :: remainder * BI_BASE + self.limbs[index] as U64
             limbs[index] = (current / divisor) as U32
             remainder = current % divisor
@@ -987,7 +987,7 @@ impl JetBigInt {
     fn unsigned_bits(self, width: Int) -> [Bool] Never! {
         value := self.abs()
         bits := [Bool].with_capacity(width)
-        for _ in 0..width {
+        for _ in 0..<width {
             (next, remainder) :: value.div_rem_small(2)
             bits.push(remainder != 0)
             value = next

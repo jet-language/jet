@@ -270,7 +270,7 @@ pub fn jet_web_d_fred_f32_reduce(ptr: U32, len: U32, seed: F32) -> F32 {
         values :: cell.borrow()
         assert(Int{ptr} == values.as_ptr().addr(), "invalid Web D-FRED input pointer")
         assert(Int{len} <= values.len(), "invalid Web D-FRED input length")
-        jet_simd_reduce_fixed(&values[..Int{len}], seed)
+        jet_simd_reduce_fixed(&values[0..<Int{len}], seed)
     })
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:575
@@ -307,7 +307,7 @@ pub fn jet_web_d_fred_f64_reduce(ptr: U32, len: U32, seed: F64) -> F64 {
         values :: cell.borrow()
         assert(Int{ptr} == values.as_ptr().addr(), "invalid Web D-FRED input pointer")
         assert(Int{len} <= values.len(), "invalid Web D-FRED input length")
-        jet_simd_reduce_fixed(&values[..Int{len}], seed)
+        jet_simd_reduce_fixed(&values[0..<Int{len}], seed)
     })
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:614

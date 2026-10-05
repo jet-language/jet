@@ -166,7 +166,7 @@ fn jet_decimal_strip_trailing_zeros(value: &JetBigInt, scale: &U32) Never! {
         }
         removable_chunks := zero_chunks.min((scale / 9) as USize)
         if removable_chunks > 0 {
-            _ :: value.limbs.drain(0..removable_chunks)
+            _ :: value.limbs.drain(0..<removable_chunks)
             scale -= (removable_chunks as U32) * 9
             continue
         }
@@ -211,7 +211,7 @@ fn jet_decimal_magnitude_from_digits(digits: [U8]) -> JetDecimalMagnitude Never!
     chunk_len :: first_chunk_len
     while offset < digits.len() {
         chunk: U32 :: 0
-        for digit in digits[offset..offset + chunk_len] -> chunk = chunk * 10 + (digit as U32)
+        for digit in digits[offset..<offset + chunk_len] -> chunk = chunk * 10 + (digit as U32)
         limbs.push(chunk)
         offset += chunk_len
         chunk_len = 9
@@ -241,7 +241,7 @@ fn jet_decimal_small_to_f64(value: I128, scale: U32) -> F64 Never! {
         length += 1
     }
     denominator := jet_decimal_power10_limbs(scale)
-    jet_ratio_limbs_to_f64(limbs[0..length], denominator, false)
+    jet_ratio_limbs_to_f64(limbs[0..<length], denominator, false)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5812
 #Clone
@@ -292,11 +292,11 @@ impl JetDecimal {
         (significand, power) := if exponent == 0 { (fraction, -1074) } else { (fraction | (U64(1) << 52), exponent - 1023 - 52) }
         numerator :: JetBigInt.from_u64(significand)
         if power >= 0 {
-            for _ in 0..power -> numerator = numerator.mul(JetBigInt.from_int(2))
+            for _ in 0..<power -> numerator = numerator.mul(JetBigInt.from_int(2))
             .Val(JetDecimal.from_bigint(^numerator, 0, negative))
         } else {
             scale := U32.try_from(-power).ok()?
-            for _ in 0..scale -> numerator = numerator.mul(JetBigInt.from_int(5))
+            for _ in 0..<scale -> numerator = numerator.mul(JetBigInt.from_int(5))
             .Val(JetDecimal.from_bigint(^numerator, scale, negative))
         }
     }
@@ -571,7 +571,7 @@ impl JetDecimal {
             value /= 10
             len += 1
         }
-        for digit in digits[0..len].iter().rev() -> out.push(Char.from(U8(48) + digit))
+        for digit in digits[0..<len].iter().rev() -> out.push(Char.from(U8(48) + digit))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6332
     fn write_u32_padded9(out: &String, value: U32) Never! {
@@ -600,7 +600,7 @@ impl JetDecimal {
         assert(width > 0)
         value :: value
         divisor :: U32(10).pow((width - 1) as U32)
-        for _ in 0..width {
+        for _ in 0..<width {
             out.push(Char.from(U8(48) + ((value / divisor) as U8)))
             value %= divisor
             written += 1
@@ -641,19 +641,19 @@ impl JetDecimal {
             digit_len += 1
         }
         if fraction_len == 0 {
-            for digit in digits[0..digit_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
+            for digit in digits[0..<digit_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
             return
         }
         if digit_len <= fraction_len {
             out.push('0')
             out.push('.')
             for _ in 0..fraction_len - digit_len -> out.push('0')
-            for digit in digits[0..digit_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
+            for digit in digits[0..<digit_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
             return
         }
-        for digit in digits[0..digit_len].iter().rev().take(digit_len - fraction_len) -> out.push(Char.from(U8(48) + digit))
+        for digit in digits[0..<digit_len].iter().rev().take(digit_len - fraction_len) -> out.push(Char.from(U8(48) + digit))
         out.push('.')
-        for digit in digits[0..fraction_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
+        for digit in digits[0..<fraction_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6435
     pub fn to_string_rep(self) -> String Never! {
