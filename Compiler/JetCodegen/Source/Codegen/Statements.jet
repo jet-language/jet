@@ -2017,9 +2017,13 @@ fn jet_codegen_transaction_save_snapshot(builder: &JetCodegenBuilder, scope: MIR
             snapshot_method :: snapshot.snapshot_method ?? panic("checked transaction rollback has no Rollback::snapshot method")
             call := jet_codegen_transaction_method_expr(builder, snapshot.local, owner, snapshot_method, [TCallArg]{}, span)
             if call.ty == {
-                .Result(ok, _) -> {
+                .Result(ok, error) -> {
                     snapshot_type = ok
-                    checked := TExpr{ty: ok, kind: TExprKind.Try{value: call, conversion: TTryConvert.NoConversion, failure: builder.function.failure_carrier}, span: span, integer_bounds: None, cost: None}
+                    // A `Never` failure is uninhabited whatever the enclosing
+                    // rail, as the checker rules for a written `?` (a plain
+                    // `snapshot` returns `LedgerSnap Never!`).
+                    conversion :: if jet_codegen_unwrap_pattern_tags(error) == (Type.Named{name: "Never"}) -> TTryConvert.Never else -> TTryConvert.NoConversion
+                    checked := TExpr{ty: ok, kind: TExprKind.Try{value: call, conversion: conversion, failure: builder.function.failure_carrier}, span: span, integer_bounds: None, cost: None}
                     snapshot_value = jet_codegen_lower_expr(&builder, checked)
                 }
                 else -> {
@@ -2060,7 +2064,9 @@ fn jet_codegen_transaction_restore_snapshot(builder: &JetCodegenBuilder, snapsho
             saved := TExpr{ty: snapshot.saved_ty, kind: TExprKind.Local{local: snapshot.saved_local}, span: span, integer_bounds: None, cost: None}
             restore_method :: snapshot.restore_method ?? panic("checked transaction rollback has no Rollback::restore method")
             call := jet_codegen_transaction_method_expr(builder, snapshot.local, owner, restore_method, [TCallArg]{jet_codegen_transaction_call_arg(saved)}, span)
-            if call.ty != (Type.Named{name: "Unit"}) -> panic("checked Rollback::restore does not return Unit")
+            // `restore` completes with Unit, also as a `Unit Never!` carrier.
+            restored :: jet_codegen_never_carrier_success(call.ty) ?? call.ty
+            if restored != (Type.Named{name: "Unit"}) -> panic("checked Rollback::restore does not return Unit")
             _ := jet_codegen_lower_expr(&builder, call)
         }
     }
