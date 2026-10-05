@@ -1052,7 +1052,7 @@ use core.tasks as tasks
 use core.time as time
 
 fn run() {{
-    {{ sender: ready_tx, receiver: ready_rx }} :: channel<Int>()
+    (ready_tx, ready_rx) :: channel<Int>()
     worker :: task {{
         child :: process.cmd(["{script}"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
         ready_tx.send(1)

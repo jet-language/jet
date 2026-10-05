@@ -109,7 +109,7 @@ fn run() {
     print("value_gradient_w:{compute.to_list(gradients.w)}")
 
     jvp :: compute.jvp(loss)
-    { value: jvp_value, tangent: jvp_tangent } :: jvp(w, x, tangent_w, tangent_x)
+    (jvp_value, jvp_tangent) :: jvp(w, x, tangent_w, tangent_x)
     print("jvp_value:{compute.to_list(jvp_value)}")
     print("jvp_tangent:{compute.to_list(jvp_tangent)}")
 
@@ -178,7 +178,7 @@ fn tiled_loss(left: Tensor, right: Tensor) -> Tensor {
 fn run() {
     left :: compute.full([1, 1], 2.0) ?? panic("left")
     right :: compute.full([1, 1], 3.0) ?? panic("right")
-    { left: grad_left, right: grad_right } :: compute.gradient(tiled_loss, ~left, ~right)
+    (grad_left, grad_right) :: compute.gradient(tiled_loss, ~left, ~right)
     print("grad_left:{compute.to_list(grad_left)}")
     print("grad_right:{compute.to_list(grad_right)}")
 
@@ -430,12 +430,12 @@ fn run() {
             print("sum:{compute.to_list(reduced)}")
             prediction :: compute.mse_loss(left, right) ?? panic("mse")
             print("mse:{compute.to_list(prediction)}")
-            { left: gradient_left, right: gradient_right } :: compute.gradient(loss, ~left, ~right)
+            (gradient_left, gradient_right) :: compute.gradient(loss, ~left, ~right)
             print("grad:{compute.to_list(gradient_left)}:{compute.to_list(gradient_right)}")
             tangent_cpu :: compute.ones([2, 2]) ?? panic("tangent")
             tangent :: compute.on_device(compute.matmul_f32_tile(tangent_cpu, compute.eye(2) ?? panic("eye")) ?? panic("tangent f32"), compute.device_vulkan()) ?? panic("tangent Vulkan")
             jvp :: compute.jvp(loss)
-            { value: jvp_value, tangent: jvp_tangent } :: jvp(left, right, tangent, tangent)
+            (jvp_value, jvp_tangent) :: jvp(left, right, tangent, tangent)
             print("jvp:{compute.to_list(jvp_value)}:{compute.to_list(jvp_tangent)}")
             stream :: compute.stream_new_on(compute.device_vulkan()) ?? panic("stream")
             compute.stream_sync(stream) ?? panic("sync")

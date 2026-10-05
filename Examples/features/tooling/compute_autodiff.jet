@@ -12,12 +12,12 @@ fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")
     x :: compute.from_list([4.0]) ?? panic("x")
-    { w: dw, x: dx } :: compute.gradient(loss, ~w, ~x)
+    (dw, dx) :: compute.gradient(loss, ~w, ~x)
     print("grad:{compute.to_list(dw)}")
     print("grad_x:{compute.to_list(dx)}")
 
     d_loss :: compute.gradient(loss)
-    { w: transform_w, x: transform_x } :: d_loss(~w, ~x)
+    (transform_w, transform_x) :: d_loss(~w, ~x)
     print("transform_w:{compute.to_list(transform_w)}")
     print("transform_x:{compute.to_list(transform_x)}")
 
@@ -31,7 +31,7 @@ fn run() {
     tw :: compute.ones([1]) ?? panic("tw")
     tx :: compute.ones([1]) ?? panic("tx")
     d_loss_jvp :: compute.jvp(loss)
-    { value: jvp_value, tangent: jvp_tangent } :: d_loss_jvp(w, x, tw, tx)
+    (jvp_value, jvp_tangent) :: d_loss_jvp(w, x, tw, tx)
     print("jvp_value:{compute.to_list(jvp_value)}")
     print("jvp:{compute.to_list(jvp_tangent)}")
 
@@ -42,12 +42,12 @@ fn run() {
     print("vjp:{compute.to_list(vjp_pull.w)}")
     print("vjp_grads_x:{compute.to_list(vjp_run.grads.x)}")
 
-    { value: vjp_value, pull: vjp_pull_fn } :: compute.vjp(loss, ~w, ~x)
+    (vjp_value, vjp_pull_fn) :: compute.vjp(loss, ~w, ~x)
     vjp_pair :: vjp_pull_fn(~tw)
     print("vjp_pair_value:{compute.to_list(vjp_value)}")
     print("vjp_pair_pull_w:{compute.to_list(vjp_pair.w)}")
 
-    { value, gradients: selected } :: compute.value_and_gradient(loss, ~w, ~x, wrt: [w])
+    (value, selected) :: compute.value_and_gradient(loss, ~w, ~x, wrt: [w])
     print("value:{compute.to_list(value)}")
     print("selected_w:{compute.to_list(selected.w)}")
 

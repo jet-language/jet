@@ -36,13 +36,13 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Make the asm operands, return marker, clobbers, and target registers match the Jet signature.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3223</code>: <code>tests/ui/ffi_asm_duplicate_clobber.stderr</code>.</p>
+<p>First UI snapshot mentioning <code>E3223</code>: <code>tests/ui/ffi_asm_missing_return_anchor.stderr</code>.</p>
 <pre class="diag">Error [E3223]: This inline assembly operand contract is incomplete
-  --&gt; tests/ui/ffi_asm_duplicate_clobber.jet:4:5
+  --&gt; tests/ui/ffi_asm_missing_return_anchor.jet:4:5
     |
   4 |     &quot;&quot;&quot;
     |     ^^^
- Why: Clobber register `r10` is listed more than once
+ Why: A value-returning assembly body needs exactly one `; -&gt; return` anchor
  Fix: Bind each Jet parameter as `{name}`, mark one result with `; -&gt; return`, and list overwritten registers on `; clobbers …`
 More: jet-lang.dev/e/E3223
 </pre>

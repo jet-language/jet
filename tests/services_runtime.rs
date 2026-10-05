@@ -1155,7 +1155,7 @@ fn sleeping_workflow(store_path: String, ready: Sender<Int>) {
 fn run() {
     temp :: testing.temp_dir("workflow-sleep-cancel")
     store_path :: Path.from(temp).join("workflow.log").to_string()
-    { sender: ready, receiver: started } :: channel<Int>()
+    (ready, started) :: channel<Int>()
     task_handle :: task sleeping_workflow(~store_path, ready)
     started.receive() ?? panic("workflow did not start")
     task_handle.cancel()

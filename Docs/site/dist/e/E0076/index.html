@@ -65,10 +65,10 @@ Error [E0076]: This result loop exits without a value
 More: jet-lang.dev/e/E0076
 
 Error [E2417]: Explicit failure domain `String (text)` is not an Error type
-  --&gt; tests/ui/result_loop_break_payloads.jet:31:18
+  --&gt; tests/ui/result_loop_break_payloads.jet:31:15
     |
- 31 | fn fallible() -&gt; Int !String { return Err(&quot;failed&quot;) }
-    |                  ^^^^^^^^^^^
+ 31 | fn fallible() Int !String -&gt; { return Err(&quot;failed&quot;) }
+    |               ^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417

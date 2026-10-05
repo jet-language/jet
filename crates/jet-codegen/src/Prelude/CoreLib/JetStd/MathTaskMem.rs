@@ -980,7 +980,7 @@ macro_rules! jet_lane_show {
         inner: super::JetSchedulerChannel<T>,
     }
     // D-TUPLE-DESTRUCT1: the tuple-destructure bind convention clones each
-    // extracted field (`{ sender: tx, receiver: rx } :: channel<T>()` clones `rx` off the
+    // extracted field (`(tx, rx) :: channel<T>()` clones `rx` off the
     // synthesized `(Sender<T>, Receiver<T>)` struct, same as `Sender` below). The
     // underlying scheduler channel is `Arc`-backed and already supports concurrent
     // receivers (the same substrate races multiple receive arms

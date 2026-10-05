@@ -1409,7 +1409,7 @@ fn channel_send_receive() {
     }
     let src = r#"
 fn run() {
-{ sender: s1, receiver: ch } :: channel<Int>()
+(s1, ch) :: channel<Int>()
     s2 :: ~s1
     t1 :: task {
         s1.send(30)

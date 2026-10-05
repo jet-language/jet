@@ -10,7 +10,7 @@ use core.http as http
 use core.net as net
 
 fn run() (Closed | HTTPError | NetError | TaskFailure)! {
-    { sender, receiver: ch } :: channel<String>()
+    (sender, ch) :: channel<String>()
     // Mini one-shot server: bind, send address back, handle one request.
     t :: task {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")

@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0070 — Jet diagnostic</title>
-<meta name="description" content="This callable, arm, or lambda uses a retired `=&gt;` arrow, or a `:&gt;` that closes no `&lt;:` fence.">
+<meta name="description" content="This callable, arm, or lambda uses a retired `:&gt;` or `=&gt;` arrow.">
 <meta property="og:title" content="E0070 — Jet diagnostic">
-<meta property="og:description" content="This callable, arm, or lambda uses a retired `=&gt;` arrow, or a `:&gt;` that closes no `&lt;:` fence.">
+<meta property="og:description" content="This callable, arm, or lambda uses a retired `:&gt;` or `=&gt;` arrow.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,26 +25,53 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0070</h1>
-<p>This callable, arm, or lambda uses a retired `=&gt;` arrow, or a `:&gt;` that closes no `&lt;:` fence.</p>
+<p>This callable, arm, or lambda uses a retired `:&gt;` or `=&gt;` arrow.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">This callable, arm, or lambda uses a retired `=&gt;` arrow, or a `:&gt;` that closes no `&lt;:` fence.</p>
+<p class="diag-copy what" data-registry-field="what">This callable, arm, or lambda uses a retired `:&gt;` or `=&gt;` arrow.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">All arrow positions use `-&gt;`; `:&gt;` only closes a `&lt;: … :&gt;` fence.</p>
+<p class="diag-copy why" data-registry-field="why">All arrow positions use `-&gt;`.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Replace the retired arrow with `-&gt;`, or add the missing `&lt;:`. For an effect ceiling, write `-[Effects]&gt;`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Replace the retired arrow with `-&gt;`. For an effect ceiling, write `-[Effects]&gt;`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0070</code>: <code>tests/ui/fenced_name_stray_close.stderr</code>.</p>
-<pre class="diag">Error [E0070]: This `:&gt;` has no opening `&lt;:`
-  --&gt; tests/ui/fenced_name_stray_close.jet:3:17
+<p>First UI snapshot mentioning <code>E0070</code>: <code>tests/ui/result_handler_malformed_arrow.stderr</code>.</p>
+<pre class="diag">Error [E0070]: This uses a retired arrow spelling
+  --&gt; tests/ui/result_handler_malformed_arrow.jet:3:16
     |
-  3 |     print(value :&gt;)
-    |                 ^^
- Why: `:&gt;` only closes a `&lt;: … :&gt;` fence; callables, arms, and lambdas use one arrow: `-&gt;`
- Fix: Write `-&gt;` for an arrow, or add the missing `&lt;:`
+  3 |     value ? ok =&gt; ok ! error -&gt; error
+    |                ^^
+ Why: Callables, arms, and lambdas use one arrow: `-&gt;`
+ Fix: Replace `:&gt;` or `=&gt;` with `-&gt;`
 More: jet-lang.dev/e/E0070
+
+Error [E0404]: `Ok(...)` only fits where a fallible result is expected
+  --&gt; tests/ui/result_handler_malformed_arrow.jet:2:14
+    |
+  2 |     value :: Ok(1)
+    |              ^^^^
+ Why: `Ok` builds the success side of a `T !E` result
+ Fix: Use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one
+More: jet-lang.dev/e/E0404
+
+Error [E0107]: Nothing named `ok` exists here
+  --&gt; tests/ui/result_handler_malformed_arrow.jet:3:19
+    |
+  3 |     value ? ok =&gt; ok ! error -&gt; error
+    |                   ^^
+ Why: A name must be declared before it&#39;s used
+ Fix: Declare it first: `ok :: ...`
+More: jet-lang.dev/e/E0107
+
+Error [E0107]: Nothing named `error` exists here
+  --&gt; tests/ui/result_handler_malformed_arrow.jet:3:33
+    |
+  3 |     value ? ok =&gt; ok ! error -&gt; error
+    |                                 ^^^^^
+ Why: A name must be declared before it&#39;s used
+ Fix: Declare it first: `error :: ...`
+More: jet-lang.dev/e/E0107
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

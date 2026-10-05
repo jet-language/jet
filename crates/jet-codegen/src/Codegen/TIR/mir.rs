@@ -6233,6 +6233,57 @@ impl<'a> LowerCtx<'a> {
         Ok(id)
     }
 
+    pub(super) fn field_name_for_type(
+        &self,
+        ty: &Type,
+        index: usize,
+    ) -> Result<String, LowerError> {
+        let ty = field_owner_type(ty);
+        if let Type::Tuple(fields) = ty {
+            return fields
+                .get(index)
+                .map(|(name, _)| name.clone())
+                .ok_or_else(|| {
+                    self.error(
+                        self.span(),
+                        format!("missing checked tuple field at position {index}"),
+                    )
+                });
+        }
+        let owner = self.field_owner_id_for_type(ty)?;
+        let definition = self
+            .type_defs
+            .iter()
+            .find(|definition| definition.id == owner)
+            .ok_or_else(|| {
+                self.error(
+                    self.span(),
+                    format!("missing checked MIR owner type {owner:?}"),
+                )
+            })?;
+        let fields = match &definition.kind {
+            MirTypeDefKind::Struct { fields, .. } => fields,
+            MirTypeDefKind::Enum { .. }
+            | MirTypeDefKind::Distinct { .. }
+            | MirTypeDefKind::Alias { .. }
+            | MirTypeDefKind::UnitFamily { .. } => {
+                return Err(self.error(
+                    self.span(),
+                    format!("checked MIR type {owner:?} has no ordered fields"),
+                ));
+            }
+        };
+        fields
+            .get(index)
+            .map(|field| field.name.clone())
+            .ok_or_else(|| {
+                self.error(
+                    self.span(),
+                    format!("missing checked MIR field at position {index} on {owner:?}"),
+                )
+            })
+    }
+
     pub(super) fn field_id_for_type(&self, ty: &Type, key: &str) -> Result<MirFieldId, LowerError> {
         let normalized = self.normalize_contextual_type(ty);
         let ty = field_owner_type(&normalized);

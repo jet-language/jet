@@ -493,7 +493,10 @@ impl<'a> Interp<'a> {
                     scope.insert(e.name.clone(), v);
                 }
             }
-            // Tuple patterns select members by name, including normalized renames.
+            // S73/D-SG7: `(a, b) :: p` binds named tuple fields in
+            // canonical (sorted-by-name) order — a tuple value's fields are
+            // always stored in that order (see `Expr::TupleLit` in `eval`),
+            // so a straight positional zip lines up correctly.
             BindPattern::Tuple { elems, span } => {
                 let CtValue::Struct { fields: vals, .. } = value else {
                     return Err(comptime_panic(
@@ -501,15 +504,19 @@ impl<'a> Interp<'a> {
                         *span,
                     ));
                 };
-                for e in elems {
-                    let v = vals
-                        .iter()
-                        .find(|(name, _)| name == &e.name)
-                        .map(|(_, value)| value.clone())
-                        .ok_or_else(|| {
-                            comptime_panic(&format!("this value has no member `{}`", e.name), e.span)
-                        })?;
-                    scope.insert(e.local_name().to_string(), v);
+                if vals.len() != elems.len() {
+                    return Err(comptime_panic(
+                        &format!(
+                            "this pattern needs exactly {} member{}, but the tuple has {}",
+                            elems.len(),
+                            if elems.len() == 1 { "" } else { "s" },
+                            vals.len()
+                        ),
+                        *span,
+                    ));
+                }
+                for (e, (_, v)) in elems.iter().zip(vals) {
+                    scope.insert(e.name.clone(), v);
                 }
             }
             BindPattern::Refutable { span, .. } => {

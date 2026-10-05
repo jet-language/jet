@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E3202</code>: <code>tests/ui/cffi_e3202_ptr_boundary.stderr</code>.</p>
 <pre class="diag">Error [E3202]: Type `*Int` cannot cross the C boundary here.
-  --&gt; tests/ui/cffi_e3202_ptr_boundary.jet:3:24
+  --&gt; tests/ui/cffi_e3202_ptr_boundary.jet:3:21
     |
-  3 |     fn return_ptr() -&gt; *Int = &quot;DemoReturnPtr&quot;
-    |                        ^^^^
+  3 |     fn return_ptr() *Int = &quot;DemoReturnPtr&quot;
+    |                     ^^^^
  Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58).
  Fix: Move the call inside `#Unsafe`, or change the type to a C-safe value type.
 More: jet-lang.dev/e/E3202

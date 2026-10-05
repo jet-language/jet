@@ -90,27 +90,27 @@ fn run() {
             mse :: cuda_mse(cuda_row, cuda_target)
             mse_value :: compute.get(mse, [0]) ?? panic("mse_value")
             if mse_value < 15.999 || mse_value > 16.001 -> panic("cuda mse parity")
-            { value: mse_gradient, target: mse_target_gradient } :: compute.gradient(cuda_mse, ~cuda_row, ~cuda_target)
+            (mse_gradient, mse_target_gradient) :: compute.gradient(cuda_mse, ~cuda_row, ~cuda_target)
             mse_gradient_tail :: compute.get(mse_gradient, [0, 256]) ?? panic("mse_gradient_tail")
             mse_target_gradient_tail :: compute.get(mse_target_gradient, [0, 256]) ?? panic("mse_target_gradient_tail")
             if mse_gradient_tail < 0.030 || mse_gradient_tail > 0.032 -> panic("cuda mse gradient")
             if mse_target_gradient_tail > -0.030 || mse_target_gradient_tail < -0.032 -> panic("cuda mse target gradient")
 
             mse_jvp :: compute.jvp(cuda_mse)
-            { value: mse_jvp_value, tangent: mse_jvp_tangent } :: mse_jvp(cuda_row, cuda_target, cuda_row, cuda_zero)
+            (mse_jvp_value, mse_jvp_tangent) :: mse_jvp(cuda_row, cuda_target, cuda_row, cuda_zero)
             mse_jvp_value_tail :: compute.get(mse_jvp_value, [0]) ?? panic("mse_jvp_value")
             mse_jvp_tangent_tail :: compute.get(mse_jvp_tangent, [0]) ?? panic("mse_jvp_tangent")
             if mse_jvp_value_tail < 15.999 || mse_jvp_value_tail > 16.001 -> panic("cuda mse jvp value")
             if mse_jvp_tangent_tail < 47.999 || mse_jvp_tangent_tail > 48.001 -> panic("cuda mse jvp")
 
             vjp_run :: compute.vjp(cuda_mse, ~cuda_row, ~cuda_target)
-            { value: vjp_gradient, target: vjp_target_gradient } :: vjp_run.grads
+            (vjp_gradient, vjp_target_gradient) :: vjp_run.grads
             vjp_gradient_tail :: compute.get(vjp_gradient, [0, 256]) ?? panic("vjp_gradient_tail")
             vjp_target_gradient_tail :: compute.get(vjp_target_gradient, [0, 256]) ?? panic("vjp_target_gradient_tail")
             if vjp_gradient_tail < 0.030 || vjp_gradient_tail > 0.032 -> panic("cuda vjp")
             if vjp_target_gradient_tail > -0.030 || vjp_target_gradient_tail < -0.032 -> panic("cuda vjp target")
             pull_fn :: vjp_run.pull
-            { value: pull_gradient, .. } :: pull_fn(~cuda_one)
+            (pull_gradient, _) :: pull_fn(~cuda_one)
             pull_gradient_tail :: compute.get(pull_gradient, [0, 256]) ?? panic("pull_gradient_tail")
             if pull_gradient_tail < 0.030 || pull_gradient_tail > 0.032 -> panic("cuda vjp pull")
 

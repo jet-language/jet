@@ -5799,8 +5799,8 @@ fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
         let out = run_cranelift_outcome(
             r#"use core.tasks as tasks
 fn run() {
-    { sender, receiver: ch } :: channel<Int>()
-    { sender: ack_sender, receiver: ack } :: channel<Int>()
+    (sender, ch) :: channel<Int>()
+    (ack_sender, ack) :: channel<Int>()
     slow :: task {
                #Shield {
                    value :: ch.receive() ?? panic("closed")
@@ -5826,8 +5826,8 @@ fn cranelift_unshielded_receive_cancel_does_not_unwind_native_frame() {
     let out = run_cranelift_without_fallback(
         r#"use core.tasks as tasks
 fn run() {
-    { sender: ready_sender, receiver: ready } :: channel<Int>()
-    { sender, receiver: ch } :: channel<Int>()
+    (ready_sender, ready) :: channel<Int>()
+    (sender, ch) :: channel<Int>()
     slow :: task {
         ready_sender.send(1)
         ch.receive() ?? panic("closed")
@@ -5850,7 +5850,7 @@ fn cranelift_unshielded_sleep_cancel_does_not_unwind_native_frame() {
         r#"use core.tasks as tasks
 use core.time as time
 fn run() {
-    { sender: ready_sender, receiver: ready } :: channel<Int>()
+    (ready_sender, ready) :: channel<Int>()
     slow :: task {
         ready_sender.send(1)
         time.sleep(200ms)
@@ -5872,7 +5872,7 @@ fn cranelift_unshielded_select_cancel_does_not_unwind_native_frame() {
         r#"use core.tasks as tasks
 fn select_cancel_worker(ready_sender: Sender<Int>) {
     task.group worker {
-        { sender: _sender, receiver: ch } :: channel<Int>()
+        (_sender, ch) :: channel<Int>()
         ready_sender.send(1)
         if {
             value, ch -> print(value)
@@ -5883,7 +5883,7 @@ fn select_cancel_worker(ready_sender: Sender<Int>) {
 
 fn run() {
     task.group g {
-    { sender: ready_sender, receiver: ready } :: channel<Int>()
+    (ready_sender, ready) :: channel<Int>()
         slow :: task select_cancel_worker(ready_sender)
         ready.receive() ?? panic("closed")
         slow.cancel()

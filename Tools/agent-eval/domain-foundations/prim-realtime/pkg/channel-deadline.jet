@@ -17,7 +17,7 @@ fn hot(tx: Sender<Int>) -[!Time]> {
 }
 
 fn run() {
-    { sender: tx, receiver: rx } :: channel<Int>(capacity: 1)
+    (tx, rx) :: channel<Int>(capacity: 1)
     tx.send(0)
     #Context(deadline: time.now() + 5) {
         hot(tx)

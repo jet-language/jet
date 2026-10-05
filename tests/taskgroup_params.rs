@@ -490,7 +490,7 @@ fn wait_in_group(sender: Sender<Int>) {
 }
 
 fn run() {
-    { sender, receiver: ready } :: channel<Int>()
+    (sender, ready) :: channel<Int>()
     outer :: task wait_in_group(sender)
     ready.receive() ?? panic("child did not start")
     outer.cancel()

@@ -2569,46 +2569,6 @@ fn sema_stmt_check_else_complement(names: [BindName], body: [Stmt], span: Span, 
     SemaStatementResult{value: statements, complete: complete && checked.complete}
 }
 
-// S74: tuple destructuring selects named members, including compute runs.
-fn sema_stmt_tuple_members(ty: Type) -> [TypeTupleField]? Never! {
-    if ty == {
-        .Tuple(fields) -> return Val(fields)
-        .Apply(name, args) -> {
-            if sema_type_nominal_leaf(Type.Named{name: name}) == "VJPRun" && args.len() == 1 {
-                pull :: Type.Fn{params: [Type]{Type.Named{name: "Tensor"}}, ret: Val(args[0]), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-                return Val([TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "pull", ty: pull}})
-            }
-        }
-        else -> {}
-    }
-    None
-}
-
-fn sema_stmt_tuple_member_list(members: [TypeTupleField]) -> String Never! {
-    names :: loop field in members -> "`{field.name}`"
-    if names.len() < 2 -> return names.join(", ")
-    prefix := [String]{}
-    loop index in 0..<(names.len() - 1) -> &prefix.push(names[index])
-    "{prefix.join(", ")} and {names[names.len() - 1]}"
-}
-
-fn sema_stmt_positional_tuple_error(elements: [BindName], members: [TypeTupleField], span: Span, diagnostics: &[Diagnostic]) {
-    strangers := [String]{}
-    loop element in elements {
-        found := false
-        loop member in members -> if member.name == element.name -> found = true
-        if !found -> &strangers.push("`{element.name}`")
-    }
-    if strangers.len() == 0 -> return
-    prefix := [String]{}
-    loop index in 0..<(strangers.len() - 1) -> &prefix.push(strangers[index])
-    missing :: if strangers.len() == 1 -> "{strangers[0]} isn't a member" else -> "{prefix.join(", ")} and {strangers[strangers.len() - 1]} aren't members"
-    written :: loop element in elements -> element.name
-    names :: loop member in members -> member.name
-    renamed :: loop member in members -> "{member.name}: …"
-    &diagnostics.push(sema_error("E0314", span, "{missing} of this tuple, so `({written.join(", ")})` can't bind it", "tuples destructure by member name, never by position; this tuple's members are {sema_stmt_tuple_member_list(members)}", "write `({names.join(", ")}) :: …` to bind the members by name, or `{{ {renamed.join(", ")} }} :: …` to give them new names"))
-}
-
 fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if pattern == {
         .Refutable(inner, fallback, names, span) -> return sema_stmt_check_refutable_binding(binding, inner, fallback, names, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2623,94 +2583,65 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
     names := sema_stmt_destructure_names(pattern)
     fields := [TypeTupleField]{}
     span := binding.name_span
-    tuple_members :: sema_stmt_tuple_members(ty)
-    tuple_record := false
-    borrowed_run :: if ty == .Apply(_, _) -> tuple_members != None else -> false
     if pattern == {
         .Struct(written_type, type_span, selected, rest, pattern_span) -> {
             span = pattern_span
-            if written_type == "" && tuple_members == .Val(members) {
-                tuple_record = true
-                loop selected_field in selected {
-                    found := false
-                    loop member in members {
-                        if member.name == selected_field.name {
-                            &fields.push(member)
-                            found = true
-                            break
-                        }
-                    }
-                    if !found {
-                        &diagnostics.push(sema_error("E0302", selected_field.span, "{type_name(ty)} has no member `{selected_field.name}`", "a record pattern on a tuple can only name the tuple's members", "use one of its members: {sema_stmt_tuple_member_list(members)}"))
-                        &fields.push(TypeTupleField{name: selected_field.name, ty: Type.Int})
-                    }
-                }
-                partial :: selected.len() < members.len()
-                if partial && rest == None {
-                    &diagnostics.push(sema_error("E0326", pattern_span, "this pattern leaves out members of {type_name(ty)}", "a destructure that doesn't name every member must end with `..` so the skipped members are visible at a glance", "add `, ..` before the closing `}}`, or name the remaining members"))
-                }
-                if !partial && rest == .Val(rest_span) {
-                    &diagnostics.push(sema_error("E0327", rest_span, "`..` is redundant — this pattern already names every member of {type_name(ty)}", "a trailing `..` only makes sense when some members are left unnamed", "remove the `..`"))
-                }
-            } else {
-                graph_option :: environment.registration_graph
-                graph :: graph_option ?? return None
-                actual :: sema_pattern_nominal_row(graph, environment.module_identity, ty)
-                actual_is_struct :: if actual == {
-                    .Val(row) -> graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Struct
-                    .None -> false
-                }
-                if !actual_is_struct {
-                    &diagnostics.push(sema_error("E0313", type_span, "`{written_type} {{ … }}` can only destructure a `{written_type}` value, but this is {type_name(ty)}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{written_type}`, or bind the whole value with a name"))
-                    sema_stmt_destructure_recover(pattern, binding.mutable, environment, &scopes, &state, &diagnostics)
-                    return None
-                }
-                nominal_row :: actual ?? return None
-                nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-                named :: sema_pattern_nominal_row(graph, environment.module_identity, Type.Named{name: written_type})
-                named_matches :: if named == {
-                    .Val(row) -> graph.modules[row.module_index].nominals[row.row].symbol.id.key == nominal.symbol.id.key
-                    .None -> false
-                }
-                if written_type != "" && !named_matches {
-                    &diagnostics.push(sema_error("E0313", type_span, "this value is a `{nominal.symbol.name}`, not a `{written_type}`", "the type named before `{{ }}` must match the value you destructure", "write `{nominal.symbol.name} {{ … }}` to match the value"))
-                    sema_stmt_destructure_recover(pattern, binding.mutable, environment, &scopes, &state, &diagnostics)
-                    return None
-                }
-                generic_names := (loop parameter in nominal.generic_params -> parameter.name)
-                arguments := sema_pattern_subject_args(ty)
-                owner_package := ""
-                if sema_registration_module_index(graph, nominal.symbol.module_name) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
-                loop selected_field in selected {
-                    field_type := Type?{None}
-                    loop field in nominal.fields {
-                        if field.symbol.name == selected_field.name {
-                            if {
-                                sema_registration_visible(field.symbol.visibility, environment.module_identity, environment.package_identity, nominal.symbol.module_name, owner_package) -> {
-                                    field_type = Val(sema_inference_substitute_type(field.ty, generic_names, arguments))
-                                    &context.name_references.push(SemaNameReferenceFact{span: selected_field.span, symbol: field.symbol, kind: "field"})
-                                }
-                                else -> {
-                                    &diagnostics.push(sema_error("E0605", selected_field.span, "`{selected_field.name}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{selected_field.name}`, or don't reach across files here"))
-                                    field_type = Val(Type.Int)
-                                }
+            graph_option :: environment.registration_graph
+            graph :: graph_option ?? return None
+            actual :: sema_pattern_nominal_row(graph, environment.module_identity, ty)
+            actual_is_struct :: if actual == {
+                .Val(row) -> graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.Struct
+                .None -> false
+            }
+            if !actual_is_struct {
+                &diagnostics.push(sema_error("E0313", type_span, "`{written_type} {{ … }}` can only destructure a `{written_type}` value, but this is {type_name(ty)}", "destructuring with `{{ }}` pulls fields out of a struct value", "destructure a `{written_type}`, or bind the whole value with a name"))
+                sema_stmt_destructure_recover(pattern, binding.mutable, environment, &scopes, &state, &diagnostics)
+                return None
+            }
+            nominal_row :: actual ?? return None
+            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            named :: sema_pattern_nominal_row(graph, environment.module_identity, Type.Named{name: written_type})
+            named_matches :: if named == {
+                .Val(row) -> graph.modules[row.module_index].nominals[row.row].symbol.id.key == nominal.symbol.id.key
+                .None -> false
+            }
+            if !named_matches {
+                &diagnostics.push(sema_error("E0313", type_span, "this value is a `{nominal.symbol.name}`, not a `{written_type}`", "the type named before `{{ }}` must match the value you destructure", "write `{nominal.symbol.name} {{ … }}` to match the value"))
+                sema_stmt_destructure_recover(pattern, binding.mutable, environment, &scopes, &state, &diagnostics)
+                return None
+            }
+            generic_names := (loop parameter in nominal.generic_params -> parameter.name)
+            arguments := sema_pattern_subject_args(ty)
+            owner_package := ""
+            if sema_registration_module_index(graph, nominal.symbol.module_name) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
+            loop selected_field in selected {
+                field_type := Type?{None}
+                loop field in nominal.fields {
+                    if field.symbol.name == selected_field.name {
+                        if {
+                            sema_registration_visible(field.symbol.visibility, environment.module_identity, environment.package_identity, nominal.symbol.module_name, owner_package) -> {
+                                field_type = Val(sema_inference_substitute_type(field.ty, generic_names, arguments))
+                                &context.name_references.push(SemaNameReferenceFact{span: selected_field.span, symbol: field.symbol, kind: "field"})
+                            }
+                            else -> {
+                                &diagnostics.push(sema_error("E0605", selected_field.span, "`{selected_field.name}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{selected_field.name}`, or don't reach across files here"))
+                                field_type = Val(Type.Int)
                             }
                         }
                     }
-                    if field_type == None {
-                        &diagnostics.push(sema_error("E0302", selected_field.span, "`{type_name(ty)}` has no field `{selected_field.name}`", "a destructuring pattern can only name declared fields", "use one of the declared field names"))
-                    }
-                    &fields.push(TypeTupleField{name: selected_field.name, ty: field_type ?? Type.Int})
                 }
-                partial := selected.len() < nominal.fields.len()
-                display_type :: if written_type == "" -> nominal.symbol.name else -> written_type
-                if {
-                    partial && rest == None -> {
-                        &diagnostics.push(sema_error("E0326", pattern_span, "this pattern leaves out fields of `{display_type}`", "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance", "add `, ..` before the closing `}}`, or name the remaining fields"))
-                    }
-                    !partial && rest != None -> {
-                        &diagnostics.push(sema_error("E0327", rest, "`..` is redundant — this pattern already names every field of `{display_type}`", "a trailing `..` only makes sense when some fields are left unnamed", "remove the `..`"))
-                    }
+                if field_type == None {
+                    &diagnostics.push(sema_error("E0302", selected_field.span, "`{type_name(ty)}` has no field `{selected_field.name}`", "a destructuring pattern can only name declared fields", "use one of the declared field names"))
+                }
+                &fields.push(TypeTupleField{name: selected_field.name, ty: field_type ?? Type.Int})
+            }
+            partial := selected.len() < nominal.fields.len()
+            if {
+                partial && rest == None -> {
+                    &diagnostics.push(sema_error("E0326", pattern_span, "this pattern leaves out fields of `{written_type}`", "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance", "add `, ..` before the closing `}}`, or name the remaining fields"))
+                }
+                !partial && rest != None -> {
+                    &diagnostics.push(sema_error("E0327", rest, "`..` is redundant — this pattern already names every field of `{written_type}`", "a trailing `..` only makes sense when some fields are left unnamed", "remove the `..`"))
                 }
             }
         }
@@ -2740,27 +2671,27 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
         }
         .Tuple(elements, pattern_span) -> {
             span = pattern_span
-            members :: tuple_members ?? {
+            if ty == {
+                .Tuple(canonical) -> fields = canonical
+                .Apply(name, args) -> {
+                    if name == "VJPRun" && args.len() == 1 && elements.len() == 2 {
+                    pull := Type.Fn{params: [Type]{Type.Named{name: "Tensor"}}, ret: Val(args[0]), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+                    fields = [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "pull", ty: pull}}
+                }
+                }
+                else -> {}
+            }
+            if fields.len() == 0 && ty != (Type.Tuple{fields: [TypeTupleField]{}}) {
                 &diagnostics.push(sema_error("E0313", pattern_span, "`( … )` can only destructure a tuple, but this is {type_name(ty)}", "destructuring with `( )` pulls named members out of a tuple value", "destructure a tuple, or bind the whole value with a name"))
                 sema_stmt_destructure_recover(pattern, binding.mutable, environment, &scopes, &state, &diagnostics)
                 return None
             }
-            sema_stmt_positional_tuple_error(elements, members, pattern_span, &diagnostics)
-            if diagnostics.len() != before {
-                sema_stmt_destructure_recover(pattern, binding.mutable, environment, &scopes, &state, &diagnostics)
-                return None
-            }
-            if elements.len() != members.len() {
-                kept :: loop element in elements -> element.name
-                suffix :: if elements.len() == 1 -> "" else -> "s"
-                &diagnostics.push(sema_error("E0315", pattern_span, "this pattern binds {elements.len()} member{suffix}, but the tuple has {members.len()}", "a tuple pattern must name every member, so none is dropped by accident", "name all {members.len()} members, or keep some with `{{ {kept.join(", ")}, .. }} :: …`"))
-            }
-            loop element in elements {
-                loop member in members {
-                    if member.name == element.name {
-                        &fields.push(member)
-                        break
-                    }
+            if {
+                elements.len() != fields.len() -> {
+                    sema_stmt_destructure_count(elements.len(), fields.len(), true, false, pattern_span, &diagnostics)
+                }
+                binding.init == .TupleLit(items, _, _) && items.len() != elements.len() -> {
+                    sema_stmt_destructure_count(elements.len(), items.len(), true, true, pattern_span, &diagnostics)
                 }
             }
         }
@@ -2785,16 +2716,15 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
             else -> Expr.Field{base: binding.init, member: field.name, span: span}
         }
         if !sema_stmt_record_binding_views(projected_binding, field.ty, scopes, &state, &context, &diagnostics) -> return None
-        if sema_stmt_destructure_moves_field(field.ty, pattern, environment) || (tuple_record && sema_shared_access_is_cell_guard_type(field.ty)) -> move_fields = true
+        if sema_stmt_destructure_moves_field(field.ty, pattern, environment) -> move_fields = true
     }
-    if !borrowed_run && binding.init == .Ident(name, _) {
+    if binding.init == .Ident(name, _) {
         source :: sema_scope_resolve(scopes, name) ?? return None
         if source.kind != SymbolKind.Parameter && !sema_stmt_move_direct(binding.init, &state, scopes, "the destructuring binding", &diagnostics) -> return None
     }
     if diagnostics.len() != before || locals.len() != names.len() -> return None
     temp := tir_generated_local("__jet_destructure_{span.start}", span)
     temp.mutable = true
-    if tuple_record -> return Val(TStmt.TupleDestructure{temp: temp, init: init, move_fields: move_fields, binds: binds, span: span})
     if pattern == {
         .Struct(_, _, _, _, _) -> Val(TStmt.StructDestructure{temp: temp, init: init, move_fields: move_fields, binds: binds, span: span})
         .Tuple(_, _) -> Val(TStmt.TupleDestructure{temp: temp, init: init, move_fields: move_fields, binds: binds, span: span})
