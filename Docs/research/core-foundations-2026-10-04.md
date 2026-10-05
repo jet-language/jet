@@ -62,9 +62,11 @@ against the Jet compiler. Statements not observed directly are marked
    (5) chip-feature requirements inferred like effects; (6) traits that carry
    their own derivation; and (7) compiler tables that are typed Jet values
    generated from those declarations.
-4. Six owner choices remain; each has a ballot draft (section 8). Everything
-   else is settled by a ratified decision or is implementation work, and the
-   catalogue says which.
+4. Eight owner choices came out of the catalogue, and each has a ballot draft
+   (section 11). Four were ratified A on 2026-10-05; four are open
+   (D-CORE-DERIVE-HOME1, D-CORE-FEATURE-FLOW1, D-CORE-LAWS1, D-CORE-HEADER1).
+   Everything else is settled by a ratified decision or is implementation
+   work, and the catalogue says which.
 5. Compile time: every family instance, role table and builtin table is built
    when the Core bundle is built and shipped in the memory-mapped interface
    record (SP12). A user build pays a table lookup, never a compile-time
@@ -146,46 +148,50 @@ ordinary Jet that a user could have written.
 
 ## 3. The catalogue
 
-One row per idea. "Ballot" means an owner choice drafted for this card.
+One row per idea. "Ratified" means the owner has decided this card's ballot.
+"Ballot" means an owner choice drafted for this card and still open.
 "Settled" means ratified law already decides it and only implementation
 remains. "Impl" means an implementation choice under an approved contract.
+Every "Settled" claim was checked against the cited decision with the
+read-only `decision show` on 2026-10-05.
 Order follows dependency: a row depends only on rows above it.
 
 | # | Idea | Problem today (evidence) | Proposal | Status | Depends on |
 |---|---|---|---|---|---|
-| 1 | Kernel door: `jet_builtins` | Core reaches compiler operations through 1,757 routing rows whose payload is Rust source (`Prelude/Core.jet:253-446`); Core functions call rows with their own module's name, 620 `core.x.y(…)` calls inside Core (for example `Core/mem/mem.jet:42-46` calls `core.mem.volatile_read` from `core.mem.volatile_read`); a hidden `__core_intrinsic` namespace (`Syntax.rs:60`); empty "compiler-owned nominal" structs (`Core/mem/mem.jet:20-31`) | One private Jet module declares every kernel operation, storage type and compiler marker; optional plain body is the meaning; only Core and admitted providers import it | **Ballot D-CORE-BUILTINS1** | D-CORE-BOUNDARY1 |
-| 2 | Roles (lang items) | Standard traits have no Jet declaration; their names and `Numeric`'s supertraits are Rust constants written twice (`Generics.rs:9-43`, `effects_surface.rs:236-262`, `Policy.rs:1933-1937`); 23 built-in `Type` variants and 42 reserved names | `#builtin.Role(.Add)` on the Core declaration; closed role list in `jet_builtins`; `jet inspect roles` renders the page | **Ballot D-CORE-ROLE1** | 1 |
-| 3 | Optimizer knowledge only from kernel ops, roles and declared rows | Risk of Swift-style string hints (`@_semantics("array.count")`, UnderscoredAttributes.md:1146) | No semantic-string hints; the optimizer knows kernel op meanings, role laws and effect rows | Settled by D-OPT-INLINE1, D-CORE-BOUNDARY1; stated in D-CORE-ROLE1 | 1, 2 |
-| 4 | Numeric family | Per-width hand rows (`Registry/BuiltinStatics.jet:210-238`, 9 widths, no 128-bit); name parser hard-codes 8/16/32/64 (`types.rs:1100-1125`); 310 `Type::IntN` and 204 `Type::Float32` match sites; ratified `F16`/`BF16` absent everywhere | `Signed<prep bits: Int>`, `Unsigned<prep bits: Int>`, `IEEE<prep exponent: Int, prep fraction: Int>` declared once in Core over `builtin.Bits<bits>`; names are aliases; standard sizes only | **Ballot D-CORE-NUMFAMILY1** | 1, 2 |
-| 5 | Conversions generated, not listed | 13 hand `from_<source>` rows per destination (`BuiltinStatics.jet:225-238`) | One `prep loop` over the family list writes the ratified `from_<source>` methods | Impl under D-SHAPE-CONVERT1 once 4 lands | 4 |
-| 6 | Literals through the literal capability | Literal fit checks in Rust (`types.rs:1127-1135`) | Each family implements `Literal.Int` with a `prep fn` range check | Settled by D-FOUND-LITERAL1 | 2, 4 |
-| 7 | Lanes are a family member | Closed lane family in Rust (`Prelude/Core/SimdLanes.rs`) | `Lanes<T, N>` over `builtin.Vector<T, N>`; element `T` from row 4 | Settled by D-LANES1, D-SIMD-NATIVE1 | 1, 4 |
-| 8 | Instruction entries spelled through the door | D-CORE-BOUNDARY1's `#Instruction` spelling is "illustrative until its marker row lands" | `#builtin.Instruction(needs:, encode:, llvm:)` declared in `jet_builtins` | Part of D-CORE-BUILTINS1 | 1 |
-| 9 | Chip-feature requirements | No way for a helper to say it needs AVX-512; `#Multiversion` and `core.arch` absent from code | Requirement inferred like an effect, shown in hover and docs, met at a `#Multiversion` copy or `prep if $build.cpu.has(…)` | **Ballot D-CORE-FEATURE-FLOW1** | 1, 8 |
-| 10 | Service providers | Three ways to choose who implements a service: target facts (`Prelude/Facts.jet:54-67`), `#Context` with a fixed menu of three fields (`Prelude/Markers.jet:177`) beside the ratified provider form (D-EFFECT-HANDLE1), test fakes as separate calls (`Prelude/Core.jet:415-417`) and `#Test(faults:)` (`Markers.jet:187`) | One trait per service; all three places name a value of that trait; `#Test(faults:)` stays as a short spelling over it | **Ballot D-CORE-PROVIDER1** | — |
-| 11 | Trait carries its derivation | Each derivable trait exists three times: a Rust name constant, a marker row (`Markers.jet:79-100`, 10 rows) and a `derive T.X` template (`Prelude/Derives.jet:13-108`) | `derive { … }` block inside the trait; the request marker and auto-derive read it | **Ballot D-CORE-DERIVE-HOME1** | 2 |
-| 12 | Codable as a group | `#Codable` is a separate row beside `#Encode`, `#Decode` | `pub marker Codable = #[Encode, Decode]` | Settled by D-MARKER-GROUP1 | 11 |
-| 13 | Typed compiler tables | Prelude "Jet" files use seven row grammars that are not Jet: tab-separated `diagnostic` rows (`Prelude/Diagnostics.jet:3-7`), `bootstrap … depends_on`, `module … exports { … }`, `source_module … owns { … }`, `dispatcher_row … | <Rust>`, `format_row` (`Prelude/Core.jet:7-16,241-253`) | Every table is ordinary typed Jet: a `prep` list of typed values (as `Registry/BuiltinStatics.jet:210` already does) or a declaration with `$` facts (as `Markers.jet` and `Facts.jet` already do) | Settled by D-META-ONE1, D-OPENTABLE1 (impl) | — |
-| 14 | Core is its own twin | `module X exports { … }` re-lists every `pub` name of each Core file; hand Rust signatures per Core call (`crates/jet-sema/src/Sema/CheckerCoreLib/`, 26,960 lines) | The interface record is generated from Core source; `Prelude/Core.jet` module and dispatcher rows retire as modules port | Settled by D-CORE-SOURCE-AUTHORITY1, D-OPENTABLE1, SP12 | 1, 13 |
-| 15 | One effect list | `Effects.jet` lists 15 roots and leaves; `core.compiler.lang.Effect` lists 12 different ones (`Random` vs `Rand`, `Proc`, `Crypto`; `Core/compiler/lang.jet:25-38`) | Generate the enum from `Effects.jet` | Settled by D-EFFECT-ENUM1 (impl) | 13 |
-| 16 | Effect scope marker | `#FX`, `#Abilities` and `#Caps` all exist as rows; the last two are retired teaching rows (`Markers.jet:163-167`) | Keep `#FX`; D-AUTHORITY-WORD2's `#Abilities` wording was superseded by D-ABILITY-NAME2 | Settled by D-ABILITY-NAME2 (record cleanup only) | — |
-| 17 | Marker argument menus | `core.compiler.lang` enums are hand-copied menus (`Core/compiler/lang.jet:1-176`) | Generated from the registry rows | Settled by D-RULEARG-TYPES1 (impl) | 13 |
-| 18 | Compile time runs compiled Core | `crates/jet-comptime/.../core_calls/` re-routes Core calls at compile time (6,443 lines, boundary report §2.1) | Comptime runs the O0 build of the same Core; the re-routes are deleted | Settled by D-EXEC1, D-META-ONE1; speed cards SP03, SP17 | 1 |
-| 19 | Per-type helper copies | 36 Core functions differ only by a type suffix, for example `identity_int`, `identity_float`, `min_int`, `max_int` (`Core/prelude/prelude.jet:21-50`) beside generic `keep<T>` | One generic function per meaning over `Numeric` or `Comparable` | Settled by D-TRAIT-OVERLOAD1, D-CORE-DOCTRINE1 (impl) | 2 |
-| 20 | Kernel-only functions inline at every level | Every `Int` operation is an out-of-line call today (boundary report §4.3) | Transparent Core functions over `builtin.` calls expand at the call site | Settled by D-CORE-BOUNDARY1 | 1 |
-| 21 | A plain body is the specification | Rust lets an intrinsic carry a "fallback body" that tools treat as the specification (`library/core/src/intrinsics/mod.rs:13-27`) | Every builtin with an expressible meaning carries its Jet body; generated tests compare body and compiled operation on every level | Part of D-CORE-BUILTINS1 | 1 |
-| 22 | Layer is a declared fact of each Core package | Each Core module's layer is hard-coded in Rust (`RingLayer.rs:214-300`, boundary report §2.4) | The Core package header states `layer:`; the compiler reads it | Settled by D-RINGLAYER1 (impl) | 14 |
-| 23 | Core package headers state only what differs | 53 Core files repeat a 10-line `package { … }` block, 54 with `version: "0.0.1"` (`Core/math/math.jet:1-10`) | Bundle-level identity once; a Core file states only its description and layer | Impl under D-CORE-BOUNDARY1's signed bundle | 14 |
-| 24 | Kernel versioning | No kernel number today | One kernel number per Core bundle | Settled by D-CORE-BOUNDARY1 | 1 |
-| 25 | Platform adapters as Core data | `OSTarget` closed enum of three systems (`OSTarget.rs:12-17`) | Systems, CPU levels and features are Core rows over the target table | Settled by D-CORE-BOUNDARY1, D-OS-FLOOR1 | 1 |
-| 26 | Unsafe builtins stay gated | 53 `#Unsafe` blocks in Core | Raw-memory builtins are themselves `#Unsafe` functions, so calling them still needs a reasoned block | Settled by D-UNSAFE-EFFECT, part of D-CORE-BUILTINS1 | 1 |
-| 27 | Error conversions generated from `#Error` | 13 hand-listed error names for `impl E -> Err` (D-STRUCT-ONCE1's example) | The `Err` conversion is derived from the `#Error` marker | Impl under D-FAIL-CONV2 | 11 |
-| 28 | Infallible Core functions | 2,444 Core lines carry `Never!` | **[INFERENCE]** likely needed because a missing contract means "fallible with `Err`" (D-TYPE-SUFFIX1). Recommend a separate audit before any ballot; not balloted here | Investigate | — |
-| 29 | Trait laws as tests | Nothing states that `Equatable` is reflexive or that `Add` on `Numeric` is associative; optimizer and readers must trust names | Tests written inside a trait run against every implementation | Later; needs property-test value generators first; not balloted here | 2, 11 |
-| 30 | `state { … }` sections versus fact enums | Typestates have a struct-body `state { … }` section (D-STATE-HOME1, `effects_surface.rs:110-116`) while D-FACTMODEL1 says states are enums | Check which ruling is later and cut over | Investigate (possible I8 drift) | — |
-| 31 | Lower-case markers | `#allow` and `#wire` are lower-case among 110 PascalCase rows (`Markers.jet:207,211`) | Keep `#allow` (ratified by D-GATE-LAW1); check whether `#wire` is live | Investigate | — |
+| 1 | Kernel door: `jet_builtins` | Core reaches compiler operations through 1,757 routing rows whose payload is Rust source (`Prelude/Core.jet:253-446`); Core functions call rows with their own module's name, 620 `core.x.y(…)` calls inside Core (for example `Core/mem/mem.jet:42-46` calls `core.mem.volatile_read` from `core.mem.volatile_read`); a hidden `__core_intrinsic` namespace (`Syntax.rs:60`); empty "compiler-owned nominal" structs (`Core/mem/mem.jet:20-31`) | One private Jet module declares every kernel operation, storage type and compiler marker; optional plain body is the meaning; only Core and admitted providers import it | **Ratified D-CORE-BUILTINS1=A** (2026-10-05) | D-CORE-BOUNDARY1 |
+| 2 | Roles (lang items) | Standard traits have no Jet declaration; their names and `Numeric`'s supertraits are Rust constants written twice (`Generics.rs:9-43`, `effects_surface.rs:236-262`, `Policy.rs:1933-1937`); 23 built-in `Type` variants and 42 reserved names | `#builtin.Role(.Add)` on the Core declaration; closed role list in `jet_builtins`; `jet inspect roles` renders the page | **Ratified D-CORE-ROLE1=A** (2026-10-05; markers PascalCase) | 1 |
+| 3 | Optimizer knowledge only from kernel ops, roles and declared rows | Risk of Swift-style string hints (`@_semantics("array.count")`, UnderscoredAttributes.md:1146) | No semantic-string hints; the optimizer knows kernel op meanings, role contracts and effect rows; it never assumes a trait law because a test passed (row 29) | Settled: follows from D-CORE-ROLE1=A (roles are the one typed hook; stated in its detail) and I8. Correction 2026-10-05: D-OPT-INLINE1 is about the inliner and does not address hints | 1, 2 |
+| 4 | Numeric family | Per-width hand rows (`Registry/BuiltinStatics.jet:210-238`, 9 widths, no 128-bit); name parser hard-codes 8/16/32/64 (`types.rs:1100-1125`); 310 `Type::IntN` and 204 `Type::Float32` match sites; ratified `F16`/`BF16` absent everywhere | `Signed<prep bits: Int>`, `Unsigned<prep bits: Int>`, `IEEE<prep exponent: Int, prep fraction: Int>` declared once in Core over `builtin.Bits<bits>`; names are aliases; standard sizes only | **Ratified D-CORE-NUMFAMILY1=A** (2026-10-05) | 1, 2 |
+| 5 | Conversions generated, not listed | 13 hand `from_<source>` rows per destination (`BuiltinStatics.jet:225-238`) | One `prep loop` over the family list writes the ratified `from_<source>` methods | Impl under D-SHAPE-CONVERT1=A (destination names the conversion) and D-STRUCT-ONCE1=A (a loop over a closed written type list); row 4 is now ratified | 4 |
+| 6 | Literals through the literal capability | Literal fit checks in Rust (`types.rs:1127-1135`) | Each family implements `Literal.Int` with a `prep fn` range check | Settled by D-FOUND-LITERAL1=A (verified 2026-10-05) | 2, 4 |
+| 7 | Lanes are a family member | Closed lane family in Rust (`Prelude/Core/SimdLanes.rs`) | `Lanes<T, N>` over `builtin.Vector<T, N>`; element `T` from row 4 | Settled by D-LANES1=A ("defined in Core over compiler lane intrinsics"), D-SIMD-NATIVE1=A, D-CORE-NUMFAMILY1=A | 1, 4 |
+| 8 | Instruction entries spelled through the door | D-CORE-BOUNDARY1's `#Instruction` spelling is "illustrative until its marker row lands" | `#builtin.Instruction(needs:, encode:, llvm:)` declared in `jet_builtins` | Settled: part of D-CORE-BUILTINS1=A (its option A declares compiler markers such as `Instruction` in `jet_builtins`) | 1 |
+| 9 | Chip-feature requirements | No way for a helper to say it needs AVX-512; `#Multiversion` and `core.arch` absent from code | Requirement inferred like an effect, shown in hover and docs, met at a `#Multiversion` copy or `prep if $build.cpu.has(…)` | **Ballot D-CORE-FEATURE-FLOW1** (open; being revised by BallotRevise) | 1, 8 |
+| 10 | Service providers | Three ways to choose who implements a service: target facts (`Prelude/Facts.jet:54-67`), `#Context` with a fixed menu of three fields (`Prelude/Markers.jet:177`) beside the ratified provider form (D-EFFECT-HANDLE1), test fakes as separate calls (`Prelude/Core.jet:415-417`) and `#Test(faults:)` (`Markers.jet:187`) | One trait per service; all three places name a value of that trait; `#Test(faults:)` stays as a short spelling over it | **Ratified D-CORE-PROVIDER1=A** (2026-10-05) | — |
+| 11 | Trait carries its derivation | Each derivable trait exists three times: a Rust name constant, a marker row (`Markers.jet:79-100`, 10 rows) and a `derive T.X` template (`Prelude/Derives.jet:13-108`) | `derive { … }` block inside the trait; the request marker and auto-derive read it | **Ballot D-CORE-DERIVE-HOME1** (open; being revised by BallotRevise) | 2 |
+| 12 | Codable as a group | `#Codable` is a separate row beside `#Encode`, `#Decode` | `pub marker Codable = #[Encode, Decode]` | Settled by D-MARKER-GROUP1=A (impl; members are active markers, which `Encode` and `Decode` are) | 11 |
+| 13 | Typed compiler tables | Prelude "Jet" files use seven row grammars that are not Jet: tab-separated `diagnostic` rows (`Prelude/Diagnostics.jet:3-7`), `bootstrap … depends_on`, `module … exports { … }`, `source_module … owns { … }`, `dispatcher_row … | <Rust>`, `format_row` (`Prelude/Core.jet:7-16,241-253`) | Every table is ordinary typed Jet: a `prep` list of typed values (as `Registry/BuiltinStatics.jet:210` already does) or a declaration with `$` facts (as `Markers.jet` and `Facts.jet` already do) | Settled by D-META-ONE1=A ("exactly one parse path"), D-OPENTABLE1=D, D-FACTDECL1=A (impl; the row grammar is internal) | — |
+| 14 | Core is its own twin | `module X exports { … }` re-lists every `pub` name of each Core file; hand Rust signatures per Core call (`crates/jet-sema/src/Sema/CheckerCoreLib/`, 26,960 lines) | The interface record is generated from Core source; `Prelude/Core.jet` module and dispatcher rows retire as modules port | Settled by D-CORE-SOURCE-AUTHORITY1=A, D-OPENTABLE1=D (Core dispatcher and export classifier generated), SP12 | 1, 13 |
+| 15 | One effect list | `Effects.jet` lists 15 roots and leaves; `core.compiler.lang.Effect` lists 12 different ones (`Random` vs `Rand`, `Proc`, `Crypto`; `Core/compiler/lang.jet:25-38`) | Generate the enum from `Effects.jet` | Settled by D-EFFECT-ENUM1=A (impl) | 13 |
+| 16 | Effect scope marker | `#FX`, `#Abilities` and `#Caps` all exist as rows; the last two are retired teaching rows (`Markers.jet:163-167`) | Keep `#FX`; D-AUTHORITY-WORD2's `#Abilities` wording was superseded by D-ABILITY-NAME2 | Settled by D-ABILITY-NAME2=A (its option D, "confirm D-AUTHORITY-WORD2", was rejected). Record conflict with D-AUTHORITY-WORD2=E noted in `~/.cache/jet-dev/ballots/READY/NOTE-CORE-FOUNDATIONS-RECORDS.md` §1 | — |
+| 17 | Marker argument menus | `core.compiler.lang` enums are hand-copied menus (`Core/compiler/lang.jet:1-176`) | Generated from the registry rows | Settled by D-RULEARG-TYPES1=A (impl) | 13 |
+| 18 | Compile time runs compiled Core | `crates/jet-comptime/.../core_calls/` re-routes Core calls at compile time (6,443 lines, boundary report §2.1) | Comptime runs the O0 build of the same Core; the re-routes are deleted | Settled by D-EXEC1=A (compile-time code runs at O0 and calls the same compiled Core), D-META-ONE1=A; speed cards SP03, SP17 | 1 |
+| 19 | Per-type helper copies | 36 Core functions differ only by a type suffix, for example `identity_int`, `identity_float`, `min_int`, `max_int` (`Core/prelude/prelude.jet:21-50`) beside generic `keep<T>` | One generic function per meaning over `Numeric` or `Comparable` | Settled by D-TRAIT-OVERLOAD1=A ("a generic definition is the only way one name serves many types"), D-CORE-DOCTRINE1=A (impl) | 2 |
+| 20 | Kernel-only functions inline at every level | Every `Int` operation is an out-of-line call today (boundary report §4.3) | Transparent Core functions over `builtin.` calls expand at the call site | Settled by D-CORE-BOUNDARY1=A (kernel operations "expand inline at every level") | 1 |
+| 21 | A plain body is the specification | Rust lets an intrinsic carry a "fallback body" that tools treat as the specification (`library/core/src/intrinsics/mod.rs:13-27`) | Every builtin with an expressible meaning carries its Jet body; generated tests compare body and compiled operation on every level | Settled: part of D-CORE-BUILTINS1=A | 1 |
+| 22 | Layer is a declared fact of each Core package | Each Core module's layer is hard-coded in Rust (`RingLayer.rs:214-300`, boundary report §2.4) | The Core package header states `layer:`; the compiler reads it | Settled by D-RINGLAYER1=A (the `layer:` package field) (impl) | 14 |
+| 23 | Core package headers state only what differs | 54 Core files repeat a 10-line `package { … }` block, all with `version: "0.0.1"`, `edition: "2026"`, `license: "MIT"` (`Core/math/math.jet:1-10`) | Members of a root take version, edition and license from the root unless they state their own; Core gets one root header | **Ballot D-CORE-HEADER1** (new 2026-10-05). Not impl: the fix changes the package model for every monorepo (D-ECO-MEMBERS1 members are independent today) | 14 |
+| 24 | Kernel versioning | No kernel number today | One kernel number per Core bundle | Settled by D-CORE-BOUNDARY1=A ("a Core bundle names the kernel number it needs") | 1 |
+| 25 | Platform adapters as Core data | `OSTarget` closed enum of three systems (`OSTarget.rs:12-17`) | Systems, CPU levels and features are Core rows over the target table | Settled by D-CORE-BOUNDARY1=A (a library change can add chip levels and operating-system adapters), D-OS-FLOOR1=A | 1 |
+| 26 | Unsafe builtins stay gated | 53 `#Unsafe` blocks in Core | Raw-memory builtins are themselves `#Unsafe` functions, so calling them still needs a reasoned block | Settled by D-UNSAFE-EFFECT=A and D-CORE-BUILTINS1=A | 1 |
+| 27 | No hand-listed error conversions | 13 hand-listed error names for `impl E -> Err` (D-STRUCT-ONCE1's example); `Prelude/Errors.jet:44-150` still ships the rows, citing D-FAIL-CONV2 | No conversion is declared or generated: an `#Error` value flows into `Err` by itself; delete the rows | Settled by D-ERR-TRAIT1=A (2026-09-29; amends D-FAIL-CONV2; "library errors use this same path") (impl: cleanup) | — |
+| 28 | Infallible Core functions | 2,444 Core lines carry `Never!` (104 files), added 2026-09-30 (commit 853ebc2d1) | Keep: Core states every contract, and `Never!` is the stated "cannot fail" | Settled by owner ruling 2026-09-30 "Core must name its failures" (card #3708 log; ratified D-CALLBACK-ERR1 lesson; `syntax-decisions.md:7688-7689`). Inference (D-FAIL-INFER-UNION1=A) serves user code. Record note: NOTE-CORE-FOUNDATIONS-RECORDS.md §4 | — |
+| 29 | Trait laws as tests | Nothing states that `Equatable` is reflexive or that `Add` on `Numeric` is associative; optimizer and readers must trust names. Property tests exist (D-TEST1) but generate only primitive, list and optional values (E0613, `BodyCheck.rs:1021-1039`) | `#Test` functions inside a trait run automatically under `jet test` for every implementing type; values built from fields; `#Waive(law, "reason")` for a knowing break | **Ballot D-CORE-LAWS1** (new 2026-10-05) | 2 |
+| 30 | `state { … }` sections versus fact enums | Typestates have a struct-body `state { … }` section (D-STATE-HOME1, `effects_surface.rs:110-116`) while D-FACTMODEL1 says states are enums | Keep the `state { … }` section; one fact registry and matcher stay behind it | Settled by D-STATE-HOME1=A (2026-08-25, later than D-FACTMODEL1's 2026-07-28; it rejected the fact-enum form as its option C); tags settled by D-TAG-SURFACE1=A. Record note: NOTE-CORE-FOUNDATIONS-RECORDS.md §2 | — |
+| 31 | Lower-case markers | `#allow` and `#wire` are lower-case among 110 PascalCase rows (`Markers.jet:207,211`) | Keep `#allow`; retire `#wire` | `#allow` settled by D-MARK-REPEAT1=A, D-GATE-LAW1=A. `#wire` impl: delete the row, its `Policy.rs:2044` test entry and its `tests/truthfulness.rs:609` zero-use triage line. No source uses it, no decision defines it, and it takes no arguments; it entered in commit 413ac90b6 without a ruling, and its triage card #1830 is done | — |
 
-Rows 1, 2, 4, 9, 10 and 11 are the owner choices. The rest are recorded so a
+Rows 1, 2, 4 and 10 are ratified (2026-10-05); rows 9, 11, 23 and 29 are open
+owner choices. The rest are settled by ratified law and are recorded so a
 planner can open implementation cards without re-deriving them.
 
 ## 4. Foundation 1: the `jet_builtins` door (D-CORE-BUILTINS1)
@@ -708,35 +714,42 @@ goldens and UI snapshots.
 ## 11. Ballot drafts and remaining follow-ups
 
 Drafts in `~/.cache/jet-dev/ballots/READY/`, each a short ballot with at most
-three options and the recommendation listed first as A. Each passed the
-store's `ballotGaps` check offline against card #4570 (`c0s7shwh`); none is
-posted.
+three options and the recommendation listed first as A. Status on 2026-10-05,
+read from Tower:
 
-| Order | Ballot | Recommended |
-|---|---|---|
-| 1 | `D-CORE-BUILTINS1.json` | A: one module, `jet_builtins` |
-| 2 | `D-CORE-ROLE1.json` | A: `#builtin.Role` on the declaration |
-| 3 | `D-CORE-NUMFAMILY1.json` | A: one generic family per number kind, standard sizes |
-| 4 | `D-CORE-DERIVE-HOME1.json` | A: the trait holds a `derive` block |
-| 5 | `D-CORE-PROVIDER1.json` | A: one interface per service; short test faults stay |
-| 6 | `D-CORE-FEATURE-FLOW1.json` | A: chip-feature needs inferred and shown |
+| Order | Ballot | Recommended | Status |
+|---|---|---|---|
+| 1 | `D-CORE-BUILTINS1.json` | A: one module, `jet_builtins` | Ratified A |
+| 2 | `D-CORE-ROLE1.json` | A: `#builtin.Role` on the declaration | Ratified A |
+| 3 | `D-CORE-NUMFAMILY1.json` | A: one generic family per number kind, standard sizes | Ratified A |
+| 4 | `D-CORE-DERIVE-HOME1.json` | A: the trait holds a `derive` block | Open, being revised |
+| 5 | `D-CORE-PROVIDER1.json` | A: one interface per service; short test faults stay | Ratified A |
+| 6 | `D-CORE-FEATURE-FLOW1.json` | A: chip-feature needs inferred and shown | Open, being revised |
+| 7 | `D-CORE-LAWS1.json` (row 29) | A: `#Test` laws inside a trait run automatically for every implementing type; `#Waive(law, "reason")` for a knowing break | New draft, not posted |
+| 8 | `D-CORE-HEADER1.json` (row 23) | A: members of a root take version, edition and license from the root unless they state their own | New draft, not posted |
 
-Follow-ups that are not ballots yet, each with the exact next step:
+Both new drafts pass `validate.mjs` offline against card #4570 (`c0s7shwh`)
+with no gaps. They follow the owner direction relayed 2026-10-05: beginner
+magic is implicit, expert control is explicit, and markers are PascalCase.
 
-- **Trait laws as tests (catalogue row 29).** An owner choice once Jet has
-  property-test value generators. Next step: check whether `core.testing`
-  can generate values for a type from its shape; if it can, draft
-  `D-CORE-LAWS1` with options "tests inside a trait run for every
-  implementation", "laws as documentation only" and "no laws".
-- **`Never!` on 2,444 Core lines (row 28).** Next step: find the rule that
-  forces an explicit contract on Core functions (search `syntax-decisions.md`
-  for D-FAIL-INFER-UNION1 and D-TYPE-SUFFIX1 and any rule on exported
-  contracts). Ballot only if no ratified rule decides it.
-- **`state { … }` sections versus fact enums (row 30).** Next step: compare
-  the ratification dates of D-STATE-HOME1 and D-FACTMODEL1; if both stand,
-  draft a merge ballot under I8.
-- **`#wire` marker (row 31).** Next step: search `Examples/` and `Core/` for
-  uses and its decision ID; retire it or record its owner.
+Results of the follow-ups listed by the first pass:
+
+- **Trait laws as tests (row 29).** Property tests exist (D-TEST1). They
+  generate only primitives, lists and optionals; any other parameter type is
+  E0613 (`crates/jet-sema/src/Sema/Bundle/Validation/BodyCheck.rs:1021-1039`).
+  D-CORE-LAWS1 therefore includes generation from a type's fields. Balloted.
+- **`Never!` on 2,444 Core lines (row 28).** These lines carry the owner ruling
+  of 2026-09-30 that Core names its failures. The ruling is in the card #3708
+  log and in the ratified D-CALLBACK-ERR1 lesson. They were added in commit
+  853ebc2d1. Settled; no ballot.
+- **`state { … }` sections versus fact enums (row 30).** D-STATE-HOME1=A
+  (2026-08-25) is later than D-FACTMODEL1=A (2026-07-28) and rejected the
+  fact-enum form. Settled; record note only.
+- **`#wire` marker (row 31).** It has no use, no decision and no arguments.
+  It is listed only in zero-use triage. Implementation: retire it.
+- **Record conflicts.** D-AUTHORITY-WORD2=E against D-ABILITY-NAME2=A, and
+  three smaller items: rows 27, 28 and 30. All are written up in
+  `~/.cache/jet-dev/ballots/READY/NOTE-CORE-FOUNDATIONS-RECORDS.md`.
 
 ## 12. Sources
 
