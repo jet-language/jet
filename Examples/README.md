@@ -43,6 +43,10 @@ fixed-width FNV results in record fields, direct and wrapper calls, and record
 copies. Its [golden](features/expected/basics/struct_call_word.out) preserves all
 64 bits independently of the exact `Int` representation.
 
+[`view_return_lifetimes.jet`](features/memory/view_return_lifetimes.jet) shows
+borrowed returns from named owners and direct operations on the returned view.
+The caller keeps the owner alive; binding the returned view first is optional.
+
 ## Auxiliary golden stream suffix
 
 The feature runner discovers `.jet` files and project directories containing a

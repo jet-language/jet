@@ -244,6 +244,13 @@ pub struct JetRustEmitContext {
     pub all_modules_selected: Bool
     // Every failure, in order, under `config.keep_going`.
     pub kept_failures: [JetRustEmitKeptFailure]{[JetRustEmitKeptFailure]{}}
+    // D-MEM-VIEWRET1 (#4392), MIRRust view_lifetime: the lifetime a View/ViewMut
+    // carrier names while a callable signature renders its returned views and
+    // their owners; "" renders the elided `&[T]` used everywhere else.
+    pub view_lifetime: String{""}
+    // MIRRust view_carriers: the names and keys of declared types whose Rust
+    // declaration takes the `'__jet_view` lifetime parameter.
+    pub view_carriers: [String:Bool]{[String:Bool]{}}
 }
 
 pub struct JetRustEmitPayloadMember {
@@ -1184,6 +1191,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         if ctx.field_names.get(jet_rust_emit_id_key(row.id.value)) != None -> next
         jet_rust_emit_register_field(&ctx, row.id, row.field.name, native_type_keys.get(jet_rust_emit_id_key(row.owner.value)) != None, row.field.span)
     }
+    ctx.view_carriers = jet_rust_emit_collect_view_carriers(&ctx)
     ctx
 }
 

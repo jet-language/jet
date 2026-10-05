@@ -82,7 +82,7 @@ fn jet_codegen_auto_derives_field_value(ctx: &JetRustEmitContext, definition: MI
 
 fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MIRTypeDef, rust_trait: String, method: String, rust_bound: String, lines: &[String]) Never! {
     name :: jet_rust_emit_type_name(&ctx, definition.id)
-    args :: jet_codegen_auto_derives_type_args(definition)
+    args :: jet_rust_emit_type_def_impl_args(ctx, definition, jet_codegen_auto_derives_type_args(definition))
     impl_generics :: jet_codegen_auto_derives_impl_generics(&ctx, definition, rust_bound)
     quoted_source_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(definition.name))
     &lines.push("impl{impl_generics} {rust_trait} for {name}{args} {{")
@@ -204,7 +204,7 @@ fn jet_codegen_auto_derives_append_distinct_display(ctx: &JetRustEmitContext, de
         else -> return
     }
     if !definition.auto_printable || jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display") -> return
-    &lines.push("impl JetDisplay for {jet_rust_emit_type_name(&ctx, definition.id)} {{")
+    &lines.push("impl JetDisplay for {jet_rust_emit_type_name(&ctx, definition.id)}{jet_rust_emit_type_def_impl_args(ctx, definition, "")} {{")
     &lines.push("    fn jet_display(&self) -> String {{")
     &lines.push("        self.0.jet_display()")
     &lines.push("    }}")
