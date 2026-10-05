@@ -49,7 +49,7 @@ carded.
 
 All owner decisions, including choices awaiting approval, live in Tower
 ballots. A card log or briefing may link one, never record a substitute decision.
-Apply the [nine clarity rules](references/clarity.md) before drafting; these
+Apply the [ten clarity rules](references/clarity.md) before drafting; these
 owner rules are stricter than schema maxima, not permission to omit required
 fields. Research the proven approaches and failures first.
 

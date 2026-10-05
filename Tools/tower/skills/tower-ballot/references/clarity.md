@@ -33,6 +33,11 @@ validator. They take precedence over expansive prose; keep every required field.
    Recommend the no-compromise design combining the best approaches, backed by
    experience and evidence. Make the short surface convincing: why it wins,
    which known mistakes it avoids, and why the alternatives are worse.
+10. **Reconcile, design away, then recommend.** A ballot that ignores Jet's
+    current, planned (ratified including unbuilt), in-flight or proposed state,
+    leaves avoidable downsides in place, or recommends anything short of a
+    best-of-all-worlds, no-compromise design backed by researched evidence is
+    rejected before posting. Fewer excellent ballots beat many weak ones.
 
 Use [authoring details](authoring.md) for research and loss redesign, and the
 [root skill](../SKILL.md) for the complete short/full submission contract.

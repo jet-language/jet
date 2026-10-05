@@ -30,9 +30,11 @@ function fixedPointActive() {
 
 function claim() {
   if (fs.existsSync(path.join(root, 'PAUSE'))) return;
-  const df = spawnSync('df', ['--output=pcent', mainDisk], { encoding: 'utf8', timeout: 30000 });
+  const df = spawnSync('df', ['-B1', '--output=size,used,avail,pcent,fstype', mainDisk], { encoding: 'utf8', timeout: 30000 });
   if (df.error || df.status !== 0) throw Error(`disk gate: ${df.error?.message || df.stderr}`);
-  const percent = Number(df.stdout.trim().split('\n').at(-1).trim().replace('%', ''));
+  // Use the same disk telemetry layout as disk-guard, not a second probe format.
+  const columns = df.stdout.trim().split('\n').at(-1).trim().split(/\s+/);
+  const percent = Number(columns[3]?.replace('%', ''));
   if (!Number.isFinite(percent)) throw Error('invalid disk usage');
   if (percent >= 88) return;
   const mem = fs.readFileSync('/proc/meminfo', 'utf8').match(/^MemAvailable:\s+(\d+)\s+kB$/m);
