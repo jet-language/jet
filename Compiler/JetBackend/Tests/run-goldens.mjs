@@ -338,7 +338,11 @@ function driverCommand() {
   return [buildDriver()];
 }
 
+function requireProofUnpaused() {
+  if (existsSync(join(process.env.HOME, ".cache/jet-dev/proofq/PAUSE"))) throw new Error("proofq paused: retain partial outputs and resume after the pause lifts");
+}
 function buildDriver() {
+  requireProofUnpaused();
   const unit = readFileSync(join(dirs.lower, "unit.jet"), "utf8");
   const release = process.env.JET_LOWER_RELEASE === "1";
   const stamp = `${release ? "release" : "dev"}\n${createHash("sha256").update(unit).digest("hex")}\n`;
@@ -374,6 +378,7 @@ function runShard(command, index, shard) {
     let pending = shard;
     const next = () => {
       if (pending.length === 0) return done();
+      requireProofUnpaused();
       const batch = pending.slice(0, size);
       const rest = pending.slice(size);
       writeFileSync(join(dir, "cases.txt"), batch.map((c) => `../${c.slug}`).join("\n") + "\n");
@@ -409,9 +414,16 @@ function runShard(command, index, shard) {
 }
 
 if (from <= 2 && until >= 2) {
-  assembleUnit();
-  const pending = open().filter((c) => existsSync(join(dirs.lower, `${c.slug}.mird`)));
-  for (const c of pending) {
+  const resume = process.env.JET_LOWER_RESUME === "1";
+  if (resume && !existsSync(join(dirs.lower, "unit.jet"))) throw new Error("resume requires the original frozen lower/unit.jet");
+  if (!resume) assembleUnit();
+  const pending = open().filter((c) => {
+    if (!existsSync(join(dirs.lower, `${c.slug}.mird`))) return false;
+    if (!resume) return true;
+    const issues = join(dirs.lower, `${c.slug}.issues`);
+    return !existsSync(join(dirs.lower, `${c.slug}.o`)) && !(existsSync(issues) && readFileSync(issues, "utf8").trim());
+  });
+  if (!resume) for (const c of pending) {
     for (const suffix of [".o", ".exe", ".elf", ".issues", ".pack-issues", ".static-issues"]) rmSync(join(dirs.lower, `${c.slug}${suffix}`), { force: true });
   }
   const command = driverCommand();
