@@ -245,6 +245,26 @@ mod jet_c_abi {
         target
     }
 
+    /// A String slice by a range (Core.rs `JetSliceRange for String`): the
+    /// receiver is borrowed, bounds are native, and out-of-range bounds stop at
+    /// the Jet source location.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_string_slice_range(
+        value: JetCString,
+        start: i64,
+        end: i64,
+        exclusive: u8,
+        file_ptr: *const u8,
+        file_len: usize,
+        line: i64,
+    ) -> JetCString {
+        guard(|| {
+            let sliced = super::jet_string_slice_value(view(value), start, end, exclusive != 0)
+                .unwrap_or_else(|message| super::jet_panic(&text(file_ptr, file_len), line_of(line), &message));
+            handle(sliced)
+        })
+    }
+
     // Display text, as generated Rust renders `print` and interpolation.
 
     #[no_mangle]
@@ -281,6 +301,12 @@ mod jet_c_abi {
         guard(|| handle(super::jet_fmt_display(&value)))
     }
 
+    /// A Float's Debug text (`JetDebug for f64`, which differs from Display).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_float_debug(value: f64) -> JetCString {
+        guard(|| handle(super::JetDebug::jet_debug(&value)))
+    }
+
     // Stops raised by generated code itself.
 
     #[no_mangle]
@@ -304,14 +330,22 @@ mod jet_c_abi {
         guard(|| super::jet_arithmetic_stop("<core.prelude>", 0, &super::jet_list_bounds_message(len, native(index))))
     }
 
-    /// A View window outside its receiver (Core.rs jet_view_new's
-    /// jet_checked_view_window), checked inline; native bounds, called only
-    /// when the check failed, so it always stops.
+    /// The exclusive end of a List slice window (Core.rs
+    /// jet_checked_range_bounds, action "slice"), stopping at the source
+    /// location when the native bounds fall outside `len`.
     #[no_mangle]
-    pub extern "C" fn jet_rt_view_window_stop(start: i64, end: i64, exclusive: u8, len: i64, file_ptr: *const u8, file_len: usize, line: i64) {
+    pub extern "C" fn jet_rt_slice_end(start: i64, end: i64, exclusive: u8, len: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
         guard(|| {
-            super::jet_checked_view_window(start, end, exclusive != 0, len, &text(file_ptr, file_len), line_of(line));
+            let range = super::JetRange { start, end, exclusive: exclusive != 0 };
+            super::jet_checked_range_bounds(len, &range, "slice", &text(file_ptr, file_len), line_of(line)).end as i64
         })
+    }
+
+    /// The exclusive end of a View window (Core.rs jet_checked_view_window),
+    /// stopping at the source location when the native bounds fall outside `len`.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_view_end(start: i64, end: i64, exclusive: u8, len: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
+        guard(|| super::jet_checked_view_window(start, end, exclusive != 0, len, &text(file_ptr, file_len), line_of(line)).1)
     }
 
     #[no_mangle]
@@ -411,6 +445,13 @@ mod jet_c_abi {
     #[no_mangle]
     pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
         guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
+    }
+
+    /// A copy of an exact Int carrier word (a big-integer owner gains a reference).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_int_clone(value: i64) -> i64 {
+        // SAFETY: `value` is a live exact-Int carrier word the caller owns.
+        guard(|| unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(value) }.into_raw())
     }
 
     /// An exact Int constant beyond the inline word range, from its decimal

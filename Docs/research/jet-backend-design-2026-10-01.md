@@ -346,6 +346,15 @@ except `jet_rt_string_drop` and `jet_rt_string_builder_finish`, which consume
 it (`jet_term_write_stdout_line` borrows, so the caller drops the text it
 printed); `jet_loop_cursor_drop` frees a range cursor. A runtime stop renders
 its report and exits the process; nothing unwinds into generated frames.
+Prelude and Core routes go through adapters that `Tools/agent/gen-c-abi-routes.mjs`
+generates (`CAbiRoutes.rs`, with the carrier table `Lower/RuntimeRoutes.jet`).
+A Jet type that generated Rust holds as a native runtime type crosses as an owned
+`Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
+explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe as
+MIRRust. Each such type gets `jet_rt_handle_{drop,clone,display,show,debug,eq}_<T>`
+adapters where the runtime type supports the operation. A `&mut T` kernel parameter
+takes the caller's handle as `HandleMut`, and the kernel mutates the value inside that
+box. A tuple result is written item by item through one out pointer per item.
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
 `libjet_runtime_c.a`; link the object with it and `-lpthread -ldl -lm`.
