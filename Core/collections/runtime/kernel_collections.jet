@@ -11,7 +11,7 @@ use std.hash.Hash
 impl<K: PartialEq + Clone, V: Clone> JetLru<K,V> {
     // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:3
     fn add_new(self: &Self, key: K, value: V) -> Bool Never! {
-        if self.bound == Val(0) or self.entries.iter().any(fn((stored,_)) -> stored == key) -> return false
+        if self.bound == 0 or self.entries.iter().any(fn((stored,_)) -> stored == key) -> return false
         _ :: self.put(^key,^value)
         true
     }

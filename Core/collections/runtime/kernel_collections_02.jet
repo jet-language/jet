@@ -650,7 +650,7 @@ fn jet_collection_float_sort_cmp(left: F64, right: F64) -> Ordering {
 pub fn jet_list_min_max_float<R>(xs: &[F64], build: fn(F64, F64) -> R) -> JetOutcome<R, JetAbsent> {
     first :: if xs.first() == {
         .Val(first) -> first
-        .None -> return Err(JetAbsent)
+        .None -> { return Err(JetAbsent) }
     }
     min := first
     max := first
@@ -831,7 +831,7 @@ pub fn jet_coll_counter_most_common(counter: &JetCounter, k: I64) -> JetCounter 
         }
         index :: if best == {
             .Val(index) -> index
-            .None -> break
+            .None -> { break }
         }
         used[index] = true
         keys.push(counter.keys[index].clone())

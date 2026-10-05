@@ -606,7 +606,7 @@ pub fn plan_select_with_acceleration(operation: JetParallelOperation, proof: ^Je
     if proof_validate(proof, operation) == .Err(rejection) -> return Err(^rejection)
     chunks :: if resources_deterministic_chunks(resources, proof.domain, usize_max) == {
         .Ok(values) -> ^values
-        .Err(rejection) -> return Err(^rejection)
+        .Err(rejection) -> { return Err(^rejection) }
     }
     execution := JetParallelExecution.Sequential(.EmptyDomain)
     if chunks.len() != 0 {

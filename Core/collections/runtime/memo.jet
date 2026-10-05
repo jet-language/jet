@@ -14,7 +14,7 @@ impl<K, V> JetLru<K, V> {
 impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
     // Rust: crates/jet-codegen/src/Prelude/Memo.rs:29
     fn put(self: &Self, key: K, value: V) -> V? {
-        if self.bound == Val(0) { return None }
+        if self.bound == 0 { return None }
         displaced :: self.entries.iter().position(fn((stored, _)) { stored == &key }).map(fn(index) { self.entries.remove(index).1 })
         self.entries.insert(0, (^key, ^value))
         if self.bound.is_some_and(fn(bound) { self.entries.len() > bound }) { _ :: self.entries.pop() }
