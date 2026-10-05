@@ -45,7 +45,7 @@ pub fn jet_std_fs_write_atomic(path: &String, bytes: &[U8]) -> () IOError! {
     temp_path := None
     temp_file := None
     // GATE #4565: kernel primitive
-    for sequence in U64{0}..<U64{128} {
+    loop sequence in U64{0}..<U64{128} {
         process_id :: #Unsafe("read native process identity for create-new atomic sibling naming") { std.process.id() }
         candidate :: parent.join(".jet_tmp_{process_id}_{sequence}")
         match #Unsafe("create-new reserves one real sibling file exclusively without overwriting another writer") {
@@ -57,7 +57,7 @@ pub fn jet_std_fs_write_atomic(path: &String, bytes: &[U8]) -> () IOError! {
                 break
             }
             Err(error) -> {
-                if error.kind() == .AlreadyExists -> continue
+                if error.kind() == .AlreadyExists -> next
                 return Err(io_error_at(.Write, path, ^error))
             }
         }

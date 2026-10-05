@@ -68,8 +68,8 @@ pub struct JetFileScope {
         &keys.sort()
         roots := [JetFileScopeRoot]{}
         loop right in keys {
-            root := right.strip_prefix("FS.Read:") ?? continue // #4303
-            if root.is_empty() -> continue
+            root := right.strip_prefix("FS.Read:") ?? next // #4303
+            if root.is_empty() -> next
             // GATE #4565: kernel primitive — target-native lexical OSPath components.
             path :: #Unsafe("decode resource root using selected-target path component semantics") {
                 if root == "repo" -> OSPath.from(".") else -> OSPath.from(root)
@@ -77,7 +77,7 @@ pub struct JetFileScope {
             if root != "repo" {
                 parent := false
                 loop component in path.components() -> if component == .ParentDir -> parent = true
-                if parent -> continue
+                if parent -> next
             }
             &roots.push(JetFileScopeRoot{path: path, allow_absolute: root != "repo" && path.is_absolute()})
         }

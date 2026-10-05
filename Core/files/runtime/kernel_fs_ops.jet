@@ -28,8 +28,8 @@ pub fn jet_fs_scope_read(scope: JetFileScope, path: String) -> [U8] io.Error! {
     last_error := None
     loop root in scope.roots() {
         relative :: if requested.is_absolute() {
-            if not root.allow_absolute() -> continue
-            stripped :: requested.strip_prefix(root.path()) ?? continue
+            if not root.allow_absolute() -> next
+            stripped :: requested.strip_prefix(root.path()) ?? next
             jet_fs_scope_relative(stripped) ?? return Err(err)
         } else -> jet_fs_scope_relative(requested) ?? return Err(err)
         // The canonical retained descriptor-relative reader owns every no-follow

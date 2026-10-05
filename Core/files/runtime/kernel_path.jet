@@ -139,13 +139,13 @@ pub fn jet_std_path_walk(path: String) -> [String] Never! {
     // GATE #4565: kernel primitive — native canonicalization and directory stream.
     #Unsafe("enumerate native directories while suppressing only the reference's best-effort errors") {
         loop stack.pop() == .Val(directory) {
-            if jet_fs_validate_walk_root(directory) == .Err(_) -> continue
-            canonical :: fs.canonicalize(directory) ?? continue
-            if visited.contains_key(canonical) -> continue
+            if jet_fs_validate_walk_root(directory) == .Err(_) -> next
+            canonical :: fs.canonicalize(directory) ?? next
+            if visited.contains_key(canonical) -> next
             visited[^canonical] = true
-            entries :: fs.read_dir(directory) ?? continue
+            entries :: fs.read_dir(directory) ?? next
             loop entry_result in entries {
-                entry :: entry_result ?? continue
+                entry :: entry_result ?? next
                 path :: entry.path()
                 &result.push(path.to_string_lossy().to_string())
                 if entry.file_type() == .Ok(kind) -> if kind.is_dir() -> &stack.push(^path)

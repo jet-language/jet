@@ -84,7 +84,7 @@ impl JetAtomicTemp {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:83
     fn create(dir: &OSPath) -> Self io.Error! {
         // GATE #4565: kernel primitive
-        for _ in 0..<128 {
+        loop _ in 0..<128 {
             sequence :: #Unsafe("atomic relaxed counter only distinguishes create-new temporary names") {
                 JET_ATOMIC_TEMP_COUNTER.fetch_add(1, Ordering.Relaxed)
             }
@@ -95,7 +95,7 @@ impl JetAtomicTemp {
             } {
                 Ok(file) -> return Ok(Self { path: ^path, file: Val(^file), committed: false })
                 Err(error) -> {
-                    if error.kind() == .AlreadyExists -> continue
+                    if error.kind() == .AlreadyExists -> next
                     return Err(^error)
                 }
             }

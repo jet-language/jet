@@ -11,7 +11,7 @@ pub fn jet_fs_validate_walk_root(path: OSPath) io.Error! {
     #Unsafe("inspect root and every nonempty ancestor with selected native filesystem semantics") {
         source :: if path.as_os_str().is_empty() -> OSPath.from(".") else -> path
         loop ancestor in source.ancestors() {
-            if ancestor.as_os_str().is_empty() -> continue
+            if ancestor.as_os_str().is_empty() -> next
             metadata :: fs.symlink_metadata(ancestor) ?? return Err(err)
             if metadata.file_type().is_symlink() -> return Err(io.Error.new(.PermissionDenied, "filesystem walk path contains symlink: {ancestor.display()}"))
         }
