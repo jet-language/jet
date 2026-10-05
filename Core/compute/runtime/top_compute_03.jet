@@ -621,7 +621,7 @@ fn jet_compute_curried_flat_input(entry: &JetComputeCurriedEntry, input: JetComp
             if !kind.is_jvp() -> return JetComputeInputPack.new(^primals, [])
             split :: base.arity
             if primals.len() != split.saturating_mul(2) -> return Err(JetComputeError.Unsupported("jvp needs one tangent for every primal"))
-            JetComputeInputPack.new(primals[..split].to_vec(), primals[split..].to_vec())
+            JetComputeInputPack.new(primals[0..<split].to_vec(), primals[split..].to_vec())
         }
         _ -> JetComputeInputPack.new(^primals, [])
     }
@@ -865,7 +865,7 @@ fn jet_compute_view_metadata(tensor: &JetTensor) -> (&[I64], USize) JetComputeEr
     if tensor.strides.len() == rank -> return (&tensor.strides, 0)
     if rank.checked_add(1) != Val(tensor.strides.len()) -> return Err(JetComputeError.InvalidShape("Tensor stride and view metadata disagree"))
     offset :: USize.try_from(tensor.strides[rank]).map_err(fn(_) { JetComputeError.InvalidShape("Tensor view offset must be non-negative") })?
-    (&tensor.strides[..rank], offset)
+    (&tensor.strides[0..<rank], offset)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5007
 fn jet_compute_view_strides(shape: &[I64], offset: USize) -> [I64] JetComputeError! {

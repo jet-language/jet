@@ -949,7 +949,7 @@ impl Context {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:3224
     fn find_memory_type(self: &Self, type_bits: U32) -> Result<U32, JetComputeError> {
-        (0..self.memory.memory_type_count as USize).find(fn(index) {
+        (0..<self.memory.memory_type_count as USize).find(fn(index) {
             type_bits & (1 << index) != 0 and
                 self.memory.memory_types[*index].property_flags &
                     (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) ==
@@ -1095,7 +1095,7 @@ fn run(op: U32, inputs: [&[F32]], output_len: USize, params: Params) -> Result<[
     context :: Context.new(^api)?
     dummy :: [F32{0.0}]
     input_buffers := [Buffer].with_capacity(5)
-    for index in 0..5 {
+    for index in 0..<5 {
         values :: inputs.get(index).copied().unwrap_or(&dummy)
         input_buffers.push(Buffer.f32(&context, values, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)?)
     }
