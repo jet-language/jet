@@ -470,7 +470,7 @@ fn vault_test_fault(name: String) -> Bool {
 // Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2907
 fn vault_test_pause_after_backup(root: OSPath) -> {
     #If(test) {
-        saved :: VAULT_TEST_BACKUP_BARRIER.lock().unwrap().clone()
+        saved :: (VAULT_TEST_BACKUP_BARRIER.lock() ?? panic("unwrap failed")).clone()
         if saved == .Val(tuple) && tuple.0 == root {
             tuple.1.wait()
             tuple.2.wait()
@@ -667,11 +667,11 @@ fn jvkw_take(bytes: [U8], at: &USize, count: USize) -> View<U8> JetVaultKeyWrapE
     value
 }
 // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:120
-fn jvkw_u16(bytes: [U8], at: &USize) -> USize JetVaultKeyWrapError! { U16.from_le_bytes((jvkw_take(bytes, at, 2) ?? return Err(err)).try_into().unwrap()) as USize }
+fn jvkw_u16(bytes: [U8], at: &USize) -> USize JetVaultKeyWrapError! { U16.from_le_bytes((jvkw_take(bytes, at, 2) ?? return Err(err)).try_into() ?? panic("unwrap failed")) as USize }
 // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:121
-fn jvkw_u32(bytes: [U8], at: &USize) -> USize JetVaultKeyWrapError! { U32.from_le_bytes((jvkw_take(bytes, at, 4) ?? return Err(err)).try_into().unwrap()) as USize }
+fn jvkw_u32(bytes: [U8], at: &USize) -> USize JetVaultKeyWrapError! { U32.from_le_bytes((jvkw_take(bytes, at, 4) ?? return Err(err)).try_into() ?? panic("unwrap failed")) as USize }
 // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:122
-fn jvkw_u64(bytes: [U8], at: &USize) -> U64 JetVaultKeyWrapError! { U64.from_le_bytes((jvkw_take(bytes, at, 8) ?? return Err(err)).try_into().unwrap()) }
+fn jvkw_u64(bytes: [U8], at: &USize) -> U64 JetVaultKeyWrapError! { U64.from_le_bytes((jvkw_take(bytes, at, 8) ?? return Err(err)).try_into() ?? panic("unwrap failed")) }
 // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:123
 fn jvkw_array<const N: USize>(bytes: [U8], at: &USize) -> [U8; N] JetVaultKeyWrapError! { (jvkw_take(bytes, at, N) ?? return Err(err)).try_into() ?? return Err(JetVaultKeyWrapError.InvalidLength) }
 // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:125
@@ -909,7 +909,7 @@ fn jvkw_open_recipient(parsed: JvkwParsed, bytes: [U8], identity: JetX25519Secre
     })
     index :: match_index ?? 0
     stanza_at :: stanzas_at + index * JVKW_RECIPIENT_STANZA_LEN
-    recipient_public :: bytes[stanza_at..<stanza_at + 32].try_into().unwrap()
+    recipient_public :: bytes[stanza_at..<stanza_at + 32].try_into() ?? panic("unwrap failed")
     #If(test) {
         JVKW_RECIPIENT_OPEN_COUNT.with((slot) -> slot.set(slot.get() + 1))
         JVKW_X25519_COUNT.with((slot) -> slot.set(slot.get() + 1))
