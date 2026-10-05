@@ -78,12 +78,18 @@ impl PluginLimits {
 impl ResourceLimiter for PluginLimits {
     // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:138
     fn memory_growing(self: &PluginLimits, _current: USize, desired: USize, maximum: USize?) -> Bool WasmError! {
-        if desired > self.memory_size { self.failure.set(Val(.Memory)); return Err(WasmError.msg("plugin memory budget exhausted")) }
+        if desired > self.memory_size {
+            self.failure.set(Val(.Memory))
+            return Err(WasmError.msg("plugin memory budget exhausted"))
+        }
         maximum.map_or(true, |max| -> desired <= max)
     }
     // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:151
     fn table_growing(self: &PluginLimits, _current: U32, desired: U32, maximum: U32?) -> Bool WasmError! {
-        if desired > self.table_elements { self.failure.set(Val(.Table)); return Err(WasmError.msg("plugin table budget exhausted")) }
+        if desired > self.table_elements {
+            self.failure.set(Val(.Table))
+            return Err(WasmError.msg("plugin table budget exhausted"))
+        }
         maximum.map_or(true, |max| -> desired <= max)
     }
     // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:164
@@ -151,10 +157,10 @@ fn plugin_relative_candidate(path: OSPath, root_text: String) -> OSPath? Err! {
         if not root.is_absolute() -> return Err("an absolute plugin path requires an absolute explicit FS.Read root")
         relative :: match path.strip_prefix(root).ok() { Val(relative) -> relative, None -> return None }
         if relative.as_os_str().is_empty() -> return Err("plugin path names the FS.Read root, not a file")
-        if relative.components().any(|c| -> c is .ParentDir or c is .RootDir or c is .Prefix(_)) -> return Err("plugin path escapes its explicit FS.Read root")
+        if relative.components().any(|c| -> c == .ParentDir or c == .RootDir or c == .Prefix(_)) -> return Err("plugin path escapes its explicit FS.Read root")
         return Val(relative.to_path_buf())
     }
-    if path.components().any(|c| -> c is .ParentDir or c is .RootDir or c is .Prefix(_)) -> return Err("plugin path must be relative and must not contain `..`")
+    if path.components().any(|c| -> c == .ParentDir or c == .RootDir or c == .Prefix(_)) -> return Err("plugin path must be relative and must not contain `..`")
     Val(path.to_path_buf())
 }
 // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:292
@@ -365,7 +371,10 @@ fn plugin_host_connect(import: HostImportFact, params: [ComponentVal], results: 
                 }
                 return
             }
-            Err(error) -> { timed_out = timed_out or error.kind() == .TimedOut; last_error = Val(error.to_string()) }
+            Err(error) -> {
+                timed_out = timed_out or error.kind() == .TimedOut
+                last_error = Val(error.to_string())
+            }
         }
     }
     message :: "plugin host import `{import.operation}` couldn't connect to `{endpoint}`: {last_error.unwrap_or_else(|| -> "no address resolved")}"
@@ -493,7 +502,7 @@ pub fn jet_plugin_load_declared(path: String, authority_wire: String, declared_n
     }
     linker := Linker<PluginHostState>.new(engine)
     imports := [String:HostImportFact]{}
-    if plugin_register_imports(&linker, component, engine, authority, declared_needs, &imports) is Err(error) {
+    if plugin_register_imports(&linker, component, engine, authority, declared_needs, &imports) == .Err(error) {
         return plugin_error(error.kind, "plugin `{path}` host-import preflight failed: {error.message}")
     }
     pre_instance :: match linker.instantiate_pre(component) {
@@ -504,7 +513,7 @@ pub fn jet_plugin_load_declared(path: String, authority_wire: String, declared_n
     &store.limiter(|state| -> &state.limits)
     &store.set_epoch_deadline(U64{1000000000})
     &store.epoch_deadline_trap()
-    if &store.set_fuel(PLUGIN_MAX_FUEL) is Err(error) -> return plugin_error(.InternalDefect, "plugin fuel setup failed: {error}")
+    if &store.set_fuel(PLUGIN_MAX_FUEL) == .Err(error) -> return plugin_error(.InternalDefect, "plugin fuel setup failed: {error}")
     instance :: match pre_instance.instantiate(&store) {
         Ok(instance) -> instance
         Err(error) -> {
@@ -555,7 +564,7 @@ pub fn jet_plugin_call(handle: U64, name: String, params_wire: String) -> String
         want_results :: func.results(plugin.store)
         if want_results.len() != 1 -> return plugin_call_error(name, .UserError, "returns {want_results.len()} values — v1 plugin calls support exactly one return value")
         zero :: match plugin_zero_val(want_results[0]) { Val(zero) -> zero, None -> return plugin_call_error(name, .UserError, "returns an unsupported Component Model type ({plugin_type_name(want_results[0])})") }
-        if &plugin.store.set_fuel(PLUGIN_MAX_FUEL) is Err(error) -> return plugin_call_error(name, .InternalDefect, "fuel setup failed: {error}")
+        if &plugin.store.set_fuel(PLUGIN_MAX_FUEL) == .Err(error) -> return plugin_call_error(name, .InternalDefect, "fuel setup failed: {error}")
         plugin.store.data_mut().limits.reset_failure()
         &plugin.store.set_epoch_deadline(U64{1})
         &plugin.store.epoch_deadline_trap()
@@ -582,11 +591,11 @@ pub fn jet_plugin_call(handle: U64, name: String, params_wire: String) -> String
         timer_joined :: timer.join().is_ok()
         &plugin.store.set_epoch_deadline(U64{1000000000})
         if not timer_joined -> return plugin_call_error(name, .InternalDefect, "call deadline worker failed")
-        if call_result is Err(error) { return plugin_call_trap_error(name, ^error, plugin.store.data().limits.failure()) }
+        if call_result == .Err(error) { return plugin_call_trap_error(name, ^error, plugin.store.data().limits.failure()) }
         // Copy owned aggregates before post_return releases guest allocations.
         wire_size :: plugin_val_wire_size(results[0], USize{0})
         copied :: wire_size.filter(|size| -> size <= PLUGIN_MAX_WIRE_BYTES).and_then(|_| -> plugin_from_val(results[0]))
-        if func.post_return(&plugin.store) is Err(error) -> return plugin_call_error(name, .InternalDefect, "post-return failed: {error}")
+        if func.post_return(&plugin.store) == .Err(error) -> return plugin_call_error(name, .InternalDefect, "post-return failed: {error}")
         match (wire_size, copied) {
             (Val(size), Val(value)) if size <= PLUGIN_MAX_WIRE_BYTES -> {
                 wire :: plugin_encode_value(value)
@@ -602,7 +611,7 @@ pub fn jet_plugin_call(handle: U64, name: String, params_wire: String) -> String
 fn plugin_call_trap_error(name: String, error: WasmError, budget_failure: PluginBudgetKind?) -> String {
     if error.downcast_ref<PluginBoundaryError>() is Val(failure) -> return plugin_call_error(name, failure.kind, failure.message)
     trap :: error.downcast_ref<Trap>()
-    trap_is_budget :: trap.is_some_and(|trap| -> trap is .OutOfFuel or trap is .Interrupt)
+    trap_is_budget :: trap.is_some_and(|trap| -> trap == .OutOfFuel or trap == .Interrupt)
     if budget_failure.is_some() or trap_is_budget {
         budget :: match budget_failure {
             Val(.Memory) -> "memory"
@@ -612,7 +621,7 @@ fn plugin_call_trap_error(name: String, error: WasmError, budget_failure: Plugin
         }
         return plugin_call_error(name, .BudgetExhausted, "{budget} budget exhausted")
     }
-    if trap is Val(trap) -> return plugin_call_error(name, .UserError, "guest trapped: {trap}")
+    if trap == .Val(trap) -> return plugin_call_error(name, .UserError, "guest trapped: {trap}")
     plugin_call_error(name, .InternalDefect, "host/runtime failed while executing the guest")
 }
 // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1509
@@ -642,7 +651,10 @@ fn plugin_integer(value: I64, ty: Type) -> ComponentVal? {
 fn plugin_to_val(value: PluginValue, ty: Type) -> ComponentVal? {
     match (value, ty) {
         (.Int(value), ty) -> plugin_integer(value, ty)
-        (.Float(value), .Float32) -> { value :: F32{value}; if value.is_finite() { Val(.Float32(value)) } else { None } }
+        (.Float(value), .Float32) -> {
+            value :: F32{value}
+            if value.is_finite() { Val(.Float32(value)) } else { None }
+        }
         (.Float(value), .Float64) -> Val(.Float64(value))
         (.Bool(value), .Bool) -> Val(.Bool(value))
         (.Text(value), .String) -> Val(.String(value.clone()))
@@ -743,7 +755,10 @@ fn plugin_zero_val(ty: Type) -> ComponentVal? {
 fn plugin_decimal_digits(value: USize) -> USize {
     value := value
     digits := USize{1}
-    loop value >= USize{10} { value /= USize{10}; digits += USize{1} }
+    loop value >= USize{10} {
+        value /= USize{10}
+        digits += USize{1}
+    }
     digits
 }
 // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1694
@@ -783,14 +798,14 @@ fn plugin_val_wire_size(value: ComponentVal, depth: USize) -> USize? {
         .Variant(name, value) -> {
             size := plugin_wire_tagged(USize{name.len()})?
             size = plugin_wire_add(size, USize{1})?
-            if value is Val(value) { size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)? }
+            if value == .Val(value) { size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)? }
             Val(size)
         }
         .Enum(name) -> plugin_wire_tagged(USize{name.len()})
         .Option(value) -> match value { Val(value) -> plugin_wire_add(USize{1}, plugin_val_wire_size(value, depth + 1)?), None -> Val(USize{1}) }
         .Result(Ok(value)) | .Result(Err(value)) -> {
             size := USize{2}
-            if value is Val(value) { size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)? }
+            if value == .Val(value) { size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)? }
             Val(size)
         }
         .Flags(names) -> {
