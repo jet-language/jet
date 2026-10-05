@@ -605,9 +605,12 @@ mod tests {
         std::fs::write(&lock_path, raw).unwrap();
         let plan = WorkspacePlan::default();
 
-        let error = write(&tmp, &plan).unwrap_err();
+        let errors = write(&tmp, &plan).unwrap_err();
 
-        assert!(error.contains("existing lock is malformed"), "{error}");
+        assert!(
+            errors.iter().any(|error| error.code == "E1202" && error.why.contains("existing lock is malformed")),
+            "{errors:?}"
+        );
         assert_eq!(std::fs::read_to_string(&lock_path).unwrap(), raw);
         std::fs::remove_dir_all(&tmp).ok();
     }
