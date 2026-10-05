@@ -112,8 +112,6 @@ fn mir_ui_backend_value(backend: MirUiBackend) -> CtValue {
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),
@@ -4140,7 +4138,7 @@ struct Machine<'a, 'state, 'debug> {
     next_dma_transfer_id: Rc<RefCell<u64>>,
     completed_parameters: Option<Vec<RuntimeValue>>,
     completed_callback_parameters: Option<Vec<RuntimeValue>>,
-    last_runtime_stop: Option<String>,
+    last_runtime_stop: Option<(String, String)>,
     atexit_handlers: Vec<RuntimeValue>,
     deadline_guards: Vec<(usize, MirScopeId, crate::scheduler::JetDeadlineGuard)>,
     /// Held for the machine's lifetime so the scoped Web runtime policy is
@@ -4852,10 +4850,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             let step = match self.step(index) {
                 Ok(step) => step,
                 Err(error) if error.code == "SOFT_EXIT" => {
-                    let Some(code) = self.last_runtime_stop.clone() else {
+                    let Some((code, message)) = self.last_runtime_stop.clone() else {
                         return Err(error);
                     };
-                    if self.catch_expected_runtime_stop(index, &code)? {
+                    if self.catch_expected_runtime_stop(index, &code, &message, stderr_len)? {
                         self.last_runtime_stop = None;
                         self.stderr.truncate(stderr_len);
                         self.exit_code = 0;
@@ -5113,6 +5111,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         &mut self,
         frame_index: usize,
         code: &str,
+        message: &str,
+        stderr_len: usize,
     ) -> Result<bool, Diagnostic> {
         let mut target = None;
         let upper = frame_index.min(self.frames.len().saturating_sub(1));
@@ -5125,11 +5125,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if scope.kind != MirScopeKind::ScopeMember
                     || !matches!(
                         function.test_scope_member(scope_id),
-                        Some(MirTestScopeMember::ExpectFail { expected_code })
-                            if expected_code.as_deref().is_none_or(|expected| expected == code)
+                        Some(MirTestScopeMember::ExpectFail { .. })
                     )
                 {
                     continue;
+                }
+                if let Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) = function.test_scope_member(scope_id) {
+                    if let Some(error) = jet_foundation::Outcome::jet_test_expect_fail_error(
+                        expected_code.as_deref(), expected_message.as_deref(), Some((code, message)),
+                    ) {
+                        self.stderr.truncate(stderr_len);
+                        return Err(self.located_runtime_stop("E3001", "", 0, &error, scope.span));
+                    }
                 }
                 let Some(exit) = function.blocks.iter().find_map(|block| {
                     block.instructions.iter().any(|instruction| {
@@ -7894,11 +7901,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .flatten();
                 self.cleanup_scope_guards(frame_index, std::slice::from_ref(scope), span)?;
                 self.frames[frame_index].scopes.remove(found);
-                if let Some(MirTestScopeMember::ExpectFail { expected_code }) = member {
+                if let Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) = member {
                     if !expected_completed {
-                        let message = jet_foundation::Outcome::jet_test_expect_fail_message(
-                            expected_code.as_deref(),
-                        );
+                        let message = jet_foundation::Outcome::jet_test_expect_fail_error(
+                            expected_code.as_deref(), expected_message.as_deref(), None,
+                        ).expect("missing stop");
                         let error = self.located_runtime_stop("E3001", "", 0, &message, span);
                         return Err(error);
                     }
@@ -11654,7 +11661,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if crate::scheduler::jet_scheduler_in_task() {
             std::panic::resume_unwind(Box::new(message.to_owned()));
         }
-        self.last_runtime_stop = Some("E3001".to_string());
+        self.last_runtime_stop = Some(("E3001".to_string(), message.to_string()));
         let file = self
             .program
             .source_files
@@ -13107,7 +13114,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         context: Option<&MirPanicContext>,
         span: Span,
     ) -> Diagnostic {
-        self.last_runtime_stop = Some("E3001".to_string());
+        self.last_runtime_stop = Some(("E3001".to_string(), jet_foundation::Outcome::jet_pool_stale_message().to_string()));
         let file = self
             .program
             .source_files
@@ -14485,7 +14492,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             &message,
             "",
         );
-        self.last_runtime_stop = Some("E3012".to_string());
+        self.last_runtime_stop = Some(("E3012".to_string(), message.clone()));
         self.stderr.push_str(&report.rendered);
         self.exit_code = report.exit_code;
         Ok(crate::Sema::Diagnostics::soft_exit(
@@ -15544,7 +15551,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         message: &str,
         span: Span,
     ) -> Diagnostic {
-        self.last_runtime_stop = Some(code.to_string());
+        self.last_runtime_stop = Some((code.to_string(), message.to_string()));
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             code, file, line, fn_name, source_line, col, caret_len, message, "",
         );
@@ -17194,6 +17201,44 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         *slot = runtime_to_data(value.clone(), span)?;
                     }
                     return Ok(RuntimeValue::Data(MirEvalValue::List(items)));
+                }
+                // `jet_list_slice`: start and end clamp into the list, and an
+                // empty or inverted window is an empty list. A `[U8]` carrier
+                // may be packed bytes.
+                "list_slice" => {
+                    let [receiver, start, end] = args.as_slice() else {
+                        return Err(mir_error_at(
+                            "MIR List.slice route requires a list, start and end",
+                            span,
+                        ));
+                    };
+                    let receiver =
+                        runtime_to_data(self.materialize_runtime(receiver.clone(), span)?, span)?;
+                    let start = int_value(runtime_to_data(start.clone(), span)?, span)?;
+                    let end = int_value(runtime_to_data(end.clone(), span)?, span)?;
+                    fn clamped_window<T>(mut items: Vec<T>, start: i64, end: i64) -> Vec<T> {
+                        let len = i64::try_from(items.len()).unwrap_or(i64::MAX);
+                        let from = start.clamp(0, len) as usize;
+                        let to = end.clamp(0, len) as usize;
+                        if to <= from {
+                            return Vec::new();
+                        }
+                        items.truncate(to);
+                        items.drain(..from);
+                        items
+                    }
+                    let sliced = match receiver {
+                        MirEvalValue::List(items) => {
+                            MirEvalValue::List(clamped_window(items, start, end))
+                        }
+                        MirEvalValue::Bytes(bytes) => {
+                            MirEvalValue::Bytes(clamped_window(bytes, start, end))
+                        }
+                        _ => {
+                            return Err(mir_error_at("MIR List.slice receiver is not a List", span));
+                        }
+                    };
+                    return Ok(RuntimeValue::Data(sliced));
                 }
                 // `jet_iter_indexes(n)`: every valid index `0..<n` of a
                 // sequence of length `n` (a negative length has none).
@@ -19873,8 +19918,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             lambda: Lambda {
                 take_names: Vec::new(),
                 params: Vec::new(),
-                result_type: None,
-                error_type: None,
                 effects: None,
                 body: LambdaBody::Block(Vec::new()),
                 span: Span::new(0, 0),
@@ -28136,8 +28179,6 @@ fn mir_runtime_owner_value<T: Send + Sync + 'static>(value: T) -> CtValue {
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),
@@ -30727,9 +30768,9 @@ fn pattern_match_carrier(
         )
     })?;
     match captures {
-        // TIR's scan emits the untyped `Option<()>` carrier and each
-        // `PatternCapture` reads one position at its own checked type, so
-        // that carrier keeps every capture in scan order.
+        // An `IsSome` scan keeps the untyped `Option<()>` carrier; it keeps
+        // every capture in scan order. An `Unwrap` scan's carrier names each
+        // capture by position at its checked type (the branch below).
         Some(captures) if tuple_fields.is_empty() => Ok(RuntimeValue::Data(MirEvalValue::Present(
             Box::new(MirEvalValue::Struct {
                 type_name: tuple_ty.display_name(),

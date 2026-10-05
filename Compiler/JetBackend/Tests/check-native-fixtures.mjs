@@ -74,6 +74,28 @@ function check(label, path, fixture, args = [], options = {}, compareStderr = tr
   }
 }
 
+// These witnesses need no runtime library: dirty ABI bytes enter generated
+// callees directly, and a tiny C host checks the linked object's data address.
+for (const place of ["register", "stack"]) {
+  for (const [value, status] of [["false", 0], ["true", 1]]) {
+    const name = `bool-${place}-${value}`;
+    const run = spawnSync(`${outDir}/${name}.elf`, [], { encoding: "utf8", timeout: 10000 });
+    const ok = run.status === status && run.stdout === "";
+    if (!ok) failures += 1;
+    console.log(`${name}: ${ok ? "ok" : "FAIL"} (exit ${run.status ?? run.signal}, expected ${status})`);
+  }
+}
+check("align64 (static image)", `${outDir}/align64.elf`, "");
+const alignmentSource = `${dirname(fileURLToPath(import.meta.url))}/check-alignment.c`;
+const alignmentProgram = `${outDir}/align64.hosted`;
+const alignmentLink = spawnSync(process.env.CC ?? "cc", [alignmentSource, `${outDir}/align64.o`, "-o", alignmentProgram], { encoding: "utf8" });
+if (alignmentLink.status !== 0) {
+  console.log(`align64 (linked object): LINK FAILED\n${alignmentLink.stderr}`);
+  failures += 1;
+} else {
+  check("align64 (linked object)", alignmentProgram, "");
+}
+
 // Link one loader per fixture: `-rdynamic` exports the runtime's symbols to
 // dlsym, and `-u` keeps every export the image imports.
 const loaderSource = `${dirname(fileURLToPath(import.meta.url))}/load-memory-image.c`;
@@ -112,7 +134,7 @@ if (runtimeLib && jetRun) {
   }
 }
 
-for (const fixture of expected) {
+for (const fixture of process.argv.includes("--abi") ? [] : expected) {
   const path = `${outDir}/${fixture.name}.elf`;
   if (!existsSync(path)) {
     console.log(`${fixture.name}: MISSING ${path}`);

@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildScoreboard, comparisons, httpProbe, metricApplicability, processTreeRssKb, probeMatches, publicationState, ratioVerdict, validateEntryShape, validateResultShape } from "./run.mjs";
 import { liveReloadInternals } from "./live-reload.mjs";
+import { compileThroughputContractIssues } from "./compile-throughput.mjs";
 
 const gauntletDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = path.resolve(gauntletDir, "../..");
@@ -699,6 +700,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.deepEqual(manifest.report_contract.axis_schemas, {
     live_reload: "gauntlet-axis-live-reload-v1",
     memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",
+    compile_throughput: "gauntlet-axis-compile-throughput-v1",
   });
   assert.equal(manifest.report_contract.axis_publication, "required_axes_complete_and_unblocked");
   for (const axis of Object.values(manifest.axes)) assert.equal(axis.status, "required");
@@ -724,6 +726,20 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   for (const runner of memorySafety.runners) {
     for (const file of runner.files) assert.equal(await exists(repoSourcePath(file.source)), true, `${runner.id}: missing ${file.source}`);
   }
+
+  // The compile-throughput cell (#4529): its contract, its harness, and the
+  // bench300k pin shared with Tools/perf/throughput/bench.json.
+  const throughput = manifest.axes.compile_throughput;
+  assert.deepEqual(compileThroughputContractIssues(throughput), []);
+  assert.equal(await exists(repoSourcePath(throughput.harness)), true);
+  const pins = JSON.parse(await fs.readFile(repoSourcePath("Tools/perf/throughput/bench.json"), "utf8"));
+  const bench300k = throughput.programs.find((program) => program.id === "bench300k");
+  assert.equal(bench300k.source_sha256, pins.programs.bench300k.source_sha256);
+  assert.equal(bench300k.expected_output, pins.programs.bench300k.expected_output);
+  assert.equal(bench300k.generator, `node Tools/perf/scaling/generate.mjs mixed --code-lines ${pins.programs.bench300k.code_lines} --seed ${pins.programs.bench300k.seed} {dir}`);
+  assert.ok(pins.programs.bench300k.shape.code_lines >= bench300k.loc_contract.nonblank_noncomment_lines_min);
+  assert.deepEqual(Object.keys(throughput.gates.memory).sort(), ["bench300k_peak_rss_bytes_max", "selfhost_peak_rss_bytes_max"]);
+  assert.ok(pins.phase_budgets.every((row) => row.owners.length > 0));
 
   const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));
   assert.equal(matrix.cells.length, manifest.corpus.matrix_cell_count);

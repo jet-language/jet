@@ -100,8 +100,10 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     rodata := [U8]{}
     rodata_align :: x64_data_align(program.data)
     data_offsets := [Int]{}
+    rodata_align := 1
     loop object in program.data {
         elf64_pad(&rodata, object.align)
+        if object.align > rodata_align -> rodata_align = object.align
         &data_offsets.push(rodata.len())
         loop byte in object.bytes -> &rodata.push(byte)
     }

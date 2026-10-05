@@ -354,9 +354,35 @@ impl<'a> Lexer<'a> {
         })
     }
 
+    /// Report the first non-indentation run on a delimiter line. A CR directly
+    /// before LF belongs to the line break, not to the forbidden text.
+    fn triple_delimiter_text(&mut self, begin: usize, end: usize, position: &str) {
+        let mut finish = end;
+        if self.at(end) == '\n' && finish > begin && self.at(finish - 1) == '\r' {
+            finish -= 1;
+        }
+        let mut first = begin;
+        while first < finish && matches!(self.at(first), ' ' | '\t') {
+            first += 1;
+        }
+        if first == finish {
+            return;
+        }
+        let mut last = first;
+        while last < finish && !matches!(self.at(last), ' ' | '\t') {
+            last += 1;
+        }
+        self.diags.push(Diagnostic::from_row(
+            "E0084",
+            &[("position", position)],
+            Some(Span::new(self.pos(first), self.pos(last))),
+        ));
+    }
+
     /// S70 (D-SG5): `"""…"""` multi-line string. The line break right after the
     /// opening `"""` is dropped, the line break before the closing `"""` is
     /// dropped, and the closing `"""`'s indentation is stripped from every line.
+    /// D-TRIPLE-DELIM1=A rejects text on either delimiter line.
     /// Plain-string escapes (S20) and `{interp}` (S8) stay active. A typed-head
     /// body leaves backslashes literal for its head grammar (D-BOUND-RAW1),
     /// except that D-BYTELIT1=B decodes `\xNN` in a `[U8]` body.
@@ -449,16 +475,17 @@ impl<'a> Lexer<'a> {
         };
 
         // Drop the line break right after the opening `"""`.
-        let mut content_begin = open_end;
-        {
-            let mut k = open_end;
-            while k < close && self.at(k) != '\n' {
-                k += 1;
-            }
-            if k < close && self.at(k) == '\n' {
-                content_begin = k + 1;
-            }
+        let mut opening_line_end = open_end;
+        while opening_line_end < close && self.at(opening_line_end) != '\n' {
+            opening_line_end += 1;
         }
+        self.triple_delimiter_text(open_end, opening_line_end, "after the opening");
+        self.triple_delimiter_text(close_line_start, close, "before the closing");
+        let content_begin = if opening_line_end < close {
+            opening_line_end + 1
+        } else {
+            open_end
+        };
         // Drop the line break right before the closing delimiter's line.
         let mut content_end = close_line_start;
         if content_end > content_begin && self.at(content_end - 1) == '\n' {

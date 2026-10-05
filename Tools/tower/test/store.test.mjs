@@ -466,3 +466,39 @@ test('stored recommendation losses migrate on live and history reads, then persi
   assertMigrated(JSON.parse(readFileSync(st.file, 'utf8')).decisions[0]);
   assertMigrated(JSON.parse(readFileSync(historyFile, 'utf8')).decisions[0]);
 });
+
+test('status snapshots persist the current form and reject removed ownerActions without writes', () => {
+  const st = fresh();
+  const input = { milestones: [], workstreams: [] };
+  const { result: posted } = st.mutate(s => db.postStatus(s, { snapshot: input, by: 'agent' }));
+  assert.equal(Object.hasOwn(posted, 'ownerActions'), false);
+  assert.deepEqual(input, { milestones: [], workstreams: [] }, 'posting does not mutate its input');
+  const before = st.load();
+  assert.deepEqual(openStore(st.dataDir).load().statusSnapshot, posted);
+  for (const ownerActions of [undefined, null, false, [], [{ text: 'Choose a layout' }]]) {
+    assert.throws(() => st.mutate(s => db.postStatus(s, {
+      snapshot: { ...input, ownerActions }, by: 'agent',
+    })), error => error.code === 'E_INVALID' && /status\.ownerActions.*removed/.test(error.message));
+    assert.deepEqual(st.load(), before, 'a rejected snapshot changes neither revision, reports nor events');
+  }
+  const replacement = st.mutate(s => db.postStatus(s, {
+    snapshot: { ...input, summary: 'Current progress' }, by: 'agent',
+  })).result;
+  assert.notEqual(replacement.id, posted.id);
+  assert.deepEqual(openStore(st.dataDir).load().statusSnapshot, replacement);
+});
+
+test('a stored board written before the owner-actions removal loads without the field', () => {
+  const st = fresh();
+  const state = empty();
+  const statusSnapshot = { id: 'existing-status', by: 'agent', created: '2026-10-04T12:00:00Z',
+    milestones: [], workstreams: [] };
+  state.statusSnapshot = statusSnapshot;
+  assert.deepEqual(db.normalize(structuredClone(state)).statusSnapshot, statusSnapshot);
+  for (const ownerActions of [null, [], [{ id: 'review', text: 'Read the proposal' }]]) {
+    const old = structuredClone(state);
+    old.statusSnapshot.ownerActions = ownerActions;
+    writeJSON(st.file, old);
+    assert.deepEqual(openStore(st.dataDir).load().statusSnapshot, statusSnapshot);
+  }
+});

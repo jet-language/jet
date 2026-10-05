@@ -50,18 +50,35 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     files.symlink(outside, outside_link) ?? panic("outside link")
     candidates :: [String]{outside, outside_dir, outside_link}
     loop path in candidates {
-        opened := [SnapshotFile]{}
-        if store_open_snapshot_files(snapshot_root, path, &opened) == {
+        if store_open_snapshot_files(snapshot_root, path) == {
             .Ok(_) -> panic("a path outside the snapshot root must be refused")
             .Err(error) -> {
                 assert(error == .InvalidInput(_))
                 assert_eq(error.message(), "snapshot path `{path}` is outside snapshot root `{snapshot_root}`")
             }
         }
-        assert_eq(opened.len(), 0)
     }
     assert_eq(files.read_link(outside_link) ?? panic("read link"), outside)
     assert_eq(files.read(outside) ?? panic("read outside"), "outside")
+    store_test_drop_roots(roots)
+}
+
+#Test("store open snapshot files returns handles without a dummy destination") {
+    roots :: store_test_temp_roots()
+    snapshot_root :: files.join(roots.root, "snapshot")
+    files.create_dir_all(snapshot_root) ?? panic("snapshot root")
+    empty :: store_open_snapshot_files(snapshot_root, snapshot_root) ?? panic("open empty snapshot")
+    assert_eq(empty.len(), 0)
+    nested :: files.join(snapshot_root, "nested")
+    files.create_dir_all(nested) ?? panic("nested snapshot directory")
+    payload :: files.join(nested, "payload")
+    files.write(payload, "snapshot") ?? panic("snapshot payload")
+    files.symlink(payload, files.join(snapshot_root, "link")) ?? panic("snapshot link")
+    opened :: store_open_snapshot_files(snapshot_root, snapshot_root) ?? panic("open snapshot")
+    assert_eq(opened.len(), 1)
+    assert_eq(opened[0].relative, "nested/payload")
+    assert(opened[0].file != None)
+    assert_eq(opened[0].id, (files.stat(payload) ?? panic("payload stat")).id)
     store_test_drop_roots(roots)
 }
 

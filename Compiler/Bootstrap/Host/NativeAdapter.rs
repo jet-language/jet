@@ -1228,11 +1228,15 @@ fn emit_native_binding_helpers(
             field_path.last().is_some_and(|name| name == field)
         }
 
+        // `expected_execution` is `program`'s sealed execution identity for
+        // `artifact`, computed once by the owner of `program` (the image never
+        // changes), so a per-session registration never re-digests the program.
         fn __jet_bootstrap_native_binding_registration(
             resources: &::jet_jit::SourceResources::SourceResourceLease,
             cleanup: Option<&::jet_jit::SourceResources::SourceResourceCleanupLease>,
             program: &::jet_foundation::MIR::MirProgram,
             artifact: ::jet_foundation::MIR::MirArtifactId,
+            expected_execution: &::jet_foundation::MIR::MirExecutionIdentity,
             field_path: Vec<String>,
             binding: __JET_SOURCE_BINDING_IDENTITY__,
             identity: __JET_SOURCE_RESOURCE_IDENTITY__,
@@ -1262,8 +1266,6 @@ fn emit_native_binding_helpers(
             )?;
             let expected_numeric = checked_numeric.option_inner()
                 .ok_or_else(|| "checked SemaRegistrationHostHooks.numeric_unit_conversion_exact lost its Option leaf".to_string())?;
-            let expected_execution = program.sealed_execution_identity(Some(artifact))
-                .map_err(|error| error.to_string())?;
             // The Source owner identity, as its key (callables only) and checked host type.
             let (owner_key, owner_type) = match &binding {
                 @p.JetEvalNativeBindingIdentity.Callable@(owner) => (
@@ -1278,13 +1280,13 @@ fn emit_native_binding_helpers(
                 __JET_SOURCE_RESOURCE_IDENTITY__::Interface { execution, artifact: owner_artifact, receiver_type }
                     if host_field
                         && owner_key.is_none()
-                        && *execution == expected_execution
+                        && *execution == *expected_execution
                         && *owner_artifact == artifact
                         && receiver_type.same_checked_type(expected_host)
                         && owner_type.same_checked_type(expected_host) => {}
                 __JET_SOURCE_RESOURCE_IDENTITY__::Callable(source)
                     if numeric_field
-                        && source.execution == expected_execution
+                        && source.execution == *expected_execution
                         && source.artifact == artifact
                         && owner_key.as_ref().is_some_and(|key| source.key == *key)
                         && source.key == __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY
@@ -1350,6 +1352,7 @@ fn emit_native_binding_helpers(
                 cleanup.as_ref(),
                 root.program.as_ref(),
                 root.artifact,
+                &root.execution,
                 vec!["JetEvalConfig".to_string(), "host_adapter".to_string()],
                 @new.JetEvalNativeBindingIdentity.Interface@(__jet_bootstrap_type_from_host(&root.receiver_type)?),
                 __JET_SOURCE_RESOURCE_IDENTITY__::Interface {

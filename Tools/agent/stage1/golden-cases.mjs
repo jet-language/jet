@@ -28,15 +28,20 @@
 // fixture manifest the stage-zero harness uses (SOURCE_FIXTURE_MANIFEST). A
 // source fixture is staged exactly as write_source_fixture_project does: that
 // manifest plus the source as main.jet (SMALL_ENTRY_RELATIVE).
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [repo, outDir, selector] = process.argv.slice(2);
-if (!repo || !outDir || !selector) {
+const [repoArg, outDir, selector] = process.argv.slice(2);
+if (!repoArg || !outDir || !selector) {
   console.error("usage: golden-cases.mjs REPO OUTDIR SELECTOR");
   process.exit(64);
 }
+// run-feature-examples.mjs stops its package-root search at its own FEATURES
+// path, which Node resolves through symlinks (~/.cache/jet-luna -> jet-dev).
+// The entry paths must be resolved the same way, or the search climbs out of
+// the repo and stages whatever directory above it holds a package.jet.
+const repo = realpathSync(repoArg);
 const { collectGoldenEntries, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));
 const { copyFeatureProject, featureProjectRoot } = await import(pathToFileURL(join(repo, "Tools/agent/run-feature-examples.mjs")));
 

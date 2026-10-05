@@ -735,12 +735,13 @@ pub fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args:
 // Run each of `function_ids` with no arguments as one pure evaluation on ONE
 // machine (Rust PureFold `evaluate` over one borrowed program): the program
 // and its row index are built once, each evaluation starts from a fresh
-// session, and the program is handed back once. Value `i` is None when
-// evaluation `i` failed, stopped, printed, or left a resource that did not
-// retire cleanly. A machine per function copied the whole program twice per
-// evaluation (a field move clones), and the caller's recursion retained one
-// copy per evaluation.
-pub fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID], config: JetEvalConfig, values: &[TComptimeValue?]) -> MIRProgram {
+// session, and the program and computed values are returned together once.
+// Value `i` is None when evaluation `i` failed, stopped, printed, or left a
+// resource that did not retire cleanly. A machine per function copied the
+// whole program twice per evaluation (a field move clones), and the caller's
+// recursion retained one copy per evaluation.
+pub fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID], config: JetEvalConfig) -> (program: MIRProgram, values: [TComptimeValue?]) {
+    values := [TComptimeValue?]{}
     span := jet_eval_empty_span()
     first_config := config
     machine := jet_eval_machine(^program, ^first_config)
@@ -751,7 +752,7 @@ pub fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionI
         }
         &values.push(jet_eval_pure_session_value(&machine, function_id, span))
     }
-    machine.program
+    (program: machine.program, values: ^values)
 }
 
 // A fresh evaluation session on `machine`'s program: every field

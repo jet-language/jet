@@ -673,6 +673,7 @@ pub enum GateKind {
     PrecisionDemotion,
     Nondeterministic,
     Structure,
+    LintAllow,
 }
 
 impl GateKind {
@@ -691,7 +692,13 @@ impl GateKind {
             Self::PrecisionDemotion => "precision_demotion",
             Self::Nondeterministic => "nondeterministic",
             Self::Structure => "structure",
+            Self::LintAllow => "lint_allow",
         }
+    }
+
+    /// D-GATE-LAW1=A: ledger and policy use the same closed set of names.
+    pub fn policy_key(self) -> crate::Policy::PolicyKey {
+        crate::Policy::PolicyKey::parse(self.name()).expect("every gate kind has a policy key")
     }
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -710,6 +717,7 @@ impl GateKind {
             | "saturating" | "checked" => Some(Self::PrecisionDemotion),
             "nondeterministic" | "determinism" => Some(Self::Nondeterministic),
             "structure" => Some(Self::Structure),
+            "lint_allow" => Some(Self::LintAllow),
             _ => None,
         }
     }
@@ -728,10 +736,6 @@ impl GateKind {
         )
     }
 
-    pub const fn is_rights_kind(self) -> bool {
-        self.is_security()
-    }
-
     const fn display_order(self) -> u8 {
         match self {
             Self::Unsafe => 0,
@@ -747,6 +751,7 @@ impl GateKind {
             Self::StateTransition => 10,
             Self::PrecisionDemotion => 11,
             Self::Structure => 12,
+            Self::LintAllow => 13,
         }
     }
 }

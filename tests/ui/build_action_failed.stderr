@@ -1,17 +1,8 @@
-Error [E-ERR-PROPAGATE]: Bare `?` propagation is retired.
-  --> tests/ui/build_action_failed.jet:5:84
-    |
-  5 |         action :: b.action("fail", [], ["never"], ["sh", "-c", "exit 7"], ["Exec"])?
-    |                                                                                    ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+Error [E3505]: Build action `fail` exited with status 7
+ Why: The sandboxed command reported a structured failure; its typed identity and source data remain in the report
+ Fix: Fix the action command, declared inputs/outputs, toolchain, or probe, then rerun `jet build`
+Error [E3505]: build action `fail` exited with status 7 (type: BuildAction::Failed)
 
-Error [E-ERR-PROPAGATE]: Bare `?` propagation is retired.
-  --> tests/ui/build_action_failed.jet:6:78
-    |
-  6 |         app :: b.add_executable("app", ["build_action_failed.jet"], [action])?
-    |                                                                              ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+first
+second
+More: jet-lang.dev/e/E3505

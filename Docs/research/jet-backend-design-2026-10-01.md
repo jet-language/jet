@@ -391,6 +391,16 @@ is reported as a native lowering failure, not silently changed to Read.
 `Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI, generated
 routes and iterator adapters together for full-pack proofs; its default mode
 retains an emitted seed's paired route set.
+
+Task and channel adapters share the iterator's typed slot descriptors rather
+than introducing another erased value ABI. A native SendFn body writes its
+result directly into an owned slot; Sema's sendability facts authorize moving
+the body and its captures to a scheduler thread. The existing task, task-group
+and channel kernels retain responsibility for ordering, cancellation and error
+policy. Consuming operands register as ownership sinks before lowering place
+reads: a task group cannot destructively consume a borrowed list header, and
+join/detach cannot consume a borrowed task. Loaded code and its destructors must
+remain mapped until every task body and returned value owner has finished.
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
 `libjet_runtime_c.a`; link the object with it and `-lpthread -ldl -lm`.
@@ -756,7 +766,7 @@ is spelled with the existing inline-assembly mechanism (D-FFI-ASM1,
 D-FFI-ASMOPS1) rather than a new builtin, so it adds no syntax and no ballot:
 
     #[Unsafe("calls machine code; …"), FFI(asm)]
-    fn os_call_address(address: Int, argument: Int) -> Int -> {
+    fn os_call_address(address: Int, argument: Int) -> Int {
         """
         mov rdi, {argument}
         call {address}

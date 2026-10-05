@@ -71,7 +71,7 @@ FFI_FEATURED_DEPS :: prep { [FFIFeaturedDep]{
     FFIFeaturedDep{name: "rustls", toml: "{{ version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }}"},
     FFIFeaturedDep{name: "sha2", toml: "{{ version = \"=0.10.9\", default-features = false, features = [] }}"},
     FFIFeaturedDep{name: "subtle", toml: "{{ version = \"=2.6.1\", default-features = false, features = [] }}"},
-    FFIFeaturedDep{name: "wasmtime", toml: "{{ version = \"26\", features = [\"component-model\"] }}"},
+    FFIFeaturedDep{name: "wasmtime", toml: "{{ version = \"25\", features = [\"component-model\"] }}"},
     FFIFeaturedDep{name: "x25519-dalek", toml: "{{ version = \"=2.0.1\", default-features = false, features = [\"precomputed-tables\", \"zeroize\"] }}"}
 } }
 
@@ -433,8 +433,8 @@ fn main() {{
 
 // The repository-relative inputs that fingerprint the jet-foundation path
 // dependency of parquet and plugin bridges.
-FFI_JET_FOUNDATION_SOURCE_SCHEMA :: prep { "jet-ffi-foundation-source-v2" }
-FFI_JET_FOUNDATION_CODEGEN_INPUTS :: prep { [String]{"Effects.jet", "Core.jet", "core/prelude.jet", "Facts.jet", "Diagnostics.jet", "Core/InlineRange.rs", "Core/TimeMonotonic.rs", "Core/MapKey.rs", "Markers.jet"} }
+FFI_JET_FOUNDATION_SOURCE_SCHEMA :: prep { "jet-ffi-foundation-source-v3" }
+FFI_JET_FOUNDATION_CODEGEN_INPUTS :: prep { [String]{"Effects.jet", "Core.jet", "core/prelude.jet", "Facts.jet", "Diagnostics.jet", "Core/InlineRange.rs", "Core/TimeMonotonic.rs", "Core/MapKey.rs", "Markers.jet", "CoreLib/Top/UnicodeTables.rs"} }
 FFI_JET_FOUNDATION_ARCHIVE_INPUTS :: prep { [String]{"archive.jet", "gzip.jet", "zstd.jet"} }
 FFI_JET_FOUNDATION_TEXT_INPUTS :: prep { [String]{"string.jet"} }
 FFI_JET_FOUNDATION_TEST_INPUTS :: prep { [String]{"diagnostics_coverage_baseline.txt"} }
@@ -442,6 +442,7 @@ FFI_JET_FOUNDATION_TEST_INPUTS :: prep { [String]{"diagnostics_coverage_baseline
 // The verified jet-foundation source directories and their input digest.
 pub struct JetFoundationSources {
     pub foundation: String
+    pub unicode: String
     pub codegen_prelude: String
     pub archive_source: String
     pub text_source: String
@@ -488,6 +489,7 @@ fn pkg_ffi_add_foundation_inputs(identity: &ForeignIdentityBuilder, field: Strin
 fn pkg_ffi_jet_foundation_sources() -[FS, Env]> JetFoundationSources ForeignBridgeError! {
     root :: foundation_jet_source_root() ?? return Err(pkg_bridge_error("{err}"))
     foundation :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_CRATE_PATH), "crate")
+    unicode :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_UNICODE_CRATE_PATH), "unicode crate")
     codegen_prelude :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")
     archive_source :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_ARCHIVE_SOURCE_PATH), "archive")
     text_source :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_TEXT_SOURCE_PATH), "text")
@@ -495,11 +497,13 @@ fn pkg_ffi_jet_foundation_sources() -[FS, Env]> JetFoundationSources ForeignBrid
     foundation_tree :: foundation_try_tree_hash(foundation) ?? return Err(pkg_bridge_error("could not fingerprint jet-foundation source: {err.message()}"))
     identity := ForeignIdentityBuilder.new(FFI_JET_FOUNDATION_SOURCE_SCHEMA)
     &identity.field("foundation-tree", foundation_tree.bytes())
+    unicode_tree :: foundation_try_tree_hash(unicode) ?? return Err(pkg_bridge_error("could not fingerprint jet-unicode source: {err.message()}"))
+    &identity.field("unicode-tree", unicode_tree.bytes())
     pkg_ffi_add_foundation_inputs(&identity, "codegen-input", codegen_prelude, FFI_JET_FOUNDATION_CODEGEN_INPUTS, "codegen")
     pkg_ffi_add_foundation_inputs(&identity, "archive-input", archive_source, FFI_JET_FOUNDATION_ARCHIVE_INPUTS, "archive")
     pkg_ffi_add_foundation_inputs(&identity, "text-input", text_source, FFI_JET_FOUNDATION_TEXT_INPUTS, "text")
     pkg_ffi_add_foundation_inputs(&identity, "tests-input", tests, FFI_JET_FOUNDATION_TEST_INPUTS, "tests")
-    Ok(JetFoundationSources{foundation: foundation, codegen_prelude: codegen_prelude, archive_source: archive_source, text_source: text_source, tests: tests, digest: identity.finish()})
+    Ok(JetFoundationSources{foundation: foundation, unicode: unicode, codegen_prelude: codegen_prelude, archive_source: archive_source, text_source: text_source, tests: tests, digest: identity.finish()})
 }
 
 // Copy one included foundation input into the Linux source-closure stage.
@@ -521,7 +525,7 @@ fn pkg_ffi_stage_foundation_inputs(source_root: String, inputs: [String], destin
 // Foundation includes into a private closure; other backends expose the
 // source directories directly because they do not remap mount destinations.
 fn pkg_ffi_jet_foundation_mounts(cache_root: String, sources: JetFoundationSources) -[FS, Env]> [NativeSandboxMount] ForeignBridgeError! {
-    mounts := [NativeSandboxMount]{NativeSandboxMount{source: sources.foundation, destination: sources.foundation}}
+    mounts := [NativeSandboxMount]{NativeSandboxMount{source: sources.foundation, destination: sources.foundation}, NativeSandboxMount{source: sources.unicode, destination: sources.unicode}}
     if !sys.is_linux() {
         &mounts.push(NativeSandboxMount{source: sources.codegen_prelude, destination: sources.codegen_prelude})
         &mounts.push(NativeSandboxMount{source: sources.archive_source, destination: sources.archive_source})

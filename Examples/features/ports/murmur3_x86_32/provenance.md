@@ -55,14 +55,14 @@ The vector input is UTF-8 bytes except for the final binary row.
 ## Validation record
 
 Commands were run from the repository root with
-`TMPDIR="$HOME/.cache/jet-test-scratch"`.
+`TMPDIR="$HOME/.cache/jet-dev/scratch"`.
 
 ### C oracle
 
 Command:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" Tools/agent/jet-env cc -std=c11 -Wall -Wextra -Werror Examples/features/ports/murmur3_x86_32/corpus/murmur3_x86_32.c Examples/features/ports/murmur3_x86_32/corpus/oracle.c -o "$HOME/.cache/jet-test-scratch/murmur3-oracle" && "$HOME/.cache/jet-test-scratch/murmur3-oracle"
+TMPDIR="$HOME/.cache/jet-dev/scratch" Tools/agent/jet-env cc -std=c11 -Wall -Wextra -Werror Examples/features/ports/murmur3_x86_32/corpus/murmur3_x86_32.c Examples/features/ports/murmur3_x86_32/corpus/oracle.c -o "$HOME/.cache/jet-dev/scratch/murmur3-oracle" && "$HOME/.cache/jet-dev/scratch/murmur3-oracle"
 ```
 
 Exit status: `0`.
@@ -86,7 +86,7 @@ Exact stdout:
 Command:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" Tools/agent/jet-env jet test --serial --show-default Examples/features/ports/murmur3_x86_32/run.jet
+TMPDIR="$HOME/.cache/jet-dev/scratch" Tools/agent/jet-env jet test --serial --show-default Examples/features/ports/murmur3_x86_32/run.jet
 ```
 
 Result:
@@ -101,7 +101,7 @@ MurmurHash3 x86 32 vectors: pass
 Command:
 
 ```sh
-golden_actual="$HOME/.cache/jet-test-scratch/murmur3-golden.out"; TMPDIR="$HOME/.cache/jet-test-scratch" Tools/agent/jet-env jet run Examples/features/ports/murmur3_x86_32/run.jet > "$golden_actual" && cmp "$golden_actual" Examples/features/expected/ports/murmur3_x86_32.out
+golden_actual="$HOME/.cache/jet-dev/scratch/murmur3-golden.out"; TMPDIR="$HOME/.cache/jet-dev/scratch" Tools/agent/jet-env jet run Examples/features/ports/murmur3_x86_32/run.jet > "$golden_actual" && cmp "$golden_actual" Examples/features/expected/ports/murmur3_x86_32.out
 ```
 
 Result: exit status `0`; `cmp` found the run output byte-for-byte equal to the
@@ -112,7 +112,7 @@ golden file. The nine output lines are the oracle stdout above.
 Command:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" Tools/agent/jet-env jet prove Examples/features/ports/murmur3_x86_32/run.jet --json
+TMPDIR="$HOME/.cache/jet-dev/scratch" Tools/agent/jet-env jet prove Examples/features/ports/murmur3_x86_32/run.jet --json
 ```
 
 The exact machine result was `"result":"pass"` with `"exitCode":0`.
@@ -123,7 +123,7 @@ test: `"frontEnd":{"failed":0,"proved":4,"selected":4,"skipped":0}` and
 The repository-wide filtered Cargo golden harness command was also attempted:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" JET_GOLDEN_FILTER=ports/murmur3_x86_32 Tools/agent/jet-env cargo test --test golden examples_compile_and_run -- --nocapture
+TMPDIR="$HOME/.cache/jet-dev/scratch" JET_GOLDEN_FILTER=ports/murmur3_x86_32 Tools/agent/jet-env cargo test --test golden examples_compile_and_run -- --nocapture
 ```
 
 It did not reach the test because unrelated concurrent Cargo processes held

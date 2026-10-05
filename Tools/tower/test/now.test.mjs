@@ -9,26 +9,29 @@ import { fileURLToPath } from 'node:url';
 import * as db from '../app/store.mjs';
 import { DEFAULTS } from '../app/config.mjs';
 import { serve } from '../app/server.mjs';
-import { buildOwnerActions, renderNowReports } from '../app/ui/now.js';
+import { renderNowReports, relativeTime } from '../app/ui/now.js';
 
 const towerRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tower = join(towerRoot, 'tower.mjs');
+// Exercise this checkout's CLI; tower.mjs intentionally redirects worktrees to main.
+const cliModule = new URL('../app/cli.mjs', import.meta.url).href;
 const sample = JSON.parse(readFileSync(join(towerRoot, 'examples/status.sample.json'), 'utf8'));
 const snapshot = () => ({ milestones: [{ title: 'Full Rust port', state: 'Building',
   progress: { 'Source ported': 75, Verified: 25, Gated: 0 } }],
-  workstreams: [{ title: 'Compiler', state: 'Active', workers: ['Pip'], blockers: ['Waiting for integration'] }],
-  ownerActions: [{ text: 'Inspect layout' }] });
+  workstreams: [{ title: 'Compiler', state: 'Active', workers: ['Pip'], blockers: ['Waiting for integration'] }] });
 const invalid = fn => assert.throws(fn, error => error.code === 'E_INVALID');
 
 function board() {
   const s = db.empty('Now');
   const card = db.addCard(s, { title: 'Report work', by: 'Pip' }, DEFAULTS);
-  // Projection fixtures: open, ratified, draft and owner-acceptance decisions.
+  // Projection fixtures: open, ratified, draft and owner-acceptance decisions;
+  // D-WAIT is a visual check still waiting for its screen capture.
   s.decisions.push(
     { id: 'D-OPEN', cardId: card.id, title: 'Pick behavior', status: 'open' },
     { id: 'D-DONE', cardId: card.id, title: 'Already voted', status: 'ratified' },
     { id: 'D-DRAFT', cardId: card.id, title: 'Not ready', status: 'open', draft: true },
-    { id: 'D-CHECK', cardId: card.id, title: 'Check presentation', status: 'open', group: 'acceptance' },
+    { id: 'D-CHECK', cardId: card.id, title: 'Check presentation', status: 'open', group: 'acceptance',
+      visualMedia: [{ kind: 'image', path: 'docs/proposals/visual-acceptance/media/now/screen.png', alt: 'Now page briefing', caption: 'after' }] },
+    { id: 'D-WAIT', cardId: card.id, title: 'Capture missing', status: 'open', group: 'acceptance' },
   );
   return { s: db.normalize(s), card };
 }
@@ -51,11 +54,7 @@ test('reports are attributed, retained/projected, link canonical cards and do no
   const projected = db.projectBoard(db.normalize(s));
   assert.equal(projected.statusSnapshot.id, status.id);
   assert.equal(projected.briefings.length, 2);
-  const actions = buildOwnerActions(projected);
-  assert.deepEqual(actions.map(a => a.text), ['Vote: Pick behavior', 'Visual check: Check presentation', 'Inspect layout']);
-  s.decisions[0].status = 'ratified';
-  assert.deepEqual(buildOwnerActions(db.projectBoard(s)).map(a => a.text), ['Visual check: Check presentation', 'Inspect layout']);
-  s.decisions[0].status = 'open';
+  assert.equal(Object.hasOwn(projected.statusSnapshot, 'ownerActions'), false);
   assert.equal(JSON.stringify({ cards: s.cards, milestones: s.milestones, decisions: s.decisions }), before);
   assert.equal(s.events[0].action, 'status.post');
   db.postStatus(s, { snapshot: sample, by: 'Pip' });
@@ -73,7 +72,7 @@ test('invalid report structures and progress fail without modifying reports', ()
     invalid(() => db.postStatus(s, { snapshot: p, by: 'Pip' }));
   }
   for (const p of [null, [], { ...snapshot(), workstreams: null }, { ...snapshot(), updatedAt: 'today' },
-    { ...snapshot(), ownerActions: [{ text: 'x', links: [{ card: null, decision: 'D' }] }] }]) {
+    { ...snapshot(), workstreams: [{ ...snapshot().workstreams[0], links: [{ card: null, decision: 'D' }] }] }]) {
     invalid(() => db.postStatus(s, { snapshot: p, by: 'Pip' }));
   }
   const p = snapshot(); p.workstreams[0].links = [{ card: '#99' }];
@@ -86,20 +85,24 @@ test('invalid report structures and progress fail without modifying reports', ()
   invalid(() => db.normalize(corrupt));
 });
 
-test('Now renders latest briefing expanded, collapsed history, metrics, workers and live owner actions safely', () => {
+test('Now renders only briefing and status reports, with safe markdown, links, metrics and workers', () => {
   const { s } = board();
   db.postBriefing(s, { title: 'Old', body: 'History body', by: 'Pip' });
   db.postBriefing(s, { title: '<script>Morning</script>', body: '# Progress\n\n**Verified**\n\n<script>alert(1)</script>', by: 'Pip',
     sections: [{ title: 'Next', body: '- Integrate', links: [{ card: '#1' }] }] });
-  db.postStatus(s, { snapshot: snapshot(), by: 'Pip' });
+  const p = snapshot();
+  p.milestones[0].links = [{ decision: 'D-OPEN' }];
+  db.postStatus(s, { snapshot: p, by: 'Pip' });
   const html = renderNowReports(db.projectBoard(s));
   assert.ok(html.indexOf('Latest briefing') < html.indexOf('Status board'));
+  assert.equal((html.match(/<details class="report /g) || []).length, 2);
+  assert.doesNotMatch(html, /Owner action needed|data-report="actions"|data-report-action-done|Vote:|Visual check:/);
   assert.match(html, /&lt;script&gt;Morning/);
   assert.match(html, /<h1 class="md__h md__h1">Progress<\/h1>/);
   assert.match(html, /<strong>Verified<\/strong>/);
   assert.doesNotMatch(html, /<script>/);
-  assert.match(html, /<details class="report__history"><summary>Briefing history · 1/);
-  assert.match(html, /<details class="report__past"><summary>Old/);
+  assert.match(html, /<details class="report__history" data-report="briefing-history"><summary>Briefing history · 1/);
+  assert.match(html, /<details class="report__past" data-report="briefing:[^"]+"><summary>Old/);
   assert.match(html, /<progress max="100" value="75"/);
   assert.match(html, /Active workers:<\/b> Pip/);
   assert.match(html, /Waiting for integration/);
@@ -109,7 +112,34 @@ test('Now renders latest briefing expanded, collapsed history, metrics, workers 
   const empty = renderNowReports({ decisions: s.decisions });
   assert.match(empty, /No briefing posted yet/);
   assert.match(empty, /No status snapshot posted yet/);
-  assert.match(empty, /Vote: Pick behavior/);
+  assert.doesNotMatch(empty, /Owner action needed|data-report="actions"|Vote:|Visual check:/);
+});
+
+test('Now reports fold to a one-line summary with title and update time, honoring saved choices', () => {
+  const { s } = board();
+  db.postBriefing(s, { title: 'Morning', body: 'Shipped.', by: 'Pip' });
+  db.postStatus(s, { snapshot: { ...snapshot(), summary: 'Port is 80% done' }, by: 'Pip' });
+  const projected = db.projectBoard(s);
+  const open = renderNowReports(projected);
+  for (const key of ['briefing', 'status']) assert.match(open, new RegExp(`<details class="report [^"]*" data-report="${key}" open>`));
+  const folded = renderNowReports(projected, { isOpen: (key) => key !== 'status' });
+  assert.match(folded, /data-report="status">\s*<summary class="report__summary">/, 'status folds when the owner closed it');
+  const summary = /data-report="status">\s*<summary class="report__summary">([\s\S]*?)<\/summary>/.exec(folded)[1];
+  assert.match(summary, /Status board/);
+  assert.match(summary, /Port is 80% done/);
+  assert.match(summary, /Updated <time datetime="[^"]+"[^>]*data-rel>just now<\/time>/);
+  const briefSummary = /data-report="briefing" open>\s*<summary class="report__summary">([\s\S]*?)<\/summary>/.exec(folded)[1];
+  assert.match(briefSummary, /Morning/);
+  assert.match(briefSummary, /<time datetime=/);
+});
+
+test('relative report times', () => {
+  const now = Date.parse('2026-10-04T12:00:00Z');
+  assert.equal(relativeTime('2026-10-04T11:59:40Z', now), 'just now');
+  assert.equal(relativeTime('2026-10-04T11:48:00Z', now), '12 min ago');
+  assert.equal(relativeTime('2026-10-04T07:00:00Z', now), '5 h ago');
+  assert.match(relativeTime('2026-09-20T07:00:00Z', now), /2026/);
+  assert.equal(relativeTime('not a date', now), 'not a date');
 });
 
 test('CLI posts persist with history/list/show, rev guards, help and live HTTP/SSE projection', { timeout: 15000 }, async t => {
@@ -118,7 +148,9 @@ test('CLI posts persist with history/list/show, rev guards, help and live HTTP/S
   const cwd = mkdtempSync(join(scratch, 'tower-now-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const cli = (args, ok = true) => {
-    const r = spawnSync(process.execPath, [tower, ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } });
+    const r = spawnSync(process.execPath, ['--input-type=module', '--eval',
+      `const { run } = await import(${JSON.stringify(cliModule)}); await run(process.argv.slice(1));`,
+      '--', ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } });
     assert.equal(r.status === 0, ok, `${args.join(' ')}: ${r.stderr}\n${r.stdout}`);
     return r.stdout;
   };
@@ -137,6 +169,10 @@ test('CLI posts persist with history/list/show, rev guards, help and live HTTP/S
   writeFileSync(join(cwd, 'status.json'), JSON.stringify(sample));
   cli(['status', 'post', '--file', 'status.json', '--by', 'Pip', '--expect-rev', '0', '--json'], false);
   const status = JSON.parse(cli(['status', 'post', '--file', 'status.json', '--by', 'Pip', '--json']));
+  writeFileSync(join(cwd, 'removed-field.json'), JSON.stringify({ ...sample, ownerActions: [] }));
+  const rejectedCli = JSON.parse(cli(['status', 'post', '--file', 'removed-field.json', '--by', 'Pip', '--json'], false));
+  assert.equal(rejectedCli.error, 'E_INVALID');
+  assert.match(rejectedCli.message, /status\.ownerActions.*removed/);
   assert.equal(JSON.parse(cli(['status', 'show', '--json'])).id, status.id);
   cli(['status', 'show', '--days', '7'], false);
   const server = serve(db.openStore(join(cwd, '.tower')), 0, false);
@@ -174,5 +210,24 @@ test('CLI posts persist with history/list/show, rev guards, help and live HTTP/S
   const httpStatus = await fetch(`${url}/api/status/post`, { method: 'POST',
     headers: { 'content-type': 'application/json', 'x-tower-client': 'cli' }, body: JSON.stringify({ by: 'Pip', snapshot: snapshot() }) });
   assert.equal(httpStatus.status, 200);
-  assert.equal((await httpStatus.json()).state.statusSnapshot.workstreams[0].title, 'Compiler');
+  const statusReply = await httpStatus.json();
+  assert.equal(statusReply.state.statusSnapshot.workstreams[0].title, 'Compiler');
+  assert.equal(Object.hasOwn(statusReply.result, 'ownerActions'), false);
+  const removedField = await fetch(`${url}/api/status/post`, { method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-tower-client': 'cli' },
+    body: JSON.stringify({ by: 'Pip', snapshot: { ...snapshot(), ownerActions: [] } }) });
+  assert.equal(removedField.status, 400);
+  const rejected = await removedField.json();
+  assert.equal(rejected.error, 'E_INVALID');
+  assert.match(rejected.message, /status\.ownerActions.*removed/);
+  const removedRoute = await fetch(`${url}/api/status/action-done`, { method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-tower-client': 'cli' },
+    body: JSON.stringify({ snapshotId: statusReply.result.id, id: 'missing', by: 'owner' }) });
+  assert.equal(removedRoute.status, 404);
+  assert.equal((await removedRoute.json()).error, 'E_USAGE');
+  const otherDevice = await (await fetch(`${url}/api/state`)).json();
+  assert.deepEqual(otherDevice.statusSnapshot, statusReply.state.statusSnapshot);
+  const disk = db.openStore(join(cwd, '.tower')).load();
+  assert.deepEqual(disk.statusSnapshot, statusReply.result);
+  assert.equal(disk.events[0].action, 'status.post');
 });

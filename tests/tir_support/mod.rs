@@ -273,9 +273,22 @@ pub fn run_plugin_tier(
     artifact: &Path,
     api_snapshot: &str,
 ) -> (i32, String, String) {
+    run_plugin_tier_in_package(name, src, tier, artifact, api_snapshot, TIR_TEST_PACKAGE)
+}
+
+/// `run_plugin_tier` under a caller-supplied `package.jet`, for guests whose
+/// host imports need declared `authority.needs`.
+pub fn run_plugin_tier_in_package(
+    name: &str,
+    src: &str,
+    tier: &str,
+    artifact: &Path,
+    api_snapshot: &str,
+    package: &str,
+) -> (i32, String, String) {
     let dir = unique_tmp(&format!("jet_plugin_tier_{name}_{tier}"));
     fs::create_dir_all(&dir).unwrap();
-    write_test_package(&dir, TIR_TEST_PACKAGE);
+    write_test_package(&dir, package);
     let api_dir = dir.join(".jet/cache/api");
     fs::create_dir_all(&api_dir).unwrap();
     let stem = artifact

@@ -45,6 +45,9 @@ mod runtime {
 mod wire {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    // DBPluginWire re-exports the shared plugin carrier from `plugin_wire`, which
+    // AOT splices into `mod jet_std` from jet-foundation's PluginWire.rs.
+    use jet_foundation::PluginWire as plugin_wire;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
 }

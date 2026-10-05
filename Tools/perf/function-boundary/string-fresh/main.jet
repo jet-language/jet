@@ -1,0 +1,20 @@
+// Function-boundary cell string-fresh: a returned String is built per call
+// and dropped every iteration (plain return spelling; pair: string-reuse).
+#CLI struct Args { n: Int }
+
+fn render(seed: Int) -> String {
+    out := ""
+    loop i in 0..<(32 + seed % 32) {
+        if (seed + i) % 2 == 0 -> out += "ab" else -> out += "xyz"
+    }
+    out
+}
+
+fn run(args: Args) {
+    acc := 0
+    loop i in 0..<args.n {
+        text :: render(i)
+        acc += text.len()
+    }
+    print(acc)
+}

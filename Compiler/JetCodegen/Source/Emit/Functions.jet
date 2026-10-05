@@ -21,15 +21,18 @@ use jet_foundation.[
 ]
 
 // MIRRust emit_callable_named: a consuming parameter is a `mut` binding.
-fn jet_rust_emit_function_param(ctx: &JetRustEmitContext, function: MIRFunction, parameter: MIRParam) -> String Never! {
-    name :: jet_rust_emit_parameter_name(function, parameter.index)
+fn jet_rust_emit_function_param_text(function: MIRFunction, parameter: MIRParam, ty: String) -> String Never! {
+    binding :: if parameter.access == MIRAccess.Move -> "mut " else -> ""
+    "{binding}{jet_rust_emit_parameter_name(function, parameter.index)}: {ty}"
+}
+
+fn jet_rust_emit_function_param_type(ctx: &JetRustEmitContext, function: MIRFunction, parameter: MIRParam) -> String Never! {
     // A window parameter takes the range window `&mut [T]` in place; a
     // whole-list caller's `&mut Vec<T>` coerces to it.
     if jet_rust_emit_window_param(ctx, function.id, parameter.index) {
-        if parameter.ty.kind == .List(element) -> return "{name}: &mut [{jet_rust_emit_type(&ctx, element)}]"
+        if parameter.ty.kind == .List(element) -> return "&mut [{jet_rust_emit_type(&ctx, element)}]"
     }
-    binding :: if parameter.access == MIRAccess.Move -> "mut " else -> ""
-    "{binding}{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}"
+    jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
 }
 
 // MIRRust capture_parameter_type: a Read capture is always a shared borrow
@@ -1098,13 +1101,51 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
 
 fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
     params := [String]{}
-    loop capture in function.capture_params -> &params.push(jet_rust_emit_capture_param(&ctx, capture))
-    loop parameter in function.params -> &params.push(jet_rust_emit_function_param(&ctx, function, parameter))
+    types := [String]{}
+    loop capture in function.capture_params {
+        rendered :: jet_rust_emit_capture_param(&ctx, capture)
+        &params.push(rendered)
+        &types.push(rendered)
+    }
+    receiver_index := -1
+    declared_indexes := [Int]{}
+    loop parameter in function.params {
+        if jet_rust_emit_is_receiver(function, parameter.index) {
+            receiver_index = params.len()
+        } else {
+            &declared_indexes.push(params.len())
+        }
+        ty :: jet_rust_emit_function_param_type(&ctx, function, parameter)
+        &params.push(jet_rust_emit_function_param_text(function, parameter, ty))
+        &types.push(ty)
+    }
+    // D-MEM-VIEWRET1 (#4392): returned views name the lifetime of the owners
+    // sema proved for them (MIRRust emit_callable_named).
+    view_lifetime :: jet_rust_emit_view_return_lifetime(&ctx, function.return_type, function.return_view_provenance, None, receiver_index, declared_indexes, types, function.span)
+    lifetimes := [String]{}
+    ret := ""
+    if view_lifetime == {
+        .Elided -> ret = jet_rust_emit_callable_return(&ctx, function)
+        .Static -> ret = jet_rust_emit_type_with_view_lifetime(&ctx, function.return_type, "'static")
+        .Named(_, owners) -> {
+            loop owner in owners {
+                parameter :: function.params[owner - function.capture_params.len()]
+                carries_view :: jet_rust_emit_type_carries_view(ctx, parameter.ty)
+                previous :: ~ctx.view_lifetime
+                if carries_view -> ctx.view_lifetime = JET_RUST_EMIT_VIEW_LIFETIME
+                rendered :: jet_rust_emit_function_param_type(&ctx, function, parameter)
+                ctx.view_lifetime = previous
+                params[owner] = jet_rust_emit_function_param_text(function, parameter, jet_rust_emit_view_owner_borrow(rendered, carries_view))
+            }
+            ret = jet_rust_emit_type_with_view_lifetime(&ctx, function.return_type, JET_RUST_EMIT_VIEW_LIFETIME)
+            &lifetimes.push(JET_RUST_EMIT_VIEW_LIFETIME)
+        }
+    }
     unsafe_prefix :: if function.is_unsafe -> "unsafe " else -> ""
     visibility :: jet_rust_emit_function_visibility(function)
     generic_params :: ~ctx.current_generic_params
-    generics :: jet_rust_emit_generic_params(&ctx, generic_params)
-    "{visibility}{unsafe_prefix}fn {jet_rust_emit_function_name(&ctx, function.id)}{generics}({params.join(", ")}) -> {jet_rust_emit_callable_return(&ctx, function)} {{"
+    generics :: jet_rust_emit_signature_generics(lifetimes, jet_rust_emit_generic_params(&ctx, generic_params))
+    "{visibility}{unsafe_prefix}fn {jet_rust_emit_function_name(&ctx, function.id)}{generics}({params.join(", ")}) -> {ret} {{"
 }
 
 fn jet_rust_emit_function_has_sentry_scope(function: MIRFunction) -> Bool Never! {
@@ -1248,10 +1289,40 @@ fn jet_rust_emit_trait_method_head(ctx: &JetRustEmitContext, trait_name: String,
             else -> &params.push("self")
         }
     }
+    receiver_slots :: params.len()
+    types := [String]{}
+    declared_indexes := [Int]{}
     loop (index, parameter) in method.params {
-        &params.push("{jet_rust_emit_trait_param_name(parameter, index)}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
+        ty :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+        &declared_indexes.push(index)
+        &types.push(ty)
+        &params.push("{jet_rust_emit_trait_param_name(parameter, index)}: {ty}")
     }
-    "fn {jet_rust_emit_trait_method_symbol(trait_name, method)}({params.join(", ")}) -> {jet_rust_emit_type(&ctx, method.return_type)}"
+    // D-MEM-VIEWRET1 (#4392), MIRRust emit_trait_method: the declaration
+    // states the same view lifetime contract as every implementation.
+    provenance :: jet_rust_emit_view_contract(method.return_view_provenance)
+    view_lifetime :: jet_rust_emit_view_return_lifetime(&ctx, method.return_type, provenance, method.self_access, -1, declared_indexes, types, method.span)
+    ret := ""
+    generics := ""
+    if view_lifetime == {
+        .Elided -> ret = jet_rust_emit_type(&ctx, method.return_type)
+        .Static -> ret = jet_rust_emit_type_with_view_lifetime(&ctx, method.return_type, "'static")
+        .Named(receiver, owners) -> {
+            if receiver && receiver_slots > 0 -> params[0] = jet_rust_emit_view_owner_self(params[0])
+            loop owner in owners {
+                parameter :: method.params[owner]
+                carries_view :: jet_rust_emit_type_carries_view(ctx, parameter.ty)
+                previous :: ~ctx.view_lifetime
+                if carries_view -> ctx.view_lifetime = JET_RUST_EMIT_VIEW_LIFETIME
+                rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+                ctx.view_lifetime = previous
+                params[receiver_slots + owner] = "{jet_rust_emit_trait_param_name(parameter, owner)}: {jet_rust_emit_view_owner_borrow(rendered, carries_view)}"
+            }
+            ret = jet_rust_emit_type_with_view_lifetime(&ctx, method.return_type, JET_RUST_EMIT_VIEW_LIFETIME)
+            generics = "<{JET_RUST_EMIT_VIEW_LIFETIME}>"
+        }
+    }
+    "fn {jet_rust_emit_trait_method_symbol(trait_name, method)}{generics}({params.join(", ")}) -> {ret}"
 }
 
 fn jet_rust_emit_trait_method_signature(ctx: &JetRustEmitContext, trait_name: String, method: MIRTraitMethod) -> String Never! {
@@ -1426,16 +1497,23 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
             if row.id == impl_trait.id && (row.name == "Add" || row.name == "Sub" || row.name == "Mul" || row.name == "Div") -> arithmetic = true
         }
     }
+    receiver_slots :: params.len()
+    types := [String]{}
+    declared_indexes := [Int]{}
     index := 0
     loop parameter in function.params {
         if jet_rust_emit_is_receiver(function, parameter.index) -> next
         name :: jet_rust_emit_trait_param_name(parameter, index)
         scalar_by_ref :: arithmetic && !jet_rust_emit_type_is_borrowed(parameter.ty)
-        if {
-            decode_codec -> &params.push("{name}: &{ctx.config.root_prefix}jet_std::DataTree")
-            scalar_by_ref -> &params.push("{name}: &{jet_rust_emit_type(&ctx, parameter.ty)}")
-            else -> &params.push("{if parameter.access == MIRAccess.Move -> "mut " else -> ""}{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
+        ty :: if {
+            decode_codec -> "&{ctx.config.root_prefix}jet_std::DataTree"
+            scalar_by_ref -> "&{jet_rust_emit_type(&ctx, parameter.ty)}"
+            else -> jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
         }
+        binding :: if !decode_codec && !scalar_by_ref && parameter.access == MIRAccess.Move -> "mut " else -> ""
+        &params.push("{binding}{name}: {ty}")
+        &types.push(ty)
+        &declared_indexes.push(index)
         if {
             decode_codec && parameter.access != MIRAccess.Read -> &call_args.push("{name}.clone()")
             scalar_by_ref -> &call_args.push("*{name}")
@@ -1492,10 +1570,37 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     if implementation.trait_ref == .Val(impl_trait) -> method_name = jet_rust_emit_trait_impl_method_symbol(&ctx, impl_trait.id, function.name)
     if encode_codec -> method_name = "jet_encode"
     if decode_codec -> method_name = "jet_decode"
-    return_type :: if {
-        encode_codec -> "{ctx.config.root_prefix}jet_std::DataTree"
-        decode_codec -> "Result<Self, Vec<{ctx.config.root_prefix}jet_std::FieldError>>"
-        else -> jet_rust_emit_type(&ctx, function.return_type)
+    // D-MEM-VIEWRET1 (#4392), MIRRust emit_callable_named: returned views name
+    // the lifetime of the trait's (or the method's own) proven owners.
+    signature_provenance :: jet_rust_emit_signature_view_provenance(ctx, function)
+    view_lifetime :: if encode_codec || decode_codec -> JetRustEmitViewLifetime.Elided else -> jet_rust_emit_view_return_lifetime(&ctx, function.return_type, signature_provenance, self_access, -1, declared_indexes, types, function.span)
+    view_lifetimes := [String]{}
+    return_type := ""
+    if {
+        encode_codec -> return_type = "{ctx.config.root_prefix}jet_std::DataTree"
+        decode_codec -> return_type = "Result<Self, Vec<{ctx.config.root_prefix}jet_std::FieldError>>"
+        else -> {
+            if view_lifetime == {
+                .Elided -> return_type = jet_rust_emit_type(&ctx, function.return_type)
+                .Static -> return_type = jet_rust_emit_type_with_view_lifetime(&ctx, function.return_type, "'static")
+                .Named(receiver, owners) -> {
+                    if receiver && receiver_slots > 0 -> params[0] = jet_rust_emit_view_owner_self(params[0])
+                    receiver_offset :: if self_access != None -> 1 else -> 0
+                    loop owner_index in owners {
+                        parameter :: function.params[owner_index + receiver_offset]
+                        carries_view :: jet_rust_emit_type_carries_view(ctx, parameter.ty)
+                        previous :: ~ctx.view_lifetime
+                        if carries_view -> ctx.view_lifetime = JET_RUST_EMIT_VIEW_LIFETIME
+                        rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+                        ctx.view_lifetime = previous
+                        binding :: if parameter.access == MIRAccess.Move -> "mut " else -> ""
+                        params[receiver_slots + owner_index] = "{binding}{jet_rust_emit_trait_param_name(parameter, owner_index)}: {jet_rust_emit_view_owner_borrow(rendered, carries_view)}"
+                    }
+                    return_type = jet_rust_emit_type_with_view_lifetime(&ctx, function.return_type, JET_RUST_EMIT_VIEW_LIFETIME)
+                    &view_lifetimes.push(JET_RUST_EMIT_VIEW_LIFETIME)
+                }
+            }
+        }
     }
     unsafe_prefix := ""
     if function.is_unsafe {
@@ -1508,7 +1613,8 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     // A trait impl, or the extension-trait impl of a runtime carrier, takes
     // no method visibility.
     method_visibility :: if implementation.trait_ref != None || jet_rust_emit_impl_carrier_trait(&ctx, implementation) != None -> "" else -> jet_rust_emit_visibility(function.visibility)
-    generics :: if implementation.trait_ref == None -> jet_rust_emit_generic_params(&ctx, local_generic_params) else -> ""
+    type_generics :: if implementation.trait_ref == None -> jet_rust_emit_generic_params(&ctx, local_generic_params) else -> ""
+    generics :: jet_rust_emit_signature_generics(view_lifetimes, type_generics)
     direct_call :: "{jet_rust_emit_function_name(&ctx, function.id)}({call_args.join(", ")})"
     call_expression :: if function.is_unsafe -> "unsafe {{ {direct_call} }}" else -> direct_call
     &lines.push("    {method_visibility}{unsafe_prefix}fn {method_name}{generics}({params.join(", ")}) -> {return_type} {{")
@@ -2149,8 +2255,10 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     previous_move_facts := ctx.move_facts
     previous_ref_bindings := ctx.ref_bindings
     previous_body_index := ctx.body_index
+    previous_expected_exits := ctx.expected_test_exits
     ctx.current_function = Val(function.id)
     ctx.body_index = jet_rust_emit_body_index(function)
+    ctx.expected_test_exits = jet_rust_emit_expected_scope_exits(&ctx, function)
     // The shared-capture plan reads the new index's partial-move rows.
     shared_locals :: jet_rust_emit_shared_capture_locals(ctx, function)
     ctx.body_index.shared_locals = shared_locals
@@ -2211,7 +2319,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     // MIRRust emit_structured_body: a body nesting deeper than the structured
     // cap falls back to the dispatch loop.
     body := [String]{}
-    structured :: plan.structured && jet_rust_emit_cfg_run(&ctx, function, plan, JetRustEmitCFGItem.Tree{position: plan.entry, indent: "{indent}    "}, &body)
+    structured :: ctx.expected_test_exits.len() == 0 && plan.structured && jet_rust_emit_cfg_run(&ctx, function, plan, JetRustEmitCFGItem.Tree{position: plan.entry, indent: "{indent}    "}, &body)
     if structured {
         loop line in body -> &lines.push(line)
     } else {
@@ -2239,6 +2347,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     ctx.move_facts = previous_move_facts
     ctx.ref_bindings = previous_ref_bindings
     ctx.body_index = previous_body_index
+    ctx.expected_test_exits = previous_expected_exits
     // MIRRust emit_callable_named: the inline attributes precede the item.
     if !function.is_inline_always && !function.is_inline -> return lines
     out := [String]{if function.is_inline_always -> "#[inline(always)]" else -> "#[inline]"}

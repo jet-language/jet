@@ -69,6 +69,7 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.net.ws", include_str!("../../../Core/net/ws.jet")),
     ("core.net.ip", include_str!("../../../Core/net/ip.jet")),
     ("core.perf", include_str!("../../../Core/perf/perf.jet")),
+    ("core.plugin", include_str!("../../../Core/plugin/plugin.jet")),
     ("core.prelude", include_str!("../../../Core/prelude/prelude.jet")),
     ("core.process", include_str!("../../../Core/process/process.jet")),
     ("core.reactive", include_str!("../../../Core/reactive/reactive.jet")),

@@ -1,0 +1,21 @@
+use core.files.path as paths
+
+trait DirectoryHost {
+    fn read_dir(self, path: paths.Path) -> [paths.Path]
+}
+
+struct Host {}
+impl Host.DirectoryHost {
+    fn read_dir(self, path: paths.Path) -> [paths.Path] { [paths.Path]{path} }
+}
+
+fn listing<H: DirectoryHost>(host: H, path: paths.Path) -> Int {
+    host.read_dir(path).len()
+}
+
+fn run() {
+    host :: Host{}
+    path :: paths.of("example")
+    _ :: host.read_dir(path)
+    _ :: listing(host, path)
+}

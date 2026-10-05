@@ -125,6 +125,20 @@ for (const [index, rawLine] of manifestText.split(/\r?\n/).entries()) {
   entries.push({ sourcePath, bytes, text });
 }
 if (entries.length === 0) fail(`${relative(repoRoot, manifestPath)} contains no sources`);
+// `--task-roots` adds the task-root fixture after the manifest sources, as the
+// self-compile harness's `task-roots` mode and the fixed point's
+// KEEP_TASK_ROOTS=true need. It is a jet_eval package file outside the source
+// roots, so it is assembled like one but never inventoried.
+const taskRoots = process.argv.slice(2).includes("--task-roots");
+if (taskRoots) {
+  const sourcePath = "Compiler/JetEval/Tests/TaskRoots.jet";
+  const bytes = await readFile(resolve(sourceRootDir, sourcePath)).catch((error) => {
+    fail(`cannot read the task-root fixture ${sourcePath}: ${error.message}`);
+  });
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) fail(`${sourcePath}: source is not valid UTF-8`);
+  entries.push({ sourcePath, bytes, text });
+}
 
 const inventoried = new Set();
 for (const sourceRoot of sourceRoots) {

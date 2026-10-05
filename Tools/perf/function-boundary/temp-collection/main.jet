@@ -1,0 +1,19 @@
+// Function-boundary cell temp-collection: a small list that never leaves the
+// function is built, scanned, and dropped on every call.
+#CLI struct Args { n: Int }
+
+fn score(seed: Int) -> Int {
+    tmp := [Int]{}
+    loop i in 0..<16 -> &tmp.push((seed * 7 + i * 13) % 101)
+    best := 0
+    loop x in tmp {
+        if x > best -> best = x
+    }
+    best + tmp[seed % 16]
+}
+
+fn run(args: Args) {
+    acc := 0
+    loop i in 0..<args.n -> acc += score(i)
+    print(acc)
+}

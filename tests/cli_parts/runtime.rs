@@ -829,11 +829,11 @@ fn top_level_help_lists_job_vocabulary_only() {
         "help must list `jet jobs`: {stdout}"
     );
     assert!(
-        stdout.contains("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name> [<job args>...]]"),
-        "help must show that job arguments follow the job name: {stdout}"
+        stdout.contains("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>]"),
+        "help must show job inspection rather than the retired runner: {stdout}"
     );
     assert!(
-        stdout.contains("List, inspect, watch, or run named project jobs"),
+        stdout.contains("List, inspect, or watch named project jobs"),
         "help must describe the jobs command: {stdout}"
     );
     assert!(
@@ -854,7 +854,7 @@ fn top_level_help_lists_job_vocabulary_only() {
             .unwrap_or_else(|error| panic!("read {golden}: {error}"));
         assert!(
             snapshot.contains("jobs")
-                && snapshot.contains("List, inspect, watch, or run named project jobs"),
+                && snapshot.contains("List, inspect, or watch named project jobs"),
             "{golden} must use the canonical jobs vocabulary"
         );
         assert!(

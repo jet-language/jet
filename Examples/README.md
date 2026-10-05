@@ -43,6 +43,10 @@ fixed-width FNV results in record fields, direct and wrapper calls, and record
 copies. Its [golden](features/expected/basics/struct_call_word.out) preserves all
 64 bits independently of the exact `Int` representation.
 
+[`view_return_lifetimes.jet`](features/memory/view_return_lifetimes.jet) shows
+borrowed returns from named owners and direct operations on the returned view.
+The caller keeps the owner alive; binding the returned view first is optional.
+
 ## Auxiliary golden stream suffix
 
 The feature runner discovers `.jet` files and project directories containing a
@@ -121,7 +125,7 @@ normative language contract.
 | [`tests/ui/list_loop_mutate.jet`](../tests/ui/list_loop_mutate.jet) | An immutable loop binding cannot mutate the collection it reads; E0507 keeps the traversal domain and repair intent explicit. | [`tests/ui/list_loop_mutate.stderr`](../tests/ui/list_loop_mutate.stderr) | `target/debug/jet check tests/ui/list_loop_mutate.jet` |
 | [`features/errors/errors.jet`](features/errors/errors.jet) | `Ok`/`Err`, unmarked propagation, `??` fallback recovery, and an explicit result-pattern handler are distinct routes. | [`features/expected/errors/errors.out`](features/expected/errors/errors.out) | `target/debug/jet run Examples/features/errors/errors.jet` |
 | [`features/errors/typed_error_families.jet`](features/errors/typed_error_families.jet) | One declared `impl Source -> Target` rail changes only the error carrier and preserves the success payload. | [`features/expected/errors/typed_error_families.out`](features/expected/errors/typed_error_families.out) | `target/debug/jet run Examples/features/errors/typed_error_families.jet` |
-| [`features/io/scope_guard.jet`](features/io/scope_guard.jet) | A statement registers a scope guard that runs once at scope exit in reverse registration order; it remains distinct from resource-only `defer close`. | [`features/expected/io/scope_guard.out`](features/expected/io/scope_guard.out) | `target/debug/jet run Examples/features/io/scope_guard.jet` |
+| [`features/io/scope_guard.jet`](features/io/scope_guard.jet) | A scope guard runs once at scope exit in reverse registration order, including plain-call failure propagation before the caller's `??` fallback; it remains distinct from resource-only `defer close`. | [`features/expected/io/scope_guard.out`](features/expected/io/scope_guard.out) | `target/debug/jet run Examples/features/io/scope_guard.jet` |
 
 The adjacent [`list_predicate_ops.jet`](features/collections/list_predicate_ops.jet)
 and [`indexed_mutation.jet`](features/collections/indexed_mutation.jet) examples

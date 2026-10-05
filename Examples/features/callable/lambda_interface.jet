@@ -1,9 +1,22 @@
-// D-LAMBDA-IFACE1=A: a stored lambda may spell its full callable interface.
+// D-LAMBDA-IFACE2=A: lambdas write parameters and an optional effect row only.
+#Error
 enum LambdaError {
     Invalid
 }
 
+struct LambdaPoint {
+    x: Int
+}
+
+fn finish(n: Int) -[]> Int LambdaError! {
+    Ok(n)
+}
+
+fn apply(f: fn(Int) -[]> Int LambdaError!, n: Int) -> Int LambdaError! {
+    f(n)
+}
+
 fn run() {
-    increment :: (n: Int) Int LambdaError! -[]> Ok(n + 1)
-    print(increment(41) ?? 0)
+    points :: [41].map(x -> LambdaPoint{x})
+    print(apply((n: Int) -[]> finish(n + 1), points[0].x) ?? 0)
 }

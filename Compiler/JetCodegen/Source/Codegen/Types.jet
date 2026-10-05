@@ -116,23 +116,26 @@ fn jet_codegen_resolve_trait_ref(modules: [SemaGraphModuleResult], name: String,
     other
 }
 
+// The traits a Rust derive provides natively.
+JET_CODEGEN_NATIVE_RUST_DERIVES :: [String]{"Clone", "Copy", "Debug", "Default", "Eq", "Hash", "Ord", "PartialEq", "PartialOrd"}
+
 fn jet_codegen_is_native_rust_derive_name(name: String) -> Bool Never! {
-    name == "Clone" || name == "Copy" || name == "Debug" || name == "Default" || name == "Eq" || name == "Hash" || name == "Ord" || name == "PartialEq" || name == "PartialOrd"
+    JET_CODEGEN_NATIVE_RUST_DERIVES.contains(name)
 }
 
 fn jet_codegen_native_rust_derive_name_for_id(id: MIRTraitID) -> String? {
-    if {
-        id == mir_trait_id("Clone") -> Val("Clone")
-        id == mir_trait_id("Copy") -> Val("Copy")
-        id == mir_trait_id("Debug") -> Val("Debug")
-        id == mir_trait_id("Default") -> Val("Default")
-        id == mir_trait_id("Eq") -> Val("Eq")
-        id == mir_trait_id("Hash") -> Val("Hash")
-        id == mir_trait_id("Ord") -> Val("Ord")
-        id == mir_trait_id("PartialEq") -> Val("PartialEq")
-        id == mir_trait_id("PartialOrd") -> Val("PartialOrd")
-        else -> None
+    loop name in JET_CODEGEN_NATIVE_RUST_DERIVES {
+        if id == mir_trait_id(name) -> return Val(name)
     }
+    None
+}
+
+// The IDs of JET_CODEGEN_NATIVE_RUST_DERIVES, for a caller that tests many
+// trait IDs: each name hashes once, not once per test.
+fn jet_codegen_native_rust_derive_ids() -> [U64:Bool] Never! {
+    ids := [U64:Bool]{}
+    loop name in JET_CODEGEN_NATIVE_RUST_DERIVES -> _ := &ids.add(mir_trait_id(name).value, true)
+    ids
 }
 
 fn jet_codegen_is_compiler_owned_trait_name(name: String) -> Bool Never! {
@@ -684,6 +687,8 @@ struct JetCodegenCompilerOwnedRecord {
 // argument declarations), so neither does this table.
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_CORE_RECORDS
 JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep { [JetCodegenCompilerOwnedRecord]{
+    JetCodegenCompilerOwnedRecord{name: "PluginFrame", fields: [String]{"function", "component", "offset"}},
+    JetCodegenCompilerOwnedRecord{name: "PluginFault", fields: [String]{"export", "message", "frames"}},
     JetCodegenCompilerOwnedRecord{name: "IOContext", fields: [String]{"operation", "resource", "os_code", "cause"}},
     JetCodegenCompilerOwnedRecord{name: "NetErrorDetail", fields: [String]{"operation", "address", "name", "message", "os_code"}},
     JetCodegenCompilerOwnedRecord{name: "AsyncPolicy", fields: [String]{"capacity", "overflow"}},

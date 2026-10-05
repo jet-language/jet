@@ -6,6 +6,34 @@ use jet_foundation::JitBackend::RunOutcome;
 
 mod common;
 
+
+#[test]
+fn source_http_parsers_bound_body_before_one_copy_projection() {
+    let source = include_str!("../Core/http/http.jet");
+    for name in ["parse_request", "parse_response"] {
+        let body = source
+            .split(&format!("pub fn {name}("))
+            .nth(1)
+            .expect("source parser")
+            .split("\npub fn ")
+            .next()
+            .unwrap();
+        let cap = body
+            .find("if raw.len() - split > C_MAX_BODY_BYTES")
+            .expect("body cap uses the input length");
+        let projection = body
+            .find("body_raw :: slice_b(raw, split, raw.len())")
+            .expect("body projection");
+        assert!(cap < projection, "{name} must reject before copying the body");
+    }
+    let slice = source
+        .split("fn slice_b(")
+        .nth(1)
+        .expect("byte projection");
+    assert!(slice.contains("raw.slice(start, end)"));
+    assert!(!slice.contains("push("), "projection must not grow a second list");
+    assert!(!slice.contains("~out"), "projection must not copy the result again");
+}
 struct Output {
     stdout: String,
     stderr: String,
@@ -331,7 +359,7 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     state :: shared HandlerState{label: "before registration"}
     mux :: server.mux()
     mux.get("/zero", () -> Ok(server.response(200, "zero")))
-    mux.get("/items/:id", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+    mux.get("/items/:id", (req: HTTPRequest) -> {
         header :: &req.header("x-state") ?? "missing"
         id :: req.param("id") ?? "missing"
         path :: req.path()
@@ -1406,7 +1434,7 @@ use core.net as net
 fn run() (HTTPError | NetError | TaskFailure)! {{
     listener :: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen")
     mux :: server.mux()
-    mux.post("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {{
+    mux.post("/", (req: HTTPRequest) -> {{
         body :: req.body().text(1024) ?? "rejected"
         return Ok(server.response(200, body))
     }})

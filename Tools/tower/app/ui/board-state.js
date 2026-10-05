@@ -12,15 +12,27 @@ export const workflowRank = (card) => {
   return 5;
 };
 
-// Owner Now/beacon review queue: ONLY needsAcceptance cards.
-// Bare phase=verify is a legacy agent state, not an owner duty.
+// Owner Now/beacon review queue: ONLY needsAcceptance cards the owner can act
+// on. Bare phase=verify is a legacy agent state, not an owner duty, and so is
+// a visual card still waiting on agent criteria or on its screen capture:
+// every card in the owner's lane offers both Accept and Bounce.
 export const openAcceptanceBallot = (card) =>
   (card.decisions || []).find(d => d.id === `D-ACCEPT-${card.num}` && d.status !== 'ratified') || null;
+
+export const evidenceMedia = (card, ballot) => ballot ? (ballot.visualMedia || []) : (card.visualMedia || []);
+
+export function acceptanceReadiness(card, ballot) {
+  const hasOpenCriteria = (card.criteria || []).some(i => !['met', 'verified'].includes(i.status));
+  const waitingOnAgent = !!card.needsAcceptance && (!ballot || hasOpenCriteria);
+  const capturePending = !!card.needsAcceptance && evidenceMedia(card, ballot).length === 0;
+  return { waitingOnAgent, capturePending, ready: !waitingOnAgent && !capturePending };
+}
 
 export function ownerVerifyQueue(cards) {
   return (cards || [])
     .filter(c => c.phase === 'verify' && !!c.needsAcceptance)
-    .map(c => ({ card: c, ballot: openAcceptanceBallot(c) }));
+    .map(c => ({ card: c, ballot: openAcceptanceBallot(c) }))
+    .filter(({ card, ballot }) => acceptanceReadiness(card, ballot).ready);
 }
 
 export function cardNumberQuery(text) {
@@ -35,12 +47,15 @@ export function cardNumberQuery(text) {
   return nums;
 }
 
+// Frozen cards sit in their epoch or sidequest section like any other card
+// (owner 2026-10-04); the `frozen` workflow filter narrows the board to them.
 export function cardMatches(card, { text = '', workflow = 'all', priority = 'all', kind = 'all', showClosed = false, milestone = null } = {}) {
   if (card.phase === 'done' && !showClosed) return false;
   if (milestone && card.milestoneId !== milestone) return false;
   if (priority !== 'all' && card.priority !== priority) return false;
   if (kind !== 'all' && card.kind !== kind) return false;
-  if (workflow !== 'all' && workflowRank(card) !== Number(workflow)) return false;
+  if (workflow === 'frozen') { if (card.phase !== 'frozen') return false; }
+  else if (workflow !== 'all' && workflowRank(card) !== Number(workflow)) return false;
   const nums = cardNumberQuery(text);
   if (nums) return nums.includes(Number(card.num));
   const needle = String(text).trim().toLowerCase();
@@ -82,14 +97,17 @@ export function sortCards(cards, { col = 'workflow', dir = 'asc' } = {}, priorit
   });
 }
 
+// The radar lists active epochs. A finished epoch still gets a section when
+// it holds frozen cards (always shown, like every card) or, with Show closed
+// on, done cards — a card is never left without its epoch section.
 export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
-  if (!showClosed) return radar;
   const shown = new Set(radar.map(e => e.id));
   const extras = epochs.flatMap(epoch => {
     if (shown.has(epoch.id)) return [];
     const linked = cards.filter(c => c.epoch === epoch.id && c.track !== 'sidequest');
     const done = linked.filter(c => c.phase === 'done').length;
-    if (!done) return [];
+    const frozen = linked.some(c => c.phase === 'frozen');
+    if (!frozen && !(showClosed && done)) return [];
     const active = linked.filter(c => !['done', 'frozen'].includes(c.phase)).length;
     const epochMilestones = milestones.filter(m => m.epochId === epoch.id && !m.archived);
     const milestonesMet = epochMilestones.filter(m => m.progress?.met === true).length;
@@ -114,5 +132,23 @@ export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
       })),
     }];
   });
-  return [...radar, ...extras];
+  return extras.length ? [...radar, ...extras] : radar;
+}
+
+// Card delete confirmation (owner 2026-10-04): every ballot on the card is
+// deleted with it. A ratified ballot needs its own explicit confirmation, so
+// the payload is only built once every ratified id is confirmed. `decisions`
+// pins the list the owner saw; the store refuses if it changed meanwhile.
+export function cardDeletePlan(card) {
+  const ballots = (card.decisions || []).map(d => ({
+    id: d.id, title: d.title || '', status: d.status, outcome: d.outcome ?? null, ratified: d.status === 'ratified',
+  }));
+  return { ballots, ratified: ballots.filter(b => b.ratified).map(b => b.id) };
+}
+
+export function cardDeletePayload(card, confirmedRatified = []) {
+  const plan = cardDeletePlan(card);
+  const confirmed = new Set(confirmedRatified);
+  if (plan.ratified.some(id => !confirmed.has(id))) return null;
+  return { id: card.id, by: 'owner', decisions: plan.ballots.map(b => b.id), deleteRatified: plan.ratified };
 }

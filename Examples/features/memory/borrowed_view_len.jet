@@ -1,0 +1,20 @@
+// The result borrows only entries, not either sibling parameter. len, index
+// and iteration read the slice in place; no materialized list is needed.
+struct SemanticSymbol {
+    name: String
+}
+
+fn symbols(enabled: Bool, entries: [SemanticSymbol], limit: Int) -> View<SemanticSymbol> from entries {
+    if !enabled -> return entries[0..<0]
+    return entries[0..<limit]
+}
+
+fn run() {
+    entries :: [SemanticSymbol{name: "alpha"}, SemanticSymbol{name: "beta"}]
+    print(symbols(true, entries, 2).len())
+    view :: symbols(true, entries, 1)
+    print(view.len())
+    print(view[0].name)
+    loop symbol in view -> print(symbol.name)
+    print(symbols(false, entries, 2).len())
+}

@@ -1,6 +1,7 @@
 // #1738 — serve must never flush stale memory over newer CLI writes.
-// Criterion 1: any board write through the server re-reads the store and
-//   409s (instead of overwriting) when another writer advanced it.
+// Criterion 1 (revised by owner direction 2026-10-04): a server write after
+//   another writer advanced the store is applied field-level on top of the
+//   fresh store — never refused, never overwriting the other write.
 // Criterion 2: the serve shutdown/handoff writes no state; the next
 //   instance loads from disk.
 // Criterion 3: a CLI write made during a serve session survives a serve
@@ -10,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { openStore, empty, addCard } from '../app/store.mjs';
+import { openStore, empty, addCard, updateCard } from '../app/store.mjs';
 import { configFile, writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
 
@@ -30,28 +31,29 @@ const post = async (port, route, body, headers = {}) => {
   return { status: r.status, json: await r.json() };
 };
 
-test('#1738: CLI writes behind a serve session are refused-then-honored, never overwritten, and survive a restart', async () => {
+test('#1738: CLI writes behind a serve session merge with server writes, are never overwritten, and survive a restart', async () => {
   const storeA = openStore(dir);
   const serverA = serve(storeA, PORT_A, false);
 
-  // a normal write through the server works and the server has seen its rev
+  // a normal write through the server works
   const viaServer = await post(PORT_A, 'card/add', { title: 'via server', by: 'ui' });
   assert.equal(viaServer.status, 200);
 
   // a CLI writer (separate store handle, same data dir) advances the store
-  // behind the server's back — exactly the incident's shape
+  // behind the server's back — exactly the incident's shape — and edits a
+  // different field of the same card
   const cli = openStore(dir);
   cli.mutate((s, cfg) => addCard(s, { title: 'via cli', by: 'cli-agent' }, cfg));
+  cli.mutate((s, cfg) => updateCard(s, '#1', { priority: 'P0', by: 'cli-agent' }, cfg));
 
-  // criterion 1: the next server write is refused with a conflict …
-  const refused = await post(PORT_A, 'card/update', { id: '#1', title: 'renamed by ui' });
-  assert.equal(refused.status, 409, 'server write after an external advance must 409, not overwrite');
-  assert.equal(refused.json.error, 'E_CONFLICT');
-
-  // … and the retry (server has now caught up) succeeds without losing the CLI write
-  const retried = await post(PORT_A, 'card/update', { id: '#1', title: 'renamed by ui' });
-  assert.equal(retried.status, 200);
-  assert.ok(retried.json.state.cards.some(c => c.title === 'via cli'), 'CLI write still present after server write');
+  // criterion 1: the owner's next write is accepted at once and lands on top
+  // of the CLI writes instead of replacing them
+  const merged = await post(PORT_A, 'card/update', { id: '#1', title: 'renamed by ui', by: 'owner' });
+  assert.equal(merged.status, 200, 'an unrelated agent write must not reject the owner write');
+  assert.ok(merged.json.state.cards.some(c => c.title === 'via cli'), 'CLI card still present after server write');
+  const card = merged.json.state.cards.find(c => c.num === 1);
+  assert.equal(card.title, 'renamed by ui');
+  assert.equal(card.priority, 'P0', 'CLI field edit survives the owner field edit');
 
   // criterion 2: shutting the server down (the handoff's only server-side
   // step) writes no state — the store file is byte-identical across it

@@ -926,6 +926,18 @@ struct SemaOrFallbackRoute {
     ambient_err: TLocal?
 }
 
+// A call that returns nothing is a statement, not a fallback value. Name the
+// legal tails of this already-braced block rather than recommending braces.
+fn sema_fallback_unit_call_name(value: Expr) -> String? Never! {
+    if value == {
+        .Paren(inner, _) -> sema_fallback_unit_call_name(inner)
+        .Call(call) -> Val(call.name)
+        .MethodCall(_, method, _, _, _, _, _, _, _, _) -> Val(method)
+        .CallValue(_, _, _) -> Val("this call")
+        else -> None
+    }
+}
+
 // The fallback route of `??`, checked in its own frame on the caller's marked
 // scope table; the caller rolls the table back on every path.
 fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_ty: Type, payload: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, fallback_state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaOrFallbackRoute? {
@@ -998,6 +1010,12 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                 fallback_expected :: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
                 tail_value = sema_check_expression(tail, fallback_expected, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
                 if tail_value == None {
+                    sema_scope_leave(&scopes, &fallback_state)
+                    return None
+                }
+                checked_tail :: tail_value ?? return None
+                if sema_expr_unwrap_tag(checked_tail.ty) == (Type.Named{name: "Unit"}) && sema_fallback_unit_call_name(tail) == .Val(call_name) {
+                    &diagnostics.push(sema_error("E0116", expr_span(tail), "`{call_name}` doesn't hand back a value", "a `??` fallback block ends with a value or leaves the enclosing function; a call that returns nothing is only a statement", "end the block with `()` after the call, or use `return` to leave the enclosing function"))
                     sema_scope_leave(&scopes, &fallback_state)
                     return None
                 }

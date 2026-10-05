@@ -81,13 +81,19 @@ unresolved owner gate, but do not wait for generic approval before working a
 fresh ungated card. Use the current short/full ballot profile through
 `tower-ballot`.
 
-Every ballot view opens with the decision's top-level `situation`: a 4–7
-sentence plain-prose summary of what the thing is, what goes wrong today (one
-concrete example), who it matters to, what is being decided, and the
-recommendation. Full ballots require it (300–1200 characters, no lists,
-headings, or code blocks, at most 32 words per sentence); short ballots may add
-it under the same rules. Set it in the `--file` JSON or with
-`tower decision add|update --situation "…"`. `tower brief` prints it first.
+Substantive decisions (language/API/product behavior, scope, anything durable)
+are Tower ballots. Transient or minimally impactful questions may be asked in
+chat; record nothing durable from them as a decision. Card logs and briefings
+may link a ballot, but cannot substitute for it.
+
+Every ballot view opens with the decision's top-level `situation`: at most four
+short plain sentences covering what a programmer sees today, the problem, and
+the vote. Full ballots require it (300–1200 characters, no lists, headings, or
+code blocks, at most 32 words per sentence); short ballots may add it under the
+same schema. Keep evidence in `detail` and `technical`. Follow the stricter
+[ballot clarity rules](../tower-ballot/references/clarity.md), then submit the
+field in `--file` JSON or with `tower decision add|update --situation "…"`.
+`tower brief` prints it first.
 
 Design away the recommended option's downsides. Keep `recommendation.losses`
 empty, or record each negligible remaining cost as `{loss, mitigation}` in both
@@ -111,11 +117,13 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs help
 
 ## Now reports
 
-Post a markdown briefing and a JSON status snapshot; both appear at the top of
-**Now**, above the existing owner duty queue:
+Post current goals as a **Current goals and progress** briefing on **Now**.
+Refresh it at proven checkpoints and remove finished goals. Derive progress
+from card evidence, not elapsed time; a briefing summarizes Tower state and
+never replaces cards or ballots. A JSON status snapshot can accompany it:
 
 ```sh
-node Tools/tower/tower.mjs briefing post --file report.md --title "Morning report" --by Pip
+node Tools/tower/tower.mjs briefing post --file report.md --title "Current goals and progress" --by Pip
 node Tools/tower/tower.mjs briefing list
 node Tools/tower/tower.mjs briefing show                 # latest; or supply its id
 node Tools/tower/tower.mjs status post --file status.json --by Pip

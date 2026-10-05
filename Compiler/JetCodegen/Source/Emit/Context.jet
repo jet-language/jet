@@ -234,6 +234,7 @@ pub struct JetRustEmitContext {
     pub ref_bindings: JetRustEmitRefBindings
     // Lookup rows of the function being printed (jet_rust_emit_body_index).
     pub body_index: JetRustEmitBodyIndex
+    pub expected_test_exits: [U64:U64]
     // Ratio-use classification of the last queried function; rebuilt when
     // its function id changes (jet_rust_emit_is_unit_ratio_parameter).
     pub unit_ratio_function: MIRFunctionID?
@@ -244,6 +245,13 @@ pub struct JetRustEmitContext {
     pub all_modules_selected: Bool
     // Every failure, in order, under `config.keep_going`.
     pub kept_failures: [JetRustEmitKeptFailure]{[JetRustEmitKeptFailure]{}}
+    // D-MEM-VIEWRET1 (#4392), MIRRust view_lifetime: the lifetime a View/ViewMut
+    // carrier names while a callable signature renders its returned views and
+    // their owners; "" renders the elided `&[T]` used everywhere else.
+    pub view_lifetime: String{""}
+    // MIRRust view_carriers: the names and keys of declared types whose Rust
+    // declaration takes the `'__jet_view` lifetime parameter.
+    pub view_carriers: [String:Bool]{[String:Bool]{}}
 }
 
 pub struct JetRustEmitPayloadMember {
@@ -1069,6 +1077,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         move_facts: jet_rust_emit_empty_move_facts(),
         ref_bindings: jet_rust_emit_empty_ref_bindings(),
         body_index: jet_rust_emit_empty_body_index(),
+        expected_test_exits: [U64:U64]{},
         unit_ratio_function: None,
         unit_ratio_parameters: [U64:Bool]{},
         selected_modules: [String:Bool]{},
@@ -1183,6 +1192,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         if ctx.field_names.get(jet_rust_emit_id_key(row.id.value)) != None -> next
         jet_rust_emit_register_field(&ctx, row.id, row.field.name, native_type_keys.get(jet_rust_emit_id_key(row.owner.value)) != None, row.field.span)
     }
+    ctx.view_carriers = jet_rust_emit_collect_view_carriers(&ctx)
     ctx
 }
 

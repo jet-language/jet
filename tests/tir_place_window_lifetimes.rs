@@ -171,3 +171,122 @@ fn run() {
 "###;
     assert_tiers_agree("tir_card_2821_nested_copy_binding", src, "9\n1\n");
 }
+
+const CARD_4392_SOURCE: &str = r###"
+fn window(asset: [U8], start: Int, width: Int) -> View<U8> from asset {
+    asset[start..<start + width]
+}
+fn longer(left: [U8], right: [U8], width: Int) -> View<U8> from left | right {
+    if left.len() >= right.len() {
+        return left[0..<width]
+    }
+    right[0..<width]
+}
+fn run() {
+    asset :: [U8{1}, U8{2}, U8{3}, U8{4}]
+    short :: [U8{9}]
+    middle :: window(asset, 1, 2)
+    print(middle.len())
+    print(window(asset, 1, 2).len())
+    picked :: longer(short, asset, 1)
+    print(picked[0])
+}
+"###;
+
+/// Card #4392: a returned view names the lifetime of the owners sema proved
+/// (one owner beside borrowed `Int` inputs, or a union of owners), so rustc
+/// never has to guess it and never rejects the signature (I2).
+#[test]
+fn card_4392_returned_view_names_its_owner_lifetime() {
+    let rust = compile("tir_card_4392_view_return", CARD_4392_SOURCE);
+    assert!(
+        rust.contains("__jet_asset: &'__jet_view Vec<u8>"),
+        "the single view owner beside Int inputs lost its lifetime:\n{rust}"
+    );
+    assert!(
+        rust.contains("__jet_left: &'__jet_view Vec<u8>, __jet_right: &'__jet_view Vec<u8>"),
+        "a union of view owners lost its shared lifetime:\n{rust}"
+    );
+    assert!(
+        rust.contains("-> &'__jet_view [u8] {"),
+        "the returned view does not name its owners' lifetime:\n{rust}"
+    );
+    assert_tiers_agree("tir_card_4392_view_return_runtime", CARD_4392_SOURCE, "2\n2\n1\n");
+}
+
+const CARD_4392_CARRIER_SOURCE: &str = r###"
+struct Record {
+    kind: View<str>
+    body: View<str>
+}
+fn split(header: String, payload: String) -> Record {
+    kind :: header.after(":")
+    body :: payload.after(":")
+    return Record{kind: kind, body: body}
+}
+fn run() {
+    header :: "kind:message"
+    payload :: "body:hello"
+    record :: split(header, payload)
+    kind :: record.kind
+    body :: record.body
+    print(~kind)
+    print(~body)
+}
+"###;
+
+/// Card #4392: a struct holding views declares the view lifetime, a function
+/// returning it names its proven owners' lifetime on the struct, and a bound
+/// field read stays the view rather than an owned copy.
+#[test]
+fn card_4392_view_carrying_struct_names_its_owner_lifetime() {
+    let rust = compile("tir_card_4392_view_carrier", CARD_4392_CARRIER_SOURCE);
+    assert!(
+        rust.lines().any(|line| line.contains("struct ")
+            && line.ends_with("Record<'__jet_view> {"))
+            && rust.contains("__jet_kind: &'__jet_view str,"),
+        "the view-carrying struct lost its lifetime parameter:\n{rust}"
+    );
+    assert!(
+        rust.lines().any(|line| line.starts_with("fn ")
+            && line.contains(
+                "(__jet_header: &'__jet_view String, __jet_payload: &'__jet_view String) -> "
+            )
+            && line.ends_with("Record<'__jet_view> {")),
+        "the struct-returning function does not name its owners' lifetime:\n{rust}"
+    );
+    assert!(
+        !rust.lines().any(|line| line.contains("jet_string_view_copy(")
+            && (line.contains(".__jet_kind") || line.contains(".__jet_body"))),
+        "a bound view field read materialized an owned copy:\n{rust}"
+    );
+    assert_tiers_agree(
+        "tir_card_4392_view_carrier_runtime",
+        CARD_4392_CARRIER_SOURCE,
+        "message\nhello\n",
+    );
+}
+
+/// Card #4392: a consumed (`^`) parameter is freed when the function returns,
+/// so sema refuses a view into it before any backend sees the signature.
+#[test]
+fn card_4392_view_into_consumed_parameter_is_rejected_in_sema() {
+    let src = r###"
+fn owned_head(xs: ^[U8]) -> View<U8> {
+    xs[0..<1]
+}
+fn run() {
+    data :: [U8{1}, U8{2}]
+    print(owned_head(^data).len())
+}
+"###;
+    let diags = tir_support::compile_source("tir_card_4392_consumed_owner", src)
+        .err()
+        .expect("a view into a consumed parameter must be rejected");
+    assert!(
+        diags
+            .iter()
+            .any(|diag| diag.code == "E2305" && diag.what.contains("which this function consumes")),
+        "{diags:?}"
+    );
+}

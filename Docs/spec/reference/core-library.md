@@ -728,6 +728,15 @@ Whole-file and metadata functions:
 `is_dir`, `is_symlink`, `kind`, and `mode`. `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
 
+The retired raw-String `read_dir` helper is not a reserved method name:
+user struct and trait methods named `read_dir` participate in normal resolution.
+
+Mapped windows have byte element type `View<U8>`: `window` and `window_len`
+return `View<U8> !IOError`, and `lines()` yields `ViewIter<View<U8>>`.
+Copying a line with `~line` produces `[U8]`, not `[[U8]]`. A `FileScope`
+parameter imported as `files.FileScope` retains its checked `read` method;
+source qualification does not change its capability dispatch.
+
 Streaming constructors keep memory bounded:
 
 ```jet
@@ -928,6 +937,9 @@ The source-facing carriers include `HTTPError`, `Method`, `Version`, `Status`,
 `Header`, `Headers`, and `Body`. The default limits are one MiB for a body,
 32 KiB for headers, 8 KiB for a header line and request line, 100 headers, and
 8 KiB for a URL.
+The source parsers check the remaining body length before projecting its bytes.
+Accepted bodies use one owned byte-slice projection; oversized bodies are
+rejected without a body allocation.
 
 | API | Result | Description |
 | --- | --- | --- |
@@ -1721,6 +1733,7 @@ fn run() {
 | --- | --- | --- |
 | `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value: Int)` / `math.abs_float(value: Float)` | `Int` / `Float` | Absolute value for integer or floating-point input. |
+| `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.min(a: Int, b: Int)` / `math.max(a: Int, b: Int)` | `Int` | Integer extrema. |
 | `math.clamp(value, lo, hi)` | `Int` | Clamp an integer; reversed bounds are accepted by swapping the bounds. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
@@ -1818,7 +1831,7 @@ fn run() {
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `units.from(magnitude, unit)` | `Measurement<Float>` | Build a measured quantity from a magnitude and a scalar unit. |
+| `units.from(magnitude, unit)` | `Measurement<Float>` | Jet-owned construction of SI value `magnitude * unit` with zero uncertainty; the host only represents the measurement. |
 | `units.si(value)` | `Measurement<Float>` | Construct a value in the SI base scale. |
 | `units.scale(value, factor)` | `Measurement<Float>` | Scale a measured value. |
 | `units.add(a, b)` / `units.sub(a, b)` | `Measurement<Float>` | Add or subtract measured values with propagated uncertainty. |
@@ -1998,6 +2011,7 @@ resulting parts (D-TEXTUNICODE1=A).
 | `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B). |
 | `text.grapheme_views(value)` / `word_views(value)` / `line_views(value)` / `byte_views(value)` | `[String]` | Produce views or segments for the requested boundaries. |
 | `text.is_alphabetic(value)` / `is_numeric(value)` / `is_whitespace(value)` | `Bool` | Test the corresponding scalar property. |
+| `text.has_control(value)` | `Bool Never!` | True iff any scalar is Unicode 17 Cc (`U+0000..U+001F` or `U+007F..U+009F`); empty text is false. One UTF-8 byte scan stops at the first match without creating per-character strings or a decoded-scalar list. |
 | `text.trim(value)` / `trim_start(value)` / `trim_end(value)` | `String` | Remove supported whitespace at both or one end. |
 | `text.pad_start(value, width, fill)` / `pad_end(value, width, fill)` | `String` | Pad to a requested display width. |
 | `text.center(value, width, fill)` | `String` | Center a value in a requested width. |
@@ -2738,6 +2752,9 @@ metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
 rendering capabilities. The source is [`Core/ui/ui.jet`](../../../Core/ui/ui.jet).
 
+The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
+`UI.Pointer`; capability checks and runtime support use the same spelling.
+
 | Signature | Result | Description |
 |---|---|---|
 | `point(x: Float, y: Float) -> Point` | point | Construct a point. |
@@ -2766,6 +2783,9 @@ handle. The provider/catalog may add interactive node and mount operations,
 but those operations remain typed provider boundaries. Build a portable tree
 first, then use backend-specific capabilities; do not infer that a node tree
 supplies a platform-native callback API.
+The native GTK `present` call runs its application loop until a window
+close request quits that loop. GTK's default close handler still owns window
+teardown; a signal-owned loop reference keeps its callback data live.
 
 ### `core.reactive` — explicit signals and dependency tracking
 

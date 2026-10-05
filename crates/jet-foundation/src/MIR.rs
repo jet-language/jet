@@ -3581,7 +3581,7 @@ pub enum MirScopeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MirTestScopeMember {
-    ExpectFail { expected_code: Option<String> },
+    ExpectFail { expected_code: Option<String>, expected_message: Option<String> },
     Timeout { duration: MirValueId },
     Skip { whole_test: bool },
     Measure,

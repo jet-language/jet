@@ -1,9 +1,11 @@
 import {
   boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot,
+  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
-import { renderNowReports } from './now.js';
+import { applyIndexDelta } from './live-delta.js';
+import { renderNowReports, refreshRelativeTimes } from './now.js';
 import { renderBallotIntro, lossText } from './ballot.js';
 
 import { projectGauntletMatrix, buildGauntletTooltip, formatPair, formatRatio, formatStamp } from './gauntlet.js';
@@ -16,9 +18,11 @@ let S = null;                 // projected state from /api/state
 let VIEW = 'now';
 let openCard = null;
 let focusIds = null, focusIdx = 0, focusFacet = null, askOpen = false, focusCompare = false;
-let closedCache = null;        // full done/archived cards for one board revision
+let closedCache = null;        // done/archived card summaries (/api/closed), newest fetched
 let closedRequest = null;
-const detailCache = new Map();
+let closedFetchedAt = 0;
+let detailShown = null;        // { id, json } of the card the modal currently shows
+let detailRequest = 0;         // newest /api/card request; older answers are dropped
 const pick = {};              // decisionId -> tentative option key
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -85,75 +89,222 @@ const api = async (route, payload, headers = {}) => {
   return j.result;
 };
 
-
-
-// ---- live state: SSE first, gentle polling as fallback -----------------------
-// The page must NEVER yank the DOM out from under the owner: passive updates
-// only re-render when the data actually changed (rev) AND the owner isn't
-// mid-read/mid-type. Otherwise they wait in `pending` until it's safe.
-let pending = null;
+// ---- live state: SSE deltas first, gentle polling as fallback ---------------
+// Agents write the board many times an hour. Every change is merged into the
+// page as it arrives — never a "refresh" prompt — without losing what the
+// owner is doing: scroll position, filters, open sections, the open card and
+// any text being typed stay put (see captureEditing/restoreEditing). Only a
+// live text selection in the main view defers the main view's redraw until
+// the selection is released.
 let es = null;
+let viewPending = false;
+let reloadWanted = false;
 
-function uiBusy() {
-  if (focusIds) return true;                                   // reading/deciding a ballot
-  if (openCard) return true;                                   // card modal open
+// Typing anywhere, an open modal, focus mode, or an unsaved draft: a server
+// upgrade reload waits for all of them.
+function ownerBusy() {
+  if (focusIds || openCard || guidanceDraft !== null || docsDirty) return true;
   const a = document.activeElement;
   if (a && (/INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.isContentEditable)) return true;
+  return [...document.querySelectorAll('[data-keep]')].some(isDirtyField);
+}
+
+function selectionHold() {
   const sel = window.getSelection?.();
-  if (sel && !sel.isCollapsed) return true;                    // text selected
-  return false;
+  return !!sel && !sel.isCollapsed && $('#view').contains(sel.anchorNode);
 }
 
 function applyState(next, { own = false } = {}) {
-  if (!next) return;
-  // server was upgraded/restarted under us → reload for fresh UI code, but
-  // only when the owner isn't mid-anything
+  if (!next?.meta) return;
+  // The server was upgraded/restarted: new UI code may be waiting. Keep the
+  // data current now and reload once the owner is idle.
   if (S?.boot && next.boot && S.boot !== next.boot) {
-    if (!uiBusy() && guidanceDraft === null) return location.reload();
-    pending = next; S = { ...next, boot: S.boot }; return;
+    reloadWanted = true;
+    setBoard({ ...next, boot: S.boot }, { own });
+    return maybeReload();
   }
-  if (S && next.meta.rev !== S.meta.rev) {
-    closedCache = null;
-    closedRequest = null;
-    detailCache.clear();
-  }
-  const changed = !S || next.meta.rev !== S.meta.rev;
-  if (own) { S = next; renderPreservingScroll(); return; }
-  if (!changed) { S = next; renderBeacon(); return; }          // nothing new — cheap refresh only
-  if (uiBusy()) {
-    pending = next;
-    S = next;                    // data is current for actions; DOM stays put
-    renderBeacon();              // beacon + pill may update, they hold no focus
-    updatePill();
-    return;
-  }
-  S = next; pending = null;
-  renderPreservingScroll();
+  if (S && next.meta.rev < S.meta.rev) return;                  // older than what we hold
+  if (S && next.meta.rev === S.meta.rev && !own) return;         // nothing new
+  setBoard(next, { own });
 }
 
-function maybeApplyPending() {
-  if (pending && !uiBusy()) { pending = null; renderPreservingScroll(); }
+function setBoard(next, { own = false } = {}) {
+  const first = !S;
+  if (S && next.meta.rev !== S.meta.rev) closedRequest = null;
+  S = next;
+  if (first) return render();
+  liveRender({ own });
 }
-document.addEventListener('focusout', () => setTimeout(maybeApplyPending, 80));
-document.addEventListener('selectionchange', () => { const s = window.getSelection?.(); if (s?.isCollapsed) setTimeout(maybeApplyPending, 300); });
+
+function maybeReload() {
+  if (!reloadWanted || ownerBusy()) return;
+  try { sessionStorage.setItem('tower.scroll', String(window.scrollY)); } catch { /* private mode */ }
+  location.reload();
+}
+
+// Board-driven views redraw on every change; Docs, AGENTS.md, and Gauntlet
+// hold their own drafts and data, so only the chrome updates under them.
+const LIVE_VIEWS = new Set(['now', 'board', 'papercuts']);
+function liveRender({ own = false } = {}) {
+  renderBeacon();
+  renderChrome();
+  if (LIVE_VIEWS.has(VIEW)) {
+    if (!own && selectionHold()) viewPending = true;
+    else { viewPending = false; renderPreservingScroll(); }
+  }
+  if (focusIds) refreshFocus();
+  if (openCard) refreshDetail();
+}
+
+function flushPending() {
+  if (viewPending && !selectionHold()) { viewPending = false; renderPreservingScroll(); }
+  maybeReload();
+}
+document.addEventListener('focusout', () => setTimeout(flushPending, 80));
+document.addEventListener('selectionchange', () => { const s = window.getSelection?.(); if (s?.isCollapsed) setTimeout(flushPending, 300); });
+
+// ---- in-progress edits survive redraws -------------------------------------
+// Any field carrying data-keep, an id, or a card-modal data-fld is matched
+// across a redraw. A field the owner is typing in, or has changed without
+// saving, is moved into the new DOM as the same node — value, caret, and undo
+// history intact. data-base holds the stored value the field was rendered
+// from; if a live update changed that value underneath an edit, the owner's
+// text wins and a small note appears on that field only.
+const keepKey = (node) => node.dataset.keep || node.id || (node.dataset.fld ? `fld:${node.dataset.fld}` : null);
+const isTextField = (node) => node.isContentEditable
+  || node.tagName === 'TEXTAREA'
+  || (node.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(node.type));
+function isDirtyField(node) {
+  if (!isTextField(node)) return false;
+  if (node.isContentEditable) return node.dataset.dirty === '1';
+  return node.value !== node.defaultValue;
+}
+document.addEventListener('input', (e) => {
+  if (e.target?.isContentEditable) e.target.dataset.dirty = '1';
+}, true);
+
+const KEEP_FIELDS = 'input, textarea, select, [contenteditable]';
+function captureEditing(root) {
+  const fields = new Map();
+  for (const node of root.querySelectorAll(KEEP_FIELDS)) {
+    const key = keepKey(node);
+    if (!key) continue;
+    const focused = node === document.activeElement;
+    // A select saves on change, so only an open (focused) one is carried.
+    if (node.tagName === 'SELECT' ? !focused : (!isTextField(node) || (!focused && !isDirtyField(node)))) continue;
+    const sel = window.getSelection?.();
+    const range = focused && node.isContentEditable && sel?.rangeCount ? sel.getRangeAt(0) : null;
+    fields.set(key, {
+      node, focused,
+      start: node.selectionStart ?? null, end: node.selectionEnd ?? null,
+      range: range && node.contains(range.startContainer)
+        ? [range.startContainer, range.startOffset, range.endContainer, range.endOffset] : null,
+    });
+  }
+  const toggles = new Map();
+  for (const node of root.querySelectorAll('[data-keep-toggle]')) {
+    toggles.set(node.dataset.keepToggle, { open: node.open, hidden: node.hidden });
+  }
+  const scrolls = new Map();
+  for (const node of root.querySelectorAll('[data-keep-scroll]')) scrolls.set(node.dataset.keepScroll, node.scrollTop);
+  return { fields, toggles, scrolls };
+}
+
+function restoreEditing(root, kept) {
+  for (const [key, state] of kept.toggles) {
+    const node = root.querySelector(`[data-keep-toggle="${CSS.escape(key)}"]`);
+    if (!node) continue;
+    if ('open' in node && state.open !== undefined) node.open = state.open;
+    node.hidden = state.hidden;
+  }
+  for (const [key, state] of kept.fields) {
+    const fresh = [...root.querySelectorAll(KEEP_FIELDS)].find(n => keepKey(n) === key && n !== state.node);
+    if (!fresh) continue;
+    const old = state.node;
+    const newBase = fresh.dataset.base;
+    const dirty = isDirtyField(old);
+    if (dirty && old.dataset.base !== undefined && newBase !== undefined && old.dataset.base !== newBase) {
+      old.dataset.conflict = newBase;
+    }
+    if (newBase !== undefined) old.dataset.base = newBase;
+    if (!dirty) {
+      // Focused but untouched: carry the node (focus, caret) but show the
+      // current stored value.
+      if (old.tagName === 'SELECT') old.value = fresh.value;
+      else if (!old.isContentEditable) { old.defaultValue = fresh.defaultValue; old.value = fresh.value; }
+      else if (old.classList.contains('is-raw')) { if (old.textContent !== newBase) old.textContent = newBase ?? ''; }
+      else if (old.innerHTML !== fresh.innerHTML) old.innerHTML = fresh.innerHTML;
+    }
+    fresh.replaceWith(old);
+    if (old.dataset.conflict !== undefined && isDirtyField(old)) {
+      old.insertAdjacentElement('afterend', el(`<div class="fld-note" role="status">An agent changed this to “${esc(String(old.dataset.conflict).slice(0, 140))}” while you were editing. Your text is kept and saves when you leave the field.</div>`));
+    }
+    if (!state.focused) continue;
+    old.focus({ preventScroll: true });
+    if (state.range) {
+      try {
+        const r = document.createRange();
+        r.setStart(state.range[0], state.range[1]);
+        r.setEnd(state.range[2], state.range[3]);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+      } catch { /* caret target vanished; focus is enough */ }
+    } else if (state.start != null && old.setSelectionRange) {
+      try { old.setSelectionRange(state.start, state.end); } catch { /* number inputs */ }
+    }
+  }
+  for (const [key, top] of kept.scrolls) {
+    const node = root.querySelector(`[data-keep-scroll="${CSS.escape(key)}"]`);
+    if (node) node.scrollTop = top;
+  }
+}
+
+// Redraw `root` with `draw()`, carrying in-progress edits across. Removing a
+// focused field fires blur in some browsers; `transplanting` tells blur-save
+// handlers that this is a redraw, not the owner leaving the field.
+let transplanting = false;
+function redrawKeeping(root, draw) {
+  const kept = captureEditing(root);
+  transplanting = true;
+  try {
+    draw();
+    restoreEditing(root, kept);
+  } finally {
+    transplanting = false;
+  }
+}
 
 function renderPreservingScroll() {
   const y = window.scrollY;
-  render();
+  redrawKeeping($('#view'), renderView);
   window.scrollTo(0, y);
 }
 
 function connectStream() {
-  try { es = new EventSource('/api/stream'); } catch { return scheduleFallbackPoll(); }
-  es.addEventListener('state', (e) => { try { applyState(JSON.parse(e.data)); } catch { /* bad frame */ } });
-  es.onerror = () => { es.close(); es = null; scheduleFallbackPoll(); checkVersion(); setTimeout(connectStream, 8000); };
+  const qs = S ? `?rev=${encodeURIComponent(S.meta.rev)}&boot=${encodeURIComponent(S.boot || '')}` : '';
+  try { es = new EventSource('/api/stream' + qs); } catch { return scheduleFallbackPoll(); }
+  es.addEventListener('state', (e) => { try { applyState(JSON.parse(e.data)); } catch (err) { console.error(err); } });
+  es.addEventListener('delta', (e) => { try { applyDelta(JSON.parse(e.data)); } catch (err) { console.error(err); refresh(); } });
+  es.addEventListener('hello', (e) => {
+    try { const h = JSON.parse(e.data); if (!S || h.boot !== S.boot || h.rev !== S.meta.rev) refresh(); } catch { refresh(); }
+  });
+  es.onerror = () => { es.close(); es = null; scheduleFallbackPoll(); checkVersion(); setTimeout(connectStream, 3000); };
 }
+
+function applyDelta(d) {
+  if (!S || d.boot !== S.boot) return refresh();
+  if (d.rev <= S.meta.rev) return;              // already have it (our own write)
+  if (d.base !== S.meta.rev) return refresh();  // missed a step: resync
+  setBoard(applyIndexDelta(S, d.patch));
+}
+
 let pollTimer = null;
 function scheduleFallbackPoll() {
   clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     if (es || document.hidden) return;
-    try { applyState(await (await fetch('/api/state')).json()); } catch { /* offline */ }
+    await refresh();
     checkVersion();
   }, 30_000);
 }
@@ -198,24 +349,30 @@ async function refresh() {
 
 // ---- derived --------------------------------------------------------------
 const noticeCards = () => S?.notices?.cards || [];
+// The closed list (/api/closed) is fetched on demand and kept across live
+// updates; a newer copy is fetched in the background when the board moves.
+// Live rows always win over a possibly older closed row for the same card.
 function cachedClosedCards() {
-  return closedCache?.rev === S?.meta?.rev ? closedCache.cards : [];
+  if (!closedCache) return [];
+  const live = new Set([...(S.cards || []).map(c => c.id)]);
+  return closedCache.cards.filter(c => !live.has(c.id));
 }
 function boardCards(showClosed = false) {
   return showClosed ? [...(S.cards || []), ...cachedClosedCards()] : (S.cards || []);
 }
-const boardMilestones = (showClosed = false) => showClosed && closedCache?.rev === S?.meta?.rev
+const boardMilestones = (showClosed = false) => showClosed && closedCache
   ? (closedCache.milestones || S.milestones || [])
   : (S?.milestones || []);
-const boardRadar = (showClosed = false) => showClosed && closedCache?.rev === S?.meta?.rev
+const boardRadar = (showClosed = false) => showClosed && closedCache
   ? (closedCache.radar || S.radar || [])
   : (S?.radar || []);
 function allCards() {
   const byId = new Map((S.cards || []).map(c => [c.id, c]));
   for (const c of noticeCards()) if (!byId.has(c.id)) byId.set(c.id, c);
-  for (const c of cachedClosedCards()) byId.set(c.id, c);
+  for (const c of cachedClosedCards()) if (!byId.has(c.id)) byId.set(c.id, c);
   return [...byId.values()];
 }
+const questionsFor = (cardId) => (S.questions || []).filter(q => q.cardId === cardId);
 const cardById = (id) => allCards().find(c => c.id === id);
 const ticket = (c) => '#' + esc(c.num ?? '');
 const CFG = () => S.config || {};
@@ -356,6 +513,23 @@ function undoToast(label, rev) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 7000);
 }
 
+// Now report sections fold per browser; the choice lives in localStorage so
+// live redraws and reloads keep it.
+const REPORT_STORE = 'tower.now.reports';
+function reportFolds() {
+  try { return JSON.parse(localStorage.getItem(REPORT_STORE) || '{}') || {}; } catch { return {}; }
+}
+function reportIsOpen(key, fallback) {
+  const saved = reportFolds()[key];
+  return typeof saved === 'boolean' ? saved : fallback;
+}
+function saveReportFold(key, open) {
+  const folds = reportFolds();
+  if (folds[key] === open) return;
+  folds[key] = open;
+  try { localStorage.setItem(REPORT_STORE, JSON.stringify(folds)); } catch { /* storage full or disabled */ }
+}
+
 // ---- NOW ----------------------------------------------------------------------
 function viewNow() {
   const v = $('#view');
@@ -371,7 +545,14 @@ function viewNow() {
     ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
   $('#focus-all')?.addEventListener('click', () => focusAll(openGenericDecisions()[0].id));
 
-  const reports = el(`<div class="now-reports">${renderNowReports(S)}</div>`);
+  const reports = el(`<div class="now-reports">${renderNowReports(S, { isOpen: reportIsOpen })}</div>`);
+  reports.querySelectorAll('details[data-report]').forEach(node => {
+    // Only real clicks change the saved choice; a redraw's initial open state
+    // also fires `toggle`, and that must not overwrite anything.
+    node.querySelector(':scope > summary')?.addEventListener('click', () => {
+      setTimeout(() => saveReportFold(node.dataset.report, node.open), 0);
+    });
+  });
   reports.querySelectorAll('[data-report-card], [data-report-decision]').forEach(button => {
     button.addEventListener('click', () => {
       const decision = S.decisions.find(d => d.id === button.dataset.reportDecision);
@@ -506,7 +687,6 @@ function acceptanceContent(card, ballot) {
 const PROOF_INLINE_MAX = 2;
 // Stored board identifier prefix (see store.mjs); `/media/` serves the file.
 const VISUAL_MEDIA_ROOT = 'docs/proposals/visual-acceptance/media/';
-const evidenceMedia = (card, ballot) => ballot ? (ballot.visualMedia || []) : (card.visualMedia || []);
 const mediaUrl = path => `/media/${String(path).slice(VISUAL_MEDIA_ROOT.length).split('/').map(encodeURIComponent).join('/')}`;
 
 // Captured evidence. Screenshots open a gallery scoped to this card or
@@ -607,48 +787,41 @@ function dutyVerify(card, ballot) {
   const media = evidenceMedia(card, ballot);
   const inline = content.proof.slice(0, PROOF_INLINE_MAX);
   const rest = content.proof.slice(PROOF_INLINE_MAX);
-  const hasOpenCriteria = (card.criteria || []).some(i => !['met', 'verified'].includes(i.status));
-  const waitingOnAgent = card.needsAcceptance && (!ballot || hasOpenCriteria);
-  const capturePending = media.length === 0;
-  const notReady = waitingOnAgent || capturePending;
-  const yourCheck = waitingOnAgent
-    ? 'The agents are still finishing the computer checks. You can look now, but you can accept only after those checks finish.'
-    : content.visualCheck || 'Try the screen yourself. Check that it looks right and is easy to use. The agents have already checked that it works.';
+  // ownerVerifyQueue admits only ready cards: the D-ACCEPT ballot exists, agent
+  // criteria are met, and the screen capture is attached.
+  const yourCheck = content.visualCheck || 'Try the screen yourself. Check that it looks right and is easy to use. The agents have already checked that it works.';
   const node = el(`<div class="duty duty--verify">
       <div class="duty__top"><span class="duty__kind">Visual check</span>
         <span class="num">${ticket(card)}</span>
-        <span class="duty__meta">${ballot ? esc(ballot.id) : 'waiting for the agents to prepare your check'}</span>${ageChip(ballot ? ballot.created : card.updated)}</div>
+        <span class="duty__meta">${esc(ballot.id)}</span>${ageChip(ballot.created)}</div>
       <h2 class="duty__title">${esc(card.title)}</h2>
       <div class="verifyblock">
         <div class="verifyblock__h">What agents already proved</div>
         <ul class="verifyblock__list">${inline.map(t => `<li>${esc(t)}</li>`).join('') || '<li class="verifyblock__empty">(nothing recorded — open the card)</li>'}</ul>
-        ${rest.length ? `<details class="verifyblock__more"><summary>+${rest.length} more</summary><ul class="verifyblock__list">${rest.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
+        ${rest.length ? `<details class="verifyblock__more" data-keep-toggle="proof:${esc(card.id)}"><summary>+${rest.length} more</summary><ul class="verifyblock__list">${rest.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
         <div class="verifyblock__h">Your eyes only</div>
         <p class="verifyblock__visual">${esc(yourCheck)}</p>
       </div>
       ${capturedEvidence(media)}
       <div class="duty__actions">
-        <button class="btn btn--amber btn--sm" data-accept ${notReady ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for computer checks' : capturePending ? 'Waiting for a screen capture' : 'Accept — looks right'}</button>
-        <button class="btn btn--ghost btn--sm" data-bounce ${waitingOnAgent ? 'disabled' : ''}>Bounce</button>
+        <button class="btn btn--amber btn--sm" data-accept>Accept — looks right</button>
+        <button class="btn btn--ghost btn--sm" data-bounce>Bounce</button>
         <button class="btn btn--ghost btn--sm" data-open>Open card</button>
       </div>
-      <div class="bouncebox" hidden>
-        <textarea placeholder="Why bounce this back? (recorded on the card)"></textarea>
+      <div class="bouncebox" hidden data-keep-toggle="bounce:${esc(card.id)}">
+        <textarea data-keep="bounce-text:${esc(card.id)}" placeholder="Why bounce this back? (recorded on the card)"></textarea>
         <button class="btn btn--amber btn--sm" data-bounce-send>Send bounce</button>
       </div>
     </div>`);
-  const doAccept = () => ballot
-    ? ownerAcceptance(ballot.id, 'accept')
-    : api('card/update', { id: card.id, phase: 'done', logEntry: 'Accepted — closed after visual review.', by: 'owner' });
+  const doAccept = () => ownerAcceptance(ballot.id, 'accept');
   $('[data-accept]', node).addEventListener('click', doAccept);
-  node.__primary = notReady ? () => showDetail(card.id) : doAccept;
+  node.__primary = doAccept;
   $('[data-open]', node).addEventListener('click', () => showDetail(card.id));
   const box = $('.bouncebox', node);
   $('[data-bounce]', node).addEventListener('click', () => { box.hidden = !box.hidden; if (!box.hidden) $('textarea', box).focus(); });
   $('[data-bounce-send]', node).addEventListener('click', () => {
     const comment = $('textarea', box).value.trim();
-    if (ballot) ownerAcceptance(ballot.id, 'bounce', comment);
-    else api('card/update', { id: card.id, phase: 'building', logEntry: `Bounced back to building: ${comment || '(no comment)'}`, by: 'owner' });
+    ownerAcceptance(ballot.id, 'bounce', comment);
   });
   bindCapturedEvidence(node, media);
   return node;
@@ -673,6 +846,7 @@ function cardTile(c) {
         <span class="prio prio-${esc(c.priority)}">${esc(c.priority)}</span>
         ${ms ? `<span class="card__mile" title="${esc(ms.title)}">${esc(milestoneTag(ms))}</span>` : ''}
         <span class="card__kind">${esc(c.kind)}</span>
+        ${phase === 'frozen' ? FROZEN_BADGE : ''}
         ${c.openQ ? `<span class="card__q">✎ ${esc(c.openQ)}</span>` : ''}
       </div>
       <h3 class="card__title">${esc(c.title)}</h3>
@@ -686,15 +860,27 @@ function cardTile(c) {
   return node;
 }
 const grid = (cards) => { const g = el('<div class="grid"></div>'); cards.forEach(c => g.appendChild(cardTile(c))); return g; };
+const FROZEN_BADGE = '<span class="frozen-badge" title="Frozen — owner-paused until you unfreeze it">❄ Frozen</span>';
 
 function collapsible(key, def, headHTML, extraClass, buildBody) {
   const open = isOpen(key, def);
   const sec = el(`<section class="epoch ${extraClass} ${open ? 'is-open' : ''}">
       <button class="epoch__head"><span class="epoch__chev">▸</span>${headHTML}</button>
       <div class="epoch__body" ${open ? '' : 'hidden'}></div></section>`);
-  $('.epoch__head', sec).addEventListener('click', () => api('ui/toggle', { key }));
+  $('.epoch__head', sec).addEventListener('click', () => toggleUi(key));
   if (open) buildBody($('.epoch__body', sec));
   return sec;
+}
+
+// Section open/closed state is stored on the board (shared across devices).
+// Flip it locally first so the click answers instantly; the server write
+// follows and its state replaces this local copy.
+function toggleUi(key) {
+  const toggled = new Set(S.meta.ui?.toggled || []);
+  if (toggled.has(key)) toggled.delete(key); else toggled.add(key);
+  S = { ...S, meta: { ...S.meta, ui: { ...(S.meta.ui || {}), toggled: [...toggled] } } };
+  renderPreservingScroll();
+  api('ui/toggle', { key }).catch(() => {});
 }
 
 // #461: archived count per epoch, fetched lazily (once an epoch section is
@@ -713,15 +899,15 @@ async function loadClosedCards() {
   if (!S) return [];
   if (closedCache?.rev === S.meta.rev) return closedCache.cards;
   if (closedRequest) return closedRequest;
-  const rev = S.meta.rev;
-  closedRequest = (async () => {
+  const request = closedRequest = (async () => {
     const r = await fetch('/api/closed');
     if (!r.ok) throw new Error(`closed cards request failed: ${r.status}`);
     const payload = await r.json();
-    if (S?.meta?.rev === rev && payload.rev === rev) closedCache = payload;
-    return payload.cards || [];
-  })().finally(() => { closedRequest = null; });
-  return closedRequest;
+    closedFetchedAt = Date.now();
+    if (!closedCache || payload.rev >= closedCache.rev) closedCache = payload;
+    return closedCache.cards || [];
+  })().finally(() => { if (closedRequest === request) closedRequest = null; });
+  return request;
 }
 
 // #464/#merge: Board = Radar's body (roadmap ledger × ops table: per-epoch
@@ -774,6 +960,7 @@ function viewBoard() {
         <option value="1" ${radarWorkflow === '1' ? 'selected' : ''}>Ready</option>
         <option value="2" ${radarWorkflow === '2' ? 'selected' : ''}>Plan</option>
         <option value="3" ${radarWorkflow === '3' ? 'selected' : ''}>Blocked</option>
+        <option value="frozen" ${radarWorkflow === 'frozen' ? 'selected' : ''}>Frozen</option>
       </select>
       <select id="radar-priority" aria-label="Filter by priority">
         <option value="all">All priorities</option>
@@ -806,7 +993,7 @@ function viewBoard() {
   };
   $('#idea-btn').addEventListener('click', fire);
   $('#idea-input').addEventListener('keydown', e => { if (e.key === 'Enter') fire(); });
-  $('#radar-mode').addEventListener('click', () => api('ui/toggle', { key: 'radar-cards' }));
+  $('#radar-mode').addEventListener('click', () => toggleUi('radar-cards'));
   $('#radar-recent').addEventListener('click', () => {
     radarRecent = !radarRecent;
     if (radarRecent && radarSort.col !== 'created' && radarSort.col !== 'updated') {
@@ -824,7 +1011,7 @@ function viewBoard() {
     viewBoard();
   });
   $('#radar-closed').addEventListener('change', (e) => { radarShowClosed = e.target.checked; renderRadarBody(); });
-  $('#radar-remaining').addEventListener('change', () => api('ui/toggle', { key: 'radar-remaining' }));
+  $('#radar-remaining').addEventListener('change', () => toggleUi('radar-remaining'));
 
   // Ideas bay — the triage half of idea-capture, kept from Board so a
   // captured idea has somewhere to be promoted or dismissed.
@@ -858,11 +1045,16 @@ function renderRadarBody() {
   if (!body) return;
   const focused = document.activeElement === $('#radar-filter');
   body.innerHTML = '';
-  if (radarShowClosed && closedCache?.rev !== S.meta.rev) {
-    body.appendChild(el('<p class="epoch__goal">Loading closed cards…</p>'));
-    loadClosedCards().then(() => { if (radarShowClosed) renderRadarBody(); })
-      .catch(() => { if (radarShowClosed) body.innerHTML = '<p class="epoch__goal">Closed cards unavailable.</p>'; });
-    return;
+  if (radarShowClosed && closedCache?.rev !== S.meta.rev && (!closedCache || Date.now() - closedFetchedAt > 10_000)) {
+    const pending = loadClosedCards();
+    if (!closedCache) {
+      body.appendChild(el('<p class="epoch__goal">Loading closed cards…</p>'));
+      pending.then(() => { if (radarShowClosed && VIEW === 'board') renderPreservingScroll(); })
+        .catch(() => { if (radarShowClosed) body.innerHTML = '<p class="epoch__goal">Closed cards unavailable.</p>'; });
+      return;
+    }
+    // Show the closed list we have now; swap in the newer one when it lands.
+    pending.then(() => { if (radarShowClosed && VIEW === 'board') renderPreservingScroll(); }).catch(() => {});
   }
   const needle = radarFilterText.trim();
   const cardsMode = isOpen('radar-cards', false);
@@ -899,7 +1091,8 @@ function renderRadarBody() {
   }
 
   // Sidequests: their own section — off-plan work, not part of any epoch.
-  const sq = cards.filter(c => c.track === 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
+  // Frozen sidequests stay here too, badged like frozen epoch cards.
+  const sq = cards.filter(c => c.track === 'sidequest' && (radarShowClosed || c.phase !== 'done'));
   if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
 
   if (!radar.length && !sq.length) {
@@ -907,10 +1100,6 @@ function renderRadarBody() {
     return;
   }
   for (const r of radar) body.appendChild(radarEpochSection(r, needle, cardsMode));
-
-  // Frozen: parked on purpose, any track — its own section, collapsed by default.
-  const fz = cards.filter(c => c.phase === 'frozen');
-  if (fz.length) body.appendChild(radarListSection('radar-frozen', 'Frozen', 'parked on purpose', fz.filter(c => radarMatches(c, needle)), fz.length, cardsMode, false));
 
   if (focused) $('#radar-filter')?.focus();
 }
@@ -972,7 +1161,7 @@ const STAGE_HELP = [
   ['building', 'Building', 'Implementation in progress'],
   ['verify', 'Review', 'Owner visual review for flagged cards; no separate agent verify step'],
   ['done', 'Done', 'Closed when exit criteria are met; hidden unless Show closed is on'],
-  ['frozen', 'Frozen', 'Owner-paused — untouched until you unfreeze it'],
+  ['frozen', 'Frozen', 'Owner-paused — stays in its epoch or sidequest section with a ❄ badge; the Frozen filter shows only these'],
 ];
 
 function openLegend() {
@@ -1026,9 +1215,12 @@ function epochProgressLabel(r, { pct = false } = {}) {
 
 function radarEpochSection(r, needle, cardsMode) {
   const e = S.epochs.find(x => x.id === r.id);
+  // Every card of the epoch, frozen included (badged); done only with Show closed.
+  const cards = boardCards(radarShowClosed).filter(c => c.epoch === r.id && c.track !== 'sidequest' && (radarShowClosed || c.phase !== 'done'));
+  const frozen = cards.filter(c => c.phase === 'frozen').length;
   return collapsible('radar:' + r.id, true,
     `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>
-     <span class="epoch__count">${epochProgressLabel(r, { pct: true })}</span>`,
+     <span class="epoch__count">${epochProgressLabel(r, { pct: true })}${frozen ? ` · ${frozen} frozen` : ''}</span>`,
     '', (body) => {
       if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
       body.appendChild(radarHead(r));
@@ -1038,10 +1230,9 @@ function radarEpochSection(r, needle, cardsMode) {
       body.appendChild(ledgerLine);
       archivedCountFor(r.id).then(n => { if (n) ledgerLine.textContent = `ledger: ${r.done} done live · ${n} archived`; });
 
-      const active = boardCards(radarShowClosed).filter(c => c.epoch === r.id && c.track !== 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
-      const activeShown = active.filter(c => radarMatches(c, needle));
-      body.appendChild(el(`<div class="radar__subhead">${radarShowClosed ? 'Cards' : 'Active'}</div>`));
-      body.appendChild(activeShown.length ? radarList(r.id, activeShown, cardsMode) : el(`<p class="epoch__goal">${active.length ? 'no match' : 'no cards'}</p>`));
+      const shown = cards.filter(c => radarMatches(c, needle));
+      body.appendChild(el(`<div class="radar__subhead">Cards</div>`));
+      body.appendChild(shown.length ? radarList(r.id, shown, cardsMode) : el(`<p class="epoch__goal">${cards.length ? 'no match' : 'no cards'}</p>`));
     });
 }
 
@@ -1117,7 +1308,7 @@ function opsRow(c) {
   const ms = milestoneOf(c);
   const tr = el(`<tr>
       <td class="num">${ticket(c)}</td>
-      <td class="ops__title" title="${esc(c.title)}">${esc(title)}</td>
+      <td class="ops__title" title="${esc(c.title)}">${c.phase === 'frozen' ? FROZEN_BADGE + ' ' : ''}${esc(title)}</td>
       <td class="ops__mile">${ms ? `<button class="card__mile" data-mile title="${esc(ms.title)}">${esc(milestoneTag(ms))}</button>` : ''}</td>
       <td><span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span></td>
       <td class="ops__prio"></td>
@@ -1128,14 +1319,19 @@ function opsRow(c) {
 
   $('[data-mile]', tr)?.addEventListener('click', (ev) => { ev.stopPropagation(); setMilestoneFilter(c.milestoneId); });
 
-  const prioSel = el(`<select data-fld="priority">${(CFG().priorities || ['P0', 'P1', 'P2', 'P3']).map(p => `<option value="${esc(p)}" ${p === c.priority ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>`);
+  const prioSel = el(`<select data-fld="priority" data-keep="prio:${esc(c.id)}">${(CFG().priorities || ['P0', 'P1', 'P2', 'P3']).map(p => `<option value="${esc(p)}" ${p === c.priority ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>`);
   prioSel.addEventListener('click', (ev) => ev.stopPropagation());
   prioSel.addEventListener('change', () => api('card/update', { id: c.id, priority: prioSel.value, by: 'owner' }));
   $('.ops__prio', tr).appendChild(prioSel);
 
-  const woIn = el(`<input data-fld="workOrder" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—">`);
+  const woIn = el(`<input data-fld="workOrder" data-keep="wo:${esc(c.id)}" data-base="${esc(c.workOrder ?? '')}" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—">`);
   woIn.addEventListener('click', (ev) => ev.stopPropagation());
-  woIn.addEventListener('change', () => api('card/update', { id: c.id, workOrder: woIn.value === '' ? null : Number(woIn.value), by: 'owner' }));
+  woIn.addEventListener('change', () => {
+    woIn.defaultValue = woIn.value;
+    woIn.dataset.base = woIn.value;
+    delete woIn.dataset.conflict;
+    api('card/update', { id: c.id, workOrder: woIn.value === '' ? null : Number(woIn.value), by: 'owner' });
+  });
   $('.ops__wo', tr).appendChild(woIn);
 
   tr.addEventListener('click', (ev) => { if (!/INPUT|SELECT/.test(ev.target.tagName)) showDetail(c.id); });
@@ -1143,47 +1339,81 @@ function opsRow(c) {
 }
 
 // ---- card modal ------------------------------------------------------------------
-const isFullCard = (card) => card && ['body', 'log', 'criteria', 'decisions', 'questions'].every(k => k in card);
+// The board index carries card summaries; the full card always comes from
+// /api/card. The modal opens at once (from the last copy seen this session
+// when there is one) and the fresh copy replaces it when it lands. Live
+// updates refetch the open card and redraw it only when it really changed,
+// keeping scroll position and any field the owner is editing. A failed load
+// says so inside the modal with a retry; it never sits on "Loading".
+const detailCache = new Map();  // card id → last full card seen
+let detailApplied = 0;
 
-async function showDetail(id) {
+async function showDetail(ref) {
+  const summary = cardById(ref);
+  const id = summary?.id || ref;
   openCard = id;
-  const summary = cardById(id);
-  const ref = summary?.id || id;
-  const key = `${S.meta.rev}:${ref}`;
-  const cached = detailCache.get(key);
-  if (cached) return renderDetail(cached);
-  if (!isFullCard(summary)) {
-    const m = $('#detail');
-    m.innerHTML = '<div class="modal__panel"><div class="modal__body"><p class="prose">Loading card…</p></div></div>';
-    m.hidden = false; $('#scrim').hidden = false;
-    try {
-      const r = await fetch(`/api/card?id=${encodeURIComponent(ref)}`);
-      if (!r.ok) throw new Error(`card request failed: ${r.status}`);
-      const payload = await r.json();
-      if (openCard !== id || S.meta.rev !== payload.rev) return;
-      detailCache.set(key, payload.card);
-      return renderDetail(payload.card);
-    } catch (err) {
-      toast('card detail unavailable', true);
-      return;
-    }
+  const cached = detailCache.get(id);
+  if (cached) renderDetail(cached);
+  else showDetailMessage(summary ? `Loading #${summary.num} ${summary.title}…` : 'Loading card…');
+  await loadDetail(id);
+}
+
+function showDetailMessage(text, retry = null) {
+  detailShown = null;
+  const m = $('#detail');
+  m.innerHTML = `<div class="modal__panel"><div class="modal__bar"><span class="card__kind">card</span>
+      <button class="modal__x" title="Close (Esc)">×</button></div>
+    <div class="modal__body"><p class="prose">${esc(text)}</p>${retry ? '<button class="btn btn--sm" data-retry>Retry</button>' : ''}</div></div>`;
+  $('.modal__x', m).addEventListener('click', closeDetail);
+  $('[data-retry]', m)?.addEventListener('click', retry);
+  m.onclick = (e) => { if (e.target === m) closeDetail(); };
+  m.hidden = false; $('#scrim').hidden = false;
+}
+
+async function loadDetail(id) {
+  const ticket = ++detailRequest;
+  try {
+    const r = await fetch(`/api/card?id=${encodeURIComponent(id)}&live=1`);
+    const payload = await r.json().catch(() => ({}));
+    if (openCard !== id || ticket < detailApplied) return;
+    if (r.status === 404) return showDetailMessage('This card no longer exists.');
+    if (!r.ok || !payload.card) throw new Error(payload.message || `request failed (${r.status})`);
+    detailApplied = ticket;
+    const card = payload.card;
+    detailCache.set(card.id, card);
+    if (detailShown?.id === card.id && detailShown.json === JSON.stringify(card)) return;
+    renderDetailKeeping(card);
+  } catch (err) {
+    if (openCard !== id || ticket < detailApplied) return;
+    if (detailShown?.id === id) return;   // keep showing the copy we have; the next update retries
+    showDetailMessage(`This card could not load: ${err.message}`, () => showDetail(id));
   }
-  return renderDetail(summary);
+}
+
+function refreshDetail() {
+  if (openCard && !$('#detail').hidden) loadDetail(openCard);
+}
+
+function renderDetailKeeping(card) {
+  const m = $('#detail');
+  const same = detailShown?.id === card.id;
+  const top = same ? ($('.modal__panel', m)?.scrollTop ?? 0) : 0;
+  redrawKeeping(m, () => renderDetail(card));
+  if (same) $('.modal__panel', m).scrollTop = top;
 }
 
 function renderDetail(c) {
   if (!c) return closeDetail();
   openCard = c.id;
+  detailShown = { id: c.id, json: JSON.stringify(c) };
   const id = c.id;
   const m = $('#detail');
   const phase = safePhase(c.phase);
   const phaseText = phaseLabel(phase);
   const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   const acceptanceBallot = openAcceptanceBallot(c);
-  const hasOpenCriteria = (c.criteria || []).some(i => !['met', 'verified'].includes(i.status));
-  const waitingOnAgent = phase === 'verify' && c.needsAcceptance && (!acceptanceBallot || hasOpenCriteria);
   const media = evidenceMedia(c, acceptanceBallot);
-  const capturePending = c.needsAcceptance && media.length === 0;
+  const { waitingOnAgent, capturePending } = acceptanceReadiness(c, acceptanceBallot);
   // Owner CTA only for needsAcceptance visual/UX cards. Bare verify is agent work.
   const cta = phase === 'frozen' ? `<button class="btn btn--red" id="cta-unfreeze">Unfreeze — start work</button>`
     : (phase === 'verify' && c.needsAcceptance) ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent || capturePending ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : capturePending ? 'Capture pending' : 'Accept — looks right'}</button>` : '';
@@ -1196,7 +1426,7 @@ function renderDetail(c) {
       <span class="card__lane ${c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none'}"><span class="pip"></span>${esc(c.lane.label)}</span>
       <button class="modal__x" title="Close (Esc)">×</button></div>
     <div class="modal__body">
-      <h2 class="modal__title" contenteditable="plaintext-only" data-fld="title">${esc(c.title)}</h2>
+      <h2 class="modal__title" contenteditable="plaintext-only" data-fld="title" data-keep="fld:title" data-base="${esc(c.title)}">${esc(c.title)}</h2>
       <p class="card__dates">created ${esc(dateDay(c.created))} · edited ${esc(dateDay(c.updated))}</p>
       ${cta ? `<div class="modal__cta">${cta}</div>` : ''}
       ${c.needsAcceptance ? capturedEvidence(media) : ''}
@@ -1207,11 +1437,11 @@ function renderDetail(c) {
         <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => (!c.epoch || x.epochId === c.epoch) && (!x.archived || x.id === c.milestoneId)).map(x => `<option value="${esc(x.id)}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Priority</div>${sel('priority', CFG().priorities || ['P0', 'P1', 'P2', 'P3'], c.priority)}</div>
         <div class="fld"><div class="fld__k">Kind</div>${sel('kind', CFG().kinds || ['task', 'feature', 'idea', 'bug'], c.kind)}</div>
-        <div class="fld"><div class="fld__k">Work order</div><input data-fld="workOrder" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—"></div>
+        <div class="fld"><div class="fld__k">Work order</div><input data-fld="workOrder" data-keep="fld:workOrder" data-base="${esc(c.workOrder ?? '')}" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—"></div>
       </div>
-      <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
+      <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" data-keep="fld:plan" data-base="${esc(c.plan || '')}" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
       <div class="modal__h">Description</div>
-      <div class="prose" contenteditable="plaintext-only" data-fld="body">${md(c.body)}</div>
+      <div class="prose" contenteditable="plaintext-only" data-fld="body" data-keep="fld:body" data-base="${esc(c.body || '')}">${md(c.body)}</div>
       <div class="modal__h">Exit criteria <span class="prose">Workers return a receipt. After integrated proof, the orchestrator marks each row met and closes the card.</span> <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner visual/UX check</label></div>
       <div id="m-criteria"></div>
       <div class="modal__h">Decisions</div><div id="m-decisions"></div>
@@ -1252,7 +1482,7 @@ function renderDetail(c) {
         ${it.metBy || it.verifiedBy ? `<div class="critrow__by">${it.metBy ? `met: ${esc(it.metBy)}` : ''}${it.verifiedBy ? `  verified: ${esc(it.verifiedBy)}` : ''}</div>` : ''}
       </div>`));
   }
-  const critAdd = el(`<div class="qadd"><input placeholder="Add exit criterion…"><button class="btn btn--red btn--sm">Add</button></div>`);
+  const critAdd = el(`<div class="qadd"><input data-keep="crit-add" placeholder="Add exit criterion…"><button class="btn btn--red btn--sm">Add</button></div>`);
   const postCrit = async () => { const i = $('input', critAdd); const t = i.value.trim(); if (!t) return; i.value = ''; await api('card/criteria-add', { id, text: t, by: 'owner' }); };
   $('button', critAdd).addEventListener('click', postCrit);
   $('input', critAdd).addEventListener('keydown', e => { if (e.key === 'Enter') postCrit(); });
@@ -1267,19 +1497,47 @@ function renderDetail(c) {
         <div class="qrow__text">${esc(q.text)}</div>
         ${q.answer ? `<div class="qrow__ans"><b>${esc(q.answeredBy || 'agent')}</b> ${esc(q.answer)}</div>` : ''}</div>`));
   }
-  const qadd = el(`<div class="qadd"><input placeholder="Leave a note or question for an agent…"><button class="btn btn--red btn--sm">Post</button></div>`);
+  const qadd = el(`<div class="qadd"><input data-keep="q-add" placeholder="Leave a note or question for an agent…"><button class="btn btn--red btn--sm">Post</button></div>`);
   const post = async () => { const i = $('input', qadd); const t = i.value.trim(); if (!t) return; i.value = ''; await api('question/add', { cardId: id, text: t, kind: 'question', by: 'owner' }); };
   $('button', qadd).addEventListener('click', post);
   $('input', qadd).addEventListener('keydown', e => { if (e.key === 'Enter') post(); });
   qb.appendChild(qadd);
 
+  // Text fields save when the owner leaves them, and only if the owner
+  // actually changed them. The description is edited as its stored Markdown
+  // source (rendered again on leave), so a click in and out never rewrites it.
   m.querySelectorAll('[data-fld]').forEach(node => {
     const k = node.dataset.fld;
-    if (node.tagName === 'SELECT' || node.tagName === 'INPUT') node.addEventListener('change', () => commit(id, k, node.value));
-    else node.addEventListener('blur', () => commit(id, k, node.innerText.trim()));
+    if (node.tagName === 'SELECT') node.addEventListener('change', () => commit(id, k, node.value));
+    else if (node.tagName === 'INPUT') node.addEventListener('change', () => {
+      node.defaultValue = node.value;
+      node.dataset.base = node.value;
+      delete node.dataset.conflict;
+      commit(id, k, node.value);
+    });
+    else {
+      node.addEventListener('focus', () => {
+        if (k !== 'body' || node.classList.contains('is-raw')) return;
+        node.textContent = node.dataset.base;
+        node.classList.add('is-raw');
+      });
+      node.addEventListener('blur', () => {
+        if (transplanting) return;
+        if (node.dataset.dirty === '1') {
+          const text = node.innerText.trim();
+          node.dataset.dirty = '';
+          node.dataset.base = text;
+          delete node.dataset.conflict;
+          commit(id, k, text);
+        } else if (k === 'body') {
+          node.innerHTML = md(node.dataset.base);
+          node.classList.remove('is-raw');
+        }
+      });
+    }
   });
   $('.modal__x', m).addEventListener('click', closeDetail);
-  $('#del-card', m).addEventListener('click', async () => { await api('card/delete', { id, by: 'owner' }); closeDetail(); });
+  $('#del-card', m).addEventListener('click', () => confirmDeleteCard(c));
   $('#cta-unfreeze', m)?.addEventListener('click', () => api('card/update', { id, phase: 'planning', logEntry: 'Unfrozen.', by: 'owner' }));
   $('#cta-done', m)?.addEventListener('click', () => acceptanceBallot
     ? ownerAcceptance(acceptanceBallot.id, 'accept')
@@ -1287,13 +1545,63 @@ function renderDetail(c) {
   m.onclick = (e) => { if (e.target === m) closeDetail(); };
   m.hidden = false; $('#scrim').hidden = false;
 }
+
+// Card delete (owner 2026-10-04). A card with ballots asks first and lists
+// every ballot that goes with it; each ratified ballot needs its own tick.
+// The owner-action header lets the server attach owner-UI provenance — the
+// only way past the ratified-decision guard (agents and the CLI never get it).
+async function deleteCardNow(payload) {
+  await api('card/delete', payload, { 'x-tower-owner-action': 'delete-card' });
+  closeDetail();
+}
+
+function confirmDeleteCard(card) {
+  const plan = cardDeletePlan(card);
+  if (!plan.ballots.length) return deleteCardNow(cardDeletePayload(card)).catch(() => {});
+  const what = plan.ballots.length === 1 ? 'its ballot' : `its ${plan.ballots.length} ballots`;
+  const dlg = el(`<dialog class="confirm" aria-labelledby="confirm-title">
+      <h3 class="confirm__h" id="confirm-title">Delete #${esc(card.num)} and ${what}?</h3>
+      <p class="prose">${esc(card.title)}</p>
+      <p class="prose">These ballots are deleted with the card. The event log records each one.</p>
+      <ul class="confirm__list">${plan.ballots.map(b => `<li>
+          <span class="decrow__id">${esc(b.id)}</span>
+          <span class="card__lane ${b.ratified ? 'lane-agent' : 'lane-owner'}">${b.ratified ? `ratified · ${esc(b.outcome)}` : esc(b.status)}</span>
+          <span class="confirm__t">${esc(b.title)}</span></li>`).join('')}</ul>
+      ${plan.ratified.map(rid => `<label class="confirm__check"><input type="checkbox" data-ratified="${esc(rid)}"> also delete ratified decision ${esc(rid)}</label>`).join('')}
+      <div class="confirm__actions">
+        <button class="btn btn--ghost btn--sm" data-cancel>Cancel</button>
+        <button class="btn btn--danger btn--sm" data-go ${plan.ratified.length ? 'disabled' : ''}>Delete card and ${what}</button>
+      </div></dialog>`);
+  const go = $('[data-go]', dlg);
+  const ticked = () => [...dlg.querySelectorAll('[data-ratified]')].filter(x => x.checked).map(x => x.dataset.ratified);
+  dlg.querySelectorAll('[data-ratified]').forEach(box => box.addEventListener('change', () => { go.disabled = !cardDeletePayload(card, ticked()); }));
+  $('[data-cancel]', dlg).addEventListener('click', () => dlg.close());
+  go.addEventListener('click', () => {
+    const payload = cardDeletePayload(card, ticked());
+    if (!payload) return;
+    go.disabled = true;
+    // A refusal (e.g. the ballots changed) is already toasted; close so the
+    // owner reopens the dialog against the card's current ballots.
+    deleteCardNow(payload).catch(() => {}).finally(() => dlg.close());
+  });
+  // Esc closes only this dialog, not the card behind it.
+  dlg.addEventListener('keydown', (e) => { if (e.key === 'Escape') e.stopPropagation(); });
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.appendChild(dlg);
+  dlg.showModal();
+}
 const commit = (id, k, v) => {
   let val = v;
   if (['plan', 'milestoneId', 'epoch'].includes(k) && v === '') val = null;
   else if (k === 'workOrder') val = v === '' ? null : Number(v);
   return api('card/update', { id, [k]: val, by: 'owner' });
 };
-function closeDetail() { openCard = null; $('#detail').hidden = true; $('#scrim').hidden = true; }
+function closeDetail() {
+  openCard = null;
+  detailShown = null;
+  $('#detail').hidden = true; $('#scrim').hidden = true;
+  setTimeout(flushPending, 0);
+}
 
 // ---- focus mode --------------------------------------------------------------------
 function focusAll(startId) {
@@ -1302,7 +1610,7 @@ function focusAll(startId) {
   focusIds = ids; focusIdx = Math.max(0, ids.indexOf(startId)); focusFacet = null; askOpen = false;
   renderFocus();
 }
-function exitFocus() { focusIds = null; $('#focus').hidden = true; render(); }
+function exitFocus() { focusIds = null; focusShown = null; $('#focus').hidden = true; render(); setTimeout(flushPending, 0); }
 function focusGo(delta) { focusIdx = Math.max(0, Math.min(focusIds.length - 1, focusIdx + delta)); focusFacet = null; askOpen = false; renderFocus(); }
 const optName = (d, key) => ((d.options || []).find(x => x.key === key) || {}).name || '';
 const REVIEW_STAGES = [
@@ -1354,8 +1662,7 @@ function facetBody(d, fk) {
 }
 // question state of a ballot: '' | 'open' (awaiting an answer) | 'answered'
 function qState(d) {
-  const cardQuestions = (cardById(d.cardId) || {}).questions || [];
-  const qs = [...cardQuestions, ...(S.questions || []), ...(S.notices?.messages || [])]
+  const qs = [...(S.questions || []), ...(S.notices?.messages || [])]
     .filter(q => q.cardId === d.cardId && q.decisionId === d.id);
   if (!qs.length) return '';
   return qs.some(q => q.status === 'open') ? 'open' : 'answered';
@@ -1445,6 +1752,17 @@ function surfaceDeck(d, c, chosen) {
     </div>
     ${fullBallot}`;
 }
+// Live updates redraw focus mode only when the ballot on screen changed (or
+// left the open set), keeping scroll, comment, and question drafts.
+let focusShown = null;
+function focusSignature() {
+  const d = S.decisions.find(x => x.id === focusIds?.[focusIdx]);
+  return d ? JSON.stringify([d, questionsFor(d.cardId).filter(q => q.decisionId === d.id)]) : null;
+}
+function refreshFocus() {
+  if (focusSignature() === focusShown) return;
+  redrawKeeping($('#focus'), renderFocus);
+}
 function renderFocus() {
   const f = $('#focus');
   focusIds = (focusIds || []).filter(id => S.decisions.some(d => d.id === id && d.status !== 'ratified'));
@@ -1457,7 +1775,7 @@ function renderFocus() {
   const pickedIds = focusIds.filter(id => pick[id]);
   const facets = availFacets(d);
   if (!focusFacet || !facets.some(([fk]) => fk === focusFacet)) focusFacet = facets.length ? facets[0][0] : null;
-  const qs = c ? (c.questions || []).filter(q => q.decisionId === d.id) : [];
+  const qs = c ? questionsFor(c.id).filter(q => q.decisionId === d.id) : [];
   const surfaceHtml = d.surface ? surfaceDeck(d, c, chosen) : '';
 
   f.innerHTML = `
@@ -1474,7 +1792,7 @@ function renderFocus() {
         <button class="btn btn--sm" id="f-close">Esc</button>
       </div>
     </div>
-    <div class="focusscroll"><div class="fdeck${d.surface ? ' fdeck--surface' : ''}">
+    <div class="focusscroll" data-keep-scroll="focus"><div class="fdeck${d.surface ? ' fdeck--surface' : ''}">
       ${renderBallotIntro(d, c, qState(d))}
       ${d.surface ? surfaceHtml : `
       <div class="fdeck__gist">${esc(d.gist || d.title)}</div>
@@ -1490,13 +1808,13 @@ function renderFocus() {
         ${Array.isArray(d.recommendation?.losses) && d.recommendation.losses.length ? `<p><b>Losses:</b> ${d.recommendation.losses.map(x => esc(lossText(x))).join('; ')}</p>` : ''}
         ${d.recommendation?.tradeoff ? `<p><b>Accepted tradeoff:</b> ${esc(d.recommendation.tradeoff)}</p>` : ''}</div>` : ''}
       `}
-      <textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
+      <textarea class="fcomment" id="f-comment" data-keep="f-comment:${esc(d.id)}" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
       <div class="deck-actions">
         ${chosen ? `<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>` : ''}
         <button class="btn btn--ghost btn--sm" id="f-ask">${askOpen ? 'Close' : '✎ Ask a question'}</button>
       </div>
       ${askOpen ? `<div class="askbox"><div class="askbox__h">Ask the agents about <b>${esc(d.id)}</b> — saved to this ballot, no decision recorded</div>
-        <textarea id="f-askt" placeholder="e.g. add a comparison, or rework option B around streaming…"></textarea>
+        <textarea id="f-askt" data-keep="f-askt:${esc(d.id)}" placeholder="e.g. add a comparison, or rework option B around streaming…"></textarea>
         <button class="btn btn--amber btn--sm" id="f-asksend">Send to agents</button></div>` : ''}
       ${qs.length ? `<div class="fqs">${qs.map(q => `<div class="qrow"><div class="qrow__top"><span class="${q.by === 'owner' ? 'qrow__by--owner' : ''}">${esc(q.by)}</span><span>${esc(q.kind)}</span><span>${esc(q.status)}</span></div><div class="qrow__text">${esc(q.text)}</div>${q.answer ? `<div class="qrow__ans"><b>${esc(q.answeredBy || 'agent')}</b> ${esc(q.answer)}</div>` : ''}</div>`).join('')}</div>` : ''}
     </div></div>
@@ -1535,14 +1853,15 @@ function renderFocus() {
   $('#f-prev', f).onclick = () => focusGo(-1);
   $('#f-next', f).onclick = () => focusGo(1);
   $('#f-close', f).onclick = exitFocus;
-  $('#f-compare', f)?.addEventListener('click', () => { focusCompare = !focusCompare; renderFocus(); });
+  $('#f-compare', f)?.addEventListener('click', () => { focusCompare = !focusCompare; redrawKeeping(f, renderFocus); });
   $('#f-clear', f)?.addEventListener('click', () => { delete pick[d.id]; updateChoice(); });
-  $('#f-ask', f).onclick = () => { askOpen = !askOpen; renderFocus(); };
+  $('#f-ask', f).onclick = () => { askOpen = !askOpen; redrawKeeping(f, renderFocus); };
   $('#f-asksend', f)?.addEventListener('click', async () => {
     const t = $('#f-askt', f).value.trim(); if (!t || !c) return; askOpen = false;
     await api('question/add', { cardId: c.id, decisionId: d.id, text: t, kind: 'question', by: 'owner' });
   });
   $('#f-record', f)?.addEventListener('click', recordBatch);
+  focusShown = focusSignature();
   f.hidden = false;
 }
 function updateChoice() {
@@ -2394,20 +2713,18 @@ function viewPapercuts() {
 
 // ---- render + routing -----------------------------------------------------------
 const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
-function render() {
-  if (!S) return;
-  renderBeacon();
-  renderChrome();
+function renderView() {
   try { (RENDER[VIEW] || viewNow)(); }
   catch (err) {
     console.error(err);
     $('#view').appendChild(el(`<div class="empty"><div class="empty__glyph">✕</div><div>Render error: ${esc(err?.message || err)}</div></div>`));
   }
-  if (focusIds) renderFocus();
-  if (openCard) {
-    const editing = $('#detail').contains(document.activeElement);
-    if (cardById(openCard)) { if (!editing) showDetail(openCard); } else closeDetail();
-  }
+}
+function render() {
+  if (!S) return;
+  renderBeacon();
+  renderChrome();
+  renderView();
 }
 function go(view) { VIEW = view; location.hash = view; render(); }
 
@@ -2488,8 +2805,6 @@ window.addEventListener('hashchange', () => {
   if (RENDER[h]) { VIEW = h; render(); }
 });
 
-// live updates: SSE stream (fallback: slow poll)
-connectStream();
 checkVersion();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); checkVersion(); } });
 
@@ -2503,6 +2818,16 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 }
 // top-level await: the window load event waits for the first full render
 await refresh();
+try {
+  const y = Number(sessionStorage.getItem('tower.scroll'));
+  sessionStorage.removeItem('tower.scroll');
+  if (y) window.scrollTo(0, y);
+} catch { /* private mode */ }
+// Live updates resume from the revision just rendered: the stream sends only
+// deltas from here (fallback: slow poll).
+connectStream();
+// "Updated 5 min ago" labels stay true without a redraw.
+setInterval(() => refreshRelativeTimes(document), 60_000);
 // Docs tab count needs the index before the owner opens Docs
 loadDocsIndex().then(() => { if (S) renderChrome(); }).catch(() => {});
 // deep links: ?focus=<decisionId> opens focus mode, ?open=<cardId|#n> a card

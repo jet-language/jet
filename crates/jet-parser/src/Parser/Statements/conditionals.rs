@@ -340,7 +340,19 @@ impl<'a> Parser<'a> {
             self.bump(); // `(`
             if !matches!(self.peek().kind, TokKind::RParen) {
                 loop {
-                    args.push(self.expr()?);
+                    // Retain a labeled scope argument as a labeled value, rather
+                    // than resolving its label as a variable in the region.
+                    let labeled = matches!(self.peek().kind, TokKind::Ident(_))
+                        && matches!(self.toks.get(self.pos + 1).map(|t| &t.kind), Some(TokKind::Colon));
+                    if labeled {
+                        let (label, at) = self.expect_ident("for the argument label")?;
+                        self.bump(); // `:`
+                        let value = self.expr()?;
+                        let end = value.span().end;
+                        args.push(Expr::TupleLit(vec![(label, value)], Span::new(at.start, end), None));
+                    } else {
+                        args.push(self.expr()?);
+                    }
                     if matches!(self.peek().kind, TokKind::RParen) {
                         break;
                     }

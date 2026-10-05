@@ -62,7 +62,7 @@ const STAGES = ["mir", "convert", "lower", "run"];
 const from = STAGES.indexOf(first);
 const until = STAGES.indexOf(last);
 if (from < 0 || until < from) throw new Error(`bad stage range ${first}..${last}`);
-const safeJet = `${process.env.HOME}/.cache/jet-luna/safe-jet.sh`;
+const safeJet = `${process.env.HOME}/.cache/jet-dev/safe-jet.sh`;
 const runtimeLib = process.env.JET_RUNTIME_C_LIB;
 const runtimePack = process.env.JET_RUNTIME_PACK;
 

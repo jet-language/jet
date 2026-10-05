@@ -678,7 +678,8 @@ impl JetShow for JetReservoirSampler {
 struct JetTestExpectFrame {
     scope: u64,
     expected: Option<String>,
-    stop: Option<String>,
+    expected_message: Option<String>,
+    stop: Option<(String, String)>,
 }
 
 struct JetTestingFailure {
@@ -714,11 +715,12 @@ fn jet_testing_clear_failure() {
 }
 
 
-pub fn jet_test_expect_fail_enter_scope(scope: u64, expected: Option<&str>) {
+pub fn jet_test_expect_fail_enter_scope(scope: u64, expected: Option<&str>, expected_message: Option<&str>) {
     JET_TEST_EXPECT_FAIL.with(|frames| {
         frames.borrow_mut().push(JetTestExpectFrame {
             scope,
             expected: expected.map(str::to_owned),
+            expected_message: expected_message.map(str::to_owned),
             stop: None,
         });
     });
@@ -741,7 +743,7 @@ pub fn jet_test_expect_fail_leave_scope(scope: u64) -> Option<String> {
             .rposition(|frame| frame.scope == scope)
             .and_then(|index| {
                 if frames[index].stop.is_some() {
-                    frames.remove(index).stop
+                    frames.remove(index).stop.map(|(code, _)| code)
                 } else {
                     None
                 }
@@ -749,23 +751,23 @@ pub fn jet_test_expect_fail_leave_scope(scope: u64) -> Option<String> {
     })
 }
 
-pub fn jet_test_record_stop(code: &str) {
+pub fn jet_test_record_stop(code: &str, message: &str) {
     JET_TEST_EXPECT_FAIL.with(|frames| {
         for frame in frames.borrow_mut().iter_mut() {
             if frame.stop.is_none() {
-                frame.stop = Some(code.to_string());
+                frame.stop = Some((code.to_string(), message.to_string()));
             }
         }
     });
 }
-pub fn jet_test_expect_fail_matching_scope() -> Option<u64> {
+pub fn jet_test_expect_fail_stopped_scope() -> Option<u64> {
     if JET_TEST_EXPECT_UNMET.with(std::cell::Cell::get) {
         return None;
     }
     JET_TEST_EXPECT_FAIL.with(|frames| {
         frames.borrow().iter().rev().find_map(|frame| {
-            let code = frame.stop.as_deref()?;
-            (frame.expected.as_deref().is_none_or(|expected| expected == code)).then_some(frame.scope)
+            frame.stop.as_ref()?;
+            (frame.expected.as_deref() != Some("__jet_test_ordinary_failure__")).then_some(frame.scope)
         })
     })
 }
@@ -774,19 +776,25 @@ pub fn jet_test_expect_fail_catch_scope() -> Option<u64> {
     let caught = JET_TEST_EXPECT_FAIL.with(|frames| {
         let mut frames = frames.borrow_mut();
         let index = frames.iter().rposition(|frame| {
-            let Some(code) = frame.stop.as_deref() else {
-                return false;
-            };
-            frame.expected.as_deref().is_none_or(|expected| expected == code)
+            frame.stop.is_some() && frame.expected.as_deref() != Some("__jet_test_ordinary_failure__")
         })?;
         let frame = frames.remove(index);
         frames.truncate(index);
         for parent in frames.iter_mut() {
             parent.stop = None;
         }
-        Some((frame.scope, frame.stop.unwrap_or_default(), index))
+        Some((frame, index))
     });
-    if let Some((scope, code, depth)) = caught {
+    if let Some((frame, depth)) = caught {
+        let (code, message) = frame.stop.as_ref().expect("caught stop");
+        if let Some(error) = jet_test_expect_fail_error(
+            frame.expected.as_deref(), frame.expected_message.as_deref(), Some((code, message)),
+        ) {
+            JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(true));
+            jet_runtime_stop("E3001", "", 0, &error);
+        }
+        let scope = frame.scope;
+        let (code, _) = frame.stop.expect("caught stop");
         JET_TEST_TIMEOUTS.with(|timeouts| {
             timeouts.borrow_mut().retain(|(_, _, _, entered_depth)| *entered_depth <= depth);
         });
@@ -803,9 +811,9 @@ pub fn jet_test_expect_fail_abort() {
     JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(false));
 }
 
-pub fn jet_test_expect_fail_unmet(expected: Option<&str>) -> ! {
+pub fn jet_test_expect_fail_unmet(expected: Option<&str>, expected_message: Option<&str>) -> ! {
     JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(true));
-    let message = jet_test_expect_fail_message(expected);
+    let message = jet_test_expect_fail_error(expected, expected_message, None).expect("missing stop");
     jet_runtime_stop("E3001", "", 0, &message)
 }
 
@@ -1399,15 +1407,15 @@ fn jet_scheduler_runtime_stop(msg: &str) -> ! {
     jet_runtime_stop("E3001", "", 0, msg)
 }
 
-fn jet_scheduler_runtime_stop_with_report(report: String) -> ! {
-    jet_test_record_stop("E3001");
+fn jet_scheduler_runtime_stop_with_report(report: JetStreamFailure) -> ! {
+    jet_test_record_stop(&report.code, &report.message);
     if jet_runtime_should_unwind() {
         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
-            rendered: report,
+            rendered: report.rendered,
             exit_code: 70,
         }));
     }
-    eprint!("{}", report);
+    eprint!("{}", report.rendered);
     jet_runtime_exit();
 }
 
@@ -1430,7 +1438,7 @@ fn jet_sentry_runtime_stop(
     foreign_fenced: Option<bool>,
     detail: &str,
 ) -> ! {
-    jet_test_record_stop(code);
+    jet_test_record_stop(code, detail);
     jet_proof_record(2, 1, code, detail, file, line);
     let report = jet_render_runtime_sentry_with_context(
         match code {
@@ -1450,7 +1458,7 @@ fn jet_sentry_runtime_stop(
         foreign_fenced,
     );
     if jet_runtime_should_unwind() {
-        jet_stream_record_failure_report(report.rendered.clone());
+        jet_stream_record_failure_report(code, detail, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, detail)
 }
@@ -1463,7 +1471,7 @@ fn jet_runtime_stop_with_context(
     src_line: &str,
     msg: &str,
 ) -> ! {
-    jet_test_record_stop(code);
+    jet_test_record_stop(code, msg);
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Simple {
             code,
@@ -1479,7 +1487,7 @@ fn jet_runtime_stop_with_context(
     let report =
         jet_runtime_stop_report(code, file, line, fn_name, src_line, 1, 1, msg, "");
     if jet_runtime_should_unwind() {
-        jet_stream_record_failure_report(report.rendered.clone());
+        jet_stream_record_failure_report(code, msg, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
 }
@@ -1528,7 +1536,7 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
         }));
     }
     let report = jet_contract_report(clause_kw, msg, file, line);
-    jet_test_record_stop("E3005");
+    jet_test_record_stop("E3005", msg);
     jet_proof_record(2, 1, "E3005", &report.what, file, line);
     std::panic::resume_unwind(Box::new(report))
 }
@@ -1537,7 +1545,11 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
 /// test harness. Length framing keeps user strings opaque; terminal text is
 /// never parsed as evidence.
 fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, line: u32) {
-    if state == 1 && jet_test_expect_fail_matching_scope().is_some() {
+    let expected = !JET_TEST_EXPECT_UNMET.with(std::cell::Cell::get)
+        && JET_TEST_EXPECT_FAIL.with(|frames| frames.borrow().last().is_some_and(|frame| {
+            jet_test_expect_fail_matches(frame.expected.as_deref(), frame.expected_message.as_deref(), name, message)
+        }));
+    if state == 1 && expected {
         jet_evidence_with_expectation(true, || {
             jet_evidence_record_write(kind, state, name, message, file, line);
         });
@@ -2227,7 +2239,7 @@ fn jet_panic_rich_code(
     msg: &str,
     locals: &str,
 ) -> ! {
-    jet_test_record_stop(code);
+    jet_test_record_stop(code, msg);
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Rich {
             code,
@@ -2247,7 +2259,7 @@ fn jet_panic_rich_code(
         code, file, line, fn_name, src_line, col, caret_len, msg, locals,
     );
     if jet_runtime_should_unwind() {
-        jet_stream_record_failure_report(report.rendered.clone());
+        jet_stream_record_failure_report(code, msg, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
 }
