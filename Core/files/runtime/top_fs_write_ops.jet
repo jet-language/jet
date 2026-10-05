@@ -63,7 +63,7 @@ pub fn jet_std_fs_write_atomic(path: &String, bytes: &[U8]) -> () IOError! {
         }
     }
     temp_path :: temp_path ?? return Err(IOError.other(.Write, Val(path.clone()), "could not reserve an atomic-write temporary file"))
-    temp_file := temp_file.expect("atomic temporary file must exist")
+    temp_file := temp_file ?? panic("atomic temporary file must exist")
     existing_permissions :: #Unsafe("snapshot target permissions if the target exists") {
         fs.metadata(&target_path).ok().map(fn(m) { m.permissions() })
     }

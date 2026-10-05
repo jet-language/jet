@@ -103,7 +103,7 @@ impl JetAtomicTemp {
         Err(io.Error.new(.AlreadyExists, "could not reserve an atomic-write temporary file"))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:114
-    fn file_mut(self: &Self) -> &fs.File { self.file.as_mut().expect("atomic temp file must be open") }
+    fn file_mut(self: &Self) -> &fs.File { self.file.as_mut() ?? panic("atomic temp file must be open") }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:118
     fn close(self: &Self) -> { _ :: self.file.take() }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:122
