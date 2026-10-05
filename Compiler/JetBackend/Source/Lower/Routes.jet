@@ -49,7 +49,18 @@ fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCa
         expected :: LowerRouteCarrier.Handle{name: name}
         return lower_route_carrier_of(p, ty) == Val(expected)
     }
+    // A Core record crosses as its runtime handle (Records.jet).
+    if carrier == .Handle(name) {
+        if lower_record_handle(p, ty) == .Val(runtime) -> return runtime == name
+    }
     lower_route_carrier_of(p, ty) == .Val(carrier)
+}
+
+// The runtime type a value of `ty` crossing as `carrier` is converted to and
+// from (Records.jet), or None when it crosses as itself.
+fn lower_route_record(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> String? {
+    if carrier == .Handle(_) -> return lower_record_handle(p, ty)
+    None
 }
 
 // A fieldless runtime enum crosses as its variant index: the Jet enum's
@@ -109,13 +120,15 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 }
 
 // `what` names the MIR operation in reports ("CoreCall", "StaticPreludeCall",
-// "BuiltinMethod").
+// "BuiltinMethod"). A Core record argument crosses as a runtime handle made
+// for the call and dropped after it.
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
     if route.params.len() != args.len() -> return lower_fail(&m, &f, "{what} {name} passes {args.len()} arguments; its runtime route takes {route.params.len()}")
     lowered := [LIRValueID]{}
+    temporaries := [LIRValueID]{}
     loop (index, arg) in args {
         ty :: lower_value_type(c, arg) ?? return lower_fail(&m, &f, "{what} {name} argument {index} has no checked type")
         if !lower_route_carrier_matches(p, ty, route.params[index]) -> return lower_fail(&m, &f, "{what} {name} argument {index} of type {mir_type_display_name(ty)} does not match its runtime route carrier")
@@ -126,8 +139,20 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             &lowered.push(lower_list_word(&f, value, 0))
             next
         }
+        if lower_route_record(p, ty, route.params[index]) == .Val(runtime) {
+            handle :: lower_record_to_runtime(p, &m, &f, ty, runtime, value)
+            &lowered.push(handle)
+            &temporaries.push(handle)
+            next
+        }
         &lowered.push(value)
     }
+    lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name)
+    if f.failed -> return
+    loop handle in temporaries -> lower_emit(&f, LIRInst.Drop{value: handle})
+}
+
+fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, lowered: [LIRValueID], what: String, name: String) Never! {
     result_ty :: lower_checked_type(c, instruction)
     if route.result == {
         .Plain(carrier) -> {
@@ -157,6 +182,13 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 lower_emit(&f, LIRInst.Store{base: box, offset: 16, value: data})
                 return
             }
+            if result_ty == .Val(ty) {
+                if lower_route_record(p, ty, carrier) == .Val(runtime) {
+                    handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
+                    lower_call_runtime(&m, &f, route.export, lowered, Val(handle))
+                    return lower_record_from_runtime(p, &m, &f, ty, handle, dst)
+                }
+            }
             if dst == .Val(kept) -> return lower_call_runtime(&m, &f, route.export, lowered, Val(kept))
             unused :: lower_new_value(&f, lower_route_layout(carrier), lower_route_drop(carrier), None)
             lower_call_runtime(&m, &f, route.export, lowered, Val(unused))
@@ -180,7 +212,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             inner :: if ty.kind == .Option(payload) -> payload else -> panic("checked Option route shape")
             box :: lower_pointer(&f)
             lower_alloc(&m, &f, box, lower_box_size(p, ty))
-            lower_route_store_payload(p, &f, box, 0, inner, some, out.slot)
+            lower_route_store_payload(p, &m, &f, box, 0, inner, some, out.slot)
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{box})})
             lower_start(&f, none_block, [LIRValueID]{})
             null :: lower_pointer(&f)
@@ -203,7 +235,9 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             box :: dst ?? lower_pointer(&f)
             lower_alloc(&m, &f, box, lower_box_size(p, ty))
             lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: out.word})
-            if list_payload {
+            // A List or a Core record payload is built on its own edge.
+            branched :: list_payload || lower_route_record(p, ok_ty, ok) != None || lower_route_record(p, err_ty, err) != None
+            if branched {
                 zero :: lower_const(&f, 0)
                 succeeded :: lower_flag(&f)
                 lower_emit(&f, LIRInst.Compare{dst: succeeded, condition: LIRCondition.Ne, left: out.word, right: zero})
@@ -212,10 +246,10 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 merge :: lower_new_block(&f)
                 lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
                 lower_start(&f, success, [LIRValueID]{})
-                lower_route_store_payload(p, &f, box, 8, ok_ty, ok, out.slot)
+                lower_route_store_payload(p, &m, &f, box, 8, ok_ty, ok, out.slot)
                 lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
                 lower_start(&f, failure, [LIRValueID]{})
-                lower_route_store_payload(p, &f, box, 8, err_ty, err, out.slot)
+                lower_route_store_payload(p, &m, &f, box, 8, err_ty, err, out.slot)
                 lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
                 lower_start(&f, merge, [LIRValueID]{})
             } else {
@@ -244,7 +278,7 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             members :: lower_inline_members(p, ty)
             loop (index, item) in items {
                 address :: lower_address(&f, slot, 8 * index)
-                lower_route_store_payload(p, &f, box, members[index].offset, members[index].ty, item, address)
+                lower_route_store_payload(p, &m, &f, box, members[index].offset, members[index].ty, item, address)
             }
         }
     }
@@ -302,9 +336,11 @@ fn lower_route_out_call(m: &LowerModule, f: &LowerFunction, export: String, args
 }
 
 // An adapter payload owns its result. List slots arrive as (data, length);
-// the native holder owns the buffer through its ordinary List drop glue.
-fn lower_route_store_payload(p: MIRProgram, f: &LowerFunction, box: LIRValueID, offset: Int, ty: MIRType, carrier: LowerRouteCarrier, slot: LIRValueID) Never! {
+// the native holder owns the buffer through its ordinary List drop glue. A
+// Core record arrives as its runtime handle, converted and dropped here.
+fn lower_route_store_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, box: LIRValueID, offset: Int, ty: MIRType, carrier: LowerRouteCarrier, slot: LIRValueID) Never! {
     if carrier == .Unit -> return
+    if lower_route_record(p, ty, carrier) == .Val(runtime) -> return lower_record_store_from_slot(p, &m, &f, ty, runtime, slot, box, offset)
     if carrier == .List(_) {
         data :: lower_pointer(&f)
         length :: lower_word(&f)

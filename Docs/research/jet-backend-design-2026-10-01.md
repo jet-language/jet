@@ -360,6 +360,18 @@ must not. Canonical Core identities override a source layout only when the gener
 name rules replace that exact identity; source-owned enums and records retain their
 native constructors and matches. Tuple adapters write zeroed word slots, and lowering
 copies each item into the tuple's naturally aligned native field offset.
+A MIR-defined Core record (the general `Err`, `IOError`, `IOContext`; schemas in
+`Lower/Records.jet`) keeps its native layout and crosses a route as its runtime
+type's handle: a generated `record.out` helper builds it through
+`jet_rt_record_new_<R>[_<Variant>]` (String handles and String/Int Option boxes
+borrowed, nested record handles taken), and `record.in` rebuilds the native value
+through `jet_rt_record_tag_<R>` and `jet_rt_record_get_<R>_<member>` (owned
+results; an Option getter returns its tag and writes one out slot). A fieldless
+Core enum member crosses as its variant index. A record argument's handle is
+dropped after the call; a returned handle is dropped after conversion. Records
+render through their runtime type's own Display, Show and Debug, as generated
+Rust does, and a failing entry's `Err` reaches `jet_rt_entry_error_exit_err` the
+same way.
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
 `libjet_runtime_c.a`; link the object with it and `-lpthread -ldl -lm`.
