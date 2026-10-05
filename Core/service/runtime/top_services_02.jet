@@ -225,7 +225,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
     }
     if tree.partitioned.iter().any(fn(name) {
         name.trim().is_empty() || name.chars().any(fn(c) { c.is_control() }) || name.len() > MAX_SERVICE_NAME || !worker_name_exists(name)
-    }) || tree.partitioned.iter().enumerate().any(fn((index, name)) { tree.partitioned[..index].iter().any(fn(seen) { seen == name }) }) {
+    }) || tree.partitioned.iter().enumerate().any(fn((index, name)) { tree.partitioned[0..<index].iter().any(fn(seen) { seen == name }) }) {
         return Err(JetServiceError.Policy("service partition state is invalid"))
     }
     group_names := [String].with_capacity(tree.groups.len())
@@ -234,7 +234,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
         if group.name.trim().is_empty() || group.name.chars().any(fn(c) { c.is_control() }) || group.name.len() > MAX_SERVICE_NAME
             || group.workers.is_empty() || group.workers.len() > MAX_SERVICE_WORKERS || !group.budget.is_valid()
             || group.workers.iter().any(fn(name) { !worker_name_exists(name) })
-            || group.workers.iter().enumerate().any(fn((index, name)) { group.workers[..index].iter().any(fn(seen) { seen == name }) })
+            || group.workers.iter().enumerate().any(fn((index, name)) { group.workers[0..<index].iter().any(fn(seen) { seen == name }) })
             || group.workers.iter().any(fn(name) { grouped_workers.iter().any(fn(seen) { seen == name }) })
             || group_names.iter().any(fn(seen) { seen == &group.name }) {
             return Err(JetServiceError.Policy("service group state is invalid"))
@@ -301,7 +301,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
         if receipt.from_generation != tree.previous_generation || receipt.to_generation != tree.generation
             || receipt.from_generation < 1 || receipt.to_generation <= receipt.from_generation
             || receipt.pinned_shards.len() > tree.workers.len() || receipt.pinned_shards.iter().any(fn(name) { !worker_name_exists(name) })
-            || receipt.pinned_shards.iter().enumerate().any(fn((index, name)) { receipt.pinned_shards[..index].iter().any(fn(seen) { seen == name }) })
+            || receipt.pinned_shards.iter().enumerate().any(fn((index, name)) { receipt.pinned_shards[0..<index].iter().any(fn(seen) { seen == name }) })
             || tree.workers.iter().any(fn(worker) {
                 receipt.pinned_shards.iter().any(fn(name) { name == &worker.name }) && worker.endpoint.generation != receipt.from_generation
             }) {
@@ -865,12 +865,12 @@ fn jet_services_rollout_decode(tree_name: &String, bytes: &[U8]) -> JetServiceRo
         .ok_or_else(fn() { jet_services_state_error("rollout journal checksum is missing") })?
     checksum_start :: marker_start + 1 + "checksum:".len()
     checksum_end :: bytes.len() - 1
-    checksum :: from_utf8(&bytes[checksum_start..checksum_end])
+    checksum :: from_utf8(&bytes[checksum_start..<checksum_end])
         .map_err(fn(_) { jet_services_state_error("rollout journal checksum is not valid UTF-8") })?
     if checksum.len() != 64 || !checksum.bytes().all(fn(byte) { byte.is_ascii_hexdigit() }) -> return Err(jet_services_state_error("rollout journal checksum is invalid"))
-    expected :: service_authority_hex(&sha256_bytes(&bytes[..marker_start + 1]))
+    expected :: service_authority_hex(&sha256_bytes(&bytes[0..<marker_start + 1]))
     if checksum != expected -> return Err(jet_services_state_error("rollout journal checksum does not match its contents"))
-    text :: from_utf8(&bytes[..marker_start + 1]).map_err(fn(_) { jet_services_state_error("rollout journal is not valid UTF-8") })?
+    text :: from_utf8(&bytes[0..<marker_start + 1]).map_err(fn(_) { jet_services_state_error("rollout journal is not valid UTF-8") })?
     lines := text.lines()
     if lines.next() != "JET-SERVICE-ROLLOUT/1" -> return Err(jet_services_state_error("rollout journal magic is invalid"))
     if jet_services_rollout_read_frame(&lines, &"tree")? != tree_name -> return Err(jet_services_state_error("rollout journal belongs to a different service tree"))
@@ -887,7 +887,7 @@ fn jet_services_rollout_decode(tree_name: &String, bytes: &[U8]) -> JetServiceRo
             rollback_available :: jet_services_rollout_read_bool(&lines, &"upgrade_available")?
             pinned_count :: jet_services_rollout_read_count(&lines, &"pinned_count")?
             pinned_shards := [String].with_capacity(pinned_count)
-            loop _ in 0..pinned_count {
+            loop _ in 0..<pinned_count {
                 name :: jet_services_rollout_read_frame(&lines, &"pinned")?
                 jet_services_rollout_name(&name, &"pinned shard")?
                 if pinned_shards.iter().any(fn(seen) { seen == &name }) -> return Err(jet_services_state_error("rollout journal contains a duplicate pinned shard"))
@@ -906,7 +906,7 @@ fn jet_services_rollout_decode(tree_name: &String, bytes: &[U8]) -> JetServiceRo
     if last_upgrade.is_none() && previous_generation != 0 -> return Err(jet_services_state_error("rollout journal has a previous generation without a receipt"))
     worker_count :: jet_services_rollout_read_count(&lines, &"worker_count")?
     workers := [(String, I64)].with_capacity(worker_count)
-    loop _ in 0..worker_count {
+    loop _ in 0..<worker_count {
         name :: jet_services_rollout_read_frame(&lines, &"worker")?
         jet_services_rollout_name(&name, &"worker")?
         worker_generation :: jet_services_rollout_read_scalar(&lines, &"worker_generation")?
@@ -918,7 +918,7 @@ fn jet_services_rollout_decode(tree_name: &String, bytes: &[U8]) -> JetServiceRo
     }
     draining_count :: jet_services_rollout_read_count(&lines, &"draining_count")?
     draining := [String].with_capacity(draining_count)
-    loop _ in 0..draining_count {
+    loop _ in 0..<draining_count {
         name :: jet_services_rollout_read_frame(&lines, &"draining")?
         jet_services_rollout_name(&name, &"draining worker")?
         if draining.iter().any(fn(seen) { seen == &name }) -> return Err(jet_services_state_error("rollout journal contains a duplicate draining worker"))
@@ -926,7 +926,7 @@ fn jet_services_rollout_decode(tree_name: &String, bytes: &[U8]) -> JetServiceRo
     }
     partitioned_count :: jet_services_rollout_read_count(&lines, &"partitioned_count")?
     partitioned := [String].with_capacity(partitioned_count)
-    loop _ in 0..partitioned_count {
+    loop _ in 0..<partitioned_count {
         name :: jet_services_rollout_read_frame(&lines, &"partitioned")?
         jet_services_rollout_name(&name, &"partitioned worker")?
         if partitioned.iter().any(fn(seen) { seen == &name }) || draining.iter().any(fn(seen) { seen == &name }) {
@@ -936,7 +936,7 @@ fn jet_services_rollout_decode(tree_name: &String, bytes: &[U8]) -> JetServiceRo
     }
     directory_count :: jet_services_rollout_read_count(&lines, &"directory_count")?
     directory := [(String, String, I64)].with_capacity(directory_count)
-    loop _ in 0..directory_count {
+    loop _ in 0..<directory_count {
         name :: jet_services_rollout_read_frame(&lines, &"directory_name")?
         worker :: jet_services_rollout_read_frame(&lines, &"directory_worker")?
         jet_services_rollout_name(&name, &"directory name")?

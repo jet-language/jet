@@ -1001,7 +1001,7 @@ fn jet_services_group(tree: &JetServiceTree, name: String, workers: [String]) ->
     if workers.iter().any(fn(worker) {
         tree.groups.iter().any(fn(group) { group.workers.iter().any(fn(member) { member == worker }) })
     }) -> return Err(JetServiceError.Policy("a worker can belong to only one service supervisor group"))
-    if workers.iter().enumerate().any(fn((index, worker)) { workers[..index].iter().any(fn(seen) { seen == worker }) }) {
+    if workers.iter().enumerate().any(fn((index, worker)) { workers[0..<index].iter().any(fn(seen) { seen == worker }) }) {
         return Err(JetServiceError.Policy(format!("group `{name}` lists a worker more than once")))
     }
     parent_id :: jet_services_topology_group_id(&tree.name, &name)
@@ -1122,7 +1122,7 @@ fn jet_services_start_with_worker_dispatcher<F: FnMut(&String, JetServiceWorkerH
     }
     jet_services_build_runtime_groups(tree)?
     activated := [JetServiceEndpoint].with_capacity(tree.workers.len())
-    loop index in 0..tree.workers.len() {
+    loop index in 0..<tree.workers.len() {
         draining :: tree.draining.iter().any(fn(name) { name == &tree.workers[index].name })
         partitioned :: tree.partitioned.iter().any(fn(name) { name == &tree.workers[index].name })
         // GATE #4565: kernel primitive

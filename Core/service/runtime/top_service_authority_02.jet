@@ -145,7 +145,7 @@ fn service_authority_read(runtime: &JetServiceRuntime) -> [(Char, [String])] Jet
     if contents.lines().count() > SERVICE_AUTH_MAX_RECORDS { return Err(JetServiceError.Policy("service authority log is full")) }
     // Ignore only syntactically incomplete crash tail; complete no-newline
     // record is truncated and must fail closed instead of becoming history.
-    (complete, tail) := contents.rfind('\n').map(fn(end) { (&contents[..end], &contents[end + 1..]) }).unwrap_or(("", &contents))
+    (complete, tail) := contents.rfind('\n').map(fn(end) { (&contents[0..<end], &contents[end + 1..]) }).unwrap_or(("", &contents))
     if !tail.is_empty() && service_authority_parse_record(tail).is_ok() {
         return Err(service_authority_error("service authority log ends with a truncated record"))
     }

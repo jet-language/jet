@@ -166,7 +166,7 @@ fn jet_services_restore_rollout_state(tree: &JetServiceTree) -> () JetServiceErr
 fn jet_services_state_read_line(bytes: &[U8], offset: &USize, label: &String) -> String JetServiceError! {
     rest :: bytes.get(*offset..).ok_or_else(fn() { jet_services_state_error("{label} is truncated") })?
     end :: rest.iter().position(fn(byte) { *byte == 10 }).ok_or_else(fn() { jet_services_state_error("{label} is truncated") })?
-    line :: from_utf8(&rest[..end]).map_err(fn(_) { jet_services_state_error("{label} is not valid UTF-8") })?
+    line :: from_utf8(&rest[0..<end]).map_err(fn(_) { jet_services_state_error("{label} is not valid UTF-8") })?
     *offset = offset.saturating_add(end + 1)
     Ok(line.to_string())
 }
@@ -175,12 +175,12 @@ fn jet_services_state_read_frame(bytes: &[U8], offset: &USize, label: &String) -
     start :: *offset
     rest :: bytes.get(start..).ok_or_else(fn() { jet_services_state_error("{label} is truncated") })?
     colon :: rest.iter().position(fn(byte) { *byte == 58 }).ok_or_else(fn() { jet_services_state_error("{label} length is missing") })?
-    length :: from_utf8(&rest[..colon]).ok().and_then(fn(text) { text.parse<USize>().ok() })
+    length :: from_utf8(&rest[0..<colon]).ok().and_then(fn(text) { text.parse<USize>().ok() })
         .ok_or_else(fn() { jet_services_state_error("{label} length is invalid") })?
     if length > MAX_SERVICE_MESSAGE -> return Err(jet_services_state_error("{label} exceeds the state record limit"))
     payload_start :: start.checked_add(colon + 1).ok_or_else(fn() { jet_services_state_error("{label} offset overflow") })?
     payload_end :: payload_start.checked_add(length).ok_or_else(fn() { jet_services_state_error("{label} length overflows the store") })?
-    payload :: bytes.get(payload_start..payload_end).ok_or_else(fn() { jet_services_state_error("{label} is truncated") })?
+    payload :: bytes.get(payload_start..<payload_end).ok_or_else(fn() { jet_services_state_error("{label} is truncated") })?
     value :: from_utf8(payload).map_err(fn(_) { jet_services_state_error("{label} is not valid UTF-8") })?
     *offset = payload_end
     Ok(value.to_string())
@@ -512,7 +512,7 @@ fn jet_services_workflow_frame(value: &String) -> String { "{value.len()}:{value
 fn jet_services_workflow_take_field(input: &String, label: &String) -> (&String, &String) JetServiceError! {
     (length_text, tail) :: input.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow {label} length is missing") })?
     length :: length_text.parse<USize>().map_err(fn(_) { jet_services_state_error("workflow {label} length is invalid") })?
-    value :: tail.get(..length).ok_or_else(fn() { jet_services_state_error("workflow {label} length is not a character boundary") })?
+    value :: tail.get(0..<length).ok_or_else(fn() { jet_services_state_error("workflow {label} length is not a character boundary") })?
     rest :: tail.get(length..).ok_or_else(fn() { jet_services_state_error("workflow {label} length is invalid") })?
     if value.chars().any(fn(c) { c.is_control() }) -> return Err(jet_services_state_error("workflow {label} contains control characters"))
     Ok((value, rest))
@@ -606,7 +606,7 @@ fn jet_services_workflow_replay_retry(workflow: &JetServiceWorkflow, key: &Strin
     if !actual.starts_with(&prefix) || !actual.ends_with(&suffix) {
         return Err(JetServiceError.Policy("workflow replay diverged: expected retry for `{key}`, got `{actual}`"))
     }
-    range := actual[prefix.len()..actual.len() - suffix.len()] // #4303
+    range := actual[prefix.len()..<actual.len() - suffix.len()] // #4303
     (attempt_text, recorded_max_text) :: range.split_once('/').ok_or_else(fn() { JetServiceError.Policy("workflow replay has an invalid retry decision for `{key}`") })?
     attempt :: attempt_text.parse<I64>().map_err(fn(_) { JetServiceError.Policy("workflow replay has an invalid retry attempt for `{key}`") })?
     recorded_max_attempts :: recorded_max_text.parse<I64>().map_err(fn(_) { JetServiceError.Policy("workflow replay has an invalid retry limit for `{key}`") })?
@@ -700,7 +700,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
             return Err(jet_services_state_error("workflow all wait count is outside the bounded range"))
         }
         values := [String].with_capacity(count)
-        loop _ in 0..count {
+        loop _ in 0..<count {
             (value, next) :: jet_services_workflow_take_field(rest, "all wait value")?
             if value.len() > MAX_SERVICE_MESSAGE -> return Err(jet_services_state_error("workflow all wait value is too large"))
             values.push(value.to_string())
