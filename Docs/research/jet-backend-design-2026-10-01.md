@@ -1049,6 +1049,9 @@ Set `JET_MIR_EMIT=1` to regenerate checked MIR with the current reference
 compiler's `emit --rust` seam without compiling or executing its Rust output.
 The native executable still runs against the golden; the dump receipt is
 explicitly an emission receipt, not a reference-execution pass.
+For independently queued shards, `--case-list FILE` selects exact newline-separated
+golden stems, rejecting empty, duplicate or unknown rows. Give each shard its own
+output directory and decoder unit; share only the checked MIR input corpus.
 
 An interrupted lowering batch can resume with `JET_LOWER_RESUME=1`: its original
 `lower/unit.jet` is required and kept frozen; completed `.o` files and nonempty

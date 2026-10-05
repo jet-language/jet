@@ -28,7 +28,7 @@
 // usage: [JET_RUNTIME_PACK=<jet_runtime.pack.o> | JET_RUNTIME_C_LIB=<libjet_runtime_c.a>] [JET=<jet binary>]
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
 //        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
-//        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [filter...]
+//        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
 // Writes <outdir>/results.tsv and <outdir>/summary.txt.
 import { createHash } from "node:crypto";
@@ -48,9 +48,14 @@ if (!outDir) {
 let first = "mir";
 let last = "run";
 const filters = [];
+let selectedStems = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--stage") first = args[++i];
   else if (args[i] === "--until") last = args[++i];
+  else if (args[i] === "--case-list") {
+    selectedStems = readFileSync(args[++i], "utf8").split("\n").map((stem) => stem.trim()).filter(Boolean);
+    if (!selectedStems.length || new Set(selectedStems).size !== selectedStems.length) throw new Error("case list must be nonempty and unique");
+  }
   else filters.push(args[i]);
 }
 const STAGES = ["mir", "convert", "lower", "run"];
@@ -70,8 +75,15 @@ const dirs = { work: join(outDir, "work"), mir: join(outDir, "mir"), lower: join
 for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
 
 const cases = [];
-for (const entry of collectGoldenEntries(features)) {
-  if (filters.length && !filters.some((needle) => entry.stem.includes(needle))) continue;
+const entries = collectGoldenEntries(features);
+if (selectedStems) {
+  if (filters.length) throw new Error("case list and substring filters are mutually exclusive");
+  const available = new Set(entries.map((entry) => entry.stem));
+  for (const stem of selectedStems) if (!available.has(stem)) throw new Error(`unknown case-list stem: ${stem}`);
+}
+const selection = selectedStems ? new Set(selectedStems) : null;
+for (const entry of entries) {
+  if (selection ? !selection.has(entry.stem) : filters.length && !filters.some((needle) => entry.stem.includes(needle))) continue;
   const slug = entry.stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
   const expectedOut = join(features, "expected", `${entry.stem}.out`);
   const expectedErr = join(features, "expected", `${entry.stem}.err.out`);
