@@ -563,25 +563,26 @@ fn plugin_error(rt: &mut JitRuntime, error: plugin_wire::PluginError) -> i64 {
         PluginError::Budget { limit, fault } => (2, Some(limit), fault),
         PluginError::Defect(fault) => (3, None, fault),
     };
+    // String fields stay inline cells (`JetVal::String`), as for every other
+    // host-built record: an `Int` cell is read back as a raw word, not text.
     let frames = fault.frames.into_iter().map(|frame| {
-        let function = rt.heap.alloc_string(frame.function);
-        let module = rt.heap.alloc_string(frame.module);
         JetVal::RecordRef(rt.heap.alloc_record_values(vec![
-            JetVal::Int(function), JetVal::Int(module), JetVal::Int(frame.offset),
+            JetVal::String(frame.function), JetVal::String(frame.component), JetVal::Int(frame.offset),
         ]))
     }).collect();
     let frames = rt.heap.alloc_list_values(frames);
-    let export = rt.heap.alloc_string(fault.export);
-    let message = rt.heap.alloc_string(fault.message);
     let fault = rt.heap.alloc_record_values(vec![
-        JetVal::Int(export), JetVal::Int(message), JetVal::Int(frames),
+        JetVal::String(fault.export), JetVal::String(fault.message), JetVal::Int(frames),
     ]);
     let mut slots = vec![JetVal::Int(tag)];
     if let Some(limit) = limit {
-        slots.push(JetVal::Int(match limit {
+        // A unit variant is a one-cell enum record holding its discriminant,
+        // in the compiler-owned `PluginLimit` row order.
+        let discriminant = match limit {
             PluginLimit::Fuel => 0, PluginLimit::Memory => 1, PluginLimit::Table => 2,
             PluginLimit::Time => 3, PluginLimit::Wire => 4,
-        }));
+        };
+        slots.push(JetVal::RecordRef(rt.heap.alloc_record_values(vec![JetVal::Int(discriminant)])));
     }
     slots.push(JetVal::RecordRef(fault));
     let error = rt.heap.alloc_record_values(slots);
@@ -696,7 +697,7 @@ fn plugin_interpreter_error(error: plugin_wire::PluginError) -> Result<AmbientMi
                 type_name: "PluginFrame".to_string(),
                 fields: vec![
                     ("function".to_string(), MirRuntimeValue::String(frame.function)),
-                    ("module".to_string(), MirRuntimeValue::String(frame.module)),
+                    ("component".to_string(), MirRuntimeValue::String(frame.component)),
                     ("offset".to_string(), MirRuntimeValue::Int(frame.offset)),
                 ],
             }).collect())),
@@ -900,11 +901,11 @@ mod failure_tests {
         let handle: u64 = load.strip_prefix("O:").expect("load returns a handle").parse().unwrap();
         let trap = plugin_wire::plugin_decode_result(&runtime::jet_plugin_call(handle, "trap", "0:")).unwrap_err();
         let PluginError::Guest(fault) = trap else { panic!("expected Guest, got {trap:?}"); };
-        assert_eq!(fault.export, "trap");
+        assert_eq!(fault.export, "trap", "{}", fault.message);
         assert!(!fault.frames.is_empty());
         assert!(fault.frames.len() <= plugin_wire::PLUGIN_MAX_FRAMES);
         assert_eq!(fault.frames[0].function, "trap");
-        assert_eq!(fault.frames[0].module, "failure_guest");
+        assert_eq!(fault.frames[0].component, "failure_guest");
         assert!(fault.frames[0].offset > 0);
 
         assert!(runtime::jet_plugin_close(handle));

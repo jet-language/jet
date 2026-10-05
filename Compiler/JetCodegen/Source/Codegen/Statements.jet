@@ -343,11 +343,20 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, program: JetCodegen
     jet_codegen_leave_scope(&builder, program, scope)
 }
 
-fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, program: JetCodegenProgram, scope: MIRScopeID, body: [TStmt], span: Span) {
+fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, program: JetCodegenProgram, scope: MIRScopeID, body: [TStmt], span: Span, expect_fail: Bool) {
     jet_codegen_lower_block(&builder, program, body)
     exit := jet_codegen_new_block(&builder, program, span, "scope-member.exit")
     join := jet_codegen_new_block(&builder, program, span, "scope-member.join")
-    if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: exit})
+    // Rust lower_scope_member_body: an `.expect_fail` body that ends in an
+    // unconditional stop jumps to its exit after the stop. The stop never
+    // returns, so the jump never runs; it keeps the exit reachable, which is
+    // where a caught stop resumes and which gives the backend's catch match
+    // an arm for the scope.
+    ends_in_stop := false
+    if builder.block_positions.get(builder.current.value) == .Val(at) {
+        if builder.blocks[at].terminator == .Unreachable(reason) -> ends_in_stop = reason == "checked unconditional stop"
+    }
+    if jet_codegen_current_is_open(builder, program) || (expect_fail && ends_in_stop) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: exit})
     jet_codegen_switch_block(&builder, program, exit)
     jet_codegen_leave_scope(&builder, program, scope)
     if jet_codegen_current_is_open(builder, program) -> jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
@@ -363,20 +372,20 @@ fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, program: JetCodeg
         .ExpectFail(expected, message) -> {
             scope := jet_codegen_enter_scope(&builder, program, MIRScopeKind.ScopeMember, span, expected)
             jet_codegen_attach_scope_member(&builder, program, scope, MIRTestScopeMember.ExpectFail{expected_code: expected, expected_message: message})
-            jet_codegen_lower_scope_member_body(&builder, program, scope, body, span)
+            jet_codegen_lower_scope_member_body(&builder, program, scope, body, span, true)
             return
         }
         .Timeout(duration) -> {
             value := jet_codegen_lower_expr(&builder, program, duration)
             scope := jet_codegen_enter_scope(&builder, program, MIRScopeKind.ScopeMember, span, Val("timeout"))
             jet_codegen_attach_scope_member(&builder, program, scope, MIRTestScopeMember.Timeout{duration: value})
-            jet_codegen_lower_scope_member_body(&builder, program, scope, body, span)
+            jet_codegen_lower_scope_member_body(&builder, program, scope, body, span, false)
             return
         }
         .Measure -> {
             scope := jet_codegen_enter_scope(&builder, program, MIRScopeKind.ScopeMember, span, Val("measure"))
             jet_codegen_attach_scope_member(&builder, program, scope, MIRTestScopeMember.Measure)
-            jet_codegen_lower_scope_member_body(&builder, program, scope, body, span)
+            jet_codegen_lower_scope_member_body(&builder, program, scope, body, span, false)
             return
         }
         .Skip -> {
@@ -2831,6 +2840,21 @@ fn jet_codegen_pattern_scan_route(builder: &JetCodegenBuilder, program: JetCodeg
     jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.pattern", member, symbol, 2, [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(result_type), MIRPreludeABI.Value)
 }
 
+// Rust tir_to_mir_expr pattern_scan_captures: an IsSome probe reads no
+// capture, so its carrier keeps the empty tuple. An Unwrap probe reads every
+// hole, so its carrier holds each hole at its checked type, named by
+// position: the canonical capture tuple each PatternCapture indexes. AOT can
+// only read a capture the carrier's type keeps.
+fn jet_codegen_pattern_scan_result_type(expression: TExpr, probe: TMatchProbe) -> Type Never! {
+    fields := [TypeTupleField]{}
+    if probe == TMatchProbe.Unwrap {
+        if expression.ty == .Tuple(checked) {
+            loop (index, field) in checked -> &fields.push(TypeTupleField{name: "{index}", ty: field.ty})
+        }
+    }
+    Type.Option{inner: Type.Tuple{fields: fields}}
+}
+
 fn jet_codegen_lower_string_match_scan(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, subject: TExpr, parts: [StrMatchPart], probe: TMatchProbe) -> MIRValueID {
     subject_value := jet_codegen_lower_expr(&builder, program, subject)
     pattern := [MIRTextPatternPart]{}
@@ -2843,7 +2867,7 @@ fn jet_codegen_lower_string_match_scan(builder: &JetCodegenBuilder, program: Jet
             }
         }
     }
-    result_type := Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{}}}
+    result_type := jet_codegen_pattern_scan_result_type(expression, probe)
     call := jet_codegen_pattern_scan_route(&builder, program, false, result_type)
     matched := jet_codegen_emit_value(&builder, program, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.TextPatternMatch{call: call, subject: subject_value, parts: pattern}})
     jet_codegen_lower_pattern_probe(&builder, program, expression, matched, probe)
@@ -2864,7 +2888,7 @@ fn jet_codegen_lower_binary_match_scan(builder: &JetCodegenBuilder, program: Jet
             }
         }
     }
-    result_type := Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{}}}
+    result_type := jet_codegen_pattern_scan_result_type(expression, probe)
     call := jet_codegen_pattern_scan_route(&builder, program, true, result_type)
     matched := jet_codegen_emit_value(&builder, program, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.BinaryPatternMatch{call: call, subject: subject_value, parts: pattern}})
     jet_codegen_lower_pattern_probe(&builder, program, expression, matched, probe)

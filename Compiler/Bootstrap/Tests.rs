@@ -85,7 +85,6 @@ fn backend_release_profile() -> Option<&'static str> {
 }
 const BOOTSTRAP_ENTRY_RELATIVE: &str = "src/compiler.jet";
 const SMALL_ENTRY_RELATIVE: &str = "main.jet";
-const TASK_ROOTS_FIXTURE_SOURCE: &str = include_str!("../JetEval/Tests/TaskRoots.jet");
 const CORE_FILES_PARTIAL_MOVE_SIBLINGS_SOURCE: &str =
     include_str!("../../tests/fixtures/core_files_partial_move_siblings.jet");
 const UNINIT_FIXED_PARTIAL_EXIT_SOURCE: &str =
@@ -2329,33 +2328,18 @@ fn bootstrap_session_root() -> PathBuf {
 fn assemble_compiler_sources(repo: &Path, task_roots: bool) {
     // The assembler runs only node; the test's own CARGO_TARGET_DIR may lie
     // outside `repo`, which jet-env rejects for cargo commands.
-    let output = Command::new(repo.join("Tools/agent/jet-env"))
+    let mut command = Command::new(repo.join("Tools/agent/jet-env"));
+    command
         .current_dir(repo)
         .env_remove("CARGO_TARGET_DIR")
-        .args(["node", "Compiler/Bootstrap/assemble.mjs"])
+        .args(["node", "Compiler/Bootstrap/assemble.mjs"]);
+    if task_roots {
+        command.arg("--task-roots");
+    }
+    let output = command
         .output()
         .unwrap_or_else(|error| panic!("cannot run bootstrap assembler: {error}"));
     assert_command_success("bootstrap assembler", &output);
-    if !task_roots {
-        return;
-    }
-    let compiler_entry = home_path()
-        .join(BOOTSTRAP_PROJECT_RELATIVE)
-        .join(BOOTSTRAP_ENTRY_RELATIVE);
-    let mut compiler_source = fs::read_to_string(&compiler_entry).unwrap_or_else(|error| {
-        panic!(
-            "cannot read assembled compiler fixture `{}`: {error}",
-            compiler_entry.display()
-        )
-    });
-    compiler_source.push_str("\n\n");
-    compiler_source.push_str(TASK_ROOTS_FIXTURE_SOURCE);
-    fs::write(&compiler_entry, compiler_source).unwrap_or_else(|error| {
-        panic!(
-            "cannot add task-root fixture to the private compiler unit `{}`: {error}",
-            compiler_entry.display()
-        )
-    });
 }
 
 fn write_small_program(project: &Path) -> PathBuf {
@@ -2885,17 +2869,11 @@ fn main() {{
     fs::write(manifest_dir.join(".bootstrap-artifact-id"), &identity)
         .expect("generated compiler identity receipt must be writable");
     println!("cargo:rustc-env=JET_COMPILER_BUILD_ID={{identity}}");
-    // The identity of the compiler *sources* (the root build.rs formula, no
-    // generated extras): every stage built from one source tree reports it as
-    // its compiler identity to the programs it compiles, so the compiler image
-    // a self-compile archives does not change from stage to stage.
-    let source_identity = BuildIdentity::semantic_id(
-        root,
-        BuildIdentity::COMPILER_DOMAIN,
-        BuildIdentity::COMPILER_SOURCES,
-        &facts,
-    )
-    .expect("generated compiler source identity must be computable");
+    // Compiler-authored MIR records the source identity, not this binary's
+    // backend profile, rustc flags, or generated extras. BUILD_ID above keeps
+    // all of those facts for artifact receipts and build/cache invalidation.
+    let source_identity = BuildIdentity::compiler_source_id(root)
+        .expect("generated compiler source identity must be computable");
     println!("cargo:rustc-env=JET_COMPILER_SOURCE_ID={{source_identity}}");
     println!("cargo::rustc-check-cfg=cfg(jet_bootstrap_compiler_artifact)");
     println!("cargo:rustc-cfg=jet_bootstrap_compiler_artifact");

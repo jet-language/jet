@@ -248,6 +248,16 @@ and #816 is the Jet-built compiler full-suite closeout. The policy-family
 homes #808–#813 and the boundary inventory #218 cannot substitute for those
 bootstrap and fixed-point proofs.
 
+The fixed-point output includes both the emitted source and its embedded
+compiler MIR image. [`BuildIdentity`](../../Compiler/Bootstrap/BuildIdentity.rs)
+separates `JET_COMPILER_SOURCE_ID` (canonical compiler source bytes, independent
+of the backend build profile) from `JET_COMPILER_BUILD_ID` (source bytes plus
+build facts and, for generated compiler binaries, generated inputs). The
+private HostFacts supplied to JetDriver use the source identity so changing
+the compiler binary's optimization profile does not change compiler-authored
+MIR. Build receipts and physical artifact/cache identities retain the build
+identity; source identity is not proof that two compiler binaries are identical.
+
 Behavioral parity between any two compiler binaries (#670) is a separate,
 reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-diff.mjs)
 runs the golden, UI and differential corpora through a pinned `--reference`
@@ -786,12 +796,13 @@ as user/guest failure, denied authority, budget exhaustion, or internal host
 defect from typed boundary state, not by parsing backend error text.
 D-PLUGIN-FAILURE1=A carries that cause as `core.plugin.PluginError`, with the
 export name, original display message, and up to 32 innermost-first Wasm frames.
-Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. Frames
-locate the function by name (empty without a name section), module and offset;
-debug-file/line loading is intentionally outside this transport. Failures before
-guest execution carry no frames. A failed load leaves a handle whose first call
-returns the load fault with export `load`, without stopping unrelated host work.
-The existing failure journey records the host call site when the caller uses `?`.
+Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. A
+`PluginFrame` locates the function by name (empty without a name section), the
+Wasm `component` it ran in, and the offset; debug-file/line loading is
+intentionally outside this transport. Failures before guest execution carry no
+frames. A failed load leaves a handle whose first call returns the load fault
+with export `load`, without stopping unrelated host work. A propagated failure
+records the host call site in the ordinary failure journey.
 
 Handles and Wasmtime stores are owner-thread state. Cross-thread use and
 unload of an active call are rejected by the existing handle boundary, and

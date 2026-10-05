@@ -4999,6 +4999,46 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
             cx.cloneable.insert(name.to_string());
         }
     }
+    // D-PLUGIN-FAILURE1=A: `core.plugin` declares no copy of its failure
+    // carrier; the compiler-owned rows (sema core_types, tir_to_mir_types)
+    // are its one identity, so checked patterns need the same owner facts.
+    if cx.core_imports.values().any(|module| module == "core.plugin") {
+        let zero = Span::new(0, 0);
+        let fault = Type::Named("PluginFault".to_string());
+        let limits = ["Fuel", "Memory", "Table", "Time", "Wire"]
+            .into_iter()
+            .map(|variant| (variant.to_string(), VariantPayload::Unit))
+            .collect::<Vec<_>>();
+        let errors = vec![
+            ("Guest".to_string(), VariantPayload::Single(fault.clone(), zero)),
+            ("Denied".to_string(), VariantPayload::Single(fault.clone(), zero)),
+            (
+                "Budget".to_string(),
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "limit".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("PluginLimit".to_string()),
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "fault".to_string(),
+                        name_span: zero,
+                        ty: fault.clone(),
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+            ("Defect".to_string(), VariantPayload::Single(fault, zero)),
+        ];
+        for (name, variants) in [("PluginLimit", limits), ("PluginError", errors)] {
+            for (variant, _) in &variants {
+                cx.variant_owner.insert(variant.clone(), name.to_string());
+            }
+            cx.enum_variants.insert(name.to_string(), variants);
+            cx.cloneable.insert(name.to_string());
+        }
+    }
     if !cx
         .core_imports
         .values()

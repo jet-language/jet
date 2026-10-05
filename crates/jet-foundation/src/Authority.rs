@@ -736,10 +736,6 @@ impl GateKind {
         )
     }
 
-    pub const fn is_rights_kind(self) -> bool {
-        self.is_security()
-    }
-
     const fn display_order(self) -> u8 {
         match self {
             Self::Unsafe => 0,

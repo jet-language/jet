@@ -2424,16 +2424,26 @@ fn notify(ready: Bool) -[Net]> {
             "fn run() { f :: (n: Int) Never! -[]> n }\n",
             "fn run() { f :: (n: Int) -> Point MyError! { n } }\n",
             "fn run() { f :: (n: Int) -> Point !Error { n } }\n",
-            "fn run() { f :: (n: Int) -> Point { n + 1 } }\n",
+            "fn run() { f :: (n: Int) -> Point { total := n + 1\n total } }\n",
         ] {
             let (tokens, _) = lex(source);
             let diagnostics = parse(&tokens).expect_err("lambda annotations must teach");
             assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0399"), "{diagnostics:?}");
         }
+        // Recovery skips the whole braced body, so the body's closing
+        // brace does not surface as a second, stray-`}` error.
+        let (tokens, _) =
+            lex("fn run() {\n    f :: (n: Int) -> Point {\n        total := n + 1\n        total\n    }\n}\n");
+        let diagnostics = parse(&tokens).expect_err("a statement body after a type must teach");
+        let codes: Vec<&str> = diagnostics.iter().map(|diagnostic| &diagnostic.code[..]).collect();
+        assert_eq!(codes, ["E0399"], "{diagnostics:?}");
         program("fn run() { f :: (x: Int) -> Point{x} }\n");
         program("fn run() { f :: (x: Int) -> Point{x: x} }\n");
         program("fn run() { f :: x -[]> Point{x} }\n");
         program("fn run() { f :: (x: Int) -[]> Point{x: x} }\n");
+        // `Type{value}` is a one-value construction (`Meters{n + 1}`), so a
+        // braced value after the arrow is a body, never a return type.
+        program("fn run() { f :: (n: Int) -> Point { n + 1 } }\n");
     }
 
     #[test]

@@ -5,13 +5,11 @@ use jet::Codegen::MIREval::{evaluate_mir_function_with_config, MirEvalConfig, Mi
 use jet::Diagnostics::{Diagnostic, Severity};
 use jet::AST::{AccessConvention, CallArg, Expr, Item, Marker, MarkerCallArg, Program, Stmt};
 use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget, MirFunctionId, MirProgram};
-use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
 
-const SOURCE_MANIFEST: &str = include_str!("../Compiler/Bootstrap/sources.list");
 const PROBE_SOURCE: &str = r####"
 fn selfhost_parser_text(facts: &[Int], text: String) {
     bytes := text.bytes()
@@ -354,56 +352,14 @@ fn parser_packages(root: &Path) -> Vec<String> {
 
 fn parser_source(root: &Path) -> String {
     let packages = parser_packages(root);
-    let mut core_imports = HashSet::new();
-    let mut source = String::new();
-    for row in SOURCE_MANIFEST.lines() {
-        let path = row.trim();
-        if path.is_empty() || path.starts_with('#') {
-            continue;
-        }
-        let parser_input = packages.iter().any(|package| {
+    let mut source = common::compiler_parity_source("selfhost parser parity source", |path| {
+        packages.iter().any(|package| {
             path.strip_prefix(package.as_str()).is_some_and(|rest| rest.starts_with("/Source/"))
-        });
-        if parser_input {
-            source.push_str("// [selfhost parser parity source: ");
-            source.push_str(path);
-            source.push_str("]\n");
-            let text = fs::read_to_string(root.join(path)).expect("canonical parser source");
-            source.push_str(&without_package_imports(&text, &mut core_imports));
-            source.push('\n');
-        }
-    }
+        })
+    });
     source.push_str(PROBE_SOURCE);
     source.push_str(&tier_run_source());
     source
-}
-
-/// D-MOD-CYCLE1=A: Compiler/ files import their dependency packages with
-/// `use jet_<package>.[names]`; the concatenated parity source is one
-/// namespace, so those import blocks are dropped. Files may also repeat one
-/// single-line Core import (`use core.text as unicode`); inside one unit the
-/// repeat is a duplicate import name (E0105), so only the first is kept, as
-/// Compiler/Bootstrap/assemble.mjs does.
-fn without_package_imports(text: &str, core_imports: &mut HashSet<String>) -> String {
-    let mut kept = String::with_capacity(text.len());
-    let mut in_import = false;
-    for line in text.split_inclusive('\n') {
-        if !in_import
-            && (line.starts_with("use jet_") || line.starts_with("use compiler_bootstrap"))
-            && line.contains(".[")
-        {
-            in_import = true;
-        }
-        if in_import {
-            in_import = !line.contains(']');
-            continue;
-        }
-        if line.starts_with("use core.") && !line.contains('[') && !core_imports.insert(line.trim_end().to_string()) {
-            continue;
-        }
-        kept.push_str(line);
-    }
-    kept
 }
 
 struct Pass {

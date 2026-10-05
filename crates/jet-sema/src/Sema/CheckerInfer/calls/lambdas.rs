@@ -75,10 +75,13 @@ impl<'a> Checker<'a> {
         // while its body is checked. If a nested call can fail, retain that
         // failure carrier on the callback; the caller then decides whether its
         // operation can project the carrier (for example collection map/filter)
-        // or must reject the widened callback type.
+        // or must reject the widened callback type. An expected row that is
+        // already fallible (`fn(HTTPRequest) -> HTTPResponse HTTPError!`) is the
+        // callback's whole contract (D-LAMBDA-IFACE2): its body, `return`
+        // included, checks against that row as a named function's would.
         let infer_failure_carrier = expected_callable
             && !expected_result_callable
-            && !exp_ret.is_some_and(|ret| is_unit_type(ret));
+            && !exp_ret.is_some_and(|ret| is_unit_type(ret) || matches!(ret.as_ref(), Type::Result { .. }));
 
         if let Some(ep) = exp_params {
             if lam.params.len() != ep.len() {

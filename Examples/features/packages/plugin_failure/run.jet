@@ -12,9 +12,9 @@ fn run() {
             assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
             frame :: fault.frames[0]
             assert(frame.function == "trap")
-            assert(frame.module == "failure_guest")
+            assert(frame.component == "failure_guest")
             assert(frame.offset > 0)
-            print("trap:Guest export={fault.export} function={frame.function} module={frame.module} located={frame.offset > 0}")
+            print("trap:Guest export={fault.export} function={frame.function} component={frame.component} located={frame.offset > 0}")
         }
         else -> assert(false)
     }
@@ -37,7 +37,7 @@ fn run() {
         else -> assert(false)
     }
     normal :: plugin.load("Examples/features/packages/plugin_failure/failure_guest.wat", policy)
-    value :: normal.normal()?
+    value :: normal.normal()
     assert(value == 42)
     print("normal:Ok {value}")
     malformed :: plugin.load("Examples/features/packages/plugin_failure/malformed_guest.wasm", policy)

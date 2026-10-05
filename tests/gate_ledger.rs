@@ -304,9 +304,11 @@ authority = { holds: { allow: [IO], deny: [Exec] }, grants: { "image-codec": [FS
     )
     .unwrap();
 
+    // D-CLI-ONE1=A retired `jet inspect authority`; package and lock
+    // authority rows are entries of the one gate ledger.
     let json = stdout(&run(
         &scratch.path,
-        &["inspect", "authority", "--json", "run.jet"],
+        &["inspect", "gates", "--json", "run.jet"],
     ));
     for subject in [
         "authority.holds.allow",

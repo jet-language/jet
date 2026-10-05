@@ -10,13 +10,7 @@ use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
 const LARGE_KIND_THRESHOLD: usize = 16;
 
-pub(crate) fn run(
-    args: &[String],
-    json: bool,
-    color: bool,
-    gates: jet::Policy::GateSet,
-    authority_only: bool,
-) {
+pub(crate) fn run(args: &[String], json: bool, color: bool, gates: jet::Policy::GateSet) {
     let Some(file) = entry_file(args) else {
         crate::cli_error!(@fix "E2104", "`jet inspect gates` needs an entry file", "jet inspect gates run.jet");
         exit(jet::ExitCodes::USAGE);
@@ -79,14 +73,14 @@ pub(crate) fn run(
     let entries = ledger
         .entries()
         .iter()
-        .filter(|entry| kind_matches(entry, kind, authority_only))
+        .filter(|entry| kind.is_none_or(|wanted| entry.kind == wanted))
         .filter(|entry| scope_matches(entry, scope.as_deref()))
         .collect::<Vec<_>>();
 
     if json {
         render_json(&entries, &bundle);
     } else {
-        render_human(&entries, &bundle, authority_only);
+        render_human(&entries, &bundle);
     }
 }
 
@@ -129,13 +123,6 @@ fn option_value(args: &[String], name: &str) -> Option<String> {
 
 fn parse_kind(value: &str) -> Result<GateKind, String> {
     GateKind::parse(value).ok_or_else(|| format!("unknown gate kind `{value}`"))
-}
-
-fn kind_matches(entry: &GateEntry, kind: Option<GateKind>, authority_only: bool) -> bool {
-    if authority_only && !entry.kind.is_rights_kind() {
-        return false;
-    }
-    kind.is_none_or(|wanted| entry.kind == wanted)
 }
 
 fn scope_matches(entry: &GateEntry, scope: Option<&str>) -> bool {
@@ -234,12 +221,8 @@ fn render_diagnostics(
     exit(jet::ExitCodes::USER_ERROR);
 }
 
-fn render_human(entries: &[&GateEntry], bundle: &jet::AST::ProgramBundle, authority_only: bool) {
-    println!(
-        "{} gates: {}",
-        if authority_only { "authority" } else { "gates" },
-        entries.len()
-    );
+fn render_human(entries: &[&GateEntry], bundle: &jet::AST::ProgramBundle) {
+    println!("gates: {}", entries.len());
     let mut index = 0;
     while index < entries.len() {
         let kind = entries[index].kind;

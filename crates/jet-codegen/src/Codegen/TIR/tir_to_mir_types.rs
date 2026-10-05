@@ -2393,7 +2393,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
 // Core oracle's vocabulary; field types are read below through
 // `core_struct_field_type`, never guessed from a folded value.
 const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
-    ("PluginFrame", &["function", "module", "offset"]),
+    ("PluginFrame", &["function", "component", "offset"]),
     ("PluginFault", &["export", "message", "frames"]),
     (
         crate::Syntax::TYPE_IO_CONTEXT,

@@ -40,11 +40,14 @@ fn main() {
         &facts,
     )
     .expect("compiler source identity must be readable");
+    let compiler_source = BuildIdentity::compiler_source_id(root)
+        .expect("compiler source identity must be readable");
     let stdlib = BuildIdentity::semantic_id(root, "jet.stdlib.v2", STDLIB_SOURCES, &facts)
         .expect("stdlib source identity must be readable");
     let runner = BuildIdentity::semantic_id(root, "jet.runner.v2", RUNNER_SOURCES, &facts)
         .expect("runner source identity must be readable");
     println!("cargo:rustc-env=JET_COMPILER_BUILD_ID={compiler}");
+    println!("cargo:rustc-env=JET_COMPILER_SOURCE_ID={compiler_source}");
     println!("cargo:rustc-env=JET_STDLIB_BUILD_ID={stdlib}");
     println!("cargo:rustc-env=JET_RUNNER_BUILD_ID={runner}");
     let mut watched = BuildIdentity::COMPILER_SOURCES

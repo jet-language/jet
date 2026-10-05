@@ -28,7 +28,7 @@ pub const PLUGIN_MAX_FRAMES: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginFrame {
     pub function: String,
-    pub module: String,
+    pub component: String,
     pub offset: i64,
 }
 
@@ -92,7 +92,7 @@ pub fn plugin_encode_error(error: &PluginError) -> String {
     let _ = write!(out, "{}:", frames.len());
     for frame in frames {
         plugin_write_tagged(&mut out, 'T', &frame.function);
-        plugin_write_tagged(&mut out, 'T', &frame.module);
+        plugin_write_tagged(&mut out, 'T', &frame.component);
         plugin_write_tagged(&mut out, 'I', &frame.offset.to_string());
     }
     out
@@ -122,11 +122,11 @@ fn plugin_read_error(bytes: &[u8]) -> Option<PluginError> {
     let mut frames = Vec::with_capacity(count);
     for _ in 0..count {
         let function = plugin_read_text(bytes, &mut pos, b'T')?;
-        let module = plugin_read_text(bytes, &mut pos, b'T')?;
+        let component = plugin_read_text(bytes, &mut pos, b'T')?;
         if bytes.get(pos) != Some(&b'I') { return None; }
         pos += 1;
         let offset = plugin_read_payload(bytes, &mut pos)?.parse().ok()?;
-        frames.push(PluginFrame { function, module, offset });
+        frames.push(PluginFrame { function, component, offset });
     }
     if pos != bytes.len() { return None; }
     let fault = PluginFault { export, message, frames };

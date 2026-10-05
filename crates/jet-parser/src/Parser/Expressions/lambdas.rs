@@ -288,6 +288,8 @@ impl<'a> Parser<'a> {
         let typed_body = matches!(&self.peek().kind, TokKind::Ident(name)
             if name.chars().next().is_some_and(char::is_uppercase));
         let body_start = self.peek().span;
+        let body_start_pos = self.pos;
+        let body_start_diags = self.diags.len();
         let struct_body = typed_body && matches!(self.peek2().kind, TokKind::LBrace);
         let error_suffix = matches!(self.peek2().kind, TokKind::Ident(_))
             && matches!(self.toks.get(self.pos + 2).map(|t| &t.kind), Some(TokKind::Bang));
@@ -316,13 +318,18 @@ impl<'a> Parser<'a> {
             let end = self.toks[self.pos - 1].span.end;
             Ok((LambdaBody::Block(statements), end))
         } else {
-            let expression = self.expr().map_err(|diagnostic| {
-                if struct_body {
-                    Self::lambda_interface_diagnostic(body_start)
-                } else {
-                    diagnostic
+            let expression = match self.expr() {
+                Ok(expression) => expression,
+                // `Type { statements }` is a retired return type before a
+                // block body. Resume statement recovery at the type so it
+                // skips the whole braced body, not just its first line.
+                Err(_) if struct_body => {
+                    self.pos = body_start_pos;
+                    self.diags.truncate(body_start_diags);
+                    return Err(Self::lambda_interface_diagnostic(body_start));
                 }
-            })?;
+                Err(diagnostic) => return Err(diagnostic),
+            };
             if matches!(self.peek().kind, TokKind::Eq) || self.peek().kind.compound_op().is_some() {
                 let op_tok = self.bump();
                 let op = op_tok.kind.compound_op();

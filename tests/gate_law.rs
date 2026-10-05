@@ -41,9 +41,9 @@ fn all_fourteen_kinds_have_one_policy_key_and_authoritative_floor() {
 
 #[test]
 fn unused_plain_name_is_not_a_structure_gate_but_written_suppression_is() {
-    let plain = ledger("fn run() { unused_value :: 1 print(\"done\") }\n");
+    let plain = ledger("fn run() {\n    unused_value :: 1\n    print(\"done\")\n}\n");
     assert!(!plain.entries().iter().any(|entry| entry.kind == jet::Sema::GateLedger::GateKind::Structure));
-    let suppressed = ledger("fn run() { _unused_value :: 1 print(\"done\") }\n");
+    let suppressed = ledger("fn run() {\n    _unused_value :: 1\n    print(\"done\")\n}\n");
     assert!(suppressed.entries().iter().any(|entry| entry.kind == jet::Sema::GateLedger::GateKind::Structure && entry.subject.contains("_unused_value")));
 }
 
