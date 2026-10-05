@@ -282,7 +282,7 @@ fn vault_recover_stale_lock(root: OSPath, dir: File, expected_hash: [U8; 32], ex
     start_value :: start ?? return Err(JetVaultError.Conflict)
     nonce_value :: nonce ?? return Err(JetVaultError.Conflict)
     hash_value :: hash ?? return Err(JetVaultError.Conflict)
-    if repo != Val(vault_uuid_hex(expected_repo)) || revision != Val(expected_revision) || !vault_valid_hex(nonce_value, 32) || hash_value != hex_bytes(expected_hash) -> return Err(JetVaultError.Conflict)
+    if repo != vault_uuid_hex(expected_repo) || revision != expected_revision || !vault_valid_hex(nonce_value, 32) || hash_value != hex_bytes(expected_hash) -> return Err(JetVaultError.Conflict)
     current_start :: vault_process_start(pid_value)
     pidfd :: #Unsafe("pidfd_open identifies stale vault lock process without PID reuse confusion") { syscall(VAULT_SYS_PIDFD_OPEN, pid_value as I32, U32{0}) }
     dead :: if pidfd >= 0 {
