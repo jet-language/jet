@@ -456,6 +456,7 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
         TOKEN_IDENT -> {
             if parser_next_statement_ahead(&state) -> return parser_parse_next_statement(&state)
             if token.payload.decoded == "defer" -> return parser_parse_defer_statement(&state)
+            if parser_task_group_ahead(&state) -> return parser_parse_task_group(&state)
             if token.payload.decoded == "assert" && parser_kind_at(&state, 1) == TOKEN_IDENT -> return parser_parse_assert_names(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) -> return parser_parse_prep_if(&state)
             if parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) -> return parser_parse_prep_loop(&state)
@@ -484,6 +485,37 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
 fn parser_scope_member_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT
         && (parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_LBRACE)
+}
+
+// Rust `stmt` (D-CONC-SPAWN1=D): `task.group g { … }` or
+// `task.group g(limit: n) { … }` opens a structured task scope.
+fn parser_task_group_ahead(state: &JetParserState) -> Bool Never! {
+    if parser_current(&state).payload.decoded != "task" || parser_kind_at(&state, 1) != TOKEN_DOT -> return false
+    selector :: parser_lookahead(&state, 2)
+    if selector.kind != TOKEN_IDENT || selector.payload.decoded != "group" || parser_kind_at(&state, 3) != TOKEN_IDENT -> return false
+    opener :: parser_kind_at(&state, 4)
+    opener == TOKEN_LBRACE || opener == TOKEN_LPAREN
+}
+
+fn parser_parse_task_group(state: &JetParserState) -> Stmt {
+    start :: parser_bump(&state)
+    parser_expect(&state, TOKEN_DOT, "after `task`")
+    parser_expect_name(&state, "for the `group` selector")
+    name :: parser_expect_name(&state, "for the task group name")
+    limit := Expr?{None}
+    if parser_current_kind(&state) == TOKEN_LPAREN {
+        parser_bump(&state)
+        label :: parser_expect_name(&state, "for the group limit label")
+        if label.payload.decoded != "limit" {
+            parser_add_error_code(&state, "E0003", label.span, "task-group parameter `{label.payload.decoded}` is not supported", "the group parameter names the maximum number of active children", "write `limit: n`")
+        }
+        parser_expect(&state, TOKEN_COLON, "after `limit`")
+        value :: parser_parse_expression(&state, 1, 0)
+        limit = Val(value.expr)
+        parser_expect(&state, TOKEN_RPAREN, "after the task-group limit")
+    }
+    body :: parser_parse_block(&state)
+    Stmt.TaskGroup{name: name.payload.decoded, name_span: name.span, limit: limit, body: body.statements, span: parser_cover(start.span, body.span)}
 }
 
 fn parser_parse_scope_member(state: &JetParserState) -> Stmt {
