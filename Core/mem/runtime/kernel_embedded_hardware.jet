@@ -614,7 +614,7 @@ pub fn jet_hardware_invoke_pending(callbacks: JetHardwarePendingCallbacks) -> US
     delivered :: if target.selected_os() == .None { callbacks.len } else { callbacks.hosted_callbacks.len() }
     loop index in 0..<delivered {
         callback :: if target.selected_os() == .None {
-            callbacks.callbacks[index] ?? continue
+            callbacks.callbacks[index] ?? next
         } else { callbacks.hosted_callbacks[index] }
         // GATE #4565: kernel primitive
         #Unsafe("generated code inserts only checked C-ABI zero-argument or captured handlers") {

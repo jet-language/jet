@@ -304,7 +304,7 @@ pub fn jet_shared_acquire_ordered(protocols: [Arc<JetSharedProtocol>]) -> [Arc<J
         // GATE #4565: kernel primitive
         if #Unsafe("pointer identity deduplicates adjacent aliases of one acquired native lease") {
             acquired.last().is_some_and(fn(previous) { Arc.ptr_eq(previous, &permit) })
-        } -> continue
+        } -> next
         acquired.push(permit.clone())
         permits.push(^permit)
     }
@@ -436,7 +436,7 @@ impl Drop for JetSharedTransactionGate {
 }
 // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:599
 fn jet_shared_transaction_part_mut(parts: &[JetSharedTransactionPart], protocol: &Arc<JetSharedCanonicalOwner>) -> &JetSharedTransactionPart {
-    if Val(index) :: parts.iter().position(fn(part) { part.protocol.owner_identity() == protocol.owner_identity() }) {
+    if parts.iter().position(fn(part) { part.protocol.owner_identity() == protocol.owner_identity() }) == .Val(index) {
         assert_eq(parts[index].protocol.protocol_order_key(), protocol.protocol_order_key(),
             "one physical Shared owner reported inconsistent protocol ordering keys")
         return &parts[index]
@@ -489,9 +489,9 @@ fn jet_shared_transaction_has_writes(state: &Rc<RefCell<JetSharedTransactionStat
 fn jet_shared_transaction_pop(state: &Rc<RefCell<JetSharedTransactionState>>) -> {
     JET_SHARED_TRANSACTION_STACK.with(fn(stack) {
         stack := stack.borrow_mut()
-        if Val(index) :: stack.iter().rposition(fn(entry) {
+        if stack.iter().rposition(fn(entry) {
             entry.upgrade().is_some_and(fn(candidate) { Rc.ptr_eq(&candidate, state) })
-        }) { stack.remove(index) }
+        }) == .Val(index) { stack.remove(index) }
     })
 }
 // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:689
@@ -505,8 +505,8 @@ fn jet_shared_transaction_merge_nested(parent: &Rc<RefCell<JetSharedTransactionS
         if child.writes {
             loop snapshot in &parent_part.snapshots { snapshot.store(false, Ordering.Release) }
         }
-        if Val(staged) :: child.staged.take() {
-            if Val(parent_staged) :: parent_part.staged.as_ref() { staged.merge_into(parent_staged.as_ref()) }
+        if child.staged.take() == .Val(staged) {
+            if parent_part.staged.as_ref() == .Val(parent_staged) { staged.merge_into(parent_staged.as_ref()) }
             else { parent_part.staged = Val(^staged) }
         }
         parent_part.writes |= child.writes
@@ -652,7 +652,7 @@ impl JetSharedTransaction {
         if parts.is_none() -> return Ok(apply())
         parts := parts.unwrap()
         rollback_hooks := rollback_hooks.unwrap_or_default()
-        if Val(parent) :: parent.and_then(fn(parent) { parent.upgrade() }) {
+        if parent.and_then(fn(parent) { parent.upgrade() }) == .Val(parent) {
             jet_shared_transaction_merge_nested(&parent, ^parts, ^rollback_hooks)
             return Ok(apply())
         }
@@ -707,7 +707,7 @@ impl Drop for JetSharedTransaction {
                 state := state.borrow_mut()
                 if state.parts.take().is_some() { state.rollback_hooks.take() } else { None }
             }
-            if Val(hooks) :: rollback_hooks {
+            if rollback_hooks == .Val(hooks) {
                 jet_shared_transaction_pop(&state)
                 loop hook in hooks.drain(..) { hook() }
             }
@@ -962,7 +962,7 @@ impl JetConditionProtocol {
             if waiter.is_none() { self.pending.fetch_add(1, Ordering.Relaxed) }
             waiter
         }
-        if Val(waiter) :: waiter { waiter.wake() }
+        if waiter == .Val(waiter) { waiter.wake() }
     }
     // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1474
     pub fn notify_all(self: &Self) -> {
@@ -1065,7 +1065,7 @@ fn jet_shared_condition_wait_registered(permit: &JetSharedCanonicalPermit, regis
 // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1603
 fn jet_shared_condition_wait_registered_with_handoff(permit: &JetSharedCanonicalPermit, registration: JetConditionRegistration, waiter: Arc<JetConditionWaiter>, handoff: (&JetSharedWaitHandoff)?) -> () ()! {
     cleanup := JetConditionWaitCleanup{registration: Val(^registration), permit: permit, waiter: waiter.as_ref(), released: false}
-    if Val(owner) :: handoff.as_deref_mut() {
+    if handoff.as_deref_mut() == .Val(owner) {
         if owner.suspend().is_err() {
             _ :: owner.abort()
             return Err(())
@@ -1079,13 +1079,13 @@ fn jet_shared_condition_wait_registered_with_handoff(permit: &JetSharedCanonical
         None -> Ok(true)
     }
     if !matches(resumed, Ok(true)) {
-        if Val(owner) :: handoff.as_deref_mut() { _ :: owner.abort() }
+        if handoff.as_deref_mut() == .Val(owner) { _ :: owner.abort() }
         cleanup.abandon()
         return Err(())
     }
     reacquired :: cleanup.finish()
     if reacquired.is_err() {
-        if Val(owner) :: handoff.as_deref_mut() { _ :: owner.abort() }
+        if handoff.as_deref_mut() == .Val(owner) { _ :: owner.abort() }
         cleanup.abandon()
         return Err(())
     }

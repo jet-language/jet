@@ -171,7 +171,7 @@ fn jet_abi_list_int_ret(v: [JetInt]) -> U64 {
     if v.is_empty() -> return 0
     buf := [U8].new()
     buf.extend_from_slice((v.len() as U32).to_le_bytes())
-    for value in ^v {
+    loop value in ^v {
         bytes :: value.to_string().into_bytes()
         buf.extend_from_slice((bytes.len() as U32).to_le_bytes())
         buf.extend_from_slice(bytes)
@@ -200,7 +200,7 @@ fn jet_abi_list_int_arg(packed: U64) -> [JetInt] {
     assert(count <= (bytes.len() - 4) / 4, "list-int count")
     offset := USize{4}
     values := [JetInt].with_capacity(count)
-    for _ in 0..<count {
+    loop _ in 0..<count {
         assert(offset + 4 <= bytes.len(), "list-int length")
         end :: offset + 4
         value_len :: U32.from_le_bytes(bytes[offset..<end].try_into().unwrap()) as USize
@@ -241,7 +241,7 @@ fn jet_abi_list_string_ret(v: [String]) -> U64 {
     buf := [U8].new()
     count :: v.len() as U32
     buf.extend_from_slice(count.to_le_bytes())
-    for s in v {
+    loop s in v {
         bytes :: s.as_bytes()
         len :: bytes.len() as U32
         buf.extend_from_slice(len.to_le_bytes())
@@ -271,7 +271,7 @@ fn jet_abi_list_string_arg(packed: U64) -> [String] {
     assert(count <= (buf.len() - 4) / 4, "list-string count")
     i := USize{4}
     out := [String].with_capacity(count)
-    for _ in 0..<count {
+    loop _ in 0..<count {
         assert(i + 4 <= buf.len(), "list-string len")
         len :: U32.from_le_bytes(buf[i..<i + 4].try_into().unwrap()) as USize
         i += 4
@@ -344,7 +344,7 @@ fn jet_abi_map_string_int_arg(packed: U64) -> JetMap<String, JetInt> {
     assert(count <= (buf.len() - 4) / 8, "map-string-int count")
     i := USize{4}
     out := JetMap<String, JetInt>.new()
-    for _ in 0..<count {
+    loop _ in 0..<count {
         len_end :: i.checked_add(4).expect("map-string-int key len overflow")
         assert(len_end <= buf.len(), "map-string-int key len")
         len :: U32.from_le_bytes(buf[i..<len_end].try_into().unwrap()) as USize
