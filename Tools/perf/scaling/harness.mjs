@@ -75,14 +75,21 @@ export function exponent(sizes, values) {
 
 // Growth of a marginal series relative to N log N between its first and last
 // measurable rung: 1 is N log N; > k fails. `min` is the resolution: a series
-// whose last marginal value is below it is not judged.
-export function growth(sizes, values, min) {
+// whose last marginal value is below it is not judged, and the first rung is
+// the first whose marginal reaches the resolution. A work counter
+// (`exact`) that is exactly zero on every earlier rung and nonzero on the
+// last "appears": work no smaller input does. Measured time or memory below
+// resolution on every earlier rung is noise, not appearance.
+export function growth(sizes, values, min, exact = false) {
   const usable = sizes.map((x, i) => [x, values[i]]).filter(([, v]) => v !== null && v !== undefined);
   if (usable.length < 2) return { verdict: 'unmeasured', reason: 'fewer than two rungs' };
   const [lastX, lastV] = usable[usable.length - 1];
   if (lastV < min) return { verdict: 'unmeasured', reason: `below resolution (${lastV} < ${min})` };
-  const first = usable.find(([, v]) => v > 0 && v >= min / 8);
-  if (!first || first[0] === lastX) return { verdict: 'appears', reason: `zero until N=${lastX}`, ratio: Infinity };
+  const first = usable.find(([, v]) => v >= min);
+  if (first[0] === lastX) {
+    if (exact && usable.slice(0, -1).every(([, v]) => v === 0)) return { verdict: 'appears', reason: `zero until N=${lastX}`, ratio: Infinity };
+    return { verdict: 'unmeasured', reason: `below resolution until N=${lastX}` };
+  }
   const ratio = (lastV / first[1]) / (nlogn(lastX) / nlogn(first[0]));
   return { verdict: 'fitted', ratio, from: first[0], to: lastX, exponent: exponent(usable.map(([x]) => x), usable.map(([, v]) => Math.max(v, 0))) };
 }
@@ -117,7 +124,7 @@ export function judge(series, bounds = FAMILIES) {
     const base = series.baseline?.ok ? (series.baseline.metrics[key] ?? 0) : 0;
     const values = points.map(point => (key in point.metrics ? point.metrics[key] - base : null));
     const { min, bound } = bounds[family(key)];
-    metrics[key] = { ...growth(sizes, values, min), bound, values };
+    metrics[key] = { ...growth(sizes, values, min, family(key) === 'counter'), bound, values };
   }
   const failures = [];
   const superlinear = key => metrics[key].verdict === 'appears' || (metrics[key].verdict === 'fitted' && metrics[key].ratio > metrics[key].bound);
