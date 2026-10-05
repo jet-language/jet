@@ -4682,7 +4682,7 @@ impl<'a> Checker<'a> {
                     *e = crate::Sema::CheckerCoreLib::dyn_call(receiver, method, vec![key, site], json_ty(), span);
                     return Some(json_ty());
                 }
-                let result = self.infer_index_with_base_type(base, index, span, kind, base_ty);
+                let result = self.infer_index_with_base_type(index, span, kind, base_ty);
                 if matches!(kind, IndexKind::Range) && self.loop_depth > 0 {
                     self.diags.push(Diagnostic::lint(
                         "L0501",
@@ -6896,25 +6896,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn infer_index(
-        &mut self,
-        base: &mut Box<Expr>,
-        index: &mut Box<Expr>,
-        span: &Span,
-        kind: &mut IndexKind,
-    ) -> Option<Type> {
-        // Keep the sema-to-TIR contract total even when an earlier expression
-        // error prevents either operand from producing a type. Diagnostics
-        // compilation still lowers the surrounding function, so an unknown
-        // index kind here would turn the user's real error into an ICE.
-        *kind = IndexKind::List;
-        self.borrow_ctx = true;
-        let base_ty = self.infer(base)?;
-        self.infer_index_with_base_type(base, index, span, kind, base_ty)
-    }
-
     fn infer_index_with_base_type(
-        &mut self, base: &mut Box<Expr>, index: &mut Box<Expr>,
+        &mut self, index: &mut Box<Expr>,
         span: &Span, kind: &mut IndexKind, base_ty: Type,
     ) -> Option<Type> {
         if let Expr::Ident(name, selector_span) = index.as_ref() {

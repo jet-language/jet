@@ -4103,7 +4103,8 @@ fn jet_rust_emit_dyn_values(ctx: &JetRustEmitContext, function: MIRFunction, row
     loop (index, value) in values {
         if index == 0 -> next
         if (row.member == "index_at" || row.member == "get_at") && index == 1 {
-            &rendered.push(jet_rust_emit_native_int_argument(&ctx, jet_rust_emit_value_consume(ctx, value), None))
+            consumed :: jet_rust_emit_value_consume(ctx, value)
+            &rendered.push(jet_rust_emit_native_int_argument(&ctx, consumed, None))
         } else if row.signature.borrow_mask[index] {
             &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read))
         } else {

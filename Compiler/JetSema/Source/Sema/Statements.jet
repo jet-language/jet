@@ -3556,7 +3556,7 @@ fn sema_stmt_is_dyn_index(operation: THandleOp) -> Bool Never! {
 
 // Collect the access chain without materializing intermediate Dyn copies:
 // the runtime setter walks the original root place and never grows prefixes.
-fn sema_stmt_dyn_path_root(place: TExpr, keys: &[Bool], steps: &[TExpr]) -> TExpr Never! {
+fn sema_stmt_dyn_path_root(place: ^TExpr, keys: &[Bool], steps: &[TExpr]) -> TExpr Never! {
     if place.kind == .HandleMethod(receiver, operation, args) {
         if operation == {
             .DynIndexKey(_, _) | .DynIndexAt(_, _) -> {
@@ -3599,19 +3599,20 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         }
         keys := [Bool]{}
         steps := [TExpr]{}
+        span :: ~place.span
+        site :: if operation == {
+            .DynIndexKey(text, _) | .DynIndexAt(text, _) -> text
+            else -> "…"
+        }
         root :: sema_stmt_dyn_path_root(place, &keys, &steps)
         checked :: sema_check_expression(expr, Val(sema_dyn_type()), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         if sema_copy_site_check_assignment(expr, environment, scopes, context, &diagnostics) -> return None
         if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return None
         if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return None
         &steps.push(checked)
-        site :: if operation == {
-            .DynIndexKey(text, _) | .DynIndexAt(text, _) -> text
-            else -> "…"
-        }
-        set :: THandleOp.DynSetPath{keys: keys, site: site, location: sema_expression_panic_location(environment, place.span)}
-        value :: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: root, operation: set, args: steps}, place.span)
-        return Val(TStmt.ExprStmt{value: value, span: Span{start: place.span.start, end: expr_span(expr).end}})
+        set :: THandleOp.DynSetPath{keys: keys, site: site, location: sema_expression_panic_location(environment, span)}
+        value :: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: root, operation: set, args: steps}, span)
+        return Val(TStmt.ExprStmt{value: value, span: Span{start: span.start, end: expr_span(expr).end}})
     }
     if target == .Index(index_base, _, index_span, _) && place.kind == .Index(checked_base, _, _, _, _, _) {
         if sema_columnar_list_element(environment, checked_base.ty) == .Val(element) {
