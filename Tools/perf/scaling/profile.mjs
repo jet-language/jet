@@ -5,7 +5,7 @@
 // its source file: a Jet compiler function (generated compiler, `jetc0`) to
 // `Compiler/**.jet`, a Rust symbol (`jet`) to its crate module file.
 //
-// node profile.mjs RUN_DIR PHASE...   (RUN_DIR holds perf.data and trace.json)
+// node profile.mjs BUILD_DIR TRACE_FILE PHASE...   (BUILD_DIR holds perf.data)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -85,7 +85,7 @@ export const profileRun = {
   wrap: dir => [PERF, 'record', '-q', '-F', '199', '-k', 'CLOCK_REALTIME', '--call-graph', 'fp', '-m', '16', '-o', path.join(dir, 'perf.data'), '--'],
 
   // Per phase: samples, top self symbols, top inclusive compiler functions.
-  async attribute(dir, phases, { repo, top = 12, ok = true, traceFile = path.join(dir, 'trace.json') } = {}) {
+  async attribute(dir, phases, { repo, traceFile, top = 12, ok = true } = {}) {
     const intervals = phaseIntervals(readTrace(traceFile));
     const wanted = new Set(phases);
     const stats = new Map(phases.map(phase => [phase, { samples: 0, self: new Map(), inclusive: new Map() }]));
@@ -135,13 +135,13 @@ export const profileRun = {
 };
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [dir, ...phases] = process.argv.slice(2);
-  if (!dir || !phases.length) {
-    console.error('Usage: node profile.mjs RUN_DIR PHASE...   (RUN_DIR holds perf.data and trace.json)');
+  const [dir, traceFile, ...phases] = process.argv.slice(2);
+  if (!dir || !traceFile || !phases.length) {
+    console.error('Usage: node profile.mjs BUILD_DIR TRACE_FILE PHASE...   (BUILD_DIR holds perf.data)');
     process.exit(2);
   }
   const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-  const result = await profileRun.attribute(path.resolve(dir), phases, { repo });
+  const result = await profileRun.attribute(path.resolve(dir), phases, { repo, traceFile: path.resolve(traceFile) });
   for (const [phase, data] of Object.entries(result.phases)) {
     console.log(`== ${phase}: ${data.samples} samples`);
     console.log('-- self');

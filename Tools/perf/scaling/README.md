@@ -31,6 +31,8 @@ failures); changed options or compilers require a new work directory.
 Generated projects, compiler stores/output and `perf.data` go under
 `--build-root` (default `/mnt/jetscratch/scaling-gate`), keyed by evidence
 directory; each point records its `build_dir` for artifact cleanup after landing.
+Re-render a profile with `node Tools/perf/scaling/profile.mjs BUILD_DIR TRACE_FILE PHASE...`,
+passing the recorded build directory and the evidence directory's `trace.json`.
 To queue the gate without monopolizing the quiet lane, run `enqueue.mjs` with
 the compiler/work-directory options and `JET_SCALING_QUEUE_STAMP` naming the
 replaced job whose mtime must be retained. It writes three
