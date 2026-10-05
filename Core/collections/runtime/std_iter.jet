@@ -60,7 +60,10 @@ fn jet_list_count_where_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool) -> I64 {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:120
 fn jet_list_update_first_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool, replacement: T) -> Bool {
     for index in 0..xs.len() {
-        if predicate(&xs[index]) { xs[index] = ^replacement; return true }
+        if predicate(&xs[index]) {
+            xs[index] = ^replacement
+            return true
+        }
     }
     false
 }
@@ -73,7 +76,10 @@ pub fn jet_list_count_where_result_kernel<T, E>(xs: &[T], predicate: fn(&T) -> B
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:156
 pub fn jet_list_update_first_result_kernel<T, E>(xs: &[T], predicate: fn(&T) -> Bool E!, replacement: T) -> Bool E! {
     for index in 0..xs.len() {
-        if predicate(&xs[index])? { xs[index] = ^replacement; return Ok(true) }
+        if predicate(&xs[index])? {
+            xs[index] = ^replacement
+            return Ok(true)
+        }
     }
     Ok(false)
 }

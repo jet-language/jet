@@ -79,7 +79,10 @@ impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
     pub fn get(self: &Self, key: &K) -> V? {
         // GATE #4565: kernel primitive
         state := #Unsafe("hold memo mutex across LRU promotion and statistics; recover poison") { self.state.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }) }
-        value :: match state.cache.get(&Val(key.clone())) { Val(value) -> value, None -> { state.misses += 1; return None } }
+        value :: match state.cache.get(&Val(key.clone())) { Val(value) -> value, None -> {
+            state.misses += 1
+            return None
+        } }
         state.hits += 1
         Val(^value)
     }

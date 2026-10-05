@@ -110,7 +110,10 @@ impl JetStringSplitIter.Iterator {
         if self.separator == {
             .Empty -> {
                 if self.phase == {
-                    0 -> { self.phase = 1; .Val(String.new()) }
+                    0 -> {
+                        self.phase = 1
+                        .Val(String.new())
+                    }
                     1 -> {
                         if self.offset >= self.source.len() {
                             self.phase = 2
@@ -139,7 +142,10 @@ impl JetStringSplitIter.Iterator {
                         self.offset = end + separator_len
                         .Val(self.source[start..end].to_owned())
                     }
-                    .None -> { self.done = true; .Val(self.source[start..].to_owned()) }
+                    .None -> {
+                        self.done = true
+                        .Val(self.source[start..].to_owned())
+                    }
                 }
             }
         }
@@ -213,7 +219,10 @@ impl<T> JetChunksIter<T>.Iterator {
     fn next(self: &JetChunksIter<T>) -> [T]? {
         chunk := [T].with_capacity(self.size)
         for _ in 0..self.size {
-            if self.inner.next() == { .Val(x) -> chunk.push(^x); .None -> break }
+            if self.inner.next() == {
+                .Val(x) -> chunk.push(^x)
+                .None -> break
+            }
         }
         if chunk.is_empty() -> .None else -> .Val(^chunk)
     }
@@ -267,7 +276,10 @@ fn jet_iter_filter_map<T, U, E>(it: JetIter<T>, f: fn(&T) -> U E!) -> JetIter<U>
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2259
 fn jet_iter_scan<T, U: Clone>(it: JetIter<T>, init: U, f: fn(&U, &T) -> U) -> JetIter<U> {
     acc := ^init
-    JetIter { source: Box.new(it.source.map(fn(x) { acc = f(&acc, &x); acc.clone() })) }
+    JetIter { source: Box.new(it.source.map(fn(x) {
+        acc = f(&acc, &x)
+        acc.clone()
+    })) }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2273
 fn jet_iter_flatten<T>(it: JetIter<[T]>) -> JetIter<T> { JetIter { source: Box.new(it.source.flatten()) } }
@@ -277,7 +289,10 @@ impl<T: Clone> JetIntersperseIter<T>.Iterator {
     type Item = T
     // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2286
     fn next(self: &JetIntersperseIter<T>) -> T? {
-        if !self.started { self.started = true; return self.inner.next() }
+        if !self.started {
+            self.started = true
+            return self.inner.next()
+        }
         if self.turn_sep {
             self.turn_sep = false
             self.next_item = self.inner.next()
@@ -379,7 +394,10 @@ fn jet_list_each_ref<T, E>(xs: &[T], f: fn(&T) -> JetOutcome<Unit, E>) -> JetOut
 fn jet_list_scan<T, U: Clone>(xs: [T], init: U, f: fn(&U, &T) -> U) -> [U] {
     acc := ^init
     out: [U] := []
-    for x in &xs { acc = f(&acc, x); out.push(acc.clone()) }
+    for x in &xs {
+        acc = f(&acc, x)
+        out.push(acc.clone())
+    }
     ^out
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2551
@@ -415,7 +433,10 @@ fn jet_list_max_by<T, K: Ord, I: IntoIterator<Item = T>>(xs: I, f: fn(&T) -> K) 
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2617
 fn jet_list_group_by<T: Clone, K: Ord + Clone, I: IntoIterator<Item = T>>(xs: I, f: fn(&T) -> K) -> [K:[T]] {
     m: [K:[T]] := [:]
-    for x in xs { k :: f(&x); m.entry(^k).or_default().push(^x) }
+    for x in xs {
+        k :: f(&x)
+        m.entry(^k).or_default().push(^x)
+    }
     ^m
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2632
@@ -528,14 +549,21 @@ fn jet_iter_average_float(it: JetIter<F64>) -> F64 {
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2797
 fn jet_iter_compare<T: Ord>(it: JetIter<T>, other: [T]) -> I64 {
-    if it.to_list().as_slice().cmp(other.as_slice()) == { .Less -> -1; .Equal -> 0; .Greater -> 1 }
+    if it.to_list().as_slice().cmp(other.as_slice()) == {
+        .Less -> -1
+        .Equal -> 0
+        .Greater -> 1
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2805
 fn jet_iter_split_at<T, R>(it: JetIter<T>, n: I64, build: fn([T], [T]) -> R) -> R {
     xs :: it.to_list()
     count :: n.max(0) as Usize
     if count >= xs.len() -> build(^xs, [])
-    else { right :: xs.split_off(count); build(^xs, ^right) }
+    else {
+        right :: xs.split_off(count)
+        build(^xs, ^right)
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2820
 fn jet_iter_chunk_while<T: Clone>(it: JetIter<T>, f: fn(&T, &T) -> Bool) -> JetIter<[T]> {
@@ -543,7 +571,10 @@ fn jet_iter_chunk_while<T: Clone>(it: JetIter<T>, f: fn(&T, &T) -> Bool) -> JetI
     chunks: [[T]] := []
     for x in xs {
         if chunks.last_mut() == .Val(last) {
-            if f(last.last().unwrap(), &x) { last.push(^x); continue }
+            if f(last.last().unwrap(), &x) {
+                last.push(^x)
+                continue
+            }
         }
         chunks.push([^x])
     }
@@ -617,7 +648,10 @@ fn jet_collection_float_sort_cmp(left: F64, right: F64) -> Ordering {
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2931
 pub fn jet_list_min_max_float<R>(xs: &[F64], build: fn(F64, F64) -> R) -> JetOutcome<R, JetAbsent> {
-    first :: if xs.first() == { .Val(first) -> first; .None -> return Err(JetAbsent) }
+    first :: if xs.first() == {
+        .Val(first) -> first
+        .None -> return Err(JetAbsent)
+    }
     min := first
     max := first
     for value in &xs[1..] {
@@ -630,7 +664,10 @@ pub fn jet_list_min_max_float<R>(xs: &[F64], build: fn(F64, F64) -> R) -> JetOut
 pub fn jet_list_min_max_by<T: Clone, K: Ord, R>(xs: &[T], f: fn(&T) -> K, build: fn(T, T) -> R) -> JetOutcome<R, JetAbsent> {
     min :: jet_list_min_by(xs.iter().cloned(), fn(x) { f(x) })
     max :: jet_list_max_by(xs.iter().cloned(), fn(x) { f(x) })
-    if (min, max) == { (.Ok(lo), .Ok(hi)) -> Ok(build(^lo, ^hi)); _ -> Err(JetAbsent) }
+    if (min, max) == {
+        (.Ok(lo), .Ok(hi)) -> Ok(build(^lo, ^hi))
+        _ -> Err(JetAbsent)
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2966
 fn jet_list_starts_with<T: PartialEq>(xs: &[T], prefix: &[T]) -> Bool { xs.starts_with(prefix) }
@@ -640,7 +677,12 @@ fn jet_list_ends_with<T: PartialEq>(xs: &[T], suffix: &[T]) -> Bool { xs.ends_wi
 fn jet_list_equal<T: PartialEq>(left: &[T], right: &[T]) -> Bool { left == right }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2983
 fn jet_list_order<T: PartialOrd>(left: &[T], right: &[T]) -> I8 {
-    if left.partial_cmp(right) == { .Val(.Less) -> 0; .Val(.Equal) -> 1; .Val(.Greater) -> 2; .None -> 3 }
+    if left.partial_cmp(right) == {
+        .Val(.Less) -> 0
+        .Val(.Equal) -> 1
+        .Val(.Greater) -> 2
+        .None -> 3
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2992
 fn jet_list_unzip<T, U, I: IntoIterator<Item = (T, U)>>(xs: I) -> ([T], [U]) { xs.into_iter().unzip() }
@@ -733,11 +775,20 @@ pub fn jet_coll_counter_add(counter: &JetCounter, key: &String, amount: I64) -> 
     for (stored_key, stored_count) in counter.keys.iter().zip(&counter.counts) {
         if stored_key == key {
             next :: stored_count + amount
-            if next != 0 { keys.push(stored_key.clone()); counts.push(next) }
+            if next != 0 {
+                keys.push(stored_key.clone())
+                counts.push(next)
+            }
             found = true
-        } else { keys.push(stored_key.clone()); counts.push(stored_count) }
+        } else {
+            keys.push(stored_key.clone())
+            counts.push(stored_count)
+        }
     }
-    if !found && amount != 0 { keys.push(key.clone()); counts.push(amount) }
+    if !found && amount != 0 {
+        keys.push(key.clone())
+        counts.push(amount)
+    }
     JetCounter { keys: ^keys, counts: ^counts }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:3224
@@ -778,7 +829,10 @@ pub fn jet_coll_counter_most_common(counter: &JetCounter, k: I64) -> JetCounter 
         for (index, count) in counter.counts.iter().enumerate() {
             if !used[index] && best.is_none_or(fn(best_index) { count > counter.counts[best_index] }) -> best = .Val(index)
         }
-        index :: if best == { .Val(index) -> index; .None -> break }
+        index :: if best == {
+            .Val(index) -> index
+            .None -> break
+        }
         used[index] = true
         keys.push(counter.keys[index].clone())
         counts.push(counter.counts[index])
@@ -811,10 +865,20 @@ pub fn jet_coll_map_set(map: &JetOrderedMap, key: &String, value: &String) -> Je
     values := [String].with_capacity(map.values.len() + 1)
     found := false
     for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
-        if stored_key == key { keys.push(key.clone()); values.push(value.clone()); found = true }
-        else { keys.push(stored_key.clone()); values.push(stored_value.clone()) }
+        if stored_key == key {
+            keys.push(key.clone())
+            values.push(value.clone())
+            found = true
+        }
+        else {
+            keys.push(stored_key.clone())
+            values.push(stored_value.clone())
+        }
     }
-    if !found { keys.push(key.clone()); values.push(value.clone()) }
+    if !found {
+        keys.push(key.clone())
+        values.push(value.clone())
+    }
     JetOrderedMap { keys: ^keys, values: ^values }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:3361
@@ -822,7 +886,10 @@ pub fn jet_coll_map_remove(map: &JetOrderedMap, key: &String) -> JetOrderedMap {
     keys := [String].with_capacity(map.keys.len())
     values := [String].with_capacity(map.values.len())
     for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
-        if stored_key != key { keys.push(stored_key.clone()); values.push(stored_value.clone()) }
+        if stored_key != key {
+            keys.push(stored_key.clone())
+            values.push(stored_value.clone())
+        }
     }
     JetOrderedMap { keys: ^keys, values: ^values }
 }

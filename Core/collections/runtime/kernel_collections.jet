@@ -457,7 +457,7 @@ fn jet_deque_push_back<T>(queue: &VecDeque<T>,value: T) -> Never! { queue.push_b
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:748
 #Inline(Always)
 fn jet_deque_delete<T: PartialEq>(queue: &VecDeque<T>,value: T) -> Never! {
-    if queue.iter().position(fn(candidate) -> candidate == value) is Val(index) -> _ :: queue.remove(index)
+    if queue.iter().position(fn(candidate) -> candidate == value) == .Val(index) -> _ :: queue.remove(index)
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:755
 #Inline(Always)
@@ -708,8 +708,11 @@ impl<T: PartialEq> JetSetReplaceKernel for [T] {
     type Item = T
     // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1194
     fn replace_value(self: &Self,value: Self.Item) -> Self.Item? Never! {
-        if self.iter().position(fn(item) -> item == value) is Val(index) -> Val(mem.replace(&self[index],^value))
-        else -> { self.push(^value); None }
+        if self.iter().position(fn(item) -> item == value) == .Val(index) -> Val(mem.replace(&self[index],^value))
+        else -> {
+            self.push(^value)
+            None
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:1204
@@ -838,7 +841,7 @@ impl JetLoopSourceKind {
             "plain" -> Val(.Plain), "chars" -> Val(.Chars), "lines:file" -> Val(.LinesFile)
             "lines:stdin" -> Val(.LinesStdin), "lines:process" -> Val(.LinesProcessStream), "channel" -> Val(.ChannelReceiver)
             _ -> {
-                if wire.strip_prefix("encoding:") is Val(payload) {
+                if wire.strip_prefix("encoding:") == .Val(payload) {
                     (reader_type,rest) :: take(payload)?
                     if reader_type.is_empty() or not rest.is_empty() -> return None
                     return Val(.EncodingReader{reader_type: reader_type})
@@ -888,7 +891,10 @@ pub fn jet_loop_range_advance(cursor: &JetLoopRangeCursor) -> Never! {
     if cursor.done -> return
     cursor.current = match cursor.current.checked_add(cursor.step) {
         Val(value) -> value
-        None -> { cursor.done = true; return }
+        None -> {
+            cursor.done = true
+            return
+        }
     }
     cursor.done = not jet_loop_range_has_next(cursor)
 }
@@ -927,7 +933,11 @@ fn jet_loop_iter_bytes_value(cursor: &JetByteLoopIterCursor) -> U8 Never! {
 fn jet_loop_iter_bytes_advance(cursor: &JetByteLoopIterCursor) -> Never! {
     if cursor.exhausted -> return
     loop _ in 1..<cursor.step {
-        if cursor.iter.next().is_none() { cursor.current = None; cursor.exhausted = true; return }
+        if cursor.iter.next().is_none() {
+            cursor.current = None
+            cursor.exhausted = true
+            return
+        }
     }
     cursor.current = cursor.iter.next().copied()
     cursor.exhausted = cursor.current.is_none()
