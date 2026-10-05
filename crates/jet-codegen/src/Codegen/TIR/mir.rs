@@ -10421,7 +10421,15 @@ impl<'a> LowerCtx<'a> {
             } else {
                 MirAccess::Read
             };
-            let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !cloned;
+            // A `^name` capture the body only reads: the closure takes the
+            // binding (the scope never uses it again), so its owning slot is
+            // filled by moving the binding in, never by a copy; each call
+            // still lends the body a read of that slot.
+            let taken = access == MirAccess::Read
+                && !cloned
+                && lambda.capture_facts.taken.contains(source)
+                && matches!(self.ownership_for(ty), MirOwnership::Owned);
+            let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !cloned && !taken;
             // `runtime` is the canonical TIR slot used by the lambda body and,
             // for borrowed and moved captures, the exact enclosing slot (which
             // may carry a generated spelling). A cloned/materialized capture's
@@ -10433,7 +10441,13 @@ impl<'a> LowerCtx<'a> {
                 .get(source)
                 .cloned()
                 .unwrap_or_else(|| runtime.clone());
-            let outer_access = if cloned { MirAccess::Read } else { access };
+            let outer_access = if cloned {
+                MirAccess::Read
+            } else if taken {
+                MirAccess::Move
+            } else {
+                access
+            };
             let outer_name = self.resolved_local_name(&TLocal::user(outer_slot));
             let place = self.place_for_local(&TLocal::user(outer_name), outer_access)?;
             if borrowed {
@@ -10465,7 +10479,7 @@ impl<'a> LowerCtx<'a> {
                         },
                     )?
                 }
-            } else if matches!(access, MirAccess::Move) {
+            } else if matches!(access, MirAccess::Move) || taken {
                 self.emit_owned(
                     &format!("closure.capture.{slot}.move"),
                     Some(ty.clone()),

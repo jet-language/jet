@@ -685,7 +685,7 @@ fn jet_deque_contains<T: PartialEq>(
 }
 
 #[inline(always)]
-fn jet_string_starts_with(text: &String, prefix: &String) -> bool {
+fn jet_string_starts_with(text: &str, prefix: &str) -> bool {
     text.starts_with(prefix)
 }
 
@@ -695,7 +695,7 @@ fn jet_string_copy(text: &String) -> String {
 }
 
 #[inline(always)]
-fn jet_string_ends_with(text: &String, suffix: &String) -> bool {
+fn jet_string_ends_with(text: &str, suffix: &str) -> bool {
     text.ends_with(suffix)
 }
 #[inline(always)]
