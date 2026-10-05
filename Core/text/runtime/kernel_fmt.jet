@@ -3,12 +3,13 @@
 // implementation (D-CORE-SOURCE-AUTHORITY1, owner rulings on #4588); these
 // adapters only marshal the compiler's carriers (I64, the exact Int's decimal
 // spelling) and keep the compiler-referenced jet_fmt_* names until the
-// compiler side changes with them.
+// compiler side changes with them. Members reached only through their
+// source-owned dispatcher rows (number, bytes, duration, ordinal, plural,
+// pad_right, pad_center) have no runtime entry point here; interpolation
+// selectors and quantity display still name the rows below.
 use core.text.fmt as fmt
 use core.text.runtime.kernel_float_format as float_format
 
-// Rust: Fmt.rs:3
-pub fn jet_fmt_number(value: I64) -> String Never! { fmt.number(Int{value}) }
 // Rust: Fmt.rs:7
 pub fn jet_fmt_decimal(value: F64, precision: I64) -> String Never! { fmt.decimal(value, Int{precision}) }
 // Rust: Fmt.rs:14. Quantity display drops only an incidental ".0" from the
@@ -39,14 +40,8 @@ pub fn jet_fmt_oct_decimal(value: String) -> String Never! {
 pub fn jet_fmt_sci(value: F64, precision: I64) -> String Never! { fmt.sci(value, Int{precision}) }
 pub fn jet_fmt_pretty(value: String) -> String Never! { fmt.pretty(value) }
 pub fn jet_fmt_percent(value: F64, precision: I64) -> String Never! { fmt.percent(value, Int{precision}) }
-pub fn jet_fmt_bytes(value: I64) -> String Never! { fmt.bytes(Int{value}) }
-pub fn jet_fmt_duration(ms: I64) -> String Never! { fmt.duration(Int{ms}) }
-pub fn jet_fmt_ordinal(value: I64) -> String Never! { fmt.ordinal(Int{value}) }
-pub fn jet_fmt_plural(count: I64, singular: String, plural: String) -> String Never! { fmt.plural(Int{count}, singular, plural) }
 pub fn jet_fmt_pad(text: String, width: I64, fill: String) -> String Never! { fmt.pad(text, Int{width}, fill) }
 pub fn jet_fmt_pad_left(text: String, width: I64, fill: String) -> String Never! { fmt.pad_left(text, Int{width}, fill) }
-pub fn jet_fmt_pad_right(text: String, width: I64, fill: String) -> String Never! { fmt.pad_right(text, Int{width}, fill) }
-pub fn jet_fmt_pad_center(text: String, width: I64, fill: String) -> String Never! { fmt.pad_center(text, Int{width}, fill) }
 
 // An optional sign then ASCII digits only (Rust rejects everything else).
 fn decimal_spelling(value: String) -> Int? Never! {
