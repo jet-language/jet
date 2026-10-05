@@ -274,8 +274,8 @@ pub fn jet_scheduler_wait_without_unwind<T>(f: fn() -> T) -> JetSchedulerWait<T>
         })
     }
     if result == {
-        Ok(value) -> .Ready(^value)
-        Err(payload) -> jet_scheduler_classify_unwind<T>(^payload)
+        .Ok(value) -> .Ready(^value)
+        .Err(payload) -> jet_scheduler_classify_unwind<T>(^payload)
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:387
@@ -371,7 +371,7 @@ impl ParkSlot {
                         if self.notified.swap(false, Ordering.Acquire) || result.timed_out() { break }
                     }
                 }
-                None -> {
+                .None -> {
                     loop {
                         guard = self.cv.wait(^guard).unwrap()
                         if self.notified.swap(false, Ordering.Acquire) { break }
