@@ -168,7 +168,7 @@ fn plugin_authority_from_wire(wire: String) -> CanonicalAuthority Err! {
     rights := [String]{}
     loop raw in wire.split('\n') {
         right := raw.trim() // #4303
-        if right.is_empty() -> continue
+        if right.is_empty() -> next
         if parse_right(right).is_none() -> return Err("plugin authority contains an unknown right `{right}`")
         &rights.push(right.to_string())
     }
@@ -204,11 +204,11 @@ fn plugin_scoped_candidates(path: String, authority: CanonicalAuthority, require
     saw_root := false
     candidates := [(OSPath, OSPath)]{}
     loop right in authority.rights() {
-        root_text :: match right.strip_prefix(prefix) { Val(root) -> root, None -> continue }
+        root_text :: match right.strip_prefix(prefix) { Val(root) -> root, None -> next }
         saw_root = true
         if root_text.is_empty() -> return Err("plugin {required_right} authority names an empty root")
         root :: OSPath.new(if root_text == "repo" { "." } else { root_text.to_string() })
-        relative :: match plugin_relative_candidate(path_ref, root_text.to_string())? { Val(relative) -> relative, None -> continue }
+        relative :: match plugin_relative_candidate(path_ref, root_text.to_string())? { Val(relative) -> relative, None -> next }
         &candidates.push((^root, ^relative))
     }
     if not saw_root -> return Err("plugin operation requires an explicit resource-scoped {required_right} authority")
