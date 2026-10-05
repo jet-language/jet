@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 4b0d9ca96f8c32268c78b269f1988d835371943e024a346cc3f9f17ca4a613c5
+// Source SHA-256: dd3e5571ee0e8f5434ffc964333099dfe82b4dd7ec461211aa1cba6e8fbd255b
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2412,26 +2412,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.http.client", "get", "jet_http_client_get", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_http_client_get"),
     CoreCallRecord::new( "core.http.client", "post", "jet_http_client_post", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_http_client_post"),
     CoreCallRecord::new( "core.http.client", "request", "jet_http_client_request_new", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_http_client_request_new"),
-    CoreCallRecord::new( "core.regex", "flags", "jet_std::jet_regex_flags", true, &[false, false, false], ),
-    CoreCallRecord::new( "core.regex", "escape", "jet_std::jet_regex_escape", true, &[true], ),
-    CoreCallRecord::new( "core.regex", "compile", "jet_std::jet_regex_compile", true, &[true], ),
-    CoreCallRecord::new( "core.regex", "compile_with", "jet_std::jet_regex_compile_with", true, &[true, true], ),
     CoreCallRecord::new( "core.regex", "literal", "jet_std::jet_regex_literal", true, &[true], ),
-    CoreCallRecord::new( "core.regex", "is_match", "jet_std::jet_regex_is_match", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "full_match", "jet_std::jet_regex_full_match", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "match", "jet_std::jet_regex_match", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "find", "jet_std::jet_regex_find", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "find_all", "jet_std::jet_regex_find_all", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "matches", "jet_std::jet_regex_matches", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "finditer", "jet_std::jet_regex_matches", true, &[true, true], ) .with_jit_symbol("jet_jit_regex_matches"),
-    CoreCallRecord::new( "core.regex", "split", "jet_std::jet_regex_split", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "split_limit", "jet_std::jet_regex_split_limit", true, &[true, true, false], ),
-    CoreCallRecord::new( "core.regex", "replace", "jet_std::jet_regex_replace", true, &[true, true, true], ),
-    CoreCallRecord::new( "core.regex", "replace_first", "jet_std::jet_regex_replace_first", true, &[true, true, true], ),
-    CoreCallRecord::new( "core.regex", "search", "jet_std::jet_regex_match", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "findall", "jet_std::jet_regex_find_all", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "fullmatch", "jet_std::jet_regex_full_match", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "sub", "jet_std::jet_regex_replace", true, &[true, true, true], ),
     CoreCallRecord::new( "core.game.raylib", "window_open", "jet_raylib_window_open", true, &[false, false, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.game.raylib", "window_should_close", "jet_raylib_window_should_close", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.game.raylib", "window_ready", "jet_raylib_window_ready", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
