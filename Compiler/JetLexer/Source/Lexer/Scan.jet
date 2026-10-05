@@ -44,17 +44,23 @@ fn ascii_digit(value: Int) -> Bool Never! {
     value >= 48 && value <= 57
 }
 
+// ASCII bytes decide without building a scalar String: the only ASCII
+// letters are A-Z and a-z, and the only ASCII numerics are 0-9.
 fn is_identifier_start(source: [U8], index: Int) -> Bool Never! {
     value :: byte_at(source, index)
-    value == 95 || ascii_alpha(value) || unicode.is_alphabetic(scalar_at(source, index))
+    if value >= 0 && value < 128 -> return value == 95 || ascii_alpha(value)
+    unicode.is_alphabetic(scalar_at(source, index))
 }
 
 fn is_identifier_continue(source: [U8], index: Int) -> Bool Never! {
     value :: byte_at(source, index)
-    value == 95 || ascii_alpha(value) || ascii_digit(value) || unicode.is_alphabetic(scalar_at(source, index)) || unicode.is_numeric(scalar_at(source, index))
+    if value >= 0 && value < 128 -> return value == 95 || ascii_alpha(value) || ascii_digit(value)
+    unicode.is_alphabetic(scalar_at(source, index)) || unicode.is_numeric(scalar_at(source, index))
 }
 
 fn first_char_is_upper(source: [U8], start: Int) -> Bool Never! {
+    value :: byte_at(source, start)
+    if value >= 0 && value < 128 -> return value >= 65 && value <= 90
     scalar := scalar_at(source, start)
     unicode.is_alphabetic(scalar) && unicode.upper(scalar) == scalar && unicode.lower(scalar) != scalar
 }
@@ -123,6 +129,11 @@ fn scan_unit_suffix_end(source: [U8], start: Int) -> Int {
 }
 
 fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {
+    // Every keyword is 2-8 bytes and starts with a byte in `N`..`y`, so other
+    // words are identifiers without reading their spelling.
+    length :: end - start
+    first :: byte_at(source, start)
+    if length < 2 || length > 8 || first < 78 || first > 121 -> return K_IDENT
     word :: slice_text(source, start, end)
     previous_is_dot :: if previous_kind == {
         K_DOT -> true

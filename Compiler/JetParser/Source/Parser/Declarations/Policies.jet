@@ -25,7 +25,7 @@ use jet_lexer.[
 fn parser_policy_file_decl_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     name :: parser_lookahead(&state, 1)
-    if name.kind != TOKEN_IDENT || name.payload.decoded != "Policy" -> return false
+    if name.kind != TOKEN_IDENT || parser_value(state, name) != "Policy" -> return false
     if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
     // D-CALLPOLICY2=C: a callable policy starts with a policy call.
     if parser_kind_at(&state, 3) == TOKEN_IDENT && parser_kind_at(&state, 4) == TOKEN_LPAREN -> return false

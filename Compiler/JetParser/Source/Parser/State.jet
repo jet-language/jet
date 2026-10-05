@@ -1,5 +1,6 @@
 // Parser state and token access. The lexer supplies canonical token IDs,
-// byte spans, exact spelling, nested string token streams, and diagnostics.
+// byte spans, interned spellings, literal facts, nested string token streams,
+// and diagnostics.
 use jet_foundation.[
     Diagnostic,
     DiagnosticFixApplicability,
@@ -14,6 +15,8 @@ use jet_foundation.[
     diagnostic_with_edit,
     diagnostic_with_edit_grade,
     diagnostic_with_label,
+    name_intern,
+    name_text,
 ]
 use jet_lexer.[
     StringPart,
@@ -41,7 +44,16 @@ use jet_lexer.[
     TOKEN_SHR,
     TOKEN_UNIFIED_ARROW,
     Token,
-    TokenPayload,
+    TokenTables,
+    token_decimal,
+    token_decoded,
+    token_integer,
+    token_interpolations,
+    token_string_part_count,
+    token_string_parts,
+    token_suffix,
+    token_synthetic,
+    token_text,
 ]
 
 pub struct JetParserState {
@@ -91,6 +103,10 @@ pub struct JetParserState {
     // template bodies entered so far. A `prep loop` inside one is a
     // template loop the derive expansion unrolls.
     pub derive_template_depth: Int{0}
+    // The lexed source's names and literal facts, as one row. A nested state
+    // (an interpolation, a pattern hole) borrows the row while it parses and
+    // hands it back (`parser_lend_tables` / `parser_return_tables`).
+    pub tables: [TokenTables]{[TokenTables]{}}
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,
@@ -108,19 +124,72 @@ pub struct ParsedBlock {
 }
 
 fn parser_synthetic_token(kind: Int, span: Span) -> Token Never! {
-    Token{
-        kind: kind,
-        span: span,
-        payload: TokenPayload{
-            text: "",
-            decoded: "",
-            integer: None,
-            decimal: None,
-            suffix: "",
-            interpolations: 0,
-            string_parts: [StringPart]{},
-        },
-    }
+    token_synthetic(kind, span)
+}
+
+// A synthetic token spelled `text`, interned in the state's names.
+fn parser_spelled_token(state: &JetParserState, kind: Int, span: Span, text: String) -> Token Never! {
+    name :: name_intern(&state.tables[0].names, text)
+    token := token_synthetic(kind, span)
+    token.text = name
+    token.decoded = name
+    token
+}
+
+// A token's decoded spelling: an identifier's name, a literal's value.
+fn parser_value(state: JetParserState, token: Token) -> String Never! {
+    token_decoded(state.tables[0], token)
+}
+
+// A token's exact source spelling.
+fn parser_text(state: JetParserState, token: Token) -> String Never! {
+    token_text(state.tables[0], token)
+}
+
+// The decoded spelling of the token `offset` tokens ahead (0 = current).
+fn parser_value_at(state: &JetParserState, offset: Int) -> String Never! {
+    token :: parser_lookahead(&state, offset)
+    parser_value(state, token)
+}
+
+fn parser_integer(state: JetParserState, token: Token) -> Int? Never! {
+    token_integer(state.tables[0], token)
+}
+
+fn parser_decimal(state: JetParserState, token: Token) -> Float? Never! {
+    token_decimal(state.tables[0], token)
+}
+
+fn parser_suffix(state: JetParserState, token: Token) -> String Never! {
+    token_suffix(state.tables[0], token)
+}
+
+fn parser_interpolations(state: JetParserState, token: Token) -> Int Never! {
+    token_interpolations(state.tables[0], token)
+}
+
+fn parser_string_part_count(state: JetParserState, token: Token) -> Int Never! {
+    token_string_part_count(state.tables[0], token)
+}
+
+fn parser_string_parts(state: JetParserState, token: Token) -> [StringPart] Never! {
+    token_string_parts(state.tables[0], token)
+}
+
+fn parser_part_text(state: JetParserState, part: StringPart) -> String Never! {
+    name_text(state.tables[0].names, part.text)
+}
+
+// A nested state parses with its parent's tables; it must hand them back
+// with `parser_return_tables` before the parent reads a token again.
+fn parser_lend_tables(state: &JetParserState, nested: &JetParserState) Never! {
+    tables :: &state.tables.pop() ?? return
+    &nested.tables.push(tables)
+}
+
+fn parser_return_tables(state: &JetParserState, nested: &JetParserState) Never! {
+    tables :: &nested.tables.pop() ?? return
+    &state.tables.push(tables)
 }
 
 fn parser_is_trivia(kind: Int) -> Bool Never! {
@@ -178,7 +247,10 @@ fn parser_lookahead(state: &JetParserState, offset: Int) -> Token Never! {
 }
 
 fn parser_current_kind(state: &JetParserState) -> Int Never! {
-    parser_current(&state).kind
+    if state.pending_type_gt -> return TOKEN_GT
+    parser_skip_trivia(&state)
+    if state.position < 0 || state.position >= state.tokens.len() -> return TOKEN_EOF
+    state.tokens[state.position].kind
 }
 
 fn parser_kind_at(state: &JetParserState, offset: Int) -> Int Never! {
@@ -302,19 +374,20 @@ fn parser_add_error_here(state: &JetParserState, what: String, why: String, fix:
 
 // Name what the reader sees. Users never type `;`: the lexer inserts it at a
 // line end, and an explicit one is retired (D-SEMI1=A).
-fn parser_describe_token(token: Token) -> String Never! {
+fn parser_describe_token(state: JetParserState, token: Token) -> String Never! {
     if token.kind == TOKEN_EOF -> return "the end of the file"
     if token.kind == TOKEN_SEMI -> return "the end of the line"
-    "`{token.payload.text}`"
+    "`{parser_text(state, token)}`"
 }
 
 fn parser_expect(state: &JetParserState, kind: Int, context: String) -> Token {
     if parser_current_kind(&state) == kind -> return parser_bump(&state)
     token :: parser_current(&state)
+    found :: parser_describe_token(state, token)
     parser_add_error(
         &state,
         token.span,
-        "expected {context}, found {parser_describe_token(token)}",
+        "expected {context}, found {found}",
         "the parser needs the expected token to keep the surrounding syntax unambiguous",
         "write the expected token here",
     )
@@ -327,16 +400,14 @@ fn parser_expect_name(state: &JetParserState, context: String) -> Token {
     // (a field, a variant field, a parameter).
     if parser_current_kind(&state) == TOKEN_KW_TAG {
         keyword :: parser_bump(&state)
-        name := parser_synthetic_token(TOKEN_IDENT, keyword.span)
-        name.payload.text = "tag"
-        name.payload.decoded = "tag"
-        return name
+        return parser_spelled_token(&state, TOKEN_IDENT, keyword.span, "tag")
     }
     token :: parser_current(&state)
+    found :: parser_describe_token(state, token)
     parser_add_error(
         &state,
         token.span,
-        "expected a name {context}, found {parser_describe_token(token)}",
+        "expected a name {context}, found {found}",
         "declarations and member paths are built from identifier tokens",
         "write an identifier here",
     )
@@ -353,7 +424,8 @@ fn parser_at_unified_arrow(state: &JetParserState) -> Bool Never! {
 fn parser_expect_unified_arrow(state: &JetParserState, context: String) -> Token {
     token :: parser_current(&state)
     if !parser_at_unified_arrow(&state) {
-        parser_add_error(&state, token.span, "expected `->` {context}, found {parser_describe_token(token)}", "callables, arms, and lambdas use one arrow", "write `->` {context}")
+        found :: parser_describe_token(state, token)
+        parser_add_error(&state, token.span, "expected `->` {context}, found {found}", "callables, arms, and lambdas use one arrow", "write `->` {context}")
         return parser_synthetic_token(TOKEN_UNIFIED_ARROW, token.span)
     }
     parser_bump(&state)
@@ -417,18 +489,18 @@ fn parser_unclosed_delimiter(state: &JetParserState, construct: String) -> Bool 
     cutoff :: if {
         at_line_end -> "the end of the line"
         token.kind == TOKEN_EOF -> "the end of the file"
-        else -> "`{token.payload.text}`"
+        else -> "`{parser_text(state, token)}`"
     }
     opener :: parser_innermost_open_delimiter(state) ?? return false
     close :: parser_closer_text(opener.kind)
-    if token.payload.text == close -> return false
+    if parser_text(state, token) == close -> return false
     parser_report_unclosed(&state, opener, cutoff, construct)
     true
 }
 
 fn parser_report_unclosed(state: &JetParserState, opener: Token, cutoff: String, construct: String) {
     close :: parser_closer_text(opener.kind)
-    open :: opener.payload.text
+    open :: parser_text(state, opener)
     at :: parser_previous_end(state)
     line := 0
     loop start in state.line_starts {
@@ -609,9 +681,10 @@ fn parser_is_identifier_byte(byte: Int) -> Bool Never! {
 
 // A keyword token: a written word the lexer reads as a keyword. A marker
 // parameter may be named by any written word (D-VERDICT-1455-1).
-fn parser_is_keyword_token(token: Token) -> Bool Never! {
-    if token.kind == TOKEN_IDENT || token.payload.text.len() == 0 -> return false
-    bytes :: token.payload.text.bytes()
+fn parser_is_keyword_token(state: JetParserState, token: Token) -> Bool Never! {
+    text :: parser_text(state, token)
+    if token.kind == TOKEN_IDENT || text.len() == 0 -> return false
+    bytes :: text.bytes()
     first :: Int.from_u8(bytes[0])
     if !((first >= 97 && first <= 122) || (first >= 65 && first <= 90)) -> return false
     loop byte in bytes {
