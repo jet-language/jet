@@ -2010,6 +2010,70 @@ pub(crate) fn demand_core_source_generic_function(
     Some(generic_free_function_instance_key(method, &type_args))
 }
 
+/// #4609: a call into another source module's generic function names the
+/// concrete instance its declaring module lowers
+/// (`specialize_module_generic_calls`) and returns that module's identity and
+/// the instance name; None when the target is not generic. The type arguments
+/// are recorded canonically, so every caller and the declaring module spell
+/// one instance key.
+pub(crate) fn demand_module_generic_function(
+    cx: &Cx,
+    sig_key: &(String, String),
+    function: &str,
+    args: &[TCallArg],
+    explicit_type_args: &[Type],
+) -> Option<(String, String)> {
+    let generic = cx.import_generics.get(sig_key)?;
+    let params = cx
+        .import_sigs
+        .get(sig_key)?
+        .iter()
+        .map(|(_, ty)| ty.clone())
+        .collect::<Vec<_>>();
+    let shape = generic_call_shape(args, explicit_type_args);
+    let subst = generic_call_substitution(&params, &generic.type_params, &shape)?;
+    let type_args = generic
+        .type_params
+        .iter()
+        .map(|param| subst.get(param).map(|ty| canonical_module_type(cx, ty)))
+        .collect::<Option<Vec<_>>>()?;
+    cx.jit_module_generic_calls
+        .borrow_mut()
+        .entry((generic.module_identity.clone(), function.to_string()))
+        .or_default()
+        .push(type_args.clone());
+    Some((
+        generic.module_identity.clone(),
+        generic_free_function_instance_key(function, &type_args),
+    ))
+}
+
+/// A type in the lowering module's spelling with each nominal that module
+/// declares qualified by its identity, the spelling every other module uses.
+fn canonical_module_type(cx: &Cx, ty: &Type) -> Type {
+    let qualify = |name: &str| {
+        (!name.contains("::") && cx.local_type_names.contains(name))
+            .then(|| format!("{}::{name}", cx.module_identity))
+    };
+    rewrite_apply_heads(&ty.map_named_types(&qualify), &|name| {
+        qualify(name).unwrap_or_else(|| name.to_string())
+    })
+}
+
+/// The reverse of `canonical_module_type` for the module `owner`: its own
+/// nominals return to the bare spelling its context declares them under.
+fn local_module_type(owner: &str, ty: &Type) -> Type {
+    let prefix = format!("{owner}::");
+    let localize = |name: &str| {
+        name.strip_prefix(&prefix)
+            .filter(|leaf| !leaf.contains("::"))
+            .map(str::to_string)
+    };
+    rewrite_apply_heads(&ty.map_named_types(&localize), &|name| {
+        localize(name).unwrap_or_else(|| name.to_string())
+    })
+}
+
 fn generic_free_function_template(items: &[Item], called_name: &str) -> Option<Func> {
     for item in items {
         match item {
@@ -2187,6 +2251,26 @@ fn checked_imported_core_source_signature<'a>(
         .filter(|signature| signature.module_identity == owner)
 }
 
+/// Keep the boundary of instances lowered in an imported module's context
+/// under that module's canonical nominal identities, as its ordinary
+/// functions are (#4609).
+fn qualify_imported_instances(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    owner: &str,
+    instances: &mut [TFunc],
+) {
+    for instance in instances {
+        for (_, ty, _) in &mut instance.params {
+            *ty = qualify_imported_type(bundle, module_idx, owner, &[], ty);
+        }
+        instance.ret = instance
+            .ret
+            .as_ref()
+            .map(|ty| qualify_imported_type(bundle, module_idx, owner, &[], ty));
+    }
+}
+
 fn lower_checked_core_source_generic_instance(
     bundle: &ProgramBundle,
     module_idx: usize,
@@ -2345,6 +2429,114 @@ fn specialize_checked_core_source_generics(
                 ));
             }
             merge_core_source_generic_calls(cx, &imported_cx);
+        }
+    }
+}
+
+fn merge_module_generic_calls(target: &Cx, source: &Cx) {
+    let calls = std::mem::take(&mut *source.jit_module_generic_calls.borrow_mut());
+    let mut target_calls = target.jit_module_generic_calls.borrow_mut();
+    for (key, type_args) in calls {
+        target_calls.entry(key).or_default().extend(type_args);
+    }
+}
+
+/// #4609: lower every instance of a source module's generic function that a
+/// call from another module demanded (`demand_module_generic_function`), in
+/// the declaring module's own context, until no lowered instance demands
+/// more. An entry-owned instance keeps the entry's bare spelling, like the
+/// entry's own specializations; an imported one takes the module's emitted
+/// prefix and canonical boundary types, like its ordinary functions.
+fn specialize_module_generic_calls(
+    bundle: &ProgramBundle,
+    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    debug_linemap: bool,
+    cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+    spawn_lambdas: &mut Vec<TJitSpawnLambda>,
+) -> Result<(), LowerError> {
+    let module_rows = (0..bundle.modules.len())
+        .filter_map(|index| {
+            bundle
+                .name_ledger
+                .module_identity(index)
+                .map(|identity| (identity, index))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut processed = std::collections::HashSet::new();
+    loop {
+        let calls = std::mem::take(&mut *cx.jit_module_generic_calls.borrow_mut());
+        if calls.is_empty() {
+            return Ok(());
+        }
+        for ((owner, function), mut instantiations) in calls {
+            instantiations.sort_by_key(|types| format!("{types:?}"));
+            instantiations.dedup();
+            let missing_target = || {
+                LowerError::new(
+                    crate::Diagnostics::Span::new(0, 0),
+                    format!("checked generic target `{owner}::{function}` has no loaded template"),
+                )
+            };
+            let module_idx = *module_rows.get(&owner).ok_or_else(missing_target)?;
+            let module = &bundle.modules[module_idx];
+            let template =
+                generic_free_function_template(&module.items, &function).ok_or_else(missing_target)?;
+            let entry = module_idx == bundle.entry;
+            let mut imported_cx = (!entry).then(|| {
+                build_imported_generic_core_cx(
+                    bundle,
+                    module_idx,
+                    extern_funcs,
+                    debug_linemap,
+                    spawn_lambdas.len(),
+                )
+            });
+            for type_args in instantiations {
+                let instance = generic_free_function_instance_key(&function, &type_args);
+                let key = function_semantic_key(&owner, &instance);
+                if !processed.insert(key.clone()) || funcs.iter().any(|f| f.key == key) {
+                    continue;
+                }
+                if let Some(imported_cx) = imported_cx.as_mut() {
+                    imported_cx.jit_spawn_site_base = spawn_lambdas.len();
+                }
+                let module_cx = imported_cx.as_ref().unwrap_or(cx);
+                let local_args = if entry {
+                    type_args
+                        .iter()
+                        .map(|ty| local_module_type(&owner, ty))
+                        .collect::<Vec<_>>()
+                } else {
+                    type_args
+                };
+                let first_instance = funcs.len();
+                let (_, mut lowered) = lower_core_source_generic_template(
+                    template.clone(),
+                    &local_args,
+                    &instance,
+                    module_cx,
+                );
+                lowered.key = key;
+                lowered.name = if entry {
+                    instance
+                } else {
+                    format!("{}::{}", mangle(&module.alias), mangle(&instance))
+                };
+                funcs.push(lowered);
+                lower_demanded_generic_methods(&module.items, module_cx, funcs)?;
+                specialize_generic_free_functions(&module.items, module_cx, funcs);
+                if !entry {
+                    qualify_imported_instances(bundle, module_idx, &owner, &mut funcs[first_instance..]);
+                }
+                spawn_lambdas.extend(std::mem::take(
+                    &mut *module_cx.jit_spawn_lambdas.borrow_mut(),
+                ));
+            }
+            if let Some(imported_cx) = &imported_cx {
+                merge_core_source_generic_calls(cx, imported_cx);
+                merge_module_generic_calls(cx, imported_cx);
+            }
         }
     }
 }
@@ -5896,11 +6088,27 @@ fn lower_checked_tir_program_on_stack(
                     _ => {}
                 }
             }
+            // #4609: the generic functions and methods an imported module
+            // instantiates in its own bodies specialize in its own context,
+            // as the entry's do, under the module's canonical boundary types.
+            let first_instance = funcs.len();
+            lower_demanded_generic_methods(&imported.items, &imported_cx, &mut funcs)?;
+            specialize_generic_free_functions(&imported.items, &imported_cx, &mut funcs);
+            qualify_imported_instances(bundle, module_idx, &imported_owner, &mut funcs[first_instance..]);
             spawn_lambdas.extend(std::mem::take(
                 &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
             ));
             merge_core_source_generic_calls(&cx, &imported_cx);
+            merge_module_generic_calls(&cx, &imported_cx);
         }
+        specialize_module_generic_calls(
+            bundle,
+            &extern_funcs,
+            debug_linemap,
+            &cx,
+            &mut funcs,
+            &mut spawn_lambdas,
+        )?;
         specialize_checked_core_source_generics(
             bundle,
             &extern_funcs,
