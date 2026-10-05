@@ -9,7 +9,7 @@ or when a phase is slower than its lines/s floor.
 node Tools/perf/scaling/generate.mjs --list                 # every shape
 node Tools/perf/scaling/generate.mjs web 125000 NEW_DIR     # one corpus
 node --test Tools/perf/scaling/scaling.test.mjs
-Tools/agent/jet-env node Tools/perf/scaling/run-gate.mjs --compiler rust=jet:target/release/jet \
+Tools/agent/jet-env node Tools/perf/scaling/run-gate.mjs --compiler rust=jet:/mnt/jetscratch/targets/ScalingGate2/release/jet \
   --compiler p15=bootstrap:$HOME/.cache/jet-dev/candP15/jetc0 --memory-max 24G \
   --timeout 120 --stop-after 60 --profile --work-dir $HOME/.cache/jet-dev/scratch/ScalingGate2
 node Tools/perf/scaling/report.mjs --runs-dir RUNS_DIR > report.md # merge all shape receipts
