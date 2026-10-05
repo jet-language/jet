@@ -61,12 +61,16 @@ int main(int argc, char **argv) {
     fclose(image);
 
     long entry = -1;
+    long data = -1;
     char word[16];
     long at;
     while (fscanf(manifest, "%15s %ld", word, &at) == 2) {
         if (strcmp(word, "entry") == 0) {
             if (at < 0 || at >= length) return fail("entry outside the image in", argv[2]);
             entry = at;
+        } else if (strcmp(word, "data") == 0) {
+            if (at <= 0 || at > length || (at < length && at % page != 0)) return fail("invalid data boundary in", argv[2]);
+            data = at;
         } else if (strcmp(word, "import") == 0) {
             char symbol[256];
             if (fscanf(manifest, "%255s", symbol) != 1) return fail("import without a symbol in", argv[2]);
@@ -87,7 +91,8 @@ int main(int argc, char **argv) {
     fclose(manifest);
     if (entry < 0) return fail("no entry in", argv[2]);
 
-    if (mprotect(base, size, PROT_READ | PROT_EXEC) != 0) return fail("mprotect failed for", argv[1]);
+    if (data < 0 || entry >= data) return fail("missing data boundary or non-code entry in", argv[2]);
+    if (mprotect(base, (size_t)((data + page - 1) / page * page), PROT_READ | PROT_EXEC) != 0) return fail("mprotect failed for", argv[1]);
     void (*run)(void) = (void (*)(void))(base + entry);
     return jet_rt_main(run);
 }
