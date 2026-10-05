@@ -1,0 +1,60 @@
+// A list that a function builds, reads and drops holds exactly the values
+// pushed onto it. Pushes past a counted loop's trip count, a list that stays
+// empty, a list of Strings, and a list rebuilt on every call all read back in
+// order.
+fn best(seed: Int) -> Int {
+    tmp := [Int]{}
+    loop i in 0..<16 -> &tmp.push((seed * 7 + i * 13) % 101)
+    top := 0
+    loop x in tmp {
+        if x > top -> top = x
+    }
+    top + tmp[seed % 16]
+}
+
+fn spill(extra: Int) -> Int {
+    tmp := [Int]{}
+    loop i in 0..<4 -> &tmp.push(i + 1)
+    loop i in 0..<extra -> &tmp.push(100 + i)
+    total := 0
+    loop x in tmp -> total += x
+    total * 1000 + tmp[tmp.len() - 1]
+}
+
+fn initials(count: Int) -> String {
+    names := [String]{}
+    loop i in 0..<3 -> &names.push("n{i}")
+    loop i in 0..<count -> &names.push("x{i}")
+    out := ""
+    loop i in 0..<names.len() -> out += names[i]
+    out
+}
+
+fn last_or_none(fill: Bool) -> Int {
+    xs := [Int]{}
+    if fill {
+        loop i in 0..<8 -> &xs.push(i * 3)
+    }
+    if xs.is_empty() -> return -1
+    xs[xs.len() - 1]
+}
+
+fn row_total(round: Int) -> Int {
+    row := [Int]{}
+    loop j in 0..<5 -> &row.push(round * 10 + j)
+    row[4] + row.len()
+}
+
+fn run() {
+    loop seed in 0..<3 -> print(best(seed))
+    print(spill(0))
+    print(spill(3))
+    print(spill(70))
+    print(initials(0))
+    print(initials(2))
+    print(last_or_none(true))
+    print(last_or_none(false))
+    total := 0
+    loop round in 0..<3 -> total += row_total(round)
+    print(total)
+}

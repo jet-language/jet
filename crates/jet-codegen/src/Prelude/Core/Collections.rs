@@ -341,6 +341,29 @@ impl<T> JetListPushSurface for Vec<T> {
     }
 }
 
+// #4566 slice 8 inline storage: `jet_mem::JetInlineList` (the vetted memory
+// prelude owns its unsafe storage); the list surfaces here are safe code.
+impl<T, const N: usize> JetListSurface for jet_mem::JetInlineList<T, N> {
+    #[inline(always)]
+    fn jet_len(&self) -> i64 {
+        <[T]>::len(self) as i64
+    }
+
+    #[inline(always)]
+    fn jet_is_empty(&self) -> bool {
+        <[T]>::is_empty(self)
+    }
+}
+
+impl<T, const N: usize> JetListPushSurface for jet_mem::JetInlineList<T, N> {
+    type Item = T;
+
+    #[inline(always)]
+    fn jet_push(&mut self, value: Self::Item) {
+        self.push(value);
+    }
+}
+
 
 #[inline(always)]
 fn jet_list_push<C: JetListPushSurface>(xs: &mut C, value: C::Item) {
@@ -1506,6 +1529,153 @@ pub(crate) fn jet_loop_range_advance(cursor: &mut JetLoopRangeCursor) {
     cursor.done = !jet_loop_range_has_next(cursor);
 }
 
+/// #4566: the elements `jet_int_sum_walk` adds in one branch-free pass.
+const JET_INT_SUM_CHUNK: usize = 256;
+/// An element joins a chunk sum only as an inline word in
+/// `[-2^52, 2^52)`, so a chunk sum stays inside `±2^60`.
+const JET_INT_SUM_ELEMENT_BITS: u32 = 52;
+/// A chunk is added only to a running total inside `[-2^61, 2^61)`, so the
+/// new total stays inside the inline range `[-2^62, 2^62)`.
+const JET_INT_SUM_TOTAL_BOUND: i64 = 1 << 61;
+
+/// #4566: the native form of an exact `Int` range walk `loop i in a..<b ->
+/// acc += xs[i]` (MIRRust `int_sum_walk`), run just before that loop. It
+/// sums the elements left under `cursor` in chunks of `JET_INT_SUM_CHUNK`,
+/// one pass per chunk that vectorises, and commits a chunk only when every
+/// element and the running total are inline words inside the bounds above,
+/// so each committed total is the exact sum. The cursor is left at the
+/// first element not committed: the exact loop finishes the walk from there
+/// (no iteration once all are committed) and reports an out-of-range index
+/// itself.
+#[inline(always)]
+pub(crate) fn jet_int_sum_walk(
+    cursor: &mut JetLoopRangeCursor,
+    acc: &mut jet_foundation::Numeric::JetInt,
+    xs: &[jet_foundation::Numeric::JetInt],
+) {
+    if cursor.done || cursor.step != 1 || !cursor.exclusive || cursor.current < 0 {
+        return;
+    }
+    let start = cursor.current as usize;
+    let end = usize::try_from(cursor.end).map_or(0, |end| end.min(xs.len()));
+    if start >= end {
+        return;
+    }
+    let mut total = acc.to_raw();
+    let mut at = start;
+    for chunk in xs[start..end].chunks(JET_INT_SUM_CHUNK) {
+        if !(-JET_INT_SUM_TOTAL_BOUND..JET_INT_SUM_TOTAL_BOUND).contains(&total) {
+            break;
+        }
+        let mut sum = 0_i64;
+        let mut wide = 0_u64;
+        for element in chunk {
+            let raw = element.to_raw();
+            wide |= (raw.wrapping_add(1 << JET_INT_SUM_ELEMENT_BITS) as u64) >> (JET_INT_SUM_ELEMENT_BITS + 1);
+            sum = sum.wrapping_add(raw);
+        }
+        if wide != 0 {
+            break;
+        }
+        total += sum;
+        at += chunk.len();
+    }
+    if at == start {
+        return;
+    }
+    // The replaced total was an inline word (checked above): no release.
+    std::mem::forget(std::mem::replace(acc, jet_foundation::Numeric::JetInt::from_i64(total)));
+    cursor.current = at as i64;
+    cursor.done = !jet_loop_range_has_next(cursor);
+}
+
+/// #4566: the most a loop capacity hint reserves up front. Past it the list
+/// grows by doubling as before, so a loop that exits early never holds more
+/// than this much unused room.
+const JET_LOOP_RESERVE_MAX_BYTES: usize = 1 << 20;
+
+/// A capacity hint before a loop that pushes onto `xs` once per trip: room
+/// for `trips` more elements, capped at `JET_LOOP_RESERVE_MAX_BYTES`. The
+/// list's contents never change.
+#[inline(always)]
+fn jet_list_reserve_for_loop<T>(xs: &mut Vec<T>, trips: u64) {
+    let cap = JET_LOOP_RESERVE_MAX_BYTES / std::mem::size_of::<T>().max(1);
+    xs.reserve(usize::try_from(trips).unwrap_or(usize::MAX).min(cap));
+}
+
+/// The capacity hint for a range loop: its cursor's remaining trips.
+#[inline(always)]
+fn jet_list_reserve_for_range<T>(xs: &mut Vec<T>, cursor: &JetLoopRangeCursor) {
+    jet_list_reserve_for_loop(xs, jet_loop_range_remaining(cursor));
+}
+
+/// How many values a fresh range cursor still yields.
+fn jet_loop_range_remaining(cursor: &JetLoopRangeCursor) -> u64 {
+    if !jet_loop_range_has_next(cursor) {
+        return 0;
+    }
+    let span = (i128::from(cursor.end) - i128::from(cursor.current)).unsigned_abs();
+    let step = i128::from(cursor.step).unsigned_abs();
+    let trips = if cursor.exclusive { span.div_ceil(step) } else { span / step + 1 };
+    u64::try_from(trips).unwrap_or(u64::MAX)
+}
+
+/// #4566 slice 7 capacity reuse (function-boundary research 4.3): a buffer
+/// the emitter reuses only when dropping it releases memory and runs nothing
+/// else (a String, or a list of scalars or Strings), so an emptied buffer
+/// that keeps its capacity is indistinguishable from a fresh empty one.
+trait JetReusableBuffer: Default {
+    fn jet_reuse_clear(&mut self);
+    fn jet_reuse_bytes(&self) -> usize;
+}
+
+impl<T> JetReusableBuffer for Vec<T> {
+    #[inline(always)]
+    fn jet_reuse_clear(&mut self) {
+        self.clear();
+    }
+
+    #[inline(always)]
+    fn jet_reuse_bytes(&self) -> usize {
+        self.capacity().saturating_mul(std::mem::size_of::<T>())
+    }
+}
+
+impl JetReusableBuffer for String {
+    #[inline(always)]
+    fn jet_reuse_clear(&mut self) {
+        self.clear();
+    }
+
+    #[inline(always)]
+    fn jet_reuse_bytes(&self) -> usize {
+        self.capacity()
+    }
+}
+
+/// A return-slot function's `out := [T]{}` / `out := ""`: the buffer its
+/// caller left in the slot, emptied, else a fresh one. The value is an empty
+/// list or String either way; only the capacity differs.
+#[inline(always)]
+fn jet_reuse_slot<B: JetReusableBuffer>(slot: &mut Option<B>) -> &mut B {
+    let buffer = slot.get_or_insert_with(B::default);
+    buffer.jet_reuse_clear();
+    buffer
+}
+
+/// The drop of a call destination on a path back to the call that refills
+/// it: the contents drop here, as `drop` would drop them, and the emptied
+/// buffer stays in the slot for that call's `jet_reuse_slot`. A buffer past
+/// `JET_LOOP_RESERVE_MAX_BYTES` is released, so a loop never keeps more
+/// than that much idle capacity alive.
+#[inline(always)]
+fn jet_retire_slot<B: JetReusableBuffer>(slot: &mut Option<B>) {
+    match slot {
+        Some(buffer) if buffer.jet_reuse_bytes() <= JET_LOOP_RESERVE_MAX_BYTES => buffer.jet_reuse_clear(),
+        _ => *slot = None,
+    }
+}
+
 include!("LoopCursor.rs");
 fn jet_loop_iter_init<C: JetLoopSource>(
     collection: C,
@@ -1978,37 +2148,54 @@ enum JetStringSplitSeparator {
     Text(String),
 }
 
-struct JetStringSplitIter {
-    source: String,
+/// Where a `split` walk stands in its source: the one piece sequence of
+/// `text.split(sep)`, read as views of the source. `JetStringSplitIter` owns
+/// its source; a loop over a stable source borrows it
+/// (`JetStringSplitCursor`).
+struct JetStringSplitState {
     separator: JetStringSplitSeparator,
     offset: usize,
     phase: u8,
     done: bool,
 }
 
-impl Iterator for JetStringSplitIter {
-    type Item = String;
+impl JetStringSplitState {
+    fn new(sep: &str) -> Self {
+        let mut chars = sep.chars();
+        let separator = match (chars.next(), chars.next()) {
+            (None, _) => JetStringSplitSeparator::Empty,
+            (Some(ch), None) => JetStringSplitSeparator::Scalar(ch),
+            (Some(_), Some(_)) => JetStringSplitSeparator::Text(sep.to_owned()),
+        };
+        JetStringSplitState {
+            separator,
+            offset: 0,
+            phase: 0,
+            done: false,
+        }
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    /// The next piece of `source`: an empty separator yields a leading empty
+    /// piece, one piece per scalar and a trailing empty piece.
+    fn next_piece<'a>(&mut self, source: &'a str) -> Option<&'a str> {
         match &self.separator {
             JetStringSplitSeparator::Empty => match self.phase {
                 0 => {
                     self.phase = 1;
-                    Some(String::new())
+                    Some(&source[..0])
                 }
                 1 => {
-                    if self.offset >= self.source.len() {
+                    if self.offset >= source.len() {
                         self.phase = 2;
-                        return Some(String::new());
+                        return Some(&source[..0]);
                     }
-                    let ch = self.source[self.offset..]
+                    let ch = source[self.offset..]
                         .chars()
                         .next()
                         .expect("offset in bounds");
-                    let width = ch.len_utf8();
-                    let out = self.source[self.offset..self.offset + width].to_owned();
-                    self.offset += width;
-                    Some(out)
+                    let start = self.offset;
+                    self.offset += ch.len_utf8();
+                    Some(&source[start..self.offset])
                 }
                 _ => None,
             },
@@ -2018,11 +2205,11 @@ impl Iterator for JetStringSplitIter {
                 }
                 let start = self.offset;
                 let found = match separator {
-                    JetStringSplitSeparator::Scalar(ch) => self.source[start..]
+                    JetStringSplitSeparator::Scalar(ch) => source[start..]
                         .find(*ch)
                         .map(|relative| (relative, ch.len_utf8())),
-                    JetStringSplitSeparator::Text(separator) => self.source[start..]
-                        .find(separator)
+                    JetStringSplitSeparator::Text(separator) => source[start..]
+                        .find(separator.as_str())
                         .map(|relative| (relative, separator.len())),
                     JetStringSplitSeparator::Empty => unreachable!("empty separator handled above"),
                 };
@@ -2030,11 +2217,11 @@ impl Iterator for JetStringSplitIter {
                     Some((relative, separator_len)) => {
                         let end = start + relative;
                         self.offset = end + separator_len;
-                        Some(self.source[start..end].to_owned())
+                        Some(&source[start..end])
                     }
                     None => {
                         self.done = true;
-                        Some(self.source[start..].to_owned())
+                        Some(&source[start..])
                     }
                 }
             }
@@ -2042,20 +2229,94 @@ impl Iterator for JetStringSplitIter {
     }
 }
 
+struct JetStringSplitIter {
+    source: String,
+    state: JetStringSplitState,
+}
+
+impl Iterator for JetStringSplitIter {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.state.next_piece(&self.source).map(str::to_owned)
+    }
+}
+
 fn jet_iter_string_split(s: &str, sep: &str) -> JetIter<String> {
-    let mut chars = sep.chars();
-    let separator = match (chars.next(), chars.next()) {
-        (None, _) => JetStringSplitSeparator::Empty,
-        (Some(ch), None) => JetStringSplitSeparator::Scalar(ch),
-        (Some(_), Some(_)) => JetStringSplitSeparator::Text(sep.to_owned()),
-    };
     JetIter(Box::new(JetStringSplitIter {
         source: s.to_owned(),
-        separator,
-        offset: 0,
-        phase: 0,
-        done: false,
+        state: JetStringSplitState::new(sep),
     }))
+}
+
+/// `loop piece in text.split(sep)` over a source that stays unchanged while
+/// the loop runs (#4566 slice 6; MIRRust `split_loop_cursor`): the loop walks
+/// the pieces of `jet_iter_string_split` as views of the borrowed source, so
+/// the source is never copied and each piece the loop binds is allocated
+/// once.
+struct JetStringSplitCursor<'a> {
+    source: &'a str,
+    state: JetStringSplitState,
+    current: Option<&'a str>,
+}
+
+fn jet_loop_split_init<'a>(source: &'a str, sep: &str) -> JetStringSplitCursor<'a> {
+    let mut state = JetStringSplitState::new(sep);
+    let current = state.next_piece(source);
+    JetStringSplitCursor {
+        source,
+        state,
+        current,
+    }
+}
+
+#[inline(always)]
+fn jet_loop_split_has_next(cursor: &JetStringSplitCursor<'_>) -> bool {
+    cursor.current.is_some()
+}
+
+#[inline(always)]
+fn jet_loop_split_value(cursor: &mut JetStringSplitCursor<'_>) -> String {
+    cursor
+        .current
+        .take()
+        .unwrap_or_else(|| {
+            jet_panic("<core.prelude>", 0, "iterator loop value requested after exhaustion")
+        })
+        .to_owned()
+}
+
+#[inline(always)]
+fn jet_loop_split_advance(cursor: &mut JetStringSplitCursor<'_>) {
+    cursor.current = cursor.state.next_piece(cursor.source);
+}
+
+/// `text.split(sep).join(joiner)` when the split iterator feeds only the join
+/// (#4566 slice 6; MIRRust `fused_split_join`). Same pieces as
+/// `jet_iter_string_split` read as views of `s`: a non-empty separator yields
+/// `s` with every match replaced by `joiner`; an empty one yields a leading
+/// empty piece, one piece per scalar and a trailing empty piece. The result
+/// is allocated once at its exact length.
+fn jet_string_split_join(s: &str, sep: &str, joiner: &str) -> String {
+    if sep.is_empty() {
+        let scalars = s.chars().count();
+        let mut out = String::with_capacity(s.len() + joiner.len() * (scalars + 1));
+        out.push_str(joiner);
+        for (start, ch) in s.char_indices() {
+            out.push_str(&s[start..start + ch.len_utf8()]);
+            out.push_str(joiner);
+        }
+        return out;
+    }
+    let matches = s.matches(sep).count();
+    let mut out = String::with_capacity(s.len() - matches * sep.len() + matches * joiner.len());
+    for (index, piece) in s.split(sep).enumerate() {
+        if index > 0 {
+            out.push_str(joiner);
+        }
+        out.push_str(piece);
+    }
+    out
 }
 
 /// Scan ASCII whitespace-delimited byte tokens without materialising each
@@ -2404,13 +2665,15 @@ where
 
 // D-CORE-EAGER1=A / D-LOOPMAP1=B: concrete collection map/filter are eager.
 // `.lazy()` enters the JetIter plane, where the same names remain deferred.
-fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
+// The map kernels borrow their source (#4566 slice 5): each element is lent
+// to the callback, so neither the list nor its elements are copied.
+fn jet_list_map<T, U, F>(xs: &[T], f: F) -> Vec<U>
 where
     F: Fn(&T) -> U,
 {
     xs.iter().map(f).collect()
 }
-fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U>
+fn jet_list_map_mut<T, U, F>(xs: &[T], mut f: F) -> Vec<U>
 where
     F: FnMut(&T) -> U,
 {
@@ -2448,17 +2711,15 @@ where
 {
     jet_collection_try_filter(xs.iter().cloned(), f)
 }
-/// Adjacent eager adapters may be fused when the intermediate list is not
-/// observable. The callbacks still run in source order, once per element.
-fn jet_list_map_filter<T, U, F, P>(xs: Vec<T>, mut map: F, mut keep: P) -> Vec<U>
+/// A fused eager adapter chain (#4566 slice 5; MIRRust
+/// `fused_adapter_chain`): one pass over the borrowed source in which `step`
+/// runs every stage on an element and yields its mapped value, or `None`
+/// when a filter stage drops it. No intermediate list is built.
+fn jet_list_map_chain<T, U, F>(xs: &[T], step: F) -> Vec<U>
 where
-    F: FnMut(&T) -> U,
-    P: FnMut(&U) -> bool,
+    F: FnMut(&T) -> Option<U>,
 {
-    xs.iter()
-        .map(|x| map(x))
-        .filter(|value| keep(value))
-        .collect()
+    xs.iter().filter_map(step).collect()
 }
 
 // List-shaped helpers serve eager concrete-List adapters and materializing
@@ -2783,7 +3044,7 @@ fn jet_iter_join<T: 'static + JetShow>(it: JetIter<T>, separator: &String) -> St
         if index > 0 {
             out.push_str(separator);
         }
-        out.push_str(&item.jet_show());
+        item.jet_show_into(&mut out);
     }
     out
 }

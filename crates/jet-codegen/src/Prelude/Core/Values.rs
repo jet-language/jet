@@ -1,5 +1,10 @@
 trait JetShow {
     fn jet_show(&self) -> String;
+    /// Append the shown text to `out`. Text pipelines (`join`) write each
+    /// item through this; a `String` appends itself without a copy.
+    fn jet_show_into(&self, out: &mut String) {
+        out.push_str(&self.jet_show());
+    }
     /// D-FAIL-CARRIER1=A: is this the carrier's clean report? The optional view
     /// answers yes, so `?T` prints its payload bare and its absence as `null`;
     /// every failure report answers no, so `T !E` prints its verdict.
@@ -271,6 +276,9 @@ impl JetDebug for f64 {
 impl JetShow for String {
     fn jet_show(&self) -> String {
         self.clone()
+    }
+    fn jet_show_into(&self, out: &mut String) {
+        out.push_str(self);
     }
 }
 impl JetDisplay for String {

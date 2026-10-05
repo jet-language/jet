@@ -4244,14 +4244,18 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             .as_ref()
                             .map(|t| cx.columnar_list_type(t).is_some())
                             .unwrap_or(false);
-                    // #4318 §4 stable loop source: a plain list loop over a place
-                    // (a local or parameter through fields) whose body never
-                    // mentions the source's root walks the list in place.
+                    // #4318 §4 stable loop source: a plain list or fixed-list
+                    // loop over a place (a local or parameter through fields)
+                    // whose body never mentions the source's root walks the
+                    // sequence in place.
                     let source_stable = method_kind.is_none()
                         && step.is_none()
                         && !by_value
                         && !columnar
-                        && matches!(lowered_coll.ty.without_user_tags(), Type::List(_))
+                        && matches!(
+                            lowered_coll.ty.without_user_tags(),
+                            Type::List(_) | Type::FixedList { .. }
+                        )
                         && stable_loop_source_root(collection).is_some_and(|root| {
                             !crate::Sema::block_free_var_reads(body).contains(root)
                         });

@@ -9887,21 +9887,6 @@ fn lower_method_call_impl(
                 } else {
                     source_result_ty
                 };
-                let lazy_or_view_receiver = matches!(
-                    &recv_ty,
-                    Type::Apply { name, .. }
-                        if name == crate::Syntax::TYPE_ITER
-                            || matches!(
-                                name.as_str(),
-                                "View" | "ViewMut" | "ComputeViewMut"
-                            )
-                );
-                if matches!(op, TClosureOp::Map | TClosureOp::MapMut) && !lazy_or_view_receiver {
-                    // The eager list helper owns a cloned receiver. Publish the
-                    // resulting generic `T: Clone` requirement with the TIR
-                    // function instead of letting rustc discover it downstream.
-                    env.note_clone(&recv_ty);
-                }
                 if never_failing_source && !fallible_callback {
                     if let Type::Result { ok, .. } = &result_ty {
                         let plain = TExpr {

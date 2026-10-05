@@ -3118,6 +3118,19 @@ impl JetInt {
         !jet_int_is_pointer(self.0)
     }
 
+    /// #4566: whether no word of `values` owns a node, by one branch-free
+    /// pass that vectorises: an inline word's two top bits agree (`00` or
+    /// `11`), a node pointer's are `01`. Such storage copies and releases
+    /// bitwise.
+    #[inline]
+    pub fn all_inline(values: &[JetInt]) -> bool {
+        values
+            .iter()
+            .fold(0_u64, |any, value| any | (value.0 ^ (value.0 << 1)))
+            & (1_u64 << 63)
+            == 0
+    }
+
     #[inline]
     pub fn from_i64(value: i64) -> Self {
         if (JET_INT_INLINE_MIN..=JET_INT_INLINE_MAX).contains(&value) {
