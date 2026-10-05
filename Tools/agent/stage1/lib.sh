@@ -359,21 +359,19 @@ receipt_reports() {
 # unit in DIR/project (package.jet + src/compiler.jet) and its source map in
 # DIR/compiler.map.json. The assembler writes under $HOME/.cache/jet-dev/
 # compiler-bootstrap, which the stage-zero test and unitcheck share, so it runs
-# with a private HOME. TASK_ROOTS=true appends the task-root fixture the way
-# assemble_compiler_sources does for the self-compile harness.
+# with a private HOME. TASK_ROOTS=true passes --task-roots, which adds the
+# task-root fixture the way assemble_compiler_sources does for the
+# self-compile harness.
 assemble_compiler() {
   local repo=$1 dir=$2 task_roots=$3
-  local home=$dir/assemble-home
+  local home=$dir/assemble-home flags=()
+  [ "$task_roots" = true ] && flags=(--task-roots)
   rm -rf "$home" "$dir/project" "$dir/compiler.map.json"
   mkdir -p "$home"
-  ( cd "$repo" && env -u JET_BOOTSTRAP_SOURCE_ROOT HOME="$home" node Compiler/Bootstrap/assemble.mjs ) > "$dir/assemble.log" 2>&1 || return 1
+  ( cd "$repo" && env -u JET_BOOTSTRAP_SOURCE_ROOT HOME="$home" node Compiler/Bootstrap/assemble.mjs "${flags[@]}" ) > "$dir/assemble.log" 2>&1 || return 1
   mv "$home/.cache/jet-luna/compiler-bootstrap/project" "$dir/project" &&
     mv "$home/.cache/jet-luna/compiler-bootstrap/compiler.map.json" "$dir/compiler.map.json" &&
     rm -rf "$home" || return 1
-  if [ "$task_roots" = true ]; then
-    printf '\n\n' >> "$dir/project/src/compiler.jet"
-    cat "$repo/Compiler/JetEval/Tests/TaskRoots.jet" >> "$dir/project/src/compiler.jet"
-  fi
 }
 
 # build_backend PROJECT_DIR PACKAGE SOURCE_FILE LOG -> prints the binary path.
