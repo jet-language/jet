@@ -431,7 +431,7 @@ fn jet_tui_table_line(values: &[String], columns: USize, width: USize) -> String
     separators :: columns.saturating_sub(1) * 3
     column_width :: width.saturating_sub(separators) / columns
     line := ""
-    loop index in 0..columns {
+    loop index in 0..<columns {
         if index > 0 { line.push_str(" | ") }
         value :: values.get(index).map(fn(value) { value.as_str() }).unwrap_or("")
         value :: jet_tui_truncate(value, column_width)
@@ -944,7 +944,7 @@ struct JetTuiBackendState {
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1687
 fn tui_grid_dims(frame: &JetRect) -> (USize, USize) { (USize{frame.width.max(1.0).floor()}, USize{frame.height.max(1.0).floor()}) }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1693
-fn tui_blank_grid(cols: USize, rows: USize) -> [[Char]] { (0..rows).map(fn(_) { [' '].repeat(cols) }).collect<[[Char]]>() }
+fn tui_blank_grid(cols: USize, rows: USize) -> [[Char]] { (0..<rows).map(fn(_) { [' '].repeat(cols) }).collect<[[Char]]>() }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1697
 fn tui_write_label(grid: &[[Char]], frame: &JetRect, label: String, style: (&JetTuiStyle)?, capabilities: &JetTuiCapabilities) -> {
     (cols, rows) :: (grid.first().map(fn(r) { r.len() }).unwrap_or(0), grid.len())

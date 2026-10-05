@@ -564,7 +564,7 @@ fn gtk_file_model_paths(model: Ptr<GListModel>) -> [String] {
     #Unsafe("consume each retained GFile item then release its retained model") {
         count :: g_list_model_get_n_items(model)
         paths := [String].with_capacity(count as USize)
-        for index in 0..count {
+        for index in 0..<count {
             if gtk_file_path(g_list_model_get_item(model, index).cast<GFile>()) == .Val(path) { paths.push(^path) }
         }
         g_object_unref(model.cast<c_void>())
@@ -972,7 +972,7 @@ impl GtkState {
     // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1111
     fn remove_tree_subtree(self: &GtkState, path: String) -> {
         child_prefix :: "{path}/"
-        for index in (0..self.tree_widgets.len()).rev() {
+        for index in (0..<self.tree_widgets.len()).rev() {
             record_path :: &self.tree_widgets[index].path
             if record_path == path || record_path.starts_with(&child_prefix) { self.remove_tree_widget(index) }
         }
@@ -1580,7 +1580,7 @@ impl JetBackend for GtkState {
         focus_paths := [String]{}
         self.reconcile_node(node, self.vbox, "root", &live, &focus_nodes, &focus_paths)
         jet_ui_bind_tree_clicks(node, "root")
-        for index in (0..self.tree_widgets.len()).rev() {
+        for index in (0..<self.tree_widgets.len()).rev() {
             if !live.contains(&self.tree_widgets[index].path) { self.remove_tree_widget(index) }
         }
         self.focused_index = previous_focus.as_ref().and_then(fn(path) {
