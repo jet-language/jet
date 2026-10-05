@@ -47,7 +47,7 @@ impl JetHyperLogLog {
         zeros :: if rest == 0 { 57 as U8 } else { rest.leading_zeros() as U8 + 1 }
         // GATE #4565: kernel primitive
         #Unsafe("exclusive register update; preserve poison panic") {
-            registers := self.state.lock().unwrap()
+            registers := self.state.lock() ?? panic("unwrap failed")
             if zeros > registers[index] { registers[index] = zeros }
         }
     }
@@ -55,7 +55,7 @@ impl JetHyperLogLog {
     fn count(self: &Self) -> I64 {
         // GATE #4565: kernel primitive
         #Unsafe("read consistent register set under mutex; preserve poison panic") {
-            registers :: self.state.lock().unwrap()
+            registers :: self.state.lock() ?? panic("unwrap failed")
             width :: registers.len() as F64
             empty :: registers.iter().filter(fn(value) { value == 0 }).count()
             if empty > 0 { return (width * (width / empty as F64).ln()).round() as I64 }
@@ -87,7 +87,7 @@ impl JetTDigest {
     fn add(self: &Self, value: F64) -> {
         // GATE #4565: kernel primitive
         #Unsafe("exclusive centroid update; preserve poison panic") {
-            centroids := self.state.lock().unwrap()
+            centroids := self.state.lock() ?? panic("unwrap failed")
             index :: centroids.partition_point(fn((mean, weight)) { mean < value })
             centroids.insert(index, (value, 1.0))
             total :: centroids.iter().map(fn((mean, weight)) { weight }).sum()
@@ -99,7 +99,7 @@ impl JetTDigest {
                     cumulative += weight
                     next
                 }
-                last := merged.last_mut().unwrap()
+                last := merged.last_mut() ?? panic("unwrap failed")
                 quantile :: cumulative / total
                 limit :: 4.0 * total * quantile * (1.0 - quantile) / Self.DELTA
                 if last.1 + weight <= limit.max(1.0) {
@@ -118,7 +118,7 @@ impl JetTDigest {
     fn quantile(self: &Self, quantile: F64) -> F64 {
         // GATE #4565: kernel primitive
         #Unsafe("consistent quantile traversal under mutex; preserve poison panic") {
-            centroids :: self.state.lock().unwrap()
+            centroids :: self.state.lock() ?? panic("unwrap failed")
             if centroids.is_empty() { return 0.0 }
             total :: centroids.iter().map(fn((mean, weight)) { weight }).sum()
             target :: quantile * total
@@ -156,7 +156,7 @@ impl JetCountMinSketch {
         second :: fnv1a_h2(bytes)
         // GATE #4565: kernel primitive
         #Unsafe("exclusive saturating counter update; preserve poison panic") {
-            rows := self.state.lock().unwrap()
+            rows := self.state.lock() ?? panic("unwrap failed")
             loop row in 0..<4 {
                 column :: (first.wrapping_add(second.wrapping_mul(row as U64 + 1)) & 0xff) as Usize
                 rows[row][column] = rows[row][column].saturating_add(1)
@@ -170,7 +170,7 @@ impl JetCountMinSketch {
         second :: fnv1a_h2(bytes)
         // GATE #4565: kernel primitive
         #Unsafe("read all four counters under one mutex; preserve poison panic") {
-            rows :: self.state.lock().unwrap()
+            rows :: self.state.lock() ?? panic("unwrap failed")
             (0..<4).map(fn(row) {
                 column :: (first.wrapping_add(second.wrapping_mul(row as U64 + 1)) & 0xff) as Usize
                 rows[row][column]
@@ -198,7 +198,7 @@ impl JetReservoirSampler {
     fn parts(self: &Self) -> (Usize, [String], U64, U64) {
         // GATE #4565: kernel primitive
         #Unsafe("snapshot sampler under mutex; preserve poison panic") {
-            inner :: self.state.lock().unwrap()
+            inner :: self.state.lock() ?? panic("unwrap failed")
             (inner.capacity, inner.reservoir.clone(), inner.count, inner.rng)
         }
     }
@@ -206,7 +206,7 @@ impl JetReservoirSampler {
     fn add(self: &Self, item: String) -> {
         // GATE #4565: kernel primitive
         #Unsafe("exclusive RNG and reservoir update; preserve poison panic") {
-            inner := self.state.lock().unwrap()
+            inner := self.state.lock() ?? panic("unwrap failed")
             inner.count += 1
             if inner.reservoir.len() < inner.capacity {
                 inner.reservoir.push(^item)

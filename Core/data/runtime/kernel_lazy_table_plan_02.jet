@@ -418,7 +418,7 @@ impl JetTableBatchState {
     pub fn pop(self: &Self) -> JetTableBatch? {
         if self.is_cancelled() { return None }
         batch :: self.queue.pop_front()?
-        self.emitted_rows = self.emitted_rows.checked_add(batch.rows).expect("accepted/emitted row counters cannot overflow")
+        self.emitted_rows = self.emitted_rows.checked_add(batch.rows) ?? panic("accepted/emitted row counters cannot overflow")
         Val(batch)
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2599

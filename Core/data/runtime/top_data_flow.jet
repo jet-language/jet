@@ -423,7 +423,7 @@ impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V> 
                 if bucket.members.is_empty() { empty = Val(index) }
                 else {
                     bucket.rank = bucket.members.iter().map(fn((id, _, key)) { (key.clone(), *id) })
-                        .min().expect("non-empty group has a rank")
+                        .min() ?? panic("non-empty group has a rank")
                 }
                 break
             }
@@ -744,7 +744,7 @@ fn jet_data_join_query<T: Clone, U: Clone, O: Clone>(left: &DataQuery<T>, right:
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1470
 fn jet_data_query_inner_join<T: Clone, U: Clone>(left: &DataQuery<T>, right: &DataQuery<U>, left_key: fn(T) -> String, right_key: fn(U) -> String) -> DataQuery<DataJoin<T, U>> {
     jet_data_join_query(left, right, ^left_key, ^right_key, JetDataJoinKind.Inner,
-        fn(left, right) { DataJoin{left: ^left, right: right.expect("inner join invariant")} }, "query.inner_join")
+        fn(left, right) { DataJoin{left: ^left, right: (right ?? panic("inner join invariant"))} }, "query.inner_join")
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1496
 fn jet_data_query_left_join<T: Clone, U: Clone>(left: &DataQuery<T>, right: &DataQuery<U>, left_key: fn(T) -> String, right_key: fn(U) -> String) -> DataQuery<DataJoin<T, JetOutcome<U, JetAbsent>>> {

@@ -94,7 +94,7 @@ fn jet_data_pivot_sum_values(values: &[(String, String, F64)], limits: &JetDataK
     keys.sort()
     output := [JetDataPivotCell].with_capacity(groups.len())
     for (row_key, column_key) in keys {
-        (count, sum) :: groups.remove(&(row_key, column_key)).unwrap()
+        (count, sum) :: groups.remove(&(row_key, column_key)) ?? panic("unwrap failed")
         output.push(JetDataPivotCell{row_key: ^row_key, column_key: ^column_key, count: count,
             sum: jet_data_normalize_zero(sum), mean: jet_data_normalize_zero(if count == 0 { 0.0 } else { sum / (count as F64) })})
     }
@@ -309,7 +309,7 @@ fn jet_data_require_bridge(provider: &String) -> Result<(), DataError> {
 fn jet_data_bar_text<K: JetShow, V: Clone + Ord + From<I64> + TryInto<I64> + Display>(groups: &[GroupValue<K, V>]) -> String {
     lines := [String]{}
     loop group in groups {
-        n :: group.value.clone().clamp(V.from(0), V.from(40)).try_into().ok().expect("plot width is clamped to 0..40") as I64
+        n :: (group.value.clone().clamp(V.from(0), V.from(40)).try_into().ok() ?? panic("plot width is clamped to 0..40")) as I64
         bars :: "#".repeat(n as USize)
         lines.push("{group.key.jet_show()} | {bars} {group.value}")
     }

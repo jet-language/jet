@@ -311,7 +311,7 @@ fn jet_data_stream_scan<T: __jet_Decode>(stream: &DataStream) -> Result<T?, Data
                         jet_data_from_encoding("csv_reader", Err(JetAbsent), ^enc))
                 }
             }
-            header :: headers.as_ref().unwrap().clone()
+            header :: (headers.as_ref() ?? panic("unwrap failed")).clone()
             match reader.next_record() {
                 Ok(None) -> {
                     stream.eof = true
