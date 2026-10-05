@@ -331,7 +331,7 @@ fn plugin_network_target(endpoint: String) -> (String, String) Err! {
     default_port :: if scheme == "https" or scheme == "wss" { U16{443} } else { U16{80} }
     if authority.starts_with('[') {
         end :: authority.find(']').ok_or_else(|| -> "network endpoint has an unterminated IPv6 address")?
-        host :: authority[1..end]
+        host :: authority[1..<end]
         suffix :: authority.get(end + 1..).unwrap_or_default()
         port :: match suffix {
             "" -> default_port
