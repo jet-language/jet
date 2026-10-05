@@ -202,7 +202,7 @@ impl<T: Clone + PartialEq> JetDedupIter<T>.Iterator {
     // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2124
     fn next(self: &JetDedupIter<T>) -> T? {
         while self.inner.next() == .Val(x) {
-            if self.prev == x -> continue
+            if self.prev == x -> next
             self.prev = .Val(x.clone())
             return .Val(^x)
         }
@@ -218,7 +218,7 @@ impl<T> JetChunksIter<T>.Iterator {
     // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2148
     fn next(self: &JetChunksIter<T>) -> [T]? {
         chunk := [T].with_capacity(self.size)
-        for _ in 0..<self.size {
+        loop _ in 0..<self.size {
             if self.inner.next() == {
                 .Val(x) -> chunk.push(^x)
                 .None -> break
@@ -413,7 +413,7 @@ fn jet_list_position<T, I: IntoIterator<Item = T>>(xs: I, f: fn(&T) -> Bool) -> 
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2577
 fn jet_list_extreme_by<T, K: Ord, I: IntoIterator<Item = T>>(xs: I, f: fn(&T) -> K, maximum: Bool) -> JetOutcome<T, JetAbsent> {
     best: (K, T)? := .None
-    for item in xs {
+    loop item in xs {
         key :: f(&item)
         replace :: if best.as_ref() == {
             .None -> true
@@ -433,7 +433,7 @@ fn jet_list_max_by<T, K: Ord, I: IntoIterator<Item = T>>(xs: I, f: fn(&T) -> K) 
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2617
 fn jet_list_group_by<T: Clone, K: Ord + Clone, I: IntoIterator<Item = T>>(xs: I, f: fn(&T) -> K) -> [K:[T]] {
     m: [K:[T]] := [:]
-    for x in xs {
+    loop x in xs {
         k :: f(&x)
         m.entry(^k).or_default().push(^x)
     }
@@ -485,9 +485,9 @@ fn jet_iter_dedup_by<T: Clone, K: PartialEq>(it: JetIter<T>, f: fn(&T) -> K) -> 
     xs :: it.to_list()
     out: [T] := []
     prev_key: K? := .None
-    for x in xs {
+    loop x in xs {
         key :: f(&x)
-        if prev_key == key -> continue
+        if prev_key == key -> next
         prev_key = .Val(^key)
         out.push(^x)
     }
@@ -569,11 +569,11 @@ fn jet_iter_split_at<T, R>(it: JetIter<T>, n: I64, build: fn([T], [T]) -> R) -> 
 fn jet_iter_chunk_while<T: Clone>(it: JetIter<T>, f: fn(&T, &T) -> Bool) -> JetIter<[T]> {
     xs :: it.to_list()
     chunks: [[T]] := []
-    for x in xs {
+    loop x in xs {
         if chunks.last_mut() == .Val(last) {
             if f(last.last().unwrap(), &x) {
                 last.push(^x)
-                continue
+                next
             }
         }
         chunks.push([^x])
@@ -604,13 +604,13 @@ fn jet_list_binary_search_by<T>(xs: &[T], f: fn(&T) -> Ordering) -> JetOutcome<I
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2874
 fn jet_list_union<T: Clone + Eq>(left: &[T], right: &[T]) -> [T] {
     out := left.to_vec()
-    for x in right { if !out.contains(x) -> out.push(x.clone()) }
+    loop x in right { if !out.contains(x) -> out.push(x.clone()) }
     ^out
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2883
 fn jet_list_intersection<T: Clone + Eq>(left: &[T], right: &[T]) -> [T] {
     out: [T] := []
-    for x in left { if right.contains(x) && !out.contains(x) -> out.push(x.clone()) }
+    loop x in left { if right.contains(x) && !out.contains(x) -> out.push(x.clone()) }
     ^out
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Collections.rs:2892
@@ -824,7 +824,7 @@ pub fn jet_coll_counter_most_common(counter: &JetCounter, k: I64) -> JetCounter 
     used :: [Bool].repeat(false, counter.keys.len())
     keys := [String].with_capacity(limit)
     counts := [I64].with_capacity(limit)
-    for _ in 0..<limit {
+    loop _ in 0..<limit {
         best: Usize? := .None
         for (index, count) in counter.counts.iter().enumerate() {
             if !used[index] && best.is_none_or(fn(best_index) { count > counter.counts[best_index] }) -> best = .Val(index)

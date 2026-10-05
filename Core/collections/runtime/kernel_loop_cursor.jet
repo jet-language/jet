@@ -72,7 +72,7 @@ pub fn jet_loop_iter_typed_value<T: JetLoopItem, I: Iterator<Item = T>>(cursor: 
 // Rust: crates/jet-codegen/src/Prelude/Core/LoopCursor.rs:123
 pub fn jet_loop_iter_typed_advance<T: JetLoopItem, I: Iterator<Item = T>>(cursor: &JetLoopIterCursor<T, I>) -> Unit T.Error! {
     if cursor.exhausted -> return Ok(())
-    for _ in 1..<cursor.step {
+    loop _ in 1..<cursor.step {
         item :: if cursor.iter.next() == {
             .Val(item) -> item
             .None -> {

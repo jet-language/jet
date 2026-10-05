@@ -9,7 +9,7 @@ pub fn jet_list_try_sort_by_key_kernel<T, K, E>(xs: &[T], key: fn(&T) -> K E!,
     for (index, item) in xs.iter().enumerate() -> keyed.push((index, key(item)?))
     keyed.sort_by(fn(left, right) { compare(&left.1, &right.1) })
     // Follow prior swaps without copying receiver values.
-    for target in 0..<keyed.len() {
+    loop target in 0..<keyed.len() {
         source := keyed[target].0
         while source < target -> source = keyed[source].0
         keyed[target].0 = source
@@ -24,7 +24,7 @@ pub fn jet_list_try_partition_kernel<T, E, I: IntoIterator<Item = T>>(xs: I,
     predicate: fn(&T) -> Bool E!) -> ([T], [T]) E! {
     yes: [T] := []
     no: [T] := []
-    for item in xs {
+    loop item in xs {
         if predicate(&item)? -> yes.push(^item)
         else -> no.push(^item)
     }

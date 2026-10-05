@@ -10,7 +10,7 @@ pub fn jet_list_para_chunks_serial_kernel<R, E>(len: Usize,
     f: fn(Range<Usize>) -> R E!) -> [(Usize, R E!)] {
     chunk_count :: len.div_ceil(JET_PARA_CHUNK_ITEMS)
     out := [(Usize, R E!)].with_capacity(chunk_count)
-    for chunk in 0..<chunk_count {
+    loop chunk in 0..<chunk_count {
         start :: chunk * JET_PARA_CHUNK_ITEMS
         end :: (start + JET_PARA_CHUNK_ITEMS).min(len)
         out.push((chunk, f(start..<end)))
@@ -42,7 +42,7 @@ fn jet_list_para_chunks_kernel<R: Send, E: Send>(len: Usize, worker_limit: Usize
     #Unsafe("scoped workers borrow the callback and join before its owner is released") {
         thread.scope(fn(scope) {
             handles := [].with_capacity(worker_count)
-            for worker in 0..<worker_count {
+            loop worker in 0..<worker_count {
                 handles.push(scope.spawn(fn() {
                     out := [(Usize, R E!)].with_capacity(chunk_count.div_ceil(worker_count))
                     for chunk in (worker..<chunk_count).step_by(worker_count) {

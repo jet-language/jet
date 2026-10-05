@@ -141,7 +141,7 @@ pub fn jet_memo_call<K: PartialEq + Clone, V: Clone>(store: &Mutex<JetMemo<K, V>
     cached :: #Unsafe("hold outer store mutex only for lookup; release before user computation; recover poison") {
         store.lock().unwrap_or_else(fn(error) { error.into_inner() }).get(&key)
     }
-    if Val(value) :: cached { return ^value }
+    if cached == .Val(value) { return ^value }
     value :: compute()
     // GATE #4565: kernel primitive
     #Unsafe("hold outer store mutex only for insertion after user computation; recover poison") {

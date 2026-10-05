@@ -601,11 +601,11 @@ fn jet_map_top_n<K: Ord + Clone,V: Ord + Clone>(m: [K:V],n: I64) -> [(K,V)] Neve
         if best.len() < limit {
             best.push((key.clone(),value.clone()))
             if best.len() == limit -> best.sort_by(rank)
-            continue
+            next
         }
         worst :: best.len() - 1
         better :: value > best[worst].1 or (value == best[worst].1 and key < best[worst].0)
-        if not better -> continue
+        if not better -> next
         best[worst] = (key.clone(),value.clone())
         inserted := worst
         while inserted > 0 and rank(best[inserted],best[inserted - 1]).is_lt() {

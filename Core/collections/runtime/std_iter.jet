@@ -54,12 +54,12 @@ pub fn jet_zip_pad_step<A: Clone, B: Clone>(left: A?, right: B?, left_fill: A, r
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:106
 fn jet_list_count_where_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool) -> I64 {
     count: I64 := 0
-    for item in xs { if predicate(item) { count += 1 } }
+    loop item in xs { if predicate(item) { count += 1 } }
     count
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:120
 fn jet_list_update_first_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool, replacement: T) -> Bool {
-    for index in 0..<xs.len() {
+    loop index in 0..<xs.len() {
         if predicate(&xs[index]) {
             xs[index] = ^replacement
             return true
@@ -70,12 +70,12 @@ fn jet_list_update_first_kernel<T>(xs: &[T], predicate: fn(&T) -> Bool, replacem
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:138
 pub fn jet_list_count_where_result_kernel<T, E>(xs: &[T], predicate: fn(&T) -> Bool E!) -> I64 E! {
     count: I64 := 0
-    for item in xs { if predicate(item)? { count += 1 } }
+    loop item in xs { if predicate(item)? { count += 1 } }
     Ok(count)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:156
 pub fn jet_list_update_first_result_kernel<T, E>(xs: &[T], predicate: fn(&T) -> Bool E!, replacement: T) -> Bool E! {
-    for index in 0..<xs.len() {
+    loop index in 0..<xs.len() {
         if predicate(&xs[index])? {
             xs[index] = ^replacement
             return Ok(true)
