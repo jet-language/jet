@@ -2496,6 +2496,13 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     // MIRRust nominal_name: the crypto carriers and any remaining native projection.
     if jet_rust_emit_core_crypto_rust_type_name(name.name) == .Val(crypto) -> return Val("{jet_rust_emit_ffi_crate()}::{crypto}")
     if name.name == "Condition" && !user_declared -> return Val("{root}jet_std::JetCondition")
+    // Prelude carriers Context::rust_type spells without a declaration row
+    // (D-TTLVAL1=A, D-COLLBREADTH1=A, D-SHARED-CYCLE1=C); a user type wins.
+    if !user_declared {
+        if name.name == "Expired" && args.len() == 0 -> return Val("JetExpired")
+        if name.name == "Cache" && args.len() == 2 -> return Val("JetCache<{jet_rust_emit_type(&ctx, args[0])}, {jet_rust_emit_type(&ctx, args[1])}>")
+        if name.name == "Shared.Weak" && args.len() == 1 -> return Val("{root}jet_std::JetSharedWeak<{jet_rust_emit_type(&ctx, args[0])}>")
+    }
     if !user_declared {
         layout :: if name.name == {
             "HVar" | "VVar" | "LengthVar" -> Val("jet_layout::LinExpr")

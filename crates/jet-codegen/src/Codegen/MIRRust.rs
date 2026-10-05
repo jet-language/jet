@@ -4614,6 +4614,20 @@ impl<'a> RustEmitter<'a> {
         if name == jet_foundation::Syntax::TYPE_CONDITION && !self.types_by_name.contains_key(name) {
             return format!("{}jet_std::JetCondition", self.config.root_prefix);
         }
+        // Prelude carriers that Context::rust_type also spells without a
+        // declaration row; a user type of the same name still wins.
+        // D-TTLVAL1=A: the expired-secret failure; D-COLLBREADTH1=A: the LRU
+        // `Cache<K, V>`; D-SHARED-CYCLE1=C: the expert weak back-edge.
+        if !self.types_by_name.contains_key(name) {
+            match name {
+                "Expired" => return "JetExpired".to_string(),
+                jet_foundation::Syntax::TYPE_LRU => return "JetCache".to_string(),
+                jet_foundation::Syntax::TYPE_SHARED_WEAK => {
+                    return format!("{}jet_std::JetSharedWeak", self.config.root_prefix)
+                }
+                _ => {}
+            }
+        }
         // D-LAYOUT1: layout variables and constraints are runtime handles in
         // the root `jet_layout` module; a user type of that name still wins.
         if let Some(rust) = crate::Codegen::layout_handle_rust_type(name)
