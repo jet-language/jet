@@ -145,6 +145,33 @@ fn jet_eval_task_roots_fixture_unit_type() -> MIRType Never! {
     mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}})
 }
 
+fn jet_eval_task_roots_fixture_list_slice(machine: &JetEvalMachine, receiver: TComptimeValue, start: Int, end: Int, span: Span) -> TComptimeValue? {
+    args :: [TComptimeValue]{receiver, TComptimeValue.Int{value: start}, TComptimeValue.Int{value: end}}
+    sliced :: jet_eval_route_builtin("list_slice", "jet_list_slice", args, MIRCallFallibility.Infallible, None, &machine, span) ?? return None
+    if sliced == {
+        .Data(value) -> Val(value)
+        else -> None
+    }
+}
+
+// `core.builtin.list_slice`, the Source twin of MIREval's route: both bounds
+// clamp into the list, an inverted window is empty, and a packed `[U8]`
+// carrier stays packed.
+fn jet_eval_task_roots_fixture_list_slices(machine: &JetEvalMachine, span: Span) -> Bool {
+    values := [TComptimeValue]{}
+    loop index in 0..<6 -> &values.push(TComptimeValue.Int{value: index * 10})
+    list :: TComptimeValue.List{values: values}
+    if jet_eval_task_roots_fixture_list_slice(&machine, list, 1, 4, span) != Val(TComptimeValue.List{values: values[1..<4]}) -> return false
+    if jet_eval_task_roots_fixture_list_slice(&machine, list, -3, 2, span) != Val(TComptimeValue.List{values: values[0..<2]}) -> return false
+    if jet_eval_task_roots_fixture_list_slice(&machine, list, 4, 99, span) != Val(TComptimeValue.List{values: values[4..<6]}) -> return false
+    if jet_eval_task_roots_fixture_list_slice(&machine, list, 5, 2, span) != Val(TComptimeValue.List{values: [TComptimeValue]{}}) -> return false
+    bytes :: "jet lang".bytes()
+    packed :: TComptimeValue.Bytes{value: bytes}
+    if jet_eval_task_roots_fixture_list_slice(&machine, packed, 4, 99, span) != Val(TComptimeValue.Bytes{value: bytes[4..<8]}) -> return false
+    if jet_eval_task_roots_fixture_list_slice(&machine, packed, 7, 2, span) != Val(TComptimeValue.Bytes{value: [U8]{}}) -> return false
+    jet_eval_task_roots_fixture_clean(&machine)
+}
+
 fn jet_eval_task_roots_fixture_shared_row(module_name: String, member: String, symbol: String, borrow_mask: ^[Bool]) -> MIRPreludeCall? {
     row := jet_eval_exact_integer_row("add", 2) ?? return None
     arity :: borrow_mask.len()
@@ -1193,6 +1220,7 @@ pub fn jet_eval_task_roots_fixture(program: ^MIRProgram, config: ^JetEvalConfig,
     // raw capability must be a live arena registration the adapter can release.
     if resource_handle != jet_eval_loop_cursor_handle_id() -> return false
     machine := jet_eval_machine(^program, ^config)
+    if !jet_eval_task_roots_fixture_list_slices(&machine, span) -> return false
     cell :: jet_eval_new_shared_cell(machine, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MIRAccess.Write)
     cell_id :: jet_eval_task_roots_fixture_shared_cell_index(cell) ?? return false
     cursor :: jet_eval_cursor_handle_new(machine, resource_handle, resource_raw, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
