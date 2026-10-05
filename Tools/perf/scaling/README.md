@@ -1,47 +1,40 @@
-# Compiler scaling gate (Tower #4319)
+# Compiler scaling gate (Tower #4319, #4601)
 
-Dependency-free Node tools; GNU time measures the complete compiler process tree.
-Default Jet: `~/.cache/jet-dev/scratch/jet-release-night12/jet`.
-Default time: `/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time`.
+Dependency-free Node tools. The gate compiles every corpus shape at a size
+ladder with every compiler and fails when any phase or work counter grows
+faster than k * N log N, naming the phase and the counter that dominates it,
+or when a phase is slower than its lines/s floor.
 
 ```sh
-node Tools/perf/scaling/generate.mjs functions 32 /tmp/new-functions
-~/.cache/jet-dev/laneS.sh node --test Tools/perf/scaling/scaling.test.mjs
-~/.cache/jet-dev/laneB.sh 8 node Tools/perf/scaling/harness.mjs --repeats 3 --work-dir ~/.cache/jet-dev/scratch/sol/SolScaleGate --receipt /tmp/scaling.json
+node Tools/perf/scaling/generate.mjs --list                 # every shape
+node Tools/perf/scaling/generate.mjs web 125000 NEW_DIR     # one corpus
+node --test Tools/perf/scaling/scaling.test.mjs
+node Tools/perf/scaling/harness.mjs --compiler rust=jet:target/release/jet \
+  --compiler p15=bootstrap:$HOME/.cache/jet-dev/candP15/jetc0 --stress --memory-max 20G --profile
 ```
 
-Axes: `functions` (N helpers), `declarations` (N structs/enums/generic aliases),
-`depth` (N nested additions), `modules` (N imported files), `match-arms` (N value
-arms plus a fixed fallback), `string-literals` (N bytes), `interpolation` (N
-holes), `fan-in` (N call sites into one shared helper, two fixed definitions),
-and `generics` (N distinct fixed-array type instantiations, fixed generic body).
-Only the selected dimension scales; necessary consuming statements also scale.
-Modules contain only a constant, not additional function/type definitions.
-Generated programs have a runnable entry; no runtime timing is included.
-The generator refuses to overwrite source files; use a new output directory.
-`mixed` (`mixed.mjs`) is the compile-throughput cell's whole-program profile:
-`node Tools/perf/scaling/generate.mjs mixed --code-lines N --seed S DIR` writes
-one package of at least N code lines and prints its digest, golden stdout and
-shape as JSON (Tools/perf/throughput measures it).
-`trait-facts-fix.json` records the module allocation evidence and dual-compiler fix spec.
-Default ladders: 256/512/1024; modules 64/128/256 (8 GiB memory cap), depth
-16/32/64, match arms 48/96/192 (nesting limits), literal bytes 1/2/4 MiB.
-Check and build each measure N=1 plus their ladder, three fresh runs per point.
-Ratios are marginal: `(metric(upper)-metric(1))/(metric(lower)-metric(1))`.
-Receipts keep commands, hashes, samples/logs, raw medians and marginal ratios.
-Exit 1: ratio >2.2, compile/counter failure, or an unmeasurable non-positive
-marginal baseline (noise); exit 2: invalid invocation. No warm build cache reuse.
+Shapes (`corpora.mjs`, `domains.mjs`, helpers in `package.mjs`): stress shapes
+grow one dimension with N (files, small functions, statements per function,
+nesting depth, enum width and arm tables, impls/traits, generic
+instantiations, comptime items, table elements, Core imports, call depth,
+fallible functions, diagnostics, interpolation holes, call sites) at N, 2N, 4N,
+8N; domain shapes are realistic programs (web, game, cli, data, gui,
+embedded, compiler, scientific, generic-lib, generated) at 125k/250k/500k/1M
+code lines. Adding a shape is one builder function plus a registry row; see
+the header comments of `corpora.mjs` and `domains.mjs`. `mixed` (`mixed.mjs`)
+remains the compile-throughput cell's pinned program.
 
-`--n BASE` replaces every selected ladder; repeat `--axis NAME` to select axes.
-Templates run in a shell, with shell-quoted `{jet}`, `{source}`, `{dir}`, `{out}`,
-`{axis}`, `{n}` placeholders; e.g. `--command 'jetc0=/path/jetc0 {source}'`.
-Repeat `--command`; `--jet`, `--time`, `--threshold`, `--receipt` replace defaults.
-`--overrides FILE` accepts an axis table, e.g.
-`{"depth":{"bound":3,"reason":"Documented algorithm and issue reference"}}`.
-There are no built-in exemptions; every override requires a reason and bound.
-`JET_PHASE_COUNTERS {"phase":"parse","visits":42,"bytes_copied":64}` lines on
-stdout/stderr are summed by phase/key; nested numeric objects also work.
-Counter ratios gate independently; no counter lines means timing/RSS-only data.
-The self-hosted compiler (a jetc runner, via `--command`) writes them when run
-with both `JET_TRACE_FILE` and `JET_PHASE_COUNTERS=1`: per phase (`register`,
-`sema.check`), the registration graph's `module_lookups` and `name_lookups`.
+Per rung the gate records wall/user/RSS (GNU time), per-phase wall from the
+`JET_TRACE_FILE` phase spans, the trace's span and item counts
+(`trace.<kind>.*`), and `JET_PHASE_COUNTERS` lines (`counter.<phase>.<name>`):
+the Jet half emits `sink.progress("counters.<phase>.<name>", n, -1)`, the
+Rust half counts through `jet_foundation::WorkCounters` (tokens, items,
+scope lookups, item/impl scans, whole-program copies, functions lowered and
+emitted, allocations), drained at every phase end by `jet_driver::Trace`.
+Series are baseline-subtracted (an N=1 rung), judged between the first and
+last measurable rung against N log N (bounds: counters 1.25, time/RSS 1.5),
+and projected to 1M lines. Floors come from
+`Tools/perf/throughput/bench.json` phase budgets plus 1M lines in 10 s end
+to end. `--profile` re-runs the top rung of a failing series under perf and
+attributes samples per phase to source functions (`profile.mjs`). Exit 0
+pass, 1 failure, 2 invalid invocation; the receipt is JSON in `--work-dir`.

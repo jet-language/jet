@@ -586,6 +586,7 @@ impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` and the failure-union probe:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
+        jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::FunctionsChecked, 1);
         // A public fallible signature is an API boundary. Validate its error
         // carrier before checking the body so the public contract teaches the
         // required visibility change at the declaration that owns it.

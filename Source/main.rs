@@ -25,10 +25,14 @@ use jet_foundation::Report::{
 
 // D-ALLOC-PROGRAM1=A: the CLI executable installs the resident instance once.
 // JIT/interpreter entry points only marshal the checked package fact into the
-// same Prelude kernel; they never implement allocation policy.
+// same Prelude kernel; they never implement allocation policy. The #4601 work
+// counters wrap it and count allocations only under `JET_PHASE_COUNTERS`.
 #[global_allocator]
-static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
-    jet::program_allocator::JetHostProgramAllocator;
+static JET_HOST_ALLOCATOR: jet_foundation::WorkCounters::CountingAllocator<
+    jet::program_allocator::JetHostProgramAllocator,
+> = jet_foundation::WorkCounters::CountingAllocator(
+    jet::program_allocator::JetHostProgramAllocator,
+);
 
 mod CheckReceipt;
 mod CmdBackendScaffold;
