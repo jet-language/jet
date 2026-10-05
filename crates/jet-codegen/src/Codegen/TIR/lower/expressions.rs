@@ -6431,10 +6431,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 .foreign_undos
                                 .get(&format!("{rust_mod}::{fn_name}"))
                                 .map(String::as_str);
-                            let sig = cx
-                                .import_sigs
-                                .get(&(call.name.clone(), fn_name.clone()))
-                                .cloned();
+                            let sig = crate::Codegen::TIR::module_call_signature(
+                                cx, &(call.name.clone(), fn_name.clone()), &call.type_args,
+                            );
                             let args: Vec<TCallArg> = call
                                 .args
                                 .iter()
@@ -6474,17 +6473,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 cx,
                                 &(call.name.clone(), fn_name.clone()),
                                 &fn_name,
-                                &args,
                                 &call.type_args,
                             ) {
-                                Some((owner, instance)) => TModuleCallForm::Qualified {
+                                Ok(Some((owner, instance))) => TModuleCallForm::Qualified {
                                     rust_mod: owner,
                                     rust_fn: instance,
                                 },
-                                None => TModuleCallForm::Qualified {
+                                Ok(None) => TModuleCallForm::Qualified {
                                     rust_mod,
                                     rust_fn: mangle(&fn_name).to_string(),
                                 },
+                                Err(error) => return invariant_violation_expr(call.name_span, error),
                             };
                             let lowered = TExpr {
                                 ty: ret,

@@ -95,11 +95,18 @@ fn sema_liveness_removable(function: Func) -> Bool Never! {
     function.body.len() == 0 && function.meta == None && function.markers.len() == 0 && function.external_type == None && function.inline_foreign == None && function.undo == None && function.web_marker == None && function.pre.len() == 0 && function.post.len() == 0 && !function.compiler_generated && !function.is_unsafe && !function.is_pure && !function.is_reactive && !function.is_replayable && !function.is_job && function.every == None && !function.is_must_use && function.kernel == None
 }
 
-fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: &[String:Bool], graph: SemaRegistrationGraph, source_index: Int, key: String, site: Span) Never! {
+fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: &[String:Bool], graph: SemaRegistrationGraph, source_index: Int, key: String, site: Span, caller_key: String) Never! {
     candidate :: candidates.get(key) ?? return
     if source_index == candidate.module_index {
-        // A private function's own body never keeps it alive.
-        if candidate.private && site.start >= candidate.body.start && site.end <= candidate.body.end -> return
+        // Specialization can carry a sibling's call site into this module's
+        // checked rows. Byte offsets from two files are not caller identities.
+        if candidate.private {
+            if caller_key != "" {
+                if caller_key == key -> return
+            } else {
+                if site.start >= candidate.body.start && site.end <= candidate.body.end -> return
+            }
+        }
         if candidate.private -> reached[key] = true
         return
     }
@@ -128,10 +135,10 @@ pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraph
     }
     reached := [String:Bool]{}
     loop (source_index, checked) in modules {
-        loop reference in checked.name_references -> sema_liveness_note_site(candidates, &reached, graph, source_index, reference.symbol.id.key, reference.span)
+        loop reference in checked.name_references -> sema_liveness_note_site(candidates, &reached, graph, source_index, reference.symbol.id.key, reference.span, "")
         loop call in checked.call_facts {
             callee :: call.callee ?? next
-            sema_liveness_note_site(candidates, &reached, graph, source_index, callee.key, call.span)
+            sema_liveness_note_site(candidates, &reached, graph, source_index, callee.key, call.span, call.caller_key)
         }
     }
     loop (module_index, module_row) in graph.modules {

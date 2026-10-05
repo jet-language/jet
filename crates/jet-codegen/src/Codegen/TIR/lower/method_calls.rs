@@ -4142,9 +4142,9 @@ fn lower_method_call_impl(
                 });
             }
             let sig = root_alias.as_ref().and_then(|alias| {
-                cx.import_sigs
-                    .get(&(alias.clone(), root_name.clone()))
-                    .cloned()
+                crate::Codegen::TIR::module_call_signature(
+                    cx, &(alias.clone(), root_name.clone()), type_args,
+                )
             });
             let Some(sig) = sig.or_else(|| cx.sigs.get(&root_name).cloned()) else {
                 return invariant_method_expr(
@@ -4207,9 +4207,12 @@ fn lower_method_call_impl(
                     return TExpr {
                         ty: ret,
                         kind: TExprKind::ModuleCall {
-                            form: TModuleCallForm::Qualified {
-                                rust_mod,
-                                rust_fn: mangle(&rust_fn).to_string(),
+                            form: match crate::Codegen::TIR::demand_module_generic_function(
+                                cx, &(alias.clone(), root_name.clone()), &rust_fn, type_args,
+                            ) {
+                                Ok(Some((rust_mod, rust_fn))) => TModuleCallForm::Qualified { rust_mod, rust_fn },
+                                Ok(None) => TModuleCallForm::Qualified { rust_mod, rust_fn: mangle(&rust_fn).to_string() },
+                                Err(error) => return invariant_method_expr(method_span, error),
                             },
                             target_return,
                             type_args: type_args.to_vec(),
@@ -6705,10 +6708,9 @@ fn lower_method_call_impl(
                             .foreign_undos
                             .get(&format!("{real_mod}::{real_fn}"))
                             .map(String::as_str);
-                        let sig = cx
-                            .import_sigs
-                            .get(&(alias.clone(), method.to_string()))
-                            .cloned();
+                        let sig = crate::Codegen::TIR::module_call_signature(
+                            cx, &(alias.clone(), method.to_string()), type_args,
+                        );
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let target_return = match imported_module_call_target_return(
                             cx,
@@ -6730,9 +6732,12 @@ fn lower_method_call_impl(
                         let lowered = TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
-                                form: TModuleCallForm::Qualified {
-                                    rust_mod: real_mod,
-                                    rust_fn: mangle(&real_fn).to_string(),
+                                form: match crate::Codegen::TIR::demand_module_generic_function(
+                                    cx, &(alias.clone(), method.to_string()), &real_fn, type_args,
+                                ) {
+                                    Ok(Some((rust_mod, rust_fn))) => TModuleCallForm::Qualified { rust_mod, rust_fn },
+                                    Ok(None) => TModuleCallForm::Qualified { rust_mod: real_mod, rust_fn: mangle(&real_fn).to_string() },
+                                    Err(error) => return invariant_method_expr(method_span, error),
                                 },
                                 target_return,
                                 type_args: type_args.to_vec(),
@@ -6748,10 +6753,9 @@ fn lower_method_call_impl(
                             .foreign_undos
                             .get(&format!("{mod_name}::{method}"))
                             .map(String::as_str);
-                        let sig = cx
-                            .import_sigs
-                            .get(&(alias.clone(), method.to_string()))
-                            .cloned();
+                        let sig = crate::Codegen::TIR::module_call_signature(
+                            cx, &(alias.clone(), method.to_string()), type_args,
+                        );
                         if let Some(extern_fn) = cx
                             .extern_funcs
                             .get(&format!("{mod_name}::{method}"))
@@ -6869,9 +6873,12 @@ fn lower_method_call_impl(
                         let lowered = TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
-                                form: TModuleCallForm::Qualified {
-                                    rust_mod: mod_name,
-                                    rust_fn: mangle(method).to_string(),
+                                form: match crate::Codegen::TIR::demand_module_generic_function(
+                                    cx, &(alias.clone(), method.to_string()), method, type_args,
+                                ) {
+                                    Ok(Some((rust_mod, rust_fn))) => TModuleCallForm::Qualified { rust_mod, rust_fn },
+                                    Ok(None) => TModuleCallForm::Qualified { rust_mod: mod_name, rust_fn: mangle(method).to_string() },
+                                    Err(error) => return invariant_method_expr(method_span, error),
                                 },
                                 target_return,
                                 type_args: type_args.to_vec(),
@@ -6890,7 +6897,9 @@ fn lower_method_call_impl(
                             .foreign_undos
                             .get(&format!("{mod_name}::{method}"))
                             .map(String::as_str);
-                        let sig = cx.import_signature_for_function(&env.fn_name, alias, method);
+                        let sig = crate::Codegen::TIR::module_call_signature(
+                            cx, &(alias.clone(), method.to_string()), type_args,
+                        ).or_else(|| cx.import_signature_for_function(&env.fn_name, alias, method));
                         if let Some(extern_fn) = cx
                             .extern_funcs
                             .get(&format!("{mod_name}::{method}"))
@@ -7010,9 +7019,12 @@ fn lower_method_call_impl(
                         let lowered = TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
-                                form: TModuleCallForm::Qualified {
-                                    rust_mod: mod_name,
-                                    rust_fn: mangle(method).to_string(),
+                                form: match crate::Codegen::TIR::demand_module_generic_function(
+                                    cx, &(alias.clone(), method.to_string()), method, type_args,
+                                ) {
+                                    Ok(Some((rust_mod, rust_fn))) => TModuleCallForm::Qualified { rust_mod, rust_fn },
+                                    Ok(None) => TModuleCallForm::Qualified { rust_mod: mod_name, rust_fn: mangle(method).to_string() },
+                                    Err(error) => return invariant_method_expr(method_span, error),
                                 },
                                 target_return,
                                 type_args: type_args.to_vec(),
