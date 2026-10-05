@@ -271,135 +271,231 @@ fn gtk_api() -> &Api? {
 // branches. Native calls always use the loaded exact symbol, never a provider mock.
 // GATE #4565: kernel primitive — audited C-ABI symbol calls.
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:358
-fn gtk_init_check() -> gboolean { if gtk_api() is Val(api) { return #Unsafe("GTK init C ABI") { api.gtk_init_check() } }; 0 }
+fn gtk_init_check() -> gboolean {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK init C ABI") { api.gtk_init_check() } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:359
-fn gtk_window_new() -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK window C ABI") { api.gtk_window_new() } }; Ptr.null() }
+fn gtk_window_new() -> Ptr<GtkWidget> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK window C ABI") { api.gtk_window_new() } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:360
-fn gtk_window_set_title(window: Ptr<GtkWidget>, title: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK window title C ABI") { api.gtk_window_set_title(window, title) } } }
+fn gtk_window_set_title(window: Ptr<GtkWidget>, title: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK window title C ABI") { api.gtk_window_set_title(window, title) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:361
-fn gtk_window_set_default_size(window: Ptr<GtkWidget>, width: I32, height: I32) -> { if gtk_api() is Val(api) { #Unsafe("GTK window size C ABI") { api.gtk_window_set_default_size(window, width, height) } } }
+fn gtk_window_set_default_size(window: Ptr<GtkWidget>, width: I32, height: I32) -> { if gtk_api() == .Val(api) { #Unsafe("GTK window size C ABI") { api.gtk_window_set_default_size(window, width, height) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:362
-fn gtk_window_set_child(window: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() is Val(api) { #Unsafe("GTK child C ABI") { api.gtk_window_set_child(window, child) } } }
+fn gtk_window_set_child(window: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK child C ABI") { api.gtk_window_set_child(window, child) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:363
-fn gtk_window_present(window: Ptr<GtkWidget>) -> { if gtk_api() is Val(api) { #Unsafe("GTK present C ABI") { api.gtk_window_present(window) } } }
+fn gtk_window_present(window: Ptr<GtkWidget>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK present C ABI") { api.gtk_window_present(window) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:364
-fn gtk_box_new(orientation: I32, spacing: I32) -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK box C ABI") { api.gtk_box_new(orientation, spacing) } }; Ptr.null() }
+fn gtk_box_new(orientation: I32, spacing: I32) -> Ptr<GtkWidget> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK box C ABI") { api.gtk_box_new(orientation, spacing) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:365
-fn gtk_box_append(box_: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() is Val(api) { #Unsafe("GTK append C ABI") { api.gtk_box_append(box_, child) } } }
+fn gtk_box_append(box_: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK append C ABI") { api.gtk_box_append(box_, child) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:366
-fn gtk_box_remove(box_: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() is Val(api) { #Unsafe("GTK remove C ABI") { api.gtk_box_remove(box_, child) } } }
+fn gtk_box_remove(box_: Ptr<GtkWidget>, child: Ptr<GtkWidget>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK remove C ABI") { api.gtk_box_remove(box_, child) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:367
-fn gtk_label_new(text: Ptr<I8>) -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK label C ABI") { api.gtk_label_new(text) } }; Ptr.null() }
+fn gtk_label_new(text: Ptr<I8>) -> Ptr<GtkWidget> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK label C ABI") { api.gtk_label_new(text) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:368
-fn gtk_label_set_text(label: Ptr<GtkWidget>, text: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK label text C ABI") { api.gtk_label_set_text(label, text) } } }
+fn gtk_label_set_text(label: Ptr<GtkWidget>, text: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK label text C ABI") { api.gtk_label_set_text(label, text) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:369
-fn gtk_button_new_with_label(label: Ptr<I8>) -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK button C ABI") { api.gtk_button_new_with_label(label) } }; Ptr.null() }
+fn gtk_button_new_with_label(label: Ptr<I8>) -> Ptr<GtkWidget> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK button C ABI") { api.gtk_button_new_with_label(label) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:370
-fn gtk_button_set_label(button: Ptr<GtkWidget>, label: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK button label C ABI") { api.gtk_button_set_label(button, label) } } }
+fn gtk_button_set_label(button: Ptr<GtkWidget>, label: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK button label C ABI") { api.gtk_button_set_label(button, label) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:371
-fn gtk_entry_new() -> Ptr<GtkWidget> { if gtk_api() is Val(api) { return #Unsafe("GTK entry C ABI") { api.gtk_entry_new() } }; Ptr.null() }
+fn gtk_entry_new() -> Ptr<GtkWidget> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK entry C ABI") { api.gtk_entry_new() } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:372
-fn gtk_editable_set_text(editable: Ptr<GtkWidget>, text: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK editable C ABI") { api.gtk_editable_set_text(editable, text) } } }
+fn gtk_editable_set_text(editable: Ptr<GtkWidget>, text: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK editable C ABI") { api.gtk_editable_set_text(editable, text) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:373
-fn gtk_widget_set_size_request(widget: Ptr<GtkWidget>, width: I32, height: I32) -> { if gtk_api() is Val(api) { #Unsafe("GTK widget size C ABI") { api.gtk_widget_set_size_request(widget, width, height) } } }
+fn gtk_widget_set_size_request(widget: Ptr<GtkWidget>, width: I32, height: I32) -> { if gtk_api() == .Val(api) { #Unsafe("GTK widget size C ABI") { api.gtk_widget_set_size_request(widget, width, height) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:374
-fn gtk_widget_add_css_class(widget: Ptr<GtkWidget>, css_class: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK add CSS C ABI") { api.gtk_widget_add_css_class(widget, css_class) } } }
+fn gtk_widget_add_css_class(widget: Ptr<GtkWidget>, css_class: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK add CSS C ABI") { api.gtk_widget_add_css_class(widget, css_class) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:375
-fn gtk_widget_remove_css_class(widget: Ptr<GtkWidget>, css_class: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK remove CSS C ABI") { api.gtk_widget_remove_css_class(widget, css_class) } } }
+fn gtk_widget_remove_css_class(widget: Ptr<GtkWidget>, css_class: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK remove CSS C ABI") { api.gtk_widget_remove_css_class(widget, css_class) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:376
-fn gtk_widget_grab_focus(widget: Ptr<GtkWidget>) -> gboolean { if gtk_api() is Val(api) { return #Unsafe("GTK focus C ABI") { api.gtk_widget_grab_focus(widget) } }; 0 }
+fn gtk_widget_grab_focus(widget: Ptr<GtkWidget>) -> gboolean {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK focus C ABI") { api.gtk_widget_grab_focus(widget) } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:377
-fn gtk_css_provider_new() -> Ptr<GtkCssProvider> { if gtk_api() is Val(api) { return #Unsafe("GTK CSS provider C ABI") { api.gtk_css_provider_new() } }; Ptr.null() }
+fn gtk_css_provider_new() -> Ptr<GtkCssProvider> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK CSS provider C ABI") { api.gtk_css_provider_new() } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:378
-fn gtk_css_provider_load_from_string(provider: Ptr<GtkCssProvider>, string: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK CSS load C ABI") { api.gtk_css_provider_load_from_string(provider, string) } } }
+fn gtk_css_provider_load_from_string(provider: Ptr<GtkCssProvider>, string: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK CSS load C ABI") { api.gtk_css_provider_load_from_string(provider, string) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:379
-fn gtk_style_context_add_provider_for_display(display: Ptr<GdkDisplay>, provider: Ptr<GtkCssProvider>, priority: I32) -> { if gtk_api() is Val(api) { #Unsafe("GTK CSS install C ABI") { api.gtk_style_context_add_provider_for_display(display, provider, priority) } } }
+fn gtk_style_context_add_provider_for_display(display: Ptr<GdkDisplay>, provider: Ptr<GtkCssProvider>, priority: I32) -> { if gtk_api() == .Val(api) { #Unsafe("GTK CSS install C ABI") { api.gtk_style_context_add_provider_for_display(display, provider, priority) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:380
-fn gdk_display_get_default() -> Ptr<GdkDisplay> { if gtk_api() is Val(api) { return #Unsafe("GDK display C ABI") { api.gdk_display_get_default() } }; Ptr.null() }
+fn gdk_display_get_default() -> Ptr<GdkDisplay> {
+    if gtk_api() == .Val(api) { return #Unsafe("GDK display C ABI") { api.gdk_display_get_default() } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:381
-fn gdk_display_get_clipboard(display: Ptr<GdkDisplay>) -> Ptr<GdkClipboard> { if gtk_api() is Val(api) { return #Unsafe("GDK clipboard C ABI") { api.gdk_display_get_clipboard(display) } }; Ptr.null() }
+fn gdk_display_get_clipboard(display: Ptr<GdkDisplay>) -> Ptr<GdkClipboard> {
+    if gtk_api() == .Val(api) { return #Unsafe("GDK clipboard C ABI") { api.gdk_display_get_clipboard(display) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:382
-fn gdk_clipboard_set_text(clipboard: Ptr<GdkClipboard>, text: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GDK clipboard write C ABI") { api.gdk_clipboard_set_text(clipboard, text) } } }
+fn gdk_clipboard_set_text(clipboard: Ptr<GdkClipboard>, text: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GDK clipboard write C ABI") { api.gdk_clipboard_set_text(clipboard, text) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:383
-fn gdk_clipboard_read_text_async(clipboard: Ptr<GdkClipboard>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GDK clipboard async C ABI") { api.gdk_clipboard_read_text_async(clipboard, cancellable, callback, user_data) } } }
+fn gdk_clipboard_read_text_async(clipboard: Ptr<GdkClipboard>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() == .Val(api) { #Unsafe("GDK clipboard async C ABI") { api.gdk_clipboard_read_text_async(clipboard, cancellable, callback, user_data) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:384
-fn gdk_clipboard_read_text_finish(clipboard: Ptr<GdkClipboard>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GDK clipboard finish C ABI") { api.gdk_clipboard_read_text_finish(clipboard, result, error) } }; Ptr.null() }
+fn gdk_clipboard_read_text_finish(clipboard: Ptr<GdkClipboard>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<I8> {
+    if gtk_api() == .Val(api) { return #Unsafe("GDK clipboard finish C ABI") { api.gdk_clipboard_read_text_finish(clipboard, result, error) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:385
-fn g_main_context_iteration(context: gpointer, may_block: gboolean) -> gboolean { if gtk_api() is Val(api) { return #Unsafe("GLib context C ABI") { api.g_main_context_iteration(context, may_block) } }; 0 }
+fn g_main_context_iteration(context: gpointer, may_block: gboolean) -> gboolean {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib context C ABI") { api.g_main_context_iteration(context, may_block) } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:386
-fn g_free(pointer: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GLib allocator C ABI") { api.g_free(pointer) } } }
+fn g_free(pointer: gpointer) -> { if gtk_api() == .Val(api) { #Unsafe("GLib allocator C ABI") { api.g_free(pointer) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:387
-fn g_signal_connect_data(instance: gpointer, detailed_signal: Ptr<I8>, c_handler: gpointer, data: gpointer, destroy_data: DestroyCallback?, connect_flags: I32) -> U64 { if gtk_api() is Val(api) { return #Unsafe("GLib signal C ABI and owned callback") { api.g_signal_connect_data(instance, detailed_signal, c_handler, data, destroy_data, connect_flags) } }; 0 }
+fn g_signal_connect_data(instance: gpointer, detailed_signal: Ptr<I8>, c_handler: gpointer, data: gpointer, destroy_data: DestroyCallback?, connect_flags: I32) -> U64 {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib signal C ABI and owned callback") { api.g_signal_connect_data(instance, detailed_signal, c_handler, data, destroy_data, connect_flags) } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:388
-fn gtk_file_dialog_new() -> Ptr<GtkFileDialog> { if gtk_api() is Val(api) { return #Unsafe("GTK file dialog C ABI") { api.gtk_file_dialog_new() } }; Ptr.null() }
+fn gtk_file_dialog_new() -> Ptr<GtkFileDialog> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK file dialog C ABI") { api.gtk_file_dialog_new() } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:389
-fn gtk_file_dialog_set_title(dialog: Ptr<GtkFileDialog>, title: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog title C ABI") { api.gtk_file_dialog_set_title(dialog, title) } } }
+fn gtk_file_dialog_set_title(dialog: Ptr<GtkFileDialog>, title: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK dialog title C ABI") { api.gtk_file_dialog_set_title(dialog, title) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:390
-fn gtk_file_dialog_set_modal(dialog: Ptr<GtkFileDialog>, modal: gboolean) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog modal C ABI") { api.gtk_file_dialog_set_modal(dialog, modal) } } }
+fn gtk_file_dialog_set_modal(dialog: Ptr<GtkFileDialog>, modal: gboolean) -> { if gtk_api() == .Val(api) { #Unsafe("GTK dialog modal C ABI") { api.gtk_file_dialog_set_modal(dialog, modal) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:391
-fn gtk_file_dialog_set_initial_folder(dialog: Ptr<GtkFileDialog>, folder: Ptr<GFile>) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog folder C ABI") { api.gtk_file_dialog_set_initial_folder(dialog, folder) } } }
+fn gtk_file_dialog_set_initial_folder(dialog: Ptr<GtkFileDialog>, folder: Ptr<GFile>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK dialog folder C ABI") { api.gtk_file_dialog_set_initial_folder(dialog, folder) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:392
-fn gtk_file_dialog_set_filters(dialog: Ptr<GtkFileDialog>, filters: Ptr<GListModel>) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog filters C ABI") { api.gtk_file_dialog_set_filters(dialog, filters) } } }
+fn gtk_file_dialog_set_filters(dialog: Ptr<GtkFileDialog>, filters: Ptr<GListModel>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK dialog filters C ABI") { api.gtk_file_dialog_set_filters(dialog, filters) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:393
-fn gtk_file_dialog_open(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog open C ABI") { api.gtk_file_dialog_open(dialog, parent, cancellable, callback, user_data) } } }
+fn gtk_file_dialog_open(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() == .Val(api) { #Unsafe("GTK dialog open C ABI") { api.gtk_file_dialog_open(dialog, parent, cancellable, callback, user_data) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:394
-fn gtk_file_dialog_open_multiple(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog multi-open C ABI") { api.gtk_file_dialog_open_multiple(dialog, parent, cancellable, callback, user_data) } } }
+fn gtk_file_dialog_open_multiple(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() == .Val(api) { #Unsafe("GTK dialog multi-open C ABI") { api.gtk_file_dialog_open_multiple(dialog, parent, cancellable, callback, user_data) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:395
-fn gtk_file_dialog_save(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GTK dialog save C ABI") { api.gtk_file_dialog_save(dialog, parent, cancellable, callback, user_data) } } }
+fn gtk_file_dialog_save(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> { if gtk_api() == .Val(api) { #Unsafe("GTK dialog save C ABI") { api.gtk_file_dialog_save(dialog, parent, cancellable, callback, user_data) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:396
-fn gtk_file_dialog_open_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GFile> { if gtk_api() is Val(api) { return #Unsafe("GTK dialog open finish C ABI") { api.gtk_file_dialog_open_finish(dialog, result, error) } }; Ptr.null() }
+fn gtk_file_dialog_open_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GFile> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK dialog open finish C ABI") { api.gtk_file_dialog_open_finish(dialog, result, error) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:397
-fn gtk_file_dialog_open_multiple_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GListModel> { if gtk_api() is Val(api) { return #Unsafe("GTK dialog multi finish C ABI") { api.gtk_file_dialog_open_multiple_finish(dialog, result, error) } }; Ptr.null() }
+fn gtk_file_dialog_open_multiple_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GListModel> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK dialog multi finish C ABI") { api.gtk_file_dialog_open_multiple_finish(dialog, result, error) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:398
-fn gtk_file_dialog_save_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GFile> { if gtk_api() is Val(api) { return #Unsafe("GTK dialog save finish C ABI") { api.gtk_file_dialog_save_finish(dialog, result, error) } }; Ptr.null() }
+fn gtk_file_dialog_save_finish(dialog: Ptr<GtkFileDialog>, result: Ptr<GAsyncResult>, error: Ptr<Ptr<GError>>) -> Ptr<GFile> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK dialog save finish C ABI") { api.gtk_file_dialog_save_finish(dialog, result, error) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:399
-fn gtk_file_filter_new() -> Ptr<GtkFileFilter> { if gtk_api() is Val(api) { return #Unsafe("GTK filter C ABI") { api.gtk_file_filter_new() } }; Ptr.null() }
+fn gtk_file_filter_new() -> Ptr<GtkFileFilter> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK filter C ABI") { api.gtk_file_filter_new() } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:400
-fn gtk_file_filter_get_type() -> GType { if gtk_api() is Val(api) { return #Unsafe("GTK filter type C ABI") { api.gtk_file_filter_get_type() } }; 0 }
+fn gtk_file_filter_get_type() -> GType {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK filter type C ABI") { api.gtk_file_filter_get_type() } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:401
-fn gtk_file_filter_set_name(filter: Ptr<GtkFileFilter>, name: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK filter name C ABI") { api.gtk_file_filter_set_name(filter, name) } } }
+fn gtk_file_filter_set_name(filter: Ptr<GtkFileFilter>, name: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK filter name C ABI") { api.gtk_file_filter_set_name(filter, name) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:402
-fn gtk_file_filter_add_pattern(filter: Ptr<GtkFileFilter>, pattern: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK filter pattern C ABI") { api.gtk_file_filter_add_pattern(filter, pattern) } } }
+fn gtk_file_filter_add_pattern(filter: Ptr<GtkFileFilter>, pattern: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK filter pattern C ABI") { api.gtk_file_filter_add_pattern(filter, pattern) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:403
-fn gtk_file_filter_add_mime_type(filter: Ptr<GtkFileFilter>, mime: Ptr<I8>) -> { if gtk_api() is Val(api) { #Unsafe("GTK MIME filter C ABI") { api.gtk_file_filter_add_mime_type(filter, mime) } } }
+fn gtk_file_filter_add_mime_type(filter: Ptr<GtkFileFilter>, mime: Ptr<I8>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK MIME filter C ABI") { api.gtk_file_filter_add_mime_type(filter, mime) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:404
-fn g_type_from_name(name: Ptr<I8>) -> GType { if gtk_api() is Val(api) { return #Unsafe("GLib type C ABI") { api.g_type_from_name(name) } }; 0 }
+fn g_type_from_name(name: Ptr<I8>) -> GType {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib type C ABI") { api.g_type_from_name(name) } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:405
-fn g_list_store_new(item_type: GType) -> Ptr<GListStore> { if gtk_api() is Val(api) { return #Unsafe("GLib store C ABI") { api.g_list_store_new(item_type) } }; Ptr.null() }
+fn g_list_store_new(item_type: GType) -> Ptr<GListStore> {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib store C ABI") { api.g_list_store_new(item_type) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:406
-fn g_list_store_append(store: Ptr<GListStore>, item: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GLib append C ABI") { api.g_list_store_append(store, item) } } }
+fn g_list_store_append(store: Ptr<GListStore>, item: gpointer) -> { if gtk_api() == .Val(api) { #Unsafe("GLib append C ABI") { api.g_list_store_append(store, item) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:407
-fn g_list_model_get_n_items(model: Ptr<GListModel>) -> U32 { if gtk_api() is Val(api) { return #Unsafe("GLib model count C ABI") { api.g_list_model_get_n_items(model) } }; 0 }
+fn g_list_model_get_n_items(model: Ptr<GListModel>) -> U32 {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib model count C ABI") { api.g_list_model_get_n_items(model) } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:408
-fn g_list_model_get_item(model: Ptr<GListModel>, position: U32) -> gpointer { if gtk_api() is Val(api) { return #Unsafe("GLib model item C ABI") { api.g_list_model_get_item(model, position) } }; Ptr.null() }
+fn g_list_model_get_item(model: Ptr<GListModel>, position: U32) -> gpointer {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib model item C ABI") { api.g_list_model_get_item(model, position) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:409
-fn g_file_new_for_path(path: Ptr<I8>) -> Ptr<GFile> { if gtk_api() is Val(api) { return #Unsafe("GIO file C ABI") { api.g_file_new_for_path(path) } }; Ptr.null() }
+fn g_file_new_for_path(path: Ptr<I8>) -> Ptr<GFile> {
+    if gtk_api() == .Val(api) { return #Unsafe("GIO file C ABI") { api.g_file_new_for_path(path) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:410
-fn g_file_get_path(file: Ptr<GFile>) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GIO path C ABI") { api.g_file_get_path(file) } }; Ptr.null() }
+fn g_file_get_path(file: Ptr<GFile>) -> Ptr<I8> {
+    if gtk_api() == .Val(api) { return #Unsafe("GIO path C ABI") { api.g_file_get_path(file) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:411
-fn g_error_free(error: Ptr<GError>) -> { if gtk_api() is Val(api) { #Unsafe("GLib error free C ABI") { api.g_error_free(error) } } }
+fn g_error_free(error: Ptr<GError>) -> { if gtk_api() == .Val(api) { #Unsafe("GLib error free C ABI") { api.g_error_free(error) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:412
-fn g_quark_from_static_string(text: Ptr<I8>) -> U32 { if gtk_api() is Val(api) { return #Unsafe("GLib static quark C ABI") { api.g_quark_from_static_string(text) } }; 0 }
+fn g_quark_from_static_string(text: Ptr<I8>) -> U32 {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib static quark C ABI") { api.g_quark_from_static_string(text) } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:413
-fn g_error_matches(error: Ptr<GError>, domain: U32, code: I32) -> gboolean { if gtk_api() is Val(api) { return #Unsafe("GLib error match C ABI") { api.g_error_matches(error, domain, code) } }; 0 }
+fn g_error_matches(error: Ptr<GError>, domain: U32, code: I32) -> gboolean {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib error match C ABI") { api.g_error_matches(error, domain, code) } }
+    0
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:414
-fn g_main_loop_new(context: gpointer, is_running: gboolean) -> Ptr<GMainLoop> { if gtk_api() is Val(api) { return #Unsafe("GLib loop C ABI") { api.g_main_loop_new(context, is_running) } }; Ptr.null() }
+fn g_main_loop_new(context: gpointer, is_running: gboolean) -> Ptr<GMainLoop> {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib loop C ABI") { api.g_main_loop_new(context, is_running) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:415
-fn g_main_loop_run(loop_: Ptr<GMainLoop>) -> { if gtk_api() is Val(api) { #Unsafe("GLib loop run C ABI") { api.g_main_loop_run(loop_) } } }
+fn g_main_loop_run(loop_: Ptr<GMainLoop>) -> { if gtk_api() == .Val(api) { #Unsafe("GLib loop run C ABI") { api.g_main_loop_run(loop_) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:416
-fn g_main_loop_unref(loop_: Ptr<GMainLoop>) -> { if gtk_api() is Val(api) { #Unsafe("GLib loop release C ABI") { api.g_main_loop_unref(loop_) } } }
+fn g_main_loop_unref(loop_: Ptr<GMainLoop>) -> { if gtk_api() == .Val(api) { #Unsafe("GLib loop release C ABI") { api.g_main_loop_unref(loop_) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:417
-fn g_object_unref(object: gpointer) -> { if gtk_api() is Val(api) { #Unsafe("GLib object release C ABI") { api.g_object_unref(object) } } }
+fn g_object_unref(object: gpointer) -> { if gtk_api() == .Val(api) { #Unsafe("GLib object release C ABI") { api.g_object_unref(object) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:418
-fn gtk_event_controller_key_new() -> Ptr<GtkEventController> { if gtk_api() is Val(api) { return #Unsafe("GTK key controller C ABI") { api.gtk_event_controller_key_new() } }; Ptr.null() }
+fn gtk_event_controller_key_new() -> Ptr<GtkEventController> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK key controller C ABI") { api.gtk_event_controller_key_new() } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:419
-fn gtk_drop_target_new(value_type: GType, actions: U32) -> Ptr<GtkDropTarget> { if gtk_api() is Val(api) { return #Unsafe("GTK drop target C ABI") { api.gtk_drop_target_new(value_type, actions) } }; Ptr.null() }
+fn gtk_drop_target_new(value_type: GType, actions: U32) -> Ptr<GtkDropTarget> {
+    if gtk_api() == .Val(api) { return #Unsafe("GTK drop target C ABI") { api.gtk_drop_target_new(value_type, actions) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:420
-fn gtk_widget_add_controller(widget: Ptr<GtkWidget>, controller: Ptr<GtkEventController>) -> { if gtk_api() is Val(api) { #Unsafe("GTK attach controller C ABI") { api.gtk_widget_add_controller(widget, controller) } } }
+fn gtk_widget_add_controller(widget: Ptr<GtkWidget>, controller: Ptr<GtkEventController>) -> { if gtk_api() == .Val(api) { #Unsafe("GTK attach controller C ABI") { api.gtk_widget_add_controller(widget, controller) } } }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:421
-fn gdk_keyval_name(keyval: U32) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GDK key name C ABI") { api.gdk_keyval_name(keyval) } }; Ptr.null() }
+fn gdk_keyval_name(keyval: U32) -> Ptr<I8> {
+    if gtk_api() == .Val(api) { return #Unsafe("GDK key name C ABI") { api.gdk_keyval_name(keyval) } }
+    Ptr.null()
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:422
-fn g_value_get_string(value: Ptr<GValue>) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GLib value string C ABI") { api.g_value_get_string(value) } }; Ptr.null() }
+fn g_value_get_string(value: Ptr<GValue>) -> Ptr<I8> {
+    if gtk_api() == .Val(api) { return #Unsafe("GLib value string C ABI") { api.g_value_get_string(value) } }
+    Ptr.null()
+}
 
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:426
 #FFI(c)
@@ -412,7 +508,10 @@ fn jet_gtk_click_trampoline(_widget: Ptr<GtkWidget>, data: gpointer) -> {
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:437
-struct ClipboardRead { done: Bool; text: String? }
+struct ClipboardRead {
+    done: Bool
+    text: String?
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:442
 #FFI(c)
 fn jet_gtk_clipboard_read_ready(source: gpointer, result: Ptr<GAsyncResult>, data: gpointer) -> {
@@ -433,9 +532,19 @@ fn jet_gtk_clipboard_read_ready(source: gpointer, result: Ptr<GAsyncResult>, dat
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:471
 #Clone
 #Copy
-enum FileDialogMode { Open; OpenMultiple; Save }
+enum FileDialogMode {
+    Open
+    OpenMultiple
+    Save
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:478
-struct FileDialogRead { done: Bool; mode: FileDialogMode; files: [String]; cancelled: Bool; error: String? }
+struct FileDialogRead {
+    done: Bool
+    mode: FileDialogMode
+    files: [String]
+    cancelled: Bool
+    error: String?
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:486
 fn gtk_file_path(file: Ptr<GFile>) -> String? {
     if file.is_null() -> return None
@@ -456,7 +565,7 @@ fn gtk_file_model_paths(model: Ptr<GListModel>) -> [String] {
         count :: g_list_model_get_n_items(model)
         paths := [String].with_capacity(count as USize)
         for index in 0..count {
-            if gtk_file_path(g_list_model_get_item(model, index).cast<GFile>()) is Val(path) { paths.push(^path) }
+            if gtk_file_path(g_list_model_get_item(model, index).cast<GFile>()) == .Val(path) { paths.push(^path) }
         }
         g_object_unref(model.cast<c_void>())
         ^paths
@@ -509,7 +618,11 @@ fn jet_gtk_drop_callback(data: gpointer, _closure: Ptr<GClosure>) -> {
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:596
-struct GtkImeBinding { state: Ptr<GtkState>; target: JetUiNodeId; path: String }
+struct GtkImeBinding {
+    state: Ptr<GtkState>
+    target: JetUiNodeId
+    path: String
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:602
 #FFI(c)
 fn jet_gtk_binding_drop(data: gpointer, _closure: Ptr<GClosure>) -> {
@@ -536,7 +649,10 @@ fn jet_gtk_insert_text_trampoline(_editable: Ptr<GtkWidget>, text: Ptr<I8>, _len
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:653
-struct GtkDragBinding { state: Ptr<GtkState>; target: JetUiNodeId }
+struct GtkDragBinding {
+    state: Ptr<GtkState>
+    target: JetUiNodeId
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:658
 #FFI(c)
 fn jet_gtk_drag_binding_drop(data: gpointer, _closure: Ptr<GClosure>) -> {
@@ -620,12 +736,12 @@ fn jet_gtk_shortcut_trampoline(_controller: Ptr<GtkWidget>, keyval: U32, _keycod
         handled_shortcut := None
         for candidate_modifiers in candidates {
             candidate :: try { JetUiShortcut.new(&key, candidate_modifiers) } catch { continue }
-            if !(state.shortcuts.dispatch(&candidate) is .Unhandled) {
+            if !(state.shortcuts.dispatch(&candidate) == .Unhandled) {
                 handled_shortcut = Val(^candidate)
                 break
             }
         }
-        if handled_shortcut is Val(shortcut) {
+        if handled_shortcut == .Val(shortcut) {
             state.trace("shortcut-dispatch {shortcut.key}")
             return 1
         }
@@ -637,13 +753,24 @@ fn jet_gtk_shortcut_trampoline(_controller: Ptr<GtkWidget>, keyval: U32, _keycod
 #Copy
 #Debug
 #Eq
-enum GtkAvailability { Uninitialized; Ready; GtkUnavailable; HeadlessOptIn; UnsupportedDisplay }
+enum GtkAvailability {
+    Uninitialized
+    Ready
+    GtkUnavailable
+    HeadlessOptIn
+    UnsupportedDisplay
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:826
 #Clone
 #Copy
 #Debug
 #Eq
-enum GtkWidgetKind { Box; Label; Button; Entry }
+enum GtkWidgetKind {
+    Box
+    Label
+    Button
+    Entry
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:834
 struct GtkWidgetRecord {
     path: String
@@ -654,9 +781,15 @@ struct GtkWidgetRecord {
     css_class: String?
 }
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:845
-enum GtkWidgetHandleTarget { Direct(widget: Ptr<GtkWidget>); TreePath(path: String) }
+enum GtkWidgetHandleTarget {
+    Direct(widget: Ptr<GtkWidget>)
+    TreePath(path: String)
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:850
-struct GtkWidgetHandle { target: GtkWidgetHandleTarget; kind: GtkWidgetKind }
+struct GtkWidgetHandle {
+    target: GtkWidgetHandleTarget
+    kind: GtkWidgetKind
+}
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:855
 struct GtkClickBinding {
     path: String
@@ -696,7 +829,7 @@ fn gtk_set_accessible_property(widget: Ptr<GtkWidget>, property: I32, value: Str
     #Unsafe("optional C string lives across GTK accessible ABI call with integer sentinel -1") {
         c_value :: value.and_then(fn(text) { CString.new(text).ok() })
         value_ptr :: c_value.as_ref().map_or(Ptr<I8>.null(), fn(text) { text.as_ptr() })
-        if gtk_api() is Val(api) {
+        if gtk_api() == .Val(api) {
             api.gtk_accessible_update_property(widget.cast<GtkAccessible>(), property, value_ptr, -1)
         }
     }
@@ -848,7 +981,7 @@ impl GtkState {
     fn reconcile_node(self: &GtkState, node: &JetUiNode, parent: Ptr<GtkWidget>, path: String,
         live: &[String], focus_nodes: &[JetUiNode], focus_paths: &[String]) -> {
         kind :: GtkState.widget_kind(node)
-        if self.tree_widgets.iter().position(fn(record) { record.path == path }) is Val(index) {
+        if self.tree_widgets.iter().position(fn(record) { record.path == path }) == .Val(index) {
             if self.tree_widgets[index].kind != kind || self.tree_widgets[index].parent != parent {
                 self.remove_tree_subtree(path)
             }
@@ -856,7 +989,7 @@ impl GtkState {
         if kind == .Entry {
             _ :: self.ime_enabled.insert(path.to_string(), node.ime != Val(JetUiImeMode.Disabled))
         }
-        (index, created) :: if self.tree_widgets.iter().position(fn(record) { record.path == path }) is Val(existing) {
+        (index, created) :: if self.tree_widgets.iter().position(fn(record) { record.path == path }) == .Val(existing) {
             (existing, false)
         } else {
             // GATE #4565: kernel primitive
@@ -912,12 +1045,12 @@ impl GtkState {
         if self.display_ok && !widget.is_null() && old_class != new_class {
             // GATE #4565: kernel primitive
             #Unsafe("C CSS loans end after GTK copies; provider initial reference is released") {
-                if old_class.as_ref().and_then(fn(css_class) { CString.new(css_class.as_str()).ok() }) is Val(old) {
+                if old_class.as_ref().and_then(fn(css_class) { CString.new(css_class.as_str()).ok() }) == .Val(old) {
                     gtk_widget_remove_css_class(widget, old.as_ptr())
                 }
-                if (node.color.as_ref(), new_class.as_ref()) is (Val(color), Val(css_class)) {
+                if (node.color.as_ref(), new_class.as_ref()) == (Val(color), Val(css_class)) {
                     css :: ".{css_class} {{ background-color: {color}; }}"
-                    if (CString.new(css_class.as_str()).ok(), CString.new(css).ok()) is (Val(cclass), Val(ccss)) {
+                    if (CString.new(css_class.as_str()).ok(), CString.new(css).ok()) == (Val(cclass), Val(ccss)) {
                         provider :: gtk_css_provider_new()
                         gtk_css_provider_load_from_string(provider, ccss.as_ptr())
                         display :: gdk_display_get_default()
@@ -944,8 +1077,8 @@ impl GtkState {
     }
     // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1245
     fn focus_current_widget(self: &GtkState) -> {
-        if self.focused_index.and_then(fn(index) { self.focus_paths.get(index) }) is Val(path) {
-            if self.tree_widgets.iter().find(fn(record) { &record.path == path }) is Val(record) {
+        if self.focused_index.and_then(fn(index) { self.focus_paths.get(index) }) == .Val(path) {
+            if self.tree_widgets.iter().find(fn(record) { &record.path == path }) == .Val(record) {
                 if self.display_ok && !record.widget.is_null() { _ :: gtk_widget_grab_focus(record.widget) }
                 self.trace("focus {path}")
             }
@@ -1097,7 +1230,7 @@ impl JetGtkBackend {
             state.ensure_init()
             id :: state.widget_handles.len() as I64
             tree_kind :: if is_button { GtkWidgetKind.Button } else { GtkWidgetKind.Label }
-            if state.tree_widgets.iter().find(fn(record) { record.kind == tree_kind && record.label == text }).map(fn(record) { record.path.clone() }) is Val(path) {
+            if state.tree_widgets.iter().find(fn(record) { record.kind == tree_kind && record.label == text }).map(fn(record) { record.path.clone() }) == .Val(path) {
                 state.widget_handles.push(GtkWidgetHandle{target: .TreePath(^path), kind: tree_kind})
                 state.trace("bind {text}")
                 return id
@@ -1117,7 +1250,7 @@ impl JetGtkBackend {
         // GATE #4565: kernel primitive
         #Unsafe("borrow widget and C text under retained state lock") {
             state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
-            if state.resolve_widget_handle(id) is Val((widget, kind)) {
+            if state.resolve_widget_handle(id) == .Val((widget, kind)) {
                 ctext :: CString.new(text).unwrap_or_else(fn(_) { CString.new("").unwrap() })
                 if kind == .Button { gtk_button_set_label(widget, ctext.as_ptr()) } else { gtk_label_set_text(widget, ctext.as_ptr()) }
                 state.trace("handle-set-text {id} {text}")
@@ -1129,7 +1262,7 @@ impl JetGtkBackend {
         // GATE #4565: kernel primitive
         #Unsafe("borrow retained widget under state lock") {
             state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
-            if state.resolve_widget_handle(id) is Val((widget, _)) {
+            if state.resolve_widget_handle(id) == .Val((widget, _)) {
                 gtk_widget_set_size_request(widget, width as I32, height as I32)
             } else { state.trace("handle-miss {id}") }
         }
@@ -1139,11 +1272,11 @@ impl JetGtkBackend {
         // GATE #4565: kernel primitive
         #Unsafe("borrow live widget and temporary C CSS; release provider initial reference") {
             state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
-            if state.resolve_widget_handle(id) is Val((widget, _)) {
+            if state.resolve_widget_handle(id) == .Val((widget, _)) {
                 trimmed := color.trim_start_matches('#') // #4303
                 class_name :: "jetfill{trimmed}"
                 css :: ".{class_name} {{ background-color: {color}; }}"
-                if (CString.new(class_name).ok(), CString.new(css).ok()) is (Val(cclass), Val(ccss)) {
+                if (CString.new(class_name).ok(), CString.new(css).ok()) == (Val(cclass), Val(ccss)) {
                     provider :: gtk_css_provider_new()
                     gtk_css_provider_load_from_string(provider, ccss.as_ptr())
                     display :: gdk_display_get_default()
@@ -1161,12 +1294,15 @@ impl JetGtkBackend {
         // GATE #4565: kernel primitive
         #Unsafe("retain shared callback under state lock and transfer each signal its own boxed owner") {
             state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
-            if state.resolve_widget_handle(id) is Val((widget, GtkWidgetKind.Button)) {
+            if state.resolve_widget_handle(id) == .Val((widget, GtkWidgetKind.Button)) {
                 callback :: Arc.new(^handler)
                 path :: state.widget_handles.get(id as USize).and_then(fn(handle) {
-                    when &handle.target { .TreePath(path) -> Val(path.clone()); _ -> None }
+                    when &handle.target {
+                        .TreePath(path) -> Val(path.clone())
+                        _ -> None
+                    }
                 })
-                if path is Val(tree_path) {
+                if path == .Val(tree_path) {
                     state.click_bindings.push(GtkClickBinding{path: tree_path.clone(), callback: ^callback, connected_widget: Ptr.null()})
                     state.attach_click_bindings(&tree_path, widget)
                 } else { GtkState.connect_click_callback(widget, ^callback) }
@@ -1189,7 +1325,7 @@ impl JetGtkBackend {
                 }
                 return
             }
-            if CString.new(title).ok() is Val(ctitle) { gtk_window_set_title(window, ctitle.as_ptr()) }
+            if CString.new(title).ok() == .Val(ctitle) { gtk_window_set_title(window, ctitle.as_ptr()) }
             gtk_window_present(window)
             main_loop :: g_main_loop_new(Ptr.null(), 0)
             g_main_loop_run(main_loop)
@@ -1205,7 +1341,7 @@ fn gtk_file_dialog_setup(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, req
         title :: CString.new(request.title.as_str()).map_err(fn(_) { JetUiHostError.InvalidRequest("file dialog title must not contain NUL") })?
         gtk_file_dialog_set_title(dialog, title.as_ptr())
         gtk_file_dialog_set_modal(dialog, 1)
-        if request.initial_directory.as_ref() is Val(directory) {
+        if request.initial_directory.as_ref() == .Val(directory) {
             path :: CString.new(directory.path()).map_err(fn(_) { JetUiHostError.InvalidRequest("file dialog initial directory must not contain NUL") })?
             folder :: g_file_new_for_path(path.as_ptr())
             if folder.is_null() -> return Err(JetUiHostError.InvalidRequest("GTK rejected the file dialog initial directory"))
@@ -1223,16 +1359,16 @@ fn gtk_file_dialog_setup(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, req
                 g_object_unref(store.cast<c_void>())
                 return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.FileDialog"})
             }
-            if CString.new(specification.label.as_str()).ok() is Val(label) {
+            if CString.new(specification.label.as_str()).ok() == .Val(label) {
                 if !specification.label.is_empty() { gtk_file_filter_set_name(filter, label.as_ptr()) }
             }
             for source_extension in &specification.extensions {
                 extension := source_extension.trim_start_matches('.') // #4303
                 pattern :: if extension.starts_with('*') { extension.to_string() } else { "*.{extension}" }
-                if CString.new(pattern).ok() is Val(cpattern) { gtk_file_filter_add_pattern(filter, cpattern.as_ptr()) }
+                if CString.new(pattern).ok() == .Val(cpattern) { gtk_file_filter_add_pattern(filter, cpattern.as_ptr()) }
             }
             for mime in &specification.mime_types {
-                if CString.new(mime.as_str()).ok() is Val(cmime) { gtk_file_filter_add_mime_type(filter, cmime.as_ptr()) }
+                if CString.new(mime.as_str()).ok() == .Val(cmime) { gtk_file_filter_add_mime_type(filter, cmime.as_ptr()) }
             }
             g_list_store_append(store, filter.cast<c_void>())
             g_object_unref(filter.cast<c_void>())
@@ -1247,7 +1383,10 @@ fn gtk_run_file_dialog(window: Ptr<GtkWidget>, request: &JetUiFileDialogRequest)
     dialog :: gtk_file_dialog_new()
     if dialog.is_null() -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.FileDialog"})
     match gtk_file_dialog_setup(dialog, window, request) {
-        Err(error) -> { g_object_unref(dialog.cast<c_void>()); return Err(^error) }
+        Err(error) -> {
+            g_object_unref(dialog.cast<c_void>())
+            return Err(^error)
+        }
         Ok(_) -> {}
     }
     mode :: when (request.kind, request.allow_multiple) {
@@ -1271,9 +1410,12 @@ fn gtk_run_file_dialog(window: Ptr<GtkWidget>, request: &JetUiFileDialogRequest)
         while !pending.done { _ :: g_main_context_iteration(Ptr.null(), 1) }
         g_object_unref(dialog.cast<c_void>())
     }
-    if pending.error is Val(message) -> return Err(JetUiHostError.HostFailure{service: "UI.FileDialog", message: ^message})
+    if pending.error == .Val(message) -> return Err(JetUiHostError.HostFailure{service: "UI.FileDialog", message: ^message})
     if pending.cancelled || pending.files.is_empty() -> return Err(JetUiHostError.Cancelled(.User))
-    access :: when request.kind { .Open -> JetUiFsAccess.Read; .Save -> JetUiFsAccess.Write }
+    access :: when request.kind {
+        .Open -> JetUiFsAccess.Read
+        .Save -> JetUiFsAccess.Write
+    }
     files := [JetUiGrantedPath].with_capacity(pending.files.len())
     for path in &pending.files { files.push(request.grant.scope(path, access)?) }
     JetUiFileDialogSelection.new(^files)
@@ -1450,8 +1592,8 @@ impl JetBackend for GtkState {
     }
     // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:2021
     fn on_event(self: &GtkState, event: JetInputEvent) -> JetEventResult {
-        if &event is .Key(code) {
-            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) is Val(result) {
+        if &event == .Key(code) {
+            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) == .Val(result) {
                 self.focus_current_widget()
                 self.last_event = Val(result)
                 return result

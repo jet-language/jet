@@ -161,15 +161,24 @@ pub fn normalize_path(path: String, platform: paths.PathPlatform) -> paths.OSPat
     loop {
         component :: paths.next(input, &cursor) ?? break
         if component.kind == {
-            .Prefix -> { paths.push_component(&normalized, input, component); rooted = true }
-            .RootDir -> { paths.push_component(&normalized, input, component); rooted = true }
+            .Prefix -> {
+                paths.push_component(&normalized, input, component)
+                rooted = true
+            }
+            .RootDir -> {
+                paths.push_component(&normalized, input, component)
+                rooted = true
+            }
             .CurDir -> { }
             .ParentDir -> {
                 if normal_depth == 0 -> return Err(UIHostError.ResourceDenied("path `{path}` escapes its lexical root"))
                 _ :: paths.pop(&normalized)
                 normal_depth -= 1
             }
-            .Normal -> { paths.push_component(&normalized, input, component); normal_depth += 1 }
+            .Normal -> {
+                paths.push_component(&normalized, input, component)
+                normal_depth += 1
+            }
         }
     }
     if normalized.encoded.len() == 0 && rooted {
@@ -374,7 +383,10 @@ pub fn headless_write_clipboard(facts: UICapabilityFacts, clipboard: &String, te
     raw :: unicode.utf8_bytes(text)
     characters := 0
     at := 0
-    loop at < raw.len() { at += unicode.utf8_width_at(raw, at); characters += 1 }
+    loop at < raw.len() {
+        at += unicode.utf8_width_at(raw, at)
+        characters += 1
+    }
     clipboard = ^text
     Ok(UIClipboardWrite{characters: characters})
 }

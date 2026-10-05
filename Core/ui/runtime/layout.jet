@@ -56,8 +56,11 @@ impl LinExpr {
         n := self.n_terms as Int
         for (idx, coeff) in other.terms[0..other.n_terms as Int] {
             slot := None as Int?
-            for i in 0..n { if terms[i].0 == idx { slot = Val(i); break } }
-            if slot is Val(i) { terms[i].1 += sign * coeff } else {
+            for i in 0..n { if terms[i].0 == idx {
+                slot = Val(i)
+                break
+            } }
+            if slot == .Val(i) { terms[i].1 += sign * coeff } else {
                 assert(n < MAX_TERMS, "layout constraint expression has more than {MAX_TERMS} distinct terms")
                 terms[n] = (idx, sign * coeff)
                 n += 1
@@ -200,7 +203,10 @@ impl Tableau {
             enter := None as Int?
             for j in 0..n {
                 if ineligible[j] -> continue
-                if obj[j] < -EPS { enter = Val(j); break }
+                if obj[j] < -EPS {
+                    enter = Val(j)
+                    break
+                }
             }
             j :: enter ?? break
             leave := None as Int?
@@ -212,7 +218,10 @@ impl Tableau {
                     better :: ratio < best_ratio - EPS
                     tied :: (ratio - best_ratio).abs() <= EPS
                     earlier :: match leave { Val(l) -> self.basis[i] < self.basis[l], None -> true }
-                    if better || (tied && earlier) { best_ratio = ratio; leave = Val(i) }
+                    if better || (tied && earlier) {
+                        best_ratio = ratio
+                        leave = Val(i)
+                    }
                 }
             }
             i :: leave ?? break // Unbounded; not expected for the layout problem family.
@@ -258,14 +267,22 @@ fn solve(inner: &Inner) -> {
     for s in specs {
         extra :: if s.strength == .Required {
             match s.op {
-                .Le -> { col :: next_col; next_col += 1; Extra.Slack(col) }
+                .Le -> {
+                    col :: next_col
+                    next_col += 1
+                    Extra.Slack(col)
+                }
                 .Ge -> {
                     surplus :: next_col
                     artificial :: next_col + 1
                     next_col += 2
                     Extra.SurplusArtificial(surplus, artificial)
                 }
-                .Eq -> { col :: next_col; next_col += 1; Extra.Artificial(col) }
+                .Eq -> {
+                    col :: next_col
+                    next_col += 1
+                    Extra.Artificial(col)
+                }
             }
         } else {
             e_plus :: next_col
@@ -286,14 +303,21 @@ fn solve(inner: &Inner) -> {
         for (idx, coeff) in s.terms { rows[i][idx] += coeff }
         rows[i][n_cols] = s.rhs
         match extras[i] {
-            .Slack(col) -> { rows[i][col] = 1.0; basis[i] = col }
+            .Slack(col) -> {
+                rows[i][col] = 1.0
+                basis[i] = col
+            }
             .SurplusArtificial(surplus, artificial) -> {
                 rows[i][surplus] = -1.0
                 rows[i][artificial] = 1.0
                 basis[i] = artificial
                 has_artificial[i] = true
             }
-            .Artificial(col) -> { rows[i][col] = 1.0; basis[i] = col; has_artificial[i] = true }
+            .Artificial(col) -> {
+                rows[i][col] = 1.0
+                basis[i] = col
+                has_artificial[i] = true
+            }
             .ErrorPair(e_plus, e_minus) -> {
                 rows[i][e_plus] = -1.0
                 rows[i][e_minus] = 1.0
@@ -323,7 +347,7 @@ fn solve(inner: &Inner) -> {
                     .Artificial(col) -> Val(col)
                     _ -> None
                 }
-                if art_col is Val(art) {
+                if art_col == .Val(art) {
                     if tab.basis[i] == art && tab.rows[i][n_cols] > EPS { names.push(specs[i].label.clone()) }
                 }
             }
@@ -343,7 +367,10 @@ fn solve(inner: &Inner) -> {
             .ErrorPair(e_plus, e_minus) -> {
                 w :: specs[i].strength.weight()
                 match specs[i].op {
-                    .Eq -> { cost2[e_plus] = w; cost2[e_minus] = w }
+                    .Eq -> {
+                        cost2[e_plus] = w
+                        cost2[e_minus] = w
+                    }
                     .Le -> cost2[e_plus] = w
                     .Ge -> cost2[e_minus] = w
                 }
@@ -396,7 +423,7 @@ impl Handle {
     pub fn value(self: &Handle, v: LinExpr) -> Float {
         self.resolve()
         inner :: self.inner.borrow()
-        if inner.infeasible is Val(conflict) {
+        if inner.infeasible == .Val(conflict) {
             names :: conflict.join(", ")
             msg :: "layout \"{inner.name}\" has no feasible solution — conflicting constraints: {names}"
             drop(inner)
@@ -409,13 +436,22 @@ impl Handle {
         inner := self.inner.borrow_mut()
         if v.n_terms == 1 {
             (idx, coeff) :: v.terms[0]
-            if (coeff - 1.0).abs() < EPS { inner.edits.insert(idx, value - v.constant); inner.dirty = true }
+            if (coeff - 1.0).abs() < EPS {
+                inner.edits.insert(idx, value - v.constant)
+                inner.dirty = true
+            }
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/Layout.rs:678
-    pub fn is_feasible(self: &Handle) -> Bool { self.resolve(); self.inner.borrow().infeasible.is_none() }
+    pub fn is_feasible(self: &Handle) -> Bool {
+        self.resolve()
+        self.inner.borrow().infeasible.is_none()
+    }
     // Rust: crates/jet-codegen/src/Prelude/Layout.rs:685
-    pub fn conflict(self: &Handle) -> [String] { self.resolve(); self.inner.borrow().infeasible.clone() ?? [] }
+    pub fn conflict(self: &Handle) -> [String] {
+        self.resolve()
+        self.inner.borrow().infeasible.clone() ?? []
+    }
     // Rust: crates/jet-codegen/src/Prelude/Layout.rs:690
     fn resolve(self: &Handle) -> {
         inner := self.inner.borrow_mut()
@@ -441,7 +477,7 @@ impl Constraint {
     fn set_strength(self: Constraint, s: Strength) -> Constraint {
         {
             inner := self.handle.borrow_mut()
-            if inner.rows.get_mut(self.idx) is Val(row) { row.strength = s }
+            if inner.rows.get_mut(self.idx) == .Val(row) { row.strength = s }
             inner.dirty = true
         }
         self
@@ -463,7 +499,7 @@ fn make_constraint(lhs: LinExpr, rhs: LinExpr, op: RelOp) -> Constraint {
     idx :: Handle{inner: handle.clone(), id: handle_id}.push_row(row)
     {
         inner := handle.borrow_mut()
-        if inner.rows.get_mut(idx) is Val(r) {
+        if inner.rows.get_mut(idx) == .Val(r) {
             op_str :: match op { .Le -> "<=", .Ge -> ">=", .Eq -> "==" }
             r.label = "constraint#{idx} ({op_str})"
         }

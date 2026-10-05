@@ -31,7 +31,7 @@ pub enum JetUiAriaRole { Button, TextInput, Label, Container }
 impl JetUiAriaRole {
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:49
     pub fn is_interactive(self: &Self) -> Bool {
-        self is .Button || self is .TextInput
+        self == .Button || self == .TextInput
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:55
@@ -257,7 +257,10 @@ pub fn jet_tui_capabilities() -> JetTuiCapabilities {
     terminal :: #Unsafe("query actual retained stdout terminal capability") { io.stdout().is_terminal() }
     capabilities := JetTuiCapabilities.for_profile(profile, width, height)
     capabilities.color = !no_color && profile != JetTuiColorProfile.ASCII && (terminal || forced)
-    if no_color { capabilities.mouse = false; capabilities.clipboard = false }
+    if no_color {
+        capabilities.mouse = false
+        capabilities.clipboard = false
+    }
     ^capabilities
 }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:545
@@ -283,15 +286,35 @@ impl JetTuiStyle {
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:579
     pub fn new() -> Self { Self{} }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:583
-    pub fn foreground(self: ^Self, color: JetTuiColor) -> Self { self := ^self; self.foreground = Val(color); ^self }
+    pub fn foreground(self: ^Self, color: JetTuiColor) -> Self {
+        self := ^self
+        self.foreground = Val(color)
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:588
-    pub fn background(self: ^Self, color: JetTuiColor) -> Self { self := ^self; self.background = Val(color); ^self }
+    pub fn background(self: ^Self, color: JetTuiColor) -> Self {
+        self := ^self
+        self.background = Val(color)
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:593
-    pub fn bold(self: ^Self, enabled: Bool) -> Self { self := ^self; self.bold = enabled; ^self }
+    pub fn bold(self: ^Self, enabled: Bool) -> Self {
+        self := ^self
+        self.bold = enabled
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:598
-    pub fn dim(self: ^Self, enabled: Bool) -> Self { self := ^self; self.dim = enabled; ^self }
+    pub fn dim(self: ^Self, enabled: Bool) -> Self {
+        self := ^self
+        self.dim = enabled
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:603
-    pub fn underline(self: ^Self, enabled: Bool) -> Self { self := ^self; self.underline = enabled; ^self }
+    pub fn underline(self: ^Self, enabled: Bool) -> Self {
+        self := ^self
+        self.underline = enabled
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:608
     fn kernel(self: &Self) -> TUIStyle {
         TUIStyle{foreground: self.foreground.map(fn(color) { color.kernel() }), background: self.background.map(fn(color) { color.kernel() }), bold: self.bold, dim: self.dim, underline: self.underline}
@@ -504,7 +527,10 @@ impl<M, Msg: Send, Update: FnMut(M, Msg) -> (M, JetTuiCommand<Msg>), View: Fn(&M
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1029
     pub fn backend(self: &Self) -> &B from self { &self.backend }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1033
-    pub fn set_constraint(self: &Self, constraint: JetSizeConstraint) -> { self.constraint = constraint; self.dirty = true }
+    pub fn set_constraint(self: &Self, constraint: JetSizeConstraint) -> {
+        self.constraint = constraint
+        self.dirty = true
+    }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1038
     pub fn set_event_mapper(self: &Self, mapper: fn(JetTuiEvent) -> Msg?) -> { self.event_mapper = Val(Box.new(mapper)) }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1045
@@ -514,7 +540,11 @@ impl<M, Msg: Send, Update: FnMut(M, Msg) -> (M, JetTuiCommand<Msg>), View: Fn(&M
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1053
     pub fn redraw(self: &Self) -> {
         match self.model.as_ref() {
-            Val(model) -> { node :: (self.view)(model); self.backend.mount_tui(^node, self.constraint); self.dirty = false }
+            Val(model) -> {
+                node :: (self.view)(model)
+                self.backend.mount_tui(^node, self.constraint)
+                self.dirty = false
+            }
             None -> {}
         }
     }
@@ -534,14 +564,23 @@ impl<M, Msg: Send, Update: FnMut(M, Msg) -> (M, JetTuiCommand<Msg>), View: Fn(&M
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1076
     pub fn dispatch_event(self: &Self, event: ^JetTuiEvent) -> JetEventResult {
-        resized :: event is .Resize
+        resized :: event == .Resize
         backend_result :: self.backend.dispatch_tui_event(event.clone())
         mapped :: self.event_mapper.as_mut().and_then(fn(mapper) { mapper(event.clone()) })
         match mapped {
-            Val(message) -> { _ :: self.dispatch_message(^message); JetEventResult.Handled }
+            Val(message) -> {
+                _ :: self.dispatch_message(^message)
+                JetEventResult.Handled
+            }
             None -> {
-                if event is .Interrupt || event is .Close { self.stopped = true; JetEventResult.Handled }
-                else { if resized { self.dirty = true }; backend_result }
+                if event == .Interrupt || event == .Close {
+                    self.stopped = true
+                    JetEventResult.Handled
+                }
+                else {
+                    if resized { self.dirty = true }
+                    backend_result
+                }
             }
         }
     }
@@ -559,7 +598,10 @@ impl<M, Msg: Send, Update: FnMut(M, Msg) -> (M, JetTuiCommand<Msg>), View: Fn(&M
             // GATE #4565: kernel primitive
             result :: #Unsafe("nonblocking receive from real retained command channel") { receiver.try_recv() }
             match result {
-                Ok(message) -> { messages.push(^message); false }
+                Ok(message) -> {
+                    messages.push(^message)
+                    false
+                }
                 Err(TryRecvError.Empty) -> true
                 Err(TryRecvError.Disconnected) -> false
             }
@@ -571,7 +613,10 @@ impl<M, Msg: Send, Update: FnMut(M, Msg) -> (M, JetTuiCommand<Msg>), View: Fn(&M
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1124
     pub fn step(self: &Self) -> Bool {
         completed :: self.pump_commands()
-        if self.dirty { self.redraw(); true } else { completed > 0 }
+        if self.dirty {
+            self.redraw()
+            true
+        } else { completed > 0 }
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1134
     pub fn run_headless<I: IntoIterator<Item = JetTuiEvent>>(self: &Self, events: ^I) -> [[String]] {
@@ -690,11 +735,19 @@ pub fn jet_tui_vertical() -> JetTuiDirection { JetTuiDirection.Vertical }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1340
 pub fn jet_tui_list_state() -> JetTuiListState { JetTuiListState{} }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1344
-pub fn jet_tui_list_state_select(state: ^JetTuiListState, index: I64) -> JetTuiListState { state := ^state; state.select(USize{index.max(0)}); ^state }
+pub fn jet_tui_list_state_select(state: ^JetTuiListState, index: I64) -> JetTuiListState {
+    state := ^state
+    state.select(USize{index.max(0)})
+    ^state
+}
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1349
 pub fn jet_tui_list_state_selected(state: JetTuiListState) -> I64 { I64{state.selected()} }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1353
-pub fn jet_tui_list_state_offset(state: ^JetTuiListState, offset: I64) -> JetTuiListState { state := ^state; state.scroll_to(USize{offset.max(0)}); ^state }
+pub fn jet_tui_list_state_offset(state: ^JetTuiListState, offset: I64) -> JetTuiListState {
+    state := ^state
+    state.scroll_to(USize{offset.max(0)})
+    ^state
+}
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1359
 #Equatable
 pub enum JetEventResult { Handled, Ignored }
@@ -847,7 +900,10 @@ impl JetBackend for JetNullBackendState {
         size
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1622
-    fn layout(self: &Self, node: &JetUiNode, frame: JetRect) -> { _ :: node; self.layout_frame = Val(frame) }
+    fn layout(self: &Self, node: &JetUiNode, frame: JetRect) -> {
+        _ :: node
+        self.layout_frame = Val(frame)
+    }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1627
     fn paint(self: &Self, node: &JetUiNode) -> {
         frame :: self.layout_frame.unwrap_or(JetRect{x: 0.0, y: 0.0, width: node.width, height: node.height})
@@ -856,12 +912,15 @@ impl JetBackend for JetNullBackendState {
         jet_ui_bind_tree_clicks(node, "null#0")
         focus := [JetUiNode]{}
         jet_ui_collect_focus(node, &focus)
-        if !focus.is_empty() { self.focused_index = Val(0); self.focus_nodes = ^focus }
+        if !focus.is_empty() {
+            self.focused_index = Val(0)
+            self.focus_nodes = ^focus
+        }
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1647
     fn on_event(self: &Self, event: ^JetInputEvent) -> JetEventResult {
-        if event is .Key(code) {
-            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) is Val(result) {
+        if event == .Key(code) {
+            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) == .Val(result) {
                 self.last_event = Val(result)
                 return result
             }

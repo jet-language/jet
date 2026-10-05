@@ -81,12 +81,15 @@ impl JetBackend for JetTuiBackendState {
         jet_ui_bind_tree_clicks(node, "tui#0")
         focus := [] as [JetUiNode]
         jet_ui_collect_focus(node, &focus)
-        if not focus.is_empty() { self.focused_index = Val(0); self.focus_nodes = focus }
+        if not focus.is_empty() {
+            self.focused_index = Val(0)
+            self.focus_nodes = focus
+        }
     }
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1905
     fn on_event(self: &JetTuiBackendState, event: JetInputEvent) -> JetEventResult {
-        if event is .Key(code) {
-            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) is Val(result) {
+        if event == .Key(code) {
+            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) == .Val(result) {
                 self.last_event = Val(result)
                 return result
             }
@@ -112,7 +115,7 @@ impl JetBackend for JetTuiBackendState {
     fn on_tui_event(self: &JetTuiBackendState, event: JetTuiEvent) -> JetEventResult {
         match event {
             .Key(code, modifiers) -> {
-                if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, &code, modifiers) is Val(result) {
+                if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, &code, modifiers) == .Val(result) {
                     self.last_event = Val(result)
                     return result
                 }
@@ -123,7 +126,7 @@ impl JetBackend for JetTuiBackendState {
             .Resize(size) -> {
                 result :: self.on_event(JetInputEvent.Resize(size))
                 if result == .Handled {
-                    if self.last_node.clone() is Val(node) {
+                    if self.last_node.clone() == .Val(node) {
                         frame :: self.layout_frame ?? JetRect{x: 0.0, y: 0.0, width: size.width, height: size.height}
                         self.layout(&node, frame)
                         self.paint(&node)
@@ -222,7 +225,7 @@ pub fn jet_ui_button(label: String) -> JetUiNode {
 pub fn jet_ui_button_with_metadata(label: String, shortcut: JetOutcome<JetUiShortcut, JetAbsent>, accessible_label: JetOutcome<String, JetAbsent>) -> JetUiNode {
     node := jet_ui_button(label)
     node.shortcut = shortcut.ok()
-    if accessible_label is Ok(name) {
+    if accessible_label == .Ok(name) {
         node.accessibility = Val(JetUiAccessibility{name: Val(name), description: None, states: []})
     }
     node
@@ -237,7 +240,10 @@ pub fn jet_ui_button_on_click(label: String, shortcut: JetOutcome<JetUiShortcut,
 pub fn jet_ui_box(children: [JetUiNode]) -> JetUiNode {
     width := 0.0
     height := 0.0
-    for child in children { width = width.max(child.width); height += child.height }
+    for child in children {
+        width = width.max(child.width)
+        height += child.height
+    }
     JetUiNode{label: "", width: width, height: height, role: Val(.Container), accessibility: None, ime: None,
         color: None, style: None, kind: .Box, children: children, key: None, on_click: None, on_drop: None, shortcut: None}
 }
@@ -292,7 +298,7 @@ pub fn jet_ui_dispatch(identity: &JetUiNodeId) -> {
     slot :: slot ?? return
     // Clone the callback while locked; invoke only after both map guards drop.
     handler :: jet_ui_click_slots().lock().unwrap_or_else(fn(e) { e.into_inner() }).get(&slot).cloned()
-    if handler is Val(callback) { callback() }
+    if handler == .Val(callback) { callback() }
 }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2322
 type JetUiDropHandler = Arc<fn([JetUiDropItem])>
@@ -339,13 +345,13 @@ pub fn jet_ui_dispatch_drop(identity: &JetUiNodeId, items: [JetUiDropItem]) -> {
     slot :: jet_ui_drop_bindings().lock().unwrap_or_else(fn(e) { e.into_inner() }).get(identity).copied()
     slot :: slot ?? return
     handler :: jet_ui_drop_slots().lock().unwrap_or_else(fn(e) { e.into_inner() }).get(&slot).cloned()
-    if handler is Val(callback) { callback(items) }
+    if handler == .Val(callback) { callback(items) }
 }
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2391
 pub fn jet_ui_bind_tree_clicks(node: &JetUiNode, path: String) -> {
     identity :: match jet_ui_node_id(node, path) { Ok(id) -> id, Err(_) -> return }
-    if node.on_click is Val(slot) { jet_ui_bind_click(identity.clone(), slot) }
-    if node.on_drop is Val(slot) { jet_ui_bind_drop(identity, slot) }
+    if node.on_click == .Val(slot) { jet_ui_bind_click(identity.clone(), slot) }
+    if node.on_drop == .Val(slot) { jet_ui_bind_drop(identity, slot) }
     if node.kind == .Box {
         for (index, child) in node.children.enumerate() { jet_ui_bind_tree_clicks(child, "{path}/{index}") }
     }
