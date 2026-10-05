@@ -421,9 +421,13 @@ fn jet_driver_row_chains_add(chains: &JetDriverRowChains, key: U64) Never! {
     chains.tails[key] = row
 }
 
-// Lowered declaration key -> its row, or -1 when the key repeats (the
-// unique-match rule of jet_driver_find_lowered_function_id), for the import
-// bindings of one assembly.
+// Lowered declaration -> its row, or -1 when it repeats (the unique-match
+// rule of jet_driver_find_lowered_function_id), for the import bindings of
+// one assembly. Functions are found by their symbol key; types, traits and
+// constants by `module id\nname` (jet_driver_lowered_member_key), because
+// their row keys are not symbol keys (types and constants are keyed
+// `module::name`, traits by name, compiler-owned enums by name), so a symbol
+// key never found an imported type, trait or runtime constant.
 struct JetDriverLoweredKeyRows {
     functions: [String:Int]
     types: [String:Int]
@@ -445,15 +449,19 @@ fn jet_driver_lowered_key_rows(lowered: JetCodegenFunctions) -> JetDriverLowered
         jet_driver_key_row_add(&rows.functions, function.key, row)
     }
     loop (row, definition) in lowered.types {
-        jet_driver_key_row_add(&rows.types, definition.key, row)
+        jet_driver_key_row_add(&rows.types, jet_driver_lowered_member_key(definition.module_id, definition.name), row)
     }
     loop (row, definition) in lowered.traits {
-        jet_driver_key_row_add(&rows.traits, definition.key, row)
+        jet_driver_key_row_add(&rows.traits, jet_driver_lowered_member_key(definition.module_id, definition.name), row)
     }
     loop (row, definition) in lowered.constants {
-        jet_driver_key_row_add(&rows.constants, definition.key, row)
+        jet_driver_key_row_add(&rows.constants, jet_driver_lowered_member_key(definition.module_id, definition.name), row)
     }
     rows
+}
+
+fn jet_driver_lowered_member_key(module_id: MIRModuleID, name: String) -> String Never! {
+    "{module_id.value}\n{name}"
 }
 
 fn jet_driver_diagnostic_at_loaded_module_index(
@@ -801,7 +809,7 @@ fn jet_driver_mir_import_items(
                 item = Val(MIRItemRef.Function{id: lowered.functions[function_row].id})
             }
             SymbolKind.Type -> {
-                type_row :: key_rows.types.get(binding.symbol.id.key) ?? -1
+                type_row :: key_rows.types.get(jet_driver_lowered_member_key(mir_module_id(binding.target_module_identity), binding.symbol.name)) ?? -1
                 if type_row < 0 {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported type has no matching lowered MIR type", "type import bindings preserve canonical target symbol identities", "retain the exact checked type key through code generation"))
                     return None
@@ -809,7 +817,7 @@ fn jet_driver_mir_import_items(
                 item = Val(MIRItemRef.Type{id: lowered.types[type_row].id})
             }
             SymbolKind.Trait -> {
-                trait_row :: key_rows.traits.get(binding.symbol.id.key) ?? -1
+                trait_row :: key_rows.traits.get(jet_driver_lowered_member_key(mir_module_id(binding.target_module_identity), binding.symbol.name)) ?? -1
                 if trait_row < 0 {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported trait has no matching lowered MIR trait", "trait import bindings preserve canonical target symbol identities", "retain the exact checked trait key through code generation"))
                     return None
@@ -817,19 +825,20 @@ fn jet_driver_mir_import_items(
                 item = Val(MIRItemRef.Trait{id: lowered.traits[trait_row].id})
             }
             SymbolKind.Constant -> {
-                constant_row :: key_rows.constants.get(binding.symbol.id.key) ?? -1
-                if constant_row < 0 {
-                    comptime_only := false
-                    if binding.declaration == {
-                        Val(declaration) -> {
-                            if declaration == {
-                                .Const(definition) -> comptime_only = definition.is_comptime
-                                else -> {}
-                            }
+                // A compile-time-only constant has no runtime use to import.
+                comptime_only := false
+                if binding.declaration == {
+                    Val(declaration) -> {
+                        if declaration == {
+                            .Const(definition) -> comptime_only = definition.is_comptime
+                            else -> {}
                         }
-                        else -> {}
                     }
-                    if comptime_only -> next
+                    else -> {}
+                }
+                if comptime_only -> next
+                constant_row :: key_rows.constants.get(jet_driver_lowered_member_key(mir_module_id(binding.target_module_identity), binding.symbol.name)) ?? -1
+                if constant_row < 0 {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported runtime constant has no matching lowered MIR constant", "runtime import bindings preserve canonical target constant identities", "retain the lowered constant row or erase only a checked compile-time-only import"))
                     return None
                 }
