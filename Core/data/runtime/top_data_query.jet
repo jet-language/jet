@@ -68,14 +68,17 @@ fn jet_analytics_result_schema(input: &JetTableSchema, spec: &JetSQLQuery) -> Je
     columns :: spec.projection.iter().flat_map(fn(item) {
         match item {
             JetSQLSelectItem.Wildcard -> input.columns.clone()
-            JetSQLSelectItem.Field(field, alias) -> {
+            .Field(field, alias) -> {
                 name :: alias.clone().unwrap_or_else(fn() { field.clone() })
                 ty :: input.column_named(field).map(fn(column) { column.ty.clone() }).unwrap_or_else(JetTableTypeId.any)
                 [JetTableColumn.new(^name, ^ty)]
             }
-            JetSQLSelectItem.Aggregate(function, field, alias) -> {
+            .Aggregate(function, field, alias) -> {
                 name :: alias.clone().unwrap_or_else(fn() {
-                    match field { Val(field) -> "{function.as_str()}_{field}"; None -> function.as_str() }
+                    match field {
+                        Val(field) -> "{function.as_str()}_{field}"
+                        None -> function.as_str()
+                    }
                 })
                 ty :: match function {
                     JetSQLAggregate.Count -> JetTableTypeId.integer()
@@ -94,8 +97,8 @@ fn jet_analytics_select_columns(input: &JetTableSchema, spec: &JetSQLQuery) -> [
     if spec.has_aggregate() || !spec.group_by.is_empty() { return None }
     spec.projection.iter().map(fn(item) {
         match item {
-            JetSQLSelectItem.Field(field, None) -> input.column_named(field).map(fn(column) { column.id.clone() })
-            JetSQLSelectItem.Wildcard | JetSQLSelectItem.Field(_, Val(_)) | JetSQLSelectItem.Aggregate(_, _, _) -> None
+            .Field(field, None) -> input.column_named(field).map(fn(column) { column.id.clone() })
+            JetSQLSelectItem.Wildcard | .Field(_, Val(_)) | .Aggregate(_, _, _) -> None
         }
     }).collect()
 }
@@ -149,10 +152,10 @@ fn jet_analytics_plan(rows: &[DataTree], spec: &JetSQLQuery) -> JetTablePlan Err
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:283
 fn jet_analytics_cell_text(cell: &DataTree) -> String {
     match cell {
-        DataTree.Text(value) -> value.clone()
-        DataTree.Int(value) -> value.to_string()
-        DataTree.Float(value) -> value.to_string()
-        DataTree.Bool(value) -> value.to_string()
+        .Text(value) -> value.clone()
+        .Int(value) -> value.to_string()
+        .Float(value) -> value.to_string()
+        .Bool(value) -> value.to_string()
         DataTree.Null -> ""
         other -> render_datatree_json(other, false, 0)
     }
@@ -161,11 +164,11 @@ fn jet_analytics_cell_text(cell: &DataTree) -> String {
 fn jet_analytics_sql_value(value: &DataTree) -> JetSQLValue {
     match value {
         DataTree.Null -> JetSQLValue.Null
-        DataTree.Bool(value) -> JetSQLValue.Bool(*value)
-        DataTree.Int(value) -> JetSQLValue.Int(I64{*value})
-        DataTree.Float(value) -> JetSQLValue.Float(*value)
-        DataTree.Number(value) -> JetSQLValue.literal(value)
-        DataTree.TypedText(value) | DataTree.Text(value) -> JetSQLValue.Text(value.clone())
+        .Bool(value) -> JetSQLValue.Bool(*value)
+        .Int(value) -> JetSQLValue.Int(I64{*value})
+        .Float(value) -> JetSQLValue.Float(*value)
+        .Number(value) -> JetSQLValue.literal(value)
+        .TypedText(value) | .Text(value) -> JetSQLValue.Text(value.clone())
         other -> JetSQLValue.Text(render_datatree_json(other, false, 0))
     }
 }
@@ -173,10 +176,10 @@ fn jet_analytics_sql_value(value: &DataTree) -> JetSQLValue {
 fn jet_analytics_sql_tree(value: JetSQLValue) -> DataTree {
     match value {
         JetSQLValue.Null -> DataTree.Null
-        JetSQLValue.Bool(value) -> DataTree.Bool(value)
-        JetSQLValue.Int(value) -> jet_datatree_encode_i64(value)
-        JetSQLValue.Float(value) -> DataTree.Float(value)
-        JetSQLValue.Text(value) -> DataTree.Text(^value)
+        .Bool(value) -> DataTree.Bool(value)
+        .Int(value) -> jet_datatree_encode_i64(value)
+        .Float(value) -> DataTree.Float(value)
+        .Text(value) -> DataTree.Text(^value)
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:317

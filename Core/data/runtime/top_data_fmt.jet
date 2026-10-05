@@ -34,21 +34,21 @@ fn jet_data_pivot_sum<T: Clone>(rows: &[T], row_key: fn(T) -> String,
 fn jet_enc_csv_to_string<T: __jet_Encode>(values: &[T]) -> String {
     trees :: values.iter().map(fn(v) { v.jet_encode() }).collect<[DataTree]>()
     rows := [[String]]{}
-    if trees.first() is Some(.Object(entries)) {
+    if trees.first() == .Val(.Object(entries)) {
         header :: entries.iter().map(fn((k, _)) { k.clone() }).collect<[String]>()
         rows.push(header.clone())
         for tree in &trees {
-            if not (tree is .Object(_)) ->
+            if not (tree == .Object(_)) ->
                 jet_panic("<core.encoding.csv>", 0, "csv.to_string needs rows or records")
             record := [String].with_capacity(header.len())
             for key in &header {
                 cell :: match datatree_get(tree, key) {
-                    Some(.Text(s)) -> s.clone()
-                    Some(.Int(n)) -> n.to_string()
-                    Some(.Float(f)) -> "{f:?}"
-                    Some(.Bool(b)) -> b.to_string()
-                    Some(.Null), None -> ""
-                    Some(other) -> render_datatree_json(other, false, 0)
+                    .Val(.Text(s)) -> s.clone()
+                    .Val(.Int(n)) -> n.to_string()
+                    .Val(.Float(f)) -> "{f:?}"
+                    .Val(.Bool(b)) -> b.to_string()
+                    Val(.Null), None -> ""
+                    .Val(other) -> render_datatree_json(other, false, 0)
                 }
                 record.push(^cell)
             }

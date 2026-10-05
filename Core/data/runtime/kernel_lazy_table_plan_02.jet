@@ -235,13 +235,20 @@ fn jet_table_detect_cycle(nodes: &[JetTableNode]) -> () JetTablePlanError! {
             top :: stack.len() - 1
             node :: stack[top].0
             next_input :: stack[top].1
-            if next_input >= nodes[node].inputs.len() { colors[node] = 2; _ :: stack.pop(); continue }
+            if next_input >= nodes[node].inputs.len() {
+                colors[node] = 2
+                _ :: stack.pop()
+                continue
+            }
             input :: nodes[node].inputs[next_input]
             stack[top].1 += 1
             input_index :: input.index()
             if input_index >= nodes.len() { continue }
             match colors[input_index] {
-                0 -> { colors[input_index] = 1; stack.push((input_index, 0)) },
+                0 -> {
+                    colors[input_index] = 1
+                    stack.push((input_index, 0))
+                },
                 1 -> return Err(JetTablePlanError.Cycle(input)),
                 _ -> {},
             }
@@ -367,7 +374,10 @@ impl JetTableBatchState {
         accepted := rows
         dropped := 0 as U128
         if Val(max_batch_rows) :: self.max_batch_rows {
-            if accepted > max_batch_rows { dropped = accepted - max_batch_rows; accepted = max_batch_rows }
+            if accepted > max_batch_rows {
+                dropped = accepted - max_batch_rows
+                accepted = max_batch_rows
+            }
         }
         if Val(max_rows) :: self.max_rows {
             if self.accepted_rows > max_rows { return JetTableBatchOffer.ArithmeticOverflow }
@@ -380,7 +390,11 @@ impl JetTableBatchState {
         }
         dropped_rows :: match self.dropped_rows.checked_add(dropped) { Val(value) -> value, None -> return JetTableBatchOffer.ArithmeticOverflow }
         if accepted == 0 {
-            if dropped > 0 { self.truncated = true; self.closed = true; self.dropped_rows = dropped_rows }
+            if dropped > 0 {
+                self.truncated = true
+                self.closed = true
+                self.dropped_rows = dropped_rows
+            }
             return JetTableBatchOffer.Truncated(batch: None, dropped_rows: dropped)
         }
         sequence :: self.next_sequence
@@ -388,7 +402,11 @@ impl JetTableBatchState {
         accepted_rows :: match self.accepted_rows.checked_add(accepted) { Val(value) -> value, None -> return JetTableBatchOffer.ArithmeticOverflow }
         self.next_sequence = next_sequence
         self.accepted_rows = accepted_rows
-        if dropped > 0 { self.truncated = true; self.closed = true; self.dropped_rows = dropped_rows }
+        if dropped > 0 {
+            self.truncated = true
+            self.closed = true
+            self.dropped_rows = dropped_rows
+        }
         batch :: JetTableBatch{sequence: sequence, rows: accepted, truncated: dropped > 0}
         self.queue.push_back(batch)
         if dropped > 0 { JetTableBatchOffer.Truncated(batch: Val(batch), dropped_rows: dropped) }

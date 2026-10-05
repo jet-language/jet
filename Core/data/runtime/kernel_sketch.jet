@@ -4,13 +4,19 @@ use std.sync.[Arc, Mutex]
 // Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:3
 fn fnv1a(data: &[U8]) -> U64 {
     hash := 14695981039346656037 as U64
-    for byte in data { hash ^= byte as U64; hash = hash.wrapping_mul(1099511628211) }
+    for byte in data {
+        hash ^= byte as U64
+        hash = hash.wrapping_mul(1099511628211)
+    }
     hash
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:12
 fn fnv1a_h2(data: &[U8]) -> U64 {
     hash := (0xcbf29ce484222325 as U64).wrapping_add(0xdeadbeef)
-    for byte in data { hash ^= byte as U64; hash = hash.wrapping_mul(1099511628211) }
+    for byte in data {
+        hash ^= byte as U64
+        hash = hash.wrapping_mul(1099511628211)
+    }
     hash
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:22
@@ -88,7 +94,11 @@ impl JetTDigest {
             merged := [].with_capacity(centroids.len())
             cumulative := 0.0
             for (mean, weight) in centroids.iter() {
-                if merged.is_empty() { merged.push((mean, weight)); cumulative += weight; continue }
+                if merged.is_empty() {
+                    merged.push((mean, weight))
+                    cumulative += weight
+                    continue
+                }
                 last := merged.last_mut().unwrap()
                 quantile :: cumulative / total
                 limit :: 4.0 * total * quantile * (1.0 - quantile) / Self.DELTA
@@ -96,7 +106,10 @@ impl JetTDigest {
                     new_weight :: last.1 + weight
                     last.0 = (last.0 * last.1 + mean * weight) / new_weight
                     last.1 = new_weight
-                } else { merged.push((mean, weight)); cumulative += weight }
+                } else {
+                    merged.push((mean, weight))
+                    cumulative += weight
+                }
             }
             *centroids = ^merged
         }
@@ -110,7 +123,10 @@ impl JetTDigest {
             total :: centroids.iter().map(fn((mean, weight)) { weight }).sum()
             target :: quantile * total
             cumulative := 0.0
-            for (mean, weight) in centroids.iter() { cumulative += weight; if cumulative >= target { return mean } }
+            for (mean, weight) in centroids.iter() {
+                cumulative += weight
+                if cumulative >= target { return mean }
+            }
             centroids.last().unwrap().0
         }
     }
@@ -136,7 +152,8 @@ impl JetCountMinSketch {
     // Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:145
     fn add(self: &Self, key: &String) -> {
         bytes :: key.as_bytes()
-        first :: fnv1a(bytes); second :: fnv1a_h2(bytes)
+        first :: fnv1a(bytes)
+        second :: fnv1a_h2(bytes)
         // GATE #4565: kernel primitive
         #Unsafe("exclusive saturating counter update; preserve poison panic") {
             rows := self.state.lock().unwrap()
@@ -149,7 +166,8 @@ impl JetCountMinSketch {
     // Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:156
     fn count(self: &Self, key: &String) -> I64 {
         bytes :: key.as_bytes()
-        first :: fnv1a(bytes); second :: fnv1a_h2(bytes)
+        first :: fnv1a(bytes)
+        second :: fnv1a_h2(bytes)
         // GATE #4565: kernel primitive
         #Unsafe("read all four counters under one mutex; preserve poison panic") {
             rows :: self.state.lock().unwrap()
@@ -190,9 +208,14 @@ impl JetReservoirSampler {
         #Unsafe("exclusive RNG and reservoir update; preserve poison panic") {
             inner := self.state.lock().unwrap()
             inner.count += 1
-            if inner.reservoir.len() < inner.capacity { inner.reservoir.push(^item); return }
+            if inner.reservoir.len() < inner.capacity {
+                inner.reservoir.push(^item)
+                return
+            }
             state := inner.rng
-            state ^= state << 13; state ^= state >> 7; state ^= state << 17
+            state ^= state << 13
+            state ^= state >> 7
+            state ^= state << 17
             inner.rng = state
             index :: (state % inner.count) as Usize
             if index < inner.capacity { inner.reservoir[index] = ^item }

@@ -376,7 +376,7 @@ impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V> 
                 .Filter(predicate) -> { if !predicate(row.clone()) -> return (false, None) }
                 .SortBy(key) -> {
                     // Preserve checked callback evaluation and the final sort key.
-                    sort_key = Some(key(row.clone()))
+                    sort_key = Val(key(row.clone()))
                 }
             }
         }
@@ -420,7 +420,7 @@ impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V> 
         loop (index, bucket) in state.buckets.iter_mut().enumerate() {
             if Val(member) :: bucket.members.iter().position(fn((id, _, _)) { *id == order }) {
                 bucket.members.remove(member)
-                if bucket.members.is_empty() { empty = Some(index) }
+                if bucket.members.is_empty() { empty = Val(index) }
                 else {
                     bucket.rank = bucket.members.iter().map(fn((id, _, key)) { (key.clone(), *id) })
                         .min().expect("non-empty group has a rank")
@@ -463,7 +463,7 @@ impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V>.
         entries :: self.entries(state.values.clone())
         // GATE #4565: kernel primitive
         #Unsafe("publish group state through the existing single-thread RefCell borrow boundary") {
-            *self.state.borrow_mut() = Some(^state)
+            *self.state.borrow_mut() = Val(^state)
         }
         Ok(DataWatchMaterialized{entries: ^entries, revision: revision, mode: self.mode,
             recomputed: false, changed: true, retained_rows: self.source.retained_rows()})
@@ -518,7 +518,7 @@ fn jet_data_static_query_entries<T: Clone>(query: &DataQuery<T>, cache: &RefCell
         entries :: rows.into_iter().enumerate().map(fn((order, value)) {
             DataWatchEntry{order: order as U64, key: None, value: ^value}
         }).collect()
-        *cache.borrow_mut() = Some(entries.clone())
+        *cache.borrow_mut() = Val(entries.clone())
         Ok(^entries)
     }
 }
@@ -606,7 +606,7 @@ impl<T: Clone, U: Clone, O: Clone> JetDataJoinWatchSource<T, U, O> {
                     return Err(jet_data_error(DataErrorKind.Limit, self.operation, "max_output_rows {limits.max_output_rows} exceeded"))
                 }
                 output.push(DataWatchEntry{order: output.len() as U64, key: None,
-                    value: self.join(left_entry.value.clone(), Some(right_entry.value.clone()))})
+                    value: self.join(left_entry.value.clone(), Val(right_entry.value.clone()))})
             }
         }
         Ok(^output)
@@ -633,7 +633,7 @@ impl<T: Clone, U: Clone, O: Clone> JetDataJoinWatchSource<T, U, O>.DataWatchSour
         retained_rows :: self.retained_rows(left.retained_rows, right.retained_rows)?
         // GATE #4565: kernel primitive
         #Unsafe("publish native RefCell join state only after both inputs and output succeed") {
-            *self.state.borrow_mut() = Some(^state)
+            *self.state.borrow_mut() = Val(^state)
         }
         Ok(DataWatchMaterialized{entries: ^output, revision: publication_revision,
             mode: if left.mode == "recomputed" || right.mode == "recomputed" { "recomputed" } else { "incremental" },
@@ -678,8 +678,8 @@ fn jet_data_join_query<T: Clone, U: Clone, O: Clone>(left: &DataQuery<T>, right:
     #Unsafe("retain native Rc snapshot cells and Arc callbacks at the existing maintained query ownership boundary") {
         left_source :: left.maintained_watch_source()
         right_source :: right.maintained_watch_source()
-        left_static_entries :: if left_source.is_none() { Some(Rc.new(RefCell.new(None))) } else { None }
-        right_static_entries :: if right_source.is_none() { Some(Rc.new(RefCell.new(None))) } else { None }
+        left_static_entries :: if left_source.is_none() { Val(Rc.new(RefCell.new(None))) } else { None }
+        right_static_entries :: if right_source.is_none() { Val(Rc.new(RefCell.new(None))) } else { None }
         tracking :: left.tracking.clone().or_else(fn() { right.tracking.clone() })
         steps := left.plan()
         steps.push(operation.strip_prefix("query.").unwrap_or(operation).to_string())
@@ -709,7 +709,7 @@ fn jet_data_join_query<T: Clone, U: Clone, O: Clone>(left: &DataQuery<T>, right:
                     join :: join.clone()
                     rows :: jet_data_inner_join_checked(&left_rows, &right_rows,
                         fn(row) { left_key(^row) }, fn(row) { right_key(^row) }, &limits)?
-                    Ok(rows.into_iter().map(fn(row) { join(^row.left, Some(^row.right)) }).collect())
+                    Ok(rows.into_iter().map(fn(row) { join(^row.left, Val(^row.right)) }).collect())
                 }
                 .Left -> {
                     left_key :: compute_left_key.clone()
@@ -724,14 +724,14 @@ fn jet_data_join_query<T: Clone, U: Clone, O: Clone>(left: &DataQuery<T>, right:
         if left_source.is_some() || right_source.is_some() {
             left_source :: left_source.unwrap_or_else(fn() {
                 entries :: match left_static_entries {
-                    Some(entries) -> ^entries
+                    .Val(entries) -> ^entries
                     None -> unreachable("missing static left join cache")
                 }
                 Rc.new(JetDataStaticWatchSource{query: left.clone(), entries: ^entries}) as Rc<DataWatchSource<T>>
             })
             right_source :: right_source.unwrap_or_else(fn() {
                 entries :: match right_static_entries {
-                    Some(entries) -> ^entries
+                    .Val(entries) -> ^entries
                     None -> unreachable("missing static right join cache")
                 }
                 Rc.new(JetDataStaticWatchSource{query: right.clone(), entries: ^entries}) as Rc<DataWatchSource<U>>
@@ -774,7 +774,7 @@ impl<T: Clone, U: Clone> JetDataMapWatchSource<T, U>.DataWatchSource<U> {
         entries :: self.map_entries(materialized.entries.clone())?
         // GATE #4565: kernel primitive
         #Unsafe("retain mapped input entries in native RefCell only after mapping succeeds") {
-            *self.base.borrow_mut() = Some(^materialized.entries)
+            *self.base.borrow_mut() = Val(^materialized.entries)
         }
         Ok(DataWatchMaterialized{entries: ^entries, revision: materialized.revision, mode: materialized.mode,
             recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
@@ -792,7 +792,7 @@ impl<T: Clone, U: Clone> JetDataMapWatchSource<T, U>.DataWatchSource<U> {
         next_base :: materialized.entries.clone()
         entries :: self.map_entries(next_base.clone())?
         // GATE #4565: kernel primitive
-        #Unsafe("commit mapped RefCell input only after every output callback succeeds") { *self.base.borrow_mut() = Some(^next_base) }
+        #Unsafe("commit mapped RefCell input only after every output callback succeeds") { *self.base.borrow_mut() = Val(^next_base) }
         Ok(DataWatchMaterialized{entries: ^entries, revision: materialized.revision, mode: materialized.mode,
             recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
     }
@@ -838,7 +838,7 @@ impl<T: Clone, K: Clone + PartialOrd> JetDataExtremeWatchSource<T, K> {
                     }
                 }
             }
-            if replace -> selected = Some((^candidate, entry.order))
+            if replace -> selected = Val((^candidate, entry.order))
         }
         selected.ok_or_else(fn() { jet_data_error(DataErrorKind.Empty, self.operation, "empty query has no extreme") })
     }
@@ -857,7 +857,7 @@ impl<T: Clone, K: Clone + PartialOrd> JetDataExtremeWatchSource<T, K>.DataWatchS
         materialized :: self.source.initial()?
         // GATE #4565: kernel primitive
         #Unsafe("retain original extreme input state through the native RefCell boundary") {
-            *self.base.borrow_mut() = Some(materialized.entries.clone())
+            *self.base.borrow_mut() = Val(materialized.entries.clone())
         }
         self.materialize(^materialized)
     }
@@ -874,7 +874,7 @@ impl<T: Clone, K: Clone + PartialOrd> JetDataExtremeWatchSource<T, K>.DataWatchS
         next_base :: materialized.entries.clone()
         output :: self.materialize(^materialized)?
         // GATE #4565: kernel primitive
-        #Unsafe("commit extreme input state only after selecting a valid output key") { *self.base.borrow_mut() = Some(^next_base) }
+        #Unsafe("commit extreme input state only after selecting a valid output key") { *self.base.borrow_mut() = Val(^next_base) }
         Ok(^output)
     }
 }
@@ -898,7 +898,7 @@ fn jet_data_extreme_materialized<T: Clone, K: Clone + PartialOrd>(rows: [T], key
                 }
             }
         }
-        if replace -> selected = Some((^candidate, order as U64))
+        if replace -> selected = Val((^candidate, order as U64))
     }
     selected.map(fn((value, _)) { [^value] })
         .ok_or_else(fn() { jet_data_error(DataErrorKind.Empty, operation, "empty query has no extreme") })

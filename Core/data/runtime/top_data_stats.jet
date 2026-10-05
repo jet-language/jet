@@ -161,7 +161,10 @@ fn jet_data_quantile_checked(values: &[F64], q: F64) -> Result<F64, DataError> {
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:343
 fn jet_data_median_checked(values: &[F64]) -> Result<F64, DataError> {
-    jet_data_quantile_checked(values, 0.5).map_err(fn(error) { error.operation = "median"; ^error })
+    jet_data_quantile_checked(values, 0.5).map_err(fn(error) {
+        error.operation = "median"
+        ^error
+    })
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:350
 fn jet_data_variance_checked(values: &[F64]) -> Result<F64, DataError> {
@@ -249,7 +252,10 @@ fn jet_data_status_native(step: String) -> DataStatus {
 fn jet_data_bridge_tool_on_path(tool: String) -> Bool {
     // GATE #4565: kernel primitive
     #Unsafe("read OS PATH and inspect candidate tool file metadata; no provider is executed") {
-        path :: match env.var_os("PATH") { Val(path) -> path; None -> return false }
+        path :: match env.var_os("PATH") {
+            Val(path) -> path
+            None -> return false
+        }
         env.split_paths(&path).any(fn(dir) { dir.join(tool).is_file() })
     }
 }
@@ -282,7 +288,12 @@ fn jet_data_status() -> [DataStatus] {
 fn jet_data_normalize_bridge_provider(provider: String) -> String? {
     lower := provider.trim().trim_end_matches('.').to_ascii_lowercase() // #4303
     p := lower.strip_suffix(".*").unwrap_or(lower.as_str()) // #4303
-    match p { "py" | "python" -> Val("py.*"); "r" -> Val("r.*"); "gpu" | "cuda" | "metal" | "vulkan" | "webgpu" -> Val("gpu.*"); _ -> None }
+    match p {
+        "py" | "python" -> Val("py.*")
+        "r" -> Val("r.*")
+        "gpu" | "cuda" | "metal" | "vulkan" | "webgpu" -> Val("gpu.*")
+        _ -> None
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:621
 fn jet_data_require_bridge(provider: &String) -> Result<(), DataError> {

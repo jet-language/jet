@@ -386,12 +386,15 @@ impl<T> JetTableEstimate<T> {
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:455
     pub fn is_exact(self: JetTableEstimate<T>) -> Bool { if self == .Exact(_) -> true else -> false }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:459
-    pub fn exact_value(self: JetTableEstimate<T>) -> T? { if self == .Exact(value) -> Some(value) else -> None }
+    pub fn exact_value(self: JetTableEstimate<T>) -> T? { if self == .Exact(value) -> Val(value) else -> None }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:466
-    pub fn unavailable_reason(self: JetTableEstimate<T>) -> String? { if self == .Unavailable{reason} -> Some(reason) else -> None }
+    pub fn unavailable_reason(self: JetTableEstimate<T>) -> String? { if self == .Unavailable{reason} -> Val(reason) else -> None }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:473
     pub fn map<U>(self: ^JetTableEstimate<T>, map: fn(T) -> U) -> JetTableEstimate<U> {
-        if self == { .Exact(value) -> .Exact(map(^value)); .Unavailable{reason} -> .Unavailable{reason: ^reason} }
+        if self == {
+            .Exact(value) -> .Exact(map(^value))
+            .Unavailable{reason} -> .Unavailable{reason: ^reason}
+        }
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:480
     pub fn validate(self: JetTableEstimate<T>) -> () JetTableEstimateError! {
@@ -415,11 +418,17 @@ impl Display for JetTableEstimateError {
 impl<T: Display> JetTableEstimate<T> {
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:506
     fn canonical_key(self: JetTableEstimate<T>) -> String {
-        if self == { .Exact(value) -> "exact:{value}"; .Unavailable{reason} -> "unavailable:{jet_table_escape(reason)}" }
+        if self == {
+            .Exact(value) -> "exact:{value}"
+            .Unavailable{reason} -> "unavailable:{jet_table_escape(reason)}"
+        }
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:515
     fn text(self: JetTableEstimate<T>) -> String {
-        if self == { .Exact(value) -> "exact({value})"; .Unavailable{reason} -> "unavailable({jet_table_escape(reason)})" }
+        if self == {
+            .Exact(value) -> "exact({value})"
+            .Unavailable{reason} -> "unavailable({jet_table_escape(reason)})"
+        }
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:524
     fn json(self: JetTableEstimate<T>) -> String {
@@ -432,14 +441,14 @@ impl<T: Display> JetTableEstimate<T> {
 // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:535
 fn jet_table_estimate_add(left: JetTableEstimate<U128>, right: JetTableEstimate<U128>, reason: String) -> JetTableEstimate<U128> {
     if (left, right) == (.Exact(l), .Exact(r)) {
-        if l.checked_add(r) == Some(sum) -> .Exact(sum)
+        if l.checked_add(r) == .Val(sum) -> .Exact(sum)
         else -> JetTableEstimate<U128>.unavailable("integer overflow")
     } else -> JetTableEstimate<U128>.unavailable(reason)
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:549
 fn jet_table_estimate_mul(left: JetTableEstimate<U128>, right: JetTableEstimate<U128>, reason: String) -> JetTableEstimate<U128> {
     if (left, right) == (.Exact(l), .Exact(r)) {
-        if l.checked_mul(r) == Some(product) -> .Exact(product)
+        if l.checked_mul(r) == .Val(product) -> .Exact(product)
         else -> JetTableEstimate<U128>.unavailable("integer overflow")
     } else -> JetTableEstimate<U128>.unavailable(reason)
 }
@@ -649,7 +658,7 @@ pub enum JetTableStreamMode {
 impl JetTableStreamMode {
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:919
     pub fn bounded(batch_rows: U128?) -> JetTableStreamMode JetTableStreamError! {
-        if batch_rows == Some(0) -> return Err(.ZeroBatchRows)
+        if batch_rows == 0 -> return Err(.ZeroBatchRows)
         Ok(.Bounded{batch_rows})
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:926
@@ -664,7 +673,7 @@ impl JetTableStreamMode {
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:938
     pub fn canonical_key(self: JetTableStreamMode) -> String {
         if self == {
-            .Bounded{batch_rows: Some(rows)} -> "bounded:{rows}"
+            .Bounded{batch_rows: Val(rows)} -> "bounded:{rows}"
             .Bounded{batch_rows: None} -> "bounded:host"
             .Materialized{reason} -> "materialized:{jet_table_escape(reason)}"
         }
@@ -672,7 +681,7 @@ impl JetTableStreamMode {
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:948
     pub fn text(self: JetTableStreamMode) -> String {
         if self == {
-            .Bounded{batch_rows: Some(rows)} -> "bounded(batch_rows={rows})"
+            .Bounded{batch_rows: Val(rows)} -> "bounded(batch_rows={rows})"
             .Bounded{batch_rows: None} -> "bounded(batch_rows=host)"
             .Materialized{reason} -> "materialized(reason={jet_table_escape(reason)})"
         }
@@ -680,7 +689,7 @@ impl JetTableStreamMode {
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:958
     pub fn validate(self: JetTableStreamMode) -> () JetTableStreamError! {
         if self == {
-            .Bounded{batch_rows: Some(0)} -> Err(.ZeroBatchRows)
+            .Bounded{batch_rows: Val(0)} -> Err(.ZeroBatchRows)
             .Bounded{..} -> Ok(())
             .Materialized{reason} -> {
                 trimmed := reason.trim() // #4303
@@ -731,22 +740,40 @@ impl JetTableNode {
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1034
     pub fn scan(id: JetTableNodeId, source: JetTableSourceId, schema: JetTableSchema, facts: JetTableFacts) -> JetTableNode {
         node := JetTableNode.new(id, .Scan, [], ^schema)
-        node.source = Some(^source)
+        node.source = Val(^source)
         node.facts = ^facts
         ^node
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1046
-    pub fn with_stream(self: ^JetTableNode, stream: JetTableStreamMode) -> JetTableNode { self.stream = ^stream; ^self }
+    pub fn with_stream(self: ^JetTableNode, stream: JetTableStreamMode) -> JetTableNode {
+        self.stream = ^stream
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1051
-    pub fn with_join_kind(self: ^JetTableNode, kind: JetTableJoinKind) -> JetTableNode { self.join_kind = Some(kind); ^self }
+    pub fn with_join_kind(self: ^JetTableNode, kind: JetTableJoinKind) -> JetTableNode {
+        self.join_kind = Val(kind)
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1056
-    pub fn with_join_keys(self: ^JetTableNode, keys: [(JetTableColumnId, JetTableColumnId)]) -> JetTableNode { self.join_keys = ^keys; ^self }
+    pub fn with_join_keys(self: ^JetTableNode, keys: [(JetTableColumnId, JetTableColumnId)]) -> JetTableNode {
+        self.join_keys = ^keys
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1064
-    pub fn with_limit(self: ^JetTableNode, limit: U128) -> JetTableNode { self.limit = Some(limit); ^self }
+    pub fn with_limit(self: ^JetTableNode, limit: U128) -> JetTableNode {
+        self.limit = Val(limit)
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1069
-    pub fn with_selected_columns(self: ^JetTableNode, columns: [JetTableColumnId]) -> JetTableNode { self.selected_columns = Some(^columns); ^self }
+    pub fn with_selected_columns(self: ^JetTableNode, columns: [JetTableColumnId]) -> JetTableNode {
+        self.selected_columns = Val(^columns)
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1074
-    pub fn with_facts(self: ^JetTableNode, facts: JetTableFacts) -> JetTableNode { self.facts = ^facts; ^self }
+    pub fn with_facts(self: ^JetTableNode, facts: JetTableFacts) -> JetTableNode {
+        self.facts = ^facts
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1079
     fn operation_key(self: JetTableNode) -> String {
         join :: self.join_kind.map((kind) -> kind.as_str().to_string()).unwrap_or_else(() -> "none")
@@ -805,7 +832,10 @@ impl JetTableSource {
             row_width_bytes: .unavailable("source row width unavailable")}
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1269
-    pub fn with_rows(self: ^JetTableSource, rows: U128) -> JetTableSource { self.rows = .exact(rows); ^self }
+    pub fn with_rows(self: ^JetTableSource, rows: U128) -> JetTableSource {
+        self.rows = .exact(rows)
+        ^self
+    }
     // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1274
     pub fn validate(self: JetTableSource) -> () JetTablePlanError! {
         _ :: self.id.validate().map_err((error) -> JetTablePlanError.Identity(^error)) ?? return Err(^err)
@@ -866,7 +896,7 @@ pub fn jet_table_derive_facts(operation: JetTableOperation, inputs: [&JetTableNo
         }
         .Join -> {
             read :: if (input_rows.first(), input_rows.get(1)) == {
-                (Some(left), Some(right)) -> jet_table_estimate_add(left, right, "join input cardinality unavailable")
+                (Val(left), Val(right)) -> jet_table_estimate_add(left, right, "join input cardinality unavailable")
                 _ -> unknown("join input cardinality unavailable")
             }
             (unknown("join cardinality unavailable"), ^read, unknown("join output cardinality unavailable"),

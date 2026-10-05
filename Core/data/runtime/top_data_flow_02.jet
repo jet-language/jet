@@ -84,7 +84,7 @@ fn jet_data_query_map<T: Clone, U: Clone>(
 fn jet_data_reducer_query<O>(tracking: Rc<DataTrackedMeta>?, steps: [String],
     compute: fn() -> Result<[O], DataError>) -> DataQuery<O> {
     match tracking {
-        Some(tracking) -> DataQuery.from_recomputation(^steps, ^tracking, compute)
+        .Val(tracking) -> DataQuery.from_recomputation(^steps, ^tracking, compute)
         None -> DataQuery.from_computation(^steps, compute)
     }
 }
@@ -102,7 +102,7 @@ fn jet_data_group_sum_query_checked<T: Clone, K: Clone + PartialEq, V: Clone + A
     aggregate :: Arc.new(fn(values: &[V]) {
         values := values.iter().cloned()
         first :: match values.next() {
-            Some(first) -> ^first
+            .Val(first) -> ^first
             None -> return Err(jet_data_error(DataErrorKind.State,
                 "query.group_by.sum", "empty group has no sum"))
         }
@@ -258,7 +258,7 @@ fn jet_data_jsonl_reader(input: JetFileReader, limits: DataLimits) -> Result<Dat
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2221
 fn jet_data_stream_fail<T>(stream: &DataStream, error: DataError) -> Result<T, DataError> {
-    stream.terminal = Some(error.clone())
+    stream.terminal = Val(error.clone())
     Err(^error)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2229
@@ -292,7 +292,7 @@ fn jet_data_stream_next<T: __jet_Decode>(
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2287
 fn jet_data_stream_scan<T: __jet_Decode>(stream: &DataStream) -> Result<T?, DataError> {
-    if stream.terminal == Some(error) -> return Err(error.clone())
+    if stream.terminal == .Val(error) -> return Err(error.clone())
     if stream.cancelled {
         return jet_data_stream_fail(stream, jet_data_error(DataErrorKind.State,
             "data.stream", "stream was cancelled before the next row"))
@@ -302,19 +302,25 @@ fn jet_data_stream_scan<T: __jet_Decode>(stream: &DataStream) -> Result<T?, Data
         DataStreamInner.CSV{reader, headers} -> {
             if headers.is_none() {
                 match reader.next_record() {
-                    Ok(Some(header)) -> headers = Some(^header.fields)
-                    Ok(None) -> { stream.eof = true; return Ok(None) }
+                    Ok(.Val(header)) -> headers = Val(^header.fields)
+                    Ok(None) -> {
+                        stream.eof = true
+                        return Ok(None)
+                    }
                     Err(enc) -> return jet_data_stream_fail(stream,
                         jet_data_from_encoding("csv_reader", Err(JetAbsent), ^enc))
                 }
             }
             header :: headers.as_ref().unwrap().clone()
             match reader.next_record() {
-                Ok(None) -> { stream.eof = true; Ok(None) }
-                Ok(Some(row)) -> {
+                Ok(None) -> {
+                    stream.eof = true
+                    Ok(None)
+                }
+                Ok(.Val(row)) -> {
                     stream.row_index += 1
                     match jet_data_stream_decode_csv_row<T>(&header, ^row.fields, stream.row_index) {
-                        Ok(value) -> Ok(Some(^value))
+                        Ok(value) -> Ok(Val(^value))
                         Err(error) -> jet_data_stream_fail(stream, ^error)
                     }
                 }
@@ -323,22 +329,36 @@ fn jet_data_stream_scan<T: __jet_Decode>(stream: &DataStream) -> Result<T?, Data
             }
         }
         DataStreamInner.JSON{reader, array_started, array_done} -> {
-            if array_done -> { stream.eof = true; return Ok(None) }
+            if array_done -> {
+                stream.eof = true
+                return Ok(None)
+            }
             if not array_started {
                 match reader.next_event() {
-                    Ok(Some(DataEvent.ArrayStart)) -> array_started = true
-                    Ok(Some(_)) -> return jet_data_stream_fail(stream,
+                    Ok(.Val(DataEvent.ArrayStart)) -> array_started = true
+                    Ok(.Val(_)) -> return jet_data_stream_fail(stream,
                         jet_data_error(DataErrorKind.Decode, "json_reader",
                             "typed JSON stream requires a top-level array of objects"))
-                    Ok(None) -> { stream.eof = true; return Ok(None) }
+                    Ok(None) -> {
+                        stream.eof = true
+                        return Ok(None)
+                    }
                     Err(enc) -> return jet_data_stream_fail(stream,
                         jet_data_from_encoding("json_reader", Err(JetAbsent), ^enc))
                 }
             }
             first :: match reader.next_event() {
-                Ok(None) -> { array_done = true; stream.eof = true; return Ok(None) }
-                Ok(Some(DataEvent.ArrayEnd)) -> { array_done = true; stream.eof = true; return Ok(None) }
-                Ok(Some(event)) -> ^event
+                Ok(None) -> {
+                    array_done = true
+                    stream.eof = true
+                    return Ok(None)
+                }
+                Ok(.Val(DataEvent.ArrayEnd)) -> {
+                    array_done = true
+                    stream.eof = true
+                    return Ok(None)
+                }
+                Ok(.Val(event)) -> ^event
                 Err(enc) -> return jet_data_stream_fail(stream,
                     jet_data_from_encoding("json_reader", Ok(stream.row_index + 1), ^enc))
             }
@@ -351,7 +371,7 @@ fn jet_data_stream_scan<T: __jet_Decode>(stream: &DataStream) -> Result<T?, Data
                 Ok(tree) -> {
                     stream.row_index += 1
                     match T.jet_decode(&tree) {
-                        Ok(value) -> Ok(Some(^value))
+                        Ok(value) -> Ok(Val(^value))
                         Err(errors) -> {
                             error := jet_data_error(DataErrorKind.Decode, "json_reader",
                                 jet_data_field_errors_reason(^errors))
@@ -365,11 +385,14 @@ fn jet_data_stream_scan<T: __jet_Decode>(stream: &DataStream) -> Result<T?, Data
             }
         }
         DataStreamInner.JSONL{reader} -> match reader.next_record() {
-            Ok(None) -> { stream.eof = true; Ok(None) }
-            Ok(Some(tree)) -> {
+            Ok(None) -> {
+                stream.eof = true
+                Ok(None)
+            }
+            Ok(.Val(tree)) -> {
                 stream.row_index += 1
                 match T.jet_decode(&tree) {
-                    Ok(value) -> Ok(Some(^value))
+                    Ok(value) -> Ok(Val(^value))
                     Err(errors) -> {
                         error := jet_data_error(DataErrorKind.Decode, "jsonl_reader",
                             jet_data_field_errors_reason(^errors))
@@ -382,12 +405,15 @@ fn jet_data_stream_scan<T: __jet_Decode>(stream: &DataStream) -> Result<T?, Data
                 jet_data_from_encoding("jsonl_reader", Ok(stream.row_index + 1), ^enc))
         }
         DataStreamInner.Provider{format: _format, rows, cursor} -> {
-            if cursor >= rows.len() -> { stream.eof = true; return Ok(None) }
+            if cursor >= rows.len() -> {
+                stream.eof = true
+                return Ok(None)
+            }
             tree :: rows[cursor].clone()
             cursor += 1
             stream.row_index += 1
             match T.jet_decode(&tree) {
-                Ok(value) -> Ok(Some(^value))
+                Ok(value) -> Ok(Val(^value))
                 Err(errors) -> {
                     error := jet_data_error(DataErrorKind.Decode, "data.provider",
                         jet_data_field_errors_reason(^errors))
@@ -628,7 +654,7 @@ fn jet_data_loader_format_for_locator(locator: &String) -> Result<DataFormat, Da
     path := locator.split(fn(character) { character == '?' or character == '#' }).next().unwrap_or(locator)
     path = path.rsplit_once("/").map_or(path, fn(entry) { entry.1 })
     extension :: match path.rsplit_once(".").map(fn(entry) { entry.1 }) {
-        Some(extension) -> extension
+        Val(extension) -> extension
         None -> return Err(jet_data_loader_error(DataErrorKind.Bridge, "data.load",
             "source has no core format; import a provider package"))
     }
@@ -678,7 +704,7 @@ fn jet_data_loader_value<T: __jet_Encode>(value: &T,
     jet_data_loader_check_payload(limits, bytes.len(), "data.value")?
     loader := jet_data_loader_new<T>(.Value, "value", "", [], .JSON,
         limits.clone(), jet_data_loader_authority("local", "")?)?
-    loader.payload = Some(^bytes)
+    loader.payload = Val(^bytes)
     Ok(^loader)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3026
@@ -750,7 +776,7 @@ fn jet_data_loader_csv_tree(text: &String, limits: &DataLimits) -> Result<DataTr
     })?
     rows := rows.into_iter()
     header :: match rows.next() {
-        Some(header) -> ^header
+        .Val(header) -> ^header
         None -> return Ok(DataTree.Array([]))
     }
     header_names: [String:Bool] := [:]
@@ -889,7 +915,7 @@ fn jet_data_loader_tree(payload: &[U8], format: DataFormat,
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3362
 fn jet_data_loader_payload<T>(loader: &DataLoader<T>) -> Result<([U8], Bool), DataError> {
     state :: jet_data_loader_kernel_state(loader)
-    if LoaderKernel.payload(&state).map_err(jet_data_loader_kernel_error)? == Some(payload) {
+    if LoaderKernel.payload(&state).map_err(jet_data_loader_kernel_error)? == .Val(payload) {
         return Ok(^payload)
     }
     if loader.source.kind == .File and loader.source.member.is_empty() {

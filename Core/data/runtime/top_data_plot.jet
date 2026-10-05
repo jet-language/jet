@@ -85,9 +85,18 @@ pub fn jet_data_line_svg<K: JetShow>(groups: &[GroupValue<K, F64>], options: &Da
     values :: jet_data_line_values(groups)
     min := values.iter().copied().fold(F64.INFINITY, F64.min)
     max := values.iter().copied().fold(F64.NEG_INFINITY, F64.max)
-    if Ok(reference) :: options.reference { min = min.min(reference); max = max.max(reference) }
-    if !min.is_finite() || !max.is_finite() { min = 0.0; max = 1.0 }
-    if (max - min).abs() < F64.EPSILON { min -= 1.0; max += 1.0 }
+    if Ok(reference) :: options.reference {
+        min = min.min(reference)
+        max = max.max(reference)
+    }
+    if !min.is_finite() || !max.is_finite() {
+        min = 0.0
+        max = 1.0
+    }
+    if (max - min).abs() < F64.EPSILON {
+        min -= 1.0
+        max += 1.0
+    }
     point :: fn(index: USize, value: F64) {
         x :: if groups.len() <= 1 { left + plot_width / 2.0 } else {
             left + plot_width * (index as F64) / ((groups.len() - 1) as F64)

@@ -48,7 +48,7 @@ fn jet_data_loader_stream_from_payload<T>(loader: &DataLoader<T>, payload: [U8])
         Ok(tree) -> ^tree
         Err(error) -> return Err(jet_data_loader_fail(loader, ^error))
     }
-    rows :: match tree { DataTree.Array(rows) -> ^rows, value -> [^value] }
+    rows :: match tree { .Array(rows) -> ^rows, value -> [^value] }
     if I64{rows.len()} > loader.limits.max_output_rows {
         return Err(jet_data_loader_fail(loader, jet_data_loader_error(DataErrorKind.Limit, "data.loader.stream", "max_output_rows {loader.limits.max_output_rows} exceeded")))
     }
@@ -334,36 +334,36 @@ module jet_data_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4090
     fn field(value: &DataTree, name: &String) -> &DataTree? {
         match value {
-            DataTree.Object(entries) -> entries.iter().find(fn(entry) { entry.0 == name }).map(fn(entry) { &entry.1 })
+            .Object(entries) -> entries.iter().find(fn(entry) { entry.0 == name }).map(fn(entry) { &entry.1 })
             _ -> None
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4096
     fn args(root: &DataTree) -> &[DataTree] DataError! {
         match field(root, "args") {
-            Val(DataTree.Array(values)) -> Ok(values)
+            Val(.Array(values)) -> Ok(values)
             _ -> Err(error(DataErrorKind.InvalidArgument, "data.web", "wire args must be an array"))
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4102
     fn text(value: &DataTree, operation: &String) -> String DataError! {
         match value {
-            DataTree.Text(value) | DataTree.TypedText(value) -> Ok(value.clone())
+            .Text(value) | .TypedText(value) -> Ok(value.clone())
             _ -> Err(error(DataErrorKind.InvalidArgument, operation, "expected text"))
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4108
     fn boolean(value: &DataTree, operation: &String) -> Bool DataError! {
         match value {
-            DataTree.Bool(value) -> Ok(value)
+            .Bool(value) -> Ok(value)
             _ -> Err(error(DataErrorKind.InvalidArgument, operation, "expected bool"))
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4114
     fn integer(value: &DataTree, operation: &String) -> I64 DataError! {
         match value {
-            DataTree.Int(value) -> Ok(value)
-            DataTree.Number(value) -> value.parse<I64>().map_err(fn(_) { error(DataErrorKind.InvalidArgument, operation, "expected exact integer") })
+            .Int(value) -> Ok(value)
+            .Number(value) -> value.parse<I64>().map_err(fn(_) { error(DataErrorKind.InvalidArgument, operation, "expected exact integer") })
             _ -> Err(error(DataErrorKind.InvalidArgument, operation, "expected exact integer"))
         }
     }
@@ -426,7 +426,7 @@ module jet_data_web {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4184
     fn bytes(value: &DataTree, operation: &String) -> [U8] DataError! {
-        values :: match value { DataTree.Array(values) -> values, _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "expected byte array")) }
+        values :: match value { .Array(values) -> values, _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "expected byte array")) }
         values.iter().map(fn(value) {
             U8.try_from(integer(value, operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, operation, "byte outside 0..255") })
         }).collect()
@@ -447,14 +447,17 @@ module jet_data_web {
     fn store(handle: Handle) -> DataTree {
         HANDLES.with(fn(cell) {
             handles := cell.borrow_mut()
-            index :: handles.iter().position(fn(slot) { slot.is_none() }).unwrap_or_else(fn() { handles.push(None); handles.len() - 1 })
+            index :: handles.iter().position(fn(slot) { slot.is_none() }).unwrap_or_else(fn() {
+                handles.push(None)
+                handles.len() - 1
+            })
             kind :: match &handle {
-                Handle.Loader(_) | Handle.TypedLoader(_) -> "loader"
-                Handle.Query(_) -> "query"
-                Handle.Tracked(_) -> "tracked"
-                Handle.Watch(_) -> "watch"
-                Handle.Grouped(_) -> "grouped"
-                Handle.Stream(_) | Handle.TypedStream(_) -> "stream"
+                .Loader(_) | .TypedLoader(_) -> "loader"
+                .Query(_) -> "query"
+                .Tracked(_) -> "tracked"
+                .Watch(_) -> "watch"
+                .Grouped(_) -> "grouped"
+                .Stream(_) | .TypedStream(_) -> "stream"
             }
             handles[index] = Val(^handle)
             handle_tree(index, kind)
@@ -581,20 +584,20 @@ module jet_data_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4363
     fn callback_number(callback: U32, row: DataTree, operation: &String) -> F64 DataError! {
         match callback_value(callback, ^row, operation)? {
-            DataTree.Int(value) -> Ok(value as F64)
-            DataTree.Float(value) -> Ok(value)
-            DataTree.Number(value) -> value.parse<F64>().map_err(fn(_) { error(DataErrorKind.InvalidValue, operation, "callback must return a finite number") })
+            .Int(value) -> Ok(value as F64)
+            .Float(value) -> Ok(value)
+            .Number(value) -> value.parse<F64>().map_err(fn(_) { error(DataErrorKind.InvalidValue, operation, "callback must return a finite number") })
             _ -> Err(error(DataErrorKind.InvalidValue, operation, "callback must return a number"))
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4385
     fn callback_key_value(value: &DataTree) -> String {
         match value {
-            DataTree.Text(value) | DataTree.TypedText(value) -> value.clone()
-            DataTree.Int(value) -> value.to_string()
-            DataTree.Float(value) -> value.to_string()
-            DataTree.Number(value) -> value.clone()
-            DataTree.Bool(value) -> value.to_string()
+            .Text(value) | .TypedText(value) -> value.clone()
+            .Int(value) -> value.to_string()
+            .Float(value) -> value.to_string()
+            .Number(value) -> value.clone()
+            .Bool(value) -> value.to_string()
             DataTree.Null -> "null"
             _ -> jet_data_loader_canonical_tree(value)
         }
@@ -629,8 +632,14 @@ module jet_data_web {
         value :: fn(index: USize) { values.get(index).ok_or_else(fn() { error(DataErrorKind.InvalidArgument, operation, "missing argument") }) }
         decode :: fn(value: &DataTree) { T.jet_decode(value).map_err(fn(errors) { error(DataErrorKind.Decode, operation, jet_data_field_errors_reason(^errors)) }) }
         loader :: match operation {
-            "load" -> { locator :: text(value(0)?, operation)?; jet_data_loader_load<T>(&locator, &limits(values.get(1))?)? }
-            "load_default" -> { locator :: text(value(0)?, operation)?; jet_data_loader_load_default<T>(&locator)? }
+            "load" -> {
+                locator :: text(value(0)?, operation)?
+                jet_data_loader_load<T>(&locator, &limits(values.get(1))?)?
+            }
+            "load_default" -> {
+                locator :: text(value(0)?, operation)?
+                jet_data_loader_load_default<T>(&locator)?
+            }
             "file" -> {
                 path :: text(value(0)?, operation)?
                 format :: format(value(1)?, operation)?
@@ -651,13 +660,16 @@ module jet_data_web {
             "database" -> {
                 query :: text(value(0)?, operation)?
                 parameters :: match value(1)? {
-                    DataTree.Array(values) -> values.iter().map(fn(value) { text(value, operation) }).collect::<[String] DataError!>()?
+                    .Array(values) -> values.iter().map(fn(value) { text(value, operation) }).collect::<[String] DataError!>()?
                     _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "parameters must be an array"))
                 }
                 authority :: text(value(2)?, operation)?
                 jet_data_loader_database<T>(&query, &parameters, &authority, &limits(values.get(3))?)?
             }
-            "value" -> { decoded :: decode(value(0)?)?; jet_data_loader_value<T>(&decoded, &limits(values.get(1))?)? }
+            "value" -> {
+                decoded :: decode(value(0)?)?
+                jet_data_loader_value<T>(&decoded, &limits(values.get(1))?)?
+            }
             _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "operation is not a typed loader constructor"))
         }
         Ok(Handle.TypedLoader(Box.new(TypedLoader<T>{loader: ^loader})))
@@ -665,7 +677,7 @@ module jet_data_web {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4557
     fn type_key(root: &DataTree, operation: &String) -> String DataError! {
         values :: match field(root, "type_args") {
-            Val(DataTree.Array(values)) if values.len() == 1 -> values
+            Val(.Array(values)) if values.len() == 1 -> values
             _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "typed data operation requires one canonical T type argument"))
         }
         value :: text(&values[0], operation)?
@@ -694,7 +706,7 @@ module jet_data_web {
         }
         if typed {
             match field(root, "type_args") {
-                Val(DataTree.Array(values)) if values.len() == 1 -> {}
+                Val(.Array(values)) if values.len() == 1 -> {}
                 _ -> return Err(error(DataErrorKind.InvalidArgument, &operation, "typed data operation requires one canonical T type argument"))
             }
         }
@@ -719,14 +731,26 @@ module jet_data_web {
             }
             "loader_cancel" -> {
                 index :: handle(value(0)?, &operation)?
-                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.cancel(); Ok(DataTree.Null) }) }
-                else { with_loader(index, &operation, fn(loader) { jet_data_loader_cancel(loader); Ok(DataTree.Null) }) }
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) {
+                    loader.cancel()
+                    Ok(DataTree.Null)
+                }) }
+                else { with_loader(index, &operation, fn(loader) {
+                    jet_data_loader_cancel(loader)
+                    Ok(DataTree.Null)
+                }) }
             }
             "offline" -> {
                 index :: handle(value(0)?, &operation)?
                 enabled :: boolean(value(1)?, &operation)?
-                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.offline(enabled); Ok(DataTree.Null) }) }
-                else { with_loader(index, &operation, fn(loader) { jet_data_loader_offline(loader, enabled); Ok(DataTree.Null) }) }
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) {
+                    loader.offline(enabled)
+                    Ok(DataTree.Null)
+                }) }
+                else { with_loader(index, &operation, fn(loader) {
+                    jet_data_loader_offline(loader, enabled)
+                    Ok(DataTree.Null)
+                }) }
             }
             "invalidate" -> {
                 index :: handle(value(0)?, &operation)?
@@ -741,8 +765,14 @@ module jet_data_web {
                     "Manual" -> DataInvalidationCause.Manual
                     _ -> DataInvalidationCause.NoCause
                 }
-                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.invalidate(cause); Ok(DataTree.Null) }) }
-                else { with_loader(index, &operation, fn(loader) { jet_data_loader_invalidate(loader, cause); Ok(DataTree.Null) }) }
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) {
+                    loader.invalidate(cause)
+                    Ok(DataTree.Null)
+                }) }
+                else { with_loader(index, &operation, fn(loader) {
+                    jet_data_loader_invalidate(loader, cause)
+                    Ok(DataTree.Null)
+                }) }
             }
             "needs_refresh" | "ready" -> {
                 index :: handle(value(0)?, &operation)?
@@ -788,17 +818,23 @@ module jet_data_web {
             }
             "stream_cancel" -> {
                 index :: handle(value(0)?, &operation)?
-                if has_typed_stream(index) { with_typed_stream(index, &operation, fn(stream) { stream.cancel(); Ok(DataTree.Null) }) }
-                else { with_stream(index, &operation, fn(stream) { jet_data_stream_cancel(stream); Ok(DataTree.Null) }) }
+                if has_typed_stream(index) { with_typed_stream(index, &operation, fn(stream) {
+                    stream.cancel()
+                    Ok(DataTree.Null)
+                }) }
+                else { with_stream(index, &operation, fn(stream) {
+                    jet_data_stream_cancel(stream)
+                    Ok(DataTree.Null)
+                }) }
             }
             "track" -> {
-                rows :: match value(0)? { DataTree.Array(rows) -> rows.clone(), _ -> return Err(error(DataErrorKind.InvalidArgument, &operation, "data.track expects an array")) }
+                rows :: match value(0)? { .Array(rows) -> rows.clone(), _ -> return Err(error(DataErrorKind.InvalidArgument, &operation, "data.track expects an array")) }
                 callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
                 tracked :: DataTracked.new(^rows, fn(row) { callback_key(callback, ^row) })?
                 Ok(store(Handle.Tracked(^tracked)))
             }
             "query" -> {
-                rows :: match value(0)? { DataTree.Array(rows) -> rows.clone(), value -> [value.clone()] }
+                rows :: match value(0)? { .Array(rows) -> rows.clone(), value -> [value.clone()] }
                 Ok(store(Handle.Query(jet_data_query(&rows))))
             }
             "tracked_query" -> {
@@ -886,7 +922,10 @@ module jet_data_web {
             }
             "watch_cancel" -> {
                 index :: handle(value(0)?, &operation)?
-                with_watch(index, &operation, fn(watch) { jet_data_watch_cancel(watch); Ok(()) })?
+                with_watch(index, &operation, fn(watch) {
+                    jet_data_watch_cancel(watch)
+                    Ok(())
+                })?
                 Ok(DataTree.Null)
             }
             "group_count" -> {
@@ -907,11 +946,18 @@ module jet_data_web {
                 Ok(store(Handle.Query(jet_data_query_map(&query, fn(row) { result_tree([("key", text_tree(^row.key)), ("value", DataTree.Float(row.value))]) }))))
             }
             "count" -> match value(0)? {
-                DataTree.Array(values) -> Ok(DataTree.Int(values.len() as I64))
-                value -> { query :: clone_query(handle(value, &operation)?)?; Ok(DataTree.Int(jet_data_query_collect(&query)?.len() as I64)) }
+                .Array(values) -> Ok(DataTree.Int(values.len() as I64))
+                value -> {
+                    query :: clone_query(handle(value, &operation)?)?
+                    Ok(DataTree.Int(jet_data_query_collect(&query)?.len() as I64))
+                }
             }
             "snapshot_reusable" -> Ok(DataTree.Bool(jet_data_loader_canonical_tree(value(0)?) == jet_data_loader_canonical_tree(value(1)?)))
-            "require_bridge" -> { provider :: text(value(0)?, &operation)?; jet_data_require_bridge(&provider)?; Ok(DataTree.Null) }
+            "require_bridge" -> {
+                provider :: text(value(0)?, &operation)?
+                jet_data_require_bridge(&provider)?
+                Ok(DataTree.Null)
+            }
             "status" -> Ok(DataTree.Array(jet_data_status().into_iter().map(fn(value) { data_status(&value) }).collect()))
             "release" -> {
                 index :: handle(value(0)?, &operation)?
@@ -977,8 +1023,14 @@ module jet_data_web {
         parsed :: str.from_utf8(input).ok().and_then(fn(value) { parse_json_typed_datatree(value).ok() })
         result :: parsed.map_or_else(fn() { Err(error(DataErrorKind.Decode, "data.web", "invalid Web DataFlow wire JSON")) }, fn(value) { dispatch(&value) })
         match result {
-            Ok(value) -> { set_output(jet_data_loader_canonical_tree(&value)); 0 }
-            Err(error) -> { set_output(wire_error(&error)); 1 }
+            Ok(value) -> {
+                set_output(jet_data_loader_canonical_tree(&value))
+                0
+            }
+            Err(error) -> {
+                set_output(wire_error(&error))
+                1
+            }
         }
     }
 }
