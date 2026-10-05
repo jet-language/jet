@@ -137,7 +137,10 @@ pub fn jet_interrupt_arm() -> () Err! { jet_interrupt_arm_mask(JET_SIGNAL_INT) }
 #Static JET_PROCESS_SIGNAL_DISPATCHER :: LazyLock<() Err!>.new(fn() {
     #Unsafe("start the one process-signal dispatcher thread and retain its exact first initialization result") {
         thread.Builder.new().name("jet-process-signal").spawn(fn() {
-            loop { thread.sleep(jet_interrupt_poll_interval()); jet_process_signal_dispatch() }
+            loop {
+                thread.sleep(jet_interrupt_poll_interval())
+                jet_process_signal_dispatch()
+            }
         }).map(fn(_) { () }).map_err(jet_interrupt_dispatcher_start_error)
     }
 })
@@ -176,7 +179,10 @@ fn jet_process_signal_dispatch() -> {
                 callbacks := [JetProcessSignalCallback]{}
                 loop (bit, handler) in [(JET_SIGNAL_TERM, handlers[2].as_ref()), (JET_SIGNAL_HUP, handlers[1].as_ref()), (JET_SIGNAL_INT, handlers[0].as_ref())] {
                     if pending & bit != 0 {
-                        if Val(handler) :: handler { registered |= bit; &callbacks.push(handler.clone()) }
+                        if Val(handler) :: handler {
+                            registered |= bit
+                            &callbacks.push(handler.clone())
+                        }
                     }
                 }
                 (registered, ^callbacks)

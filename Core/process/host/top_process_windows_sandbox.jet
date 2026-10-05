@@ -549,7 +549,10 @@ module jet_process_windows_sandbox {
         if needs_quotes { text.push('"') }
         slashes := USize{0}
         for character in value.chars() {
-            if character == '\\' { slashes += 1; continue }
+            if character == '\\' {
+                slashes += 1
+                continue
+            }
             if character == '"' {
                 text.extend(std.iter.repeat('\\').take(slashes * 2 + 1))
                 text.push(character)
@@ -608,7 +611,10 @@ module jet_process_windows_sandbox {
                     count :: file.read(&chunk)?
                     if count == 0 -> break
                     kept :: match limit {
-                        None -> { bytes.extend_from_slice(chunk[..count]); count }
+                        None -> {
+                            bytes.extend_from_slice(chunk[..count])
+                            count
+                        }
                         Val(maximum) -> {
                             shared :: budget.as_ref().expect("bounded Windows sandbox output needs a shared budget")
                             used := shared.load(Ordering.Acquire)
@@ -616,7 +622,10 @@ module jet_process_windows_sandbox {
                                 available :: maximum.saturating_sub(used)
                                 kept :: available.min(count)
                                 match shared.compare_exchange(used, used + kept, Ordering.AcqRel, Ordering.Acquire) {
-                                    Ok(_) -> { bytes.extend_from_slice(chunk[..kept]); break kept }
+                                    Ok(_) -> {
+                                        bytes.extend_from_slice(chunk[..kept])
+                                        break kept
+                                    }
                                     Err(next) -> used = next
                                 }
                             }
@@ -697,7 +706,7 @@ module jet_process_windows_sandbox {
                 reason: "native AppContainer launch, ACL projection, inherited-handle list, and Job Object probe succeeded"}
             Ok(result) -> BackendStatus{available: false, mechanism: "{MECHANISM}-unavailable", policy: "not-enforced",
                 reason: "native Windows sandbox probe exited with {result.output.status}"}
-            Err(WindowsSandboxError.Unsupported(detail)) | Err(WindowsSandboxError.Io(detail)) -> BackendStatus{
+            Err(.Unsupported(detail)) | Err(.Io(detail)) -> BackendStatus{
                 available: false, mechanism: "{MECHANISM}-unavailable", policy: "not-enforced",
                 reason: "native Windows sandbox probe failed: {detail}"}
         }
@@ -793,19 +802,34 @@ module jet_process_windows_sandbox {
         process_done := false
         loop {
             result :: WaitForSingleObject(process.raw(), 50)
-            if result == 0 { process_done = true; break }
-            if result == WAIT_FAILED { wait_error = Val(io.Error.last_os_error()); break }
+            if result == 0 {
+                process_done = true
+                break
+            }
+            if result == WAIT_FAILED {
+                wait_error = Val(io.Error.last_os_error())
+                break
+            }
             if output_limit_hit.load(Ordering.Acquire) -> break
-            if deadline.is_some_and(deadline -> Instant.now() >= deadline) { timed_out = true; break }
+            if deadline.is_some_and(deadline -> Instant.now() >= deadline) {
+                timed_out = true
+                break
+            }
         }
         // Closing the complete process tree after leader exit prevents descendants from retaining pipe writers.
         // Failed termination drops the kill-on-close Job before waiting.
         owned_job := Val(job)
-        terminate_error :: if process_done -> { drop(owned_job.take()); None }
+        terminate_error :: if process_done -> {
+            drop(owned_job.take())
+            None
+        }
         else -> {
             match owned_job.as_ref().expect("job guard exists").terminate() {
                 Ok(()) -> None
-                Err(error) -> { drop(owned_job.take()); Val(error) }
+                Err(error) -> {
+                    drop(owned_job.take())
+                    Val(error)
+                }
             }
         }
         if !process_done && WaitForSingleObject(process.raw(), INFINITE) == WAIT_FAILED {

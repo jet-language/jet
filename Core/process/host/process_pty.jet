@@ -91,12 +91,18 @@ module unix {
             }
             Ok(())
         }
-        if limits.cpu_time_ms is Val(milliseconds) {
+        if limits.cpu_time_ms == .Val(milliseconds) {
             seconds :: milliseconds.max(0).saturating_add(999) / 1000
             set(RLIMIT_CPU, seconds as U64, seconds.saturating_add(1) as U64)?
         }
-        if limits.memory_bytes is Val(bytes) { bytes :: bytes.max(0) as U64; set(RLIMIT_MEMORY, bytes, bytes)? }
-        if limits.open_files is Val(files) { files :: files.max(0) as U64; set(RLIMIT_NOFILE, files, files)? }
+        if limits.memory_bytes == .Val(bytes) {
+            bytes :: bytes.max(0) as U64
+            set(RLIMIT_MEMORY, bytes, bytes)?
+        }
+        if limits.open_files == .Val(files) {
+            files :: files.max(0) as U64
+            set(RLIMIT_NOFILE, files, files)?
+        }
         Ok(())
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:159
@@ -580,7 +586,10 @@ module windows {
         if quoted -> output.push('"')
         slashes := 0
         loop character in value.chars() {
-            if character == '\\' { slashes += 1; continue }
+            if character == '\\' {
+                slashes += 1
+                continue
+            }
             if character == '"' {
                 output.extend(std.iter.repeat_n('\\', slashes * 2 + 1))
             } else { output.extend(std.iter.repeat_n('\\', slashes)) }
@@ -685,7 +694,7 @@ module windows {
                     return Err(^error)
                 }
             }
-            if job.assign(process.raw()) is Err(error) {
+            if job.assign(process.raw()) == .Err(error) {
                 _ :: os.TerminateProcess(process.raw(), 1)
                 _ :: os.WaitForSingleObject(process.raw(), INFINITE)
                 return Err(^error)
@@ -779,7 +788,7 @@ module windows {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1207
     pub fn interrupt(_pid: U32, job: &File, input: (&File)?) -> io.Error! {
-        if input is Val(input) {
+        if input == .Val(input) {
             // GATE #4565: kernel primitive
             #Unsafe("clone the owned ConPTY input and send ETX through the terminal keyboard byte stream") {
                 input := input.try_clone()?

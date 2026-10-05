@@ -105,7 +105,10 @@ fn jet_std_io_choose(prompt: &String, items: &[String]) -> String IOError! {
 fn jet_std_io_secret_error(error: JetTermSecretError) -> IOError {
     projection :: jet_term_secret_error_projection(&error)
     message :: error.message()
-    operation :: match projection.operation { .Read -> IOOperation.Read; .Flush -> IOOperation.Flush }
+    operation :: match projection.operation {
+        .Read -> IOOperation.Read
+        .Flush -> IOOperation.Flush
+    }
     resource :: Val(projection.resource.to_string())
     match projection.kind {
         .InvalidInput -> IOError.InvalidInput(IOContext.new(operation, ^resource, None, Val(^message)))
@@ -208,7 +211,10 @@ impl<T> Iterator for JetProgressIter<T> {
     fn next(self: &Self) -> T? {
         item :: match self.inner.next() {
             Val(item) -> ^item
-            None -> { self.finish(); return None }
+            None -> {
+                self.finish()
+                return None
+            }
         }
         match self.state.advance(jet_style_enabled(), jet_std_io_progress_emit, jet_std_io_progress_finish) {
             Err(error) -> jet_panic("<progress>", 0, "{error:?}")
@@ -345,7 +351,7 @@ fn jet_std_env_decode<T: __jet_Decode>(prefix: &String, file: &String, allow: &[
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:648
 fn jet_env_insert_tree(tree: &DataTree, segments: &[String], value: String) -> {
-    if tree is .Object(pairs) {
+    if tree == .Object(pairs) {
         if segments.first() == Val(segment) {
             if segments.len() == 1 {
                 if pairs.iter_mut().find(fn(pair) { pair.0.eq_ignore_ascii_case(segment) }) == Val((_, existing)) {
@@ -353,7 +359,7 @@ fn jet_env_insert_tree(tree: &DataTree, segments: &[String], value: String) -> {
                 } else { &pairs.push((segment.clone(), DataTree.Text(^value))) }
                 return
             }
-            if pairs.iter_mut().find(fn(pair) { pair.0.eq_ignore_ascii_case(segment) && pair.1 is .Object(_) }) == Val((_, child)) {
+            if pairs.iter_mut().find(fn(pair) { pair.0.eq_ignore_ascii_case(segment) && pair.1 == .Object(_) }) == Val((_, child)) {
                 jet_env_insert_tree(child, segments[1..], ^value)
             } else {
                 child := DataTree.Object([])
@@ -454,7 +460,10 @@ module jet_os_interrupt {
     struct PanicBoundary {}
     impl PanicBoundary {
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:765
-        fn enter() -> Self { jet_interrupt_handler_panic_enter(); Self{} }
+        fn enter() -> Self {
+            jet_interrupt_handler_panic_enter()
+            Self{}
+        }
     }
     impl Drop for PanicBoundary {
         // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:772
@@ -471,7 +480,10 @@ module jet_os_interrupt {
                     handlers := [Arc<fn() -> () + Send + Sync>]{}
                     loop {
                         match rx.recv_timeout(jet_interrupt_poll_interval()) {
-                            Ok(.Register(handler, ready)) -> { &handlers.push(^handler); _ :: ready.send(()) }
+                            Ok(.Register(handler, ready)) -> {
+                                &handlers.push(^handler)
+                                _ :: ready.send(())
+                            }
                             Err(.Disconnected) -> return
                             Err(.Timeout) -> {}
                         }
@@ -531,15 +543,27 @@ fn jet_testing_record_evidence_failure(error: TestEvidenceError) -> {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:872
 fn jet_testing_golden(path: &String, actual: &String) -> Bool {
     match jet_testing_golden_result(path, actual) {
-        Ok(value) -> { jet_testing_clear_failure(); value }
-        Err(error) -> { jet_testing_record_evidence_failure(^error); false }
+        Ok(value) -> {
+            jet_testing_clear_failure()
+            value
+        }
+        Err(error) -> {
+            jet_testing_record_evidence_failure(^error)
+            false
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:885
 fn jet_testing_fixture(path: &String) -> String {
     match jet_testing_fixture_result(path) {
-        Ok(contents) -> { jet_testing_clear_failure(); ^contents }
-        Err(error) -> { jet_testing_record_evidence_failure(^error); String.new() }
+        Ok(contents) -> {
+            jet_testing_clear_failure()
+            ^contents
+        }
+        Err(error) -> {
+            jet_testing_record_evidence_failure(^error)
+            String.new()
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:899

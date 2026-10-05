@@ -49,7 +49,7 @@ fn jet_process_topology_now() -> U64 {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:11
 fn jet_process_publish_topology(pid: U32, state: JetDevtoolsTopologyProcessState) -> {
     fact :: JetDevtoolsTopologyProcessFact.new("process:{pid}", JET_PROCESS_TOPOLOGY_SOURCE, None, state,
-        Some(pid as U64), [], JetDevtoolsTopologyFreshness.fresh(jet_process_topology_now()))
+        Val(pid as U64), [], JetDevtoolsTopologyFreshness.fresh(jet_process_topology_now()))
     if Ok(fact) :: fact {
         if Ok(event) :: fact.to_protocol_event(JET_PROCESS_TOPOLOGY_SOURCE) -> jet_devtools_publish_event(^event)
     }
@@ -75,7 +75,7 @@ fn jet_process_on_signal(signal: &ProcessSignal) -> {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:56
 fn jet_process_spec_timeout(spec: ProcessSpec, timeout: &Duration) -> ProcessSpec {
     spec := ^spec
-    spec.timeout_ms = Some(timeout.as_millis().max(0))
+    spec.timeout_ms = Val(timeout.as_millis().max(0))
     ^spec
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:63
@@ -85,25 +85,25 @@ fn jet_process_limit_i64(value: &JetInt) -> I64 {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:75
 fn jet_process_spec_output_limit(spec: ProcessSpec, output_limit: JetInt) -> ProcessSpec {
     spec := ^spec
-    spec.output_limit = Some(jet_process_limit_i64(&output_limit))
+    spec.output_limit = Val(jet_process_limit_i64(&output_limit))
     ^spec
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:82
 fn jet_process_spec_cpu_time_limit(spec: ProcessSpec, cpu_time: &Duration) -> ProcessSpec {
     spec := ^spec
-    spec.cpu_time_limit_ms = Some(cpu_time.as_millis().max(0))
+    spec.cpu_time_limit_ms = Val(cpu_time.as_millis().max(0))
     ^spec
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:89
 fn jet_process_spec_memory_limit(spec: ProcessSpec, memory_bytes: JetInt) -> ProcessSpec {
     spec := ^spec
-    spec.memory_limit_bytes = Some(jet_process_limit_i64(&memory_bytes))
+    spec.memory_limit_bytes = Val(jet_process_limit_i64(&memory_bytes))
     ^spec
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:96
 fn jet_process_spec_open_file_limit(spec: ProcessSpec, open_files: JetInt) -> ProcessSpec {
     spec := ^spec
-    spec.open_file_limit = Some(jet_process_limit_i64(&open_files))
+    spec.open_file_limit = Val(jet_process_limit_i64(&open_files))
     ^spec
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:104
@@ -149,13 +149,13 @@ fn jet_process_spec_detached(spec: ProcessSpec) -> ProcessSpec {
 // Terminal opt-in retains the same spec/cwd/environment/streams/lifecycle model.
 fn jet_process_spec_terminal(spec: ProcessSpec) -> ProcessSpec {
     spec := ^spec
-    spec.terminal = Some(TerminalPolicy.default())
+    spec.terminal = Val(TerminalPolicy.default())
     ^spec
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:181
 fn jet_process_spec_terminal_with_policy(spec: ProcessSpec, policy: &TerminalPolicy) -> ProcessSpec {
     spec := ^spec
-    spec.terminal = Some(policy.clone())
+    spec.terminal = Val(policy.clone())
     ^spec
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:188
@@ -194,10 +194,10 @@ fn jet_process_environment(spec: &ProcessSpec) -> [JetEnvEntry] IOError! {
     child_env := if spec.env_clear { [] } else { jet_std_env_snapshot_raw() }
     loop (name, value) in &spec.env_set {
         jet_env_validate_name(name).map_err(fn(error) {
-            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Val(name.clone()), None, Val(error.jet_show())))
         })?
         jet_env_validate_value(value).map_err(fn(error) {
-            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Val(name.clone()), None, Val(error.jet_show())))
         })?
         // GATE #4565: kernel primitive
         #Unsafe("encode selected native OS strings without losing non-Unicode inherited entries") {
@@ -208,7 +208,7 @@ fn jet_process_environment(spec: &ProcessSpec) -> [JetEnvEntry] IOError! {
     }
     loop name in &spec.env_remove {
         jet_env_validate_name(name).map_err(fn(error) {
-            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Val(name.clone()), None, Val(error.jet_show())))
         })?
         // GATE #4565: kernel primitive
         #Unsafe("compare validated name against selected-native raw logical environment keys") {
@@ -221,13 +221,13 @@ fn jet_process_environment(spec: &ProcessSpec) -> [JetEnvEntry] IOError! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:280
 fn jet_process_command_builder_with_identity(spec: &ProcessSpec, executable_identity: String?) -> Command IOError! {
     if spec.cmd.is_empty() {
-        return Err(IOError.InvalidInput(IOContext.new(IOOperation.Resolve, None, None, Some("process command needs at least one word"))))
+        return Err(IOError.InvalidInput(IOContext.new(IOOperation.Resolve, None, None, Val("process command needs at least one word"))))
     }
     // GATE #4565: kernel primitive
     #Unsafe("configure one real native child command with a synchronous atomic logical-environment snapshot") {
         command := Command.new(executable_identity.unwrap_or(spec.cmd[0]))
         command.args(&spec.cmd[1..])
-        if Some(cwd) :: &spec.cwd -> command.current_dir(cwd)
+        if Val(cwd) :: &spec.cwd -> command.current_dir(cwd)
         if spec.env_clear || !spec.env_set.is_empty() || !spec.env_remove.is_empty() {
             child_env :: jet_process_environment(spec)?
             command.env_clear()
@@ -250,7 +250,7 @@ fn jet_process_command_base_with_identity(spec: &ProcessSpec, executable_identit
     command := jet_process_command_builder_with_identity(spec, executable_identity)?
     // GATE #4565: kernel primitive
     #Unsafe("configure closed stdin by default, never inherit parent stdin accidentally") {
-        command.stdin(match &spec.stdin { Some(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
+        command.stdin(match &spec.stdin { .Val(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
         command.stdout(jet_process_stdio(&spec.stdout))
         command.stderr(jet_process_stdio(&spec.stderr))
     }
@@ -268,7 +268,7 @@ fn jet_process_attach_process_group(command: &Command, spec: &ProcessSpec) -> ()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:350
 fn jet_process_sandbox_error(spec: &ProcessSpec, error: jet_process_sandbox.Error) -> IOError {
-    detail :: match error { jet_process_sandbox.Error.Unsupported(detail) | jet_process_sandbox.Error.Io(detail) -> detail }
+    detail :: match error { .Unsupported(detail) | .Io(detail) -> detail }
     IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), detail)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:366
@@ -276,16 +276,16 @@ fn jet_process_sandbox_env(spec: &ProcessSpec) -> [String:String] IOError! {
     environment := [:]
     loop (name, value) in &spec.env_set {
         jet_env_validate_name(name).map_err(fn(error) {
-            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Val(name.clone()), None, Val(error.jet_show())))
         })?
         jet_env_validate_value(value).map_err(fn(error) {
-            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Val(name.clone()), None, Val(error.jet_show())))
         })?
         environment.insert(name.clone(), value.clone())
     }
     loop name in &spec.env_remove {
         jet_env_validate_name(name).map_err(fn(error) {
-            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Val(name.clone()), None, Val(error.jet_show())))
         })?
         environment.remove(name)
     }
@@ -333,7 +333,7 @@ fn jet_process_child_from_inner(child: Child, spec: &ProcessSpec, process_group:
         child := ^child
         job :: if target.selected_os() == .Windows && !spec.detached {
             match jet_process_pty.attach_job(child.as_raw_handle(), jet_process_native_limits(spec)) {
-                Ok(job) -> Some(Rc.new(^job))
+                Ok(job) -> Val(Rc.new(^job))
                 Err(error) -> {
                     _ :: child.kill()
                     _ :: child.wait()
@@ -361,7 +361,7 @@ fn jet_process_child_from_inner(child: Child, spec: &ProcessSpec, process_group:
             stdout_worker: Rc.new(RefCell.new(^stdout_worker)), stderr_worker: Rc.new(RefCell.new(^stderr_worker)),
             output_limit_hit: ^output_limit_hit, output_read_error: ^output_read_error,
             terminal: None, process_group: process_group, detached: spec.detached,
-            inner: Rc.new(RefCell.new(Some(ProcessHandle.Std{child: ^child, job: ^job}))),
+            inner: Rc.new(RefCell.new(Val(ProcessHandle.Std{child: ^child, job: ^job}))),
             timeout_ms: spec.timeout_ms, output_limit: spec.output_limit,
             audit_spec: Rc.new(spec.clone()), audit_plan: plan.map(fn(plan) { Rc.new(^plan) }), started: Instant.now()
         })
@@ -409,9 +409,9 @@ fn jet_process_policy_sandbox_cwd(spec: &ProcessSpec) -> OSPath IOError! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:638
 fn jet_process_spec_spawn(spec: &ProcessSpec) -> ProcessChild IOError! {
     jet_process_resource_limits_check(spec)?
-    launch_plan :: if spec.policy_wire.is_some() { Some(jet_process_spec_plan(spec)?) } else { None }
+    launch_plan :: if spec.policy_wire.is_some() { Val(jet_process_spec_plan(spec)?) } else { None }
     jet_process_spec_backend_check(spec, jet_process_sandbox.status().available)?
-    if Some(plan) :: launch_plan.as_ref() -> jet_process_verify_launch_plan(spec, plan)?
+    if Val(plan) :: launch_plan.as_ref() -> jet_process_verify_launch_plan(spec, plan)?
     jet_process_terminal_backend_check(spec)?
     if spec.terminal.is_some() {
         return jet_process_terminal_spawn(spec, launch_plan.as_ref().map(fn(plan) { plan.executable_identity.as_str() }), launch_plan.as_ref())
@@ -422,7 +422,7 @@ fn jet_process_spec_spawn(spec: &ProcessSpec) -> ProcessChild IOError! {
         cwd :: jet_process_policy_sandbox_cwd(spec)?
         sandbox_scope :: jet_process_policy_sandbox_scope(spec, plan.executable_identity)?
         output_dir :: if sandbox_scope.output_writable {
-            Some(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
+            Val(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
         } else { None }
         environment :: jet_process_sandbox_env(spec)?
         // GATE #4565: kernel primitive
@@ -435,7 +435,7 @@ fn jet_process_spec_spawn(spec: &ProcessSpec) -> ProcessChild IOError! {
                         command.stdout(Stdio.null())
                         command.stderr(Stdio.null())
                     } else {
-                        command.stdin(match &spec.stdin { Some(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
+                        command.stdin(match &spec.stdin { .Val(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
                         command.stdout(jet_process_stdio(&spec.stdout))
                         command.stderr(jet_process_stdio(&spec.stderr))
                     }
@@ -486,16 +486,16 @@ fn jet_process_terminal_spawn(spec: &ProcessSpec, executable_identity: String?, 
             pair :: jet_process_pty.open(config).map_err(fn(error) {
                 IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error)
             })?
-            stdin :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
-            stdout :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
-            stderr :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+            stdin :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), error) })?
+            stdout :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), error) })?
+            stderr :: pair.slave.try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), error) })?
             os :: target.selected_os()
             child :: if (os == .Linux || os == .MacOS) && spec.policy_wire.is_some() {
                 executable :: executable_identity.expect("authority terminal launch must have a resolved executable")
                 cwd :: jet_process_policy_sandbox_cwd(spec)?
                 sandbox_scope :: jet_process_policy_sandbox_scope(spec, executable)?
                 output_dir :: if sandbox_scope.output_writable {
-                    Some(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
+                    Val(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
                 } else { None }
                 environment :: jet_process_sandbox_env(spec)?
                 jet_process_sandbox.spawn(OSPath.new(executable), &spec.cmd[1..], cwd, output_dir.as_ref(),
@@ -513,33 +513,33 @@ fn jet_process_terminal_spawn(spec: &ProcessSpec, executable_identity: String?, 
                 command.stdout(Stdio.from(^stdout))
                 command.stderr(Stdio.from(^stderr))
                 jet_process_pty.attach_command(&command, jet_process_native_limits(spec))
-                    .map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+                    .map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), error) })?
                 command.spawn().map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error) })?
             }
             drop(^pair.slave)
             master :: Rc.new(^pair.master)
-            stdin :: master.as_ref().try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
-            stdout :: master.as_ref().try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Some("process terminal"), error) })?
+            stdin :: master.as_ref().try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), error) })?
+            stdout :: master.as_ref().try_clone().map_err(fn(error) { IOError.other(IOOperation.Resolve, Val("process terminal"), error) })?
             output_limit :: spec.output_limit.map(fn(limit) { limit.max(0) as Usize })
             output_budget :: output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) })
             output_limit_hit :: Arc.new(AtomicBool.new(false))
             output_read_error :: Arc.new(AtomicBool.new(false))
             pid :: child.id()
-            (stdout, stdout_state, stdout_worker) :: jet_process_spawn_output_reader(Some(^stdout), true, output_limit,
-                ^output_budget, output_limit_hit.clone(), output_read_error.clone(), Some(pid))
+            (stdout, stdout_state, stdout_worker) :: jet_process_spawn_output_reader(Val(^stdout), true, output_limit,
+                ^output_budget, output_limit_hit.clone(), output_read_error.clone(), Val(pid))
             jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Starting)
             jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Running)
             return Ok(ProcessChild{
                 wait_result: Rc.new(RefCell.new(None)), cleanup_error: Rc.new(RefCell.new(None)),
-                stdin: Rc.new(RefCell.new(Some(ProcessStdin.Terminal(^stdin)))),
+                stdin: Rc.new(RefCell.new(Val(ProcessStdin.Terminal(^stdin)))),
                 stdout: Rc.new(RefCell.new(^stdout)),
                 // A PTY has one combined stream; a second reader would steal bytes.
                 stderr: Rc.new(RefCell.new(None)), stdout_state: ^stdout_state, stderr_state: None,
                 stdout_worker: Rc.new(RefCell.new(^stdout_worker)), stderr_worker: Rc.new(RefCell.new(None)),
                 output_limit_hit: ^output_limit_hit, output_read_error: ^output_read_error,
-                terminal: Ok(TerminalSession{master: Some(^master), control: None}),
+                terminal: Ok(TerminalSession{master: Val(^master), control: None}),
                 process_group: true, detached: spec.detached,
-                inner: Rc.new(RefCell.new(Some(ProcessHandle.Std{child: ^child, job: None}))),
+                inner: Rc.new(RefCell.new(Val(ProcessHandle.Std{child: ^child, job: None}))),
                 timeout_ms: spec.timeout_ms, output_limit: spec.output_limit,
                 audit_spec: Rc.new(spec.clone()), audit_plan: plan.cloned().map(Rc.new), started: Instant.now()
             })
@@ -547,7 +547,7 @@ fn jet_process_terminal_spawn(spec: &ProcessSpec, executable_identity: String?, 
         environment :: jet_process_environment(spec)?
         executable :: executable_identity.or_else(fn() { spec.cmd.first().map(fn(word) { word.as_str() }) })
             .ok_or_else(fn() { IOError.InvalidInput(IOContext.new(IOOperation.Resolve, None, None,
-                Some("process command needs at least one word"))) })?
+                Val("process command needs at least one word"))) })?
         native :: jet_process_pty.spawn(jet_process_pty.PtyConfig{cols: policy.size.cols, rows: policy.size.rows,
                 raw: policy.mode == TerminalMode.Raw}, executable, &spec.cmd[1..], spec.cwd.as_ref(), &environment,
                 jet_process_native_limits(spec))
@@ -557,21 +557,21 @@ fn jet_process_terminal_spawn(spec: &ProcessSpec, executable_identity: String?, 
         output_budget :: output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) })
         output_limit_hit :: Arc.new(AtomicBool.new(false))
         output_read_error :: Arc.new(AtomicBool.new(false))
-        (stdout, stdout_state, stdout_worker) :: jet_process_spawn_output_reader(Some(^native.output), true, output_limit,
-            ^output_budget, output_limit_hit.clone(), output_read_error.clone(), Some(native.pid))
+        (stdout, stdout_state, stdout_worker) :: jet_process_spawn_output_reader(Val(^native.output), true, output_limit,
+            ^output_budget, output_limit_hit.clone(), output_read_error.clone(), Val(native.pid))
         pid :: native.pid
         jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Starting)
         jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Running)
         Ok(ProcessChild{
             wait_result: Rc.new(RefCell.new(None)), cleanup_error: Rc.new(RefCell.new(None)),
-            stdin: Rc.new(RefCell.new(Some(ProcessStdin.Terminal(^native.input)))),
+            stdin: Rc.new(RefCell.new(Val(ProcessStdin.Terminal(^native.input)))),
             stdout: Rc.new(RefCell.new(^stdout)), stderr: Rc.new(RefCell.new(None)),
             stdout_state: ^stdout_state, stderr_state: None,
             stdout_worker: Rc.new(RefCell.new(^stdout_worker)), stderr_worker: Rc.new(RefCell.new(None)),
             output_limit_hit: ^output_limit_hit, output_read_error: ^output_read_error,
-            terminal: Ok(TerminalSession{master: None, control: Some(^control)}),
+            terminal: Ok(TerminalSession{master: None, control: Val(^control)}),
             process_group: true, detached: false,
-            inner: Rc.new(RefCell.new(Some(ProcessHandle.Native{process: ^native.process, job: Rc.new(^native.job), pid: native.pid}))),
+            inner: Rc.new(RefCell.new(Val(ProcessHandle.Native{process: ^native.process, job: Rc.new(^native.job), pid: native.pid}))),
             timeout_ms: spec.timeout_ms, output_limit: spec.output_limit,
             audit_spec: Rc.new(spec.clone()), audit_plan: plan.cloned().map(Rc.new), started: Instant.now()
         })
@@ -591,7 +591,7 @@ fn jet_process_output_state_read(state: &Arc<ProcessOutputState>, bytes: &[U8]) 
                 buffer.cursor += count
                 return Ok(count)
             }
-            if Some((kind, message)) :: &buffer.error -> return Err(io.Error.new(kind, message.clone()))
+            if Val((kind, message)) :: &buffer.error -> return Err(io.Error.new(kind, message.clone()))
             if buffer.closed -> return Ok(0)
             buffer = state.ready.wait(^buffer).unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
         }
@@ -604,11 +604,11 @@ fn jet_process_output_state_snapshot(state: &Arc<ProcessOutputState>?, stream: S
     // GATE #4565: kernel primitive
     #Unsafe("consume retained receipt bytes under native output mutex, preserving error kind and complete live-read history") {
         buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
-        if Some((kind, message)) :: &buffer.error {
-            return Err(IOError.other(IOOperation.Read, Some(stream.to_string()), io.Error.new(kind, message.clone())))
+        if Val((kind, message)) :: &buffer.error {
+            return Err(IOError.other(IOOperation.Read, Val(stream.to_string()), io.Error.new(kind, message.clone())))
         }
         bytes :: take(&buffer.bytes)
-        String.from_utf8(^bytes).map_err(fn(error) { IOError.other(IOOperation.Read, Some(stream.to_string()), error) })
+        String.from_utf8(^bytes).map_err(fn(error) { IOError.other(IOOperation.Read, Val(stream.to_string()), error) })
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1106
@@ -645,7 +645,7 @@ fn jet_process_output_worker<R: io.Read + Send>(reader: R, state: Arc<ProcessOut
                 if count == 0 -> return Ok(())
                 kept :: match limit {
                     None -> count
-                    Some(limit) -> jet_process_output_reserve(limit, budget.as_ref().expect("bounded process output needs a shared budget"), count)
+                    .Val(limit) -> jet_process_output_reserve(limit, budget.as_ref().expect("bounded process output needs a shared budget"), count)
                 }
                 if kept != 0 {
                     buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
@@ -663,7 +663,7 @@ fn jet_process_output_worker<R: io.Read + Send>(reader: R, state: Arc<ProcessOut
             read_error.store(true, Ordering.Release)
             jet_process_stop_output(None, group_pid)
             buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
-            if buffer.error.is_none() -> buffer.error = Some((error.kind(), error.to_string()))
+            if buffer.error.is_none() -> buffer.error = Val((error.kind(), error.to_string()))
         }
         buffer := state.bytes.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
         buffer.closed = true
@@ -687,7 +687,7 @@ fn jet_process_spawn_output_reader<R: io.Read + Send>(reader: R?, terminal_eof: 
         worker :: spawn(fn() {
             jet_process_output_worker(^reader, ^worker_state, terminal_eof, limit, ^budget, ^limit_hit, ^read_error, group_pid)
         })
-        (Some(io.BufReader.new(ProcessReader.Shared(state.clone()))), Some(^state), Some(^worker))
+        (Val(io.BufReader.new(ProcessReader.Shared(state.clone()))), Val(^state), Val(^worker))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1247
@@ -709,8 +709,11 @@ fn jet_process_drain_reader<R: io.Read + Send>(reader: R?, limit: Usize?, budget
                         count :: io.Read.read(&reader, &chunk)?
                         if count == 0 -> break
                         kept :: match limit {
-                            None -> { bytes.extend_from_slice(&chunk[..count]); count }
-                            Some(limit) -> {
+                            None -> {
+                                bytes.extend_from_slice(&chunk[..count])
+                                count
+                            }
+                            .Val(limit) -> {
                                 budget :: budget.as_ref().expect("bounded process output needs a shared budget")
                                 kept :: jet_process_output_reserve(limit, budget, count)
                                 if kept != 0 -> bytes.extend_from_slice(&chunk[..kept])
@@ -730,13 +733,13 @@ fn jet_process_drain_reader<R: io.Read + Send>(reader: R?, limit: Usize?, budget
                 match result {
                     Ok(result) -> {
                         if result.is_err() {
-                            if Some(cancel) :: cancel.as_ref() -> cancel.store(true, Ordering.Release)
+                            if Val(cancel) :: cancel.as_ref() -> cancel.store(true, Ordering.Release)
                             jet_process_stop_output(groups.as_ref(), group_pid)
                         }
                         ^result
                     }
                     Err(payload) -> {
-                        if Some(cancel) :: cancel.as_ref() -> cancel.store(true, Ordering.Release)
+                        if Val(cancel) :: cancel.as_ref() -> cancel.store(true, Ordering.Release)
                         jet_process_stop_output(groups.as_ref(), group_pid)
                         resume_unwind(^payload)
                     }
@@ -751,8 +754,8 @@ fn jet_process_finish_output_drain(drain: JoinHandle<JetProcessOutput io.Error!>
     // GATE #4565: kernel primitive
     #Unsafe("join native output drain and map panic/read failure at the stream's read context") {
         drain.unwrap().join()
-            .map_err(fn(_) { IOError.other(IOOperation.Read, Some(stream.to_string()), "process output reader panicked") })?
-            .map_err(fn(error) { IOError.other(IOOperation.Read, Some(stream.to_string()), error) })
+            .map_err(fn(_) { IOError.other(IOOperation.Read, Val(stream.to_string()), "process output reader panicked") })?
+            .map_err(fn(error) { IOError.other(IOOperation.Read, Val(stream.to_string()), error) })
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1348
@@ -762,7 +765,7 @@ fn jet_process_collect_pipeline_drains(output_drain: JoinHandle<JetProcessOutput
     output := JetProcessOutput{text: "", exceeded: false}
     match jet_process_finish_output_drain(^output_drain, "pipeline stdout") {
         Ok(result) -> output = ^result
-        Err(error) -> first_error = Some(^error)
+        Err(error) -> first_error = Val(^error)
     }
     output_exceeded := output.exceeded
     errors := ""
@@ -772,10 +775,10 @@ fn jet_process_collect_pipeline_drains(output_drain: JoinHandle<JetProcessOutput
                 output_exceeded |= result.exceeded
                 errors.push_str(&result.text)
             }
-            Err(error) -> if first_error.is_none() -> first_error = Some(^error)
+            Err(error) -> if first_error.is_none() -> first_error = Val(^error)
         }
     }
-    if Some(error) :: first_error -> return Err(^error)
+    if Val(error) :: first_error -> return Err(^error)
     output.exceeded = output_exceeded
     Ok((^output, ^errors))
 }
@@ -796,8 +799,8 @@ fn jet_process_finish_output_worker(worker: JoinHandle<() io.Error!>?, stream: S
     // GATE #4565: kernel primitive
     #Unsafe("reap native shared-output worker and preserve panic/read failure") {
         worker.unwrap().join()
-            .map_err(fn(_) { IOError.other(IOOperation.Read, Some(stream.to_string()), "process output reader panicked") })?
-            .map_err(fn(error) { IOError.other(IOOperation.Read, Some(stream.to_string()), error) })
+            .map_err(fn(_) { IOError.other(IOOperation.Read, Val(stream.to_string()), "process output reader panicked") })?
+            .map_err(fn(error) { IOError.other(IOOperation.Read, Val(stream.to_string()), error) })
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1423
@@ -834,7 +837,7 @@ fn jet_process_spec_run_windows(spec: &ProcessSpec) -> ProcessReceipt IOError! {
     cwd :: jet_process_policy_sandbox_cwd(spec)?
     sandbox_scope :: jet_process_policy_sandbox_scope(spec, &plan.executable_identity)?
     output_dir :: if sandbox_scope.output_writable {
-        Some(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error_windows(spec, error) })?)
+        Val(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error_windows(spec, error) })?)
     } else { None }
     environment :: jet_process_sandbox_env(spec)?
     // GATE #4565: kernel primitive
@@ -847,17 +850,17 @@ fn jet_process_spec_run_windows(spec: &ProcessSpec) -> ProcessReceipt IOError! {
                 "authority-bound Windows launch returned a different isolation backend"))
         }
         output :: String.from_utf8(^result.output.stdout)
-            .map_err(fn(error) { IOError.other(IOOperation.Read, Some("process stdout"), error) })?
+            .map_err(fn(error) { IOError.other(IOOperation.Read, Val("process stdout"), error) })?
         errors :: String.from_utf8(^result.output.stderr)
-            .map_err(fn(error) { IOError.other(IOOperation.Read, Some("process stderr"), error) })?
-        Ok(jet_process_receipt(spec, Some(&plan), true, result.pid, result.output.status.code().unwrap_or(-1) as I64,
+            .map_err(fn(error) { IOError.other(IOOperation.Read, Val("process stderr"), error) })?
+        Ok(jet_process_receipt(spec, Val(&plan), true, result.pid, result.output.status.code().unwrap_or(-1) as I64,
             result.output.status.success(), Err(JetAbsent{}), result.timed_out, ^output, ^errors, None))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1533
 fn jet_process_sandbox_error_windows(spec: &ProcessSpec, error: jet_process_sandbox.WindowsSandboxError) -> IOError {
     detail :: match error {
-        jet_process_sandbox.WindowsSandboxError.Unsupported(detail) | jet_process_sandbox.WindowsSandboxError.Io(detail) -> ^detail
+        .Unsupported(detail) | .Io(detail) -> ^detail
     }
     IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), ^detail)
 }
@@ -867,7 +870,7 @@ fn jet_process_direct_group_cleanup(pid: U32) -> IOError? {
     #Unsafe("kill remaining real Unix descendants after leader wait; already absent group is successful cleanup") {
         match jet_process_pty.signal_group(pid, jet_process_signal_kill()) {
             Ok(()) -> None
-            Err(error) -> if error.kind() == io.ErrorKind.NotFound { None } else { Some(jet_process_cleanup_io_error(^error)) }
+            Err(error) -> if error.kind() == io.ErrorKind.NotFound { None } else { Val(jet_process_cleanup_io_error(^error)) }
         }
     }
 }
@@ -886,9 +889,9 @@ fn jet_process_spec_run_direct(spec: &ProcessSpec) -> ProcessReceipt IOError! {
         output_budget :: output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) })
         output_limit_hit :: Arc.new(AtomicBool.new(false))
         output_drain :: jet_process_drain_reader(child.stdout.take(), output_limit, output_budget.clone(),
-            output_limit_hit.clone(), None, None, Some(child_pid))
+            output_limit_hit.clone(), None, None, Val(child_pid))
         stderr_drain :: jet_process_drain_reader(child.stderr.take(), output_limit, ^output_budget,
-            output_limit_hit.clone(), None, None, Some(child_pid))
+            output_limit_hit.clone(), None, None, Val(child_pid))
         cancel_control :: jet_scheduler_current_task_control()
         cancel_guard :: cancel_control.as_ref().map(fn(control) {
             control.register_cancel_callback(Arc.new(fn() { jet_process_pipeline_stop_group(child_pid) }))
@@ -924,10 +927,10 @@ fn jet_process_spec_run_direct(spec: &ProcessSpec) -> ProcessReceipt IOError! {
             Ok(status) -> ^status
             Err(error) -> {
                 jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Failed)
-                return Err(IOError.other(IOOperation.Close, Some("process"), ^error))
+                return Err(IOError.other(IOOperation.Close, Val("process"), ^error))
             }
         }
-        if Some(error) :: cleanup_error {
+        if Val(error) :: cleanup_error {
             jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState.Failed)
             return Err(^error)
         }
@@ -984,7 +987,7 @@ fn jet_process_sandbox_pipeline_spawn(spec: &ProcessSpec, launch_plan: &ProcessP
     cwd :: jet_process_policy_sandbox_cwd(spec)?
     sandbox_scope :: jet_process_policy_sandbox_scope(spec, &launch_plan.executable_identity)?
     output_dir :: if sandbox_scope.output_writable {
-        Some(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
+        Val(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
     } else { None }
     environment :: jet_process_sandbox_env(spec)?
     // GATE #4565: kernel primitive
@@ -992,10 +995,10 @@ fn jet_process_sandbox_pipeline_spawn(spec: &ProcessSpec, launch_plan: &ProcessP
         jet_process_sandbox.spawn(OSPath.new(&launch_plan.executable_identity), &spec.cmd[1..], cwd,
             output_dir.as_ref(), &environment, sandbox_scope.share_network, sandbox_scope.source_readable, false,
             spec.cmd.first().map(fn(word) { OsStr.new(word.as_str()) }), fn(command) {
-                if Some(stdout) :: input {
+                if Val(stdout) :: input {
                     command.stdin(Stdio.from(^stdout))
                 } else {
-                    command.stdin(match &spec.stdin { Some(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
+                    command.stdin(match &spec.stdin { .Val(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
                 }
                 command.stdout(Stdio.piped())
                 command.stderr(Stdio.piped())

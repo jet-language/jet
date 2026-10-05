@@ -125,7 +125,7 @@ pub fn spawn_with_read_only_mounts(executable: OSPath, args: [String], source_di
             command := Command.new(MACOS_SANDBOX_EXEC)
             // Inline profile avoids replacement between spawn and Seatbelt read.
             &command.arg("-p").arg(profile).arg(command_executable).args(args).env_clear().current_dir(source_dir)
-            if output_dir is Val(output_dir) { &command.env("JET_BUILD_OUTPUT", output_dir) }
+            if output_dir == .Val(output_dir) { &command.env("JET_BUILD_OUTPUT", output_dir) }
             keys := env.keys().to_list()
             &keys.sort()
             loop key in keys { &command.env(key, env[key]) }
@@ -293,20 +293,33 @@ pub fn wait_with_limited_output(child: ^Child, timeout: Duration?) -> Output Err
         known_descendants := [U32]{}
         if direct_wait {
             match &child.wait() {
-                Ok(child_status) -> { child_reaped = true; status = Val(child_status) },
+                Ok(child_status) -> {
+                    child_reaped = true
+                    status = Val(child_status)
+                },
                 Err(error) -> wait_error = Val(^error),
             }
         } else {
             loop {
                 if target.selected_os() == .Linux { &known_descendants.extend(collect_descendant_pids(child.id())) }
                 match &child.try_wait() {
-                    Ok(Val(child_status)) -> { child_reaped = true; status = Val(child_status); break },
+                    Ok(Val(child_status)) -> {
+                        child_reaped = true
+                        status = Val(child_status)
+                        break
+                    },
                     Ok(None) -> {
                         if exceeded.load(Ordering.Acquire) || reader_failed.load(Ordering.Acquire) -> break
-                        if deadline.is_some_and(deadline -> Instant.now() >= deadline) { timed_out = true; break }
+                        if deadline.is_some_and(deadline -> Instant.now() >= deadline) {
+                            timed_out = true
+                            break
+                        }
                         thread.sleep(Duration.from_millis(5))
                     },
-                    Err(error) -> { wait_error = Val(^error); break },
+                    Err(error) -> {
+                        wait_error = Val(^error)
+                        break
+                    },
                 }
             }
         }
@@ -315,13 +328,13 @@ pub fn wait_with_limited_output(child: ^Child, timeout: Duration?) -> Output Err
         stdout :: stdout.map_err(error -> Error.Io(error.to_string())) ?? return Err(err)
         stderr :: stderr_thread.join().map_err(_ -> Error.Io("sandbox stderr reader panicked")) ?? return Err(err)
         stderr :: stderr.map_err(error -> Error.Io(error.to_string())) ?? return Err(err)
-        if wait_error is Val(error) -> return Err(.Io(error.to_string()))
+        if wait_error == .Val(error) -> return Err(.Io(error.to_string()))
         if exceeded.load(Ordering.Acquire) -> return Err(.Io("sandbox process output exceeded {MAX_CAPTURED_OUTPUT_BYTES} bytes"))
         if timed_out {
             timeout :: timeout.expect("timeout flag requires a timeout")
             return Err(.Io("sandbox process timed out after {timeout.as_millis()}ms"))
         }
-        if cleanup_error is Val(error) -> return Err(.Io(error.to_string()))
+        if cleanup_error == .Val(error) -> return Err(.Io(error.to_string()))
         status :: status.expect("sandbox child must exit or have a cleanup reason")
         Ok(Output{status: status, stdout: ^stdout.0, stderr: ^stderr.0})
     }
@@ -345,7 +358,7 @@ fn validate_read_only_mounts(mounts: [ReadOnlyMount]) -> [ReadOnlyMount] Error! 
             if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err(.Unsupported("sandbox mount source `{mount.source.display()}` is not a real directory"))
             source :: real_directory(mount.source) ?? return Err(err)
             destination :: mount.destination
-            if !destination.is_absolute() || destination == OSPath.new("/") || destination.components().any(component -> component is .CurDir || component is .ParentDir) {
+            if !destination.is_absolute() || destination == OSPath.new("/") || destination.components().any(component -> component == .CurDir || component == .ParentDir) {
                 return Err(.Unsupported("sandbox mount destination `{destination.display()}` is not an absolute, normalized directory"))
             }
             &out.push(ReadOnlyMount.new(^source, ~destination))
@@ -358,7 +371,7 @@ pub fn mounted_executable_path(executable: OSPath, mounts: [ReadOnlyMount]) -> O
     if target.selected_os() != .Linux -> return ~executable
     best := None as (USize, USize, @OSPath)? // #4303: relative path loan retains executable owner.
     loop i in 0..<mounts.len() {
-        if executable.strip_prefix(mounts[i].source) is Ok(relative) {
+        if executable.strip_prefix(mounts[i].source) == .Ok(relative) {
             depth :: relative.components().count()
             // Rust max_by_key selects the last equal key, not the most-specific source.
             if best.is_none() || depth >= best.unwrap().0 { best = Val((depth, i, relative)) }
@@ -404,7 +417,10 @@ pub fn linux_sandbox_command(bwrap: OSPath, source_dir: OSPath?, output_dir: OSP
         loop mount in mounts {
             destination := OSPath.new("/")
             loop component in mount.destination.components() {
-                if component is .Normal(part) { &destination.push(part); &command.arg("--dir").arg(destination) }
+                if component == .Normal(part) {
+                    &destination.push(part)
+                    &command.arg("--dir").arg(destination)
+                }
             }
             &command.arg("--ro-bind").arg(mount.source).arg(mount.destination)
         }
@@ -412,7 +428,7 @@ pub fn linux_sandbox_command(bwrap: OSPath, source_dir: OSPath?, output_dir: OSP
         keys := env.keys().to_list()
         &keys.sort()
         loop key in keys { &command.arg("--setenv").arg(key).arg(env[key]) }
-        if argv0 is Val(argv0) { &command.arg("--argv0").arg(argv0) }
+        if argv0 == .Val(argv0) { &command.arg("--argv0").arg(argv0) }
         // User executable/argv cannot be parsed as wrapper options.
         &command.arg("--")
         ^command
@@ -450,7 +466,7 @@ pub fn build_profile(executable: OSPath, source_dir: OSPath, output_dir: OSPath?
     }
     &profile.push_str(")\n(allow file-read*\n")
     if source_readable { &profile.push_str("  (subpath \"{source_dir}\")\n") }
-    if output_dir is Val(output_dir) { &profile.push_str("  (subpath \"{output_dir}\")\n") }
+    if output_dir == .Val(output_dir) { &profile.push_str("  (subpath \"{output_dir}\")\n") }
     &profile.push_str("  (literal \"{executable}\")\n  (subpath \"/System\")\n  (subpath \"/usr/lib\")\n  (subpath \"/usr/bin\")\n  (subpath \"/bin\")\n  (subpath \"/sbin\")\n  (subpath \"/nix/store\")\n")
     loop mount in mounts {
         source :: sbpl_path(mount.source) ?? return Err(err)
@@ -461,7 +477,7 @@ pub fn build_profile(executable: OSPath, source_dir: OSPath, output_dir: OSPath?
         }
     }
     &profile.push(')')
-    if output_dir is Val(output_dir) { &profile.push_str("(allow file-write* (subpath \"{output_dir}\"))\n") }
+    if output_dir == .Val(output_dir) { &profile.push_str("(allow file-write* (subpath \"{output_dir}\"))\n") }
     else if source_writable { &profile.push_str("(allow file-write* (subpath \"{source_dir}\"))\n") }
     if share_network { &profile.push_str("(allow network*)\n") } else { &profile.push_str("(deny network*)\n") }
     &profile.push_str("(deny device*)\n")
