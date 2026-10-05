@@ -259,7 +259,7 @@ impl<T: Send + Sync> SourceSharedInteropWeakOwner for JetSharedPhysicalOwnerWeak
         alias :: self.owner.try_retain_alias()? ?? return Ok(None)
         root :: self.owner.source_interop_root(self.type_id, self.root_builder.clone())?
         if root.type_id() != self.type_id || root.identity() != self.owner.physical_identity()
-            || root.protocol_order_key() != Val(self.owner.protocol_order_key()) {
+            || root.protocol_order_key() != self.owner.protocol_order_key() {
             return Err("Source Shared weak upgrade resolved an inconsistent physical root")
         }
         Ok(Val((^root, Box.new(^alias))))
