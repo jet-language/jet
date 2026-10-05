@@ -1499,6 +1499,29 @@ fn run() {
     );
 }
 
+#[test]
+fn split_aggregate_builder_uses_the_native_callback_abi() {
+    let src = r#"
+fn run() {
+    values :: [1, 2, 3, 4]
+    parts :: values.split(2)
+    print(parts.left)
+    print(parts.right)
+}
+"#;
+    let rust = compile("tir_native_split_builder", src);
+    assert!(rust.contains("jet_iter_split_at("));
+    assert!(
+        rust.contains("move |__jet_callback_arg_0: Vec<"),
+        "the owned split vectors must cross a native closure adapter"
+    );
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_native_split_builder", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "[1, 2]\n[3, 4]\n");
+    }
+}
+
 /// D-ITERTOOLS1=A: positional picks have one spelling and one terminal path.
 #[test]
 fn iter_positional_pick_uses_skip_then_first() {

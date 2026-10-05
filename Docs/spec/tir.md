@@ -92,6 +92,13 @@ no dependency on that root's module layout. A native-width overflow uses the
 registry-backed `E3010` stop; an include host supplies only the stop transport,
 not another conversion rule or runtime dependency.
 
+Generic native callback kernels share one argument-ownership adapter across
+static, builtin-receiver, and closure-receiver routes. Split aggregate builders
+receive owned vectors; indexed builders receive an owned index and a borrowed
+item. The adapter translates those host conventions to the checked callable's
+read/write/move parameters rather than passing the boxed Jet callable directly
+to a Rust `FnOnce`/`FnMut` parameter.
+
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and

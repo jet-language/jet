@@ -4319,6 +4319,7 @@ fn jet_rust_emit_host_callback(ctx: &JetRustEmitContext, function: MIRFunction, 
 fn jet_rust_emit_native_kernel_callback_inputs(symbol: String, index: Int) -> [Bool]? Never! {
     if symbol == "jet_map_merge_with" && index == 2 -> return Val([Bool]{true, false, false})
     if symbol == "jet_iter_split_at" && index == 2 -> return Val([Bool]{false, false})
+    if symbol == "jet_iter_enumerate" && index == 1 -> return Val([Bool]{false, true})
     if symbol == "jet_expiring_secret_with" && index == 1 -> return Val([Bool]{true})
     None
 }
@@ -4440,8 +4441,8 @@ fn jet_rust_emit_closure_call_argument(ctx: &JetRustEmitContext, function: MIRFu
     adapt_unit_result :: symbol == "jet_list_each_ref"
     parallel :: row.member.starts_with("para_")
     if jet_rust_emit_host_borrow_callback_value(&ctx, function, arg.value, adapt_unit_result, parallel) == .Val(callback) -> return callback
-    // `.indexed()` rows: `jet_iter_enumerate` calls a host `FnMut(i64, &T)`.
-    if row.module_name == "core.builtin" && row.member == "iter_enumerate" && index == 0 -> return jet_rust_emit_host_callback_with_inputs(&ctx, function, arg.value, [Bool]{false, true})
+    host_inputs :: jet_rust_emit_native_kernel_callback_inputs(symbol, index + 1)
+    if host_inputs == .Val(inputs) -> return jet_rust_emit_host_callback_with_inputs(&ctx, function, arg.value, inputs)
     if jet_rust_emit_closure_route_uses_borrowed_callback(ctx, row, function, arg.value) {
         producer :: jet_rust_emit_find_value_instruction(ctx, function, arg.value)
         closure_value := false

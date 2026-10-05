@@ -27162,6 +27162,7 @@ impl<'a> RustEmitter<'a> {
         match (symbol.rsplit("::").next().unwrap_or(symbol), index) {
             ("jet_map_merge_with", 2) => Some(&[true, false, false]),
             ("jet_iter_split_at", 2) => Some(&[false, false]),
+            ("jet_iter_enumerate", 1) => Some(&[false, true]),
             ("jet_expiring_secret_with", 1) => Some(&[true]),
             _ => None,
         }
@@ -30137,9 +30138,8 @@ impl<'a> RustEmitter<'a> {
         ) {
             return callback;
         }
-        // `.indexed()` rows: `jet_iter_enumerate` calls a host `FnMut(i64, &T)`.
-        if row.module == "core.builtin" && row.member == "iter_enumerate" && index == 0 {
-            return self.host_callback_with_inputs(function, arg.value, &[false, true]);
+        if let Some(inputs) = Self::native_kernel_callback_inputs(row.symbol.name(), index + 1) {
+            return self.host_callback_with_inputs(function, arg.value, inputs);
         }
         if self.closure_route_uses_borrowed_callback(row, function, arg.value) {
             if !matches!(
