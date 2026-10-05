@@ -42,7 +42,7 @@ pub fn jet_dyn_keys(tree: &Dyn) -> Vec<String> {
 pub fn jet_dyn_len(tree: &Dyn, site: &str) -> Result<i64, String> {
     let len = match tree {
         Dyn::Array(items) => items.len(), Dyn::Object(entries) => entries.len(),
-        Dyn::Text(text) | Dyn::TypedText(text) => text.chars().count(), Dyn::Bytes(bytes) => bytes.len(),
+        Dyn::Text(text) => text.chars().count(), Dyn::Bytes(bytes) => bytes.len(),
         other => return Err(dyn_stop(site, format!("{} has no length", dyn_kind_for(other)))),
     };
     Ok(len as i64)
@@ -100,7 +100,7 @@ pub fn jet_dyn_binary(op: &str, left: &Dyn, right: &Dyn, site: &str) -> Result<D
             _ => return Err(dyn_stop(site, format!("unknown Dyn operator {op}"))),
         };
         let value = jet_int_owned_from_raw_result(value);
-        return Ok(if value.is_inline() { Dyn::Int(value.to_raw()) } else { Dyn::Number(value.to_string_rep()) });
+        return Ok(Dyn::Int(value));
     }
     let a = match left { Dyn::Float(value) => Some(*value), _ => left_int.as_ref().map(jet_int_owned_to_f64) };
     let b = match right { Dyn::Float(value) => Some(*value), _ => right_int.as_ref().map(jet_int_owned_to_f64) };
@@ -176,7 +176,7 @@ impl super::__jet_Decode for super::JetZonedDateTime {
     fn jet_decode(tree: &Dyn) -> Result<Self, Vec<FieldError>> {
         match tree {
             Dyn::DateTime(_) => Ok(jet_dyn_datetime_payload(tree).unwrap()),
-            Dyn::Text(text) | Dyn::TypedText(text) => {
+            Dyn::Text(text) => {
                 let tree = Dyn::parse_datetime(text).map_err(FieldError::one)?;
                 Ok(jet_dyn_datetime_payload(&tree).unwrap())
             }

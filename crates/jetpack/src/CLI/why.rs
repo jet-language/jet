@@ -182,7 +182,7 @@ mod tests {
             .iter()
             .find_map(|(name, value)| (name == "line").then_some(value))
             .unwrap(),
-            &Dyn::Int(12)
+            &Dyn::Int(12.into())
         );
         assert_eq!(
             field(field(&object, "trust").unwrap().as_object().unwrap(), "grade")
@@ -233,7 +233,7 @@ mod tests {
                 .iter()
                 .find_map(|(name, value)| (name == "bytes").then_some(value))
                 .unwrap(),
-            &Dyn::Int(4096)
+            &Dyn::Int(4096.into())
         );
     }
 }

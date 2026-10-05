@@ -969,7 +969,7 @@ fn required_string(object: &BTreeMap<String, Dyn>, key: &str) -> Result<String, 
 
 fn required_u64(object: &BTreeMap<String, Dyn>, key: &str) -> Result<u64, RecordingError> {
     match object.get(key) {
-        Some(Dyn::Int(value)) => u64::try_from(*value).map_err(|_| {
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| {
             RecordingError::InvalidEvent(format!("event `{key}` must be a non-negative integer"))
         }),
         Some(_) => Err(RecordingError::InvalidEvent(format!(

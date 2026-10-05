@@ -118,7 +118,7 @@ fn read_plan(path: &Path) -> TryPlan {
     };
 
     if let Some(version) = take_value(&mut object, "version") {
-        if !matches!(version, Dyn::Int(1)) {
+        if !matches!(version, Dyn::Int(value) if value.to_i64() == Some(1)) {
             fail("unsupported try plan version; expected version 1")
         }
     }
@@ -471,7 +471,7 @@ fn take_string_default(
 
 fn take_number(object: &mut Vec<(String, Dyn)>, key: &str) -> usize {
     match take_value(object, key) {
-        Some(Dyn::Int(value)) if value >= 0 => value as usize,
+        Some(Dyn::Int(value)) => value.to_usize().unwrap_or_else(|| fail(&format!("`{key}` must be a non-negative integer"))),
         Some(_) => fail(&format!("`{key}` must be a non-negative integer")),
         None => fail(&format!("try edit is missing `{key}`")),
     }

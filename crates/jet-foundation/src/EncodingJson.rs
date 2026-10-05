@@ -21,7 +21,7 @@ mod tests {
     fn integer_tokens_never_round_through_float() {
         assert_eq!(
             parse_json("-9223372036854775808", false),
-            Ok(Dyn::Int(i64::MIN))
+            Ok(Dyn::Int(i64::MIN.into()))
         );
         assert_eq!(
             parse_json("9223372036854775808", false),
@@ -296,7 +296,7 @@ impl Parser {
         }
         if is_integer {
             if let Ok(value) = text.parse::<i64>() {
-                return Ok(Dyn::Int(value));
+                return Ok(Dyn::Int((value).into()));
             }
             super::jet_json_number::validate_json_number(&text)
                 .map_err(|message| self.err(&message))?;

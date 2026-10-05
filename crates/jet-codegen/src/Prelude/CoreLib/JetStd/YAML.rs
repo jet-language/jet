@@ -52,6 +52,7 @@
         enum FlowError {
             Depth,
             Budget,
+            Syntax(String),
             Unsupported(String),
         }
 
@@ -122,7 +123,7 @@
             match error {
                 FlowError::Depth => "YAML value is nested too deeply".to_owned(),
                 FlowError::Budget => "YAML value exceeds its node or byte budget".to_owned(),
-                FlowError::Unsupported(message) => message,
+                FlowError::Unsupported(message) | FlowError::Syntax(message) => message,
             }
         }
 
@@ -360,6 +361,9 @@
                     } else {
                         self.parse_inline_value(rest, self.next_depth(depth)?)?
                     };
+                    if entries.iter().any(|(name, _)| name == &key) {
+                        return Err(ParseError { line: line_no, message: format!("duplicate key `{key}`"), unsupported: false });
+                    }
                     entries.push((key, value));
                 }
                 self.object(entries)
@@ -554,7 +558,10 @@
                         let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
                         let (v, nj) = parse_flow_at(chars, i, next_depth, budget)?;
                         i = nj;
-                        let key = key.trim().to_string();
+                        let key = unquote_key(key.trim());
+                        if entries.iter().any(|(name, _)| name == &key) {
+                            return Err(FlowError::Syntax(format!("duplicate key `{key}`")));
+                        }
                         budget
                             .bytes(key.len())
                             .map_err(|_| FlowError::Budget)?;
@@ -873,6 +880,25 @@
                         .map(|(k, val)| format!("{}: {}", render_key(k), render_scalar(val)))
                         .collect();
                     format!("{{{}}}", parts.join(", "))
+                }
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            #[test]
+            fn dyn_rules_reject_duplicate_keys_in_every_map_form() {
+                for text in ["a: 1\na: 2", "{a: 1, a: 2}", "outer: {x: 1, x: 2}"] {
+                    assert!(super::parse_to_tree(text).is_err(), "host YAML accepted {text}");
+                }
+            }
+
+            #[test]
+            fn dyn_rules_preserve_huge_number_lexemes() {
+                let huge = "12345678901234567890123456789012345678901234567890";
+                for token in [huge, "1e400"] {
+                    let tree = super::parse_to_tree(&format!("a: {token}")).expect("host YAML number");
+                    assert!(matches!(tree.get("a"), Some(super::Dyn::Number(value)) if value == token));
                 }
             }
         }

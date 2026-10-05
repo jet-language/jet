@@ -4025,7 +4025,7 @@ fn datetime_value(seconds: i64, nanos: u32, leap_second: bool) -> CtValue {
     )
 }
 
-pub(super) fn dyn_datetime_value(value: jet_foundation::Dyn::DynDateTime) -> CtValue {
+pub(crate) fn dyn_datetime_value(value: jet_foundation::Dyn::DynDateTime) -> CtValue {
     structure(
         "ZonedDateTime",
         vec![

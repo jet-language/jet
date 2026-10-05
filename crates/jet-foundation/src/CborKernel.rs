@@ -15,6 +15,41 @@ pub enum Value {
     Object(Vec<(String, Value)>),
 }
 
+/// The single Dyn-to-wire projection used by hosts and generated runtimes.
+pub fn from_dyn_at(value: &crate::Dyn::Dyn, path: &str) -> Result<Value, Error> {
+    use crate::Dyn::Dyn;
+    let unsupported = |reason: String| Error::new(ErrorKind::Unsupported, 0, path, reason);
+    Ok(match value {
+        Dyn::Null => Value::Null,
+        Dyn::Bool(value) => Value::Bool(*value),
+        Dyn::Int(value) => Value::Int(value.to_i64()
+            .ok_or_else(|| unsupported("CBOR integer is outside I64".to_string()))?),
+        Dyn::Float(value) => Value::Float(*value),
+        Dyn::Number(text) => match text.parse::<i64>() {
+            Ok(value) => Value::Int(value),
+            Err(_) => Value::Float(text.parse::<f64>().ok().filter(|value| value.is_finite())
+                .ok_or_else(|| unsupported(format!("number {text} is outside the CBOR Int and float64 range")))?),
+        },
+        Dyn::Text(value) => Value::Text(value.clone()),
+        Dyn::Bytes(value) => Value::Bytes(value.clone()),
+        Dyn::DateTime(value) => Value::DateTime(*value),
+        Dyn::Array(values) => {
+            let mut output = Vec::with_capacity(values.len());
+            for (index, value) in values.iter().enumerate() {
+                output.push(from_dyn_at(value, &format!("{path}[{index}]"))?);
+            }
+            Value::Array(output)
+        }
+        Dyn::Object(entries) => {
+            let mut output = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
+                output.push((key.clone(), from_dyn_at(value, &format!("{path}[{key:?}]"))?));
+            }
+            Value::Object(output)
+        }
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub max_depth: i64,
@@ -1008,7 +1043,6 @@ fn decode_value(
                     depth + 1,
                     items,
                     path,
-                    false,
                 )?;
                 let key = match key_value {
                     Value::Text(value) => value,

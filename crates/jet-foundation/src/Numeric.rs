@@ -3249,7 +3249,36 @@ impl JetInt {
     }
 
     pub fn to_i64(&self) -> Option<i64> {
-        self.to_big().try_i64()
+        if self.is_inline() {
+            Some(self.to_raw())
+        } else {
+            // The borrowed owner keeps the immutable node alive.
+            unsafe { (*jet_int_pointer(self.0)).value.try_i64() }
+        }
+    }
+
+    pub fn to_i128(&self) -> Option<i128> {
+        if self.is_inline() {
+            Some(i128::from(self.to_raw()))
+        } else {
+            unsafe { (*jet_int_pointer(self.0)).value.try_i128() }
+        }
+    }
+
+    pub fn to_u64(&self) -> Option<u64> {
+        self.to_i128().and_then(|value| u64::try_from(value).ok())
+    }
+
+    pub fn to_usize(&self) -> Option<usize> {
+        self.to_i128().and_then(|value| usize::try_from(value).ok())
+    }
+
+    pub fn to_f64(&self) -> f64 {
+        if self.is_inline() {
+            self.to_raw() as f64
+        } else {
+            unsafe { (*jet_int_pointer(self.0)).value.to_f64() }
+        }
     }
 
 
@@ -3407,6 +3436,22 @@ impl Ord for JetInt {
 impl From<i64> for JetInt {
     fn from(value: i64) -> Self {
         Self::from_i64(value)
+    }
+}
+
+impl From<u64> for JetInt {
+    fn from(value: u64) -> Self {
+        if value <= JET_INT_INLINE_MAX as u64 {
+            Self::from_i64(value as i64)
+        } else {
+            Self::from_big(CtBigInt::from_u64(value))
+        }
+    }
+}
+
+impl From<i32> for JetInt {
+    fn from(value: i32) -> Self {
+        Self::from_i64(i64::from(value))
     }
 }
 

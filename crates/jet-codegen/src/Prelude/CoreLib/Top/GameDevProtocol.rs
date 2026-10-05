@@ -1327,7 +1327,8 @@ fn jet_game_control_optional_u64(
 ) -> Result<Option<u64>, String> {
     match jet_game_control_field(fields, name) {
         None | Some(jet_std::Dyn::Null) => Ok(None),
-        Some(jet_std::Dyn::Int(value)) if *value >= 0 => Ok(Some(*value as u64)),
+        Some(jet_std::Dyn::Int(value)) => value.to_u64().map(Some)
+            .ok_or_else(|| format!("{name} must be a non-negative integer")),
         Some(jet_std::Dyn::Number(value)) => value
             .parse::<u64>()
             .map(Some)

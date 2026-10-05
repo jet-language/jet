@@ -4,8 +4,8 @@
 use crate::Comptime::Builtins::exact_int_value;
 use crate::AST::{CtFloat, CtKey, CtValue};
 
-fn from_json_int(value: i64) -> CtValue {
-    exact_int_value(crate::Numeric::CtBigInt::from_int(value))
+fn from_json_int(value: crate::Numeric::JetInt) -> CtValue {
+    exact_int_value(value.to_big())
 }
 
 /// One carrier node as the interpreter's `Dyn` enum value. JSON parsing
@@ -44,7 +44,7 @@ pub(super) fn from_json(value: jet_foundation::Dyn::Dyn) -> CtValue {
         ),
         jet_foundation::Dyn::Dyn::DateTime(value) => json_variant(
             "DateTime",
-            Some(super::CorePureParity::dyn_datetime_value(value)),
+            Some(super::Methods::dyn_datetime_value(value)),
         ),
     }
 }

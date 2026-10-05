@@ -80,8 +80,8 @@ pub fn number_lexeme(scalar: &str) -> Option<String> {
     };
     for (prefix, radix) in [("0x", 16), ("0o", 8), ("0b", 2)] {
         if let Some(digits) = body.strip_prefix(prefix) {
-            let value = u128::from_str_radix(digits, radix).ok()?;
-            return Some(if value == 0 { "0".to_string() } else { format!("{sign}{value}") });
+            let value = crate::Numeric::CtBigInt::from_radix(digits, radix).ok()?;
+            return Some(if value.is_zero() { "0".to_string() } else { format!("{sign}{}", value.to_string_rep()) });
         }
     }
     let mut body = body.to_string();

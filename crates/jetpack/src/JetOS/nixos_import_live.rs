@@ -130,7 +130,7 @@ fn live_bool(root: &[(String, Dyn)], key: &str) -> bool {
 
 fn live_num(root: &[(String, Dyn)], key: &str) -> Option<f64> {
     match import_json_value(root, key) {
-        Some(Dyn::Int(n)) => Some(*n as f64),
+        Some(Dyn::Int(n)) => Some(n.to_f64()),
         Some(Dyn::Float(n)) => Some(*n),
         Some(Dyn::Number(n)) => n.parse::<f64>().ok(),
         _ => None,
@@ -144,7 +144,7 @@ fn live_num_list(root: &[(String, Dyn)], key: &str) -> Vec<i64> {
             values
                 .iter()
                 .filter_map(|value| match value {
-                    Dyn::Int(n) => Some(*n),
+                    Dyn::Int(n) => n.to_i64(),
                     Dyn::Float(n) => Some(*n as i64),
                     Dyn::Number(n) => n.parse::<i64>().ok(),
                     _ => None,
@@ -503,7 +503,7 @@ fn plan_from_live_facts(
                 continue;
             }
             let rendered = match value {
-                Dyn::Int(n) => render_live_number(*n as f64),
+                Dyn::Int(n) => n.to_string_rep(),
                 Dyn::Float(n) => render_live_number(*n),
                 Dyn::Number(n) => n.clone(),
                 Dyn::Bool(b) => b.to_string(),

@@ -301,7 +301,7 @@ fn jet_browser_string(
 
 fn jet_browser_id(value: &jet_std::Dyn) -> Option<i64> {
     match jet_browser_get(value, "id") {
-        Some(jet_std::Dyn::Int(value)) if *value >= 0 => Some(*value),
+        Some(jet_std::Dyn::Int(value)) => value.to_i64().filter(|value| *value >= 0),
         Some(jet_std::Dyn::Float(value))
             if value.is_finite()
                 && value.fract() == 0.0
@@ -400,7 +400,7 @@ fn jet_browser_event_network_facts(
         .unwrap_or_default();
     let status_code = jet_browser_get(params, "response")
         .and_then(|response| match jet_browser_get(response, "status") {
-            Some(jet_std::Dyn::Int(value)) if (0..=599).contains(value) => Some(*value),
+            Some(jet_std::Dyn::Int(value)) => value.to_i64().filter(|value| (0..=599).contains(value)),
             Some(jet_std::Dyn::Float(value))
                 if value.is_finite() && value.fract() == 0.0 && (0.0..=599.0).contains(value) =>
             {
@@ -534,7 +534,7 @@ fn jet_browser_command_with_timeout(
     let id = state.next_id;
     state.next_id += 1;
     let request = jet_browser_object(vec![
-        ("id", jet_std::Dyn::Int(id)),
+        ("id", jet_std::Dyn::Int(id.into())),
         ("method", jet_browser_text(method)),
         ("params", params),
     ]);
@@ -976,7 +976,7 @@ fn jet_browser_fulfill_request(
         "network.provideResponse",
         jet_browser_object(vec![
             ("request", jet_browser_text(request_id)),
-            ("statusCode", jet_std::Dyn::Int(status)),
+            ("statusCode", jet_std::Dyn::Int(status.into())),
             ("body", body_value),
         ]),
     )

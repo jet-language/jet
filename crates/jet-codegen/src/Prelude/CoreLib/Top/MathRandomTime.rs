@@ -1687,7 +1687,7 @@ fn jet_std_json_render_canonical(d: &jet_std::Dyn) -> String {
         match t {
             jet_std::Dyn::Null => "null".to_string(),
             jet_std::Dyn::Bool(b) => b.to_string(),
-            jet_std::Dyn::Int(n) => jet_std::jet_int_to_string(*n),
+            jet_std::Dyn::Int(n) => n.to_string_rep(),
             jet_std::Dyn::Float(f) => format!("{:?}", f),
             jet_std::Dyn::Number(text) => text.clone(),
             jet_std::Dyn::Text(s) => jet_quote_json_local(s),

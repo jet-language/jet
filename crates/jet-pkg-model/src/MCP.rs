@@ -302,14 +302,16 @@ pub enum RequestId {
 impl RequestId {
     fn to_json_value(&self) -> Dyn {
         match self {
-            Self::Number(value) => Dyn::Int(*value),
+            Self::Number(value) => Dyn::Int((*value).into()),
             Self::String(value) => Dyn::Text(value.clone()),
         }
     }
 
     fn from_json_value(value: &Dyn) -> Result<Self, CodecError> {
         match value {
-            Dyn::Int(value) => Ok(Self::Number(*value)),
+            Dyn::Int(value) => value.to_i64().map(Self::Number).ok_or_else(|| CodecError::InvalidMessage(
+                "request id is outside the i64 range".to_string(),
+            )),
             Dyn::Text(value) => Ok(Self::String(value.clone())),
             _ => Err(CodecError::InvalidMessage(
                 "request id must be an integer or string".to_string(),
@@ -1363,7 +1365,7 @@ fn required_string(object: &[(String, Dyn)], name: &str) -> Result<String, Codec
 
 fn rpc_error_to_json(error: &McpRpcError) -> Dyn {
     let mut object = BTreeMap::new();
-    object.insert("code".to_string(), Dyn::Int(error.code));
+    object.insert("code".to_string(), Dyn::Int((error.code).into()));
     object.insert(
         "message".to_string(),
         Dyn::Text(error.message.clone()),
@@ -1379,7 +1381,9 @@ fn rpc_error_from_json(value: &Dyn) -> Result<McpRpcError, CodecError> {
         CodecError::InvalidMessage("response error must be a JSON object".to_string())
     })?;
     let code = match field(object, "code") {
-        Some(Dyn::Int(code)) => *code,
+        Some(Dyn::Int(code)) => code.to_i64().ok_or_else(|| CodecError::InvalidMessage(
+            "response error code is outside the i64 range".to_string(),
+        ))?,
         _ => {
             return Err(CodecError::InvalidMessage(
                 "response error code must be an integer".to_string(),

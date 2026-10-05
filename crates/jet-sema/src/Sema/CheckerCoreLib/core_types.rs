@@ -126,7 +126,7 @@ pub(crate) fn data_renamed_to_dyn(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0351",
         "the value tree is named `Dyn`, not `Data`".to_string(),
-        "`Dyn` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Text`/`.Bytes`/`.DateTime`/`.Array`/`.Object`".to_string(),
+        "`Dyn` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Number`/`.Text`/`.Bytes`/`.DateTime`/`.Array`/`.Object`".to_string(),
         "write `Dyn` instead of `Data`".to_string(),
         Some(span),
     )

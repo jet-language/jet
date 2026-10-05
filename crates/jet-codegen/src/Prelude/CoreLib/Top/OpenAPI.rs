@@ -1330,7 +1330,8 @@ fn jet_openapi_contract_integer(
     name: &str,
 ) -> Result<i64, String> {
     match jet_openapi_contract_field(object, name)? {
-        jet_std::Dyn::Int(value) => Ok(*value),
+        jet_std::Dyn::Int(value) => value.to_i64()
+            .ok_or_else(|| format!("OpenAPI route contract field `{name}` is out of range")),
         jet_std::Dyn::Number(value) => value
             .parse::<i64>()
             .map_err(|_| format!("OpenAPI route contract field `{name}` is out of range")),

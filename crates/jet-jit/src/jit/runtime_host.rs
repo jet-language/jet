@@ -13561,31 +13561,6 @@ mod service_adapter {
 
 
 
-    fn job_dyn_to_cbor(value: &crate::Encoding::json_rt::Dyn) -> CborValue {
-        match value {
-            crate::Encoding::json_rt::Dyn::Null => CborValue::Null,
-            crate::Encoding::json_rt::Dyn::Bool(value) => CborValue::Bool(*value),
-            crate::Encoding::json_rt::Dyn::Int(value) => CborValue::Int(*value),
-            crate::Encoding::json_rt::Dyn::Float(value) => CborValue::Float(*value),
-            // #4602: a number lexeme crosses as the number it spells.
-            crate::Encoding::json_rt::Dyn::Number(value) => value
-                .parse::<i64>()
-                .map(CborValue::Int)
-                .unwrap_or_else(|_| CborValue::Float(value.parse::<f64>().unwrap_or(f64::NAN))),
-            crate::Encoding::json_rt::Dyn::Text(value) => CborValue::Text(value.clone()),
-            crate::Encoding::json_rt::Dyn::Bytes(value) => CborValue::Bytes(value.clone()),
-            crate::Encoding::json_rt::Dyn::DateTime(value) => CborValue::DateTime(*value),
-            crate::Encoding::json_rt::Dyn::Array(values) => {
-                CborValue::Array(values.iter().map(job_dyn_to_cbor).collect())
-            }
-            crate::Encoding::json_rt::Dyn::Object(entries) => CborValue::Object(
-                entries
-                    .iter()
-                    .map(|(name, value)| (name.clone(), job_dyn_to_cbor(value)))
-                    .collect(),
-            ),
-        }
-    }
 
     fn job_encode_payload(
         rt: &mut JitRuntime,
@@ -13593,7 +13568,8 @@ mod service_adapter {
         descriptor: &RuntimeTypeDescriptor,
     ) -> Result<Vec<u8>, String> {
         let tree = crate::Receipt::encode_jit_value(rt, raw, descriptor)?;
-        CborKernel::encode(&job_dyn_to_cbor(&tree), true)
+        CborKernel::encode(&CborKernel::from_dyn_at(&tree, "$")
+            .map_err(|error| format!("queued #Job result CBOR encoding failed: {error:?}"))?, true)
             .map_err(|error| format!("queued #Job result CBOR encoding failed: {error:?}"))
     }
 

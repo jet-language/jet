@@ -112,11 +112,8 @@ fn dyn_from_ct(value: &CtValue) -> Option<jet_std::Dyn> {
                     _ => None,
                 },
                 "Int" => match payload {
-                    Some(CtValue::Int(value)) => Some(jet_std::Dyn::Int(*value)),
-                    Some(CtValue::BigInt(value)) => value
-                        .try_i64()
-                        .map(jet_std::Dyn::Int)
-                        .or_else(|| Some(jet_std::Dyn::Number(value.to_string_rep()))),
+                    Some(CtValue::Int(value)) => Some(jet_std::Dyn::Int((*value).into())),
+                    Some(CtValue::BigInt(value)) => Some(jet_std::Dyn::Int(crate::Numeric::JetInt::from_big(value.clone()))),
                     _ => None,
                 },
                 "Float" => match payload {
@@ -158,11 +155,8 @@ fn dyn_from_ct(value: &CtValue) -> Option<jet_std::Dyn> {
                 _ => None,
             }
         }
-        CtValue::Int(value) => Some(jet_std::Dyn::Int(*value)),
-        CtValue::BigInt(value) => value
-            .try_i64()
-            .map(jet_std::Dyn::Int)
-            .or_else(|| Some(jet_std::Dyn::Number(value.to_string_rep()))),
+        CtValue::Int(value) => Some(jet_std::Dyn::Int((*value).into())),
+        CtValue::BigInt(value) => Some(jet_std::Dyn::Int(crate::Numeric::JetInt::from_big(value.clone()))),
         CtValue::Float(value) => Some(jet_std::Dyn::Float(value.as_f64())),
         CtValue::Bool(value) => Some(jet_std::Dyn::Bool(*value)),
         CtValue::Str(value) => Some(jet_std::Dyn::Text(value.clone())),
@@ -230,6 +224,7 @@ pub(super) fn decode_int_ct(value: &CtValue) -> Result<CtValue, CtValue> {
     jet_std::decode_int_with(
         &tree,
         crate::Numeric::CtBigInt::from_int,
+        |value| Ok(value.to_big()),
         |text| {
             crate::Numeric::CtBigInt::from_str(text).map_err(|error| error.to_string())
         },
@@ -280,7 +275,7 @@ impl __jet_Decode for String {
 
 impl __jet_Encode for i64 {
     fn jet_encode(&self) -> jet_std::Dyn {
-        jet_std::Dyn::Int(*self)
+        jet_std::Dyn::Int((*self).into())
     }
 }
 
@@ -289,6 +284,7 @@ impl __jet_Decode for i64 {
         jet_std::decode_int_with(
             tree,
             |value| value,
+            |value| value.to_i64().ok_or_else(|| "exact Int is outside i64".to_owned()),
             |text| {
                 text.parse::<i64>()
                     .map_err(|_| "exact Int is outside i64".to_owned())
@@ -299,7 +295,7 @@ impl __jet_Decode for i64 {
 
 impl __jet_Encode for u64 {
     fn jet_encode(&self) -> jet_std::Dyn {
-        jet_std::Dyn::Int(*self as i64)
+        jet_std::Dyn::Int((*self).into())
     }
 }
 
@@ -308,6 +304,7 @@ impl __jet_Decode for u64 {
         jet_std::decode_int_with(
             tree,
             |value| value,
+            |value| value.to_i64().ok_or_else(|| "exact Int is outside i64".to_owned()),
             |text| {
                 text.parse::<i64>()
                     .map_err(|_| "exact Int is outside i64".to_owned())

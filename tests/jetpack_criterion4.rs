@@ -86,7 +86,7 @@ fn hangar_du_all_reports_every_root_and_exact_physical_total() {
         + measured_bytes(&first.join("hangar"), &mut seen)
         + measured_bytes(&second.join("hangar"), &mut seen);
     let actual = match report.get("total_bytes").unwrap() {
-        Dyn::Int(value) => *value as u64,
+        Dyn::Int(value) => value.to_u64().expect("total bytes is in u64 range"),
         Dyn::Float(value) => *value as u64,
         Dyn::Number(value) => value
             .parse::<f64>()

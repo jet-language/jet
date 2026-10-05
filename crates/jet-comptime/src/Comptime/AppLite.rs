@@ -1080,7 +1080,7 @@ fn tree_to_untyped(tree: &web_kernel::Dyn, span: Span) -> Result<CtValue, String
     match tree {
         web_kernel::Dyn::Null => Ok(CtValue::Unit),
         web_kernel::Dyn::Bool(value) => Ok(CtValue::Bool(*value)),
-        web_kernel::Dyn::Int(value) => Ok(CtValue::Int(*value)),
+        web_kernel::Dyn::Int(value) => Ok(super::Builtins::exact_int_value(value.to_big())),
         web_kernel::Dyn::Float(value) => Ok(CtValue::Float(crate::AST::CtFloat::f64(*value))),
         web_kernel::Dyn::Number(value) => value
             .parse::<i64>()
@@ -1421,7 +1421,7 @@ fn app_loader_callback(
 fn ct_to_json_string(value: &CtValue) -> String {
     fn tree(value: &CtValue) -> web_kernel::Dyn {
         match value {
-            CtValue::Int(value) => web_kernel::Dyn::Int(*value),
+            CtValue::Int(value) => web_kernel::Dyn::Int((*value).into()),
             CtValue::Float(value) => web_kernel::Dyn::Float(value.as_f64()),
             CtValue::Bool(value) => web_kernel::Dyn::Bool(*value),
             CtValue::Char(value) => web_kernel::Dyn::Text(value.to_string()),

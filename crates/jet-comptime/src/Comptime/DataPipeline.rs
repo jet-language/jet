@@ -1610,7 +1610,7 @@ fn data_arrow_tree_value(value: jet_foundation::Dyn::Dyn) -> CtValue {
             super::JSONInterp::json_variant("Bool", Some(CtValue::Bool(value)))
         }
         jet_foundation::Dyn::Dyn::Int(value) => {
-            super::JSONInterp::json_variant("Int", Some(CtValue::Int(value)))
+            super::JSONInterp::json_variant("Int", Some(super::Builtins::exact_int_value(value.to_big())))
         }
         jet_foundation::Dyn::Dyn::Float(value) => super::JSONInterp::json_variant(
             "Float",

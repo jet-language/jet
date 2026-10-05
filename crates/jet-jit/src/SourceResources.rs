@@ -5722,7 +5722,10 @@ fn dyn_value(tree: crate::enc_stream::runtime::jet_std::Dyn) -> MirRuntimeValue 
     let (variant, args) = match tree {
         Dyn::Null => ("Null", Vec::new()),
         Dyn::Bool(value) => ("Bool", vec![MirRuntimeValue::Bool(value)]),
-        Dyn::Int(value) => ("Int", vec![MirRuntimeValue::Int(value)]),
+        Dyn::Int(value) => ("Int", vec![match value.to_i64() {
+            Some(value) => MirRuntimeValue::Int(value),
+            None => MirRuntimeValue::BigInt(value.to_string_rep()),
+        }]),
         Dyn::Float(value) => (
             "Float",
             vec![MirRuntimeValue::Float { value, f32: false }],
@@ -5935,7 +5938,10 @@ fn dyn_from_value(
             )),
         },
         "Int" => match arg(0)? {
-            MirRuntimeValue::Int(value) if args.len() == 1 => Ok(Dyn::Int(*value)),
+            MirRuntimeValue::Int(value) if args.len() == 1 => Ok(Dyn::Int((*value).into())),
+            MirRuntimeValue::BigInt(value) if args.len() == 1 => jet_foundation::Numeric::CtBigInt::from_str(value)
+                .map(|value| Dyn::Int(jet_foundation::Numeric::JetInt::from_big(value)))
+                .map_err(|message| MirNativeCursorError::internal(&message)),
             _ => Err(MirNativeCursorError::internal(
                 "Dyn.Int carrier has the wrong payload",
             )),

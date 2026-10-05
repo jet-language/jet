@@ -51,7 +51,7 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
             for key in &header {
                 let cell = match jet_std::dyn_get(tree, key) {
                     Some(jet_std::Dyn::Text(s)) => s.clone(),
-                    Some(jet_std::Dyn::Int(n)) => jet_std::jet_int_to_string(*n),
+                    Some(jet_std::Dyn::Int(n)) => n.to_string_rep(),
                     Some(jet_std::Dyn::Float(f)) => format!("{:?}", f),
                     Some(jet_std::Dyn::Bool(b)) => b.to_string(),
                     Some(jet_std::Dyn::Bytes(bytes)) => jet_std::Dyn::bytes_text(bytes),
@@ -77,7 +77,7 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
                     .iter()
                     .map(|cell| match cell {
                         jet_std::Dyn::Text(s) => s.clone(),
-                        jet_std::Dyn::Int(n) => jet_std::jet_int_to_string(*n),
+                        jet_std::Dyn::Int(n) => n.to_string_rep(),
                         jet_std::Dyn::Float(f) => format!("{:?}", f),
                         jet_std::Dyn::Bool(b) => b.to_string(),
                         jet_std::Dyn::Bytes(bytes) => jet_std::Dyn::bytes_text(bytes),

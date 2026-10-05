@@ -776,8 +776,8 @@ function jet_codec_i64(value) {
 
 function jet_dyn_int(tree) {
   let value = null;
-  if (tree?.tag === "Int") value = jet_codec_i64(jet_codec_tree_payload(tree));
-  else if (tree?.tag === "Number") value = jet_codec_i64(jet_codec_json_exact_integer(jet_codec_tree_payload(tree)));
+  if (tree?.tag === "Int") value = BigInt(jet_codec_tree_payload(tree));
+  else if (tree?.tag === "Number") value = jet_codec_json_exact_integer(jet_codec_tree_payload(tree));
   if (value != null) return { tag: "Ok", values: [value] };
   return {
     tag: "Err",
@@ -1033,9 +1033,7 @@ function jet_codec_typed_temporal(tree, descriptor) {
 
 function jet_codec_encode_int(value) {
   const integer = BigInt(value);
-  return integer >= JET_I64_MIN && integer <= JET_I64_MAX
-    ? { tag: "Int", values: [integer] }
-    : { tag: "Number", values: [integer.toString()] };
+  return { tag: "Int", values: [integer] };
 }
 
 function jet_codec_encode_typed(value, descriptor) {

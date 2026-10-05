@@ -3060,7 +3060,7 @@ fn jet_data_loader_canonical_tree(tree: &jet_std::Dyn) -> String {
     match tree {
         jet_std::Dyn::Null => "null".to_string(),
         jet_std::Dyn::Bool(value) => value.to_string(),
-        jet_std::Dyn::Int(value) => jet_std::jet_int_to_string(*value),
+        jet_std::Dyn::Int(value) => value.to_string_rep(),
         jet_std::Dyn::Float(value) => format!("{value:?}"),
         jet_std::Dyn::Number(value) => value.clone(),
         jet_std::Dyn::Text(value) => {
@@ -4107,7 +4107,8 @@ mod jet_data_web {
     }
     fn integer(value: &jet_std::Dyn, operation: &str) -> Result<i64, jet_std::DataError> {
         match value {
-            jet_std::Dyn::Int(value) => Ok(*value),
+            jet_std::Dyn::Int(value) => value.to_i64().ok_or_else(|| error(
+                jet_std::DataErrorKind::InvalidArgument, operation, "expected exact integer")),
             jet_std::Dyn::Number(value) => value.parse::<i64>().map_err(|_| error(
                 jet_std::DataErrorKind::InvalidArgument, operation, "expected exact integer",
             )),
@@ -4195,7 +4196,7 @@ mod jet_data_web {
     }
     fn handle_tree(handle: usize, kind: &str) -> jet_std::Dyn {
         result_tree(vec![
-            ("handle", jet_std::Dyn::Int(handle as i64)),
+            ("handle", jet_std::Dyn::Int((handle as i64).into())),
             ("kind", text_tree(kind)),
         ])
     }
@@ -4360,7 +4361,7 @@ mod jet_data_web {
         operation: &str,
     ) -> Result<f64, jet_std::DataError> {
         match callback_value(callback, row, operation)? {
-            jet_std::Dyn::Int(value) => Ok(value as f64),
+            jet_std::Dyn::Int(value) => Ok(value.to_f64()),
             jet_std::Dyn::Float(value) => Ok(value),
             jet_std::Dyn::Number(value) => value.parse::<f64>().map_err(|_| {
                 error(
@@ -4405,7 +4406,7 @@ mod jet_data_web {
             ("invalidated_by", text_tree(format!("{:?}", value.invalidated_by))),
             ("error", text_tree(value.error.clone())),
             ("cleanup", text_tree(value.cleanup.clone())),
-            ("buffered_bytes", jet_std::Dyn::Int(value.buffered_bytes)),
+            ("buffered_bytes", jet_std::Dyn::Int(value.buffered_bytes.into())),
             ("backpressure", jet_std::Dyn::Bool(value.backpressure)),
             ("last_good", jet_std::Dyn::Bool(value.last_good)),
         ])
@@ -4449,14 +4450,14 @@ mod jet_data_web {
     fn watch_status(value: &jet_std::DataWatchStatus) -> jet_std::Dyn {
         result_tree(vec![
             ("mode", text_tree(value.mode.clone())),
-            ("revision", jet_std::Dyn::Int(value.revision)),
-            ("retained_rows", jet_std::Dyn::Int(value.retained_rows)),
-            ("recomputations", jet_std::Dyn::Int(value.recomputations)),
+            ("revision", jet_std::Dyn::Int(value.revision.into())),
+            ("retained_rows", jet_std::Dyn::Int(value.retained_rows.into())),
+            ("recomputations", jet_std::Dyn::Int(value.recomputations.into())),
             ("active", jet_std::Dyn::Bool(value.active)),
-            ("generation", jet_std::Dyn::Int(value.generation)),
+            ("generation", jet_std::Dyn::Int(value.generation.into())),
             ("dirty", jet_std::Dyn::Bool(value.dirty)),
             ("error", text_tree(value.error.clone())),
-            ("freshness_ms", jet_std::Dyn::Int(value.freshness_ms)),
+            ("freshness_ms", jet_std::Dyn::Int(value.freshness_ms.into())),
             ("invalidation_cause", text_tree(value.invalidation_cause.clone())),
             ("refreshing", jet_std::Dyn::Bool(value.refreshing)),
             ("cancelled", jet_std::Dyn::Bool(value.cancelled)),
@@ -4891,7 +4892,7 @@ mod jet_data_web {
                 let index = handle(value(0)?, &operation)?;
                 let query = with_grouped(index, &operation, |grouped| Ok(jet_data_group_count_query(grouped)))?;
                 Ok(store(Handle::Query(jet_data_query_map(&query, |row| {
-                    result_tree(vec![("key", text_tree(row.key)), ("value", jet_std::Dyn::Int(row.value))])
+                    result_tree(vec![("key", text_tree(row.key)), ("value", jet_std::Dyn::Int(row.value.into()))])
                 }))))
             }
             "group_sum" => {
@@ -4919,10 +4920,10 @@ mod jet_data_web {
                 }))))
             }
             "count" => match value(0)? {
-                jet_std::Dyn::Array(values) => Ok(jet_std::Dyn::Int(values.len() as i64)),
+                jet_std::Dyn::Array(values) => Ok(jet_std::Dyn::Int((values.len() as i64).into())),
                 value => {
                     let query = clone_query(handle(value, &operation)?)?;
-                    Ok(jet_std::Dyn::Int(jet_data_query_collect(&query)?.len() as i64))
+                    Ok(jet_std::Dyn::Int((jet_data_query_collect(&query)?.len() as i64).into()))
                 }
             },
             "snapshot_reusable" => {

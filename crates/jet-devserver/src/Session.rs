@@ -2567,7 +2567,7 @@ fn json_string(value: &Dyn) -> Option<&str> {
 
 fn json_u64(value: &Dyn) -> Option<u64> {
     match value {
-        Dyn::Int(value) if *value >= 0 => (*value).try_into().ok(),
+        Dyn::Int(value) => value.to_u64(),
         Dyn::Float(value)
             if value.fract() == 0.0 && *value >= 0.0 && *value <= u64::MAX as f64 =>
         {

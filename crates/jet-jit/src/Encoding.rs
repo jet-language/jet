@@ -215,6 +215,7 @@ const DT_FLOAT: i64 = crate::types_meta::PRELUDE_DYN_FLOAT;
 const DT_NUMBER: i64 = crate::types_meta::PRELUDE_DYN_NUMBER;
 const DT_TEXT: i64 = crate::types_meta::PRELUDE_DYN_TEXT;
 const DT_BYTES: i64 = crate::types_meta::PRELUDE_DYN_BYTES;
+const DT_DATETIME: i64 = crate::types_meta::PRELUDE_DYN_DATETIME;
 const DT_ARRAY: i64 = crate::types_meta::PRELUDE_DYN_ARRAY;
 const DT_OBJECT: i64 = crate::types_meta::PRELUDE_DYN_OBJECT;
 
@@ -248,7 +249,7 @@ fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
             DT_ARRAY | DT_BYTES | DT_OBJECT => {
                 let _ = rt.heap.record_set_record(h, 1, payload);
             }
-            DT_NULL | DT_INT => {
+            DT_NULL | DT_INT | DT_DATETIME => {
                 let _ = rt.heap.record_set_int(h, 1, payload);
             }
 
@@ -261,7 +262,7 @@ pub(crate) fn alloc_dyn(tree: &json_rt::Dyn) -> i64 {
     match tree {
         json_rt::Dyn::Null => alloc_dt_record(DT_NULL, 0),
         json_rt::Dyn::Bool(b) => alloc_dt_record(DT_BOOL, i64::from(*b)),
-        json_rt::Dyn::Int(n) => alloc_dt_record(DT_INT, *n),
+        json_rt::Dyn::Int(n) => alloc_dt_record(DT_INT, n.to_raw()),
         json_rt::Dyn::Float(f) => alloc_dt_record(DT_FLOAT, f.to_bits() as i64),
         json_rt::Dyn::Number(text) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text.clone()));
@@ -281,8 +282,13 @@ pub(crate) fn alloc_dyn(tree: &json_rt::Dyn) -> i64 {
             });
             alloc_dt_record(DT_BYTES, list)
         }
-        json_rt::Dyn::DateTime(_) => crate::runtime_host::runtime_stop_unwind(
-            "E3001", 0, "Dyn.DateTime requires the AOT time payload boundary"),
+        json_rt::Dyn::DateTime(value) => {
+            let zone = crate::Time::time_rt::JetZone::named(&value.offset_text())
+                .expect("Dyn DateTime has a valid fixed offset");
+            let instant = crate::Time::time_rt::JetDateTime::from_timestamp_ns_with_leap(
+                value.unix_seconds, value.nanos, value.leap_second);
+            alloc_dt_record(DT_DATETIME, crate::Time::push(crate::Time::TimeValue::Zoned(instant.in_zone(&zone))))
+        }
         json_rt::Dyn::Array(items) => {
             let handles: Vec<i64> = items.iter().map(alloc_dyn).collect();
             let list = Concurrency::with_runtime_mut(|rt| {
@@ -360,6 +366,7 @@ pub(crate) fn read_dyn(handle: i64) -> Option<json_rt::Dyn> {
                     };
                     Some((disc, payload, None, None, None, None))
                 }
+                DT_DATETIME => Some((disc, rt.heap.record_get_int(handle, 1)?, None, None, None, None)),
                 DT_FLOAT => {
                     let f = rt.heap.record_get_float(handle, 1)?;
                     Some((disc, 0i64, None, None, None, Some(f)))
@@ -409,7 +416,20 @@ pub(crate) fn read_dyn(handle: i64) -> Option<json_rt::Dyn> {
     match disc {
         DT_NULL => Some(json_rt::Dyn::Null),
         DT_BOOL => Some(json_rt::Dyn::Bool(payload != 0)),
-        DT_INT => Some(json_rt::Dyn::Int(payload)),
+        DT_INT => Some(json_rt::Dyn::Int(unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(payload) })),
+        DT_DATETIME => crate::Time::with_time(payload, |value| match value {
+            crate::Time::TimeValue::Zoned(value) => {
+                let instant = value.to_datetime();
+                let offset = value.offset_seconds();
+                if offset % 60 != 0 || offset.abs() >= 86400 {
+                    crate::runtime_host::runtime_stop_unwind("E3001", 0,
+                        "Dyn.DateTime requires a minute-aligned RFC 3339 offset");
+                }
+                Some(json_rt::Dyn::datetime(instant.unix_seconds_anchor(),
+                    instant.nanosecond() as u32, instant.is_leap_second(), offset as i32))
+            }
+            _ => None,
+        }),
         DT_FLOAT => Some(json_rt::Dyn::Float(float_val?)),
         DT_TEXT => Some(json_rt::Dyn::Text(text?)),
         DT_NUMBER => Some(json_rt::Dyn::Number(text?)),
@@ -1670,7 +1690,7 @@ fn typed_decode_list(
         json_rt::Dyn::Array(values) => values.clone(),
         json_rt::Dyn::Bytes(values) => values
             .iter()
-            .map(|value| json_rt::Dyn::Int(json_rt::jet_int_from_i64(i64::from(*value))))
+            .map(|value| json_rt::Dyn::Int(i64::from(*value).into()))
             .collect(),
         _ => {
             return Err(json_rt::FieldError::one(format!(
@@ -2040,6 +2060,7 @@ fn typed_decode_int(
     let raw = json_rt::decode_int_with(
         tree,
         json_rt::jet_int_from_i64,
+        |value| Ok(value.clone().into_raw()),
         json_rt::jet_int_from_str,
     )?;
     if let Some((lo, hi)) = descriptor.integer_range {
@@ -2184,7 +2205,7 @@ fn migration_default_tree(type_name: &str) -> Option<json_rt::Dyn> {
     Some(match leaf {
         "Bool" => json_rt::Dyn::Bool(false),
         "Int" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32"
-        | "U64" | "U128" => json_rt::Dyn::Int(0),
+        | "U64" | "U128" => json_rt::Dyn::Int((0).into()),
         "Float" | "F32" | "F64" => json_rt::Dyn::Float(0.0),
         "String" => json_rt::Dyn::Text(String::new()),
         _ => return None,
@@ -2830,7 +2851,7 @@ fn xml_value_to_dyn(value: jet_foundation::XmlPull::Value) -> json_rt::Dyn {
     match value {
         Value::Null => json_rt::Dyn::Null,
         Value::Bool(b) => json_rt::Dyn::Bool(b),
-        Value::Int(n) => json_rt::Dyn::Int(n),
+        Value::Int(n) => json_rt::Dyn::Int((n).into()),
         Value::Text(s) => json_rt::Dyn::Text(s),
         Value::Array(xs) => {
             json_rt::Dyn::Array(xs.into_iter().map(xml_value_to_dyn).collect())
@@ -2850,7 +2871,8 @@ fn dyn_to_xml_value(
     match tree {
         json_rt::Dyn::Null => Ok(Value::Null),
         json_rt::Dyn::Bool(b) => Ok(Value::Bool(*b)),
-        json_rt::Dyn::Int(n) => Ok(Value::Int(*n)),
+        json_rt::Dyn::Int(n) => n.to_i64().map(Value::Int)
+            .ok_or_else(|| "XML integer is outside I64".to_string()),
         json_rt::Dyn::Number(text) => Ok(Value::Text(text.clone())),
         json_rt::Dyn::Text(s) => Ok(Value::Text(s.clone())),
         json_rt::Dyn::Array(xs) => Ok(Value::Array(
@@ -3288,7 +3310,10 @@ fn jet_jit_cbor_to_bytes_canonical(tree: i64) -> i64 {
 fn jet_jit_cbor_to_bytes_impl(tree: i64, canonical: bool) -> i64 {
     match read_dyn(tree) {
         Some(tree) => {
-            let value = cbor_dyn_to_value(&tree);
+            let value = match CborKernel::from_dyn_at(&tree, "$") {
+                Ok(value) => value,
+                Err(error) => return result_err_cbor(error),
+            };
             match CborKernel::encode(&value, canonical) {
                 Ok(out) => result_ok(alloc_byte_list(&out) as u64),
                 Err(error) => result_err_cbor(error),
@@ -3298,33 +3323,12 @@ fn jet_jit_cbor_to_bytes_impl(tree: i64, canonical: bool) -> i64 {
     }
 }
 
-fn cbor_dyn_to_value(value: &json_rt::Dyn) -> Value {
-    match value {
-        json_rt::Dyn::Null => Value::Null,
-        json_rt::Dyn::Bool(value) => Value::Bool(*value),
-        json_rt::Dyn::Int(value) => Value::Int(*value),
-        json_rt::Dyn::Float(value) => Value::Float(*value),
-        json_rt::Dyn::Number(value) => Value::Text(value.clone()),
-        json_rt::Dyn::Text(value) => Value::Text(value.clone()),
-        json_rt::Dyn::Bytes(value) => Value::Bytes(value.clone()),
-        json_rt::Dyn::DateTime(value) => Value::DateTime(*value),
-        json_rt::Dyn::Array(values) => {
-            Value::Array(values.iter().map(cbor_dyn_to_value).collect())
-        }
-        json_rt::Dyn::Object(entries) => Value::Object(
-            entries
-                .iter()
-                .map(|(key, value)| (key.clone(), cbor_dyn_to_value(value)))
-                .collect(),
-        ),
-    }
-}
 
 fn cbor_value_to_dyn(value: Value) -> json_rt::Dyn {
     match value {
         Value::Null => json_rt::Dyn::Null,
         Value::Bool(value) => json_rt::Dyn::Bool(value),
-        Value::Int(value) => json_rt::Dyn::Int(value),
+        Value::Int(value) => json_rt::Dyn::Int((value).into()),
         Value::Float(value) => json_rt::Dyn::Float(value),
         Value::Text(value) => json_rt::Dyn::Text(value),
         Value::Bytes(value) => json_rt::Dyn::Bytes(value),
@@ -3750,6 +3754,7 @@ fn jet_jit_dyn_decode_int(tree: i64) -> i64 {
     match json_rt::decode_int_with(
         &tree,
         json_rt::jet_int_from_i64,
+        |value| Ok(value.clone().into_raw()),
         json_rt::jet_int_from_str,
     ) {
         Ok(value) => result_ok(value as u64),
@@ -4163,9 +4168,9 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::Dyn, String> 
             text.map(json_rt::Dyn::Text)
                 .ok_or_else(|| "invalid DateTime codec value".to_string())
         }
-        CODEC_KIND_DURATION => Ok(json_rt::Dyn::Int(codec_rt::jet_codec_duration_encode(
+        CODEC_KIND_DURATION => Ok(json_rt::Dyn::Int((codec_rt::jet_codec_duration_encode(
             value,
-        ))),
+        )).into())),
         CODEC_KIND_DECIMAL => {
             let decimal = Concurrency::with_runtime_mut(|rt| {
                 let index = value.saturating_sub(1) as usize;
@@ -4250,7 +4255,10 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
             }
         }
         (CODEC_KIND_DURATION, json_rt::Dyn::Int(ns)) => {
-            result_ok(codec_rt::jet_codec_duration_decode(ns) as u64)
+            match ns.to_i64() {
+                Some(ns) => result_ok(codec_rt::jet_codec_duration_decode(ns) as u64),
+                None => result_err_decode("", "Duration is outside the I64 range"),
+            }
         }
         (CODEC_KIND_DURATION, json_rt::Dyn::Number(text)) => {
             let decoded =
@@ -4288,7 +4296,7 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
             }
         }
         (CODEC_KIND_DECIMAL, json_rt::Dyn::Int(value)) => {
-            match codec_rt::jet_codec_decimal_decode_int(value) {
+            match jet_foundation::Numeric::CtDecimal::from_json_number(&value.to_string_rep()) {
                 Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
                 Err(error) => result_err_decode("", &error),
             }

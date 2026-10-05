@@ -5,6 +5,8 @@
 //! parsers enforce duplicate-key policy at their boundary instead of collapsing data
 //! through a map.
 
+use super::Numeric::JetInt;
+
 /// An instant and its frozen RFC 3339 offset. Leap labels retain the preceding
 /// POSIX second, just like JetDateTime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -135,7 +137,7 @@ pub fn dyn_base64(bytes: &[u8]) -> String {
 pub enum Dyn {
     Null,
     Bool(bool),
-    Int(i64),
+    Int(JetInt),
     Float(f64),
     Number(String),
     Text(String),
@@ -200,14 +202,13 @@ impl Dyn {
 
 impl std::hash::Hash for Dyn {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        use std::hash::Hash;
         std::mem::discriminant(self).hash(state);
         match self {
             Self::Null => {}
             Self::Bool(v) => v.hash(state),
             Self::Int(v) => v.hash(state),
             Self::Float(v) => (if *v == 0.0 { 0 } else { v.to_bits() }).hash(state),
-            Self::Number(v) | Self::TypedText(v) | Self::Text(v) => v.hash(state),
+            Self::Number(v) | Self::Text(v) => v.hash(state),
             Self::Bytes(v) => v.hash(state),
             Self::DateTime(v) => v.hash(state),
             Self::Array(v) => v.hash(state),
@@ -254,7 +255,7 @@ mod dyn_tests {
         assert_eq!(hash(&Dyn::Float(0.0)), hash(&Dyn::Float(-0.0)));
         let value = Dyn::parse_datetime("2024-01-01T00:00:00Z").unwrap();
         assert_eq!(hash(&value), hash(&value.clone()));
-        assert_ne!(Dyn::Int(1), Dyn::Float(1.0));
+        assert_ne!(Dyn::Int(1.into()), Dyn::Float(1.0));
         assert_ne!(Dyn::Object(vec![("b".into(), Dyn::Null), ("a".into(), Dyn::Null)]),
             Dyn::Object(vec![("a".into(), Dyn::Null), ("b".into(), Dyn::Null)]));
     }

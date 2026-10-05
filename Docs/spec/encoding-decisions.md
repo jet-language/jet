@@ -20,13 +20,23 @@ citations; a narrower decision controls the public surface where it says so.
 ## Shared value and error model
 
 Use one `Dyn` for untyped values. Its closed variants are `Null`, `Bool`,
-`Int`, `Float`, `Text`, `Bytes`, `DateTime`, `Array`, and `Object`
-(D-INFER-PRIVATE1=A); objects preserve insertion
-order, and integers and floats remain distinct. A codec must reject malformed
+`Int`, `Float`, `Number`, `Text`, `Bytes`, `DateTime`, `Array`, and `Object`
+(D-INFER-PRIVATE1=A; D-DATATREE-RULES1=A). `Int` owns an exact Jet integer,
+including values wider than machine integers; `Number` owns a parsed number's
+exact source spelling until a typed read checks the destination's range.
+Objects preserve insertion order; duplicate keys are a parse error, except
+`parse_allow_duplicates`, which keeps the later value. Integers and floats
+remain distinct. A codec must reject malformed
 input instead of fabricating a value. Base64, base32, and hex are scalar byte
 helpers, not `Dyn` adapters. This keeps one tree walker and one set of
 format adapters while preserving the distinction between text serialization
 and byte alphabets.
+
+Typed decoding is strict: a text leaf is not an integer, float, or Boolean.
+Only text-native sources (environment variables, CSV cells, route and query
+parameters) parse text into scalar destinations. This is a property of the
+source decoder, not a second public value-tree case. CBOR byte strings become
+`Bytes`; temporal leaves use `DateTime` with their fixed RFC 3339 offset.
 
 Use one adapter identity per format for whole-value operations and bounded
 reader/writer operations. The streaming formats are JSON, JSONL, CSV, XML,
@@ -156,10 +166,10 @@ The format-specific item rules are these:
   `Text(String)`, `Bytes([U8])`, `DateTime(ZonedDateTime)`, `ArrayStart`,
   `ArrayEnd`, `ObjectStart`, `Key(String)`, and `ObjectEnd`.
 
-The Prelude carrier may also carry `Number(String)` for exact-token JSON
-decoding; this preserves number text without adding a `Dyn` variant.
-The event list above remains the public reader/writer algebra for this
-decision.
+`Number(String)` preserves exact parsed number spelling in `Dyn`
+(D-DATATREE-RULES1=A). The incremental JSON reader exposes the same lexical
+number event; typed decoding performs numeric conversion only at the read
+boundary, without rounding through binary64.
 
 - A JSON writer writes `DataEvent.Bytes` as a standard padded base64 string and
   `DataEvent.DateTime` as its canonical RFC 3339 string, exactly as whole-value

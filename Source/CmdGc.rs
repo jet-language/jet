@@ -470,7 +470,8 @@ fn uint_field(
     name: &str,
 ) -> Result<u64, TraceError> {
     match field(object, name)? {
-        Dyn::Int(value) if *value >= 0 => Ok(*value as u64),
+        Dyn::Int(value) => value.to_u64().ok_or_else(|| TraceError::new(ErrorKind::Malformed,
+            format!("GC trace `{name}` is not a non-negative integer"))),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not a non-negative integer"),

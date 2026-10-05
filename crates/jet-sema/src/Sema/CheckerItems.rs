@@ -4596,7 +4596,7 @@ impl<'a> Checker<'a> {
                             ),
                             "pattern tests must name a variant on the value's enum type"
                                 .to_string(),
-                            "the `Dyn` variants are Null/Bool/Int/Float/Text/Bytes/DateTime/Array/Object"
+                            "the `Dyn` variants are Null/Bool/Int/Float/Number/Text/Bytes/DateTime/Array/Object"
                                 .to_string(),
                             Some(span),
                         ));

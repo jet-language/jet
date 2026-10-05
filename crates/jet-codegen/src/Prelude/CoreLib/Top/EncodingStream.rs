@@ -1804,7 +1804,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::Dyn::Int(value),
+                        jet_std::Dyn::Int((value).into()),
                     )
                 }
             }
@@ -2211,7 +2211,7 @@ fn jet_jsonl_write_tree(
     match value {
         jet_std::Dyn::Null => writer.write_event(jet_std::DataEvent::Null),
         jet_std::Dyn::Bool(value) => writer.write_event(jet_std::DataEvent::Bool(*value)),
-        jet_std::Dyn::Int(value) => writer.write_event(jet_std::DataEvent::Int(*value)),
+        jet_std::Dyn::Int(value) => writer.write_event(jet_std::DataEvent::Int(value.to_raw())),
         jet_std::Dyn::Float(value) => writer.write_event(jet_std::DataEvent::Float(*value)),
         jet_std::Dyn::Number(text) => writer.write_event(jet_std::DataEvent::Number(text.clone())),
         jet_std::Dyn::Text(value) => writer.write_event(jet_std::DataEvent::Text(value.clone())),
@@ -4162,7 +4162,8 @@ fn jet_enc_json_canonical_tree(
         jet_std::Dyn::Bool(true) => Ok(b"true".to_vec()),
         jet_std::Dyn::Bool(false) => Ok(b"false".to_vec()),
         jet_std::Dyn::Int(n) => {
-            if (*n as f64) as i128 != *n as i128 {
+            let number = n.to_big().checked_widen(false);
+            if number.is_none() {
                 return Err(jet_encoding_error(
                     jet_std::EncodingErrorKind::Unsupported,
                     0,
@@ -4171,7 +4172,7 @@ fn jet_enc_json_canonical_tree(
                     "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text",
                 ));
             }
-            Ok(jet_json_jcs_number(*n as f64).into_bytes())
+            Ok(jet_json_jcs_number(number.expect("checked exact binary64")).into_bytes())
         }
         jet_std::Dyn::Float(f) => {
             if !f.is_finite() {

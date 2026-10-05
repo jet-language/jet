@@ -2955,7 +2955,7 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
     // Rust checks the operand under the surrounding expectation; only a
     // Float carrier changes how a decimal literal operand elaborates.
     operand_expected := Type?{None}
-    if op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true) -> operand_expected = if expected == Val(sema_dyn_type()) -> Val(Type.Float) else -> ~expected
+    if op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true) -> operand_expected = if expected == (Val(sema_dyn_type())) -> Val(Type.Float) else -> ~expected
     value :: sema_check_expression(operand, operand_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if op == UnOp.Neg {
         if value.ty == {
@@ -2991,7 +2991,7 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
 // and adopts the machine carrier only where Float or F32 is expected (Rust
 // `Expr::Float` inference).
 fn sema_expr_expects_machine_float(expected: Type?) -> Bool Never! {
-    expected == (Val(Type.Float)) || expected == (Val(Type.Float32)) || expected == Val(sema_dyn_type())
+    expected == (Val(Type.Float)) || expected == (Val(Type.Float32)) || expected == (Val(sema_dyn_type()))
 }
 
 fn sema_expr_decimal_literal(text: String, span: Span) -> TExpr Never! {

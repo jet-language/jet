@@ -93,38 +93,18 @@ impl super::JetDebug for Dyn {
         render_dyn_json(self, false, 0)
     }
 }
-/// Preserve exact integer semantics at the Dyn boundary. The Int variant
-/// carries only the inline JetInt payload; larger values stay lexical Numbers
-/// so a tagged owner word is never mistaken for a host integer.
+/// Native integer encoders construct an owned exact Int, never a Number token.
 pub(crate) fn jet_dyn_encode_i64(value: i64) -> Dyn {
-    if (jet_foundation::Numeric::JetInt::inline_min()
-        ..=jet_foundation::Numeric::JetInt::inline_max())
-        .contains(&value)
-    {
-        Dyn::Int(value)
-    } else {
-        Dyn::Number(value.to_string())
-    }
+    Dyn::Int(value.into())
 }
 
 pub(crate) fn jet_dyn_encode_u64(value: u64) -> Dyn {
-    if value <= jet_foundation::Numeric::JetInt::inline_max() as u64 {
-        Dyn::Int(value as i64)
-    } else {
-        Dyn::Number(value.to_string())
-    }
+    Dyn::Int(value.into())
 }
 
-/// Jet's `Dyn.Int` holds an exact `Int`. The native carrier's `Int` slot
-/// holds only the inline JetInt payload, so a wider value is carried as its
-/// decimal `Number` lexeme (the rule `jet_encode` uses). These three functions
-/// are the one crossing of the Jet variant over that carrier: construct, test,
-/// and read the payload. A parsed `Number` lexeme is never an `Int` (#4602).
+/// Construct the canonical owned payload. Parsed Number tokens stay distinct.
 pub fn jet_dyn_int(value: jet_foundation::Numeric::JetInt) -> Dyn {
-    value
-        .to_i64()
-        .map(jet_dyn_encode_i64)
-        .unwrap_or_else(|| Dyn::Number(value.to_string_rep()))
+    Dyn::Int(value)
 }
 
 pub fn jet_dyn_is_int(tree: &Dyn) -> bool {
@@ -133,7 +113,7 @@ pub fn jet_dyn_is_int(tree: &Dyn) -> bool {
 
 pub fn jet_dyn_int_payload(tree: &Dyn) -> Option<jet_foundation::Numeric::JetInt> {
     match tree {
-        Dyn::Int(value) => Some(jet_foundation::Numeric::JetInt::from(*value)),
+        Dyn::Int(value) => Some(value.clone()),
         _ => None,
     }
 }
@@ -295,7 +275,7 @@ impl JetDynAccess for Dyn {
     }
     fn int(&self) -> Result<i64, Vec<FieldError>> {
         match self {
-            Dyn::Int(n) => Ok(*n),
+            Dyn::Int(n) => Ok(n.clone().into_raw()),
             // #4602: a parsed number keeps its lexeme as `Number`; reading it
             // as an Int range-checks it exactly as the `decode_*` helpers do
             // for derived codecs — one protocol for hand and derived codecs.
@@ -336,7 +316,7 @@ impl JetDynAccess for Dyn {
         match self {
             Dyn::Float(f) => Ok(*f),
             Dyn::Int(n) => {
-                let value = jet_int_to_f64(*n);
+                let value = n.to_f64();
                 if value.is_finite() {
                     Ok(value)
                 } else {
@@ -364,7 +344,7 @@ impl JetDynAccess for Dyn {
     fn to_text(&self) -> Option<String> {
         match self {
             Dyn::Text(text) => Some(text.clone()),
-            Dyn::Int(value) => Some(jet_int_to_string(*value)),
+            Dyn::Int(value) => Some(value.to_string_rep()),
             Dyn::Float(value) => Some(format!("{:?}", value)),
             Dyn::Bool(value) => Some(value.to_string()),
             Dyn::Number(text) => Some(text.clone()),
@@ -453,6 +433,7 @@ pub(crate) fn jet_dyn_decode_fixed_integer(
     let value = decode_int_with(
         t,
         i128::from,
+        |value| value.to_i128().ok_or_else(|| "exact Int is outside i128".to_string()),
         |text| {
             text.parse::<i128>()
                 .map_err(|_| "exact Int is outside i128".to_string())
@@ -481,10 +462,11 @@ macro_rules! jet_dyn_decode_helpers {
         pub fn decode_int_with<T>(
             t: &Dyn,
             from_i64: impl Fn(i64) -> T,
+            from_exact: impl Fn(&jet_foundation::Numeric::JetInt) -> Result<T, String>,
             parse_exact: impl Fn(&str) -> Result<T, String>,
         ) -> Result<T, Vec<FieldError>> {
             match t {
-                Dyn::Int(n) => Ok(from_i64(*n)),
+                Dyn::Int(n) => from_exact(n).map_err(FieldError::one),
                 Dyn::Float(f)
                     if f.is_finite()
                         && f.fract() == 0.0
@@ -515,13 +497,13 @@ macro_rules! jet_dyn_decode_helpers {
         /// Resident raw exact-Int wrapper. Every successful result is a
         /// managed carrier, including a large `Dyn::Int`.
         pub fn decode_int(t: &Dyn) -> Result<i64, Vec<FieldError>> {
-            decode_int_with(t, jet_int_from_i64, |text| jet_int_from_str(text))
+            decode_int_with(t, jet_int_from_i64, |value| Ok(value.clone().into_raw()), |text| jet_int_from_str(text))
         }
         pub fn decode_float(t: &Dyn) -> Result<f64, Vec<FieldError>> {
             match t {
                 Dyn::Float(f) => Ok(*f),
                 Dyn::Int(n) => {
-                    let value = jet_int_to_f64(*n);
+                    let value = n.to_f64();
                     if value.is_finite() {
                         Ok(value)
                     } else {
@@ -600,7 +582,7 @@ macro_rules! jet_dyn_decode_helpers {
         pub fn decode_f32(t: &Dyn) -> Result<f32, Vec<FieldError>> {
             let value = match t {
                 Dyn::Float(value) => *value,
-                Dyn::Int(value) => jet_int_to_f64(*value),
+                Dyn::Int(value) => value.to_f64(),
                 Dyn::Number(text) => decode_finite_lexeme(text, "F32")?,
                 Dyn::Text(text) if jet_text_cells_active() => text
                     .trim()

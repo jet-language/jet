@@ -1832,7 +1832,7 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
     let mut conflicts = Vec::new();
     add_json_projection(&mut facts, "provider.swiftpm.native", &root);
     match object_field(&root, "version") {
-        Some(Dyn::Int(version)) if matches!(*version, 1..=3) => {
+        Some(Dyn::Int(version)) if matches!(version.to_i64(), Some(1..=3)) => {
             add_typed_text_fact(
                 &mut facts,
                 "provider.swiftpm.lock.version",
@@ -3410,7 +3410,7 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
     }
     if let Some(value) = object_field(&object, "port-version") {
         add_typed_json_fact(&mut facts, "provider.vcpkg.variant.port-version", value);
-        if !matches!(value, Dyn::Int(value) if *value >= 0) {
+        if !matches!(value, Dyn::Int(value) if value.to_u64().is_some()) {
             losses.push("vcpkg `port-version` must be a non-negative integer".to_string());
         }
     }
@@ -3462,7 +3462,7 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
                     }
                 }
                 if let Some(value) = object_field(override_value, "port-version") {
-                    if !matches!(value, Dyn::Int(value) if *value >= 0) {
+                    if !matches!(value, Dyn::Int(value) if value.to_u64().is_some()) {
                         losses.push(format!(
                             "vcpkg override {index} `port-version` must be a non-negative integer"
                         ));

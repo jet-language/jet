@@ -251,9 +251,7 @@ impl<'a> JSONParser<'a> {
             }
             Ok(Dyn::Float(value))
         } else {
-            Ok(Dyn::Int(
-                raw.parse().map_err(|_| format!("invalid number `{raw}`"))?,
-            ))
+            Ok(Dyn::Int(raw.parse::<i64>().map_err(|_| format!("invalid number `{raw}`"))?.into()))
         }
     }
 
@@ -347,7 +345,7 @@ pub fn json_str(v: &Dyn) -> Option<&str> {
 
 pub fn json_int(v: &Dyn) -> Option<i64> {
     match v {
-        Dyn::Int(n) => Some(*n),
+        Dyn::Int(n) => n.to_i64(),
         Dyn::Float(f) => Some(*f as i64),
         _ => None,
     }
@@ -355,7 +353,7 @@ pub fn json_int(v: &Dyn) -> Option<i64> {
 
 pub fn json_u32(v: &Dyn) -> Option<u32> {
     match v {
-        Dyn::Int(n) => u32::try_from(*n).ok(),
+        Dyn::Int(n) => n.to_i64().and_then(|value| u32::try_from(value).ok()),
         _ => None,
     }
 }
@@ -509,10 +507,10 @@ mod tests {
 
     #[test]
     fn protocol_positions_require_nonnegative_integer_u32_values() {
-        assert_eq!(json_u32(&Dyn::Int(42)), Some(42));
-        assert_eq!(json_u32(&Dyn::Int(-1)), None);
+        assert_eq!(json_u32(&Dyn::Int(42.into())), Some(42));
+        assert_eq!(json_u32(&Dyn::Int((-1).into())), None);
         assert_eq!(json_u32(&Dyn::Float(1.5)), None);
-        assert_eq!(json_u32(&Dyn::Int(i64::MAX)), None);
+        assert_eq!(json_u32(&Dyn::Int(i64::MAX.into())), None);
     }
 
     #[test]

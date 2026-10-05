@@ -1379,7 +1379,8 @@ fn string_field(fields: &[(String, Dyn)], name: &str) -> Result<String, String> 
 
 fn integer_field(fields: &[(String, Dyn)], name: &str) -> Result<i64, String> {
     match field(fields, name) {
-        Some(Dyn::Int(value)) => Ok(*value),
+        Some(Dyn::Int(value)) => value.to_i64()
+            .ok_or_else(|| format!("record index field `{name}` must be an integer")),
         Some(Dyn::Number(value)) => value
             .parse::<i64>()
             .map_err(|_| format!("record index field `{name}` must be an integer")),

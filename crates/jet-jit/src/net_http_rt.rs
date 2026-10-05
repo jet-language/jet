@@ -78,7 +78,7 @@ trait __jet_Encode {
 }
 impl __jet_Encode for i64 {
     fn jet_encode(&self) -> JetDyn {
-        JetDyn::Int(*self)
+        JetDyn::Int((*self).into())
     }
 }
 // Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Decode`.

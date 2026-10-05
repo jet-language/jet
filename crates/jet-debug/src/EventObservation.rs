@@ -121,7 +121,7 @@ pub fn render(snapshot: &str) -> Result<String, String> {
 
 fn integer(object: &Dyn, key: &str) -> Result<i64, String> {
     match json_get(object, key) {
-        Some(Dyn::Int(value)) => Ok(*value),
+        Some(Dyn::Int(value)) => value.to_i64().ok_or_else(|| format!("runtime event observation has invalid `{key}`")),
         _ => Err(format!("runtime event observation has invalid `{key}`")),
     }
 }

@@ -2301,8 +2301,6 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "DateTime",
             "Array",
             "Object",
-            "Number",
-            "TypedText",
         ],
     ),
     (

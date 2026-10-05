@@ -1833,6 +1833,7 @@ fn jet_prop_trace_sample(engine: &str, case_index: u64, seed: u64, input: &str) 
 /// encoding kernels, and let `jet_std` re-export that same type below.
 const DYN_FOUNDATION_ROOT: &str = concat!(
     "\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\n",
+    "use jet_foundation::Numeric;\n",
     "mod jet_foundation_dyn {\n",
     include_str!("../../../jet-foundation/src/Dyn.rs"),
     "\n}\n",

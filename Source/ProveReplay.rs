@@ -1836,7 +1836,7 @@ fn parse_recorded_act_payload(
     }
     let line = match object_field(&root, "line") {
         Some(Dyn::Int(line)) => {
-            usize::try_from(*line).map_err(|_| "recorded act line is invalid".to_string())?
+            line.to_usize().ok_or_else(|| "recorded act line is invalid".to_string())?
         }
         _ => return Err("recorded act line must be an integer".into()),
     };
@@ -1919,7 +1919,7 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
             return Err(format!("Time payload has unknown field `{key}`"));
         }
     }
-    if !matches!(object_field(&root, "call_id"), Some(Dyn::Int(0))) {
+    if !matches!(object_field(&root, "call_id"), Some(Dyn::Int(value)) if value.to_i64() == Some(0)) {
         return Err("Time payload call_id is invalid".into());
     }
     if !matches!(
@@ -1942,7 +1942,7 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
         &["bits", "t", "v"],
         &["bits", "t", "v"],
     )?;
-    if !matches!(object_field(unix_ns, "bits"), Some(Dyn::Int(64)))
+    if !matches!(object_field(unix_ns, "bits"), Some(Dyn::Int(value)) if value.to_i64() == Some(64))
         || !matches!(
             object_field(unix_ns, "t").and_then(|value| value.as_str().ok()),
             Some("int")
@@ -2320,10 +2320,10 @@ fn flatten_identity_fields(
         &["frames", "payload_bytes"],
         &["frames", "payload_bytes"],
     )?;
-    if !matches!(object_field(limits, "frames"), Some(Dyn::Int(100_000)))
+    if !matches!(object_field(limits, "frames"), Some(Dyn::Int(value)) if value.to_i64() == Some(100_000))
         || !matches!(
             object_field(limits, "payload_bytes"),
-            Some(Dyn::Int(268_435_456))
+            Some(Dyn::Int(value)) if value.to_i64() == Some(268_435_456)
         )
     {
         return Err("header replay limits are invalid".into());
@@ -2343,7 +2343,8 @@ fn flatten_identity_fields(
         .and_then(|value| value.as_str().ok())
         .ok_or_else(|| "header run outcome is invalid".to_string())?;
     let status = match object_field(run, "status") {
-        Some(Dyn::Int(status)) if (0..=255).contains(status) => *status,
+        Some(Dyn::Int(status)) => status.to_i64().filter(|value| (0..=255).contains(value))
+            .ok_or_else(|| "header run status is invalid".to_string())?,
         _ => return Err("header run status is invalid".into()),
     };
     if !matches!(outcome, "exit" | "panic") {
@@ -2365,8 +2366,8 @@ fn flatten_identity_fields(
         &["major", "minor"],
         &["major", "minor"],
     )?;
-    if !matches!(object_field(version, "major"), Some(Dyn::Int(1)))
-        || !matches!(object_field(version, "minor"), Some(Dyn::Int(0)))
+    if !matches!(object_field(version, "major"), Some(Dyn::Int(value)) if value.to_i64() == Some(1))
+        || !matches!(object_field(version, "minor"), Some(Dyn::Int(value)) if value.to_i64() == Some(0))
     {
         return Err("header version is incompatible".into());
     }

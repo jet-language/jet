@@ -198,7 +198,7 @@ fn decode_devtools_events(
     if let Some(cursor) = object.get("cursor") {
         envelope.set_cursor(match cursor {
             Dyn::Null => None,
-            Dyn::Int(value) if *value >= 0 => Some(*value as u64),
+            Dyn::Int(value) => Some(value.to_u64().ok_or_else(|| "devtools envelope cursor must be a sequence".to_string())?),
             Dyn::Float(value)
                 if value.fract() == 0.0 && *value >= 0.0 && *value <= u64::MAX as f64 =>
             {
@@ -886,10 +886,8 @@ fn devtools_optional_u64(
 ) -> Result<Option<u64>, String> {
     match object.get(key) {
         Some(Dyn::Null) | None => Ok(None),
-        Some(Dyn::Int(value)) if *value >= 0 => u64::try_from(*value)
-            .map(Some)
-            .map_err(|_| format!("devtools event `{key}` must be non-negative")),
-        Some(Dyn::Int(_)) => Err(format!("devtools event `{key}` must be non-negative")),
+        Some(Dyn::Int(value)) => value.to_u64().map(Some)
+            .ok_or_else(|| format!("devtools event `{key}` must be non-negative")),
         Some(_) => Err(format!("devtools event `{key}` must be an integer or null")),
     }
 }
@@ -987,8 +985,8 @@ fn devtools_required_u64(
         .get(key)
         .ok_or_else(|| format!("devtools envelope missing `{key}`"))?;
     match value {
-        Dyn::Int(value) => u64::try_from(*value)
-            .map_err(|_| format!("devtools envelope `{key}` must be non-negative")),
+        Dyn::Int(value) => value.to_u64()
+            .ok_or_else(|| format!("devtools envelope `{key}` must be non-negative")),
         _ => Err(format!("devtools envelope `{key}` must be an integer")),
     }
 }
@@ -3840,8 +3838,7 @@ fn web_stream_required_u64(
     key: &str,
 ) -> Result<u64, (String, String)> {
     match object.get(key) {
-        Some(Dyn::Int(value)) if *value >= 0 => Ok(*value as u64),
-        Some(Dyn::Int(_)) => Err(web_stream_request_error(format!(
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| web_stream_request_error(format!(
             "web stream `{key}` must be non-negative"
         ))),
         Some(_) => Err(web_stream_request_error(format!(

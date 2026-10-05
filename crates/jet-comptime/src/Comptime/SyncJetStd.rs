@@ -74,7 +74,7 @@ pub fn render_dyn_json(tree: &Dyn, pretty: bool, depth: usize) -> String {
     match tree {
         Dyn::Null => "null".to_string(),
         Dyn::Bool(value) => value.to_string(),
-        Dyn::Int(value) => jet_int_to_string(*value),
+        Dyn::Int(value) => value.to_string_rep(),
         Dyn::Float(value) => {
             assert!(value.is_finite(), "JSON cannot encode a non-finite Float");
             format!("{:?}", value)

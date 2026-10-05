@@ -1874,9 +1874,7 @@ fn object_kind(value: &Dyn) -> Result<&str, &'static str> {
 
 fn json_usize(value: Option<&Dyn>) -> Result<usize, &'static str> {
     match value {
-        Some(Dyn::Int(value)) if *value >= 0 => {
-            usize::try_from(*value).map_err(|_| "certificate_invalid")
-        }
+        Some(Dyn::Int(value)) => value.to_usize().ok_or("certificate_invalid"),
         _ => Err("certificate_invalid"),
     }
 }

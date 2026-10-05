@@ -105,7 +105,8 @@ impl StatusValue {
         match value {
             crate::Dyn::Dyn::Null => Ok(Self::Null),
             crate::Dyn::Dyn::Bool(value) => Ok(Self::Bool(*value)),
-            crate::Dyn::Dyn::Int(value) => Ok(Self::Integer(i128::from(*value))),
+            crate::Dyn::Dyn::Int(value) => value.to_i128().map(Self::Integer)
+                .ok_or_else(|| "report integer is outside i128".to_string()),
             crate::Dyn::Dyn::Float(value) if value.is_finite() => {
                 Ok(Self::Float(value.to_string()))
             }

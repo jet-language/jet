@@ -2034,7 +2034,7 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFu
         names := jet_rust_emit_shape_name_map(&ctx, target_type, "db", "core.db.decode")
         rendered := jet_rust_emit_call_arguments(&ctx, function, args, route_info.signature.borrow_mask)
         target := jet_rust_emit_type(&ctx, target_type)
-        return Val("{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({rendered}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target}>(&__jet_db_entries) }}")
+        return Val("{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({rendered}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int((*value).into()), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target}>(&__jet_db_entries) }}")
     }
     if module_name == "core.sys" && member == "decode" {
         if type_args.len() != 1 {

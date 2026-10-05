@@ -26,7 +26,7 @@ pub trait __jet_Decode: Sized {
     fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>>;
 
     fn jet_decode_byte(value: u8) -> Result<Self, Vec<jet_std::FieldError>> {
-        Self::jet_decode(&jet_std::Dyn::Int(i64::from(value)))
+        Self::jet_decode(&jet_std::Dyn::Int((i64::from(value)).into()))
     }
 }
 
@@ -36,14 +36,10 @@ impl __jet_Encode for i64 {
     }
 }
 
-// Exact `Int` owns its one-word carrier.  Values that fit the physical
-// Dyn::Int slot stay there; spilled values retain their decimal lexeme in
-// Dyn::Number instead of exposing the tagged owner word as a number.
+// Encoding exact Int retains its owner and its Int variant at every magnitude.
 impl __jet_Encode for jet_foundation::Numeric::JetInt {
     fn jet_encode(&self) -> jet_std::Dyn {
-        self.to_i64()
-            .map(jet_std::jet_dyn_encode_i64)
-            .unwrap_or_else(|| jet_std::Dyn::Number(self.to_string_rep()))
+        jet_std::Dyn::Int(self.clone())
     }
 }
 
@@ -89,14 +85,14 @@ impl __jet_Encode for JetDateTime {
 }
 impl __jet_Encode for jet_std::Duration {
     fn jet_encode(&self) -> jet_std::Dyn {
-        jet_std::Dyn::Int(jet_codec_duration_encode(self.ns))
+        jet_std::Dyn::Int((jet_codec_duration_encode(self.ns)).into())
     }
 }
 impl __jet_Encode for u8 {
     const __JET_IS_BYTE: bool = true;
 
     fn jet_encode(&self) -> jet_std::Dyn {
-        jet_std::Dyn::Int(i64::from(*self))
+        jet_std::Dyn::Int((i64::from(*self)).into())
     }
 
     fn jet_encode_byte(&self) -> u8 {
@@ -112,7 +108,7 @@ macro_rules! jet_impl_sized_int_encode {
     ($($ty:ty),* $(,)?) => {$(
         impl __jet_Encode for $ty {
             fn jet_encode(&self) -> jet_std::Dyn {
-                jet_std::Dyn::Int(*self as i64)
+                jet_std::Dyn::Int((*self as i64).into())
             }
         }
     )*};
@@ -199,6 +195,7 @@ impl __jet_Decode for jet_foundation::Numeric::JetInt {
         jet_std::decode_int_with(
             t,
             jet_foundation::Numeric::JetInt::from_i64,
+            |value| Ok(value.clone()),
             |text| {
                 jet_foundation::Numeric::CtBigInt::from_str(text)
                     .map(jet_foundation::Numeric::JetInt::from_big)
@@ -368,7 +365,7 @@ impl __jet_Decode for JetDateTime {
     fn jet_decode(t: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         let tree = match t {
             jet_std::Dyn::DateTime(_) => t.clone(),
-            jet_std::Dyn::Text(text) | jet_std::Dyn::TypedText(text) =>
+            jet_std::Dyn::Text(text) =>
                 jet_std::Dyn::parse_datetime(text).map_err(jet_std::FieldError::one)?,
             other => return Err(jet_std::FieldError::one(format!(
                 "expected DateTime, found {}", jet_std::dyn_kind_for(other)))),
@@ -383,6 +380,7 @@ impl __jet_Decode for jet_std::Duration {
         let ns = jet_std::decode_int_with(
             t,
             |value| value,
+            |value| value.to_i64().ok_or_else(|| "exact Int is outside i64".to_owned()),
             |text| {
                 text.parse::<i64>()
                     .map_err(|_| "exact Int is outside i64".to_owned())
@@ -443,12 +441,12 @@ impl __jet_Decode for jet_std::JetDecimal {
                     jet_std::FieldError::one(format!("expected Decimal: {error}"))
                 })
             }
-            jet_std::Dyn::Text(text) => {
+            jet_std::Dyn::Text(text) if jet_std::jet_text_cells_active() => {
                 jet_codec_decimal_decode_text(text).map_err(|error| {
                     jet_std::FieldError::one(format!("expected Decimal: {error}"))
                 })
             }
-            jet_std::Dyn::Int(n) => jet_codec_decimal_decode_int(*n)
+            jet_std::Dyn::Int(n) => jet_std::JetDecimal::from_json_number(&n.to_string_rep())
                 .map_err(jet_std::FieldError::one),
             other => Err(jet_std::FieldError::one(format!(
                 "expected Decimal, found {}", jet_std::dyn_kind_for(other)
@@ -462,7 +460,7 @@ impl<T: __jet_Decode> __jet_Decode for Vec<T> {
             jet_std::Dyn::Bytes(bytes) if <T as __jet_Decode>::__JET_IS_BYTE => {
                 jet_decode_sequence(bytes.len(), |index| T::jet_decode_byte(bytes[index]))
             }
-            jet_std::Dyn::Text(text) | jet_std::Dyn::TypedText(text)
+            jet_std::Dyn::Text(text)
                 if <T as __jet_Decode>::__JET_IS_BYTE => {
                 let bytes = jet_foundation::BaseEncodingStrict::decode_base64(text, false, false)
                     .map_err(|error| jet_std::FieldError::one(error.to_string()))?;

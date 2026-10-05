@@ -1751,10 +1751,10 @@ impl HistoryStrategyBehavior<HistorySchemaCommand> for HistorySchemaStrategy {
 
 fn history_value_dyn(value: &HistoryValue) -> crate::Dyn::Dyn {
     match value {
-        HistoryValue::Integer(value) => crate::Dyn::Dyn::Int(*value),
+        HistoryValue::Integer(value) => crate::Dyn::Dyn::Int((*value).into()),
         HistoryValue::Boolean(value) => crate::Dyn::Dyn::Bool(*value),
         HistoryValue::Text(value) => crate::Dyn::Dyn::Text(value.clone()),
-        HistoryValue::Handle(handle) => crate::Dyn::Dyn::Int(handle.value as i64),
+        HistoryValue::Handle(handle) => crate::Dyn::Dyn::Int((handle.value as i64).into()),
         HistoryValue::Redacted(label) => crate::Dyn::Dyn::Object(vec![
             (
                 "redacted".to_string(),
@@ -1788,7 +1788,7 @@ fn history_schema_command_dyn(
                 command
                     .creates
                     .iter()
-                    .map(|handle| crate::Dyn::Dyn::Int(handle.value as i64))
+                    .map(|handle| crate::Dyn::Dyn::Int((handle.value as i64).into()))
                     .collect(),
             ),
         ),
@@ -1798,7 +1798,7 @@ fn history_schema_command_dyn(
                 command
                     .consumes
                     .iter()
-                    .map(|handle| crate::Dyn::Dyn::Int(handle.value as i64))
+                    .map(|handle| crate::Dyn::Dyn::Int((handle.value as i64).into()))
                     .collect(),
             ),
         ),

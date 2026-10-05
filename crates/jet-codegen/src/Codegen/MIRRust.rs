@@ -8356,7 +8356,7 @@ impl<'a> RustEmitter<'a> {
             .map_or(nominal_name, |(_, leaf)| leaf);
         match nominal_name {
             "HandleID" | "TaskID" | "EventID" => {
-                format!("jet_std::Dyn::Int({value}.value as i64)")
+                format!("jet_std::Dyn::Int(({value}.value as i64).into())")
             }
             _ => format!("{value}.jet_encode()"),
         }
@@ -22623,7 +22623,7 @@ impl<'a> RustEmitter<'a> {
             let root = &self.config.root_prefix;
             let target_ty = self.rust_type(target);
             return format!(
-                "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
+                "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int((*value).into()), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
                 values.join(", ")
             );
         }

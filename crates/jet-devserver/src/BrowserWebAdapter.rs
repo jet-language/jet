@@ -514,11 +514,11 @@ fn parse_dom_state_value(value: &Dyn) -> Result<WebStateValue, String> {
     match kind.as_str() {
         "text" => Ok(WebStateValue::Text(required_json_string(&object, "value")?)),
         "integer" => match object.get("value") {
-            Some(Dyn::Int(value)) => Ok(WebStateValue::Integer(*value)),
+            Some(Dyn::Int(value)) => value.to_i64().map(WebStateValue::Integer).ok_or_else(|| "web DOM integer state value is outside I64".to_string()),
             _ => Err("web DOM integer state value must be a JSON integer".to_string()),
         },
         "unsigned" => match object.get("value") {
-            Some(Dyn::Int(value)) if *value >= 0 => Ok(WebStateValue::Unsigned(*value as u64)),
+            Some(Dyn::Int(value)) => value.to_u64().map(WebStateValue::Unsigned).ok_or_else(|| "web DOM unsigned state value must be a non-negative integer".to_string()),
             _ => Err("web DOM unsigned state value must be a non-negative integer".to_string()),
         },
         "boolean" => match object.get("value") {
@@ -534,7 +534,7 @@ fn parse_dom_state_value(value: &Dyn) -> Result<WebStateValue, String> {
             let mut bytes = Vec::with_capacity(values.len());
             for value in values {
                 match value {
-                    Dyn::Int(value) if (0..=255).contains(value) => bytes.push(*value as u8),
+                    Dyn::Int(value) if value.to_u64().is_some_and(|value| value <= 255) => bytes.push(value.to_u64().unwrap() as u8),
                     _ => return Err("web DOM bytes state value has a non-byte element".to_string()),
                 }
             }
@@ -735,7 +735,7 @@ fn snapshot_from_manifest(
                 let Ok(module) = object_map(module) else {
                     return false;
                 };
-                matches!(module.get("id"), Some(Dyn::Int(id)) if *id == *module_id)
+                matches!(module.get("id"), Some(Dyn::Int(id)) if id.to_i64() == Some(*module_id))
             })
             .ok_or_else(|| format!("web manifest selected module {module_id} is missing"))?;
         let module = object_map(module_value)
@@ -2063,9 +2063,7 @@ fn optional_string<'a>(object: &'a BTreeMap<String, Dyn>, key: &str) -> Option<&
 
 fn required_u64(object: &BTreeMap<String, Dyn>, key: &str) -> Result<u64, String> {
     match object.get(key) {
-        Some(Dyn::Int(value)) if *value >= 0 => {
-            u64::try_from(*value).map_err(|_| format!("browser action `{key}` is out of range"))
-        }
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| format!("browser action `{key}` is out of range")),
         _ => Err(format!(
             "browser action `{key}` must be a non-negative integer"
         )),
@@ -2080,7 +2078,7 @@ fn required_u32(object: &BTreeMap<String, Dyn>, key: &str) -> Result<u32, String
 
 fn optional_u32(object: &BTreeMap<String, Dyn>, key: &str) -> Option<u32> {
     object.get(key).and_then(|value| match value {
-        Dyn::Int(value) if *value >= 0 => u32::try_from(*value).ok(),
+        Dyn::Int(value) => value.to_u64().and_then(|value| value.try_into().ok()),
         _ => None,
     })
 }

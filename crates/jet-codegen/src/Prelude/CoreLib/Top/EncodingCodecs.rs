@@ -77,7 +77,7 @@ fn jet_xml_to_dyn(value: crate::jet_xml_pull::Value) -> jet_std::Dyn {
     match value {
         crate::jet_xml_pull::Value::Null => jet_std::Dyn::Null,
         crate::jet_xml_pull::Value::Bool(value) => jet_std::Dyn::Bool(value),
-        crate::jet_xml_pull::Value::Int(value) => jet_std::Dyn::Int(value),
+        crate::jet_xml_pull::Value::Int(value) => jet_std::Dyn::Int((value).into()),
         crate::jet_xml_pull::Value::Text(value) => jet_std::Dyn::Text(value),
         crate::jet_xml_pull::Value::Array(values) => jet_std::Dyn::Array(
             values.into_iter().map(jet_xml_to_dyn).collect(),
@@ -95,7 +95,8 @@ fn jet_xml_from_dyn(value: &jet_std::Dyn) -> Result<crate::jet_xml_pull::Value, 
     match value {
         jet_std::Dyn::Null => Ok(crate::jet_xml_pull::Value::Null),
         jet_std::Dyn::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
-        jet_std::Dyn::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
+        jet_std::Dyn::Int(value) => value.to_i64().map(crate::jet_xml_pull::Value::Int)
+            .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, 0, 1, 1, "XML integer is outside I64")),
         jet_std::Dyn::Number(text) => Ok(crate::jet_xml_pull::Value::Text(text.clone())),
         jet_std::Dyn::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
         jet_std::Dyn::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
@@ -362,67 +363,12 @@ fn jet_enc_xml_decode_bytes<T: __jet_Decode>(
     T::jet_decode(&jet_xml_to_dyn(projected))
 }
 
-fn jet_cbor_value_error(
-    path: &str,
-    reason: impl Into<String>,
-) -> jet_std::EncodingError {
-    jet_std::EncodingError::new(
-        jet_std::EncodingFormat::CBOR,
-        jet_std::EncodingErrorKind::Unsupported,
-        0,
-        Err(JetAbsent),
-        Err(JetAbsent),
-        path,
-        reason,
-    )
-}
 
 fn jet_cbor_value_at(
     value: &jet_std::Dyn,
     path: &str,
 ) -> Result<crate::jet_cbor_kernel::Value, jet_std::EncodingError> {
-    match value {
-        jet_std::Dyn::Null => Ok(crate::jet_cbor_kernel::Value::Null),
-        jet_std::Dyn::Bool(value) => Ok(crate::jet_cbor_kernel::Value::Bool(*value)),
-        jet_std::Dyn::Int(value) => Ok(crate::jet_cbor_kernel::Value::Int(*value)),
-        jet_std::Dyn::Float(value) => Ok(crate::jet_cbor_kernel::Value::Float(*value)),
-        // #4602: a number lexeme crosses as the CBOR number it spells: an
-        // integer in range as major 0/1, anything else as a finite float64.
-        jet_std::Dyn::Number(text) => {
-            if let Ok(value) = text.parse::<i64>() {
-                Ok(crate::jet_cbor_kernel::Value::Int(value))
-            } else {
-                match text.parse::<f64>() {
-                    Ok(value) if value.is_finite() => {
-                        Ok(crate::jet_cbor_kernel::Value::Float(value))
-                    }
-                    _ => Err(jet_cbor_value_error(
-                        path,
-                        format!("number {text} is outside the CBOR Int and float64 range"),
-                    )),
-                }
-            }
-        }
-        jet_std::Dyn::Text(value) => Ok(crate::jet_cbor_kernel::Value::Text(value.clone())),
-        jet_std::Dyn::Bytes(value) => Ok(crate::jet_cbor_kernel::Value::Bytes(value.clone())),
-        jet_std::Dyn::DateTime(value) => Ok(crate::jet_cbor_kernel::Value::DateTime(*value)),
-        jet_std::Dyn::Array(values) => {
-            let mut output = Vec::with_capacity(values.len());
-            for (index, value) in values.iter().enumerate() {
-                let child_path = format!("{path}[{index}]");
-                output.push(jet_cbor_value_at(value, &child_path)?);
-            }
-            Ok(crate::jet_cbor_kernel::Value::Array(output))
-        }
-        jet_std::Dyn::Object(entries) => {
-            let mut output = Vec::with_capacity(entries.len());
-            for (key, value) in entries {
-                let child_path = format!("{path}[{key:?}]");
-                output.push((key.clone(), jet_cbor_value_at(value, &child_path)?));
-            }
-            Ok(crate::jet_cbor_kernel::Value::Object(output))
-        }
-    }
+    crate::jet_cbor_kernel::from_dyn_at(value, path).map_err(jet_cbor_error)
 }
 
 fn jet_cbor_value(
@@ -435,7 +381,7 @@ fn jet_cbor_tree(value: crate::jet_cbor_kernel::Value) -> jet_std::Dyn {
     match value {
         crate::jet_cbor_kernel::Value::Null => jet_std::Dyn::Null,
         crate::jet_cbor_kernel::Value::Bool(value) => jet_std::Dyn::Bool(value),
-        crate::jet_cbor_kernel::Value::Int(value) => jet_std::Dyn::Int(value),
+        crate::jet_cbor_kernel::Value::Int(value) => jet_std::Dyn::Int((value).into()),
         crate::jet_cbor_kernel::Value::Float(value) => jet_std::Dyn::Float(value),
         crate::jet_cbor_kernel::Value::Text(value) => jet_std::Dyn::Text(value),
         crate::jet_cbor_kernel::Value::Bytes(value) => jet_std::Dyn::Bytes(value),

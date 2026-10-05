@@ -808,8 +808,8 @@ fn jet_error_json_u32(
     name: &str,
 ) -> Result<u32, String> {
     match value {
-        crate::Dyn::Dyn::Int(value) => u32::try_from(*value)
-            .map_err(|_| format!("error report {name} is not a u32")),
+        crate::Dyn::Dyn::Int(value) => value.to_i64().and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| format!("error report {name} is not a u32")),
         _ => Err(format!("error report {name} is not an integer")),
     }
 }

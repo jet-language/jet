@@ -28,7 +28,7 @@
         match t {
             Dyn::Null => "null".to_string(),
             Dyn::Bool(b) => b.to_string(),
-            Dyn::Int(n) => jet_int_to_string(*n),
+            Dyn::Int(n) => n.to_string_rep(),
             Dyn::Float(f) => {
                 assert!(f.is_finite(), "JSON cannot encode a non-finite Float");
                 format!("{:?}", f)

@@ -2235,7 +2235,7 @@ fn read_compile_phases(
         };
         let duration_ms = match duration {
             Dyn::Float(value) => *value,
-            Dyn::Int(value) => *value as f64,
+            Dyn::Int(value) => value.to_f64(),
             Dyn::Number(value) => value.parse::<f64>().map_err(|_| {
                 ProviderFailure::malformed("explain-build node duration is not a number")
             })?,

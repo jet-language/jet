@@ -1924,7 +1924,7 @@ fn json_number(
     field: &str,
 ) -> Result<i64, String> {
     match object_field(object, field) {
-        Some(Dyn::Int(value)) => Ok(*value),
+        Some(Dyn::Int(value)) => value.to_i64().ok_or_else(|| format!("C toolchain manifest field `{field}` is outside I64")),
         _ => Err(format!("C toolchain manifest field `{field}` is not a number")),
     }
 }

@@ -52,7 +52,7 @@ fn sema_dyn_wrappable(ty: Type) -> Bool Never! {
 }
 
 fn sema_dyn_site(expr: Expr) -> String Never! {
-    if expr == {
+    return if expr == {
         .Ident(name, _) -> name
         .Field(base, member, _) -> "{sema_dyn_site(base)}.{member}"
         .Index(base, index, _, _) -> "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
@@ -61,7 +61,11 @@ fn sema_dyn_site(expr: Expr) -> String Never! {
         .Float(value, _, _, raw) -> raw ?? "{value}"
         .Bool(value, _) -> if value -> "true" else -> "false"
         .Unary(op, inner, _) -> {
-            if op == UnOp.Neg && (inner == {.Int(_, _, _, _) | .Float(_, _, _, _) -> true else -> false}) -> return "-{sema_dyn_site(inner)}"
+            literal :: if inner == {
+                .Int(_, _, _, _) | .Float(_, _, _, _) -> true
+                else -> false
+            }
+            if op == UnOp.Neg && literal -> return "-{sema_dyn_site(inner)}"
             "…"
         }
         .Str(parts, _) -> {

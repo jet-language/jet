@@ -750,7 +750,7 @@ fn parse_history_artifact_detail(detail: &str) -> Option<String> {
         let version = fields
             .iter()
             .find_map(|(key, value)| (key == "version").then_some(value));
-        if schema != Some("jet.testing.history") || !matches!(version, Some(Dyn::Int(1))) {
+        if schema != Some("jet.testing.history") || !matches!(version, Some(Dyn::Int(value)) if value.to_i64() == Some(1)) {
             return None;
         }
         Some(artifact.to_string())
@@ -840,7 +840,7 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
             .iter()
             .find_map(|(key, value)| (key == name).then_some(value))
     };
-    if !matches!(field("version"), Some(Dyn::Int(1)))
+    if !matches!(field("version"), Some(Dyn::Int(value)) if value.to_i64() == Some(1))
         || !matches!(
             field("target").and_then(|value| value.as_str().ok()),
             Some(value) if value == target.input_sha256
@@ -853,7 +853,7 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
         return None;
     }
     let parse_u64 = |value: Option<&Dyn>| match value {
-        Some(Dyn::Int(value)) if *value >= 0 => u64::try_from(*value).ok(),
+        Some(Dyn::Int(value)) => value.to_u64(),
         Some(Dyn::Text(value)) => value.parse().ok(),
         _ => None,
     };

@@ -76,7 +76,7 @@
                     }
                     Item::KeyVal { path, value } => {
                         set_key(&mut root, &current, &path, value_to_tree(value)).map_err(
-                            |message| ParseError { line, message },
+                            |message| ParseError { line, message, unsupported: false },
                         )?;
                     }
                 }
@@ -658,7 +658,11 @@
                     }
                     self.skip_inline_ws();
                     let value = self.value(depth + 1)?;
-                    entries.push((path.join("."), value));
+                    let key = path.join(".");
+                    if entries.iter().any(|(name, _)| name == &key) {
+                        return Err(self.err(format!("duplicate key `{key}`")));
+                    }
+                    entries.push((key, value));
                     self.skip_inline_ws();
                     match self.bump() {
                         Some(',') => continue,
@@ -751,7 +755,6 @@
                         }
                     }
                 }
-                let mut is_float = false;
                 while let Some(c) = self.peek() {
                     match c {
                         '0'..='9' | '_' => {
@@ -759,21 +762,14 @@
                             self.pos += 1;
                         }
                         '.' | 'e' | 'E' | '+' | '-' => {
-                            is_float = true;
                             tok.push(c);
                             self.pos += 1;
                         }
                         _ => break,
                     }
                 }
-                let clean: String = tok.chars().filter(|c| *c != '_').collect();
-                let valid = if is_float {
-                    clean.parse::<f64>().is_ok()
-                } else {
-                    clean.parse::<i64>().is_ok()
-                };
                 match crate::jet_json_number::number_lexeme(&tok) {
-                    Some(lexeme) if valid => Ok(Value::Number(lexeme)),
+                    Some(lexeme) => Ok(Value::Number(lexeme)),
                     _ => Err(self.err(crate::jet_encoding_errors::toml_invalid_number(&tok))),
                 }
             }
@@ -800,8 +796,8 @@
                 if tok.is_empty() {
                     return Err(self.err(crate::jet_encoding_errors::TOML_EXPECTED_RADIX_DIGITS));
                 }
-                i64::from_str_radix(&tok, radix)
-                    .map(|value| Value::Number(value.to_string()))
+                crate::Numeric::CtBigInt::from_radix(&tok, radix)
+                    .map(|value| Value::Number(value.to_string_rep()))
                     .map_err(|_| {
                         self.err(crate::jet_encoding_errors::toml_invalid_radix_integer(radix, &tok))
                     })
@@ -815,6 +811,22 @@
         #[cfg(test)]
         mod tests {
             use super::{parse_to_tree, MAX_TOML_DEPTH};
+
+            #[test]
+            fn dyn_rules_reject_duplicate_keys_in_every_map_form() {
+                for text in ["a = 1\na = 2", "a = { x = 1, x = 2 }", "a.x = 1\n[a]\nx = 2"] {
+                    assert!(parse_to_tree(text).is_err(), "host TOML accepted {text}");
+                }
+            }
+
+            #[test]
+            fn dyn_rules_preserve_huge_number_lexemes() {
+                let huge = "12345678901234567890123456789012345678901234567890";
+                for token in [huge, "1e400"] {
+                    let tree = parse_to_tree(&format!("a = {token}")).expect("host TOML number");
+                    assert!(matches!(tree.get("a"), Some(super::Dyn::Number(value)) if value == token));
+                }
+            }
 
             fn dotted_path(depth: usize) -> String {
                 (0..depth)

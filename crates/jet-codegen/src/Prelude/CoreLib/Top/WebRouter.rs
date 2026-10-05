@@ -349,7 +349,7 @@ fn jet_web_router_json_value_for_field(
         JetWebRouterValueType::String => Ok(jet_std::Dyn::Text(raw.to_string())),
         JetWebRouterValueType::Int => raw
             .parse::<i64>()
-            .map(jet_std::Dyn::Int)
+            .map(|value| jet_std::Dyn::Int(value.into()))
             .map_err(|_| format!("parameter `{}` expects Int, got {raw}", field.name)),
         JetWebRouterValueType::Bool => match raw {
             "true" => Ok(jet_std::Dyn::Bool(true)),

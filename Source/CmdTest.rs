@@ -565,7 +565,7 @@ fn object_text<'a>(value: &'a Dyn, key: &str) -> Option<&'a str> {
 
 fn object_int(value: &Dyn, key: &str) -> Option<i64> {
     match object_value(value, key)? {
-        Dyn::Int(value) => Some(*value),
+        Dyn::Int(value) => value.to_i64(),
         Dyn::Number(value) => value.parse().ok(),
         _ => None,
     }

@@ -1766,9 +1766,7 @@ fn read_dbvalue(handle: i64) -> Option<wire::DBValue> {
 fn dbvalue_to_dyn(value: wire::DBValue) -> crate::Encoding::json_rt::Dyn {
     match value {
         wire::DBValue::Null => crate::Encoding::json_rt::Dyn::Null,
-        wire::DBValue::Int(value) => crate::Encoding::json_rt::Dyn::Int(
-            crate::Encoding::json_rt::jet_int_from_i64(value),
-        ),
+        wire::DBValue::Int(value) => crate::Encoding::json_rt::Dyn::Int(value.into()),
         wire::DBValue::Float(value) => crate::Encoding::json_rt::Dyn::Float(value),
         wire::DBValue::Text(value) => crate::Encoding::json_rt::Dyn::Text(value),
         wire::DBValue::Bool(value) => crate::Encoding::json_rt::Dyn::Bool(value),
