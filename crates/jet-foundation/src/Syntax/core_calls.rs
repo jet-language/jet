@@ -1478,7 +1478,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 254f63fd495946c694c84804daaf475a1c50834cbb4c2a6ec269055f8e735597
+// Source SHA-256: 4b0d9ca96f8c32268c78b269f1988d835371943e024a346cc3f9f17ca4a613c5
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2324,20 +2324,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.auth", "magic_link_consume", "jet_auth_magic_link_consume", true, &[false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot().with_jit_symbol("jet_jit_auth_magic_link_consume"),
     CoreCallRecord::new( "core.auth", "oauth_begin", "jet_auth_oauth_begin", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot().with_jit_symbol("jet_jit_auth_oauth_begin"),
     CoreCallRecord::new( "core.auth", "oauth_finish", "jet_auth_oauth_finish", true, &[false, false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot().with_jit_symbol("jet_jit_auth_oauth_finish"),
-    CoreCallRecord::new( "core.sync", "text_merge", "jet_sync_text_merge", true, &[true, true], ),
-    CoreCallRecord::new( "core.sync", "text_show", "jet_sync_text_show", true, &[true], ),
-    CoreCallRecord::new( "core.sync", "text_metadata", "jet_sync_text_metadata", true, &[true], ),
-    CoreCallRecord::new( "core.sync", "counter_merge", "jet_sync_counter_merge", true, &[true, true], ),
-    CoreCallRecord::new( "core.sync", "counter_value", "jet_sync_counter_value", true, &[true], ) .with_native_int_result(),
-    CoreCallRecord::new("core.sync", "map_new", "jet_sync_map_new", true, &[]),
-    CoreCallRecord::new( "core.sync", "map_get", "jet_sync_map_get", true, &[true, true], ),
-    CoreCallRecord::new( "core.sync", "map_merge", "jet_sync_map_merge", true, &[true, true], ),
-    CoreCallRecord::new("core.sync", "map_show", "jet_sync_map_show", true, &[true]),
-    CoreCallRecord::new("core.sync", "list_new", "jet_sync_list_new", true, &[]),
-    CoreCallRecord::new( "core.sync", "list_merge", "jet_sync_list_merge", true, &[true, true], ),
-    CoreCallRecord::new( "core.sync", "list_show", "jet_sync_list_show", true, &[true], ),
-    CoreCallRecord::new( "core.sync", "policy_allows", "jet_db_policy_allows", true, &[true, true, true], ),
-    CoreCallRecord::new( "core.sync", "policy_show", "jet_db_policy_show", true, &[true], ),
     CoreCallRecord::new("core.net", "ip_addr", "jet_net_ip_addr", true, &[true]) .with_pure_route(CoreCallPureRoute::Net),
     CoreCallRecord::new("core.net", "gethostname", "jet_std_os_hostname", true, &[]),
     CoreCallRecord::new( "core.net", "ip_to_string", "jet_net_ip_to_string", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net),
@@ -3087,11 +3073,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.yaml", "to_string", "jet_enc_yaml_to_string", true, &[true]).with_jit_symbol("jet_jit_yaml_to_string"),
     CoreCallRecord::new("core.encoding.xml", "to_bytes", "jet_std_xml_to_bytes", true, &[true, true]).with_jit_symbol("jet_jit_xml_to_bytes"),
     CoreCallRecord::new("core.service", "workflow_start", "jet_services_workflow_start", true, &[true, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sync", "text_edit", "jet_sync_text_edit", true, &[true, false, false, false, false]).without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "workflow_outcome", "jet_services_workflow_outcome", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sync", "list_push", "jet_sync_list_push", true, &[false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "workflow_history", "jet_services_workflow_history", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sync", "policy_new", "jet_db_policy_new", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_db_policy"),
     sema_web_call("core.web", "on", "jet_web_on", &[true, true, false]),
 ];
 // END GENERATED CORE CALLS
