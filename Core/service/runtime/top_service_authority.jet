@@ -78,7 +78,7 @@ impl<T> JetServiceChannel<T> {
     #Unsafe("dequeue buffered values before reporting closed, under the same FIFO mutex")
     fn try_recv(self: &JetServiceChannel<T>) -> T JetServiceChannelError<T>! {
         values := self.values.lock().unwrap()
-        if Val(value) :: values.pop_front() { return Ok(^value) }
+        if values.pop_front() == .Val(value) { return Ok(^value) }
         if self.closed.load(Ordering.Acquire) { Err(JetServiceChannelError.Closed) } else { Err(JetServiceChannelError.Empty) }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:82
@@ -269,7 +269,7 @@ impl Drop for ServiceAuthorityFileLock {
 fn service_authority_file_lock(store: &String,suffix: &String) -> ServiceAuthorityFileLock JetServiceError! {
     service_authority_validate_store_path(store)?
     path :: OSPath.from("{store}.{suffix}.lock")
-    if Val(parent) :: path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) {
+    if path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) == .Val(parent) {
         fs.create_dir_all(parent).map_err(fn(error) { service_authority_error("could not create service lock directory: {error}") })?
     }
     started :: service_authority_now()
@@ -292,7 +292,7 @@ fn service_authority_file_lock(store: &String,suffix: &String) -> ServiceAuthori
                         .is_some_and(fn(age) { age >= Duration.from_millis(SERVICE_AUTH_LOCK_STALE_MS as U64) })
                     if stale {
                         _ :: fs.remove_file(&path)
-                        continue
+                        next
                     }
                     if now.saturating_sub(started) >= SERVICE_AUTH_LOCK_TIMEOUT_MS {
                         return Err(service_authority_error("service authority lock remained held beyond its recovery budget"))
@@ -307,7 +307,7 @@ fn service_authority_file_lock(store: &String,suffix: &String) -> ServiceAuthori
 fn service_authority_operation_lock(runtime: &JetServiceRuntime,operation: &String) -> ServiceAuthorityFileLock JetServiceError! {
     input := [U8].new()
     store :: service_authority_store_identity(&runtime.store)
-    for field in [store.as_bytes(),operation.as_bytes()] {
+    loop field in [store.as_bytes(),operation.as_bytes()] {
         input.extend_from_slice(&(field.len() as U64).to_be_bytes())
         input.extend_from_slice(field)
     }
@@ -334,7 +334,7 @@ fn service_authority_store_identity(store: &String) -> String {
     path :: OSPath.from(store)
     absolute :: if path.is_absolute() { path.to_path_buf() } else { env.current_dir().map(fn(directory) { directory.join(&path) }).unwrap_or_else(fn(_) { path.to_path_buf() }) }
     normalized := OSPath.new()
-    for component in absolute.components() {
+    loop component in absolute.components() {
         match component {
             Component.CurDir -> {},
             Component.ParentDir -> { _ :: normalized.pop() },
@@ -427,7 +427,7 @@ fn service_authority_provider_issue() -> String JetServiceError! {
     token :: jet_crypto_entropy_bytes(SERVICE_AUTHORITY_TOKEN_BYTES as I64).map_err(fn(_) { JetServiceError.Policy("service authority cannot obtain cryptographic entropy") })?
     authority := String.with_capacity(SERVICE_AUTHORITY_TOKEN_PREFIX.len()+SERVICE_AUTHORITY_TOKEN_BYTES*2)
     authority.push_str(SERVICE_AUTHORITY_TOKEN_PREFIX)
-    for byte in token { authority.push_str(&"{byte:02x}") }
+    loop byte in token { authority.push_str(&"{byte:02x}") }
     Ok(^authority)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:648
@@ -441,7 +441,7 @@ fn service_authority_signing_key(authority: &String) -> Array<U8,SERVICE_AUTHORI
 fn service_authority_directory_payload(authority: &String,tree_name: &String,name: &String,endpoint: &JetServiceEndpoint) -> [U8] {
     generation :: endpoint.generation.to_string()
     payload := [U8].new()
-    for field in ["jet-service-directory-v2".as_bytes(),authority.as_bytes(),tree_name.as_bytes(),name.as_bytes(),endpoint.tree.as_bytes(),endpoint.worker.as_bytes(),generation.as_bytes()] {
+    loop field in ["jet-service-directory-v2".as_bytes(),authority.as_bytes(),tree_name.as_bytes(),name.as_bytes(),endpoint.tree.as_bytes(),endpoint.worker.as_bytes(),generation.as_bytes()] {
         payload.extend_from_slice(&(field.len() as U64).to_be_bytes())
         payload.extend_from_slice(field)
     }
@@ -504,7 +504,7 @@ fn service_authority_register(endpoint: &JetServiceEndpoint,started: Bool) -> ()
     if !registry.contains_key(&key) && registry.values().any(fn(state) { state.authority == endpoint.authority && state.tree != endpoint.tree }) {
         return Err(JetServiceError.Revoked("service authority does not match its registered tree"))
     }
-    if Val(state) :: registry.get_mut(&key) {
+    if registry.get_mut(&key) == .Val(state) {
         if state.tree != endpoint.tree || state.worker != endpoint.worker { return Err(JetServiceError.Revoked("service endpoint authority does not match its tree")) }
         if started && state.partitioned { return Err(JetServiceError.Partitioned("service endpoint authority is partitioned")) }
         if state.generation != endpoint.generation {
@@ -567,7 +567,7 @@ fn service_authority_adopt_alias(source: &JetServiceEndpoint,authority: String) 
     source_state :: registry.get(&source_key).cloned().ok_or_else(fn() { JetServiceError.Partitioned("service endpoint authority is not registered") })?
     if source_state.tree != alias.tree || source_state.worker != alias.worker { return Err(JetServiceError.Revoked("service authority alias does not match its worker")) }
     if source_state.partitioned || !source_state.started { return Err(JetServiceError.Partitioned("service authority alias source is not active")) }
-    if Val(existing) :: registry.get(&alias_key) {
+    if registry.get(&alias_key) == .Val(existing) {
         if existing.tree != alias.tree || existing.worker != alias.worker || existing.generation != alias.generation {
             return Err(JetServiceError.Revoked("service authority alias is already bound to another worker"))
         }
@@ -707,8 +707,8 @@ fn service_authority_current_endpoint(runtime: &JetServiceRuntime,entry: &Servic
         candidates := [(String,String,String,I64,String?)].new()
         exact_stopped := false
         newer_generation := false
-        for state in registry.values() {
-            if state.tree != entry.tree || state.worker != entry.worker || state.partitioned { continue }
+        loop state in registry.values() {
+            if state.tree != entry.tree || state.worker != entry.worker || state.partitioned { next }
             // A stopped replacement never revokes a still-running source generation.
             if state.generation > entry.generation && state.started { newer_generation = true }
             candidate :: (state.authority.clone(),state.tree.clone(),state.worker.clone(),state.generation,
@@ -723,7 +723,7 @@ fn service_authority_current_endpoint(runtime: &JetServiceRuntime,entry: &Servic
         }
         (^exact,^newer_exact,^candidates,exact_stopped,newer_generation)
     }
-    selected :: if Val(exact) :: exact { ^exact } else if Val(newer_exact) :: newer_exact { ^newer_exact } else {
+    selected :: if exact == .Val(exact) { ^exact } else if newer_exact == .Val(newer_exact) { ^newer_exact } else {
         bound :: candidates.iter().filter(fn(candidate) { candidate.4.as_ref() == Some(&store) }).collect<[&(String,String,String,I64,String?)]>()
         if bound.len() == 1 { bound[0].clone() }
         else if bound.len() > 1 { return Err(JetServiceError.Ambiguous("multiple active service authorities are bound to this store")) }
@@ -808,7 +808,7 @@ fn service_authority_bind_store(runtime: &JetServiceRuntime,endpoint: &JetServic
 fn service_authority_remove_pending(store: &String,id: &String) -> () JetServiceError! {
     pending := service_pending_registry().lock().map_err(fn(_) { service_authority_error("service pending registry lock is poisoned") })?
     store_identity :: service_authority_store_identity(store)
-    for queue in pending.values_mut() {
+    loop queue in pending.values_mut() {
         queue.retain(fn((queued_id,_,queued_store)) { queued_id != id || service_authority_store_identity(queued_store) != store_identity })
     }
     Ok(())
@@ -821,7 +821,7 @@ fn service_authority_remove_pending_entry(runtime: &JetServiceRuntime,entry: &Se
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1555
 fn service_authority_cleanup_expired(runtime: &JetServiceRuntime,entries: &[ServiceAuthorityEntry],now: I64) -> Bool JetServiceError! {
     cleaned := false
-    for entry in entries {
+    loop entry in entries {
         if service_authority_entry_expired(entry,now) {
             service_authority_append_event(runtime,entry,JetDeliveryState.DeadLettered,entry.attempts,now)?
             service_authority_remove_pending_entry(runtime,entry)?
@@ -874,8 +874,8 @@ pub fn jet_services_authority_take_pending(endpoint: &JetServiceEndpoint,capacit
             entry.state == JetDeliveryState.Cancelled || entry.dead || !service_authority_entry_routes_to_endpoint(&runtime,entry,endpoint) ||
             (entry.delivered_to_worker && entry.delivered) || (entry.retained_until.is_some() && !queued) ||
             service_authority_entry_expired(entry,service_authority_now()) || skip_ids.iter().any(fn(id) { id == &entry.id }) ||
-            (entry.delivered_to_worker && !entry.delivered) { continue }
-        if queued { continue }
+            (entry.delivered_to_worker && !entry.delivered) { next }
+        if queued { next }
         if queue.len() >= SERVICE_AUTH_MAX_PENDING { return Err(JetServiceError.Full("service authority pending delivery queue is full")) }
         queue.push((entry.id.clone(),entry.message.clone(),store.clone()))
     }
@@ -922,7 +922,7 @@ pub fn jet_services_authority_requeue_pending(endpoint: &JetServiceEndpoint,entr
     queue := pending.entry(^key).or_default()
     if queue.len().saturating_add(normalized_entries.len()) > SERVICE_AUTH_MAX_PENDING { return Err(JetServiceError.Full("service authority pending delivery queue is full")) }
     restored := [(String,String,String)].with_capacity(normalized_entries.len()+queue.len())
-    for entry in normalized_entries {
+    loop entry in normalized_entries {
         if !queue.iter().any(fn(queued) { queued == &entry }) && !restored.iter().any(fn(queued) { queued == &entry }) { restored.push(^entry) }
     }
     restored.append(queue)

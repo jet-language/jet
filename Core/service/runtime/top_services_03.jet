@@ -19,14 +19,14 @@ fn jet_services_rollout_path(authority: &JetServiceStateAuthority) -> String Jet
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3761
 fn jet_services_rollout_operation_lock(tree: &JetServiceTree) -> ServiceAuthorityFileLock? JetServiceError! {
-    if Val(authority) :: tree.state_authority.as_ref() {
+    if tree.state_authority.as_ref() == .Val(authority) {
         return service_authority_file_lock(&authority.store, "rollout-operation").map(fn(lock) { Val(^lock) })
     }
     Ok(None)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3770
 fn jet_services_rollout_store_assert_current(tree: &JetServiceTree) -> () JetServiceError! {
-    if Val(persisted) :: jet_services_rollout_store_load(tree)? {
+    if jet_services_rollout_store_load(tree)? == .Val(persisted) {
         if persisted != jet_services_rollout_snapshot(tree) {
             return Err(JetServiceError.Stale("service rollout state changed since this controller started"))
         }
@@ -71,7 +71,7 @@ fn jet_services_rollout_store_write(tree: &JetServiceTree) -> () JetServiceError
         _guard :: service_authority_lock().lock().map_err(fn(_) { jet_services_state_error("service rollout lock is poisoned") })?
         _file_lock :: service_authority_file_lock(&path, "rollout")?
         rollout_path :: OSPath.new(&path)
-        if Val(parent) :: rollout_path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) {
+        if rollout_path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) == .Val(parent) {
             create_dir_all(parent).map_err(fn(error) { jet_services_state_error("cannot create service rollout directory: {error}") })?
         }
         jet_services_state_validate_path(rollout_path)?
@@ -100,7 +100,7 @@ fn jet_services_restore_rollout_state(tree: &JetServiceTree) -> () JetServiceErr
         return Err(jet_services_state_error("rollout journal worker topology does not match the service declaration"))
     }
     receipt :: state.last_upgrade.clone()
-    if Val(receipt) :: &receipt {
+    if (&receipt) == .Val(receipt) {
         if receipt.rollback_available {
             authority :: tree.state_authority.as_ref().ok_or_else(fn() { jet_services_state_error("rollout receipt has no state authority") })?
             expected_store :: jet_services_rollback_store_path(authority, receipt.from_generation)?
@@ -284,7 +284,7 @@ fn jet_services_state_store_write_unlocked(authority: &JetServiceStateAuthority,
     jet_services_state_validate_path(path)?
     // GATE #4565: kernel primitive
     #Unsafe("create a private state temporary file, sync and rename atomically; remove failed temporaries") {
-        if Val(parent) :: path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) {
+        if path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) == .Val(parent) {
             create_dir_all(parent).map_err(fn(error) { jet_services_state_error("cannot create service state directory: {error}") })?
         }
         // Check again after creating missing directories, without claiming a cross-process filesystem lock.
@@ -619,7 +619,7 @@ fn jet_services_workflow_replay_retry(workflow: &JetServiceWorkflow, key: &Strin
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:4903
 // The sole workflow record reader is also the writer's in-memory apply path.
 fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &String) -> () JetServiceError! {
-    if Val(fields) :: payload.strip_prefix("workflow-start:") {
+    if payload.strip_prefix("workflow-start:") == .Val(fields) {
         (run_id_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow start run id is missing") })?
         run_id :: run_id_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow start run id is invalid") })?
         (version_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow start version is missing") })?
@@ -633,7 +633,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         }
         workflows.push(JetServiceWorkflow{id: ^id, run_id, version, steps: [], history: ["start@v{version}"],
             replay_cursor: 0, status: JetTaskStatus.Running, activity_outcomes: [], outcome: None})
-    } else if Val(fields) :: payload.strip_prefix("workflow-step:") {
+    } else if payload.strip_prefix("workflow-step:") == .Val(fields) {
         (run_id_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow step run id is missing") })?
         run_id :: run_id_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow step run id is invalid") })?
         step :: jet_services_workflow_field(fields, "step")?.to_string()
@@ -644,7 +644,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         if workflow.steps.len() >= MAX_SERVICE_WORKFLOW_STEPS -> return Err(jet_services_state_error("workflow step history limit exceeded"))
         workflow.steps.push(step.clone())
         workflow.history.push("step:{step}")
-    } else if Val(fields) :: payload.strip_prefix("workflow-wait-sleep:") {
+    } else if payload.strip_prefix("workflow-wait-sleep:") == .Val(fields) {
         (run_id_text, nanos_text) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow sleep run id or duration is missing") })?
         run_id :: run_id_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow sleep run id is invalid") })?
         nanos :: nanos_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow sleep duration is invalid") })?
@@ -654,7 +654,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         if workflow.outcome.is_some() -> return Err(jet_services_state_error("workflow sleep follows a terminal workflow outcome"))
         workflow.history.push("sleep:{nanos}")
         workflow.status = JetTaskStatus.Running
-    } else if Val(fields) :: payload.strip_prefix("workflow-wait-sleep-cancelled:") {
+    } else if payload.strip_prefix("workflow-wait-sleep-cancelled:") == .Val(fields) {
         run_id :: fields.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow cancelled sleep run id is invalid") })?
         if run_id < 1 -> return Err(jet_services_state_error("workflow cancelled sleep run id is invalid"))
         workflow :: workflows.iter_mut().find(fn(workflow) { workflow.run_id == run_id })
@@ -665,7 +665,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         workflow.history.push("sleep-cancelled")
         workflow.status = JetTaskStatus.CancelRequested
         workflow.outcome = Val(JetTaskOutcome.Cancelled)
-    } else if Val(fields) :: payload.strip_prefix("workflow-wait-sleep-deadline:") {
+    } else if payload.strip_prefix("workflow-wait-sleep-deadline:") == .Val(fields) {
         run_id :: fields.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow deadline sleep run id is invalid") })?
         if run_id < 1 -> return Err(jet_services_state_error("workflow deadline sleep run id is invalid"))
         workflow :: workflows.iter_mut().find(fn(workflow) { workflow.run_id == run_id })
@@ -676,7 +676,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         workflow.history.push("sleep-deadline")
         workflow.status = JetTaskStatus.Paused
         workflow.outcome = Val(JetTaskOutcome.DeadlineBlown)
-    } else if Val(fields) :: payload.strip_prefix("workflow-wait-activity:") {
+    } else if payload.strip_prefix("workflow-wait-activity:") == .Val(fields) {
         (run_id_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow activity wait run id is missing") })?
         run_id :: run_id_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow activity wait run id is invalid") })?
         (activity, rest) :: jet_services_workflow_take_field(fields, "wait activity")?
@@ -690,7 +690,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         if workflow.outcome.is_some() -> return Err(jet_services_state_error("workflow activity wait follows a terminal workflow outcome"))
         workflow.history.push("activity:{activity}:{argument}")
         workflow.status = JetTaskStatus.Running
-    } else if Val(fields) :: payload.strip_prefix("workflow-wait-all:") {
+    } else if payload.strip_prefix("workflow-wait-all:") == .Val(fields) {
         (run_id_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow all wait run id is missing") })?
         run_id :: run_id_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow all wait run id is invalid") })?
         (count_text, initial_rest) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow all wait count is missing") })?
@@ -712,7 +712,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         if workflow.outcome.is_some() -> return Err(jet_services_state_error("workflow all wait follows a terminal workflow outcome"))
         workflow.history.push("all:{values.join(",")}")
         workflow.status = JetTaskStatus.Running
-    } else if Val(fields) :: payload.strip_prefix("workflow-activity:") {
+    } else if payload.strip_prefix("workflow-activity:") == .Val(fields) {
         (run_id_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow activity run id is missing") })?
         run_id :: run_id_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow activity run id is invalid") })?
         (attempt_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow activity attempt is missing") })?
@@ -735,7 +735,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         workflow.steps.push(jet_services_workflow_activity_step(activity, key, attempt, max_attempts))
         workflow.history.push("activity:{activity}:{key}@{attempt}/{max_attempts}")
         workflow.status = JetTaskStatus.Running
-    } else if Val(fields) :: payload.strip_prefix("workflow-activity-retry:") {
+    } else if payload.strip_prefix("workflow-activity-retry:") == .Val(fields) {
         (run_id_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow activity retry run id is missing") })?
         run_id :: run_id_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow activity retry run id is invalid") })?
         (attempt_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow activity retry attempt is missing") })?
@@ -760,7 +760,7 @@ fn jet_services_workflow_apply(workflows: &[JetServiceWorkflow], payload: &Strin
         workflow.steps[index] = jet_services_workflow_activity_step(&activity, key, attempt, max_attempts)
         workflow.history.push("activity-retry:{key}@{attempt}/{max_attempts}:{outcome.jet_show()}")
         workflow.status = JetTaskStatus.Paused
-    } else if Val(fields) :: payload.strip_prefix("workflow-activity-done:") {
+    } else if payload.strip_prefix("workflow-activity-done:") == .Val(fields) {
         (run_id_text, fields) :: fields.split_once(':').ok_or_else(fn() { jet_services_state_error("workflow activity completion run id is missing") })?
         run_id :: run_id_text.parse<I64>().map_err(fn(_) { jet_services_state_error("workflow activity completion run id is invalid") })?
         (key, rest) :: jet_services_workflow_take_field(fields, "idempotency key")?
@@ -800,7 +800,7 @@ fn jet_services_workflow_append(tree: &JetServiceTree, payload: String) -> () Je
     _workflow_lock :: service_authority_file_lock(&authority.store, "workflow")?
     applied := jet_services_workflow_replay(&authority)?
     loop durable in &applied {
-        if Val(current) :: tree.workflows.iter().find(fn(workflow) { workflow.run_id == durable.run_id }) {
+        if tree.workflows.iter().find(fn(workflow) { workflow.run_id == durable.run_id }) == .Val(current) {
             durable.replay_cursor = current.replay_cursor
         }
     }
@@ -850,7 +850,7 @@ fn jet_services_workflow_start_id(tree: &JetServiceTree, id: String, version: I6
         return Err(JetServiceError.Policy("workflow id must be non-empty and visible"))
     }
     if version < 1 -> return Err(JetServiceError.Policy("workflow version must be >= 1"))
-    if Val(existing) :: tree.workflows.iter_mut().find(fn(workflow) { workflow.id == id && workflow.version == version }) {
+    if tree.workflows.iter_mut().find(fn(workflow) { workflow.id == id && workflow.version == version }) == .Val(existing) {
         // Begin a deterministic replay pass; new decisions may append after recorded history ends.
         existing.replay_cursor = 1
         return Ok(existing.run_id)
@@ -861,7 +861,7 @@ fn jet_services_workflow_start_id(tree: &JetServiceTree, id: String, version: I6
     run_id :: tree.workflows.iter().map(fn(workflow) { workflow.run_id }).max().unwrap_or(0).checked_add(1)
         .ok_or_else(fn() { JetServiceError.Policy("workflow run id exhausted") })?
     jet_services_workflow_append(tree, "workflow-start:{run_id}:{version}:{jet_services_workflow_frame(&id)}")?
-    if Val(workflow) :: tree.workflows.iter_mut().find(fn(workflow) { workflow.run_id == run_id }) -> workflow.replay_cursor = 1
+    if tree.workflows.iter_mut().find(fn(workflow) { workflow.run_id == run_id }) == .Val(workflow) -> workflow.replay_cursor = 1
     Ok(run_id)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:5444

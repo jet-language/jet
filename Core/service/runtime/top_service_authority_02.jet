@@ -82,7 +82,7 @@ fn service_authority_entry_routes_to_endpoint(runtime: &JetServiceRuntime, entry
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1922
 fn service_authority_hex(bytes: &[U8]) -> String {
     output := String.with_capacity(bytes.len() * 2)
-    for byte in bytes { output.push_str("{byte:02x}") }
+    loop byte in bytes { output.push_str("{byte:02x}") }
     ^output
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1930
@@ -104,7 +104,7 @@ fn service_authority_field(value: &String) -> String {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1952
 fn service_authority_record(op: Char, fields: &[String]) -> String {
     record := op.to_string()
-    for field in fields {
+    loop field in fields {
         record.push('|')
         record.push_str(&service_authority_field(field))
     }
@@ -117,7 +117,7 @@ fn service_authority_parse_record(line: &String) -> (Char, [String]) JetServiceE
     op :: parts.next().and_then(fn(value) { value.chars().next() })
         .ok_or_else(fn() { service_authority_error("service authority record has no operation") })?
     fields := [String]{}
-    for part in parts {
+    loop part in parts {
         (length, encoded) := part.split_once(':').ok_or_else(fn() { service_authority_error("service authority field is malformed") })?
         length :: length.parse::<USize>().map_err(fn(_) { service_authority_error("service authority field length is malformed") })?
         bytes :: service_authority_unhex(encoded).ok_or_else(fn() { service_authority_error("service authority field is not hex") })?
@@ -189,7 +189,7 @@ fn service_authority_append(runtime: &JetServiceRuntime, op: Char, fields: &[Str
 fn service_authority_id(runtime: &JetServiceRuntime, endpoint: &JetServiceEndpoint, message: &String, key: &String) -> String {
     input := [U8]{}
     store :: service_authority_store_identity(&runtime.store)
-    for field in [store.as_bytes(), endpoint.tree.as_bytes(), endpoint.worker.as_bytes(), message.as_bytes(), key.as_bytes()] {
+    loop field in [store.as_bytes(), endpoint.tree.as_bytes(), endpoint.worker.as_bytes(), message.as_bytes(), key.as_bytes()] {
         input.extend_from_slice(&(field.len() as U64).to_be_bytes())
         input.extend_from_slice(field)
     }

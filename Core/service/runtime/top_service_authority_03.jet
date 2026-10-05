@@ -453,7 +453,7 @@ impl JetJobQueue {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4290
     fn initialize(self: &Self) -> () JetServiceError! {
         self.transaction((queue, store) -> {
-            for statement in [JET_JOB_QUEUE_CREATE_META, JET_JOB_QUEUE_CREATE_JOBS, JET_JOB_QUEUE_CREATE_EVENTS,
+            loop statement in [JET_JOB_QUEUE_CREATE_META, JET_JOB_QUEUE_CREATE_JOBS, JET_JOB_QUEUE_CREATE_EVENTS,
                 JET_JOB_QUEUE_CREATE_DUE_INDEX, JET_JOB_QUEUE_CREATE_EVENT_INDEX] {
                 _ :: store.execute(statement, []).map_err(error -> jet_job_queue_sql_error("schema", error))?
             }
@@ -544,7 +544,7 @@ impl JetJobQueue {
     pub fn enqueue_bulk(self: &Self, requests: [JetJobEnqueue]) -> [JetJobQueueReceipt] JetServiceError! {
         if requests.is_empty() -> return Err(JetServiceError.Policy("queue bulk enqueue requires at least one job"))
         if requests.len() > JET_JOB_QUEUE_MAX_BULK -> return Err(JetServiceError.Full("queue bulk enqueue is limited to {JET_JOB_QUEUE_MAX_BULK} jobs"))
-        for request in requests {
+        loop request in requests {
             jet_job_queue_validate_enqueue(&request)?
             if request.payload.type_id != request.job_type -> return Err(JetServiceError.Policy("job payload type must match the declared job type"))
         }
@@ -553,14 +553,14 @@ impl JetJobQueue {
             next_sequence := queue.next_sequence(store)?
             receipts := [JetJobQueueReceipt].with_capacity(requests.len())
             observations := [JetJobQueueDevtoolsTransition].with_capacity(requests.len())
-            for request in requests {
+            loop request in requests {
                 if Val(key) = request.idempotency_key.as_ref() {
                     if Val(existing) = queue.find_by_key(store, key)? {
                         if existing.job_type != request.job_type || existing.payload_type != request.payload.type_id || existing.payload != request.payload.bytes {
                             return Err(JetServiceError.Policy("job idempotency key was already used by another job"))
                         }
                         receipts.push(jet_job_queue_make_receipt(&existing, queue.policy.delivery, true))
-                        continue
+                        next
                     }
                 }
                 depth_rows :: store.query("SELECT COUNT(*) AS depth FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('queued', 'running', 'retrying')",
@@ -715,7 +715,7 @@ impl JetJobQueue {
                     extra :: [("finished_at_ms", JetJobQueueValue.Int(now)), ("due_at_ms", JetJobQueueValue.Int(now)), ("retry_at_ms", JetJobQueueValue.Int(now)), ("lease_owner", JetJobQueueValue.Null), ("lease_token", JetJobQueueValue.Null), ("lease_until_ms", JetJobQueueValue.Null), ("error_type", JetJobQueueValue.Text("jet.queue.attempts")), ("error_reason", JetJobQueueValue.Text("max_attempts")), ("error_detail", JetJobQueueValue.Null)]
                     jet_job_queue_update_event(store, &record, .DeadLettered, record.attempts, now, Val("max_attempts"), None, None, &extra)?
                     &observations.push(JetJobQueueDevtoolsTransition.from_record(&record, .DeadLettered, record.attempts, now, Val("max_attempts"), None, None))
-                    continue
+                    next
                 }
                 attempts :: record.attempts.saturating_add(1)
                 lease_until_ms :: now.saturating_add(policy.lease_ms)

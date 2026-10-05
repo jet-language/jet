@@ -250,7 +250,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
             checked :: jet_services_attach_state_authority(authority, JetServiceStateAdapter.Snapshot)?
             prefix :: "v{checked.version}:"
             if !tree.event_log.is_empty() -> return Err(JetServiceError.Policy("Snapshot state adapter cannot contain event-log records"))
-            if Val(snapshot) :: &tree.snapshot {
+            if (&tree.snapshot) == .Val(snapshot) {
                 if snapshot.len() > MAX_SERVICE_MESSAGE -> return Err(JetServiceError.Policy("snapshot record exceeds the state record limit"))
                 _ :: jet_services_read_state_record(&prefix, snapshot)?
             }
@@ -297,7 +297,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> () JetServiceError! {
     if tree.draining.len() > tree.workers.len() || tree.draining.iter().any(fn(name) { !worker_name_exists(name) }) {
         return Err(JetServiceError.Policy("service draining state is invalid"))
     }
-    if Val(receipt) :: &tree.last_upgrade {
+    if (&tree.last_upgrade) == .Val(receipt) {
         if receipt.from_generation != tree.previous_generation || receipt.to_generation != tree.generation
             || receipt.from_generation < 1 || receipt.to_generation <= receipt.from_generation
             || receipt.pinned_shards.len() > tree.workers.len() || receipt.pinned_shards.iter().any(fn(name) { !worker_name_exists(name) })
@@ -484,7 +484,7 @@ fn jet_services_receive(tree: &JetServiceTree, endpoint: &JetServiceEndpoint) ->
         should_stop :: worker.mailbox.channel.depth() == 0
         (^message, should_stop, ^mailbox_before, ^snapshot)
     }
-    if Val(snapshot) :: snapshot.as_ref() -> jet_services_topology_publish_state(snapshot)
+    if snapshot.as_ref() == .Val(snapshot) -> jet_services_topology_publish_state(snapshot)
     if draining && should_stop {
         if Err(error) :: jet_services_finish_drain(tree, endpoint) {
             restore :: tree.workers.iter_mut().find(fn(worker) { worker.endpoint == endpoint })
@@ -539,7 +539,7 @@ fn jet_services_fail_worker(tree: &JetServiceTree, endpoint: &JetServiceEndpoint
         .ok_or_else(fn() { JetServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree") })?
     supervisor_index :: tree.groups.iter().position(fn(group) { group.workers.iter().any(fn(name) { name == &worker_name }) })
         .unwrap_or(tree.groups.len())
-    scope :: if Val(group) :: tree.groups.iter().find(fn(group) { group.workers.iter().any(fn(name) { name == &worker_name }) }) {
+    scope :: if tree.groups.iter().find(fn(group) { group.workers.iter().any(fn(name) { name == &worker_name }) }) == .Val(group) {
         group.workers.iter().filter_map(fn(name) { tree.workers.iter().position(fn(worker) { &worker.name == name }) }).collect()
     } else {
         tree.workers.iter().enumerate()
@@ -591,9 +591,9 @@ fn jet_services_fail_worker(tree: &JetServiceTree, endpoint: &JetServiceEndpoint
         authority_updated.push(index)
     }
     _ :: jet_services_task_fail(&tree.workers[start].task, "worker `{worker_name}` failed under supervisor")
-    if Val(supervisor) :: tree.supervisor_tasks.get(supervisor_index) -> _ :: jet_services_task_fail(supervisor, "supervisor restarted worker `{worker_name}`")
+    if tree.supervisor_tasks.get(supervisor_index) == .Val(supervisor) -> _ :: jet_services_task_fail(supervisor, "supervisor restarted worker `{worker_name}`")
     loop index in ^target_indices -> jet_services_restart_worker(&tree.workers[index], &budget, now, preserve_mailboxes)
-    if Val(supervisor) :: tree.supervisor_tasks.get(supervisor_index) -> _ :: jet_services_task_restart(supervisor)
+    if tree.supervisor_tasks.get(supervisor_index) == .Val(supervisor) -> _ :: jet_services_task_restart(supervisor)
     // Restart cannot silently rejoin an authority-partitioned side of the graph.
     loop worker in &tree.workers {
         if tree.partitioned.iter().any(fn(name) { name == &worker.name }) {

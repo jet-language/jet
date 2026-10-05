@@ -1006,7 +1006,7 @@ fn jet_services_group(tree: &JetServiceTree, name: String, workers: [String]) ->
     }
     parent_id :: jet_services_topology_group_id(&tree.name, &name)
     loop worker_name in &workers {
-        if Val(worker) :: tree.workers.iter().find(fn(worker) { &worker.name == worker_name }) {
+        if tree.workers.iter().find(fn(worker) { &worker.name == worker_name }) == .Val(worker) {
             jet_services_reparent_topology(&worker.task, Val(parent_id.clone()))?
         }
     }
@@ -1039,11 +1039,11 @@ fn jet_services_build_runtime_groups(tree: &JetServiceTree) -> () JetServiceErro
         // Ungrouped workers still own a supervisor boundary and join on close.
         ungrouped: Arc<JetTaskGroupRuntime<Arc<Mutex<JetServiceSupervisorState>>>>? := None
         loop (index, worker) in tree.workers.iter().enumerate() {
-            if assigned[index] -> continue
+            if assigned[index] -> next
             child :: ungrouped.get_or_insert_with(fn() { Arc.new(JetTaskGroupRuntime.new()) })
             child.register(worker.task.clone())
         }
-        if Val(child) :: ungrouped {
+        if ungrouped == .Val(child) {
             supervisor :: Arc.new(Mutex.new(JetServiceSupervisorState.new(JetServiceSupervisorStatus.Starting)))
             jet_services_bind_topology(&supervisor, JetServiceTopologyKind.Supervisor,
                 jet_services_topology_group_id(&tree.name, "ungrouped"), Val(jet_services_topology_root_id(&tree.name)))?
