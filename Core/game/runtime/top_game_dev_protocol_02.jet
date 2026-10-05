@@ -644,7 +644,7 @@ module jet_game_wasm_bridge {
         const MAX_CONTROLS_PER_TICK: USize = 32
         pending :: jet_devtools_command_count(session.envelope.session_id).min(MAX_CONTROLS_PER_TICK)
         dispatched := 0
-        for _ in 0..pending {
+        for _ in 0..<pending {
             request :: match jet_devtools_poll_game_control(session.envelope.session_id) {
                 Val(request) -> request
                 None -> break
