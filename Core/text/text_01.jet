@@ -40,7 +40,7 @@ fn jet_vault_decomposition(cp: U32) -> ([U32]View)? {
     index :: UNICODE_DECOMP_INDEX.binary_search_by_key(cp, |row| -> row.0).ok()?
     (_, start, len, canonical) :: UNICODE_DECOMP_INDEX[index]
     if canonical == U8{0} -> return None
-    Val(UNICODE_DECOMP_POOL[USize{start}..USize{start + len}])
+    Val(UNICODE_DECOMP_POOL[USize{start}..<USize{start + len}])
 }
 // Rust: crates/jet-pkg-model/src/Prelude/VaultNfc.rs:50
 fn jet_vault_decompose(cp: U32, output: &[U32]) -> {

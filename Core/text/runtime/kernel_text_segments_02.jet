@@ -1064,21 +1064,21 @@ fn jet_text_parse_rsplit(text: &String, separator: &String, maxsplit: I64) -> [S
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1174
 fn jet_text_parse_split_once(text: &String, separator: &String) -> (Bool, String, String) {
     match text.find(separator.as_str()) {
-        .Val(index) -> (true, text[..<index].to_string(), text[index + separator.len()..].to_string())
+        .Val(index) -> (true, text[0..<index].to_string(), text[index + separator.len()..].to_string())
         .None -> (false, text.clone(), String.new())
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1187
 fn jet_text_parse_partition(text: &String, separator: &String) -> (String, String, String) {
     match text.find(separator.as_str()) {
-        .Val(index) -> (text[..<index].to_string(), separator.clone(), text[index + separator.len()..].to_string())
+        .Val(index) -> (text[0..<index].to_string(), separator.clone(), text[index + separator.len()..].to_string())
         .None -> (text.clone(), String.new(), String.new())
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1200
 fn jet_text_parse_rpartition(text: &String, separator: &String) -> (String, String, String) {
     match text.rfind(separator.as_str()) {
-        .Val(index) -> (text[..<index].to_string(), separator.clone(), text[index + separator.len()..].to_string())
+        .Val(index) -> (text[0..<index].to_string(), separator.clone(), text[index + separator.len()..].to_string())
         .None -> (String.new(), String.new(), text.clone())
     }
 }
@@ -1137,7 +1137,7 @@ fn jet_text_parse_kv(text: &String, separator: &String) -> (String, Bool, String
     }
     match text.find(separator.as_str()) {
         .Val(index) -> {
-            key := text[..<index].trim() // #4303
+            key := text[0..<index].trim() // #4303
             value := text[index + separator.len()..].trim() // #4303
             (key.to_string(), true, value.to_string())
         }
@@ -1234,7 +1234,7 @@ fn jet_text_shorten(text: &String, width: I64, placeholder: &String) -> String {
     keep :: (width as USize).saturating_sub(placeholder.len())
     end :: text.char_indices().take_while(fn(row) -> row.0 < keep)
         .map(fn(row) -> row.0 + row.1.len_utf8()).last().unwrap_or(0).min(keep)
-    format("{}{}", text[..<end], placeholder)
+    format("{}{}", text[0..<end], placeholder)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1413
 fn jet_text_indent(text: &String, prefix: &String) -> String {
@@ -1323,7 +1323,7 @@ fn jet_text_html_unescape(text: &String) -> String {
     rest := text.as_str()
     loop {
         start :: rest.find('&') ?? break
-        &out.push_str(rest[..<start])
+        &out.push_str(rest[0..<start])
         after :: rest[start + 1..]
         end_option :: after.find(';').filter(fn(end) -> end <= 31)
         if end_option == .None {
@@ -1332,7 +1332,7 @@ fn jet_text_html_unescape(text: &String) -> String {
             next
         }
         end :: end_option.unwrap()
-        name :: after[..<end]
+        name :: after[0..<end]
         if jet_text_html_entity(name) == .Val(decoded) {
             &out.push_str(decoded)
             rest = after[end + 1..]
@@ -1378,7 +1378,7 @@ fn jet_text_parse_find_from(text: &String, needle: &String, start: I64) -> I64 {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1564
 fn jet_text_parse_rfind_from(text: &String, needle: &String, end: I64) -> I64 {
     stop :: end.clamp(0, text.len() as I64) as USize
-    prefix :: text.get(..<stop) ?? return -1
+    prefix :: text.get(0..<stop) ?? return -1
     prefix.rfind(needle.as_str()).map_or(-1, fn(index) -> index as I64)
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1571
