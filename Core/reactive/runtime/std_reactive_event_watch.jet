@@ -151,7 +151,7 @@ impl Drop for ReactiveTransactionContextGuard {
         JET_REACTIVE_TRANSACTION_CONTEXT.with(fn(contexts) {
             values := contexts.borrow_mut()
             context :: values.pop()
-            debug_assert(context.as_ref().map(fn(context) { context.signal }) == Val(self.signal))
+            debug_assert(context.as_ref().map(fn(context) { context.signal }) == self.signal)
         })
     }
 }
@@ -1454,7 +1454,7 @@ fn jet_process_alive(pid: I64) -> Bool {
         if pid <= 0 { return false }
         pid :: I32.try_from(pid).ok() ?? return false
         result :: kill(pid, 0)
-        result == 0 || std.io.Error.last_os_error().raw_os_error() == Val(1)
+        result == 0 || std.io.Error.last_os_error().raw_os_error() == 1
     } else if target.selected_family() == "windows" {
         if pid <= 0 { return false }
         SYNCHRONIZE :: U32{0x0010_0000}
