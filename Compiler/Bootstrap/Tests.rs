@@ -3723,13 +3723,14 @@ fn replace_self_tokens(text: &str, self_type: &str) -> String {
 
 /// The compiler-image envelope reader checks the archive prefix exactly as
 /// full restore does, without decoding the MIR payload or hashing the
-/// archive: it accepts a well-formed prefix in front of a payload and
-/// checksum that full restore rejects.
+/// archive: it accepts a well-formed prefix in front of a payload that
+/// restore rejects and a checksum that the per-file verification rejects.
+/// Restore itself never hashes the archive.
 #[test]
 fn compiler_image_envelope_reads_only_the_checked_prefix() {
     use crate::compiler_bootstrap_compiler_image::{
-        read_compiler_image_envelope, restore_compiler_image, CompilerImageMetadataWriter,
-        FORMAT_VERSION, MAGIC,
+        read_compiler_image_envelope, restore_compiler_image, verify_compiler_image_checksum,
+        CompilerImageMetadataWriter, FORMAT_VERSION, MAGIC,
     };
     use ::jet_foundation::MIR::{MirArtifactId, MirFunctionId, MIR_SCHEMA_VERSION};
     let digest = [7u8; 32];
@@ -3741,9 +3742,9 @@ fn compiler_image_envelope_reads_only_the_checked_prefix() {
         writer.write_u64(11);
         writer.write_u64(13);
         writer.write_raw(&digest);
+        writer.write_raw(&[0u8; 32]);
         writer.write_bytes(b"identity").unwrap();
         writer.write_bytes(b"not a MIR payload").unwrap();
-        writer.write_raw(&[0u8; 32]);
         writer.finish()
     };
     let bytes = archive(MIR_SCHEMA_VERSION);
@@ -3756,6 +3757,10 @@ fn compiler_image_envelope_reads_only_the_checked_prefix() {
     let restored = restore_compiler_image(&bytes, digest, MirArtifactId(11), MirFunctionId(13));
     assert_eq!(
         restored.err().map(|error| error.0).as_deref(),
+        Some("truncated native MIR image"),
+    );
+    assert_eq!(
+        verify_compiler_image_checksum(&bytes).err().map(|error| error.0).as_deref(),
         Some("compiler-image archive checksum mismatch"),
     );
     let envelope_error = |bytes: &[u8], expected_digest: [u8; 32], artifact: u64, entry: u64| {
@@ -3995,9 +4000,17 @@ fn write_backend_project(
     });
     let image_path = source_dir.join("compiler.image");
     match compiler_image {
-        Some(image) => fs::write(&image_path, image).unwrap_or_else(|error| {
-            panic!("cannot write backend compiler image `{}`: {error}", image_path.display())
-        }),
+        // The compiler restores this image from its own executable without
+        // hashing it, so the archive checksum is verified here, once per file.
+        Some(image) => {
+            crate::compiler_bootstrap_compiler_image::verify_compiler_image_checksum(image)
+                .unwrap_or_else(|error| {
+                    panic!("backend compiler image for `{}` is corrupt: {error}", image_path.display())
+                });
+            fs::write(&image_path, image).unwrap_or_else(|error| {
+                panic!("cannot write backend compiler image `{}`: {error}", image_path.display())
+            })
+        }
         None => match fs::remove_file(&image_path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
