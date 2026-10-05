@@ -185,8 +185,13 @@ pub fn sema_error_conversion_function(from_ty: String, from_span: Span, to_ty: S
 // Registration of every declared conversion in one module (the Rust
 // reference's `register_error_conv`): E2406 orphan rule, E2405 duplicate,
 // E2418 cycle and E2419 ambiguity. An accepted conversion becomes its checked
-// routine; a rejected one is removed so it never reaches lowering.
-pub fn sema_error_conversion_items(items: [Item], diagnostics: &[Diagnostic]) -> [Item] {
+// routine; a rejected one is removed so it never reaches lowering. `items` is
+// rewritten in place, and a list without a conversion is left untouched.
+pub fn sema_error_conversion_items(items: &[Item], diagnostics: &[Diagnostic]) {
+    has_conversion :: loop item in items {
+        if item == .ErrorConv(_) -> break true
+    } ?? false
+    if !has_conversion -> return
     local_types :: sema_error_conversion_local_types(items)
     edges := [SemaErrorConversionEdge]{}
     output := [Item]{}
@@ -235,7 +240,7 @@ pub fn sema_error_conversion_items(items: [Item], diagnostics: &[Diagnostic]) ->
         }
         &output.push(Item.Func{value: sema_error_conversion_function(from_ty, definition.from_span, to_ty, definition.to_span, Type.Named{name: from_ty}, definition.body, definition.body_span)})
     }
-    output
+    items = output
 }
 
 // D-FAIL-CONV2=A: the canonical Prelude conversion of one family member into

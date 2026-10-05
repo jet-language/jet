@@ -11,8 +11,9 @@
 // closes the innermost open span of kind `name`, together with any deeper
 // span an early return left open, and reports how many items it processed.
 // `progress` reports `done` of `total` items of the open phase; the host
-// throttles it. `functions` says whether per-function spans were requested
-// (`JET_TRACE_DETAIL=functions`).
+// throttles it. A `progress` kind `counters.<phase>.<counter>` is instead one
+// #4319 scaling counter value (`done`), written once. `functions` says whether
+// per-function spans were requested (`JET_TRACE_DETAIL=functions`).
 pub trait CompilerTraceSink {
     fn begin(self, name: String, detail: String, index: Int, total: Int) Never!
     fn end(self, name: String, items: Int) Never!

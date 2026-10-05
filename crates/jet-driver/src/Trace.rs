@@ -5,6 +5,9 @@
 //! running or killed compile is still a loadable trace (Perfetto and
 //! chrome://tracing accept the JSON array without its closing `]`).
 //! `JET_TRACE_DETAIL=functions` also asks for one span per function.
+//! A progress kind `counters.<phase>.<counter>` is a #4319 scaling counter
+//! (written once, unthrottled); with `JET_PHASE_COUNTERS` also set, each is
+//! echoed to stderr as a `JET_PHASE_COUNTERS` line for `Tools/perf/scaling`.
 //!
 //! This is the one trace writer. The Rust driver opens spans with [`span`];
 //! the bootstrap host hands the same sink to the Jet compiler as its
@@ -30,6 +33,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub const TRACE_FILE_ENV: &str = "JET_TRACE_FILE";
 /// `functions` adds per-function spans.
 pub const TRACE_DETAIL_ENV: &str = "JET_TRACE_DETAIL";
+/// Set (non-empty): counter events are also `JET_PHASE_COUNTERS` stderr lines.
+pub const PHASE_COUNTERS_ENV: &str = "JET_PHASE_COUNTERS";
+/// Progress kinds with this prefix are counters (`counters.<phase>.<name>`).
+const COUNTER_PREFIX: &str = "counters.";
 
 /// Minimum spacing of progress events of one kind; the last item is
 /// always written.
@@ -83,6 +90,7 @@ pub struct TraceSink {
     start: Instant,
     pid: u32,
     functions: bool,
+    phase_counters: bool,
     state: Mutex<TraceState>,
 }
 
@@ -106,7 +114,10 @@ impl TraceSink {
         let path = std::env::var_os(TRACE_FILE_ENV).filter(|path| !path.is_empty())?;
         let functions = std::env::var(TRACE_DETAIL_ENV).is_ok_and(|detail| detail == "functions");
         match Self::create(std::path::Path::new(&path), functions) {
-            Ok(sink) => Some(sink),
+            Ok(mut sink) => {
+                sink.phase_counters = std::env::var_os(PHASE_COUNTERS_ENV).is_some_and(|value| !value.is_empty());
+                Some(sink)
+            }
             Err(error) => {
                 eprintln!(
                     "jet: {TRACE_FILE_ENV}: cannot write `{}`: {error}",
@@ -142,6 +153,7 @@ impl TraceSink {
             start: Instant::now(),
             pid,
             functions,
+            phase_counters: false,
             state: Mutex::new(TraceState {
                 file: Some(file),
                 stacks: HashMap::new(),
@@ -232,6 +244,10 @@ impl TraceSink {
     /// `done` of `total` items of the open `kind` phase are finished.
     /// Written at most every 200 ms per kind, and always for the last item.
     pub fn progress(&self, kind: &str, done: i64, total: i64) {
+        if let Some(counter) = kind.strip_prefix(COUNTER_PREFIX) {
+            self.counter(counter, done);
+            return;
+        }
         let now = Instant::now();
         let thread = current_thread();
         let mut guard = self.lock();
@@ -257,6 +273,32 @@ impl TraceSink {
 
     fn micros(&self) -> u64 {
         u64::try_from(self.start.elapsed().as_micros()).unwrap_or(u64::MAX)
+    }
+
+    /// One `<phase>.<name>` counter value: a counter event in the trace and,
+    /// with `JET_PHASE_COUNTERS` set, a `JET_PHASE_COUNTERS` stderr line.
+    fn counter(&self, counter: &str, value: i64) {
+        let Some((phase, name)) = counter.rsplit_once('.') else { return };
+        let ts = self.micros();
+        let thread = current_thread();
+        {
+            let mut guard = self.lock();
+            let state = &mut *guard;
+            if state.file.is_some() {
+                state.line.clear();
+                push_event_head(&mut state.line, counter, None, 'C', ts, self.pid, thread);
+                let _ = write!(state.line, ",\"args\":{{\"value\":{value}}}}},\n");
+                state.write_line();
+            }
+        }
+        if self.phase_counters {
+            let mut line = String::from("JET_PHASE_COUNTERS {\"phase\":");
+            push_json_string(&mut line, phase);
+            line.push(',');
+            push_json_string(&mut line, name);
+            let _ = write!(line, ":{value}}}");
+            eprintln!("{line}");
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, TraceState> {
@@ -358,5 +400,17 @@ mod tests {
         assert_eq!(ends.len(), 2);
         assert!(ends[0].contains("\"cat\":\"sema.module\""));
         assert!(ends[1].contains("\"cat\":\"compile\"") && ends[1].contains("\"items\":3"));
+    }
+
+    #[test]
+    fn counter_kinds_are_unthrottled_counter_events() {
+        let path = std::env::temp_dir().join(format!("jet-trace-counter-test-{}.json", std::process::id()));
+        let sink = TraceSink::create(&path, false).expect("trace file");
+        sink.progress("counters.sema.check.module_lookups", 7, -1);
+        sink.progress("counters.sema.check.name_lookups", 3, -1);
+        let text = std::fs::read_to_string(&path).expect("trace text");
+        let _ = std::fs::remove_file(&path);
+        assert!(text.contains("\"name\":\"sema.check.module_lookups\",\"ph\":\"C\"") && text.contains("\"args\":{\"value\":7}"));
+        assert!(text.contains("\"name\":\"sema.check.name_lookups\",\"ph\":\"C\"") && text.contains("\"args\":{\"value\":3}"));
     }
 }

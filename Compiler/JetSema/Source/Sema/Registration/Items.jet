@@ -502,6 +502,15 @@ pub fn sema_build_facts_reject_debug_traces(facts: SemaBuildFacts) -> Bool Never
     facts.artifact_build || facts.profile == "release" || facts.profile == "hardened"
 }
 
+// #4319 scaling counters (Tools/perf/scaling) of the graph's lookups: module
+// rows by identity and names in a module's namespace. One counter set is
+// shared by every copy of a graph; it counts only when the graph's
+// `counting` is set, so an uncounted lookup costs one flag test.
+pub struct SemaLookupCounters {
+    pub module_lookups: Int
+    pub name_lookups: Int
+}
+
 pub struct SemaRegistrationGraph {
     pub package_identity: String
     pub entry_module_identity: String
@@ -517,6 +526,8 @@ pub struct SemaRegistrationGraph {
     pub imports: [SemaRegistrationImport]
     pub unit_facts: [SemaRegistrationUnitFact]
     pub host_hooks: Shared<SemaRegistrationHostHooks>
+    pub lookup_counters: Shared<SemaLookupCounters>
+    pub counting: Bool
     pub internal_problem: String?
     pub diagnostics: [Diagnostic]
     pub complete: Bool
@@ -1862,14 +1873,16 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
     // D-CONF-GENSPELL1=A: each valid module alias becomes an expanded module
     // instance before anything else sees the items (Rust expands before
     // sibling mangling and registration).
-    module_row.program = sema_generic_modules_expand(module_row.program, module_row.module_identity, templates)
+    // Each rewrite below updates the program in place and leaves it
+    // untouched (uncopied) when it has nothing to rewrite.
+    sema_generic_modules_expand(&module_row.program, input.module_identity, templates)
     // D-MOD2/D-MOD3: inline modules give their members one lifted identity
     // (types beside the module, top-level member functions by member name)
     // and resolve `module.f(...)` and `use module.[f]` before registration.
-    module_row.program = sema_inline_modules_lower(module_row.program, &diagnostics)
+    sema_inline_modules_lower(&module_row.program, &diagnostics)
     // D-STRUCT-ONCE1=A: root `prep loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
-    module_row.program.items = sema_derive_expand_template_loops(module_row.program.items, &diagnostics)
+    sema_derive_expand_template_loops(&module_row.program.items, &diagnostics)
     // Reject reserved type declarations before automatic capability expansion:
     // an invalid nominal must not produce methods that cascade from E0106.
     item_index := 0
@@ -1882,11 +1895,11 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
     }
     // D-ERR-CONV: declared conversions register once per module and become
     // their checked conversion routines before any declaration is resolved.
-    module_row.program.items = sema_error_conversion_items(module_row.program.items, &diagnostics)
+    sema_error_conversion_items(&module_row.program.items, &diagnostics)
     // D-ONCE-DERIVE1=A: selected built-in capabilities expand from the Prelude
     // derive templates into compiler-generated trait blocks before any
     // declaration, impl, or known-time value is registered.
-    module_row.program.items = sema_derive_expand_builtin_items(module_row.program.items, &diagnostics)
+    sema_derive_expand_builtin_items(&module_row.program.items, &diagnostics)
     row_source_file :: ~module_row.source_file
     row_source_origin :: ~module_row.source_origin
     row_source_segments :: ~module_row.source_segments
@@ -1932,7 +1945,13 @@ fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Neve
 
 // Rust `Bundle/ItemReuse.rs` `by_identity`: module identity -> row.
 fn sema_registration_module_index(graph: SemaRegistrationGraph, identity: String) -> Int? {
+    if graph.counting -> graph.lookup_counters.module_lookups += 1
     graph.module_rows.get(identity)
+}
+
+// The graph's lookup counts so far (SemaLookupCounters).
+pub fn sema_registration_lookup_counts(graph: SemaRegistrationGraph) -> SemaLookupCounters {
+    SemaLookupCounters{module_lookups: graph.lookup_counters.module_lookups, name_lookups: graph.lookup_counters.name_lookups}
 }
 
 // The registered module NAME (`core.term`) of a module IDENTITY such as a
@@ -2170,7 +2189,8 @@ pub fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name
     graph.compiler_builtin_rows.get(name)
 }
 
-pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, host_hooks: Shared<SemaRegistrationHostHooks>) -> SemaRegistrationGraph {
+// `counting` sets the graph's `counting` (#4319 lookup counters).
+pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, host_hooks: Shared<SemaRegistrationHostHooks>, counting: Bool) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Module identity -> row; duplicates are rejected below, so the first row
@@ -2188,7 +2208,7 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     if package_identity == "" || entry_module_identity == "" {
         &diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, host_hooks: host_hooks, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, host_hooks: host_hooks, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}}
     loop indexed_module in 0..<graph.modules.len() -> sema_registration_index_nominal_rows(&graph, indexed_module, 0)
     if entry_module_identity != "" && sema_registration_module_index(graph, entry_module_identity) == None {
         &graph.diagnostics.push(sema_error_optional("E0003", None, "the declaration graph entry is not loaded", "the entry identity must name one prepared module", "include the entry module in the loader's module inputs"))
@@ -2308,6 +2328,7 @@ fn sema_registration_item_is_expanded_template(item: Item) -> Bool Never! {
 }
 
 pub fn sema_registration_lookup_name(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
+    if graph.counting -> graph.lookup_counters.name_lookups += 1
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     module_row :: graph.modules[module_index]
     if module_row.symbol_positions.get(name) == .Val(symbol_position) {

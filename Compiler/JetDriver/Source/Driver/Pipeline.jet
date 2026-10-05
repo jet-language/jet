@@ -125,6 +125,7 @@ use jet_sema.[
     SemaFunctionMemoryPlan,
     SemaGraphModuleResult,
     SemaGraphResult,
+    SemaLookupCounters,
     SemaRegistrationForeignHandleFacts,
     SemaRegistrationGraph,
     SemaRegistrationImport,
@@ -155,6 +156,7 @@ use jet_sema.[
     sema_hardware_use_merge,
     sema_hardware_use_snapshot,
     sema_name_build_facts,
+    sema_registration_lookup_counts,
     sema_registration_prepare_graph,
     sema_source_location_at,
 ]
@@ -2509,6 +2511,18 @@ fn jet_driver_keep_going_row(kg: &JetDriverKeepGoingLog, phase: String, item: St
     &kg.rows.push("{phase}\t{body}")
 }
 
+// #4319: the registration graph's lookups during `phase` (`counts` less
+// `since`) as counter events `counters.<phase>.<counter>`. The host writes
+// each to the trace and, with JET_PHASE_COUNTERS set, as a
+// `JET_PHASE_COUNTERS` line for Tools/perf/scaling. The graph counts only
+// while a trace is open.
+fn jet_driver_trace_lookup_counters(trace_sink: CompilerTraceSink?, phase: String, counts: SemaLookupCounters, since: SemaLookupCounters) {
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.{phase}.module_lookups", counts.module_lookups - since.module_lookups, -1)
+        sink.progress("counters.{phase}.name_lookups", counts.name_lookups - since.name_lookups, -1)
+    }
+}
+
 // Writes the rows recorded since the last flush to the trace sink.
 fn jet_driver_keep_going_flush(kg: &JetDriverKeepGoingLog, trace_sink: CompilerTraceSink?) {
     if trace_sink == .Val(sink) {
@@ -2798,7 +2812,12 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             edition: package.edition,
         })
     }
-    if request.trace_sink == .Val(sink) -> sink.begin("register", "", -1, -1)
+    // #4319: the graph counts its lookups only while a trace is open.
+    counting := false
+    if request.trace_sink == .Val(sink) {
+        sink.begin("register", "", -1, -1)
+        counting = true
+    }
     registration_graph := sema_registration_prepare_graph(
         registration_inputs,
         load.imports,
@@ -2809,8 +2828,11 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         target_machine,
         jet_driver_build_facts(load, request, target_machine),
         request.eval_config.host_hooks,
+        counting,
     )
     if request.trace_sink == .Val(sink) -> sink.end("register", registration_graph.modules.len())
+    register_lookups :: sema_registration_lookup_counts(registration_graph)
+    jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})
     if kg.enabled -> registration_graph.keep_going = true
     if registration_graph.internal_problem != None {
         loop diagnostic in registration_graph.diagnostics -> &load.diagnostics.push(diagnostic)
@@ -2823,6 +2845,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
     comptime_stage := sema_collect_comptime_declarations(registration_graph, package_policies, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
+    jet_driver_trace_lookup_counters(request.trace_sink, "sema.check", sema_registration_lookup_counts(registration_graph), register_lookups)
     if kg.enabled {
         loop diagnostic in comptime_stage.diagnostics -> &load.diagnostics.push(diagnostic)
         jet_driver_keep_going_diagnostics(&kg, "sema.check", load.diagnostics)

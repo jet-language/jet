@@ -1193,7 +1193,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
                 memory_func := func
                 if memory_row == {
                     .Val(row) -> {
-                        memory_func = row.function
+                        if row.function == .Val(planned) -> memory_func = planned
                         loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
                         if !row.complete -> complete = false
                     }
@@ -1364,7 +1364,7 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &
     memory_complete := true
     if memory_row == {
         .Val(row) -> {
-            memory_func = row.function
+            if row.function == .Val(planned) -> memory_func = planned
             loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
             memory_complete = row.complete
         }
@@ -1532,7 +1532,7 @@ fn sema_check_registration_method(source_module: SemaRegistrationModule, memory_
     memory_complete := true
     if memory_row == {
         .Val(row) -> {
-            memory_func = row.function
+            if row.function == .Val(planned) -> memory_func = planned
             loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
             memory_complete = row.complete
         }
@@ -1816,7 +1816,9 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                         summary_name_references := [SemaNameReferenceFact]{}
                         summary_row := sema_function_memory_find(memory_plan, source_module.module_identity, "", func.span)
                         summary_func := func
-                        if summary_row == .Val(row) -> summary_func = row.function
+                        if summary_row == .Val(row) {
+                            if row.function == .Val(planned) -> summary_func = planned
+                        }
                         checked := sema_function_check(summary_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
                         if checked.value == .Val(function) {
                             _ := sema_function_publish_return_views(&scopes, function)
@@ -1873,7 +1875,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             memory_func := func
                             if memory_row == {
                                 .Val(row) -> {
-                                    memory_func = row.function
+                                    if row.function == .Val(planned) -> memory_func = planned
                                     loop diagnostic in row.diagnostics -> &diagnostics.push(diagnostic)
                                     if !row.complete {
                                         complete = false
