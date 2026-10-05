@@ -11,7 +11,7 @@ struct JetSyncDocument { representation: String }
 fn jet_sync_escape_display(value: String) -> String {
     escaped := String.with_capacity(value.len())
     loop ch in value.chars() {
-        if ch is ('\\' | ',' | '=' | '|' | ':' | '/') -> escaped.push('\\')
+        if ch == ('\\' | ',' | '=' | '|' | ':' | '/') -> escaped.push('\\')
         escaped.push(ch)
     }
     ^escaped
@@ -22,11 +22,11 @@ fn jet_sync_unescape_display(value: String) -> String? {
     escaped := false
     loop ch in value.chars() {
         if escaped {
-            if !(ch is ('\\' | ',' | '=' | '|' | ':' | '/')) -> return None
+            if !(ch == ('\\' | ',' | '=' | '|' | ':' | '/')) -> return None
             unescaped.push(ch)
             escaped = false
         } else if ch == '\\' { escaped = true }
-        else if ch is (',' | '=' | '|' | ':' | '/') { return None }
+        else if ch == (',' | '=' | '|' | ':' | '/') { return None }
         else { unescaped.push(ch) }
     }
     if !escaped { Val(^unescaped) } else { None }
@@ -255,7 +255,7 @@ fn jet_sync_publish(session_id: String, doc_show: String) -> String {
     transport :: if changed { Val("sync:{receipt.session_id}:{receipt.generation}:{receipt.document.representation}") } else { None }
     // GATE #4565: kernel primitive
     #Unsafe("release the mutex guard before invoking the external transport publisher") { drop(^sessions) }
-    if transport is Val(transport) -> jet_live_publish_transport("sync:{receipt.session_id}", ^transport)
+    if transport == .Val(transport) -> jet_live_publish_transport("sync:{receipt.session_id}", ^transport)
     ^shown
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:436

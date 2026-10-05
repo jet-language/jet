@@ -323,7 +323,7 @@ fn jet_sync_map_set_replica(map: JetSyncMap,replica: String,key: String,value: S
     // Writes advance beyond every observed remote clock.
     next_clock :: map.entries.iter().map(fn((_,_,clock,_)) { *clock }).max().unwrap_or(0).checked_add(1)
     if next_clock.is_none() { return JetSyncMap{entries: [],valid: false} }
-    if Some((_,v,clock,writer)) :: map.entries.iter_mut().find(fn((k,_,_,_)) { k == &key }) {
+    if Val((_,v,clock,writer)) :: map.entries.iter_mut().find(fn((k,_,_,_)) { k == &key }) {
         *v = ^value
         *clock = next_clock.unwrap()
         *writer = ^replica
@@ -355,7 +355,10 @@ fn jet_sync_map_merge(a: &JetSyncMap,b: &JetSyncMap) -> JetSyncMap {
     }
     if merged.len() > MAX_SYNC_ENTRIES { return JetSyncMap{entries: [],valid: false} }
     keys :: merged.keys().cloned().collect::<[String]>().sorted()
-    entries :: keys.into_iter().map(fn(key) { (value,clock,writer) :: merged.remove(&key).unwrap(); (^key,^value,clock,^writer) }).collect()
+    entries :: keys.into_iter().map(fn(key) {
+        (value,clock,writer) :: merged.remove(&key).unwrap()
+        (^key,^value,clock,^writer)
+    }).collect()
     JetSyncMap{entries: ^entries,valid: true}
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:642
@@ -384,7 +387,7 @@ fn jet_sync_map_set_generic<K: __jet_Encode,V: __jet_Encode>(map: JetSyncMapGene
     if key_id.len() > MAX_SYNC_TEXT || jet_sync_value_id(&value).len() > MAX_SYNC_TEXT { return ^map }
     next_clock :: map.entries.iter().map(fn((_,_,clock,_)) { *clock }).max().unwrap_or(0).checked_add(1)
     if next_clock.is_none() { return JetSyncMapGeneric{entries: [],valid: false} }
-    if Some((existing_key,existing_value,clock,writer)) :: map.entries.iter_mut().find(fn((existing_key,_,_,_)) { jet_sync_value_id(existing_key) == key_id }) {
+    if Val((existing_key,existing_value,clock,writer)) :: map.entries.iter_mut().find(fn((existing_key,_,_,_)) { jet_sync_value_id(existing_key) == key_id }) {
         *existing_key = ^key
         *existing_value = ^value
         *clock = next_clock.unwrap()
@@ -599,14 +602,14 @@ fn jet_sync_decode_error<T: Into<String>>(message: T) -> [FieldError] { FieldErr
 // Invalid carriers are absorbing denials, including across codec boundaries.
 fn jet_sync_is_invalid_marker(tree: &DataTree) -> Bool {
     match tree {
-        DataTree.Object(fields) -> fields.len() == 1 && fields[0].0 == "invalid" && matches!(&fields[0].1,DataTree.Bool(true)),
+        .Object(fields) -> fields.len() == 1 && fields[0].0 == "invalid" && matches!(&fields[0].1,DataTree.Bool(true)),
         _ -> false
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1222
 fn jet_sync_object(tree: &DataTree,expected: &[String],label: &String) -> &[(String,DataTree)] [FieldError]! {
     match tree {
-        DataTree.Object(fields) -> {
+        .Object(fields) -> {
             if fields.len() != expected.len() || fields.iter().any(fn((key,_)) { !expected.iter().any(fn(name) { *name == key }) })
                 || expected.iter().any(fn(name) { !fields.iter().any(fn((key,_)) { key == name }) }) {
                 return Err(jet_sync_decode_error("{label} has missing, duplicate, or unknown fields"))
@@ -623,15 +626,15 @@ fn jet_sync_object_field(fields: &[(String,DataTree)],name: &String,label: &Stri
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1257
 fn jet_sync_decode_string(tree: &DataTree,label: &String) -> String [FieldError]! {
     match tree {
-        DataTree.Text(value) -> Ok(value.clone()),
+        .Text(value) -> Ok(value.clone()),
         other -> Err(jet_sync_decode_error("{label} must be text, got {datatree_kind_for(other)}"))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1270
 fn jet_sync_decode_u64(tree: &DataTree,label: &String) -> U64 [FieldError]! {
     value :: match tree {
-        DataTree.Text(value) -> value.clone(),
-        DataTree.Int(value) if *value >= 0 -> value.to_string(),
+        .Text(value) -> value.clone(),
+        .Int(value) if *value >= 0 -> value.to_string(),
         other -> { return Err(jet_sync_decode_error("{label} must be a non-negative integer, got {datatree_kind_for(other)}")) }
     }
     if value.is_empty() || (value.len() > 1 && value.starts_with('0')) { return Err(jet_sync_decode_error("{label} is not canonical")) }
@@ -640,15 +643,18 @@ fn jet_sync_decode_u64(tree: &DataTree,label: &String) -> U64 [FieldError]! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1292
 fn jet_sync_decode_array(tree: &DataTree,label: &String) -> &[DataTree] [FieldError]! {
     match tree {
-        DataTree.Array(values) -> Ok(values),
+        .Array(values) -> Ok(values),
         other -> Err(jet_sync_decode_error("{label} must be an array, got {datatree_kind_for(other)}"))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1305
 fn jet_sync_decode_field<T>(fields: &[(String,DataTree)],name: &String,label: &String,errors: &[FieldError],decode: fn(&DataTree) -> T [FieldError]!) -> T? {
     match jet_sync_object_field(fields,name,label).and_then(^decode) {
-        Ok(value) -> Some(^value),
-        Err(child) -> { errors.extend(FieldError.under_errors(name,^child)); None }
+        Ok(value) -> Val(^value),
+        Err(child) -> {
+            errors.extend(FieldError.under_errors(name,^child))
+            None
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1321
@@ -686,7 +692,10 @@ impl __jet_Decode for JetSyncText {
         for (index,value) in values.iter().enumerate() {
             fields :: match jet_sync_object(value,&["replica","counter","after","ch","deleted"],"SyncText atom") {
                 Ok(fields) -> fields,
-                Err(entry_errors) -> { jet_sync_frame_entry(&errors,index,^entry_errors); continue }
+                Err(entry_errors) -> {
+                    jet_sync_frame_entry(&errors,index,^entry_errors)
+                    continue
+                }
             }
             entry_errors := []
             replica :: jet_sync_decode_field(fields,"replica","SyncText atom",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncText.replica") })
@@ -694,22 +703,22 @@ impl __jet_Decode for JetSyncText {
             after :: jet_sync_decode_field(fields,"after","SyncText atom",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncText.after") })
             ch :: jet_sync_decode_field(fields,"ch","SyncText atom",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncText.ch") })
             deleted :: jet_sync_decode_field(fields,"deleted","SyncText atom",&entry_errors,fn(tree) {
-                match tree { DataTree.Bool(value) -> Ok(*value), _ -> Err(jet_sync_decode_error("SyncText.deleted expects a Bool")) }
+                match tree { .Bool(value) -> Ok(*value), _ -> Err(jet_sync_decode_error("SyncText.deleted expects a Bool")) }
             })
-            if (Some(replica),Some(counter),Some(after),Some(ch),Some(deleted)) :: (replica,counter,after,ch,deleted) {
+            if (Val(replica),Val(counter),Val(after),Val(ch),Val(deleted)) :: (replica,counter,after,ch,deleted) {
                 anchor :: if after.is_empty() { Ok(None) } else {
                     match after.rsplit_once(':') {
                         Some((replica,counter)) -> match counter.parse::<U64>() {
-                            Ok(counter) if jet_sync_token_is_valid(replica) && counter > 0 -> Ok(Some((replica.to_string(),counter))),
+                            Ok(counter) if jet_sync_token_is_valid(replica) && counter > 0 -> Ok(Val((replica.to_string(),counter))),
                             _ -> Err(())
                         },
                         None -> Err(())
                     }
                 }
                 chars := ch.chars()
-                single :: match (chars.next(),chars.next()) { (Some(ch),None) -> Some(ch), _ -> None }
+                single :: match (chars.next(),chars.next()) { (Val(ch),None) -> Val(ch), _ -> None }
                 match (anchor,single) {
-                    (Ok(anchor),Some(ch)) if jet_sync_token_is_valid(&replica) && counter > 0 -> {
+                    (Ok(anchor),Val(ch)) if jet_sync_token_is_valid(&replica) && counter > 0 -> {
                         id :: (replica.clone(),counter)
                         if seen.insert(^id,true).is_some() { entry_errors.extend(jet_sync_decode_error("SyncText contains duplicate atom identities")) }
                         else { atoms.push(JetSyncTextAtom{replica,counter,after: anchor,ch,deleted}) }
@@ -751,13 +760,16 @@ impl __jet_Decode for JetSyncCounter {
         for (index,value) in values.iter().enumerate() {
             fields :: match jet_sync_object(value,&["replica","positive","negative"],"SyncCounter entry") {
                 Ok(fields) -> fields,
-                Err(entry_errors) -> { jet_sync_frame_entry(&errors,index,^entry_errors); continue }
+                Err(entry_errors) -> {
+                    jet_sync_frame_entry(&errors,index,^entry_errors)
+                    continue
+                }
             }
             entry_errors := []
             replica :: jet_sync_decode_field(fields,"replica","SyncCounter entry",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncCounter.replica") })
             positive :: jet_sync_decode_field(fields,"positive","SyncCounter entry",&entry_errors,fn(tree) { jet_sync_decode_u64(tree,"SyncCounter.positive") })
             negative :: jet_sync_decode_field(fields,"negative","SyncCounter entry",&entry_errors,fn(tree) { jet_sync_decode_u64(tree,"SyncCounter.negative") })
-            if (Some(replica),Some(positive),Some(negative)) :: (replica,positive,negative) {
+            if (Val(replica),Val(positive),Val(negative)) :: (replica,positive,negative) {
                 if !jet_sync_token_is_valid(&replica) { entry_errors.extend(jet_sync_decode_error("SyncCounter replica is invalid")) }
                 else if counts.iter().any(fn((existing,_,_)) { existing == &replica }) { entry_errors.extend(jet_sync_decode_error("SyncCounter contains duplicate replicas")) }
                 else { counts.push((^replica,positive,negative)) }
@@ -793,14 +805,17 @@ impl __jet_Decode for JetSyncMap {
         for (index,value) in values.iter().enumerate() {
             fields :: match jet_sync_object(value,&["key","value","clock","writer"],"SyncMap entry") {
                 Ok(fields) -> fields,
-                Err(entry_errors) -> { jet_sync_frame_entry(&errors,index,^entry_errors); continue }
+                Err(entry_errors) -> {
+                    jet_sync_frame_entry(&errors,index,^entry_errors)
+                    continue
+                }
             }
             entry_errors := []
             key :: jet_sync_decode_field(fields,"key","SyncMap entry",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncMap.key") })
             entry_value :: jet_sync_decode_field(fields,"value","SyncMap entry",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncMap.value") })
             clock :: jet_sync_decode_field(fields,"clock","SyncMap entry",&entry_errors,fn(tree) { jet_sync_decode_u64(tree,"SyncMap.clock") })
             writer :: jet_sync_decode_field(fields,"writer","SyncMap entry",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncMap.writer") })
-            if (Some(key),Some(entry_value),Some(clock),Some(writer)) :: (key,entry_value,clock,writer) {
+            if (Val(key),Val(entry_value),Val(clock),Val(writer)) :: (key,entry_value,clock,writer) {
                 if !jet_sync_token_is_valid(&key) || !jet_sync_token_is_valid(&writer) || entry_value.len() > MAX_SYNC_TEXT || clock == 0 {
                     entry_errors.extend(jet_sync_decode_error("SyncMap entry is invalid"))
                 } else if entries.iter().any(fn((existing,_,_,_)) { existing == &key }) { entry_errors.extend(jet_sync_decode_error("SyncMap contains duplicate keys")) }
@@ -836,12 +851,15 @@ impl __jet_Decode for JetSyncList {
         for (index,value) in values.iter().enumerate() {
             fields :: match jet_sync_object(value,&["replica","item"],"SyncList item") {
                 Ok(fields) -> fields,
-                Err(entry_errors) -> { jet_sync_frame_entry(&errors,index,^entry_errors); continue }
+                Err(entry_errors) -> {
+                    jet_sync_frame_entry(&errors,index,^entry_errors)
+                    continue
+                }
             }
             entry_errors := []
             replica :: jet_sync_decode_field(fields,"replica","SyncList item",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncList.replica") })
             item :: jet_sync_decode_field(fields,"item","SyncList item",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncList.item") })
-            if (Some(replica),Some(item)) :: (replica,item) {
+            if (Val(replica),Val(item)) :: (replica,item) {
                 if !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT { entry_errors.extend(jet_sync_decode_error("SyncList item is invalid")) }
                 else if items.iter().any(fn((existing_replica,existing_item)) { existing_replica == &replica && existing_item == &item }) { entry_errors.extend(jet_sync_decode_error("SyncList contains duplicate items")) }
                 else { items.push((^replica,^item)) }
@@ -876,14 +894,17 @@ impl<K: __jet_Decode + __jet_Encode,V: __jet_Decode + __jet_Encode> __jet_Decode
         for (index,value) in values.iter().enumerate() {
             fields :: match jet_sync_object(value,&["key","value","clock","writer"],"SyncMap entry") {
                 Ok(fields) -> fields,
-                Err(entry_errors) -> { jet_sync_frame_entry(&errors,index,^entry_errors); continue }
+                Err(entry_errors) -> {
+                    jet_sync_frame_entry(&errors,index,^entry_errors)
+                    continue
+                }
             }
             entry_errors := []
             key :: jet_sync_decode_field(fields,"key","SyncMap entry",&entry_errors,K.jet_decode)
             entry_value :: jet_sync_decode_field(fields,"value","SyncMap entry",&entry_errors,V.jet_decode)
             clock :: jet_sync_decode_field(fields,"clock","SyncMap entry",&entry_errors,fn(tree) { jet_sync_decode_u64(tree,"SyncMap.clock") })
             writer :: jet_sync_decode_field(fields,"writer","SyncMap entry",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncMap.writer") })
-            if (Some(key),Some(entry_value),Some(clock),Some(writer)) :: (key,entry_value,clock,writer) {
+            if (Val(key),Val(entry_value),Val(clock),Val(writer)) :: (key,entry_value,clock,writer) {
                 if !jet_sync_token_is_valid(&writer) || clock == 0 { entry_errors.extend(jet_sync_decode_error("SyncMap entry is invalid")) }
                 else {
                     key_id :: jet_sync_value_id(&key)
@@ -921,12 +942,15 @@ impl<T: __jet_Decode + __jet_Encode> __jet_Decode for JetSyncListGeneric<T> {
         for (index,value) in values.iter().enumerate() {
             fields :: match jet_sync_object(value,&["replica","item"],"SyncList item") {
                 Ok(fields) -> fields,
-                Err(entry_errors) -> { jet_sync_frame_entry(&errors,index,^entry_errors); continue }
+                Err(entry_errors) -> {
+                    jet_sync_frame_entry(&errors,index,^entry_errors)
+                    continue
+                }
             }
             entry_errors := []
             replica :: jet_sync_decode_field(fields,"replica","SyncList item",&entry_errors,fn(tree) { jet_sync_decode_string(tree,"SyncList.replica") })
             item :: jet_sync_decode_field(fields,"item","SyncList item",&entry_errors,T.jet_decode)
-            if (Some(replica),Some(item)) :: (replica,item) {
+            if (Val(replica),Val(item)) :: (replica,item) {
                 if !jet_sync_token_is_valid(&replica) { entry_errors.extend(jet_sync_decode_error("SyncList item is invalid")) }
                 else {
                     item_id :: jet_sync_value_id(&item)
