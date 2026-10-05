@@ -56,13 +56,13 @@ pub fn jet_std_os_release() -> String {
     // GATE #4565: kernel primitive
     #Unsafe("resolve selected target release via native files, uname or Windows environment") {
         if target.selected_os() == .Linux {
-            if fs.read_to_string(OSPath.new("/proc/sys/kernel/osrelease")) is Ok(text) {
+            if fs.read_to_string(OSPath.new("/proc/sys/kernel/osrelease")) == .Ok(text) {
                 trimmed := text.trim() // #4303
                 if !trimmed.is_empty() -> return trimmed.to_string()
             }
-            if fs.read_to_string(OSPath.new("/etc/os-release")) is Ok(text) {
+            if fs.read_to_string(OSPath.new("/etc/os-release")) == .Ok(text) {
                 loop line in text.lines() {
-                    if line.strip_prefix("VERSION_ID=") is Val(value) {
+                    if line.strip_prefix("VERSION_ID=") == .Val(value) {
                         value := value.trim_matches('"') // #4303
                         return value.to_string()
                     }
@@ -70,15 +70,15 @@ pub fn jet_std_os_release() -> String {
             }
         }
         if target.selected_os() == .MacOS {
-            if Command.new("uname").arg("-r").output() is Ok(output) {
-                if String.from_utf8(^output.stdout) is Ok(s) {
+            if Command.new("uname").arg("-r").output() == .Ok(output) {
+                if String.from_utf8(^output.stdout) == .Ok(s) {
                     trimmed := s.trim() // #4303
                     if !trimmed.is_empty() -> return trimmed.to_string()
                 }
             }
         }
         if target.selected_family() == .Windows {
-            if env.var("OS") is Ok(v) { if !v.is_empty() -> return ^v }
+            if env.var("OS") == .Ok(v) { if !v.is_empty() -> return ^v }
         }
         String.new()
     }
@@ -88,9 +88,9 @@ pub fn jet_std_os_version() -> String {
     // GATE #4565: kernel primitive
     #Unsafe("resolve selected target version and retain release fallback") {
         if target.selected_os() == .Linux {
-            if fs.read_to_string(OSPath.new("/etc/os-release")) is Ok(text) {
+            if fs.read_to_string(OSPath.new("/etc/os-release")) == .Ok(text) {
                 loop line in text.lines() {
-                    if line.strip_prefix("PRETTY_NAME=") is Val(value) {
+                    if line.strip_prefix("PRETTY_NAME=") == .Val(value) {
                         value := value.trim_matches('"') // #4303
                         return value.to_string()
                     }
@@ -99,8 +99,8 @@ pub fn jet_std_os_version() -> String {
             return jet_std_os_release()
         }
         if target.selected_os() == .MacOS {
-            if Command.new("sw_vers").arg("-productVersion").output() is Ok(output) {
-                if String.from_utf8(^output.stdout) is Ok(s) {
+            if Command.new("sw_vers").arg("-productVersion").output() == .Ok(output) {
+                if String.from_utf8(^output.stdout) == .Ok(s) {
                     trimmed := s.trim() // #4303
                     if !trimmed.is_empty() -> return "macOS {trimmed}"
                 }
@@ -501,8 +501,8 @@ pub fn jet_std_os_uptime() -> F64 {
     if target.selected_os() == .Linux {
         // GATE #4565: kernel primitive
         #Unsafe("read actual Linux uptime fact and preserve zero fallback") {
-            if fs.read_to_string(OSPath.new("/proc/uptime")) is Ok(text) {
-                if text.split_whitespace().next() is Val(first) {
+            if fs.read_to_string(OSPath.new("/proc/uptime")) == .Ok(text) {
+                if text.split_whitespace().next() == .Val(first) {
                     if first.parse<F64>() is Ok(v) -> return v
                 }
             }

@@ -10,7 +10,7 @@ pub fn jet_env_config_file_is_project_relative(file: String) -> Bool {
     // GATE #4565: kernel primitive
     #Unsafe("classify the selected target's native path components without IO or normalization") {
         path :: OSPath.new(file)
-        !path.is_absolute() && !path.components().any(part -> part is .ParentDir)
+        !path.is_absolute() && !path.components().any(part -> part == .ParentDir)
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/EnvConfig.rs:28
