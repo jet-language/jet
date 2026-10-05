@@ -129,7 +129,7 @@ pub fn jet_crypto_pbkdf2_hmac(password: [U8], salt: [U8], iterations: I64, key_l
     count :: USize.from_i64(key_len) ?? return [U8]{}
     block_count :: U32.from_usize(count.div_ceil(32)) ?? return [U8]{}
     output := [U8]{}
-    loop block in U32{1}..=block_count {
+    loop block in U32{1}..block_count {
         input := [U8]{}
         loop byte in salt -> &input.push(byte)
         loop i in 0..<4 -> &input.push(U8.from_u32((block >> ((3 - i) * 8)) & U32{255}) ?? panic("PBKDF2 block byte narrowing failed"))

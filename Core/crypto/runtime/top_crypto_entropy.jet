@@ -229,7 +229,7 @@ fn jet_crypto_entropy_wasi_attempt(out: &[U8]) -> () U16! {
         } else {
             for chunk in out.chunks_mut(8) {
                 bytes :: get_random_u64().to_ne_bytes()
-                chunk.copy_from_slice(&bytes[..chunk.len()])
+                chunk.copy_from_slice(&bytes[0..<chunk.len()])
             }
             Ok(())
         }
@@ -238,7 +238,7 @@ fn jet_crypto_entropy_wasi_attempt(out: &[U8]) -> () U16! {
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:313
 fn jet_crypto_entropy_wasi_with(count: USize, provider: fn(&[U8]) -> U16) -> [U8] JetCryptoError! {
     const ERRNO_INTR: U16 = 27
-    for generation in 0..17 {
+    for generation in 0..<17 {
         allocation := [U8].filled(count, 0)
         #If(test) { jet_crypto_entropy_observe_wasi_attempt(.Created, generation, allocation) }
         errno :: provider(&allocation)

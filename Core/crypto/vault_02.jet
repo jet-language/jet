@@ -677,7 +677,7 @@ fn jvkw_array<const N: USize>(bytes: [U8], at: &USize) -> [U8; N] JetVaultKeyWra
 // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:125
 fn jvkw_parse(bytes: [U8]) -> JvkwParsed JetVaultKeyWrapError! {
     if bytes.len() > JVKW_MAX || bytes.len() < 16 -> return Err(JetVaultKeyWrapError.InvalidLength)
-    if bytes[..<4] != JVKW_MAGIC -> return Err(JetVaultKeyWrapError.InvalidEncoding)
+    if bytes[0..<4] != JVKW_MAGIC -> return Err(JetVaultKeyWrapError.InvalidEncoding)
     if bytes[4] != JVKW_VERSION -> return Err(JetVaultKeyWrapError.UnsupportedVersion)
     mode :: if bytes[5] == 1 { JetVaultKeyWrapMode.Recipient } else if bytes[5] == 2 { JetVaultKeyWrapMode.Passphrase } else { return Err(JetVaultKeyWrapError.UnsupportedMode) }
     key_type :: bytes[6]
@@ -928,7 +928,7 @@ fn jvkw_open_recipient(parsed: JvkwParsed, bytes: [U8], identity: JetX25519Secre
     #If(test) { JVKW_HKDF_COUNT.with((slot) -> slot.set(slot.get() + 1)) }
     nonce :: Zeroizing(hkdf24(shared.0, salt, nonce_info) ?? return Err(JetVaultKeyWrapError.OpenFailed))
     aad := "JVKW1 recipient aad".into_bytes()
-    &aad.extend_from_slice(bytes[..<stanzas_at])
+    &aad.extend_from_slice(bytes[0..<stanzas_at])
     &aad.extend_from_slice(recipient_public)
     #If(test) { JVKW_AEAD_COUNT.with((slot) -> slot.set(slot.get() + 1)) }
     cipher :: XChaCha20Poly1305.new_from_slice(kek.0) ?? return Err(JetVaultKeyWrapError.OpenFailed)
@@ -954,12 +954,12 @@ fn jvkw_open<T: JetVaultKey>(wrapped: JetWrappedVaultKey, unlock: JetVaultKeyUnl
         else -> return Err(JetVaultKeyWrapError.OpenFailed)
     }
     aad := "JVKW1 payload".into_bytes()
-    &aad.extend_from_slice(wrapped.bytes[..<parsed.header_end])
+    &aad.extend_from_slice(wrapped.bytes[0..<parsed.header_end])
     cipher :: XChaCha20Poly1305.new_from_slice(backup_key.0) ?? return Err(JetVaultKeyWrapError.OpenFailed)
     plaintext :: Zeroizing(cipher.decrypt(XNonce.from_slice(parsed.payload_nonce), Payload{msg: wrapped.bytes[parsed.header_end..], aad: aad}) ?? return Err(JetVaultKeyWrapError.OpenFailed))
     if plaintext.0.len() != 64 || parsed.key_type != T.TAG -> return Err(JetVaultKeyWrapError.OpenFailed)
     public :: plaintext.0[32..].try_into() ?? return Err(JetVaultKeyWrapError.OpenFailed)
-    key :: Zeroizing(~plaintext.0[..<32])
+    key :: Zeroizing(~plaintext.0[0..<32])
     typed :: T.from_bytes(~key.0) ?? return Err(JetVaultKeyWrapError.OpenFailed)
     derived :: typed.public_bytes()
     if derived.len() != 32 || !Bool.from(derived.ct_eq(public)) -> return Err(JetVaultKeyWrapError.OpenFailed)
