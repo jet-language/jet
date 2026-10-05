@@ -22,8 +22,8 @@ use jet_foundation::CborKernel::{self, Value};
 use jet_foundation::Shape::ShapeProjectionKind;
 use jet_rt::JetVal;
 // The Foundation carrier's tier-side accessors are a trait defined by the
-// included Prelude `DataTree.rs`; the host adapters below call them by name.
-use self::json_rt::JetDataTreeAccess;
+// included Prelude `Dyn.rs`; the host adapters below call them by name.
+use self::json_rt::JetDynAccess;
 
 mod encoding_base_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
@@ -67,7 +67,7 @@ pub(crate) const CSV_DECODE_FLOAT: i64 = 1;
 pub(crate) const CSV_DECODE_BOOL: i64 = 2;
 pub(crate) const CSV_DECODE_STRING: i64 = 3;
 pub(crate) const CSV_DECODE_CHAR: i64 = 4;
-pub(crate) const CSV_DECODE_DATATREE: i64 = 5;
+pub(crate) const CSV_DECODE_DYN: i64 = 5;
 pub(crate) const CSV_DECODE_DATE: i64 = 10;
 pub(crate) const CSV_DECODE_LOCAL_DATE: i64 = 11;
 pub(crate) const CSV_DECODE_LOCAL_TIME: i64 = 12;
@@ -76,12 +76,12 @@ pub(crate) const CSV_DECODE_DURATION: i64 = 14;
 pub(crate) const CSV_DECODE_DECIMAL: i64 = 15;
 
 
-/// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
+/// Canonical `jet_std` JSON/Dyn runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
     pub(crate) use jet_foundation::Shape::ShapeProjection;
-    pub use jet_foundation::DataTree::DataTree;
+    pub use jet_foundation::Dyn::Dyn;
     // AOT places the Foundation JSON kernel at the program root; the
-    // DataTree/TOML renderers name its quoting entry unqualified.
+    // Dyn/TOML renderers name its quoting entry unqualified.
     use crate::jet_encoding_json::quote_json;
 
 
@@ -137,12 +137,12 @@ pub(crate) mod json_rt {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
-    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DynKind.rs");
     // The one FieldError projection (I9), included beside its caller so
-    // `DataTree.rs`'s `JetShow`/`JetDisplay` impls resolve it here too.
+    // `Dyn.rs`'s `JetShow`/`JetDisplay` impls resolve it here too.
     include!("../../jet-codegen/src/Prelude/Core/FieldError.rs");
-    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
-    jet_datatree_decode_helpers!();
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Dyn.rs");
+    jet_dyn_decode_helpers!();
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSON.rs");
     #[allow(unused_imports)]
@@ -178,21 +178,21 @@ pub(crate) mod json_rt {
         crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_f64(value))
     }
 
-    pub fn parse_datatree(text: &str) -> Result<DataTree, EncodingError> {
-        parse_json_datatree(text)
+    pub fn parse_dyn(text: &str) -> Result<Dyn, EncodingError> {
+        parse_json_dyn(text)
     }
 
-    pub fn parse_datatree_typed_ordered(text: &str) -> Result<DataTree, EncodingError> {
-        parse_json_typed_datatree(text)
+    pub fn parse_dyn_typed_ordered(text: &str) -> Result<Dyn, EncodingError> {
+        parse_json_typed_dyn(text)
     }
 
     /// D-JSON3 lenient decode. The walk, the coercion message and the audit-line
-    /// shape are ONE policy in the included `JSONDataTree.rs`; this host used to
+    /// shape are ONE policy in the included `JSONDyn.rs`; this host used to
     /// carry a byte-equivalent `coerce_walk` copy self-documented as "same as"
     /// AOT's (I8/I9). Only the sink is per-tier, and picking it is the resident
     /// output adapter's job — a raw `eprintln!` would escape `ProgramOutput`,
     /// and a raw buffer push would escape the program's own output order.
-    pub fn decode_lenient(text: &str) -> Result<DataTree, EncodingError> {
+    pub fn decode_lenient(text: &str) -> Result<Dyn, EncodingError> {
         jet_std_json_decode_lenient(text, &mut |line| {
             let _ = crate::runtime_host::write_jit_stderr(
                 &crate::IO::term_prelude::jet_term_print_frame(&line),
@@ -202,11 +202,11 @@ pub(crate) mod json_rt {
     }
 }
 /// Shared CSV/data query kernel. The resident layer only marshals heap
-/// `DataTree` values; plan parsing and comparison stay in the Prelude.
+/// `Dyn` values; plan parsing and comparison stay in the Prelude.
 pub(crate) mod data_query_rt {
     pub(crate) mod jet_std {
         pub(crate) use super::super::json_rt::{
-            datatree_get, render_datatree_json, DataTree, FieldError,
+            dyn_get, render_dyn_json, Dyn, FieldError,
         };
         // `DataSchema::infer` / `DataFormat` from CommonTypes.rs, cut by
         // build.rs (`write_data_schema_std`).
@@ -219,22 +219,22 @@ pub(crate) mod data_query_rt {
 
 /// Canonical YAML via build.rs-stripped include (trailing prelude brace removed).
 mod yaml_rt {
-    use super::json_rt::DataTree;
+    use super::json_rt::Dyn;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!(concat!(env!("OUT_DIR"), "/yaml_std.rs"));
 }
 
-/// DataTree heap ABI: record `[disc:i64, payload:i64]` (Float payload = to_bits).
+/// Dyn heap ABI: record `[disc:i64, payload:i64]` (Float payload = to_bits).
 /// Discriminants come from the Prelude enum declaration at build time.
-const DT_NULL: i64 = crate::types_meta::PRELUDE_DATATREE_NULL;
-const DT_BOOL: i64 = crate::types_meta::PRELUDE_DATATREE_BOOL;
-const DT_INT: i64 = crate::types_meta::PRELUDE_DATATREE_INT;
-const DT_FLOAT: i64 = crate::types_meta::PRELUDE_DATATREE_FLOAT;
-const DT_TEXT: i64 = crate::types_meta::PRELUDE_DATATREE_TEXT;
-const DT_BYTES: i64 = crate::types_meta::PRELUDE_DATATREE_BYTES;
-const DT_ARRAY: i64 = crate::types_meta::PRELUDE_DATATREE_ARRAY;
-const DT_OBJECT: i64 = crate::types_meta::PRELUDE_DATATREE_OBJECT;
+const DT_NULL: i64 = crate::types_meta::PRELUDE_DYN_NULL;
+const DT_BOOL: i64 = crate::types_meta::PRELUDE_DYN_BOOL;
+const DT_INT: i64 = crate::types_meta::PRELUDE_DYN_INT;
+const DT_FLOAT: i64 = crate::types_meta::PRELUDE_DYN_FLOAT;
+const DT_TEXT: i64 = crate::types_meta::PRELUDE_DYN_TEXT;
+const DT_BYTES: i64 = crate::types_meta::PRELUDE_DYN_BYTES;
+const DT_ARRAY: i64 = crate::types_meta::PRELUDE_DYN_ARRAY;
+const DT_OBJECT: i64 = crate::types_meta::PRELUDE_DYN_OBJECT;
 // Private adapter tags: these carriers never escape a typed JSON decode.
 const DT_NUMBER: i64 = -1;
 const DT_TYPED_TEXT: i64 = -2;
@@ -252,7 +252,7 @@ const DT_TYPED_TEXT_PREFIX: &str = "\u{0}jet-dt-typed-text\0";
 /// payload with `struct_get_str`, and `jet_jit_struct_get_str` answers 0 for
 /// an Int slot, so an Int-tagged `.Text` bound heap id 0 — the first string
 /// the lowerer allocates, the entry file path — instead of the payload.
-/// Allocate one DataTree enum record with the carrier tag expected by its
+/// Allocate one Dyn enum record with the carrier tag expected by its
 /// payload type.  Handles are record references in typed enum fields; dense
 /// erased lists may still carry those same handles as `JetVal::Int`, which the
 /// reader accepts explicitly below.
@@ -279,39 +279,39 @@ fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
                 let _ = rt.heap.record_set_int(h, 1, payload);
             }
 
-            _ => jet_foundation::ice!(None, "invalid DataTree discriminant"),
+            _ => jet_foundation::ice!(None, "invalid Dyn discriminant"),
         }
         h
     })
 }
-fn tagged_datatree_text(prefix: &str, text: &str) -> String {
+fn tagged_dyn_text(prefix: &str, text: &str) -> String {
     let mut tagged = String::with_capacity(prefix.len() + text.len());
     tagged.push_str(prefix);
     tagged.push_str(text);
     tagged
 }
 
-pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
+pub(crate) fn alloc_dyn(tree: &json_rt::Dyn) -> i64 {
     match tree {
-        json_rt::DataTree::Null => alloc_dt_record(DT_NULL, 0),
-        json_rt::DataTree::Bool(b) => alloc_dt_record(DT_BOOL, i64::from(*b)),
-        json_rt::DataTree::Int(n) => alloc_dt_record(DT_INT, *n),
-        json_rt::DataTree::Float(f) => alloc_dt_record(DT_FLOAT, f.to_bits() as i64),
-        json_rt::DataTree::Number(text) => {
-            let text = tagged_datatree_text(DT_NUMBER_PREFIX, text);
+        json_rt::Dyn::Null => alloc_dt_record(DT_NULL, 0),
+        json_rt::Dyn::Bool(b) => alloc_dt_record(DT_BOOL, i64::from(*b)),
+        json_rt::Dyn::Int(n) => alloc_dt_record(DT_INT, *n),
+        json_rt::Dyn::Float(f) => alloc_dt_record(DT_FLOAT, f.to_bits() as i64),
+        json_rt::Dyn::Number(text) => {
+            let text = tagged_dyn_text(DT_NUMBER_PREFIX, text);
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
             alloc_dt_record(DT_TEXT, sid)
         }
-        json_rt::DataTree::TypedText(text) => {
-            let text = tagged_datatree_text(DT_TYPED_TEXT_PREFIX, text);
+        json_rt::Dyn::TypedText(text) => {
+            let text = tagged_dyn_text(DT_TYPED_TEXT_PREFIX, text);
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
             alloc_dt_record(DT_TEXT, sid)
         }
-        json_rt::DataTree::Text(s) => {
+        json_rt::Dyn::Text(s) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s.clone()));
             alloc_dt_record(DT_TEXT, sid)
         }
-        json_rt::DataTree::Bytes(bs) => {
+        json_rt::Dyn::Bytes(bs) => {
             let list = Concurrency::with_runtime_mut(|rt| {
                 let list = rt.heap.alloc_empty_list();
                 for byte in bs {
@@ -321,8 +321,10 @@ pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
             });
             alloc_dt_record(DT_BYTES, list)
         }
-        json_rt::DataTree::Array(items) => {
-            let handles: Vec<i64> = items.iter().map(alloc_datatree).collect();
+        json_rt::Dyn::DateTime(_) => crate::runtime_host::runtime_stop_unwind(
+            "E3001", 0, "Dyn.DateTime requires the AOT time payload boundary"),
+        json_rt::Dyn::Array(items) => {
+            let handles: Vec<i64> = items.iter().map(alloc_dyn).collect();
             let list = Concurrency::with_runtime_mut(|rt| {
                 rt.heap.alloc_list_values(
                     handles
@@ -333,12 +335,12 @@ pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
             });
             alloc_dt_record(DT_ARRAY, list)
         }
-        json_rt::DataTree::Object(entries) => {
-            // Ordered pair list (AOT `Vec<(String, DataTree)>`), not a key-sorted
+        json_rt::Dyn::Object(entries) => {
+            // Ordered pair list (AOT `Vec<(String, Dyn)>`), not a key-sorted
             // Map — Codable / source field order must survive `json.to_string`.
             let pairs: Vec<(String, i64)> = entries
                 .iter()
-                .map(|(k, v)| (k.clone(), alloc_datatree(v)))
+                .map(|(k, v)| (k.clone(), alloc_dyn(v)))
                 .collect();
             let list = Concurrency::with_runtime_mut(|rt| {
                 let pair_values = pairs
@@ -358,14 +360,14 @@ pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
     }
 }
 
-fn datatree_handle_slot(slot: &JetVal) -> Option<i64> {
+fn dyn_handle_slot(slot: &JetVal) -> Option<i64> {
     match slot {
         JetVal::Int(value) | JetVal::RecordRef(value) => Some(*value),
         _ => None,
     }
 }
 
-fn datatree_string_slot(rt: &runtime_host::JitRuntime, slot: &JetVal) -> Option<String> {
+fn dyn_string_slot(rt: &runtime_host::JitRuntime, slot: &JetVal) -> Option<String> {
     match slot {
         JetVal::String(value) => Some(value.clone()),
         JetVal::StringView { owner, start, end } => rt
@@ -377,7 +379,7 @@ fn datatree_string_slot(rt: &runtime_host::JitRuntime, slot: &JetVal) -> Option<
     }
 }
 
-pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
+pub(crate) fn read_dyn(handle: i64) -> Option<json_rt::Dyn> {
     let (disc, payload, text, child_handles, object_pairs, float_val) =
         Concurrency::with_runtime_mut(|rt| {
             let disc = rt.heap.record_get_int(handle, 0)?;
@@ -403,21 +405,21 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
                     Some((disc, 0i64, None, None, None, Some(f)))
                 }
                 DT_TEXT | DT_NUMBER | DT_TYPED_TEXT => {
-                    let s = datatree_string_slot(rt, rt.heap.record_get(handle, 1)?)?;
+                    let s = dyn_string_slot(rt, rt.heap.record_get(handle, 1)?)?;
                     Some((disc, 0i64, Some(s), None, None, None))
                 }
                 DT_ARRAY => {
-                    let payload = datatree_handle_slot(rt.heap.record_get(handle, 1)?)?;
+                    let payload = dyn_handle_slot(rt.heap.record_get(handle, 1)?)?;
                     let items = rt
                         .heap
                         .clone_list_values(payload)?
                         .into_iter()
-                        .map(|slot| datatree_handle_slot(&slot))
+                        .map(|slot| dyn_handle_slot(&slot))
                         .collect::<Option<Vec<_>>>()?;
                     Some((disc, payload, None, Some(items), None, None))
                 }
                 DT_BYTES => {
-                    let payload = datatree_handle_slot(rt.heap.record_get(handle, 1)?)?;
+                    let payload = dyn_handle_slot(rt.heap.record_get(handle, 1)?)?;
                     let bytes = rt
                         .heap
                         .clone_list_values(payload)?
@@ -430,13 +432,13 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
                     Some((disc, payload, None, Some(bytes), None, None))
                 }
                 DT_OBJECT => {
-                    let payload = datatree_handle_slot(rt.heap.record_get(handle, 1)?)?;
+                    let payload = dyn_handle_slot(rt.heap.record_get(handle, 1)?)?;
                     let slots = rt.heap.clone_list_values(payload)?;
                     let mut pairs = Vec::with_capacity(slots.len());
                     for slot in slots {
-                        let rec = datatree_handle_slot(&slot)?;
-                        let key = datatree_string_slot(rt, rt.heap.record_get(rec, 0)?)?;
-                        let value = datatree_handle_slot(rt.heap.record_get(rec, 1)?)?;
+                        let rec = dyn_handle_slot(&slot)?;
+                        let key = dyn_string_slot(rt, rt.heap.record_get(rec, 0)?)?;
+                        let value = dyn_handle_slot(rt.heap.record_get(rec, 1)?)?;
                         pairs.push((key, value));
                     }
                     Some((disc, payload, None, None, Some(pairs), None))
@@ -445,44 +447,44 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
             }
         })?;
     match disc {
-        DT_NULL => Some(json_rt::DataTree::Null),
-        DT_BOOL => Some(json_rt::DataTree::Bool(payload != 0)),
-        DT_INT => Some(json_rt::DataTree::Int(payload)),
-        DT_FLOAT => Some(json_rt::DataTree::Float(float_val?)),
+        DT_NULL => Some(json_rt::Dyn::Null),
+        DT_BOOL => Some(json_rt::Dyn::Bool(payload != 0)),
+        DT_INT => Some(json_rt::Dyn::Int(payload)),
+        DT_FLOAT => Some(json_rt::Dyn::Float(float_val?)),
         DT_TEXT => {
             let text = text?;
             if let Some(text) = text.strip_prefix(DT_NUMBER_PREFIX) {
-                Some(json_rt::DataTree::Number(text.to_owned()))
+                Some(json_rt::Dyn::Number(text.to_owned()))
             } else if let Some(text) = text.strip_prefix(DT_TYPED_TEXT_PREFIX) {
-                Some(json_rt::DataTree::TypedText(text.to_owned()))
+                Some(json_rt::Dyn::TypedText(text.to_owned()))
             } else if let Some(text) = text.strip_prefix(DT_TEXT_PREFIX) {
-                Some(json_rt::DataTree::Text(text.to_owned()))
+                Some(json_rt::Dyn::Text(text.to_owned()))
             } else {
-                Some(json_rt::DataTree::Text(text))
+                Some(json_rt::Dyn::Text(text))
             }
         }
-        DT_NUMBER => Some(json_rt::DataTree::Number(text?)),
-        DT_TYPED_TEXT => Some(json_rt::DataTree::TypedText(text?)),
+        DT_NUMBER => Some(json_rt::Dyn::Number(text?)),
+        DT_TYPED_TEXT => Some(json_rt::Dyn::TypedText(text?)),
         DT_ARRAY => {
             let items = child_handles?
                 .into_iter()
-                .map(read_datatree)
+                .map(read_dyn)
                 .collect::<Option<Vec<_>>>()?;
-            Some(json_rt::DataTree::Array(items))
+            Some(json_rt::Dyn::Array(items))
         }
         DT_BYTES => {
             let bytes = child_handles?
                 .into_iter()
                 .map(|byte| u8::try_from(byte).ok())
                 .collect::<Option<Vec<_>>>()?;
-            Some(json_rt::DataTree::Bytes(bytes))
+            Some(json_rt::Dyn::Bytes(bytes))
         }
         DT_OBJECT => {
             let pairs = object_pairs?
                 .into_iter()
-                .map(|(key, value)| read_datatree(value).map(|tree| (key, tree)))
+                .map(|(key, value)| read_dyn(value).map(|tree| (key, tree)))
                 .collect::<Option<Vec<_>>>()?;
-            Some(json_rt::DataTree::Object(pairs))
+            Some(json_rt::Dyn::Object(pairs))
         }
         _ => None,
     }
@@ -614,8 +616,8 @@ fn clone_string_list(list: i64) -> Vec<String> {
     })
 }
 
-fn env_config_insert_tree(tree: &mut json_rt::DataTree, segments: &[String], value: String) {
-    let json_rt::DataTree::Object(entries) = tree else {
+fn env_config_insert_tree(tree: &mut json_rt::Dyn, segments: &[String], value: String) {
+    let json_rt::Dyn::Object(entries) = tree else {
         return;
     };
     let Some(segment) = segments.first() else {
@@ -626,18 +628,18 @@ fn env_config_insert_tree(tree: &mut json_rt::DataTree, segments: &[String], val
             .iter_mut()
             .find(|(name, _)| name.eq_ignore_ascii_case(segment))
         {
-            *existing = json_rt::DataTree::Text(value);
+            *existing = json_rt::Dyn::Text(value);
         } else {
-            entries.push((segment.clone(), json_rt::DataTree::Text(value)));
+            entries.push((segment.clone(), json_rt::Dyn::Text(value)));
         }
         return;
     }
     if let Some((_, child)) = entries.iter_mut().find(|(name, child)| {
-        name.eq_ignore_ascii_case(segment) && matches!(child, json_rt::DataTree::Object(_))
+        name.eq_ignore_ascii_case(segment) && matches!(child, json_rt::Dyn::Object(_))
     }) {
         env_config_insert_tree(child, &segments[1..], value);
     } else {
-        let mut child = json_rt::DataTree::Object(Vec::new());
+        let mut child = json_rt::Dyn::Object(Vec::new());
         env_config_insert_tree(&mut child, &segments[1..], value);
         entries.push((segment.clone(), child));
     }
@@ -658,7 +660,7 @@ fn alloc_env_config_origins(origins: &[(String, String)]) -> i64 {
     })
 }
 
-/// Build the resident `DataTree` source carrier for environment configuration.
+/// Build the resident `Dyn` source carrier for environment configuration.
 ///
 /// The source order, dotenv parser, prefix fold, nested-key split, and
 /// allowlist are all owned by `Prelude/Core/EnvConfig.rs`; this function only
@@ -692,13 +694,13 @@ fn jet_jit_env_config(prefix: i64, file: i64, allow: i64) -> i64 {
             Ok(entries) => entries,
             Err(reason) => return result_err_decode("", &format!("E2416: {reason}")),
         };
-    let mut tree = json_rt::DataTree::Object(Vec::new());
+    let mut tree = json_rt::Dyn::Object(Vec::new());
     let mut origins = Vec::with_capacity(entries.len());
     for entry in entries {
         origins.push((entry.name, entry.segments.join(".")));
         env_config_insert_tree(&mut tree, &entry.segments, entry.value);
     }
-    let tree = alloc_datatree(&tree);
+    let tree = alloc_dyn(&tree);
     let origins = alloc_env_config_origins(&origins);
     let carrier = Concurrency::with_runtime_mut(|rt| {
         let carrier = rt.heap.alloc_record(2);
@@ -1181,7 +1183,7 @@ fn jet_jit_enc_csv_to_string(values: i64, type_key: i64) -> i64 {
             for value in values {
                 trees.push(crate::Receipt::encode_jit_value_slot(rt, value, descriptor)?);
             }
-            csv_render_datatree(&json_rt::DataTree::Array(trees)).map_err(str::to_owned)
+            csv_render_dyn(&json_rt::Dyn::Array(trees)).map_err(str::to_owned)
         })();
         match rendered {
             Ok(rendered) => rt.heap.alloc_string(rendered),
@@ -1193,23 +1195,23 @@ fn jet_jit_enc_csv_to_string(values: i64, type_key: i64) -> i64 {
     })
 }
 
-/// Typed `csv.to_string([T])` where `T` is `#Codable`: the encoded `DataTree` is
+/// Typed `csv.to_string([T])` where `T` is `#Codable`: the encoded `Dyn` is
 /// an array of flat objects. Header comes from the first row's keys, then one
 /// record per element. Mirrors AOT `jet_enc_csv_to_string` cell for cell.
 /// parity: guard tests/encoding_parity.rs::typed_csv_encode_matches_aot_and_default_dev
-fn csv_render_datatree(tree: &json_rt::DataTree) -> Result<String, &'static str> {
-    let json_rt::DataTree::Array(trees) = tree else {
+fn csv_render_dyn(tree: &json_rt::Dyn) -> Result<String, &'static str> {
+    let json_rt::Dyn::Array(trees) = tree else {
         return Err("csv.to_string needs rows or records");
     };
     let mut header: Vec<String> = Vec::new();
-    if let Some(json_rt::DataTree::Object(entries)) = trees.first() {
+    if let Some(json_rt::Dyn::Object(entries)) = trees.first() {
         header = entries.iter().map(|(k, _)| k.clone()).collect();
     } else if !trees.is_empty() {
         return Err("csv.to_string needs rows or records");
     }
     let mut rows: Vec<Vec<String>> = vec![header.clone()];
     for tree in trees {
-        let json_rt::DataTree::Object(entries) = tree else {
+        let json_rt::Dyn::Object(entries) = tree else {
             return Err("csv.to_string needs rows or records");
         };
         let mut record = Vec::with_capacity(header.len());
@@ -1219,12 +1221,14 @@ fn csv_render_datatree(tree: &json_rt::DataTree) -> Result<String, &'static str>
                 .find(|(k, _)| k == key)
                 .map(|(_, v)| v.clone());
             record.push(match cell {
-                Some(json_rt::DataTree::Text(s)) => s,
-                Some(json_rt::DataTree::Int(n)) => n.to_string(),
-                Some(json_rt::DataTree::Float(f)) => format!("{f:?}"),
-                Some(json_rt::DataTree::Bool(b)) => b.to_string(),
-                Some(json_rt::DataTree::Null) | None => String::new(),
-                Some(other) => json_rt::render_datatree_json(&other, false, 0),
+                Some(json_rt::Dyn::Text(s)) => s,
+                Some(json_rt::Dyn::Int(n)) => n.to_string(),
+                Some(json_rt::Dyn::Float(f)) => format!("{f:?}"),
+                Some(json_rt::Dyn::Bool(b)) => b.to_string(),
+                Some(json_rt::Dyn::Bytes(bytes)) => json_rt::Dyn::bytes_text(&bytes),
+                Some(json_rt::Dyn::DateTime(value)) => value.to_rfc3339(),
+                Some(json_rt::Dyn::Null) | None => String::new(),
+                Some(other) => json_rt::render_dyn_json(&other, false, 0),
             });
         }
         rows.push(record);
@@ -1233,9 +1237,9 @@ fn csv_render_datatree(tree: &json_rt::DataTree) -> Result<String, &'static str>
 }
 
 fn jet_jit_csv_tree_to_string(tree: i64) -> i64 {
-    let rendered = read_datatree(tree)
-        .ok_or("invalid DataTree")
-        .and_then(|t| csv_render_datatree(&t));
+    let rendered = read_dyn(tree)
+        .ok_or("invalid Dyn")
+        .and_then(|t| csv_render_dyn(&t));
     Concurrency::with_runtime_mut(|rt| match rendered {
         Ok(rendered) => rt.heap.alloc_string(rendered),
         Err(message) => {
@@ -1403,11 +1407,11 @@ fn jet_jit_uuid_v7(clock: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
-// ── JSON / DataTree (core.encoding.json) ─────────────────────────────────────
+// ── JSON / Dyn (core.encoding.json) ─────────────────────────────────────
 
 fn jet_jit_json_parse(text: i64) -> i64 {
-    match json_rt::parse_datatree(&clone_string(text)) {
-        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
+    match json_rt::parse_dyn(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_dyn(&tree) as u64),
         Err(error) => result_err_encoding(error),
     }
 }
@@ -1415,15 +1419,15 @@ fn jet_jit_json_parse(text: i64) -> i64 {
 /// Ordered JSON parsing is the front half of typed `json.decode`. Its failure
 /// uses the same canonical `EncodingError` carrier as every format parser.
 fn jet_jit_json_parse_ordered(text: i64) -> i64 {
-    match json_rt::parse_datatree_typed_ordered(&clone_string(text)) {
-        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
+    match json_rt::parse_dyn_typed_ordered(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_dyn(&tree) as u64),
         Err(error) => result_err_encoding(error),
     }
 }
 
 fn jet_jit_json_decode(text: i64) -> i64 {
     match json_rt::decode_lenient(&clone_string(text)) {
-        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
+        Ok(tree) => result_ok(alloc_dyn(&tree) as u64),
         Err(error) => result_err_encoding(error),
     }
 }
@@ -1552,12 +1556,12 @@ fn typed_is_secret(descriptor: &runtime_host::RuntimeTypeDescriptor) -> bool {
 
 fn typed_codec_slot(
     descriptor: &runtime_host::RuntimeTypeDescriptor,
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
 ) -> Result<JetVal, Vec<json_rt::FieldError>> {
     let kind = typed_codec_kind(descriptor).ok_or_else(|| {
         json_rt::FieldError::one(format!("type `{}` has no checked decoder", descriptor.name))
     })?;
-    let result = jet_jit_codec_decode(kind, alloc_datatree(tree));
+    let result = jet_jit_codec_decode(kind, alloc_dyn(tree));
     Concurrency::with_runtime_result(
         json_rt::FieldError::one("typed codec has no active resident runtime"),
         |rt| {
@@ -1642,14 +1646,14 @@ fn typed_default_field(
 }
 
 fn typed_decode_record(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     descriptor: &runtime_host::RuntimeTypeDescriptor,
 ) -> Result<JetVal, Vec<json_rt::FieldError>> {
-    let json_rt::DataTree::Object(entries) = tree else {
+    let json_rt::Dyn::Object(entries) = tree else {
         return Err(json_rt::FieldError::one(format!(
             "expected {}, found {}",
             descriptor.name,
-            json_rt::datatree_kind_for(tree)
+            json_rt::dyn_kind_for(tree)
         )));
     };
     let mut slots = vec![JetVal::Int(0); descriptor.fields.len()];
@@ -1726,20 +1730,20 @@ fn typed_decode_record(
 }
 
 fn typed_decode_list(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     descriptor: &runtime_host::RuntimeTypeDescriptor,
 ) -> Result<JetVal, Vec<json_rt::FieldError>> {
     let child = typed_child_descriptor(descriptor, descriptor.element, "element")?;
     let values = match tree {
-        json_rt::DataTree::Array(values) => values.clone(),
-        json_rt::DataTree::Bytes(values) => values
+        json_rt::Dyn::Array(values) => values.clone(),
+        json_rt::Dyn::Bytes(values) => values
             .iter()
-            .map(|value| json_rt::DataTree::Int(json_rt::jet_int_from_i64(i64::from(*value))))
+            .map(|value| json_rt::Dyn::Int(json_rt::jet_int_from_i64(i64::from(*value))))
             .collect(),
         _ => {
             return Err(json_rt::FieldError::one(format!(
                 "expected list, found {}",
-                json_rt::datatree_kind_for(tree)
+                json_rt::dyn_kind_for(tree)
             )))
         }
     };
@@ -1762,13 +1766,13 @@ fn typed_decode_list(
 }
 
 fn typed_decode_map(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     descriptor: &runtime_host::RuntimeTypeDescriptor,
 ) -> Result<JetVal, Vec<json_rt::FieldError>> {
-    let json_rt::DataTree::Object(entries) = tree else {
+    let json_rt::Dyn::Object(entries) = tree else {
         return Err(json_rt::FieldError::one(format!(
             "expected map, found {}",
-            json_rt::datatree_kind_for(tree)
+            json_rt::dyn_kind_for(tree)
         )));
     };
     let key = typed_child_descriptor(descriptor, descriptor.key, "key")?;
@@ -1779,7 +1783,7 @@ fn typed_decode_map(
         let key_slot = match key.kind {
             runtime_host::RuntimeValueKind::String => JetVal::String(name.clone()),
             runtime_host::RuntimeValueKind::Int => {
-                match typed_decode_int(&json_rt::DataTree::Text(name.clone()), &key) {
+                match typed_decode_int(&json_rt::Dyn::Text(name.clone()), &key) {
                     Ok(value) => value,
                     Err(error) => {
                         errors.extend(json_rt::FieldError::under_errors(name, error));
@@ -1865,14 +1869,14 @@ fn typed_decode_map(
 }
 
 fn typed_enum_shape_matches(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     parent: &runtime_host::RuntimeTypeDescriptor,
     variant: &runtime_host::RuntimeVariantDescriptor,
 ) -> bool {
     if variant.fields.is_empty() {
         return match tree {
-            json_rt::DataTree::Null => true,
-            json_rt::DataTree::Text(name) | json_rt::DataTree::TypedText(name) => {
+            json_rt::Dyn::Null => true,
+            json_rt::Dyn::Text(name) | json_rt::Dyn::TypedText(name) => {
                 name == &variant.name || name == &variant.wire_name
             }
             _ => false,
@@ -1888,47 +1892,47 @@ fn typed_enum_shape_matches(
         if typed_codec_kind(&child).is_some() {
             return matches!(
                 tree,
-                json_rt::DataTree::Text(_)
-                    | json_rt::DataTree::TypedText(_)
-                    | json_rt::DataTree::Int(_)
-                    | json_rt::DataTree::Number(_)
-                    | json_rt::DataTree::Float(_)
+                json_rt::Dyn::Text(_)
+                    | json_rt::Dyn::TypedText(_)
+                    | json_rt::Dyn::Int(_)
+                    | json_rt::Dyn::Number(_)
+                    | json_rt::Dyn::Float(_)
             );
         }
         return match child.kind {
-            runtime_host::RuntimeValueKind::Unit => matches!(tree, json_rt::DataTree::Null),
+            runtime_host::RuntimeValueKind::Unit => matches!(tree, json_rt::Dyn::Null),
             runtime_host::RuntimeValueKind::Int => matches!(
                 tree,
-                json_rt::DataTree::Int(_)
-                    | json_rt::DataTree::Number(_)
-                    | json_rt::DataTree::Text(_)
-                    | json_rt::DataTree::TypedText(_)
+                json_rt::Dyn::Int(_)
+                    | json_rt::Dyn::Number(_)
+                    | json_rt::Dyn::Text(_)
+                    | json_rt::Dyn::TypedText(_)
             ),
             runtime_host::RuntimeValueKind::Float => matches!(
                 tree,
-                json_rt::DataTree::Int(_)
-                    | json_rt::DataTree::Number(_)
-                    | json_rt::DataTree::Float(_)
-                    | json_rt::DataTree::Text(_)
+                json_rt::Dyn::Int(_)
+                    | json_rt::Dyn::Number(_)
+                    | json_rt::Dyn::Float(_)
+                    | json_rt::Dyn::Text(_)
             ),
             runtime_host::RuntimeValueKind::Bool => {
-                matches!(tree, json_rt::DataTree::Bool(_) | json_rt::DataTree::Text(_))
+                matches!(tree, json_rt::Dyn::Bool(_) | json_rt::Dyn::Text(_))
             }
             runtime_host::RuntimeValueKind::Char
             | runtime_host::RuntimeValueKind::String => matches!(
                 tree,
-                json_rt::DataTree::Text(_)
-                    | json_rt::DataTree::TypedText(_)
-                    | json_rt::DataTree::Int(_)
-                    | json_rt::DataTree::Float(_)
-                    | json_rt::DataTree::Bool(_)
+                json_rt::Dyn::Text(_)
+                    | json_rt::Dyn::TypedText(_)
+                    | json_rt::Dyn::Int(_)
+                    | json_rt::Dyn::Float(_)
+                    | json_rt::Dyn::Bool(_)
             ),
             runtime_host::RuntimeValueKind::List => {
-                matches!(tree, json_rt::DataTree::Array(_) | json_rt::DataTree::Bytes(_))
+                matches!(tree, json_rt::Dyn::Array(_) | json_rt::Dyn::Bytes(_))
             }
             runtime_host::RuntimeValueKind::Map
             | runtime_host::RuntimeValueKind::Record => {
-                matches!(tree, json_rt::DataTree::Object(_))
+                matches!(tree, json_rt::Dyn::Object(_))
             }
             runtime_host::RuntimeValueKind::Option | runtime_host::RuntimeValueKind::Shared => true,
             runtime_host::RuntimeValueKind::Result => false,
@@ -1937,13 +1941,13 @@ fn typed_enum_shape_matches(
                     || matches!(child.canonical.as_str(), "Path" | "JetPath"))
                     && matches!(
                         tree,
-                        json_rt::DataTree::Text(_) | json_rt::DataTree::TypedText(_)
+                        json_rt::Dyn::Text(_) | json_rt::Dyn::TypedText(_)
                     )
             }
             _ => false,
         };
     }
-    let json_rt::DataTree::Object(entries) = tree else {
+    let json_rt::Dyn::Object(entries) = tree else {
         return false;
     };
     variant.fields.iter().all(|field| {
@@ -1954,11 +1958,11 @@ fn typed_enum_shape_matches(
 }
 
 fn typed_decode_enum(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     descriptor: &runtime_host::RuntimeTypeDescriptor,
 ) -> Result<JetVal, Vec<json_rt::FieldError>> {
     let (variant, payload) = match tree {
-        json_rt::DataTree::Text(name) | json_rt::DataTree::TypedText(name) => {
+        json_rt::Dyn::Text(name) | json_rt::Dyn::TypedText(name) => {
             let variant = if descriptor.serde_untagged {
                 descriptor
                     .variants
@@ -1975,11 +1979,11 @@ fn typed_decode_enum(
                 if descriptor.serde_untagged {
                     tree.clone()
                 } else {
-                    json_rt::DataTree::Null
+                    json_rt::Dyn::Null
                 },
             )
         }
-        json_rt::DataTree::Null => (
+        json_rt::Dyn::Null => (
             descriptor
                 .serde_untagged
                 .then(|| {
@@ -1991,7 +1995,7 @@ fn typed_decode_enum(
                 .flatten(),
             tree.clone(),
         ),
-        json_rt::DataTree::Object(entries) => {
+        json_rt::Dyn::Object(entries) => {
             if descriptor.serde_untagged {
                 (
                     descriptor
@@ -2006,8 +2010,8 @@ fn typed_decode_enum(
                     .iter()
                     .find(|(name, _)| name == tag_name)
                     .and_then(|(_, value)| match value {
-                        json_rt::DataTree::Text(name)
-                        | json_rt::DataTree::TypedText(name) => Some(name),
+                        json_rt::Dyn::Text(name)
+                        | json_rt::Dyn::TypedText(name) => Some(name),
                         _ => None,
                     });
                 if let Some(name) = tagged {
@@ -2053,7 +2057,7 @@ fn typed_decode_enum(
     let mut slots = vec![JetVal::Int(variant.discriminant)];
     if variant.fields.len() == 1 {
         let value = match &payload {
-            json_rt::DataTree::Object(entries) => entries
+            json_rt::Dyn::Object(entries) => entries
                 .iter()
                 .find(|(name, _)| name == &variant.fields[0].source_name)
                 .map(|(_, value)| value)
@@ -2063,7 +2067,7 @@ fn typed_decode_enum(
         let child = typed_child_descriptor(descriptor, Some(variant.fields[0].type_id), "variant field")?;
         slots.push(typed_decode_value(value, &child)?);
     } else if !variant.fields.is_empty() {
-        let json_rt::DataTree::Object(entries) = &payload else {
+        let json_rt::Dyn::Object(entries) = &payload else {
             return Err(json_rt::FieldError::one(format!(
                 "expected object payload for {}",
                 variant.name
@@ -2089,11 +2093,11 @@ fn typed_decode_enum(
 }
 
 fn typed_decode_int(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     descriptor: &runtime_host::RuntimeTypeDescriptor,
 ) -> Result<JetVal, Vec<json_rt::FieldError>> {
     if let Some(width) = descriptor.integer_width {
-        let value = json_rt::jet_datatree_decode_fixed_integer(
+        let value = json_rt::jet_dyn_decode_fixed_integer(
             tree,
             width.signed,
             width.bits,
@@ -2128,7 +2132,7 @@ fn typed_decode_int(
 }
 
 fn typed_decode_value(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     descriptor: &runtime_host::RuntimeTypeDescriptor,
 ) -> Result<JetVal, Vec<json_rt::FieldError>> {
     if typed_codec_kind(descriptor).is_some() {
@@ -2136,10 +2140,10 @@ fn typed_decode_value(
     }
     match descriptor.kind {
         runtime_host::RuntimeValueKind::Unit => match tree {
-            json_rt::DataTree::Null => Ok(JetVal::Int(0)),
+            json_rt::Dyn::Null => Ok(JetVal::Int(0)),
             _ => Err(json_rt::FieldError::one(format!(
                 "expected Unit, found {}",
-                json_rt::datatree_kind_for(tree)
+                json_rt::dyn_kind_for(tree)
             ))),
         },
         runtime_host::RuntimeValueKind::Int => typed_decode_int(tree, descriptor),
@@ -2164,7 +2168,7 @@ fn typed_decode_value(
         }
         runtime_host::RuntimeValueKind::String => json_rt::decode_string(tree).map(JetVal::String),
         runtime_host::RuntimeValueKind::Option => {
-            if matches!(tree, json_rt::DataTree::Null) {
+            if matches!(tree, json_rt::Dyn::Null) {
                 return Ok(JetVal::Int(typed_result_handle(false, 0)));
             }
             let child = typed_child_descriptor(descriptor, descriptor.ok, "option")?;
@@ -2216,8 +2220,8 @@ fn typed_decode_value(
     }
 }
 
-pub(crate) fn decode_datatree_for_type(
-    tree: &json_rt::DataTree,
+pub(crate) fn decode_dyn_for_type(
+    tree: &json_rt::Dyn,
     type_key: &str,
 ) -> Result<i64, Vec<json_rt::FieldError>> {
     let descriptor = typed_runtime_descriptor(type_key)
@@ -2244,7 +2248,7 @@ fn json_decode_callback_slot(
     });
     slot.map(Some).ok_or(())
 }
-fn migration_default_tree(type_name: &str) -> Option<json_rt::DataTree> {
+fn migration_default_tree(type_name: &str) -> Option<json_rt::Dyn> {
     let leaf = type_name
         .rsplit(['.', ':'])
         .next()
@@ -2253,20 +2257,20 @@ fn migration_default_tree(type_name: &str) -> Option<json_rt::DataTree> {
         .next()
         .unwrap_or(type_name);
     Some(match leaf {
-        "Bool" => json_rt::DataTree::Bool(false),
+        "Bool" => json_rt::Dyn::Bool(false),
         "Int" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32"
-        | "U64" | "U128" => json_rt::DataTree::Int(0),
-        "Float" | "F32" | "F64" => json_rt::DataTree::Float(0.0),
-        "String" => json_rt::DataTree::Text(String::new()),
+        | "U64" | "U128" => json_rt::Dyn::Int(0),
+        "Float" | "F32" | "F64" => json_rt::Dyn::Float(0.0),
+        "String" => json_rt::Dyn::Text(String::new()),
         _ => return None,
     })
 }
 
 fn migrate_typed_tree(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     plan: &SchemaMigrationPlan,
-) -> Result<json_rt::DataTree, Vec<json_rt::FieldError>> {
-    let json_rt::DataTree::Object(entries) = tree else {
+) -> Result<json_rt::Dyn, Vec<json_rt::FieldError>> {
+    let json_rt::Dyn::Object(entries) = tree else {
         return Err(json_rt::FieldError::one(format!(
             "migration `{}` expects an object",
             plan.type_name
@@ -2341,7 +2345,7 @@ fn migrate_typed_tree(
             }
         }
     }
-    Ok(json_rt::DataTree::Object(fields))
+    Ok(json_rt::Dyn::Object(fields))
 }
 
 
@@ -2355,7 +2359,7 @@ fn jet_jit_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i64 {
         Ok(callback) => callback,
         Err(()) => return 0,
     };
-    match json_rt::parse_datatree_typed_ordered(&text) {
+    match json_rt::parse_dyn_typed_ordered(&text) {
         Ok(tree) => {
             let tree = match migration.as_ref() {
                 Some(plan) => match migrate_typed_tree(&tree, plan) {
@@ -2365,7 +2369,7 @@ fn jet_jit_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i64 {
                 None => tree,
             };
             if let Some(callback) = callback {
-                let tree_handle = alloc_datatree(&tree);
+                let tree_handle = alloc_dyn(&tree);
                 let Some(decoded_result) =
                     runtime_host::invoke_universal_unary(callback, tree_handle)
                 else {
@@ -2390,7 +2394,7 @@ fn jet_jit_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i64 {
                 }
                 decoded_result
             } else {
-                match decode_datatree_for_type(&tree, &type_key) {
+                match decode_dyn_for_type(&tree, &type_key) {
                     Ok(value) => result_ok(value as u64),
                     Err(errors) => result_err_fields(errors),
                 }
@@ -2416,8 +2420,8 @@ fn jet_jit_data_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i6
         Ok(callback) => callback,
         Err(()) => return 0,
     };
-    match json_rt::parse_datatree_typed_ordered(&text) {
-        Ok(json_rt::DataTree::Array(items)) => {
+    match json_rt::parse_dyn_typed_ordered(&text) {
+        Ok(json_rt::Dyn::Array(items)) => {
             let Some(descriptor) = typed_runtime_descriptor(&type_key) else {
                 return result_err_fields(json_rt::FieldError::one(format!(
                     "typed JSON has no type `{type_key}`"
@@ -2428,7 +2432,7 @@ fn jet_jit_data_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i6
             let mut callback_fault = false;
             for (index, item) in items.iter().enumerate() {
                 if let Some(callback) = callback {
-                    let tree_handle = alloc_datatree(item);
+                    let tree_handle = alloc_dyn(item);
                     let Some(decoded_result) =
                         runtime_host::invoke_universal_unary(callback, tree_handle)
                     else {
@@ -2463,7 +2467,7 @@ fn jet_jit_data_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i6
                         raw_values.push(bits as i64);
                     }
                 } else {
-                    match decode_datatree_for_type(item, &type_key) {
+                    match decode_dyn_for_type(item, &type_key) {
                         Ok(value) => raw_values.push(value),
                         Err(error) => errors.extend(json_rt::FieldError::under_errors(
                             &format!("[{index}]"),
@@ -2499,7 +2503,7 @@ fn jet_jit_data_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i6
         }
         Ok(tree) => result_err_fields(json_rt::FieldError::one(format!(
             "expected a list, found {}",
-            json_rt::datatree_kind_for(&tree)
+            json_rt::dyn_kind_for(&tree)
         ))),
         Err(error) => result_err_fields(json_rt::FieldError::one(format!(
             "invalid JSON (line {}): {}",
@@ -2509,13 +2513,13 @@ fn jet_jit_data_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i6
     }
 }
 
-/// Typed codec ABI for TIR's borrowed DataTree route. The checked target type
+/// Typed codec ABI for TIR's borrowed Dyn route. The checked target type
 /// travels as a heap string because the resident host has no monomorphized
 /// Rust type to receive at this boundary.
 fn jet_codec_decode_typed(tree: i64, type_key: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
+    let Some(tree) = read_dyn(tree) else {
         return result_err_fields(json_rt::FieldError::one(
-            "typed codec received an invalid DataTree",
+            "typed codec received an invalid Dyn",
         ));
     };
     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
@@ -2523,14 +2527,14 @@ fn jet_codec_decode_typed(tree: i64, type_key: i64) -> i64 {
             "typed codec received an invalid type key",
         ));
     };
-    match decode_datatree_for_type(&tree, &type_key) {
+    match decode_dyn_for_type(&tree, &type_key) {
         Ok(value) => result_ok(value as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
 
-fn typed_tree_insert(tree: &mut json_rt::DataTree, path: &[String], value: json_rt::DataTree) {
-    let json_rt::DataTree::Object(entries) = tree else {
+fn typed_tree_insert(tree: &mut json_rt::Dyn, path: &[String], value: json_rt::Dyn) {
+    let json_rt::Dyn::Object(entries) = tree else {
         return;
     };
     let Some(segment) = path.first() else {
@@ -2548,11 +2552,11 @@ fn typed_tree_insert(tree: &mut json_rt::DataTree, path: &[String], value: json_
         return;
     }
     if let Some((_, child)) = entries.iter_mut().find(|(name, child)| {
-        name.eq_ignore_ascii_case(segment) && matches!(child, json_rt::DataTree::Object(_))
+        name.eq_ignore_ascii_case(segment) && matches!(child, json_rt::Dyn::Object(_))
     }) {
         typed_tree_insert(child, &path[1..], value);
     } else {
-        let mut child = json_rt::DataTree::Object(Vec::new());
+        let mut child = json_rt::Dyn::Object(Vec::new());
         typed_tree_insert(&mut child, &path[1..], value);
         entries.push((segment.clone(), child));
     }
@@ -2575,12 +2579,12 @@ fn typed_env_projection_descriptor(
 }
 
 fn typed_env_project_tree(
-    tree: &json_rt::DataTree,
+    tree: &json_rt::Dyn,
     descriptor: &runtime_host::RuntimeTypeDescriptor,
     _prefix: &str,
     _origins: &[(String, String)],
-) -> json_rt::DataTree {
-    let json_rt::DataTree::Object(entries) = tree else {
+) -> json_rt::Dyn {
+    let json_rt::Dyn::Object(entries) = tree else {
         return tree.clone();
     };
     let projected = entries
@@ -2608,7 +2612,7 @@ fn typed_env_project_tree(
             (field.name_for(ShapeProjectionKind::Json).to_string(), value)
         })
         .collect();
-    json_rt::DataTree::Object(projected)
+    json_rt::Dyn::Object(projected)
 }
 
 fn typed_env_error_result(
@@ -2653,8 +2657,8 @@ fn jet_jit_env_decode(prefix: i64, file: i64, allow: i64, type_key: i64) -> i64 
     }) else {
         return result;
     };
-    let Some(tree) = read_datatree(tree_handle) else {
-        return result_err_fields(json_rt::FieldError::one("typed env returned an invalid DataTree"));
+    let Some(tree) = read_dyn(tree_handle) else {
+        return result_err_fields(json_rt::FieldError::one("typed env returned an invalid Dyn"));
     };
     let origins = clone_env_config_origins(origins_handle);
     let tree = typed_env_project_tree(&tree, &descriptor, &prefix_text, &origins);
@@ -2686,7 +2690,7 @@ fn jet_jit_db_decode(row: i64, type_key: i64) -> i64 {
             )
         })
         .collect::<Vec<_>>();
-    let tree = match crate::DB::db_row_to_datatree(row, &names) {
+    let tree = match crate::DB::db_row_to_dyn(row, &names) {
         Ok(tree) => tree,
         Err(error) => return result_err_fields(json_rt::FieldError::one(error)),
     };
@@ -2702,44 +2706,51 @@ fn jet_jit_db_decode(row: i64, type_key: i64) -> i64 {
 
 
 fn jet_jit_json_to_string(tree: i64) -> i64 {
-    let rendered = read_datatree(tree)
-        .map(|t| json_rt::render_datatree_json(&t, false, 0))
+    let rendered = read_dyn(tree)
+        .map(|t| json_rt::render_dyn_json(&t, false, 0))
+        .unwrap_or_else(|| "null".to_string());
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+}
+
+fn jet_jit_dyn_display(tree: i64) -> i64 {
+    let rendered = read_dyn(tree)
+        .map(|tree| tree.to_text().unwrap_or_else(|| json_rt::render_dyn_json(&tree, false, 0)))
         .unwrap_or_else(|| "null".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
 fn jet_jit_json_to_string_pretty(tree: i64) -> i64 {
-    let rendered = read_datatree(tree)
-        .map(|t| json_rt::render_datatree_json(&t, true, 0))
+    let rendered = read_dyn(tree)
+        .map(|t| json_rt::render_dyn_json(&t, true, 0))
         .unwrap_or_else(|| "null".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
 /// `core.encoding.json.canonical` — same sort+render as `jet_std_json_render_canonical`.
-fn render_canonical(t: &json_rt::DataTree) -> String {
-    fn sort_tree(t: &json_rt::DataTree) -> json_rt::DataTree {
+fn render_canonical(t: &json_rt::Dyn) -> String {
+    fn sort_tree(t: &json_rt::Dyn) -> json_rt::Dyn {
         match t {
-            json_rt::DataTree::Object(entries) => {
+            json_rt::Dyn::Object(entries) => {
                 let mut sorted = entries.clone();
                 sorted.sort_by(|a, b| a.0.cmp(&b.0));
-                json_rt::DataTree::Object(
+                json_rt::Dyn::Object(
                     sorted
                         .into_iter()
                         .map(|(k, v)| (k, sort_tree(&v)))
                         .collect(),
                 )
             }
-            json_rt::DataTree::Array(items) => {
-                json_rt::DataTree::Array(items.iter().map(sort_tree).collect())
+            json_rt::Dyn::Array(items) => {
+                json_rt::Dyn::Array(items.iter().map(sort_tree).collect())
             }
             other => other.clone(),
         }
     }
-    json_rt::render_datatree_json(&sort_tree(t), false, 0)
+    json_rt::render_dyn_json(&sort_tree(t), false, 0)
 }
 
 fn jet_jit_json_canonical(tree: i64) -> i64 {
-    let rendered = read_datatree(tree)
+    let rendered = read_dyn(tree)
         .map(|t| render_canonical(&t))
         .unwrap_or_else(|| "null".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
@@ -2751,22 +2762,22 @@ fn jet_jit_json_canonical_checked(tree: i64, limits: i64) -> i64 {
 }
 
 /// `core.encoding.json.events` — same walk as `jet_std_json_events`.
-fn json_events(t: &json_rt::DataTree) -> String {
-    fn walk(path: String, t: &json_rt::DataTree, out: &mut Vec<String>) {
+fn json_events(t: &json_rt::Dyn) -> String {
+    fn walk(path: String, t: &json_rt::Dyn, out: &mut Vec<String>) {
         let here = if path.is_empty() {
             "$".to_string()
         } else {
             path
         };
         match t {
-            json_rt::DataTree::Object(entries) => {
+            json_rt::Dyn::Object(entries) => {
                 out.push(format!("object_start {here}"));
                 for (k, v) in entries {
                     walk(format!("{here}.{k}"), v, out);
                 }
                 out.push(format!("object_end {here}"));
             }
-            json_rt::DataTree::Array(items) => {
+            json_rt::Dyn::Array(items) => {
                 out.push(format!("array_start {here}"));
                 for (i, v) in items.iter().enumerate() {
                     walk(format!("{here}[{i}]"), v, out);
@@ -2782,7 +2793,7 @@ fn json_events(t: &json_rt::DataTree) -> String {
 }
 
 fn jet_jit_json_events(tree: i64) -> i64 {
-    let rendered = read_datatree(tree)
+    let rendered = read_dyn(tree)
         .map(|t| json_events(&t))
         .unwrap_or_else(|| String::new());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
@@ -2797,8 +2808,8 @@ fn jet_jit_jsonl_parse(text: i64) -> i64 {
         if trimmed.is_empty() {
             continue;
         }
-        match json_rt::parse_datatree(trimmed) {
-            Ok(tree) => handles.push(alloc_datatree(&tree)),
+        match json_rt::parse_dyn(trimmed) {
+            Ok(tree) => handles.push(alloc_dyn(&tree)),
             Err(mut error) => {
                 error.format = json_rt::EncodingFormat::JSONL;
                 error.line = error.line.map(|line| idx as i64 + line);
@@ -2818,7 +2829,7 @@ fn jet_jit_jsonl_parse(text: i64) -> i64 {
 
 /// `core.encoding.jsonl.to_string` — same as `jet_std_jsonl_render`.
 fn jet_jit_jsonl_to_string(rows: i64) -> i64 {
-    let trees: Vec<json_rt::DataTree> = Concurrency::with_runtime_mut(|rt| {
+    let trees: Vec<json_rt::Dyn> = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(rows).unwrap_or(0);
         let mut out = Vec::with_capacity(len as usize);
         for i in 0..len {
@@ -2827,7 +2838,7 @@ fn jet_jit_jsonl_to_string(rows: i64) -> i64 {
         out
     })
     .into_iter()
-    .filter_map(read_datatree)
+    .filter_map(read_dyn)
     .collect();
     let mut rendered = trees
         .iter()
@@ -2855,7 +2866,7 @@ fn jet_jit_jsonl_count_rows(text: i64) -> i64 {
 
 fn jet_jit_jsonl_append_line(text: i64, value: i64) -> i64 {
     let source = clone_string(text);
-    let rendered = read_datatree(value)
+    let rendered = read_dyn(value)
         .map(|tree| render_canonical(&tree))
         .unwrap_or_else(|| "null".to_string());
     let output = if source.is_empty() {
@@ -2875,8 +2886,8 @@ fn jet_jit_jsonl_first(text: i64) -> i64 {
         if trimmed.is_empty() {
             continue;
         }
-        match json_rt::parse_datatree(trimmed) {
-            Ok(tree) => return result_ok(alloc_datatree(&tree) as u64),
+        match json_rt::parse_dyn(trimmed) {
+            Ok(tree) => return result_ok(alloc_dyn(&tree) as u64),
             Err(mut error) => {
                 error.format = json_rt::EncodingFormat::JSONL;
                 error.line = error.line.map(|line| idx as i64 + line);
@@ -2889,48 +2900,48 @@ fn jet_jit_jsonl_first(text: i64) -> i64 {
 
 // ── XML via the shared foundation kernel ────────────────────────────────────
 
-fn xml_value_to_datatree(value: jet_foundation::XmlPull::Value) -> json_rt::DataTree {
+fn xml_value_to_dyn(value: jet_foundation::XmlPull::Value) -> json_rt::Dyn {
     use jet_foundation::XmlPull::Value;
     match value {
-        Value::Null => json_rt::DataTree::Null,
-        Value::Bool(b) => json_rt::DataTree::Bool(b),
-        Value::Int(n) => json_rt::DataTree::Int(n),
-        Value::Text(s) => json_rt::DataTree::Text(s),
+        Value::Null => json_rt::Dyn::Null,
+        Value::Bool(b) => json_rt::Dyn::Bool(b),
+        Value::Int(n) => json_rt::Dyn::Int(n),
+        Value::Text(s) => json_rt::Dyn::Text(s),
         Value::Array(xs) => {
-            json_rt::DataTree::Array(xs.into_iter().map(xml_value_to_datatree).collect())
+            json_rt::Dyn::Array(xs.into_iter().map(xml_value_to_dyn).collect())
         }
-        Value::Object(es) => json_rt::DataTree::Object(
+        Value::Object(es) => json_rt::Dyn::Object(
             es.into_iter()
-                .map(|(k, v)| (k, xml_value_to_datatree(v)))
+                .map(|(k, v)| (k, xml_value_to_dyn(v)))
                 .collect(),
         ),
     }
 }
 
-fn datatree_to_xml_value(
-    tree: &json_rt::DataTree,
+fn dyn_to_xml_value(
+    tree: &json_rt::Dyn,
 ) -> Result<jet_foundation::XmlPull::Value, String> {
     use jet_foundation::XmlPull::Value;
     match tree {
-        json_rt::DataTree::Null => Ok(Value::Null),
-        json_rt::DataTree::Bool(b) => Ok(Value::Bool(*b)),
-        json_rt::DataTree::Int(n) => Ok(Value::Int(*n)),
-        json_rt::DataTree::Number(_) | json_rt::DataTree::TypedText(_) => {
+        json_rt::Dyn::Null => Ok(Value::Null),
+        json_rt::Dyn::Bool(b) => Ok(Value::Bool(*b)),
+        json_rt::Dyn::Int(n) => Ok(Value::Int(*n)),
+        json_rt::Dyn::Number(_) | json_rt::Dyn::TypedText(_) => {
             Err("internal JSON carrier escaped typed decode".to_string())
         }
-        json_rt::DataTree::Text(s) => Ok(Value::Text(s.clone())),
-        json_rt::DataTree::Array(xs) => Ok(Value::Array(
+        json_rt::Dyn::Text(s) => Ok(Value::Text(s.clone())),
+        json_rt::Dyn::Array(xs) => Ok(Value::Array(
             xs.iter()
-                .map(datatree_to_xml_value)
+                .map(dyn_to_xml_value)
                 .collect::<Result<Vec<_>, _>>()?,
         )),
-        json_rt::DataTree::Object(es) => Ok(Value::Object(
+        json_rt::Dyn::Object(es) => Ok(Value::Object(
             es.iter()
-                .map(|(k, v)| Ok((k.clone(), datatree_to_xml_value(v)?)))
+                .map(|(k, v)| Ok((k.clone(), dyn_to_xml_value(v)?)))
                 .collect::<Result<Vec<_>, String>>()?,
         )),
-        json_rt::DataTree::Float(_) | json_rt::DataTree::Bytes(_) => {
-            Err("XML tree cannot contain Float or Bytes values".to_string())
+        json_rt::Dyn::Float(_) | json_rt::Dyn::Bytes(_) | json_rt::Dyn::DateTime(_) => {
+            Err("XML tree cannot contain Float, Bytes or DateTime values".to_string())
         }
     }
 }
@@ -2975,7 +2986,7 @@ fn xml_error_encoding(error: jet_foundation::XmlPull::Error) -> json_rt::Encodin
 
 fn jet_jit_xml_parse(text: i64) -> i64 {
     match jet_foundation::XmlKernel::parse_document(&clone_string(text)) {
-        Ok(value) => result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64),
+        Ok(value) => result_ok(alloc_dyn(&xml_value_to_dyn(value)) as u64),
         Err(error) => result_err_encoding(xml_error_encoding(error)),
     }
 }
@@ -3065,7 +3076,7 @@ fn jet_jit_xml_parse_with(text: i64, options: i64) -> i64 {
         Err(reason) => return result_err_encoding(xml_shape_error(reason)),
     };
     match jet_foundation::XmlKernel::parse_document_with(&clone_string(text), &options) {
-        Ok(value) => result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64),
+        Ok(value) => result_ok(alloc_dyn(&xml_value_to_dyn(value)) as u64),
         Err(error) => result_err_encoding(xml_error_encoding(error)),
     }
 }
@@ -3105,7 +3116,7 @@ fn jet_jit_toml_decode_typed(text: i64, type_key: i64) -> i64 {
         ));
     };
     match json_rt::toml::parse_to_tree(&text) {
-        Ok(tree) => match decode_datatree_for_type(&tree, &type_key) {
+        Ok(tree) => match decode_dyn_for_type(&tree, &type_key) {
             Ok(value) => result_ok(value as u64),
             Err(errors) => result_err_fields(errors),
         },
@@ -3124,7 +3135,7 @@ fn jet_jit_yaml_decode_typed(text: i64, type_key: i64) -> i64 {
         ));
     };
     match yaml_rt::yaml::parse_to_tree(&text) {
-        Ok(tree) => match decode_datatree_for_type(&tree, &type_key) {
+        Ok(tree) => match decode_dyn_for_type(&tree, &type_key) {
             Ok(value) => result_ok(value as u64),
             Err(errors) => result_err_fields(errors),
         },
@@ -3136,8 +3147,8 @@ fn jet_jit_yaml_decode_typed(text: i64, type_key: i64) -> i64 {
 }
 
 fn jet_jit_xml_to_string(tree: i64) -> i64 {
-    let rendered = read_datatree(tree)
-        .and_then(|t| datatree_to_xml_value(&t).ok())
+    let rendered = read_dyn(tree)
+        .and_then(|t| dyn_to_xml_value(&t).ok())
         .and_then(|v| jet_foundation::XmlKernel::render_document(&v).ok())
         .unwrap_or_default();
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
@@ -3215,8 +3226,8 @@ fn jet_jit_xml_canonical(tree: i64, options: i64) -> i64 {
 fn xml_tree_value(
     tree: i64,
 ) -> Result<jet_foundation::XmlPull::Value, json_rt::EncodingError> {
-    let dt = read_datatree(tree).ok_or_else(|| xml_shape_error("invalid DataTree"))?;
-    datatree_to_xml_value(&dt).map_err(xml_shape_error)
+    let dt = read_dyn(tree).ok_or_else(|| xml_shape_error("invalid Dyn"))?;
+    dyn_to_xml_value(&dt).map_err(xml_shape_error)
 }
 
 fn pack_opt_string(opt: Option<String>) -> i64 {
@@ -3234,7 +3245,7 @@ fn jet_jit_xml_root(tree: i64) -> i64 {
     match xml_tree_value(tree)
         .and_then(|v| jet_foundation::XmlKernel::document_root(&v).map_err(xml_error_encoding))
     {
-        Ok(root) => result_ok(alloc_datatree(&xml_value_to_datatree(root)) as u64),
+        Ok(root) => result_ok(alloc_dyn(&xml_value_to_dyn(root)) as u64),
         Err(error) => result_err_encoding(error),
     }
 }
@@ -3280,7 +3291,7 @@ fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
     }
 }
 
-/// `xml.content` → Result[[DataTree], EncodingError].
+/// `xml.content` → Result[[Dyn], EncodingError].
 fn jet_jit_xml_content(tree: i64) -> i64 {
     match xml_tree_value(tree)
         .and_then(|v| jet_foundation::XmlKernel::element_content(&v).map_err(xml_error_encoding))
@@ -3288,7 +3299,7 @@ fn jet_jit_xml_content(tree: i64) -> i64 {
         Ok(nodes) => {
             let handles: Vec<i64> = nodes
                 .into_iter()
-                .map(|n| alloc_datatree(&xml_value_to_datatree(n)))
+                .map(|n| alloc_dyn(&xml_value_to_dyn(n)))
                 .collect();
             let list = Concurrency::with_runtime_mut(|rt| {
                 let list = rt.heap.alloc_empty_list();
@@ -3322,7 +3333,7 @@ fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
 fn jet_jit_xml_project(text: i64) -> i64 {
     match jet_foundation::XmlKernel::parse_document(&clone_string(text)) {
         Ok(value) => match jet_foundation::XmlKernel::project_document_for_decode(&value) {
-            Ok(projected) => result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64),
+            Ok(projected) => result_ok(alloc_dyn(&xml_value_to_dyn(projected)) as u64),
             Err(e) => result_err_fields(xml_decode_fields(e)),
         },
         Err(e) => result_err_fields(xml_decode_fields(e)),
@@ -3334,7 +3345,7 @@ fn jet_jit_xml_project_bytes(bytes: i64) -> i64 {
     let input = clone_bytes(bytes);
     match jet_foundation::XmlKernel::parse_document_bytes(&input) {
         Ok(value) => match jet_foundation::XmlKernel::project_document_for_decode(&value) {
-            Ok(projected) => result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64),
+            Ok(projected) => result_ok(alloc_dyn(&xml_value_to_dyn(projected)) as u64),
             Err(e) => result_err_fields(xml_decode_fields(e)),
         },
         Err(e) => result_err_fields(xml_decode_fields(e)),
@@ -3352,56 +3363,58 @@ fn jet_jit_cbor_to_bytes_canonical(tree: i64) -> i64 {
 }
 
 fn jet_jit_cbor_to_bytes_impl(tree: i64, canonical: bool) -> i64 {
-    match read_datatree(tree) {
+    match read_dyn(tree) {
         Some(tree) => {
-            let value = cbor_datatree_to_value(&tree);
+            let value = cbor_dyn_to_value(&tree);
             match CborKernel::encode(&value, canonical) {
                 Ok(out) => result_ok(alloc_byte_list(&out) as u64),
                 Err(error) => result_err_cbor(error),
             }
         }
-        None => result_err_msg("invalid DataTree"),
+        None => result_err_msg("invalid Dyn"),
     }
 }
 
-fn cbor_datatree_to_value(value: &json_rt::DataTree) -> Value {
+fn cbor_dyn_to_value(value: &json_rt::Dyn) -> Value {
     match value {
-        json_rt::DataTree::Null => Value::Null,
-        json_rt::DataTree::Bool(value) => Value::Bool(*value),
-        json_rt::DataTree::Int(value) => Value::Int(*value),
-        json_rt::DataTree::Float(value) => Value::Float(*value),
-        json_rt::DataTree::Number(_) | json_rt::DataTree::TypedText(_) => {
+        json_rt::Dyn::Null => Value::Null,
+        json_rt::Dyn::Bool(value) => Value::Bool(*value),
+        json_rt::Dyn::Int(value) => Value::Int(*value),
+        json_rt::Dyn::Float(value) => Value::Float(*value),
+        json_rt::Dyn::Number(_) | json_rt::Dyn::TypedText(_) => {
             unreachable!("internal JSON carrier escaped typed decode")
         }
-        json_rt::DataTree::Text(value) => Value::Text(value.clone()),
-        json_rt::DataTree::Bytes(value) => Value::Bytes(value.clone()),
-        json_rt::DataTree::Array(values) => {
-            Value::Array(values.iter().map(cbor_datatree_to_value).collect())
+        json_rt::Dyn::Text(value) => Value::Text(value.clone()),
+        json_rt::Dyn::Bytes(value) => Value::Bytes(value.clone()),
+        json_rt::Dyn::DateTime(value) => Value::DateTime(*value),
+        json_rt::Dyn::Array(values) => {
+            Value::Array(values.iter().map(cbor_dyn_to_value).collect())
         }
-        json_rt::DataTree::Object(entries) => Value::Object(
+        json_rt::Dyn::Object(entries) => Value::Object(
             entries
                 .iter()
-                .map(|(key, value)| (key.clone(), cbor_datatree_to_value(value)))
+                .map(|(key, value)| (key.clone(), cbor_dyn_to_value(value)))
                 .collect(),
         ),
     }
 }
 
-fn cbor_value_to_datatree(value: Value) -> json_rt::DataTree {
+fn cbor_value_to_dyn(value: Value) -> json_rt::Dyn {
     match value {
-        Value::Null => json_rt::DataTree::Null,
-        Value::Bool(value) => json_rt::DataTree::Bool(value),
-        Value::Int(value) => json_rt::DataTree::Int(value),
-        Value::Float(value) => json_rt::DataTree::Float(value),
-        Value::Text(value) => json_rt::DataTree::Text(value),
-        Value::Bytes(value) => json_rt::DataTree::Bytes(value),
-        Value::Array(values) => json_rt::DataTree::Array(
-            values.into_iter().map(cbor_value_to_datatree).collect(),
+        Value::Null => json_rt::Dyn::Null,
+        Value::Bool(value) => json_rt::Dyn::Bool(value),
+        Value::Int(value) => json_rt::Dyn::Int(value),
+        Value::Float(value) => json_rt::Dyn::Float(value),
+        Value::Text(value) => json_rt::Dyn::Text(value),
+        Value::Bytes(value) => json_rt::Dyn::Bytes(value),
+        Value::DateTime(value) => json_rt::Dyn::DateTime(value),
+        Value::Array(values) => json_rt::Dyn::Array(
+            values.into_iter().map(cbor_value_to_dyn).collect(),
         ),
-        Value::Object(entries) => json_rt::DataTree::Object(
+        Value::Object(entries) => json_rt::Dyn::Object(
             entries
                 .into_iter()
-                .map(|(key, value)| (key, cbor_value_to_datatree(value)))
+                .map(|(key, value)| (key, cbor_value_to_dyn(value)))
                 .collect(),
         ),
     }
@@ -3502,8 +3515,8 @@ fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) 
         }
         None => CborKernel::Options::safe(),
     };
-    match CborKernel::decode(&input, &options, allow_bytes) {
-        Ok(value) => result_ok(alloc_datatree(&cbor_value_to_datatree(value)) as u64),
+    match CborKernel::decode(&input, &options) {
+        Ok(value) => result_ok(alloc_dyn(&cbor_value_to_dyn(value)) as u64),
         Err(error) if allow_bytes => result_err_fields(cbor_decode_fields(error)),
         Err(error) => result_err_cbor(error),
     }
@@ -3553,7 +3566,7 @@ fn jet_jit_enc_csv_decode(text: i64, callback: i64, element_kind: i64) -> i64 {
             if callback_fault {
                 return Err(Vec::new());
             }
-            let tree_handle = alloc_datatree(&tree);
+            let tree_handle = alloc_dyn(&tree);
             let Some(decoded_result) = runtime_host::invoke_universal_unary(callback, tree_handle)
             else {
                 callback_fault = true;
@@ -3589,8 +3602,8 @@ fn jet_jit_enc_csv_decode(text: i64, callback: i64, element_kind: i64) -> i64 {
             Ok(value)
         },
         |row, error| json_rt::FieldError::under_errors(row, error),
-        json_rt::DataTree::Text,
-        json_rt::DataTree::Object,
+        json_rt::Dyn::Text,
+        json_rt::Dyn::Object,
     );
     if callback_fault {
         return 0;
@@ -3615,16 +3628,16 @@ fn jet_jit_csv_query_read(path: i64) -> i64 {
 
 fn jet_jit_csv_decode_scalar(kind: i64, tree: i64) -> i64 {
     match kind {
-        CSV_DECODE_INT => jet_jit_datatree_decode_int(tree),
-        CSV_DECODE_FLOAT => jet_jit_datatree_float(tree),
-        CSV_DECODE_BOOL => jet_jit_datatree_bool(tree),
-        CSV_DECODE_STRING => jet_jit_datatree_decode_string(tree),
-        CSV_DECODE_CHAR => jet_jit_datatree_decode_char(tree),
-        CSV_DECODE_DATATREE => {
-            if read_datatree(tree).is_some() {
+        CSV_DECODE_INT => jet_jit_dyn_decode_int(tree),
+        CSV_DECODE_FLOAT => jet_jit_dyn_float(tree),
+        CSV_DECODE_BOOL => jet_jit_dyn_bool(tree),
+        CSV_DECODE_STRING => jet_jit_dyn_decode_string(tree),
+        CSV_DECODE_CHAR => jet_jit_dyn_decode_char(tree),
+        CSV_DECODE_DYN => {
+            if read_dyn(tree).is_some() {
                 result_ok(tree as u64)
             } else {
-                result_err_decode("", "invalid DataTree")
+                result_err_decode("", "invalid Dyn")
             }
         }
         CSV_DECODE_DATE => jet_jit_codec_decode(CODEC_KIND_DATE, tree),
@@ -3633,7 +3646,7 @@ fn jet_jit_csv_decode_scalar(kind: i64, tree: i64) -> i64 {
         CSV_DECODE_DATETIME => jet_jit_codec_decode(CODEC_KIND_DATETIME, tree),
         CSV_DECODE_DURATION => jet_jit_codec_decode(CODEC_KIND_DURATION, tree),
         CSV_DECODE_DECIMAL => jet_jit_codec_decode(CODEC_KIND_DECIMAL, tree),
-        _ => result_err_decode("", "CSV query row type has no scalar DataTree decoder"),
+        _ => result_err_decode("", "CSV query row type has no scalar Dyn decoder"),
     }
 }
 
@@ -3679,11 +3692,11 @@ fn jet_jit_enc_csv_query(path: i64, sql: i64, callback: i64, element_kind: i64) 
                 .map(|(index, value)| {
                     (
                         fields.get(index).cloned().unwrap_or_default(),
-                        json_rt::DataTree::Text(value),
+                        json_rt::Dyn::Text(value),
                     )
                 })
                 .collect();
-            json_rt::DataTree::Object(object)
+            json_rt::Dyn::Object(object)
         })
         .collect::<Vec<_>>();
 
@@ -3694,7 +3707,7 @@ fn jet_jit_enc_csv_query(path: i64, sql: i64, callback: i64, element_kind: i64) 
     let mut decode_errors = Vec::new();
     for (index, tree) in trees.iter().enumerate() {
         let row_path = format!("row {}", index + 1);
-        let tree_handle = alloc_datatree(tree);
+        let tree_handle = alloc_dyn(tree);
         let decoded_result = Concurrency::with_runtime_mut(|rt| {
             runtime_host::jit_callable_parts(rt, callback)
                 .and_then(|slot| runtime_host::invoke_universal_unary(slot, tree_handle))
@@ -3763,43 +3776,43 @@ fn jet_jit_enc_csv_query(path: i64, sql: i64, callback: i64, element_kind: i64) 
 
 
 fn jet_jit_data_query_rows(rows: i64, sql: i64) -> i64 {
-    let Some(json_rt::DataTree::Array(rows)) = read_datatree(rows) else {
+    let Some(json_rt::Dyn::Array(rows)) = read_dyn(rows) else {
         return result_err_fields(json_rt::FieldError::one(
             "analytics query needs an array of rows",
         ));
     };
     let sql = clone_string(sql);
     match data_query_rt::jet_data_query_trees(&rows, &sql) {
-        Ok(selected) => result_ok(alloc_datatree(&json_rt::DataTree::Array(selected)) as u64),
+        Ok(selected) => result_ok(alloc_dyn(&json_rt::Dyn::Array(selected)) as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
 
 
-fn jet_jit_datatree_field(tree: i64, name: i64) -> i64 {
+fn jet_jit_dyn_field(tree: i64, name: i64) -> i64 {
     let key = clone_string(name);
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode(&key, "invalid DataTree");
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode(&key, "invalid Dyn");
     };
     match tree.field(&key) {
-        Ok(value) => result_ok(alloc_datatree(&value) as u64),
+        Ok(value) => result_ok(alloc_dyn(&value) as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
 
-fn jet_jit_datatree_at(tree: i64, index: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode(&format!("[{index}]"), "invalid DataTree");
+fn jet_jit_dyn_at(tree: i64, index: i64) -> i64 {
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode(&format!("[{index}]"), "invalid Dyn");
     };
     match tree.at(index) {
-        Ok(value) => result_ok(alloc_datatree(&value) as u64),
+        Ok(value) => result_ok(alloc_dyn(&value) as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
 
-fn jet_jit_datatree_int(tree: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode("", "invalid DataTree");
+fn jet_jit_dyn_int(tree: i64) -> i64 {
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode("", "invalid Dyn");
     };
     match tree.int() {
         Ok(value) => result_ok(value as u64),
@@ -3807,10 +3820,10 @@ fn jet_jit_datatree_int(tree: i64) -> i64 {
     }
 }
 
-/// `__jet_Decode for Int`, distinct from strict `DataTree.int()`.
-fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode("", "invalid DataTree");
+/// `__jet_Decode for Int`, distinct from strict `Dyn.int()`.
+fn jet_jit_dyn_decode_int(tree: i64) -> i64 {
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode("", "invalid Dyn");
     };
     match json_rt::decode_int_with(
         &tree,
@@ -3824,9 +3837,9 @@ fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
 
 /// `__jet_Decode for Char`, with String's shared coercion policy and the
 /// Prelude's exact single-scalar error.
-fn jet_jit_datatree_decode_char(tree: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode("", "invalid DataTree");
+fn jet_jit_dyn_decode_char(tree: i64) -> i64 {
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode("", "invalid Dyn");
     };
     let text = match json_rt::decode_string(&tree) {
         Ok(text) => text,
@@ -3865,7 +3878,7 @@ fn jet_jit_decode_int_range(result: i64, lo: i64, hi: i64, type_name: i64) -> i6
     }
 }
 
-/// Apply the shared inline-range kernel to a successful typed DataTree decode.
+/// Apply the shared inline-range kernel to a successful typed Dyn decode.
 /// The result handle remains the carrier for both success and failure, so this
 /// host only adapts the result arena to the Prelude function.
 fn jet_jit_decode_inline_range(result: i64, lo: i64, hi: i64) -> i64 {
@@ -3927,24 +3940,24 @@ fn jet_jit_decode_fixed_len(result: i64, expected: i64) -> i64 {
     ))
 }
 
-fn jet_jit_datatree_decode_list_error(tree: i64) -> i64 {
-    let reason = read_datatree(tree)
+fn jet_jit_dyn_decode_list_error(tree: i64) -> i64 {
+    let reason = read_dyn(tree)
         .map(|tree| {
             format!(
                 "expected a list, found {}",
-                json_rt::datatree_kind_for(&tree)
+                json_rt::dyn_kind_for(&tree)
             )
         })
         .unwrap_or_else(|| "expected a list, found value".to_string());
     result_err_decode("", &reason)
 }
 
-fn jet_jit_datatree_decode_map_error(tree: i64) -> i64 {
-    let reason = read_datatree(tree)
+fn jet_jit_dyn_decode_map_error(tree: i64) -> i64 {
+    let reason = read_dyn(tree)
         .map(|tree| {
             format!(
                 "expected an object, found {}",
-                json_rt::datatree_kind_for(&tree)
+                json_rt::dyn_kind_for(&tree)
             )
         })
         .unwrap_or_else(|| "expected an object, found value".to_string());
@@ -4006,13 +4019,13 @@ fn jet_jit_decode_error_accumulate_segment(accum: i64, result: i64, segment: i64
     result_err_fields(combined)
 }
 
-fn jet_jit_datatree_decode_union_error() -> i64 {
+fn jet_jit_dyn_decode_union_error() -> i64 {
     result_err_decode("", "value does not match any union member")
 }
 
-fn jet_jit_datatree_text(tree: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode("", "invalid DataTree");
+fn jet_jit_dyn_text(tree: i64) -> i64 {
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode("", "invalid Dyn");
     };
     match tree.text() {
         Ok(value) => {
@@ -4023,10 +4036,10 @@ fn jet_jit_datatree_text(tree: i64) -> i64 {
     }
 }
 
-/// `__jet_Decode for String`, distinct from strict `DataTree.text()`.
-fn jet_jit_datatree_decode_string(tree: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode("", "invalid DataTree");
+/// `__jet_Decode for String`, distinct from strict `Dyn.text()`.
+fn jet_jit_dyn_decode_string(tree: i64) -> i64 {
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode("", "invalid Dyn");
     };
     match json_rt::decode_string(&tree) {
         Ok(value) => {
@@ -4037,9 +4050,9 @@ fn jet_jit_datatree_decode_string(tree: i64) -> i64 {
     }
 }
 
-fn jet_jit_datatree_bool(tree: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode("", "invalid DataTree");
+fn jet_jit_dyn_bool(tree: i64) -> i64 {
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode("", "invalid Dyn");
     };
     match json_rt::decode_bool(&tree) {
         Ok(value) => result_ok(u64::from(value)),
@@ -4047,9 +4060,9 @@ fn jet_jit_datatree_bool(tree: i64) -> i64 {
     }
 }
 
-fn jet_jit_datatree_float(tree: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode("", "invalid DataTree");
+fn jet_jit_dyn_float(tree: i64) -> i64 {
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode("", "invalid Dyn");
     };
     match json_rt::decode_float(&tree) {
         Ok(value) => result_ok(value.to_bits()),
@@ -4059,13 +4072,13 @@ fn jet_jit_datatree_float(tree: i64) -> i64 {
 
 /// D-DATATREE-ERGO1=A: the JIT only marshals the resident heap tree into the
 /// shared Prelude operation; it does not reimplement scalar policy here.
-fn jet_jit_datatree_to_text(tree: i64) -> i64 {
-    pack_opt_string(read_datatree(tree).and_then(|tree| tree.to_text()))
+fn jet_jit_dyn_to_text(tree: i64) -> i64 {
+    pack_opt_string(read_dyn(tree).and_then(|tree| tree.to_text()))
 }
 
 /// D-DATATREE-ERGO1=A: compare through the shared Prelude tree operation.
-fn jet_jit_datatree_equal_unordered(left: i64, right: i64) -> i64 {
-    match (read_datatree(left), read_datatree(right)) {
+fn jet_jit_dyn_equal_unordered(left: i64, right: i64) -> i64 {
+    match (read_dyn(left), read_dyn(right)) {
         (Some(left), Some(right)) => i64::from(left.equal_unordered(&right)),
         _ => 0,
     }
@@ -4073,10 +4086,10 @@ fn jet_jit_datatree_equal_unordered(left: i64, right: i64) -> i64 {
 
 fn jet_jit_toml_parse(text: i64) -> i64 {
     match json_rt::toml::parse_to_tree(&clone_string(text)) {
-        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
+        Ok(tree) => result_ok(alloc_dyn(&tree) as u64),
         Err(error) => result_err_encoding(json_rt::EncodingError::new(
             json_rt::EncodingFormat::TOML,
-            json_rt::EncodingErrorKind::Syntax,
+            if error.unsupported { json_rt::EncodingErrorKind::Unsupported } else { json_rt::EncodingErrorKind::Syntax },
             0,
             Ok(error.line as i64),
             Err(json_rt::JetAbsent),
@@ -4094,7 +4107,7 @@ fn jet_jit_toml_loads(text: i64) -> i64 {
 }
 
 fn jet_jit_toml_to_string(tree: i64) -> i64 {
-    let rendered = read_datatree(tree)
+    let rendered = read_dyn(tree)
         .map(|t| json_rt::toml::render(&t))
         .unwrap_or_else(|| String::new());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
@@ -4102,10 +4115,10 @@ fn jet_jit_toml_to_string(tree: i64) -> i64 {
 
 fn jet_jit_yaml_parse(text: i64) -> i64 {
     match yaml_rt::yaml::parse_to_tree(&clone_string(text)) {
-        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
+        Ok(tree) => result_ok(alloc_dyn(&tree) as u64),
         Err(error) => result_err_encoding(json_rt::EncodingError::new(
             json_rt::EncodingFormat::YAML,
-            json_rt::EncodingErrorKind::Syntax,
+            if error.unsupported { json_rt::EncodingErrorKind::Unsupported } else { json_rt::EncodingErrorKind::Syntax },
             0,
             Ok(error.line as i64),
             Err(json_rt::JetAbsent),
@@ -4116,7 +4129,7 @@ fn jet_jit_yaml_parse(text: i64) -> i64 {
 }
 
 fn jet_jit_yaml_to_string(tree: i64) -> i64 {
-    let rendered = read_datatree(tree)
+    let rendered = read_dyn(tree)
         .map(|t| yaml_rt::yaml::render(&t))
         .unwrap_or_else(|| String::new());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
@@ -4186,11 +4199,11 @@ fn jet_jit_decode_error_show(handle: i64) -> i64 {
         rt.heap.alloc_string(shown)
     })
 }
-fn jet_jit_bytes_datatree(bytes: i64) -> i64 {
+fn jet_jit_bytes_dyn(bytes: i64) -> i64 {
     alloc_dt_record(DT_BYTES, bytes)
 }
 
-fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, String> {
+fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::Dyn, String> {
     match kind {
         CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE => {
             let text = crate::Time::with_time(value, |value| match value {
@@ -4201,7 +4214,7 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, Str
                 )),
                 _ => None,
             });
-            text.map(json_rt::DataTree::Text)
+            text.map(json_rt::Dyn::Text)
                 .ok_or_else(|| "invalid Date codec value".to_string())
         }
         CODEC_KIND_LOCAL_TIME => {
@@ -4213,7 +4226,7 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, Str
                 )),
                 _ => None,
             });
-            text.map(json_rt::DataTree::Text)
+            text.map(json_rt::Dyn::Text)
                 .ok_or_else(|| "invalid LocalTime codec value".to_string())
         }
         CODEC_KIND_DATETIME => {
@@ -4225,10 +4238,10 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, Str
                 )),
                 _ => None,
             });
-            text.map(json_rt::DataTree::Text)
+            text.map(json_rt::Dyn::Text)
                 .ok_or_else(|| "invalid DateTime codec value".to_string())
         }
-        CODEC_KIND_DURATION => Ok(json_rt::DataTree::Int(codec_rt::jet_codec_duration_encode(
+        CODEC_KIND_DURATION => Ok(json_rt::Dyn::Int(codec_rt::jet_codec_duration_encode(
             value,
         ))),
         CODEC_KIND_DECIMAL => {
@@ -4240,7 +4253,7 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, Str
                     .cloned()
             })
             .ok_or_else(|| "invalid Decimal codec value".to_string())?;
-            Ok(json_rt::DataTree::Text(codec_rt::jet_codec_decimal_encode(
+            Ok(json_rt::Dyn::Text(codec_rt::jet_codec_decimal_encode(
                 &decimal,
             )))
         }
@@ -4253,10 +4266,10 @@ fn jet_jit_codec_encode(kind: i64, value: i64) -> i64 {
         Ok(tree) => tree,
         Err(error) => {
             Concurrency::with_runtime_mut(|rt| rt.set_trap(&error));
-            json_rt::DataTree::Null
+            json_rt::Dyn::Null
         }
     };
-    alloc_datatree(&tree)
+    alloc_dyn(&tree)
 }
 
 fn jet_codec_encode_typed(value: i64, type_key: i64) -> i64 {
@@ -4275,7 +4288,7 @@ fn jet_codec_encode_typed(value: i64, type_key: i64) -> i64 {
         None => Err(format!("typed codec encode has no type `{type_key}`")),
     };
     match tree {
-        Ok(tree) => alloc_datatree(&tree),
+        Ok(tree) => alloc_dyn(&tree),
         Err(message) => {
             Concurrency::with_runtime_mut(|rt| rt.set_trap(&message));
             0
@@ -4284,12 +4297,12 @@ fn jet_codec_encode_typed(value: i64, type_key: i64) -> i64 {
 }
 
 fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
-    let Some(tree) = read_datatree(tree) else {
-        return result_err_decode("", "invalid DataTree");
+    let Some(tree) = read_dyn(tree) else {
+        return result_err_decode("", "invalid Dyn");
     };
     match (kind, tree) {
-        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::Text(text))
-        | (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::TypedText(text)) => {
+        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::Dyn::Text(text))
+        | (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::Dyn::TypedText(text)) => {
             match codec_rt::jet_codec_date_decode(&text) {
                 Ok((year, month, day)) => result_ok(crate::Time::push(TimeValue::Date(
                     crate::Time::time_rt::JetDate::new(year, month, day),
@@ -4297,8 +4310,8 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
                 Err(error) => result_err_decode("", &format!("expected Date: {error}")),
             }
         }
-        (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::Text(text))
-        | (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::TypedText(text)) => {
+        (CODEC_KIND_LOCAL_TIME, json_rt::Dyn::Text(text))
+        | (CODEC_KIND_LOCAL_TIME, json_rt::Dyn::TypedText(text)) => {
             match codec_rt::jet_codec_local_time_decode(&text) {
                 Ok((hour, minute, second)) => result_ok(crate::Time::push(TimeValue::LocalTime(
                     crate::Time::time_rt::JetLocalTime::new(hour, minute, second),
@@ -4306,8 +4319,8 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
                 Err(error) => result_err_decode("", &format!("expected LocalTime: {error}")),
             }
         }
-        (CODEC_KIND_DATETIME, json_rt::DataTree::Text(text))
-        | (CODEC_KIND_DATETIME, json_rt::DataTree::TypedText(text)) => {
+        (CODEC_KIND_DATETIME, json_rt::Dyn::Text(text))
+        | (CODEC_KIND_DATETIME, json_rt::Dyn::TypedText(text)) => {
             match codec_rt::jet_codec_datetime_decode(&text) {
                 Ok((secs, nanos, leap_second)) => result_ok(crate::Time::push(TimeValue::DateTime(
                     crate::Time::time_rt::JetDateTime::from_timestamp_ns_with_leap(
@@ -4317,11 +4330,11 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
                 Err(error) => result_err_decode("", &format!("expected DateTime: {error}")),
             }
         }
-        (CODEC_KIND_DURATION, json_rt::DataTree::Int(ns)) => {
+        (CODEC_KIND_DURATION, json_rt::Dyn::Int(ns)) => {
             result_ok(codec_rt::jet_codec_duration_decode(ns) as u64)
         }
-        (CODEC_KIND_DURATION, json_rt::DataTree::Number(text))
-        | (CODEC_KIND_DURATION, json_rt::DataTree::Text(text)) => {
+        (CODEC_KIND_DURATION, json_rt::Dyn::Number(text))
+        | (CODEC_KIND_DURATION, json_rt::Dyn::Text(text)) => {
             let decoded =
                 jet_foundation::JSONNumber::json_exact_integer_text(&text).and_then(|value| {
                     value
@@ -4333,25 +4346,25 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
                 Err(error) => result_err_decode("", &error),
             }
         }
-        (CODEC_KIND_DURATION, json_rt::DataTree::TypedText(text)) => {
+        (CODEC_KIND_DURATION, json_rt::Dyn::TypedText(text)) => {
             result_err_decode("", &format!("expected Duration, found text {:?}", text))
         }
-        (CODEC_KIND_DECIMAL, json_rt::DataTree::Number(text)) => {
+        (CODEC_KIND_DECIMAL, json_rt::Dyn::Number(text)) => {
             match jet_foundation::Numeric::CtDecimal::from_json_number(&text) {
                 Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
                 Err(error) => result_err_decode("", &format!("expected Decimal: {error}")),
             }
         }
-        (CODEC_KIND_DECIMAL, json_rt::DataTree::TypedText(text)) => {
+        (CODEC_KIND_DECIMAL, json_rt::Dyn::TypedText(text)) => {
             result_err_decode("", &format!("expected Decimal, found text {:?}", text))
         }
-        (CODEC_KIND_DECIMAL, json_rt::DataTree::Text(text)) => {
+        (CODEC_KIND_DECIMAL, json_rt::Dyn::Text(text)) => {
             match codec_rt::jet_codec_decimal_decode_text(&text) {
                 Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
                 Err(error) => result_err_decode("", &format!("expected Decimal: {error}")),
             }
         }
-        (CODEC_KIND_DECIMAL, json_rt::DataTree::Int(value)) => {
+        (CODEC_KIND_DECIMAL, json_rt::Dyn::Int(value)) => {
             match codec_rt::jet_codec_decimal_decode_int(value) {
                 Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
                 Err(error) => result_err_decode("", &error),
@@ -4361,35 +4374,35 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
             "",
             &format!(
                 "expected Date, found {}",
-                json_rt::datatree_kind_for(&other)
+                json_rt::dyn_kind_for(&other)
             ),
         ),
         (CODEC_KIND_LOCAL_TIME, other) => result_err_decode(
             "",
             &format!(
                 "expected LocalTime, found {}",
-                json_rt::datatree_kind_for(&other)
+                json_rt::dyn_kind_for(&other)
             ),
         ),
         (CODEC_KIND_DATETIME, other) => result_err_decode(
             "",
             &format!(
                 "expected DateTime, found {}",
-                json_rt::datatree_kind_for(&other)
+                json_rt::dyn_kind_for(&other)
             ),
         ),
         (CODEC_KIND_DURATION, other) => result_err_decode(
             "",
             &format!(
                 "expected Duration, found {}",
-                json_rt::datatree_kind_for(&other)
+                json_rt::dyn_kind_for(&other)
             ),
         ),
         (CODEC_KIND_DECIMAL, other) => result_err_decode(
             "",
             &format!(
                 "expected Decimal, found {}",
-                json_rt::datatree_kind_for(&other)
+                json_rt::dyn_kind_for(&other)
             ),
         ),
         (_, _) => result_err_decode("", "unknown codec kind"),
@@ -4497,7 +4510,7 @@ host_fns! {
     data_json_decode: "jet_data_json_decode" => jet_jit_data_json_decode_typed: sig_ternary;
     db_decode: "jet_jit_db_decode" => jet_jit_db_decode: sig_binary;
     json_to_string: "jet_jit_json_to_string" => jet_jit_json_to_string: sig_unary;
-    datatree_display: "jet_jit_datatree_display" => jet_jit_json_to_string: sig_unary;
+    dyn_display: "jet_jit_dyn_display" => jet_jit_dyn_display: sig_unary;
     json_to_string_pretty: "jet_jit_json_to_string_pretty" => jet_jit_json_to_string_pretty: sig_unary;
     json_canonical: "jet_jit_json_canonical" => jet_jit_json_canonical: sig_unary;
     json_canonical_checked: "jet_jit_json_canonical_checked" => jet_jit_json_canonical_checked: sig_binary;
@@ -4525,7 +4538,7 @@ host_fns! {
     cbor_parse_options: "jet_jit_cbor_parse_options" => jet_jit_cbor_parse_options: sig_binary;
     cbor_decode_tree: "jet_jit_cbor_decode_tree" => jet_jit_cbor_decode_tree: sig_unary;
     cbor_decode_tree_options: "jet_jit_cbor_decode_tree_options" => jet_jit_cbor_decode_tree_options: sig_binary;
-    bytes_datatree: "jet_jit_bytes_datatree" => jet_jit_bytes_datatree: sig_unary;
+    bytes_dyn: "jet_jit_bytes_dyn" => jet_jit_bytes_dyn: sig_unary;
     codec_encode: "jet_jit_codec_encode" => jet_jit_codec_encode: sig_binary;
     codec_decode: "jet_jit_codec_decode" => jet_jit_codec_decode: sig_binary;
     codec_encode_prelude: "jet_codec_encode" => jet_jit_codec_encode: sig_binary;
@@ -4538,37 +4551,37 @@ host_fns! {
     enc_csv_query: "jet_jit_enc_csv_query" => jet_jit_enc_csv_query: sig_quaternary;
     csv_decode_scalar: "jet_jit_csv_decode_scalar" => jet_jit_csv_decode_scalar: sig_binary;
     data_query_rows: "jet_jit_data_query_rows" => jet_jit_data_query_rows: sig_binary;
-    datatree_field: "jet_jit_datatree_field" => jet_jit_datatree_field: sig_binary;
-    datatree_field_prelude: "jet_datatree_field" => jet_jit_datatree_field: sig_binary;
-    datatree_at_prelude: "jet_datatree_at" => jet_jit_datatree_at: sig_binary;
-    datatree_int_prelude: "jet_datatree_int" => jet_jit_datatree_int: sig_unary;
-    datatree_text_prelude: "jet_datatree_text" => jet_jit_datatree_text: sig_unary;
-    datatree_bool_prelude: "jet_datatree_bool" => jet_jit_datatree_bool: sig_unary;
-    datatree_float_prelude: "jet_datatree_float" => jet_jit_datatree_float: sig_unary;
-    datatree_to_text_prelude: "jet_datatree_to_text" => jet_jit_datatree_to_text: sig_unary;
-    datatree_equal_unordered_prelude: "jet_datatree_equal_unordered" => jet_jit_datatree_equal_unordered: sig_binary;
-    datatree_at: "jet_jit_datatree_at" => jet_jit_datatree_at: sig_binary;
-    datatree_int: "jet_jit_datatree_int" => jet_jit_datatree_int: sig_unary;
-    datatree_decode_int: "jet_jit_datatree_decode_int" => jet_jit_datatree_decode_int: sig_unary;
-    datatree_decode_string: "jet_jit_datatree_decode_string" => jet_jit_datatree_decode_string: sig_unary;
-    datatree_decode_char: "jet_jit_datatree_decode_char" => jet_jit_datatree_decode_char: sig_unary;
+    dyn_field: "jet_jit_dyn_field" => jet_jit_dyn_field: sig_binary;
+    dyn_field_prelude: "jet_dyn_field" => jet_jit_dyn_field: sig_binary;
+    dyn_at_prelude: "jet_dyn_at" => jet_jit_dyn_at: sig_binary;
+    dyn_int_prelude: "jet_dyn_int" => jet_jit_dyn_int: sig_unary;
+    dyn_text_prelude: "jet_dyn_text" => jet_jit_dyn_text: sig_unary;
+    dyn_bool_prelude: "jet_dyn_bool" => jet_jit_dyn_bool: sig_unary;
+    dyn_float_prelude: "jet_dyn_float" => jet_jit_dyn_float: sig_unary;
+    dyn_to_text_prelude: "jet_dyn_to_text" => jet_jit_dyn_to_text: sig_unary;
+    dyn_equal_unordered_prelude: "jet_dyn_equal_unordered" => jet_jit_dyn_equal_unordered: sig_binary;
+    dyn_at: "jet_jit_dyn_at" => jet_jit_dyn_at: sig_binary;
+    dyn_int: "jet_jit_dyn_int" => jet_jit_dyn_int: sig_unary;
+    dyn_decode_int: "jet_jit_dyn_decode_int" => jet_jit_dyn_decode_int: sig_unary;
+    dyn_decode_string: "jet_jit_dyn_decode_string" => jet_jit_dyn_decode_string: sig_unary;
+    dyn_decode_char: "jet_jit_dyn_decode_char" => jet_jit_dyn_decode_char: sig_unary;
     decode_int_range: "jet_jit_decode_int_range" => jet_jit_decode_int_range: sig_quaternary;
     decode_inline_range: "jet_jit_decode_inline_range" => jet_jit_decode_inline_range: sig_ternary;
     decode_f32_range: "jet_jit_decode_f32_range" => jet_jit_decode_f32_range: sig_unary;
     decode_fixed_len: "jet_jit_decode_fixed_len" => jet_jit_decode_fixed_len: sig_binary;
-    datatree_decode_list_error: "jet_jit_datatree_decode_list_error" => jet_jit_datatree_decode_list_error: sig_unary;
-    datatree_decode_map_error: "jet_jit_datatree_decode_map_error" => jet_jit_datatree_decode_map_error: sig_unary;
+    dyn_decode_list_error: "jet_jit_dyn_decode_list_error" => jet_jit_dyn_decode_list_error: sig_unary;
+    dyn_decode_map_error: "jet_jit_dyn_decode_map_error" => jet_jit_dyn_decode_map_error: sig_unary;
     decode_error_under: "jet_jit_decode_error_under" => jet_jit_decode_error_under: sig_binary;
     decode_error_under_segment: "jet_jit_decode_error_under_segment" => jet_jit_decode_error_under_segment: sig_binary;
     decode_error_under_prelude: "jet_std::FieldError::under" => jet_jit_decode_error_under_prelude: sig_binary;
     decode_error_accumulate: "jet_jit_decode_error_accumulate" => jet_jit_decode_error_accumulate: sig_ternary;
     decode_error_accumulate_segment: "jet_jit_decode_error_accumulate_segment" => jet_jit_decode_error_accumulate_segment: sig_ternary;
-    datatree_decode_union_error: "jet_jit_datatree_decode_union_error" => jet_jit_datatree_decode_union_error: sig_nullary;
-    datatree_text: "jet_jit_datatree_text" => jet_jit_datatree_text: sig_unary;
-    datatree_bool: "jet_jit_datatree_bool" => jet_jit_datatree_bool: sig_unary;
-    datatree_float: "jet_jit_datatree_float" => jet_jit_datatree_float: sig_unary;
-    datatree_to_text: "jet_jit_datatree_to_text" => jet_jit_datatree_to_text: sig_unary;
-    datatree_equal_unordered: "jet_jit_datatree_equal_unordered" => jet_jit_datatree_equal_unordered: sig_binary;
+    dyn_decode_union_error: "jet_jit_dyn_decode_union_error" => jet_jit_dyn_decode_union_error: sig_nullary;
+    dyn_text: "jet_jit_dyn_text" => jet_jit_dyn_text: sig_unary;
+    dyn_bool: "jet_jit_dyn_bool" => jet_jit_dyn_bool: sig_unary;
+    dyn_float: "jet_jit_dyn_float" => jet_jit_dyn_float: sig_unary;
+    dyn_to_text: "jet_jit_dyn_to_text" => jet_jit_dyn_to_text: sig_unary;
+    dyn_equal_unordered: "jet_jit_dyn_equal_unordered" => jet_jit_dyn_equal_unordered: sig_binary;
     published_schema_merge: "jet_jit_published_schema_merge" => jet_jit_published_schema_merge: sig_binary;
     object_from_map: "jet_jit_object_from_map" => jet_jit_object_from_map: sig_unary;
     object_from_map_ordered: "jet_jit_object_from_map_ordered" => jet_jit_object_from_map_ordered: sig_binary;
@@ -4595,16 +4608,16 @@ host_fns! {
 }
 
 fn jet_jit_published_schema_merge(known: i64, original: i64) -> i64 {
-    let Some(known) = read_datatree(known) else {
+    let Some(known) = read_dyn(known) else {
         return 0;
     };
-    let Some(original) = read_datatree(original) else {
+    let Some(original) = read_dyn(original) else {
         return 0;
     };
-    alloc_datatree(&json_rt::jet_datatree_merge_wire_order(&known, &original))
+    alloc_dyn(&json_rt::jet_dyn_merge_wire_order(&known, &original))
 }
 
-/// `DataTree.Object(map)` when the payload is a computed Map: snapshot entries in
+/// `Dyn.Object(map)` when the payload is a computed Map: snapshot entries in
 /// map iteration order (BTree key order) into the ordered pair-list Object ABI.
 fn jet_jit_object_from_map(map: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -4625,11 +4638,11 @@ fn jet_jit_object_from_map(map: i64) -> i64 {
     })
 }
 
-/// Materialize a `DataTree.Object` map using checked source-order keys.
+/// Materialize a `Dyn.Object` map using checked source-order keys.
 ///
 /// Generated Codable encoders build a temporary String map in schema order,
 /// while ordinary map encoding intentionally remains key-sorted. The compiler
-/// supplies that order only for this DataTree boundary; absent keys (optional
+/// supplies that order only for this Dyn boundary; absent keys (optional
 /// fields) are skipped rather than materialized as zero handles.
 fn jet_jit_object_from_map_ordered(map: i64, order: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -4662,7 +4675,7 @@ fn jet_jit_object_from_map_ordered(map: i64, order: i64) -> i64 {
 /// Pattern `if tree == .Object(entries)`: ordered pair list → user-facing Map.
 fn jet_jit_object_entries_to_map(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        // Computed `DataTree.Object(map)` payloads are already maps.
+        // Computed `Dyn.Object(map)` payloads are already maps.
         if rt.heap.map_len(list).is_some() {
             return list;
         }
@@ -4673,7 +4686,7 @@ fn jet_jit_object_entries_to_map(list: i64) -> i64 {
         let map = rt.heap.alloc_empty_map();
         for i in 0..len {
             // json.parse stores ordered pairs as `List` of `RecordRef`, not
-            // `IntList`. Keys are `JetVal::String`, values are DataTree records.
+            // `IntList`. Keys are `JetVal::String`, values are Dyn records.
             let rec = rt.heap.list_get_raw(list, i).unwrap_or(0);
             let k = match rt.heap.record_get(rec, 0).cloned() {
                 Some(JetVal::String(text)) => rt.heap.alloc_string(text),

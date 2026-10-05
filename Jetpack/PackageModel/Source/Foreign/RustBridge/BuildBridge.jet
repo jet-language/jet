@@ -311,19 +311,19 @@ fn pkg_ffi_cargo_metadata(cargo: String, manifest: String) -[Exec, Time.Wait]> S
     Ok(receipt.output)
 }
 
-// The Rust `DataTree::get` refusal for an absent key.
-fn pkg_ffi_json_field(value: DataTree, key: String) -> DataTree ForeignBridgeError! {
+// The Rust `Dyn::get` refusal for an absent key.
+fn pkg_ffi_json_field(value: Dyn, key: String) -> Dyn ForeignBridgeError! {
     fields :: pkg_json_object(value) ?? return Err(pkg_bridge_error("missing key `{key}`"))
     field :: fields.get(key) ?? return Err(pkg_bridge_error("missing key `{key}`"))
     Ok(field)
 }
 
-fn pkg_ffi_json_items(value: DataTree) -> [DataTree] ForeignBridgeError! {
+fn pkg_ffi_json_items(value: Dyn) -> [Dyn] ForeignBridgeError! {
     items :: pkg_json_array(value) ?? return Err(pkg_bridge_error(@PKG_JSON_NOT_ARRAY))
     Ok(items)
 }
 
-fn pkg_ffi_json_text(value: DataTree) -> String ForeignBridgeError! {
+fn pkg_ffi_json_text(value: Dyn) -> String ForeignBridgeError! {
     text :: pkg_json_text(value) ?? return Err(pkg_bridge_error(@PKG_JSON_NOT_STRING))
     Ok(text)
 }

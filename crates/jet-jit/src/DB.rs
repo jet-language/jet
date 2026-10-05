@@ -1313,7 +1313,7 @@ pub(crate) mod pool {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs");
 }
 
-// DBValue heap record ABI (same 2-slot shape as DataTree): [disc:i64, payload].
+// DBValue heap record ABI (same 2-slot shape as Dyn): [disc:i64, payload].
 const DV_NULL: i64 = 0;
 const DV_INT: i64 = 1;
 const DV_FLOAT: i64 = 2;
@@ -1763,25 +1763,25 @@ fn read_dbvalue(handle: i64) -> Option<wire::DBValue> {
         }
     })
 }
-fn dbvalue_to_datatree(value: wire::DBValue) -> crate::Encoding::json_rt::DataTree {
+fn dbvalue_to_dyn(value: wire::DBValue) -> crate::Encoding::json_rt::Dyn {
     match value {
-        wire::DBValue::Null => crate::Encoding::json_rt::DataTree::Null,
-        wire::DBValue::Int(value) => crate::Encoding::json_rt::DataTree::Int(
+        wire::DBValue::Null => crate::Encoding::json_rt::Dyn::Null,
+        wire::DBValue::Int(value) => crate::Encoding::json_rt::Dyn::Int(
             crate::Encoding::json_rt::jet_int_from_i64(value),
         ),
-        wire::DBValue::Float(value) => crate::Encoding::json_rt::DataTree::Float(value),
-        wire::DBValue::Text(value) => crate::Encoding::json_rt::DataTree::Text(value),
-        wire::DBValue::Bool(value) => crate::Encoding::json_rt::DataTree::Bool(value),
-        wire::DBValue::Blob(value) => crate::Encoding::json_rt::DataTree::Bytes(value),
+        wire::DBValue::Float(value) => crate::Encoding::json_rt::Dyn::Float(value),
+        wire::DBValue::Text(value) => crate::Encoding::json_rt::Dyn::Text(value),
+        wire::DBValue::Bool(value) => crate::Encoding::json_rt::Dyn::Bool(value),
+        wire::DBValue::Blob(value) => crate::Encoding::json_rt::Dyn::Bytes(value),
     }
 }
 
 /// Convert the checked DB row carrier (a string-keyed map of DBValue handles)
-/// through the canonical DB-column projection and DataTree carrier.
-pub(crate) fn db_row_to_datatree(
+/// through the canonical DB-column projection and Dyn carrier.
+pub(crate) fn db_row_to_dyn(
     row: i64,
     names: &[(&str, &str)],
-) -> Result<crate::Encoding::json_rt::DataTree, String> {
+) -> Result<crate::Encoding::json_rt::Dyn, String> {
     let pairs = Concurrency::with_runtime_string(|rt| {
         let len = rt
             .heap
@@ -1814,9 +1814,9 @@ pub(crate) fn db_row_to_datatree(
         })
         .collect::<Result<_, _>>()?;
     let projected = wire::jet_db_row_project(&row, names, |value| {
-        dbvalue_to_datatree(value.clone())
+        dbvalue_to_dyn(value.clone())
     });
-    Ok(crate::Encoding::json_rt::DataTree::Object(projected))
+    Ok(crate::Encoding::json_rt::Dyn::Object(projected))
 }
 
 
@@ -3138,7 +3138,7 @@ fn connection_core_call(
             })
         }
         (
-            "core.encoding.datatree",
+            "core.encoding.dyn",
             "int" | "float" | "text" | "bool" | "blob" | "is_null",
             [value @ CtValue::Enum { type_name, .. }],
         ) if type_name == "DBValue" => ambient_db_value(value, span).map(|value| match method {

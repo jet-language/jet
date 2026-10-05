@@ -64,12 +64,27 @@ pub(crate) fn json_ty() -> Type {
     Type::Named(Syntax::TYPE_DATA.to_string())
 }
 
-/// The ordered `DataTree.Object` payload a compiler-generated struct encoder
-/// accumulates: `[(key: String, value: DataTree)]`, one row per emitted field
+pub(crate) fn is_dyn_type(ty: &Type) -> bool {
+    matches!(ty.without_user_tags(), Type::Named(name) if Syntax::is_data_type_name(name))
+}
+
+pub(crate) fn dyn_wrappable(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::Int | Type::Float | Type::String | Type::Bool => true,
+        Type::Named(name) => Syntax::is_data_type_name(name)
+            || matches!(name.as_str(), "DateTime" | "ZonedDateTime"),
+        Type::List(elem) | Type::FixedList { elem, .. } => is_u8_ty(elem) || dyn_wrappable(elem),
+        Type::Map { key, value, .. } => **key == Type::String && dyn_wrappable(value),
+        _ => false,
+    }
+}
+
+/// The ordered `Dyn.Object` payload a compiler-generated struct encoder
+/// accumulates: `[(key: String, value: Dyn)]`, one row per emitted field
 /// in declaration order. It is the pair list every engine already stores for
 /// an Object, so appending a row per present field keeps the encoder linear
 /// in the field count while absent optional fields stay off the wire.
-pub(crate) fn data_tree_object_pairs_ty() -> Type {
+pub(crate) fn dyn_object_pairs_ty() -> Type {
     Type::List(Box::new(Type::Tuple(vec![
         ("key".to_string(), Box::new(Type::String)),
         ("value".to_string(), Box::new(json_ty())),
@@ -104,15 +119,15 @@ pub(crate) fn field_error_ty() -> Type {
     Type::Named("FieldError".to_string())
 }
 
-/// D-SERDE13=B: the value tree's one user-facing name is `DataTree`. The old
+/// D-SERDE13=B: the value tree's one user-facing name is `Dyn`. The old
 /// `Data` spelling is retired (no alias, I8) — point at the new name wherever a
 /// user still writes `Data` as a type or a construction receiver.
-pub(crate) fn data_renamed_to_datatree(span: Span) -> Diagnostic {
+pub(crate) fn data_renamed_to_dyn(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0351",
-        "the value tree is named `DataTree`, not `Data`".to_string(),
-        "`DataTree` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Text`/`.Array`/`.Object`".to_string(),
-        "write `DataTree` instead of `Data`".to_string(),
+        "the value tree is named `Dyn`, not `Data`".to_string(),
+        "`Dyn` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Text`/`.Bytes`/`.DateTime`/`.Array`/`.Object`".to_string(),
+        "write `Dyn` instead of `Data`".to_string(),
         Some(span),
     )
 }
@@ -364,7 +379,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-TERM1 (ratified 2026-06-22): terminal key-event enum.
         | "Key"
         // D-SERDE2 / D-VALIDATE-DECODE1: the format-agnostic value tree.
-        | "DataTree"
+        | "Dyn"
         // D-VALIDATE1 (ratified 2026-07-12, card #506): the accumulated
         // validation error a `validate { }` block / `Type.validate(value)` /
         // `Validate.over(s)` build up.
@@ -735,7 +750,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "seed" => Some(Type::Option(Box::new(Type::Int))),
             "case_ids" => Some(Type::List(Box::new(Type::String))),
             "inputs" | "reference" | "candidate" => Some(Type::List(Box::new(Type::Named(
-                "DataTree".to_string(),
+                "Dyn".to_string(),
             )))),
             "status" | "relation" | "source" | "tool" | "target" | "reason" => {
                 Some(Type::String)
@@ -2786,6 +2801,8 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "Int" => Some(vec![Type::Int]),
         "Float" => Some(vec![Type::Float]),
         "Text" => Some(vec![Type::String]),
+        "Bytes" => Some(vec![Type::List(Box::new(u8_ty()))]),
+        "DateTime" => Some(vec![Type::Named("ZonedDateTime".to_string())]),
         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
         "Object" => Some(vec![Type::Map {
             key: Box::new(Type::String),
@@ -2794,7 +2811,7 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         }]),
         // `Number` is the compiler-only lexical carrier used by typed JSON
         // parsing. It is accepted in generated union decoder patterns, but
-        // has no public `DataTree.Number(...)` constructor.
+        // has no public `Dyn.Number(...)` constructor.
         "Number" => Some(vec![Type::String]),
         _ => None,
     }
@@ -3624,7 +3641,7 @@ pub fn encoding_handle_method_return(
             Some(Some(result_ty(unit, error)))
         }
         ("JSONLReader", "next", 0) => Some(Some(result_ty(
-            Type::Option(Box::new(Type::Named("DataTree".to_string()))),
+            Type::Option(Box::new(Type::Named("Dyn".to_string()))),
             error,
         ))),
         ("JSONLWriter", "write", 1) | ("JSONLWriter", "flush" | "finish", 0) => {
@@ -3639,7 +3656,7 @@ pub fn encoding_handle_method_return(
             Some(Some(result_ty(unit, error)))
         }
         ("XMLReader", "next", 0) => Some(Some(result_ty(
-            Type::Option(Box::new(Type::Named("DataTree".to_string()))),
+            Type::Option(Box::new(Type::Named("Dyn".to_string()))),
             error,
         ))),
         ("XMLWriter", "write", 1) | ("XMLWriter", "flush" | "finish", 0) => {
@@ -3729,15 +3746,15 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ),
             (
                 "inputs".to_string(),
-                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+                Type::List(Box::new(Type::Named("Dyn".to_string()))),
             ),
             (
                 "reference".to_string(),
-                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+                Type::List(Box::new(Type::Named("Dyn".to_string()))),
             ),
             (
                 "candidate".to_string(),
-                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+                Type::List(Box::new(Type::Named("Dyn".to_string()))),
             ),
             ("first_difference".to_string(), Type::Int),
             ("reason".to_string(), Type::String),
@@ -4466,6 +4483,7 @@ pub(crate) fn core_encoding_variants(
             ("Float", Type::Float),
             ("Text", Type::String),
             (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
+            ("DateTime", Type::Named("ZonedDateTime".to_string())),
             ("Key", Type::String),
         ] {
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));

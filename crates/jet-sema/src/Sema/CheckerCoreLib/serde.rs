@@ -79,10 +79,10 @@ impl<'a> Checker<'a> {
             }
             Type::Named(n) => {
                 n == "Decimal"
-                    || n == "DataTree"
+                    || n == "Dyn"
                     || matches!(
                         n.as_str(),
-                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "ZonedDateTime" | "Duration"
                     )
                     || is_json_type_name(n)
                     || self.serde_trait_impl(n, crate::Generics::ENCODE)
@@ -139,11 +139,11 @@ impl<'a> Checker<'a> {
                                 .is_some_and(|module| module == "core.crypto")
                     });
                 n == "Decimal"
-                    || n == "DataTree"
+                    || n == "Dyn"
                     || core_secret
                     || matches!(
                         n.as_str(),
-                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "ZonedDateTime" | "Duration"
                     )
                     || self.serde_trait_impl(n, crate::Generics::DECODE)
                     || self.type_param_scope.iter().any(|p| {

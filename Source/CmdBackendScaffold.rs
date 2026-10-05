@@ -12,7 +12,7 @@ use std::process::exit;
 
 use jet::ExitCodes;
 use jet::Migrations::MigrationLock;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::EncodingJson::parse_json;
 use jet_foundation::Hex::{decode as decode_hex, encode as hex_bytes};
 use jet_foundation::JSON::json_escape as json_quote;
@@ -1381,18 +1381,18 @@ fn render_receipt_inputs(options: &Options) -> String {
     )
 }
 fn receipt_input_text(
-    fields: &[(String, DataTree)],
+    fields: &[(String, Dyn)],
     key: &str,
 ) -> Option<Option<String>> {
     match json_value(fields, key)? {
-        DataTree::Null => Some(None),
-        DataTree::Text(value) => Some(Some(value.clone())),
+        Dyn::Null => Some(None),
+        Dyn::Text(value) => Some(Some(value.clone())),
         _ => None,
     }
 }
 
-fn parse_receipt_inputs(value: &DataTree) -> Option<Options> {
-    let DataTree::Object(fields) = value else {
+fn parse_receipt_inputs(value: &Dyn) -> Option<Options> {
+    let Dyn::Object(fields) = value else {
         return None;
     };
     const KEYS: &[&str] = &["path", "model", "up", "down", "risk", "lock", "version"];
@@ -1414,9 +1414,9 @@ fn parse_receipt_inputs(value: &DataTree) -> Option<Options> {
         None => None,
     };
     let version = match json_value(fields, "version")? {
-        DataTree::Null => None,
-        DataTree::Int(value) if *value > 0 => Some(*value as u64),
-        DataTree::Number(value) => {
+        Dyn::Null => None,
+        Dyn::Int(value) if *value > 0 => Some(*value as u64),
+        Dyn::Number(value) => {
             let value = value.parse::<u64>().ok()?;
             (value > 0).then_some(value)
         }
@@ -1489,7 +1489,7 @@ fn parse_receipt(
         return None;
     }
     let text = std::str::from_utf8(bytes).ok()?;
-    let DataTree::Object(fields) = parse_json(text, true).ok()? else {
+    let Dyn::Object(fields) = parse_json(text, true).ok()? else {
         return None;
     };
     const KEYS: &[&str] = &[
@@ -1539,7 +1539,7 @@ fn parse_receipt(
     } else {
         None
     };
-    let DataTree::Array(entries) = json_value(&fields, "files")? else {
+    let Dyn::Array(entries) = json_value(&fields, "files")? else {
         return None;
     };
     if entries.is_empty() || entries.len() > 1024 {
@@ -1548,7 +1548,7 @@ fn parse_receipt(
     let mut files = Vec::with_capacity(entries.len());
     let mut seen = BTreeSet::new();
     for entry in entries {
-        let DataTree::Object(entry_fields) = entry else {
+        let Dyn::Object(entry_fields) = entry else {
             return None;
         };
         if (entry_fields.len() != 2 && entry_fields.len() != 3)
@@ -1562,7 +1562,7 @@ fn parse_receipt(
         let digest = json_text(entry_fields, "digest")?.to_string();
         let before = match json_value(entry_fields, "before") {
             None => None,
-            Some(DataTree::Text(value)) => Some(decode_hex(value)?),
+            Some(Dyn::Text(value)) => Some(decode_hex(value)?),
             Some(_) => return None,
         };
         let is_app = app_relative.as_deref() == Some(path.as_str());
@@ -1615,17 +1615,17 @@ fn parse_receipt(
 
 
 fn json_value<'a>(
-    fields: &'a [(String, DataTree)],
+    fields: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     fields
         .iter()
         .find_map(|(field, value)| (field == key).then_some(value))
 }
 
-fn json_text<'a>(fields: &'a [(String, DataTree)], key: &str) -> Option<&'a str> {
+fn json_text<'a>(fields: &'a [(String, Dyn)], key: &str) -> Option<&'a str> {
     match json_value(fields, key)? {
-        DataTree::Text(value) => Some(value),
+        Dyn::Text(value) => Some(value),
         _ => None,
     }
 }

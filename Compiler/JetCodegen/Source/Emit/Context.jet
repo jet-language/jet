@@ -9,7 +9,6 @@ use jet_foundation.[
     MIRForeignID,
     MIRForeign,
     MIRFieldRow,
-    MIRFunction,
     MIRFunctionID,
     MIRGenericParam,
     MIRNominalRef,
@@ -524,6 +523,7 @@ fn jet_rust_emit_foreign_name(ctx: &JetRustEmitContext, id: MIRForeignID) -> Str
 // place. Sema admits a range window only for a parameter proven
 // length-preserving; whole-list callers still pass `&mut Vec<T>`, which
 // coerces.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::collect_window_params
 fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Never! {
     // Last row per function id, matching the scan this index replaces.
     function_index := [String:Int]{}
@@ -534,7 +534,8 @@ fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Nev
     // they reach along the edges, the same least fixed point the former
     // whole-program rescans reached.
     windows := [String:Bool]{}
-    forwards := [String:[String]]{}
+    forward_slots := [String:Int]{}
+    forwards := [[String]]{}
     pending := [String]{}
     loop function in program.functions {
         // Built on the first write argument this function passes: first
@@ -596,9 +597,13 @@ fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Nev
                                 if parameter_values.get(jet_rust_emit_id_key(value.value)) == .Val(index) {
                                     if index >= 0 {
                                         source :: "{function.id.value}:{index}"
-                                        targets := forwards.get(source) ?? [String]{}
-                                        &targets.push(key)
-                                        forwards[source] = targets
+                                        slot := forward_slots.get(source) ?? -1
+                                        if slot < 0 {
+                                            slot = forwards.len()
+                                            forward_slots[source] = slot
+                                            &forwards.push([String]{})
+                                        }
+                                        &forwards[slot].push(key)
                                     }
                                 }
                             }
@@ -612,8 +617,8 @@ fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Nev
     loop cursor < pending.len() {
         source := pending[cursor]
         cursor += 1
-        targets :: forwards.get(source) ?? [String]{}
-        loop key in targets {
+        slot :: forward_slots.get(source) ?? next
+        loop key in forwards[slot] {
             if windows.get(key) == None {
                 windows[key] = true
                 &pending.push(key)
@@ -670,13 +675,6 @@ fn jet_rust_emit_core_rows(ctx: JetRustEmitContext, id: MIRCoreCallID) -> [MIRCo
     [MIRCoreCall]{ctx.program.core_calls[index]}
 }
 
-// The row with this id as a zero- or one-row list, so loops that used to scan
-// a whole MIR table for one id visit only the indexed row.
-fn jet_rust_emit_function_rows(ctx: JetRustEmitContext, id: MIRFunctionID) -> [MIRFunction] Never! {
-    index :: jet_rust_emit_function_index(ctx, id) ?? return [MIRFunction]{}
-    [MIRFunction]{ctx.program.functions[index]}
-}
-
 fn jet_rust_emit_foreign_rows(ctx: JetRustEmitContext, id: MIRForeignID) -> [MIRForeign] Never! {
     index :: jet_rust_emit_foreign_index(ctx, id) ?? return [MIRForeign]{}
     [MIRForeign]{ctx.program.foreign[index]}
@@ -687,9 +685,9 @@ fn jet_rust_emit_trait_rows(ctx: JetRustEmitContext, id: MIRTraitID) -> [MIRTrai
     [MIRTraitDef]{ctx.program.traits[index]}
 }
 
-fn jet_rust_emit_type_rows(ctx: JetRustEmitContext, id: MIRTypeID) -> [MIRTypeDef] Never! {
-    index :: ctx.type_index_by_id.get(jet_rust_emit_id_key(id.value)) ?? return [MIRTypeDef]{}
-    [MIRTypeDef]{ctx.program.types[index]}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::new
+fn jet_rust_emit_type_index(ctx: JetRustEmitContext, id: MIRTypeID) -> Int? {
+    ctx.type_index_by_id.get(jet_rust_emit_id_key(id.value))
 }
 
 // program.fields rows with this id, first to last.
@@ -739,6 +737,7 @@ fn jet_rust_emit_compiler_trait_symbol(name: String) -> String Never! {
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::new
 fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetRustEmitContext Never! {
     functions := [String:String]{}
     types := [String:String]{}
@@ -789,15 +788,24 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     field_index_by_id := [String:Int]{}
     field_last_index_by_id := [String:Int]{}
     field_rows_by_owner := [String:[Int]]{}
+    field_owner_slots := [String:Int]{}
+    field_owner_keys := [String]{}
+    field_owner_rows := [[Int]]{}
     loop (index, row) in program.fields {
         key :: jet_rust_emit_id_key(row.id.value)
         if field_index_by_id.get(key) == None -> field_index_by_id[key] = index
         field_last_index_by_id[key] = index
         owner_key :: jet_rust_emit_id_key(row.owner.value)
-        owner_rows := field_rows_by_owner.get(owner_key) ?? [Int]{}
-        &owner_rows.push(index)
-        field_rows_by_owner[owner_key] = owner_rows
+        slot := field_owner_slots.get(owner_key) ?? -1
+        if slot < 0 {
+            slot = field_owner_rows.len()
+            field_owner_slots[owner_key] = slot
+            &field_owner_keys.push(owner_key)
+            &field_owner_rows.push([Int]{})
+        }
+        &field_owner_rows[slot].push(index)
     }
+    loop slot in 0..<field_owner_rows.len() -> field_rows_by_owner[field_owner_keys[slot]] = field_owner_rows[slot]
     type_instance_first := [String:Int]{}
     type_instance_last := [String:Int]{}
     loop (index, instance) in program.type_instances {
@@ -819,14 +827,23 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         prelude_call_last[key] = index
     }
     impls_by_trait := [String:[Int]]{}
+    impl_trait_slots := [String:Int]{}
+    impl_trait_keys := [String]{}
+    impl_trait_rows := [[Int]]{}
     loop (index, implementation) in program.impls {
         if implementation.trait_ref == .Val(trait_ref) {
             trait_key :: jet_rust_emit_id_key(trait_ref.id.value)
-            rows := impls_by_trait.get(trait_key) ?? [Int]{}
-            &rows.push(index)
-            impls_by_trait[trait_key] = rows
+            slot := impl_trait_slots.get(trait_key) ?? -1
+            if slot < 0 {
+                slot = impl_trait_rows.len()
+                impl_trait_slots[trait_key] = slot
+                &impl_trait_keys.push(trait_key)
+                &impl_trait_rows.push([Int]{})
+            }
+            &impl_trait_rows[slot].push(index)
         }
     }
+    loop slot in 0..<impl_trait_rows.len() -> impls_by_trait[impl_trait_keys[slot]] = impl_trait_rows[slot]
     ctx := JetRustEmitContext{
         program: program,
         config: config,

@@ -2,7 +2,7 @@
 //!
 //! D-SERDE2/D-SERDE16: `Encode` and `Decode` are ordinary trait contracts.
 //! Built-in `#Codable` registration and hand-written impls both enter this
-//! registry and reach the same typed DataTree dispatch surface; neither path
+//! registry and reach the same typed Dyn dispatch surface; neither path
 //! owns a private wire engine.
 
 use crate::Diagnostics::{Diagnostic, Span};
@@ -1979,7 +1979,7 @@ impl TraitRegistry {
                 }
             }
             // A const compute dimension carries no runtime value; it is
-            // compile-time-only and therefore has no DataTree codec.
+            // compile-time-only and therefore has no Dyn codec.
             Type::Measure(_) => !matches!(trait_name, ENCODE | DECODE),
             Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
         }
@@ -2569,7 +2569,7 @@ impl TraitRegistry {
             "DataTracked",
             "DataWatch",
             "DataWatchStatus",
-            "DataTree",
+            "Dyn",
             "DBValue",
             "DBLease",
             "DBPoolReceipt",
@@ -2685,7 +2685,7 @@ impl TraitRegistry {
             "DataTracked",
             "DataWatch",
             "DataWatchStatus",
-            "DataTree",
+            "Dyn",
             // Core time carriers have real Prelude JetDebug impls. Keep them
             // in the registry so nested auto-derived Debug uses that hook too.
             "Date",
@@ -2751,7 +2751,7 @@ impl TraitRegistry {
         // was E0915), the exact predicate split `is_core_shown_type`
         // (jet-sema/src/Sema/Diagnostics.rs) warns about. The Prelude owns the
         // text: `impl JetShow`/`impl JetDisplay for FieldError` in
-        // Prelude/CoreLib/JetStd/DataTree.rs, one projection every tier calls.
+        // Prelude/CoreLib/JetStd/Dyn.rs, one projection every tier calls.
         self.trait_impls
             .insert(("FieldError".to_string(), DISPLAY.to_string()));
         for ty in [
@@ -3371,9 +3371,9 @@ impl TraitRegistry {
         };
         let is_data = |ty: &Type| matches!(ty, Type::Named(n) if Syntax::is_data_type_name(n));
         let expected = if trait_name == ENCODE {
-            "`fn encode(self) -> DataTree`".to_string()
+            "`fn encode(self) -> Dyn`".to_string()
         } else {
-            format!("`fn decode(tree: DataTree) -> {type_name} [FieldError]!`")
+            format!("`fn decode(tree: Dyn) -> {type_name} [FieldError]!`")
         };
         let mut saw_verb = false;
         for m in methods {

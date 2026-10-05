@@ -1,5 +1,5 @@
 use super::*;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 
 /// `jet fix --edition=2027` rewrites `json.canonical(x)` per D-JSONCANON1:
 /// an omitted contract is the implicit default `Err`, so a fallible function
@@ -193,23 +193,23 @@ fn check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence(
             .env("NO_COLOR", "1");
         command.output().unwrap()
     };
-    let parse_status = |output: &Output| -> DataTree {
+    let parse_status = |output: &Output| -> Dyn {
         let payload = machine_payload(output);
         assert!(!payload.is_empty(), "check emitted no machine report");
         parse_json(&payload).unwrap_or_else(|_| panic!("invalid machine report:\n{payload}"))
     };
-    let diagnostic_report = |status: &DataTree| -> DataTree {
+    let diagnostic_report = |status: &Dyn| -> Dyn {
         match jet_foundation::JSON::json_get(status, "reports").unwrap() {
-            DataTree::Array(reports) => reports
+            Dyn::Array(reports) => reports
                 .first()
                 .cloned()
                 .expect("diagnostic status must contain one report"),
             _ => panic!("diagnostic status reports is not an array"),
         }
     };
-    let report = |output: &Output| -> DataTree { parse_status(output) };
-    let first_report = |status: &DataTree| diagnostic_report(status);
-    let assert_safe_edit = |value: &DataTree| {
+    let report = |output: &Output| -> Dyn { parse_status(output) };
+    let first_report = |status: &Dyn| diagnostic_report(status);
+    let assert_safe_edit = |value: &Dyn| {
         assert_eq!(
             jet_foundation::JSON::json_str(
                 jet_foundation::JSON::json_get(value, "applicability").unwrap()
@@ -218,7 +218,7 @@ fn check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence(
             "safe"
         );
         let edits = match jet_foundation::JSON::json_get(value, "fix_edits").unwrap() {
-            DataTree::Array(edits) => edits,
+            Dyn::Array(edits) => edits,
             _ => panic!("fix_edits is not an array"),
         };
         assert_eq!(edits.len(), 1);
@@ -1660,13 +1660,13 @@ fn measured_test_targets_filter_and_json_match_test_runner_contract() {
         "JSON must contain one record per selected claim: {json_stdout}"
     );
     for record in records {
-        let DataTree::Object(_) = &record else {
+        let Dyn::Object(_) = &record else {
             panic!("measurement JSON record is not an object")
         };
         assert!(
             matches!(
                 record.get("name").ok(),
-                Some(DataTree::Text(name) | DataTree::TypedText(name))
+                Some(Dyn::Text(name) | Dyn::TypedText(name))
                     if name == "measured-needle"
             ),
             "JSON claim name is wrong: {record:?}"

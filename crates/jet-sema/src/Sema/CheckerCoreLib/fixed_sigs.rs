@@ -1266,7 +1266,7 @@ fn core_fixed_sig_impl(
         param_contract: None,
         call_metadata: None,
     };
-    let comparison_data = Type::Named("DataTree".to_string());
+    let comparison_data = Type::Named("Dyn".to_string());
     let comparison_fn = Type::Fn {
         params: vec![comparison_data.clone()],
         ret: Some(Box::new(comparison_data.clone())),

@@ -141,11 +141,24 @@ fn sema_call_generic_count_diagnostic(name: String, expected: Int, actual: Int, 
     sema_error("E0119", span, "`{name}` expects {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site type arguments have to line up", "provide exactly the declared type arguments")
 }
 
+// Rust `infer_call` (`direct_calls.rs`): a declared function named `name`
+// (`funcs.get(name)`) is the call target even when a nearer value binding
+// shares the name; only without one does the nearer binding decide.
+fn sema_call_declared_function_index(scopes: SemaScopeTable, name: String) -> Int? {
+    slot :: scopes.name_slots.get(name) ?? return None
+    found := Int?{None}
+    loop index in scopes.name_positions[slot] {
+        if scopes.bindings[index].symbol.kind == SymbolKind.Function -> found = Val(index)
+    }
+    found
+}
+
 pub fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
-    index :: sema_scope_resolve_index(scopes, name) ?? {
+    nearest :: sema_scope_resolve_index(scopes, name) ?? {
         &diagnostics.push(sema_call_unknown_function(name, span))
         return None
     }
+    index :: if scopes.bindings[nearest].symbol.kind == SymbolKind.Function -> nearest else -> sema_call_declared_function_index(scopes, name) ?? nearest
     symbol :: scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Function {
         ty :: symbol.ty ?? {

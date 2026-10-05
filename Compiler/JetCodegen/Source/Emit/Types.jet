@@ -183,23 +183,24 @@ fn jet_rust_emit_c_abi_nominal_name(definition: MIRTypeDef, kind: String) -> Str
     jet_rust_emit_generated_path("__jet_c_abi_{kind}::{definition.key}")
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::c_abi_record_def
 fn jet_rust_emit_c_abi_record_definition(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
     if ty.kind == {
         .Apply(name, args) -> {
             if name.name == "Ptr" || args.len() != 0 -> return None
-            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
-                if definition.id == name.id {
-                    if definition.generic_params.len() != 0 || definition.layout == None -> return None
-                    layout :: definition.layout ?? return None
+            if jet_rust_emit_type_index(ctx, name.id) == .Val(definition_index) {
+                if ctx.program.types[definition_index].id == name.id {
+                    if ctx.program.types[definition_index].generic_params.len() != 0 || ctx.program.types[definition_index].layout == None -> return None
+                    layout :: ctx.program.types[definition_index].layout ?? return None
                     if layout == {
                         .C | .CAligned(_, _) -> {}
                         .Columnar -> return None
                     }
-                    if definition.kind == {
+                    if ctx.program.types[definition_index].kind == {
                         .Struct(fields, _) -> {
                             physical_field := false
                             loop field in fields { if !field.computed -> physical_field = true }
-                            if physical_field -> return Val(definition)
+                            if physical_field -> return Val(ctx.program.types[definition_index])
                         }
                         else -> {}
                     }
@@ -212,21 +213,21 @@ fn jet_rust_emit_c_abi_record_definition(ctx: &JetRustEmitContext, ty: MIRType) 
     None
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::c_abi_enum_def
 fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
     if ty.kind == {
         .Apply(name, args) -> {
             if args.len() != 0 -> return None
-            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
-                if definition.id != name.id -> next
-                if definition.generic_params.len() != 0 || definition.c_layout_tag == None || definition.enum_layout == None -> return None
-                if definition.layout == None -> return None
-                layout :: definition.layout ?? return None
+            if jet_rust_emit_type_index(ctx, name.id) == .Val(definition_index) {
+                if ctx.program.types[definition_index].generic_params.len() != 0 || ctx.program.types[definition_index].c_layout_tag == None || ctx.program.types[definition_index].enum_layout == None -> return None
+                if ctx.program.types[definition_index].layout == None -> return None
+                layout :: ctx.program.types[definition_index].layout ?? return None
                 if layout != MIRStructLayout.C -> return None
-                if definition.kind == {
+                if ctx.program.types[definition_index].kind == {
                     .Enum(variants, _) -> {
                         if variants.len() == 0 -> return None
-                        enum_tag :: definition.c_layout_tag ?? return None
-                        facts :: definition.enum_layout ?? return None
+                        enum_tag :: ctx.program.types[definition_index].c_layout_tag ?? return None
+                        facts :: ctx.program.types[definition_index].enum_layout ?? return None
                         if facts.bytes == None || facts.fields.len() != variants.len() -> return None
                         bytes :: facts.bytes ?? ByteLayout{size: 0, alignment: 0, stride: 0}
                         if bytes.size <= 0 || bytes.alignment <= 0 || bytes.stride != bytes.size -> return None
@@ -267,7 +268,7 @@ fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) ->
                             bytes.size <= payload_offset -> return None
                             else -> {}
                         }
-                        return Val(definition)
+                        return Val(ctx.program.types[definition_index])
                     }
                     else -> return None
                 }
@@ -540,19 +541,20 @@ fn jet_rust_emit_send_function_type(ctx: &JetRustEmitContext, params: [MIRType],
     "std::sync::Arc<dyn Fn({rendered.join(", ")}) -> {result} + Send + Sync + 'static>"
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::generic_params_for_type
 fn jet_rust_emit_type_application_generic_params(ctx: &JetRustEmitContext, source: MIRType) -> [MIRGenericParam] Never! {
     if source.kind == {
         .Apply(name, args) -> {
-            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
-                if definition.id == name.id {
-                    if definition.generic_params.len() != args.len() -> return [MIRGenericParam]{}
+            if jet_rust_emit_type_index(ctx, name.id) == .Val(definition_index) {
+                if ctx.program.types[definition_index].id == name.id {
+                    if ctx.program.types[definition_index].generic_params.len() != args.len() -> return [MIRGenericParam]{}
                     parameters := [MIRGenericParam]{}
                     index := 0
                     loop index < args.len() {
                         if args[index].kind == {
                             .Apply(argument_name, argument_args) -> {
                                 if argument_args.len() == 0 && !argument_name.name.contains("::") {
-                                    declared := definition.generic_params[index]
+                                    declared := ctx.program.types[definition_index].generic_params[index]
                                     parameters = jet_rust_emit_merge_generic_params(parameters, [MIRGenericParam]{MIRGenericParam{name: argument_name.name, bounds: declared.bounds}})
                                 }
                             }
@@ -990,6 +992,7 @@ fn jet_rust_emit_handle_for_definition(ctx: &JetRustEmitContext, definition: MIR
     None
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_handle_type
 fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycle, lines: &[String]) Never! {
     if handle.payload.library == "core.process" -> return
     name :: jet_rust_emit_type(&ctx, handle.ty)
@@ -1019,8 +1022,8 @@ fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycl
     }
     close_function := MIRFunctionID?{None}
     if handle.close == .Val(candidate) {
-        loop function in jet_rust_emit_function_rows(ctx, candidate) {
-            if function.id == candidate && jet_rust_emit_function_target_enabled(ctx.config, function) -> close_function = Val(candidate)
+        if jet_rust_emit_function_index(ctx, candidate) == .Val(function_index) {
+            if ctx.program.functions[function_index].id == candidate && jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[function_index]) -> close_function = Val(candidate)
         }
     }
     if close_foreign == None && close_function == None -> return
@@ -1033,8 +1036,8 @@ fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycl
         close_function != None -> {
         close := jet_rust_emit_function_name(&ctx, close_function_id)
         needs_unsafe := false
-        loop function in jet_rust_emit_function_rows(ctx, close_function_id) {
-            if function.id == close_function_id -> needs_unsafe = function.is_unsafe
+        if jet_rust_emit_function_index(ctx, close_function_id) == .Val(function_index) {
+            if ctx.program.functions[function_index].id == close_function_id -> needs_unsafe = ctx.program.functions[function_index].is_unsafe
         }
         &lines.push("            let __jet_handle = {name}::from_raw(__jet_raw as *mut core::ffi::c_void);")
         if {
@@ -1067,6 +1070,7 @@ fn jet_rust_emit_derived_impl_matches_type(implementation: MIRImplDef, definitio
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::validate_derived_trait
 fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MIRTypeDef, trait_id: MIRTraitID, trait_name: String) Never! {
     trait_definition := MIRTraitDef?{None}
     trait_key := ""
@@ -1105,8 +1109,8 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MI
         if method.default != None -> next
         implemented := false
         loop function_id in impl_row.methods {
-            loop function in jet_rust_emit_function_rows(ctx, function_id) {
-                if function.id == function_id && function.name == method.name -> implemented = true
+            if jet_rust_emit_function_index(ctx, function_id) == .Val(function_index) {
+                if ctx.program.functions[function_index].id == function_id && ctx.program.functions[function_index].name == method.name -> implemented = true
             }
         }
         if !implemented -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derived implementation omits a required method", method.name, Val(impl_row.span))
@@ -1415,14 +1419,15 @@ fn jet_rust_emit_named_field(ctx: &JetRustEmitContext, owner: String, raw: Strin
     "__jet_missing_field_{jet_rust_emit_sanitize(raw)}"
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::shape_name_map
 fn jet_rust_emit_shape_name_map(ctx: &JetRustEmitContext, target: MIRType, projection: String, member: String) -> String Never! {
     identity :: target.identity ?? {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR shape adapter target has no canonical type identity", "checked shape adapters must retain the target struct identity", None)
         return "&[]"
     }
-    loop definition in jet_rust_emit_type_rows(ctx, identity) {
-        if definition.id == identity {
-            if definition.kind == {
+    if jet_rust_emit_type_index(ctx, identity) == .Val(definition_index) {
+        if ctx.program.types[definition_index].id == identity {
+            if ctx.program.types[definition_index].kind == {
                 .Struct(fields, _) -> {
                     pairs := [String]{}
                     loop field in fields {
@@ -1963,7 +1968,7 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
 fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     if raw.starts_with("<corelib>/Core/sync::") && raw.ends_with("::RowPolicy") -> return None
     name :: jet_rust_emit_core_qualified_leaf(jet_rust_emit_core_source_type_leaf(raw)) ?? return None
-    if name == "DataTree" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val("DataTree")
+    if name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val("Dyn")
     if jet_rust_emit_job_queue_type_name(name) == .Val(queue) -> return Val(queue)
     lanes :: [String]{"F32x4", "F64x2", "F32x8", "F64x4", "I8x16", "I16x8", "I32x4", "I64x2", "U8x16", "U16x8", "U32x4", "U64x2", "I8x32", "I16x16", "I32x8", "I64x4", "U8x32", "U16x16", "U32x8", "U64x4", "Vec2", "Vec3", "Vec4", "Mat3", "Mat4"}
     if lanes.contains(name) -> return Val(~name)

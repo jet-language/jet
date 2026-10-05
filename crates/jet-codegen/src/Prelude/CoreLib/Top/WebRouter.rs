@@ -239,7 +239,7 @@ fn jet_web_router_parse_json_search(
     };
     let value = jet_std::parse_json_strict(&encoded)
         .map_err(|error| format!("invalid JSON search value: {}", error.reason))?;
-    let jet_std::DataTree::Object(entries) = value else {
+    let jet_std::Dyn::Object(entries) = value else {
         return Err("JSON search value must be an object".to_string());
     };
     if entries.len() > JET_WEB_ROUTER_MAX_PARAMS {
@@ -256,18 +256,18 @@ fn jet_web_router_parse_json_search(
         .collect()
 }
 
-fn jet_web_router_json_value_text(value: &jet_std::DataTree) -> Result<String, String> {
+fn jet_web_router_json_value_text(value: &jet_std::Dyn) -> Result<String, String> {
     match value {
-        jet_std::DataTree::Text(text) | jet_std::DataTree::TypedText(text) => Ok(text.clone()),
-        jet_std::DataTree::Bool(value) => Ok(value.to_string()),
-        jet_std::DataTree::Int(value) => Ok(value.to_string()),
-        jet_std::DataTree::Float(value) if value.is_finite() => Ok(value.to_string()),
-        jet_std::DataTree::Float(_) => Err("JSON search number must be finite".to_string()),
-        jet_std::DataTree::Number(value) => Ok(value.clone()),
-        jet_std::DataTree::Null
-        | jet_std::DataTree::Array(_)
-        | jet_std::DataTree::Object(_)
-        | jet_std::DataTree::Bytes(_) => Ok(jet_std::render_json(value, false, 0)),
+        jet_std::Dyn::Text(text) | jet_std::Dyn::TypedText(text) => Ok(text.clone()),
+        jet_std::Dyn::Bool(value) => Ok(value.to_string()),
+        jet_std::Dyn::Int(value) => Ok(value.to_string()),
+        jet_std::Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),
+        jet_std::Dyn::Float(_) => Err("JSON search number must be finite".to_string()),
+        jet_std::Dyn::Number(value) => Ok(value.clone()),
+        jet_std::Dyn::Null
+        | jet_std::Dyn::Array(_)
+        | jet_std::Dyn::Object(_)
+        | jet_std::Dyn::Bytes(_) | jet_std::Dyn::DateTime(_) => Ok(jet_std::render_json(value, false, 0)),
     }
 }
 
@@ -344,23 +344,23 @@ fn jet_web_router_parse_value(
 fn jet_web_router_json_value_for_field(
     field: &JetWebRouterField,
     raw: &str,
-) -> Result<jet_std::DataTree, String> {
+) -> Result<jet_std::Dyn, String> {
     match field.value_type {
-        JetWebRouterValueType::String => Ok(jet_std::DataTree::Text(raw.to_string())),
+        JetWebRouterValueType::String => Ok(jet_std::Dyn::Text(raw.to_string())),
         JetWebRouterValueType::Int => raw
             .parse::<i64>()
-            .map(jet_std::DataTree::Int)
+            .map(jet_std::Dyn::Int)
             .map_err(|_| format!("parameter `{}` expects Int, got {raw}", field.name)),
         JetWebRouterValueType::Bool => match raw {
-            "true" => Ok(jet_std::DataTree::Bool(true)),
-            "false" => Ok(jet_std::DataTree::Bool(false)),
+            "true" => Ok(jet_std::Dyn::Bool(true)),
+            "false" => Ok(jet_std::Dyn::Bool(false)),
             _ => Err(format!("parameter `{}` expects Bool, got {raw}", field.name)),
         },
         JetWebRouterValueType::Float => raw
             .parse::<f64>()
             .ok()
             .filter(|value| value.is_finite())
-            .map(jet_std::DataTree::Float)
+            .map(jet_std::Dyn::Float)
             .ok_or_else(|| format!("parameter `{}` expects Float, got {raw}", field.name)),
         JetWebRouterValueType::Json => jet_std::parse_json_strict(raw)
             .map_err(|error| format!("parameter `{}` expects JSON: {}", field.name, error.reason)),
@@ -1364,7 +1364,7 @@ impl JetWebRouter {
                         })
                         .collect::<Result<Vec<_>, String>>()?;
                     let encoded = jet_std::render_json(
-                        &jet_std::DataTree::Object(entries),
+                        &jet_std::Dyn::Object(entries),
                         false,
                         0,
                     );

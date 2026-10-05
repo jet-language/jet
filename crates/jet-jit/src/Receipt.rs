@@ -14,7 +14,7 @@ pub(crate) mod kernel {
 
     #[allow(non_camel_case_types)]
     pub(crate) trait __jet_Encode {
-        fn jet_encode(&self) -> jet_std::DataTree;
+        fn jet_encode(&self) -> jet_std::Dyn;
     }
 
     fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
@@ -24,7 +24,7 @@ pub(crate) mod kernel {
     include!("../../jet-codegen/src/Prelude/Core/Receipt.rs");
 }
 
-use crate::Encoding::json_rt::DataTree;
+use crate::Encoding::json_rt::Dyn;
 use crate::runtime_host::{
     JitRuntime, RuntimeTypeDescriptor, RuntimeValueAbi, RuntimeValueKind,
 };
@@ -48,7 +48,7 @@ pub(crate) type HistoryCallableEncoder = fn(
     &RuntimeTypeDescriptor,
     &mut EncodeState,
     usize,
-) -> Result<DataTree, String>;
+) -> Result<Dyn, String>;
 
 impl EncodeState {
     pub(crate) fn visit(&mut self, depth: usize) -> Result<(), String> {
@@ -213,21 +213,21 @@ pub(crate) fn encode_int(
     rt: &JitRuntime,
     raw: i64,
     descriptor: &RuntimeTypeDescriptor,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     if let Some(width) = descriptor.integer_width {
         return Ok(if width.signed {
-            crate::Encoding::json_rt::jet_datatree_encode_i64(raw)
+            crate::Encoding::json_rt::jet_dyn_encode_i64(raw)
         } else {
-            crate::Encoding::json_rt::jet_datatree_encode_u64(raw as u64)
+            crate::Encoding::json_rt::jet_dyn_encode_u64(raw as u64)
         });
     }
     match rt.heap.int_to_i64(raw) {
-        Some(value) => Ok(crate::Encoding::json_rt::jet_datatree_encode_i64(value)),
-        None => Ok(DataTree::Number(rt.heap.int_to_string(raw))),
+        Some(value) => Ok(crate::Encoding::json_rt::jet_dyn_encode_i64(value)),
+        None => Ok(Dyn::Number(rt.heap.int_to_string(raw))),
     }
 }
 
-fn encode_float(word: RuntimeWord, descriptor: &RuntimeTypeDescriptor) -> Result<DataTree, String> {
+fn encode_float(word: RuntimeWord, descriptor: &RuntimeTypeDescriptor) -> Result<Dyn, String> {
     let value = match word {
         RuntimeWord::Float(value) => value,
         RuntimeWord::Bits(value) => match descriptor.abi {
@@ -253,14 +253,14 @@ fn encode_float(word: RuntimeWord, descriptor: &RuntimeTypeDescriptor) -> Result
             descriptor.name
         ));
     }
-    Ok(DataTree::Float(value))
+    Ok(Dyn::Float(value))
 }
 
 fn encode_string(
     state: &mut EncodeState,
     word: RuntimeWord,
     descriptor: &RuntimeTypeDescriptor,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let value = match word {
         RuntimeWord::String(value) => value,
         RuntimeWord::Bits(value) => {
@@ -279,7 +279,7 @@ fn encode_string(
         }
     };
     state.bytes(value.len())?;
-    Ok(DataTree::Text(value))
+    Ok(Dyn::Text(value))
 }
 
 fn encode_value(
@@ -288,15 +288,15 @@ fn encode_value(
     descriptor: &RuntimeTypeDescriptor,
     state: &mut EncodeState,
     depth: usize,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     state.visit(depth)?;
     match descriptor.kind {
-        RuntimeValueKind::Unit => Ok(DataTree::Null),
+        RuntimeValueKind::Unit => Ok(Dyn::Null),
         RuntimeValueKind::Int => encode_int(rt, bits(word, &descriptor.name)?, descriptor),
         RuntimeValueKind::Float => encode_float(word, descriptor),
         RuntimeValueKind::Bool => match word {
-            RuntimeWord::Bool(value) => Ok(DataTree::Bool(value)),
-            RuntimeWord::Bits(value) => Ok(DataTree::Bool(value != 0)),
+            RuntimeWord::Bool(value) => Ok(Dyn::Bool(value)),
+            RuntimeWord::Bits(value) => Ok(Dyn::Bool(value != 0)),
             RuntimeWord::Float(_)
             | RuntimeWord::Char(_)
             | RuntimeWord::String(_) => Err(format!(
@@ -321,7 +321,7 @@ fn encode_value(
             };
             let value = value.to_string();
             state.bytes(value.len())?;
-            Ok(DataTree::Text(value))
+            Ok(Dyn::Text(value))
         }
         RuntimeValueKind::String => encode_string(state, word, descriptor),
         RuntimeValueKind::List => {
@@ -397,11 +397,11 @@ fn encode_result_like(
     ok_id: Option<u64>,
     state: &mut EncodeState,
     depth: usize,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let (is_ok, payload) = crate::runtime_host::jit_result_parts(rt, raw)
         .ok_or_else(|| format!("receipt value `{}` has an invalid result handle", owner.name))?;
     if !is_ok {
-        return Ok(DataTree::Null);
+        return Ok(Dyn::Null);
     }
     let child = lookup_descriptor(rt, ok_id, "result payload")?;
     let word = word_from_raw(rt, payload as i64, &child)?;
@@ -414,7 +414,7 @@ fn encode_byte_list(
     owner: &RuntimeTypeDescriptor,
     state: &mut EncodeState,
     depth: usize,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let length = rt
         .heap
         .list_len(raw)
@@ -445,7 +445,7 @@ fn encode_byte_list(
         );
     }
     state.bytes(bytes.len())?;
-    Ok(DataTree::Bytes(bytes))
+    Ok(Dyn::Bytes(bytes))
 }
 
 fn is_byte_descriptor(descriptor: &RuntimeTypeDescriptor) -> bool {
@@ -459,7 +459,7 @@ fn encode_list(
     owner: &RuntimeTypeDescriptor,
     state: &mut EncodeState,
     depth: usize,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let length = rt
         .heap
         .list_len(raw)
@@ -486,7 +486,7 @@ fn encode_list(
                 let word = word_from_slot(rt, slot, &element)?;
                 values.push(encode_value(rt, word, &element, state, depth + 1)?);
             }
-            Ok(DataTree::Array(values))
+            Ok(Dyn::Array(values))
         }
     };
     state.leave(owner, raw);
@@ -499,7 +499,7 @@ fn encode_map(
     owner: &RuntimeTypeDescriptor,
     state: &mut EncodeState,
     depth: usize,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let length = rt
         .heap
         .map_len(raw)
@@ -542,7 +542,7 @@ fn encode_map(
             let value = encode_value(rt, word, &value, state, depth + 1)?;
             entries.push((key_text, value));
         }
-        Ok(DataTree::Object(entries))
+        Ok(Dyn::Object(entries))
     };
     state.leave(owner, raw);
     result
@@ -591,7 +591,7 @@ fn encode_record(
     owner: &RuntimeTypeDescriptor,
     state: &mut EncodeState,
     depth: usize,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     state.enter(owner, raw)?;
     let result = (|| {
         let mut fields = Vec::with_capacity(owner.fields.len());
@@ -630,7 +630,7 @@ fn encode_record(
             let value = encode_value(rt, word, &child, state, depth + 1)?;
             fields.push((field_json_name.to_string(), value));
         }
-        Ok(DataTree::Object(fields))
+        Ok(Dyn::Object(fields))
     })();
     state.leave(owner, raw);
     result
@@ -642,7 +642,7 @@ fn encode_enum(
     owner: &RuntimeTypeDescriptor,
     state: &mut EncodeState,
     depth: usize,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     state.enter(owner, raw)?;
     let result = (|| {
         let discriminant = rt
@@ -686,22 +686,22 @@ fn encode_enum(
                 )
             })?)
         } else {
-            Some(DataTree::Object(named_payload))
+            Some(Dyn::Object(named_payload))
         };
         if owner.serde_untagged {
-            return Ok(payload.unwrap_or(DataTree::Null));
+            return Ok(payload.unwrap_or(Dyn::Null));
         }
         if let Some(tag) = owner.serde_tag.as_deref() {
             state.bytes(tag.len())?;
             state.bytes(variant_wire.len())?;
-            let mut entries = vec![(tag.to_string(), DataTree::Text(variant_wire))];
+            let mut entries = vec![(tag.to_string(), Dyn::Text(variant_wire))];
             match payload {
                 None => {}
                 Some(value) if variant.fields.len() == 1 => {
                     state.bytes("value".len())?;
                     entries.push(("value".to_string(), value));
                 }
-                Some(DataTree::Object(fields)) => entries.extend(fields),
+                Some(Dyn::Object(fields)) => entries.extend(fields),
                 Some(_) => {
                     return Err(format!(
                         "receipt enum variant `{}` has an invalid named payload",
@@ -709,16 +709,16 @@ fn encode_enum(
                     ))
                 }
             }
-            return Ok(DataTree::Object(entries));
+            return Ok(Dyn::Object(entries));
         }
         match payload {
             None => {
                 state.bytes(variant_wire.len())?;
-                Ok(DataTree::Text(variant_wire))
+                Ok(Dyn::Text(variant_wire))
             }
             Some(payload) => {
                 state.bytes(variant_wire.len())?;
-                Ok(DataTree::Object(vec![(variant_wire, payload)]))
+                Ok(Dyn::Object(vec![(variant_wire, payload)]))
             }
         }
     })();
@@ -735,7 +735,7 @@ pub(crate) fn encode_jit_value_nested(
     descriptor: &RuntimeTypeDescriptor,
     state: &mut EncodeState,
     depth: usize,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let word = word_from_raw(rt, raw, descriptor)?;
     encode_value(rt, word, descriptor, state, depth)
 }
@@ -745,7 +745,7 @@ pub(crate) fn encode_jit_value_slot(
     rt: &mut JitRuntime,
     value: JetVal,
     descriptor: &RuntimeTypeDescriptor,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let mut state = EncodeState {
         nodes: 0,
         bytes: 0,
@@ -764,7 +764,7 @@ pub(crate) fn encode_jit_value_with_history_callback(
     raw: i64,
     descriptor: &RuntimeTypeDescriptor,
     callback: HistoryCallableEncoder,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let mut state = EncodeState {
         nodes: 0,
         bytes: 0,
@@ -783,7 +783,7 @@ pub(crate) fn encode_jit_value(
     rt: &mut JitRuntime,
     raw: i64,
     descriptor: &RuntimeTypeDescriptor,
-) -> Result<DataTree, String> {
+) -> Result<Dyn, String> {
     let mut state = EncodeState {
         nodes: 0,
         bytes: 0,
@@ -825,7 +825,7 @@ fn ambient_core_call(
             span,
         )));
     };
-    let payload = jet_codegen::Comptime::render_datatree_for_tir(value);
+    let payload = jet_codegen::Comptime::render_dyn_for_tir(value);
     kernel::jet_receipt_attach_encoded(
         &payload,
         section_name,

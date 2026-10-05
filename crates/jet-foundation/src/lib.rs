@@ -24,7 +24,7 @@ pub mod Facts;
 pub mod Generics;
 pub mod Hex;
 pub mod JSON;
-pub mod DataTree;
+pub mod Dyn;
 pub mod JSONNumber;
 pub mod JitBackend;
 pub mod HotSwap;
@@ -98,6 +98,8 @@ pub mod Registry;
 pub mod Report;
 pub mod RuntimeDiagnosticCore;
 pub mod RingLayer;
+/// Code mask and test-item removal for generated Rust source.
+pub mod RustSource;
 pub mod SHA256;
 pub mod ServiceTree;
 pub mod StreamCursor;

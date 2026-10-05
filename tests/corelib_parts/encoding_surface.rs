@@ -419,7 +419,7 @@ fn run() -[Rand, Time]> {
 }
 
 #[test]
-fn encoding_breadth_codecs_share_data_tree() {
+fn encoding_breadth_codecs_share_dyn() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping encoding breadth test (need rustc)");
@@ -748,7 +748,7 @@ fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn show(result: DataTree XMLError!) -> String {
+fn show(result: Dyn XMLError!) -> String {
     if result == {
         .Ok(_) -> { return "accepted" }
         .Err(error) -> {
@@ -1302,7 +1302,7 @@ fn run() {{
     // Hostile: document_end before document_start → State, no bytes.
     bad_out :: files.create("{input}.bad") ?? panic("bad create")
     bad :: xml.writer(^bad_out) ?? panic("bad writer")
-    end := DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+    end := Dyn.Object(["$xml_event": Dyn.Text("document_end")])
     if bad.write(end) == {{
         .Ok(_) -> {{ print("hostile-missed") }}
         .Err(error) -> {{

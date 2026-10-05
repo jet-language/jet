@@ -1,24 +1,24 @@
 // JSON provider documents: npm package.json and packuments, PyPI JSON API
-// records, and SwiftPM Package.resolved, plus the DataTree helpers every
+// records, and SwiftPM Package.resolved, plus the Dyn helpers every
 // JSON provider report shares. Ported from the JSON half of
 // jetpack::ProviderGraph. Parsing is Core JSON under the reference's
 // protocol bounds (`pkg_json_parse_protocol`, D-CORE-JSONLIMIT1=A).
 
 impl MetadataFacts {
     // Record one typed fact holding the compact JSON of `value`.
-    fn add_typed_json(&self, key: String, value: DataTree) Never! {
+    fn add_typed_json(&self, key: String, value: Dyn) Never! {
         self.typed[key] = [String]{pkg_json_render(value)}
     }
 
     // Keep every native top-level field in the typed projection under
     // `namespace`, beside the byte-for-byte native document.
-    fn add_json_projection(&self, namespace: String, object: [String: DataTree]) Never! {
+    fn add_json_projection(&self, namespace: String, object: [String: Dyn]) Never! {
         loop key in object.keys().to_list() -> &self.add_typed_json("{namespace}.{key}", object[key])
     }
 
     // Record a typed JSON fact that may be declared more than once; a second,
     // different value is a conflict and both values are kept.
-    fn add_conflicting_typed_json(&self, key: String, value: DataTree) Never! {
+    fn add_conflicting_typed_json(&self, key: String, value: Dyn) Never! {
         rendered :: pkg_json_render(value)
         existing :: self.typed.get(key) ?? [String]{}
         loop previous in existing {
@@ -34,7 +34,7 @@ impl MetadataFacts {
 }
 
 // Rust `json_string`: the non-blank string at `key`.
-fn provider_graph_json_string(object: [String: DataTree], key: String) -> String? Never! {
+fn provider_graph_json_string(object: [String: Dyn], key: String) -> String? Never! {
     value :: object.get(key) ?? return None
     text :: pkg_json_text(value) ?? return None
     if text.trim() == "" -> return None
@@ -42,7 +42,7 @@ fn provider_graph_json_string(object: [String: DataTree], key: String) -> String
 }
 
 // The first non-blank string among `keys`.
-fn provider_graph_json_first_string(object: [String: DataTree], keys: [String]) -> String? Never! {
+fn provider_graph_json_first_string(object: [String: Dyn], keys: [String]) -> String? Never! {
     loop key in keys {
         value :: provider_graph_json_string(object, key) ?? next
         return Val(value)
@@ -59,14 +59,14 @@ fn provider_graph_either<T>(first: T?, second: T?) -> T? Never! {
 }
 
 // The keys of the object at `key`, in document order.
-fn provider_graph_json_keys(object: [String: DataTree], key: String) -> [String] Never! {
+fn provider_graph_json_keys(object: [String: Dyn], key: String) -> [String] Never! {
     value :: object.get(key) ?? return [String]{}
     fields :: pkg_json_object(value) ?? return [String]{}
     fields.keys().to_list()
 }
 
 // Strings of the array at `key`; an object item contributes its `name`.
-fn provider_graph_json_array_strings(object: [String: DataTree], key: String) -> [String] Never! {
+fn provider_graph_json_array_strings(object: [String: Dyn], key: String) -> [String] Never! {
     value :: object.get(key) ?? return [String]{}
     items :: pkg_json_array(value) ?? return [String]{}
     out := [String]{}
@@ -87,28 +87,28 @@ fn provider_graph_json_array_strings(object: [String: DataTree], key: String) ->
 }
 
 // Rust `json_value_text`: a string's text, anything else as compact JSON.
-fn provider_graph_json_value_text(value: DataTree) -> String Never! {
+fn provider_graph_json_value_text(value: Dyn) -> String Never! {
     if value == {
         .Text(text) -> text
         else -> pkg_json_render(value)
     }
 }
 
-fn provider_graph_is_text(value: DataTree) -> Bool Never! {
+fn provider_graph_is_text(value: Dyn) -> Bool Never! {
     pkg_json_text(value) != None
 }
 
-fn provider_graph_is_non_blank_text(value: DataTree) -> Bool Never! {
+fn provider_graph_is_non_blank_text(value: Dyn) -> Bool Never! {
     text :: pkg_json_text(value) ?? return false
     text.trim() != ""
 }
 
-fn provider_graph_is_bool(value: DataTree) -> Bool Never! {
+fn provider_graph_is_bool(value: Dyn) -> Bool Never! {
     pkg_json_bool(value) != None
 }
 
 // Rust `json_string_list`: one string, or an array of only strings.
-fn provider_graph_json_string_list(value: DataTree) -> [String]? Never! {
+fn provider_graph_json_string_list(value: Dyn) -> [String]? Never! {
     if pkg_json_text(value) == {
         .Val(text) -> return Val([String]{text})
         .None -> {}
@@ -123,7 +123,7 @@ fn provider_graph_json_string_list(value: DataTree) -> [String]? Never! {
 }
 
 // The document's root object, or None when it is not a JSON object.
-fn provider_graph_json_root(document: String) -> [String: DataTree]? Never! {
+fn provider_graph_json_root(document: String) -> [String: Dyn]? Never! {
     if pkg_json_parse_protocol(document) == {
         .Parsed(tree) -> pkg_json_object(tree)
         .Failed(_) -> None
@@ -266,8 +266,8 @@ impl ProviderFactReport {
             }
             &losses.push("npm `{set.field}` must be an object")
         }
-        runtime_value :: metadata.get("dependencies") ?? DataTree.Null
-        optional_value :: metadata.get("optionalDependencies") ?? DataTree.Null
+        runtime_value :: metadata.get("dependencies") ?? Dyn.Null
+        optional_value :: metadata.get("optionalDependencies") ?? Dyn.Null
         if pkg_json_object(runtime_value) == {
             .Val(runtime) -> {
                 if pkg_json_object(optional_value) == {
@@ -364,8 +364,8 @@ impl ProviderFactReport {
     }
 
     // A PyPI JSON API record (`info` plus artifact `urls`).
-    fn pypi_json_document(object: [String: DataTree]) -> ProviderFactReport Never! {
-        info_object :: pkg_json_object(object.get("info") ?? DataTree.Null)
+    fn pypi_json_document(object: [String: Dyn]) -> ProviderFactReport Never! {
+        info_object :: pkg_json_object(object.get("info") ?? Dyn.Null)
         has_info :: info_object != None
         info :: info_object ?? object
         facts := MetadataFacts.empty(ProviderFamily.PyPI, provider_graph_either(provider_graph_json_string(info, "name"), provider_graph_json_string(object, "name")) ?? "")
@@ -480,7 +480,7 @@ impl ProviderFactReport {
             &facts.add_typed_json(projection.target, value)
         }
         artifact_hashes := [(filename: String, digest: String)]{}
-        urls :: pkg_json_array(object.get("urls") ?? DataTree.Null) ?? [DataTree]{}
+        urls :: pkg_json_array(object.get("urls") ?? Dyn.Null) ?? [Dyn]{}
         loop index in 0..<urls.len() {
             url :: pkg_json_object(urls[index]) ?? {
                 &losses.push("PyPI `urls[{index}]` must be an object")
@@ -544,7 +544,7 @@ impl ProviderFactReport {
             if left.filename == right.filename && left.digest != right.digest -> &conflicts.push("PyPI artifact `{left.filename}` has conflicting sha256 digests")
         }
         if artifact_hashes.len() == 1 -> facts.integrity_hash = artifact_hashes[0].digest
-        vulnerabilities :: pkg_json_array(object.get("vulnerabilities") ?? DataTree.Null) ?? [DataTree]{}
+        vulnerabilities :: pkg_json_array(object.get("vulnerabilities") ?? Dyn.Null) ?? [Dyn]{}
         loop index in 0..<vulnerabilities.len() {
             &facts.add_typed_json("provider.pypi.advisory.vulnerability.{index}", vulnerabilities[index])
             if pkg_json_object(vulnerabilities[index]) == None -> &losses.push("PyPI vulnerability {index} must be an object")
@@ -561,7 +561,7 @@ impl ProviderFactReport {
     fn swiftpm_document(document: String) -> ProviderFactReport Never! {
         root :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "Package.resolved is not valid JSON")
         root_pins :: root.get("pins")
-        nested :: pkg_json_object(root.get("object") ?? DataTree.Null) ?? [String: DataTree]{}
+        nested :: pkg_json_object(root.get("object") ?? Dyn.Null) ?? [String: Dyn]{}
         object_pins :: nested.get("pins")
         if root_pins != None && object_pins != None && root_pins != object_pins {
             return ProviderFactReport.unreadable(ProviderFamily.SwiftPM, "swiftpm", "SwiftPM lock has conflicting top-level and object `pins` arrays")
@@ -601,7 +601,7 @@ impl ProviderFactReport {
                 if !provider_graph_is_text(value) -> &losses.push("SwiftPM pin `{field}` must be a string")
             }
             facts.name = provider_graph_either(identity, package) ?? ""
-            state := [String: DataTree]{}
+            state := [String: Dyn]{}
             has_state := false
             if pin.get("state") == {
                 .Val(raw_state) -> {
@@ -619,7 +619,7 @@ impl ProviderFactReport {
                 state_fields :: [String]{"version", "revision", "branch"}
                 loop field in state_fields {
                     value :: state.get(field) ?? next
-                    if !provider_graph_is_text(value) && value != DataTree.Null -> &losses.push("SwiftPM pin `{facts.name}` state field `{field}` must be a string or null")
+                    if !provider_graph_is_text(value) && value != Dyn.Null -> &losses.push("SwiftPM pin `{facts.name}` state field `{field}` must be a string or null")
                 }
             }
             version :: provider_graph_either(provider_graph_json_string(state, "version"), provider_graph_json_string(pin, "version"))

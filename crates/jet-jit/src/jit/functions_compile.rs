@@ -831,7 +831,7 @@ fn csv_decode_function<'a>(
                 || clif_ty_from_mir(&function.return_type) != Some(types::I64)
             {
                 return Err(format!(
-                    "CSV Decode function `{}` does not use the canonical DataTree/result ABI",
+                    "CSV Decode function `{}` does not use the canonical Dyn/result ABI",
                     function.name
                 ));
             }
@@ -853,7 +853,7 @@ fn csv_scalar_decode_kind(ty: &MirType) -> Option<i64> {
         MirTypeKind::String => Some(crate::Encoding::CSV_DECODE_STRING),
         MirTypeKind::Char => Some(crate::Encoding::CSV_DECODE_CHAR),
         MirTypeKind::Apply { name, args } if args.is_empty() => match name.name.as_str() {
-            "DataTree" => Some(crate::Encoding::CSV_DECODE_DATATREE),
+            "Dyn" => Some(crate::Encoding::CSV_DECODE_DYN),
             "Date" => Some(crate::Encoding::CSV_DECODE_DATE),
             "LocalDate" => Some(crate::Encoding::CSV_DECODE_LOCAL_DATE),
             "LocalTime" => Some(crate::Encoding::CSV_DECODE_LOCAL_TIME),
@@ -948,7 +948,7 @@ fn json_decode_function<'a>(
                 || clif_ty_from_mir(&function.return_type) != Some(types::I64)
             {
                 return Err(format!(
-                    "JSON Decode function `{}` does not use the canonical DataTree/result ABI",
+                    "JSON Decode function `{}` does not use the canonical Dyn/result ABI",
                     function.name
                 ));
             }
@@ -3751,7 +3751,7 @@ fn lower_csv_decode_thunk(
         .block_params(entry)
         .get(1)
         .copied()
-        .ok_or_else(|| "CSV Decode thunk has no DataTree payload".to_string())?;
+        .ok_or_else(|| "CSV Decode thunk has no Dyn payload".to_string())?;
     let target = module.declare_func_in_func(target_id, builder.func);
     let call = builder.ins().call(target, &[payload]);
     let result = builder
@@ -3844,7 +3844,7 @@ fn lower_json_decode_thunk(
         .block_params(entry)
         .get(1)
         .copied()
-        .ok_or_else(|| "JSON Decode thunk has no DataTree payload".to_string())?;
+        .ok_or_else(|| "JSON Decode thunk has no Dyn payload".to_string())?;
     let target = module.declare_func_in_func(target_id, builder.func);
     let call = builder.ins().call(target, &[payload]);
     let result = builder
@@ -8622,13 +8622,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .copied()
                     .ok_or_else(|| "MIR string view display host returned no value".to_string());
             }
-            if args.is_empty() && name.name == "DataTree" {
+            if args.is_empty() && name.name == "Dyn" {
                 let value = self.cast(builder, value, types::I64)?;
                 return self
-                    .call_host(builder, self.host.encoding.datatree_display, &[value])?
+                    .call_host(builder, self.host.encoding.dyn_display, &[value])?
                     .first()
                     .copied()
-                    .ok_or_else(|| "MIR DataTree display host returned no value".to_string());
+                    .ok_or_else(|| "MIR Dyn display host returned no value".to_string());
             }
         }
         if matches!(
@@ -13906,7 +13906,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .call_host(builder, self.host.coll.list_new, &[])?
             .first()
             .copied()
-            .ok_or_else(|| "MIR ordered DataTree object keys returned no list".to_string())?;
+            .ok_or_else(|| "MIR ordered Dyn object keys returned no list".to_string())?;
         for key in keys {
             let key = self.cast(builder, self.value(key)?, types::I64)?;
             let _ = self.call_host(builder, self.host.coll.list_push, &[list, key])?;
@@ -14063,7 +14063,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .first()
                     .copied()
                     .ok_or_else(|| {
-                        "MIR DataTree object map adapter returned no value".to_string()
+                        "MIR Dyn object map adapter returned no value".to_string()
                     })?;
             }
             self.set_field(builder, record, index + 1, ty, value)?;

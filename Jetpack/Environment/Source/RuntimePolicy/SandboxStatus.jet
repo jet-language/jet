@@ -82,16 +82,16 @@ pub fn env_warn_sandbox_fallback(theme: Theme) Never! -[FS, Env, Exec, Time.Wait
 // The machine report for a sandbox refusal or warning.
 fn env_sandbox_json(code: String, severity: String, status: SandboxStatus) -> String Never! {
     refusal :: code == "E1275"
-    fields := [String: DataTree]{}
-    fields["schema_version"] = DataTree.Text("1")
-    fields["code"] = DataTree.Text(code)
-    fields["severity"] = DataTree.Text(severity)
-    fields["message"] = DataTree.Text(if refusal -> @SANDBOX_REQUIRED_MESSAGE else -> @SANDBOX_FALLBACK_MESSAGE)
-    fields["why"] = DataTree.Text(status.reason)
-    fields["policy"] = DataTree.Text(status.policy)
-    fields["fix"] = DataTree.Text(if refusal -> @SANDBOX_REQUIRED_FIX else -> @SANDBOX_FALLBACK_FIX)
-    fields["mechanism"] = DataTree.Text(status.mechanism)
-    json.to_string_pretty(DataTree.Object(fields))
+    fields := [String: Dyn]{}
+    fields["schema_version"] = Dyn.Text("1")
+    fields["code"] = Dyn.Text(code)
+    fields["severity"] = Dyn.Text(severity)
+    fields["message"] = Dyn.Text(if refusal -> @SANDBOX_REQUIRED_MESSAGE else -> @SANDBOX_FALLBACK_MESSAGE)
+    fields["why"] = Dyn.Text(status.reason)
+    fields["policy"] = Dyn.Text(status.policy)
+    fields["fix"] = Dyn.Text(if refusal -> @SANDBOX_REQUIRED_FIX else -> @SANDBOX_FALLBACK_FIX)
+    fields["mechanism"] = Dyn.Text(status.mechanism)
+    json.to_string_pretty(Dyn.Object(fields))
 }
 
 // Validate a persisted child-boundary receipt before presenting it as an

@@ -311,7 +311,7 @@ fn cli_package_collision_record(metadata: String, path: String) -> PackageCollis
     record :: pkg_json_object(record_value) ?? return Err(CliError.Other("profile collision record is not an object"))
     selected := String?{None}
     if record.get("selected") == .Val(value) {
-        if value != DataTree.Null {
+        if value != Dyn.Null {
             text :: pkg_json_text(value) ?? return Err(CliError.Other(@PKG_JSON_NOT_STRING))
             selected = Val(text)
         }
@@ -329,9 +329,9 @@ fn cli_package_collision_record(metadata: String, path: String) -> PackageCollis
     Ok(Val(PackageCollisionRecord{selected: selected, contenders: cli_sorted_contenders(contenders)}))
 }
 
-// A required string field: `missing` when absent, the DataTree accessor
+// A required string field: `missing` when absent, the Dyn accessor
 // message when not a string.
-fn cli_required_json_text(object: [String: DataTree], key: String, missing: String) -> String CliError! {
+fn cli_required_json_text(object: [String: Dyn], key: String, missing: String) -> String CliError! {
     value :: object.get(key) ?? return Err(CliError.Other(missing))
     text :: pkg_json_text(value) ?? return Err(CliError.Other(@PKG_JSON_NOT_STRING))
     Ok(text)
@@ -521,7 +521,7 @@ pub fn cli_read_package_generations(state: String) -[FS, Env]> [PackageGeneratio
     Ok(records)
 }
 
-fn cli_positive_json_int(value: DataTree?) -> Int? Never! {
+fn cli_positive_json_int(value: Dyn?) -> Int? Never! {
     if value == {
         .Val(tree) -> if tree == {
             .Int(number) -> if number > 0 -> Val(number) else -> None
@@ -578,7 +578,7 @@ pub fn cli_read_package_generation_record(state: String, generation: Int) -[FS, 
 // One recorded package: its output digest, and provider facts that parse,
 // validate, match their digest, and agree with the package's raw ref,
 // target, and provider. Returns the output digest.
-fn cli_validate_package_generation_entry(package: [String: DataTree]) -> String CliError! {
+fn cli_validate_package_generation_entry(package: [String: Dyn]) -> String CliError! {
     output_hash :: cli_required_json_text(package, "output_hash", "profile generation package lacks output hash")
     if !cli_is_canonical_digest(output_hash) -> return Err(CliError.Other("profile generation package has invalid output hash"))
     facts_value :: package.get("provider_facts") ?? return Err(CliError.Other("profile generation package lacks provider facts"))

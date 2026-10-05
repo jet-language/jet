@@ -4111,15 +4111,18 @@ impl THandleOp {
             | HTTPRespField(_)
             | HTTPRespHeader
             | ArgsSpecHelp
-            | DataTreeField
-            | DataTreeAt
-            | DataTreeInt
-            | DataTreeText
-            | DataTreeBool
-            | DataTreeFloat
-            | DataTreeToText
-            | DataTreeEqualUnordered
-            | DataTreeDecode(_)
+            | DynIndexKey { .. } | DynIndexAt { .. } | DynGetKey | DynGetAt
+            | DynHas | DynKeys | DynRemove | DynLen { .. }
+            | DynBinary { .. } | DynCompare { .. } | DynSetPath { .. }
+            | DynField
+            | DynAt
+            | DynInt
+            | DynText
+            | DynBool
+            | DynFloat
+            | DynToText
+            | DynEqualUnordered
+            | DynDecode(_)
             | SerdeEncode
             | JSONField
             | JSONAt

@@ -66,7 +66,7 @@ fn sema_expression_panic_location(environment: SemaScopeEnvironment, span: Span)
             column = local - segment.line_starts[line_index]
         }
     }
-    TPanicLoc{file: file, source_line: "", line: line, column: column, caret: column, function: "", locals: [TPanicLocal]{}}
+    TPanicLoc{file: file, source_line: "", line: line, column: column, caret: column, function: environment.function_name, locals: [TPanicLocal]{}}
 }
 
 fn sema_expression_failure_carrier(ty: Type) -> TFailureCarrier Never! {
@@ -881,7 +881,22 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     checked_route :: route ?? return None
     fallback_payload :: checked_route.payload
     if checked_route.reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true)
-    result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: subject, fallback: checked_route.value ?? TOrFallback.Value{value: sema_tir_expr(fallback_payload, TExprKind.Unit, span)}, ambient_err: checked_route.ambient_err}, span)
+    route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_expr(fallback_payload, TExprKind.Unit, span)}
+    // D-FAILURE-FOUNDATION1=A (Rust `lower_or_fallback`): a mixed `T? E!`
+    // carrier has two failure routes, so `??` removes them one at a time:
+    // first its Result route (where `err` is bound and a value fallback is
+    // lifted to `Val(fallback)`), then the remaining Option route. Only one
+    // route runs, so the fallback is still evaluated at most once.
+    if subject.ty == .Result(ok, _) && ok == .Option(_) {
+        failure_route :: if route_value == {
+            .Value(fallback_value) -> TOrFallback.Value{value: sema_tir_expr(ok, TExprKind.Present{value: fallback_value}, fallback_value.span)}
+            else -> route_value
+        }
+        after_result :: sema_tir_expr(ok, TExprKind.OrFallback{value: subject, fallback: failure_route, ambient_err: checked_route.ambient_err}, span)
+        mixed :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: after_result, fallback: route_value, ambient_err: None}, span)
+        return sema_expr_expected(mixed, expected, environment, &diagnostics)
+    }
+    result :: sema_tir_expr(fallback_payload, TExprKind.OrFallback{value: subject, fallback: route_value, ambient_err: checked_route.ambient_err}, span)
     sema_expr_expected(result, expected, environment, &diagnostics)
 }
 

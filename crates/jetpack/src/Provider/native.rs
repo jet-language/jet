@@ -12,7 +12,7 @@ use super::{
 use crate::NixIndex::NativeRecipe;
 use crate::RefSpec::{RefSpec as PackageRef, Source, SourceTable};
 use crate::{Envelope, JSON, SHA256};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -597,14 +597,14 @@ fn fetch_release_metadata(tag: Option<&str>) -> Result<ReleaseFacts, ProviderErr
     })
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], field: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], field: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == field).then_some(value))
 }
 
 fn json_string(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     field: &str,
 ) -> Result<String, ProviderError> {
     match object_field(object, field).and_then(|value| value.as_str().ok()) {

@@ -61,7 +61,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
         return true;
     }
-    // D-ENC-DYN1=A+: DataTree and its canonical format spellings are one
+    // D-ENC-DYN1=A+: Dyn and its canonical format spellings are one
     // Clone-backed Prelude enum. Their variant construction/matching has a
     // dedicated TIR path below; admit the type here so functions using a
     // dynamic value do not fall back before that path can run.

@@ -349,12 +349,14 @@ pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServi
     current_source := String?{None}
     source_prefix := "// jet:source-map source="
     line_prefix := "// jet:line "
+    // Rust `str::lines`: a `\r` is dropped only as part of a `\r\n`
+    // terminator, so the final unterminated segment keeps a bare `\r`.
     lines := source.split("\n").to_list()
     loop index in 0..<lines.len() {
         line := lines[index].trim_start()
         bytes := line.bytes()
-        if bytes.len() > 0 && bytes[bytes.len() - 1] == 13 {
-            line = String.from_bytes(bytes[0..bytes.len() - 1]) ?? line
+        if index + 1 < lines.len() && bytes.len() > 0 && bytes[bytes.len() - 1] == 13 {
+            line = String.from_bytes(bytes[0..<bytes.len() - 1]) ?? line
         }
         if line.starts_with(source_prefix) {
             source_name := line.slice(source_prefix.len(), line.len())
@@ -367,7 +369,10 @@ pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServi
             next
         }
         if !line.starts_with(line_prefix) -> next
-        source_line :: Int.parse(line.slice(line_prefix.len(), line.len()).trim()) ?? next
+        // Rust parses the line number as `usize`: a signed spelling is not a row.
+        line_text :: line.slice(line_prefix.len(), line.len()).trim()
+        if line_text.starts_with("-") -> next
+        source_line :: Int.parse(line_text) ?? next
         &generated_lines.push(TComptimeValue.Struct{type_name: "CompilerGeneratedLine", fields: [TComptimeField]{
             TComptimeField{name: "generated_line", value: jet_eval_compiler_services_int(index + 1)},
             TComptimeField{name: "source", value: jet_eval_compiler_services_option_string(current_source)},

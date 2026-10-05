@@ -3,7 +3,7 @@
 mod common;
 
 use std::fs;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_str, parse_json};
 use std::path::PathBuf;
 
@@ -246,7 +246,7 @@ fn manifest_partitions(manifest: &str) -> Vec<(String, String)> {
     let root = parse_json(manifest).expect("manifest must be valid JSON");
     let partitions = json_get(&root, "partitions").expect("manifest missing partitions");
     let rows = match partitions {
-        DataTree::Object(rows) => rows,
+        Dyn::Object(rows) => rows,
         _ => panic!("manifest partitions must be an object"),
     };
     rows.iter()

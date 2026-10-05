@@ -1,5 +1,5 @@
 use core as core
-use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+use core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat]
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -31,7 +31,7 @@ fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> Enc
 //
 // `rows` is the physical codec: it does not guess types. Every cell stays
 // text. Quotes wrap a field; `""` is a literal quote. `parse` / `to_string`
-// lift those rows into `DataTree` arrays so CSV participates in the shared
+// lift those rows into `Dyn` arrays so CSV participates in the shared
 // tree without a second table type.
 //
 // Typed `decode<T>` remains a compiler lowering over header-named columns.
@@ -61,17 +61,17 @@ pub fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blan
     Ok(data)
 }
 
-pub fn decode(text: String) -> DataTree EncodingError! { parse(text) }
+pub fn decode(text: String) -> Dyn EncodingError! { parse(text) }
 
-pub fn parse(text: String) -> DataTree EncodingError! {
+pub fn parse(text: String) -> Dyn EncodingError! {
     physical :: parse_rows(text, true)
-    items := [DataTree]{}
+    items := [Dyn]{}
     loop row in physical {
-        fields := [DataTree]{}
-        loop field in row.fields -> &fields.push(DataTree.Text(field))
-        &items.push(DataTree.Array(fields))
+        fields := [Dyn]{}
+        loop field in row.fields -> &fields.push(Dyn.Text(field))
+        &items.push(Dyn.Array(fields))
     }
-    Ok(DataTree.Array(items))
+    Ok(Dyn.Array(items))
 }
 
 pub fn to_string(rows: [CSVRow]) -> String Never! {
@@ -82,21 +82,21 @@ pub fn to_string(rows: [CSVRow]) -> String Never! {
 
 
 /// Tiny SQL: `SELECT *` (all rows as arrays) or `SELECT COUNT(*)`.
-pub fn query(path: String, sql: String) -[FS]> DataTree EncodingError! {
+pub fn query(path: String, sql: String) -[FS]> Dyn EncodingError! {
     text :: host_read_text(path) ?? return Err(syntax_error(EncodingFormat.CSV, 0, 1, 1, "", "missing csv"))
     physical :: parse_rows(text, true)
     q := trim_ascii(ascii_fold(sql))
-    if q == "select count(*)" || q == "select count(*) from csv" -> return Ok(DataTree.Int(physical.len()))
+    if q == "select count(*)" || q == "select count(*) from csv" -> return Ok(Dyn.Int(physical.len()))
     if q != "select *" && q != "select * from csv" {
         return Err(unsupported_error(EncodingFormat.CSV, 0, "CSV query supports only SELECT * and SELECT COUNT(*)"))
     }
-    items := [DataTree]{}
+    items := [Dyn]{}
     loop row in physical {
-        fields := [DataTree]{}
-        loop field in row.fields -> &fields.push(DataTree.Text(field))
-        &items.push(DataTree.Array(fields))
+        fields := [Dyn]{}
+        loop field in row.fields -> &fields.push(Dyn.Text(field))
+        &items.push(Dyn.Array(fields))
     }
-    Ok(DataTree.Array(items))
+    Ok(Dyn.Array(items))
 }
 
 fn trim_ascii(text: String) -> String Never! {

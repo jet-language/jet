@@ -18,61 +18,61 @@ fn run() {
     operation_id :: env.get("JET_COMPTIME_OPERATION_ID") ?? "mixed-reader-mutation-fallible"
     journal_path :: env.get("JET_COMPTIME_OBSERVATION_PATH") ?? ""
     if journal_path != "" {
-        observations :: DataTree.Object([
-            "result": DataTree.Object([
-                "comptime": DataTree.Text("{comptime_value}"),
-                "runtime": DataTree.Text("{runtime_value}")
+        observations :: Dyn.Object([
+            "result": Dyn.Object([
+                "comptime": Dyn.Text("{comptime_value}"),
+                "runtime": Dyn.Text("{runtime_value}")
             ]),
-            "typed_failure": DataTree.Array([]),
-            "mutation": DataTree.Array([
-                DataTree.Object([
-                    "stage": DataTree.Text("comptime"),
-                    "binding": DataTree.Text("ct"),
-                    "operation": DataTree.Text("Reader.read_u8"),
-                    "consumed": DataTree.Int(2),
-                    "remaining": DataTree.Int(1)
+            "typed_failure": Dyn.Array([]),
+            "mutation": Dyn.Array([
+                Dyn.Object([
+                    "stage": Dyn.Text("comptime"),
+                    "binding": Dyn.Text("ct"),
+                    "operation": Dyn.Text("Reader.read_u8"),
+                    "consumed": Dyn.Int(2),
+                    "remaining": Dyn.Int(1)
                 ]),
-                DataTree.Object([
-                    "stage": DataTree.Text("runtime"),
-                    "binding": DataTree.Text("rt"),
-                    "operation": DataTree.Text("Reader.read_u8"),
-                    "consumed": DataTree.Int(2),
-                    "remaining": DataTree.Int(1)
+                Dyn.Object([
+                    "stage": Dyn.Text("runtime"),
+                    "binding": Dyn.Text("rt"),
+                    "operation": Dyn.Text("Reader.read_u8"),
+                    "consumed": Dyn.Int(2),
+                    "remaining": Dyn.Int(1)
                 ])
             ]),
-            "input_consumption": DataTree.Array([
-                DataTree.Object([
-                    "stage": DataTree.Text("comptime"),
-                    "input": DataTree.Array([DataTree.Int(7), DataTree.Int(9), DataTree.Int(11)]),
-                    "consumed": DataTree.Array([DataTree.Int(7), DataTree.Int(9)]),
-                    "remaining": DataTree.Array([DataTree.Int(11)])
+            "input_consumption": Dyn.Array([
+                Dyn.Object([
+                    "stage": Dyn.Text("comptime"),
+                    "input": Dyn.Array([Dyn.Int(7), Dyn.Int(9), Dyn.Int(11)]),
+                    "consumed": Dyn.Array([Dyn.Int(7), Dyn.Int(9)]),
+                    "remaining": Dyn.Array([Dyn.Int(11)])
                 ]),
-                DataTree.Object([
-                    "stage": DataTree.Text("runtime"),
-                    "input": DataTree.Array([DataTree.Int(7), DataTree.Int(9), DataTree.Int(11)]),
-                    "consumed": DataTree.Array([DataTree.Int(7), DataTree.Int(9)]),
-                    "remaining": DataTree.Array([DataTree.Int(11)])
+                Dyn.Object([
+                    "stage": Dyn.Text("runtime"),
+                    "input": Dyn.Array([Dyn.Int(7), Dyn.Int(9), Dyn.Int(11)]),
+                    "consumed": Dyn.Array([Dyn.Int(7), Dyn.Int(9)]),
+                    "remaining": Dyn.Array([Dyn.Int(11)])
                 ])
             ]),
-            "ordered_effects": DataTree.Array([
-                DataTree.Text("stdout:{comptime_value}"),
-                DataTree.Text("stdout:{runtime_value}")
+            "ordered_effects": Dyn.Array([
+                Dyn.Text("stdout:{comptime_value}"),
+                Dyn.Text("stdout:{runtime_value}")
             ]),
-            "cleanup": DataTree.Array([
-                DataTree.Text("ct-reader"),
-                DataTree.Text("rt-reader")
+            "cleanup": Dyn.Array([
+                Dyn.Text("ct-reader"),
+                Dyn.Text("rt-reader")
             ]),
-            "resource_premises": DataTree.Object([
-                "fuel": DataTree.Text("finite"),
-                "input": DataTree.Text("fixed-bytes"),
-                "allocation": DataTree.Text("successful")
+            "resource_premises": Dyn.Object([
+                "fuel": Dyn.Text("finite"),
+                "input": Dyn.Text("fixed-bytes"),
+                "allocation": Dyn.Text("successful")
             ]),
-            "schedule": DataTree.Text("source-order"),
-            "allowed_schedules": DataTree.Array([DataTree.Text("source-order")])
+            "schedule": Dyn.Text("source-order"),
+            "allowed_schedules": Dyn.Array([Dyn.Text("source-order")])
         ])
-        record :: DataTree.Object([
-            "operation_id": DataTree.Text(operation_id),
-            "mode": DataTree.Text(mode),
+        record :: Dyn.Object([
+            "operation_id": Dyn.Text(operation_id),
+            "mode": Dyn.Text(mode),
             "observations": observations
         ])
         fs.write(journal_path, json.to_string(record) + "\n") ?? panic("comptime observation journal")

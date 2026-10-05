@@ -1,4 +1,4 @@
-use super::core_types::{data_tree_object_pairs_ty, json_ty, u8_ty};
+use super::core_types::{dyn_object_pairs_ty, json_ty, u8_ty};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::suggest_field;
@@ -12,16 +12,43 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         let json = json_ty();
+        if variant == "object" && args.is_empty() {
+            return Some(json);
+        }
+        if variant == "from" {
+            if args.len() != 1 {
+                self.diags.push(Diagnostic::error("E0306",
+                    format!("Dyn.from expects one value, got {}", args.len()),
+                    "Dyn.from calls one value's Encode contract".to_string(),
+                    "pass one value".to_string(), Some(span)));
+            }
+            for arg in args.iter_mut() {
+                let saved = self.expected_type.take();
+                let ty = self.infer(&mut arg.expr);
+                self.expected_type = saved;
+                if let Some(ty) = ty {
+                    if !self.is_encodable(&ty) {
+                        self.diags.push(Diagnostic::error("E0905",
+                            format!("`{}` does not implement `Encode`", ty.show()),
+                            "`Dyn.from` calls the value's Encode contract".to_string(),
+                            "derive or implement `Encode` on this type".to_string(), Some(arg.span)));
+                    }
+                }
+            }
+            return Some(json);
+        }
         let expected = match variant {
             "Null" => Vec::new(),
             "Bool" => vec![Type::Bool],
             "Int" => vec![Type::Int],
             "Float" => vec![Type::Float],
             "Text" => vec![Type::String],
+            "Bytes" => vec![Type::List(Box::new(u8_ty()))],
+            "DateTime" => vec![Type::Named("ZonedDateTime".to_string())],
             "Array" => vec![Type::List(Box::new(json.clone()))],
             // A compiler-generated struct encoder hands over its ordered pair
             // list directly; source code always builds an Object from a map.
-            "Object" if self.is_generated_object_pairs(args) => vec![data_tree_object_pairs_ty()],
+            "Object" if self.is_generated_object_pairs(args) => vec![dyn_object_pairs_ty()],
             "Object" => vec![Type::Map {
                 key: Box::new(Type::String),
                 key_span: None,
@@ -31,7 +58,7 @@ impl<'a> Checker<'a> {
                 // No typed edit here: this dynamic enum literal exposes
                 // only the whole literal span, so replacement would erase
                 // its type and payload.
-                let candidates = ["Null", "Bool", "Int", "Float", "Text", "Array", "Object"]
+                let candidates = ["Null", "Bool", "Int", "Float", "Text", "Bytes", "DateTime", "Array", "Object"]
                     .iter()
                     .map(|s| s.to_string())
                     .collect::<Vec<_>>();
@@ -42,7 +69,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0304",
                     format!("`{}` has no variant `{}`", Syntax::TYPE_DATA, variant),
-                    "the dynamic `DataTree` value exposes Null/Bool/Int/Float/Text/Array/Object"
+                    "the dynamic `Dyn` value exposes Null/Bool/Int/Float/Text/Bytes/DateTime/Array/Object"
                         .to_string(),
                     fix,
                     Some(span),
@@ -64,7 +91,7 @@ impl<'a> Checker<'a> {
                         if expected.len() == 1 { "" } else { "s" },
                         args.len()
                     ),
-                    "each `DataTree` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[DataTree], Object→Map)".to_string(),
+                    "each `Dyn` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Bytes→[U8], DateTime→ZonedDateTime, Array→[Dyn], Object→Map)".to_string(),
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
@@ -80,7 +107,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Only compiler-generated bodies may pass the ordered
-    /// `[(key: String, value: DataTree)]` accumulator to `DataTree.Object`.
+    /// `[(key: String, value: Dyn)]` accumulator to `Dyn.Object`.
     fn is_generated_object_pairs(&self, args: &[crate::AST::CallArg]) -> bool {
         if !self.compiler_generated {
             return false;
@@ -92,7 +119,7 @@ impl<'a> Checker<'a> {
             return false;
         };
         self.lookup(name)
-            .is_some_and(|local| local.ty == data_tree_object_pairs_ty())
+            .is_some_and(|local| local.ty == dyn_object_pairs_ty())
     }
 
     /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` /

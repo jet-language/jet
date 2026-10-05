@@ -146,7 +146,7 @@ fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
     let cache = dir.join(".jet/bindings/lua");
     assert!(cache.join("libjet_lua_ops.a").is_file());
     let provenance = fs::read_to_string(cache.join("ops.provenance")).unwrap();
-    assert!(provenance.contains("state=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"));
+    assert!(provenance.contains("state=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n"));
     let generated = fs::read_to_string(cache.join("ops.jet")).unwrap();
     assert!(
         generated.contains("pub struct TableView")

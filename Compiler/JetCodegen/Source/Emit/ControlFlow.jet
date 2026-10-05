@@ -155,6 +155,16 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
             if jet_rust_emit_persist_value_update(&ctx, function, place) == .Val(update) -> &lines.push("{update};")
             return lines
         }
+        // MIRRust: a read of a shared constant holds the shared value; its
+        // readers borrow it in place (`JetSharedSlot`).
+        .Global(name) -> {
+            if instruction.result == .Val(value) {
+                if jet_rust_emit_shared_constant_accessor(&ctx, name) == .Val(accessor) {
+                    &lines.push("{jet_rust_emit_value_slot(value)} = {accessor};")
+                    return lines
+                }
+            }
+        }
         .InitializeUninit(place) -> {
             loop row in function.places {
                 if row.id == place && row.projections.len() == 0 {
@@ -506,8 +516,8 @@ fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MIRFunction, mo
     if handle.close == .Val(close_id) {
         close :: jet_rust_emit_function_name(&ctx, close_id)
         needs_unsafe := false
-        loop candidate in jet_rust_emit_function_rows(ctx, close_id) {
-            if candidate.id == close_id -> needs_unsafe = candidate.is_unsafe
+        if jet_rust_emit_function_index(ctx, close_id) == .Val(candidate_index) {
+            if ctx.program.functions[candidate_index].id == close_id -> needs_unsafe = ctx.program.functions[candidate_index].is_unsafe
         }
         call :: if needs_unsafe -> "unsafe {{ {close}(__jet_handle) }}" else -> "{close}(__jet_handle)"
         return "{{ let __jet_handle = {moved}; let _ = {call}; () }}"

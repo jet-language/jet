@@ -548,7 +548,8 @@ pub(crate) fn method_call_in_subset(
     // name. The single payload arg must be in-subset. `JSON.Null` is the no-arg Field
     // form, handled in `expr_in_subset`'s `Field` arm, not here.
     if let Expr::Ident(type_name, _) = receiver {
-        if !locals.contains(type_name) && is_json_type_name(type_name) && is_json_variant(method) {
+        if !locals.contains(type_name) && is_json_type_name(type_name)
+            && (is_json_variant(method) || matches!(method, "object" | "from")) {
             return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
         }
     }
@@ -1160,10 +1161,16 @@ pub(crate) fn method_call_in_subset(
         }
     }
     if let Some(handle) = recv_type {
+        if matches!(handle, "__DynOp__" | "__DynField__")
+            || (handle == "Dyn" && matches!(method, "get" | "has" | "keys" | "remove" | "len"))
+        {
+            return expr_in_subset(receiver, cx, locals)
+                && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
+        }
         if (handle == "__SerdeEncode__" && method == "encode" && args.is_empty())
             || (handle == "__Debug__" && method == "debug" && args.is_empty())
             || (handle == Syntax::TYPE_DATA
-                && method == Syntax::METHOD_DATATREE_DECODE
+                && method == Syntax::METHOD_DYN_DECODE
                 && args.is_empty())
         {
             return expr_in_subset(receiver, cx, locals);

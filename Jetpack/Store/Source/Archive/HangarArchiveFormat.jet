@@ -42,10 +42,10 @@ pub struct HangarArchiveReport {
     // Stable `jet.status/v1` output for the Hangar CLI (Rust `report_json`).
     fn json(self, action: String) -> String Never! {
         fields :: StatusFields.new()
-            .with("bytes", DataTree.Int(self.bytes))
-            .with("objects", DataTree.Int(self.objects))
-            .with("root", DataTree.Text(self.root))
-            .with("signed", DataTree.Bool(self.signed))
+            .with("bytes", Dyn.Int(self.bytes))
+            .with("objects", Dyn.Int(self.objects))
+            .with("root", Dyn.Text(self.root))
+            .with("signed", Dyn.Bool(self.signed))
         StatusEnvelope.new(action, true).with_fields(fields).json()
     }
 }

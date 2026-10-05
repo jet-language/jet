@@ -1,0 +1,31 @@
+// D-SERDE-ACCESS=B: dynamic Dyn/JSON accessor methods
+use core.encoding.json as json
+
+fn run() {
+    raw :: "{{\"user\":{{\"name\":\"Alice\",\"score\":42,\"active\":true}}}}"
+    tree :: json.parse(raw) ?? panic("parse")
+    user :: &tree.field("user") ?? panic("user")
+    name :: &user.field("name") ?? panic("name")
+    score :: &user.field("score") ?? panic("score")
+    active :: &user.field("active") ?? panic("active")
+    print(name.text() ?? panic("name text"))
+    print(score.int() ?? panic("score int"))
+    print(active.bool() ?? panic("active bool"))
+    print(Dyn.Text("Alice").to_text() ?? "none")
+    print(Dyn.Int(42).to_text() ?? "none")
+    print(Dyn.Float(2.5).to_text() ?? "none")
+    print(Dyn.Float(1.0).to_text() ?? "none")
+    print(Dyn.Bool(true).to_text() ?? "none")
+    print(Dyn.Null.to_text() ?? "none")
+    empty_array :: [Dyn]{}
+    print(Dyn.Array(empty_array).to_text() ?? "none")
+    empty_object :: [String:Dyn]{}
+    print(Dyn.Object(empty_object).to_text() ?? "none")
+    left :: json.parse("{{\"a\":1,\"nested\":[true,\"x\"]}}") ?? panic("left")
+    right :: json.parse("{{\"nested\":[true,\"x\"],\"a\":1}}") ?? panic("right")
+    print(left.equal_unordered(right))
+    print(Dyn.Null.equal_unordered(Dyn.Null))
+    print(Dyn.Array([Dyn.Int(1), Dyn.Int(2)]).equal_unordered(Dyn.Array([Dyn.Int(2), Dyn.Int(1)])))
+    print(Dyn.Int(1).equal_unordered(Dyn.Float(1.0)))
+    print(Dyn.Float(Float.NAN).equal_unordered(Dyn.Float(Float.NAN)))
+}

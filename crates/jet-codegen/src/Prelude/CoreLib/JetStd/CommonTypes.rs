@@ -287,6 +287,7 @@ pub enum DataEvent {
     Number(String),
     Text(String),
     Bytes(Vec<u8>),
+    DateTime(super::JetZonedDateTime),
     ArrayStart,
     ArrayEnd,
     ObjectStart,
@@ -835,7 +836,7 @@ pub enum DataStreamInner {
     },
     Provider {
         format: DataFormat,
-        rows: Vec<DataTree>,
+        rows: Vec<Dyn>,
         cursor: usize,
     },
 }
@@ -872,7 +873,7 @@ impl DataSchema {
     ///
     /// Missing fields and explicit nulls are nullable. Conflicting concrete
     /// types widen to `Any`, while integers and floats share `float`.
-    pub fn infer(tree: &DataTree, format: DataFormat) -> Self {
+    pub fn infer(tree: &Dyn, format: DataFormat) -> Self {
         fn merge_type(left: &'static str, right: &'static str) -> (&'static str, bool) {
             if left == right {
                 return (
@@ -901,22 +902,23 @@ impl DataSchema {
             }
             ("Any", false)
         }
-        fn value_type(value: &DataTree) -> &'static str {
+        fn value_type(value: &Dyn) -> &'static str {
             match value {
-                DataTree::Null => "null",
-                DataTree::Bool(_) => "bool",
-                DataTree::Int(_) => "int",
-                DataTree::Float(_) | DataTree::Number(_) => "float",
-                DataTree::TypedText(_) | DataTree::Text(_) => "text",
-                DataTree::Bytes(_) => "bytes",
-                DataTree::Array(_) => "array",
-                DataTree::Object(_) => "object",
+                Dyn::Null => "null",
+                Dyn::Bool(_) => "bool",
+                Dyn::Int(_) => "int",
+                Dyn::Float(_) | Dyn::Number(_) => "float",
+                Dyn::TypedText(_) | Dyn::Text(_) => "text",
+                Dyn::Bytes(_) => "bytes",
+                Dyn::DateTime(_) => "datetime",
+                Dyn::Array(_) => "array",
+                Dyn::Object(_) => "object",
             }
         }
         fn absorb(
             fields: &mut std::collections::BTreeMap<String, (&'static str, bool)>,
             name: String,
-            value: &DataTree,
+            value: &Dyn,
             nullable: bool,
         ) {
             let current_type = value_type(value);
@@ -932,20 +934,20 @@ impl DataSchema {
 
         let mut fields = std::collections::BTreeMap::<String, (&'static str, bool)>::new();
         match tree {
-            DataTree::Object(entries) => {
+            Dyn::Object(entries) => {
                 for (name, value) in entries {
-                    absorb(&mut fields, name.clone(), value, matches!(value, DataTree::Null));
+                    absorb(&mut fields, name.clone(), value, matches!(value, Dyn::Null));
                 }
             }
-            DataTree::Array(values) => {
+            Dyn::Array(values) => {
                 let mut rows_seen = 0usize;
                 for value in values {
-                    let DataTree::Object(entries) = value else {
+                    let Dyn::Object(entries) = value else {
                         absorb(
                             &mut fields,
                             "$".to_string(),
                             value,
-                            rows_seen > 0 || matches!(value, DataTree::Null),
+                            rows_seen > 0 || matches!(value, Dyn::Null),
                         );
                         rows_seen = rows_seen.saturating_add(1);
                         continue;
@@ -959,7 +961,7 @@ impl DataSchema {
                             &mut fields,
                             name.clone(),
                             value,
-                            rows_seen > 0 || matches!(value, DataTree::Null),
+                            rows_seen > 0 || matches!(value, Dyn::Null),
                         );
                     }
                     for name in fields
@@ -979,7 +981,7 @@ impl DataSchema {
                 &mut fields,
                 "$".to_string(),
                 value,
-                matches!(value, DataTree::Null),
+                matches!(value, Dyn::Null),
             ),
         }
         let columns = fields

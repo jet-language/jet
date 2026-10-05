@@ -18,7 +18,7 @@ use jet::RecordIndex::{
     RecordCapture, RecordIdentity, RecordIndex, RecordIndexEntry, RecordKind, RecordLink,
 };
 use jet::AST::{Expr, Func, Item, Stmt};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::Evidence::{
     decode_report_bytes, EvidenceKind, EvidenceOutcome, EvidenceReport,
 };
@@ -273,7 +273,7 @@ fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
     }
     let header = std::str::from_utf8(&bytes[16..header_end])
         .map_err(|_| "replay artifact header is not UTF-8".to_string())?;
-    let DataTree::Object(fields) =
+    let Dyn::Object(fields) =
         parse_json(header).map_err(|_| "replay artifact header is not valid JSON".to_string())?
     else {
         return Err("replay artifact header is not a JSON object".into());
@@ -741,7 +741,7 @@ fn history_artifact_path(target: &Target, member: &Member) -> PathBuf {
 fn parse_history_artifact_detail(detail: &str) -> Option<String> {
     detail.lines().find_map(|line| {
         let artifact = line.trim().strip_prefix(HISTORY_ARTIFACT_PREFIX)?;
-        let DataTree::Object(fields) = parse_json(artifact).ok()? else {
+        let Dyn::Object(fields) = parse_json(artifact).ok()? else {
             return None;
         };
         let schema = fields
@@ -750,7 +750,7 @@ fn parse_history_artifact_detail(detail: &str) -> Option<String> {
         let version = fields
             .iter()
             .find_map(|(key, value)| (key == "version").then_some(value));
-        if schema != Some("jet.testing.history") || !matches!(version, Some(DataTree::Int(1))) {
+        if schema != Some("jet.testing.history") || !matches!(version, Some(Dyn::Int(1))) {
             return None;
         }
         Some(artifact.to_string())
@@ -832,7 +832,7 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
         return None;
     }
     let text = fs::read_to_string(path).ok()?;
-    let DataTree::Object(fields) = parse_json(&text).ok()? else {
+    let Dyn::Object(fields) = parse_json(&text).ok()? else {
         return None;
     };
     let field = |name: &str| {
@@ -840,7 +840,7 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
             .iter()
             .find_map(|(key, value)| (key == name).then_some(value))
     };
-    if !matches!(field("version"), Some(DataTree::Int(1)))
+    if !matches!(field("version"), Some(Dyn::Int(1)))
         || !matches!(
             field("target").and_then(|value| value.as_str().ok()),
             Some(value) if value == target.input_sha256
@@ -852,9 +852,9 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
     {
         return None;
     }
-    let parse_u64 = |value: Option<&DataTree>| match value {
-        Some(DataTree::Int(value)) if *value >= 0 => u64::try_from(*value).ok(),
-        Some(DataTree::Text(value)) | Some(DataTree::TypedText(value)) => value.parse().ok(),
+    let parse_u64 = |value: Option<&Dyn>| match value {
+        Some(Dyn::Int(value)) if *value >= 0 => u64::try_from(*value).ok(),
+        Some(Dyn::Text(value)) | Some(Dyn::TypedText(value)) => value.parse().ok(),
         _ => None,
     };
     let seed = parse_u64(field("seed"))?;
@@ -4533,7 +4533,7 @@ fn canonicalize_evidence_rows(target: &Target, rows: &[String]) -> (String, Stri
 }
 
 fn row_string_field(row: &str, field: &str) -> Option<String> {
-    let DataTree::Object(fields) = parse_json(row).ok()? else {
+    let Dyn::Object(fields) = parse_json(row).ok()? else {
         return None;
     };
     fields

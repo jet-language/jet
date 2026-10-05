@@ -728,16 +728,16 @@ impl<'a> Interp<'a> {
                     && matches!(method, "to_string" | "to_string_pretty")
                 {
                     if let Some(value) = argv.first() {
-                        // Keep the canonical DataTree value on its renderer path.
+                        // Keep the canonical Dyn value on its renderer path.
                         // Every other value must enter the typed Encode adapter,
                         // which recursively gives nested explicit codecs precedence
                         // over structural fallback.
-                        let is_dynamic_data_tree =
-                            matches!(value, CtValue::Enum { type_name, .. } if type_name == "DataTree");
-                        if !is_dynamic_data_tree {
+                        let is_dynamic_dyn =
+                            matches!(value, CtValue::Enum { type_name, .. } if type_name == "Dyn");
+                        if !is_dynamic_dyn {
                             let tree = self.encode_value(value, span)?;
                             return Ok(CtValue::Str(
-                                super::super::super::JSONInterp::render_ordered_datatree(
+                                super::super::super::JSONInterp::render_ordered_dyn(
                                     &tree,
                                     method == "to_string_pretty",
                                     0,
@@ -748,7 +748,7 @@ impl<'a> Interp<'a> {
                 }
                 // D-ENC-CBOR-SURFACE1 / R12: generic whole-value CBOR decode
                 // uses the same typed tree walker as every other codec.  Keep
-                // this ahead of the compatibility `cbor.decode(DataTree)` arm
+                // this ahead of the compatibility `cbor.decode(Dyn)` arm
                 // below: the type argument is the semantic distinction.
                 if module == "core.encoding.cbor" && method == "decode" && !type_args.is_empty() {
                     let bytes = match argv.first() {
@@ -771,7 +771,7 @@ impl<'a> Interp<'a> {
                         }
                     };
                     let tree = match super::super::super::EncodingLite::cbor_decode(
-                        &bytes, &options, true,
+                        &bytes, &options,
                     ) {
                         Ok(tree) => tree,
                         Err(error) => {

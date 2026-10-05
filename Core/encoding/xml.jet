@@ -1,4 +1,4 @@
-use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+use core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat]
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -43,7 +43,7 @@ fn safe_xml_limits() -> XMLLimits Never! {
 // core.encoding.xml — well-formed XML 1.0 without DTDs.
 //
 // The Jet codec parses elements, attributes, text, comments, and empty tags
-// into a `DataTree` object `{ name, attrs, children }`. DTDs, parameter
+// into a `Dyn` object `{ name, attrs, children }`. DTDs, parameter
 // entities, XInclude, and namespace rewriting are rejected. Hostile entity
 // expansion cannot occur because this parser never defines named entities;
 // only the five XML predefined names and numeric character references decode.
@@ -115,28 +115,28 @@ pub struct XMLRenderOptions {
 }
 
 pub struct XMLReader {
-    pub root: DataTree
+    pub root: Dyn
     pub yielded: Bool
 }
 
 impl XMLReader {
-    pub fn next(&self) -> DataTree? Never! {
+    pub fn next(&self) -> Dyn? Never! {
         if self.yielded -> return None
         self.yielded = true
         Val(self.root)
     }
 }
 
-pub fn parse(text: String) -> DataTree EncodingError! { parse_xml(text) }
+pub fn parse(text: String) -> Dyn EncodingError! { parse_xml(text) }
 
-pub fn decode(text: String) -> DataTree EncodingError! { parse_xml(text) }
+pub fn decode(text: String) -> Dyn EncodingError! { parse_xml(text) }
 
-pub fn parse_bytes(bytes: [U8]) -> DataTree EncodingError! {
+pub fn parse_bytes(bytes: [U8]) -> Dyn EncodingError! {
     text :: String.from_bytes(bytes) ?? return Err(syntax_error(EncodingFormat.XML, 0, 1, 1, "", "XML input is not valid UTF-8"))
     parse_xml(text)
 }
 
-pub fn parse_with(text: String, limits: XMLLimits) -> DataTree EncodingError! {
+pub fn parse_with(text: String, limits: XMLLimits) -> Dyn EncodingError! {
     if limits.max_depth < 1 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_depth must be positive"))
     if limits.max_nodes < 1 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_nodes must be positive"))
     if limits.max_attributes_per_element < 0 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_attributes_per_element cannot be negative"))
@@ -152,9 +152,9 @@ pub fn parse_with(text: String, limits: XMLLimits) -> DataTree EncodingError! {
 }
 
 
-pub fn to_string(value: DataTree) -> String Never! { render_xml(value) }
+pub fn to_string(value: Dyn) -> String Never! { render_xml(value) }
 
-pub fn to_bytes(value: DataTree) -> [U8] Never! { to_string(value).bytes() }
+pub fn to_bytes(value: Dyn) -> [U8] Never! { to_string(value).bytes() }
 
 pub fn canonical(text: String) -> String EncodingError! { to_string(parse_xml(text)) }
 
@@ -163,22 +163,22 @@ pub fn reader(text: String) -> XMLReader EncodingError! {
     Ok(XMLReader{root: root, yielded: false})
 }
 
-pub fn attribute(name: String, value: String) -> DataTree Never! {
-    DataTree.Object(["name": DataTree.Text(~name), "value": DataTree.Text(~value)])
+pub fn attribute(name: String, value: String) -> Dyn Never! {
+    Dyn.Object(["name": Dyn.Text(~name), "value": Dyn.Text(~value)])
 }
 
-pub fn content(text: String) -> DataTree Never! { DataTree.Text(~text) }
+pub fn content(text: String) -> Dyn Never! { Dyn.Text(~text) }
 
 pub fn expanded_name(name: String) -> String Never! { ~name }
 
-pub fn root(value: DataTree) -> DataTree Never! { ~value }
+pub fn root(value: Dyn) -> Dyn Never! { ~value }
 
 
 pub struct XMLWriter {
     pub parts: [U8]
 }
 impl XMLWriter {
-    pub fn write(&self, value: DataTree) Never! {
+    pub fn write(&self, value: Dyn) Never! {
         chunk :: render_xml(value).bytes()
         loop b in chunk -> &self.parts.push(b)
     }
@@ -190,11 +190,11 @@ impl XMLWriter {
     pub fn finish(&self) Never! {}
 }
 
-fn parse_xml(text: String) -> DataTree EncodingError! {
+fn parse_xml(text: String) -> Dyn EncodingError! {
     parse_xml_limited(text, safe_xml_limits())
 }
 
-fn parse_xml_limited(text: String, limits: XMLLimits) -> DataTree EncodingError! {
+fn parse_xml_limited(text: String, limits: XMLLimits) -> Dyn EncodingError! {
     if text.bytes().len() > limits.max_text_bytes {
         return Err(unsupported_error(EncodingFormat.XML, 0, "XML document exceeds XMLLimits.max_text_bytes"))
     }
@@ -217,12 +217,12 @@ fn parse_xml_limited(text: String, limits: XMLLimits) -> DataTree EncodingError!
     Ok(node)
 }
 
-fn element_tree(name: String, attrs: [DataTree], children: [DataTree]) -> DataTree Never! {
-    entries := [String:DataTree]{}
-    _ :: &entries.add("name", DataTree.Text(~name))
-    _ :: &entries.add("attrs", DataTree.Array(~attrs))
-    _ :: &entries.add("children", DataTree.Array(~children))
-    DataTree.Object(entries)
+fn element_tree(name: String, attrs: [Dyn], children: [Dyn]) -> Dyn Never! {
+    entries := Dyn.object()
+    entries["name"] = Dyn.Text(~name)
+    entries["attrs"] = Dyn.Array(~attrs)
+    entries["children"] = Dyn.Array(~children)
+    entries
 }
 
 struct XMLParser {
@@ -341,7 +341,7 @@ impl XMLParser {
         if out.len() == 0 -> return Err(self.fail("expected an XML name beginning with a letter or underscore"))
         Ok(String.from_bytes(out) ?? "")
     }
-    fn parse_element(&self) -> DataTree EncodingError! {
+    fn parse_element(&self) -> Dyn EncodingError! {
         self.depth += 1
         if self.depth > self.max_depth {
             return Err(unsupported_error(EncodingFormat.XML, self.index, "XML nesting exceeds XMLLimits.max_depth"))
@@ -354,7 +354,7 @@ impl XMLParser {
         lt :: &self.bump() ?? return Err(self.fail("expected '<'"))
         if lt != (U8{60}) -> return Err(self.fail("expected '<'"))
         name :: &self.parse_name()
-        attrs := [DataTree]{}
+        attrs := [Dyn]{}
         loop {
             _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
             b :: self.peek() ?? return Err(self.fail("unterminated start tag"))
@@ -366,7 +366,7 @@ impl XMLParser {
                 _ :: &self.bump()
                 _ :: &self.expect(U8{62}, "'>' to close an empty tag") ?? return Err(self.fail("invalid empty XML tag"))
                 self.depth -= 1
-                return Ok(element_tree(name, attrs, [DataTree]{}))
+                return Ok(element_tree(name, attrs, [Dyn]{}))
             }
             attr_name :: &self.parse_name()
             _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
@@ -374,7 +374,7 @@ impl XMLParser {
             _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
             attr_value :: &self.parse_quoted()
             loop prior in attrs {
-                prior_name :: tree_field_or(prior, "name", DataTree.Text(""))
+                prior_name :: tree_field_or(prior, "name", Dyn.Text(""))
                 if (prior_name.to_text() ?? "") == attr_name {
                     return Err(self.fail("duplicate XML attribute `{attr_name}`"))
                 }
@@ -384,7 +384,7 @@ impl XMLParser {
                 return Err(unsupported_error(EncodingFormat.XML, self.index, "XML attribute count exceeds XMLLimits.max_attributes_per_element"))
             }
         }
-        children := [DataTree]{}
+        children := [Dyn]{}
         loop {
             if self.starts_with("</") {
                 loop _ in 0..<2 -> _ :: &self.bump()
@@ -407,7 +407,7 @@ impl XMLParser {
                 next
             }
             text :: &self.parse_text()
-            if text.len() > 0 -> &children.push(DataTree.Text(text))
+            if text.len() > 0 -> &children.push(Dyn.Text(text))
             if self.eof() -> return Err(self.fail("unterminated element `{name}`"))
         }
         return Err(self.fail("unterminated element `{name}`"))
@@ -533,7 +533,7 @@ fn push_xml_utf8(out: &[U8], cp: Int) -> Bool EncodingError! {
     true
 }
 
-fn tree_field_or(value: DataTree, name: String, fallback: DataTree) -> DataTree Never! {
+fn tree_field_or(value: Dyn, name: String, fallback: Dyn) -> Dyn Never! {
     if &value.field(name) == {
         .Ok(tree) -> return tree
         .Err(_) -> return ~fallback
@@ -541,25 +541,26 @@ fn tree_field_or(value: DataTree, name: String, fallback: DataTree) -> DataTree 
     ~fallback
 }
 
-fn render_xml(value: DataTree) -> String Never! {
-    name_tree :: tree_field_or(value, "name", DataTree.Text("root"))
+
+fn render_xml(value: Dyn) -> String Never! {
+    name_tree :: tree_field_or(value, "name", Dyn.Text("root"))
     name :: name_tree.to_text() ?? "root"
     out := "<{name}"
-    attrs :: tree_field_or(value, "attrs", DataTree.Array([DataTree]{}))
+    attrs :: tree_field_or(value, "attrs", Dyn.Array([Dyn]{}))
     out = "{out}{render_xml_attrs(attrs)}"
     out = "{out}>"
-    children :: tree_field_or(value, "children", DataTree.Array([DataTree]{}))
+    children :: tree_field_or(value, "children", Dyn.Array([Dyn]{}))
     out = "{out}{render_xml_children(children)}"
     "{out}</{name}>"
 }
 
-fn render_xml_attrs(tree: DataTree) -> String Never! {
+fn render_xml_attrs(tree: Dyn) -> String Never! {
     if tree == {
         .Array(items) -> {
             out := ""
             loop item in items {
-                attr_name :: tree_field_or(item, "name", DataTree.Text(""))
-                attr_value :: tree_field_or(item, "value", DataTree.Text(""))
+                attr_name :: tree_field_or(item, "name", Dyn.Text(""))
+                attr_value :: tree_field_or(item, "value", Dyn.Text(""))
                 name :: attr_name.to_text() ?? ""
                 value :: attr_value.to_text() ?? ""
                 if name.len() > 0 -> out = "{out} {name}=\"{escape_xml_attr(value)}\""
@@ -570,14 +571,14 @@ fn render_xml_attrs(tree: DataTree) -> String Never! {
     }
 }
 
-fn render_xml_children(tree: DataTree) -> String Never! {
+fn render_xml_children(tree: Dyn) -> String Never! {
     if tree == {
         .Array(items) -> return render_xml_array(items)
         else -> return ""
     }
 }
 
-fn render_xml_array(items: [DataTree]) -> String Never! {
+fn render_xml_array(items: [Dyn]) -> String Never! {
     out := ""
     loop item in items {
         if item == {

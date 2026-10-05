@@ -516,10 +516,10 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
     }
     if module_name == "core.testing" && member == "histories" {
         t :: core_sig_named("T")
-        data_tree :: core_sig_named("DataTree")
+        dyn_value :: core_sig_named("Dyn")
         strategy :: core_sig_apply("HistoryStrategy", t)
-        command_callback :: core_sig_fn([Type]{Type.List{element: t}}, data_tree)
-        observe_callback :: core_sig_fn([Type]{data_tree}, data_tree)
+        command_callback :: core_sig_fn([Type]{Type.List{element: t}}, dyn_value)
+        observe_callback :: core_sig_fn([Type]{dyn_value}, dyn_value)
         parameters := [CoreCallTypedParameter]{
             core_sig_param_type("seed", "seed", ParamZone.Either, Type.Int),
             core_sig_param_type("cases", "cases", ParamZone.Either, Type.Int),

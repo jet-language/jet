@@ -4,7 +4,7 @@
 //! JetOS generation. Split out of the former `tests/jetpack.rs`.
 
 use std::fs;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 
 mod common;
 
@@ -614,7 +614,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     let proof_response = studio_json(&proof);
     assert_eq!(
         proof_response.get("success").unwrap(),
-        &DataTree::Bool(true),
+        &Dyn::Bool(true),
         "proof: {proof}"
     );
     let proof_revision = json_string(&proof_response, "source_revision");

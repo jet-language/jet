@@ -388,7 +388,7 @@ fn provider_native_fetch_release_metadata(requested: String?) -[Env, Net, Time.W
 }
 
 // Parse release metadata that must be a JSON object.
-fn provider_native_parse_object(text: String, label: String) -> [String: DataTree] RegistryError! {
+fn provider_native_parse_object(text: String, label: String) -> [String: Dyn] RegistryError! {
     tree :: if pkg_json_parse_protocol(text) == {
         .Parsed(value) -> value
         .Failed(reason) -> { return Err(RegistryError.Reason(reason)) }
@@ -397,13 +397,13 @@ fn provider_native_parse_object(text: String, label: String) -> [String: DataTre
     Ok(object)
 }
 
-fn provider_native_json_text(object: [String: DataTree], field: String) -> String? Never! {
+fn provider_native_json_text(object: [String: Dyn], field: String) -> String? Never! {
     value :: object.get(field) ?? return None
     pkg_json_text(value)
 }
 
 // A non-empty string field.
-fn provider_native_json_string(object: [String: DataTree], field: String) -> String RegistryError! {
+fn provider_native_json_string(object: [String: Dyn], field: String) -> String RegistryError! {
     value :: provider_native_json_text(object, field) ?? ""
     if value == "" -> return Err(RegistryError.Reason("release metadata field `{field}` is not a string"))
     Ok(value)

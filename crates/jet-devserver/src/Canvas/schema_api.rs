@@ -62,7 +62,7 @@ fn canvas_machine_output(action: &str, ok: bool, payload: &str) -> String {
     let payload = payload.trim();
     let value = jet_foundation::JSON::parse_json_with_limit(payload, CANVAS_PAYLOAD_LIMIT)
         .ok()
-        .and_then(|tree| StatusValue::from_data_tree(&tree).ok())
+        .and_then(|tree| StatusValue::from_dyn(&tree).ok())
         .unwrap_or_else(|| StatusValue::String(payload.to_owned()));
     StatusEnvelope::new(action, ok)
         .with_field("canvas", value)

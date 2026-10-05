@@ -2,6 +2,7 @@
 // Rust parser or semantic compiler is involved.
 use jet_foundation.[
     AccessConvention,
+    CLICommandBinding,
     CallLabel,
     ConstAttr,
     ConstDef,
@@ -179,6 +180,9 @@ fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
     }
     parser_expect(&state, TOKEN_RPAREN, "after the policy callable parameter")
     body := parser_parse_block(&state)
+    // The wrapper body's line end lexes as `;` before the outer `}` (Rust
+    // imports_policy.rs skips every `Semi` in this gap).
+    parser_skip_semicolons(&state)
     close :: parser_expect(&state, TOKEN_RBRACE, "after the policy wrapper body")
     parser_finish_statement(&state)
     if !is_pub {
@@ -1424,7 +1428,7 @@ fn parser_parse_inline_foreign_body(state: &JetParserState, markers: [Marker], r
     }
     parser_skip_semicolons(&state)
     parser_expect(&state, TOKEN_RBRACE, "`}}` to close the `#FFI` foreign-source body")
-    Val(InlineForeign{lang: lang, lang_span: lang_span, marker_span: ffi.span, source: source.payload.decoded, source_span: source.span, asm_contract: None})
+    Val(InlineForeign{lang: lang, lang_span: lang_span, marker_span: ffi.span, source: source.payload.decoded, source_span: source.span})
 }
 
 // D-MEMPROVENANCE3=A: an optional `from src (| src)*` or `from (slot: srcs, …)`
@@ -1637,6 +1641,17 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
             next
         }
         if parser_take_prep_fn(&state) -> member_modifiers.is_comptime = true
+        // D-CLI-GLOBAL1=E (Rust `cli_binding_starts_here` / `cli_binding`):
+        // `name = callable` binds a program-struct command to a function; it
+        // is a command member, never a stored field.
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_EQ {
+            command_name :: parser_bump(&state)
+            parser_bump(&state)
+            target :: parser_parse_expression(&state, 1, 0)
+            &value.cli_bindings.push(CLICommandBinding{name: command_name.payload.decoded, name_span: command_name.span, markers: member_modifiers.markers, target: target.expr})
+            if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+            next
+        }
         if parser_current_kind(&state) == {
             TOKEN_KW_FN -> {
                 method :: parser_parse_function(&state, member_modifiers, true)
@@ -2035,6 +2050,52 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     result
 }
 
+// D-MODULE-BIND1: `name :: value` / `name := value` at file scope declares a
+// module binding, not an executable script statement (Rust
+// `module_binding_def`). The retired typed form `name : Type …` takes the same
+// route so the binding parser teaches it.
+fn parser_module_binding_ahead(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_IDENT -> return false
+    next :: parser_kind_at(&state, 1)
+    if next == TOKEN_COLON_COLON || next == TOKEN_COLON_EQ || next == TOKEN_COLON -> return true
+    // `Type{ … } :: value` is a destructuring head; the module-binding parser
+    // rejects it with one diagnostic (Rust `pattern_target_is_binding`).
+    if next != TOKEN_LBRACE -> return false
+    depth := 0
+    offset := 1
+    loop {
+        kind :: parser_kind_at(&state, offset)
+        if kind == TOKEN_EOF -> return false
+        if kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RBRACE {
+            depth -= 1
+            if depth == 0 {
+                after :: parser_kind_at(&state, offset + 1)
+                return after == TOKEN_COLON_COLON || after == TOKEN_COLON_EQ
+            }
+        }
+        offset += 1
+    }
+    false
+}
+
+// The module constant or variable a parsed file-scope binding declares, spanning
+// `start` through `end`. A line that is not one named binding stays a script
+// statement (None), which sema reports as top-level executable code.
+fn parser_module_binding_item(statement: Stmt, start: Span, end: Int) -> Item? {
+    if statement == .Val(binding) {
+        if binding.pattern != None || binding.name == "" -> return None
+        definition := ast_const(binding.name, binding.name_span, Span{start: start.start, end: end}, binding.init)
+        definition.meta = binding.meta
+        definition.is_comptime = binding.is_comptime
+        definition.ct = binding.ct
+        definition.ty = binding.ty
+        definition.mutable = binding.mutable
+        return Val(Item.Const{value: definition})
+    }
+    None
+}
+
 fn parser_parse_type_alias(state: &JetParserState, modifiers: ParsedItemModifiers) -> TypeAliasDef {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `alias`")
@@ -2303,6 +2364,8 @@ fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef {
     parser_expect(&state, TOKEN_DOT, "`.` between a type and derive trait")
     trait_token :: parser_expect_name(&state, "after `.` in a derive declaration")
     parser_expect(&state, TOKEN_LBRACE, "`{{` before derive methods")
+    // Rust `derive_body_items`: template depth covers the whole body.
+    state.derive_template_depth += 1
     body := [DeriveBodyItem]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
@@ -2320,6 +2383,7 @@ fn parser_parse_user_derive(state: &JetParserState) -> DeriveDef {
             }
         }
     }
+    state.derive_template_depth -= 1
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after derive methods")
     DeriveDef{trait_name: trait_token.payload.decoded, trait_span: trait_token.span, type_param: type_name.payload.decoded, body: body, span: parser_cover(start.span, close.span)}
 }

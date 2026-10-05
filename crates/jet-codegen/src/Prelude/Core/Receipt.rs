@@ -38,7 +38,7 @@ pub fn jet_receipt_attach<T: __jet_Encode>(
 }
 
 /// Attach a value already rendered by an execution-tier adapter. The adapter
-/// supplies no receipt policy: this function parses the canonical DataTree and
+/// supplies no receipt policy: this function parses the canonical Dyn and
 /// sends it through the same validation, digest, and publication path as the
 /// generated `__jet_Encode` entry point.
 pub fn jet_receipt_attach_encoded(
@@ -53,7 +53,7 @@ pub fn jet_receipt_attach_encoded(
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let tree = jet_std::parse_json_datatree(payload).unwrap_or_else(|error| {
+        let tree = jet_std::parse_json_dyn(payload).unwrap_or_else(|error| {
             let line = error.line.ok().unwrap_or(0);
             panic!(
                 "receipt section `{section_name}` is not valid canonical JSON (line {}): {}",
@@ -66,7 +66,7 @@ pub fn jet_receipt_attach_encoded(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn jet_receipt_attach_tree(
-    tree: jet_std::DataTree,
+    tree: jet_std::Dyn,
     section_name: &str,
     type_name: &str,
     schema_digest: &str,
@@ -87,10 +87,10 @@ fn jet_receipt_attach_tree(
     jet_receipt_validate_digest(schema_digest, "schema");
 
     let tree = jet_receipt_canonical_tree(&tree);
-    let jet_std::DataTree::Object(_) = &tree else {
+    let jet_std::Dyn::Object(_) = &tree else {
         panic!("receipt section `{section_name}` must encode as an object");
     };
-    let mut payload = jet_std::render_datatree_json(&tree, false, 0).into_bytes();
+    let mut payload = jet_std::render_dyn_json(&tree, false, 0).into_bytes();
     payload.push(b'\n');
     if payload.len() > JET_RECEIPT_SECTION_BYTES {
         panic!(
@@ -131,21 +131,21 @@ fn jet_receipt_attach_tree(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn jet_receipt_canonical_tree(tree: &jet_std::DataTree) -> jet_std::DataTree {
+fn jet_receipt_canonical_tree(tree: &jet_std::Dyn) -> jet_std::Dyn {
     match tree {
-        jet_std::DataTree::Array(values) => jet_std::DataTree::Array(
+        jet_std::Dyn::Array(values) => jet_std::Dyn::Array(
             values
                 .iter()
                 .map(jet_receipt_canonical_tree)
                 .collect(),
         ),
-        jet_std::DataTree::Object(values) => {
+        jet_std::Dyn::Object(values) => {
             let mut values = values
                 .iter()
                 .map(|(name, value)| (name.clone(), jet_receipt_canonical_tree(value)))
                 .collect::<Vec<_>>();
             values.sort_by(|left, right| left.0.cmp(&right.0));
-            jet_std::DataTree::Object(values)
+            jet_std::Dyn::Object(values)
         }
         _ => tree.clone(),
     }

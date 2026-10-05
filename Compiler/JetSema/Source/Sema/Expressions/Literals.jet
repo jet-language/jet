@@ -435,6 +435,12 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
     if expected == .Val(expected_ty) {
         normalized :: sema_expr_expected_type(sema_expr_unwrap_tag(expected_ty), environment)
         if normalized == {
+            .Named(name) -> {
+                if name == "Dyn" {
+                    expected_element = Val(sema_dyn_type())
+                    result_ty = Val(Type.List{element: sema_dyn_type()})
+                }
+            }
             .List(element) -> {
                 expected_element = Val(element)
                 result_ty = Val(normalized)
@@ -491,6 +497,13 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
     if expected == .Val(expected_ty) {
         normalized :: sema_expr_unwrap_tag(expected_ty)
         if normalized == {
+            .Named(name) -> {
+                if name == "Dyn" {
+                    expected_key = Val(Type.String)
+                    expected_value = Val(sema_dyn_type())
+                    result_ty = Val(Type.Map{key: Type.String, key_span: None, value: sema_dyn_type()})
+                }
+            }
             .Map(key, key_span, value) -> {
                 expected_key = Val(key)
                 expected_value = Val(value)
@@ -653,6 +666,12 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         else -> None
     }
     checked_index :: sema_check_expression(index, index_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_dyn_is_type(sema_expr_expected_type(base_ty, environment)) {
+        site :: "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
+        operation :: sema_dyn_index_operation(checked_index.ty, site, span, environment, &diagnostics) ?? return None
+        value :: sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{checked_index}}, span)
+        return sema_expr_expected(value, expected, environment, &diagnostics)
+    }
     result_ty := Type?{None}
     resolved_kind := ast_kind
     if base_ty == {
@@ -824,7 +843,7 @@ fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment) -> B
 
 // D-CAPBUNDLE1: the bundle markers of a distinct type named in this scope.
 fn sema_expression_distinct_bundles(name: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> [String]? {
-    owner :: sema_expression_type_symbol(&scopes, name) ?? return None
+    owner :: sema_expression_type_symbol(&scopes, environment, name) ?? return None
     declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return None
     if declaration == .Distinct(definition) {
         derives :: loop marker in definition.derives -> marker.name

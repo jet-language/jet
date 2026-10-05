@@ -41,7 +41,7 @@ pub(crate) mod runtime {
         }
 
         pub(crate) use crate::Encoding::json_rt::{
-            parse_json_strict, render_json, DataTree,
+            parse_json_strict, render_json, Dyn,
         };
         #[allow(unused_imports)]
         pub use jet_foundation::Outcome::*;

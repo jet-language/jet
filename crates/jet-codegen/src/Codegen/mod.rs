@@ -561,7 +561,7 @@ const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
         )),
     },
     // Checked Arrow file-reader registration depends on the C-data carrier
-    // above and uses the generated crate's DataTree/ArrowData facades.
+    // above and uses the generated crate's Dyn/ArrowData facades.
     EmbeddedPreludePart {
         name: "arrow_file_reader",
         dependencies: &["arrow_data"],
@@ -607,7 +607,7 @@ const FOUNDATION_PLACEMENTS: &[(&str, FoundationPlacement)] = &[
     ("EncodingErrors", FoundationPlacement::Module("jet_encoding_errors")),
     ("JSONNumber", FoundationPlacement::Module("jet_json_number")),
     ("EncodingJson", FoundationPlacement::Module("jet_encoding_json")),
-    ("DataTree", FoundationPlacement::Module("jet_foundation_datatree")),
+    ("Dyn", FoundationPlacement::Module("jet_foundation_dyn")),
     ("ArrowData", FoundationPlacement::Module("jet_arrow_data")),
     (
         "ArrowFileReader",
@@ -653,6 +653,7 @@ fn push_foundation_facade(out: &mut String, include_arrow: bool) {
         };
         out.push_str(&format!("    pub mod {module} {{ pub use {target}::*; }}\n"));
     }
+    out.push_str("    pub mod BaseEncodingStrict { pub use crate::jet_base_encoding_strict::*; }\n");
     out.push_str("}\n");
 }
 
@@ -1827,21 +1828,21 @@ fn jet_prop_trace_sample(engine: &str, case_index: u64, seed: u64, input: &str) 
 /// contiguous — those files are one audited compiler/runtime kernel. Optional
 /// fragments are selected from `bundle.used_core`. Package-owned Core behavior
 /// may use an explicit ABI bridge, but never falls back to this path.
-/// The DataTree carrier is owned by Foundation. Keep its source verbatim in a
+/// The Dyn carrier is owned by Foundation. Keep its source verbatim in a
 /// private generated module, expose the protocol path expected by Foundation
 /// encoding kernels, and let `jet_std` re-export that same type below.
-const DATATREE_FOUNDATION_ROOT: &str = concat!(
+const DYN_FOUNDATION_ROOT: &str = concat!(
     "\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\n",
-    "mod jet_foundation_datatree {\n",
-    include_str!("../../../jet-foundation/src/DataTree.rs"),
+    "mod jet_foundation_dyn {\n",
+    include_str!("../../../jet-foundation/src/Dyn.rs"),
     "\n}\n",
-    "#[allow(non_snake_case)]\nmod DataTree {\n",
-    "    pub use crate::jet_foundation_datatree::DataTree;\n",
+    "#[allow(non_snake_case)]\nmod Dyn {\n",
+    "    pub use crate::jet_foundation_dyn::{Dyn, DynDateTime};\n",
     "}\n",
 );
 
-const DATATREE_PRELUDE_REEXPORT: &str =
-    "\npub use crate::DataTree::DataTree;\n";
+const DYN_PRELUDE_REEXPORT: &str =
+    "\npub use crate::Dyn::Dyn;\n";
 
 const RESOURCE_FACTS_PRELUDE: &str = concat!(
     "\n#[allow(non_snake_case, unused_imports)]\nmod ResourceSchedule {\n",
@@ -1923,17 +1924,18 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     "\n}\n",
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/WireOrder.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DynKind.rs"),
     // D-VALIDATE-DECODE1=B: keep the canonical FieldError rendering beside
-    // DataTree's JetShow/JetDisplay implementations in the same JetStd scope.
+    // Dyn's JetShow/JetDisplay implementations in the same JetStd scope.
     include_str!("../Prelude/Core/FieldError.rs"),
     // D-VALIDATE-DECODE1=B: the accumulated decode/validate failure has one
     // rendering. Splice it beside the type so `impl JetShow for FieldError`
     // below, the Cranelift host, and the TIR evaluator cannot drift (I9).
-    DATATREE_PRELUDE_REEXPORT,
-    include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
+    DYN_PRELUDE_REEXPORT,
+    include_str!("../Prelude/CoreLib/JetStd/Dyn.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DynRuntime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/TestingComparison.rs"),
-    "\njet_datatree_decode_helpers!();\n",
+    "\njet_dyn_decode_helpers!();\n",
     // `EncodingStream.rs` validates exact JSON number tokens through
     // `jet_std::validate_json_number`. The root `jet_json_number` module holds
     // the one implementation; name it here so the generated program, the JIT
@@ -1947,11 +1949,11 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     // D-FFI-CALLBACK2=A: generated callback registrations share one managed
     // ownership/ACK/quiescence runtime with the AOT and fixture paths.
     JETSTD_FFI_CALLBACKS_PRELUDE,
-    // The DataTree renderer below and TOML.rs (`super::quote_json`) quote
+    // The Dyn renderer below and TOML.rs (`super::quote_json`) quote
     // through the Foundation JSON kernel. The host that splices these files
     // imports the entry beside them (jet-jit/src/Encoding.rs does the same).
     "\nuse crate::jet_encoding_json::quote_json;\n",
-    include_str!("../Prelude/CoreLib/JetStd/JSONDataTree.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/JSONDyn.rs"),
     include_str!("../Prelude/CoreLib/JetStd/TOML.rs"),
     include_str!("../Prelude/CoreLib/JetStd/YAML.rs"),
     SHARED_ROUTES_PRELUDE,
@@ -3501,10 +3503,10 @@ fn push_corelib_prelude_body(
     // the unconditional JetStd data carrier, while LiveQuery remains optional.
     out.push_str(LIVE_LIFECYCLE_PRELUDE);
     // Foundation EncodingJson/JSON/diagnostic kernels import
-    // `crate::DataTree::DataTree`; emit the canonical carrier at crate root
+    // `crate::Dyn::Dyn`; emit the canonical carrier at crate root
     // before the JetStd brace chain begins. JetStd re-exports this same type
-    // through DATATREE_PRELUDE_REEXPORT below.
-    out.push_str(DATATREE_FOUNDATION_ROOT);
+    // through DYN_PRELUDE_REEXPORT below.
+    out.push_str(DYN_FOUNDATION_ROOT);
     // D-SIMD1/D-SIMD2/D-SIMD3 / I9: MathTaskMem's fixed-array lane values
     // call this root-level kernel. JIT and TIR/comptime include the same
     // source directly and marshal their resident carriers into its slice API.
@@ -3629,8 +3631,8 @@ fn push_corelib_prelude_body(
     // Flat fragments outside `mod jet_std` name it unqualified.
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
     // D-SERDE-ACCESS=B: the Foundation carrier's accessors are a trait in the
-    // kernel's `DataTree.rs`; flat user code calls them by method syntax.
-    out.push_str("\npub use crate::jet_std::JetDataTreeAccess;\n");
+    // kernel's `Dyn.rs`; flat user code calls them by method syntax.
+    out.push_str("\npub use crate::jet_std::JetDynAccess;\n");
     // CommonTypes' exact-Int formatting adapters are always emitted.
     out.push_str(include_str!("../Prelude/Core/Fmt.rs"));
     out.push_str(include_str!("../Prelude/Core/FmtAot.rs"));

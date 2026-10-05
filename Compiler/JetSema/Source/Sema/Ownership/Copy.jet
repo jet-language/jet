@@ -154,11 +154,7 @@ fn sema_copy_named_is_core(name: String) -> Bool Never! {
     // language carriers below are intrinsic and intentionally have no module
     // export row; all other Core names come from the generated table.
     if name == "Unit" || name == "Never" || name == "Err" || name == "U8" || name == "str" || name == "bytes" || name == "Complex" || name == "Range" -> return true
-    leaf :: core_module_type_leaf(name)
-    loop row in CORE_MODULE_EXPORTS {
-        if core_module_export_has_name(row.type_exports, leaf) -> return true
-    }
-    false
+    core_type_modules(name).len() > 0
 }
 
 fn sema_copy_is_clock_type(ty: Type) -> Bool Never! {

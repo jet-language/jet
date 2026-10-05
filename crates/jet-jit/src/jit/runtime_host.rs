@@ -64,7 +64,7 @@ fn history_capture_tree(
     capture_by_address: bool,
     mut state: Option<&mut crate::Receipt::EncodeState>,
     depth: usize,
-) -> Option<crate::Encoding::json_rt::DataTree> {
+) -> Option<crate::Encoding::json_rt::Dyn> {
     let index = i64::try_from(index).ok()?;
     if capture_by_address {
         let address = rt.heap.record_get_int(environment, index)?;
@@ -83,7 +83,7 @@ fn history_capture_tree(
                 let tree = rt
                     .heap
                     .clone_string(raw)
-                    .map(crate::Encoding::json_rt::DataTree::Text)?;
+                    .map(crate::Encoding::json_rt::Dyn::Text)?;
                 history_capture_visit(&mut state, depth)?;
                 Some(tree)
             }
@@ -95,25 +95,25 @@ fn history_capture_tree(
                 };
                 let tree = value
                     .is_finite()
-                    .then_some(crate::Encoding::json_rt::DataTree::Float(value))?;
+                    .then_some(crate::Encoding::json_rt::Dyn::Float(value))?;
                 history_capture_visit(&mut state, depth)?;
                 Some(tree)
             }
             RuntimeValueKind::Bool => {
                 let value = unsafe { std::ptr::read(address as *const u8) != 0 };
                 history_capture_visit(&mut state, depth)?;
-                Some(crate::Encoding::json_rt::DataTree::Bool(value))
+                Some(crate::Encoding::json_rt::Dyn::Bool(value))
             }
             RuntimeValueKind::Char => {
                 let value = unsafe { std::ptr::read(address as *const u32) };
                 let value =
                     char::from_u32(value).map(|value| value.to_string())?;
                 history_capture_visit(&mut state, depth)?;
-                Some(crate::Encoding::json_rt::DataTree::Text(value))
+                Some(crate::Encoding::json_rt::Dyn::Text(value))
             }
             RuntimeValueKind::Unit => {
                 history_capture_visit(&mut state, depth)?;
-                Some(crate::Encoding::json_rt::DataTree::Null)
+                Some(crate::Encoding::json_rt::Dyn::Null)
             }
             _ => {
                 let raw = unsafe { std::ptr::read(address as *const i64) };
@@ -150,7 +150,7 @@ fn history_capture_tree(
                         .and_then(|raw| rt.heap.clone_string(raw))
                 })?;
             history_capture_visit(&mut state, depth)?;
-            Some(crate::Encoding::json_rt::DataTree::Text(value))
+            Some(crate::Encoding::json_rt::Dyn::Text(value))
         }
         RuntimeValueKind::Float => {
             let value = rt
@@ -158,21 +158,21 @@ fn history_capture_tree(
                 .record_get_float(environment, index)
                 .filter(|value| value.is_finite())?;
             history_capture_visit(&mut state, depth)?;
-            Some(crate::Encoding::json_rt::DataTree::Float(value))
+            Some(crate::Encoding::json_rt::Dyn::Float(value))
         }
         RuntimeValueKind::Bool => {
             let value = rt.heap.record_get_bool(environment, index)?;
             history_capture_visit(&mut state, depth)?;
-            Some(crate::Encoding::json_rt::DataTree::Bool(value))
+            Some(crate::Encoding::json_rt::Dyn::Bool(value))
         }
         RuntimeValueKind::Char => {
             let value = rt.heap.record_get_char(environment, index)?;
             history_capture_visit(&mut state, depth)?;
-            Some(crate::Encoding::json_rt::DataTree::Text(value.to_string()))
+            Some(crate::Encoding::json_rt::Dyn::Text(value.to_string()))
         }
         RuntimeValueKind::Unit => {
             history_capture_visit(&mut state, depth)?;
-            Some(crate::Encoding::json_rt::DataTree::Null)
+            Some(crate::Encoding::json_rt::Dyn::Null)
         }
         _ => {
             let raw = rt.heap.record_get_int(environment, index)?;
@@ -199,7 +199,7 @@ fn history_encode_callable(
     descriptor: &RuntimeTypeDescriptor,
     state: &mut crate::Receipt::EncodeState,
     depth: usize,
-) -> Result<crate::Encoding::json_rt::DataTree, String> {
+) -> Result<crate::Encoding::json_rt::Dyn, String> {
     let slot = jit_callable_slot(rt, raw)
         .ok_or_else(|| "history capture callable is invalid".to_string())?;
     let target = rt
@@ -245,8 +245,8 @@ fn history_encode_callable(
             )
             .ok_or_else(|| "history capture callable value is unavailable".to_string())?;
             state.bytes(capture_descriptor.canonical.len())?;
-            captures.push(crate::Encoding::json_rt::DataTree::Array(vec![
-                crate::Encoding::json_rt::DataTree::Text(capture_descriptor.canonical.clone()),
+            captures.push(crate::Encoding::json_rt::Dyn::Array(vec![
+                crate::Encoding::json_rt::Dyn::Text(capture_descriptor.canonical.clone()),
                 capture,
             ]));
         }
@@ -254,14 +254,14 @@ fn history_encode_callable(
         state.bytes("function_identity".len())?;
         state.bytes("captures".len())?;
         state.bytes(function_identity.len())?;
-        Ok(crate::Encoding::json_rt::DataTree::Object(vec![
+        Ok(crate::Encoding::json_rt::Dyn::Object(vec![
             (
                 "function_identity".to_string(),
-                crate::Encoding::json_rt::DataTree::Text(function_identity),
+                crate::Encoding::json_rt::Dyn::Text(function_identity),
             ),
             (
                 "captures".to_string(),
-                crate::Encoding::json_rt::DataTree::Array(captures),
+                crate::Encoding::json_rt::Dyn::Array(captures),
             ),
         ]))
     })();
@@ -294,7 +294,7 @@ fn history_callable_fingerprint(
         let descriptor = rt.runtime_type_descriptor(*type_id)?.clone();
         let by_address = target.capture_place_flags[index] && !slot.history_captures_owned?;
         let tree = history_capture_tree(rt, slot.env, index, &descriptor, by_address, None, 0)?;
-        let encoded = crate::Encoding::json_rt::render_datatree_json(&tree, false, 0);
+        let encoded = crate::Encoding::json_rt::render_dyn_json(&tree, false, 0);
         let descriptor_key = descriptor.canonical;
         for part in [&descriptor_key, &encoded] {
             material.extend_from_slice(&(part.len() as u64).to_le_bytes());
@@ -307,7 +307,7 @@ fn history_callable_fingerprint(
 fn history_strategy_schema_fingerprint(descriptor: Option<&RuntimeTypeDescriptor>) -> String {
     let schema = descriptor
         .map(|descriptor| descriptor.canonical.as_str())
-        .unwrap_or("DataTree");
+        .unwrap_or("Dyn");
     let mut material = b"history-strategy-schema".to_vec();
     material.extend_from_slice(&(schema.len() as u64).to_le_bytes());
     material.extend_from_slice(schema.as_bytes());
@@ -11432,7 +11432,7 @@ fn jet_jit_receipt_attach(
     });
     match encoded {
         Ok((section_name, type_name, schema_digest, tree)) => {
-            let payload = crate::Encoding::json_rt::render_datatree_json(&tree, false, 0);
+            let payload = crate::Encoding::json_rt::render_dyn_json(&tree, false, 0);
             if payload.len() > 64 * 1024 * 1024 {
                 Concurrency::with_runtime_mut(|rt| {
                     rt.set_host_fault("receipt.attach payload exceeds 64 MiB");
@@ -13561,23 +13561,24 @@ mod service_adapter {
 
 
 
-    fn job_datatree_to_cbor(value: &crate::Encoding::json_rt::DataTree) -> CborValue {
+    fn job_dyn_to_cbor(value: &crate::Encoding::json_rt::Dyn) -> CborValue {
         match value {
-            crate::Encoding::json_rt::DataTree::Null => CborValue::Null,
-            crate::Encoding::json_rt::DataTree::Bool(value) => CborValue::Bool(*value),
-            crate::Encoding::json_rt::DataTree::Int(value) => CborValue::Int(*value),
-            crate::Encoding::json_rt::DataTree::Float(value) => CborValue::Float(*value),
-            crate::Encoding::json_rt::DataTree::Number(value)
-            | crate::Encoding::json_rt::DataTree::TypedText(value)
-            | crate::Encoding::json_rt::DataTree::Text(value) => CborValue::Text(value.clone()),
-            crate::Encoding::json_rt::DataTree::Bytes(value) => CborValue::Bytes(value.clone()),
-            crate::Encoding::json_rt::DataTree::Array(values) => {
-                CborValue::Array(values.iter().map(job_datatree_to_cbor).collect())
+            crate::Encoding::json_rt::Dyn::Null => CborValue::Null,
+            crate::Encoding::json_rt::Dyn::Bool(value) => CborValue::Bool(*value),
+            crate::Encoding::json_rt::Dyn::Int(value) => CborValue::Int(*value),
+            crate::Encoding::json_rt::Dyn::Float(value) => CborValue::Float(*value),
+            crate::Encoding::json_rt::Dyn::Number(value)
+            | crate::Encoding::json_rt::Dyn::TypedText(value)
+            | crate::Encoding::json_rt::Dyn::Text(value) => CborValue::Text(value.clone()),
+            crate::Encoding::json_rt::Dyn::Bytes(value) => CborValue::Bytes(value.clone()),
+            crate::Encoding::json_rt::Dyn::DateTime(value) => CborValue::DateTime(*value),
+            crate::Encoding::json_rt::Dyn::Array(values) => {
+                CborValue::Array(values.iter().map(job_dyn_to_cbor).collect())
             }
-            crate::Encoding::json_rt::DataTree::Object(entries) => CborValue::Object(
+            crate::Encoding::json_rt::Dyn::Object(entries) => CborValue::Object(
                 entries
                     .iter()
-                    .map(|(name, value)| (name.clone(), job_datatree_to_cbor(value)))
+                    .map(|(name, value)| (name.clone(), job_dyn_to_cbor(value)))
                     .collect(),
             ),
         }
@@ -13589,7 +13590,7 @@ mod service_adapter {
         descriptor: &RuntimeTypeDescriptor,
     ) -> Result<Vec<u8>, String> {
         let tree = crate::Receipt::encode_jit_value(rt, raw, descriptor)?;
-        CborKernel::encode(&job_datatree_to_cbor(&tree), true)
+        CborKernel::encode(&job_dyn_to_cbor(&tree), true)
             .map_err(|error| format!("queued #Job result CBOR encoding failed: {error:?}"))
     }
 
@@ -13701,7 +13702,7 @@ mod service_adapter {
                     )),
                 ));
             }
-            let value = CborKernel::decode(&payload.bytes, &CborKernel::Options::safe(), true)
+            let value = CborKernel::decode(&payload.bytes, &CborKernel::Options::safe())
                 .map_err(|error| job_error(payload, "decode", Some(format!("{error:?}"))))?;
             let value = job_decode_value(rt, &value, &descriptor, 0)
                 .map_err(|error| job_error(payload, "decode", Some(error)))?;
@@ -15499,14 +15500,14 @@ fn testing_compare_terminal(
         )
     })
 }
-fn read_result_datatree(
+fn read_result_dyn(
     value: i64,
-) -> Option<(i64, crate::Encoding::json_rt::DataTree)> {
+) -> Option<(i64, crate::Encoding::json_rt::Dyn)> {
     let payload = Concurrency::with_runtime_mut(|rt| {
         let (ok, bits) = jit_result_parts(rt, value)?;
         ok.then(|| i64::try_from(bits).ok()).flatten()
     })?;
-    let tree = crate::Encoding::read_datatree(payload)?;
+    let tree = crate::Encoding::read_dyn(payload)?;
     Some((payload, tree))
 }
 
@@ -15575,11 +15576,11 @@ fn jet_jit_testing_compare(cases: i64, reference: i64, candidate: i64, relation:
     let mut reference_values = Vec::with_capacity(inputs.len());
     let mut candidate_values = Vec::with_capacity(inputs.len());
     for (index, input) in inputs.iter().copied().enumerate() {
-        let Some(tree) = crate::Encoding::read_datatree(input) else {
+        let Some(tree) = crate::Encoding::read_dyn(input) else {
             return testing_compare_terminal(
                 relation_name,
                 ComparisonStatus::Unavailable,
-                "core.testing.compare corpus element is not a DataTree",
+                "core.testing.compare corpus element is not a Dyn",
                 true,
                 cases,
                 seed,
@@ -15589,8 +15590,8 @@ fn jet_jit_testing_compare(cases: i64, reference: i64, candidate: i64, relation:
         };
         // Each side receives its own copy; the Core adapter never shares the
         // input object between implementations.
-        let reference_input = crate::Encoding::alloc_datatree(&tree);
-        let candidate_input = crate::Encoding::alloc_datatree(&tree);
+        let reference_input = crate::Encoding::alloc_dyn(&tree);
+        let candidate_input = crate::Encoding::alloc_dyn(&tree);
         let observed = invoke_universal_unary(reference_slot, reference_input)
             .filter(|_| jet_jit_is_trapped() == 0)
             .and_then(|reference_value| {
@@ -15613,13 +15614,13 @@ fn jet_jit_testing_compare(cases: i64, reference: i64, candidate: i64, relation:
             );
         };
         let (Some((reference_value, reference_tree)), Some((candidate_value, candidate_tree))) = (
-            read_result_datatree(reference_raw),
-            read_result_datatree(candidate_raw),
+            read_result_dyn(reference_raw),
+            read_result_dyn(candidate_raw),
         ) else {
             return testing_compare_terminal(
                 relation_name,
                 ComparisonStatus::Unavailable,
-                "core.testing.compare callback returned a value that is not a DataTree",
+                "core.testing.compare callback returned a value that is not a Dyn",
                 true,
                 cases,
                 seed,
@@ -15637,12 +15638,12 @@ fn jet_jit_testing_compare(cases: i64, reference: i64, candidate: i64, relation:
         };
         samples.push(ComparisonSample::new(
             identity,
-            ComparisonObservation::value(crate::Encoding::json_rt::render_datatree_json(
+            ComparisonObservation::value(crate::Encoding::json_rt::render_dyn_json(
                 &reference_tree,
                 false,
                 0,
             )),
-            ComparisonObservation::value(crate::Encoding::json_rt::render_datatree_json(
+            ComparisonObservation::value(crate::Encoding::json_rt::render_dyn_json(
                 &candidate_tree,
                 false,
                 0,
@@ -15709,10 +15710,10 @@ fn jet_testing_history_rng_below(handle: i64, bound: i64) -> i64 {
 }
 
 fn testing_history_observation(value: i64) -> Option<ComparisonObservation> {
-    let tree = crate::Encoding::read_datatree(value)?;
+    let tree = crate::Encoding::read_dyn(value)?;
     Some(
         ComparisonObservation::failure(
-            crate::Encoding::json_rt::render_datatree_json(&tree, false, 0),
+            crate::Encoding::json_rt::render_dyn_json(&tree, false, 0),
             "history_state",
         )
         .with_mutation("history lifecycle")
@@ -15920,17 +15921,17 @@ fn testing_history_input(
             |rt| marshal_history_enum_input(rt, case, descriptor),
         );
     }
-    let tree = crate::Encoding::json_rt::parse_datatree(&case.json())
+    let tree = crate::Encoding::json_rt::parse_dyn(&case.json())
         .map_err(|_| "core.testing.histories case could not be decoded")?;
     let operations = match tree {
-        crate::Encoding::json_rt::DataTree::Object(fields) => fields
+        crate::Encoding::json_rt::Dyn::Object(fields) => fields
             .into_iter()
             .find(|(name, _)| name == "operations")
             .map(|(_, value)| value)
             .ok_or("core.testing.histories case has no operations")?,
         _ => return Err("core.testing.histories case has an invalid JSON shape"),
     };
-    Ok(crate::Encoding::alloc_datatree(&operations))
+    Ok(crate::Encoding::alloc_dyn(&operations))
 }
 #[derive(Clone, Debug)]
 struct JitHistoryCommand {
@@ -16047,10 +16048,10 @@ impl jet_foundation::TestingHistory::HistoryStrategyBehavior<JitHistoryCommand>
             .is_some_and(|value| value != 0)
     }
 
-    fn commands_to_data_tree(
+    fn commands_to_dyn(
         &self,
         commands: &[JitHistoryCommand],
-    ) -> Option<crate::DataTree::DataTree> {
+    ) -> Option<crate::Dyn::Dyn> {
         Concurrency::with_runtime_mut(|rt| {
             let mut values = Vec::with_capacity(commands.len());
             for command in commands {
@@ -16058,11 +16059,11 @@ impl jet_foundation::TestingHistory::HistoryStrategyBehavior<JitHistoryCommand>
                     Some(descriptor) => {
                         crate::Receipt::encode_jit_value(rt, command.raw, descriptor).ok()?
                     }
-                    None => crate::Encoding::read_datatree(command.raw)?,
+                    None => crate::Encoding::read_dyn(command.raw)?,
                 };
                 values.push(value);
             }
-            Some(crate::DataTree::DataTree::Array(values))
+            Some(crate::Dyn::Dyn::Array(values))
         })
     }
 }
@@ -16952,8 +16953,8 @@ fn decode_jit_history_strategy(
                 weight,
             });
         }
-        let command_descriptor = if command_type == "DataTree"
-            || command_type.starts_with("DataTree|")
+        let command_descriptor = if command_type == "Dyn"
+            || command_type.starts_with("Dyn|")
         {
             None
         } else {
@@ -17000,26 +17001,26 @@ fn testing_history_execute(
     let actual_value = invoke_universal_unary(actual, actual_input)
         .filter(|_| jet_jit_is_trapped() == 0)
         .ok_or("core.testing.histories actual callback stopped before observing a value")?;
-    let model_tree = crate::Encoding::read_datatree(model_value)
-        .ok_or("core.testing.histories model callback returned a non-DataTree")?;
-    let actual_tree = crate::Encoding::read_datatree(actual_value)
-        .ok_or("core.testing.histories actual callback returned a non-DataTree")?;
+    let model_tree = crate::Encoding::read_dyn(model_value)
+        .ok_or("core.testing.histories model callback returned a non-Dyn")?;
+    let actual_tree = crate::Encoding::read_dyn(actual_value)
+        .ok_or("core.testing.histories actual callback returned a non-Dyn")?;
     let model_observed = invoke_universal_unary(
         observe,
-        crate::Encoding::alloc_datatree(&model_tree),
+        crate::Encoding::alloc_dyn(&model_tree),
     )
     .filter(|_| jet_jit_is_trapped() == 0)
     .ok_or("core.testing.histories model observer stopped before observing a value")?;
     let actual_observed = invoke_universal_unary(
         observe,
-        crate::Encoding::alloc_datatree(&actual_tree),
+        crate::Encoding::alloc_dyn(&actual_tree),
     )
     .filter(|_| jet_jit_is_trapped() == 0)
     .ok_or("core.testing.histories actual observer stopped before observing a value")?;
     let reference = testing_history_observation(model_observed)
-        .ok_or("core.testing.histories model observer returned a non-DataTree")?;
+        .ok_or("core.testing.histories model observer returned a non-Dyn")?;
     let candidate = testing_history_observation(actual_observed)
-        .ok_or("core.testing.histories actual observer returned a non-DataTree")?;
+        .ok_or("core.testing.histories actual observer returned a non-Dyn")?;
     Ok((model_value, actual_value, reference, candidate))
 }
 
@@ -17139,7 +17140,7 @@ fn testing_history_observe_typed_case(
     let evidence_tree =
         <JitHistoryStrategy as jet_foundation::TestingHistory::HistoryStrategyBehavior<
             JitHistoryCommand,
-        >>::commands_to_data_tree(strategy, &typed.commands);
+        >>::commands_to_dyn(strategy, &typed.commands);
     let Some(evidence_tree) = evidence_tree else {
         return terminal(
             ComparisonStatus::Unavailable,
@@ -17185,7 +17186,7 @@ fn testing_history_observe_typed_case(
     };
     let sample = ComparisonSample::new(identity, reference, candidate)
         .with_replays(reference_replay, candidate_replay);
-    inputs.push(crate::Encoding::alloc_datatree(&evidence_tree));
+    inputs.push(crate::Encoding::alloc_dyn(&evidence_tree));
     reference_values.push(model_value);
     candidate_values.push(actual_value);
     compare_samples(relation.clone(), [sample])
@@ -17416,7 +17417,7 @@ fn jet_jit_testing_histories(
         );
     }
     let (command_descriptor, strategy) =
-        if command_type == "DataTree" || command_type.starts_with("DataTree|") {
+        if command_type == "Dyn" || command_type.starts_with("Dyn|") {
             (
                 None,
                 jet_foundation::TestingHistory::HistorySchemaStrategy::new(command_type.clone()),

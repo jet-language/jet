@@ -2,7 +2,6 @@
 // checked frame/place access; registered Core/Prelude routes live in Routes.
 use jet_foundation.[
     MIRAccess,
-    MIRBasicBlock,
     MIRBinaryOp,
     MIRBlockID,
     MIRCallArg,
@@ -18,7 +17,6 @@ use jet_foundation.[
     MIRPlace,
     MIRPlaceBase,
     MIRPlaceID,
-    MIRProgram,
     MIRProjection,
     MIRStringPart,
     MIRType,
@@ -38,23 +36,27 @@ use jet_sema.[
     sema_checked_const_char,
 ]
 
-fn jet_eval_find_function(program: MIRProgram, id: MIRFunctionID) -> MIRFunction? {
-    loop function in program.functions {
-        if function.id == id -> return Val(function)
+// Lookups borrow machine.program through the machine's row maps
+// (jet_eval_program_rows): only the selected row, or field, is copied out.
+fn jet_eval_function_row(machine: JetEvalMachine, id: MIRFunctionID) -> Int? {
+    machine.rows.functions.get(id.value)
+}
+
+fn jet_eval_find_function(machine: JetEvalMachine, id: MIRFunctionID) -> MIRFunction? {
+    row :: jet_eval_function_row(machine, id) ?? return None
+    Val(machine.program.functions[row])
+}
+
+fn jet_eval_function_block_row(machine: JetEvalMachine, function: Int, id: MIRBlockID) -> Int? {
+    loop index in 0..<machine.program.functions[function].blocks.len() {
+        if machine.program.functions[function].blocks[index].id == id -> return Val(index)
     }
     None
 }
 
-fn jet_eval_block(function: MIRFunction, id: MIRBlockID) -> MIRBasicBlock? {
-    loop block in function.blocks {
-        if block.id == id -> return Val(block)
-    }
-    None
-}
-
-fn jet_eval_place(function: MIRFunction, id: MIRPlaceID) -> MIRPlace? {
-    loop place in function.places {
-        if place.id == id -> return Val(place)
+fn jet_eval_function_place(machine: JetEvalMachine, function: Int, id: MIRPlaceID) -> MIRPlace? {
+    loop index in 0..<machine.program.functions[function].places.len() {
+        if machine.program.functions[function].places[index].id == id -> return Val(machine.program.functions[function].places[index])
     }
     None
 }
@@ -91,24 +93,23 @@ fn jet_eval_shared_write(machine: &JetEvalMachine, index: Int, access: MIRAccess
     jet_eval_drop_value(&machine, previous, span)
 }
 
-fn jet_eval_field_name(program: MIRProgram, id: MIRFieldID) -> String? {
-    loop row in program.fields {
-        if row.id == id -> return Val(row.field.name)
-    }
-    None
+fn jet_eval_field_name(machine: JetEvalMachine, id: MIRFieldID) -> String? {
+    row :: machine.rows.fields.get(id.value) ?? return None
+    Val(machine.program.fields[row].field.name)
 }
 
 fn jet_eval_static(machine: &JetEvalMachine, name: String, span: Span) -> JetEvalRuntimeValue? {
     if machine.config.globals.get(name) == .Val(provided) -> return Val(JetEvalRuntimeValue.Data{value: provided})
-    loop constant in machine.program.constants {
-        if constant.key == name -> return jet_eval_constant_runtime(constant.value, &machine, span)
+    row :: machine.rows.constants.get(name) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR global `{name}` is not provided by the evaluation")
+        return None
     }
-    jet_eval_compiler_fail(&machine, span, "MIR global `{name}` is not provided by the evaluation")
-    None
+    constant :: ~machine.program.constants[row].value
+    jet_eval_constant_runtime(constant, &machine, span)
 }
 
 fn jet_eval_field(value: JetEvalRuntimeValue, field: MIRFieldID, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
-    name :: jet_eval_field_name(machine.program, field) ?? {
+    name :: jet_eval_field_name(machine, field) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR field ID is missing")
         return None
     }
@@ -541,18 +542,18 @@ fn jet_eval_read_base(machine: &JetEvalMachine, frame_index: Int, base: MIRPlace
 // A base that is itself an address or shared capture cell is read through
 // first; that temporary is discharged before returning.
 fn jet_eval_read_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIRPlaceID, span: Span) -> JetEvalRuntimeValue? {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR frame function is unavailable")
         return None
     }
-    place :: jet_eval_place(function, place_id) ?? {
+    place :: jet_eval_function_place(machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR place is unavailable")
         return None
     }
     if place.projections.len() == 0 && place.base == .Local(local) {
         uninit_fixed := false
-        loop row in function.locals {
-            if row.id == local && row.uninit && row.ty.kind == .FixedList(_, _) -> uninit_fixed = true
+        loop index in 0..<machine.program.functions[function].locals.len() {
+            if machine.program.functions[function].locals[index].id == local && machine.program.functions[function].locals[index].uninit && machine.program.functions[function].locals[index].ty.kind == .FixedList(_, _) -> uninit_fixed = true
         }
         current :: machine.frames[frame_index].locals.get(local.value) ?? return None
         if uninit_fixed && current == .Aggregate(aggregate) {
@@ -601,7 +602,7 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
     projection :: projections[position]
     if projection == {
         .Field(field, _) -> {
-            name :: jet_eval_field_name(machine.program, field) ?? {
+            name :: jet_eval_field_name(machine, field) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR field ID is missing")
                 return None
             }
@@ -712,7 +713,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
         projection :: projections[position]
         if projection == {
             .Field(field, _) -> {
-                name :: jet_eval_field_name(machine.program, field) ?? return None
+                name :: jet_eval_field_name(machine, field) ?? return None
                 if aggregate == .Struct(type_name, fields) {
                     updated_fields := fields
                     loop index in 0..<updated_fields.len() {
@@ -915,10 +916,10 @@ fn jet_eval_write_base(machine: &JetEvalMachine, frame_index: Int, base: MIRPlac
 fn jet_eval_take_partial_fixed_list_base(machine: &JetEvalMachine, frame_index: Int, base: MIRPlaceBase, span: Span) -> JetEvalRuntimeValue? {
     if base == {
         .Local(local_id) -> {
-            function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? return None
+            function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? return None
             local := MIRLocal?{None}
-            loop candidate in function.locals {
-                if candidate.id == local_id -> local = Val(candidate)
+            loop index in 0..<machine.program.functions[function].locals.len() {
+                if machine.program.functions[function].locals[index].id == local_id -> local = Val(machine.program.functions[function].locals[index])
             }
             row :: local ?? return None
             length := MIRMeasure?{None}
@@ -1004,12 +1005,12 @@ fn jet_eval_fixed_backing_write(machine: &JetEvalMachine, frame_index: Int, root
 }
 
 fn jet_eval_write_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIRPlaceID, value: JetEvalRuntimeValue, span: Span) -> Bool {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR frame function is unavailable")
         jet_eval_drop_value(&machine, value, span)
         return false
     }
-    place :: jet_eval_place(function, place_id) ?? {
+    place :: jet_eval_function_place(machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR write targets an unavailable place")
         jet_eval_drop_value(&machine, value, span)
         return false
@@ -1101,29 +1102,23 @@ fn jet_eval_mark_base_moved(machine: &JetEvalMachine, frame_index: Int, base: MI
 }
 
 fn jet_eval_partial_fixed_list_move_is_drop(machine: JetEvalMachine, frame_index: Int) -> Bool Never! {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? return false
-    frame :: machine.frames[frame_index]
-    block := MIRBasicBlock?{None}
-    loop candidate in function.blocks {
-        if candidate.id == frame.block -> block = Val(candidate)
-    }
-    row :: block ?? return false
-    if frame.ip <= 0 || frame.ip >= row.instructions.len() -> return false
-    move_instruction :: row.instructions[frame.ip - 1]
-    drop_instruction :: row.instructions[frame.ip]
-    result :: move_instruction.result ?? return false
-    if drop_instruction.operation == {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? return false
+    block :: jet_eval_function_block_row(machine, function, machine.frames[frame_index].block) ?? return false
+    ip :: machine.frames[frame_index].ip
+    if ip <= 0 || ip >= machine.program.functions[function].blocks[block].instructions.len() -> return false
+    result :: machine.program.functions[function].blocks[block].instructions[ip - 1].result ?? return false
+    if machine.program.functions[function].blocks[block].instructions[ip].operation == {
         .Drop(value, _) -> value == result
         else -> false
     }
 }
 
 fn jet_eval_move_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIRPlaceID, span: Span) -> JetEvalRuntimeValue? {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR frame function is unavailable")
         return None
     }
-    place :: jet_eval_place(function, place_id) ?? {
+    place :: jet_eval_function_place(machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR move targets an unavailable place")
         return None
     }
@@ -1454,12 +1449,12 @@ fn jet_eval_binary(machine: &JetEvalMachine, op: MIRBinaryOp, left: JetEvalRunti
 }
 
 fn jet_eval_value_type(machine: &JetEvalMachine, frame_index: Int, value: MIRValueID, span: Span) -> MIRType? {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR interpolation function is unavailable")
         return None
     }
-    loop fact in function.values {
-        if fact.id == value -> return Val(fact.ty)
+    loop index in 0..<machine.program.functions[function].values.len() {
+        if machine.program.functions[function].values[index].id == value -> return Val(machine.program.functions[function].values[index].ty)
     }
     jet_eval_compiler_fail(&machine, span, "MIR interpolation value has no type fact")
     None

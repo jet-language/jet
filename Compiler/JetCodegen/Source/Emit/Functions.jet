@@ -59,7 +59,13 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) ->
     "let mut {jet_rust_emit_local_slot(local.id)}: Option<{jet_rust_emit_type(&ctx, local.ty)}> = None;"
 }
 
-fn jet_rust_emit_value_declaration(ctx: &JetRustEmitContext, value: MIRValueFact) -> String Never! {
+// MIRRust emit_slots: a `Global` read of a shared constant holds the shared
+// value in a `JetSharedSlot`, whose readers borrow it in place.
+fn jet_rust_emit_value_declaration(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueFact) -> String Never! {
+    if jet_rust_emit_shared_constant_value(&ctx, function, value.id) {
+        root :: ~ctx.config.root_prefix
+        return "let mut {jet_rust_emit_value_slot(value.id)}: {root}JetSharedSlot<{jet_rust_emit_type(&ctx, value.ty)}> = {root}JetSharedSlot::empty();"
+    }
     "let mut {jet_rust_emit_value_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;"
 }
 
@@ -1006,6 +1012,7 @@ fn jet_rust_emit_trait_default_args(method: MIRTraitMethod) -> String Never! {
     args.join(", ")
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_trait_method
 fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: MIRTraitDef, method: MIRTraitMethod, lines: &[String]) Never! {
     default_id :: method.default ?? {
         &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
@@ -1013,21 +1020,21 @@ fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: M
     }
     found := false
     valid := true
-    loop function in jet_rust_emit_function_rows(ctx, default_id) {
-        if function.id == default_id {
+    if jet_rust_emit_function_index(ctx, default_id) == .Val(function_index) {
+        if ctx.program.functions[function_index].id == default_id {
             found = true
-            if function.name != method.name || function.generic_params.len() > 0 || function.capture_params.len() > 0 || function.failure != method.failure || !mir_type_same_checked_type(function.return_type, method.return_type) {
+            if ctx.program.functions[function_index].name != method.name || ctx.program.functions[function_index].generic_params.len() > 0 || ctx.program.functions[function_index].capture_params.len() > 0 || ctx.program.functions[function_index].failure != method.failure || !mir_type_same_checked_type(ctx.program.functions[function_index].return_type, method.return_type) {
                 valid = false
             }
-            if function.form == {
+            if ctx.program.functions[function_index].form == {
                 .TraitMethod(_, trait_ref, self_access, serde) -> {
                     if trait_ref.id != definition.id || trait_ref.name != definition.key || self_access != method.self_access || serde != None -> valid = false
                 }
                 else -> valid = false
             }
             expected_index := 0
-            loop parameter in function.params {
-                if jet_rust_emit_is_receiver(function, parameter.index) -> next
+            loop parameter in ctx.program.functions[function_index].params {
+                if jet_rust_emit_is_receiver(ctx.program.functions[function_index], parameter.index) -> next
                 if expected_index >= method.params.len() {
                     valid = false
                     next
@@ -1049,10 +1056,10 @@ fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: M
         &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
         return
     }
-    loop function in jet_rust_emit_function_rows(ctx, default_id) {
-        if function.id == default_id {
+    if jet_rust_emit_function_index(ctx, default_id) == .Val(function_index) {
+        if ctx.program.functions[function_index].id == default_id {
             &lines.push("    {jet_rust_emit_trait_method_head(&ctx, definition.name, method)} {{")
-            &lines.push("        {jet_rust_emit_function_name(&ctx, function.id)}({jet_rust_emit_trait_default_args(method)})")
+            &lines.push("        {jet_rust_emit_function_name(&ctx, default_id)}({jet_rust_emit_trait_default_args(method)})")
             &lines.push("    }}")
         }
     }
@@ -1080,8 +1087,8 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     self_access := MIRAccess?{None}
     owner := MIRType?{None}
     // MIRRust emit_impl: a codec impl bridges the Jet `encode`/`decode` verbs to
-    // the runtime `__jet_Encode::jet_encode(&self) -> DataTree` and the static
-    // `__jet_Decode::jet_decode(&DataTree) -> Result<Self, Vec<FieldError>>`.
+    // the runtime `__jet_Encode::jet_encode(&self) -> Dyn` and the static
+    // `__jet_Decode::jet_decode(&Dyn) -> Result<Self, Vec<FieldError>>`.
     encode_codec := false
     decode_codec := false
     if function.form == {
@@ -1170,7 +1177,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
         name :: jet_rust_emit_trait_param_name(parameter, index)
         scalar_by_ref :: arithmetic && !jet_rust_emit_type_is_borrowed(parameter.ty)
         if {
-            decode_codec -> &params.push("{name}: &{ctx.config.root_prefix}jet_std::DataTree")
+            decode_codec -> &params.push("{name}: &{ctx.config.root_prefix}jet_std::Dyn")
             scalar_by_ref -> &params.push("{name}: &{jet_rust_emit_type(&ctx, parameter.ty)}")
             else -> &params.push("{if parameter.access == MIRAccess.Move -> "mut " else -> ""}{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
         }
@@ -1186,7 +1193,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
         return
     }
     if decode_codec && (self_access != None || index != 1) {
-        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Decode implementation method is not static with one argument", "the codec bridge renders Decode as `jet_decode(tree: &DataTree)`", Val(function.span))
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Decode implementation method is not static with one argument", "the codec bridge renders Decode as `jet_decode(tree: &Dyn)`", Val(function.span))
         return
     }
     // Codec, compiler-generated and compiler-owned trait rows carry identity
@@ -1231,7 +1238,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     if encode_codec -> method_name = "jet_encode"
     if decode_codec -> method_name = "jet_decode"
     return_type :: if {
-        encode_codec -> "{ctx.config.root_prefix}jet_std::DataTree"
+        encode_codec -> "{ctx.config.root_prefix}jet_std::Dyn"
         decode_codec -> "Result<Self, Vec<{ctx.config.root_prefix}jet_std::FieldError>>"
         else -> jet_rust_emit_type(&ctx, function.return_type)
     }
@@ -1253,6 +1260,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     &lines.push("")
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_impl
 fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRImplDef, lines: &[String]) Never! {
     previous_generic_params := ctx.current_generic_params
     impl_type_params :: jet_rust_emit_type_application_generic_params(&ctx, implementation.self_type)
@@ -1279,8 +1287,8 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
                     if implementation.serde == None && (required.default == None || implementation.delegation != None) {
                         implemented := false
                         loop method_id in implementation.methods {
-                            loop function in jet_rust_emit_function_rows(ctx, method_id) {
-                                if function.id == method_id && function.name == required.name && (ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, function)) -> implemented = true
+                            if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
+                                if ctx.program.functions[function_index].id == method_id && ctx.program.functions[function_index].name == required.name && (ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[function_index])) -> implemented = true
                             }
                         }
                         if !implemented -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl omits a required method", "every checked trait method without a default must have one impl method row", Val(implementation.span))
@@ -1297,7 +1305,10 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
     }
     loop method_id in implementation.methods {
         found := false
-        loop function in jet_rust_emit_function_rows(ctx, method_id) {
+        if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
+            // The emitters below write through `ctx`, so they take a copy of
+            // the row, as the one-row adapter this replaces did.
+            function :: ~ctx.program.functions[function_index]
             if function.id == method_id {
                 found = true
                 if ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, function) {
@@ -1468,7 +1479,7 @@ fn jet_rust_emit_native_codec_type_def(ctx: &JetRustEmitContext, implementation:
 // reads back from the lowered template, so the printed body is checked
 // against what sema generated instead of re-deriving serde markers the MIR
 // does not carry (`#[Flatten]`, a `validate` block, defaults): every literal
-// string in body order, the key of every `DataTree.field` lookup in body
+// string in body order, the key of every `Dyn.field` lookup in body
 // order, and the one journey origin every `Err` return claims (a call
 // statement, empty when none). A call to another codec method of the same
 // direction (a nested field or payload's `decode`/`encode`) is what the
@@ -1479,6 +1490,7 @@ struct JetRustEmitCodecTemplate {
     origin: String
 }
 
+// Rust: none (Jet-only pass)
 fn jet_rust_emit_codec_call_allowed(ctx: &JetRustEmitContext, codec: MIRSerdeCodec?, callee: MIRCallee) -> Bool Never! {
     if codec == None -> return false
     target := MIRFunctionID?{None}
@@ -1489,8 +1501,8 @@ fn jet_rust_emit_codec_call_allowed(ctx: &JetRustEmitContext, codec: MIRSerdeCod
         else -> {}
     }
     id :: target ?? return false
-    loop candidate in jet_rust_emit_function_rows(ctx, id) {
-        if candidate.id == id && candidate.form == .TraitMethod(_, _, _, serde) -> return serde == codec
+    if jet_rust_emit_function_index(ctx, id) == .Val(candidate_index) {
+        if ctx.program.functions[candidate_index].id == id && ctx.program.functions[candidate_index].form == .TraitMethod(_, _, _, serde) -> return serde == codec
     }
     false
 }
@@ -1543,7 +1555,7 @@ fn jet_rust_emit_codec_template(ctx: &JetRustEmitContext, function: MIRFunction)
                 .Semantic(operation) -> {
                     if operation == {
                         .HandleMethod(call, _, args, _, _) -> {
-                            if jet_rust_emit_prelude_symbol(&ctx, call).ends_with("jet_datatree_field") {
+                            if jet_rust_emit_prelude_symbol(&ctx, call).ends_with("jet_dyn_field") {
                                 if args.len() != 1 -> return None
                                 field_key :: texts_by_value.get(jet_rust_emit_id_key(args[0].value)) ?? return None
                                 &field_keys.push(field_key)
@@ -1659,7 +1671,7 @@ fn jet_rust_emit_native_derived_decode(ctx: &JetRustEmitContext, implementation:
             if !jet_rust_emit_same_texts(keys, template.field_keys) -> return false
             required := [Bool]{}
             loop key in keys -> &required.push(template.texts.contains("E2410: missing required field `{key}`"))
-            &body.push("if !matches!(__jet_tree, {root}jet_std::DataTree::Object(_)) {{ {origin}return Err(vec![{root}jet_std::FieldError {{ path: String::new(), reason: \"expected an object\".to_string() }}]); }}")
+            &body.push("if !matches!(__jet_tree, {root}jet_std::Dyn::Object(_)) {{ {origin}return Err(vec![{root}jet_std::FieldError {{ path: String::new(), reason: \"expected an object\".to_string() }}]); }}")
             &body.push("let mut __jet_errors: Vec<{root}jet_std::FieldError> = Vec::new();")
             steps :: jet_rust_emit_native_record_decode(&ctx, definition, "Self", "", fields, keys, required, "__jet_tree")
             loop step in steps -> &body.push(step)
@@ -1702,7 +1714,7 @@ fn jet_rust_emit_native_derived_decode(ctx: &JetRustEmitContext, implementation:
         }
         else -> return false
     }
-    &lines.push("fn jet_decode(__jet_tree: &{root}jet_std::DataTree) -> Result<Self, Vec<{root}jet_std::FieldError>> {{")
+    &lines.push("fn jet_decode(__jet_tree: &{root}jet_std::Dyn) -> Result<Self, Vec<{root}jet_std::FieldError>> {{")
     &lines.push("    {body.join("\n    ")}")
     &lines.push("}}")
     &lines.push("")
@@ -1728,7 +1740,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
     body := [String]{}
     if definition.kind == {
         .Struct(fields, _) -> {
-            &body.push("let mut __jet_pairs: Vec<(String, {root}jet_std::DataTree)> = Vec::new();")
+            &body.push("let mut __jet_pairs: Vec<(String, {root}jet_std::Dyn)> = Vec::new();")
             // Every key must appear in the template in field order; a
             // flattened field has no key of its own.
             cursor := 0
@@ -1750,7 +1762,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                     &body.push("__jet_pairs.push(({quoted}.to_string(), {root}jet_codec_encode(0, {value})));")
                 }
             }
-            &body.push("{root}jet_std::DataTree::Object(__jet_pairs)")
+            &body.push("{root}jet_std::Dyn::Object(__jet_pairs)")
         }
         .Enum(variants, _) -> {
             if variants.len() == 0 -> return false
@@ -1760,10 +1772,10 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                 head :: jet_rust_emit_enum_variant_name(&ctx, definition.id, variant.name)
                 wire :: jet_rust_emit_quote(variant.wire_name)
                 if variant.payload == {
-                    .Unit -> &arms.push("{head} => {root}jet_std::DataTree::Text({wire}.to_string()),")
+                    .Unit -> &arms.push("{head} => {root}jet_std::Dyn::Text({wire}.to_string()),")
                     .Single(_) -> {
                         value :: if jet_rust_emit_equality_edge_boxed(definition, variant.name) -> "__jet_value.as_ref()" else -> "__jet_value"
-                        &arms.push("{head}(__jet_value) => {root}jet_std::DataTree::Object(vec![({wire}.to_string(), {root}jet_codec_encode(0, {value}))]),")
+                        &arms.push("{head}(__jet_value) => {root}jet_std::Dyn::Object(vec![({wire}.to_string(), {root}jet_codec_encode(0, {value}))]),")
                     }
                     .Named(fields) -> {
                         bindings := [String]{}
@@ -1775,7 +1787,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                             &pairs.push("({jet_rust_emit_quote(field.name)}.to_string(), {root}jet_codec_encode(0, {value}))")
                         }
                         pattern :: if bindings.len() == 0 -> ".." else -> bindings.join(", ")
-                        &arms.push("{head} {{ {pattern} }} => {root}jet_std::DataTree::Object(vec![({wire}.to_string(), {root}jet_std::DataTree::Object(vec![{pairs.join(", ")}]))]),")
+                        &arms.push("{head} {{ {pattern} }} => {root}jet_std::Dyn::Object(vec![({wire}.to_string(), {root}jet_std::Dyn::Object(vec![{pairs.join(", ")}]))]),")
                     }
                 }
             }
@@ -1783,7 +1795,7 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
         }
         else -> return false
     }
-    &lines.push("fn jet_encode(&self) -> {root}jet_std::DataTree {{")
+    &lines.push("fn jet_encode(&self) -> {root}jet_std::Dyn {{")
     &lines.push("    {body.join("\n    ")}")
     &lines.push("}}")
     &lines.push("")
@@ -1814,7 +1826,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     loop line in partial_lines -> &lines.push("    {line}")
     loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
     values_start :: lines.len()
-    loop value in function.values -> &lines.push("    {jet_rust_emit_value_declaration(&ctx, value)}")
+    loop value in function.values -> &lines.push("    {jet_rust_emit_value_declaration(&ctx, function, value)}")
     values_end :: lines.len()
     // Slots that park later payloads of a moved enum subject.
     loop value in function.values {

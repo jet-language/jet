@@ -838,11 +838,11 @@ fn jet_http_route_param<T: __jet_Decode>(
     let Some(raw) = jet_http_route_raw(req, name)? else {
         return Ok(None);
     };
-    let text = jet_std::DataTree::Text(raw.clone());
+    let text = jet_std::Dyn::Text(raw.clone());
     if let Ok(value) = T::jet_decode(&text) {
         return Ok(Some(value));
     }
-    let tree = jet_std::parse_json_typed_datatree(&raw).map_err(|_| ())?;
+    let tree = jet_std::parse_json_typed_dyn(&raw).map_err(|_| ())?;
     T::jet_decode(&tree).map(Some).map_err(|_| ())
 }
 
@@ -851,51 +851,51 @@ fn jet_http_route_optional<T: __jet_Decode>(
     name: &str,
 ) -> Result<T, ()> {
     let Some(raw) = jet_http_route_raw(req, name)? else {
-        return T::jet_decode(&jet_std::DataTree::Null).map_err(|_| ());
+        return T::jet_decode(&jet_std::Dyn::Null).map_err(|_| ());
     };
-    let text = jet_std::DataTree::Text(raw.clone());
+    let text = jet_std::Dyn::Text(raw.clone());
     if let Ok(value) = T::jet_decode(&text) {
         return Ok(value);
     }
-    let tree = jet_std::parse_json_typed_datatree(&raw).map_err(|_| ())?;
+    let tree = jet_std::parse_json_typed_dyn(&raw).map_err(|_| ())?;
     T::jet_decode(&tree).map_err(|_| ())
 }
 
-fn jet_http_contract_object(value: &jet_std::DataTree) -> Option<&[(String, jet_std::DataTree)]> {
+fn jet_http_contract_object(value: &jet_std::Dyn) -> Option<&[(String, jet_std::Dyn)]> {
     match value {
-        jet_std::DataTree::Object(entries) => Some(entries.as_slice()),
+        jet_std::Dyn::Object(entries) => Some(entries.as_slice()),
         _ => None,
     }
 }
 
 fn jet_http_contract_field<'a>(
-    object: &'a [(String, jet_std::DataTree)],
+    object: &'a [(String, jet_std::Dyn)],
     name: &str,
-) -> Option<&'a jet_std::DataTree> {
+) -> Option<&'a jet_std::Dyn> {
     object
         .iter()
         .find_map(|(field, value)| (field == name).then_some(value))
 }
 
 fn jet_http_contract_text<'a>(
-    object: &'a [(String, jet_std::DataTree)],
+    object: &'a [(String, jet_std::Dyn)],
     name: &str,
 ) -> Option<&'a str> {
     match jet_http_contract_field(object, name)? {
-        jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => Some(value),
+        jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => Some(value),
         _ => None,
     }
 }
 
 pub(crate) fn jet_http_route_schema_matches(
-    value: &jet_std::DataTree,
-    schema: &jet_std::DataTree,
+    value: &jet_std::Dyn,
+    schema: &jet_std::Dyn,
 ) -> bool {
     let Some(schema_object) = jet_http_contract_object(schema) else {
         return false;
     };
     if let Some(any_of) = jet_http_contract_field(schema_object, "anyOf") {
-        let jet_std::DataTree::Array(items) = any_of else {
+        let jet_std::Dyn::Array(items) = any_of else {
             return false;
         };
         return items
@@ -903,7 +903,7 @@ pub(crate) fn jet_http_route_schema_matches(
             .any(|candidate| jet_http_route_schema_matches(value, candidate));
     }
     if let Some(one_of) = jet_http_contract_field(schema_object, "oneOf") {
-        let jet_std::DataTree::Array(items) = one_of else {
+        let jet_std::Dyn::Array(items) = one_of else {
             return false;
         };
         return items
@@ -916,25 +916,25 @@ pub(crate) fn jet_http_route_schema_matches(
         return true;
     };
     match kind {
-        "null" => matches!(value, jet_std::DataTree::Null),
-        "boolean" => matches!(value, jet_std::DataTree::Bool(_)),
+        "null" => matches!(value, jet_std::Dyn::Null),
+        "boolean" => matches!(value, jet_std::Dyn::Bool(_)),
         "integer" => match value {
-            jet_std::DataTree::Int(_) => true,
-            jet_std::DataTree::Number(number) => number.parse::<i64>().is_ok(),
+            jet_std::Dyn::Int(_) => true,
+            jet_std::Dyn::Number(number) => number.parse::<i64>().is_ok(),
             _ => false,
         },
         "number" => matches!(
             value,
-            jet_std::DataTree::Int(_)
-                | jet_std::DataTree::Float(_)
-                | jet_std::DataTree::Number(_)
+            jet_std::Dyn::Int(_)
+                | jet_std::Dyn::Float(_)
+                | jet_std::Dyn::Number(_)
         ),
         "string" => matches!(
             value,
-            jet_std::DataTree::Text(_) | jet_std::DataTree::TypedText(_)
+            jet_std::Dyn::Text(_) | jet_std::Dyn::TypedText(_)
         ),
         "array" => {
-            let jet_std::DataTree::Array(items) = value else {
+            let jet_std::Dyn::Array(items) = value else {
                 return false;
             };
             let Some(item_schema) = jet_http_contract_field(schema_object, "items") else {
@@ -945,7 +945,7 @@ pub(crate) fn jet_http_route_schema_matches(
                 .all(|item| jet_http_route_schema_matches(item, item_schema))
         }
         "object" => {
-            let jet_std::DataTree::Object(fields) = value else {
+            let jet_std::Dyn::Object(fields) = value else {
                 return false;
             };
             let Some(properties) = jet_http_contract_field(schema_object, "properties")
@@ -957,17 +957,17 @@ pub(crate) fn jet_http_route_schema_matches(
                 schema_object,
                 "additionalProperties",
             ) {
-                Some(jet_std::DataTree::Bool(value)) => *value,
+                Some(jet_std::Dyn::Bool(value)) => *value,
                 None => true,
                 _ => false,
             };
             let required = match jet_http_contract_field(schema_object, "required") {
                 None => Vec::new(),
-                Some(jet_std::DataTree::Array(names)) => names
+                Some(jet_std::Dyn::Array(names)) => names
                     .iter()
                     .filter_map(|name| match name {
-                        jet_std::DataTree::Text(name)
-                        | jet_std::DataTree::TypedText(name) => Some(name.as_str()),
+                        jet_std::Dyn::Text(name)
+                        | jet_std::Dyn::TypedText(name) => Some(name.as_str()),
                         _ => None,
                     })
                     .collect::<Vec<_>>(),
@@ -1000,11 +1000,11 @@ fn jet_http_route_validate_body(
     let contract_object = jet_http_contract_object(&contract).ok_or(())?;
     let request_body = jet_http_contract_field(contract_object, "request_body").ok_or(())?;
     let request_body_object = match request_body {
-        jet_std::DataTree::Null => return Ok(request),
+        jet_std::Dyn::Null => return Ok(request),
         value => jet_http_contract_object(value).ok_or(())?,
     };
     let required = match jet_http_contract_field(request_body_object, "required") {
-        Some(jet_std::DataTree::Bool(value)) => *value,
+        Some(jet_std::Dyn::Bool(value)) => *value,
         _ => return Err(()),
     };
     let schema = jet_http_contract_field(request_body_object, "schema").ok_or(())?;
@@ -1018,7 +1018,7 @@ fn jet_http_route_validate_body(
         return Ok(request);
     }
     let text = String::from_utf8(bytes.clone()).map_err(|_| ())?;
-    let value = jet_std::parse_json_typed_datatree(&text).map_err(|_| ())?;
+    let value = jet_std::parse_json_typed_dyn(&text).map_err(|_| ())?;
     if !jet_http_route_schema_matches(&value, schema) {
         return Err(());
     }
@@ -1102,7 +1102,7 @@ fn jet_http_require_route_contract(
             ),
         );
     }
-    let Some(jet_std::DataTree::Array(responses)) =
+    let Some(jet_std::Dyn::Array(responses)) =
         jet_http_contract_field(contract_object, "responses")
     else {
         jet_panic(
@@ -1124,7 +1124,7 @@ fn jet_http_require_route_contract(
             ),
         );
     }
-    let Some(jet_std::DataTree::Array(_)) =
+    let Some(jet_std::Dyn::Array(_)) =
         jet_http_contract_field(contract_object, "parameters")
     else {
         jet_panic(
@@ -1136,7 +1136,7 @@ fn jet_http_require_route_contract(
             ),
         );
     };
-    let Some(jet_std::DataTree::Array(_)) =
+    let Some(jet_std::Dyn::Array(_)) =
         jet_http_contract_field(contract_object, "security")
     else {
         jet_panic(
@@ -1149,11 +1149,11 @@ fn jet_http_require_route_contract(
         );
     };
     match jet_http_contract_field(contract_object, "request_body") {
-        Some(jet_std::DataTree::Null) => {}
-        Some(jet_std::DataTree::Object(body)) => {
+        Some(jet_std::Dyn::Null) => {}
+        Some(jet_std::Dyn::Object(body)) => {
             let valid_required = matches!(
                 jet_http_contract_field(body, "required"),
-                Some(jet_std::DataTree::Bool(_))
+                Some(jet_std::Dyn::Bool(_))
             );
             let valid_content_type = jet_http_contract_text(body, "content_type")
                 .is_some_and(|value| !value.is_empty());

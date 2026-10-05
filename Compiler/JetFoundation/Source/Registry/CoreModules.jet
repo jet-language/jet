@@ -24,7 +24,12 @@ pub struct CoreModuleDeclaration {
 }
 
 pub fn core_module_export(module_name: String) -> CoreModuleExportNames? {
-    loop row in CORE_MODULE_EXPORTS {
+    core_module_export_in(CORE_MODULE_EXPORTS, module_name)
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn core_module_export_in(rows: [CoreModuleExportNames], module_name: String) -> CoreModuleExportNames? {
+    loop row in rows {
         if row.module_name == module_name -> return Val(row)
     }
     None
@@ -129,19 +134,37 @@ pub fn core_module_type_leaf(name: String) -> String Never! {
         }
     }
     if {
-        namespace_separator >= 0 -> String.from_bytes(bytes[namespace_separator + 2..bytes.len()]) ?? name
-        module_separator >= 0 -> String.from_bytes(bytes[module_separator + 1..bytes.len()]) ?? name
+        namespace_separator >= 0 -> String.from_bytes(bytes[namespace_separator + 2..<bytes.len()]) ?? name
+        module_separator >= 0 -> String.from_bytes(bytes[module_separator + 1..<bytes.len()]) ?? name
         else -> name
     }
 }
 
 pub fn core_type_modules(name: String) -> [String] Never! {
-    leaf :: core_module_type_leaf(name)
+    core_type_modules_in(CORE_MODULE_EXPORTS, core_module_type_leaf(name))
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn core_type_modules_in(rows: [CoreModuleExportNames], leaf: String) -> [String] Never! {
     modules := [String]{}
-    loop row in CORE_MODULE_EXPORTS {
+    loop row in rows {
         if core_module_export_has_name(row.type_exports, leaf) -> &modules.push(row.module_name)
     }
     modules
+}
+
+// Rust `CoreModuleExports::core_enum_variants`: the canonical variant names of
+// a Core enum leaf. Payload shape stays with the checked source declaration.
+pub fn core_enum_variants(name: String) -> [String]? {
+    core_enum_variants_in(CORE_ENUM_ROWS, name)
+}
+
+fn core_enum_variants_in(rows: [CoreModuleTypeExport], name: String) -> [String]? {
+    loop row in rows {
+        if row.name != name -> next
+        if row.kind == .Enum(variants) -> return Val(variants)
+    }
+    None
 }
 fn core_module_source_declaration_line(source_text: String, module_name: String) -> String? {
     prefix := "module {module_name} "
@@ -150,7 +173,7 @@ fn core_module_source_declaration_line(source_text: String, module_name: String)
     loop line_start < source_bytes.len() {
         line_end := line_start
         loop line_end < source_bytes.len() && source_bytes[line_end] != (U8{10}) -> line_end += 1
-        line :: String.from_bytes(source_bytes[line_start..line_end]) ?? return None
+        line :: String.from_bytes(source_bytes[line_start..<line_end]) ?? return None
         trimmed := line.trim()
         if trimmed.starts_with(prefix) -> return Val(trimmed)
         line_start = line_end + 1
@@ -166,7 +189,7 @@ fn core_module_source_brace_clause(line: String, name: String) -> String? {
     end := 0
     loop end < bytes.len() {
         if bytes[end] == (U8{125}) {
-            return Val(String.from_bytes(bytes[0..end]) ?? "")
+            return Val(String.from_bytes(bytes[0..<end]) ?? "")
         }
         end += 1
     }
@@ -181,7 +204,7 @@ fn core_module_source_bracket_clause(line: String, name: String) -> String? {
     end := 0
     loop end < bytes.len() {
         if bytes[end] == (U8{93}) {
-            return Val(String.from_bytes(bytes[0..end]) ?? "")
+            return Val(String.from_bytes(bytes[0..<end]) ?? "")
         }
         end += 1
     }
@@ -212,7 +235,7 @@ fn core_module_source_leaf_kind(text: String) -> CoreLeafKind? {
     if value == "crypto_nominal" -> return Val(CoreLeafKind.CryptoNominal)
     if value.starts_with("plain(") && value.ends_with(")") {
         bytes := value.bytes()
-        variants_text :: String.from_bytes(bytes[6..bytes.len() - 1]) ?? return None
+        variants_text :: String.from_bytes(bytes[6..<bytes.len() - 1]) ?? return None
         variants := [String]{}
         if variants_text.trim() != "" {
             loop variant in variants_text.split("|") {
@@ -225,7 +248,7 @@ fn core_module_source_leaf_kind(text: String) -> CoreLeafKind? {
     }
     if value.starts_with("generic(") && value.ends_with(")") {
         bytes := value.bytes()
-        arity_text :: String.from_bytes(bytes[8..bytes.len() - 1]) ?? return None
+        arity_text :: String.from_bytes(bytes[8..<bytes.len() - 1]) ?? return None
         arity :: Int.parse(arity_text.trim()) ?? return None
         if arity < 0 -> return None
         return Val(CoreLeafKind.Generic{arity: arity})

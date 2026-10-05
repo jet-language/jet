@@ -117,8 +117,9 @@ fn jet_eval_route_exact_integer_host(row: MIRPreludeCall, args: [JetEvalRuntimeV
 }
 
 fn jet_eval_route_exact_integer_member_host(member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
-    loop row in machine.program.prelude_calls {
-        if row.family == MIRPreludeFamily.Overflow && row.module_name == "core.numeric" && row.member == member && jet_eval_route_exact_integer_symbol(member, mir_symbol_name(row.symbol)) {
+    loop index in 0..<machine.program.prelude_calls.len() {
+        if machine.program.prelude_calls[index].family == MIRPreludeFamily.Overflow && machine.program.prelude_calls[index].module_name == "core.numeric" && machine.program.prelude_calls[index].member == member && jet_eval_route_exact_integer_symbol(member, mir_symbol_name(machine.program.prelude_calls[index].symbol)) {
+            row :: ~machine.program.prelude_calls[index]
             return jet_eval_route_exact_integer_host(row, args, &machine, result_ty, span)
         }
     }
@@ -137,8 +138,9 @@ fn jet_eval_route_is_exact_integer(value: TComptimeValue) -> Bool Never! {
 }
 
 fn jet_eval_route_exact_compare_member_host(member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
-    loop row in machine.program.prelude_calls {
-        if row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.compare" && row.member == member && mir_symbol_name(row.symbol) == "jet_int_compare" {
+    loop index in 0..<machine.program.prelude_calls.len() {
+        if machine.program.prelude_calls[index].family == MIRPreludeFamily.BuiltinMethod && machine.program.prelude_calls[index].module_name == "core.compare" && machine.program.prelude_calls[index].member == member && mir_symbol_name(machine.program.prelude_calls[index].symbol) == "jet_int_compare" {
+            row :: ~machine.program.prelude_calls[index]
             return jet_eval_host_row(&machine, row, args, result_ty, span)
         }
     }
@@ -217,8 +219,9 @@ fn jet_eval_route_precise_symbol(module_name: String, member: String, symbol: St
 }
 
 fn jet_eval_route_precise_member_host(module_name: String, member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
-    loop row in machine.program.prelude_calls {
-        if row.family == MIRPreludeFamily.PreciseBuiltin && row.module_name == module_name && row.member == member && row.signature.arity == args.len() && jet_eval_route_precise_symbol(module_name, member, mir_symbol_name(row.symbol)) {
+    loop index in 0..<machine.program.prelude_calls.len() {
+        if machine.program.prelude_calls[index].family == MIRPreludeFamily.PreciseBuiltin && machine.program.prelude_calls[index].module_name == module_name && machine.program.prelude_calls[index].member == member && machine.program.prelude_calls[index].signature.arity == args.len() && jet_eval_route_precise_symbol(module_name, member, mir_symbol_name(machine.program.prelude_calls[index].symbol)) {
+            row :: ~machine.program.prelude_calls[index]
             return jet_eval_host_row(&machine, row, args, result_ty, span)
         }
     }

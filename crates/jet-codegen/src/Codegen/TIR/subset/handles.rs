@@ -390,24 +390,24 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("HTTPResponse", "body", 0) => THandleOp::HTTPRespField("body"),
         ("HTTPResponse", "header", 1) => THandleOp::HTTPRespHeader,
         ("HTTPResponse", "trailers", 1) => THandleOp::HTTPRespTrailers,
-        // D-SERDE-ACCESS=B: DataTree accessor methods.
-        ("DataTree", "field", 1) => THandleOp::DataTreeField,
-        ("DataTree", "at", 1) => THandleOp::DataTreeAt,
-        ("DataTree", "int", 0) => THandleOp::DataTreeInt,
-        ("DataTree", "text", 0) => THandleOp::DataTreeText,
-        ("DataTree", "bool", 0) => THandleOp::DataTreeBool,
-        ("DataTree", "float", 0) => THandleOp::DataTreeFloat,
-        ("DataTree", "to_text", 0) => THandleOp::DataTreeToText,
-        ("DataTree", "equal_unordered", 1) => THandleOp::DataTreeEqualUnordered,
+        // D-SERDE-ACCESS=B: Dyn accessor methods.
+        ("Dyn", "field", 1) => THandleOp::DynField,
+        ("Dyn", "at", 1) => THandleOp::DynAt,
+        ("Dyn", "int", 0) => THandleOp::DynInt,
+        ("Dyn", "text", 0) => THandleOp::DynText,
+        ("Dyn", "bool", 0) => THandleOp::DynBool,
+        ("Dyn", "float", 0) => THandleOp::DynFloat,
+        ("Dyn", "to_text", 0) => THandleOp::DynToText,
+        ("Dyn", "equal_unordered", 1) => THandleOp::DynEqualUnordered,
         // D-SERDE-ACCESS=B: same accessors on JSON/Data (the dynamic parse result).
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "int", 0) => THandleOp::JSONInt,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "to_text", 0) => THandleOp::JSONToText,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
+        ("JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
+        ("JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
+        ("JSON" | "TOML" | "YAML" | "CSV", "int", 0) => THandleOp::JSONInt,
+        ("JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
+        ("JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
+        ("JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
+        ("JSON" | "TOML" | "YAML" | "CSV", "to_text", 0) => THandleOp::JSONToText,
+        ("JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
             THandleOp::JSONEqualUnordered
         }
         ("MIME", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {
@@ -626,7 +626,7 @@ pub(crate) fn handle_method_return_ty(
     let span = crate::Diagnostics::Span { start: 0, end: 0 };
     let mut sink = Vec::new();
     let ret = crate::Codegen::is_json_type_name(handle)
-        .then(|| crate::Sema::datatree_method_return(method, nargs).map(Some))
+        .then(|| crate::Sema::dyn_method_return(method, nargs).map(Some))
         .flatten()
         .or_else(|| crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| crate::Sema::encoding_handle_method_return(handle, method, nargs))

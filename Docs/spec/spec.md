@@ -402,7 +402,10 @@ evaluates its single final expression while building, and names bound inside a
 scope, other `name :: value` and `name := value` bindings remain runtime module
 globals; they do not require `#Persist`. `#Static NAME :: value` requests a
 stable-address Rust static when the contract needs one, and `#Inline NAME ::
-value` copies the value into use sites (D-CONSTMARK1). The retired `@NAME`
+value` copies the value into use sites (D-CONSTMARK1). Without a marker, an
+immutable constant whose value is a number, text, or a small record or enum
+case of those is copied into its use sites; a list or map is read through one
+shared item instead, and a large one is built once. The retired `@NAME`
 spelling teaches E0388. `#Persist name := value` additionally marks hot-reload state on a bare
 binding (D-VERDICT-1308-1, D-PERSIST1).
 
@@ -506,9 +509,9 @@ trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
 
 ### Encoding and validation
 
-`Encode.encode(self) -> DataTree` and
-`Decode.decode(tree: DataTree) -> Self ![FieldError]` are ordinary trait methods.
-`DataTree.decode<T>()` is the public typed-dispatch path for primitive,
+`Encode.encode(self) -> Dyn` and
+`Decode.decode(tree: Dyn) -> Self ![FieldError]` are ordinary trait methods.
+`Dyn.decode<T>()` is the public typed-dispatch path for primitive,
 container, generated, and hand-written implementations. A built-in derive adds
 typed Jet items beside the marked type and sends them through the same sema, TIR,
 and codegen path as hand-written members. JSON therefore compares the same
@@ -1305,7 +1308,7 @@ The ratified instances use the same grid:
 | dependency | build / dependency | E1204 binds resolved bytes to the lockfile hash; trust commands record the grant decision |
 | link | link / foreign signature | D-FFI-UNIFY1 gives a foreign declaration one binder descriptor and one effect leaf |
 | schema binder | link / foreign signature | D-BOUND-BIND1 turns a JSON, CSV, SQL DDL, XML, or proto schema into visible Jet source, hashed and stamped in its header |
-| wire | run / wire value | D-SERDE1 and D-ENC1 use `DataTree` and one typed codec path |
+| wire | run / wire value | D-SERDE1 and D-ENC1 use `Dyn` and one typed codec path |
 | validation | run / wire value | D-VALIDATE1 accumulates `FieldError` values; D-VALIDATE-DECODE1 gives decode failures one shape |
 | migration | run / wire value | D-MIGRATE1 and D-MIGRATE4 apply named schema operations transparently through typed decode |
 | fact | all rows / fact | D-FACT-LAW1 and D-FACT-FLOW1 keep dataflow facts in the shared sema ledger |
@@ -2326,7 +2329,7 @@ See [channel buffering](#bounded-buffering-law) and
 The [core-library reference](reference/core-library.md) is the complete
 user-facing module and signature index. Compiler-known `core.*` namespaces
 cover file, terminal, environment, process, math, random, time, arguments,
-numeric, and encoding operations. `core.encoding` uses one `DataTree` value for
+numeric, and encoding operations. `core.encoding` uses one `Dyn` value for
 JSON, CSV, TOML, and YAML and supports `#Codable`. Every fallible call returns
 `T !E`; handle it with `??`, a pattern test, or contextual `?(text)`. Importing
 a core namespace does not by itself emit every helper: code generation keeps
@@ -2706,7 +2709,7 @@ the script and compiles against provisioned Lua 5.4. Each `open()` owns an
 independent in-process `lua_State`; the script runs once for session
 initialization and its mutable state persists within that session.
 
-**Boundary.** Generated functions use `DataTree`; sibling
+**Boundary.** Generated functions use `Dyn`; sibling
 `<name>_typed<T>` adapters require `T: [Encode, Decode]` and validate the
 decoded result. Null, booleans, integers, floats, strings, lists, and
 string-keyed maps retain their data meaning. Cycles, unsupported keys/values,
@@ -2797,7 +2800,7 @@ to `_` in Jet names, and writes a typed cache. `open()` starts one supervised
 worker accepts only binder-approved function identities; Jet never sends source
 or an arbitrary command string. The shipped supervisor is POSIX-only.
 
-**Boundary.** Each call accepts and returns one `DataTree` through a
+**Boundary.** Each call accepts and returns one `Dyn` through a
 length-framed structured JSON protocol. Objects, lists, integers, floats,
 booleans, text, and null retain their data meaning. Requests and responses are
 capped at 1 MiB and depth 64. Exceptions become
@@ -2820,7 +2823,7 @@ the worker calls the exact Perl name. `open()` starts one supervised POSIX
 worker, loads the script once, and retains package and lexical state. Generated
 entries carry a fixed allowlist.
 
-**Boundary.** Each entry accepts and returns one `DataTree` through Perl's core
+**Boundary.** Each entry accepts and returns one `Dyn` through Perl's core
 `JSON::PP`. Requests and responses are length-framed and capped at 1 MiB;
 stdout is not a result channel. Exceptions become
 `PerlError.CommandFailed`; stderr, paths, stack traces, and exception text stay
@@ -2842,7 +2845,7 @@ Jet-compatible name. The generated allowlist fixes the callable identity;
 source and arbitrary commands never cross the API.
 
 **Boundary.** `open()` starts one supervised worker and loads the script once,
-retaining its state. Methods accept and return `DataTree` through Ruby's
+retaining its state. Methods accept and return `Dyn` through Ruby's
 standard JSON library. Length-framed messages are capped at 1 MiB and stdout
 is not the result channel. Ruby exceptions become
 `RubyError.CommandFailed`; exception text, traces, stderr, and paths stay
@@ -2863,7 +2866,7 @@ argument by value; references, defaults, variadics, nested functions, and
 unsupported generated names are rejected. The generated cache uses a native C
 pool bridge.
 
-**Boundary.** PHP calls accept and return one `DataTree` over a length-framed
+**Boundary.** PHP calls accept and return one `Dyn` over a length-framed
 JSON protocol. The pool has four workers per pool and eight generation-tagged
 pool slots. A worker allowlist fixes the function identity; stdout is not the
 result channel. `PhpError` distinguishes not-running, timeout, cancellation,
@@ -2882,7 +2885,7 @@ and the descriptor/provenance record. See
 parses the script without running its top-level body and binds direct named
 functions with one required argument. `open()` starts a supervised worker,
 loads the script once, and retains its state. A normal function round-trips
-`DataTree`; `<name>_table<T>` maps ordinary `[T]` rows to a data frame and back
+`Dyn`; `<name>_table<T>` maps ordinary `[T]` rows to a data frame and back
 through the same framed channel.
 
 **Boundary.** `<name>_plot` runs on an isolated SVG device and returns a
@@ -2932,13 +2935,13 @@ file-backed type library; the registered form is
 restricted, out-parameter, or unrepresentable members. Primitive VARIANT types
 become Jet scalars, BSTR becomes `String`, dispatch interfaces become
 move-only opaque `Object` values, and VARIANT/SAFEARRAY values cross as bounded
-`DataTree`. Dynamic name-based `IDispatch` is available only inside explicit
+`Dyn`. Dynamic name-based `IDispatch` is available only inside explicit
 `#Unsafe`; generated safe calls use fixed DISPIDs. Each live object owns a
 single-threaded apartment and a generation-tagged handle tied to its creating
 thread. `close(^object)` releases it and balances `CoUninitialize`; stale,
 cross-thread, and double-close uses fail before invocation. HRESULT and
 EXCEPINFO become `ComError` variants without vendor text. Calls carry
-`FFI.Com`; frames and DataTree depth are capped at 1 MiB and 64.
+`FFI.Com`; frames and Dyn depth are capped at 1 MiB and 64.
 
 **Evidence.** Provenance hashes the extracted type-library schema and generated
 surface. A released file-backed binding may omit the original `.tlb`, but when

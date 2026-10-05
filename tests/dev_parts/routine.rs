@@ -5318,7 +5318,7 @@ fn run() {
 /// and hand that `f64` to `int_to_string`, declared `i64`.
 ///
 /// Separately, the compiler-written `Frame::decode` decodes a `[Float#4]`
-/// field: `result_payload` yields `f64` while `lower_datatree_decode_list_items`
+/// field: `result_payload` yields `f64` while `lower_dyn_decode_list_items`
 /// hardcoded `list_push`, declared `i64`. The codec is generated for every
 /// structurally eligible struct (D-META-AUTO1=A), so declaring `Frame` emits
 /// that site — `require_funcs` proves it rather than assuming it.
@@ -6618,6 +6618,53 @@ fn persist_binding_codegen_uses_safe_prelude_cell() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-MEM-COPYSEM1: a read of a folded list constant borrows its one shared
+/// table (`JetSharedSlot`); passing it to a read parameter, indexing it or
+/// taking its length never copies the rows.
+#[test]
+fn list_constant_reads_borrow_the_shared_table() {
+    let dir = std::env::temp_dir().join(format!("jet_shared_constant_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("table.jet");
+    let rows = (0..400)
+        .map(|index| {
+            format!(
+                "    Row{{code: \"E{index:04}\", meaning: \"meaning number {index} padded so the table is large\"}},"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let src = [
+        "struct Row {\n    code: String\n    meaning: String\n}\n\nROWS :: prep { [Row]{\n",
+        rows.as_str(),
+        "\n} }\n\nfn find_in(rows: [Row], code: String) -> Bool {\n    loop row in rows {\n        if row.code == code -> return true\n    }\n    false\n}\n\nfn run() {\n    if find_in(ROWS, \"E0399\") -> print(ROWS[3].meaning)\n    print(\"{ROWS.len()}\")\n}\n",
+    ]
+    .concat();
+    fs::write(&path, &src).unwrap();
+    let shown = path.to_string_lossy().to_string();
+    let rust = jet::compile_with_path(&src, &shown)
+        .unwrap_or_else(|diags| {
+            panic!(
+                "front end rejected fixture:\n{}",
+                jet::render_diagnostics(&shown, &src, &diags)
+            )
+        })
+        .rust;
+    assert!(
+        rust.contains("JetSharedSlot::new(std::rc::Rc::clone(value))"),
+        "a list constant must hand reads its shared value:\n{rust}"
+    );
+    assert!(
+        rust.contains("JetSharedSlot::empty()"),
+        "a read of a list constant must hold the shared table, not a copy:\n{rust}"
+    );
+    assert!(
+        rust.contains("ROWS_shared();"),
+        "each read of a list constant must take the shared value, not a copy:\n{rust}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// D-PERSIST1: `#Persist` module bindings survive a real hot reload when the
 /// shape is compatible; an incompatible shape reset reports the exact reason
 /// and reseeds from the new initializer. Shared store is consulted by both
@@ -6643,15 +6690,15 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> DataTree {
-        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
-        return DataTree.Object(m)
+    fn encode(self) -> Dyn {
+        m :: [String:Dyn]{ "email": Dyn.Text(~self.addr) }
+        return Dyn.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email [FieldError]! {
-        f := &tree.field("email") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> Email [FieldError]! {
+        f := &tree.field("email") ?? Dyn.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
     }

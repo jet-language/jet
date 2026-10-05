@@ -49,6 +49,7 @@ const TIR_CORE_CALLS_PATH = "crates/jet-codegen/src/Codegen/TIR/lower/method_cal
 const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet";
 const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
 const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
+const CORE_ENUM_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet";
 const CORE_EXPORTS_PATH = "crates/jet-foundation/src/CoreModuleExports.rs";
 const CORE_SOURCE_TEXTS_PATH = "crates/jet-sema/src/CoreSourceTexts.rs";
 const CORE_ROWS_GENERATOR_PATH = "Compiler/Bootstrap/generate-core-sources.mjs";
@@ -800,11 +801,11 @@ const RATIFIED_DECLINES = {
   "gap.core.sync.locked": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
   "gap.core.encoding.xml.close": ["D-CORESURF-SMALL1", "XMLWriter.finish"],
   "gap.core.encoding.xml.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
-  "gap.core.encoding.xml.end": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.end": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"],
   "gap.core.encoding.xml.flush": ["D-CORESURF-SMALL1", "XMLWriter.flush"],
-  "gap.core.encoding.xml.indent": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
-  "gap.core.encoding.xml.name": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
-  "gap.core.encoding.xml.nodetype": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.indent": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.name": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.nodetype": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"],
   "gap.core.encoding.xml.write": ["D-CORESURF-SMALL1", "XMLWriter.write"],
   "gap.core.encoding.xml.clear": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
   "gap.core.process.id": ["D-CORESURF-SMALL1", "ProcessChild.id"],
@@ -2704,6 +2705,34 @@ function writeCoreCallRegistry(source, declarations) {
     generatedCoreCallRegistry(source, tirSource, declarations),
   );
 }
+// Core enum leaves for the Jet compiler's `core_enum_variants` (the Rust
+// CoreModuleExports query): the CoreLeafKind::Enum rows of the export table,
+// in Core.jet module declaration order.
+function generatedCoreEnumRows(source, declarations) {
+  const lines = [
+    "// BEGIN GENERATED CORE ENUM ROWS",
+    "// Source: " + CORE_SOURCE_PATH,
+    "// Source SHA-256: " + sha256(source),
+    "// Core enum leaves in Core.jet module declaration order; the first row",
+    "// naming a type is its canonical variant list.",
+    "pub CORE_ENUM_ROWS :: [CoreModuleTypeExport]{",
+  ];
+  for (const module of declarations.modules) {
+    for (const type of module.types) {
+      if (type.genericArity || !(type.variants && type.variants.length)) continue;
+      lines.push(
+        "    CoreModuleTypeExport{name: " + jetStringExpression(type.name) +
+        ", kind: CoreLeafKind.Enum{variants: [String]{" +
+        type.variants.map(jetStringExpression).join(", ") + "}}},",
+      );
+    }
+  }
+  lines.push("}", "// END GENERATED CORE ENUM ROWS", "");
+  return lines.join("\n");
+}
+function writeCoreEnumRows(source, declarations) {
+  writeFileSync(join(ROOT, CORE_ENUM_ROWS_PATH), generatedCoreEnumRows(source, declarations));
+}
 
 function writeRingDependencyTable(source, declarations) {
   const path = join(ROOT, RING_LAYER_PATH);
@@ -2776,6 +2805,10 @@ function validateGeneratedViews(source, declarations) {
   }
   // The Jet-hosted CLI's Core row table is generated from the export table.
   execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH), "--check"], { cwd: ROOT, stdio: "inherit" });
+  if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
+      read(CORE_ENUM_ROWS_PATH) !== generatedCoreEnumRows(source, declarations)) {
+    throw new Error("CoreEnumRows.jet is stale; run --write to regenerate from Core.jet");
+  }
   validateCoreCallRegistry(source, declarations);
 }
 
@@ -2789,6 +2822,7 @@ function writeCoreViews() {
   writeEncodingFormatTable(source, declarations);
   writeCoreCallTable(source, declarations);
   writeCoreCallRegistry(source, declarations);
+  writeCoreEnumRows(source, declarations);
   process.stdout.write("wrote generated Core views, dispatcher, and Jet CoreCall registry\n");
   return { source, declarations };
 }

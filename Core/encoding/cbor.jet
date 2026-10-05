@@ -1,5 +1,6 @@
-use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.math as math
+use core.time as time
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -26,15 +27,13 @@ fn safe_limits() -> EncodingLimits Never! {
 }
 
 
-// core.encoding.cbor — RFC 8949 definite-length CBOR as DataTree.
+// core.encoding.cbor — RFC 8949 definite-length CBOR as Dyn.
 //
-// Major types 0–5 and common simple values (false, true, null) are
-// implemented in Jet. Definite-length text, arrays, maps, and float64 are
-// supported. Indefinite-length items, tags, half/single-precision floats, and
-// bstr → `DataTree` (no Bytes variant on the public tree) are rejected as
-// `Unsupported` rather than silently coerced. Canonical encode
-// (`to_bytes_canonical`) uses shortest integer forms and sorted map keys by
-// encoded byte order.
+// Major types 0–5, byte strings, float64, and false/true/null are implemented
+// in Jet. DateTime decodes tag 0 RFC 3339 text or tag 1 epoch seconds and
+// encodes canonical tag 0 text. Other tags, indefinite-length items, and
+// half/single-precision floats fail as Unsupported. Canonical encode uses
+// shortest integer forms and sorts map keys by encoded byte order.
 pub struct CBOROptions {
     pub max_depth: Int
     pub max_items: Int
@@ -70,25 +69,25 @@ pub struct CBORError {
     pub reason: String
 }
 
-pub fn parse(data: [U8]) -> DataTree EncodingError! { decode(data) }
+pub fn parse(data: [U8]) -> Dyn EncodingError! { decode(data) }
 
-pub fn decode(data: [U8]) -> DataTree EncodingError! { decode_cbor(data) }
+pub fn decode(data: [U8]) -> Dyn EncodingError! { decode_cbor(data) }
 
-pub fn to_bytes(value: DataTree) -> [U8] Never! { encode_cbor(value, false) }
+pub fn to_bytes(value: Dyn) -> [U8] Never! { encode_cbor(value, false) }
 
-pub fn to_bytes_canonical(value: DataTree) -> [U8] Never! { encode_cbor(value, true) }
+pub fn to_bytes_canonical(value: Dyn) -> [U8] Never! { encode_cbor(value, true) }
 
 pub fn reader(data: [U8]) -> CBORReader Never! { {bytes: data, index: 0} }
 
 pub fn writer() -> CBORWriter Never! { {parts: [U8]{}} }
 
 impl CBORWriter {
-    pub fn write(&self, value: DataTree) Never! {
+    pub fn write(&self, value: Dyn) Never! {
         chunk :: encode_cbor(value, false)
         loop b in chunk -> &self.parts.push(b)
     }
 
-    pub fn write_canonical(&self, value: DataTree) Never! {
+    pub fn write_canonical(&self, value: Dyn) Never! {
         chunk :: encode_cbor(value, true)
         loop b in chunk -> &self.parts.push(b)
     }
@@ -96,7 +95,7 @@ impl CBORWriter {
     pub fn to_bytes(self) -> [U8] Never! { self.parts }
 }
 
-fn decode_cbor(data: [U8]) -> DataTree EncodingError! {
+fn decode_cbor(data: [U8]) -> Dyn EncodingError! {
     p := CBORReader{bytes: data, index: 0}
     value :: &p.read_value(1)
     if p.index != data.len() {
@@ -135,7 +134,7 @@ impl CBORReader {
         Ok(b)
     }
 
-    fn read_value(&self, depth: Int) -> DataTree EncodingError! {
+    fn read_value(&self, depth: Int) -> Dyn EncodingError! {
         if depth > safe_limits().max_depth {
             return Err(self.fail(EncodingErrorKind.Limit, "CBOR nesting exceeds EncodingLimits.safe().max_depth"))
         }
@@ -144,30 +143,62 @@ impl CBORReader {
         major :: (head_int >> 5) & 7
         extra :: head_int & 31
         if extra == 31 {
-            return Err(self.fail(EncodingErrorKind.Unsupported, "indefinite-length CBOR is not part of the Core DataTree adapter"))
+            return Err(self.fail(EncodingErrorKind.Unsupported, "indefinite-length CBOR is not part of the Core Dyn adapter"))
         }
         if major == 7 {
-            if extra == 20 -> return Ok(DataTree.Bool(false))
-            if extra == 21 -> return Ok(DataTree.Bool(true))
-            if extra == 22 -> return Ok(DataTree.Null)
+            if extra == 20 -> return Ok(Dyn.Bool(false))
+            if extra == 21 -> return Ok(Dyn.Bool(true))
+            if extra == 22 -> return Ok(Dyn.Null)
             if extra == 27 {
                 bits :: &self.read_length(extra)
                 value :: math.from_bits(bits) ?? return Err(self.fail(EncodingErrorKind.Syntax, "CBOR float64 value could not be reconstructed"))
-                return Ok(DataTree.Float(value))
+                return Ok(Dyn.Float(value))
             }
             return Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR simple value or floating-point width"))
         }
         if major == 6 {
-            return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR tags are not projected into DataTree"))
+            tag :: &self.read_length(extra)
+            if tag != 0 && tag != 1 -> return Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR tag {tag}"))
+            payload :: &self.read_value(depth + 1)
+            if tag == 0 {
+                text :: payload.text() ?? return Err(self.fail(EncodingErrorKind.Syntax, "CBOR tag 0 requires RFC 3339 text"))
+                raw :: text.bytes()
+                if raw.len() >= 28 && (raw[raw.len() - 9] == (U8{43}) || raw[raw.len() - 9] == (U8{45})) && raw[raw.len() - 6] == (U8{58}) && raw[raw.len() - 3] == (U8{58}) {
+                    return Err(self.fail(EncodingErrorKind.Unsupported, "date-time offsets with seconds are unsupported"))
+                }
+                stamp :: Dyn.Text(text)
+                z :: stamp.decode<ZonedDateTime>() ?? return Err(self.fail(EncodingErrorKind.Syntax, "invalid CBOR tag 0 date-time"))
+                if z.offset_seconds() %% 60 != 0 -> return Err(self.fail(EncodingErrorKind.Unsupported, "date-time offset must be whole minutes"))
+                return Ok(Dyn.DateTime(z))
+            }
+            if payload == {
+                .Int(seconds) -> return Ok(Dyn.DateTime(time.zoned(time.from_unix_seconds(seconds), time.utc())))
+                .Float(seconds) -> {
+                    if !math.is_finite(seconds) || seconds < -9223372036854775808.0 || seconds >= 9223372036854775808.0 {
+                        return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR epoch seconds are outside the supported range"))
+                    }
+                    whole :: math.floor(seconds)
+                    nanos :: Int{math.round((seconds - whole) * 1000000000.0)}
+                    dt :: time.from_unix_seconds(Int{whole}).plus_duration(time.duration_ns(nanos))
+                    return Ok(Dyn.DateTime(time.zoned(dt, time.utc())))
+                }
+                else -> return Err(self.fail(EncodingErrorKind.Syntax, "CBOR tag 1 requires Int or Float epoch seconds"))
+            }
         }
         n :: &self.read_length(extra)
         if major == {
-            0 -> return Ok(DataTree.Int(n))
-            1 -> return Ok(DataTree.Int(-1 - n))
+            0 -> return Ok(Dyn.Int(n))
+            1 -> return Ok(Dyn.Int(-1 - n))
             else -> { _ := 0 }
         }
         if major == 2 {
-            return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR byte strings have no DataTree.Bytes variant; encode as text or use a typed field"))
+            if n > safe_limits().max_item_bytes -> return Err(self.fail(EncodingErrorKind.Limit, "CBOR byte string exceeds EncodingLimits.safe().max_item_bytes"))
+            raw := [U8]{}
+            loop _ in 0..<n {
+                b :: &self.read_byte()
+                &raw.push(b)
+            }
+            return Ok(Dyn.Bytes(raw))
         }
         if major == 3 {
             if n > safe_limits().max_item_bytes {
@@ -179,32 +210,32 @@ impl CBORReader {
                 &raw.push(b)
             }
             text :: String.from_bytes(raw) ?? return Err(self.fail(EncodingErrorKind.Syntax, "CBOR text string is not valid UTF-8"))
-            return Ok(DataTree.Text(text))
+            return Ok(Dyn.Text(text))
         }
         if major == 4 {
             if n > safe_limits().max_item_bytes {
                 return Err(self.fail(EncodingErrorKind.Limit, "CBOR array exceeds EncodingLimits.safe().max_item_bytes"))
             }
-            items := [DataTree]{}
+            items := [Dyn]{}
             loop _ in 0..<n {
                 item :: &self.read_value(depth + 1)
                 &items.push(item)
             }
-            return Ok(DataTree.Array(items))
+            return Ok(Dyn.Array(items))
         }
         if major == 5 {
             if n > safe_limits().max_item_bytes {
                 return Err(self.fail(EncodingErrorKind.Limit, "CBOR map exceeds EncodingLimits.safe().max_item_bytes"))
             }
-            entries := [String:DataTree]{}
+            entries := Dyn.object()
             loop _ in 0..<n {
                 key_tree :: &self.read_value(depth + 1)
-                key :: key_tree.text() ?? return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR map keys must be text to land in DataTree.Object"))
-                if entries.has_key(key) -> return Err(self.fail(EncodingErrorKind.Syntax, "duplicate CBOR map key `{key}`"))
+                key :: key_tree.text() ?? return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR map keys must be text to land in Dyn.Object"))
+                if entries.has(key) -> return Err(self.fail(EncodingErrorKind.Syntax, "duplicate CBOR map key `{key}`"))
                 value :: &self.read_value(depth + 1)
-                _ :: &entries.add(key, value)
+                entries[key] = value
             }
-            return Ok(DataTree.Object(entries))
+            return Ok(entries)
         }
         Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR major type"))
     }
@@ -239,7 +270,7 @@ impl CBORReader {
     }
 }
 
-fn encode_cbor(value: DataTree, canonical: Bool) -> [U8] Never! {
+fn encode_cbor(value: Dyn, canonical: Bool) -> [U8] Never! {
     out := [U8]{}
     write_cbor(&out, value, canonical)
     out
@@ -249,7 +280,7 @@ fn cbor_push(out: &[U8], value: U8) {
     &out.push(value)
 }
 
-fn write_cbor(out: &[U8], value: DataTree, canonical: Bool) Never! {
+fn write_cbor(out: &[U8], value: Dyn, canonical: Bool) Never! {
     if value == {
         .Null -> { cbor_push(&out, U8{246}) }
         .Bool(v) -> {
@@ -266,27 +297,34 @@ fn write_cbor(out: &[U8], value: DataTree, canonical: Bool) Never! {
             write_cbor_head(&out, 3, raw.len())
             loop b in raw { cbor_push(&out, b) }
         }
+        .Bytes(raw) -> {
+            write_cbor_head(&out, 2, raw.len())
+            loop b in raw -> cbor_push(&out, b)
+        }
+        .DateTime(_) -> {
+            write_cbor_head(&out, 6, 0)
+            write_cbor(&out, Dyn.Text(value.to_text() ?? ""), canonical)
+        }
         .Array(items) -> { write_cbor_array(&out, items, canonical) }
-        .Object(entries) -> { write_cbor_object(&out, entries, canonical) }
+        .Object(_) -> { write_cbor_object(&out, value, canonical) }
     }
 }
 
-fn write_cbor_array(out: &[U8], items: [DataTree], canonical: Bool) {
+fn write_cbor_array(out: &[U8], items: [Dyn], canonical: Bool) {
     write_cbor_head(&out, 4, items.len())
     loop item in items -> write_cbor(&out, item, canonical)
 }
 
-fn write_cbor_object(out: &[U8], entries: [String:DataTree], canonical: Bool) {
+fn write_cbor_object(out: &[U8], entries: Dyn, canonical: Bool) {
     write_cbor_head(&out, 5, entries.len())
     if !canonical {
-        loop pair in entries {
-            write_cbor(&out, DataTree.Text(pair.key), canonical)
-            write_cbor(&out, pair.value, canonical)
+        loop key in entries.keys() {
+            write_cbor(&out, Dyn.Text(key), canonical)
+            write_cbor(&out, entries[key], canonical)
         }
         return
     }
-    keys := [String]{}
-    loop pair in entries -> &keys.push(pair.key)
+    keys := entries.keys()
     loop i in 0..<keys.len() {
         loop j in (i + 1)..<keys.len() {
             if compare_cbor_text(keys[j], keys[i]) < 0 {
@@ -297,8 +335,8 @@ fn write_cbor_object(out: &[U8], entries: [String:DataTree], canonical: Bool) {
         }
     }
     loop key in keys {
-        write_cbor(&out, DataTree.Text(key), canonical)
-        write_cbor(&out, entries.get(key) ?? DataTree.Null, canonical)
+        write_cbor(&out, Dyn.Text(key), canonical)
+        write_cbor(&out, entries[key], canonical)
     }
 }
 

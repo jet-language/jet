@@ -620,9 +620,14 @@ pub fn sema_collection_is_set(receiver: Type) -> Bool Never! {
 // The one lookup: the checked row for this receiver and method, with its
 // receiver-specific access and callback positions resolved.
 pub fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCollectionMethodContract? {
+    sema_collection_method_contract_in(COLLECTION_OPERATIONS, receiver, method)
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn sema_collection_method_contract_in(rows: [CollectionOperationRow], receiver: Type, method: String) -> SemaCollectionMethodContract? {
     kind :: sema_collection_kind(receiver) ?? return None
     family := sema_collection_family(kind)
-    loop row in COLLECTION_OPERATIONS {
+    loop row in rows {
         if row.name == method && row.status != CollectionStatus.Proposed && collection_receivers_accept(row.receivers, family) {
             callbacks := [Int]{}
             seeds := [Int]{}

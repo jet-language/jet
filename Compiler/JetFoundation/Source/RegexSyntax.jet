@@ -138,7 +138,7 @@ fn regex_syntax_parse_group(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
             }
             else -> {
                 end :: parser.byte_pos
-                other :: String.from_bytes(parser.bytes[kind_start..end]) ?? ""
+                other :: String.from_bytes(parser.bytes[kind_start..<end]) ?? ""
                 return Val(regex_syntax_error(parser, "unsupported group `?{other}`"))
             }
         }
@@ -259,7 +259,7 @@ fn regex_syntax_parse_unicode_class(parser: &RegexSyntaxParser) -> RegexSyntaxEr
     }
     if regex_syntax_bump(&parser) != Val(125) -> return Val(regex_syntax_error(parser, "missing `}}` in Unicode class"))
     end_byte :: parser.byte_pos - 1
-    name :: String.from_bytes(parser.bytes[start_byte..end_byte]) ?? ""
+    name :: String.from_bytes(parser.bytes[start_byte..<end_byte]) ?? ""
     if name == "L" || name == "Letter" || name == "N" || name == "Number" || name == "Alphabetic" || name == "White_Space" || name == "Whitespace" -> return None
     Val(regex_syntax_error(parser, "unsupported Unicode class `{name}`"))
 }

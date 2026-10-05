@@ -123,17 +123,17 @@ fn booking_schedule(index: testing.Count, name: String) -> testing.HistorySchedu
 
 fn booking_key(handle: testing.HandleID) -> String { "{handle.value}" }
 
-fn booking_public_state(states: [String:String]) -> DataTree {
-    values := [String:DataTree]{}
+fn booking_public_state(states: [String:String]) -> Dyn {
+    values := [String:Dyn]{}
     loop (key, state) in states {
-        values[key] = DataTree.Text(state)
+        values[key] = Dyn.Text(state)
     }
-    DataTree.Object(values)
+    Dyn.Object(values)
 }
 
 // Independent reference transition table.  It consumes typed commands only;
 // it never calls the production implementation or shares its defect logic.
-fn booking_model(commands: [BookingCommand]) -> DataTree {
+fn booking_model(commands: [BookingCommand]) -> Dyn {
     states := [String:String]{}
     loop command in commands {
         if command == {
@@ -153,7 +153,7 @@ fn booking_model(commands: [BookingCommand]) -> DataTree {
 
 // Candidate implementation with one deliberate observable defect: a retry
 // after timeout forgets to release the timed-out handle.
-fn booking_actual_bug(commands: [BookingCommand]) -> DataTree {
+fn booking_actual_bug(commands: [BookingCommand]) -> Dyn {
     states := [String:String]{}
     loop command in commands {
         if command == {
@@ -174,7 +174,7 @@ fn booking_actual_bug(commands: [BookingCommand]) -> DataTree {
 }
 
 // Correct production implementation kept separate from the reference model.
-fn booking_actual_correct(commands: [BookingCommand]) -> DataTree {
+fn booking_actual_correct(commands: [BookingCommand]) -> Dyn {
     states := [String:String]{}
     loop command in commands {
         if command == {
@@ -575,7 +575,7 @@ fn booking_concrete_strategy() -> testing.HistoryStrategy<BookingCommand> {
     }
 }
 
-fn counter_model(commands: [CounterCommand]) -> DataTree {
+fn counter_model(commands: [CounterCommand]) -> Dyn {
     value := 0
     loop command in commands {
         if command == {
@@ -584,10 +584,10 @@ fn counter_model(commands: [CounterCommand]) -> DataTree {
             else -> {}
         }
     }
-    DataTree.Int(value)
+    Dyn.Int(value)
 }
 
-fn counter_actual(commands: [CounterCommand]) -> DataTree {
+fn counter_actual(commands: [CounterCommand]) -> Dyn {
     value := 0
     loop command in commands {
         if command == {
@@ -596,10 +596,10 @@ fn counter_actual(commands: [CounterCommand]) -> DataTree {
             else -> {}
         }
     }
-    DataTree.Int(value)
+    Dyn.Int(value)
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: Dyn) -> Dyn { ~value }
 
 fn run() {
     defect_rules :: booking_strategy()

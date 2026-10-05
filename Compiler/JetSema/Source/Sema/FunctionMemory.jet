@@ -39,6 +39,9 @@ pub struct SemaFunctionMemoryFunction {
 
 pub struct SemaFunctionMemoryPlan {
     pub functions: [SemaFunctionMemoryFunction]
+    // Row position of the first function per `sema_function_memory_key`, so
+    // every body check finds its row without scanning the whole plan.
+    pub positions: [String:Int]
     pub diagnostics: [Diagnostic]
     pub complete: Bool
 }
@@ -57,8 +60,10 @@ struct SemaFunctionMemoryPolicy {
     explanation: String
 }
 
-fn sema_function_memory_span_equal(left: Span, right: Span) -> Bool Never! {
-    left.start == right.start && left.end == right.end
+// Exact function identity: module plus declaration span. The integers lead,
+// so no module identity text can collide with another key.
+fn sema_function_memory_key(module_identity: String, span: Span) -> String Never! {
+    "{span.start}:{span.end}:{module_identity}"
 }
 
 fn sema_function_memory_policy_scope_rank(scope: PolicyScope) -> Int Never! {
@@ -275,10 +280,14 @@ pub fn sema_function_memory_plan(modules: [SemaFunctionMemoryModuleInput]) -> Se
         functions[index] = function
     }
     complete := diagnostics.len() == 0
-    loop function in functions {
+    positions := [String:Int]{}
+    loop index in 0..<functions.len() {
+        function :: functions[index]
         if !function.complete -> complete = false
+        key :: sema_function_memory_key(function.module_identity, function.function.span)
+        if positions.get(key) == None -> positions[key] = index
     }
-    SemaFunctionMemoryPlan{functions: functions, diagnostics: diagnostics, complete: complete}
+    SemaFunctionMemoryPlan{functions: functions, positions: positions, diagnostics: diagnostics, complete: complete}
 }
 
 pub fn sema_function_memory_plan_from_graph(graph: SemaRegistrationGraph) -> SemaFunctionMemoryPlan {
@@ -314,10 +323,8 @@ pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclar
 }
 
 pub fn sema_function_memory_find(plan: SemaFunctionMemoryPlan, module_identity: String, span: Span) -> SemaFunctionMemoryFunction? {
-    loop function in plan.functions {
-        if function.module_identity == module_identity && sema_function_memory_span_equal(function.function.span, span) -> return Val(function)
-    }
-    None
+    position :: plan.positions.get(sema_function_memory_key(module_identity, span)) ?? return None
+    Val(plan.functions[position])
 }
 
 pub fn sema_function_memory_tir_promotion(promotion: GCPromotion) -> TGCPromotion Never! {

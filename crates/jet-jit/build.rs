@@ -339,12 +339,12 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
             "JetTLSVersion",
         ),
         // The carrier enum lives in Foundation; Codegen embeds this same file
-        // (`Codegen/mod.rs` DATATREE_PRELUDE_REEXPORT), so one source feeds
+        // (`Codegen/mod.rs` DYN_PRELUDE_REEXPORT), so one source feeds
         // both the AOT Prelude and the resident discriminant table.
         (
-            "DataTree",
-            "../jet-foundation/src/DataTree.rs",
-            "DataTree",
+            "Dyn",
+            "../jet-foundation/src/Dyn.rs",
+            "Dyn",
         ),
     ];
     let mut entries = Vec::new();
@@ -355,13 +355,13 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
             .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
         entries.push((jet_name, rust_enum_variants(&source, rust_name)));
     }
-    let data_tree = entries
+    let dyn_value = entries
         .iter()
-        .find(|(name, _)| *name == "DataTree")
+        .find(|(name, _)| *name == "Dyn")
         .map(|(_, variants)| variants.clone())
-        .expect("DataTree metadata");
+        .expect("Dyn metadata");
     for alias in ["JSON", "TOML", "YAML", "CSV"] {
-        entries.push((alias, data_tree.clone()));
+        entries.push((alias, dyn_value.clone()));
     }
 
     let mut body = String::from(
@@ -376,10 +376,10 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
     }
     body.push_str("        (jet_foundation::Syntax::TYPE_ORDERING, jet_foundation::Syntax::ORDERING_VARIANTS),\n");
     body.push_str("    ]\n}\n");
-    if let Some((_, variants)) = entries.iter().find(|(name, _)| *name == "DataTree") {
+    if let Some((_, variants)) = entries.iter().find(|(name, _)| *name == "Dyn") {
         for (index, variant) in variants.iter().enumerate() {
             body.push_str(&format!(
-                "\npub(crate) const PRELUDE_DATATREE_{}: i64 = {index};\n",
+                "\npub(crate) const PRELUDE_DYN_{}: i64 = {index};\n",
                 variant.to_ascii_uppercase()
             ));
         }

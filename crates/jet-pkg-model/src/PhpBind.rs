@@ -330,7 +330,7 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
     ));
     for name in functions {
         out.push_str(&format!(
-            r#"pub fn {name}(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {{
+            r#"pub fn {name}(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {{
     raw :: abi.{name}(pool.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)

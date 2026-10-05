@@ -273,56 +273,65 @@ fn jet_ring_insert_string(rows: &[String], value: String) Never! {
     rows[index] = value
 }
 
-fn jet_ring_has_string(rows: [String], value: String) -> Bool Never! {
-    loop row in rows {
-        if row == value -> return true
+// Stable scalar-position ordering, using the same key comparison as publication.
+// Rust: crates/jet-foundation/src/RingLayer.rs::classify_prelude_closure
+fn jet_ring_closure_order(rows: [JetRingLayerFact]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<rows.len() -> &order.push(index)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && !(rows[order[right]].key < rows[order[left]].key)) {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width = width * 2
     }
-    false
+    order
 }
 
-fn jet_ring_insert_layer_fact(rows: &[JetRingLayerFact], key: String, layer: MIRRuntimeLayer) Never! {
-    index := 0
-    loop index < rows.len() {
-        if rows[index].key == key -> return
-        if key < rows[index].key -> break
-        index += 1
-    }
-    &rows.push(JetRingLayerFact{key: key, layer: layer})
-    cursor := rows.len() - 1
-    loop cursor > index {
-        rows[cursor] = rows[cursor - 1]
-        cursor -= 1
-    }
-    rows[index] = JetRingLayerFact{key: key, layer: layer}
-}
-
+// Rust: crates/jet-foundation/src/RingLayer.rs::classify_prelude_closure
 pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] Never! {
     pending := [String]{}
+    pending_keys := [String:Bool]{}
+    classified := [String:Bool]{}
     loop root in roots {
-        if !jet_ring_is_closure_marker(root) -> jet_ring_insert_string(&pending, root)
+        if !jet_ring_is_closure_marker(root) && !(pending_keys.get(root) ?? false) {
+            &pending.push(root)
+            pending_keys[root] = true
+        }
     }
     closure := [JetRingLayerFact]{}
-    loop pending.len() > 0 {
-        current := pending[0]
-        loop index in 1..<pending.len() -> pending[index - 1] = pending[index]
-        _ := &pending.pop()
-        already_classified := false
-        loop row in closure {
-            if row.key == current -> already_classified = true
-        }
-        if already_classified -> next
-        jet_ring_insert_layer_fact(&closure, current, jet_ring_core_usage_layer(current))
+    cursor := 0
+    loop cursor < pending.len() {
+        current :: pending[cursor]
+        cursor += 1
+        pending_keys[current] = false
+        classified[current] = true
+        &closure.push(JetRingLayerFact{key: current, layer: jet_ring_core_usage_layer(current)})
         loop dependency in jet_ring_dependency_keys(current) {
-            if !jet_ring_has_string(pending, dependency) {
-                found := false
-                loop row in closure {
-                    if row.key == dependency -> found = true
-                }
-                if !found -> jet_ring_insert_string(&pending, dependency)
+            if !(pending_keys.get(dependency) ?? false) && !(classified.get(dependency) ?? false) {
+                &pending.push(dependency)
+                pending_keys[dependency] = true
             }
         }
     }
-    closure
+    ordered :: loop index in jet_ring_closure_order(closure) -> closure[index]
+    ordered
 }
 
 pub fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] Never! {

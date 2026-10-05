@@ -1412,7 +1412,7 @@ fn route_codec(ty: &Type) -> String {
         Type::Int | Type::IntN { .. } => "int".to_string(),
         Type::Float => "float".to_string(),
         Type::Bool => "bool".to_string(),
-        Type::Named(name) if matches!(name.as_str(), "JSON" | "Data") => "json".to_string(),
+        Type::Named(name) if matches!(name.as_str(), "JSON" | "Dyn") => "json".to_string(),
         _ => "string".to_string(),
     }
 }
@@ -1778,7 +1778,7 @@ fn is_resume_type_serializable(ty: &Type, named: &HashSet<String>) -> bool {
         Type::Named(name) => {
             matches!(
                 name.as_str(),
-                "Data" | "JSON" | "Date" | "DateTime" | "Decimal" | "Duration" | "Unit"
+                "Dyn" | "JSON" | "Date" | "DateTime" | "ZonedDateTime" | "Decimal" | "Duration" | "Unit"
             ) || named.contains(name)
         }
         Type::Apply { name, args } => {

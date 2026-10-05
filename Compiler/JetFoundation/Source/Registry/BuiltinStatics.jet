@@ -323,11 +323,17 @@ fn builtin_static_numeric_row(owner: String, method: String) -> BuiltinStaticRow
 // Every row for `owner.method`, across modules; the caller admits the one
 // whose module matches how the owner was named.
 pub fn builtin_static_rows(owner: String, method: String) -> [BuiltinStaticRow] Never! {
+    rows := builtin_static_rows_in(BUILTIN_STATIC_ROWS, owner, method)
+    if builtin_static_numeric_row(owner, method) == .Val(row) -> &rows.push(row)
+    rows
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn builtin_static_rows_in(table: [BuiltinStaticRow], owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := [BuiltinStaticRow]{}
-    loop row in BUILTIN_STATIC_ROWS {
+    loop row in table {
         if row.owner == owner && row.method == method -> &rows.push(row)
     }
-    if builtin_static_numeric_row(owner, method) == .Val(row) -> &rows.push(row)
     rows
 }
 

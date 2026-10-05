@@ -509,14 +509,14 @@ fn run() {
     }
 }
 
-/// D-DISPLAYDBG1: map iteration's tuple-like record can project its DataTree
+/// D-DISPLAYDBG1: map iteration's tuple-like record can project its Dyn
 /// value through the explicit Debug path on every execution tier.
 #[test]
-fn datatree_map_iteration_display_matches_every_tier() {
+fn dyn_map_iteration_display_matches_every_tier() {
     let src = r#"
 fn run() {
-    fields :: [String:DataTree]{
-        "key": DataTree.Object(["nested": DataTree.Int(1)])
+    fields :: [String:Dyn]{
+        "key": Dyn.Object(["nested": Dyn.Int(1)])
     }
     loop (key, value) in fields {
         print("{key}:{value:Debug}")
@@ -525,7 +525,7 @@ fn run() {
 }
 "#;
     assert_tiers_agree(
-        "datatree_map_iteration_display",
+        "dyn_map_iteration_display",
         src,
         "key:{\"nested\":1}\nkey:{\"nested\":1}\n",
     );

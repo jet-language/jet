@@ -23,16 +23,16 @@ pub fn assert_equal(comparison: TestComparison) -> Bool Never! {
 
 /// D-CALLBACK-ERR1=A: both callbacks share one failure type `E`, which the
 /// comparison passes up; two callbacks that cannot fail make it `Never`.
-pub fn compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E! {
+pub fn compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E! {
     normalized := relation
     if normalized.len() == 0 -> normalized = "typed_equality"
     if normalized == "ordered_effects" || normalized == "typed_failure" {
         return terminal_comparison(normalized, "relation requires recorded observations")
     }
     if cases.len() == 0 -> return terminal_comparison(normalized, "comparison needs at least one case")
-    inputs := [DataTree]{}
-    reference_values := [DataTree]{}
-    candidate_values := [DataTree]{}
+    inputs := [Dyn]{}
+    reference_values := [Dyn]{}
+    candidate_values := [Dyn]{}
     case_ids := [String]{}
     first_difference := -1
     loop i in 0..<cases.len() {
@@ -77,9 +77,9 @@ fn terminal_comparison(relation: String, reason: String) -> TestComparison {
         target: "embedded-prelude",
         seed: None,
         case_ids: [String]{},
-        inputs: [DataTree]{},
-        reference: [DataTree]{},
-        candidate: [DataTree]{},
+        inputs: [Dyn]{},
+        reference: [Dyn]{},
+        candidate: [Dyn]{},
         first_difference: -1,
         reason: reason,
         universal_proof: false,
