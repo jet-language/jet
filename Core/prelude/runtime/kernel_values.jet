@@ -122,7 +122,7 @@ struct JetDeferredClose<F: FnOnce> { close: F? }
 // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:200
 impl<F: FnOnce> JetDeferredClose<F> {
     fn new(close: F) -> JetDeferredClose<F> { JetDeferredClose{close: Val(^close)} }
-    fn run(self: &JetDeferredClose<F>) -> { if self.close.take() is Val(close) { close() } }
+    fn run(self: &JetDeferredClose<F>) -> { if self.close.take() == .Val(close) { close() } }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:210
 impl<F: FnOnce> Drop for JetDeferredClose<F> { fn drop(self: &JetDeferredClose<F>) -> { self.run() } }
@@ -311,14 +311,14 @@ impl<T: Clone, E: Clone> Loadable<T, E> {
     // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:510
     fn loaded(self) -> JetOutcome<T, JetAbsent> {
         if jet_loadable_has_value(self.loadable_tag()) {
-            if self is .Loaded(v) -> return Ok(v.clone())
+            if self == .Loaded(v) -> return Ok(v.clone())
             unreachable("loaded tag requires Loaded payload")
         } else { Err(JetAbsent{}) }
     }
     // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:518
     fn or_else(self, default: T) -> T {
         if jet_loadable_has_value(self.loadable_tag()) {
-            if self is .Loaded(v) -> return v.clone()
+            if self == .Loaded(v) -> return v.clone()
             unreachable("loaded tag requires Loaded payload")
         } else { default }
     }

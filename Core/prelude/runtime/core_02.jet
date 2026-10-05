@@ -742,32 +742,44 @@ fn jet_panic_rich(file: String, line: U32, fn_name: String, src_line: String, co
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2182
 pub fn jet_test_failure_message(file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, msg: String, locals: String) -> String {
-    if jet_testing_take_failure() is Val(failure) -> return jet_runtime_stop_report("E3001", file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail).rendered
+    if jet_testing_take_failure() == .Val(failure) -> return jet_runtime_stop_report("E3001", file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail).rendered
     jet_runtime_stop_report("E3001", file, line, fn_name, src_line, col, caret_len, msg, locals).rendered
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2214
 fn jet_eq<T: PartialEq>(left: T, right: T) -> Bool { left == right }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2218
 fn jet_require(condition: Bool, msg: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, locals: String) -> {
-    if condition { jet_testing_clear_failure(); return }
-    if jet_testing_take_failure() is Val(failure) -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail)
+    if condition {
+        jet_testing_clear_failure()
+        return
+    }
+    if jet_testing_take_failure() == .Val(failure) -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail)
     jet_panic_rich(file, line, fn_name, src_line, col, caret_len, msg, locals)
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2252
 fn jet_require_eq(condition: Bool, left_debug: String, right_debug: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, locals: String) -> {
-    if condition { jet_testing_clear_failure(); return }
-    if jet_testing_take_failure() is Val(failure) -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail)
+    if condition {
+        jet_testing_clear_failure()
+        return
+    }
+    if jet_testing_take_failure() == .Val(failure) -> jet_panic_rich(file, line, fn_name, src_line, col, caret_len, failure.message, failure.detail)
     msg :: jet_require_eq_message(left_debug, right_debug).to_string()
     jet_panic_rich(file, line, fn_name, src_line, col, caret_len, msg, locals)
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2288
 fn jet_test_require(condition: Bool, msg: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, locals: String) -> () Err! {
-    if condition { jet_testing_clear_failure(); Ok(()) }
+    if condition {
+        jet_testing_clear_failure()
+        Ok(())
+    }
     else { Err(jet_test_failure_message(file, line, fn_name, src_line, col, caret_len, msg, locals)) }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2310
 fn jet_test_require_eq(condition: Bool, left_debug: String, right_debug: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, locals: String) -> () Err! {
-    if condition { jet_testing_clear_failure(); Ok(()) }
+    if condition {
+        jet_testing_clear_failure()
+        Ok(())
+    }
     else {
         msg :: jet_require_eq_message(left_debug, right_debug).to_string()
         Err(jet_test_failure_message(file, line, fn_name, src_line, col, caret_len, msg, locals))
@@ -812,7 +824,7 @@ fn jet_slice_vec<T: Clone>(xs: View<T>, a: I64, b: I64, file: String, line: U32)
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2404
 fn jet_checked_range_bounds(len: I64, range: JetRange, action: String, file: String, line: U32) -> Range<Int> {
     bounds :: jet_range_bounds(range.start, range.end, range.exclusive, len)
-    if bounds is None {
+    if bounds == .None {
         kind :: if range.exclusive { "exclusive" } else { "inclusive" }
         jet_panic(file, line, "can't {action} {len} items from {range.start} to {range.end} ({kind})")
     }
@@ -1028,7 +1040,10 @@ fn jet_map_add_new<M: DerefMut<[K:V]>, K: Ord + Clone, V: Clone>(m: &M, k: ^K, v
 fn jet_map_setdefault<M: DerefMut<[K:V]>, K: Ord, V: Clone>(m: &M, k: ^K, v: ^V) -> V { m.entry(^k).or_insert(^v).clone() }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2892
 fn jet_map_update_string<V>(m: &[String:V], key: String, f: fn(V?) -> V) -> {
-    if m.get_mut(key) is Val(existing) { next :: f(Val(@existing)); existing = ^next }
+    if m.get_mut(key) == .Val(existing) {
+        next :: f(Val(@existing))
+        existing = ^next
+    }
     else { _ :: m.insert(~key, f(None)) }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:2911
@@ -1040,7 +1055,7 @@ impl<V> JetStringBytesMap<V> for [String:V] {
     // Rust: crates/jet-codegen/src/Prelude/Core.rs:2919
     fn update_bytes(self: &[String:V], bytes: View<U8>, f: fn((@V)?) -> V) -> () ()! {
         key := str.from_utf8(bytes).map_err(_ -> ())? // #4303 borrowed strict UTF-8 key
-        if self.get_mut(key) is Val(existing) -> existing = f(Val(@existing))
+        if self.get_mut(key) == .Val(existing) -> existing = f(Val(@existing))
         else -> _ :: self.insert(key.to_owned(), f(None))
         Ok(())
     }
@@ -1109,7 +1124,7 @@ impl JetStringCountBuilder {
         source :: mem.take(&target)
         loop (key, value) in source.into_iter() {
             bytes :: key.into_bytes()
-            if JetStringCountBuilder.short_key(bytes) is Val(short) -> _ :: short_counts.insert(short, value)
+            if JetStringCountBuilder.short_key(bytes) == .Val(short) -> _ :: short_counts.insert(short, value)
             else -> _ :: long_counts.insert(^bytes, value)
         }
         JetStringCountBuilder{target: &target, short_counts: ^short_counts, long_counts: ^long_counts}
@@ -1118,13 +1133,13 @@ impl JetStringCountBuilder {
 impl JetStringBytesMap<I64> for JetStringCountBuilder {
     // Rust: crates/jet-codegen/src/Prelude/Core.rs:3074
     fn update_bytes(self: &JetStringCountBuilder, bytes: View<U8>, f: fn((@I64)?) -> I64) -> () ()! {
-        if JetStringCountBuilder.short_key(bytes) is Val(key) {
-            if self.short_counts.get_mut(key) is Val(existing) -> existing = f(Val(@existing))
+        if JetStringCountBuilder.short_key(bytes) == .Val(key) {
+            if self.short_counts.get_mut(key) == .Val(existing) -> existing = f(Val(@existing))
             else {
                 _ :: str.from_utf8(bytes).map_err(_ -> ())?
                 _ :: self.short_counts.insert(key, f(None))
             }
-        } else if self.long_counts.get_mut(bytes) is Val(existing) -> existing = f(Val(@existing))
+        } else if self.long_counts.get_mut(bytes) == .Val(existing) -> existing = f(Val(@existing))
         else {
             _ :: str.from_utf8(bytes).map_err(_ -> ())?
             _ :: self.long_counts.insert(bytes.to_owned(), f(None))
@@ -1162,7 +1177,10 @@ fn jet_map_merge_with<K: Ord + Clone, V: Clone>(left: JetMap<K, V>, other: JetMa
     storage := jet_map_make_mut(&out)
     loop (k, right) in other.range((Bound.Unbounded, Bound.Unbounded)) {
         match storage.remove(k) {
-            .Val(left_v) -> { resolved :: conflict(k, ^left_v, ~right); _ :: storage.insert(~k, ^resolved) },
+            .Val(left_v) -> {
+                resolved :: conflict(k, ^left_v, ~right)
+                _ :: storage.insert(~k, ^resolved)
+            },
             .None -> _ :: storage.insert(~k, ~right),
         }
     }
@@ -1214,7 +1232,10 @@ fn jet_list_remove_slot<T: Clone>(xs: &[T], index: I64) -> T JetAbsent! {
 fn jet_list_insert<T>(xs: &[T], index: I64, value: ^T) -> {
     match jet_list_insert_kernel(&xs, index, ^value) {
         .Ok(_) -> {},
-        .Err(error) -> { message :: error.message(); jet_runtime_stop(error.code(), "<core.collections>", 0, message) },
+        .Err(error) -> {
+            message :: error.message()
+            jet_runtime_stop(error.code(), "<core.collections>", 0, message)
+        },
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:3283

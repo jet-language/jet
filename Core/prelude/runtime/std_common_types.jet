@@ -521,9 +521,9 @@ impl DataError {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:761
     fn display_text(self) -> String Never! {
         out := "{self.kind:Debug} {self.operation}"
-        if self.row is Val(row) -> out += ", row {row}"
-        if self.column is Val(column) -> out += ", column {column}"
-        if self.index is Val(index) -> out += ", index {index}"
+        if self.row == .Val(row) -> out += ", row {row}"
+        if self.column == .Val(column) -> out += ", column {column}"
+        if self.index == .Val(index) -> out += ", index {index}"
         out += ": {self.reason}"
         out
     }
@@ -617,7 +617,7 @@ impl DataSchema {
         fn absorb(fields: &[String: (String, Bool)], name: String, value: DataTree, nullable: Bool) Never! {
             current_type :: value_type(value)
             merged := (current_type, nullable or current_type == "null")
-            if fields.get(name) is Val(current) {
+            if fields.get(name) == .Val(current) {
                 pair :: merge_type(current.0, current_type)
                 merged = (pair.0, current.1 or nullable or pair.1)
             }
@@ -626,19 +626,19 @@ impl DataSchema {
         fields := [String: (String, Bool)]{}
         match tree {
             .Object(entries) => {
-                loop (name, value) in entries -> absorb(&fields, name.clone(), value, value is .Null)
+                loop (name, value) in entries -> absorb(&fields, name.clone(), value, value == .Null)
             },
             .Array(values) => {
                 rows_seen := 0
                 loop value in values {
-                    if value is .Object(entries) {
+                    if value == .Object(entries) {
                         present := [String: Bool]{}
                         loop (name, _) in entries -> present[name] = true
                         loop (name, item) in entries -> absorb(&fields, name.clone(), item, rows_seen > 0 or item is .Null)
                         names :: fields.keys().collect()
                         loop name in names {
                             if not present.contains_key(name) {
-                                if fields.get(name) is Val(current) -> fields[name] = (current.0, true)
+                                if fields.get(name) == .Val(current) -> fields[name] = (current.0, true)
                             }
                         }
                     } else {
@@ -647,7 +647,7 @@ impl DataSchema {
                     rows_seen = rows_seen.saturating_add(1)
                 }
             },
-            value => absorb(&fields, "$", value, value is .Null),
+            value => absorb(&fields, "$", value, value == .Null),
         }
         // Rust BTreeMap order: sort the keys once, never depend on hash iteration.
         names := fields.keys().collect()
@@ -850,7 +850,7 @@ impl DataQueryRows<T> {
     fn explain(self) -> [String] Never! {
         steps := [String]{}
         loop node in self.plan.nodes -> steps.push(node.operation.as_str())
-        if self.plan.output_node() is Val(node) {
+        if self.plan.output_node() == .Val(node) {
             if not node.stream.is_streaming() -> steps.push("streaming_fallback:{node.operation.as_str()}")
         }
         steps
@@ -1032,7 +1032,7 @@ impl DataTracked<T, K>.DataTrackedReader<T> {
         self.state.read(fn(state) {
             if revision > current -> return Err(DataError.simple(.StaleRevision, "data.query.watch",
                 "requested revision is newer than the source"))
-            if state.changes.first() is Val(first) {
+            if state.changes.first() == .Val(first) {
                 if revision.saturating_add(U64{1}) < first.revision -> return Err(
                     DataError.simple(.StaleRevision, "data.query.watch", "requested revision is no longer retained"))
             }

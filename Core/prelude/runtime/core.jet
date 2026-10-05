@@ -191,7 +191,7 @@ fn jet_list_para_chunks<R: Send>(len: Int, worker_limit: Int, f: fn(Range<Int>) 
             }
         }
     }
-    if first_failure is Val(failure) { jet_para_raise_failure(failure) }
+    if first_failure == .Val(failure) { jet_para_raise_failure(failure) }
     results
 }
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:425
@@ -390,7 +390,7 @@ pub fn jet_test_expect_fail_leave_scope(scope: U64) -> String? {
     if JET_TEST_EXPECT_COMPLETED.with(completed -> {
         values := completed.borrow_mut()
         values.iter().rposition((candidate, _) -> candidate == scope).map(index -> values.remove(index).1)
-    }) is Val(result) -> return Val(result)
+    }) == .Val(result) -> return Val(result)
     JET_TEST_EXPECT_FAIL.with(frames -> {
         values := frames.borrow_mut()
         values.iter().rposition(frame -> frame.scope == scope).and_then(index -> {
@@ -430,7 +430,7 @@ pub fn jet_test_expect_fail_catch_scope() -> U64? {
         for parent in values.iter_mut() { parent.stop = None }
         Val((frame.scope, frame.stop.unwrap_or(""), index))
     })
-    if caught is Val((scope, code, depth)) {
+    if caught == .Val((scope, code, depth)) {
         JET_TEST_TIMEOUTS.with(timeouts -> timeouts.borrow_mut().retain((_, _, _, entered_depth) -> entered_depth <= depth))
         JET_TEST_EXPECT_COMPLETED.with(completed -> completed.borrow_mut().push((scope, code)))
         Val(scope)
@@ -585,7 +585,7 @@ fn jet_runtime_process_exit(code: I32, report: String?) -> Never {
     jet_std_os_run_atexit()
     _ :: jet_runtime_report_parked_tasks()
     jet_observe_drain_after_exit()
-    if report is Val(text) { std.io.eprint(text) }
+    if report == .Val(text) { std.io.eprint(text) }
     _ :: std.io.stdout().flush()
     _ :: std.io.stderr().flush()
     std.process.exit(code)
@@ -599,7 +599,7 @@ fn jet_runtime_boundary<T>(run: fn() -> T) -> T {
             jet_std_os_run_atexit()
             parked_exit :: jet_runtime_report_parked_tasks()
             jet_observe_drain_after_exit()
-            if parked_exit is Val(code) { std.process.exit(code) }
+            if parked_exit == .Val(code) { std.process.exit(code) }
             value
         }
         Err(payload) -> {
@@ -905,7 +905,7 @@ impl JetShiftCount for U64 { fn jet_shift_count(self) -> JetFixedWide { JetFixed
 // Rust: crates/jet-codegen/src/Prelude/Core.rs:1555
 impl JetShiftCount for JetInt {
     fn jet_shift_count(self) -> JetFixedWide {
-        if self.to_i64() is Val(count) -> return count.jet_shift_count()
+        if self.to_i64() == .Val(count) -> return count.jet_shift_count()
         if self.compare(&JetInt.from_i64(I64{0})).is_lt() {
             JetFixedWide{high: I64{-9223372036854775807} - I64{1}, low: U64{0}}
         } else { JetFixedWide{high: I64{9223372036854775807}, low: U64{18446744073709551615}} }

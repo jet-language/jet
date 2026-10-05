@@ -12,35 +12,35 @@ use std.cmp.[Ordering]
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5384
 pub fn jet_int_exact_div_rem(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! {
     match jet_exact_numeric.div_rem(jet_std_raw_to_exact(value), jet_std_raw_to_exact(divisor)) {
-        .Some((quotient, remainder)) => (jet_std_exact_to_raw(quotient), jet_std_exact_to_raw(remainder)),
+        .Val((quotient, remainder)) => (jet_std_exact_to_raw(quotient), jet_std_exact_to_raw(remainder)),
         .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("div")),
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5406
 pub fn jet_int_exact_div_rem_euclid(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! {
     match jet_exact_numeric.div_rem_euclid(jet_std_raw_to_exact(value), jet_std_raw_to_exact(divisor)) {
-        .Some((quotient, remainder)) => (jet_std_exact_to_raw(quotient), jet_std_exact_to_raw(remainder)),
+        .Val((quotient, remainder)) => (jet_std_exact_to_raw(quotient), jet_std_exact_to_raw(remainder)),
         .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("div_euclid")),
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5428
 pub fn jet_int_exact_floor_div(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! {
     match jet_exact_numeric.floor_div(jet_std_raw_to_exact(value), jet_std_raw_to_exact(divisor)) {
-        .Some(value) => jet_std_exact_to_raw(value),
+        .Val(value) => jet_std_exact_to_raw(value),
         .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("floor_div")),
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5447
 pub fn jet_int_exact_mod(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! {
     match jet_exact_numeric.modulo(jet_std_raw_to_exact(value), jet_std_raw_to_exact(divisor)) {
-        .Some(value) => jet_std_exact_to_raw(value),
+        .Val(value) => jet_std_exact_to_raw(value),
         .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("mod")),
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5466
 pub fn jet_int_exact_pow(value: I64, exponent: I64, file: String, line: U32) -> I64 Never! {
     match jet_exact_numeric.pow(jet_std_raw_to_exact(value), jet_std_raw_to_exact(exponent)) {
-        .Some(value) => jet_std_exact_to_raw(value),
+        .Val(value) => jet_std_exact_to_raw(value),
         .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("pow")),
     }
 }
@@ -63,14 +63,14 @@ pub fn jet_int_exact_div_mod(value: I64, divisor: I64, file: String, line: U32) 
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5522
 pub fn jet_int_exact_shl(value: I64, count: I64, file: String, line: U32) -> I64 Never! {
     match jet_exact_numeric.shl(jet_std_raw_to_exact(value), jet_std_raw_to_exact(count)) {
-        .Some(value) => jet_std_exact_to_raw(value),
+        .Val(value) => jet_std_exact_to_raw(value),
         .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("shl")),
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5541
 pub fn jet_int_exact_shr(value: I64, count: I64, file: String, line: U32) -> I64 Never! {
     match jet_exact_numeric.shr(jet_std_raw_to_exact(value), jet_std_raw_to_exact(count)) {
-        .Some(value) => jet_std_exact_to_raw(value),
+        .Val(value) => jet_std_exact_to_raw(value),
         .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("shr")),
     }
 }
@@ -195,8 +195,11 @@ fn jet_decimal_magnitude_from_digits(digits: [U8]) -> JetDecimalMagnitude Never!
         for digit in digits {
             next := small.checked_mul(10).and_then(fn(value) { value.checked_add(digit as I128) })
             match next {
-                .Some(value) => { small = value },
-                .None => { fits = false; break },
+                .Val(value) => { small = value },
+                .None => {
+                    fits = false
+                    break
+                },
             }
         }
         if fits -> return .Small(small)
@@ -218,7 +221,7 @@ fn jet_decimal_magnitude_from_digits(digits: [U8]) -> JetDecimalMagnitude Never!
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5769
 fn jet_decimal_parse(s: String) -> (Bool, JetDecimalMagnitude, U32) Err! {
-    if let .Some((negative, value, scale)) = json_decimal_small(s)? -> return (negative, .Small(value), scale)
+    if let .Val((negative, value, scale)) = json_decimal_small(s)? -> return (negative, .Small(value), scale)
     (negative, digits, scale) := json_decimal_lexeme(s)?
     (negative, jet_decimal_magnitude_from_digits(digits), scale)
 }
@@ -254,7 +257,7 @@ impl JetDecimal.Eq {}
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5825
 impl JetDecimal.PartialOrd {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5827
-    fn partial_cmp(self, other: JetDecimal) -> Ordering? Never! { .Some(self.compare_value(other)) }
+    fn partial_cmp(self, other: JetDecimal) -> Ordering? Never! { .Val(self.compare_value(other)) }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5832
 impl JetDecimal.Ord {
@@ -281,7 +284,7 @@ impl JetDecimal {
     // Every binary denominator is a power of two; a power of five gives an exact decimal.
     pub fn from_float(value: F64) -> JetDecimal? Never! {
         if !value.is_finite() -> return .None
-        if value == 0.0 -> return .Some(JetDecimal.from_int(0).expect("zero is a valid Decimal"))
+        if value == 0.0 -> return .Val(JetDecimal.from_int(0).expect("zero is a valid Decimal"))
         bits := value.to_bits()
         negative := (bits >> 63) != 0
         exponent := ((bits >> 52) & 0x7ff) as I32
@@ -290,11 +293,11 @@ impl JetDecimal {
         numerator :: JetBigInt.from_u64(significand)
         if power >= 0 {
             for _ in 0..power -> numerator = numerator.mul(JetBigInt.from_int(2))
-            .Some(JetDecimal.from_bigint(^numerator, 0, negative))
+            .Val(JetDecimal.from_bigint(^numerator, 0, negative))
         } else {
             scale := U32.try_from(-power).ok()?
             for _ in 0..scale -> numerator = numerator.mul(JetBigInt.from_int(5))
-            .Some(JetDecimal.from_bigint(^numerator, scale, negative))
+            .Val(JetDecimal.from_bigint(^numerator, scale, negative))
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5905
@@ -305,23 +308,29 @@ impl JetDecimal {
     fn normalize(^self) -> JetDecimal Never! {
         match &self.magnitude {
             .Small(value) => {
-                while self.scale > 0 && value != 0 && value % 10 == 0 { value /= 10; self.scale -= 1 }
+                while self.scale > 0 && value != 0 && value % 10 == 0 {
+                    value /= 10
+                    self.scale -= 1
+                }
             },
             .Big(value) => jet_decimal_strip_trailing_zeros(&value, &self.scale),
         }
-        if self.is_zero() { self.negative = false; self.scale = 0 }
+        if self.is_zero() {
+            self.negative = false
+            self.scale = 0
+        }
         ^self
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5931
     fn signed_small(self) -> I128? Never! {
         match self.magnitude {
-            .Small(value) => if self.negative { value.checked_neg() } else { .Some(value) },
+            .Small(value) => if self.negative { value.checked_neg() } else { .Val(value) },
             .Big(_) => .None,
         }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5942
     fn scale_small(value: I128, places: U32) -> I128? Never! {
-        if value == 0 -> return .Some(0)
+        if value == 0 -> return .Val(0)
         value.checked_mul(I128(10).checked_pow(places)?)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5949
@@ -332,7 +341,11 @@ impl JetDecimal {
         denominator_abs := denominator.unsigned_abs()
         left :: numerator_abs
         right :: denominator_abs
-        while right != 0 { remainder := left % right; left = right; right = remainder }
+        while right != 0 {
+            remainder := left % right
+            left = right
+            right = remainder
+        }
         numerator_abs := I128.try_from(numerator_abs / left).ok()?
         denominator_abs := I128.try_from(denominator_abs / left).ok()?
         numerator := if negative { numerator_abs.checked_neg()? } else { numerator_abs }
@@ -350,8 +363,8 @@ impl JetDecimal {
         }
         if self.negative != other.negative -> return if self.negative { .Less } else { .Greater }
         scale := self.scale.max(other.scale)
-        if let (.Some(left), .Some(right)) = (self.signed_small(), other.signed_small()) {
-            if let (.Some(left), .Some(right)) = (JetDecimal.scale_small(left, scale - self.scale), JetDecimal.scale_small(right, scale - other.scale)) -> return left.cmp(right)
+        if let (.Val(left), .Val(right)) = (self.signed_small(), other.signed_small()) {
+            if let (.Val(left), .Val(right)) = (JetDecimal.scale_small(left, scale - self.scale), JetDecimal.scale_small(right, scale - other.scale)) -> return left.cmp(right)
         }
         self.scaled_bigint(scale).compare(other.scaled_bigint(scale))
     }
@@ -361,7 +374,7 @@ impl JetDecimal {
     fn from_signed_small_preserving_scale(value: I128, scale: U32) -> JetDecimal? Never! {
         negative := value < 0
         magnitude := if negative { value.checked_neg()? } else { value }
-        .Some(JetDecimal{negative: negative, magnitude: .Small(magnitude), scale: scale})
+        .Val(JetDecimal{negative: negative, magnitude: .Small(magnitude), scale: scale})
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6037
     fn magnitude_bigint(self) -> JetBigInt Never! {
@@ -379,7 +392,7 @@ impl JetDecimal {
     fn from_bigint_preserving_scale(value: JetBigInt, scale: U32, negative: Bool) -> JetDecimal Never! {
         magnitude := value.abs()
         negative := negative && !magnitude.is_zero()
-        magnitude := match magnitude.try_i128() { .Some(value) => JetDecimalMagnitude.Small(value), .None => JetDecimalMagnitude.Big(^magnitude) }
+        magnitude := match magnitude.try_i128() { .Val(value) => JetDecimalMagnitude.Small(value), .None => JetDecimalMagnitude.Big(^magnitude) }
         JetDecimal{negative: negative, magnitude: ^magnitude, scale: scale}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6075
@@ -399,7 +412,7 @@ impl JetDecimal {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6094
     fn add_with_sign(self, other: JetDecimal, negate_other: Bool) -> JetDecimal Never! {
-        if let .Some(value) = self.try_add(other, negate_other) -> return ^value
+        if let .Val(value) = self.try_add(other, negate_other) -> return ^value
         scale := self.scale.max(other.scale)
         left := self.scaled_bigint(scale)
         right := other.scaled_bigint(scale)
@@ -414,13 +427,16 @@ impl JetDecimal {
     pub fn mul(self, other: JetDecimal) -> JetDecimal Never! {
         scale :: self.scale + other.scale
         minimum_scale := self.scale.max(other.scale)
-        if let (.Some(left), .Some(right)) = (self.signed_small(), other.signed_small()) {
-            if let .Some(product_value) = left.checked_mul(right) {
+        if let (.Val(left), .Val(right)) = (self.signed_small(), other.signed_small()) {
+            if let .Val(product_value) = left.checked_mul(right) {
                 product :: product_value
                 if product == 0 { scale = minimum_scale } else {
-                    while scale > minimum_scale && product % 10 == 0 { product /= 10; scale -= 1 }
+                    while scale > minimum_scale && product % 10 == 0 {
+                        product /= 10
+                        scale -= 1
+                    }
                 }
-                if let .Some(value) = JetDecimal.from_signed_small_preserving_scale(product, scale) -> return ^value
+                if let .Val(value) = JetDecimal.from_signed_small_preserving_scale(product, scale) -> return ^value
             }
         }
         product := self.signed_bigint().mul(other.signed_bigint())
@@ -439,9 +455,9 @@ impl JetDecimal {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6164
     pub fn to_fraction(self) -> JetFraction? Never! {
-        if let .Some(value) = self.signed_small() {
-            if let .Some(denominator) = I128(10).checked_pow(self.scale) {
-                if let .Some(fraction) = JetDecimal.small_fraction(value, denominator) -> return .Some(^fraction)
+        if let .Val(value) = self.signed_small() {
+            if let .Val(denominator) = I128(10).checked_pow(self.scale) {
+                if let .Val(fraction) = JetDecimal.small_fraction(value, denominator) -> return .Val(^fraction)
             }
         }
         JetFraction.from_bigints(self.signed_bigint(), JetDecimal.scale_factor(self.scale))
@@ -457,11 +473,11 @@ impl JetDecimal {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6188
     pub fn div(self, other: JetDecimal) -> JetFraction? Never! {
         if other.is_zero() -> return .None
-        if let (.Some(left), .Some(right)) = (self.signed_small(), other.signed_small()) {
+        if let (.Val(left), .Val(right)) = (self.signed_small(), other.signed_small()) {
             numerator := I128(10).checked_pow(other.scale).and_then(fn(scale) { left.checked_mul(scale) })
             denominator := I128(10).checked_pow(self.scale).and_then(fn(scale) { right.checked_mul(scale) })
-            if let (.Some(numerator), .Some(denominator)) = (numerator, denominator) {
-                if let .Some(fraction) = JetDecimal.small_fraction(numerator, denominator) -> return .Some(^fraction)
+            if let (.Val(numerator), .Val(denominator)) = (numerator, denominator) {
+                if let .Val(fraction) = JetDecimal.small_fraction(numerator, denominator) -> return .Val(^fraction)
             }
         }
         self.to_fraction()?.div(other.to_fraction()?)
@@ -475,7 +491,7 @@ impl JetDecimal {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6217
     pub fn to_int_exact(self) -> I64? Never! {
         (quotient, remainder, _) := self.quotient_remainder()
-        if remainder.is_zero() { .Some(jet_int_pack(^quotient)) } else { .None }
+        if remainder.is_zero() { .Val(jet_int_pack(^quotient)) } else { .None }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6222
     fn floor_int(self) -> JetBigInt Never! {
@@ -524,7 +540,7 @@ impl JetDecimal {
         scaled := fraction.numerator.mul(JetDecimal.scale_factor(scale))
         (digits, remainder) := scaled.div_rem(fraction.denominator)?
         if !remainder.is_zero() -> return .None
-        .Some(JetDecimal.from_signed_bigint(^digits, scale))
+        .Val(JetDecimal.from_signed_bigint(^digits, scale))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6300
     fn magnitude_len(self) -> USize Never! {
@@ -532,7 +548,10 @@ impl JetDecimal {
             .Small(value) => {
                 value :: value
                 digits: USize :: 1
-                while value >= 10 { value /= 10; digits += 1 }
+                while value >= 10 {
+                    value /= 10
+                    digits += 1
+                }
                 digits
             },
             .Big(value) => value.decimal_digit_count(),
@@ -540,11 +559,18 @@ impl JetDecimal {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6315
     fn write_u128_magnitude(out: &String, value: U128) Never! {
-        if value == 0 { out.push('0'); return }
+        if value == 0 {
+            out.push('0')
+            return
+        }
         value :: value
         digits: [U8; 39] :: [0; 39]
         len: USize :: 0
-        while value != 0 { digits[len] = (value % 10) as U8; value /= 10; len += 1 }
+        while value != 0 {
+            digits[len] = (value % 10) as U8
+            value /= 10
+            len += 1
+        }
         for digit in digits[0..len].iter().rev() -> out.push(Char.from(U8(48) + digit))
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6332
@@ -585,12 +611,18 @@ impl JetDecimal {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6381
     fn write_magnitude_split(self, split: USize, out: &String) Never! {
         match self.magnitude {
-            .Small(_) => { assert(false, "split writer requires a big magnitude"); return },
+            .Small(_) => {
+                assert(false, "split writer requires a big magnitude")
+                return
+            },
             .Big(value) => {
                 top := value.limbs.last().unwrap_or(0)
                 top_width: USize :: 1
                 probe :: top
-                while probe >= 10 { probe /= 10; top_width += 1 }
+                while probe >= 10 {
+                    probe /= 10
+                    top_width += 1
+                }
                 written: USize :: 0
                 JetDecimal.write_u32_digits_with_split(&out, top, top_width, split, &written)
                 for limb in value.limbs.iter().rev().skip(1) -> JetDecimal.write_u32_digits_with_split(&out, limb, 9, split, &written)
@@ -603,7 +635,11 @@ impl JetDecimal {
         value :: value as U128
         digits: [U8; 39] :: [0; 39]
         digit_len: USize :: 0
-        while value != 0 { digits[digit_len] = (value % 10) as U8; value /= 10; digit_len += 1 }
+        while value != 0 {
+            digits[digit_len] = (value % 10) as U8
+            value /= 10
+            digit_len += 1
+        }
         if fraction_len == 0 {
             for digit in digits[0..digit_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
             return
@@ -638,7 +674,10 @@ impl JetDecimal {
             JetDecimal.write_small_scaled(value, fraction_len, &out)
             return ^out
         }
-        if fraction_len == 0 { self.write_magnitude(&out); return ^out }
+        if fraction_len == 0 {
+            self.write_magnitude(&out)
+            return ^out
+        }
         if digit_len <= fraction_len {
             out.push('0')
             out.push('.')
@@ -720,9 +759,9 @@ impl IOError.JetDebug {
             .PermissionDenied(context) => ("PermissionDenied", context), .TimedOut(context) => ("TimedOut", context),
             .Cancelled(context) => ("Cancelled", context), .Closed(context) => ("Closed", context),
             .Protocol(context) => ("Protocol", context), .Other(context) => ("Other", context),
-            .ResourceLimit(limit) => return jet_debug_variant("ResourceLimit", .Some(limit.jet_debug())),
+            .ResourceLimit(limit) => return jet_debug_variant("ResourceLimit", .Val(limit.jet_debug())),
         }
-        jet_debug_variant(variant, .Some(context.jet_debug()))
+        jet_debug_variant(variant, .Val(context.jet_debug()))
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6603

@@ -19,7 +19,7 @@ impl DataWatchOperationSource<T> {
             .SortBy(key) => {
                 limit :: DataLimits.safe().max_sort_rows
                 if retained_rows as I64 > limit -> return Err(DataError.simple(.Limit, "data.query.watch", "max_sort_rows {limit} exceeded"))
-                for entry in &entries -> entry.key = Some(key(entry.value.clone()))
+                for entry in &entries -> entry.key = Val(key(entry.value.clone()))
                 entries.sort_by(fn(left, right) { left.key.cmp(right.key) })
             },
         }
@@ -33,7 +33,7 @@ impl DataWatchOperationSource<T>.DataWatchSource<T> {
         materialized :: self.inner.initial()?
         next_base :: materialized.entries.clone()
         entries :: self.apply_operation(next_base.clone(), materialized.retained_rows)?
-        self.base.replace(Some(next_base))
+        self.base.replace(Val(next_base))
         DataWatchMaterialized{entries: entries, revision: materialized.revision, mode: materialized.mode,
             recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows}
     }
@@ -47,7 +47,7 @@ impl DataWatchOperationSource<T>.DataWatchSource<T> {
         }
         next_base :: materialized.entries.clone()
         entries :: self.apply_operation(next_base.clone(), materialized.retained_rows)?
-        self.base.replace(Some(next_base))
+        self.base.replace(Val(next_base))
         DataWatchMaterialized{entries: entries, revision: materialized.revision, mode: materialized.mode,
             recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows}
     }
@@ -61,7 +61,7 @@ impl DataTrackedWatchSource<T> {
         for operation in operations {
             match operation {
                 .Filter(predicate) => { if !predicate(row.clone()) -> return (false, None) },
-                .SortBy(key) => sort_key = Some(key(row.clone())),
+                .SortBy(key) => sort_key = Val(key(row.clone())),
             }
         }
         (true, sort_key)
@@ -70,7 +70,7 @@ impl DataTrackedWatchSource<T> {
     fn insert_entry(entries: &[DataWatchEntry<T>], entry: DataWatchEntry<T>) Never! {
         position :: entries.iter().position(fn(existing) {
             match (entry.key, existing.key) {
-                (Some(left), Some(right)) => left.cmp(right) == .Less || (left == right && entry.order < existing.order),
+                (Val(left), Val(right)) => left.cmp(right) == .Less || (left == right && entry.order < existing.order),
                 _ => entry.order < existing.order,
             }
         }).unwrap_or(entries.len())
@@ -101,11 +101,11 @@ impl DataTrackedWatchSource<T> {
                 if accepted -> Self.insert_entry(entries, DataWatchEntry{order: change.order, key: key, value: row})
             },
             .Replace{after, ..} => {
-                if Some(index) = index -> entries.remove(index)
+                if Val(index) = index -> entries.remove(index)
                 (accepted, key) :: Self.accepts(&self.operations, after)
                 if accepted -> Self.insert_entry(entries, DataWatchEntry{order: change.order, key: key, value: after})
             },
-            .Remove{..} => { if Some(index) = index -> entries.remove(index) },
+            .Remove{..} => { if Val(index) = index -> entries.remove(index) },
         }
     }
 }
@@ -288,10 +288,13 @@ impl DataQuery<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2339
     pub fn from_tracked<K>(tracked: DataTracked<T, K>) -> DataQuery<T> Never! {
         Self{source: .Tracked(Rc.new(tracked.clone())), operations: [], steps: ["track"],
-            tracking: Some(Rc.new(tracked.clone())), watch_source: None, consumed: Rc.new(Cell.new(false))}
+            tracking: Val(Rc.new(tracked.clone())), watch_source: None, consumed: Rc.new(Cell.new(false))}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2355
-    pub fn with_step(self, step: String) -> DataQuery<T> Never! { self.steps.push(step); self }
+    pub fn with_step(self, step: String) -> DataQuery<T> Never! {
+        self.steps.push(step)
+        self
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2360
     pub fn plan(self) -> [String] Never! { self.steps.clone() }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2364
@@ -332,11 +335,17 @@ impl DataQuery<T> {
         }
         for operation in self.operations {
             match operation {
-                .Filter(predicate) => { predicate :: predicate.clone(); rows = rows.filter(fn(row) { predicate(row) }) },
-                .SortBy(key) => { key :: key.clone(); rows = rows.sort_by(fn(row) { key(row) }) },
+                .Filter(predicate) => {
+                    predicate :: predicate.clone()
+                    rows = rows.filter(fn(row) { predicate(row) })
+                },
+                .SortBy(key) => {
+                    key :: key.clone()
+                    rows = rows.sort_by(fn(row) { key(row) })
+                },
             }
         }
-        Some(rows)
+        Val(rows)
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2447
     fn is_computed(self) -> Bool Never! { match self.source { .Computed(_) => true, _ => false } }
@@ -344,27 +353,30 @@ impl DataQuery<T> {
     fn is_recomputed(self) -> Bool Never! { match self.source { .Recomputed(_) => true, _ => false } }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2455
     fn recomputation(self) -> ([T] DataError!)? Never! {
-        match self.source { .Recomputed(compute) => Some(compute()), _ => None }
+        match self.source { .Recomputed(compute) => Val(compute()), _ => None }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2463
     fn from_computation(steps: [String], compute: fn() -> [T] DataError!) -> DataQuery<T> Never! {
-        Self{source: .Computed(Rc.new(RefCell.new(Some(Box.new(compute))))), operations: [], steps: steps,
+        Self{source: .Computed(Rc.new(RefCell.new(Val(Box.new(compute))))), operations: [], steps: steps,
             tracking: None, watch_source: None, consumed: Rc.new(Cell.new(false))}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2479
     fn from_recomputation(steps: [String], tracking: Rc<DataTrackedMeta>, compute: fn() -> [T] DataError!) -> DataQuery<T> Never! {
-        Self{source: .Recomputed(Rc.new(compute)), operations: [], steps: steps, tracking: Some(tracking),
+        Self{source: .Recomputed(Rc.new(compute)), operations: [], steps: steps, tracking: Val(tracking),
             watch_source: None, consumed: Rc.new(Cell.new(false))}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2496
-    fn with_watch_source(self, source: Rc<DataWatchSource<T>>) -> DataQuery<T> Never! { self.watch_source = Some(source); self }
+    fn with_watch_source(self, source: Rc<DataWatchSource<T>>) -> DataQuery<T> Never! {
+        self.watch_source = Val(source)
+        self
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2504
     fn tracked_reader(self) -> Rc<DataTrackedReader<T>>? Never! {
-        match self.source { .Tracked(source) => Some(source.clone()), _ => None }
+        match self.source { .Tracked(source) => Val(source.clone()), _ => None }
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2511
     fn maintained_watch_source(self) -> Rc<DataWatchSource<T>>? Never! {
-        if Some(source) = self.watch_source -> return Some(source.clone())
+        if Val(source) = self.watch_source -> return Val(source.clone())
         self.tracked_reader().map(fn(source) { Rc.new(DataTrackedWatchSource{source: source, operations: self.operations.clone()}) })
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2528
@@ -414,7 +426,7 @@ impl DataQueryCursor<T> {
         batch := [T].with_capacity(batch_size)
         for _ in 0..batch_size {
             row :: self.next_with_sort_limit(max_sort_rows)?
-            match row { Some(row) => batch.push(row), None => break }
+            match row { .Val(row) => batch.push(row), None => break }
         }
         batch
     }
@@ -425,12 +437,12 @@ impl DataQueryCursor<T> {
                 if index >= rows.len() -> return None
                 row :: rows[index].clone()
                 index += 1
-                Some(row)
+                Val(row)
             },
             .Filter{input, predicate} => {
                 loop {
                     row :: input.next_with_sort_limit(max_sort_rows)?
-                    match row { None => return None, Some(row) => { if predicate(row.clone()) -> return Some(row) } }
+                    match row { None => return None, Val(row) => { if predicate(row.clone()) -> return Val(row) } }
                 }
             },
             .SortBy{input, key, rows, index} => {
@@ -440,7 +452,7 @@ impl DataQueryCursor<T> {
                         row :: input.next_with_sort_limit(max_sort_rows)?
                         match row {
                             None => break,
-                            Some(row) => {
+                            .Val(row) => {
                                 if max_sort_rows.is_some_and(fn(limit) { limit < 1 || I64.try_from(keyed.len()).unwrap_or(I64.MAX) >= limit }) {
                                     return Err(DataQueryPlanLimit{operation: "sort_by", limit: max_sort_rows.unwrap_or(0)})
                                 }
@@ -449,13 +461,13 @@ impl DataQueryCursor<T> {
                         }
                     }
                     keyed.sort_by(fn(left, right) { left.0.cmp(right.0) })
-                    rows = Some(keyed.into_iter().map(fn(pair) { pair.1 }).collect())
+                    rows = Val(keyed.into_iter().map(fn(pair) { pair.1 }).collect())
                 }
                 sorted :: rows.as_ref().expect("sort rows initialized")
                 if index >= sorted.len() -> return None
                 row :: sorted[index].clone()
                 index += 1
-                Some(row)
+                Val(row)
             },
         }
     }
@@ -610,7 +622,10 @@ fn jet_limb_decimal_digits(limbs: View<U32>) -> Int Never! {
     if length == 0 || limbs[0] == 0 && length == 1 -> return 1
     top := limbs[length - 1]
     digits := 1
-    while top >= 10 { top /= 10; digits += 1 }
+    while top >= 10 {
+        top /= 10
+        digits += 1
+    }
     digits + length.saturating_sub(1) * 9
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2936
@@ -621,7 +636,10 @@ fn jet_limb_decimal_prefix_f64(limbs: View<U32>, digits: Int) -> Float Never! {
     top_index :: jet_limb_len(limbs) - 1
     top_width := 1
     width_probe := limbs[top_index]
-    while width_probe >= 10 { width_probe /= 10; top_width += 1 }
+    while width_probe >= 10 {
+        width_probe /= 10
+        top_width += 1
+    }
     prefix := 0.0
     consumed := 0
     for index in (0..=top_index).rev() {
@@ -684,11 +702,17 @@ fn jet_limb_sub_assign(left: &[U32], right: View<U32>) Never! {
     for index in 0..left.len() {
         subtrahend :: right.get(index).copied().unwrap_or(0) as I64 + borrow
         difference :: left[index] as I64 - subtrahend
-        if difference < 0 { left[index] = (difference + BI_BASE as I64) as U32; borrow = 1 }
-        else { left[index] = difference as U32; borrow = 0 }
+        if difference < 0 {
+            left[index] = (difference + BI_BASE as I64) as U32
+            borrow = 1
+        }
+        else {
+            left[index] = difference as U32
+            borrow = 0
+        }
     }
     assert(borrow == 0)
-    while left.len() > 1 && left.last() == Some(0) -> _ :: left.pop()
+    while left.len() > 1 && left.last() == 0 -> _ :: left.pop()
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3034
 fn jet_ratio_cmp_pow2(numerator: View<U32>, denominator: View<U32>, exponent: I64) -> Ordering Never! {
@@ -723,8 +747,14 @@ fn jet_ratio_limbs_to_f64(numerator: View<U32>, denominator: View<U32>, negative
     if decimal_delta < -400 -> return jet_ratio_zero(negative)
     exponent := jet_ratio_exponent(numerator, denominator)
     loop {
-        if jet_ratio_cmp_pow2(numerator, denominator, exponent) == .Less { exponent -= 1; continue }
-        if jet_ratio_cmp_pow2(numerator, denominator, exponent + 1) != .Less { exponent += 1; continue }
+        if jet_ratio_cmp_pow2(numerator, denominator, exponent) == .Less {
+            exponent -= 1
+            continue
+        }
+        if jet_ratio_cmp_pow2(numerator, denominator, exponent + 1) != .Less {
+            exponent += 1
+            continue
+        }
         break
     }
     if exponent > 1023 -> return jet_ratio_inf(negative)
@@ -765,7 +795,10 @@ fn jet_ratio_limbs_to_f64(numerator: View<U32>, denominator: View<U32>, negative
     sticky :: !jet_limb_is_zero(&remainder)
     if guard && (sticky || (significand & 1) != 0) {
         significand += 1
-        if significand == U64(1) << 53 { significand >>= 1; exponent += 1 }
+        if significand == U64(1) << 53 {
+            significand >>= 1
+            exponent += 1
+        }
     }
     if exponent > 1023 -> return jet_ratio_inf(negative)
     bits :: ((exponent + 1023) as U64) << 52 | (significand & ((U64(1) << 52) - 1))
@@ -785,7 +818,10 @@ impl JetBigInt {
     pub fn from_u64(value: U64) -> JetBigInt Never! {
         if value == 0 -> return Self.from_int(0)
         limbs := []
-        while value > 0 { limbs.push((value % BI_BASE) as U32); value /= BI_BASE }
+        while value > 0 {
+            limbs.push((value % BI_BASE) as U32)
+            value /= BI_BASE
+        }
         Self{negative: false, limbs: limbs}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3218
@@ -795,15 +831,18 @@ impl JetBigInt {
         // GATE #4483: native widened negation preserves I64.MIN's magnitude.
         v := if negative { std.i128.from(n).wrapping_neg() as U64 } else { n as U64 }
         limbs := []
-        while v > 0 { limbs.push((v % BI_BASE) as U32); v /= BI_BASE }
+        while v > 0 {
+            limbs.push((v % BI_BASE) as U32)
+            v /= BI_BASE
+        }
         Self{negative: negative, limbs: limbs}
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3239
     pub fn from_str(s: String) -> JetBigInt Err! {
         t := s.trim() // #4303
         if t.is_empty() -> return Err("empty exact Int string")
-        (negative, body) :: if Some(rest) = t.strip_prefix('-') { (true, rest) }
-            else if Some(rest) = t.strip_prefix('+') { (false, rest) } else { (false, t) }
+        (negative, body) :: if Val(rest) = t.strip_prefix('-') { (true, rest) }
+            else if Val(rest) = t.strip_prefix('+') { (false, rest) } else { (false, t) }
         if body.is_empty() || !body.chars().all(fn(c) { c.is_ascii_digit() }) -> return Err("invalid exact Int string `{s}`")
         acc := Self{negative: false, limbs: [0]}
         for ch in body.chars() -> acc = acc.mul_small(10).add_small(ch.to_digit(10).unwrap() as U32)
@@ -814,8 +853,8 @@ impl JetBigInt {
     pub fn from_radix(text: String, radix: U32) -> JetBigInt Err! {
         if radix < 2 || radix > 36 -> return Err("integer radix must be between 2 and 36, got {radix}")
         text := text.trim() // #4303
-        (negative, digits) :: if Some(rest) = text.strip_prefix('-') { (true, rest) }
-            else if Some(rest) = text.strip_prefix('+') { (false, rest) } else { (false, text) }
+        (negative, digits) :: if Val(rest) = text.strip_prefix('-') { (true, rest) }
+            else if Val(rest) = text.strip_prefix('+') { (false, rest) } else { (false, text) }
         if digits.is_empty() -> return Err("integer radix text is empty")
         value := Self.from_int(0)
         for digit in digits.chars() {
@@ -884,7 +923,10 @@ impl JetBigInt {
             a :: self.limbs[i] as I64
             b :: other.limbs.get(i).unwrap_or(0) as I64
             cur := a - b - borrow
-            if cur < 0 { cur += BI_BASE as I64; borrow = 1 } else { borrow = 0 }
+            if cur < 0 {
+                cur += BI_BASE as I64
+                borrow = 1
+            } else { borrow = 0 }
             limbs.push(cur as U32)
         }
         Self{negative: false, limbs: limbs}.normalize()
@@ -934,20 +976,31 @@ impl JetBigInt {
     fn bit_width(self) -> Int Never! {
         value := self.abs()
         width := 0
-        while !value.is_zero() { (next, _) :: value.div_rem_small(2); value = next; width += 1 }
+        while !value.is_zero() {
+            (next, _) :: value.div_rem_small(2)
+            value = next
+            width += 1
+        }
         width
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3472
     fn unsigned_bits(self, width: Int) -> [Bool] Never! {
         value := self.abs()
         bits := [Bool].with_capacity(width)
-        for _ in 0..width { (next, remainder) :: value.div_rem_small(2); bits.push(remainder != 0); value = next }
+        for _ in 0..width {
+            (next, remainder) :: value.div_rem_small(2)
+            bits.push(remainder != 0)
+            value = next
+        }
         bits
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3483
     fn from_unsigned_bits(bits: View<Bool>) -> JetBigInt Never! {
         value := Self.from_int(0)
-        for bit in bits.iter().rev() { value = value.mul_small(2); if bit -> value = value.add_small(1) }
+        for bit in bits.iter().rev() {
+            value = value.mul_small(2)
+            if bit -> value = value.add_small(1)
+        }
         value
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3494
@@ -959,7 +1012,10 @@ impl JetBigInt {
             for bit in &bits {
                 if !carry -> break
                 if bit -> bit = false
-                else { bit = true; carry = false }
+                else {
+                    bit = true
+                    carry = false
+                }
             }
         }
         bits
@@ -973,7 +1029,10 @@ impl JetBigInt {
         for bit in &bits {
             if !carry -> break
             if bit -> bit = false
-            else { bit = true; carry = false }
+            else {
+                bit = true
+                carry = false
+            }
         }
         Self.from_unsigned_bits(&bits).neg()
     }

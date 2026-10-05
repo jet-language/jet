@@ -19,7 +19,7 @@ impl<C> Iterator<[C]> for JetColumnListIntoRows<C> {
     fn next(self: &JetColumnListIntoRows<C>) -> [C]? {
         if self.remaining == 0 -> return None
         self.remaining -= 1
-        Some(self.columns.iter_mut().map((column) -> column.next().expect("columnar store columns have inconsistent lengths")).collect())
+        Val(self.columns.iter_mut().map((column) -> column.next().expect("columnar store columns have inconsistent lengths")).collect())
     }
 }
 impl<S: JetRow> JetColumnList<S> {

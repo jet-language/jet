@@ -11,7 +11,7 @@ struct JetScopeGuard<F: FnOnce> { f: F? }
 fn jet_scope_guard<F: FnOnce>(f: F) -> JetScopeGuard<F> { JetScopeGuard{f: Val(^f)} }
 // Rust: crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs:12
 impl<F: FnOnce> Drop for JetScopeGuard<F> {
-    fn drop(self: &JetScopeGuard<F>) -> { if self.f.take() is Val(f) { f() } }
+    fn drop(self: &JetScopeGuard<F>) -> { if self.f.take() == .Val(f) { f() } }
 }
 // Transaction Drop runs commit hooks LIFO, or snapshots then rollback hooks LIFO.
 // Unselected callback stacks are destroyed without invocation.
@@ -45,10 +45,10 @@ fn jet_transaction_commit(transaction: &JetTransaction) -> { transaction.commit(
 impl Drop for JetTransaction {
     fn drop(self: &JetTransaction) -> {
         if self.committed {
-            while self.hooks.pop() is Val(f) { f() }
+            while self.hooks.pop() == .Val(f) { f() }
         } else {
-            while self.snapshots.pop() is Val(f) { f() }
-            while self.rollback_hooks.pop() is Val(f) { f() }
+            while self.snapshots.pop() == .Val(f) { f() }
+            while self.rollback_hooks.pop() == .Val(f) { f() }
         }
     }
 }

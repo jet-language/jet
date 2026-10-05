@@ -239,7 +239,7 @@ impl<T: Send + Sync> JetFfiCallbackState<T> {
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:287
     fn enter(self: &Arc<Self>) -> JetFfiInFlight<T> JetFfiCallbackDispatch! {
-        if self.check_thread() is Err(error) {
+        if self.check_thread() == .Err(error) {
             self.record_callback_failure("callback entered without its vetted thread attachment")
             return Err(^error)
         }
@@ -276,7 +276,7 @@ impl<T: Send + Sync> JetFfiCallbackState<T> {
         guard :: match self.enter() {
             Ok(guard) -> ^guard
             Err(error) -> {
-                if error is .RejectedThread || error is .RejectedReentrant -> self.spawn_stop().detach()
+                if error == .RejectedThread || error == .RejectedReentrant -> self.spawn_stop().detach()
                 return ^error
             }
         }
@@ -325,7 +325,7 @@ impl<T: Send + Sync> JetFfiCallbackState<T> {
             if leader {
                 native_result :: catch_unwind(AssertUnwindSafe(fn() { (self.native_stop)() }))
                     .map_err(fn(_) { "native shutdown hook panicked" }).and_then(fn(result) { ^result })
-                if native_result is Err(message) {
+                if native_result == .Err(message) {
                     self.record_native_failure(^message)
                     return self.stop_result()
                 }
@@ -339,7 +339,7 @@ impl<T: Send + Sync> JetFfiCallbackState<T> {
                 callback :: self.callback.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).take()
                 drop(^wait)
                 drop(^callback)
-                if release is Val(release) -> _ :: catch_unwind(AssertUnwindSafe(fn() { release() }))
+                if release == .Val(release) -> _ :: catch_unwind(AssertUnwindSafe(fn() { release() }))
                 self.wake.notify_all()
             } else {
                 wait := self.wait_lock.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
@@ -354,10 +354,10 @@ impl<T: Send + Sync> JetFfiCallbackState<T> {
     fn stop_result(self: &Self) -> JetFfiStopResult {
         // GATE #4565: kernel primitive
         #Unsafe("snapshot retained shutdown errors under their mutexes") {
-            if self.native_failure.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone() is Val(message) {
+            if self.native_failure.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone() == .Val(message) {
                 return .Quarantined(^message)
             }
-            if self.callback_failure.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone() is Val(message) {
+            if self.callback_failure.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).clone() == .Val(message) {
                 return .CallbackFailed(^message)
             }
             if self.phase() == JET_FFI_CALLBACK_STOPPED { .Stopped }
@@ -370,7 +370,10 @@ struct JetFfiInFlight<T: Send + Sync> { state: Arc<JetFfiCallbackState<T>>, acti
 impl<T: Send + Sync> Drop for JetFfiInFlight<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:482
     fn drop(self: &Self) -> {
-        if self.active { self.active = false; self.state.leave() }
+        if self.active {
+            self.active = false
+            self.state.leave()
+        }
     }
 }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:490
@@ -379,7 +382,10 @@ impl<T: Send + Sync> JetFfiCallbackEvent<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:496
     pub fn value(self: &Self) -> &T { self.value }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:502
-    pub fn stop(self: &Self) -> { self.state.request_stop(); self.state.spawn_stop().detach() }
+    pub fn stop(self: &Self) -> {
+        self.state.request_stop()
+        self.state.spawn_stop().detach()
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:507
     pub fn callback_identity(self: &Self) -> &String { &self.state.contract.callback_identity }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:511
@@ -409,7 +415,10 @@ impl<T: Send + Sync> JetFfiCallbackRegistration<T> {
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:566
     pub fn dispatch(self: &Self, value: T) -> JetFfiCallbackDispatch { self.state.dispatch(^value) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:570
-    pub fn stop(self: &Self) -> { self.state.request_stop(); self.state.spawn_stop().detach() }
+    pub fn stop(self: &Self) -> {
+        self.state.request_stop()
+        self.state.spawn_stop().detach()
+    }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs:577
     pub fn unsubscribe(self: ^Self) -> JetTask<JetFfiStopResult> {
         owned := ^self
@@ -524,7 +533,7 @@ pub fn jet_ffi_callback_registration_start_i64(
         release_context :: native_token_slot.clone()
         release_hook :: Arc.new(fn() {
             token :: *release_context.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
-            if token is Val(token) {
+            if token == .Val(token) {
                 _ :: catch_unwind(AssertUnwindSafe(fn() { native_release(ptr.from_addr<c_void>(token)) }))
             }
         })
@@ -690,7 +699,7 @@ pub fn jet_ffi_callback_registration_unsubscribe(handle: *c_void) -> *c_void {
     #Unsafe("consume the one registration allocation, transferring it to stop-task ownership until drain") {
         raw :: Box.from_raw(handle.cast<JetFfiRawRegistration>())
         registration :: raw.registration.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).take()
-        if registration is None {
+        if registration == .None {
             mem.forget(^raw)
             return ptr.null_mut<c_void>()
         }

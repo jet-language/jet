@@ -20,7 +20,10 @@ fn trap_fraction(msg: String) Never! { Concurrency.with_runtime_mut(fn(rt) { rt.
 fn divide_by_zero_message() -> String Never! { runtime_host.contract_kernel.jet_arithmetic_message("divide_zero") }
 // Rust: crates/jet-jit/src/Numeric.rs:37
 pub fn push_decimal(d: ^CtDecimal) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { rt.decimal_values.push(Val(^d)); rt.decimal_values.len() as I64 })
+    Concurrency.with_runtime_mut(fn(rt) {
+        rt.decimal_values.push(Val(^d))
+        rt.decimal_values.len() as I64
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:45
 fn with_decimal<R>(handle: I64, f: fn(CtDecimal) -> R) -> R? Never! {
@@ -31,7 +34,8 @@ fn with_decimal<R>(handle: I64, f: fn(CtDecimal) -> R) -> R? Never! {
 }
 // Rust: crates/jet-jit/src/Numeric.rs:51
 fn push_decimal_in_runtime(rt: &JitRuntime, value: ^CtDecimal) -> I64 Never! {
-    rt.decimal_values.push(Val(^value)); rt.decimal_values.len() as I64
+    rt.decimal_values.push(Val(^value))
+    rt.decimal_values.len() as I64
 }
 // Rust: crates/jet-jit/src/Numeric.rs:57
 fn decimal_binary(left: I64, right: I64, operation: fn(CtDecimal, CtDecimal) -> CtDecimal) -> I64 Never! {
@@ -47,7 +51,10 @@ fn decimal_binary(left: I64, right: I64, operation: fn(CtDecimal, CtDecimal) -> 
 }
 // Rust: crates/jet-jit/src/Numeric.rs:80
 fn push_fraction(f: ^CtFraction) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { rt.fraction_values.push(Val(^f)); rt.fraction_values.len() as I64 })
+    Concurrency.with_runtime_mut(fn(rt) {
+        rt.fraction_values.push(Val(^f))
+        rt.fraction_values.len() as I64
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:87
 fn with_fraction<R>(handle: I64, f: fn(CtFraction) -> R) -> R? Never! {
@@ -58,7 +65,10 @@ fn with_fraction<R>(handle: I64, f: fn(CtFraction) -> R) -> R? Never! {
 }
 // Rust: crates/jet-jit/src/Numeric.rs:94
 fn push_complex(value: JetComplex) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { rt.complex_values.push(Val(value)); rt.complex_values.len() as I64 })
+    Concurrency.with_runtime_mut(fn(rt) {
+        rt.complex_values.push(Val(value))
+        rt.complex_values.len() as I64
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:101
 fn with_complex<R>(handle: I64, f: fn(JetComplex) -> R) -> R? Never! {
@@ -73,7 +83,8 @@ fn jet_jit_int_from_int(n: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(
 fn jet_jit_int_to_native(value: I64) -> I64 Never! {
     Concurrency.with_runtime_mut(fn(rt) {
         if rt.heap.int_to_i64(value) == .Val(native) -> return native
-        rt.set_arithmetic_stop(U32{0}, "native Int argument exceeds host range"); I64{0}
+        rt.set_arithmetic_stop(U32{0}, "native Int argument exceeds host range")
+        I64{0}
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:131
@@ -83,7 +94,8 @@ fn jet_jit_int_from_str(str_id: I64) -> I64 Never! {
     Concurrency.with_runtime_mut(fn(rt) {
         text :: rt.heap.clone_string(str_id).unwrap_or("")
         if rt.heap.int_from_str(text) == .Ok(id) -> return id
-        rt.set_trap("invalid default Int literal"); I64{0}
+        rt.set_trap("invalid default Int literal")
+        I64{0}
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:148
@@ -106,32 +118,42 @@ fn jet_jit_int_neg(a: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
 fn jet_jit_int_abs(a: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_abs(a) }) }
 // Rust: crates/jet-jit/src/Numeric.rs:184
 fn jet_jit_int_not(a: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { negative :: rt.heap.int_neg(a); one :: rt.heap.int_from_i64(I64{1}); rt.heap.int_sub(negative, one) })
+    Concurrency.with_runtime_mut(fn(rt) {
+        negative :: rt.heap.int_neg(a)
+        one :: rt.heap.int_from_i64(I64{1})
+        rt.heap.int_sub(negative, one)
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:192
 fn jet_jit_int_shl(a: I64, b: I64) -> I64 Never! {
     Concurrency.with_runtime_mut(fn(rt) {
         if rt.heap.int_shl(a, b) == .Val(value) -> return value
-        rt.set_trap("invalid shift count"); I64{0}
+        rt.set_trap("invalid shift count")
+        I64{0}
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:202
 fn jet_jit_int_shr(a: I64, b: I64) -> I64 Never! {
     Concurrency.with_runtime_mut(fn(rt) {
         if rt.heap.int_shr(a, b) == .Val(value) -> return value
-        rt.set_trap("invalid shift count"); I64{0}
+        rt.set_trap("invalid shift count")
+        I64{0}
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:212
 fn jet_jit_int_to_string(a: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { text :: rt.heap.int_to_string(a); rt.heap.alloc_string(^text) })
+    Concurrency.with_runtime_mut(fn(rt) {
+        text :: rt.heap.int_to_string(a)
+        rt.heap.alloc_string(^text)
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:219
 fn jet_jit_int_to_radix(value: I64, radix: I64) -> I64 Never! {
     Concurrency.with_runtime_mut(fn(rt) {
         if rt.heap.int_to_i64(radix) == .Val(r) {
             if r < I64{0} || r > I64{4294967295} {
-                rt.set_trap("integer radix must be between 2 and 36"); return I64{0}
+                rt.set_trap("integer radix must be between 2 and 36")
+                return I64{0}
             }
             text :: rt.heap.int_to_string(value)
             if CtBigInt.from_str(text) == {
@@ -145,7 +167,8 @@ fn jet_jit_int_to_radix(value: I64, radix: I64) -> I64 Never! {
             }
             return I64{0}
         }
-        rt.set_trap("integer radix must fit in Int"); I64{0}
+        rt.set_trap("integer radix must fit in Int")
+        I64{0}
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:244
@@ -174,37 +197,66 @@ fn jet_jit_int_from_radix(text: I64, radix: I64) -> I64 Never! {
 fn jet_jit_int_to_f64(a: I64) -> F64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_to_f64(a) }) }
 // Rust: crates/jet-jit/src/Numeric.rs:274
 fn jet_jit_int_div(a: I64, b: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_div(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_div(a, b) == .Val(value) -> return value
+        rt.set_arithmetic_stop(U32{0}, divide_by_zero_message())
+        I64{0}
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:284
 fn jet_jit_int_div_euclid(a: I64, b: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_div_euclid(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_div_euclid(a, b) == .Val(value) -> return value
+        rt.set_arithmetic_stop(U32{0}, divide_by_zero_message())
+        I64{0}
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:294
 fn jet_jit_int_rem_euclid(a: I64, b: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_rem_euclid(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_rem_euclid(a, b) == .Val(value) -> return value
+        rt.set_arithmetic_stop(U32{0}, divide_by_zero_message())
+        I64{0}
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:304
 fn jet_jit_int_floor_div(a: I64, b: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_floor_div(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_floor_div(a, b) == .Val(value) -> return value
+        rt.set_arithmetic_stop(U32{0}, divide_by_zero_message())
+        I64{0}
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:314
 fn jet_jit_int_mod(a: I64, b: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_mod(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_mod(a, b) == .Val(value) -> return value
+        rt.set_arithmetic_stop(U32{0}, divide_by_zero_message())
+        I64{0}
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:324
 fn jet_jit_int_rem(a: I64, b: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_rem(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_rem(a, b) == .Val(value) -> return value
+        rt.set_arithmetic_stop(U32{0}, divide_by_zero_message())
+        I64{0}
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:334
 fn jet_jit_int_pow(a: I64, b: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_pow(a, b) == .Val(value) -> return value; rt.set_trap("invalid default Int exponent"); I64{0} })
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_pow(a, b) == .Val(value) -> return value
+        rt.set_trap("invalid default Int exponent")
+        I64{0}
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:352
 fn located_int_op(line: I64, failure: String, op: fn(&JitRuntime) -> I64?) -> I64 Never! {
     Concurrency.with_runtime_mut(fn(rt) {
         if op(&rt) == .Val(value) -> return value
-        rt.set_arithmetic_stop(line as U32, failure); I64{0}
+        rt.set_arithmetic_stop(line as U32, failure)
+        I64{0}
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:366
@@ -410,7 +462,10 @@ fn jet_jit_u64_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_
 
 // Rust: crates/jet-jit/src/Numeric.rs:541
 fn jet_jit_int_factorial(a: I64) -> I64 Never! {
-    Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_factorial(a); int_option(&rt, result) })
+    Concurrency.with_runtime_mut(fn(rt) {
+        result :: rt.heap.int_factorial(a)
+        int_option(&rt, result)
+    })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:548
 fn int_option(rt: &JitRuntime, value: I64?) -> I64 Never! {
@@ -429,9 +484,15 @@ fn jet_jit_int_is_even(value: I64) -> I8 Never! { Concurrency.with_runtime_mut(f
 // Rust: crates/jet-jit/src/Numeric.rs:566
 fn jet_jit_int_is_odd(value: I64) -> I8 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_is_odd(value) as I8 }) }
 // Rust: crates/jet-jit/src/Numeric.rs:570
-fn jet_jit_int_isqrt(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_isqrt(value); int_option(&rt, result) }) }
+fn jet_jit_int_isqrt(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_isqrt(value)
+    int_option(&rt, result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:577
-fn jet_jit_int_binomial(n: I64, k: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_binomial(n,k); int_option(&rt, result) }) }
+fn jet_jit_int_binomial(n: I64, k: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_binomial(n,k)
+    int_option(&rt, result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:584
 fn jet_jit_int_digits(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_digits(value) }) }
 // Rust: crates/jet-jit/src/Numeric.rs:588
@@ -439,21 +500,45 @@ fn jet_jit_int_leading_ones(value: I64) -> I64 Never! { Concurrency.with_runtime
 // Rust: crates/jet-jit/src/Numeric.rs:592
 fn jet_jit_int_trailing_ones(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_trailing_ones(value) }) }
 // Rust: crates/jet-jit/src/Numeric.rs:596
-fn jet_jit_int_checked_abs(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_abs(value); int_option(&rt, result) }) }
+fn jet_jit_int_checked_abs(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_checked_abs(value)
+    int_option(&rt, result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:603
-fn jet_jit_int_checked_neg(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_neg(value); int_option(&rt, result) }) }
+fn jet_jit_int_checked_neg(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_checked_neg(value)
+    int_option(&rt, result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:610
-fn jet_jit_int_checked_add(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_add(l,r); int_option(&rt,result) }) }
+fn jet_jit_int_checked_add(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_checked_add(l,r)
+    int_option(&rt,result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:617
-fn jet_jit_int_checked_sub(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_sub(l,r); int_option(&rt,result) }) }
+fn jet_jit_int_checked_sub(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_checked_sub(l,r)
+    int_option(&rt,result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:624
-fn jet_jit_int_checked_mul(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_mul(l,r); int_option(&rt,result) }) }
+fn jet_jit_int_checked_mul(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_checked_mul(l,r)
+    int_option(&rt,result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:631
-fn jet_jit_int_checked_div(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_div(l,r); int_option(&rt,result) }) }
+fn jet_jit_int_checked_div(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_checked_div(l,r)
+    int_option(&rt,result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:638
-fn jet_jit_int_checked_rem(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_rem(l,r); int_option(&rt,result) }) }
+fn jet_jit_int_checked_rem(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_checked_rem(l,r)
+    int_option(&rt,result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:645
-fn jet_jit_int_checked_pow(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_pow(l,r); int_option(&rt,result) }) }
+fn jet_jit_int_checked_pow(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) {
+    result :: rt.heap.int_checked_pow(l,r)
+    int_option(&rt,result)
+}) }
 // Rust: crates/jet-jit/src/Numeric.rs:652
 fn jet_jit_int_saturating_add(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_saturating_add(l,r) }) }
 // Rust: crates/jet-jit/src/Numeric.rs:656
@@ -470,14 +555,16 @@ fn jet_jit_int_lcm(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(f
 fn jet_jit_int_div_mod(l: I64,r: I64) -> I64 Never! {
     Concurrency.with_runtime_mut(fn(rt) {
         if rt.heap.int_div_mod(l,r) == .Val((q,rem)) -> return int_pair(&rt,q,rem)
-        rt.set_arithmetic_stop(U32{0},divide_by_zero_message()); int_pair(&rt,I64{0},I64{0})
+        rt.set_arithmetic_stop(U32{0},divide_by_zero_message())
+        int_pair(&rt,I64{0},I64{0})
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:686
 fn jet_jit_int_div_rem_pair(l: I64,r: I64) -> I64 Never! {
     Concurrency.with_runtime_mut(fn(rt) {
         if rt.heap.int_div_rem(l,r) == .Val((q,rem)) -> return int_pair(&rt,q,rem)
-        rt.set_arithmetic_stop(U32{0},divide_by_zero_message()); int_pair(&rt,I64{0},I64{0})
+        rt.set_arithmetic_stop(U32{0},divide_by_zero_message())
+        int_pair(&rt,I64{0},I64{0})
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:696
@@ -486,7 +573,8 @@ fn jet_jit_decimal_from_str(str_id: I64) -> I64 Never! {
         if rt.heap.get_string(str_id) == .Val(text) {
             if CtDecimal.from_str(text) == .Ok(value) -> return push_decimal_in_runtime(&rt,^value)
         }
-        rt.set_trap("invalid Decimal string"); I64{0}
+        rt.set_trap("invalid Decimal string")
+        I64{0}
     })
 }
 // Rust: crates/jet-jit/src/Numeric.rs:708
@@ -504,7 +592,8 @@ fn jet_jit_decimal_div(a: I64,b: I64) -> I64 Never! {
         None
     })
     if fraction == .Val(value) -> return push_fraction(^value)
-    trap_fraction("divided by zero"); I64{0}
+    trap_fraction("divided by zero")
+    I64{0}
 }
 // Rust: crates/jet-jit/src/Numeric.rs:743
 fn jet_jit_decimal_equal(a: I64,b: I64) -> I8 Never! {
@@ -550,7 +639,8 @@ fn jet_jit_fraction_new(n: I64,d: I64) -> I64 Never! {
 // Rust: crates/jet-jit/src/Numeric.rs:806
 fn jet_jit_fraction_from_parts(n: I64,d: I64) -> I64 Never! {
     if fraction_from_int_handles(n,d) == .Val(f) -> return push_fraction(^f)
-    trap_fraction("invalid exact quotient"); I64{0}
+    trap_fraction("invalid exact quotient")
+    I64{0}
 }
 // Rust: crates/jet-jit/src/Numeric.rs:816
 fn zero_fraction() -> CtFraction Never! { CtFraction{numerator: CtBigInt.from_int(0),denominator: CtBigInt.from_int(1)} }
@@ -559,28 +649,32 @@ fn jet_jit_fraction_add(a: I64,b: I64) -> I64 Never! {
     left :: with_fraction(a,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
     right :: with_fraction(b,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
     if left.add(right) == .Val(out) -> return push_fraction(^out)
-    trap_fraction("this sum of ratios overflows the value type"); I64{0}
+    trap_fraction("this sum of ratios overflows the value type")
+    I64{0}
 }
 // Rust: crates/jet-jit/src/Numeric.rs:835
 fn jet_jit_fraction_sub(a: I64,b: I64) -> I64 Never! {
     left :: with_fraction(a,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
     right :: with_fraction(b,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
     if left.sub(right) == .Val(out) -> return push_fraction(^out)
-    trap_fraction("this difference of ratios overflows the value type"); I64{0}
+    trap_fraction("this difference of ratios overflows the value type")
+    I64{0}
 }
 // Rust: crates/jet-jit/src/Numeric.rs:847
 fn jet_jit_fraction_mul(a: I64,b: I64) -> I64 Never! {
     left :: with_fraction(a,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
     right :: with_fraction(b,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
     if left.mul(right) == .Val(out) -> return push_fraction(^out)
-    trap_fraction("this product of ratios overflows the value type"); I64{0}
+    trap_fraction("this product of ratios overflows the value type")
+    I64{0}
 }
 // Rust: crates/jet-jit/src/Numeric.rs:859
 fn jet_jit_fraction_div(a: I64,b: I64) -> I64 Never! {
     left :: with_fraction(a,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
     right :: with_fraction(b,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
     if left.div(right) == .Val(out) -> return push_fraction(^out)
-    trap_fraction("divided by zero"); I64{0}
+    trap_fraction("divided by zero")
+    I64{0}
 }
 // Rust: crates/jet-jit/src/Numeric.rs:871
 fn jet_jit_fraction_equal(a: I64,b: I64) -> I8 Never! {
@@ -1570,22 +1664,29 @@ pub fn register_numeric_symbols(builder: &JITBuilder) Never! {
 pub fn declare_numeric_host_fns<M: Module>(module: &M) -> NumericHostFns Err! {
     cc :: module.target_config().default_call_conv
     sig_unary := Signature.new(cc)
-    sig_unary.params.push(AbiParam.new(types.I64)); sig_unary.returns.push(AbiParam.new(types.I64))
+    sig_unary.params.push(AbiParam.new(types.I64))
+    sig_unary.returns.push(AbiParam.new(types.I64))
     sig_binary := Signature.new(cc)
-    sig_binary.params.push(AbiParam.new(types.I64)); sig_binary.params.push(AbiParam.new(types.I64))
+    sig_binary.params.push(AbiParam.new(types.I64))
+    sig_binary.params.push(AbiParam.new(types.I64))
     sig_binary.returns.push(AbiParam.new(types.I64))
     sig_compare := Signature.new(cc)
-    sig_compare.params.push(AbiParam.new(types.I64)); sig_compare.params.push(AbiParam.new(types.I64))
+    sig_compare.params.push(AbiParam.new(types.I64))
+    sig_compare.params.push(AbiParam.new(types.I64))
     sig_compare.returns.push(AbiParam.new(types.I8))
     sig_compare_i64 := Signature.new(cc)
-    sig_compare_i64.params.push(AbiParam.new(types.I64)); sig_compare_i64.params.push(AbiParam.new(types.I64))
+    sig_compare_i64.params.push(AbiParam.new(types.I64))
+    sig_compare_i64.params.push(AbiParam.new(types.I64))
     sig_compare_i64.returns.push(AbiParam.new(types.I64))
     sig_unary_bool := Signature.new(cc)
-    sig_unary_bool.params.push(AbiParam.new(types.I64)); sig_unary_bool.returns.push(AbiParam.new(types.I8))
+    sig_unary_bool.params.push(AbiParam.new(types.I64))
+    sig_unary_bool.returns.push(AbiParam.new(types.I8))
     sig_unary_f64 := Signature.new(cc)
-    sig_unary_f64.params.push(AbiParam.new(types.I64)); sig_unary_f64.returns.push(AbiParam.new(types.F64))
+    sig_unary_f64.params.push(AbiParam.new(types.I64))
+    sig_unary_f64.returns.push(AbiParam.new(types.F64))
     sig_complex_parts := Signature.new(cc)
-    sig_complex_parts.params.push(AbiParam.new(types.F64)); sig_complex_parts.params.push(AbiParam.new(types.F64))
+    sig_complex_parts.params.push(AbiParam.new(types.F64))
+    sig_complex_parts.params.push(AbiParam.new(types.F64))
     sig_complex_parts.returns.push(AbiParam.new(types.I64))
     sig_located := Signature.new(cc)
     loop i in 0..<4 -> sig_located.params.push(AbiParam.new(types.I64))

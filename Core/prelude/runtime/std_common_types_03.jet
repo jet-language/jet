@@ -216,7 +216,10 @@ impl JetBigInt {
         exponent := bit_index - 1
         if bit_index > 53 && guard && (sticky || (top & 1) != 0) {
             top += 1
-            if top == (1 as U64) << 53 { top >>= 1; exponent += 1 }
+            if top == (1 as U64) << 53 {
+                top >>= 1
+                exponent += 1
+            }
         }
         if exponent > 1023 -> return if self.negative { F64.NEG_INFINITY } else { F64.INFINITY }
         bits := if bit_index <= 53 { (top as F64).to_bits() } else { ((exponent as U64 + 1023) << 52) | (top & (((1 as U64) << 52) - 1)) }
@@ -916,7 +919,10 @@ impl JetFraction {
         if denominator.is_zero() -> return None
         n := ^numerator
         d := ^denominator
-        if d.negative { n = n.neg(); d = d.neg() }
+        if d.negative {
+            n = n.neg()
+            d = d.neg()
+        }
         divisor :: JetBigInt.gcd(n, d)
         Val(JetFraction{numerator: (n.div_rem(divisor) ?? return None).0, denominator: (d.div_rem(divisor) ?? return None).0})
     }
@@ -925,7 +931,10 @@ impl JetFraction {
         if denominator.is_zero() -> return None
         n := ^numerator
         d := ^denominator
-        if d.negative { n = n.neg(); d = d.neg() }
+        if d.negative {
+            n = n.neg()
+            d = d.neg()
+        }
         Val(JetFraction{numerator: ^n, denominator: ^d})
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5218

@@ -13,7 +13,14 @@ pub enum JetMapKey {
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/MapKey.rs:20
 fn jet_map_key_kind(key: JetMapKey) -> U8 {
-    if key == { .Int(_), .BigInt{..} -> 0; .UInt(_) -> 1; .String(_) -> 2; .Bool(_) -> 3; .Char(_) -> 4; .Record(_) -> 5 }
+    if key == {
+        .Int(_), .BigInt{..} -> 0
+        .UInt(_) -> 1
+        .String(_) -> 2
+        .Bool(_) -> 3
+        .Char(_) -> 4
+        .Record(_) -> 5
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/MapKey.rs:32
 pub fn jet_map_key_cmp(left: JetMapKey, right: JetMapKey) -> Ordering {
@@ -49,7 +56,7 @@ impl PartialEq for JetMapKey {
 impl Eq for JetMapKey {}
 impl PartialOrd for JetMapKey {
     // Rust: crates/jet-codegen/src/Prelude/Core/MapKey.rs:100
-    fn partial_cmp(self: JetMapKey, other: JetMapKey) -> Ordering? { Some(jet_map_key_cmp(self, other)) }
+    fn partial_cmp(self: JetMapKey, other: JetMapKey) -> Ordering? { Val(jet_map_key_cmp(self, other)) }
 }
 impl Ord for JetMapKey {
     // Rust: crates/jet-codegen/src/Prelude/Core/MapKey.rs:106
