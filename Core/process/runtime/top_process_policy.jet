@@ -1,46 +1,9 @@
-// CoreLib/Top/ProcessPolicy.rs:1–562. Private portable authority/receipt policy.
-// The sole accepted ProcessSpecState is borrowed; this is not a public plan,
-// authority, handle or capability. Root activation stays HELD #4460/#4476/#4477.
-// Stream/error enums below keep the original native patterns (#4476/#4477).
-//
-// Native inventory / Main stage-2 extraction (no provider or fake facts here):
-// :106 jet_process_backend_limits() -> Vec<String>: native cfg selects the
-// exact std::env::consts::OS (&'static str); backend_limits below projects it.
-// :239 jet_process_policy_authority_cwd(&ProcessSpec) -> Result<Option<&str>, IOError>:
-// native std::path::Path::new(cwd).is_absolute(&Path) -> bool is sampled for
-// that SAME borrowed cwd, on the target, and passed below; no lexical substitute.
-// :446 jet_process_resolve_executable(&ProcessSpec) -> Result<String, IOError>:
-// keep Path::is_absolute(&Path)->bool, fs::canonicalize(impl AsRef<Path>)->
-// io::Result<PathBuf>, Path::is_file(&Path)->bool, OsStr PATH equality,
-// env::split_paths(&OsStr)->SplitPaths, Path::join(&Path,impl AsRef<Path>)->PathBuf,
-// Path::to_string_lossy(&Path)->Cow<str>, and
-// jet_std_env_snapshot_raw()->Vec<(OsString,OsString)> native. Empty argv is
-// portable validation below; native failures retain Resolve/command context.
-// :498 jet_process_isolation_backend()->Option<String> consumes
-// jet_process_sandbox::status()->Status{available:bool,mechanism:String,policy:String,reason:String}.
-// :503 backend_check consumes that actual availability, not a probe/table here.
-// :519 jet_process_spec_plan(&ProcessSpec)->Result<ProcessPlan,IOError> stays HELD:
-// resource_limits_check(spec) FIRST, bound-policy check, authority_cwd, native
-// resolve_executable, policy_check, check_executable, actual isolation backend,
-// native ProcessPlan marshaling, then unavailable error with the policy digest.
-// There is deliberately no second ProcessPlan or high-level native fallback.
-// Original pure private signatures before fact extraction:
-// policy_limits(&ProcessSpec)->Vec<String>, policy_material(&ProcessSpec)->String,
-// policy_digest(&ProcessSpec)->String, backend_check(&ProcessSpec)->Result<(),IOError>.
-// Their only added inputs below are the genuine native backend-limits return
-// and status.available/is_some fact; adapters pass them without reinterpretation.
-// Process.rs:115–169 jet_process_resource_limits_check(&ProcessSpec)->Result<(),IOError>
-// is held native target/resource validation, not a successful portable stub.
-// CommonTypes.rs:546–556 native ProcessPlan has EXACTLY executable_identity,
-// argv, input_digest, policy_digest, backend, authority, descendants, limits,
-// outputs, in that declaration order; no Jet replacement is declared here.
-// Native adapters: jet-jit ProcessPrelude.rs:483–576 borrows/moves the exact
-// 16 spec fields; spec_plan(&ProcessSpec)->Result<ProcessPlan,IOError> :575–577;
-// Process.rs:988–1015 mir_process_plan marshals original native plan fields.
-// Process.rs:404–484 receipt uses this redactor/material/digest, with native
-// clock/IO/limit facts; :572–604 verify_launch_plan compares backend, policy
-// digest, then input digest. PTY supported()->bool is ProcessPty.rs:1252–1268;
-// its open/attach/resize/job APIs, resource checks, IO/clock/launch stay stage2.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs:1-562
+// One authority/receipt policy owner over the borrowed canonical ProcessSpecState.
+// Pure policy projections stay native-fact-independent; the executable and plan
+// adapters below sample real target OS, logical environment, cwd and sandbox
+// status. Native failures preserve Resolve/command context; no second plan,
+// provider, launch path or successful fallback is introduced.
 //
 // Rust tests inventory: build_sandbox.rs:1–1658 (recipe/agent real native
 // confinement, ambient-env denial, unavailable-backend refusal, descendant/
@@ -54,6 +17,15 @@ use core.process.runtime.top_process_spec as process_policy_spec
 use core.text.runtime.kernel_unicode_string as process_policy_text
 use core.crypto.runtime.kernel_sha256 as process_policy_sha
 use core.encoding as process_policy_encoding
+use core.files.OSPath
+use core.sys.target
+use core.process.runtime.top_fs_io_env_os_testing.jet_std_env_snapshot_raw
+use core.process.runtime.top_process.jet_process_resource_limits_check
+use core.process.runtime.top_process_sandbox as jet_process_sandbox
+use core.prelude.runtime.std_common_types.ProcessPlan
+use std.ffi.[OsStr, OsString]
+use std.fs
+use std.env
 
 // Rust jet_process_policy::terminal_facts :8–14, actual PTY supported fact.
 pub fn terminal_facts(pty_supported: Bool) -> [String] Never! {
@@ -425,4 +397,73 @@ pub fn jet_process_plan_backend_check(spec: process_policy_spec.ProcessSpecState
 pub fn jet_process_isolation_backend(available: Bool, mechanism: ^String) -> String? Never! {
     if available -> return Val(^mechanism)
     None
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs:446
+pub fn jet_process_resolve_executable(spec: process_policy_spec.ProcessSpecState) -> String IOError! {
+    jet_process_command_check(spec)?
+    command :: spec.cmd[0]
+    candidate :: OSPath.new(command)
+    // GATE #4565: kernel primitive
+    has_path :: #Unsafe("sample the selected native path's absolute fact without a lexical replacement") {
+        candidate.is_absolute() || command.contains("/") || command.contains("\\")
+    }
+    if has_path {
+        // GATE #4565: kernel primitive
+        return #Unsafe("resolve the actual executable path, retaining native canonicalization failure") {
+            fs.canonicalize(candidate).map(fn(path) { path.to_string_lossy().to_string() })
+                .map_err(fn(error) { IOError.other(IOOperation.Resolve, Val(command.clone()), error) })
+        }
+    }
+    snapshot :: jet_std_env_snapshot_raw()
+    // GATE #4565: kernel primitive
+    path_value :: #Unsafe("use the canonical captured PATH's exact selected-native OsStr encoding, not current host environment or Unicode filtering") {
+        snapshot.into_iter().find(fn(entry) {
+            OsStr.from_encoded_bytes_unchecked(entry.name) == OsStr.new("PATH")
+        }).map(fn(entry) { OsString.from_encoded_bytes_unchecked(^entry.value) })
+    }
+    if path_value.is_none() {
+        return Err(IOError.other(IOOperation.Resolve, Val(command.clone()), "cannot resolve executable without a PATH snapshot"))
+    }
+    // GATE #4565: kernel primitive
+    #Unsafe("iterate native split_paths in snapshot order, query actual file metadata, and canonicalize the first file candidate") {
+        loop directory in env.split_paths(&path_value.unwrap()) {
+            path :: directory.join(command)
+            if path.is_file() {
+                return fs.canonicalize(&path).map(fn(path) { path.to_string_lossy().to_string() })
+                    .map_err(fn(error) { IOError.other(IOOperation.Resolve, Val(command.clone()), error) })
+            }
+        }
+    }
+    Err(IOError.other(IOOperation.Resolve, Val(command.clone()), "executable was not found in the captured PATH"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs:519
+pub fn jet_process_spec_plan(spec: process_policy_spec.ProcessSpecState) -> ProcessPlan IOError! {
+    // Preserve original precedence: native resource limits before authority.
+    jet_process_resource_limits_check(spec)?
+    jet_process_plan_authority_check(spec)?
+    // GATE #4565: kernel primitive
+    cwd_absolute :: #Unsafe("sample the exact borrowed cwd's native absolute-path fact") {
+        spec.cwd.as_ref().is_some_and(fn(cwd) { OSPath.new(cwd).is_absolute() })
+    }
+    _ :: jet_process_policy_authority_cwd(spec, cwd_absolute)?
+    executable_identity :: jet_process_resolve_executable(spec)?
+    jet_process_policy_check(spec)?
+    jet_process_policy_check_executable(spec, executable_identity)?
+    status :: jet_process_sandbox.status()
+    backend :: jet_process_isolation_backend(status.available, ^status.mechanism).unwrap_or_else(fn() { "unavailable" })
+    backend_limits :: jet_process_backend_limits(target.selected_os())
+    plan :: ProcessPlan{
+        executable_identity: ^executable_identity,
+        argv: spec.cmd.iter().map(fn(word) { jet_process_policy_redact(spec, word) }).collect<[String]>(),
+        input_digest: jet_process_input_digest(spec),
+        policy_digest: jet_process_policy_digest(spec, backend_limits),
+        backend: backend.clone(),
+        authority: jet_process_policy_receipt_rights(spec),
+        descendants: jet_process_policy_descendants(spec),
+        limits: jet_process_policy_limits(spec, ^backend_limits),
+        outputs: jet_process_policy_outputs(spec),
+    }
+    jet_process_plan_backend_check(spec, backend, plan.policy_digest)?
+    Ok(^plan)
 }

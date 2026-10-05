@@ -1,897 +1,514 @@
-// PORT-PENDING 0288 crates-jet-codegen-src-prelude-corelib-top-mathlibpure-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:1-1749
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Shared core.math helpers (I9). Included by AOT prelude, JIT math_rt, and comptime ambient.
-//RS // Keep std-only; no jet_std / host types.
-//RS 
-//RS /// D-TYPE2-IMAG1=A: the one runtime value for imaginary literals. The type and
-//RS /// all arithmetic stay in this shared Prelude source so AOT, JIT, comptime,
-//RS /// and web cannot grow different complex-number rules.
-//RS #[derive(Clone, Copy, Debug, PartialEq)]
-//RS pub struct JetComplex {
-//RS     pub real: f64,
-//RS     pub imaginary: f64,
-//RS }
-//RS 
-//RS impl JetComplex {
-//RS     pub fn from_parts(real: f64, imaginary: f64) -> Self {
-//RS         Self { real, imaginary }
-//RS     }
-//RS 
-//RS     pub fn add(&self, other: &Self) -> Self {
-//RS         Self::from_parts(self.real + other.real, self.imaginary + other.imaginary)
-//RS     }
-//RS 
-//RS     pub fn sub(&self, other: &Self) -> Self {
-//RS         Self::from_parts(self.real - other.real, self.imaginary - other.imaginary)
-//RS     }
-//RS 
-//RS     pub fn mul(&self, other: &Self) -> Self {
-//RS         Self::from_parts(
-//RS             self.real * other.real - self.imaginary * other.imaginary,
-//RS             self.real * other.imaginary + self.imaginary * other.real,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn div(&self, other: &Self) -> Self {
-//RS         let denominator = other.real * other.real + other.imaginary * other.imaginary;
-//RS         Self::from_parts(
-//RS             (self.real * other.real + self.imaginary * other.imaginary) / denominator,
-//RS             (self.imaginary * other.real - self.real * other.imaginary) / denominator,
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn abs(self) -> f64 {
-//RS         self.real.hypot(self.imaginary)
-//RS     }
-//RS 
-//RS     pub fn to_string_rep(&self) -> String {
-//RS         let sign = if self.imaginary.is_sign_negative() { '-' } else { '+' };
-//RS         format!("{} {} {}i", self.real, sign, self.imaginary.abs())
-//RS     }
-//RS }
-//RS 
-//RS impl std::fmt::Display for JetComplex {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         f.write_str(&self.to_string_rep())
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_complex_from_parts(real: f64, imaginary: f64) -> JetComplex {
-//RS     JetComplex::from_parts(real, imaginary)
-//RS }
-//RS 
-//RS pub fn jet_complex_add(left: &JetComplex, right: &JetComplex) -> JetComplex {
-//RS     left.add(right)
-//RS }
-//RS 
-//RS pub fn jet_complex_sub(left: &JetComplex, right: &JetComplex) -> JetComplex {
-//RS     left.sub(right)
-//RS }
-//RS 
-//RS pub fn jet_complex_mul(left: &JetComplex, right: &JetComplex) -> JetComplex {
-//RS     left.mul(right)
-//RS }
-//RS 
-//RS pub fn jet_complex_div(left: &JetComplex, right: &JetComplex) -> JetComplex {
-//RS     left.div(right)
-//RS }
-//RS 
-//RS pub fn jet_complex_abs(value: JetComplex) -> f64 {
-//RS     value.abs()
-//RS }
-//RS 
-//RS pub fn jet_complex_to_string(value: &JetComplex) -> String {
-//RS     value.to_string_rep()
-//RS }
-//RS 
-//RS pub fn jet_std_math_pi() -> f64 {
-//RS     std::f64::consts::PI
-//RS }
-//RS 
-//RS pub fn jet_std_math_abs_i64(value: i64) -> i64 {
-//RS     value.abs()
-//RS }
-//RS 
-//RS pub fn jet_std_math_abs_f64(value: f64) -> f64 {
-//RS     value.abs()
-//RS }
-//RS 
-//RS pub fn jet_std_math_abs_f32(value: f32) -> f32 {
-//RS     value.abs()
-//RS }
-//RS 
-//RS /// Scalar IEEE-754 predicates shared by AOT, resident JIT, and comptime.
-//RS pub fn jet_std_math_is_nan(value: f64) -> bool {
-//RS     value.is_nan()
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_infinite(value: f64) -> bool {
-//RS     value.is_infinite()
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_finite(value: f64) -> bool {
-//RS     value.is_finite()
-//RS }
-//RS 
-//RS pub fn jet_std_math_asinh(value: f64) -> f64 {
-//RS     value.asinh()
-//RS }
-//RS 
-//RS pub fn jet_std_math_acosh(value: f64) -> f64 {
-//RS     value.acosh()
-//RS }
-//RS 
-//RS pub fn jet_std_math_atanh(value: f64) -> f64 {
-//RS     value.atanh()
-//RS }
-//RS 
-//RS pub fn jet_std_math_cbrt(value: f64) -> f64 {
-//RS     value.cbrt()
-//RS }
-//RS pub fn jet_std_math_exp(value: f64) -> f64 {
-//RS     value.exp()
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_std_math_exp2(value: f64) -> f64 {
-//RS     value.exp2()
-//RS }
-//RS 
-//RS pub fn jet_std_math_exp_m1(value: f64) -> f64 {
-//RS     value.exp_m1()
-//RS }
-//RS 
-//RS /// Compensated summation for Python-compatible `math.fsum` semantics.
-//RS pub fn jet_std_math_fsum(values: Vec<f64>) -> f64 {
-//RS     let mut total = 0.0;
-//RS     let mut compensation = 0.0;
-//RS     for value in values {
-//RS         let corrected = value - compensation;
-//RS         let next = total + corrected;
-//RS         compensation = (next - total) - corrected;
-//RS         total = next;
-//RS     }
-//RS     total
-//RS }
-//RS pub fn jet_stats_sum(values: Vec<f64>) -> f64 {
-//RS     jet_std_math_fsum(values)
-//RS }
-//RS pub fn jet_stats_count(values: Vec<f64>) -> i64 {
-//RS     values.len() as i64
-//RS }
-//RS 
-//RS pub fn jet_stats_prod(values: Vec<f64>) -> f64 {
-//RS     values.into_iter().product()
-//RS }
-//RS 
-//RS pub fn jet_stats_cumsum(values: Vec<f64>) -> Vec<f64> {
-//RS     let mut total = 0.0;
-//RS     values
-//RS         .into_iter()
-//RS         .map(|value| {
-//RS             total += value;
-//RS             total
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_cumprod(values: Vec<f64>) -> Vec<f64> {
-//RS     let mut total = 1.0;
-//RS     values
-//RS         .into_iter()
-//RS         .map(|value| {
-//RS             total *= value;
-//RS             total
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_diff(values: Vec<f64>) -> Vec<f64> {
-//RS     values
-//RS         .windows(2)
-//RS         .map(|pair| pair[1] - pair[0])
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_moving_average(values: Vec<f64>, window: i64) -> Vec<f64> {
-//RS     if window <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     let window = window as usize;
-//RS     (0..values.len())
-//RS         .map(|index| {
-//RS             let start = index.saturating_add(1).saturating_sub(window);
-//RS             let slice = &values[start..=index];
-//RS             slice.iter().sum::<f64>() / slice.len() as f64
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_ewma(values: Vec<f64>, alpha: f64) -> Vec<f64> {
-//RS     let Some((&first, rest)) = values.split_first() else {
-//RS         return Vec::new();
-//RS     };
-//RS     let alpha = alpha.clamp(0.0, 1.0);
-//RS     let mut total = first;
-//RS     let mut out = vec![total];
-//RS     out.extend(rest.iter().map(|value| {
-//RS         total = alpha * *value + (1.0 - alpha) * total;
-//RS         total
-//RS     }));
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_stats_rank(values: Vec<f64>) -> Vec<f64> {
-//RS     values
-//RS         .iter()
-//RS         .map(|value| {
-//RS             1.0 + values.iter().filter(|other| *other < value).count() as f64
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_zscore(values: Vec<f64>) -> Vec<f64> {
-//RS     if values.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     let mean = values.iter().sum::<f64>() / values.len() as f64;
-//RS     let variance = values
-//RS         .iter()
-//RS         .map(|value| {
-//RS             let delta = *value - mean;
-//RS             delta * delta
-//RS         })
-//RS         .sum::<f64>()
-//RS         / values.len() as f64;
-//RS     let deviation = variance.sqrt();
-//RS     if deviation == 0.0 {
-//RS         return Vec::new();
-//RS     }
-//RS     values
-//RS         .into_iter()
-//RS         .map(|value| (value - mean) / deviation)
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_clip(values: Vec<f64>, low: f64, high: f64) -> Vec<f64> {
-//RS     values
-//RS         .into_iter()
-//RS         .map(|value| value.clamp(low, high))
-//RS         .collect()
-//RS }
-//RS fn jet_stats_sorted(mut values: Vec<f64>) -> Vec<f64> {
-//RS     values.sort_by(f64::total_cmp);
-//RS     values
-//RS }
-//RS 
-//RS fn jet_stats_mean_value(values: &[f64]) -> Option<f64> {
-//RS     (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
-//RS }
-//RS 
-//RS fn jet_stats_quantile_value(values: &[f64], probability: f64) -> Option<f64> {
-//RS     let sorted = jet_stats_sorted(values.to_vec());
-//RS     let (&first, rest) = sorted.split_first()?;
-//RS     let last = rest.last().copied().unwrap_or(first);
-//RS     if probability <= 0.0 {
-//RS         return Some(first);
-//RS     }
-//RS     if probability >= 1.0 {
-//RS         return Some(last);
-//RS     }
-//RS     let position = probability * (sorted.len() - 1) as f64;
-//RS     let lower = position.floor() as usize;
-//RS     let upper = position.ceil() as usize;
-//RS     if lower == upper {
-//RS         return Some(sorted[lower]);
-//RS     }
-//RS     let fraction = position - lower as f64;
-//RS     Some(sorted[lower] + (sorted[upper] - sorted[lower]) * fraction)
-//RS }
-//RS 
-//RS pub fn jet_stats_mean(values: Vec<f64>) -> Option<f64> {
-//RS     jet_stats_mean_value(&values)
-//RS }
-//RS 
-//RS pub fn jet_stats_geometric_mean(values: Vec<f64>) -> Option<f64> {
-//RS     if values.is_empty() || values.iter().any(|value| *value <= 0.0) {
-//RS         return None;
-//RS     }
-//RS     Some((values.iter().map(|value| value.ln()).sum::<f64>() / values.len() as f64).exp())
-//RS }
-//RS 
-//RS pub fn jet_stats_harmonic_mean(values: Vec<f64>) -> Option<f64> {
-//RS     if values.is_empty() || values.iter().any(|value| *value == 0.0) {
-//RS         return None;
-//RS     }
-//RS     Some(values.len() as f64 / values.iter().map(|value| 1.0 / value).sum::<f64>())
-//RS }
-//RS 
-//RS pub fn jet_stats_median(values: Vec<f64>) -> Option<f64> {
-//RS     jet_stats_quantile_value(&values, 0.5)
-//RS }
-//RS 
-//RS pub fn jet_stats_median_grouped(values: Vec<f64>, interval: f64) -> Option<f64> {
-//RS     if values.is_empty() || interval <= 0.0 {
-//RS         return None;
-//RS     }
-//RS     let sorted = jet_stats_sorted(values);
-//RS     let middle = if sorted.len() % 2 == 1 {
-//RS         sorted[sorted.len() / 2]
-//RS     } else {
-//RS         (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
-//RS     };
-//RS     let lower = middle - interval / 2.0;
-//RS     let upper = lower + interval;
-//RS     let below = sorted.iter().filter(|value| **value < lower).count();
-//RS     let frequency = sorted
-//RS         .iter()
-//RS         .filter(|value| **value >= lower && **value < upper)
-//RS         .count();
-//RS     if frequency == 0 {
-//RS         Some(middle)
-//RS     } else {
-//RS         Some(lower + interval * (sorted.len() / 2 - below) as f64 / frequency as f64)
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_stats_median_low(values: Vec<f64>) -> Option<f64> {
-//RS     let sorted = jet_stats_sorted(values);
-//RS     sorted
-//RS         .get((sorted.len().saturating_sub(1)) / 2)
-//RS         .copied()
-//RS }
-//RS 
-//RS pub fn jet_stats_median_high(values: Vec<f64>) -> Option<f64> {
-//RS     let sorted = jet_stats_sorted(values);
-//RS     sorted.get(sorted.len() / 2).copied()
-//RS }
-//RS 
-//RS pub fn jet_stats_quantile(values: Vec<f64>, probability: f64) -> Option<f64> {
-//RS     jet_stats_quantile_value(&values, probability)
-//RS }
-//RS 
-//RS pub fn jet_stats_percentile(values: Vec<f64>, percent: f64) -> Option<f64> {
-//RS     jet_stats_quantile_value(&values, percent / 100.0)
-//RS }
-//RS 
-//RS pub fn jet_stats_mode(values: Vec<f64>) -> Option<f64> {
-//RS     let first = values.first().copied()?;
-//RS     let mut best = first;
-//RS     let mut best_count = 0usize;
-//RS     for value in &values {
-//RS         let count = values.iter().filter(|other| **other == *value).count();
-//RS         if count > best_count {
-//RS             best = *value;
-//RS             best_count = count;
-//RS         }
-//RS     }
-//RS     Some(best)
-//RS }
-//RS 
-//RS pub fn jet_stats_multimode(values: Vec<f64>) -> Vec<f64> {
-//RS     let Some(first) = values.first().copied() else {
-//RS         return Vec::new();
-//RS     };
-//RS     let best_count = values
-//RS         .iter()
-//RS         .map(|value| values.iter().filter(|other| **other == *value).count())
-//RS         .max()
-//RS         .unwrap_or(0);
-//RS     let mut out = Vec::new();
-//RS     for value in std::iter::once(first).chain(values.iter().copied().skip(1)) {
-//RS         let count = values.iter().filter(|other| **other == value).count();
-//RS         if count == best_count && !out.contains(&value) {
-//RS             out.push(value);
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_stats_pvariance(values: Vec<f64>) -> Option<f64> {
-//RS     let mean = jet_stats_mean_value(&values)?;
-//RS     Some(values.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / values.len() as f64)
-//RS }
-//RS 
-//RS pub fn jet_stats_variance(values: Vec<f64>) -> Option<f64> {
-//RS     if values.len() < 2 {
-//RS         return None;
-//RS     }
-//RS     let mean = jet_stats_mean_value(&values)?;
-//RS     Some(values.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / (values.len() - 1) as f64)
-//RS }
-//RS 
-//RS pub fn jet_stats_pstdev(values: Vec<f64>) -> Option<f64> {
-//RS     jet_stats_pvariance(values).map(f64::sqrt)
-//RS }
-//RS 
-//RS pub fn jet_stats_stdev(values: Vec<f64>) -> Option<f64> {
-//RS     jet_stats_variance(values).map(f64::sqrt)
-//RS }
-//RS 
-//RS pub fn jet_stats_covariance(left: Vec<f64>, right: Vec<f64>) -> Option<f64> {
-//RS     if left.len() < 2 || left.len() != right.len() {
-//RS         return None;
-//RS     }
-//RS     let left_mean = jet_stats_mean_value(&left)?;
-//RS     let right_mean = jet_stats_mean_value(&right)?;
-//RS     Some(
-//RS         left.iter()
-//RS             .zip(right.iter())
-//RS             .map(|(a, b)| (a - left_mean) * (b - right_mean))
-//RS             .sum::<f64>()
-//RS             / (left.len() - 1) as f64,
-//RS     )
-//RS }
-//RS 
-//RS pub fn jet_stats_covariance_population(left: Vec<f64>, right: Vec<f64>) -> Option<f64> {
-//RS     if left.is_empty() || left.len() != right.len() {
-//RS         return None;
-//RS     }
-//RS     let left_mean = jet_stats_mean_value(&left)?;
-//RS     let right_mean = jet_stats_mean_value(&right)?;
-//RS     Some(
-//RS         left.iter()
-//RS             .zip(right.iter())
-//RS             .map(|(a, b)| (a - left_mean) * (b - right_mean))
-//RS             .sum::<f64>()
-//RS             / left.len() as f64,
-//RS     )
-//RS }
-//RS 
-//RS pub fn jet_stats_correlation(left: Vec<f64>, right: Vec<f64>) -> Option<f64> {
-//RS     let covariance = jet_stats_covariance(left.clone(), right.clone())?;
-//RS     let left_deviation = jet_stats_stdev(left)?;
-//RS     let right_deviation = jet_stats_stdev(right)?;
-//RS     (left_deviation != 0.0 && right_deviation != 0.0)
-//RS         .then_some(covariance / (left_deviation * right_deviation))
-//RS }
-//RS 
-//RS pub fn jet_stats_kde(values: Vec<f64>, bandwidth: f64) -> Vec<f64> {
-//RS     if values.is_empty() || bandwidth <= 0.0 {
-//RS         return Vec::new();
-//RS     }
-//RS     let scale = values.len() as f64 * bandwidth * (2.0 * std::f64::consts::PI).sqrt();
-//RS     values
-//RS         .iter()
-//RS         .map(|point| {
-//RS             values
-//RS                 .iter()
-//RS                 .map(|value| {
-//RS                     let z = (point - value) / bandwidth;
-//RS                     (-0.5 * z * z).exp()
-//RS                 })
-//RS                 .sum::<f64>()
-//RS                 / scale
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_kde_random(values: Vec<f64>, bandwidth: f64, count: i64) -> Vec<f64> {
-//RS     let density = jet_stats_kde(values, bandwidth);
-//RS     if density.is_empty() || count <= 0 {
-//RS         return Vec::new();
-//RS     }
-//RS     (0..count)
-//RS         .map(|index| density[index as usize % density.len()])
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_min(values: Vec<f64>) -> Option<f64> {
-//RS     values.into_iter().reduce(f64::min)
-//RS }
-//RS 
-//RS pub fn jet_stats_max(values: Vec<f64>) -> Option<f64> {
-//RS     values.into_iter().reduce(f64::max)
-//RS }
-//RS 
-//RS pub fn jet_stats_range(values: Vec<f64>) -> Option<f64> {
-//RS     Some(jet_stats_max(values.clone())? - jet_stats_min(values)?)
-//RS }
-//RS 
-//RS pub fn jet_stats_sumprod(left: Vec<f64>, right: Vec<f64>) -> Option<f64> {
-//RS     (left.len() == right.len()).then(|| left.into_iter().zip(right).map(|(a, b)| a * b).sum())
-//RS }
-//RS 
-//RS pub fn jet_stats_weighted_mean(values: Vec<f64>, weights: Vec<f64>) -> Option<f64> {
-//RS     if values.is_empty() || values.len() != weights.len() || weights.iter().any(|weight| *weight < 0.0) {
-//RS         return None;
-//RS     }
-//RS     let total_weight = weights.iter().sum::<f64>();
-//RS     (total_weight != 0.0).then(|| {
-//RS         values
-//RS             .into_iter()
-//RS             .zip(weights)
-//RS             .map(|(value, weight)| value * weight)
-//RS             .sum::<f64>()
-//RS             / total_weight
-//RS     })
-//RS }
-//RS 
-//RS pub fn jet_stats_quantiles(values: Vec<f64>, count: i64) -> Vec<f64> {
-//RS     if count <= 0 || values.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     (1..count)
-//RS         .filter_map(|index| jet_stats_quantile_value(&values, index as f64 / count as f64))
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_iqr(values: Vec<f64>) -> Option<f64> {
-//RS     Some(jet_stats_quantile_value(&values, 0.75)? - jet_stats_quantile_value(&values, 0.25)?)
-//RS }
-//RS 
-//RS pub fn jet_stats_mad(values: Vec<f64>) -> Option<f64> {
-//RS     let median = jet_stats_median(values.clone())?;
-//RS     jet_stats_median(values.into_iter().map(|value| (value - median).abs()).collect())
-//RS }
-//RS 
-//RS pub fn jet_stats_mean_abs_deviation(values: Vec<f64>) -> Option<f64> {
-//RS     let mean = jet_stats_mean_value(&values)?;
-//RS     Some(values.iter().map(|value| (value - mean).abs()).sum::<f64>() / values.len() as f64)
-//RS }
-//RS 
-//RS pub fn jet_stats_skew(values: Vec<f64>) -> Option<f64> {
-//RS     if values.len() < 3 {
-//RS         return None;
-//RS     }
-//RS     let mean = jet_stats_mean_value(&values)?;
-//RS     let deviation = jet_stats_stdev(values.clone())?;
-//RS     (deviation != 0.0).then(|| {
-//RS         values
-//RS             .iter()
-//RS             .map(|value| ((value - mean) / deviation).powi(3))
-//RS             .sum::<f64>()
-//RS             / values.len() as f64
-//RS     })
-//RS }
-//RS 
-//RS pub fn jet_stats_kurtosis(values: Vec<f64>) -> Option<f64> {
-//RS     if values.len() < 4 {
-//RS         return None;
-//RS     }
-//RS     let mean = jet_stats_mean_value(&values)?;
-//RS     let deviation = jet_stats_stdev(values.clone())?;
-//RS     (deviation != 0.0).then(|| {
-//RS         values
-//RS             .iter()
-//RS             .map(|value| ((value - mean) / deviation).powi(4))
-//RS             .sum::<f64>()
-//RS             / values.len() as f64
-//RS             - 3.0
-//RS     })
-//RS }
-//RS 
-//RS pub fn jet_stats_spearman(left: Vec<f64>, right: Vec<f64>) -> Option<f64> {
-//RS     jet_stats_correlation(jet_stats_rank(left), jet_stats_rank(right))
-//RS }
-//RS 
-//RS pub fn jet_stats_residuals(left: Vec<f64>, right: Vec<f64>) -> Vec<f64> {
-//RS     if left.len() < 2 || left.len() != right.len() {
-//RS         return Vec::new();
-//RS     }
-//RS     let mean_x = match jet_stats_mean_value(&left) {
-//RS         Some(value) => value,
-//RS         None => return Vec::new(),
-//RS     };
-//RS     let mean_y = match jet_stats_mean_value(&right) {
-//RS         Some(value) => value,
-//RS         None => return Vec::new(),
-//RS     };
-//RS     let numerator = left
-//RS         .iter()
-//RS         .zip(right.iter())
-//RS         .map(|(x, y)| (x - mean_x) * (y - mean_y))
-//RS         .sum::<f64>();
-//RS     let denominator = left.iter().map(|x| (x - mean_x).powi(2)).sum::<f64>();
-//RS     if denominator == 0.0 {
-//RS         return Vec::new();
-//RS     }
-//RS     let slope = numerator / denominator;
-//RS     let intercept = mean_y - slope * mean_x;
-//RS     left.iter()
-//RS         .zip(right.iter())
-//RS         .map(|(x, y)| y - (slope * x + intercept))
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_stats_histogram(values: Vec<f64>, bins: i64) -> Vec<i64> {
-//RS     if bins <= 0 || values.is_empty() {
-//RS         return Vec::new();
-//RS     }
-//RS     let Some(low) = jet_stats_min(values.clone()) else {
-//RS         return Vec::new();
-//RS     };
-//RS     let Some(high) = jet_stats_max(values.clone()) else {
-//RS         return Vec::new();
-//RS     };
-//RS     let mut out = vec![0i64; bins as usize];
-//RS     if high == low {
-//RS         out[0] = values.len() as i64;
-//RS         return out;
-//RS     }
-//RS     let span = high - low;
-//RS     for value in values {
-//RS         let mut index = ((value - low) / span * bins as f64) as i64;
-//RS         index = index.clamp(0, bins - 1);
-//RS         out[index as usize] += 1;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_stats_winsorize(values: Vec<f64>, probability: f64) -> Vec<f64> {
-//RS     let Some(low) = jet_stats_quantile_value(&values, probability) else {
-//RS         return values;
-//RS     };
-//RS     let Some(high) = jet_stats_quantile_value(&values, 1.0 - probability) else {
-//RS         return values;
-//RS     };
-//RS     values.into_iter().map(|value| value.clamp(low, high)).collect()
-//RS }
-//RS 
-//RS /// Integer product for `math.prod`'s default exact integer carrier.
-//RS pub fn jet_std_math_prod_int(values: Vec<i64>) -> i64 {
-//RS     values.iter().copied().product()
-//RS }
-//RS 
-//RS /// Dot product over the shorter input, matching `math.sumprod`'s core shape.
-//RS pub fn jet_std_math_sumprod(left: Vec<f64>, right: Vec<f64>) -> f64 {
-//RS     left.into_iter()
-//RS         .zip(right)
-//RS         .map(|(a, b)| a * b)
-//RS         .sum()
-//RS }
-//RS 
-//RS pub fn jet_std_math_ln_1p(value: f64) -> f64 {
-//RS     value.ln_1p()
-//RS }
-//RS 
-//RS pub fn jet_std_math_log(value: f64, base: f64) -> f64 {
-//RS     value.log(base)
-//RS }
-//RS 
-//RS pub fn jet_std_math_copysign(value: f64, sign: f64) -> f64 {
-//RS     value.copysign(sign)
-//RS }
-//RS 
-//RS pub fn jet_std_math_signum(value: f64) -> f64 {
-//RS     value.signum()
-//RS }
-//RS 
-//RS pub fn jet_std_math_fma(a: f64, b: f64, c: f64) -> f64 {
-//RS     a.mul_add(b, c)
-//RS }
-//RS 
-//RS pub fn jet_std_math_identity_f64(value: f64) -> f64 {
-//RS     value
-//RS }
-//RS 
-//RS pub fn jet_std_math_zero_f64(_: f64) -> f64 {
-//RS     0.0
-//RS }
-//RS 
-//RS pub fn jet_std_math_lerp(a: f64, b: f64, t: f64) -> f64 {
-//RS     a + (b - a) * t
-//RS }
-//RS 
-//RS pub fn jet_std_math_degrees(value: f64) -> f64 {
-//RS     value.to_degrees()
-//RS }
-//RS 
-//RS pub fn jet_std_math_radians(value: f64) -> f64 {
-//RS     value.to_radians()
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_even(value: i64) -> bool {
-//RS     value % 2 == 0
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_odd(value: i64) -> bool {
-//RS     value % 2 != 0
-//RS }
-//RS 
-//RS pub fn jet_std_math_checked_abs(value: i64) -> Option<i64> {
-//RS     value.checked_abs()
-//RS }
-//RS pub fn jet_std_math_checked_add(left: i64, right: i64) -> Option<i64> {
-//RS     left.checked_add(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_saturating_add(left: i64, right: i64) -> i64 {
-//RS     left.saturating_add(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_checked_neg(value: i64) -> Option<i64> {
-//RS     value.checked_neg()
-//RS }
-//RS 
-//RS pub fn jet_std_math_checked_div(left: i64, right: i64) -> Option<i64> {
-//RS     left.checked_div(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_checked_rem(left: i64, right: i64) -> Option<i64> {
-//RS     left.checked_rem(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_normal(value: f64) -> bool {
-//RS     value.is_normal()
-//RS }
-//RS pub fn jet_std_math_is_subnormal(value: f64) -> bool {
-//RS     value.is_subnormal()
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_canonical(value: f64) -> bool {
-//RS     value.is_finite() || value.is_nan()
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_signed(value: f64) -> bool {
-//RS     value.is_sign_negative()
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_zero(value: f64) -> bool {
-//RS     value == 0.0
-//RS }
-//RS 
-//RS pub fn jet_std_math_is_integer(value: f64) -> bool {
-//RS     value.is_finite() && value.fract() == 0.0
-//RS }
-//RS 
-//RS pub fn jet_std_math_sign_bit(value: f64) -> bool {
-//RS     value.is_sign_negative()
-//RS }
-//RS pub fn jet_std_math_next_up(value: f64) -> f64 {
-//RS     value.next_up()
-//RS }
-//RS 
-//RS pub fn jet_std_math_next_down(value: f64) -> f64 {
-//RS     value.next_down()
-//RS }
-//RS 
-//RS pub fn jet_std_math_radix(_value: f64) -> i64 {
-//RS     2
-//RS }
-//RS 
-//RS pub fn jet_std_math_zero() -> f64 {
-//RS     0.0
-//RS }
-//RS 
-//RS pub fn jet_std_math_copy(value: f64) -> f64 {
-//RS     value
-//RS }
-//RS pub fn jet_std_math_cot(value: f64) -> f64 {
-//RS     1.0 / value.tan()
-//RS }
-//RS 
-//RS pub fn jet_std_math_inv(value: f64) -> f64 {
-//RS     1.0 / value
-//RS }
-//RS pub fn jet_std_math_sin_cos(value: f64) -> (f64, f64) {
-//RS     value.sin_cos()
-//RS }
-//RS 
-//RS pub fn jet_std_math_modf(value: f64) -> (f64, f64) {
-//RS     (value.fract(), value.trunc())
-//RS }
-//RS 
-//RS pub fn jet_std_math_frexp(value: f64) -> (f64, i64) {
-//RS     let exponent = jet_std_math_ilogb(value).unwrap_or(0);
-//RS     let fraction = if value == 0.0 || !value.is_finite() {
-//RS         value
-//RS     } else {
-//RS         jet_std_math_ldexp(value, -exponent)
-//RS     };
-//RS     (fraction, exponent)
-//RS }
-//RS 
-//RS pub fn jet_std_math_div_mod(left: i64, right: i64) -> (i64, i64) {
-//RS     (left.div_euclid(right), left.rem_euclid(right))
-//RS }
-//RS 
-//RS pub fn jet_std_math_div_rem(left: i64, right: i64) -> (i64, i64) {
-//RS     (left / right, left % right)
-//RS }
-//RS 
-//RS /// IEEE-754 bit conversions share this Prelude symbol across AOT, resident
-//RS /// JIT, and the evaluator.  The integer carrier is intentionally word-sized;
-//RS /// the evaluator projects larger exact `Int` values modulo two's-complement
-//RS /// `u64` before calling this function.
-//RS pub fn jet_std_math_to_bits(value: f64) -> i64 {
-//RS     value.to_bits() as i64
-//RS }
-//RS 
-//RS pub fn jet_std_math_from_bits(bits: i64) -> f64 {
-//RS     f64::from_bits(bits as u64)
-//RS }
-//RS 
-//RS pub fn jet_std_math_min_i64(left: i64, right: i64) -> i64 {
-//RS     left.min(right)
-//RS }
-//RS 
-//RS pub fn jet_std_math_max_i64(left: i64, right: i64) -> i64 {
-//RS     left.max(right)
-//RS }
-//RS 
-//RS /// `round` uses nearest-integer ties away from zero, for both signs.
-//RS pub fn jet_std_math_round(value: f64) -> i64 {
-//RS     value.round() as i64
-//RS }
-//RS 
-//RS pub fn jet_std_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
-//RS     value.clamp(low, high)
-//RS }
-//RS 
-//RS pub fn jet_std_math_min_f64(left: f64, right: f64) -> f64 {
-//RS     match (left.is_nan(), right.is_nan()) {
-//RS         (true, false) => right,
-//RS         (false, true) => left,
-//RS         _ => left.min(right),
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_std_math_max_f64(left: f64, right: f64) -> f64 {
-//RS     match (left.is_nan(), right.is_nan()) {
-//RS         (true, false) => right,
-//RS         (false, true) => left,
-//RS         _ => left.max(right),
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_std_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
-//RS     value.clamp(low, high)
-//RS }
-//RS 
-//RS pub fn jet_std_math_min_f32(left: f32, right: f32) -> f32 {
-//RS     match (left.is_nan(), right.is_nan()) {
-//RS         (true, false) => right,
-//RS         (false, true) => left,
-//RS         _ => left.min(right),
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_std_math_max_f32(left: f32, right: f32) -> f32 {
-//RS     match (left.is_nan(), right.is_nan()) {
-//RS         (true, false) => right,
-//RS         (false, true) => left,
-//RS         _ => left.max(right),
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_std_math_clamp_f32(value: f32, low: f32, high: f32) -> f32 {
-//RS     value.clamp(low, high)
-//RS }
-//RS 
-//RS /// The largest whole number whose square is at most `value`, or absent when
-//RS /// there is none. A negative number has no whole square root.
-//RS pub fn jet_std_math_isqrt(value: i64) -> Option<i64> {
-//RS     if value < 0 {
-//RS         return None;
-//RS     }
-//RS     let mut root = (value as f64).sqrt() as i64;
-//RS     // The float square root can land either side on large values, so walk back
-//RS     // to the exact answer.
-//RS     while root > 0 && root.saturating_mul(root) > value {
-//RS         root -= 1;
-//RS     }
-//RS     while (root + 1).saturating_mul(root + 1) <= value {
-//RS         root += 1;
-//RS     }
-//RS     Some(root)
-//RS }
-//RS 
-//RS /// The product of every whole number from 1 to `value`, or absent when there is
-//RS /// no answer: a negative input, or a result past the range. 21 factorial is
-//RS /// already too big.
-//RS pub fn jet_std_math_factorial(value: i64) -> Option<i64> {
-//RS     if value < 0 {
-//RS         return None;
-//RS     }
-//RS     let mut total: i64 = 1;
-//RS     let mut step: i64 = 2;
-//RS     while step <= value {
-//RS         total = total.checked_mul(step)?;
-//RS         step += 1;
-//RS     }
-//RS     Some(total)
-//RS }
+use core.math.runtime.kernel_complex as complex_policy
+use std.f64.consts.[PI]
+use std.fmt.[Display, Formatter]
+use core.math.runtime.kernel_float_policy.[jet_std_math_ilogb, jet_std_math_ldexp, float_policy_to_bits, float_policy_from_bits]
+
+// One canonical runtime complex value; arithmetic delegates to the existing
+// allocation-free Float-pair policy without copying any aggregate owner.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:8
+#Derive(Clone, Copy, Debug, PartialEq)
+pub struct JetComplex { pub real: F64, pub imaginary: F64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:13
+impl JetComplex {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:14
+    pub fn from_parts(real: F64, imaginary: F64) -> Self { Self{real, imaginary} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:18
+    pub fn add(self: &Self, other: &Self) -> Self {
+        value :: complex_policy.jet_complex_add((real: self.real, imaginary: self.imaginary), (real: other.real, imaginary: other.imaginary))
+        Self.from_parts(value.real, value.imaginary)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:22
+    pub fn sub(self: &Self, other: &Self) -> Self {
+        value :: complex_policy.jet_complex_sub((real: self.real, imaginary: self.imaginary), (real: other.real, imaginary: other.imaginary))
+        Self.from_parts(value.real, value.imaginary)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:26
+    pub fn mul(self: &Self, other: &Self) -> Self {
+        value :: complex_policy.jet_complex_mul((real: self.real, imaginary: self.imaginary), (real: other.real, imaginary: other.imaginary))
+        Self.from_parts(value.real, value.imaginary)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:33
+    pub fn div(self: &Self, other: &Self) -> Self {
+        value :: complex_policy.jet_complex_div((real: self.real, imaginary: self.imaginary), (real: other.real, imaginary: other.imaginary))
+        Self.from_parts(value.real, value.imaginary)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:41
+    pub fn abs(self) -> F64 { complex_policy.jet_complex_abs((real: self.real, imaginary: self.imaginary)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:45
+    pub fn to_string_rep(self: &Self) -> String {
+        sign :: if self.imaginary.is_sign_negative() -> '-' else -> '+'
+        // Use the canonical Float Display append route, not Debug interpolation.
+        format!("{} {} {}i", self.real, sign, self.imaginary.abs())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:51
+impl Display for JetComplex {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:52
+    fn fmt(self: &Self, f: &Formatter) -> std.fmt.Result { f.write_str(&self.to_string_rep()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:57
+pub fn jet_complex_from_parts(real: F64, imaginary: F64) -> JetComplex { JetComplex.from_parts(real, imaginary) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:61
+pub fn jet_complex_add(left: &JetComplex, right: &JetComplex) -> JetComplex { left.add(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:65
+pub fn jet_complex_sub(left: &JetComplex, right: &JetComplex) -> JetComplex { left.sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:69
+pub fn jet_complex_mul(left: &JetComplex, right: &JetComplex) -> JetComplex { left.mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:73
+pub fn jet_complex_div(left: &JetComplex, right: &JetComplex) -> JetComplex { left.div(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:77
+pub fn jet_complex_abs(value: JetComplex) -> F64 { value.abs() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:81
+pub fn jet_complex_to_string(value: &JetComplex) -> String { value.to_string_rep() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:85
+pub fn jet_std_math_pi() -> F64 { PI }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:89
+pub fn jet_std_math_abs_i64(value: I64) -> I64 { value.abs() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:93
+pub fn jet_std_math_abs_f64(value: F64) -> F64 { value.abs() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:97
+pub fn jet_std_math_abs_f32(value: F32) -> F32 { value.abs() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:102
+pub fn jet_std_math_is_nan(value: F64) -> Bool { value.is_nan() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:106
+pub fn jet_std_math_is_infinite(value: F64) -> Bool { value.is_infinite() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:110
+pub fn jet_std_math_is_finite(value: F64) -> Bool { value.is_finite() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:114
+pub fn jet_std_math_asinh(value: F64) -> F64 { value.asinh() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:118
+pub fn jet_std_math_acosh(value: F64) -> F64 { value.acosh() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:122
+pub fn jet_std_math_atanh(value: F64) -> F64 { value.atanh() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:126
+pub fn jet_std_math_cbrt(value: F64) -> F64 { value.cbrt() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:129
+pub fn jet_std_math_exp(value: F64) -> F64 { value.exp() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:134
+pub fn jet_std_math_exp2(value: F64) -> F64 { value.exp2() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:138
+pub fn jet_std_math_exp_m1(value: F64) -> F64 { value.exp_m1() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:143
+pub fn jet_std_math_fsum(values: [F64]) -> F64 {
+    total := 0.0
+    compensation := 0.0
+    for value in values {
+        corrected :: value - compensation
+        next :: total + corrected
+        compensation = (next - total) - corrected
+        total = next
+    }
+    total
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:154
+pub fn jet_stats_sum(values: [F64]) -> F64 { jet_std_math_fsum(^values) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:157
+pub fn jet_stats_count(values: [F64]) -> I64 { values.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:161
+pub fn jet_stats_prod(values: [F64]) -> F64 { values.into_iter().product() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:165
+pub fn jet_stats_cumsum(values: [F64]) -> [F64] {
+    total := 0.0
+    values.into_iter().map(fn(value) { total += value; total }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:176
+pub fn jet_stats_cumprod(values: [F64]) -> [F64] {
+    total := 1.0
+    values.into_iter().map(fn(value) { total *= value; total }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:187
+pub fn jet_stats_diff(values: [F64]) -> [F64] { values.windows(2).map(fn(pair) { pair[1] - pair[0] }).collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:194
+pub fn jet_stats_moving_average(values: [F64], window: I64) -> [F64] {
+    if window <= 0 -> return []
+    window :: window as USize
+    (0..<values.len()).map(fn(index) {
+        start :: index.saturating_add(1).saturating_sub(window)
+        slice :: &values[start..=index]
+        slice.iter().sum<F64>() / slice.len() as F64
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:208
+pub fn jet_stats_ewma(values: [F64], alpha: F64) -> [F64] {
+    (first, rest) :: values.split_first() ?? return []
+    alpha :: alpha.clamp(0.0, 1.0)
+    total := *first
+    out := [total]
+    out.extend(rest.iter().map(fn(value) { total = alpha * *value + (1.0 - alpha) * total; total }))
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:222
+pub fn jet_stats_rank(values: [F64]) -> [F64] {
+    values.iter().map(fn(value) { 1.0 + values.iter().filter(fn(other) { *other < value }).count() as F64 }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:231
+pub fn jet_stats_zscore(values: [F64]) -> [F64] {
+    if values.is_empty() -> return []
+    mean :: values.iter().sum<F64>() / values.len() as F64
+    variance :: values.iter().map(fn(value) { delta :: *value - mean; delta * delta }).sum<F64>() / values.len() as F64
+    deviation :: variance.sqrt()
+    if deviation == 0.0 -> return []
+    values.into_iter().map(fn(value) { (value - mean) / deviation }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:254
+pub fn jet_stats_clip(values: [F64], low: F64, high: F64) -> [F64] { values.into_iter().map(fn(value) { value.clamp(low, high) }).collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:260
+fn jet_stats_sorted(values: [F64]) -> [F64] { values.sort_by(F64.total_cmp); ^values }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:265
+fn jet_stats_mean_value(values: View<F64>) -> F64? { if values.is_empty() -> None else -> Val(values.iter().sum<F64>() / values.len() as F64) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:269
+fn jet_stats_quantile_value(values: View<F64>, probability: F64) -> F64? {
+    sorted :: jet_stats_sorted(values.to_vec())
+    (first, rest) :: sorted.split_first()?
+    first :: *first
+    last :: rest.last().copied().unwrap_or(first)
+    if probability <= 0.0 -> return Val(first)
+    if probability >= 1.0 -> return Val(last)
+    position :: probability * (sorted.len() - 1) as F64
+    lower :: position.floor() as USize
+    upper :: position.ceil() as USize
+    if lower == upper -> return Val(sorted[lower])
+    fraction :: position - lower as F64
+    Val(sorted[lower] + (sorted[upper] - sorted[lower]) * fraction)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:289
+pub fn jet_stats_mean(values: [F64]) -> F64? { jet_stats_mean_value(&values) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:293
+pub fn jet_stats_geometric_mean(values: [F64]) -> F64? {
+    if values.is_empty() || values.iter().any(fn(value) { *value <= 0.0 }) -> return None
+    Val((values.iter().map(fn(value) { value.ln() }).sum<F64>() / values.len() as F64).exp())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:300
+pub fn jet_stats_harmonic_mean(values: [F64]) -> F64? {
+    if values.is_empty() || values.iter().any(fn(value) { *value == 0.0 }) -> return None
+    Val(values.len() as F64 / values.iter().map(fn(value) { 1.0 / value }).sum<F64>())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:307
+pub fn jet_stats_median(values: [F64]) -> F64? { jet_stats_quantile_value(&values, 0.5) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:311
+pub fn jet_stats_median_grouped(values: [F64], interval: F64) -> F64? {
+    if values.is_empty() || interval <= 0.0 -> return None
+    sorted :: jet_stats_sorted(^values)
+    middle :: if sorted.len() % 2 == 1 -> sorted[sorted.len() / 2]
+        else -> (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
+    lower :: middle - interval / 2.0
+    upper :: lower + interval
+    below :: sorted.iter().filter(fn(value) { **value < lower }).count()
+    frequency :: sorted.iter().filter(fn(value) { **value >= lower && **value < upper }).count()
+    if frequency == 0 -> Val(middle)
+    else -> Val(lower + interval * (sorted.len() / 2 - below) as F64 / frequency as F64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:335
+pub fn jet_stats_median_low(values: [F64]) -> F64? {
+    sorted :: jet_stats_sorted(^values)
+    sorted.get(sorted.len().saturating_sub(1) / 2).copied()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:342
+pub fn jet_stats_median_high(values: [F64]) -> F64? {
+    sorted :: jet_stats_sorted(^values)
+    sorted.get(sorted.len() / 2).copied()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:347
+pub fn jet_stats_quantile(values: [F64], probability: F64) -> F64? { jet_stats_quantile_value(&values, probability) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:351
+pub fn jet_stats_percentile(values: [F64], percent: F64) -> F64? { jet_stats_quantile_value(&values, percent / 100.0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:355
+pub fn jet_stats_mode(values: [F64]) -> F64? {
+    first :: values.first().copied()?
+    best := first
+    best_count := USize{0}
+    for value in &values {
+        count :: values.iter().filter(fn(other) { **other == *value }).count()
+        if count > best_count { best = *value; best_count = count }
+    }
+    Val(best)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:369
+pub fn jet_stats_multimode(values: [F64]) -> [F64] {
+    first :: values.first().copied() ?? return []
+    best_count :: values.iter().map(fn(value) { values.iter().filter(fn(other) { **other == *value }).count() }).max().unwrap_or(0)
+    out := [F64]{}
+    for value in std.iter.once(first).chain(values.iter().copied().skip(1)) {
+        count :: values.iter().filter(fn(other) { **other == value }).count()
+        if count == best_count && !out.contains(&value) -> out.push(value)
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:388
+pub fn jet_stats_pvariance(values: [F64]) -> F64? {
+    mean :: jet_stats_mean_value(&values)?
+    Val(values.iter().map(fn(value) { (value - mean).powi(2) }).sum<F64>() / values.len() as F64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:393
+pub fn jet_stats_variance(values: [F64]) -> F64? {
+    if values.len() < 2 -> return None
+    mean :: jet_stats_mean_value(&values)?
+    Val(values.iter().map(fn(value) { (value - mean).powi(2) }).sum<F64>() / (values.len() - 1) as F64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:401
+pub fn jet_stats_pstdev(values: [F64]) -> F64? { jet_stats_pvariance(^values).map(F64.sqrt) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:405
+pub fn jet_stats_stdev(values: [F64]) -> F64? { jet_stats_variance(^values).map(F64.sqrt) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:409
+pub fn jet_stats_covariance(left: [F64], right: [F64]) -> F64? {
+    if left.len() < 2 || left.len() != right.len() -> return None
+    left_mean :: jet_stats_mean_value(&left)?
+    right_mean :: jet_stats_mean_value(&right)?
+    Val(left.iter().zip(right.iter()).map(fn((a, b)) { (a - left_mean) * (b - right_mean) }).sum<F64>() / (left.len() - 1) as F64)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:424
+pub fn jet_stats_covariance_population(left: [F64], right: [F64]) -> F64? {
+    if left.is_empty() || left.len() != right.len() -> return None
+    left_mean :: jet_stats_mean_value(&left)?
+    right_mean :: jet_stats_mean_value(&right)?
+    Val(left.iter().zip(right.iter()).map(fn((a, b)) { (a - left_mean) * (b - right_mean) }).sum<F64>() / left.len() as F64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:439
+pub fn jet_stats_correlation(left: [F64], right: [F64]) -> F64? {
+    if left.len() < 2 || left.len() != right.len() -> return None
+    left_mean :: jet_stats_mean_value(&left)?
+    right_mean :: jet_stats_mean_value(&right)?
+    covariance :: left.iter().zip(right.iter()).map(fn((a, b)) { (a - left_mean) * (b - right_mean) }).sum<F64>() / (left.len() - 1) as F64
+    left_deviation :: jet_stats_stdev(^left)?
+    right_deviation :: jet_stats_stdev(^right)?
+    if left_deviation != 0.0 && right_deviation != 0.0 -> Val(covariance / (left_deviation * right_deviation)) else -> None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:447
+pub fn jet_stats_kde(values: [F64], bandwidth: F64) -> [F64] {
+    if values.is_empty() || bandwidth <= 0.0 -> return []
+    scale :: values.len() as F64 * bandwidth * (2.0 * PI).sqrt()
+    values.iter().map(fn(point) {
+        values.iter().map(fn(value) { z :: (point - value) / bandwidth; (-0.5 * z * z).exp() }).sum<F64>() / scale
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:467
+pub fn jet_stats_kde_random(values: [F64], bandwidth: F64, count: I64) -> [F64] {
+    density :: jet_stats_kde(^values, bandwidth)
+    if density.is_empty() || count <= 0 -> return []
+    (0..<count).map(fn(index) { density[index as USize % density.len()] }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:477
+pub fn jet_stats_min(values: [F64]) -> F64? { values.into_iter().reduce(F64.min) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:481
+pub fn jet_stats_max(values: [F64]) -> F64? { values.into_iter().reduce(F64.max) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:485
+pub fn jet_stats_range(values: [F64]) -> F64? {
+    high :: values.iter().copied().reduce(F64.max)?
+    low :: values.into_iter().reduce(F64.min)?
+    Val(high - low)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:489
+pub fn jet_stats_sumprod(left: [F64], right: [F64]) -> F64? {
+    if left.len() == right.len() -> Val(left.into_iter().zip(right).map(fn((a, b)) { a * b }).sum())
+    else -> None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:493
+pub fn jet_stats_weighted_mean(values: [F64], weights: [F64]) -> F64? {
+    if values.is_empty() || values.len() != weights.len() || weights.iter().any(fn(weight) { *weight < 0.0 }) -> return None
+    total_weight :: weights.iter().sum<F64>()
+    if total_weight == 0.0 -> return None
+    Val(values.into_iter().zip(weights).map(fn((value, weight)) { value * weight }).sum<F64>() / total_weight)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:508
+pub fn jet_stats_quantiles(values: [F64], count: I64) -> [F64] {
+    if count <= 0 || values.is_empty() -> return []
+    (1..<count).filter_map(fn(index) { jet_stats_quantile_value(&values, index as F64 / count as F64) }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:517
+pub fn jet_stats_iqr(values: [F64]) -> F64? {
+    Val(jet_stats_quantile_value(&values, 0.75)? - jet_stats_quantile_value(&values, 0.25)?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:521
+pub fn jet_stats_mad(values: [F64]) -> F64? {
+    median :: jet_stats_quantile_value(&values, 0.5)?
+    jet_stats_median(values.into_iter().map(fn(value) { (value - median).abs() }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:526
+pub fn jet_stats_mean_abs_deviation(values: [F64]) -> F64? {
+    mean :: jet_stats_mean_value(&values)?
+    Val(values.iter().map(fn(value) { (value - mean).abs() }).sum<F64>() / values.len() as F64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:531
+pub fn jet_stats_skew(values: [F64]) -> F64? {
+    if values.len() < 3 -> return None
+    mean :: jet_stats_mean_value(&values)?
+    deviation :: (values.iter().map(fn(value) { (value - mean).powi(2) }).sum<F64>() / (values.len() - 1) as F64).sqrt()
+    if deviation == 0.0 -> return None
+    Val(values.iter().map(fn(value) { ((value - mean) / deviation).powi(3) }).sum<F64>() / values.len() as F64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:546
+pub fn jet_stats_kurtosis(values: [F64]) -> F64? {
+    if values.len() < 4 -> return None
+    mean :: jet_stats_mean_value(&values)?
+    deviation :: (values.iter().map(fn(value) { (value - mean).powi(2) }).sum<F64>() / (values.len() - 1) as F64).sqrt()
+    if deviation == 0.0 -> return None
+    Val(values.iter().map(fn(value) { ((value - mean) / deviation).powi(4) }).sum<F64>() / values.len() as F64 - 3.0)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:562
+pub fn jet_stats_spearman(left: [F64], right: [F64]) -> F64? { jet_stats_correlation(jet_stats_rank(^left), jet_stats_rank(^right)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:566
+pub fn jet_stats_residuals(left: [F64], right: [F64]) -> [F64] {
+    if left.len() < 2 || left.len() != right.len() -> return []
+    mean_x :: jet_stats_mean_value(&left) ?? return []
+    mean_y :: jet_stats_mean_value(&right) ?? return []
+    numerator :: left.iter().zip(right.iter()).map(fn((x, y)) { (x - mean_x) * (y - mean_y) }).sum<F64>()
+    denominator :: left.iter().map(fn(x) { (x - mean_x).powi(2) }).sum<F64>()
+    if denominator == 0.0 -> return []
+    slope :: numerator / denominator
+    intercept :: mean_y - slope * mean_x
+    left.iter().zip(right.iter()).map(fn((x, y)) { y - (slope * x + intercept) }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:595
+pub fn jet_stats_histogram(values: [F64], bins: I64) -> [I64] {
+    if bins <= 0 || values.is_empty() -> return []
+    low :: values.iter().copied().reduce(F64.min) ?? return []
+    high :: values.iter().copied().reduce(F64.max) ?? return []
+    out := [I64].filled(bins as USize, 0)
+    if high == low { out[0] = values.len() as I64; return out }
+    span :: high - low
+    for value in values {
+        index := ((value - low) / span * bins as F64) as I64
+        index = index.clamp(0, bins - 1)
+        out[index as USize] += 1
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:619
+pub fn jet_stats_winsorize(values: [F64], probability: F64) -> [F64] {
+    low :: jet_stats_quantile_value(&values, probability) ?? return ^values
+    high :: jet_stats_quantile_value(&values, 1.0 - probability) ?? return ^values
+    values.into_iter().map(fn(value) { value.clamp(low, high) }).collect()
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:630
+pub fn jet_std_math_prod_int(values: [I64]) -> I64 { values.iter().copied().product() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:635
+pub fn jet_std_math_sumprod(left: [F64], right: [F64]) -> F64 { left.into_iter().zip(right).map(fn((a, b)) { a * b }).sum() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:642
+pub fn jet_std_math_ln_1p(value: F64) -> F64 { value.ln_1p() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:646
+pub fn jet_std_math_log(value: F64, base: F64) -> F64 { value.log(base) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:650
+pub fn jet_std_math_copysign(value: F64, sign: F64) -> F64 { value.copysign(sign) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:654
+pub fn jet_std_math_signum(value: F64) -> F64 { value.signum() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:658
+pub fn jet_std_math_fma(a: F64, b: F64, c: F64) -> F64 { a.mul_add(b, c) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:662
+pub fn jet_std_math_identity_f64(value: F64) -> F64 { value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:666
+pub fn jet_std_math_zero_f64(_: F64) -> F64 { 0.0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:670
+pub fn jet_std_math_lerp(a: F64, b: F64, t: F64) -> F64 { a + (b - a) * t }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:674
+pub fn jet_std_math_degrees(value: F64) -> F64 { value.to_degrees() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:678
+pub fn jet_std_math_radians(value: F64) -> F64 { value.to_radians() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:682
+pub fn jet_std_math_is_even(value: I64) -> Bool { value % 2 == 0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:686
+pub fn jet_std_math_is_odd(value: I64) -> Bool { value % 2 != 0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:690
+pub fn jet_std_math_checked_abs(value: I64) -> I64? { value.checked_abs() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:693
+pub fn jet_std_math_checked_add(left: I64, right: I64) -> I64? { left.checked_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:697
+pub fn jet_std_math_saturating_add(left: I64, right: I64) -> I64 { left.saturating_add(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:701
+pub fn jet_std_math_checked_neg(value: I64) -> I64? { value.checked_neg() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:705
+pub fn jet_std_math_checked_div(left: I64, right: I64) -> I64? { left.checked_div(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:709
+pub fn jet_std_math_checked_rem(left: I64, right: I64) -> I64? { left.checked_rem(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:713
+pub fn jet_std_math_is_normal(value: F64) -> Bool { value.is_normal() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:716
+pub fn jet_std_math_is_subnormal(value: F64) -> Bool { value.is_subnormal() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:720
+pub fn jet_std_math_is_canonical(value: F64) -> Bool { value.is_finite() || value.is_nan() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:724
+pub fn jet_std_math_is_signed(value: F64) -> Bool { value.is_sign_negative() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:728
+pub fn jet_std_math_is_zero(value: F64) -> Bool { value == 0.0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:732
+pub fn jet_std_math_is_integer(value: F64) -> Bool { value.is_finite() && value.fract() == 0.0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:736
+pub fn jet_std_math_sign_bit(value: F64) -> Bool { value.is_sign_negative() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:739
+pub fn jet_std_math_next_up(value: F64) -> F64 { value.next_up() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:743
+pub fn jet_std_math_next_down(value: F64) -> F64 { value.next_down() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:747
+pub fn jet_std_math_radix(_value: F64) -> I64 { 2 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:751
+pub fn jet_std_math_zero() -> F64 { 0.0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:755
+pub fn jet_std_math_copy(value: F64) -> F64 { value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:758
+pub fn jet_std_math_cot(value: F64) -> F64 { 1.0 / value.tan() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:762
+pub fn jet_std_math_inv(value: F64) -> F64 { 1.0 / value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:765
+pub fn jet_std_math_sin_cos(value: F64) -> (F64, F64) { value.sin_cos() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:769
+pub fn jet_std_math_modf(value: F64) -> (F64, F64) { (value.fract(), value.trunc()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:773
+pub fn jet_std_math_frexp(value: F64) -> (F64, I64) {
+    exponent :: jet_std_math_ilogb(value).unwrap_or(0)
+    fraction :: if value == 0.0 || !value.is_finite() -> value else -> jet_std_math_ldexp(value, -exponent)
+    (fraction, exponent)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:783
+pub fn jet_std_math_div_mod(left: I64, right: I64) -> (I64, I64) { (left.div_euclid(right), left.rem_euclid(right)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:787
+pub fn jet_std_math_div_rem(left: I64, right: I64) -> (I64, I64) { (left / right, left % right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:795
+pub fn jet_std_math_to_bits(value: F64) -> I64 {
+    // GATE #4565: kernel primitive — reuse canonical exact binary64 word seam.
+    #Unsafe("reinterpret the canonical binary64 word as signed without changing its bits") { float_policy_to_bits(value) as I64 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:799
+pub fn jet_std_math_from_bits(bits: I64) -> F64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("reconstruct binary64 from the complete two's-complement input word") { float_policy_from_bits(bits as U64) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:803
+pub fn jet_std_math_min_i64(left: I64, right: I64) -> I64 { left.min(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:807
+pub fn jet_std_math_max_i64(left: I64, right: I64) -> I64 { left.max(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:812
+pub fn jet_std_math_round(value: F64) -> I64 { value.round() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:816
+pub fn jet_std_math_clamp_i64(value: I64, low: I64, high: I64) -> I64 { value.clamp(low, high) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:820
+pub fn jet_std_math_min_f64(left: F64, right: F64) -> F64 {
+    match (left.is_nan(), right.is_nan()) { (true, false) -> right, (false, true) -> left, _ -> left.min(right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:828
+pub fn jet_std_math_max_f64(left: F64, right: F64) -> F64 {
+    match (left.is_nan(), right.is_nan()) { (true, false) -> right, (false, true) -> left, _ -> left.max(right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:836
+pub fn jet_std_math_clamp_f64(value: F64, low: F64, high: F64) -> F64 { value.clamp(low, high) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:840
+pub fn jet_std_math_min_f32(left: F32, right: F32) -> F32 {
+    match (left.is_nan(), right.is_nan()) { (true, false) -> right, (false, true) -> left, _ -> left.min(right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:848
+pub fn jet_std_math_max_f32(left: F32, right: F32) -> F32 {
+    match (left.is_nan(), right.is_nan()) { (true, false) -> right, (false, true) -> left, _ -> left.max(right) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:856
+pub fn jet_std_math_clamp_f32(value: F32, low: F32, high: F32) -> F32 { value.clamp(low, high) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:862
+// Canonical owner: core.math.runtime.kernel_fixed_count.jet_std_math_isqrt.
+// Reuse its Main-approved division-based overflow repair, not the obsolete
+// saturating-square loop that can never terminate at I64.MAX.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:881
+// Canonical owner: core.math.runtime.kernel_fixed_count.jet_std_math_factorial.
+
+// PORT-PENDING 0288 crates-jet-codegen-src-prelude-corelib-top-mathlibpure-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:893-1749
 //RS 
 //RS pub fn jet_std_math_gcd(mut a: i64, mut b: i64) -> i64 {
 //RS     a = a.abs();

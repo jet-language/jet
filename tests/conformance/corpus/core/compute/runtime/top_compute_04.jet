@@ -1,0 +1,99 @@
+use core.compute.runtime.top_compute.[JetComputeDevice, JetComputeError]
+use core.compute.runtime.top_compute_04.[jet_compute_tensor_from_shape, jet_compute_matrix,
+    jet_compute_vec, jet_compute_slice_checked, jet_compute_tensor_shape, jet_compute_tensor_to_list,
+    jet_compute_copy_checked, jet_compute_view_mut_checked, jet_compute_window_bounds,
+    jet_compute_window_set, jet_compute_window_get, jet_compute_get, jet_compute_require_same_contract,
+    jet_compute_webgpu_binary_values]
+use core.prelude.runtime.kernel_view_access.[jet_view_address]
+use core.compute.runtime.top_compute_04.[jet_compute_matmul,
+    jet_compute_broadcast_shape, jet_compute_broadcast_to, jet_compute_transpose,
+    jet_compute_sum_axis, jet_compute_on_device, jet_compute_device_cpu, jet_compute_device_auto,
+    jet_compute_device_metal, jet_compute_device_cuda, jet_compute_device_vulkan, jet_compute_device_webgpu]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5973-6031,6574-6591
+// Behavioral controls: the Rust range contains no inline tests.
+#Test("tensor_construction_rejects_negative_axes_and_preserves_cpu_shape") {
+    assert(jet_compute_matrix(-1, 2, 0.0).is_err())
+    assert(jet_compute_vec(-1, 0.0).is_err())
+    tensor :: jet_compute_tensor_from_shape([I64]{2, 3}, 4.0, JetComputeDevice.Cpu).unwrap()
+    assert(jet_compute_tensor_shape(&tensor) == [I64]{2, 3})
+    assert(jet_compute_tensor_to_list(&tensor) == [F64]{4.0, 4.0, 4.0, 4.0, 4.0, 4.0})
+    assert(jet_compute_window_bounds(&tensor, 0, 1, true).unwrap() == (0..3))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6033-6050,6149-6222
+#Test("owned_tensor_slice_and_copy_detach_backing_without_mutating_source") {
+    tensor := jet_compute_matrix(2, 3, 2.0).unwrap()
+    slice := jet_compute_slice_checked(&tensor, 0, 1, true).unwrap()
+    assert(jet_compute_tensor_shape(&slice) == [I64]{1, 3})
+    jet_compute_window_set(&slice, 0, 1, true, 1, 9.0).unwrap()
+    assert(jet_compute_get(&slice, [I64]{0, 1}).unwrap() == 9.0)
+    assert(jet_compute_get(&tensor, [I64]{0, 1}).unwrap() == 2.0)
+    copy := jet_compute_copy_checked(&tensor).unwrap()
+    jet_compute_window_set(&copy, 0, 1, true, 0, 7.0).unwrap()
+    assert(jet_compute_window_get(&tensor, 0, 1, true, 0).unwrap() == 2.0)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6276-6299,6340-6380
+#Test("tensor_mutation_rejects_shared_storage_but_empty_element_bounds_land_first") {
+    tensor := jet_compute_matrix(2, 3, 0.0).unwrap()
+    alias :: tensor.clone()
+    assert(jet_compute_view_mut_checked(&tensor, 0, 1, true).is_err())
+    assert(jet_compute_window_set(&tensor, 0, 1, true, 0, 1.0).err() == Val("Tensor mutable view requires exclusive backing storage"))
+    assert(jet_compute_window_set(&tensor, 0, 0, true, 0, 1.0).err() == jet_view_address(0, 0).err())
+    assert(jet_compute_tensor_shape(&alias) == [I64]{2, 3})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5764-5772
+#Test("webgpu_host_requirement_is_explicit_without_cpu_fallback") {
+    match jet_compute_webgpu_binary_values("add", [F32]{1.0}, [F32]{2.0}) {
+        Err(JetComputeError.Unsupported(reason)) -> assert(reason == "WebGPU backend requires a browser WebGPU host")
+        _ -> panic("WebGPU without its browser host must not claim a result")
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6593-6721
+#Test("matmul_preserves_values_and_rejects_disagreeing_inner_dimensions") {
+    left :: jet_compute_matrix(2, 3, 2.0).unwrap()
+    right :: jet_compute_matrix(3, 2, 3.0).unwrap()
+    result :: jet_compute_matmul(&left, &right).unwrap()
+    assert(jet_compute_tensor_shape(&result) == [I64]{2, 2})
+    assert(jet_compute_tensor_to_list(&result) == [F64]{18.0, 18.0, 18.0, 18.0})
+    assert(jet_compute_matmul(&left, &left).is_err())
+    vector :: jet_compute_vec(3, 1.0).unwrap()
+    assert(jet_compute_matmul(&vector, &right).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6849-7010
+#Test("broadcast_singleton_to_zero_never_reads_empty_source") {
+    assert(jet_compute_broadcast_shape([I64]{1, 3}, [I64]{0, 3}).unwrap() == [I64]{0, 3})
+    assert(jet_compute_broadcast_shape([I64]{2, 3}, [I64]{4, 3}).is_err())
+    assert(jet_compute_broadcast_shape([I64]{}, [I64]{3}).is_err())
+    tensor :: jet_compute_matrix(1, 3, 7.0).unwrap()
+    empty :: jet_compute_broadcast_to(&tensor, [I64]{0, 3}).unwrap()
+    assert(jet_compute_tensor_shape(&empty) == [I64]{0, 3})
+    assert(jet_compute_tensor_to_list(&empty).is_empty())
+    expanded :: jet_compute_broadcast_to(&tensor, [I64]{2, 3}).unwrap()
+    assert(jet_compute_tensor_to_list(&expanded) == [F64]{7.0, 7.0, 7.0, 7.0, 7.0, 7.0})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7012-7212
+#Test("transpose_reduction_respects_source_strides_and_empty_axis") {
+    tensor :: jet_compute_matrix(2, 3, 2.0).unwrap()
+    transposed :: jet_compute_transpose(&tensor).unwrap()
+    assert(jet_compute_tensor_shape(&transposed) == [I64]{3, 2})
+    sum :: jet_compute_sum_axis(&transposed, 1).unwrap()
+    assert(jet_compute_tensor_to_list(&sum) == [F64]{4.0, 4.0, 4.0})
+    assert(jet_compute_sum_axis(&tensor, -1).is_err())
+    assert(jet_compute_sum_axis(&tensor, 2).is_err())
+    empty :: jet_compute_matrix(2, 0, 0.0).unwrap()
+    assert(jet_compute_tensor_to_list(&jet_compute_sum_axis(&empty, 1).unwrap()) == [F64]{0.0, 0.0})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6723-6745,6814-6845
+#Test("explicit_cpu_placement_keeps_tensor_values_and_device_constructors") {
+    assert(jet_compute_device_cpu() == JetComputeDevice.Cpu)
+    assert(jet_compute_device_auto() == JetComputeDevice.Auto)
+    assert(jet_compute_device_metal() == JetComputeDevice.Metal)
+    assert(jet_compute_device_cuda() == JetComputeDevice.Cuda)
+    assert(jet_compute_device_vulkan() == JetComputeDevice.Vulkan)
+    assert(jet_compute_device_webgpu() == JetComputeDevice.WebGpu)
+    tensor :: jet_compute_matrix(1, 2, 3.0).unwrap()
+    placed :: jet_compute_on_device(&tensor, JetComputeDevice.Cpu).unwrap()
+    assert(placed.device == JetComputeDevice.Cpu)
+    assert(jet_compute_tensor_to_list(&placed) == [F64]{3.0, 3.0})
+}

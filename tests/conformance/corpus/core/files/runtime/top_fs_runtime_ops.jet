@@ -1,0 +1,42 @@
+use core.files.runtime.top_fs_runtime_ops.[jet_std_fs_temp_file, jet_std_fs_read_at,
+    jet_std_fs_read_bytes, jet_std_fs_chown, jet_std_fs_set_mode, jet_std_fs_map,
+    jet_std_fs_map_len, jet_std_fs_map_is_empty, jet_std_fs_map_window_view]
+use core.files.runtime.top_fs_write_ops.jet_std_fs_write_bytes
+use core.prelude.runtime.std_open.IOError
+use core.sys.target
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs:305
+#Test("chown_checks_owner_then_group_before_native_path") {
+    path :: "missing-chown-control"
+    if target.selected_family() == "unix" {
+        assert(jet_std_fs_chown(&path, -2, -2) ==
+            Err(IOError.other(.Write, Val(path), "owner must be -1 or a non-negative u32")))
+        assert(jet_std_fs_chown(&path, -1, -2) ==
+            Err(IOError.other(.Write, Val(path), "group must be -1 or a non-negative u32")))
+    } else {
+        assert(jet_std_fs_chown(&path, -2, -2) ==
+            Err(IOError.other(.Write, None, "chown is unavailable on this platform")))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs:366
+#Test("mode_range_validation_precedes_filesystem_access") {
+    path :: "missing-mode-control"
+    reason :: if target.selected_family() == "unix" {
+        "file mode must be between 0 and u32::MAX"
+    } else { "file mode must contain only the readonly bit on this platform" }
+    assert(jet_std_fs_set_mode(&path, -1) == Err(IOError.other(.Write, Val(path), reason)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs:452,489,511
+#Test("native_positional_read_and_map_views_keep_byte_extent") {
+    owner :: jet_std_fs_temp_file(&"fs-runtime-control").unwrap()
+    path :: owner.path.to_string_lossy().to_string()
+    assert(jet_std_fs_write_bytes(&path, &[U8{1}, U8{2}, U8{3}, U8{4}]) == Ok(()))
+    assert(jet_std_fs_read_at(&path, -10, 2) == Ok([U8{1}, U8{2}]))
+    assert(jet_std_fs_read_at(&path, 3, 9) == Ok([U8{4}]))
+    assert(jet_std_fs_read_at(&path, 1, -2) == Ok([]))
+    map :: jet_std_fs_map(&path).unwrap()
+    assert(jet_std_fs_map_len(&map) == 4 and not jet_std_fs_map_is_empty(&map))
+    view :: jet_std_fs_map_window_view(&map, 1, 3).unwrap()
+    assert(view.len() == 2 and view[0] == U8{2} and view[1] == U8{3})
+    assert(jet_std_fs_read_bytes(&path) == Ok([U8{1}, U8{2}, U8{3}, U8{4}]))
+}

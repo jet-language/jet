@@ -1,0 +1,38 @@
+use core.http.runtime.top_http_client.*
+use core.http.HTTPError
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:79-120,459-463
+#Test("http_client_invalid_header_fails_before_native_transport") {
+    request :: jet_http_client_request_new_owned("GET", "/checked")
+    request :: jet_http_client_request_header_owned(^request, "bad header", "value")
+    result :: native_http_request(^request)
+    assert(result.is_err())
+    assert(result.unwrap_err() == HTTPError.InvalidHeader)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:79-107,187-196
+#Test("http_client_unset_body_is_distinct_from_explicit_empty_body") {
+    request :: jet_http_client_request_new_owned("POST", "/checked")
+    (length, has_body, chunks) :: jet_http_client_body_upload(&request).unwrap()
+    assert(length.is_none() && !has_body && chunks.is_none())
+    request :: jet_http_client_request_body_owned(^request, "")
+    (length, has_body, chunks) :: jet_http_client_body_upload(&request).unwrap()
+    assert(length == Val(0) && has_body && chunks.is_some())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs:128-163,198-305
+#Test("http_client_owned_builder_preserves_duplicate_pairs_and_timeout_phases") {
+    request :: jet_http_client_request_new_owned("POST", "/checked")
+    request :: jet_http_client_request_json_text_owned(^request, "{}")
+    request :: jet_http_client_request_cookie_owned(^request, "key", "one")
+    request :: jet_http_client_request_cookie_owned(^request, "key", "two")
+    request :: jet_http_client_request_form_owned(^request, "field", "value")
+    request :: jet_http_client_request_timeout(^request, 11)
+    request :: jet_http_client_request_connect_timeout(^request, 22)
+    request :: jet_http_client_request_first_byte_timeout(^request, 33)
+    assert(request.body_set)
+    assert(request.headers.get("content-type").unwrap() == "application/json")
+    assert(request.cookies == ["key", "one", "key", "two"])
+    assert(request.form == ["field", "value"])
+    assert(request.timeout_ms == Val(11))
+    assert(request.connect_timeout_ms == Val(22))
+    assert(request.first_byte_timeout_ms == Val(33))
+}

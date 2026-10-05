@@ -1,1032 +1,680 @@
-// PORT-PENDING 0282 crates-jet-codegen-src-prelude-corelib-top-handlesraylib-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:1-1028
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── View<T> (D-DYNARRAY1) ────────────────────────────────────────────────────
-//RS // `list.view(a..b)` is a zero-copy window: unlike every bridge type below,
-//RS // `View<T>` has no owning Rust struct here — it lowers straight to a plain
-//RS // borrowed slice `&[T]` (`Context::rust_type`'s `View` arm, crates/jet-codegen/
-//RS // src/Codegen/Context.rs), and its constructor/method helpers
-//RS // (`jet_view_new`/`jet_view_fold`/`jet_view_map`) live in Core.rs next to
-//RS // `jet_slice_vec`/`jet_list_fold` — the same bare (non-`jet_std::`-namespaced)
-//RS // family every other list method belongs to, since `.view(...)` dispatches
-//RS // through the ordinary list-method machinery, not the handle-type dispatch
-//RS // the structs below use. Ownership (the window cannot outlive its list) is
-//RS // proved by sema's E2305, not by a Rust lifetime parameter on a wrapper type.
-//RS 
-//RS // ── Streaming file handles (E2-M7, D-IO2) ────────────────────────────────────
-//RS // FileReader / FileWriter are RAII: Drop closes (and flushes) them
-//RS // on every exit path — including `?` early returns and panics.
-//RS struct JetFileReader {
-//RS     inner: std::io::BufReader<std::fs::File>,
-//RS     path: String,
-//RS }
-//RS struct JetFileWriter {
-//RS     inner: std::io::BufWriter<std::fs::File>,
-//RS     path: String,
-//RS }
-//RS 
-//RS // ── core.db connection handle (D-DBDRIVER1) ──────────────────────────────────
-//RS // The real SQLite connection lives in the FFI bridge crate's thread-local
-//RS // handle map (`rusqlite::Connection` can't cross into this always-compiled
-//RS // prelude — I6). `JetDbConnection` is a thin, move-only handle wrapper so
-//RS // `.query`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` dispatch by
-//RS // receiver TYPE (`DBConnection`), the same mechanism `FileReader`/`FileWriter`
-//RS // use, instead of exposing the bare `u64` to Jet code.
-//RS #[derive(Debug)]
-//RS struct JetDbConnection {
-//RS     handle: u64,
-//RS }
-//RS 
-//RS trait JetDbCarrier {
-//RS     fn jet_db_handle(&self) -> u64;
-//RS }
-//RS 
-//RS impl JetDbCarrier for JetDbConnection {
-//RS     fn jet_db_handle(&self) -> u64 {
-//RS         self.handle
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// D-DBDRIVER1: keep rusqlite in the hidden FFI bridge while the generated
-//RS /// program owns only a typed handle and the checked SQL/policy carriers.
-//RS macro_rules! jet_db_bridge {
-//RS     ($bridge:ident) => {
-//RS         impl JetDbCarrier for JetDbScope {
-//RS             fn jet_db_handle(&self) -> u64 {
-//RS                 self.handle
-//RS             }
-//RS         }
-//RS 
-//RS         fn jet_db_open(path: &String) -> JetDbConnection {
-//RS             let handle = $bridge::jet_db_open(path);
-//RS             if handle == 0 {
-//RS                 jet_runtime_stop("E3001", "", 0, "database open failed")
-//RS             }
-//RS             JetDbConnection { handle }
-//RS         }
-//RS 
-//RS         fn jet_db_open_memory() -> JetDbConnection {
-//RS             let handle = $bridge::jet_db_open_memory();
-//RS             if handle == 0 {
-//RS                 jet_runtime_stop("E3001", "", 0, "in-memory database open failed")
-//RS             }
-//RS             JetDbConnection { handle }
-//RS         }
-//RS 
-//RS         fn jet_db_close<T: JetDbCarrier>(connection: T) -> bool {
-//RS             $bridge::jet_db_close(connection.jet_db_handle())
-//RS         }
-//RS 
-//RS         // A transaction statement reads the handle; the connection stays
-//RS         // owned by its binding (or the escaping handler that captured it).
-//RS         fn jet_db_begin<T: JetDbCarrier>(connection: &T) -> bool {
-//RS             $bridge::jet_db_begin(connection.jet_db_handle())
-//RS         }
-//RS 
-//RS         fn jet_db_commit<T: JetDbCarrier>(connection: &T) -> bool {
-//RS             $bridge::jet_db_commit(connection.jet_db_handle())
-//RS         }
-//RS 
-//RS         fn jet_db_rollback<T: JetDbCarrier>(connection: &T) -> bool {
-//RS             $bridge::jet_db_rollback(connection.jet_db_handle())
-//RS         }
-//RS 
-//RS         struct JetAotDbBackend<'a> {
-//RS             scope: &'a JetDbScope,
-//RS         }
-//RS 
-//RS         impl jet_std::JetDBBackend for JetAotDbBackend<'_> {
-//RS             fn begin(&mut self) -> bool {
-//RS                 $bridge::jet_db_begin(self.scope.handle)
-//RS             }
-//RS 
-//RS             fn begin_with_lock(&mut self, lock: jet_std::JetMigrationLock) -> bool {
-//RS                 let mode = if matches!(lock, jet_std::JetMigrationLock::Exclusive) {
-//RS                     1
-//RS                 } else {
-//RS                     0
-//RS                 };
-//RS                 $bridge::jet_db_begin_mode(self.scope.handle, mode)
-//RS             }
-//RS 
-//RS             fn commit(&mut self) -> bool {
-//RS                 $bridge::jet_db_commit(self.scope.handle)
-//RS             }
-//RS 
-//RS             fn rollback(&mut self) {
-//RS                 let _ = $bridge::jet_db_rollback(self.scope.handle);
-//RS             }
-//RS 
-//RS             fn execute(
-//RS                 &mut self,
-//RS                 sql: &jet_std::SQL,
-//RS                 allow_schema: bool,
-//RS             ) -> Result<i64, jet_std::DBError> {
-//RS                 let sql = if allow_schema {
-//RS                     jet_std::jet_db_apply_compiled_migration_policy_with_proof(
-//RS                         sql,
-//RS                         &self.scope.policy.table,
-//RS                         jet_db_policy_compiled(&self.scope.policy),
-//RS                         &self.scope.user,
-//RS                     )?
-//RS                     .into_sql()?
-//RS                 } else {
-//RS                     jet_std::jet_db_apply_compiled_policy_with_proof(
-//RS                         sql,
-//RS                         &self.scope.policy.table,
-//RS                         jet_db_policy_compiled(&self.scope.policy),
-//RS                         &self.scope.user,
-//RS                     )?
-//RS                     .into_sql()?
-//RS                 };
-//RS                 let params = jet_std::jet_db_encode_params(&sql.1);
-//RS                 let wire = $bridge::jet_db_execute(self.scope.handle, &sql.0, &params);
-//RS                 jet_std::jet_db_decode_execute_result(&wire)
-//RS             }
-//RS 
-//RS             fn query(
-//RS                 &mut self,
-//RS                 sql: &jet_std::SQL,
-//RS                 allow_schema: bool,
-//RS             ) -> Result<Vec<JetMap<String, jet_std::DBValue>>, jet_std::DBError> {
-//RS                 let sql = if allow_schema {
-//RS                     jet_std::jet_db_apply_compiled_migration_policy_with_proof(
-//RS                         sql,
-//RS                         &self.scope.policy.table,
-//RS                         jet_db_policy_compiled(&self.scope.policy),
-//RS                         &self.scope.user,
-//RS                     )?
-//RS                     .into_sql()?
-//RS                 } else {
-//RS                     jet_std::jet_db_apply_compiled_policy_with_proof(
-//RS                         sql,
-//RS                         &self.scope.policy.table,
-//RS                         jet_db_policy_compiled(&self.scope.policy),
-//RS                         &self.scope.user,
-//RS                     )?
-//RS                     .into_sql()?
-//RS                 };
-//RS                 let params = jet_std::jet_db_encode_params(&sql.1);
-//RS                 let wire = $bridge::jet_db_query(self.scope.handle, &sql.0, &params);
-//RS                 jet_std::jet_db_decode_query_result(&wire)
-//RS             }
-//RS         }
-//RS 
-//RS         fn jet_db_scope_migrate(
-//RS             scope: &JetDbScope,
-//RS             name: &String,
-//RS             steps: &Vec<jet_std::SQL>,
-//RS         ) -> Result<i64, jet_std::DBError> {
-//RS             let mut backend = JetAotDbBackend { scope };
-//RS             jet_std::jet_db_migrate(&mut backend, name, steps)
-//RS         }
-//RS 
-//RS         fn jet_db_scope_transaction(
-//RS             scope: &JetDbScope,
-//RS             label: &String,
-//RS             steps: &Vec<jet_std::SQL>,
-//RS         ) -> Result<i64, jet_std::DBError> {
-//RS             let mut backend = JetAotDbBackend { scope };
-//RS             jet_std::jet_db_transaction(&mut backend, label, steps)
-//RS         }
-//RS 
-//RS         fn jet_db_scope_execute_with_metadata(
-//RS             scope: &JetDbScope,
-//RS             sql: &jet_std::SQL,
-//RS             metadata: &String,
-//RS         ) -> Result<i64, jet_std::DBError> {
-//RS             let _ = metadata;
-//RS             let mut backend = JetAotDbBackend { scope };
-//RS             jet_std::JetDBBackend::execute(&mut backend, sql, false)
-//RS         }
-//RS 
-//RS         fn jet_db_scope_query_with_metadata(
-//RS             scope: &JetDbScope,
-//RS             sql: &jet_std::SQL,
-//RS             metadata: &String,
-//RS         ) -> Result<Vec<JetMap<String, jet_std::DBValue>>, jet_std::DBError> {
-//RS             let _ = metadata;
-//RS             let mut backend = JetAotDbBackend { scope };
-//RS             jet_std::JetDBBackend::query(&mut backend, sql, false)
-//RS         }
-//RS 
-//RS         fn jet_db_scope_query_one_with_metadata(
-//RS             scope: &JetDbScope,
-//RS             sql: &jet_std::SQL,
-//RS             metadata: &String,
-//RS         ) -> Result<Result<JetMap<String, jet_std::DBValue>, JetAbsent>, jet_std::DBError> {
-//RS             let _ = metadata;
-//RS             let rows = jet_db_scope_query_with_metadata(scope, sql, metadata)?;
-//RS             Ok(jet_std::jet_db_first_row(rows))
-//RS         }
-//RS         /// D-DBPOLICY-BIND1: policy authority is a distinct capability. Keeping
-//RS         /// the policy and user on the scope prevents a caller from replacing
-//RS         /// either one between SQL operations while retaining the connection.
-//RS         pub(crate) fn jet_db_with_policy(
-//RS             connection: &JetDbConnection,
-//RS             policy: JetRowPolicy,
-//RS             user: String,
-//RS         ) -> JetDbScope {
-//RS             JetDbScope {
-//RS                 handle: connection.handle,
-//RS                 policy,
-//RS                 user,
-//RS                 request_id: jet_db_current_request_id(),
-//RS             }
-//RS         }
-//RS         /// D-DBPOLICY1: `core.db.policy` reports a rejected policy on the
-//RS         /// module's one failure domain, `DBError`. The closed policy language
-//RS         /// itself is still compiled once by `jet_db_policy_new`.
-//RS         fn jet_db_policy_checked(
-//RS             table: &String,
-//RS             expression: &String,
-//RS         ) -> Result<JetRowPolicy, jet_std::DBError> {
-//RS             jet_db_policy_new(table.clone(), expression.clone())
-//RS                 .map_err(|message| jet_std::DBError { message })
-//RS         }
-//RS 
-//RS         /// D-DBPOOL1: AOT drivers are bridge connections; admission, health,
-//RS         /// reset, deadlines and draining stay in the shared pool Prelude.
-//RS         fn jet_db_pool_hooks() -> JetDbPoolHooks<JetDbConnection> {
-//RS             JetDbPoolHooks::new(
-//RS                 |path: &str| {
-//RS                     let handle = $bridge::jet_db_open(path);
-//RS                     if handle == 0 {
-//RS                         Err(jet_db_pool_error("database pool backend open failed"))
-//RS                     } else {
-//RS                         Ok(JetDbConnection { handle })
-//RS                     }
-//RS                 },
-//RS                 |connection: &mut JetDbConnection| $bridge::jet_db_health(connection.handle),
-//RS                 |connection: &mut JetDbConnection| $bridge::jet_db_reset(connection.handle),
-//RS                 |connection: JetDbConnection| {
-//RS                     let _ = $bridge::jet_db_close(connection.handle);
-//RS                 },
-//RS             )
-//RS         }
-//RS 
-//RS         fn jet_db_pool_new(
-//RS             url: &String,
-//RS             max: i64,
-//RS         ) -> Result<JetDbPool<JetDbConnection>, jet_std::DBError> {
-//RS             JetDbPool::new(url.clone(), max, jet_db_pool_hooks())
-//RS         }
-//RS 
-//RS         fn jet_db_pool_acquire(
-//RS             pool: &JetDbPool<JetDbConnection>,
-//RS         ) -> Result<JetDbLease<JetDbConnection>, jet_std::DBError> {
-//RS             pool.acquire(None)
-//RS         }
-//RS 
-//RS         fn jet_db_pool_acquire_deadline(
-//RS             pool: &JetDbPool<JetDbConnection>,
-//RS             deadline: &jet_std::Duration,
-//RS         ) -> Result<JetDbLease<JetDbConnection>, jet_std::DBError> {
-//RS             let deadline_ms =
-//RS                 jet_std_time_now().saturating_add(deadline.ns.saturating_div(1_000_000));
-//RS             pool.acquire(Some(deadline_ms))
-//RS         }
-//RS 
-//RS         fn jet_db_pool_ready(
-//RS             pool: &JetDbPool<JetDbConnection>,
-//RS         ) -> Result<bool, jet_std::DBError> {
-//RS             pool.ready()
-//RS         }
-//RS 
-//RS         fn jet_db_pool_drain(
-//RS             pool: &JetDbPool<JetDbConnection>,
-//RS         ) -> Result<JetDbPoolReceipt, jet_std::DBError> {
-//RS             pool.drain(None)
-//RS         }
-//RS 
-//RS         fn jet_db_pool_receipt(pool: &JetDbPool<JetDbConnection>) -> JetDbPoolReceipt {
-//RS             pool.receipt()
-//RS         }
-//RS 
-//RS         fn jet_db_lease_close(
-//RS             lease: &JetDbLease<JetDbConnection>,
-//RS         ) -> Result<(), jet_std::DBError> {
-//RS             lease.release();
-//RS             Ok(())
-//RS         }
-//RS 
-//RS     };
-//RS }
-//RS 
-//RS 
-//RS 
-//RS // ── core.plugin sandboxed WASM handle (D-DEP-WASM1=A / D-PLUGIN1=B, c81) ─────
-//RS // The real wasmtime `Store`/`Instance` live in the FFI bridge crate's
-//RS // thread-local handle map (wasmtime types can't cross into this
-//RS // always-compiled prelude — I6). `JetPlugin` is a thin, `Copy` handle wrapper,
-//RS // same shape as `JetDbConnection`, so `.call`/`.call_int` dispatch by receiver
-//RS // TYPE (`Plugin`) instead of exposing the bare `u64` to Jet code.
-//RS #[derive(Clone, Copy, Debug)]
-//RS struct JetPlugin {
-//RS     handle: u64,
-//RS }
-//RS // The FFI bridge keeps wasmtime-specific state out of generated Jet values. A
-//RS // generated invocation expands `jet_plugin_bridge!(bridge_crate)` after the
-//RS // cached core block, where it can convert the bridge's wire result into the
-//RS // typed handle expected by CoreCall lowering. The authority argument has
-//RS // already crossed the checked boundary as its canonical wire string.
-//RS macro_rules! jet_plugin_bridge {
-//RS     ($bridge:ident) => {
-//RS         fn jet_plugin_load(path: &String, authority_wire: &String) -> JetPlugin {
-//RS             let wire = $bridge::jet_plugin_load(path, authority_wire);
-//RS             match wire
-//RS                 .strip_prefix("O:")
-//RS                 .and_then(|value| value.parse::<u64>().ok())
-//RS             {
-//RS                 Some(handle) if handle != 0 => JetPlugin { handle },
-//RS                 _ => {
-//RS                     let message = wire.strip_prefix("E:").unwrap_or("plugin load failed");
-//RS                     jet_runtime_stop("E3001", "", 0, message)
-//RS                 }
-//RS             }
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS // The typed vault carriers live in the hidden FFI bridge.  Display remains a
-//RS // generated-program concern so user interpolation can render opaque handles
-//RS // without exposing their secret payloads.
-//RS macro_rules! jet_vault_display_bridge {
-//RS     ($bridge:ident) => {
-//RS         impl<T> JetDisplay for $bridge::JetVaultKeyRef<T> {
-//RS             fn jet_display(&self) -> String {
-//RS                 self.to_string()
-//RS             }
-//RS         }
-//RS 
-//RS         impl JetDisplay for $bridge::JetVaultKeyStatus {
-//RS             fn jet_display(&self) -> String {
-//RS                 format!("{self:?}")
-//RS             }
-//RS         }
-//RS 
-//RS         impl JetDisplay for $bridge::JetVaultError {
-//RS             fn jet_display(&self) -> String {
-//RS                 self.to_string()
-//RS             }
-//RS         }
-//RS 
-//RS         impl<T> JetDisplay for $bridge::JetVaultWrite<T> {
-//RS             fn jet_display(&self) -> String {
-//RS                 format!("{self:?}")
-//RS             }
-//RS         }
-//RS 
-//RS         impl<T> JetDisplay for $bridge::JetVaultRotation<T> {
-//RS             fn jet_display(&self) -> String {
-//RS                 format!("{self:?}")
-//RS             }
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS // jet:raylib-begin
-//RS // -- core.game.raylib bridge (D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A) -----------------
-//RS // Display remains explicit: without JET_RAYLIB_DISPLAY=1 the bridge is a
-//RS // deterministic headless adapter. With the flag set, Jet dynamically loads
-//RS // the native raylib shared library and calls the real C API without adding a
-//RS // compile-time link requirement to every CI run.
-//RS #[derive(Clone, Debug)]
-//RS struct RaylibWindow {
-//RS     width: i64,
-//RS     height: i64,
-//RS     title: String,
-//RS     native: bool,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug)]
-//RS struct RaylibColor {
-//RS     r: i64,
-//RS     g: i64,
-//RS     b: i64,
-//RS     a: i64,
-//RS }
-//RS 
-//RS /// D-GAME-LOOP1=A: typed sound handle (headless-safe; native play is best-effort).
-//RS #[derive(Clone, Debug)]
-//RS struct RaylibSound {
-//RS     path: String,
-//RS }
-//RS 
-//RS type RaylibAtlasRegion = JetRaylibAtlasRegion;
-//RS 
-//RS /// Typed atlas metadata. The optional native texture is loaded only when a
-//RS /// display is active and the atlas declares a texture asset.
-//RS #[derive(Clone, Debug)]
-//RS struct RaylibTextureAtlas {
-//RS     path: String,
-//RS     name: String,
-//RS     texture_path: Option<String>,
-//RS     regions: Vec<RaylibAtlasRegion>,
-//RS     native_texture: Option<JetRaylibCTexture2D>,
-//RS }
-//RS 
-//RS type RaylibSpriteDrawCall = JetRaylibSpriteDrawCall;
-//RS 
-//RS impl JetShow for RaylibTextureAtlas {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("RaylibTextureAtlas({})", self.name)
-//RS     }
-//RS }
-//RS impl JetDebug for RaylibTextureAtlas {
-//RS     fn jet_debug(&self) -> String {
-//RS         self.jet_show()
-//RS     }
-//RS }
-//RS 
-//RS #[repr(C)]
-//RS #[derive(Clone, Copy, Debug)]
-//RS struct JetRaylibCTexture2D {
-//RS     id: i32,
-//RS     width: i32,
-//RS     height: i32,
-//RS     mipmaps: i32,
-//RS     format: i32,
-//RS }
-//RS 
-//RS #[repr(C)]
-//RS #[derive(Clone, Copy, Debug)]
-//RS struct JetRaylibCColor {
-//RS     r: u8,
-//RS     g: u8,
-//RS     b: u8,
-//RS     a: u8,
-//RS }
-//RS 
-//RS #[repr(C)]
-//RS #[derive(Clone, Copy, Debug)]
-//RS struct JetRaylibCRectangle {
-//RS     x: f32,
-//RS     y: f32,
-//RS     width: f32,
-//RS     height: f32,
-//RS }
-//RS 
-//RS #[repr(C)]
-//RS #[derive(Clone, Copy, Debug)]
-//RS struct JetRaylibCVector2 {
-//RS     x: f32,
-//RS     y: f32,
-//RS }
-//RS 
-//RS type JetRaylibInitWindow = unsafe extern "C" fn(i32, i32, *const std::os::raw::c_char);
-//RS type JetRaylibWindowShouldClose = unsafe extern "C" fn() -> bool;
-//RS type JetRaylibBeginDrawing = unsafe extern "C" fn();
-//RS type JetRaylibClearBackground = unsafe extern "C" fn(JetRaylibCColor);
-//RS type JetRaylibDrawRectangle = unsafe extern "C" fn(i32, i32, i32, i32, JetRaylibCColor);
-//RS type JetRaylibDrawText =
-//RS     unsafe extern "C" fn(*const std::os::raw::c_char, i32, i32, i32, JetRaylibCColor);
-//RS type JetRaylibEndDrawing = unsafe extern "C" fn();
-//RS type JetRaylibCloseWindow = unsafe extern "C" fn();
-//RS type JetRaylibIsKeyDown = unsafe extern "C" fn(i32) -> bool;
-//RS type JetRaylibIsGamepadButtonDown = unsafe extern "C" fn(i32, i32) -> bool;
-//RS type JetRaylibGetGamepadAxisMovement = unsafe extern "C" fn(i32, i32) -> f32;
-//RS type JetRaylibSetTargetFps = unsafe extern "C" fn(i32);
-//RS type JetRaylibLoadTexture =
-//RS     unsafe extern "C" fn(*const std::os::raw::c_char) -> JetRaylibCTexture2D;
-//RS type JetRaylibDrawTexturePro = unsafe extern "C" fn(
-//RS     JetRaylibCTexture2D,
-//RS     JetRaylibCRectangle,
-//RS     JetRaylibCRectangle,
-//RS     JetRaylibCVector2,
-//RS     f32,
-//RS     JetRaylibCColor,
-//RS );
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS struct JetRaylibApi {
-//RS     init_window: JetRaylibInitWindow,
-//RS     window_should_close: JetRaylibWindowShouldClose,
-//RS     begin_drawing: JetRaylibBeginDrawing,
-//RS     clear_background: JetRaylibClearBackground,
-//RS     draw_rectangle: JetRaylibDrawRectangle,
-//RS     draw_text: JetRaylibDrawText,
-//RS     end_drawing: JetRaylibEndDrawing,
-//RS     close_window: JetRaylibCloseWindow,
-//RS     is_key_down: JetRaylibIsKeyDown,
-//RS     is_gamepad_button_down: Option<JetRaylibIsGamepadButtonDown>,
-//RS     get_gamepad_axis_movement: Option<JetRaylibGetGamepadAxisMovement>,
-//RS     set_target_fps: JetRaylibSetTargetFps,
-//RS     load_texture: Option<JetRaylibLoadTexture>,
-//RS     draw_texture_pro: Option<JetRaylibDrawTexturePro>,
-//RS }
-//RS 
-//RS static JET_RAYLIB_WINDOW_OPEN: std::sync::atomic::AtomicBool =
-//RS     std::sync::atomic::AtomicBool::new(false);
-//RS static JET_RAYLIB_FRAME_INDEX: std::sync::atomic::AtomicU64 =
-//RS     std::sync::atomic::AtomicU64::new(0);
-//RS 
-//RS 
-//RS fn jet_raylib_display_enabled() -> bool {
-//RS     std::env::var("JET_RAYLIB_DISPLAY").as_deref() == Ok("1")
-//RS }
-//RS 
-//RS fn jet_raylib_clamp_u8(v: i64) -> u8 {
-//RS     v.clamp(0, 255) as u8
-//RS }
-//RS 
-//RS fn jet_raylib_c_color(color: &RaylibColor) -> JetRaylibCColor {
-//RS     JetRaylibCColor {
-//RS         r: jet_raylib_clamp_u8(color.r),
-//RS         g: jet_raylib_clamp_u8(color.g),
-//RS         b: jet_raylib_clamp_u8(color.b),
-//RS         a: jet_raylib_clamp_u8(color.a),
-//RS     }
-//RS }
-//RS fn jet_raylib_native_color(color: &RaylibColor) -> JetDevtoolsNativeColor {
-//RS     JetDevtoolsNativeColor::new(
-//RS         jet_raylib_clamp_u8(color.r),
-//RS         jet_raylib_clamp_u8(color.g),
-//RS         jet_raylib_clamp_u8(color.b),
-//RS         jet_raylib_clamp_u8(color.a),
-//RS     )
-//RS }
-//RS 
-//RS fn jet_raylib_draw_native_command(command: &JetDevtoolsNativeDrawCommand) {
-//RS     if !JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         return;
-//RS     }
-//RS     let Some(api) = jet_raylib_api() else {
-//RS         return;
-//RS     };
-//RS     match command {
-//RS         JetDevtoolsNativeDrawCommand::Rectangle {
-//RS             x,
-//RS             y,
-//RS             width,
-//RS             height,
-//RS             color,
-//RS         } => {
-//RS             // SAFETY: the raylib drawing context is active and the command
-//RS             // contains plain integer/color ABI values.
-//RS             unsafe {
-//RS                 (api.draw_rectangle)(
-//RS                     *x,
-//RS                     *y,
-//RS                     *width,
-//RS                     *height,
-//RS                     JetRaylibCColor {
-//RS                         r: color.red,
-//RS                         g: color.green,
-//RS                         b: color.blue,
-//RS                         a: color.alpha,
-//RS                     },
-//RS                 )
-//RS             };
-//RS         }
-//RS         JetDevtoolsNativeDrawCommand::Text {
-//RS             text,
-//RS             x,
-//RS             y,
-//RS             size,
-//RS             color,
-//RS         } => {
-//RS             let text_c = jet_raylib_cstring(text);
-//RS             // SAFETY: the text pointer is valid for the call and the command
-//RS             // color matches raylib's C ABI.
-//RS             unsafe {
-//RS                 (api.draw_text)(
-//RS                     text_c.as_ptr(),
-//RS                     *x,
-//RS                     *y,
-//RS                     (*size).max(1),
-//RS                     JetRaylibCColor {
-//RS                         r: color.red,
-//RS                         g: color.green,
-//RS                         b: color.blue,
-//RS                         a: color.alpha,
-//RS                     },
-//RS                 )
-//RS             };
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_cstring(s: &String) -> std::ffi::CString {
-//RS     let filtered: Vec<u8> = s.as_bytes().iter().copied().filter(|b| *b != 0).collect();
-//RS     std::ffi::CString::new(filtered).unwrap_or_else(|_| std::ffi::CString::new("").unwrap())
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS mod jet_raylib_dyn {
-//RS     use super::*;
-//RS     use std::os::raw::{c_char, c_int, c_void};
-//RS     use std::sync::OnceLock;
-//RS 
-//RS     #[cfg(target_os = "linux")]
-//RS     #[link(name = "dl")]
-//RS     unsafe extern "C" {}
-//RS 
-//RS     unsafe extern "C" {
-//RS         fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
-//RS         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-//RS     }
-//RS 
-//RS     const RTLD_NOW: c_int = 2;
-//RS     static API: OnceLock<Option<JetRaylibApi>> = OnceLock::new();
-//RS 
-//RS     pub(super) fn api() -> Option<&'static JetRaylibApi> {
-//RS         API.get_or_init(load).as_ref()
-//RS     }
-//RS 
-//RS     fn load() -> Option<JetRaylibApi> {
-//RS         // SAFETY: the loader only reads process-global dynamic-linker state.
-//RS         let handle = unsafe {
-//RS             #[cfg(target_os = "macos")]
-//RS             {
-//RS                 dlopen(b"libraylib.dylib\0".as_ptr().cast(), RTLD_NOW)
-//RS             }
-//RS             #[cfg(not(target_os = "macos"))]
-//RS             {
-//RS                 let first = dlopen(b"libraylib.so\0".as_ptr().cast(), RTLD_NOW);
-//RS                 if first.is_null() {
-//RS                     dlopen(b"libraylib.so.5\0".as_ptr().cast(), RTLD_NOW)
-//RS                 } else {
-//RS                     first
-//RS                 }
-//RS             }
-//RS         };
-//RS         if handle.is_null() {
-//RS             return None;
-//RS         }
-//RS         Some(JetRaylibApi {
-//RS             init_window: symbol(handle, b"InitWindow\0")?,
-//RS             window_should_close: symbol(handle, b"WindowShouldClose\0")?,
-//RS             begin_drawing: symbol(handle, b"BeginDrawing\0")?,
-//RS             clear_background: symbol(handle, b"ClearBackground\0")?,
-//RS             draw_rectangle: symbol(handle, b"DrawRectangle\0")?,
-//RS             draw_text: symbol(handle, b"DrawText\0")?,
-//RS             end_drawing: symbol(handle, b"EndDrawing\0")?,
-//RS             close_window: symbol(handle, b"CloseWindow\0")?,
-//RS             is_key_down: symbol(handle, b"IsKeyDown\0")?,
-//RS             is_gamepad_button_down: symbol(handle, b"IsGamepadButtonDown\0"),
-//RS             get_gamepad_axis_movement: symbol(handle, b"GetGamepadAxisMovement\0"),
-//RS             set_target_fps: symbol(handle, b"SetTargetFPS\0")?,
-//RS             load_texture: symbol(handle, b"LoadTexture\0"),
-//RS             draw_texture_pro: symbol(handle, b"DrawTexturePro\0"),
-//RS         })
-//RS     }
-//RS 
-//RS     fn symbol<T: Copy>(handle: *mut c_void, name: &[u8]) -> Option<T> {
-//RS         // SAFETY: names are NUL-terminated raylib symbols and T matches each
-//RS         // requested C function signature at the call site above.
-//RS         let ptr = unsafe { dlsym(handle, name.as_ptr().cast()) };
-//RS         if ptr.is_null() {
-//RS             None
-//RS         } else {
-//RS             // SAFETY: C function pointers and data pointers have the platform ABI
-//RS             // representation used by dlsym on supported Unix targets.
-//RS             Some(unsafe { std::mem::transmute_copy(&ptr) })
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_raylib_api() -> Option<&'static JetRaylibApi> {
-//RS     jet_raylib_dyn::api()
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn jet_raylib_api() -> Option<&'static JetRaylibApi> {
-//RS     None
-//RS }
-//RS 
-//RS 
-//RS fn jet_raylib_native_texture(path: &String) -> Option<JetRaylibCTexture2D> {
-//RS     if !JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         return None;
-//RS     }
-//RS     let api = jet_raylib_api()?;
-//RS     let load_texture = api.load_texture?;
-//RS     let path_c = jet_raylib_cstring(path);
-//RS     // SAFETY: the path pointer is valid for the call and the function pointer
-//RS     // was loaded from the active raylib shared library.
-//RS     let texture = unsafe { load_texture(path_c.as_ptr()) };
-//RS     (texture.id > 0).then_some(texture)
-//RS }
-//RS 
-//RS fn jet_raylib_load_texture_atlas(path: &String) -> RaylibTextureAtlas {
-//RS     let spec = jet_raylib_load_texture_atlas_spec(path);
-//RS     let native_texture = spec
-//RS         .texture_path
-//RS         .as_ref()
-//RS         .and_then(jet_raylib_native_texture);
-//RS     RaylibTextureAtlas {
-//RS         path: spec.path,
-//RS         name: spec.name,
-//RS         texture_path: spec.texture_path,
-//RS         regions: spec.regions,
-//RS         native_texture,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_draw_sprite(
-//RS     atlas: &RaylibTextureAtlas,
-//RS     region: &String,
-//RS     x: i64,
-//RS     y: i64,
-//RS ) {
-//RS     let Some(draw_call) =
-//RS         jet_raylib_sprite_draw_call(&atlas.name, &atlas.regions, region, x, y)
-//RS     else {
-//RS         return;
-//RS     };
-//RS     let source_x = draw_call.source_x;
-//RS     let source_y = draw_call.source_y;
-//RS     let width = draw_call.width;
-//RS     let height = draw_call.height;
-//RS     jet_raylib_record_draw_call(draw_call);
-//RS     let Some(texture) = atlas.native_texture else {
-//RS         return;
-//RS     };
-//RS     let Some(draw_texture_pro) = jet_raylib_api().and_then(|api| api.draw_texture_pro) else {
-//RS         return;
-//RS     };
-//RS     let source = JetRaylibCRectangle {
-//RS         x: source_x as f32,
-//RS         y: source_y as f32,
-//RS         width: width as f32,
-//RS         height: height as f32,
-//RS     };
-//RS     let destination = JetRaylibCRectangle {
-//RS         x: x as f32,
-//RS         y: y as f32,
-//RS         width: width as f32,
-//RS         height: height as f32,
-//RS     };
-//RS     // SAFETY: texture and geometry are ABI mirrors, and raylib owns the
-//RS     // active drawing context established by begin_drawing.
-//RS     unsafe {
-//RS         draw_texture_pro(
-//RS             texture,
-//RS             source,
-//RS             destination,
-//RS             JetRaylibCVector2 { x: 0.0, y: 0.0 },
-//RS             0.0,
-//RS             JetRaylibCColor {
-//RS                 r: 255,
-//RS                 g: 255,
-//RS                 b: 255,
-//RS                 a: 255,
-//RS             },
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWindow {
-//RS     let mut native = false;
-//RS     if jet_raylib_display_enabled() {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             let title_c = jet_raylib_cstring(title);
-//RS             // SAFETY: raylib is loaded, the title pointer is valid for the call,
-//RS             // and all C interaction is confined to this vetted bridge.
-//RS             unsafe { (api.init_window)(width as i32, height as i32, title_c.as_ptr()) };
-//RS             JET_RAYLIB_WINDOW_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
-//RS             native = true;
-//RS         }
-//RS     }
-//RS     if native {
-//RS         let native_width = width.clamp(1, i64::from(i32::MAX)) as u32;
-//RS         let native_height = height.clamp(1, i64::from(i32::MAX)) as u32;
-//RS         jet_devtools_native_window_open(native_width, native_height);
-//RS     }
-//RS     RaylibWindow {
-//RS         width,
-//RS         height,
-//RS         title: title.clone(),
-//RS         native,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_window_should_close(window: &RaylibWindow) -> bool {
-//RS     if window.native {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             // SAFETY: the function pointer was loaded from raylib and takes no args.
-//RS             return unsafe { (api.window_should_close)() };
-//RS         }
-//RS     }
-//RS     true
-//RS }
-//RS 
-//RS fn jet_raylib_window_ready(window: &RaylibWindow) -> bool {
-//RS     window.native
-//RS }
-//RS 
-//RS fn jet_raylib_begin_drawing(window: &RaylibWindow) {
-//RS     if window.native {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             // SAFETY: the raylib window was opened by this bridge.
-//RS             unsafe { (api.begin_drawing)() };
-//RS             let frame_index =
-//RS                 JET_RAYLIB_FRAME_INDEX.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-//RS             let width = window.width.clamp(1, i64::from(i32::MAX)) as u32;
-//RS             let height = window.height.clamp(1, i64::from(i32::MAX)) as u32;
-//RS             for command in jet_devtools_native_frame_begin(frame_index, width, height) {
-//RS                 jet_raylib_draw_native_command(&command);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_clear_background(color: &RaylibColor) {
-//RS     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             // SAFETY: color is a repr(C) mirror of raylib Color.
-//RS             unsafe { (api.clear_background)(jet_raylib_c_color(color)) };
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_draw_text(text: &String, x: i64, y: i64, size: i64, color: &RaylibColor) {
-//RS     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             jet_devtools_native_draw(JetDevtoolsNativeDrawCommand::Text {
-//RS                 text: text.clone(),
-//RS                 x: x as i32,
-//RS                 y: y as i32,
-//RS                 size: size as i32,
-//RS                 color: jet_raylib_native_color(color),
-//RS             });
-//RS             let text_c = jet_raylib_cstring(text);
-//RS             // SAFETY: the text pointer is valid for the call, color matches C ABI,
-//RS             // and raylib owns the active drawing context.
-//RS             unsafe {
-//RS                 (api.draw_text)(
-//RS                     text_c.as_ptr(),
-//RS                     x as i32,
-//RS                     y as i32,
-//RS                     size as i32,
-//RS                     jet_raylib_c_color(color),
-//RS                 )
-//RS             };
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_draw_rectangle(x: i64, y: i64, width: i64, height: i64, color: &RaylibColor) {
-//RS     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             jet_devtools_native_draw(JetDevtoolsNativeDrawCommand::Rectangle {
-//RS                 x: x as i32,
-//RS                 y: y as i32,
-//RS                 width: width as i32,
-//RS                 height: height as i32,
-//RS                 color: jet_raylib_native_color(color),
-//RS             });
-//RS             // SAFETY: color is a repr(C) mirror of raylib Color.
-//RS             unsafe {
-//RS                 (api.draw_rectangle)(
-//RS                     x as i32,
-//RS                     y as i32,
-//RS                     width as i32,
-//RS                     height as i32,
-//RS                     jet_raylib_c_color(color),
-//RS                 )
-//RS             };
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_end_drawing() {
-//RS     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             // SAFETY: the raylib window/drawing context is bridge-owned.
-//RS             unsafe { (api.end_drawing)() };
-//RS             jet_devtools_native_frame_end();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_close_window(window: &RaylibWindow) {
-//RS     if window.native {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             // SAFETY: the window was opened by this bridge.
-//RS             unsafe { (api.close_window)() };
-//RS             JET_RAYLIB_WINDOW_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
-//RS             jet_devtools_native_window_close();
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
-//RS     RaylibColor { r, g, b, a }
-//RS }
-//RS 
-//RS fn jet_raylib_key_code(name: &String) -> i32 {
-//RS     match name.as_str() {
-//RS         "Space" | "space" => 32,
-//RS         "Enter" | "enter" => 257,
-//RS         "Escape" | "escape" | "Esc" | "esc" => 256,
-//RS         "Right" | "right" => 262,
-//RS         "Left" | "left" => 263,
-//RS         "Down" | "down" => 264,
-//RS         "Up" | "up" => 265,
-//RS         "A" | "a" => 65,
-//RS         "D" | "d" => 68,
-//RS         "S" | "s" => 83,
-//RS         "W" | "w" => 87,
-//RS         _ => -1,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_key_down(name: &String) -> bool {
-//RS     let key = jet_raylib_key_code(name);
-//RS     if key < 0 {
-//RS         return false;
-//RS     }
-//RS     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             // SAFETY: key code is a plain raylib KeyboardKey integer.
-//RS             let pressed = unsafe { (api.is_key_down)(key) };
-//RS             if jet_devtools_native_input(JetDevtoolsNativeInput::Key {
-//RS                 code: name.clone(),
-//RS                 pressed,
-//RS             }) {
-//RS                 return false;
-//RS             }
-//RS             return pressed;
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn jet_raylib_gamepad_button_code(name: &String) -> i32 {
-//RS     jet_raylib_button_code(name).unwrap_or(-1)
-//RS }
-//RS 
-//RS fn jet_raylib_gamepad_axis_code(name: &String) -> i32 {
-//RS     jet_raylib_axis_code(name).unwrap_or(-1)
-//RS }
-//RS 
-//RS fn jet_raylib_gamepad_down(gamepad: i64, button: &String) -> bool {
-//RS     let Ok(gamepad) = i32::try_from(gamepad) else {
-//RS         return false;
-//RS     };
-//RS     let button_code = jet_raylib_gamepad_button_code(button);
-//RS     if gamepad < 0 || button_code < 0 {
-//RS         return false;
-//RS     }
-//RS     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             if let Some(is_gamepad_button_down) = api.is_gamepad_button_down {
-//RS                 // SAFETY: both integers are validated raylib enum values.
-//RS                 let pressed = unsafe { is_gamepad_button_down(gamepad, button_code) };
-//RS                 if jet_devtools_native_input(JetDevtoolsNativeInput::Gamepad {
-//RS                     gamepad: i64::from(gamepad),
-//RS                     control: button.clone(),
-//RS                     pressed,
-//RS                 }) {
-//RS                     return false;
-//RS                 }
-//RS                 return pressed;
-//RS             }
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn jet_raylib_gamepad_axis(gamepad: i64, axis: &String) -> f64 {
-//RS     let Ok(gamepad) = i32::try_from(gamepad) else {
-//RS         return 0.0;
-//RS     };
-//RS     let axis = jet_raylib_gamepad_axis_code(axis);
-//RS     if gamepad < 0 || axis < 0 {
-//RS         return 0.0;
-//RS     }
-//RS     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             if let Some(get_gamepad_axis_movement) = api.get_gamepad_axis_movement {
-//RS                 // SAFETY: both integers are validated raylib enum values.
-//RS                 return unsafe { get_gamepad_axis_movement(gamepad as i32, axis) as f64 };
-//RS             }
-//RS         }
-//RS     }
-//RS     0.0
-//RS }
-//RS 
-//RS fn jet_raylib_set_target_fps(fps: i64) {
-//RS     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
-//RS         if let Some(api) = jet_raylib_api() {
-//RS             let fps = fps.clamp(1, 240) as i32;
-//RS             // SAFETY: the raylib window was opened by this bridge.
-//RS             unsafe { (api.set_target_fps)(fps) };
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_raylib_load_sound(path: &String) -> RaylibSound {
-//RS     RaylibSound { path: path.clone() }
-//RS }
-//RS 
-//RS /// Returns whether a play was accepted (always true for a non-empty path in headless).
-//RS fn jet_raylib_play_sound(sound: &RaylibSound) -> bool {
-//RS     !sound.path.is_empty()
-//RS }
-//RS // jet:raylib-end
-// END-PORT-PENDING 0282 crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:1-1028
+use std.io.[BufReader, BufWriter]
+use std.fs.[File]
+use std.sync.[OnceLock]
+use std.sync.atomic.[AtomicBool, AtomicU64, Ordering]
+use std.ffi.[CString]
+use std.os.raw.[c_char, c_void]
+use std.env as env
+use std.mem as mem
+use core.sys.target as target
+use core.prelude.runtime.kernel_values.[JetShow, JetDebug, JetDisplay]
+use core.mem.runtime.portable_core.[jet_runtime_stop, JetAbsent, JetOutcome]
+use core.db.runtime.std_db_plugin_wire as jet_std
+use core.db.runtime.std_db_plugin_wire.[SQL, DBValue, DBError, JetDBBackend, JetMigrationLock]
+use core.db.runtime.top_db_pool.[JetDbPool, JetDbLease, JetDbPoolHooks, JetDbPoolReceipt, jet_db_pool_error]
+use core.sync.runtime.top_sync.[JetDbScope, JetRowPolicy, jet_db_policy_new, jet_db_policy_compiled, jet_db_current_request_id]
+use core.time.runtime.deadline.[jet_std_time_now]
+use core.prelude.runtime.std_common_types_02.[Duration]
+use jet_pkg_model.DB as db_kernel
+use core.plugin.plugin_02 as plugin_kernel
+use core.crypto.vault.[JetVaultKeyRef, JetVaultKeyStatus, JetVaultError, JetVaultWrite, JetVaultRotation]
+use core.game.runtime.kernel_raylib.[JetRaylibAtlasRegion, JetRaylibSpriteDrawCall, jet_raylib_load_texture_atlas_spec, jet_raylib_sprite_draw_call, jet_raylib_record_draw_call, jet_raylib_button_code, jet_raylib_axis_code]
+use jet_foundation.Devtools.*
 
+// View<T> is a zero-copy borrowed slice. Its canonical constructors and list
+// methods belong to Core's list owner; sema E2305 proves its owner lifetime.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:16
+struct JetFileReader { inner: BufReader<File>, path: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:20
+struct JetFileWriter { inner: BufWriter<File>, path: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:32
+#Debug
+struct JetDbConnection { handle: U64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:37
+trait JetDbCarrier {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:38
+    fn jet_db_handle(self: &Self) -> U64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:41
+impl JetDbCarrier for JetDbConnection {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:42
+    fn jet_db_handle(self: &Self) -> U64 { self.handle }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:49
+// The macro's generated bodies are now owned directly here. The native kernel
+// owns SQLite handles; policy checks and wire decoding remain in Jet.
+impl JetDbCarrier for JetDbScope {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:53
+    fn jet_db_handle(self: &Self) -> U64 { self.handle }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:58
+fn jet_db_open(path: &String) -> JetDbConnection {
+    // GATE #4565: kernel primitive
+    handle :: #Unsafe("native SQLite kernel retains one connection handle") { db_kernel.jet_db_open(path) }
+    if handle == 0 -> jet_runtime_stop("E3001", "", 0, "database open failed")
+    JetDbConnection{handle}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:66
+fn jet_db_open_memory() -> JetDbConnection {
+    // GATE #4565: kernel primitive
+    handle :: #Unsafe("open the real in-memory SQLite handle") { db_kernel.jet_db_open_memory() }
+    if handle == 0 -> jet_runtime_stop("E3001", "", 0, "in-memory database open failed")
+    JetDbConnection{handle}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:74
+fn jet_db_close<T: JetDbCarrier>(connection: T) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("consume the typed handle and close its native database") { db_kernel.jet_db_close(connection.jet_db_handle()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:80
+fn jet_db_begin<T: JetDbCarrier>(connection: &T) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow the connection for native transaction begin") { db_kernel.jet_db_begin(connection.jet_db_handle()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:84
+fn jet_db_commit<T: JetDbCarrier>(connection: &T) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("commit the borrowed native database transaction") { db_kernel.jet_db_commit(connection.jet_db_handle()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:88
+fn jet_db_rollback<T: JetDbCarrier>(connection: &T) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("rollback the borrowed native database transaction") { db_kernel.jet_db_rollback(connection.jet_db_handle()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:92
+struct JetAotDbBackend { scope: &JetDbScope }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:96
+impl JetDBBackend for JetAotDbBackend {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:97
+    fn begin(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("begin through the scoped native handle") { db_kernel.jet_db_begin(self.scope.handle) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:101
+    fn begin_with_lock(self: &Self, lock: JetMigrationLock) -> Bool {
+        mode :: if lock == .Exclusive -> 1 else -> 0
+        // GATE #4565: kernel primitive
+        #Unsafe("select exclusive versus ordinary native migration lock") { db_kernel.jet_db_begin_mode(self.scope.handle, mode) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:110
+    fn commit(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("commit through the scope handle") { db_kernel.jet_db_commit(self.scope.handle) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:114
+    fn rollback(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("rollback through the scope handle") { _ :: db_kernel.jet_db_rollback(self.scope.handle) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:118
+    fn execute(self: &Self, sql: &SQL, allow_schema: Bool) -> I64 DBError! {
+        checked :: if allow_schema {
+            jet_std.jet_db_apply_compiled_migration_policy_with_proof(sql, &self.scope.policy.table,
+                jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()?
+        } else {
+            jet_std.jet_db_apply_compiled_policy_with_proof(sql, &self.scope.policy.table,
+                jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()?
+        }
+        params :: jet_std.jet_db_encode_params(&checked.1)
+        // GATE #4565: kernel primitive
+        wire :: #Unsafe("execute only checked SQL and encoded bound parameters on the scoped SQLite handle") {
+            db_kernel.jet_db_execute(self.scope.handle, &checked.0, &params)
+        }
+        jet_std.jet_db_decode_execute_result(&wire)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:145
+    fn query(self: &Self, sql: &SQL, allow_schema: Bool) -> [[String:DBValue]] DBError! {
+        checked :: if allow_schema {
+            jet_std.jet_db_apply_compiled_migration_policy_with_proof(sql, &self.scope.policy.table,
+                jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()?
+        } else {
+            jet_std.jet_db_apply_compiled_policy_with_proof(sql, &self.scope.policy.table,
+                jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()?
+        }
+        params :: jet_std.jet_db_encode_params(&checked.1)
+        // GATE #4565: kernel primitive
+        wire :: #Unsafe("query only checked SQL with bound parameters on the scoped SQLite handle") {
+            db_kernel.jet_db_query(self.scope.handle, &checked.0, &params)
+        }
+        jet_std.jet_db_decode_query_result(&wire)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:173
+fn jet_db_scope_migrate(scope: &JetDbScope, name: &String, steps: &[SQL]) -> I64 DBError! {
+    backend := JetAotDbBackend{scope}
+    jet_std.jet_db_migrate(&backend, name, steps)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:182
+fn jet_db_scope_transaction(scope: &JetDbScope, label: &String, steps: &[SQL]) -> I64 DBError! {
+    backend := JetAotDbBackend{scope}
+    jet_std.jet_db_transaction(&backend, label, steps)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:191
+fn jet_db_scope_execute_with_metadata(scope: &JetDbScope, sql: &SQL, metadata: &String) -> I64 DBError! {
+    _ :: metadata
+    backend := JetAotDbBackend{scope}
+    backend.execute(sql, false)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:201
+fn jet_db_scope_query_with_metadata(scope: &JetDbScope, sql: &SQL, metadata: &String) -> [[String:DBValue]] DBError! {
+    _ :: metadata
+    backend := JetAotDbBackend{scope}
+    backend.query(sql, false)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:211
+fn jet_db_scope_query_one_with_metadata(scope: &JetDbScope, sql: &SQL, metadata: &String) -> JetOutcome<[String:DBValue], JetAbsent> DBError! {
+    _ :: metadata
+    rows :: jet_db_scope_query_with_metadata(scope, sql, metadata)?
+    Ok(jet_std.jet_db_first_row(^rows))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:223
+pub fn jet_db_with_policy(connection: &JetDbConnection, policy: JetRowPolicy, user: String) -> JetDbScope {
+    JetDbScope{handle: connection.handle, policy: ^policy, user: ^user, request_id: jet_db_current_request_id()}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:238
+fn jet_db_policy_checked(table: &String, expression: &String) -> JetRowPolicy DBError! {
+    jet_db_policy_new(table.clone(), expression.clone()).map_err(fn(message) { DBError{message: ^message} })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:248
+fn jet_db_pool_hooks() -> JetDbPoolHooks<JetDbConnection> {
+    JetDbPoolHooks.new(fn(path: &String) {
+        // GATE #4565: kernel primitive
+        handle :: #Unsafe("pool opening calls the real native database outside the pool lock") { db_kernel.jet_db_open(path) }
+        if handle == 0 -> Err(jet_db_pool_error("database pool backend open failed"))
+        else -> Ok(JetDbConnection{handle})
+    }, fn(connection: &JetDbConnection) {
+        // GATE #4565: kernel primitive
+        #Unsafe("check health of the leased database handle") { db_kernel.jet_db_health(connection.handle) }
+    }, fn(connection: &JetDbConnection) {
+        // GATE #4565: kernel primitive
+        #Unsafe("reset transaction state before database reuse") { db_kernel.jet_db_reset(connection.handle) }
+    }, fn(connection: JetDbConnection) {
+        // GATE #4565: kernel primitive
+        #Unsafe("consume and close the pool driver handle exactly once") { _ :: db_kernel.jet_db_close(connection.handle) }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:266
+fn jet_db_pool_new(url: &String, max: I64) -> JetDbPool<JetDbConnection> DBError! { JetDbPool.new(url.clone(), max, jet_db_pool_hooks()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:273
+fn jet_db_pool_acquire(pool: &JetDbPool<JetDbConnection>) -> JetDbLease<JetDbConnection> DBError! { pool.acquire(None) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:279
+fn jet_db_pool_acquire_deadline(pool: &JetDbPool<JetDbConnection>, deadline: &Duration) -> JetDbLease<JetDbConnection> DBError! {
+    deadline_ms :: jet_std_time_now().saturating_add(deadline.ns.saturating_div(1_000_000))
+    pool.acquire(Val(deadline_ms))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:288
+fn jet_db_pool_ready(pool: &JetDbPool<JetDbConnection>) -> Bool DBError! { pool.ready() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:294
+fn jet_db_pool_drain(pool: &JetDbPool<JetDbConnection>) -> JetDbPoolReceipt DBError! { pool.drain(None) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:300
+fn jet_db_pool_receipt(pool: &JetDbPool<JetDbConnection>) -> JetDbPoolReceipt { pool.receipt() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:304
+fn jet_db_lease_close(lease: &JetDbLease<JetDbConnection>) -> () DBError! { lease.release(); Ok(()) }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:322
+#Derive(Clone, Copy, Debug)
+struct JetPlugin { handle: U64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:331
+// The original macro's typed wire boundary is owned here, not expanded through Rust.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:333
+fn jet_plugin_load(path: &String, authority_wire: &String) -> JetPlugin {
+    wire :: plugin_kernel.jet_plugin_load(path, authority_wire)
+    match wire.strip_prefix("O:").and_then(fn(value) { value.parse<U64>().ok() }) {
+        Val(handle) if handle != 0 -> JetPlugin{handle}
+        _ -> {
+            message :: wire.strip_prefix("E:").unwrap_or("plugin load failed")
+            jet_runtime_stop("E3001", "", 0, message)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:352
+// Display stays in the generated-program owner; no secret payload is exposed.
+impl<T> JetDisplay for JetVaultKeyRef<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:355
+    fn jet_display(self: &Self) -> String { self.to_string() }
+}
+impl JetDisplay for JetVaultKeyStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:361
+    fn jet_display(self: &Self) -> String { format!("{self:?}") }
+}
+impl JetDisplay for JetVaultError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:367
+    fn jet_display(self: &Self) -> String { self.to_string() }
+}
+impl<T> JetDisplay for JetVaultWrite<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:373
+    fn jet_display(self: &Self) -> String { format!("{self:?}") }
+}
+impl<T> JetDisplay for JetVaultRotation<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:379
+    fn jet_display(self: &Self) -> String { format!("{self:?}") }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:392
+#Derive(Clone, Debug)
+struct RaylibWindow { width: I64, height: I64, title: String, native: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:400
+#Derive(Clone, Copy, Debug)
+struct RaylibColor { r: I64, g: I64, b: I64, a: I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:408
+#Derive(Clone, Debug)
+struct RaylibSound { path: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:414
+// RaylibAtlasRegion is the canonical JetRaylibAtlasRegion; do not duplicate it.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:418
+#Derive(Clone, Debug)
+struct RaylibTextureAtlas {
+    path: String, name: String, texture_path: String?, regions: [JetRaylibAtlasRegion], native_texture: JetRaylibCTexture2D?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:427
+// RaylibSpriteDrawCall uses the canonical JetRaylibSpriteDrawCall directly.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:429
+impl JetShow for RaylibTextureAtlas {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:430
+    fn jet_show(self: &Self) -> String { "RaylibTextureAtlas({self.name})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:434
+impl JetDebug for RaylibTextureAtlas {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:435
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:440
+#Layout(c)
+#Derive(Clone, Copy, Debug)
+struct JetRaylibCTexture2D { id: I32, width: I32, height: I32, mipmaps: I32, format: I32 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:450
+#Layout(c)
+#Derive(Clone, Copy, Debug)
+struct JetRaylibCColor { r: U8, g: U8, b: U8, a: U8 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:459
+#Layout(c)
+#Derive(Clone, Copy, Debug)
+struct JetRaylibCRectangle { x: F32, y: F32, width: F32, height: F32 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:468
+#Layout(c)
+#Derive(Clone, Copy, Debug)
+struct JetRaylibCVector2 { x: F32, y: F32 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:475
+// GATE #4565: kernel primitive — C-callable pointers invoked only in audited boundaries.
+type JetRaylibInitWindow = fn(I32, I32, *const c_char) -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:476
+type JetRaylibWindowShouldClose = fn() -> Bool
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:477
+type JetRaylibBeginDrawing = fn() -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:478
+type JetRaylibClearBackground = fn(JetRaylibCColor) -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:479
+type JetRaylibDrawRectangle = fn(I32, I32, I32, I32, JetRaylibCColor) -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:480
+type JetRaylibDrawText = fn(*const c_char, I32, I32, I32, JetRaylibCColor) -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:482
+type JetRaylibEndDrawing = fn() -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:483
+type JetRaylibCloseWindow = fn() -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:484
+type JetRaylibIsKeyDown = fn(I32) -> Bool
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:485
+type JetRaylibIsGamepadButtonDown = fn(I32, I32) -> Bool
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:486
+type JetRaylibGetGamepadAxisMovement = fn(I32, I32) -> F32
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:487
+type JetRaylibSetTargetFps = fn(I32) -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:488
+type JetRaylibLoadTexture = fn(*const c_char) -> JetRaylibCTexture2D
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:490
+type JetRaylibDrawTexturePro = fn(JetRaylibCTexture2D, JetRaylibCRectangle, JetRaylibCRectangle, JetRaylibCVector2, F32, JetRaylibCColor) -> ()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:499
+#Derive(Clone, Copy)
+struct JetRaylibApi {
+    init_window: JetRaylibInitWindow, window_should_close: JetRaylibWindowShouldClose,
+    begin_drawing: JetRaylibBeginDrawing, clear_background: JetRaylibClearBackground,
+    draw_rectangle: JetRaylibDrawRectangle, draw_text: JetRaylibDrawText,
+    end_drawing: JetRaylibEndDrawing, close_window: JetRaylibCloseWindow,
+    is_key_down: JetRaylibIsKeyDown, is_gamepad_button_down: JetRaylibIsGamepadButtonDown?,
+    get_gamepad_axis_movement: JetRaylibGetGamepadAxisMovement?, set_target_fps: JetRaylibSetTargetFps,
+    load_texture: JetRaylibLoadTexture?, draw_texture_pro: JetRaylibDrawTexturePro?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:517
+// GATE #4565: kernel primitive
+static JET_RAYLIB_WINDOW_OPEN: AtomicBool = AtomicBool.new(false)
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:519
+// GATE #4565: kernel primitive
+static JET_RAYLIB_FRAME_INDEX: AtomicU64 = AtomicU64.new(0)
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:523
+fn jet_raylib_display_enabled() -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("read explicit display opt-in from the native environment") { env.var("JET_RAYLIB_DISPLAY").as_deref() == Ok("1") }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:527
+fn jet_raylib_clamp_u8(v: I64) -> U8 { v.clamp(0, 255) as U8 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:531
+fn jet_raylib_c_color(color: &RaylibColor) -> JetRaylibCColor {
+    JetRaylibCColor{r: jet_raylib_clamp_u8(color.r), g: jet_raylib_clamp_u8(color.g), b: jet_raylib_clamp_u8(color.b), a: jet_raylib_clamp_u8(color.a)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:539
+fn jet_raylib_native_color(color: &RaylibColor) -> JetDevtoolsNativeColor {
+    JetDevtoolsNativeColor.new(jet_raylib_clamp_u8(color.r), jet_raylib_clamp_u8(color.g), jet_raylib_clamp_u8(color.b), jet_raylib_clamp_u8(color.a))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:548
+fn jet_raylib_draw_native_command(command: &JetDevtoolsNativeDrawCommand) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("native raylib pointers require a live window and matching C geometry/color ABI") {
+        if !JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) -> return
+        api :: jet_raylib_api() ?? return
+        match command {
+            .Rectangle{x, y, width, height, color} -> {
+                (api.draw_rectangle)(*x, *y, *width, *height, JetRaylibCColor{r: color.red, g: color.green, b: color.blue, a: color.alpha})
+            }
+            .Text{text, x, y, size, color} -> {
+                text_c :: jet_raylib_cstring(text)
+                (api.draw_text)(text_c.as_ptr(), *x, *y, (*size).max(1), JetRaylibCColor{r: color.red, g: color.green, b: color.blue, a: color.alpha})
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:608
+fn jet_raylib_cstring(s: &String) -> CString {
+    filtered :: s.as_bytes().iter().copied().filter(fn(b) { *b != 0 }).collect<[U8]>()
+    // GATE #4565: kernel primitive
+    #Unsafe("own a NUL-terminated C buffer with interior NUL bytes filtered out") {
+        CString.new(^filtered).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:613
+module jet_raylib_dyn {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:619
+    // GATE #4565: kernel primitive — use libdl on Linux and the process C loader on other Unix targets.
+    prep if target.selected_os() == .Linux {
+        #Import module c.dl {
+            // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:624
+            fn dlopen(filename: *const c_char, flags: I32) -> *mut c_void = "dlopen"
+            // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:625
+            fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void = "dlsym"
+        }
+    } else {
+        prep if target.selected_family() == .Unix {
+            #Import module c {
+                // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:624
+                fn dlopen(filename: *const c_char, flags: I32) -> *mut c_void = "dlopen"
+                // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:625
+                fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void = "dlsym"
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:628
+    const RTLD_NOW: I32 = 2
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:629
+    // GATE #4565: kernel primitive
+    static API: OnceLock<JetRaylibApi?> = OnceLock.new()
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:631
+    fn api() -> &JetRaylibApi? {
+        // GATE #4565: kernel primitive
+        #Unsafe("initialize the process-lifetime dynamic raylib API at most once") { API.get_or_init(load).as_ref() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:635
+    fn load() -> JetRaylibApi? {
+        // GATE #4565: kernel primitive
+        #Unsafe("native loader retains the raylib library for process lifetime, with exact symbol signatures") {
+            handle :: if target.selected_os() == .Macos {
+                name :: [U8; 16]{108,105,98,114,97,121,108,105,98,46,100,121,108,105,98,0}
+                dlopen(name.as_ptr().cast(), RTLD_NOW)
+            } else {
+                name :: [U8; 13]{108,105,98,114,97,121,108,105,98,46,115,111,0}
+                first :: dlopen(name.as_ptr().cast(), RTLD_NOW)
+                if first.is_null() {
+                    versioned :: [U8; 15]{108,105,98,114,97,121,108,105,98,46,115,111,46,53,0}
+                    dlopen(versioned.as_ptr().cast(), RTLD_NOW)
+                } else { first }
+            }
+            if handle.is_null() -> return None
+            Val(JetRaylibApi{
+                init_window: symbol<JetRaylibInitWindow>(handle, &[U8; 11]{73,110,105,116,87,105,110,100,111,119,0})?,
+                window_should_close: symbol<JetRaylibWindowShouldClose>(handle, &[U8; 18]{87,105,110,100,111,119,83,104,111,117,108,100,67,108,111,115,101,0})?,
+                begin_drawing: symbol<JetRaylibBeginDrawing>(handle, &[U8; 13]{66,101,103,105,110,68,114,97,119,105,110,103,0})?,
+                clear_background: symbol<JetRaylibClearBackground>(handle, &[U8; 16]{67,108,101,97,114,66,97,99,107,103,114,111,117,110,100,0})?,
+                draw_rectangle: symbol<JetRaylibDrawRectangle>(handle, &[U8; 14]{68,114,97,119,82,101,99,116,97,110,103,108,101,0})?,
+                draw_text: symbol<JetRaylibDrawText>(handle, &[U8; 9]{68,114,97,119,84,101,120,116,0})?,
+                end_drawing: symbol<JetRaylibEndDrawing>(handle, &[U8; 11]{69,110,100,68,114,97,119,105,110,103,0})?,
+                close_window: symbol<JetRaylibCloseWindow>(handle, &[U8; 12]{67,108,111,115,101,87,105,110,100,111,119,0})?,
+                is_key_down: symbol<JetRaylibIsKeyDown>(handle, &[U8; 10]{73,115,75,101,121,68,111,119,110,0})?,
+                is_gamepad_button_down: symbol<JetRaylibIsGamepadButtonDown>(handle, &[U8; 20]{73,115,71,97,109,101,112,97,100,66,117,116,116,111,110,68,111,119,110,0}),
+                get_gamepad_axis_movement: symbol<JetRaylibGetGamepadAxisMovement>(handle, &[U8; 23]{71,101,116,71,97,109,101,112,97,100,65,120,105,115,77,111,118,101,109,101,110,116,0}),
+                set_target_fps: symbol<JetRaylibSetTargetFps>(handle, &[U8; 13]{83,101,116,84,97,114,103,101,116,70,80,83,0})?,
+                load_texture: symbol<JetRaylibLoadTexture>(handle, &[U8; 12]{76,111,97,100,84,101,120,116,117,114,101,0}),
+                draw_texture_pro: symbol<JetRaylibDrawTexturePro>(handle, &[U8; 15]{68,114,97,119,84,101,120,116,117,114,101,80,114,111,0})
+            })
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:673
+    fn symbol<T: Copy>(handle: *mut c_void, name: View<U8>) -> T? {
+        // GATE #4565: kernel primitive
+        #Unsafe("dlsym C function and data pointers share the supported Unix ABI; T is the requested signature") {
+            ptr :: dlsym(handle, name.as_ptr().cast())
+            if ptr.is_null() -> None else -> Val(mem.transmute_copy(&ptr))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:688
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:693
+fn jet_raylib_api() -> &JetRaylibApi? {
+    prep if target.selected_family() == .Unix { jet_raylib_dyn.api() } else { None }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:698
+fn jet_raylib_native_texture(path: &String) -> JetRaylibCTexture2D? {
+    // GATE #4565: kernel primitive
+    #Unsafe("load a native texture only while the raylib window is active; path pointer lives for the call") {
+        if !JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) -> return None
+        api :: jet_raylib_api()?
+        load_texture :: api.load_texture?
+        path_c :: jet_raylib_cstring(path)
+        texture :: load_texture(path_c.as_ptr())
+        if texture.id > 0 -> Val(texture) else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:711
+fn jet_raylib_load_texture_atlas(path: &String) -> RaylibTextureAtlas {
+    spec :: jet_raylib_load_texture_atlas_spec(path)
+    native_texture :: spec.texture_path.as_ref().and_then(jet_raylib_native_texture)
+    RaylibTextureAtlas{path: ^spec.path, name: ^spec.name, texture_path: ^spec.texture_path, regions: ^spec.regions, native_texture}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:726
+fn jet_raylib_draw_sprite(atlas: &RaylibTextureAtlas, region: &String, x: I64, y: I64) -> {
+    draw_call :: jet_raylib_sprite_draw_call(&atlas.name, &atlas.regions, region, x, y) ?? return
+    source_x :: draw_call.source_x
+    source_y :: draw_call.source_y
+    width :: draw_call.width
+    height :: draw_call.height
+    jet_raylib_record_draw_call(^draw_call)
+    texture :: atlas.native_texture ?? return
+    draw_texture_pro :: jet_raylib_api().and_then(fn(api) { api.draw_texture_pro }) ?? return
+    source :: JetRaylibCRectangle{x: source_x as F32, y: source_y as F32, width: width as F32, height: height as F32}
+    destination :: JetRaylibCRectangle{x: x as F32, y: y as F32, width: width as F32, height: height as F32}
+    // GATE #4565: kernel primitive
+    #Unsafe("texture and geometry mirror raylib C ABI; begin_drawing owns the active context") {
+        draw_texture_pro(texture, source, destination, JetRaylibCVector2{x: 0.0, y: 0.0}, 0.0, JetRaylibCColor{r: 255, g: 255, b: 255, a: 255})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:779
+fn jet_raylib_window_open(width: I64, height: I64, title: &String) -> RaylibWindow {
+    native := false
+    // GATE #4565: kernel primitive
+    #Unsafe("native raylib initialization uses a live C title buffer and publishes window state sequentially") {
+        if jet_raylib_display_enabled() {
+            if Val(api) :: jet_raylib_api() {
+                title_c :: jet_raylib_cstring(title)
+                (api.init_window)(width as I32, height as I32, title_c.as_ptr())
+                JET_RAYLIB_WINDOW_OPEN.store(true, Ordering.SeqCst)
+                native = true
+            }
+        }
+    }
+    if native {
+        native_width :: width.clamp(1, I32.MAX as I64) as U32
+        native_height :: height.clamp(1, I32.MAX as I64) as U32
+        jet_devtools_native_window_open(native_width, native_height)
+    }
+    RaylibWindow{width, height, title: title.clone(), native}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:804
+fn jet_raylib_window_should_close(window: &RaylibWindow) -> Bool {
+    if window.native {
+        if Val(api) :: jet_raylib_api() {
+            // GATE #4565: kernel primitive
+            return #Unsafe("loaded raylib close predicate takes no arguments") { (api.window_should_close)() }
+        }
+    }
+    true
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:814
+fn jet_raylib_window_ready(window: &RaylibWindow) -> Bool { window.native }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:818
+fn jet_raylib_begin_drawing(window: &RaylibWindow) -> {
+    if window.native {
+        if Val(api) :: jet_raylib_api() {
+            // GATE #4565: kernel primitive
+            #Unsafe("bridge-owned window establishes drawing context and atomically increments frame identity") {
+                (api.begin_drawing)()
+                frame_index :: JET_RAYLIB_FRAME_INDEX.fetch_add(1, Ordering.SeqCst) + 1
+                width :: window.width.clamp(1, I32.MAX as I64) as U32
+                height :: window.height.clamp(1, I32.MAX as I64) as U32
+                for command in jet_devtools_native_frame_begin(frame_index, width, height) { jet_raylib_draw_native_command(&command) }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:834
+fn jet_raylib_clear_background(color: &RaylibColor) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("live raylib window accepts the C color mirror") {
+        if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
+            if Val(api) :: jet_raylib_api() -> (api.clear_background)(jet_raylib_c_color(color))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:843
+fn jet_raylib_draw_text(text: &String, x: I64, y: I64, size: I64, color: &RaylibColor) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("record text then invoke raylib with a call-lifetime C string and C color") {
+        if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
+            if Val(api) :: jet_raylib_api() {
+                jet_devtools_native_draw(.Text{text: text.clone(), x: x as I32, y: y as I32, size: size as I32, color: jet_raylib_native_color(color)})
+                text_c :: jet_raylib_cstring(text)
+                (api.draw_text)(text_c.as_ptr(), x as I32, y as I32, size as I32, jet_raylib_c_color(color))
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:869
+fn jet_raylib_draw_rectangle(x: I64, y: I64, width: I64, height: I64, color: &RaylibColor) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("record rectangle then draw integer geometry with the C color mirror") {
+        if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
+            if Val(api) :: jet_raylib_api() {
+                jet_devtools_native_draw(.Rectangle{x: x as I32, y: y as I32, width: width as I32, height: height as I32, color: jet_raylib_native_color(color)})
+                (api.draw_rectangle)(x as I32, y as I32, width as I32, height as I32, jet_raylib_c_color(color))
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:893
+fn jet_raylib_end_drawing() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("end drawing only for the bridge-owned live raylib window") {
+        if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
+            if Val(api) :: jet_raylib_api() { (api.end_drawing)(); jet_devtools_native_frame_end() }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:903
+fn jet_raylib_close_window(window: &RaylibWindow) -> {
+    if window.native {
+        if Val(api) :: jet_raylib_api() {
+            // GATE #4565: kernel primitive
+            #Unsafe("close bridge-owned raylib window and publish closed state before devtools notification") {
+                (api.close_window)()
+                JET_RAYLIB_WINDOW_OPEN.store(false, Ordering.SeqCst)
+                jet_devtools_native_window_close()
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:914
+fn jet_raylib_color(r: I64, g: I64, b: I64, a: I64) -> RaylibColor { RaylibColor{r, g, b, a} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:918
+fn jet_raylib_key_code(name: &String) -> I32 {
+    match name {
+        "Space" | "space" -> 32, "Enter" | "enter" -> 257,
+        "Escape" | "escape" | "Esc" | "esc" -> 256,
+        "Right" | "right" -> 262, "Left" | "left" -> 263,
+        "Down" | "down" -> 264, "Up" | "up" -> 265,
+        "A" | "a" -> 65, "D" | "d" -> 68, "S" | "s" -> 83, "W" | "w" -> 87,
+        _ -> -1
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:935
+fn jet_raylib_key_down(name: &String) -> Bool {
+    key :: jet_raylib_key_code(name)
+    if key < 0 -> return false
+    // GATE #4565: kernel primitive
+    #Unsafe("sample native key only for a live window; consumed debugger input is not gameplay input") {
+        if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
+            if Val(api) :: jet_raylib_api() {
+                pressed :: (api.is_key_down)(key)
+                if jet_devtools_native_input(.Key{code: name.clone(), pressed}) -> return false
+                return pressed
+            }
+        }
+    }
+    false
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:956
+fn jet_raylib_gamepad_button_code(name: &String) -> I32 { jet_raylib_button_code(name).unwrap_or(-1) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:960
+fn jet_raylib_gamepad_axis_code(name: &String) -> I32 { jet_raylib_axis_code(name).unwrap_or(-1) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:964
+fn jet_raylib_gamepad_down(gamepad: I64, button: &String) -> Bool {
+    gamepad :: match I32.try_from(gamepad) { Ok(value) -> value, Err(_) -> return false }
+    button_code :: jet_raylib_gamepad_button_code(button)
+    if gamepad < 0 || button_code < 0 -> return false
+    // GATE #4565: kernel primitive
+    #Unsafe("validated gamepad and button codes call the optional native function; debugger consumption wins") {
+        if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
+            if Val(api) :: jet_raylib_api() {
+                if Val(is_gamepad_button_down) :: api.is_gamepad_button_down {
+                    pressed :: is_gamepad_button_down(gamepad, button_code)
+                    if jet_devtools_native_input(.Gamepad{gamepad: gamepad as I64, control: button.clone(), pressed}) -> return false
+                    return pressed
+                }
+            }
+        }
+    }
+    false
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:991
+fn jet_raylib_gamepad_axis(gamepad: I64, axis: &String) -> F64 {
+    gamepad :: match I32.try_from(gamepad) { Ok(value) -> value, Err(_) -> return 0.0 }
+    axis :: jet_raylib_gamepad_axis_code(axis)
+    if gamepad < 0 || axis < 0 -> return 0.0
+    // GATE #4565: kernel primitive
+    #Unsafe("validated gamepad and axis query the optional native axis function") {
+        if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
+            if Val(api) :: jet_raylib_api() {
+                if Val(get_gamepad_axis_movement) :: api.get_gamepad_axis_movement -> return get_gamepad_axis_movement(gamepad, axis) as F64
+            }
+        }
+    }
+    0.0
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:1010
+fn jet_raylib_set_target_fps(fps: I64) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("set bounded target FPS only on the live bridge-owned window") {
+        if JET_RAYLIB_WINDOW_OPEN.load(Ordering.SeqCst) {
+            if Val(api) :: jet_raylib_api() { fps :: fps.clamp(1, 240) as I32; (api.set_target_fps)(fps) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:1020
+fn jet_raylib_load_sound(path: &String) -> RaylibSound { RaylibSound{path: path.clone()} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:1025
+fn jet_raylib_play_sound(sound: &RaylibSound) -> Bool { !sound.path.is_empty() }

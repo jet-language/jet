@@ -1,1046 +1,639 @@
 // PORT-PENDING 0296 crates-jet-codegen-src-prelude-corelib-top-process-slice-1819: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1819-3316
 // Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS struct JetProcessPipelineChild {
-//RS     child: std::process::Child,
-//RS     #[cfg(windows)]
-//RS     job: Option<std::fs::File>,
-//RS }
+use core.process.runtime.top_process.*
+use core.process.host.process_pty as jet_process_pty
+use core.sys.target
+use core.prelude.runtime.std_common_types.[ProcessSpec, ProcessReceipt, ProcessChild, ProcessHandle, ProcessResourceLimit]
+use core.prelude.runtime.std_open.[IOError, IOOperation, IOContext]
+use core.prelude.runtime.kernel_values.[JetAbsent, JetOutcome, jet_outcome_of]
+use core.tasks.runtime.scheduler.[jet_scheduler_current_task_control, jet_scheduler_park_ms, jet_scheduler_shielded, jet_task_deliver_cancel]
+use std.process.[Child, ChildStdout, ChildStdin, ExitStatus, Stdio]
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.thread.JoinHandle
+use std.time.[Instant, Duration]
+use std.io as io
+use std.io.[Read, Write]
+use std.fs.File
+use core.devtools.runtime.kernel_devtools_topology_panel.JetDevtoolsTopologyProcessState
+use jet_foundation.Numeric.JetInt
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1819
+struct JetProcessPipelineChild { child: Child, job: File? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1825
+// GATE #4565: kernel primitive
+#Unsafe("Windows job attachment owns child handle and kills/reaps the child if attachment fails")
+fn jet_process_pipeline_child(child: Child, spec: &ProcessSpec) -> JetProcessPipelineChild IOError! {
+    child := ^child
+    if target.selected_os() == .Windows {
+        job :: if spec.detached { None } else {
+            match jet_process_pty.attach_job(child.as_raw_handle(), jet_process_native_limits(spec)) {
+                Ok(job) -> Val(^job)
+                Err(error) -> {
+                    _ :: child.kill()
+                    _ :: child.wait()
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), ^error))
+                }
+            }
+        }
+        return Ok(JetProcessPipelineChild{child:^child, job:^job})
+    }
+    Ok(JetProcessPipelineChild{child:^child, job:None})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1861
+// GATE #4565: kernel primitive
+#Unsafe("stop the selected process tree before killing its direct child")
+fn jet_process_pipeline_child_stop(child: &JetProcessPipelineChild) -> () {
+    if target.selected_family() == "unix" { _ :: jet_process_pty.signal_group(child.child.id(), jet_process_signal_kill()) }
+    if target.selected_os() == .Windows {
+        if Val(job) :: child.job.take() { _ :: jet_process_pty.terminate(&job) }
+    }
+    _ :: child.child.kill()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1870
+// GATE #4565: kernel primitive
+#Unsafe("stop descendants after the direct child was already reaped")
+fn jet_process_pipeline_child_stop_after_wait(child: &JetProcessPipelineChild) -> () {
+    if target.selected_family() == "unix" { _ :: jet_process_pty.signal_group(child.child.id(), jet_process_signal_kill()) }
+    if target.selected_os() == .Windows {
+        if Val(job) :: child.job.take() { _ :: jet_process_pty.terminate(&job) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1881
+// GATE #4565: kernel primitive
+#Unsafe("stop every pipeline child before waiting to avoid sequential tree shutdown deadlocks")
+fn jet_process_pipeline_cleanup(children: &[JetProcessPipelineChild]) -> () {
+    for child in children.iter_mut() { jet_process_pipeline_child_stop(child) }
+    for child in children.iter_mut() { _ :: child.child.wait() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1890
+// GATE #4565: kernel primitive
+#Unsafe("snapshot registered Unix group IDs under poison-recovering mutex before signaling them")
+fn jet_process_pipeline_stop_groups(groups: &Arc<Mutex<[U32]>>) -> () {
+    if target.selected_family() == "unix" {
+        groups :: groups.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        for pid in groups.iter() { _ :: jet_process_pty.signal_group(*pid, jet_process_signal_kill()) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1905
+// GATE #4565: kernel primitive
+#Unsafe("signal a real Unix process group; non-Unix pipeline stop uses its child handles")
+fn jet_process_pipeline_stop_group(pid: U32) -> () {
+    if target.selected_family() == "unix" { _ :: jet_process_pty.signal_group(pid, jet_process_signal_kill()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1912
+fn jet_process_stop_output(groups: &Arc<Mutex<[U32]>>?, group_pid: U32?) -> () {
+    if Val(groups) :: groups { jet_process_pipeline_stop_groups(groups) }
+    else if Val(pid) :: group_pid { jet_process_pipeline_stop_group(pid) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1923
+// GATE #4565: kernel primitive
+#Unsafe("bounded pipe relay publishes prefix before release-signaling limit and stopping the process tree")
+fn jet_process_forward_pipeline_output(reader: ChildStdout, writer: ChildStdin, limit: USize, budget: Arc<AtomicUsize>, limit_hit: Arc<AtomicBool>, cancel: Arc<AtomicBool>, groups: Arc<Mutex<[U32]>>) -> () io.Error! {
+    reader := ^reader
+    writer := ^writer
+    result :: fn() {
+        chunk := [0u8; JET_PROCESS_IO_CHUNK_BYTES]
+        loop {
+            count :: reader.read(&chunk)?
+            if count == 0 { return Ok(()) }
+            kept :: jet_process_output_reserve(limit, &budget, count)
+            if kept != 0 {
+                match writer.write_all(&chunk[..kept]) {
+                    Ok(()) -> {}
+                    Err(error) if error.kind() == io.ErrorKind.BrokenPipe -> return Err(^error)
+                    Err(error) -> return Err(^error)
+                }
+            }
+            if kept < count {
+                limit_hit.store(true, Ordering.Release)
+                jet_process_pipeline_stop_groups(&groups)
+                return Ok(())
+            }
+        }
+    }()
+    if result.is_err() {
+        cancel.store(true, Ordering.Release)
+        jet_process_pipeline_stop_groups(&groups)
+    }
+    ^result
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1966
+// GATE #4565: kernel primitive
+#Unsafe("join every pipe relay even when one fails, returning the first observed typed IO error")
+fn jet_process_join_pipeline_forwarders(forwarders: &[JoinHandle<() io.Error!>]) -> () IOError! {
+    first_error := None
+    loop while Val(forwarder) :: forwarders.pop() {
+        result :: forwarder.join().map_err(fn(_) {
+            IOError.other(IOOperation.Read, Val("pipeline stdout"), "pipeline output forwarder panicked")
+        })
+        match result {
+            Ok(Ok(())) -> {}
+            Ok(Err(error)) -> {
+                if first_error.is_none() { first_error = Val(IOError.other(IOOperation.Read, Val("pipeline stdout"), ^error)) }
+            }
+            Err(error) -> { if first_error.is_none() { first_error = Val(^error) } }
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
 //RS 
-//RS fn jet_process_pipeline_child(
-//RS     child: std::process::Child,
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<JetProcessPipelineChild, jet_std::IOError> {
-//RS     #[cfg(windows)]
-//RS     {
-//RS         let mut child = child;
-//RS         let job = if spec.detached {
-//RS             None
-//RS         } else {
-//RS             use std::os::windows::io::AsRawHandle;
-//RS             match jet_process_pty::attach_job(
-//RS                 child.as_raw_handle(),
-//RS                 jet_process_native_limits(spec),
-//RS             ) {
-//RS                 Ok(job) => Some(job),
-//RS                 Err(error) => {
-//RS                     let _ = child.kill();
-//RS                     let _ = child.wait();
-//RS                     return Err(jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Resolve,
-//RS                         spec.cmd.first().cloned(),
-//RS                         error,
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         };
-//RS         return Ok(JetProcessPipelineChild { child, job });
-//RS     }
-//RS     #[cfg(not(windows))]
-//RS     {
-//RS         let _ = spec;
-//RS         Ok(JetProcessPipelineChild { child })
-//RS     }
-//RS }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1999
+// GATE #4565: kernel primitive
+#Unsafe("pipeline transaction owns native children, bounded relays, cancellation guard and all joined drains until receipt publication")
+fn jet_process_spec_pipeline(specs: &[ProcessSpec]) -> ProcessReceipt IOError! {
+    if specs.is_empty() {
+        return Err(IOError.InvalidInput(IOContext.new(IOOperation.Resolve, None, None, Val("process.pipeline needs at least one command"))))
+    }
+    for spec in specs { jet_process_pipeline_resource_limits_check(spec)? }
+    if specs.iter().any(fn(spec) { spec.policy_wire.is_some() }) {
+        return Err(IOError.other(IOOperation.Resolve, Val("process.pipeline"),
+            "authority-bound pipelines need one auditable launch transaction; refusing before spawn"))
+    }
+    direct_wait :: target.selected_family() == "unix" && specs.iter().all(fn(spec) {
+        spec.timeout_ms.is_none() && spec.memory_limit_bytes.is_none() && spec.open_file_limit.is_none()
+    })
+    children := [JetProcessPipelineChild].with_capacity(specs.len())
+    stage_started := if direct_wait { [Instant]{} } else { [Instant].with_capacity(specs.len()) }
+    prev_stdout: ChildStdout? := None
+    stage_budgets :: specs.iter().map(fn(spec) { spec.output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) }) }).collect::<[Arc<AtomicUsize>?]>()
+    pipeline_limit_hit :: Arc.new(AtomicBool.new(false))
+    pipeline_cancel :: Arc.new(AtomicBool.new(false))
+    pipeline_groups :: Arc.new(Mutex.new([U32].with_capacity(specs.len())))
+    cancel_control :: jet_scheduler_current_task_control()
+    cancel_groups :: pipeline_groups.clone()
+    cancel_state :: pipeline_cancel.clone()
+    cancel_guard :: cancel_control.as_ref().map(fn(control) {
+        control.register_cancel_callback(Arc.new(fn() {
+            cancel_state.store(true, Ordering.Release)
+            jet_process_pipeline_stop_groups(&cancel_groups)
+        }))
+    })
+    forwarders := [JoinHandle<() io.Error!>].with_capacity(specs.len().saturating_sub(1))
+    for (index, spec) in specs.iter().enumerate() {
+        is_last :: index + 1 == specs.len()
+        input :: prev_stdout.take()
+        limited_input :: index.checked_sub(1).is_some_and(fn(previous) { jet_process_pipeline_needs_relay(&specs[previous]) })
+        (input, forward_input) :: if limited_input { (None, ^input) } else { (^input, None) }
+        child :: (fn() -> Child IOError! {
+            os :: target.selected_os()
+            if (os == .Linux || os == .MacOS) && spec.policy_wire.is_some() {
+                plan :: jet_process_spec_plan(spec)?
+                return jet_process_sandbox_pipeline_spawn(spec, &plan, ^input)
+            }
+            if spec.terminal.is_some() {
+                return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+                    "terminal sessions cannot be used as pipeline stages; spawn the session directly"))
+            }
+            command := jet_process_command_builder_with_identity(spec, None)?
+            if Val(stdout) :: input { command.stdin(Stdio.from(^stdout)) }
+            else if forward_input.is_some() { command.stdin(Stdio.piped()) }
+            else {
+                command.stdin(match &spec.stdin { Val(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
+            }
+            if is_last { command.stdout(jet_process_stdio(&spec.stdout)) } else { command.stdout(Stdio.piped()) }
+            command.stderr(jet_process_stdio(&spec.stderr))
+            if target.selected_family() == "unix" {
+                jet_process_attach_process_group(&command, spec)
+                    .map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), ^error) })?
+            }
+            command.spawn().map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), ^error) })
+        })()
+        child := match child {
+            Ok(child) -> match jet_process_pipeline_child(^child, spec) {
+                Ok(child) -> ^child
+                Err(error) -> {
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(^error)
+                }
+            }
+            Err(error) -> {
+                jet_process_pipeline_cleanup(&children)
+                _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                return Err(^error)
+            }
+        }
+        child_pid :: child.child.id()
+        pipeline_groups.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() }).push(child_pid)
+        if pipeline_cancel.load(Ordering.Acquire) { jet_process_pipeline_stop_groups(&pipeline_groups) }
+        if Val(stdout) :: forward_input {
+            previous :: match index.checked_sub(1) {
+                Val(previous) -> previous
+                None -> {
+                    jet_process_pipeline_cleanup(std.slice.from_mut(&child))
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "limited pipeline input has no preceding stage"))
+                }
+            }
+            stdin :: match child.child.stdin.take() {
+                Val(stdin) -> ^stdin
+                None -> {
+                    jet_process_pipeline_cleanup(std.slice.from_mut(&child))
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "limited pipeline stage did not provide stdin"))
+                }
+            }
+            limit :: match specs[previous].output_limit.map(fn(value) { value.max(0) as USize }) {
+                Val(limit) -> limit
+                None -> {
+                    jet_process_pipeline_cleanup(std.slice.from_mut(&child))
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "limited pipeline input has no output limit"))
+                }
+            }
+            budget :: match stage_budgets[previous].clone() {
+                Val(budget) -> ^budget
+                None -> {
+                    jet_process_pipeline_cleanup(std.slice.from_mut(&child))
+                    jet_process_pipeline_cleanup(&children)
+                    _ :: jet_process_join_pipeline_forwarders(&forwarders)
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), "limited pipeline input has no shared budget"))
+                }
+            }
+            groups :: pipeline_groups.clone()
+            limit_hit :: pipeline_limit_hit.clone()
+            cancel :: pipeline_cancel.clone()
+            forwarders.push(std.thread.spawn(fn() {
+                result :: std.panic.catch_unwind(std.panic.AssertUnwindSafe(fn() {
+                    jet_process_forward_pipeline_output(^stdout, ^stdin, limit, ^budget, ^limit_hit, cancel.clone(), groups.clone())
+                }))
+                match result {
+                    Ok(result) -> ^result
+                    Err(payload) -> {
+                        cancel.store(true, Ordering.Release)
+                        jet_process_pipeline_stop_groups(&groups)
+                        std.panic.resume_unwind(^payload)
+                    }
+                }
+            }))
+        }
+        prev_stdout = child.child.stdout.take()
+        children.push(^child)
+        if !direct_wait { stage_started.push(Instant.now()) }
+    }
+    final_limit :: specs.last().and_then(fn(spec) { spec.output_limit }).map(fn(limit) { limit.max(0) as USize })
+    output_drain :: prev_stdout.take().and_then(fn(stdout) {
+        jet_process_drain_reader(Val(^stdout), final_limit, stage_budgets.last().cloned().flatten(),
+            pipeline_limit_hit.clone(), Val(pipeline_cancel.clone()), Val(pipeline_groups.clone()), None)
+    })
+    stderr_drains :: children.iter_mut().enumerate().map(fn((index, child)) {
+        jet_process_drain_reader(child.child.stderr.take(), specs[index].output_limit.map(fn(limit) { limit.max(0) as USize }),
+            stage_budgets[index].clone(), pipeline_limit_hit.clone(), Val(pipeline_cancel.clone()), Val(pipeline_groups.clone()), None)
+    }).collect()
+    code := 0i64
+    success := true
+    timed_out := false
+    output_limit_exceeded := false
+    resource_limit := None
+    wait_error := None
+    stage_finished := [Bool].repeat(false, children.len())
+    if direct_wait {
+        for index in 0..children.len() {
+            status :: match children[index].child.wait() {
+                Ok(status) -> ^status
+                Err(error) -> {
+                    jet_process_pipeline_cleanup(&children)
+                    wait_error = Val(IOError.other(IOOperation.Close, Val("pipeline process"), ^error))
+                    break
+                }
+            }
+            stage_finished[index] = true
+            if Val(limit) :: jet_process_status_resource_limit(&status, &specs[index]) {
+                jet_process_pipeline_cleanup(&children)
+                resource_limit = Val(limit)
+                break
+            }
+            jet_process_pipeline_child_stop_after_wait(&children[index])
+            if !status.success() { success = false; code = status.code().unwrap_or(-1) as I64 }
+        }
+    } else {
+        for index in 0..children.len() {
+            if stage_finished[index] { continue }
+            status :: loop {
+                if pipeline_limit_hit.load(Ordering.Acquire) {
+                    jet_process_pipeline_cleanup(&children)
+                    output_limit_exceeded = true
+                    break None
+                }
+                if pipeline_cancel.load(Ordering.Acquire) {
+                    jet_process_pipeline_cleanup(&children)
+                    break None
+                }
+                current_status := None
+                for stage in 0..children.len() {
+                    if stage_finished[stage] { continue }
+                    if Val(limit) :: jet_process_live_resource_limit(children[stage].child.id(), &specs[stage]) {
+                        jet_process_pipeline_cleanup(&children)
+                        resource_limit = Val(limit)
+                        break
+                    }
+                    status :: match children[stage].child.try_wait() {
+                        Ok(status) -> ^status
+                        Err(error) -> {
+                            jet_process_pipeline_cleanup(&children)
+                            wait_error = Val(IOError.other(IOOperation.Close, Val("pipeline process"), ^error))
+                            break
+                        }
+                    }
+                    if Val(status) :: status {
+                        if Val(limit) :: jet_process_status_resource_limit(&status, &specs[stage]) {
+                            jet_process_pipeline_cleanup(&children)
+                            resource_limit = Val(limit)
+                            break
+                        }
+                        stage_finished[stage] = true
+                        jet_process_pipeline_child_stop_after_wait(&children[stage])
+                        if !status.success() { success = false; code = status.code().unwrap_or(-1) as I64 }
+                        if stage == index { current_status = Val(^status) }
+                    }
+                }
+                // Equivalent to Rust's labeled break from the inner stage scan.
+                if resource_limit.is_some() || wait_error.is_some() { break None }
+                if current_status.is_some() { break ^current_status }
+                if specs.iter().enumerate().any(fn((stage, spec)) {
+                    !stage_finished[stage] && spec.timeout_ms.is_some_and(fn(timeout) {
+                        stage_started[stage].elapsed() >= Duration.from_millis(timeout.max(0) as U64)
+                    })
+                }) {
+                    jet_process_pipeline_cleanup(&children)
+                    timed_out = true
+                    success = false
+                    break None
+                }
+                jet_scheduler_park_ms("process wait", 10)
+            }
+            if status.is_none() { break }
+        }
+    }
+    if pipeline_cancel.load(Ordering.Acquire) { jet_process_pipeline_cleanup(&children) }
+    forwarder_result :: jet_process_join_pipeline_forwarders(&forwarders)
+    pipeline_output_exceeded :: pipeline_limit_hit.load(Ordering.Acquire)
+    drains :: jet_process_collect_pipeline_drains(^output_drain, ^stderr_drains)
+    drop(^cancel_guard)
+    cancellation_pending :: cancel_control.as_ref().is_some_and(fn(control) { control.cancelled.load(Ordering.Acquire) })
+    if cancellation_pending && !jet_scheduler_shielded() { jet_task_deliver_cancel() }
+    forwarder_result?
+    (output, errors) :: drains?
+    output_exceeded :: output.exceeded
+    if Val(error) :: wait_error { return Err(^error) }
+    if Val(limit) :: resource_limit { return Err(IOError.ResourceLimit(limit)) }
+    output_limit_exceeded = output_limit_exceeded || pipeline_output_exceeded
+    if output_exceeded || output_limit_exceeded { return Err(IOError.ResourceLimit(ProcessResourceLimit.Output)) }
+    output_text :: ^output.text
+    secret_values := specs.iter().flat_map(jet_process_policy_secret_values).collect::<[String]>()
+    secret_values.sort_by_key(fn(value) { std.cmp.Reverse(value.len()) })
+    secret_values.dedup()
+    Ok(jet_process_receipt(specs.last().expect("nonempty pipeline"), None, true, 0, code, success,
+        Err(JetAbsent{}), timed_out, ^output_text, ^errors, Val(&secret_values)))
+}
 //RS 
-//RS fn jet_process_pipeline_child_stop(child: &mut JetProcessPipelineChild) {
-//RS     #[cfg(unix)]
-//RS     let _ = jet_process_pty::signal_group(child.child.id(), jet_process_signal_kill());
-//RS     #[cfg(windows)]
-//RS     if let Some(job) = child.job.take() {
-//RS         let _ = jet_process_pty::terminate(&job);
-//RS     }
-//RS     let _ = child.child.kill();
-//RS }
-//RS fn jet_process_pipeline_child_stop_after_wait(child: &mut JetProcessPipelineChild) {
-//RS     #[cfg(unix)]
-//RS     let _ = jet_process_pty::signal_group(child.child.id(), jet_process_signal_kill());
-//RS     #[cfg(windows)]
-//RS     if let Some(job) = child.job.take() {
-//RS         let _ = jet_process_pty::terminate(&job);
-//RS     }
-//RS     #[cfg(not(any(unix, windows)))]
-//RS     let _ = child;
-//RS }
-//RS 
-//RS fn jet_process_pipeline_cleanup(children: &mut [JetProcessPipelineChild]) {
-//RS     for child in children.iter_mut() {
-//RS         jet_process_pipeline_child_stop(child);
-//RS     }
-//RS     for child in children.iter_mut() {
-//RS         let _ = child.child.wait();
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_pipeline_stop_groups(
-//RS     groups: &std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
-//RS ) {
-//RS     #[cfg(unix)]
-//RS     {
-//RS         let groups = groups
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         for &pid in groups.iter() {
-//RS             let _ = jet_process_pty::signal_group(pid, jet_process_signal_kill());
-//RS         }
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     let _ = groups;
-//RS }
-//RS fn jet_process_pipeline_stop_group(pid: u32) {
-//RS     #[cfg(unix)]
-//RS     let _ = jet_process_pty::signal_group(pid, jet_process_signal_kill());
-//RS     #[cfg(not(unix))]
-//RS     let _ = pid;
-//RS }
-//RS 
-//RS fn jet_process_stop_output(
-//RS     groups: Option<&std::sync::Arc<std::sync::Mutex<Vec<u32>>>>,
-//RS     group_pid: Option<u32>,
-//RS ) {
-//RS     if let Some(groups) = groups {
-//RS         jet_process_pipeline_stop_groups(groups);
-//RS     } else if let Some(pid) = group_pid {
-//RS         jet_process_pipeline_stop_group(pid);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_forward_pipeline_output(
-//RS     mut reader: std::process::ChildStdout,
-//RS     mut writer: std::process::ChildStdin,
-//RS     limit: usize,
-//RS     budget: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-//RS     limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     groups: std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
-//RS ) -> std::io::Result<()> {
-//RS     let result = (|| {
-//RS         let mut chunk = [0u8; JET_PROCESS_IO_CHUNK_BYTES];
-//RS         loop {
-//RS             let count = std::io::Read::read(&mut reader, &mut chunk)?;
-//RS             if count == 0 {
-//RS                 return Ok(());
-//RS             }
-//RS             let kept = jet_process_output_reserve(limit, &budget, count);
-//RS             if kept != 0 {
-//RS                 match std::io::Write::write_all(&mut writer, &chunk[..kept]) {
-//RS                     Ok(()) => {}
-//RS                     Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
-//RS                         return Err(error)
-//RS                     }
-//RS                     Err(error) => return Err(error),
-//RS                 }
-//RS             }
-//RS             if kept < count {
-//RS                 // Publish the bounded prefix before stopping the tree. This
-//RS                 // preserves the typed output-limit result instead of turning
-//RS                 // the deliberate shutdown into a downstream BrokenPipe.
-//RS                 limit_hit.store(true, std::sync::atomic::Ordering::Release);
-//RS                 jet_process_pipeline_stop_groups(&groups);
-//RS                 return Ok(());
-//RS             }
-//RS         }
-//RS     })();
-//RS     if result.is_err() {
-//RS         cancel.store(true, std::sync::atomic::Ordering::Release);
-//RS         jet_process_pipeline_stop_groups(&groups);
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS fn jet_process_join_pipeline_forwarders(
-//RS     forwarders: &mut Vec<std::thread::JoinHandle<std::io::Result<()>>>,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let mut first_error = None;
-//RS     while let Some(forwarder) = forwarders.pop() {
-//RS         let result = forwarder.join().map_err(|_| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Read,
-//RS                 Some("pipeline stdout".to_string()),
-//RS                 "pipeline output forwarder panicked",
-//RS             )
-//RS         });
-//RS         match result {
-//RS             Ok(Ok(())) => {}
-//RS             Ok(Err(error)) => {
-//RS                 if first_error.is_none() {
-//RS                     first_error = Some(jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Read,
-//RS                         Some("pipeline stdout".to_string()),
-//RS                         error,
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             Err(error) => {
-//RS                 if first_error.is_none() {
-//RS                     first_error = Some(error);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     first_error.map_or(Ok(()), Err)
-//RS }
-//RS 
-//RS fn jet_process_spec_pipeline(
-//RS     specs: &Vec<jet_std::ProcessSpec>,
-//RS ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-//RS     if specs.is_empty() {
-//RS         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS             jet_std::IOOperation::Resolve,
-//RS             None,
-//RS             None,
-//RS             Some("process.pipeline needs at least one command".to_string()),
-//RS         )));
-//RS     }
-//RS     for spec in specs {
-//RS         jet_process_pipeline_resource_limits_check(spec)?;
-//RS     }
-//RS     if specs.iter().any(|spec| spec.policy_wire.is_some()) {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             Some("process.pipeline".to_string()),
-//RS             "authority-bound pipelines need one auditable launch transaction; refusing before spawn",
-//RS         ));
-//RS     }
-//RS     #[cfg(unix)]
-//RS     let direct_wait = specs.iter().all(|spec| {
-//RS         spec.timeout_ms.is_none()
-//RS             && spec.memory_limit_bytes.is_none()
-//RS             && spec.open_file_limit.is_none()
-//RS     });
-//RS     #[cfg(not(unix))]
-//RS     let direct_wait = false;
-//RS     let mut children: Vec<JetProcessPipelineChild> = Vec::with_capacity(specs.len());
-//RS     let mut stage_started = if direct_wait {
-//RS         Vec::new()
-//RS     } else {
-//RS         Vec::with_capacity(specs.len())
-//RS     };
-//RS     let mut prev_stdout: Option<std::process::ChildStdout> = None;
-//RS     let stage_budgets = specs
-//RS         .iter()
-//RS         .map(|spec| {
-//RS             spec.output_limit
-//RS                 .map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)))
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let pipeline_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let pipeline_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let pipeline_groups = std::sync::Arc::new(std::sync::Mutex::new(
-//RS         Vec::with_capacity(specs.len()),
-//RS     ));
-//RS     let cancel_control = jet_scheduler_current_task_control();
-//RS     let cancel_groups = pipeline_groups.clone();
-//RS     let cancel_state = pipeline_cancel.clone();
-//RS     let cancel_guard = cancel_control.as_ref().map(|control| {
-//RS         control.register_cancel_callback(std::sync::Arc::new(move || {
-//RS             cancel_state.store(true, std::sync::atomic::Ordering::Release);
-//RS             jet_process_pipeline_stop_groups(&cancel_groups);
-//RS         }))
-//RS     });
-//RS     let mut forwarders = Vec::with_capacity(specs.len().saturating_sub(1));
-//RS     for (index, spec) in specs.iter().enumerate() {
-//RS         let is_last = index + 1 == specs.len();
-//RS         let input = prev_stdout.take();
-//RS         let limited_input = index
-//RS             .checked_sub(1)
-//RS             .is_some_and(|previous| jet_process_pipeline_needs_relay(&specs[previous]));
-//RS         let (input, forward_input) = if limited_input {
-//RS             (None, input)
-//RS         } else {
-//RS             (input, None)
-//RS         };
-//RS         let child = (|| -> Result<std::process::Child, jet_std::IOError> {
-//RS             #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS             if spec.policy_wire.is_some() {
-//RS                 let plan = jet_process_spec_plan(spec)?;
-//RS                 return jet_process_sandbox_pipeline_spawn(spec, &plan, input);
-//RS             }
-//RS             if spec.terminal.is_some() {
-//RS                 return Err(jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Resolve,
-//RS                     spec.cmd.first().cloned(),
-//RS                     "terminal sessions cannot be used as pipeline stages; spawn the session directly",
-//RS                 ));
-//RS             }
-//RS             let mut command = jet_process_command_builder_with_identity(spec, None)?;
-//RS             if let Some(stdout) = input {
-//RS                 command.stdin(std::process::Stdio::from(stdout));
-//RS             } else if forward_input.is_some() {
-//RS                 command.stdin(std::process::Stdio::piped());
-//RS             } else {
-//RS                 command.stdin(match &spec.stdin {
-//RS                     Some(mode) => jet_process_stdio(mode),
-//RS                     None => std::process::Stdio::null(),
-//RS                 });
-//RS             }
-//RS             if is_last {
-//RS                 command.stdout(jet_process_stdio(&spec.stdout));
-//RS             } else {
-//RS                 command.stdout(std::process::Stdio::piped());
-//RS             }
-//RS             command.stderr(jet_process_stdio(&spec.stderr));
-//RS             #[cfg(unix)]
-//RS             jet_process_attach_process_group(&mut command, spec).map_err(|error| {
-//RS                 jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Resolve,
-//RS                     spec.cmd.first().cloned(),
-//RS                     error,
-//RS                 )
-//RS             })?;
-//RS             command.spawn().map_err(|error| {
-//RS                 jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Resolve,
-//RS                     spec.cmd.first().cloned(),
-//RS                     error,
-//RS                 )
-//RS             })
-//RS         })();
-//RS         let mut child = match child {
-//RS             Ok(child) => match jet_process_pipeline_child(child, spec) {
-//RS                 Ok(child) => child,
-//RS                 Err(error) => {
-//RS                     jet_process_pipeline_cleanup(&mut children);
-//RS                     let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
-//RS                     return Err(error);
-//RS                 }
-//RS             },
-//RS             Err(error) => {
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
-//RS                 return Err(error);
-//RS             }
-//RS         };
-//RS         let child_pid = child.child.id();
-//RS         pipeline_groups
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS             .push(child_pid);
-//RS         if pipeline_cancel.load(std::sync::atomic::Ordering::Acquire) {
-//RS             jet_process_pipeline_stop_groups(&pipeline_groups);
-//RS         }
-//RS         if let Some(stdout) = forward_input {
-//RS             let Some(previous) = index.checked_sub(1) else {
-//RS                 jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
-//RS                 return Err(jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Resolve,
-//RS                     spec.cmd.first().cloned(),
-//RS                     "limited pipeline input has no preceding stage",
-//RS                 ));
-//RS             };
-//RS             let Some(stdin) = child.child.stdin.take() else {
-//RS                 jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
-//RS                 return Err(jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Resolve,
-//RS                     spec.cmd.first().cloned(),
-//RS                     "limited pipeline stage did not provide stdin",
-//RS                 ));
-//RS             };
-//RS             let Some(limit) = specs[previous]
-//RS                 .output_limit
-//RS                 .map(|value| value.max(0) as usize)
-//RS             else {
-//RS                 jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
-//RS                 return Err(jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Resolve,
-//RS                     spec.cmd.first().cloned(),
-//RS                     "limited pipeline input has no output limit",
-//RS                 ));
-//RS             };
-//RS             let Some(budget) = stage_budgets[previous]
-//RS                 .clone()
-//RS             else {
-//RS                 jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 let _ = jet_process_join_pipeline_forwarders(&mut forwarders);
-//RS                 return Err(jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Resolve,
-//RS                     spec.cmd.first().cloned(),
-//RS                     "limited pipeline input has no shared budget",
-//RS                 ));
-//RS             };
-//RS             let groups = pipeline_groups.clone();
-//RS             let limit_hit = pipeline_limit_hit.clone();
-//RS             let cancel = pipeline_cancel.clone();
-//RS             forwarders.push(std::thread::spawn(move || {
-//RS                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                     jet_process_forward_pipeline_output(
-//RS                         stdout, stdin, limit, budget, limit_hit, cancel.clone(), groups.clone(),
-//RS                     )
-//RS                 }));
-//RS                 match result {
-//RS                     Ok(result) => result,
-//RS                     Err(payload) => {
-//RS                         cancel.store(true, std::sync::atomic::Ordering::Release);
-//RS                         jet_process_pipeline_stop_groups(&groups);
-//RS                         std::panic::resume_unwind(payload);
-//RS                     }
-//RS                 }
-//RS             }));
-//RS         }
-//RS         prev_stdout = child.child.stdout.take();
-//RS         children.push(child);
-//RS         if !direct_wait {
-//RS             stage_started.push(std::time::Instant::now());
-//RS         }
-//RS     }
-//RS     let final_limit = specs
-//RS         .last()
-//RS         .and_then(|spec| spec.output_limit)
-//RS         .map(|limit| limit.max(0) as usize);
-//RS     let output_drain = prev_stdout.take().and_then(|stdout| {
-//RS         jet_process_drain_reader(
-//RS             Some(stdout),
-//RS             final_limit,
-//RS             stage_budgets.last().cloned().flatten(),
-//RS             pipeline_limit_hit.clone(),
-//RS             Some(pipeline_cancel.clone()),
-//RS             Some(pipeline_groups.clone()),
-//RS             None,
-//RS         )
-//RS     });
-//RS     let stderr_drains = children
-//RS         .iter_mut()
-//RS         .enumerate()
-//RS         .map(|(index, child)| {
-//RS             jet_process_drain_reader(
-//RS                 child.child.stderr.take(),
-//RS                 specs[index].output_limit.map(|limit| limit.max(0) as usize),
-//RS                 stage_budgets[index].clone(),
-//RS                 pipeline_limit_hit.clone(),
-//RS                 Some(pipeline_cancel.clone()),
-//RS                 Some(pipeline_groups.clone()),
-//RS                 None,
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let mut code = 0;
-//RS     let mut success = true;
-//RS     let mut timed_out = false;
-//RS     let mut output_limit_exceeded = false;
-//RS     let mut resource_limit = None;
-//RS     let mut wait_error = None;
-//RS     let mut stage_finished = vec![false; children.len()];
-//RS     if direct_wait {
-//RS         for index in 0..children.len() {
-//RS             let status = match children[index].child.wait() {
-//RS                 Ok(status) => status,
-//RS                 Err(error) => {
-//RS                     jet_process_pipeline_cleanup(&mut children);
-//RS                     wait_error = Some(jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Close,
-//RS                         Some("pipeline process".to_string()),
-//RS                         error,
-//RS                     ));
-//RS                     break;
-//RS                 }
-//RS             };
-//RS             stage_finished[index] = true;
-//RS             if let Some(limit) = jet_process_status_resource_limit(&status, &specs[index]) {
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 resource_limit = Some(limit);
-//RS                 break;
-//RS             }
-//RS             jet_process_pipeline_child_stop_after_wait(&mut children[index]);
-//RS             if !status.success() {
-//RS                 success = false;
-//RS                 code = status.code().unwrap_or(-1) as i64;
-//RS             }
-//RS         }
-//RS     } else {
-//RS     'stages: for index in 0..children.len() {
-//RS         if stage_finished[index] {
-//RS             continue;
-//RS         }
-//RS         let status = 'wait: loop {
-//RS             if pipeline_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 output_limit_exceeded = true;
-//RS                 break None;
-//RS             }
-//RS             if pipeline_cancel.load(std::sync::atomic::Ordering::Acquire) {
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 break None;
-//RS             }
-//RS             let mut current_status = None;
-//RS             for stage in 0..children.len() {
-//RS                 if stage_finished[stage] {
-//RS                     continue;
-//RS                 }
-//RS                 if let Some(limit) = jet_process_live_resource_limit(
-//RS                     children[stage].child.id(),
-//RS                     &specs[stage],
-//RS                 )
-//RS                 {
-//RS                     jet_process_pipeline_cleanup(&mut children);
-//RS                     resource_limit = Some(limit);
-//RS                     break 'wait None;
-//RS                 }
-//RS                 let status = match children[stage].child.try_wait() {
-//RS                     Ok(status) => status,
-//RS                     Err(error) => {
-//RS                         jet_process_pipeline_cleanup(&mut children);
-//RS                         wait_error = Some(jet_std::IOError::other(
-//RS                             jet_std::IOOperation::Close,
-//RS                             Some("pipeline process".to_string()),
-//RS                             error,
-//RS                         ));
-//RS                         break 'wait None;
-//RS                     }
-//RS                 };
-//RS                 if let Some(status) = status {
-//RS                     if let Some(limit) = jet_process_status_resource_limit(&status, &specs[stage]) {
-//RS                         jet_process_pipeline_cleanup(&mut children);
-//RS                         resource_limit = Some(limit);
-//RS                         break 'wait None;
-//RS                     }
-//RS                     stage_finished[stage] = true;
-//RS                     jet_process_pipeline_child_stop_after_wait(&mut children[stage]);
-//RS                     if !status.success() {
-//RS                         success = false;
-//RS                         code = status.code().unwrap_or(-1) as i64;
-//RS                     }
-//RS                     if stage == index {
-//RS                         current_status = Some(status);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if current_status.is_some() {
-//RS                 break current_status;
-//RS             }
-//RS             if specs.iter().enumerate().any(|(stage, spec)| {
-//RS                 !stage_finished[stage]
-//RS                     && spec.timeout_ms.is_some_and(|timeout| {
-//RS                         stage_started[stage].elapsed()
-//RS                             >= std::time::Duration::from_millis(timeout.max(0) as u64)
-//RS                     })
-//RS             }) {
-//RS                 jet_process_pipeline_cleanup(&mut children);
-//RS                 timed_out = true;
-//RS                 success = false;
-//RS                 break None;
-//RS             }
-//RS             jet_scheduler_park_ms("process wait", 10);
-//RS         };
-//RS         let Some(_status) = status else {
-//RS             break 'stages;
-//RS         };
-//RS     }
-//RS     }
-//RS     if pipeline_cancel.load(std::sync::atomic::Ordering::Acquire) {
-//RS         jet_process_pipeline_cleanup(&mut children);
-//RS     }
-//RS     let forwarder_result = jet_process_join_pipeline_forwarders(&mut forwarders);
-//RS     let pipeline_output_exceeded = pipeline_limit_hit.load(std::sync::atomic::Ordering::Acquire);
-//RS     let drains = jet_process_collect_pipeline_drains(output_drain, stderr_drains);
-//RS     drop(cancel_guard);
-//RS     let cancellation_pending = cancel_control.as_ref().is_some_and(|control| {
-//RS         control
-//RS             .cancelled
-//RS             .load(std::sync::atomic::Ordering::Acquire)
-//RS     });
-//RS     if cancellation_pending && !jet_scheduler_shielded() {
-//RS         jet_task_deliver_cancel();
-//RS     }
-//RS     forwarder_result?;
-//RS     let (output, errors) = drains?;
-//RS     let output_exceeded = output.exceeded;
-//RS     if let Some(error) = wait_error {
-//RS         return Err(error);
-//RS     }
-//RS     if let Some(limit) = resource_limit {
-//RS         return Err(jet_std::IOError::ResourceLimit(limit));
-//RS     }
-//RS     output_limit_exceeded |= pipeline_output_exceeded;
-//RS     if output_exceeded || output_limit_exceeded {
-//RS         return Err(jet_std::IOError::ResourceLimit(
-//RS             jet_std::ProcessResourceLimit::Output,
-//RS         ));
-//RS     }
-//RS     let output_text = output.text;
-//RS     let mut secret_values = specs
-//RS         .iter()
-//RS         .flat_map(jet_process_policy_secret_values)
-//RS         .collect::<Vec<_>>();
-//RS     secret_values.sort_by_key(|value| std::cmp::Reverse(value.len()));
-//RS     secret_values.dedup();
-//RS     Ok(jet_process_receipt(
-//RS         specs.last().expect("nonempty pipeline"),
-//RS         None,
-//RS         true,
-//RS         0,
-//RS         code,
-//RS         success,
-//RS         Err(JetAbsent),
-//RS         timed_out,
-//RS         output_text,
-//RS         errors,
-//RS         Some(&secret_values),
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_process_inner_id(inner: &jet_std::ProcessHandle) -> u32 {
-//RS     match inner {
-//RS         jet_std::ProcessHandle::Std { child, .. } => child.id(),
-//RS         #[cfg(windows)]
-//RS         jet_std::ProcessHandle::Native { pid, .. } => *pid,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_inner_try_wait(
-//RS     inner: &mut jet_std::ProcessHandle,
-//RS ) -> std::io::Result<Option<std::process::ExitStatus>> {
-//RS     match inner {
-//RS         jet_std::ProcessHandle::Std { child, .. } => child.try_wait(),
-//RS         #[cfg(windows)]
-//RS         jet_std::ProcessHandle::Native { process, .. } => {
-//RS             use std::os::windows::process::ExitStatusExt;
-//RS             jet_process_pty::try_wait(process)
-//RS                 .map(|code| code.map(std::process::ExitStatus::from_raw))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_inner_wait(
-//RS     inner: &mut jet_std::ProcessHandle,
-//RS ) -> std::io::Result<std::process::ExitStatus> {
-//RS     match inner {
-//RS         jet_std::ProcessHandle::Std { child, .. } => child.wait(),
-//RS         #[cfg(windows)]
-//RS         jet_std::ProcessHandle::Native { process, .. } => {
-//RS             use std::os::windows::process::ExitStatusExt;
-//RS             jet_process_pty::wait(process).map(std::process::ExitStatus::from_raw)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_inner_kill(inner: &mut jet_std::ProcessHandle) -> std::io::Result<()> {
-//RS     match inner {
-//RS         jet_std::ProcessHandle::Std { child, job } => {
-//RS             #[cfg(windows)]
-//RS             if let Some(job) = job {
-//RS                 return jet_process_pty::terminate(job);
-//RS             }
-//RS             #[cfg(not(windows))]
-//RS             let _ = job;
-//RS             child.kill()
-//RS         }
-//RS         #[cfg(windows)]
-//RS         jet_std::ProcessHandle::Native { job, .. } => jet_process_pty::terminate(job),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn jet_process_linux_vm_size(pid: u32) -> Option<u64> {
-//RS     let path = format!("/proc/{pid}/status");
-//RS     let status = std::fs::read_to_string(path).ok()?;
-//RS     status.lines().find_map(|line| {
-//RS         let value = line.strip_prefix("VmSize:")?.trim();
-//RS         let kilobytes = value.strip_suffix("kB")?.trim().parse::<u64>().ok()?;
-//RS         Some(kilobytes.saturating_mul(1024))
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn jet_process_linux_open_files(pid: u32) -> Option<u64> {
-//RS     let path = format!("/proc/{pid}/fd");
-//RS     Some(std::fs::read_dir(path).ok()?.count() as u64)
-//RS }
-//RS 
-//RS /// Linux's rlimits make the ceiling real; this parent-side observation turns
-//RS /// the two limits whose native failure is normally `ENOMEM`/`EMFILE` into the
-//RS /// same typed process outcome as CPU/output. `/proc` is a Linux contract, so a
-//RS /// read race simply leaves the kernel-enforced failure to the child and does
-//RS /// not invent a classification.
-//RS fn jet_process_live_resource_limit(
-//RS     pid: u32,
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Option<jet_std::ProcessResourceLimit> {
-//RS     #[cfg(target_os = "linux")]
-//RS     {
-//RS         if let Some(limit) = spec.memory_limit_bytes {
-//RS             // RLIMIT_AS can reject the next allocation while VmSize is still
-//RS             // just below the declared ceiling. Leave a small observation
-//RS             // window so the parent supervisor reports the typed limit before
-//RS             // the child turns that exhaustion into an untyped allocator exit.
-//RS             const MEMORY_OBSERVATION_WINDOW: u64 = 1024 * 1024;
-//RS             let threshold = (limit.max(0) as u64).saturating_sub(MEMORY_OBSERVATION_WINDOW);
-//RS             if jet_process_linux_vm_size(pid).is_some_and(|used| used >= threshold) {
-//RS                 return Some(jet_std::ProcessResourceLimit::Memory);
-//RS             }
-//RS         }
-//RS         if let Some(limit) = spec.open_file_limit {
-//RS             if jet_process_linux_open_files(pid)
-//RS                 .is_some_and(|used| used >= limit.max(0) as u64)
-//RS             {
-//RS                 return Some(jet_std::ProcessResourceLimit::OpenFiles);
-//RS             }
-//RS         }
-//RS     }
-//RS     let _ = (pid, spec);
-//RS     None
-//RS }
-//RS 
-//RS #[cfg(windows)]
-//RS fn jet_process_inner_resource_limit(
-//RS     inner: &jet_std::ProcessHandle,
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> std::io::Result<Option<jet_std::ProcessResourceLimit>> {
-//RS     let job = match inner {
-//RS         jet_std::ProcessHandle::Std { job, .. } => job.as_deref(),
-//RS         jet_std::ProcessHandle::Native { job, .. } => Some(job.as_ref()),
-//RS     };
-//RS     let Some(job) = job else {
-//RS         return Ok(None);
-//RS     };
-//RS     jet_process_pty::resource_limit_hit(job, jet_process_native_limits(spec)).map(|hit| {
-//RS         hit.map(|hit| match hit {
-//RS             jet_process_pty::ResourceLimitKind::CpuTime => {
-//RS                 jet_std::ProcessResourceLimit::CpuTime
-//RS             }
-//RS             jet_process_pty::ResourceLimitKind::Memory => jet_std::ProcessResourceLimit::Memory,
-//RS         })
-//RS     })
-//RS }
-//RS 
-//RS fn jet_process_status_resource_limit(
-//RS     status: &std::process::ExitStatus,
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Option<jet_std::ProcessResourceLimit> {
-//RS     #[cfg(unix)]
-//RS     if spec.cpu_time_limit_ms.is_some()
-//RS         && std::os::unix::process::ExitStatusExt::signal(status) == Some(24)
-//RS     {
-//RS         // SIGXCPU is the POSIX rlimit CPU exhaustion signal on Linux and macOS.
-//RS         return Some(jet_std::ProcessResourceLimit::CpuTime);
-//RS     }
-//RS     let _ = (status, spec);
-//RS     None
-//RS }
-//RS 
-//RS fn jet_process_tree_signal(
-//RS     inner: &mut jet_std::ProcessHandle,
-//RS     process_group: bool,
-//RS     signal: i32,
-//RS ) -> std::io::Result<()> {
-//RS     #[cfg(unix)]
-//RS     if process_group {
-//RS         return match jet_process_pty::signal_group(jet_process_inner_id(inner), signal) {
-//RS             Ok(()) => Ok(()),
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-//RS             Err(error) => Err(error),
-//RS         };
-//RS     }
-//RS     let _ = (process_group, signal);
-//RS     jet_process_inner_kill(inner)
-//RS }
-//RS 
-//RS fn jet_process_cleanup_io_error(error: std::io::Error) -> jet_std::IOError {
-//RS     jet_std::IOError::other(
-//RS         jet_std::IOOperation::Close,
-//RS         Some("process".to_string()),
-//RS         error,
-//RS     )
-//RS }
-//RS 
-//RS fn jet_process_record_cleanup_error(child: &jet_std::ProcessChild, error: jet_std::IOError) {
-//RS     if let Ok(mut slot) = child.cleanup_error.try_borrow_mut() {
-//RS         if slot.is_none() {
-//RS             *slot = Some(error);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
-//RS     child
-//RS         .inner
-//RS         .borrow()
-//RS         .as_ref()
-//RS         .map(|inner| jet_process_inner_id(inner) as i64)
-//RS         .unwrap_or(0)
-//RS }
-//RS fn jet_process_child_wait(
-//RS     child: &jet_std::ProcessChild,
-//RS ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-//RS     if let Some(error) = child.cleanup_error.borrow().clone() {
-//RS         return Err(error);
-//RS     }
-//RS     if let Some(result) = child.wait_result.borrow().clone() {
-//RS         return Ok(result);
-//RS     }
-//RS     let topology_pid = jet_process_child_id(child);
-//RS     let _cleanup = JetProcessWaitCleanup { child };
-//RS     // Every piped stream has a worker from spawn onward. Waiting first can
-//RS     // deadlock when either pipe fills; independent workers keep stdout and
-//RS     // stderr flowing even when the caller consumes only one live stream.
-//RS     let output_limit_hit = child.output_limit_hit.clone();
-//RS     let output_read_error = child.output_read_error.clone();
-//RS     let mut timed_out = false;
-//RS     let mut resource_limit = None;
-//RS     // No timeout/live resource probe needs a scheduler poll. Output workers
-//RS     // terminate the process group on a cap or read failure, so a blocking wait
-//RS     // retains bounded capture and deadlock safety.
-//RS     #[cfg(unix)]
-//RS     let direct_wait = child.timeout_ms.is_none()
-//RS         && child.audit_spec.memory_limit_bytes.is_none()
-//RS         && child.audit_spec.open_file_limit.is_none()
-//RS         && (child.process_group || child.output_limit.is_none());
-//RS     #[cfg(not(unix))]
-//RS     let direct_wait = false;
-//RS     let cancel_control = if direct_wait && child.process_group {
-//RS         jet_scheduler_current_task_control()
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let cancel_guard = cancel_control.as_ref().map(|control| {
-//RS         let pid = topology_pid as u32;
-//RS         control.register_cancel_callback(std::sync::Arc::new(move || {
-//RS             jet_process_pipeline_stop_group(pid);
-//RS         }))
-//RS     });
-//RS     let status = if direct_wait {
-//RS         let mut slot = child.inner.borrow_mut();
-//RS         let Some(inner) = slot.as_mut() else {
-//RS             return Err(jet_std::IOError::Closed(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Close,
-//RS                 Some("process".to_string()),
-//RS                 None,
-//RS                 Some("process child wait result is unavailable".to_string()),
-//RS             )));
-//RS         };
-//RS         jet_process_inner_wait(inner).map_err(|error| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Close,
-//RS                 Some("process".to_string()),
-//RS                 error,
-//RS             )
-//RS         })?
-//RS     } else {
-//RS         loop {
-//RS         let mut slot = child.inner.borrow_mut();
-//RS         let Some(inner) = slot.as_mut() else {
-//RS             return Err(jet_std::IOError::Closed(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Close,
-//RS                 Some("process".to_string()),
-//RS                 None,
-//RS                 Some("process child wait result is unavailable".to_string()),
-//RS             )));
-//RS         };
-//RS         #[cfg(windows)]
-//RS         if let Some(limit) = jet_process_inner_resource_limit(inner, &child.audit_spec).map_err(|error| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Close,
-//RS                 Some("process".to_string()),
-//RS                 error,
-//RS             )
-//RS         })? {
-//RS             jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
-//RS                 .map_err(|error| {
-//RS                     jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Close,
-//RS                         Some("process".to_string()),
-//RS                         error,
-//RS                     )
-//RS                 })?;
-//RS             resource_limit = Some(limit);
-//RS             break jet_process_inner_wait(inner).map_err(|error| {
-//RS                 jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Close,
-//RS                     Some("process".to_string()),
-//RS                     error,
-//RS                 )
-//RS             })?;
-//RS         }
-//RS         if let Some(limit) = jet_process_live_resource_limit(jet_process_inner_id(inner), &child.audit_spec) {
-//RS             jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
-//RS                 .map_err(|error| {
-//RS                     jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Close,
-//RS                         Some("process".to_string()),
-//RS                         error,
-//RS                     )
-//RS                 })?;
-//RS             resource_limit = Some(limit);
-//RS             break jet_process_inner_wait(inner).map_err(|error| {
-//RS                 jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Close,
-//RS                     Some("process".to_string()),
-//RS                     error,
-//RS                 )
-//RS             })?;
-//RS         }
-//RS         if let Some(status) = jet_process_inner_try_wait(inner).map_err(|error| {
-//RS             jet_std::IOError::other(
-//RS                 jet_std::IOOperation::Close,
-//RS                 Some("process".to_string()),
-//RS                 error,
-//RS             )
-//RS         })? {
-//RS             break status;
-//RS         }
-//RS         if output_limit_hit.load(std::sync::atomic::Ordering::Acquire)
-//RS             || output_read_error.load(std::sync::atomic::Ordering::Acquire)
-//RS         {
-//RS             jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
-//RS                 .map_err(|error| {
-//RS                     jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Close,
-//RS                         Some("process".to_string()),
-//RS                         error,
-//RS                     )
-//RS                 })?;
-//RS             break jet_process_inner_wait(inner).map_err(|error| {
-//RS                 jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Close,
-//RS                     Some("process".to_string()),
-//RS                     error,
-//RS                 )
-//RS             })?;
-//RS         }
-//RS         if let Some(timeout) = child.timeout_ms {
-//RS             if child.started.elapsed() >= std::time::Duration::from_millis(timeout as u64) {
-//RS                 jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
-//RS                     .map_err(|error| {
-//RS                         jet_std::IOError::other(
-//RS                             jet_std::IOOperation::Close,
-//RS                             Some("process".to_string()),
-//RS                             error,
-//RS                         )
-//RS                     })?;
-//RS                 timed_out = true;
-//RS                 break jet_process_inner_wait(inner).map_err(|error| {
-//RS                     jet_std::IOError::other(
-//RS                         jet_std::IOOperation::Close,
-//RS                         Some("process".to_string()),
-//RS                         error,
-//RS                     )
-//RS                 })?;
-//RS             }
-//RS         }
-//RS         drop(slot);
-//RS         // D-TASKRUNTIME1=A: process waits are scheduler wait points. Parking
-//RS         // here keeps the worker available and makes inherited cancellation and
-//RS         // deadlines wake the wait exactly like channel, timer, and I/O waits.
-//RS         jet_scheduler_park_ms("process wait", 10);
-//RS         }
-//RS     };
-//RS     drop(cancel_guard);
-//RS     let cancellation_pending = cancel_control.as_ref().is_some_and(|control| {
-//RS         control
-//RS             .cancelled
-//RS             .load(std::sync::atomic::Ordering::Acquire)
-//RS     });
-//RS     // Unix process groups need one final sweep after the leader exits because
-//RS     // the group has no close-time kill contract. Windows Job Objects already
-//RS     // carry `KILL_ON_JOB_CLOSE`; calling TerminateJobObject again after the
-//RS     // leader exits races an empty/signaled job and can turn a successful wait
-//RS     // into a cleanup error. Dropping the native handle below closes that job
-//RS     // and kills any remaining descendants.
-//RS     #[cfg(unix)]
-//RS     let cleanup_error = if child.process_group {
-//RS         if let Some(inner) = child.inner.borrow_mut().as_mut() {
-//RS             jet_process_tree_signal(inner, true, jet_process_signal_kill())
-//RS                 .err()
-//RS                 .map(jet_process_cleanup_io_error)
-//RS         } else {
-//RS             None
-//RS         }
-//RS     } else {
-//RS         None
-//RS     };
-//RS     #[cfg(not(unix))]
-//RS     let cleanup_error: Option<jet_std::IOError> = None;
-//RS     if let Some(error) = cleanup_error.as_ref() {
-//RS         jet_process_record_cleanup_error(child, error.clone());
-//RS     }
-//RS     let pid = child
-//RS         .inner
-//RS         .borrow()
-//RS         .as_ref()
-//RS         .map(|inner| jet_process_inner_id(inner) as i64)
-//RS         .unwrap_or(0);
-//RS     child.inner.borrow_mut().take();
-//RS     *child.stdin.borrow_mut() = None;
-//RS     // ConPTY keeps its output pipe live until the pseudoconsole is released.
-//RS     // Close it after the child exits, before joining the reader, or `wait()`
-//RS     // can block forever on an otherwise finished terminal child.
-//RS     #[cfg(windows)]
-//RS     if let Some(session) = child.terminal.as_ref().ok() {
-//RS         session.control.close();
-//RS     }
-//RS     let (output, errors) = jet_process_collect_child_output(child)?;
-//RS     if cancellation_pending && !jet_scheduler_shielded() {
-//RS         jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState::Failed);
-//RS         jet_task_deliver_cancel();
-//RS     }
-//RS     if let Some(error) = cleanup_error {
-//RS         jet_process_publish_topology_id(
-//RS             topology_pid,
-//RS             JetDevtoolsTopologyProcessState::Failed,
-//RS         );
-//RS         return Err(error);
-//RS     }
-//RS     if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
-//RS         jet_process_publish_topology_id(
-//RS             topology_pid,
-//RS             JetDevtoolsTopologyProcessState::Failed,
-//RS         );
-//RS         return Err(jet_std::IOError::ResourceLimit(
-//RS             jet_std::ProcessResourceLimit::Output,
-//RS         ));
-//RS     }
-//RS     if let Some(limit) = resource_limit {
-//RS         jet_process_publish_topology_id(
-//RS             topology_pid,
-//RS             JetDevtoolsTopologyProcessState::Failed,
-//RS         );
-//RS         return Err(jet_std::IOError::ResourceLimit(limit));
-//RS     }
-//RS     if let Some(limit) = jet_process_status_resource_limit(&status, &child.audit_spec) {
-//RS         jet_process_publish_topology_id(
-//RS             topology_pid,
-//RS             JetDevtoolsTopologyProcessState::Failed,
-//RS         );
-//RS         return Err(jet_std::IOError::ResourceLimit(limit));
-//RS     }
-//RS     let code = status.code().unwrap_or(-1) as i64;
-//RS     #[cfg(unix)]
-//RS     let signal = jet_outcome_of(
-//RS         std::os::unix::process::ExitStatusExt::signal(&status)
-//RS             .map(i64::from)
-//RS             .map(jet_foundation::Numeric::JetInt::from_i64),
-//RS     );
-//RS     #[cfg(not(unix))]
-//RS     let signal = Err(JetAbsent);
-//RS     let result = jet_process_receipt(
-//RS         &child.audit_spec,
-//RS         child.audit_plan.as_deref(),
-//RS         child.process_group,
-//RS         pid,
-//RS         code,
-//RS         status.success(),
-//RS         signal,
-//RS         timed_out,
-//RS         output,
-//RS         errors,
-//RS         None,
-//RS     );
-//RS     jet_process_publish_topology_id(
-//RS         topology_pid,
-//RS         if timed_out || !status.success() {
-//RS             JetDevtoolsTopologyProcessState::Failed
-//RS         } else {
-//RS             JetDevtoolsTopologyProcessState::Exited
-//RS         },
-//RS     );
-//RS     *child.wait_result.borrow_mut() = Some(result.clone());
-//RS     Ok(result)
-//RS }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2403
+// GATE #4565: kernel primitive
+#Unsafe("read PID from the retained selected child handle")
+fn jet_process_inner_id(inner: &ProcessHandle) -> U32 {
+    match inner {
+        ProcessHandle.Std{child, ..} -> child.id()
+        ProcessHandle.Native{pid, ..} -> *pid
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2411
+// GATE #4565: kernel primitive
+#Unsafe("poll retained child handle and convert exact Windows raw exit code")
+fn jet_process_inner_try_wait(inner: &ProcessHandle) -> ExitStatus? io.Error! {
+    match inner {
+        ProcessHandle.Std{child, ..} -> child.try_wait()
+        ProcessHandle.Native{process, ..} -> jet_process_pty.try_wait(process).map(fn(code) { code.map(ExitStatus.from_raw) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2425
+// GATE #4565: kernel primitive
+#Unsafe("wait on owned native child handle and preserve its raw Windows exit code")
+fn jet_process_inner_wait(inner: &ProcessHandle) -> ExitStatus io.Error! {
+    match inner {
+        ProcessHandle.Std{child, ..} -> child.wait()
+        ProcessHandle.Native{process, ..} -> jet_process_pty.wait(process).map(ExitStatus.from_raw)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2438
+// GATE #4565: kernel primitive
+#Unsafe("kill the retained child or complete Windows job, never a detached lookup by name")
+fn jet_process_inner_kill(inner: &ProcessHandle) -> () io.Error! {
+    match inner {
+        ProcessHandle.Std{child, job} -> {
+            if target.selected_os() == .Windows {
+                if Val(job) :: job { return jet_process_pty.terminate(job) }
+            }
+            child.kill()
+        }
+        ProcessHandle.Native{job, ..} -> jet_process_pty.terminate(job)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2455
+// GATE #4565: kernel primitive
+#Unsafe("read Linux proc status without inventing a resource classification on a raced read")
+fn jet_process_linux_vm_size(pid: U32) -> U64? {
+    path :: OSPath.new("/proc/{pid}/status")
+    status :: std.fs.read_to_string(path).ok()?
+    status.lines().find_map(fn(line) {
+        value := line.strip_prefix("VmSize:")?.trim() // #4303
+        kilobytes :: value.strip_suffix("kB")?.trim().parse::<U64>().ok()?
+        Val(kilobytes.saturating_mul(1024))
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2466
+// GATE #4565: kernel primitive
+#Unsafe("count entries in the actual Linux process descriptor directory")
+fn jet_process_linux_open_files(pid: U32) -> U64? {
+    path :: OSPath.new("/proc/{pid}/fd")
+    Val(std.fs.read_dir(path).ok()?.count() as U64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2476
+// Linux rlimits enforce ceilings; observation classifies ENOMEM/EMFILE before
+// untyped child failure. A raced proc read leaves classification to the kernel.
+fn jet_process_live_resource_limit(pid: U32, spec: &ProcessSpec) -> ProcessResourceLimit? {
+    if target.selected_os() == .Linux {
+        if Val(limit) :: spec.memory_limit_bytes {
+            // RLIMIT_AS may reject the next allocation just below its ceiling.
+            const MEMORY_OBSERVATION_WINDOW: U64 = 1024 * 1024
+            threshold :: (limit.max(0) as U64).saturating_sub(MEMORY_OBSERVATION_WINDOW)
+            if jet_process_linux_vm_size(pid).is_some_and(fn(used) { used >= threshold }) { return Val(ProcessResourceLimit.Memory) }
+        }
+        if Val(limit) :: spec.open_file_limit {
+            if jet_process_linux_open_files(pid).is_some_and(fn(used) { used >= limit.max(0) as U64 }) {
+                return Val(ProcessResourceLimit.OpenFiles)
+            }
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2506
+// GATE #4565: kernel primitive
+#Unsafe("query retained Windows job accounting for the checked process limits")
+fn jet_process_inner_resource_limit(inner: &ProcessHandle, spec: &ProcessSpec) -> ProcessResourceLimit? io.Error! {
+    job := match inner {
+        ProcessHandle.Std{job, ..} -> job.as_ref()
+        ProcessHandle.Native{job, ..} -> Val(job.as_ref())
+    }
+    job := job ?? return Ok(None)
+    jet_process_pty.resource_limit_hit(job, jet_process_native_limits(spec)).map(fn(hit) {
+        hit.map(fn(hit) { match hit {
+            jet_process_pty.ResourceLimitKind.CpuTime -> ProcessResourceLimit.CpuTime
+            jet_process_pty.ResourceLimitKind.Memory -> ProcessResourceLimit.Memory
+        } })
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2527
+// GATE #4565: kernel primitive
+#Unsafe("selected Unix exit-status signal reports POSIX SIGXCPU without host target assumptions")
+fn jet_process_status_resource_limit(status: &ExitStatus, spec: &ProcessSpec) -> ProcessResourceLimit? {
+    if target.selected_family() == "unix" && spec.cpu_time_limit_ms.is_some() && status.signal() == Val(24) {
+        return Val(ProcessResourceLimit.CpuTime)
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2542
+// GATE #4565: kernel primitive
+#Unsafe("signal retained Unix group, treating an already vanished group as cleaned, otherwise kill the native child")
+fn jet_process_tree_signal(inner: &ProcessHandle, process_group: Bool, signal: I32) -> () io.Error! {
+    if target.selected_family() == "unix" && process_group {
+        return match jet_process_pty.signal_group(jet_process_inner_id(inner), signal) {
+            Ok(()) -> Ok(())
+            Err(error) if error.kind() == io.ErrorKind.NotFound -> Ok(())
+            Err(error) -> Err(^error)
+        }
+    }
+    jet_process_inner_kill(inner)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2559
+fn jet_process_cleanup_io_error(error: io.Error) -> IOError { IOError.other(IOOperation.Close, Val("process"), ^error) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2567
+// GATE #4565: kernel primitive
+#Unsafe("record only the first cleanup error through the retained child's borrow-checked slot")
+fn jet_process_record_cleanup_error(child: &ProcessChild, error: IOError) -> () {
+    if Ok(slot) :: child.cleanup_error.try_borrow_mut() {
+        if slot.is_none() { *slot = Val(^error) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2575
+// GATE #4565: kernel primitive
+#Unsafe("borrow the retained child handle for PID projection without extending its lifetime")
+fn jet_process_child_id(child: &ProcessChild) -> I64 {
+    child.inner.borrow().as_ref().map(fn(inner) { jet_process_inner_id(inner) as I64 }).unwrap_or(0)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:2583
+// GATE #4565: kernel primitive
+#Unsafe("wait owns retained child borrows, cancellation callback and native handles until pipe workers drain and cached receipt publishes")
+fn jet_process_child_wait(child: &ProcessChild) -> ProcessReceipt IOError! {
+    if Val(error) :: child.cleanup_error.borrow().clone() { return Err(^error) }
+    if Val(result) :: child.wait_result.borrow().clone() { return Ok(^result) }
+    topology_pid :: jet_process_child_id(child)
+    _cleanup :: JetProcessWaitCleanup{child:child}
+    // Independent stdout/stderr workers keep full pipes from deadlocking wait.
+    output_limit_hit :: child.output_limit_hit.clone()
+    output_read_error :: child.output_read_error.clone()
+    timed_out := false
+    resource_limit := None
+    direct_wait :: target.selected_family() == "unix" && child.timeout_ms.is_none()
+        && child.audit_spec.memory_limit_bytes.is_none() && child.audit_spec.open_file_limit.is_none()
+        && (child.process_group || child.output_limit.is_none())
+    cancel_control :: if direct_wait && child.process_group { jet_scheduler_current_task_control() } else { None }
+    cancel_guard :: cancel_control.as_ref().map(fn(control) {
+        pid :: topology_pid as U32
+        control.register_cancel_callback(Arc.new(fn() { jet_process_pipeline_stop_group(pid) }))
+    })
+    status :: if direct_wait {
+        slot := child.inner.borrow_mut()
+        inner := slot.as_mut() ?? return Err(IOError.Closed(IOContext.new(
+            IOOperation.Close, Val("process"), None, Val("process child wait result is unavailable"))))
+        jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+    } else {
+        loop {
+            slot := child.inner.borrow_mut()
+            inner := slot.as_mut() ?? return Err(IOError.Closed(IOContext.new(
+                IOOperation.Close, Val("process"), None, Val("process child wait result is unavailable"))))
+            if target.selected_os() == .Windows {
+                if Val(limit) :: jet_process_inner_resource_limit(inner, &child.audit_spec).map_err(jet_process_cleanup_io_error)? {
+                    jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
+                    resource_limit = Val(limit)
+                    break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+                }
+            }
+            if Val(limit) :: jet_process_live_resource_limit(jet_process_inner_id(inner), &child.audit_spec) {
+                jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
+                resource_limit = Val(limit)
+                break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+            }
+            if Val(status) :: jet_process_inner_try_wait(inner).map_err(jet_process_cleanup_io_error)? { break ^status }
+            if output_limit_hit.load(Ordering.Acquire) || output_read_error.load(Ordering.Acquire) {
+                jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
+                break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+            }
+            if Val(timeout) :: child.timeout_ms {
+                if child.started.elapsed() >= Duration.from_millis(timeout as U64) {
+                    jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill()).map_err(jet_process_cleanup_io_error)?
+                    timed_out = true
+                    break jet_process_inner_wait(inner).map_err(jet_process_cleanup_io_error)?
+                }
+            }
+            drop(^slot)
+            // D-TASKRUNTIME1=A: release child borrow before inherited wait points.
+            jet_scheduler_park_ms("process wait", 10)
+        }
+    }
+    drop(^cancel_guard)
+    cancellation_pending :: cancel_control.as_ref().is_some_and(fn(control) { control.cancelled.load(Ordering.Acquire) })
+    // Unix groups need a final sweep. Windows jobs kill on close: another
+    // TerminateJobObject after leader exit races a signaled/empty job.
+    cleanup_error :: if target.selected_family() == "unix" && child.process_group {
+        slot := child.inner.borrow_mut()
+        if Val(inner) :: slot.as_mut() {
+            jet_process_tree_signal(inner, true, jet_process_signal_kill()).err().map(jet_process_cleanup_io_error)
+        } else { None }
+    } else { None }
+    if Val(error) :: cleanup_error.as_ref() { jet_process_record_cleanup_error(child, error.clone()) }
+    pid :: child.inner.borrow().as_ref().map(fn(inner) { jet_process_inner_id(inner) as I64 }).unwrap_or(0)
+    child.inner.borrow_mut().take()
+    *child.stdin.borrow_mut() = None
+    // Release ConPTY before joining its output worker; otherwise pipe stays live.
+    if target.selected_os() == .Windows {
+        if Val(session) :: child.terminal.as_ref().ok() { session.control.close() }
+    }
+    (output, errors) :: jet_process_collect_child_output(child)?
+    if cancellation_pending && !jet_scheduler_shielded() {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        jet_task_deliver_cancel()
+    }
+    if Val(error) :: cleanup_error {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        return Err(^error)
+    }
+    if output_limit_hit.load(Ordering.Acquire) {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        return Err(IOError.ResourceLimit(ProcessResourceLimit.Output))
+    }
+    if Val(limit) :: resource_limit {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        return Err(IOError.ResourceLimit(limit))
+    }
+    if Val(limit) :: jet_process_status_resource_limit(&status, &child.audit_spec) {
+        jet_process_publish_topology_id(topology_pid, JetDevtoolsTopologyProcessState.Failed)
+        return Err(IOError.ResourceLimit(limit))
+    }
+    code :: status.code().unwrap_or(-1) as I64
+    signal :: if target.selected_family() == "unix" {
+        jet_outcome_of(status.signal().map(fn(signal) { JetInt.from_i64(signal as I64) }))
+    } else { Err(JetAbsent{}) }
+    result :: jet_process_receipt(&child.audit_spec, child.audit_plan.as_ref(), child.process_group,
+        pid, code, status.success(), ^signal, timed_out, ^output, ^errors, None)
+    jet_process_publish_topology_id(topology_pid,
+        if timed_out || !status.success() { JetDevtoolsTopologyProcessState.Failed } else { JetDevtoolsTopologyProcessState.Exited })
+    *child.wait_result.borrow_mut() = Val(result.clone())
+    Ok(^result)
+}
 //RS // #1481 core.process: a non-blocking companion to `wait()` — reports whether
 //RS // the child has already exited without draining its output pipes or
 //RS // blocking. Peeks the same underlying handle `id`/`kill` already borrow.

@@ -1,1447 +1,1004 @@
-// PORT-PENDING 0263 crates-jet-codegen-src-prelude-corelib-top-dataflow-slice-3592: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3592-5034
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn jet_data_loader_status<T>(
-//RS     loader: &jet_std::DataLoader<T>,
-//RS ) -> jet_std::DataLoaderStatus {
-//RS     jet_data_loader_status_from_kernel(jet_foundation::PreludeDataFlow::status(
-//RS         &jet_data_loader_kernel_state(loader),
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_data_loader_source_identity<T>(
-//RS     loader: &jet_std::DataLoader<T>,
-//RS ) -> jet_std::DataSourceIdentity {
-//RS     loader.source.clone()
-//RS }
-//RS 
-//RS fn jet_data_loader_authority_of<T>(
-//RS     loader: &jet_std::DataLoader<T>,
-//RS ) -> jet_std::DataAuthority {
-//RS     loader.authority.clone()
-//RS }
-//RS 
-//RS fn jet_data_snapshot_reusable(
-//RS     previous: &jet_std::DataSnapshotIdentity,
-//RS     current: &jet_std::DataSnapshotIdentity,
-//RS ) -> bool {
-//RS     previous.id == current.id
-//RS         && previous.source == current.source
-//RS         && previous.content == current.content
-//RS         && previous.schema == current.schema
-//RS         && previous.format == current.format
-//RS }
-//RS 
-//RS fn jet_data_loader_stream_from_payload<T>(
-//RS     loader: &mut jet_std::DataLoader<T>,
-//RS     payload: Vec<u8>,
-//RS ) -> Result<jet_std::DataStream, jet_std::DataError> {
-//RS     let tree = match jet_data_loader_tree(&payload, loader.format, &loader.limits) {
-//RS         Ok(tree) => tree,
-//RS         Err(error) => return Err(jet_data_loader_fail(loader, error)),
-//RS     };
-//RS     let rows = match tree {
-//RS         jet_std::DataTree::Array(rows) => rows,
-//RS         value => vec![value],
-//RS     };
-//RS     if rows.len() as i64 > loader.limits.max_output_rows {
-//RS         return Err(jet_data_loader_fail(
-//RS             loader,
-//RS             jet_data_loader_error(
-//RS                 jet_std::DataErrorKind::Limit,
-//RS                 "data.loader.stream",
-//RS                 format!("max_output_rows {} exceeded", loader.limits.max_output_rows),
-//RS             ),
-//RS         ));
-//RS     }
-//RS     let stream = jet_std::DataStream {
-//RS         inner: jet_std::DataStreamInner::Provider {
-//RS             format: loader.format,
-//RS             rows,
-//RS             cursor: 0,
-//RS         },
-//RS         limits: loader.limits.clone(),
-//RS         terminal: None,
-//RS         eof: false,
-//RS         row_index: 0,
-//RS         cancelled: false,
-//RS     };
-//RS     loader.status.buffered_bytes = i64::try_from(payload.len()).unwrap_or(i64::MAX);
-//RS     loader.status.backpressure =
-//RS         loader.status.buffered_bytes > loader.limits.encoding.buffer_bytes;
-//RS     Ok(stream)
-//RS }
-//RS 
-//RS fn jet_data_loader_stream<R: __jet_Decode>(
-//RS     loader: &mut jet_std::DataLoader<impl Sized>,
-//RS ) -> Result<jet_std::DataStream, jet_std::DataError> {
-//RS     if loader.cancelled {
-//RS         return Err(jet_data_loader_error(
-//RS             jet_std::DataErrorKind::State,
-//RS             "data.loader.stream",
-//RS             "loader was cancelled",
-//RS         ));
-//RS     }
-//RS     let kernel_state = jet_data_loader_kernel_state(loader);
-//RS     let payload = match jet_foundation::PreludeDataFlow::payload(&kernel_state) {
-//RS         Ok(Some((payload, _offline))) => Some(payload),
-//RS         Ok(None) => None,
-//RS         Err(error) => {
-//RS             return Err(jet_data_loader_fail(
-//RS                 loader,
-//RS                 jet_data_loader_kernel_error(error),
-//RS             ))
-//RS         }
-//RS     };
-//RS     if let Some(payload) = payload {
-//RS         return jet_data_loader_stream_from_payload(loader, payload);
-//RS     }
-//RS     if loader.format == jet_std::DataFormat::Parquet {
-//RS         let payload = match jet_data_loader_payload(loader) {
-//RS             Ok((payload, _offline)) => payload,
-//RS             Err(error) => return Err(jet_data_loader_fail(loader, error)),
-//RS         };
-//RS         return jet_data_loader_stream_from_payload(loader, payload);
-//RS     }
-//RS     if loader.source.kind != jet_std::DataLoaderKind::File || !loader.source.member.is_empty() {
-//RS         return Err(jet_data_loader_fail(
-//RS             loader,
-//RS             jet_data_loader_error(
-//RS                 jet_std::DataErrorKind::Bridge,
-//RS                 "data.loader.stream",
-//RS                 "provider-owned sources must expose a bounded DataStream directly",
-//RS             ),
-//RS         ));
-//RS     }
-//RS     let raw_locator = loader.raw_locator.clone();
-//RS     let source_locator = loader.source.locator.clone();
-//RS     let file = std::fs::File::open(&raw_locator).map_err(|error| {
-//RS         jet_data_loader_error(
-//RS             jet_std::DataErrorKind::IO,
-//RS             "data.loader.stream",
-//RS             format!("could not open `{source_locator}`: {error}"),
-//RS         )
-//RS     });
-//RS     let file = match file {
-//RS         Ok(file) => file,
-//RS         Err(error) => return Err(jet_data_loader_fail(loader, error)),
-//RS     };
-//RS     let input = JetFileReader {
-//RS         inner: std::io::BufReader::new(file),
-//RS         path: raw_locator,
-//RS     };
-//RS     let stream = match loader.format {
-//RS         jet_std::DataFormat::CSV => jet_data_csv_reader::<R>(input, loader.limits.clone()),
-//RS         jet_std::DataFormat::JSON => jet_data_json_reader::<R>(input, loader.limits.clone()),
-//RS         jet_std::DataFormat::JSONL => jet_data_jsonl_reader(input, loader.limits.clone()),
-//RS         jet_std::DataFormat::Parquet => unreachable!(),
-//RS         jet_std::DataFormat::Arrow => Err(jet_data_loader_error(
-//RS             jet_std::DataErrorKind::Bridge,
-//RS             "data.loader.stream",
-//RS             "Arrow IPC has a separate provider boundary; Parquet is the registered reader",
-//RS         )),
-//RS     };
-//RS     let stream = match stream {
-//RS         Ok(stream) => stream,
-//RS         Err(error) => return Err(jet_data_loader_fail(loader, error)),
-//RS     };
-//RS     loader.status.buffered_bytes = 0;
-//RS     loader.status.backpressure = false;
-//RS     Ok(stream)
-//RS }
-//RS 
-//RS fn jet_data_stream_cancel(stream: &mut jet_std::DataStream) {
-//RS     stream.cancelled = true;
-//RS     if stream.terminal.is_none() {
-//RS         stream.terminal = Some(jet_data_error(
-//RS             jet_std::DataErrorKind::State,
-//RS             "data.stream",
-//RS             "stream was cancelled",
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataFormat {
-//RS     fn jet_show(&self) -> String {
-//RS         self.as_str().to_string()
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataStatus {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "DataStatus(step: {}, path: {}, clone_value: {}, ownership: {}, trust: {}, fallback: {}, replacement: {})",
-//RS             jet_data_loader_bounded_text(&self.step, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS             jet_data_loader_bounded_text(&self.path, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS             jet_data_loader_bounded_text(&self.clone_value, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS             jet_data_loader_bounded_text(&self.ownership, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS             jet_data_loader_bounded_text(&self.trust, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS             jet_data_loader_bounded_text(&self.fallback, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS             jet_data_loader_bounded_text(&self.replacement, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl JetDisplay for jet_std::DataStatus {
-//RS     fn jet_display(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS 
-//RS impl JetDebug for jet_std::DataStatus {
-//RS     fn jet_debug(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataLoaderKind {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("{self:?}")
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataFreshness {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("{self:?}")
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataInvalidationCause {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("{self:?}")
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataAuthority {
-//RS     fn jet_show(&self) -> String {
-//RS         let scope = if jet_data_loader_sensitive_value(&self.scope) {
-//RS             "<redacted>".to_string()
-//RS         } else {
-//RS             jet_data_loader_bounded_text(&self.scope, JET_DATA_LOADER_MAX_PUBLIC_TEXT)
-//RS         };
-//RS         let revision = if jet_data_loader_sensitive_value(&self.revision) {
-//RS             "<redacted>".to_string()
-//RS         } else {
-//RS             jet_data_loader_bounded_text(&self.revision, JET_DATA_LOADER_MAX_PUBLIC_TEXT)
-//RS         };
-//RS         if revision.is_empty() {
-//RS             scope
-//RS         } else {
-//RS             format!("{scope}@{revision}")
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataSourceIdentity {
-//RS     fn jet_show(&self) -> String {
-//RS         let member = if self.member.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             format!("#{member}", member = jet_data_loader_public_member(&self.member))
-//RS         };
-//RS         let parameters = self
-//RS             .parameters
-//RS             .iter()
-//RS             .map(|parameter| jet_data_loader_public_parameter(parameter))
-//RS             .collect::<Vec<_>>();
-//RS         let parameters = if parameters.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             format!("?{}", parameters.join("&"))
-//RS         };
-//RS         let locator = jet_data_loader_public_locator(&self.locator);
-//RS         format!("{:?}:{}{}{}", self.kind, locator, member, parameters)
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataLoaderStatus {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "LoaderStatus {{ identity: {}, freshness: {:?}, invalidated_by: {:?}, error: {:?}, cleanup: {}, buffered_bytes: {}, backpressure: {}, last_good: {} }}",
-//RS             jet_data_loader_bounded_text(&self.identity, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS             self.freshness,
-//RS             self.invalidated_by,
-//RS             jet_data_loader_status_text(&self.error),
-//RS             jet_data_loader_bounded_text(&self.cleanup, JET_DATA_LOADER_MAX_STATUS_TEXT),
-//RS             self.buffered_bytes.max(0),
-//RS             self.backpressure,
-//RS             self.last_good
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl JetDisplay for jet_std::DataLoaderStatus {
-//RS     fn jet_display(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS 
-//RS impl JetDebug for jet_std::DataLoaderStatus {
-//RS     fn jet_debug(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS 
-//RS impl JetShow for jet_std::DataSnapshotIdentity {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "SnapshotIdentity {{ id: {}, source: {}, content: {}, schema: {}, format: {} }}",
-//RS             self.id,
-//RS             self.source,
-//RS             self.content,
-//RS             self.schema,
-//RS             self.format.as_str()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// D-COLUMNAR-BOUNDARY1=A: decode only through the row model, then hand the
-//RS /// values to the ordinary deferred query carrier. Grouping, limits, and
-//RS /// ordering remain the existing DataQuery implementation. The typed Arrow
-//RS /// carrier is consumed here so its single release owner cannot be cloned.
-//RS fn jet_data_query_arrow<T>(
-//RS     batch: jet_std::DataArrowBatch<T>,
-//RS ) -> Result<jet_std::DataQuery<T>, jet_std::DataError>
-//RS where
-//RS     T: crate::jet_arrow_data::ArrowRow + Clone + 'static,
-//RS {
-//RS     let limits = jet_std::DataLimits::safe();
-//RS     jet_data_limits_validate(&limits)?;
-//RS     let max_rows = usize::try_from(limits.max_output_rows).map_err(|_| {
-//RS         jet_data_error(
-//RS             jet_std::DataErrorKind::Limit,
-//RS             "data.query_arrow",
-//RS             "max_output_rows cannot be represented by this target",
-//RS         )
-//RS     })?;
-//RS     if batch.row_count() > max_rows {
-//RS         return Err(jet_data_error(
-//RS             jet_std::DataErrorKind::Limit,
-//RS             "data.query_arrow",
-//RS             format!("max_output_rows {} exceeded", limits.max_output_rows),
-//RS         ));
-//RS     }
-//RS     let mut rows = Vec::with_capacity(batch.row_count());
-//RS     for index in 0..batch.row_count() {
-//RS         let row = batch.row(index).map_err(|error| jet_std::DataError {
-//RS             kind: jet_std::DataErrorKind::Bridge,
-//RS             operation: "data.query_arrow".to_string(),
-//RS             row: Ok(index as i64),
-//RS             column: Err(JetAbsent),
-//RS             index: Err(JetAbsent),
-//RS             reason: error.to_string(),
-//RS             cause: Err(JetAbsent),
-//RS         })?;
-//RS         rows.push(row);
-//RS     }
-//RS     Ok(jet_data_query(&rows))
-//RS }
-//RS /// Consume a producer-vetted Arrow owner for the canonical data namespace.
-//RS /// Validation and release ownership are completed by Foundation before this
-//RS /// value reaches ordinary Jet code. Import is an ownership-preserving move;
-//RS /// no second cleanup authority is created.
-//RS fn jet_data_arrow_import<T>(
-//RS     batch: jet_std::DataArrowBatch<T>,
-//RS ) -> jet_std::DataArrowBatch<T> {
-//RS     batch
-//RS }
-//RS // D-DATA-WEB1=A: the Web/Wasm adapter exposes one handle-free wire only.
-//RS // JavaScript owns transport and callback publication; this module retains the
-//RS // canonical DataLoader/DataQuery/DataStream state and all decode/limit policy.
-//RS #[cfg(target_arch = "wasm32")]
-//RS mod jet_data_web {
-//RS     use super::*;
-//RS     use std::cell::RefCell;
-//RS 
-//RS     trait WebTypedStream {
-//RS         fn next(&mut self) -> Result<jet_std::DataTree, jet_std::DataError>;
-//RS         fn collect(&mut self) -> Result<jet_std::DataTree, jet_std::DataError>;
-//RS         fn cancel(&mut self);
-//RS     }
-//RS     trait WebTypedLoader {
-//RS         fn bind(&mut self, payload: &Vec<u8>) -> Result<(), jet_std::DataError>;
-//RS         fn bind_text(&mut self, payload: &String) -> Result<(), jet_std::DataError>;
-//RS         fn snapshot(&mut self) -> Result<jet_std::DataTree, jet_std::DataError>;
-//RS         fn cancel(&mut self);
-//RS         fn offline(&mut self, enabled: bool);
-//RS         fn invalidate(&mut self, cause: jet_std::DataInvalidationCause);
-//RS         fn needs_refresh(&self) -> bool;
-//RS         fn ready(&self) -> bool;
-//RS         fn status(&self) -> jet_std::DataTree;
-//RS         fn source_identity(&self) -> jet_std::DataTree;
-//RS         fn authority(&self) -> jet_std::DataTree;
-//RS         fn stream(&mut self) -> Result<Box<dyn WebTypedStream>, jet_std::DataError>;
-//RS     }
-//RS     struct TypedStream<T> {
-//RS         stream: jet_std::DataStream,
-//RS         marker: std::marker::PhantomData<T>,
-//RS     }
-//RS     struct TypedLoader<T> {
-//RS         loader: jet_std::DataLoader<T>,
-//RS     }
-//RS     impl<T> WebTypedStream for TypedStream<T>
-//RS     where
-//RS         T: __jet_Decode + __jet_Encode + Clone + 'static,
-//RS     {
-//RS         fn next(&mut self) -> Result<jet_std::DataTree, jet_std::DataError> {
-//RS             match jet_data_stream_next::<T>(&mut self.stream)? {
-//RS                 Ok(value) => Ok(result_tree(vec![
-//RS                     ("tag", text_tree("Some")),
-//RS                     ("values", jet_std::DataTree::Array(vec![value.jet_encode()])),
-//RS                 ])),
-//RS                 Err(_) => Ok(result_tree(vec![
-//RS                     ("tag", text_tree("None")),
-//RS                     ("values", jet_std::DataTree::Array(Vec::new())),
-//RS                 ])),
-//RS             }
-//RS         }
-//RS         fn collect(&mut self) -> Result<jet_std::DataTree, jet_std::DataError> {
-//RS             Ok(jet_std::DataTree::Array(
-//RS                 jet_data_stream_collect::<T>(&mut self.stream)?
-//RS                     .into_iter()
-//RS                     .map(|value| value.jet_encode())
-//RS                     .collect(),
-//RS             ))
-//RS         }
-//RS         fn cancel(&mut self) {
-//RS             jet_data_stream_cancel(&mut self.stream);
-//RS         }
-//RS     }
-//RS     impl<T> WebTypedLoader for TypedLoader<T>
-//RS     where
-//RS         T: __jet_Decode + __jet_Encode + Clone + 'static,
-//RS     {
-//RS         fn bind(&mut self, payload: &Vec<u8>) -> Result<(), jet_std::DataError> {
-//RS             jet_data_loader_bind(&mut self.loader, payload)
-//RS         }
-//RS         fn bind_text(&mut self, payload: &String) -> Result<(), jet_std::DataError> {
-//RS             jet_data_loader_bind_text(&mut self.loader, payload)
-//RS         }
-//RS         fn snapshot(&mut self) -> Result<jet_std::DataTree, jet_std::DataError> {
-//RS             Ok(snapshot(jet_data_loader_snapshot(&mut self.loader)?))
-//RS         }
-//RS         fn cancel(&mut self) {
-//RS             jet_data_loader_cancel(&mut self.loader);
-//RS         }
-//RS         fn offline(&mut self, enabled: bool) {
-//RS             jet_data_loader_offline(&mut self.loader, enabled);
-//RS         }
-//RS         fn invalidate(&mut self, cause: jet_std::DataInvalidationCause) {
-//RS             jet_data_loader_invalidate(&mut self.loader, cause);
-//RS         }
-//RS         fn needs_refresh(&self) -> bool {
-//RS             jet_data_loader_needs_refresh(&self.loader)
-//RS         }
-//RS         fn ready(&self) -> bool {
-//RS             jet_data_loader_ready(&self.loader)
-//RS         }
-//RS         fn status(&self) -> jet_std::DataTree {
-//RS             status(&jet_data_loader_status(&self.loader))
-//RS         }
-//RS         fn source_identity(&self) -> jet_std::DataTree {
-//RS             source_identity(&jet_data_loader_source_identity(&self.loader))
-//RS         }
-//RS         fn authority(&self) -> jet_std::DataTree {
-//RS             result_tree(vec![
-//RS                 ("scope", text_tree(self.loader.authority.scope.clone())),
-//RS                 ("revision", text_tree(self.loader.authority.revision.clone())),
-//RS             ])
-//RS         }
-//RS         fn stream(&mut self) -> Result<Box<dyn WebTypedStream>, jet_std::DataError> {
-//RS             Ok(Box::new(TypedStream::<T> {
-//RS                 stream: jet_data_loader_stream::<T>(&mut self.loader)?,
-//RS                 marker: std::marker::PhantomData,
-//RS             }))
-//RS         }
-//RS     }
-//RS     type WebTypeFactory = fn(&str, &[jet_std::DataTree]) -> Result<Handle, jet_std::DataError>;
-//RS     thread_local! {
-//RS         static WEB_TYPE_FACTORIES: RefCell<Vec<(String, WebTypeFactory)>> = const { RefCell::new(Vec::new()) };
-//RS     }
-//RS     pub fn register_type<T>(key: &'static str)
-//RS     where
-//RS         T: __jet_Decode + __jet_Encode + Clone + 'static,
-//RS     {
-//RS         WEB_TYPE_FACTORIES.with(|cell| {
-//RS             let mut factories = cell.borrow_mut();
-//RS             if !factories.iter().any(|(known, _)| known == key) {
-//RS                 factories.push((key.to_string(), typed_factory::<T>));
-//RS             }
-//RS         });
-//RS     }
-//RS     enum Handle {
-//RS         Loader(jet_std::DataLoader<jet_std::DataTree>),
-//RS         TypedLoader(Box<dyn WebTypedLoader>),
-//RS         Query(jet_std::DataQuery<jet_std::DataTree>),
-//RS         Tracked(jet_std::DataTracked<jet_std::DataTree, String>),
-//RS         Watch(jet_std::DataWatch<jet_std::DataTree>),
-//RS         Grouped(jet_std::DataGroupedQuery<jet_std::DataTree, String>),
-//RS         Stream(jet_std::DataStream),
-//RS         TypedStream(Box<dyn WebTypedStream>),
-//RS     }
-//RS 
-//RS     thread_local! {
-//RS         static HANDLES: RefCell<Vec<Option<Handle>>> = const { RefCell::new(Vec::new()) };
-//RS         static INPUTS: RefCell<[Vec<u8>; 4]> = const { RefCell::new([Vec::new(), Vec::new(), Vec::new(), Vec::new()]) };
-//RS         static OUTPUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
-//RS     }
-//RS 
-//RS     #[link(wasm_import_module = "env")]
-//RS     unsafe extern "C" {
-//RS         fn jet_data_web_callback_bool(callback: u32, pointer: u32, length: u32) -> u32;
-//RS         fn jet_data_web_callback_key(callback: u32, pointer: u32, length: u32) -> u64;
-//RS         fn jet_data_web_callback_value(callback: u32, pointer: u32, length: u32) -> u64;
-//RS     }
-//RS 
-//RS     fn quote(value: &str) -> String {
-//RS         jet_data_loader_quote(value)
-//RS     }
-//RS     fn error(kind: jet_std::DataErrorKind, operation: &str, reason: impl Into<String>) -> jet_std::DataError {
-//RS         jet_data_error(kind, operation, reason)
-//RS     }
-//RS     fn field<'a>(value: &'a jet_std::DataTree, name: &str) -> Option<&'a jet_std::DataTree> {
-//RS         match value {
-//RS             jet_std::DataTree::Object(entries) => entries.iter().find(|(key, _)| key == name).map(|(_, value)| value),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     fn args<'a>(root: &'a jet_std::DataTree) -> Result<&'a [jet_std::DataTree], jet_std::DataError> {
-//RS         match field(root, "args") {
-//RS             Some(jet_std::DataTree::Array(values)) => Ok(values),
-//RS             _ => Err(error(jet_std::DataErrorKind::InvalidArgument, "data.web", "wire args must be an array")),
-//RS         }
-//RS     }
-//RS     fn text(value: &jet_std::DataTree, operation: &str) -> Result<String, jet_std::DataError> {
-//RS         match value {
-//RS             jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => Ok(value.clone()),
-//RS             _ => Err(error(jet_std::DataErrorKind::InvalidArgument, operation, "expected text")),
-//RS         }
-//RS     }
-//RS     fn boolean(value: &jet_std::DataTree, operation: &str) -> Result<bool, jet_std::DataError> {
-//RS         match value {
-//RS             jet_std::DataTree::Bool(value) => Ok(*value),
-//RS             _ => Err(error(jet_std::DataErrorKind::InvalidArgument, operation, "expected bool")),
-//RS         }
-//RS     }
-//RS     fn integer(value: &jet_std::DataTree, operation: &str) -> Result<i64, jet_std::DataError> {
-//RS         match value {
-//RS             jet_std::DataTree::Int(value) => Ok(*value),
-//RS             jet_std::DataTree::Number(value) => value.parse::<i64>().map_err(|_| error(
-//RS                 jet_std::DataErrorKind::InvalidArgument, operation, "expected exact integer",
-//RS             )),
-//RS             _ => Err(error(jet_std::DataErrorKind::InvalidArgument, operation, "expected exact integer")),
-//RS         }
-//RS     }
-//RS     fn handle(value: &jet_std::DataTree, operation: &str) -> Result<usize, jet_std::DataError> {
-//RS         let value = field(value, "handle").unwrap_or(value);
-//RS         let value = integer(value, operation)?;
-//RS         usize::try_from(value).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, operation, "invalid handle"))
-//RS     }
-//RS     fn limits(value: Option<&jet_std::DataTree>) -> Result<jet_std::DataLimits, jet_std::DataError> {
-//RS         let mut result = jet_std::DataLimits::safe();
-//RS         let Some(value) = value else { return Ok(result) };
-//RS         let Some(encoding) = field(value, "encoding") else { return Ok(result) };
-//RS         let number = |name: &str, fallback: i64| {
-//RS             field(encoding, name).and_then(|value| integer(value, "data.limits").ok()).unwrap_or(fallback)
-//RS         };
-//RS         result.encoding.buffer_bytes = number("buffer_bytes", result.encoding.buffer_bytes);
-//RS         result.encoding.max_depth = number("max_depth", result.encoding.max_depth);
-//RS         result.encoding.max_item_bytes = number("max_item_bytes", result.encoding.max_item_bytes);
-//RS         result.encoding.max_expansion_depth = number("max_expansion_depth", result.encoding.max_expansion_depth);
-//RS         result.encoding.max_expansion_bytes = number("max_expansion_bytes", result.encoding.max_expansion_bytes);
-//RS         for (name, target) in [
-//RS             ("max_groups", &mut result.max_groups),
-//RS             ("max_sort_rows", &mut result.max_sort_rows),
-//RS             ("max_join_rows", &mut result.max_join_rows),
-//RS             ("max_output_rows", &mut result.max_output_rows),
-//RS         ] {
-//RS             if let Some(value) = field(value, name) {
-//RS                 *target = integer(value, "data.limits")?;
-//RS             }
-//RS         }
-//RS         Ok(result)
-//RS     }
-//RS     fn has_typed_loader(index: usize) -> bool {
-//RS         HANDLES.with(|cell| matches!(cell.borrow().get(index).and_then(Option::as_ref), Some(Handle::TypedLoader(_))))
-//RS     }
-//RS     fn has_typed_stream(index: usize) -> bool {
-//RS         HANDLES.with(|cell| matches!(cell.borrow().get(index).and_then(Option::as_ref), Some(Handle::TypedStream(_))))
-//RS     }
-//RS     fn with_typed_loader<R>(
-//RS         index: usize,
-//RS         operation: &str,
-//RS         body: impl FnOnce(&mut dyn WebTypedLoader) -> Result<R, jet_std::DataError>,
-//RS     ) -> Result<R, jet_std::DataError> {
-//RS         HANDLES.with(|cell| {
-//RS             let mut handles = cell.borrow_mut();
-//RS             match handles.get_mut(index).and_then(Option::as_mut) {
-//RS                 Some(Handle::TypedLoader(loader)) => body(loader.as_mut()),
-//RS                 _ => Err(error(jet_std::DataErrorKind::State, operation, "handle is not a typed loader")),
-//RS             }
-//RS         })
-//RS     }
-//RS     fn with_typed_stream<R>(
-//RS         index: usize,
-//RS         operation: &str,
-//RS         body: impl FnOnce(&mut dyn WebTypedStream) -> Result<R, jet_std::DataError>,
-//RS     ) -> Result<R, jet_std::DataError> {
-//RS         HANDLES.with(|cell| {
-//RS             let mut handles = cell.borrow_mut();
-//RS             match handles.get_mut(index).and_then(Option::as_mut) {
-//RS                 Some(Handle::TypedStream(stream)) => body(stream.as_mut()),
-//RS                 _ => Err(error(jet_std::DataErrorKind::State, operation, "handle is not a typed stream")),
-//RS             }
-//RS         })
-//RS     }
-//RS     fn bytes(value: &jet_std::DataTree, operation: &str) -> Result<Vec<u8>, jet_std::DataError> {
-//RS         let jet_std::DataTree::Array(values) = value else {
-//RS             return Err(error(jet_std::DataErrorKind::InvalidArgument, operation, "expected byte array"));
-//RS         };
-//RS         values.iter().map(|value| {
-//RS             let value = integer(value, operation)?;
-//RS             u8::try_from(value).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, operation, "byte outside 0..255"))
-//RS         }).collect()
-//RS     }
-//RS     fn format(value: &jet_std::DataTree, operation: &str) -> Result<String, jet_std::DataError> {
-//RS         text(value, operation)
-//RS     }
-//RS     fn result_tree(entries: Vec<(&str, jet_std::DataTree)>) -> jet_std::DataTree {
-//RS         jet_std::DataTree::Object(entries.into_iter().map(|(key, value)| (key.to_string(), value)).collect())
-//RS     }
-//RS     fn text_tree(value: impl Into<String>) -> jet_std::DataTree {
-//RS         jet_std::DataTree::Text(value.into())
-//RS     }
-//RS     fn handle_tree(handle: usize, kind: &str) -> jet_std::DataTree {
-//RS         result_tree(vec![
-//RS             ("handle", jet_std::DataTree::Int(handle as i64)),
-//RS             ("kind", text_tree(kind)),
-//RS         ])
-//RS     }
-//RS     fn store(handle: Handle) -> jet_std::DataTree {
-//RS         HANDLES.with(|cell| {
-//RS             let mut handles = cell.borrow_mut();
-//RS             let index = handles.iter().position(Option::is_none).unwrap_or_else(|| {
-//RS                 handles.push(None);
-//RS                 handles.len() - 1
-//RS             });
-//RS             let kind = match &handle {
-//RS                 Handle::Loader(_) | Handle::TypedLoader(_) => "loader",
-//RS                 Handle::Query(_) => "query",
-//RS                 Handle::Tracked(_) => "tracked",
-//RS                 Handle::Watch(_) => "watch",
-//RS                 Handle::Grouped(_) => "grouped",
-//RS                 Handle::Stream(_) | Handle::TypedStream(_) => "stream",
-//RS             };
-//RS             handles[index] = Some(handle);
-//RS             handle_tree(index, kind)
-//RS         })
-//RS     }
-//RS     fn with_loader<R>(
-//RS         index: usize,
-//RS         operation: &str,
-//RS         body: impl FnOnce(&mut jet_std::DataLoader<jet_std::DataTree>) -> Result<R, jet_std::DataError>,
-//RS     ) -> Result<R, jet_std::DataError> {
-//RS         HANDLES.with(|cell| {
-//RS             let mut handles = cell.borrow_mut();
-//RS             match handles.get_mut(index).and_then(Option::as_mut) {
-//RS                 Some(Handle::Loader(loader)) => body(loader),
-//RS                 _ => Err(error(jet_std::DataErrorKind::State, operation, "handle is not a loader")),
-//RS             }
-//RS         })
-//RS     }
-//RS     fn clone_query(index: usize) -> Result<jet_std::DataQuery<jet_std::DataTree>, jet_std::DataError> {
-//RS         HANDLES.with(|cell| match cell.borrow().get(index).and_then(Option::as_ref) {
-//RS             Some(Handle::Query(query)) => Ok(query.clone()),
-//RS             _ => Err(error(jet_std::DataErrorKind::State, "data.query", "handle is not a query")),
-//RS         })
-//RS     }
-//RS     fn with_tracked<R>(
-//RS         index: usize,
-//RS         operation: &str,
-//RS         body: impl FnOnce(&jet_std::DataTracked<jet_std::DataTree, String>) -> Result<R, jet_std::DataError>,
-//RS     ) -> Result<R, jet_std::DataError> {
-//RS         HANDLES.with(|cell| {
-//RS             let handles = cell.borrow();
-//RS             match handles.get(index).and_then(Option::as_ref) {
-//RS                 Some(Handle::Tracked(tracked)) => body(tracked),
-//RS                 _ => Err(error(jet_std::DataErrorKind::State, operation, "handle is not a tracked source")),
-//RS             }
-//RS         })
-//RS     }
-//RS     fn clone_tracked(
-//RS         index: usize,
-//RS         operation: &str,
-//RS     ) -> Result<jet_std::DataTracked<jet_std::DataTree, String>, jet_std::DataError> {
-//RS         with_tracked(index, operation, |tracked| Ok(tracked.clone()))
-//RS     }
-//RS     fn with_watch<R>(
-//RS         index: usize,
-//RS         operation: &str,
-//RS         body: impl FnOnce(&jet_std::DataWatch<jet_std::DataTree>) -> Result<R, jet_std::DataError>,
-//RS     ) -> Result<R, jet_std::DataError> {
-//RS         HANDLES.with(|cell| {
-//RS             let handles = cell.borrow();
-//RS             match handles.get(index).and_then(Option::as_ref) {
-//RS                 Some(Handle::Watch(watch)) => body(watch),
-//RS                 _ => Err(error(jet_std::DataErrorKind::State, operation, "handle is not a watch")),
-//RS             }
-//RS         })
-//RS     }
-//RS     fn with_grouped<R>(
-//RS         index: usize,
-//RS         operation: &str,
-//RS         body: impl FnOnce(&jet_std::DataGroupedQuery<jet_std::DataTree, String>) -> Result<R, jet_std::DataError>,
-//RS     ) -> Result<R, jet_std::DataError> {
-//RS         HANDLES.with(|cell| {
-//RS             let handles = cell.borrow();
-//RS             match handles.get(index).and_then(Option::as_ref) {
-//RS                 Some(Handle::Grouped(grouped)) => body(grouped),
-//RS                 _ => Err(error(jet_std::DataErrorKind::State, operation, "handle is not a grouped query")),
-//RS             }
-//RS         })
-//RS     }
-//RS     fn with_stream<R>(
-//RS         index: usize,
-//RS         operation: &str,
-//RS         body: impl FnOnce(&mut jet_std::DataStream) -> Result<R, jet_std::DataError>,
-//RS     ) -> Result<R, jet_std::DataError> {
-//RS         HANDLES.with(|cell| {
-//RS             let mut handles = cell.borrow_mut();
-//RS             match handles.get_mut(index).and_then(Option::as_mut) {
-//RS                 Some(Handle::Stream(stream)) => body(stream),
-//RS                 _ => Err(error(jet_std::DataErrorKind::State, operation, "handle is not a stream")),
-//RS             }
-//RS         })
-//RS     }
-//RS     fn callback_filter(callback: u32, row: jet_std::DataTree) -> bool {
-//RS         let encoded = jet_data_loader_canonical_tree(&row);
-//RS         unsafe { jet_data_web_callback_bool(callback, encoded.as_ptr() as usize as u32, encoded.len() as u32) != 0 }
-//RS     }
-//RS     fn callback_key(callback: u32, row: jet_std::DataTree) -> String {
-//RS         let encoded = jet_data_loader_canonical_tree(&row);
-//RS         let packed = unsafe { jet_data_web_callback_key(callback, encoded.as_ptr() as usize as u32, encoded.len() as u32) };
-//RS         if packed == 0 { return String::new() }
-//RS         let pointer = (packed >> 32) as u32;
-//RS         let length = packed as u32;
-//RS         let value = unsafe { std::slice::from_raw_parts(pointer as *const u8, length as usize) };
-//RS         let value = String::from_utf8_lossy(value).into_owned();
-//RS         INPUTS.with(|cell| cell.borrow_mut()[3].clear());
-//RS         value
-//RS     }
-//RS     fn callback_value(
-//RS         callback: u32,
-//RS         row: jet_std::DataTree,
-//RS         operation: &str,
-//RS     ) -> Result<jet_std::DataTree, jet_std::DataError> {
-//RS         let encoded = jet_data_loader_canonical_tree(&row);
-//RS         let packed = unsafe {
-//RS             jet_data_web_callback_value(
-//RS                 callback,
-//RS                 encoded.as_ptr() as usize as u32,
-//RS                 encoded.len() as u32,
-//RS             )
-//RS         };
-//RS         if packed == 0 {
-//RS             return Err(error(
-//RS                 jet_std::DataErrorKind::InvalidValue,
-//RS                 operation,
-//RS                 "callback did not return a value",
-//RS             ));
-//RS         }
-//RS         let pointer = (packed >> 32) as u32;
-//RS         let length = packed as u32;
-//RS         let bytes = unsafe { std::slice::from_raw_parts(pointer as *const u8, length as usize) };
-//RS         let value = match std::str::from_utf8(bytes) {
-//RS             Ok(value) => value.to_owned(),
-//RS             Err(_) => {
-//RS                 INPUTS.with(|cell| cell.borrow_mut()[3].clear());
-//RS                 return Err(error(
-//RS                     jet_std::DataErrorKind::Decode,
-//RS                     operation,
-//RS                     "callback returned invalid UTF-8",
-//RS                 ));
-//RS             }
-//RS         };
-//RS         INPUTS.with(|cell| cell.borrow_mut()[3].clear());
-//RS         let value = jet_std::parse_json_typed_datatree(&value).map_err(|_| {
-//RS             error(
-//RS                 jet_std::DataErrorKind::Decode,
-//RS                 operation,
-//RS                 "callback returned invalid JSON",
-//RS             )
-//RS         })?;
-//RS         Ok(value)
-//RS     }
-//RS     fn callback_number(
-//RS         callback: u32,
-//RS         row: jet_std::DataTree,
-//RS         operation: &str,
-//RS     ) -> Result<f64, jet_std::DataError> {
-//RS         match callback_value(callback, row, operation)? {
-//RS             jet_std::DataTree::Int(value) => Ok(value as f64),
-//RS             jet_std::DataTree::Float(value) => Ok(value),
-//RS             jet_std::DataTree::Number(value) => value.parse::<f64>().map_err(|_| {
-//RS                 error(
-//RS                     jet_std::DataErrorKind::InvalidValue,
-//RS                     operation,
-//RS                     "callback must return a finite number",
-//RS                 )
-//RS             }),
-//RS             _ => Err(error(
-//RS                 jet_std::DataErrorKind::InvalidValue,
-//RS                 operation,
-//RS                 "callback must return a number",
-//RS             )),
-//RS         }
-//RS     }
-//RS     fn callback_key_value(value: &jet_std::DataTree) -> String {
-//RS         match value {
-//RS             jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => value.clone(),
-//RS             jet_std::DataTree::Int(value) => value.to_string(),
-//RS             jet_std::DataTree::Float(value) => value.to_string(),
-//RS             jet_std::DataTree::Number(value) => value.clone(),
-//RS             jet_std::DataTree::Bool(value) => value.to_string(),
-//RS             jet_std::DataTree::Null => "null".to_string(),
-//RS             _ => jet_data_loader_canonical_tree(value),
-//RS         }
-//RS     }
-//RS     fn data_status(value: &jet_std::DataStatus) -> jet_std::DataTree {
-//RS         result_tree(vec![
-//RS             ("step", text_tree(value.step.clone())),
-//RS             ("path", text_tree(value.path.clone())),
-//RS             ("clone_value", text_tree(value.clone_value.clone())),
-//RS             ("ownership", text_tree(value.ownership.clone())),
-//RS             ("trust", text_tree(value.trust.clone())),
-//RS             ("fallback", text_tree(value.fallback.clone())),
-//RS             ("replacement", text_tree(value.replacement.clone())),
-//RS         ])
-//RS     }
-//RS     fn status(value: &jet_std::DataLoaderStatus) -> jet_std::DataTree {
-//RS         result_tree(vec![
-//RS             ("identity", text_tree(value.identity.clone())),
-//RS             ("freshness", text_tree(format!("{:?}", value.freshness))),
-//RS             ("invalidated_by", text_tree(format!("{:?}", value.invalidated_by))),
-//RS             ("error", text_tree(value.error.clone())),
-//RS             ("cleanup", text_tree(value.cleanup.clone())),
-//RS             ("buffered_bytes", jet_std::DataTree::Int(value.buffered_bytes)),
-//RS             ("backpressure", jet_std::DataTree::Bool(value.backpressure)),
-//RS             ("last_good", jet_std::DataTree::Bool(value.last_good)),
-//RS         ])
-//RS     }
-//RS     fn source_identity(value: &jet_std::DataSourceIdentity) -> jet_std::DataTree {
-//RS         result_tree(vec![
-//RS             ("kind", result_tree(vec![
-//RS                 ("tag", text_tree(value.kind.jet_show())),
-//RS                 ("values", jet_std::DataTree::Array(Vec::new())),
-//RS             ])),
-//RS             ("locator", text_tree(value.locator.clone())),
-//RS             ("member", text_tree(value.member.clone())),
-//RS             ("parameters", jet_std::DataTree::Array(
-//RS                 value.parameters.iter().map(|value| text_tree(value.clone())).collect(),
-//RS             )),
-//RS         ])
-//RS     }
-//RS     fn snapshot<T: __jet_Encode>(value: jet_std::DataSnapshot<T>) -> jet_std::DataTree {
-//RS         result_tree(vec![
-//RS             ("value", value.value.jet_encode()),
-//RS             ("identity", result_tree(vec![
-//RS                 ("id", text_tree(value.identity.id)),
-//RS                 ("source", text_tree(value.identity.source)),
-//RS                 ("content", text_tree(value.identity.content)),
-//RS                 ("schema", text_tree(value.identity.schema)),
-//RS                 ("format", text_tree(value.identity.format.as_str())),
-//RS             ])),
-//RS             ("provenance", result_tree(vec![
-//RS                 ("source", source_identity(&value.provenance.source)),
-//RS                 ("format", text_tree(value.provenance.format.as_str())),
-//RS                 ("authority", result_tree(vec![
-//RS                     ("scope", text_tree(value.provenance.authority.scope)),
-//RS                     ("revision", text_tree(value.provenance.authority.revision)),
-//RS                 ])),
-//RS             ])),
-//RS             ("schema", text_tree(value.schema.identity)),
-//RS             ("status", status(&value.status)),
-//RS             ("content", jet_std::DataTree::Bytes(value.content)),
-//RS         ])
-//RS     }
-//RS     fn watch_status(value: &jet_std::DataWatchStatus) -> jet_std::DataTree {
-//RS         result_tree(vec![
-//RS             ("mode", text_tree(value.mode.clone())),
-//RS             ("revision", jet_std::DataTree::Int(value.revision)),
-//RS             ("retained_rows", jet_std::DataTree::Int(value.retained_rows)),
-//RS             ("recomputations", jet_std::DataTree::Int(value.recomputations)),
-//RS             ("active", jet_std::DataTree::Bool(value.active)),
-//RS             ("generation", jet_std::DataTree::Int(value.generation)),
-//RS             ("dirty", jet_std::DataTree::Bool(value.dirty)),
-//RS             ("error", text_tree(value.error.clone())),
-//RS             ("freshness_ms", jet_std::DataTree::Int(value.freshness_ms)),
-//RS             ("invalidation_cause", text_tree(value.invalidation_cause.clone())),
-//RS             ("refreshing", jet_std::DataTree::Bool(value.refreshing)),
-//RS             ("cancelled", jet_std::DataTree::Bool(value.cancelled)),
-//RS         ])
-//RS     }
-//RS     fn typed_factory<T>(
-//RS         operation: &str,
-//RS         values: &[jet_std::DataTree],
-//RS     ) -> Result<Handle, jet_std::DataError>
-//RS     where
-//RS         T: __jet_Decode + __jet_Encode + Clone + 'static,
-//RS     {
-//RS         let value = |index: usize| {
-//RS             values.get(index).ok_or_else(|| {
-//RS                 error(
-//RS                     jet_std::DataErrorKind::InvalidArgument,
-//RS                     operation,
-//RS                     "missing argument",
-//RS                 )
-//RS             })
-//RS         };
-//RS         let decode = |value: &jet_std::DataTree| {
-//RS             T::jet_decode(value).map_err(|errors| {
-//RS                 error(
-//RS                     jet_std::DataErrorKind::Decode,
-//RS                     operation,
-//RS                     jet_data_field_errors_reason(errors),
-//RS                 )
-//RS             })
-//RS         };
-//RS         let loader = match operation {
-//RS             "load" => {
-//RS                 let locator = text(value(0)?, operation)?;
-//RS                 jet_data_loader_load::<T>(&locator, &limits(values.get(1))?)?
-//RS             }
-//RS             "load_default" => {
-//RS                 let locator = text(value(0)?, operation)?;
-//RS                 jet_data_loader_load_default::<T>(&locator)?
-//RS             }
-//RS             "file" => {
-//RS                 let path = text(value(0)?, operation)?;
-//RS                 let format = format(value(1)?, operation)?;
-//RS                 jet_data_loader_file::<T>(&path, &format, &limits(values.get(2))?)?
-//RS             }
-//RS             "file_member" => {
-//RS                 let path = text(value(0)?, operation)?;
-//RS                 let member = text(value(1)?, operation)?;
-//RS                 let format = format(value(2)?, operation)?;
-//RS                 jet_data_loader_file_member::<T>(&path, &member, &format, &limits(values.get(3))?)?
-//RS             }
-//RS             "url" => {
-//RS                 let url = text(value(0)?, operation)?;
-//RS                 let format = format(value(1)?, operation)?;
-//RS                 let authority = text(value(2)?, operation)?;
-//RS                 jet_data_loader_url::<T>(&url, &format, &authority, &limits(values.get(3))?)?
-//RS             }
-//RS             "database" => {
-//RS                 let query = text(value(0)?, operation)?;
-//RS                 let parameters = match value(1)? {
-//RS                     jet_std::DataTree::Array(values) => values
-//RS                         .iter()
-//RS                         .map(|value| text(value, operation))
-//RS                         .collect::<Result<Vec<_>, _>>()?,
-//RS                     _ => return Err(error(
-//RS                         jet_std::DataErrorKind::InvalidArgument,
-//RS                         operation,
-//RS                         "parameters must be an array",
-//RS                     )),
-//RS                 };
-//RS                 let authority = text(value(2)?, operation)?;
-//RS                 jet_data_loader_database::<T>(
-//RS                     &query,
-//RS                     &parameters,
-//RS                     &authority,
-//RS                     &limits(values.get(3))?,
-//RS                 )?
-//RS             }
-//RS             "value" => {
-//RS                 let decoded = decode(value(0)?)?;
-//RS                 jet_data_loader_value::<T>(&decoded, &limits(values.get(1))?)?
-//RS             }
-//RS             _ => {
-//RS                 return Err(error(
-//RS                     jet_std::DataErrorKind::InvalidArgument,
-//RS                     operation,
-//RS                     "operation is not a typed loader constructor",
-//RS                 ))
-//RS             }
-//RS         };
-//RS         Ok(Handle::TypedLoader(Box::new(TypedLoader { loader })))
-//RS     }
-//RS     fn type_key(root: &jet_std::DataTree, operation: &str) -> Result<String, jet_std::DataError> {
-//RS         let values = match field(root, "type_args") {
-//RS             Some(jet_std::DataTree::Array(values)) if values.len() == 1 => values,
-//RS             _ => return Err(error(
-//RS                 jet_std::DataErrorKind::InvalidArgument,
-//RS                 operation,
-//RS                 "typed data operation requires one canonical T type argument",
-//RS             )),
-//RS         };
-//RS         let value = text(&values[0], operation)?;
-//RS         Ok(value
-//RS             .split_once(":abi=")
-//RS             .map_or(value.as_str(), |(name, _)| name)
-//RS             .to_string())
-//RS     }
-//RS     fn typed_handle(
-//RS         root: &jet_std::DataTree,
-//RS         operation: &str,
-//RS     ) -> Result<Handle, jet_std::DataError> {
-//RS         let key = type_key(root, operation)?;
-//RS         let values = args(root)?;
-//RS         WEB_TYPE_FACTORIES.with(|cell| {
-//RS             let factories = cell.borrow();
-//RS             let Some((_, factory)) = factories.iter().find(|(known, _)| known == &key) else {
-//RS                 return Err(error(
-//RS                     jet_std::DataErrorKind::Bridge,
-//RS                     operation,
-//RS                     format!("typed data codec `{key}` is not registered"),
-//RS                 ));
-//RS             };
-//RS             factory(operation, values)
-//RS         })
-//RS     }
-//RS     fn dispatch(root: &jet_std::DataTree) -> Result<jet_std::DataTree, jet_std::DataError> {
-//RS         let operation = text(field(root, "op").ok_or_else(|| error(jet_std::DataErrorKind::InvalidArgument, "data.web", "wire operation is missing"))?, "data.web")?;
-//RS         let values = args(root)?;
-//RS         let value = |index: usize| values.get(index).ok_or_else(|| error(jet_std::DataErrorKind::InvalidArgument, &operation, "missing argument"));
-//RS         let typed = matches!(
-//RS             operation.as_str(),
-//RS             "load"
-//RS                 | "load_default"
-//RS                 | "file"
-//RS                 | "file_member"
-//RS                 | "url"
-//RS                 | "database"
-//RS                 | "value"
-//RS                 | "snapshot"
-//RS                 | "stream"
-//RS                 | "stream_next"
-//RS                 | "stream_collect"
-//RS         );
-//RS         if typed {
-//RS             match field(root, "type_args") {
-//RS                 Some(jet_std::DataTree::Array(values)) if values.len() == 1 => {}
-//RS                 _ => {
-//RS                     return Err(error(
-//RS                         jet_std::DataErrorKind::InvalidArgument,
-//RS                         &operation,
-//RS                         "typed data operation requires one canonical T type argument",
-//RS                     ))
-//RS                 }
-//RS             }
-//RS         }
-//RS         match operation.as_str() {
-//RS             "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" => {
-//RS                 Ok(store(typed_handle(root, &operation)?))
-//RS             }
-//RS             "bind" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let payload = bytes(value(1)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| loader.bind(&payload).map(|_| jet_std::DataTree::Null))
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| jet_data_loader_bind(loader, &payload).map(|_| jet_std::DataTree::Null))
-//RS                 }
-//RS             }
-//RS             "bind_text" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let payload = text(value(1)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| loader.bind_text(&payload).map(|_| jet_std::DataTree::Null))
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| jet_data_loader_bind_text(loader, &payload).map(|_| jet_std::DataTree::Null))
-//RS                 }
-//RS             }
-//RS             "snapshot" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| loader.snapshot())
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| jet_data_loader_snapshot(loader).map(snapshot))
-//RS                 }
-//RS             }
-//RS             "loader_cancel" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| { loader.cancel(); Ok(jet_std::DataTree::Null) })
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| { jet_data_loader_cancel(loader); Ok(jet_std::DataTree::Null) })
-//RS                 }
-//RS             }
-//RS             "offline" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let enabled = boolean(value(1)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| { loader.offline(enabled); Ok(jet_std::DataTree::Null) })
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| { jet_data_loader_offline(loader, enabled); Ok(jet_std::DataTree::Null) })
-//RS                 }
-//RS             }
-//RS             "invalidate" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let cause = text(value(1)?, &operation)?;
-//RS                 let cause = match cause.as_str() {
-//RS                     "Loader" => jet_std::DataInvalidationCause::Loader,
-//RS                     "Input" => jet_std::DataInvalidationCause::Input,
-//RS                     "ArchiveMember" => jet_std::DataInvalidationCause::ArchiveMember,
-//RS                     "Parameters" => jet_std::DataInvalidationCause::Parameters,
-//RS                     "Credential" => jet_std::DataInvalidationCause::Credential,
-//RS                     "Capability" => jet_std::DataInvalidationCause::Capability,
-//RS                     "Manual" => jet_std::DataInvalidationCause::Manual,
-//RS                     _ => jet_std::DataInvalidationCause::NoCause,
-//RS                 };
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| { loader.invalidate(cause); Ok(jet_std::DataTree::Null) })
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| { jet_data_loader_invalidate(loader, cause); Ok(jet_std::DataTree::Null) })
-//RS                 }
-//RS             }
-//RS             "needs_refresh" | "ready" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| Ok(jet_std::DataTree::Bool(if operation == "ready" { loader.ready() } else { loader.needs_refresh() })))
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| Ok(jet_std::DataTree::Bool(if operation == "ready" { jet_data_loader_ready(loader) } else { jet_data_loader_needs_refresh(loader) })))
-//RS                 }
-//RS             }
-//RS             "loader_status" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| Ok(loader.status()))
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| Ok(status(&jet_data_loader_status(loader))))
-//RS                 }
-//RS             }
-//RS             "source_identity" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| Ok(loader.source_identity()))
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| Ok(source_identity(&jet_data_loader_source_identity(loader))))
-//RS                 }
-//RS             }
-//RS             "authority_of" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     with_typed_loader(index, &operation, |loader| Ok(loader.authority()))
-//RS                 } else {
-//RS                     with_loader(index, &operation, |loader| Ok(result_tree(vec![("scope", text_tree(loader.authority.scope.clone())), ("revision", text_tree(loader.authority.revision.clone()))])))
-//RS                 }
-//RS             }
-//RS             "stream" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_loader(index) {
-//RS                     Ok(store(Handle::TypedStream(with_typed_loader(index, &operation, |loader| loader.stream())?)))
-//RS                 } else {
-//RS                     let stream = with_loader(index, &operation, jet_data_loader_stream)?;
-//RS                     Ok(store(Handle::Stream(stream)))
-//RS                 }
-//RS             }
-//RS             "stream_next" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_stream(index) {
-//RS                     with_typed_stream(index, &operation, |stream| stream.next())
-//RS                 } else {
-//RS                     with_stream(index, &operation, |stream| match jet_data_stream_next::<jet_std::DataTree>(stream)? {
-//RS                         Ok(value) => Ok(result_tree(vec![("tag", text_tree("Some")), ("values", jet_std::DataTree::Array(vec![value]))])),
-//RS                         Err(_) => Ok(result_tree(vec![("tag", text_tree("None")), ("values", jet_std::DataTree::Array(Vec::new()))])),
-//RS                     })
-//RS                 }
-//RS             }
-//RS             "stream_collect" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_stream(index) {
-//RS                     with_typed_stream(index, &operation, |stream| stream.collect())
-//RS                 } else {
-//RS                     with_stream(index, &operation, |stream| Ok(jet_std::DataTree::Array(
-//RS                         jet_data_stream_collect::<jet_std::DataTree>(stream)?,
-//RS                     )))
-//RS                 }
-//RS             }
-//RS             "stream_cancel" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 if has_typed_stream(index) {
-//RS                     with_typed_stream(index, &operation, |stream| { stream.cancel(); Ok(jet_std::DataTree::Null) })
-//RS                 } else {
-//RS                     with_stream(index, &operation, |stream| { jet_data_stream_cancel(stream); Ok(jet_std::DataTree::Null) })
-//RS                 }
-//RS             }
-//RS             "track" => {
-//RS                 let rows = match value(0)? {
-//RS                     jet_std::DataTree::Array(rows) => rows.clone(),
-//RS                     _ => {
-//RS                         return Err(error(
-//RS                             jet_std::DataErrorKind::InvalidArgument,
-//RS                             &operation,
-//RS                             "data.track expects an array",
-//RS                         ))
-//RS                     }
-//RS                 };
-//RS                 let callback = u32::try_from(integer(value(1)?, &operation)?).map_err(|_| {
-//RS                     error(
-//RS                         jet_std::DataErrorKind::InvalidArgument,
-//RS                         &operation,
-//RS                         "invalid callback",
-//RS                     )
-//RS                 })?;
-//RS                 let tracked =
-//RS                     jet_std::DataTracked::new(rows, move |row| callback_key(callback, row))?;
-//RS                 Ok(store(Handle::Tracked(tracked)))
-//RS             }
-//RS             "query" => {
-//RS                 let rows = match value(0)? { jet_std::DataTree::Array(rows) => rows.clone(), value => vec![value.clone()] };
-//RS                 Ok(store(Handle::Query(jet_data_query(&rows))))
-//RS             }
-//RS             "tracked_query" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let tracked = clone_tracked(index, &operation)?;
-//RS                 Ok(store(Handle::Query(jet_std::DataQuery::from_tracked(&tracked))))
-//RS             }
-//RS             "track_insert" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let row = value(1)?.clone();
-//RS                 with_tracked(index, &operation, |tracked| tracked.insert(row))?;
-//RS                 Ok(jet_std::DataTree::Null)
-//RS             }
-//RS             "track_replace" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let key = callback_key_value(value(1)?);
-//RS                 let row = value(2)?.clone();
-//RS                 with_tracked(index, &operation, |tracked| tracked.replace(key, row))?;
-//RS                 Ok(jet_std::DataTree::Null)
-//RS             }
-//RS             "track_remove" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let key = callback_key_value(value(1)?);
-//RS                 with_tracked(index, &operation, |tracked| tracked.remove(key))?;
-//RS                 Ok(jet_std::DataTree::Null)
-//RS             }
-//RS             "filter" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let callback = u32::try_from(integer(value(1)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid callback"))?;
-//RS                 let query = clone_query(index)?;
-//RS                 Ok(store(Handle::Query(jet_data_query_filter(&query, move |row| callback_filter(callback, row)))))
-//RS             }
-//RS             "sort_by" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let callback = u32::try_from(integer(value(1)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid callback"))?;
-//RS                 let query = clone_query(index)?;
-//RS                 Ok(store(Handle::Query(jet_data_query_sort_by(&query, move |row| callback_key(callback, row)))))
-//RS             }
-//RS             "map" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let callback = u32::try_from(integer(value(1)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid callback"))?;
-//RS                 let query = clone_query(index)?;
-//RS                 Ok(store(Handle::Query(jet_data_query_map_checked(&query, move |row| {
-//RS                     callback_value(callback, row, "query.map")
-//RS                 }))))
-//RS             }
-//RS             "min" | "max" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let callback = u32::try_from(integer(value(1)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid callback"))?;
-//RS                 let query = clone_query(index)?;
-//RS                 let values = if operation == "min" {
-//RS                     jet_data_query_min(&query, move |row| callback_key(callback, row))
-//RS                 } else {
-//RS                     jet_data_query_max(&query, move |row| callback_key(callback, row))
-//RS                 };
-//RS                 Ok(store(Handle::Query(jet_data_query_map(&values, |value| text_tree(value)))))
-//RS             }
-//RS             "inner_join" | "left_join" => {
-//RS                 let left = clone_query(handle(value(0)?, &operation)?)?;
-//RS                 let right = clone_query(handle(value(1)?, &operation)?)?;
-//RS                 let left_callback = u32::try_from(integer(value(2)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid left callback"))?;
-//RS                 let right_callback = u32::try_from(integer(value(3)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid right callback"))?;
-//RS                 if operation == "inner_join" {
-//RS                     let joined = jet_data_query_inner_join(
-//RS                         &left,
-//RS                         &right,
-//RS                         move |row| callback_key(left_callback, row),
-//RS                         move |row| callback_key(right_callback, row),
-//RS                     );
-//RS                     Ok(store(Handle::Query(jet_data_query_map(&joined, |row| {
-//RS                         result_tree(vec![("left", row.left), ("right", row.right)])
-//RS                     }))))
-//RS                 } else {
-//RS                     let joined = jet_data_query_left_join(
-//RS                         &left,
-//RS                         &right,
-//RS                         move |row| callback_key(left_callback, row),
-//RS                         move |row| callback_key(right_callback, row),
-//RS                     );
-//RS                     Ok(store(Handle::Query(jet_data_query_map(&joined, |row| {
-//RS                         let right = match row.right {
-//RS                             Ok(value) => value,
-//RS                             Err(_) => jet_std::DataTree::Null,
-//RS                         };
-//RS                         result_tree(vec![("left", row.left), ("right", right)])
-//RS                     }))))
-//RS                 }
-//RS             }
-//RS             "group_by" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let callback = u32::try_from(integer(value(1)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid callback"))?;
-//RS                 let query = clone_query(index)?;
-//RS                 let grouped = jet_data_query_group_by(&query, move |row| callback_key(callback, row));
-//RS                 Ok(store(Handle::Grouped(grouped)))
-//RS             }
-//RS             "watch" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let query = clone_query(index)?;
-//RS                 Ok(store(Handle::Watch(jet_data_query_watch(&query)?)))
-//RS             }
-//RS             "watch_get" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 Ok(jet_std::DataTree::Array(with_watch(index, &operation, |watch| jet_data_watch_get(watch))?))
-//RS             }
-//RS             "watch_status" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 Ok(with_watch(index, &operation, |watch| Ok(watch_status(&jet_data_watch_status(watch))))?)
-//RS             }
-//RS             "watch_cancel" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 with_watch(index, &operation, |watch| {
-//RS                     jet_data_watch_cancel(watch);
-//RS                     Ok(())
-//RS                 })?;
-//RS                 Ok(jet_std::DataTree::Null)
-//RS             }
-//RS             "group_count" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let query = with_grouped(index, &operation, |grouped| Ok(jet_data_group_count_query(grouped)))?;
-//RS                 Ok(store(Handle::Query(jet_data_query_map(&query, |row| {
-//RS                     result_tree(vec![("key", text_tree(row.key)), ("value", jet_std::DataTree::Int(row.value))])
-//RS                 }))))
-//RS             }
-//RS             "group_sum" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let callback = u32::try_from(integer(value(1)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid callback"))?;
-//RS                 let query = with_grouped(index, &operation, |grouped| {
-//RS                     Ok(jet_data_group_sum_query_checked(grouped, move |row| {
-//RS                         callback_number(callback, row, "query.group_by.sum")
-//RS                     }))
-//RS                 })?;
-//RS                 Ok(store(Handle::Query(jet_data_query_map(&query, |row| {
-//RS                     result_tree(vec![("key", text_tree(row.key)), ("value", jet_std::DataTree::Float(row.value))])
-//RS                 }))))
-//RS             }
-//RS             "group_mean" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 let callback = u32::try_from(integer(value(1)?, &operation)?).map_err(|_| error(jet_std::DataErrorKind::InvalidArgument, &operation, "invalid callback"))?;
-//RS                 let query = with_grouped(index, &operation, |grouped| {
-//RS                     Ok(jet_data_group_mean_query_checked(grouped, move |row| {
-//RS                         callback_number(callback, row, "query.group_by.mean")
-//RS                     }))
-//RS                 })?;
-//RS                 Ok(store(Handle::Query(jet_data_query_map(&query, |row| {
-//RS                     result_tree(vec![("key", text_tree(row.key)), ("value", jet_std::DataTree::Float(row.value))])
-//RS                 }))))
-//RS             }
-//RS             "count" => match value(0)? {
-//RS                 jet_std::DataTree::Array(values) => Ok(jet_std::DataTree::Int(values.len() as i64)),
-//RS                 value => {
-//RS                     let query = clone_query(handle(value, &operation)?)?;
-//RS                     Ok(jet_std::DataTree::Int(jet_data_query_collect(&query)?.len() as i64))
-//RS                 }
-//RS             },
-//RS             "snapshot_reusable" => {
-//RS                 let left = value(0)?;
-//RS                 let right = value(1)?;
-//RS                 Ok(jet_std::DataTree::Bool(jet_data_loader_canonical_tree(left) == jet_data_loader_canonical_tree(right)))
-//RS             }
-//RS             "require_bridge" => {
-//RS                 let provider = text(value(0)?, &operation)?;
-//RS                 jet_data_require_bridge(&provider)?;
-//RS                 Ok(jet_std::DataTree::Null)
-//RS             }
-//RS             "status" => Ok(jet_std::DataTree::Array(jet_data_status().into_iter().map(|value| data_status(&value)).collect())),
-//RS             "release" => {
-//RS                 let index = handle(value(0)?, &operation)?;
-//RS                 HANDLES.with(|cell| if let Some(slot) = cell.borrow_mut().get_mut(index) { *slot = None; });
-//RS                 Ok(jet_std::DataTree::Null)
-//RS             }
-//RS             _ => Err(error(jet_std::DataErrorKind::Bridge, &operation, "operation is not available on the Web DataFlow bridge")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn wire_error(error: &jet_std::DataError) -> String {
-//RS         format!("{{\"error\":{{\"kind\":{},\"operation\":{},\"reason\":{}}}}}", quote(&error.kind.to_string()), quote(&error.operation), quote(&error.reason))
-//RS     }
-//RS     fn set_output(value: String) {
-//RS         OUTPUT.with(|cell| *cell.borrow_mut() = value.into_bytes());
-//RS     }
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_data_web_input_alloc(slot: u32, length: u32) -> u32 {
-//RS         let Ok(slot) = usize::try_from(slot) else { return 0 };
-//RS         if slot >= 4 { return 0 }
-//RS         INPUTS.with(|cell| {
-//RS             let mut inputs = cell.borrow_mut();
-//RS             let input = &mut inputs[slot];
-//RS             input.resize(length as usize, 0);
-//RS             input.as_mut_ptr() as usize as u32
-//RS         })
-//RS     }
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_data_web_input_free(slot: u32, _pointer: u32) {
-//RS         if let Ok(slot) = usize::try_from(slot) {
-//RS             INPUTS.with(|cell| if let Some(input) = cell.borrow_mut().get_mut(slot) { input.clear(); });
-//RS         }
-//RS     }
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_data_web_output_ptr() -> u32 {
-//RS         OUTPUT.with(|cell| cell.borrow().as_ptr() as usize as u32)
-//RS     }
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_data_web_output_len() -> u32 {
-//RS         OUTPUT.with(|cell| u32::try_from(cell.borrow().len()).unwrap_or(u32::MAX))
-//RS     }
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_data_web_output_clear() {
-//RS         OUTPUT.with(|cell| cell.borrow_mut().clear());
-//RS     }
-//RS     #[no_mangle]
-//RS     pub extern "C" fn jet_data_web_call(pointer: u32, length: u32) -> i32 {
-//RS         let input = unsafe { std::slice::from_raw_parts(pointer as *const u8, length as usize) };
-//RS         let parsed = std::str::from_utf8(input).ok().and_then(|value| jet_std::parse_json_typed_datatree(value).ok());
-//RS         let result = parsed.map_or_else(
-//RS             || Err(error(jet_std::DataErrorKind::Decode, "data.web", "invalid Web DataFlow wire JSON")),
-//RS             |value| dispatch(&value),
-//RS         );
-//RS         match result {
-//RS             Ok(value) => { set_output(jet_data_loader_canonical_tree(&value)); 0 }
-//RS             Err(error) => { set_output(wire_error(&error)); 1 }
-//RS         }
-//RS     }
-//RS }
-//RS #[cfg(target_arch = "wasm32")]
-//RS pub fn jet_data_web_register_type<T>(key: &'static str)
-//RS where
-//RS     T: __jet_Decode + __jet_Encode + Clone + 'static,
-//RS {
-//RS     jet_data_web::register_type::<T>(key);
-//RS }
-//RS 
-//RS /// D-SQL-SURFACE1=C / D-QUERY-RETAIN1=A: `[T].query(SQL)`. Internal symbol
-//RS /// behind the one public `query` spelling; the checked SQL selects source
-//RS /// rows eagerly and the result is the same reusable deferred carrier the
-//RS /// list door returns.
-//RS fn jet_data_query_sql<T: __jet_Encode + Clone + 'static>(
-//RS     rows: &Vec<T>,
-//RS     sql: &String,
-//RS ) -> Result<jet_std::DataQuery<T>, Vec<jet_std::FieldError>> {
-//RS     let selected = jet_data_query_rows(rows, sql)?;
-//RS     Ok(jet_data_query(&selected).with_step("sql"))
-//RS }
-//RS 
-//RS fn jet_enc_csv_query<T: __jet_Decode + __jet_Encode + Clone + 'static>(
-//RS     path: &String,
-//RS     sql: &String,
-//RS ) -> Result<jet_std::DataQuery<T>, Vec<jet_std::FieldError>> {
-//RS     let text = jet_data_query_read(path)?;
-//RS     let csv_rows = jet_ring_csv_parse(&text, &",".to_string(), false, false)
-//RS         .map_err(jet_std::FieldError::one)?;
-//RS     let header = csv_rows.first().cloned().unwrap_or_default();
-//RS     jet_data_query_validate_fields(&header, sql)?;
-//RS     let rows = jet_enc_csv_decode::<T>(&text)?;
-//RS     jet_data_query_sql(&rows, sql)
-//RS }
-// END-PORT-PENDING 0263 crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3592-5034
+use core.data.[DataLoader, DataLoaderStatus, DataSourceIdentity, DataAuthority, DataSnapshotIdentity, DataFormat, DataStream, DataStreamInner, DataError, DataErrorKind, DataStatus, DataLoaderKind, DataFreshness, DataInvalidationCause, DataLimits]
+use core.encoding.runtime.std_data_tree.[DataTree]
+use core.prelude.runtime.std_common_types.[DataArrowBatch]
+use core.prelude.runtime.std_common_types_02.[DataQuery]
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay, JetDebug]
+use core.mem.runtime.portable_core.[JetAbsent]
+use core.encoding.runtime.top_encoding_traits.[__jet_Decode, __jet_Encode]
+use core.encoding.runtime.std_stream.[JetFileReader]
+use core.data.runtime.top_data_flow.[jet_data_limits_validate, jet_data_query]
+use core.data.runtime.top_data_stats.[jet_data_error]
+use core.data.runtime.top_data_flow_02.[jet_data_loader_status_from_kernel, jet_data_loader_kernel_state, jet_data_loader_tree, jet_data_loader_fail, jet_data_loader_error, jet_data_loader_kernel_error, jet_data_loader_payload, jet_data_loader_bounded_text, jet_data_loader_sensitive_value, jet_data_loader_public_member, jet_data_loader_public_parameter, jet_data_loader_public_locator, jet_data_loader_status_text, JET_DATA_LOADER_MAX_STATUS_TEXT, JET_DATA_LOADER_MAX_PUBLIC_TEXT, jet_data_csv_reader, jet_data_json_reader, jet_data_jsonl_reader]
+use jet_foundation.PreludeDataFlow as PreludeDataFlow
+use jet_arrow_data.[ArrowRow]
+use std.fs.[File]
+use std.io.[BufReader]
+use core.prelude.runtime.std_common_types.[DataTracked, DataSnapshot]
+use core.prelude.runtime.std_common_types_02.[DataGroupedQuery, DataWatch, DataWatchStatus]
+use core.encoding.runtime.std_data_tree.[FieldError, parse_json_typed_datatree]
+use core.data.runtime.top_data_flow.[jet_data_query_filter, jet_data_query_sort_by, jet_data_query_map, jet_data_query_map_checked, jet_data_query_min, jet_data_query_max, jet_data_query_inner_join, jet_data_query_left_join, jet_data_query_group_by, jet_data_query_collect, jet_data_query_watch, jet_data_watch_get, jet_data_watch_status, jet_data_watch_cancel]
+use core.data.runtime.top_data_flow_02.[jet_data_stream_next, jet_data_stream_collect, jet_data_loader_bind, jet_data_loader_bind_text, jet_data_loader_snapshot, jet_data_loader_cancel, jet_data_loader_offline, jet_data_loader_invalidate, jet_data_loader_needs_refresh, jet_data_loader_ready, jet_data_loader_load, jet_data_loader_load_default, jet_data_loader_file, jet_data_loader_file_member, jet_data_loader_url, jet_data_loader_database, jet_data_loader_value, jet_data_field_errors_reason, jet_data_loader_quote, jet_data_loader_canonical_tree, jet_data_group_count_query, jet_data_group_sum_query_checked, jet_data_group_mean_query_checked]
+use core.data.runtime.top_data_stats.[jet_data_status, jet_data_require_bridge]
+use core.data.runtime.top_data_fmt.jet_data_query_rows
+use core.data.runtime.top_data_query.[jet_data_query_read, jet_data_query_validate_fields]
+use core.encoding.runtime.top_encoding_csv.jet_ring_csv_parse
+use core.encoding.runtime.top_encoding_traits.jet_enc_csv_decode
+use std.boxed.Box
+use std.marker.PhantomData
+use std.cell.RefCell
+use std.thread.ThreadLocal
+use std.slice
+use std.str
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3592
+fn jet_data_loader_status<T>(loader: &DataLoader<T>) -> DataLoaderStatus {
+    jet_data_loader_status_from_kernel(PreludeDataFlow.status(&jet_data_loader_kernel_state(loader)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3600
+fn jet_data_loader_source_identity<T>(loader: &DataLoader<T>) -> DataSourceIdentity { loader.source.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3606
+fn jet_data_loader_authority_of<T>(loader: &DataLoader<T>) -> DataAuthority { loader.authority.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3612
+fn jet_data_snapshot_reusable(previous: &DataSnapshotIdentity, current: &DataSnapshotIdentity) -> Bool {
+    previous.id == current.id && previous.source == current.source && previous.content == current.content && previous.schema == current.schema && previous.format == current.format
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3623
+fn jet_data_loader_stream_from_payload<T>(loader: &DataLoader<T>, payload: [U8]) -> DataStream DataError! {
+    tree :: match jet_data_loader_tree(&payload, loader.format, &loader.limits) {
+        Ok(tree) -> ^tree
+        Err(error) -> return Err(jet_data_loader_fail(loader, ^error))
+    }
+    rows :: match tree { DataTree.Array(rows) -> ^rows, value -> [^value] }
+    if I64{rows.len()} > loader.limits.max_output_rows {
+        return Err(jet_data_loader_fail(loader, jet_data_loader_error(DataErrorKind.Limit, "data.loader.stream", "max_output_rows {loader.limits.max_output_rows} exceeded")))
+    }
+    stream :: DataStream{inner: DataStreamInner.Provider{format: loader.format, rows: ^rows, cursor: 0}, limits: loader.limits.clone(), terminal: None, eof: false, row_index: 0, cancelled: false}
+    loader.status.buffered_bytes = I64.try_from(payload.len()).unwrap_or(I64.MAX)
+    loader.status.backpressure = loader.status.buffered_bytes > loader.limits.encoding.buffer_bytes
+    Ok(^stream)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3663
+fn jet_data_loader_stream<R: __jet_Decode, T>(loader: &DataLoader<T>) -> DataStream DataError! {
+    if loader.cancelled { return Err(jet_data_loader_error(DataErrorKind.State, "data.loader.stream", "loader was cancelled")) }
+    kernel_state :: jet_data_loader_kernel_state(loader)
+    payload :: match PreludeDataFlow.payload(&kernel_state) {
+        Ok(Val((payload, _offline))) -> Val(^payload)
+        Ok(None) -> None
+        Err(error) -> return Err(jet_data_loader_fail(loader, jet_data_loader_kernel_error(^error)))
+    }
+    if Val(payload) :: payload { return jet_data_loader_stream_from_payload(loader, ^payload) }
+    if loader.format == DataFormat.Parquet {
+        payload :: match jet_data_loader_payload(loader) {
+            Ok((payload, _offline)) -> ^payload
+            Err(error) -> return Err(jet_data_loader_fail(loader, ^error))
+        }
+        return jet_data_loader_stream_from_payload(loader, ^payload)
+    }
+    if loader.source.kind != DataLoaderKind.File || !loader.source.member.is_empty() {
+        return Err(jet_data_loader_fail(loader, jet_data_loader_error(DataErrorKind.Bridge, "data.loader.stream", "provider-owned sources must expose a bounded DataStream directly")))
+    }
+    raw_locator :: loader.raw_locator.clone()
+    source_locator :: loader.source.locator.clone()
+    // GATE #4565: kernel primitive
+    file :: #Unsafe("open the loader's retained OS path as an owned read handle; preserve native IO errors") {
+        File.open(&raw_locator).map_err(fn(error) { jet_data_loader_error(DataErrorKind.IO, "data.loader.stream", "could not open `{source_locator}`: {error}") })
+    }
+    file :: match file { Ok(file) -> ^file, Err(error) -> return Err(jet_data_loader_fail(loader, ^error)) }
+    // GATE #4565: kernel primitive
+    input :: #Unsafe("move the open file into its single buffered reader owner") { JetFileReader{inner: BufReader.new(^file), path: ^raw_locator} }
+    stream :: match loader.format {
+        DataFormat.CSV -> jet_data_csv_reader<R>(^input, loader.limits.clone())
+        DataFormat.JSON -> jet_data_json_reader<R>(^input, loader.limits.clone())
+        DataFormat.JSONL -> jet_data_jsonl_reader(^input, loader.limits.clone())
+        DataFormat.Parquet -> panic("Parquet payload handled before file stream")
+        DataFormat.Arrow -> Err(jet_data_loader_error(DataErrorKind.Bridge, "data.loader.stream", "Arrow IPC has a separate provider boundary; Parquet is the registered reader"))
+    }
+    stream :: match stream { Ok(stream) -> ^stream, Err(error) -> return Err(jet_data_loader_fail(loader, ^error)) }
+    loader.status.buffered_bytes = 0
+    loader.status.backpressure = false
+    Ok(^stream)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3741
+fn jet_data_stream_cancel(stream: &DataStream) -> () {
+    stream.cancelled = true
+    if stream.terminal.is_none() { stream.terminal = Val(jet_data_error(DataErrorKind.State, "data.stream", "stream was cancelled")) }
+}
+impl JetShow for DataFormat {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3753
+    fn jet_show(self: &Self) -> String { self.as_str().to_string() }
+}
+impl JetShow for DataStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3759
+    fn jet_show(self: &Self) -> String {
+        "DataStatus(step: {jet_data_loader_bounded_text(&self.step, JET_DATA_LOADER_MAX_STATUS_TEXT)}, path: {jet_data_loader_bounded_text(&self.path, JET_DATA_LOADER_MAX_STATUS_TEXT)}, clone_value: {jet_data_loader_bounded_text(&self.clone_value, JET_DATA_LOADER_MAX_STATUS_TEXT)}, ownership: {jet_data_loader_bounded_text(&self.ownership, JET_DATA_LOADER_MAX_STATUS_TEXT)}, trust: {jet_data_loader_bounded_text(&self.trust, JET_DATA_LOADER_MAX_STATUS_TEXT)}, fallback: {jet_data_loader_bounded_text(&self.fallback, JET_DATA_LOADER_MAX_STATUS_TEXT)}, replacement: {jet_data_loader_bounded_text(&self.replacement, JET_DATA_LOADER_MAX_STATUS_TEXT)})"
+    }
+}
+impl JetDisplay for DataStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3774
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+impl JetDebug for DataStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3780
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+impl JetShow for DataLoaderKind {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3786
+    fn jet_show(self: &Self) -> String { "{self:?}" }
+}
+impl JetShow for DataFreshness {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3792
+    fn jet_show(self: &Self) -> String { "{self:?}" }
+}
+impl JetShow for DataInvalidationCause {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3798
+    fn jet_show(self: &Self) -> String { "{self:?}" }
+}
+impl JetShow for DataAuthority {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3804
+    fn jet_show(self: &Self) -> String {
+        scope :: if jet_data_loader_sensitive_value(&self.scope) { "<redacted>" } else { jet_data_loader_bounded_text(&self.scope, JET_DATA_LOADER_MAX_PUBLIC_TEXT) }
+        revision :: if jet_data_loader_sensitive_value(&self.revision) { "<redacted>" } else { jet_data_loader_bounded_text(&self.revision, JET_DATA_LOADER_MAX_PUBLIC_TEXT) }
+        if revision.is_empty() { scope } else { "{scope}@{revision}" }
+    }
+}
+impl JetShow for DataSourceIdentity {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3824
+    fn jet_show(self: &Self) -> String {
+        member :: if self.member.is_empty() { "" } else { "#{jet_data_loader_public_member(&self.member)}" }
+        parameters :: self.parameters.iter().map(fn(parameter) { jet_data_loader_public_parameter(parameter) }).collect::<[String]>()
+        parameters :: if parameters.is_empty() { "" } else { "?{parameters.join("&")}" }
+        locator :: jet_data_loader_public_locator(&self.locator)
+        "{self.kind:?}:{locator}{member}{parameters}"
+    }
+}
+impl JetShow for DataLoaderStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3846
+    fn jet_show(self: &Self) -> String {
+        "LoaderStatus {{ identity: {jet_data_loader_bounded_text(&self.identity, JET_DATA_LOADER_MAX_STATUS_TEXT)}, freshness: {self.freshness:?}, invalidated_by: {self.invalidated_by:?}, error: {jet_data_loader_status_text(&self.error):?}, cleanup: {jet_data_loader_bounded_text(&self.cleanup, JET_DATA_LOADER_MAX_STATUS_TEXT)}, buffered_bytes: {self.buffered_bytes.max(0)}, backpressure: {self.backpressure}, last_good: {self.last_good} }}"
+    }
+}
+impl JetDisplay for DataLoaderStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3862
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+impl JetDebug for DataLoaderStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3868
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+impl JetShow for DataSnapshotIdentity {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3874
+    fn jet_show(self: &Self) -> String { "SnapshotIdentity {{ id: {self.id}, source: {self.source}, content: {self.content}, schema: {self.schema}, format: {self.format.as_str()} }}" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3890
+/// Consume the single Arrow release owner and decode through its row model.
+fn jet_data_query_arrow<T: ArrowRow + Clone>(batch: DataArrowBatch<T>) -> DataQuery<T> DataError! {
+    limits :: DataLimits.safe()
+    jet_data_limits_validate(&limits)?
+    max_rows :: USize.try_from(limits.max_output_rows).map_err(fn(_) { jet_data_error(DataErrorKind.Limit, "data.query_arrow", "max_output_rows cannot be represented by this target") })?
+    if batch.row_count() > max_rows { return Err(jet_data_error(DataErrorKind.Limit, "data.query_arrow", "max_output_rows {limits.max_output_rows} exceeded")) }
+    rows := [T].with_capacity(batch.row_count())
+    for index in 0..batch.row_count() {
+        row :: batch.row(index).map_err(fn(error) { DataError{kind: DataErrorKind.Bridge, operation: "data.query_arrow", row: Ok(I64{index}), column: Err(JetAbsent), index: Err(JetAbsent), reason: error.to_string(), cause: Err(JetAbsent)} })?
+        rows.push(^row)
+    }
+    Ok(jet_data_query(&rows))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3931
+/// Move the producer-vetted Arrow owner without creating a second authority.
+fn jet_data_arrow_import<T>(batch: DataArrowBatch<T>) -> DataArrowBatch<T> { ^batch }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3936
+// D-DATA-WEB1=A: one handle-free Web/Wasm wire; JavaScript owns transport and
+// callback publication; this owner retains canonical state and decode policy.
+// Selected wasm32 publication is an integration concern, not a second backend.
+module jet_data_web {
+    use super.*
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3944
+    trait WebTypedStream {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3945
+        fn next(self: &Self) -> DataTree DataError!
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3946
+        fn collect(self: &Self) -> DataTree DataError!
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3947
+        fn cancel(self: &Self) -> ()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3949
+    trait WebTypedLoader {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3950
+        fn bind(self: &Self, payload: &[U8]) -> () DataError!
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3951
+        fn bind_text(self: &Self, payload: &String) -> () DataError!
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3952
+        fn snapshot(self: &Self) -> DataTree DataError!
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3953
+        fn cancel(self: &Self) -> ()
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3954
+        fn offline(self: &Self, enabled: Bool) -> ()
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3955
+        fn invalidate(self: &Self, cause: DataInvalidationCause) -> ()
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3956
+        fn needs_refresh(self: &Self) -> Bool
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3957
+        fn ready(self: &Self) -> Bool
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3958
+        fn status(self: &Self) -> DataTree
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3959
+        fn source_identity(self: &Self) -> DataTree
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3960
+        fn authority(self: &Self) -> DataTree
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3961
+        fn stream(self: &Self) -> Box<WebTypedStream> DataError!
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3963
+    struct TypedStream<T> { stream: DataStream, marker: PhantomData<T> }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3967
+    struct TypedLoader<T> { loader: DataLoader<T> }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3970
+    impl<T: __jet_Decode + __jet_Encode + Clone> WebTypedStream for TypedStream<T> {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3974
+        fn next(self: &Self) -> DataTree DataError! {
+            match jet_data_stream_next<T>(&self.stream)? {
+                Ok(value) -> Ok(result_tree([("tag", text_tree("Some")), ("values", DataTree.Array([value.jet_encode()]))]))
+                Err(_) -> Ok(result_tree([("tag", text_tree("None")), ("values", DataTree.Array([]))]))
+            }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3986
+        fn collect(self: &Self) -> DataTree DataError! {
+            Ok(DataTree.Array(jet_data_stream_collect<T>(&self.stream)?.into_iter().map(fn(value) { value.jet_encode() }).collect()))
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3994
+        fn cancel(self: &Self) -> () { jet_data_stream_cancel(&self.stream) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3998
+    impl<T: __jet_Decode + __jet_Encode + Clone> WebTypedLoader for TypedLoader<T> {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4002
+        fn bind(self: &Self, payload: &[U8]) -> () DataError! { jet_data_loader_bind(&self.loader, payload) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4005
+        fn bind_text(self: &Self, payload: &String) -> () DataError! { jet_data_loader_bind_text(&self.loader, payload) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4008
+        fn snapshot(self: &Self) -> DataTree DataError! { Ok(snapshot(jet_data_loader_snapshot(&self.loader)?)) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4011
+        fn cancel(self: &Self) -> () { jet_data_loader_cancel(&self.loader) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4014
+        fn offline(self: &Self, enabled: Bool) -> () { jet_data_loader_offline(&self.loader, enabled) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4017
+        fn invalidate(self: &Self, cause: DataInvalidationCause) -> () { jet_data_loader_invalidate(&self.loader, cause) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4020
+        fn needs_refresh(self: &Self) -> Bool { jet_data_loader_needs_refresh(&self.loader) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4023
+        fn ready(self: &Self) -> Bool { jet_data_loader_ready(&self.loader) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4026
+        fn status(self: &Self) -> DataTree { status(&jet_data_loader_status(&self.loader)) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4029
+        fn source_identity(self: &Self) -> DataTree { source_identity(&jet_data_loader_source_identity(&self.loader)) }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4032
+        fn authority(self: &Self) -> DataTree {
+            result_tree([("scope", text_tree(self.loader.authority.scope.clone())), ("revision", text_tree(self.loader.authority.revision.clone()))])
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4038
+        fn stream(self: &Self) -> Box<WebTypedStream> DataError! {
+            Ok(Box.new(TypedStream<T>{stream: jet_data_loader_stream<T, T>(&self.loader)?, marker: PhantomData}))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4045
+    type WebTypeFactory = fn(&String, &[DataTree]) -> Handle DataError!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4046
+    // GATE #4565: kernel primitive
+    static WEB_TYPE_FACTORIES: ThreadLocal<RefCell<[(String, WebTypeFactory)]>> =
+        #Unsafe("one typed codec registry per wasm thread; borrows remain inside synchronous callbacks") { ThreadLocal.new(fn() { RefCell.new([]) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4049
+    // GATE #4565: kernel primitive
+    #Unsafe("register a typed factory under an exclusive thread-local borrow")
+    pub fn register_type<T: __jet_Decode + __jet_Encode + Clone>(key: &String) -> () {
+        WEB_TYPE_FACTORIES.with(fn(cell) {
+            factories := cell.borrow_mut()
+            if !factories.iter().any(fn(entry) { entry.0 == key }) { factories.push((key.to_string(), typed_factory<T>)) }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4060
+    enum Handle {
+        Loader(DataLoader<DataTree>)
+        TypedLoader(Box<WebTypedLoader>)
+        Query(DataQuery<DataTree>)
+        Tracked(DataTracked<DataTree, String>)
+        Watch(DataWatch<DataTree>)
+        Grouped(DataGroupedQuery<DataTree, String>)
+        Stream(DataStream)
+        TypedStream(Box<WebTypedStream>)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4071
+    // GATE #4565: kernel primitive
+    static HANDLES: ThreadLocal<RefCell<[Handle?]>> =
+        #Unsafe("one owned handle registry per wasm thread; released slots are empty") { ThreadLocal.new(fn() { RefCell.new([]) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4073
+    // GATE #4565: kernel primitive
+    static INPUTS: ThreadLocal<RefCell<[[U8]; 4]>> =
+        #Unsafe("four wasm-owned wire input buffers, with slot three reserved for callback returns") { ThreadLocal.new(fn() { RefCell.new([[], [], [], []]) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4074
+    // GATE #4565: kernel primitive
+    static OUTPUT: ThreadLocal<RefCell<[U8]>> =
+        #Unsafe("one retained wire output buffer per wasm thread") { ThreadLocal.new(fn() { RefCell.new([]) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4079
+    // GATE #4565: kernel primitive — wasm env imports.
+    #FFI(c)
+    fn jet_data_web_callback_bool(callback: U32, pointer: U32, length: U32) -> U32
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4080
+    #FFI(c)
+    fn jet_data_web_callback_key(callback: U32, pointer: U32, length: U32) -> U64
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4081
+    #FFI(c)
+    fn jet_data_web_callback_value(callback: U32, pointer: U32, length: U32) -> U64
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4084
+    fn quote(value: &String) -> String { jet_data_loader_quote(value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4087
+    fn error(kind: DataErrorKind, operation: &String, reason: String) -> DataError { jet_data_error(kind, operation, ^reason) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4090
+    fn field(value: &DataTree, name: &String) -> &DataTree? {
+        match value {
+            DataTree.Object(entries) -> entries.iter().find(fn(entry) { entry.0 == name }).map(fn(entry) { &entry.1 })
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4096
+    fn args(root: &DataTree) -> &[DataTree] DataError! {
+        match field(root, "args") {
+            Val(DataTree.Array(values)) -> Ok(values)
+            _ -> Err(error(DataErrorKind.InvalidArgument, "data.web", "wire args must be an array"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4102
+    fn text(value: &DataTree, operation: &String) -> String DataError! {
+        match value {
+            DataTree.Text(value) | DataTree.TypedText(value) -> Ok(value.clone())
+            _ -> Err(error(DataErrorKind.InvalidArgument, operation, "expected text"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4108
+    fn boolean(value: &DataTree, operation: &String) -> Bool DataError! {
+        match value {
+            DataTree.Bool(value) -> Ok(value)
+            _ -> Err(error(DataErrorKind.InvalidArgument, operation, "expected bool"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4114
+    fn integer(value: &DataTree, operation: &String) -> I64 DataError! {
+        match value {
+            DataTree.Int(value) -> Ok(value)
+            DataTree.Number(value) -> value.parse<I64>().map_err(fn(_) { error(DataErrorKind.InvalidArgument, operation, "expected exact integer") })
+            _ -> Err(error(DataErrorKind.InvalidArgument, operation, "expected exact integer"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4123
+    fn handle(value: &DataTree, operation: &String) -> USize DataError! {
+        value :: field(value, "handle").unwrap_or(value)
+        USize.try_from(integer(value, operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, operation, "invalid handle") })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4128
+    fn limits(value: &DataTree?) -> DataLimits DataError! {
+        result := DataLimits.safe()
+        value :: value ?? return Ok(^result)
+        encoding :: field(value, "encoding") ?? return Ok(^result)
+        number :: fn(name: &String, fallback: I64) { field(encoding, name).and_then(fn(value) { integer(value, "data.limits").ok() }).unwrap_or(fallback) }
+        result.encoding.buffer_bytes = number("buffer_bytes", result.encoding.buffer_bytes)
+        result.encoding.max_depth = number("max_depth", result.encoding.max_depth)
+        result.encoding.max_item_bytes = number("max_item_bytes", result.encoding.max_item_bytes)
+        result.encoding.max_expansion_depth = number("max_expansion_depth", result.encoding.max_expansion_depth)
+        result.encoding.max_expansion_bytes = number("max_expansion_bytes", result.encoding.max_expansion_bytes)
+        for (name, target) in [("max_groups", &result.max_groups), ("max_sort_rows", &result.max_sort_rows), ("max_join_rows", &result.max_join_rows), ("max_output_rows", &result.max_output_rows)] {
+            if Val(value) :: field(value, name) { *target = integer(value, "data.limits")? }
+        }
+        Ok(^result)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4152
+    // GATE #4565: kernel primitive
+    #Unsafe("inspect this thread's handle under an immutable registry borrow")
+    fn has_typed_loader(index: USize) -> Bool {
+        HANDLES.with(fn(cell) { match cell.borrow().get(index).and_then(fn(slot) { slot.as_ref() }) { Val(Handle.TypedLoader(_)) -> true, _ -> false } })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4155
+    // GATE #4565: kernel primitive
+    #Unsafe("inspect this thread's stream under an immutable registry borrow")
+    fn has_typed_stream(index: USize) -> Bool {
+        HANDLES.with(fn(cell) { match cell.borrow().get(index).and_then(fn(slot) { slot.as_ref() }) { Val(Handle.TypedStream(_)) -> true, _ -> false } })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4158
+    // GATE #4565: kernel primitive
+    #Unsafe("typed loader callback holds the exclusive registry borrow and cannot leak it")
+    fn with_typed_loader<R>(index: USize, operation: &String, body: fn(&WebTypedLoader) -> R DataError!) -> R DataError! {
+        HANDLES.with(fn(cell) {
+            handles := cell.borrow_mut()
+            match handles.get_mut(index).and_then(fn(slot) { slot.as_mut() }) {
+                Val(Handle.TypedLoader(loader)) -> body(loader.as_mut())
+                _ -> Err(error(DataErrorKind.State, operation, "handle is not a typed loader"))
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4171
+    // GATE #4565: kernel primitive
+    #Unsafe("typed stream callback holds the exclusive registry borrow and cannot leak it")
+    fn with_typed_stream<R>(index: USize, operation: &String, body: fn(&WebTypedStream) -> R DataError!) -> R DataError! {
+        HANDLES.with(fn(cell) {
+            handles := cell.borrow_mut()
+            match handles.get_mut(index).and_then(fn(slot) { slot.as_mut() }) {
+                Val(Handle.TypedStream(stream)) -> body(stream.as_mut())
+                _ -> Err(error(DataErrorKind.State, operation, "handle is not a typed stream"))
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4184
+    fn bytes(value: &DataTree, operation: &String) -> [U8] DataError! {
+        values :: match value { DataTree.Array(values) -> values, _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "expected byte array")) }
+        values.iter().map(fn(value) {
+            U8.try_from(integer(value, operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, operation, "byte outside 0..255") })
+        }).collect()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4193
+    fn format(value: &DataTree, operation: &String) -> String DataError! { text(value, operation) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4196
+    fn result_tree(entries: [(String, DataTree)]) -> DataTree { DataTree.Object(entries.into_iter().map(fn(entry) { (entry.0.to_string(), ^entry.1) }).collect()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4199
+    fn text_tree(value: String) -> DataTree { DataTree.Text(^value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4202
+    fn handle_tree(handle: USize, kind: &String) -> DataTree {
+        result_tree([("handle", DataTree.Int(handle as I64)), ("kind", text_tree(kind.to_string()))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4208
+    // GATE #4565: kernel primitive
+    #Unsafe("move one owned handle into the first vacant thread-local slot")
+    fn store(handle: Handle) -> DataTree {
+        HANDLES.with(fn(cell) {
+            handles := cell.borrow_mut()
+            index :: handles.iter().position(fn(slot) { slot.is_none() }).unwrap_or_else(fn() { handles.push(None); handles.len() - 1 })
+            kind :: match &handle {
+                Handle.Loader(_) | Handle.TypedLoader(_) -> "loader"
+                Handle.Query(_) -> "query"
+                Handle.Tracked(_) -> "tracked"
+                Handle.Watch(_) -> "watch"
+                Handle.Grouped(_) -> "grouped"
+                Handle.Stream(_) | Handle.TypedStream(_) -> "stream"
+            }
+            handles[index] = Val(^handle)
+            handle_tree(index, kind)
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4227
+    // GATE #4565: kernel primitive
+    #Unsafe("untyped loader callback holds the exclusive registry borrow and cannot leak it")
+    fn with_loader<R>(index: USize, operation: &String, body: fn(&DataLoader<DataTree>) -> R DataError!) -> R DataError! {
+        HANDLES.with(fn(cell) {
+            handles := cell.borrow_mut()
+            match handles.get_mut(index).and_then(fn(slot) { slot.as_mut() }) {
+                Val(Handle.Loader(loader)) -> body(loader)
+                _ -> Err(error(DataErrorKind.State, operation, "handle is not a loader"))
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4240
+    // GATE #4565: kernel primitive
+    #Unsafe("clone a reusable query under an immutable registry borrow")
+    fn clone_query(index: USize) -> DataQuery<DataTree> DataError! {
+        HANDLES.with(fn(cell) {
+            match cell.borrow().get(index).and_then(fn(slot) { slot.as_ref() }) {
+                Val(Handle.Query(query)) -> Ok(query.clone())
+                _ -> Err(error(DataErrorKind.State, "data.query", "handle is not a query"))
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4246
+    // GATE #4565: kernel primitive
+    #Unsafe("tracked callback holds an immutable registry borrow and cannot leak it")
+    fn with_tracked<R>(index: USize, operation: &String, body: fn(&DataTracked<DataTree, String>) -> R DataError!) -> R DataError! {
+        HANDLES.with(fn(cell) {
+            handles :: cell.borrow()
+            match handles.get(index).and_then(fn(slot) { slot.as_ref() }) {
+                Val(Handle.Tracked(tracked)) -> body(tracked)
+                _ -> Err(error(DataErrorKind.State, operation, "handle is not a tracked source"))
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4259
+    fn clone_tracked(index: USize, operation: &String) -> DataTracked<DataTree, String> DataError! {
+        with_tracked(index, operation, fn(tracked) { Ok(tracked.clone()) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4265
+    // GATE #4565: kernel primitive
+    #Unsafe("watch callback holds an immutable registry borrow and cannot leak it")
+    fn with_watch<R>(index: USize, operation: &String, body: fn(&DataWatch<DataTree>) -> R DataError!) -> R DataError! {
+        HANDLES.with(fn(cell) {
+            handles :: cell.borrow()
+            match handles.get(index).and_then(fn(slot) { slot.as_ref() }) {
+                Val(Handle.Watch(watch)) -> body(watch)
+                _ -> Err(error(DataErrorKind.State, operation, "handle is not a watch"))
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4278
+    // GATE #4565: kernel primitive
+    #Unsafe("grouped callback holds an immutable registry borrow and cannot leak it")
+    fn with_grouped<R>(index: USize, operation: &String, body: fn(&DataGroupedQuery<DataTree, String>) -> R DataError!) -> R DataError! {
+        HANDLES.with(fn(cell) {
+            handles :: cell.borrow()
+            match handles.get(index).and_then(fn(slot) { slot.as_ref() }) {
+                Val(Handle.Grouped(grouped)) -> body(grouped)
+                _ -> Err(error(DataErrorKind.State, operation, "handle is not grouped"))
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4291
+    // GATE #4565: kernel primitive
+    #Unsafe("stream callback holds an exclusive registry borrow and cannot leak it")
+    fn with_stream<R>(index: USize, operation: &String, body: fn(&DataStream) -> R DataError!) -> R DataError! {
+        HANDLES.with(fn(cell) {
+            handles := cell.borrow_mut()
+            match handles.get_mut(index).and_then(fn(slot) { slot.as_mut() }) {
+                Val(Handle.Stream(stream)) -> body(stream)
+                _ -> Err(error(DataErrorKind.State, operation, "handle is not a stream"))
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4304
+    fn callback_filter(callback: U32, row: DataTree) -> Bool {
+        encoded :: jet_data_loader_canonical_tree(&row)
+        // GATE #4565: kernel primitive
+        #Unsafe("borrow encoded wasm bytes only for the synchronous env bool callback") {
+            jet_data_web_callback_bool(callback, encoded.as_ptr() as USize as U32, encoded.len() as U32) != 0
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4308
+    // GATE #4565: kernel primitive
+    #Unsafe("callback returns a packed wasm pointer/length owned by input slot three; copy before clearing")
+    fn callback_key(callback: U32, row: DataTree) -> String {
+        encoded :: jet_data_loader_canonical_tree(&row)
+        packed :: jet_data_web_callback_key(callback, encoded.as_ptr() as USize as U32, encoded.len() as U32)
+        if packed == 0 { return "" }
+        pointer :: (packed >> 32) as U32
+        length :: packed as U32
+        value :: slice.from_raw_parts(pointer as *const U8, length as USize)
+        value :: String.from_utf8_lossy(value).into_owned()
+        INPUTS.with(fn(cell) { cell.borrow_mut()[3].clear() })
+        ^value
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4319
+    // GATE #4565: kernel primitive
+    #Unsafe("decode packed callback bytes before freeing input slot three; preserve UTF8/JSON errors")
+    fn callback_value(callback: U32, row: DataTree, operation: &String) -> DataTree DataError! {
+        encoded :: jet_data_loader_canonical_tree(&row)
+        packed :: jet_data_web_callback_value(callback, encoded.as_ptr() as USize as U32, encoded.len() as U32)
+        if packed == 0 { return Err(error(DataErrorKind.InvalidValue, operation, "callback did not return a value")) }
+        pointer :: (packed >> 32) as U32
+        length :: packed as U32
+        bytes :: slice.from_raw_parts(pointer as *const U8, length as USize)
+        value :: match str.from_utf8(bytes) {
+            Ok(value) -> value.to_owned()
+            Err(_) -> {
+                INPUTS.with(fn(cell) { cell.borrow_mut()[3].clear() })
+                return Err(error(DataErrorKind.Decode, operation, "callback returned invalid UTF-8"))
+            }
+        }
+        INPUTS.with(fn(cell) { cell.borrow_mut()[3].clear() })
+        value :: parse_json_typed_datatree(&value).map_err(fn(_) { error(DataErrorKind.Decode, operation, "callback returned invalid JSON") })?
+        Ok(^value)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4363
+    fn callback_number(callback: U32, row: DataTree, operation: &String) -> F64 DataError! {
+        match callback_value(callback, ^row, operation)? {
+            DataTree.Int(value) -> Ok(value as F64)
+            DataTree.Float(value) -> Ok(value)
+            DataTree.Number(value) -> value.parse<F64>().map_err(fn(_) { error(DataErrorKind.InvalidValue, operation, "callback must return a finite number") })
+            _ -> Err(error(DataErrorKind.InvalidValue, operation, "callback must return a number"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4385
+    fn callback_key_value(value: &DataTree) -> String {
+        match value {
+            DataTree.Text(value) | DataTree.TypedText(value) -> value.clone()
+            DataTree.Int(value) -> value.to_string()
+            DataTree.Float(value) -> value.to_string()
+            DataTree.Number(value) -> value.clone()
+            DataTree.Bool(value) -> value.to_string()
+            DataTree.Null -> "null"
+            _ -> jet_data_loader_canonical_tree(value)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4396
+    fn data_status(value: &DataStatus) -> DataTree {
+        result_tree([("step", text_tree(value.step.clone())), ("path", text_tree(value.path.clone())), ("clone_value", text_tree(value.clone_value.clone())), ("ownership", text_tree(value.ownership.clone())), ("trust", text_tree(value.trust.clone())), ("fallback", text_tree(value.fallback.clone())), ("replacement", text_tree(value.replacement.clone()))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4407
+    fn status(value: &DataLoaderStatus) -> DataTree {
+        result_tree([("identity", text_tree(value.identity.clone())), ("freshness", text_tree("{value.freshness:?}")), ("invalidated_by", text_tree("{value.invalidated_by:?}")), ("error", text_tree(value.error.clone())), ("cleanup", text_tree(value.cleanup.clone())), ("buffered_bytes", DataTree.Int(value.buffered_bytes)), ("backpressure", DataTree.Bool(value.backpressure)), ("last_good", DataTree.Bool(value.last_good))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4419
+    fn source_identity(value: &DataSourceIdentity) -> DataTree {
+        result_tree([("kind", result_tree([("tag", text_tree(value.kind.jet_show())), ("values", DataTree.Array([]))])), ("locator", text_tree(value.locator.clone())), ("member", text_tree(value.member.clone())), ("parameters", DataTree.Array(value.parameters.iter().map(fn(value) { text_tree(value.clone()) }).collect()))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4432
+    fn snapshot<T: __jet_Encode>(value: DataSnapshot<T>) -> DataTree {
+        result_tree([
+            ("value", value.value.jet_encode()),
+            ("identity", result_tree([("id", text_tree(^value.identity.id)), ("source", text_tree(^value.identity.source)), ("content", text_tree(^value.identity.content)), ("schema", text_tree(^value.identity.schema)), ("format", text_tree(value.identity.format.as_str().to_string()))])),
+            ("provenance", result_tree([("source", source_identity(&value.provenance.source)), ("format", text_tree(value.provenance.format.as_str().to_string())), ("authority", result_tree([("scope", text_tree(^value.provenance.authority.scope)), ("revision", text_tree(^value.provenance.authority.revision))]))])),
+            ("schema", text_tree(^value.schema.identity)), ("status", status(&value.status)), ("content", DataTree.Bytes(^value.content))
+        ])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4455
+    fn watch_status(value: &DataWatchStatus) -> DataTree {
+        result_tree([("mode", text_tree(value.mode.clone())), ("revision", DataTree.Int(value.revision)), ("retained_rows", DataTree.Int(value.retained_rows)), ("recomputations", DataTree.Int(value.recomputations)), ("active", DataTree.Bool(value.active)), ("generation", DataTree.Int(value.generation)), ("dirty", DataTree.Bool(value.dirty)), ("error", text_tree(value.error.clone())), ("freshness_ms", DataTree.Int(value.freshness_ms)), ("invalidation_cause", text_tree(value.invalidation_cause.clone())), ("refreshing", DataTree.Bool(value.refreshing)), ("cancelled", DataTree.Bool(value.cancelled))])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4471
+    fn typed_factory<T: __jet_Decode + __jet_Encode + Clone>(operation: &String, values: &[DataTree]) -> Handle DataError! {
+        value :: fn(index: USize) { values.get(index).ok_or_else(fn() { error(DataErrorKind.InvalidArgument, operation, "missing argument") }) }
+        decode :: fn(value: &DataTree) { T.jet_decode(value).map_err(fn(errors) { error(DataErrorKind.Decode, operation, jet_data_field_errors_reason(^errors)) }) }
+        loader :: match operation {
+            "load" -> { locator :: text(value(0)?, operation)?; jet_data_loader_load<T>(&locator, &limits(values.get(1))?)? }
+            "load_default" -> { locator :: text(value(0)?, operation)?; jet_data_loader_load_default<T>(&locator)? }
+            "file" -> {
+                path :: text(value(0)?, operation)?
+                format :: format(value(1)?, operation)?
+                jet_data_loader_file<T>(&path, &format, &limits(values.get(2))?)?
+            }
+            "file_member" -> {
+                path :: text(value(0)?, operation)?
+                member :: text(value(1)?, operation)?
+                format :: format(value(2)?, operation)?
+                jet_data_loader_file_member<T>(&path, &member, &format, &limits(values.get(3))?)?
+            }
+            "url" -> {
+                url :: text(value(0)?, operation)?
+                format :: format(value(1)?, operation)?
+                authority :: text(value(2)?, operation)?
+                jet_data_loader_url<T>(&url, &format, &authority, &limits(values.get(3))?)?
+            }
+            "database" -> {
+                query :: text(value(0)?, operation)?
+                parameters :: match value(1)? {
+                    DataTree.Array(values) -> values.iter().map(fn(value) { text(value, operation) }).collect::<[String] DataError!>()?
+                    _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "parameters must be an array"))
+                }
+                authority :: text(value(2)?, operation)?
+                jet_data_loader_database<T>(&query, &parameters, &authority, &limits(values.get(3))?)?
+            }
+            "value" -> { decoded :: decode(value(0)?)?; jet_data_loader_value<T>(&decoded, &limits(values.get(1))?)? }
+            _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "operation is not a typed loader constructor"))
+        }
+        Ok(Handle.TypedLoader(Box.new(TypedLoader<T>{loader: ^loader})))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4557
+    fn type_key(root: &DataTree, operation: &String) -> String DataError! {
+        values :: match field(root, "type_args") {
+            Val(DataTree.Array(values)) if values.len() == 1 -> values
+            _ -> return Err(error(DataErrorKind.InvalidArgument, operation, "typed data operation requires one canonical T type argument"))
+        }
+        value :: text(&values[0], operation)?
+        Ok(value.split_once(":abi=").map_or(value.as_str(), fn(pair) { pair.0 }).to_string())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4572
+    // GATE #4565: kernel primitive
+    #Unsafe("invoke a registered codec under the immutable thread-local factory borrow")
+    fn typed_handle(root: &DataTree, operation: &String) -> Handle DataError! {
+        key :: type_key(root, operation)?
+        values :: args(root)?
+        WEB_TYPE_FACTORIES.with(fn(cell) {
+            factories :: cell.borrow()
+            entry :: factories.iter().find(fn(entry) { entry.0 == key }) ?? return Err(error(DataErrorKind.Bridge, operation, "typed data codec `{key}` is not registered"))
+            entry.1(operation, values)
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4590
+    fn dispatch(root: &DataTree) -> DataTree DataError! {
+        operation :: text(field(root, "op").ok_or_else(fn() { error(DataErrorKind.InvalidArgument, "data.web", "wire operation is missing") })?, "data.web")?
+        values :: args(root)?
+        value :: fn(index: USize) { values.get(index).ok_or_else(fn() { error(DataErrorKind.InvalidArgument, &operation, "missing argument") }) }
+        typed :: match operation {
+            "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" | "snapshot" | "stream" | "stream_next" | "stream_collect" -> true
+            _ -> false
+        }
+        if typed {
+            match field(root, "type_args") {
+                Val(DataTree.Array(values)) if values.len() == 1 -> {}
+                _ -> return Err(error(DataErrorKind.InvalidArgument, &operation, "typed data operation requires one canonical T type argument"))
+            }
+        }
+        match operation {
+            "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" -> Ok(store(typed_handle(root, &operation)?))
+            "bind" -> {
+                index :: handle(value(0)?, &operation)?
+                payload :: bytes(value(1)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.bind(&payload).map(fn(_) { DataTree.Null }) }) }
+                else { with_loader(index, &operation, fn(loader) { jet_data_loader_bind(loader, &payload).map(fn(_) { DataTree.Null }) }) }
+            }
+            "bind_text" -> {
+                index :: handle(value(0)?, &operation)?
+                payload :: text(value(1)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.bind_text(&payload).map(fn(_) { DataTree.Null }) }) }
+                else { with_loader(index, &operation, fn(loader) { jet_data_loader_bind_text(loader, &payload).map(fn(_) { DataTree.Null }) }) }
+            }
+            "snapshot" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.snapshot() }) }
+                else { with_loader(index, &operation, fn(loader) { jet_data_loader_snapshot(loader).map(snapshot) }) }
+            }
+            "loader_cancel" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.cancel(); Ok(DataTree.Null) }) }
+                else { with_loader(index, &operation, fn(loader) { jet_data_loader_cancel(loader); Ok(DataTree.Null) }) }
+            }
+            "offline" -> {
+                index :: handle(value(0)?, &operation)?
+                enabled :: boolean(value(1)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.offline(enabled); Ok(DataTree.Null) }) }
+                else { with_loader(index, &operation, fn(loader) { jet_data_loader_offline(loader, enabled); Ok(DataTree.Null) }) }
+            }
+            "invalidate" -> {
+                index :: handle(value(0)?, &operation)?
+                cause :: text(value(1)?, &operation)?
+                cause :: match cause {
+                    "Loader" -> DataInvalidationCause.Loader
+                    "Input" -> DataInvalidationCause.Input
+                    "ArchiveMember" -> DataInvalidationCause.ArchiveMember
+                    "Parameters" -> DataInvalidationCause.Parameters
+                    "Credential" -> DataInvalidationCause.Credential
+                    "Capability" -> DataInvalidationCause.Capability
+                    "Manual" -> DataInvalidationCause.Manual
+                    _ -> DataInvalidationCause.NoCause
+                }
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { loader.invalidate(cause); Ok(DataTree.Null) }) }
+                else { with_loader(index, &operation, fn(loader) { jet_data_loader_invalidate(loader, cause); Ok(DataTree.Null) }) }
+            }
+            "needs_refresh" | "ready" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { Ok(DataTree.Bool(if operation == "ready" { loader.ready() } else { loader.needs_refresh() })) }) }
+                else { with_loader(index, &operation, fn(loader) { Ok(DataTree.Bool(if operation == "ready" { jet_data_loader_ready(loader) } else { jet_data_loader_needs_refresh(loader) })) }) }
+            }
+            "loader_status" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { Ok(loader.status()) }) }
+                else { with_loader(index, &operation, fn(loader) { Ok(status(&jet_data_loader_status(loader))) }) }
+            }
+            "source_identity" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { Ok(loader.source_identity()) }) }
+                else { with_loader(index, &operation, fn(loader) { Ok(source_identity(&jet_data_loader_source_identity(loader))) }) }
+            }
+            "authority_of" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_loader(index) { with_typed_loader(index, &operation, fn(loader) { Ok(loader.authority()) }) }
+                else { with_loader(index, &operation, fn(loader) { Ok(result_tree([("scope", text_tree(loader.authority.scope.clone())), ("revision", text_tree(loader.authority.revision.clone()))])) }) }
+            }
+            "stream" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_loader(index) { Ok(store(Handle.TypedStream(with_typed_loader(index, &operation, fn(loader) { loader.stream() })?))) }
+                else { Ok(store(Handle.Stream(with_loader(index, &operation, jet_data_loader_stream<DataTree, DataTree>)?))) }
+            }
+            "stream_next" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_stream(index) { with_typed_stream(index, &operation, fn(stream) { stream.next() }) }
+                else {
+                    with_stream(index, &operation, fn(stream) {
+                        match jet_data_stream_next<DataTree>(stream)? {
+                            Ok(value) -> Ok(result_tree([("tag", text_tree("Some")), ("values", DataTree.Array([^value]))]))
+                            Err(_) -> Ok(result_tree([("tag", text_tree("None")), ("values", DataTree.Array([]))]))
+                        }
+                    })
+                }
+            }
+            "stream_collect" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_stream(index) { with_typed_stream(index, &operation, fn(stream) { stream.collect() }) }
+                else { with_stream(index, &operation, fn(stream) { Ok(DataTree.Array(jet_data_stream_collect<DataTree>(stream)?)) }) }
+            }
+            "stream_cancel" -> {
+                index :: handle(value(0)?, &operation)?
+                if has_typed_stream(index) { with_typed_stream(index, &operation, fn(stream) { stream.cancel(); Ok(DataTree.Null) }) }
+                else { with_stream(index, &operation, fn(stream) { jet_data_stream_cancel(stream); Ok(DataTree.Null) }) }
+            }
+            "track" -> {
+                rows :: match value(0)? { DataTree.Array(rows) -> rows.clone(), _ -> return Err(error(DataErrorKind.InvalidArgument, &operation, "data.track expects an array")) }
+                callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
+                tracked :: DataTracked.new(^rows, fn(row) { callback_key(callback, ^row) })?
+                Ok(store(Handle.Tracked(^tracked)))
+            }
+            "query" -> {
+                rows :: match value(0)? { DataTree.Array(rows) -> rows.clone(), value -> [value.clone()] }
+                Ok(store(Handle.Query(jet_data_query(&rows))))
+            }
+            "tracked_query" -> {
+                tracked :: clone_tracked(handle(value(0)?, &operation)?, &operation)?
+                Ok(store(Handle.Query(DataQuery.from_tracked(&tracked))))
+            }
+            "track_insert" -> {
+                index :: handle(value(0)?, &operation)?
+                row :: value(1)?.clone()
+                with_tracked(index, &operation, fn(tracked) { tracked.insert(^row) })?
+                Ok(DataTree.Null)
+            }
+            "track_replace" -> {
+                index :: handle(value(0)?, &operation)?
+                key :: callback_key_value(value(1)?)
+                row :: value(2)?.clone()
+                with_tracked(index, &operation, fn(tracked) { tracked.replace(^key, ^row) })?
+                Ok(DataTree.Null)
+            }
+            "track_remove" -> {
+                index :: handle(value(0)?, &operation)?
+                key :: callback_key_value(value(1)?)
+                with_tracked(index, &operation, fn(tracked) { tracked.remove(^key) })?
+                Ok(DataTree.Null)
+            }
+            "filter" -> {
+                index :: handle(value(0)?, &operation)?
+                callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
+                query :: clone_query(index)?
+                Ok(store(Handle.Query(jet_data_query_filter(&query, fn(row) { callback_filter(callback, ^row) }))))
+            }
+            "sort_by" -> {
+                index :: handle(value(0)?, &operation)?
+                callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
+                query :: clone_query(index)?
+                Ok(store(Handle.Query(jet_data_query_sort_by(&query, fn(row) { callback_key(callback, ^row) }))))
+            }
+            "map" -> {
+                index :: handle(value(0)?, &operation)?
+                callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
+                query :: clone_query(index)?
+                Ok(store(Handle.Query(jet_data_query_map_checked(&query, fn(row) { callback_value(callback, ^row, "query.map") }))))
+            }
+            "min" | "max" -> {
+                index :: handle(value(0)?, &operation)?
+                callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
+                query :: clone_query(index)?
+                values :: if operation == "min" { jet_data_query_min(&query, fn(row) { callback_key(callback, ^row) }) } else { jet_data_query_max(&query, fn(row) { callback_key(callback, ^row) }) }
+                Ok(store(Handle.Query(jet_data_query_map(&values, fn(value) { text_tree(^value) }))))
+            }
+            "inner_join" | "left_join" -> {
+                left :: clone_query(handle(value(0)?, &operation)?)?
+                right :: clone_query(handle(value(1)?, &operation)?)?
+                left_callback :: U32.try_from(integer(value(2)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid left callback") })?
+                right_callback :: U32.try_from(integer(value(3)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid right callback") })?
+                if operation == "inner_join" {
+                    joined :: jet_data_query_inner_join(&left, &right, fn(row) { callback_key(left_callback, ^row) }, fn(row) { callback_key(right_callback, ^row) })
+                    Ok(store(Handle.Query(jet_data_query_map(&joined, fn(row) { result_tree([("left", ^row.left), ("right", ^row.right)]) }))))
+                } else {
+                    joined :: jet_data_query_left_join(&left, &right, fn(row) { callback_key(left_callback, ^row) }, fn(row) { callback_key(right_callback, ^row) })
+                    Ok(store(Handle.Query(jet_data_query_map(&joined, fn(row) {
+                        right :: match row.right { Ok(value) -> ^value, Err(_) -> DataTree.Null }
+                        result_tree([("left", ^row.left), ("right", ^right)])
+                    }))))
+                }
+            }
+            "group_by" -> {
+                index :: handle(value(0)?, &operation)?
+                callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
+                query :: clone_query(index)?
+                grouped :: jet_data_query_group_by(&query, fn(row) { callback_key(callback, ^row) })
+                Ok(store(Handle.Grouped(^grouped)))
+            }
+            "watch" -> {
+                query :: clone_query(handle(value(0)?, &operation)?)?
+                Ok(store(Handle.Watch(jet_data_query_watch(&query)?)))
+            }
+            "watch_get" -> {
+                index :: handle(value(0)?, &operation)?
+                Ok(DataTree.Array(with_watch(index, &operation, fn(watch) { jet_data_watch_get(watch) })?))
+            }
+            "watch_status" -> {
+                index :: handle(value(0)?, &operation)?
+                Ok(with_watch(index, &operation, fn(watch) { Ok(watch_status(&jet_data_watch_status(watch))) })?)
+            }
+            "watch_cancel" -> {
+                index :: handle(value(0)?, &operation)?
+                with_watch(index, &operation, fn(watch) { jet_data_watch_cancel(watch); Ok(()) })?
+                Ok(DataTree.Null)
+            }
+            "group_count" -> {
+                index :: handle(value(0)?, &operation)?
+                query :: with_grouped(index, &operation, fn(grouped) { Ok(jet_data_group_count_query(grouped)) })?
+                Ok(store(Handle.Query(jet_data_query_map(&query, fn(row) { result_tree([("key", text_tree(^row.key)), ("value", DataTree.Int(row.value))]) }))))
+            }
+            "group_sum" -> {
+                index :: handle(value(0)?, &operation)?
+                callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
+                query :: with_grouped(index, &operation, fn(grouped) { Ok(jet_data_group_sum_query_checked(grouped, fn(row) { callback_number(callback, ^row, "query.group_by.sum") })) })?
+                Ok(store(Handle.Query(jet_data_query_map(&query, fn(row) { result_tree([("key", text_tree(^row.key)), ("value", DataTree.Float(row.value))]) }))))
+            }
+            "group_mean" -> {
+                index :: handle(value(0)?, &operation)?
+                callback :: U32.try_from(integer(value(1)?, &operation)?).map_err(fn(_) { error(DataErrorKind.InvalidArgument, &operation, "invalid callback") })?
+                query :: with_grouped(index, &operation, fn(grouped) { Ok(jet_data_group_mean_query_checked(grouped, fn(row) { callback_number(callback, ^row, "query.group_by.mean") })) })?
+                Ok(store(Handle.Query(jet_data_query_map(&query, fn(row) { result_tree([("key", text_tree(^row.key)), ("value", DataTree.Float(row.value))]) }))))
+            }
+            "count" -> match value(0)? {
+                DataTree.Array(values) -> Ok(DataTree.Int(values.len() as I64))
+                value -> { query :: clone_query(handle(value, &operation)?)?; Ok(DataTree.Int(jet_data_query_collect(&query)?.len() as I64)) }
+            }
+            "snapshot_reusable" -> Ok(DataTree.Bool(jet_data_loader_canonical_tree(value(0)?) == jet_data_loader_canonical_tree(value(1)?)))
+            "require_bridge" -> { provider :: text(value(0)?, &operation)?; jet_data_require_bridge(&provider)?; Ok(DataTree.Null) }
+            "status" -> Ok(DataTree.Array(jet_data_status().into_iter().map(fn(value) { data_status(&value) }).collect()))
+            "release" -> {
+                index :: handle(value(0)?, &operation)?
+                // GATE #4565: kernel primitive
+                #Unsafe("drop the owned handle in this thread's slot; an absent slot is already released") {
+                    HANDLES.with(fn(cell) { if Val(slot) :: cell.borrow_mut().get_mut(index) { *slot = None } })
+                }
+                Ok(DataTree.Null)
+            }
+            _ -> Err(error(DataErrorKind.Bridge, &operation, "operation is not available on the Web DataFlow bridge"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4954
+    fn wire_error(error: &DataError) -> String {
+        "{{\"error\":{{\"kind\":{quote(&error.kind.to_string())},\"operation\":{quote(&error.operation)},\"reason\":{quote(&error.reason)}}}}}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4957
+    // GATE #4565: kernel primitive
+    #Unsafe("replace the retained output only after the previous synchronous call has finished")
+    fn set_output(value: String) -> () { OUTPUT.with(fn(cell) { *cell.borrow_mut() = value.into_bytes() }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4961
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("publish the selected wasm input buffer address; the host must not retain it after resize/free")
+    pub fn jet_data_web_input_alloc(slot: U32, length: U32) -> U32 {
+        slot :: match USize.try_from(slot) { Ok(slot) -> slot, Err(_) -> return 0 }
+        if slot >= 4 { return 0 }
+        INPUTS.with(fn(cell) {
+            inputs := cell.borrow_mut()
+            input := &inputs[slot]
+            input.resize(length as USize, 0)
+            input.as_mut_ptr() as USize as U32
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4972
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("clear a valid owned wasm input slot; the caller relinquishes all borrowed addresses")
+    pub fn jet_data_web_input_free(slot: U32, _pointer: U32) -> () {
+        if Ok(slot) :: USize.try_from(slot) { INPUTS.with(fn(cell) { if Val(input) :: cell.borrow_mut().get_mut(slot) { input.clear() } }) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4978
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("borrow the retained output address until output clear or the next wire call")
+    pub fn jet_data_web_output_ptr() -> U32 { OUTPUT.with(fn(cell) { cell.borrow().as_ptr() as USize as U32 }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4982
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("read the retained output length under its immutable thread-local borrow")
+    pub fn jet_data_web_output_len() -> U32 { OUTPUT.with(fn(cell) { U32.try_from(cell.borrow().len()).unwrap_or(U32.MAX) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4986
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("clear the retained wire output after the host relinquishes its borrowed address")
+    pub fn jet_data_web_output_clear() -> () { OUTPUT.with(fn(cell) { cell.borrow_mut().clear() }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:4990
+    // GATE #4565: kernel primitive
+    #FFI(c)
+    #Unsafe("read a host-provided wasm input span only for this synchronous dispatch and retain encoded output")
+    pub fn jet_data_web_call(pointer: U32, length: U32) -> I32 {
+        input :: slice.from_raw_parts(pointer as *const U8, length as USize)
+        parsed :: str.from_utf8(input).ok().and_then(fn(value) { parse_json_typed_datatree(value).ok() })
+        result :: parsed.map_or_else(fn() { Err(error(DataErrorKind.Decode, "data.web", "invalid Web DataFlow wire JSON")) }, fn(value) { dispatch(&value) })
+        match result {
+            Ok(value) -> { set_output(jet_data_loader_canonical_tree(&value)); 0 }
+            Err(error) -> { set_output(wire_error(&error)); 1 }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:5004
+// Wasm-only codec registration uses the same canonical registry.
+pub fn jet_data_web_register_type<T: __jet_Decode + __jet_Encode + Clone>(key: &String) -> () { jet_data_web.register_type<T>(key) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:5011
+// D-SQL-SURFACE1=C / D-QUERY-RETAIN1=A: checked SQL selects eagerly, then returns
+// the same reusable deferred carrier as the ordinary list query door.
+fn jet_data_query_sql<T: __jet_Encode + Clone>(rows: &[T], sql: &String) -> DataQuery<T> [FieldError]! {
+    selected :: jet_data_query_rows(rows, sql)?
+    Ok(jet_data_query(&selected).with_step("sql"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:5023
+fn jet_enc_csv_query<T: __jet_Decode + __jet_Encode + Clone>(path: &String, sql: &String) -> DataQuery<T> [FieldError]! {
+    text :: jet_data_query_read(path)?
+    csv_rows :: jet_ring_csv_parse(&text, ",", false, false).map_err(FieldError.one)?
+    header :: csv_rows.first().cloned().unwrap_or_default()
+    jet_data_query_validate_fields(&header, sql)?
+    rows :: jet_enc_csv_decode<T>(&text)?
+    jet_data_query_sql(&rows, sql)
+}
 

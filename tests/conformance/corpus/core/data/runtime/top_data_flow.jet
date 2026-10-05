@@ -1,0 +1,88 @@
+use core.data.[DataLimits, DataErrorKind]
+use core.data.runtime.top_data_flow.[jet_data_query, jet_data_query_collect, jet_data_query_filter, jet_data_query_sort_by, jet_data_collect_rows_checked, jet_data_inner_join_checked_default, jet_data_left_join_checked_default, jet_data_group_sum_materialized]
+use core.data.runtime.top_data_flow.[jet_data_track, jet_data_query_tracked, jet_data_track_replace, jet_data_query_left_join, jet_data_query_watch, jet_data_watch_get, jet_data_extreme_materialized, JetDataExtreme]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:521/614/624/666
+#Test("data_list_query_is_retained_and_operations_remain_ordered") {
+    rows :: ["c", "a", "b"]
+    query :: jet_data_query(&rows)
+    filtered :: jet_data_query_filter(&query, fn(row) { row != "b" })
+    sorted :: jet_data_query_sort_by(&filtered, fn(row) { row })
+    assert_eq(jet_data_query_collect(&sorted).unwrap(), ["a", "c"])
+    assert_eq(jet_data_query_collect(&sorted).unwrap(), ["a", "c"])
+    assert_eq(jet_data_query_collect(&query).unwrap(), ["c", "a", "b"])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:470
+#Test("data_collect_rows_checks_output_limit_without_partial_success") {
+    query :: jet_data_query(&["a", "b", "c"])
+    source :: query.rows_frame().unwrap()
+    limits := DataLimits.safe()
+    limits.max_output_rows = 2
+    error :: jet_data_collect_rows_checked(&source, &limits).unwrap_err()
+    assert_eq(error.kind, DataErrorKind.Limit)
+    assert_eq(error.operation, "query.collect")
+    assert_eq(error.reason, "max_output_rows 2 exceeded")
+    limits.max_output_rows = 3
+    assert_eq(jet_data_collect_rows_checked(&source, &limits).unwrap(), ["a", "b", "c"])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:327/401
+#Test("data_join_keeps_left_order_duplicates_and_absent_right_rows") {
+    left :: ["a", "missing"]
+    right :: ["a", "a"]
+    inner :: jet_data_inner_join_checked_default(&left, &right, fn(row) { row }, fn(row) { row }).unwrap()
+    assert_eq(inner.len(), 2)
+    assert(inner.iter().all(fn(row) { row.left == "a" && row.right == "a" }))
+    outer :: jet_data_left_join_checked_default(&left, &right, fn(row) { row }, fn(row) { row }).unwrap()
+    assert_eq(outer.len(), 3)
+    assert_eq(outer[0].left, "a")
+    assert_eq(outer[0].right.ok(), Val("a"))
+    assert_eq(outer[1].right.ok(), Val("a"))
+    assert_eq(outer[2].left, "missing")
+    assert(outer[2].right.is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:740
+#Test("data_materialized_group_sum_preserves_first_seen_key_order") {
+    query :: jet_data_query(&["b", "a", "b"])
+    key :: fn(row) { row }
+    value :: fn(_) -> I64 core.data.DataError! { Ok(I64{1}) }
+    groups :: jet_data_group_sum_materialized(&query, &key, &value).unwrap()
+    assert_eq(groups.len(), 2)
+    assert_eq(groups[0].key, "b")
+    assert_eq(groups[0].value, I64{2})
+    assert_eq(groups[1].key, "a")
+    assert_eq(groups[1].value, I64{1})
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1338/1496
+#Test("data_maintained_join_refreshes_tracked_side_and_retains_static_input") {
+    tracked :: jet_data_track(&["a"], fn(row) { row }).unwrap()
+    left :: jet_data_query_tracked(&tracked)
+    right :: jet_data_query(&["a", "a"])
+    joined :: jet_data_query_left_join(&left, &right, fn(row) { row }, fn(row) { row })
+    watch :: jet_data_query_watch(&joined).unwrap()
+    initial :: jet_data_watch_get(&watch).unwrap()
+    assert_eq(initial.len(), 2)
+    assert_eq(initial[0].right.ok(), Val("a"))
+    jet_data_track_replace(&tracked, "a", "missing").unwrap()
+    refreshed :: jet_data_watch_get(&watch).unwrap()
+    assert_eq(refreshed.len(), 1)
+    assert_eq(refreshed[0].left, "missing")
+    assert(refreshed[0].right.is_err())
+    assert_eq(jet_data_watch_get(&watch).unwrap()[0].left, "missing")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1734
+#Test("data_extreme_materialized_rejects_empty_and_selects_min_max") {
+    key :: fn(row) { row }
+    assert_eq(jet_data_extreme_materialized([I64{3}, I64{1}, I64{2}], &key, JetDataExtreme.Min, "query.min").unwrap(), [I64{1}])
+    assert_eq(jet_data_extreme_materialized([I64{3}, I64{1}, I64{2}], &key, JetDataExtreme.Max, "query.max").unwrap(), [I64{3}])
+    error :: jet_data_extreme_materialized([I64]{}, &key, JetDataExtreme.Min, "query.min").unwrap_err()
+    assert_eq(error.kind, DataErrorKind.Empty)
+    assert_eq(error.reason, "empty query has no extreme")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1599/1734
+#Test("data_extreme_materialized_rejects_nonfinite_keys") {
+    key :: fn(row) { row }
+    error :: jet_data_extreme_materialized([F64.INFINITY], &key, JetDataExtreme.Max, "query.max").unwrap_err()
+    assert_eq(error.kind, DataErrorKind.NonFinite)
+    assert_eq(error.reason, "extreme key must be finite")
+}

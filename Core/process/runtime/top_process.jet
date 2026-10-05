@@ -1,757 +1,463 @@
-// PORT-PENDING 0295 crates-jet-codegen-src-prelude-corelib-top-process-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1-1818
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS const JET_PROCESS_TOPOLOGY_SOURCE: &str = "process-runtime";
-//RS 
-//RS fn jet_process_topology_now() -> u64 {
-//RS     std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .ok()
-//RS         .and_then(|duration| u64::try_from(duration.as_millis()).ok())
-//RS         .unwrap_or(0)
-//RS }
-//RS 
-//RS fn jet_process_publish_topology(
-//RS     pid: u32,
-//RS     state: JetDevtoolsTopologyProcessState,
-//RS ) {
-//RS     let fact = JetDevtoolsTopologyProcessFact::new(
-//RS         format!("process:{pid}"),
-//RS         JET_PROCESS_TOPOLOGY_SOURCE,
-//RS         None,
-//RS         state,
-//RS         Some(u64::from(pid)),
-//RS         Vec::new(),
-//RS         JetDevtoolsTopologyFreshness::fresh(jet_process_topology_now()),
-//RS     );
-//RS     if let Ok(fact) = fact {
-//RS         if let Ok(event) = fact.to_protocol_event(JET_PROCESS_TOPOLOGY_SOURCE) {
-//RS             jet_devtools_publish_event(event);
-//RS         }
-//RS     }
-//RS }
-//RS fn jet_process_publish_topology_id(
-//RS     pid: i64,
-//RS     state: JetDevtoolsTopologyProcessState,
-//RS ) {
-//RS     if let Ok(pid) = u32::try_from(pid) {
-//RS         if pid != 0 {
-//RS             jet_process_publish_topology(pid, state);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS // D-FOUND-LIFECYCLE1=A: signal subscription is an infallible public operation.
-//RS // Native arming failures use one deterministic shared Prelude panic path;
-//RS // target capability rejection happens before a call reaches this function.
-//RS fn jet_process_on_signal(signal: &jet_std::ProcessSignal) {
-//RS     let _ = jet_scheduler_root_task_control();
-//RS     let callback: std::sync::Arc<dyn Fn() + Send + Sync + 'static> =
-//RS         std::sync::Arc::new(|| {
-//RS             jet_scheduler_root_task_control().cancel();
-//RS         });
-//RS     if let Err(message) = jet_process_signal_register(signal.mask(), callback) {
-//RS         panic!("{}", jet_process_signal_error(&message));
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_spec_timeout(
-//RS     mut spec: jet_std::ProcessSpec,
-//RS     timeout: &jet_std::Duration,
-//RS ) -> jet_std::ProcessSpec {
-//RS     spec.timeout_ms = Some(timeout.as_millis().max(0));
-//RS     spec
-//RS }
-//RS fn jet_process_limit_i64(value: &jet_foundation::Numeric::JetInt) -> i64 {
-//RS     value
-//RS         .to_i64()
-//RS         .unwrap_or_else(|| {
-//RS             if value < &jet_foundation::Numeric::JetInt::from_i64(0) {
-//RS                 0
-//RS             } else {
-//RS                 i64::MAX
-//RS             }
-//RS         })
-//RS         .max(0)
-//RS }
-//RS fn jet_process_spec_output_limit(
-//RS     mut spec: jet_std::ProcessSpec,
-//RS     output_limit: jet_foundation::Numeric::JetInt,
-//RS ) -> jet_std::ProcessSpec {
-//RS     spec.output_limit = Some(jet_process_limit_i64(&output_limit));
-//RS     spec
-//RS }
-//RS fn jet_process_spec_cpu_time_limit(
-//RS     mut spec: jet_std::ProcessSpec,
-//RS     cpu_time: &jet_std::Duration,
-//RS ) -> jet_std::ProcessSpec {
-//RS     spec.cpu_time_limit_ms = Some(cpu_time.as_millis().max(0));
-//RS     spec
-//RS }
-//RS fn jet_process_spec_memory_limit(
-//RS     mut spec: jet_std::ProcessSpec,
-//RS     memory_bytes: jet_foundation::Numeric::JetInt,
-//RS ) -> jet_std::ProcessSpec {
-//RS     spec.memory_limit_bytes = Some(jet_process_limit_i64(&memory_bytes));
-//RS     spec
-//RS }
-//RS fn jet_process_spec_open_file_limit(
-//RS     mut spec: jet_std::ProcessSpec,
-//RS     open_files: jet_foundation::Numeric::JetInt,
-//RS ) -> jet_std::ProcessSpec {
-//RS     spec.open_file_limit = Some(jet_process_limit_i64(&open_files));
-//RS     spec
-//RS }
-//RS 
-//RS fn jet_process_native_limits(spec: &jet_std::ProcessSpec) -> jet_process_pty::ResourceLimits {
-//RS     jet_process_pty::ResourceLimits {
-//RS         cpu_time_ms: spec.cpu_time_limit_ms,
-//RS         memory_bytes: spec.memory_limit_bytes,
-//RS         open_files: spec.open_file_limit,
-//RS     }
-//RS }
-//RS 
-//RS /// Refuse a request before spawn when this target has no honest native
-//RS /// enforcement path. Unix uses the child `setrlimit` seam; Windows uses Job
-//RS /// Objects for CPU and memory, but has no portable per-process descriptor cap.
-//RS fn jet_process_resource_limits_check(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     #[cfg(target_os = "macos")]
-//RS     if spec.memory_limit_bytes.is_some() || spec.open_file_limit.is_some() {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "macOS can enforce CPU limits here, but cannot report typed memory or open-file exhaustion; refusing those requests before spawn",
-//RS         ));
-//RS     }
-//RS     #[cfg(windows)]
-//RS     if spec.open_file_limit.is_some() {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "open_file_limit cannot be enforced by Windows Job Objects; refusing before spawn",
-//RS         ));
-//RS     }
-//RS     #[cfg(windows)]
-//RS     if spec.policy_wire.is_some()
-//RS         && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some())
-//RS     {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "authority-bound Windows CPU and memory limits are unsupported by the captured runner; refusing before spawn",
-//RS         ));
-//RS     }
-//RS     #[cfg(windows)]
-//RS     if spec.detached && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some()) {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "detached Windows children cannot carry CPU or memory Job Object limits; refusing before spawn",
-//RS         ));
-//RS     }
-//RS     #[cfg(not(any(
-//RS         target_os = "linux",
-//RS         target_os = "macos",
-//RS         target_os = "windows"
-//RS     )))]
-//RS     if spec.cpu_time_limit_ms.is_some()
-//RS         || spec.memory_limit_bytes.is_some()
-//RS         || spec.open_file_limit.is_some()
-//RS     {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "process CPU, memory, and open-file limits are unsupported on this target; refusing before spawn",
-//RS         ));
-//RS     }
-//RS     let _ = spec;
-//RS     Ok(())
-//RS }
-//RS fn jet_process_spec_detached(mut spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-//RS     spec.detached = true;
-//RS     spec
-//RS }
-//RS // D-PROCESS-SESSION1=A: one opt-in for a terminal-backed session. It stays on
-//RS // the same `ProcessSpec`, so cwd, environment, streams, timeout, and the child
-//RS // lifecycle keep one model.
-//RS fn jet_process_spec_terminal(mut spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-//RS     spec.terminal = Some(jet_std::TerminalPolicy::default());
-//RS     spec
-//RS }
-//RS fn jet_process_spec_terminal_with_policy(
-//RS     mut spec: jet_std::ProcessSpec,
-//RS     policy: &jet_std::TerminalPolicy,
-//RS ) -> jet_std::ProcessSpec {
-//RS     spec.terminal = Some(policy.clone());
-//RS     spec
-//RS }
-//RS // D-PROCESS-SESSION2=D: an open keyed report lets new preview facts use String
-//RS // keys without changing a public report type. Known facts come from the
-//RS // checked TerminalFact namespace. Unix PTY support advertises the three
-//RS // stable facts; unsupported targets keep the set empty.
-//RS fn jet_process_spec_abilities(_spec: &jet_std::ProcessSpec) -> std::collections::HashSet<String> {
-//RS     let mut facts = std::collections::HashSet::new();
-//RS     for fact in jet_process_policy::terminal_facts(jet_process_pty::supported()) {
-//RS         facts.insert((*fact).to_string());
-//RS     }
-//RS     facts
-//RS }
-//RS // D-PROCESS-SESSION1=A: a terminal session needs a native backend. Running the
-//RS // child on plain pipes instead would change what an interactive program prints,
-//RS // so the launch fails rather than silently dropping the requested terminal.
-//RS fn jet_process_terminal_backend_check(spec: &jet_std::ProcessSpec) -> Result<(), jet_std::IOError> {
-//RS     if spec.terminal.is_none() {
-//RS         return Ok(());
-//RS     }
-//RS     if jet_process_pty::supported() {
-//RS         return Ok(());
-//RS     }
-//RS     Err(jet_std::IOError::other(
-//RS         jet_std::IOOperation::Resolve,
-//RS         spec.cmd.first().cloned(),
-//RS         "terminal sessions need a native PTY or ConPTY backend, and this build has none",
-//RS     ))
-//RS }
-//RS const JET_PROCESS_IO_CHUNK_BYTES: usize = 16 * 1024;
-//RS 
-//RS fn jet_process_output_buffer_capacity(limit: Option<usize>) -> usize {
-//RS     limit
-//RS         .unwrap_or(JET_PROCESS_IO_CHUNK_BYTES)
-//RS         .min(JET_PROCESS_IO_CHUNK_BYTES)
-//RS }
-//RS 
-//RS fn jet_process_stdio(mode: &jet_std::ProcessStreamMode) -> std::process::Stdio {
-//RS     match mode {
-//RS         // `Stream` and `Capture` both pipe — they differ only in which Jet API
-//RS         // is meant to drain the pipe (see `ProcessStreamMode` in CommonTypes.rs).
-//RS         jet_std::ProcessStreamMode::Stream | jet_std::ProcessStreamMode::Capture => {
-//RS             std::process::Stdio::piped()
-//RS         }
-//RS         jet_std::ProcessStreamMode::Inherit => std::process::Stdio::inherit(),
-//RS     }
-//RS }
-//RS 
-//RS // D-ENV-MUTATE1=A: one composed snapshot feeds both std::process and the
-//RS // Windows CreateProcessW backend. Do not let the terminal path grow a second
-//RS // environment policy.
-//RS fn jet_process_environment(spec: &jet_std::ProcessSpec) -> Result<JetEnvEntries, jet_std::IOError> {
-//RS     let mut child_env = if spec.env_clear {
-//RS         Vec::new()
-//RS     } else {
-//RS         jet_std_env_snapshot_raw()
-//RS     };
-//RS     for (name, value) in &spec.env_set {
-//RS         jet_env_validate_name(name).map_err(|error| {
-//RS             jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 Some(name.clone()),
-//RS                 None,
-//RS                 Some(error.jet_show()),
-//RS             ))
-//RS         })?;
-//RS         jet_env_validate_value(value).map_err(|error| {
-//RS             jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 Some(name.clone()),
-//RS                 None,
-//RS                 Some(error.jet_show()),
-//RS             ))
-//RS         })?;
-//RS         let os_name = std::ffi::OsString::from(name);
-//RS         child_env
-//RS             .retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), os_name.as_os_str()));
-//RS         child_env.push((os_name, std::ffi::OsString::from(value)));
-//RS     }
-//RS     for name in &spec.env_remove {
-//RS         jet_env_validate_name(name).map_err(|error| {
-//RS             jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 Some(name.clone()),
-//RS                 None,
-//RS                 Some(error.jet_show()),
-//RS             ))
-//RS         })?;
-//RS         let name = std::ffi::OsStr::new(name);
-//RS         child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
-//RS     }
-//RS     Ok(child_env)
-//RS }
-//RS 
-//RS fn jet_process_command_builder_with_identity(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     executable_identity: Option<&str>,
-//RS ) -> Result<std::process::Command, jet_std::IOError> {
-//RS     if spec.cmd.is_empty() {
-//RS         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS             jet_std::IOOperation::Resolve,
-//RS             None,
-//RS             None,
-//RS             Some("process command needs at least one word".to_string()),
-//RS         )));
-//RS     }
-//RS     let mut command = std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
-//RS     command.args(&spec.cmd[1..]);
-//RS     if let Some(cwd) = &spec.cwd {
-//RS         command.current_dir(cwd);
-//RS     }
-//RS     if spec.env_clear || !spec.env_set.is_empty() || !spec.env_remove.is_empty() {
-//RS         let child_env = jet_process_environment(spec)?;
-//RS         command.env_clear();
-//RS         command.envs(child_env);
-//RS     } else {
-//RS         // Keep the logical environment's raw values without cloning the
-//RS         // entire table for every child. The lock guard lasts through the
-//RS         // synchronous `envs` call, so the child sees one atomic snapshot.
-//RS         let child_env = jet_env_read();
-//RS         command.env_clear();
-//RS         command.envs(child_env.iter().map(|(name, value)| (name, value)));
-//RS     }
-//RS     Ok(command)
-//RS }
-//RS 
-//RS fn jet_process_command_base_with_identity(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     executable_identity: Option<&str>,
-//RS ) -> Result<std::process::Command, jet_std::IOError> {
-//RS     let mut command = jet_process_command_builder_with_identity(spec, executable_identity)?;
-//RS     // No `.stdin(...)` call (default) closes the child's stdin —
-//RS     // no accidental terminal/parent-stdin inheritance.
-//RS     command.stdin(match &spec.stdin {
-//RS         Some(mode) => jet_process_stdio(mode),
-//RS         None => std::process::Stdio::null(),
-//RS     });
-//RS     command.stdout(jet_process_stdio(&spec.stdout));
-//RS     command.stderr(jet_process_stdio(&spec.stderr));
-//RS     Ok(command)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_process_attach_process_group(
-//RS     command: &mut std::process::Command,
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> std::io::Result<()> {
-//RS     let limits = jet_process_native_limits(spec);
-//RS     if limits.cpu_time_ms.is_none()
-//RS         && limits.memory_bytes.is_none()
-//RS         && limits.open_files.is_none()
-//RS     {
-//RS         use std::os::unix::process::CommandExt;
-//RS         // `process_group(0)` is expressible to the platform spawn backend,
-//RS         // unlike a `pre_exec` closure, so ordinary children can use
-//RS         // posix_spawn while retaining the descendant process-group boundary.
-//RS         command.process_group(0);
-//RS         Ok(())
-//RS     } else {
-//RS         jet_process_pty::attach_process_group(command, limits)
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS fn jet_process_sandbox_error(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     error: jet_process_sandbox::Error,
-//RS ) -> jet_std::IOError {
-//RS     let detail = match error {
-//RS         jet_process_sandbox::Error::Unsupported(detail)
-//RS         | jet_process_sandbox::Error::Io(detail) => detail,
-//RS     };
-//RS     jet_std::IOError::other(
-//RS         jet_std::IOOperation::Resolve,
-//RS         spec.cmd.first().cloned(),
-//RS         detail,
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-//RS fn jet_process_sandbox_env(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<std::collections::BTreeMap<String, String>, jet_std::IOError> {
-//RS     let mut environment = std::collections::BTreeMap::new();
-//RS     for (name, value) in &spec.env_set {
-//RS         jet_env_validate_name(name).map_err(|error| {
-//RS             jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 Some(name.clone()),
-//RS                 None,
-//RS                 Some(error.jet_show()),
-//RS             ))
-//RS         })?;
-//RS         jet_env_validate_value(value).map_err(|error| {
-//RS             jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 Some(name.clone()),
-//RS                 None,
-//RS                 Some(error.jet_show()),
-//RS             ))
-//RS         })?;
-//RS         environment.insert(name.clone(), value.clone());
-//RS     }
-//RS     for name in &spec.env_remove {
-//RS         jet_env_validate_name(name).map_err(|error| {
-//RS             jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Resolve,
-//RS                 Some(name.clone()),
-//RS                 None,
-//RS                 Some(error.jet_show()),
-//RS             ))
-//RS         })?;
-//RS         environment.remove(name);
-//RS     }
-//RS     Ok(environment)
-//RS }
-//RS 
-//RS 
-//RS fn jet_process_receipt(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     plan: Option<&jet_std::ProcessPlan>,
-//RS     process_group: bool,
-//RS     pid: i64,
-//RS     code: i64,
-//RS     success: bool,
-//RS     signal: JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
-//RS     timed_out: bool,
-//RS     output: String,
-//RS     errors: String,
-//RS     extra_secret_values: Option<&[String]>,
-//RS ) -> jet_std::ProcessReceipt {
-//RS     let owned_secret_values;
-//RS     let secret_values = if let Some(values) = extra_secret_values {
-//RS         values
-//RS     } else {
-//RS         owned_secret_values = jet_process_policy_secret_values(spec);
-//RS         &owned_secret_values
-//RS     };
-//RS     let executable_identity = plan
-//RS         .map(|plan| plan.executable_identity.clone())
-//RS         .or_else(|| jet_process_resolve_executable(spec).ok())
-//RS         .or_else(|| spec.cmd.first().cloned())
-//RS         .unwrap_or_default();
-//RS     let argv = plan.map(|plan| plan.argv.clone()).unwrap_or_else(|| {
-//RS         spec.cmd
-//RS             .iter()
-//RS             .map(|word| jet_process_policy_redact(spec, word))
-//RS             .collect()
-//RS     });
-//RS     let policy_digest = plan
-//RS         .map(|plan| plan.policy_digest.clone())
-//RS         .unwrap_or_else(|| jet_process_policy_digest(spec));
-//RS     let input_digest = plan
-//RS         .map(|plan| plan.input_digest.clone())
-//RS         .unwrap_or_else(|| jet_process_input_digest(spec));
-//RS     let backend = plan
-//RS         .map(|plan| plan.backend.clone())
-//RS         .unwrap_or_else(|| "ambient".to_string());
-//RS     let authority = plan
-//RS         .map(|plan| plan.authority.clone())
-//RS         .unwrap_or_else(|| jet_process_policy_receipt_rights(spec));
-//RS     let descendants = if spec.detached {
-//RS         "detached".to_string()
-//RS     } else if process_group {
-//RS         "contained".to_string()
-//RS     } else {
-//RS         plan.map(|plan| plan.descendants.clone())
-//RS             .unwrap_or_else(|| "direct".to_string())
-//RS     };
-//RS     let limits = plan
-//RS         .map(|plan| plan.limits.clone())
-//RS         .unwrap_or_else(|| jet_process_policy_limits(spec));
-//RS     let mut outputs = plan
-//RS         .map(|plan| plan.outputs.clone())
-//RS         .unwrap_or_else(|| jet_process_policy_outputs(spec));
-//RS     outputs.push(format!("captured-bytes={}", output.len() + errors.len()));
-//RS     let redacted = spec.policy_wire.is_some() || !secret_values.is_empty();
-//RS     jet_std::ProcessReceipt {
-//RS         code: jet_foundation::Numeric::JetInt::from_i64(code),
-//RS         output: jet_process_redact_text(&output, secret_values),
-//RS         errors: jet_process_redact_text(&errors, secret_values),
-//RS         success,
-//RS         signal,
-//RS         timed_out,
-//RS         executable_identity,
-//RS         argv,
-//RS         input_digest,
-//RS         policy_digest,
-//RS         backend,
-//RS         authority,
-//RS         descendants,
-//RS         limits,
-//RS         outputs,
-//RS         redacted,
-//RS         pid: jet_foundation::Numeric::JetInt::from_i64(pid),
-//RS         limit_hit: jet_outcome_of(
-//RS             timed_out.then_some(jet_std::ProcessResourceLimit::WallTime),
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_process_child_from_inner(
-//RS     mut child: std::process::Child,
-//RS     spec: &jet_std::ProcessSpec,
-//RS     process_group: bool,
-//RS     plan: Option<jet_std::ProcessPlan>,
-//RS ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
-//RS     #[cfg(windows)]
-//RS     let job = if spec.detached {
-//RS         None
-//RS     } else {
-//RS         use std::os::windows::io::AsRawHandle;
-//RS         match jet_process_pty::attach_job(
-//RS             child.as_raw_handle(),
-//RS             jet_process_native_limits(spec),
-//RS         ) {
-//RS             Ok(job) => Some(std::rc::Rc::new(job)),
-//RS             Err(error) => {
-//RS                 let _ = child.kill();
-//RS                 let _ = child.wait();
-//RS                 return Err(jet_std::IOError::other(
-//RS                     jet_std::IOOperation::Resolve,
-//RS                     spec.cmd.first().cloned(),
-//RS                     error,
-//RS                 ));
-//RS             }
-//RS         }
-//RS     };
-//RS     #[cfg(not(windows))]
-//RS     let job = None;
-//RS     let process_group = process_group || job.is_some();
-//RS     let pid = child.id();
-//RS     let output_limit = spec.output_limit.map(|limit| limit.max(0) as usize);
-//RS     let output_budget =
-//RS         output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-//RS     let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let output_read_error = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS     let (stdout, stdout_state, stdout_worker) = jet_process_spawn_output_reader(
-//RS         child.stdout.take(),
-//RS         false,
-//RS         output_limit,
-//RS         output_budget.clone(),
-//RS         output_limit_hit.clone(),
-//RS         output_read_error.clone(),
-//RS         process_group.then_some(pid),
-//RS     );
-//RS     let (stderr, stderr_state, stderr_worker) = jet_process_spawn_output_reader(
-//RS         child.stderr.take(),
-//RS         false,
-//RS         output_limit,
-//RS         output_budget,
-//RS         output_limit_hit.clone(),
-//RS         output_read_error.clone(),
-//RS         process_group.then_some(pid),
-//RS     );
-//RS     jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Starting);
-//RS     jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Running);
-//RS     Ok(jet_std::ProcessChild {
-//RS         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
-//RS         stdin: std::rc::Rc::new(std::cell::RefCell::new(
-//RS             child.stdin.take().map(jet_std::ProcessStdin::Pipe),
-//RS         )),
-//RS         stdout: std::rc::Rc::new(std::cell::RefCell::new(stdout)),
-//RS         stderr: std::rc::Rc::new(std::cell::RefCell::new(stderr)),
-//RS         stdout_state,
-//RS         stderr_state,
-//RS         stdout_worker: std::rc::Rc::new(std::cell::RefCell::new(stdout_worker)),
-//RS         stderr_worker: std::rc::Rc::new(std::cell::RefCell::new(stderr_worker)),
-//RS         output_limit_hit,
-//RS         output_read_error,
-//RS         terminal: Err(JetAbsent),
-//RS         process_group,
-//RS         detached: spec.detached,
-//RS         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(jet_std::ProcessHandle::Std {
-//RS             child,
-//RS             job,
-//RS         }))),
-//RS         timeout_ms: spec.timeout_ms,
-//RS         output_limit: spec.output_limit,
-//RS         audit_spec: std::rc::Rc::new(spec.clone()),
-//RS         audit_plan: plan.map(std::rc::Rc::new),
-//RS         started: std::time::Instant::now(),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_process_verify_launch_plan(
-//RS     spec: &jet_std::ProcessSpec,
-//RS     plan: &jet_std::ProcessPlan,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let Some(backend) = jet_process_isolation_backend() else {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "authority-bound process launch rejected because its isolation backend is unavailable",
-//RS         ));
-//RS     };
-//RS     if plan.backend != backend {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "authority-bound process launch rejected because its isolation backend changed after planning",
-//RS         ));
-//RS     }
-//RS     if plan.policy_digest != jet_process_policy_digest(spec) {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "authority-bound process launch rejected a policy digest change after planning",
-//RS         ));
-//RS     }
-//RS     if plan.input_digest != jet_process_input_digest(spec) {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "authority-bound process launch rejected because its argv inputs changed after planning",
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_process_pipeline_resource_limits_check(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     jet_process_resource_limits_check(spec)?;
-//RS     #[cfg(windows)]
-//RS     if spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some() {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "Windows process pipelines cannot attach declared CPU or memory Job Object limits; refusing before spawn",
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS // The default capture ceiling bounds the final receipt. Intermediate stages
-//RS // already have a bounded kernel pipe, so do not insert a userspace relay for
-//RS // the implicit ceiling. An explicit (different) stage limit still gets the
-//RS // bounded relay and its shared byte budget.
-//RS fn jet_process_pipeline_needs_relay(spec: &jet_std::ProcessSpec) -> bool {
-//RS     spec.output_limit
-//RS         .is_some_and(|limit| limit != JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES as i64)
-//RS }
-//RS 
-//RS fn jet_process_policy_sandbox_cwd(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<&std::path::Path, jet_std::IOError> {
-//RS     Ok(std::path::Path::new(
-//RS         jet_process_policy_authority_cwd(spec)?.unwrap_or("/"),
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_process_spec_spawn(
-//RS     spec: &jet_std::ProcessSpec,
-//RS ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
-//RS     jet_process_resource_limits_check(spec)?;
-//RS     let launch_plan = if spec.policy_wire.is_some() {
-//RS         Some(jet_process_spec_plan(spec)?)
-//RS     } else {
-//RS         None
-//RS     };
-//RS     jet_process_spec_backend_check(spec)?;
-//RS     if let Some(plan) = launch_plan.as_ref() {
-//RS         jet_process_verify_launch_plan(spec, plan)?;
-//RS     }
-//RS     jet_process_terminal_backend_check(spec)?;
-//RS     if spec.terminal.is_some() {
-//RS         return jet_process_terminal_spawn(
-//RS             spec,
-//RS             launch_plan
-//RS                 .as_ref()
-//RS                 .map(|plan| plan.executable_identity.as_str()),
-//RS             launch_plan.as_ref(),
-//RS         );
-//RS     }
-//RS     #[cfg(any(target_os = "linux", target_os = "macos"))]
-//RS     if spec.policy_wire.is_some() {
-//RS         let plan = launch_plan
-//RS             .as_ref()
-//RS             .expect("authority launch must have a plan");
-//RS         let cwd = jet_process_policy_sandbox_cwd(spec)?;
-//RS         let sandbox_scope =
-//RS             jet_process_policy_sandbox_scope(spec, &plan.executable_identity)?;
-//RS         let output_dir = if sandbox_scope.output_writable {
-//RS             Some(
-//RS                 jet_process_sandbox::agent_output_dir(cwd)
-//RS                     .map_err(|error| jet_process_sandbox_error(spec, error))?,
-//RS             )
-//RS         } else {
-//RS             None
-//RS         };
-//RS         let environment = jet_process_sandbox_env(spec)?;
-//RS         let child = jet_process_sandbox::spawn(
-//RS             std::path::Path::new(&plan.executable_identity),
-//RS             &spec.cmd[1..],
-//RS             cwd,
-//RS             output_dir.as_deref(),
-//RS             &environment,
-//RS             sandbox_scope.share_network,
-//RS             sandbox_scope.source_readable,
-//RS             false,
-//RS             spec.cmd
-//RS                 .first()
-//RS                 .map(|word| std::ffi::OsStr::new(word.as_str())),
-//RS             |command| {
-//RS                 if spec.detached {
-//RS                     command.stdin(std::process::Stdio::null());
-//RS                     command.stdout(std::process::Stdio::null());
-//RS                     command.stderr(std::process::Stdio::null());
-//RS                 } else {
-//RS                     command.stdin(match &spec.stdin {
-//RS                         Some(mode) => jet_process_stdio(mode),
-//RS                         None => std::process::Stdio::null(),
-//RS                     });
-//RS                     command.stdout(jet_process_stdio(&spec.stdout));
-//RS                     command.stderr(jet_process_stdio(&spec.stderr));
-//RS                 }
-//RS                 jet_process_pty::attach_process_group(command, jet_process_native_limits(spec))
-//RS                     .map_err(|error| jet_process_sandbox::Error::Io(error.to_string()))?;
-//RS                 Ok(())
-//RS             },
-//RS         )
-//RS         .map_err(|error| jet_process_sandbox_error(spec, error))?;
-//RS         return jet_process_child_from_inner(child, spec, true, launch_plan.clone());
-//RS     }
-//RS 
-//RS     #[cfg(target_os = "windows")]
-//RS     if spec.policy_wire.is_some() {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             "authority-bound Windows process children require capture via run(); refusing an unsandboxed spawn",
-//RS         ));
-//RS     }
-//RS 
-//RS     let mut command = jet_process_command_base_with_identity(
-//RS         spec,
-//RS         launch_plan
-//RS             .as_ref()
-//RS             .map(|plan| plan.executable_identity.as_str()),
-//RS     )?;
-//RS     if spec.detached {
-//RS         command.stdin(std::process::Stdio::null());
-//RS         command.stdout(std::process::Stdio::null());
-//RS         command.stderr(std::process::Stdio::null());
-//RS     }
-//RS     #[cfg(unix)]
-//RS     jet_process_attach_process_group(&mut command, spec).map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     let child = command.spawn().map_err(|error| {
-//RS         jet_std::IOError::other(
-//RS             jet_std::IOOperation::Resolve,
-//RS             spec.cmd.first().cloned(),
-//RS             error,
-//RS         )
-//RS     })?;
-//RS     // Ordinary Unix children get the same descendant boundary as terminal
-//RS     // sessions. Windows keeps direct-child cleanup until its native job
-//RS     // boundary is available.
-//RS     jet_process_child_from_inner(child, spec, cfg!(unix), launch_plan)
-//RS }
-//RS 
+use core.prelude.runtime.core.jet_panic
+use core.sys.target
+use core.process.host.process_pty as jet_process_pty
+use core.process.runtime.top_process_policy as jet_process_policy
+use core.process.runtime.top_process_sandbox as jet_process_sandbox
+use core.process.runtime.top_process_policy.*
+use core.process.runtime.top_process_02.*
+use core.process.runtime.top_interrupt.[jet_process_signal_register, jet_process_signal_error]
+use core.tasks.runtime.scheduler.jet_scheduler_root_task_control
+use core.process.runtime.top_fs_io_env_os_testing.[jet_std_env_snapshot_raw, jet_env_validate_name, jet_env_validate_value]
+use core.sys.runtime.env_init.[JetEnvEntry, jet_env_read, jet_env_key_eq]
+use core.prelude.runtime.std_common_types.[ProcessSignal, ProcessSpec, ProcessStreamMode, TerminalPolicy, ProcessPlan, ProcessChild, ProcessHandle, ProcessStdin]
+use core.prelude.runtime.std_common_types_02.Duration
+use core.prelude.runtime.std_open.[IOError, IOOperation, IOContext, ProcessReceipt, ProcessResourceLimit]
+use core.process.runtime.top_process_spec.JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES
+use core.files.OSPath
+use core.devtools.runtime.kernel_devtools_topology_panel.[JetDevtoolsTopologyProcessFact, JetDevtoolsTopologyProcessState, JetDevtoolsTopologyFreshness]
+use jet_std.jet_devtools_publish_event
+use jet_foundation.Numeric.JetInt
+use std.time.[SystemTime, UNIX_EPOCH, Instant]
+use std.process.[Command, Stdio, Child]
+use std.ffi.[OsStr, OsString]
+use std.sync.Arc
+use std.sync.atomic.[AtomicUsize, AtomicBool]
+use std.rc.Rc
+use std.cell.RefCell
+use std.collections.HashSet
+use std.io as io
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1
+const JET_PROCESS_TOPOLOGY_SOURCE: String = "process-runtime"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:3
+fn jet_process_topology_now() -> U64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("sample real system wall time and checked milliseconds without substituting a process-relative clock") {
+        SystemTime.now().duration_since(UNIX_EPOCH).ok().and_then(fn(duration) { U64.try_from(duration.as_millis()).ok() }).unwrap_or(0)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:11
+fn jet_process_publish_topology(pid: U32, state: JetDevtoolsTopologyProcessState) -> {
+    fact :: JetDevtoolsTopologyProcessFact.new("process:{pid}", JET_PROCESS_TOPOLOGY_SOURCE, None, state,
+        Some(pid as U64), [], JetDevtoolsTopologyFreshness.fresh(jet_process_topology_now()))
+    if Ok(fact) :: fact {
+        if Ok(event) :: fact.to_protocol_event(JET_PROCESS_TOPOLOGY_SOURCE) -> jet_devtools_publish_event(^event)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:30
+fn jet_process_publish_topology_id(pid: I64, state: JetDevtoolsTopologyProcessState) -> {
+    if Ok(pid) :: U32.try_from(pid) {
+        if pid != 0 -> jet_process_publish_topology(pid, state)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:42
+// Signal subscription is infallible; native arming failure takes the shared panic path.
+fn jet_process_on_signal(signal: &ProcessSignal) -> {
+    _ :: jet_scheduler_root_task_control()
+    // GATE #4565: kernel primitive
+    callback :: #Unsafe("retain Send+Sync static cancellation callback for the registered process signal") {
+        Arc.new(fn() { jet_scheduler_root_task_control().cancel() })
+    }
+    if Err(message) :: jet_process_signal_register(signal.mask(), ^callback) {
+        jet_panic(&"", 0, &jet_process_signal_error(message))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:56
+fn jet_process_spec_timeout(spec: ProcessSpec, timeout: &Duration) -> ProcessSpec {
+    spec := ^spec
+    spec.timeout_ms = Some(timeout.as_millis().max(0))
+    ^spec
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:63
+fn jet_process_limit_i64(value: &JetInt) -> I64 {
+    value.to_i64().unwrap_or_else(fn() { if value < &JetInt.from_i64(0) { 0 } else { I64.MAX } }).max(0)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:75
+fn jet_process_spec_output_limit(spec: ProcessSpec, output_limit: JetInt) -> ProcessSpec {
+    spec := ^spec
+    spec.output_limit = Some(jet_process_limit_i64(&output_limit))
+    ^spec
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:82
+fn jet_process_spec_cpu_time_limit(spec: ProcessSpec, cpu_time: &Duration) -> ProcessSpec {
+    spec := ^spec
+    spec.cpu_time_limit_ms = Some(cpu_time.as_millis().max(0))
+    ^spec
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:89
+fn jet_process_spec_memory_limit(spec: ProcessSpec, memory_bytes: JetInt) -> ProcessSpec {
+    spec := ^spec
+    spec.memory_limit_bytes = Some(jet_process_limit_i64(&memory_bytes))
+    ^spec
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:96
+fn jet_process_spec_open_file_limit(spec: ProcessSpec, open_files: JetInt) -> ProcessSpec {
+    spec := ^spec
+    spec.open_file_limit = Some(jet_process_limit_i64(&open_files))
+    ^spec
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:104
+fn jet_process_native_limits(spec: &ProcessSpec) -> jet_process_pty.ResourceLimits {
+    jet_process_pty.ResourceLimits{cpu_time_ms: spec.cpu_time_limit_ms, memory_bytes: spec.memory_limit_bytes, open_files: spec.open_file_limit}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:112
+// Reject unenforceable resource requests before any native child is spawned.
+fn jet_process_resource_limits_check(spec: &ProcessSpec) -> () IOError! {
+    os :: target.selected_os()
+    if os == .MacOS && (spec.memory_limit_bytes.is_some() || spec.open_file_limit.is_some()) {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "macOS can enforce CPU limits here, but cannot report typed memory or open-file exhaustion; refusing those requests before spawn"))
+    }
+    if os == .Windows {
+        if spec.open_file_limit.is_some() {
+            return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+                "open_file_limit cannot be enforced by Windows Job Objects; refusing before spawn"))
+        }
+        if spec.policy_wire.is_some() && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some()) {
+            return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+                "authority-bound Windows CPU and memory limits are unsupported by the captured runner; refusing before spawn"))
+        }
+        if spec.detached && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some()) {
+            return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+                "detached Windows children cannot carry CPU or memory Job Object limits; refusing before spawn"))
+        }
+    }
+    if os != .Linux && os != .MacOS && os != .Windows
+        && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some() || spec.open_file_limit.is_some()) {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "process CPU, memory, and open-file limits are unsupported on this target; refusing before spawn"))
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:170
+fn jet_process_spec_detached(spec: ProcessSpec) -> ProcessSpec {
+    spec := ^spec
+    spec.detached = true
+    ^spec
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:174
+// Terminal opt-in retains the same spec/cwd/environment/streams/lifecycle model.
+fn jet_process_spec_terminal(spec: ProcessSpec) -> ProcessSpec {
+    spec := ^spec
+    spec.terminal = Some(TerminalPolicy.default())
+    ^spec
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:181
+fn jet_process_spec_terminal_with_policy(spec: ProcessSpec, policy: &TerminalPolicy) -> ProcessSpec {
+    spec := ^spec
+    spec.terminal = Some(policy.clone())
+    ^spec
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:188
+// Open keyed ability facts; never advertise an unavailable native terminal.
+fn jet_process_spec_abilities(_spec: &ProcessSpec) -> HashSet<String> {
+    facts := HashSet<String>.new()
+    loop fact in jet_process_policy.terminal_facts(jet_process_pty.supported()) -> _ :: facts.insert(fact.to_string())
+    ^facts
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:199
+// No pipe fallback: interactive terminal behavior requires a real PTY/ConPTY.
+fn jet_process_terminal_backend_check(spec: &ProcessSpec) -> () IOError! {
+    if spec.terminal.is_none() || jet_process_pty.supported() -> return Ok(())
+    Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+        "terminal sessions need a native PTY or ConPTY backend, and this build has none"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:215
+const JET_PROCESS_IO_CHUNK_BYTES: Usize = 16 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:217
+fn jet_process_output_buffer_capacity(limit: Usize?) -> Usize {
+    limit.unwrap_or(JET_PROCESS_IO_CHUNK_BYTES).min(JET_PROCESS_IO_CHUNK_BYTES)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:223
+fn jet_process_stdio(mode: &ProcessStreamMode) -> Stdio {
+    // GATE #4565: kernel primitive
+    #Unsafe("create native stdio configuration; Capture and Stream both pipe but differ in the consuming API") {
+        match mode {
+            ProcessStreamMode.Stream | ProcessStreamMode.Capture -> Stdio.piped()
+            ProcessStreamMode.Inherit -> Stdio.inherit()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:234
+// One logical environment composition for ordinary and native Windows launches.
+fn jet_process_environment(spec: &ProcessSpec) -> [JetEnvEntry] IOError! {
+    child_env := if spec.env_clear { [] } else { jet_std_env_snapshot_raw() }
+    loop (name, value) in &spec.env_set {
+        jet_env_validate_name(name).map_err(fn(error) {
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+        })?
+        jet_env_validate_value(value).map_err(fn(error) {
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+        })?
+        // GATE #4565: kernel primitive
+        #Unsafe("encode selected native OS strings without losing non-Unicode inherited entries") {
+            os_name :: OsString.from(name).into_encoded_bytes()
+            child_env.retain(fn(entry) { !jet_env_key_eq(entry.name, os_name) })
+            child_env.push(JetEnvEntry{name: ^os_name, value: OsString.from(value).into_encoded_bytes()})
+        }
+    }
+    loop name in &spec.env_remove {
+        jet_env_validate_name(name).map_err(fn(error) {
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+        })?
+        // GATE #4565: kernel primitive
+        #Unsafe("compare validated name against selected-native raw logical environment keys") {
+            os_name :: OsStr.new(name).as_encoded_bytes()
+            child_env.retain(fn(entry) { !jet_env_key_eq(entry.name, os_name) })
+        }
+    }
+    Ok(^child_env)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:280
+fn jet_process_command_builder_with_identity(spec: &ProcessSpec, executable_identity: String?) -> Command IOError! {
+    if spec.cmd.is_empty() {
+        return Err(IOError.InvalidInput(IOContext.new(IOOperation.Resolve, None, None, Some("process command needs at least one word"))))
+    }
+    // GATE #4565: kernel primitive
+    #Unsafe("configure one real native child command with a synchronous atomic logical-environment snapshot") {
+        command := Command.new(executable_identity.unwrap_or(spec.cmd[0]))
+        command.args(&spec.cmd[1..])
+        if Some(cwd) :: &spec.cwd -> command.current_dir(cwd)
+        if spec.env_clear || !spec.env_set.is_empty() || !spec.env_remove.is_empty() {
+            child_env :: jet_process_environment(spec)?
+            command.env_clear()
+            command.envs(child_env.iter().map(fn(entry) {
+                (OsStr.from_encoded_bytes_unchecked(entry.name), OsStr.from_encoded_bytes_unchecked(entry.value))
+            }))
+        } else {
+            // The guard lives through envs: no whole-table clone for ordinary children.
+            child_env :: jet_env_read()
+            command.env_clear()
+            command.envs(child_env.iter().map(fn(entry) {
+                (OsStr.from_encoded_bytes_unchecked(entry.name), OsStr.from_encoded_bytes_unchecked(entry.value))
+            }))
+        }
+        Ok(^command)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:312
+fn jet_process_command_base_with_identity(spec: &ProcessSpec, executable_identity: String?) -> Command IOError! {
+    command := jet_process_command_builder_with_identity(spec, executable_identity)?
+    // GATE #4565: kernel primitive
+    #Unsafe("configure closed stdin by default, never inherit parent stdin accidentally") {
+        command.stdin(match &spec.stdin { Some(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
+        command.stdout(jet_process_stdio(&spec.stdout))
+        command.stderr(jet_process_stdio(&spec.stderr))
+    }
+    Ok(^command)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:328
+// Selected Unix caller only; process_group(0) keeps ordinary children eligible for posix_spawn.
+fn jet_process_attach_process_group(command: &Command, spec: &ProcessSpec) -> () io.Error! {
+    limits :: jet_process_native_limits(spec)
+    if limits.cpu_time_ms.is_none() && limits.memory_bytes.is_none() && limits.open_files.is_none() {
+        // GATE #4565: kernel primitive
+        #Unsafe("assign the native child its own descendant process group through the Unix spawn backend") { command.process_group(0) }
+        Ok(())
+    } else { jet_process_pty.attach_process_group(command, limits) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:350
+fn jet_process_sandbox_error(spec: &ProcessSpec, error: jet_process_sandbox.Error) -> IOError {
+    detail :: match error { jet_process_sandbox.Error.Unsupported(detail) | jet_process_sandbox.Error.Io(detail) -> detail }
+    IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), detail)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:366
+fn jet_process_sandbox_env(spec: &ProcessSpec) -> [String:String] IOError! {
+    environment := [:]
+    loop (name, value) in &spec.env_set {
+        jet_env_validate_name(name).map_err(fn(error) {
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+        })?
+        jet_env_validate_value(value).map_err(fn(error) {
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+        })?
+        environment.insert(name.clone(), value.clone())
+    }
+    loop name in &spec.env_remove {
+        jet_env_validate_name(name).map_err(fn(error) {
+            IOError.InvalidInput(IOContext.new(IOOperation.Resolve, Some(name.clone()), None, Some(error.jet_show())))
+        })?
+        environment.remove(name)
+    }
+    Ok(^environment)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:404
+fn jet_process_receipt(spec: &ProcessSpec, plan: &ProcessPlan?, process_group: Bool, pid: I64, code: I64, success: Bool, signal: Int?, timed_out: Bool, output: String, errors: String, extra_secret_values: View<String>?) -> ProcessReceipt {
+    owned_secret_values :: if extra_secret_values.is_none() { jet_process_policy_secret_values(spec) } else { [] }
+    secret_values :: extra_secret_values.unwrap_or(owned_secret_values.as_slice())
+    executable_identity :: plan.map(fn(plan) { plan.executable_identity.clone() })
+        .or_else(fn() { jet_process_resolve_executable(spec).ok() }).or_else(fn() { spec.cmd.first().cloned() }).unwrap_or_default()
+    argv :: plan.map(fn(plan) { plan.argv.clone() }).unwrap_or_else(fn() {
+        spec.cmd.iter().map(fn(word) { jet_process_policy_redact(spec, word) }).collect<[String]>()
+    })
+    policy_digest :: plan.map(fn(plan) { plan.policy_digest.clone() }).unwrap_or_else(fn() {
+        jet_process_policy_digest(spec, jet_process_backend_limits(target.selected_os()))
+    })
+    input_digest :: plan.map(fn(plan) { plan.input_digest.clone() }).unwrap_or_else(fn() { jet_process_input_digest(spec) })
+    backend :: plan.map(fn(plan) { plan.backend.clone() }).unwrap_or_else(fn() { "ambient" })
+    authority :: plan.map(fn(plan) { plan.authority.clone() }).unwrap_or_else(fn() { jet_process_policy_receipt_rights(spec) })
+    descendants :: if spec.detached { "detached" } else if process_group { "contained" } else {
+        plan.map(fn(plan) { plan.descendants.clone() }).unwrap_or_else(fn() { "direct" })
+    }
+    limits :: plan.map(fn(plan) { plan.limits.clone() }).unwrap_or_else(fn() {
+        jet_process_policy_limits(spec, jet_process_backend_limits(target.selected_os()))
+    })
+    outputs := plan.map(fn(plan) { plan.outputs.clone() }).unwrap_or_else(fn() { jet_process_policy_outputs(spec) })
+    captured_bytes :: output.len() + errors.len()
+    outputs.push("captured-bytes={captured_bytes}")
+    redacted :: spec.policy_wire.is_some() || !secret_values.is_empty()
+    ProcessReceipt{
+        code: code as Int, output: jet_process_redact_text(output, secret_values),
+        errors: jet_process_redact_text(errors, secret_values), success: success, signal: signal, timed_out: timed_out,
+        executable_identity: ^executable_identity, argv: ^argv, input_digest: ^input_digest,
+        policy_digest: ^policy_digest, backend: ^backend, authority: ^authority,
+        descendants: ^descendants, limits: ^limits, outputs: ^outputs, redacted: redacted,
+        pid: pid as Int, limit_hit: timed_out.then_some(ProcessResourceLimit.WallTime)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:487
+fn jet_process_child_from_inner(child: Child, spec: &ProcessSpec, process_group: Bool, plan: ProcessPlan?) -> ProcessChild IOError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("own the real child, native Job boundary, pipe-drain workers and shared lifecycle state; reap failed Job attachments") {
+        child := ^child
+        job :: if target.selected_os() == .Windows && !spec.detached {
+            match jet_process_pty.attach_job(child.as_raw_handle(), jet_process_native_limits(spec)) {
+                Ok(job) -> Some(Rc.new(^job))
+                Err(error) -> {
+                    _ :: child.kill()
+                    _ :: child.wait()
+                    return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error))
+                }
+            }
+        } else { None }
+        process_group :: process_group || job.is_some()
+        pid :: child.id()
+        output_limit :: spec.output_limit.map(fn(limit) { limit.max(0) as Usize })
+        output_budget :: output_limit.map(fn(_) { Arc.new(AtomicUsize.new(0)) })
+        output_limit_hit :: Arc.new(AtomicBool.new(false))
+        output_read_error :: Arc.new(AtomicBool.new(false))
+        (stdout, stdout_state, stdout_worker) :: jet_process_spawn_output_reader(child.stdout.take(), false, output_limit,
+            output_budget.clone(), output_limit_hit.clone(), output_read_error.clone(), process_group.then_some(pid))
+        (stderr, stderr_state, stderr_worker) :: jet_process_spawn_output_reader(child.stderr.take(), false, output_limit,
+            ^output_budget, output_limit_hit.clone(), output_read_error.clone(), process_group.then_some(pid))
+        jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Starting)
+        jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState.Running)
+        Ok(ProcessChild{
+            wait_result: Rc.new(RefCell.new(None)), cleanup_error: Rc.new(RefCell.new(None)),
+            stdin: Rc.new(RefCell.new(child.stdin.take().map(ProcessStdin.Pipe))),
+            stdout: Rc.new(RefCell.new(^stdout)), stderr: Rc.new(RefCell.new(^stderr)),
+            stdout_state: ^stdout_state, stderr_state: ^stderr_state,
+            stdout_worker: Rc.new(RefCell.new(^stdout_worker)), stderr_worker: Rc.new(RefCell.new(^stderr_worker)),
+            output_limit_hit: ^output_limit_hit, output_read_error: ^output_read_error,
+            terminal: None, process_group: process_group, detached: spec.detached,
+            inner: Rc.new(RefCell.new(Some(ProcessHandle.Std{child: ^child, job: ^job}))),
+            timeout_ms: spec.timeout_ms, output_limit: spec.output_limit,
+            audit_spec: Rc.new(spec.clone()), audit_plan: plan.map(fn(plan) { Rc.new(^plan) }), started: Instant.now()
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:572
+fn jet_process_verify_launch_plan(spec: &ProcessSpec, plan: &ProcessPlan) -> () IOError! {
+    status :: jet_process_sandbox.status()
+    backend :: jet_process_isolation_backend(status.available, ^status.mechanism) ?? return Err(IOError.other(
+        IOOperation.Resolve, spec.cmd.first().cloned(), "authority-bound process launch rejected because its isolation backend is unavailable"))
+    if plan.backend != backend -> return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+        "authority-bound process launch rejected because its isolation backend changed after planning"))
+    if plan.policy_digest != jet_process_policy_digest(spec, jet_process_backend_limits(target.selected_os())) {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "authority-bound process launch rejected a policy digest change after planning"))
+    }
+    if plan.input_digest != jet_process_input_digest(spec) {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "authority-bound process launch rejected because its argv inputs changed after planning"))
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:607
+fn jet_process_pipeline_resource_limits_check(spec: &ProcessSpec) -> () IOError! {
+    jet_process_resource_limits_check(spec)?
+    if target.selected_os() == .Windows && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some()) {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "Windows process pipelines cannot attach declared CPU or memory Job Object limits; refusing before spawn"))
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:621
+// The implicit receipt ceiling needs no relay on a bounded kernel pipe; explicit different limits do.
+fn jet_process_pipeline_needs_relay(spec: &ProcessSpec) -> Bool {
+    spec.output_limit.is_some_and(fn(limit) { limit != JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:630
+fn jet_process_policy_sandbox_cwd(spec: &ProcessSpec) -> OSPath IOError! {
+    // GATE #4565: kernel primitive
+    absolute :: #Unsafe("query actual selected-native cwd absoluteness for authority policy validation") {
+        spec.cwd.as_ref().is_some_and(fn(cwd) { OSPath.new(cwd).is_absolute() })
+    }
+    Ok(OSPath.new(jet_process_policy_authority_cwd(spec, absolute)?.unwrap_or("/")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:638
+fn jet_process_spec_spawn(spec: &ProcessSpec) -> ProcessChild IOError! {
+    jet_process_resource_limits_check(spec)?
+    launch_plan :: if spec.policy_wire.is_some() { Some(jet_process_spec_plan(spec)?) } else { None }
+    jet_process_spec_backend_check(spec, jet_process_sandbox.status().available)?
+    if Some(plan) :: launch_plan.as_ref() -> jet_process_verify_launch_plan(spec, plan)?
+    jet_process_terminal_backend_check(spec)?
+    if spec.terminal.is_some() {
+        return jet_process_terminal_spawn(spec, launch_plan.as_ref().map(fn(plan) { plan.executable_identity.as_str() }), launch_plan.as_ref())
+    }
+    os :: target.selected_os()
+    if (os == .Linux || os == .MacOS) && spec.policy_wire.is_some() {
+        plan :: launch_plan.as_ref().expect("authority launch must have a plan")
+        cwd :: jet_process_policy_sandbox_cwd(spec)?
+        sandbox_scope :: jet_process_policy_sandbox_scope(spec, plan.executable_identity)?
+        output_dir :: if sandbox_scope.output_writable {
+            Some(jet_process_sandbox.agent_output_dir(cwd).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?)
+        } else { None }
+        environment :: jet_process_sandbox_env(spec)?
+        // GATE #4565: kernel primitive
+        child :: #Unsafe("spawn actual authority-confined child with sorted BTree-equivalent environment and descendant group enforcement") {
+            jet_process_sandbox.spawn(OSPath.new(plan.executable_identity), &spec.cmd[1..], cwd, output_dir.as_ref(),
+                &environment, sandbox_scope.share_network, sandbox_scope.source_readable, false,
+                spec.cmd.first().map(fn(word) { OsStr.new(word.as_str()) }), fn(command) {
+                    if spec.detached {
+                        command.stdin(Stdio.null())
+                        command.stdout(Stdio.null())
+                        command.stderr(Stdio.null())
+                    } else {
+                        command.stdin(match &spec.stdin { Some(mode) -> jet_process_stdio(mode), None -> Stdio.null() })
+                        command.stdout(jet_process_stdio(&spec.stdout))
+                        command.stderr(jet_process_stdio(&spec.stderr))
+                    }
+                    jet_process_pty.attach_process_group(command, jet_process_native_limits(spec))
+                        .map_err(fn(error) { jet_process_sandbox.Error.Io(error.to_string()) })?
+                    Ok(())
+                }).map_err(fn(error) { jet_process_sandbox_error(spec, error) })?
+        }
+        return jet_process_child_from_inner(^child, spec, true, launch_plan.clone())
+    }
+    if os == .Windows && spec.policy_wire.is_some() {
+        return Err(IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(),
+            "authority-bound Windows process children require capture via run(); refusing an unsandboxed spawn"))
+    }
+    command := jet_process_command_base_with_identity(spec, launch_plan.as_ref().map(fn(plan) { plan.executable_identity.as_str() }))?
+    // GATE #4565: kernel primitive
+    #Unsafe("spawn a real ordinary child, closed detached streams, and selected-Unix descendant boundary") {
+        if spec.detached {
+            command.stdin(Stdio.null())
+            command.stdout(Stdio.null())
+            command.stderr(Stdio.null())
+        }
+        if target.selected_family() == .Unix {
+            jet_process_attach_process_group(&command, spec)
+                .map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error) })?
+        }
+        child :: command.spawn().map_err(fn(error) { IOError.other(IOOperation.Resolve, spec.cmd.first().cloned(), error) })?
+        jet_process_child_from_inner(^child, spec, target.selected_family() == .Unix, ^launch_plan)
+    }
+}
+
+// PORT-PENDING 0295 crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:753-1818
 //RS #[cfg(unix)]
 //RS fn jet_process_terminal_spawn(
 //RS     spec: &jet_std::ProcessSpec,

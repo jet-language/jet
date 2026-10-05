@@ -1,0 +1,21 @@
+use core.net.runtime.top_dns_resolver_policy.[jet_net_dns_socket_addr, jet_net_dns_parse_resolv_conf, jet_net_dns_parse_scutil, jet_net_dns_parse_windows_addresses]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:1
+#Test("dns_server_addresses_are_literal_ips_with_fixed_port") {
+    assert_eq(jet_net_dns_socket_addr("  [2001:db8::1]  "), Val("[2001:db8::1]:53"))
+    assert_eq(jet_net_dns_socket_addr("127.0.0.1"), Val("127.0.0.1:53"))
+    assert_eq(jet_net_dns_socket_addr("dns.example"), None)
+    assert_eq(jet_net_dns_socket_addr("127.0.0.1:54"), None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:8
+#Test("dns_resolv_conf_preserves_valid_nameserver_order_and_comments") {
+    assert_eq(jet_net_dns_parse_resolv_conf("# nameserver 8.8.8.8\nnameserver 1.1.1.1 # primary\nsearch example.org\nnameserver bad\nnameserver\n nameserver ::1\nnameserver 1.1.1.1 extra"), ["1.1.1.1:53", "[::1]:53", "1.1.1.1:53"])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:20
+#Test("dns_scutil_requires_numeric_nameserver_labels") {
+    assert_eq(jet_net_dns_parse_scutil("nameserver[0] : 1.1.1.1\nnameserver[x] : 8.8.8.8\nnameserver[] : 8.8.4.4\nnameserver[12] : 2001:db8::1\nsearch[0] : 9.9.9.9"), ["1.1.1.1:53", "[2001:db8::1]:53"])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:33
+#Test("dns_windows_addresses_split_braces_commas_and_whitespace") {
+    assert_eq(jet_net_dns_parse_windows_addresses("{1.1.1.1, [::1]}\ninvalid 8.8.8.8"), ["1.1.1.1:53", "[::1]:53", "8.8.8.8:53"])
+}

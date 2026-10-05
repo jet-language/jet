@@ -1,0 +1,40 @@
+use core.game.runtime.top_game.[GameInputSnapshot, jet_game_backend_headless, jet_game_backend_should_continue, jet_game_backend_present, jet_game_scene_new, jet_game_scene_component, jet_game_scene_query, jet_game_input_pressed, jet_game_replay_input]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:283/294/298
+#Test("game_headless_backend_uses_foundation_frame_budget") {
+    backend := jet_game_backend_headless()
+    backend.frame_budget.set_requested(Some(I64{2})).unwrap()
+    assert(jet_game_backend_should_continue(&backend))
+    jet_game_backend_present(&backend)
+    assert(jet_game_backend_should_continue(&backend))
+    jet_game_backend_present(&backend)
+    assert(!jet_game_backend_should_continue(&backend))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:371/380
+#Test("game_scene_components_project_one_synthetic_data_row") {
+    name :: "scene"
+    scene :: jet_game_scene_new(&name)
+    position :: "Position"
+    velocity :: "Velocity"
+    jet_game_scene_component(&scene, &position)
+    jet_game_scene_component(&scene, &position)
+    jet_game_scene_component(&scene, &velocity)
+    wanted :: "Position,Velocity"
+    assert_eq(jet_game_scene_query(&scene, &wanted), ["Position{x:0},Velocity{dx:0}"])
+    absent :: "Missing"
+    assert_eq(jet_game_scene_query(&scene, &absent), [])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:504/526
+#Test("game_input_and_absent_replay_preserve_action_and_cursor_contract") {
+    snapshot :: GameInputSnapshot{pressed: ["jump"]}
+    jump :: "jump"
+    absent :: "absent"
+    assert(jet_game_input_pressed(&snapshot, &jump))
+    assert(!jet_game_input_pressed(&snapshot, &absent))
+    cursor: I64 := 0
+    assert_eq(jet_game_replay_input(&None, 0, &[], &cursor), [])
+    assert_eq(cursor, I64{1})
+    cursor = I64.MAX
+    assert_eq(jet_game_replay_input(&None, 1, &[], &cursor), [])
+    assert_eq(cursor, I64.MAX)
+}

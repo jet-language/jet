@@ -1,0 +1,82 @@
+use core.compute.runtime.top_compute_03.[JetComputeError, JetComputeTransformKind, JetComputeResultShape, JetComputeBase, JetComputeBaseResult, JetComputeInputPack, JetComputeCurriedResult, JetComputeHandle, jet_compute_curried_new, jet_compute_curried_clone, jet_compute_curried_drop, jet_compute_curried_entry, jet_compute_call_curried, jet_compute_row_major_strides, jet_compute_numel, jet_compute_storage_len, jet_compute_abilities_match, jet_compute_place_with_profile, jet_compute_validate_placement, jet_compute_vulkan, jet_compute_webgpu]
+use core.compute.runtime.top_compute.[JetComputeDevice, CPU_ORACLE_F64_PROFILE, CPU_ORACLE_F32_PROFILE, CPU_ORACLE_BACKEND, MAX_TENSOR_ELEMENTS]
+use core.sys.target
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:4151-4173
+#Test("compute_transform_numeric_abi_and_names") {
+    assert(JetComputeTransformKind.from_i64(-1).is_none())
+    assert(JetComputeTransformKind.from_i64(4).is_none())
+    assert(JetComputeTransformKind.from_i64(0) == Val(.Gradient))
+    assert(JetComputeTransformKind.from_i64(1) == Val(.ValueAndGradient))
+    assert(JetComputeTransformKind.from_i64(2) == Val(.Vjp))
+    assert(JetComputeTransformKind.from_i64(3) == Val(.Jvp))
+    assert(JetComputeTransformKind.Jvp.is_jvp())
+    assert(!JetComputeTransformKind.Vjp.is_jvp())
+    assert(JetComputeTransformKind.ValueAndGradient.name() == "value_and_gradient")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:4927-4987
+#Test("compute_shape_validation_keeps_zero_axis_and_overflow_precedence") {
+    assert(jet_compute_row_major_strides(&[2, 3, 4]) == Ok([12, 4, 1]))
+    assert(jet_compute_numel(&[2, 0, 4]) == Ok(0))
+    assert(jet_compute_storage_len(&[0, 3]) == Ok(0))
+    assert(jet_compute_storage_len(&[0, I64.MAX]) == Err(JetComputeError.InvalidShape("Tensor shape axis exceeds the Core storage limit")))
+    assert(jet_compute_row_major_strides(&[]) == Err(JetComputeError.InvalidShape("Tensor shape must have at least one axis")))
+    assert(jet_compute_numel(&[-1]) == Err(JetComputeError.InvalidShape("Tensor shape axes must be non-negative")))
+    assert(jet_compute_numel(&[I64.MAX, 2]) == Err(JetComputeError.InvalidShape("Tensor numel overflow")))
+    assert(jet_compute_storage_len(&[MAX_TENSOR_ELEMENTS as I64, 2]).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:3973-3979
+#Test("compute_ability_receipt_order_is_exact_not_set_equality") {
+    assert(jet_compute_abilities_match(&["a", "b"], &["a", "b"]))
+    assert(!jet_compute_abilities_match(&["b", "a"], &["a", "b"]))
+    assert(!jet_compute_abilities_match(&["a"], &["a", "b"]))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5207-5455
+#Test("compute_auto_receipt_is_concrete_and_tampering_fails") {
+    receipt := jet_compute_place_with_profile(.Auto, CPU_ORACLE_F64_PROFILE).unwrap()
+    assert(receipt.selected == JetComputeDevice.Cpu)
+    assert(receipt.backend == CPU_ORACLE_BACKEND)
+    assert(receipt.reason == "policy=auto; selected=cpu; ability=cpu-oracle.f64")
+    assert(jet_compute_validate_placement(.Cpu, &receipt).is_ok())
+    receipt.reason = "bad\nreason"
+    assert(jet_compute_validate_placement(.Cpu, &receipt) == Err(JetComputeError.Device("Tensor placement receipt does not match a registered backend ability")))
+    assert(jet_compute_validate_placement(.Auto, &receipt) == Err(JetComputeError.Unsupported("a Tensor must record the concrete backend selected by Auto placement")))
+    assert(jet_compute_place_with_profile(.WebGpu, CPU_ORACLE_F64_PROFILE) == Err(JetComputeError.Unsupported("WebGPU backend supports only F32Strict+Reproducible; create an F32 Tensor first")))
+    assert(jet_compute_place_with_profile(.WebGpu, CPU_ORACLE_F32_PROFILE) == Err(JetComputeError.Device("WebGPU device is unavailable; no CPU fallback was selected")))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:4201-4219,4298-4388,4559-4613
+#Test("compute_curried_handle_reference_lifecycle_and_expiration") {
+    // GATE #4565: kernel primitive
+    #Unsafe("exercise the real thread-local callable registry, including final capture destruction") {
+        base :: JetComputeBase.new(0, fn(inputs) { JetComputeBaseResult.TensorTuple([]) })
+        handle :: jet_compute_curried_new(^base, .Gradient, &[], .TensorTuple(0))
+        assert(handle > 0)
+        assert(jet_compute_curried_clone(handle) == handle)
+        jet_compute_curried_drop(handle)
+        assert(jet_compute_curried_entry(handle).is_some())
+        result :: jet_compute_call_curried(handle, JetComputeInputPack.new([], [])).unwrap()
+        match result { .Gradient(rows) -> assert(rows.is_empty()), _ -> assert(false) }
+        jet_compute_curried_drop(handle)
+        assert(jet_compute_curried_entry(handle).is_none())
+        assert(jet_compute_curried_clone(handle) == 0)
+        assert(jet_compute_curried_clone(0) == 0)
+        match jet_compute_call_curried(handle, JetComputeInputPack.new([], [])) {
+            Err(.Unsupported(message)) -> assert(message == "autodiff callable handle is invalid or expired")
+            _ -> assert(false)
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:3898-3948
+#Test("compute_gpu_unavailable_arms_never_claim_cpu_results") {
+    assert(!jet_compute_webgpu.available())
+    assert(jet_compute_webgpu.copy(&[]) == Err(JetComputeError.Unsupported("WebGPU backend requires a browser WebGPU host")))
+    if target.selected_os() != "linux" {
+        assert(!jet_compute_vulkan.available())
+        assert(jet_compute_vulkan.binary(0, &[1.0], &[]) == Err(JetComputeError.Unsupported("Vulkan backend is unavailable on this target")))
+    }
+}

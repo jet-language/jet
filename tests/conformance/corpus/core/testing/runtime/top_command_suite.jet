@@ -1,0 +1,19 @@
+use core.testing.runtime.command_suite.[jet_test_suite_install, jet_test_suite_new, jet_test_suite_run, jet_test_suite_status]
+use core.testing.runtime.top_command_suite
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CommandSuite.rs:3-17
+#Test("command_suite_uses_one_shared_snapshot_and_runner") {
+    jet_test_suite_install(fn() { (I64{7}, I64{3}) })
+    before :: jet_test_suite_new()
+    assert(before.iteration == I64{0})
+    assert(before.result == I64{0})
+    assert(jet_test_suite_run(before) == I64{3})
+    assert(jet_test_suite_status() == I64{3})
+    assert(before.iteration == I64{0})
+    assert(before.result == I64{0})
+    after :: jet_test_suite_new()
+    assert(after.iteration == I64{7})
+    assert(after.result == I64{3})
+    assert(after.jet_show() == "TestSuite { iteration: 7, result: 3 }")
+    jet_test_suite_install(fn() { (I64{0}, I64{0}) })
+}

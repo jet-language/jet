@@ -1,156 +1,110 @@
-// PORT-PENDING 0271 crates-jet-codegen-src-prelude-corelib-top-fsruntimeops-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:1-152
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Filesystem write and binary terminal operations shared by AOT and the
-//RS // interpreter. The surrounding engine supplies `jet_std`,
-//RS // `jet_fault_should_fail`, and the raw path kernel.
-//RS 
-//RS pub(crate) fn jet_std_fs_write_bytes(
-//RS     path: &String,
-//RS     bytes: &Vec<u8>,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
-//RS         return Err(error);
-//RS     }
-//RS     if jet_fault_should_fail("FS.Write") {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Write,
-//RS             Some(path.clone()),
-//RS             "fault injected: FS.Write",
-//RS         ));
-//RS     }
-//RS     std::fs::write(path, bytes)
-//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
-//RS }
-//RS 
-//RS pub(crate) fn jet_std_fs_write_at(
-//RS     path: &String,
-//RS     offset: i64,
-//RS     bytes: &Vec<u8>,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
-//RS         return Err(error);
-//RS     }
-//RS     use std::io::{Seek, SeekFrom, Write};
-//RS     if jet_fault_should_fail("FS.Write") {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Write,
-//RS             Some(path.clone()),
-//RS             "fault injected: FS.Write",
-//RS         ));
-//RS     }
-//RS     let mut file = std::fs::OpenOptions::new()
-//RS         .create(true)
-//RS         .write(true)
-//RS         .open(path)
-//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
-//RS     file.seek(SeekFrom::Start(offset.max(0) as u64))
-//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
-//RS     file.write_all(bytes)
-//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
-//RS }
-//RS 
-//RS pub(crate) fn jet_std_fs_write_atomic(
-//RS     path: &String,
-//RS     bytes: &Vec<u8>,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
-//RS         return Err(error);
-//RS     }
-//RS     use std::io::Write;
-//RS 
-//RS     if jet_fault_should_fail("FS.Write") {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Write,
-//RS             Some(path.clone()),
-//RS             "fault injected: FS.Write",
-//RS         ));
-//RS     }
-//RS     let target = std::path::Path::new(path);
-//RS     let parent = target.parent().unwrap_or_else(|| std::path::Path::new("."));
-//RS     let mut temp_path = None;
-//RS     let mut temp_file = None;
-//RS     for sequence in 0..128u64 {
-//RS         let candidate = parent.join(format!(
-//RS             ".jet_tmp_{}_{}",
-//RS             std::process::id(),
-//RS             sequence
-//RS         ));
-//RS         match std::fs::OpenOptions::new()
-//RS             .create_new(true)
-//RS             .write(true)
-//RS             .open(&candidate)
-//RS         {
-//RS             Ok(file) => {
-//RS                 temp_path = Some(candidate);
-//RS                 temp_file = Some(file);
-//RS                 break;
-//RS             }
-//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-//RS             Err(error) => {
-//RS                 return Err(jet_std::io_error_at(
-//RS                     jet_std::IOOperation::Write,
-//RS                     path,
-//RS                     error,
-//RS                 ))
-//RS             }
-//RS         }
-//RS     }
-//RS     let Some(temp_path) = temp_path else {
-//RS         return Err(jet_std::IOError::other(
-//RS             jet_std::IOOperation::Write,
-//RS             Some(path.clone()),
-//RS             "could not reserve an atomic-write temporary file",
-//RS         ));
-//RS     };
-//RS     let mut temp_file = temp_file.expect("atomic temporary file must exist");
-//RS     let existing_permissions = std::fs::metadata(target).ok().map(|m| m.permissions());
-//RS     if let Err(error) = temp_file.write_all(bytes) {
-//RS         let _ = std::fs::remove_file(&temp_path);
-//RS         return Err(jet_std::io_error_at(
-//RS             jet_std::IOOperation::Write,
-//RS             &temp_path.to_string_lossy(),
-//RS             error,
-//RS         ));
-//RS     }
-//RS     if let Some(permissions) = existing_permissions {
-//RS         if let Err(error) = temp_file.set_permissions(permissions) {
-//RS             let _ = std::fs::remove_file(&temp_path);
-//RS             return Err(jet_std::io_error_at(
-//RS                 jet_std::IOOperation::Write,
-//RS                 &temp_path.to_string_lossy(),
-//RS                 error,
-//RS             ));
-//RS         }
-//RS     }
-//RS     if let Err(error) = temp_file.sync_all() {
-//RS         let _ = std::fs::remove_file(&temp_path);
-//RS         return Err(jet_std::io_error_at(
-//RS             jet_std::IOOperation::Flush,
-//RS             &temp_path.to_string_lossy(),
-//RS             error,
-//RS         ));
-//RS     }
-//RS     drop(temp_file);
-//RS     if let Err(error) = std::fs::rename(&temp_path, target) {
-//RS         let _ = std::fs::remove_file(&temp_path);
-//RS         return Err(jet_std::io_error_at(jet_std::IOOperation::Write, path, error));
-//RS     }
-//RS     #[cfg(unix)]
-//RS     if let Err(error) = std::fs::File::open(parent).and_then(|dir| dir.sync_all()) {
-//RS         return Err(jet_std::io_error_at(jet_std::IOOperation::Flush, path, error));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(crate) fn jet_std_io_binwrite(
-//RS     path: &String,
-//RS     bytes: &Vec<u8>,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     jet_std_fs_write_bytes(path, bytes)
-//RS }
-//RS 
-//RS pub(crate) fn jet_std_io_buffered() -> JetStdinReader {
-//RS     jet_std_io_stdin()
-//RS }
-// END-PORT-PENDING 0271 crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:1-152
+use core.prelude.runtime.std_open.[IOError, IOOperation]
+use core.encoding.runtime.std_data_tree.io_error_at
+use core.files.runtime.std_mapped_file.jet_std_files_writer_refusal
+use core.testing.runtime.fault_injection.jet_fault_should_fail
+use core.term.runtime.kernel_stdin_reader.[JetStdinReader, jet_std_io_stdin]
+use core.sys.target
+use std.fs as fs
+use std.io.[Seek, SeekFrom, Write]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:1
+// Shared filesystem write/fault policy; native paths remain OSPath at the kernel boundary.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:5
+pub fn jet_std_fs_write_bytes(path: &String, bytes: &[U8]) -> () IOError! {
+    if jet_std_files_writer_refusal(path) is Val(error) -> return Err(^error)
+    if jet_fault_should_fail("FS.Write") ->
+        return Err(IOError.other(.Write, Val(path.clone()), "fault injected: FS.Write"))
+    // GATE #4565: kernel primitive
+    #Unsafe("write borrowed initialized bytes to the selected native filesystem path") {
+        fs.write(OSPath.from(path), bytes)
+    }.map_err(fn(error) { io_error_at(.Write, path, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:23
+pub fn jet_std_fs_write_at(path: &String, offset: I64, bytes: &[U8]) -> () IOError! {
+    if jet_std_files_writer_refusal(path) is Val(error) -> return Err(^error)
+    if jet_fault_should_fail("FS.Write") ->
+        return Err(IOError.other(.Write, Val(path.clone()), "fault injected: FS.Write"))
+    // GATE #4565: kernel primitive
+    file := #Unsafe("open/create writable file without truncation for positional write") {
+        fs.OpenOptions.new().create(true).write(true).open(OSPath.from(path))
+    }.map_err(fn(error) { io_error_at(.Write, path, ^error) })?
+    #Unsafe("seek owned native descriptor to clamped non-negative source offset") {
+        file.seek(SeekFrom.Start(offset.max(0) as U64))
+    }.map_err(fn(error) { io_error_at(.Write, path, ^error) })?
+    #Unsafe("complete native write from borrowed initialized input bytes") {
+        file.write_all(bytes)
+    }.map_err(fn(error) { io_error_at(.Write, path, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:50
+pub fn jet_std_fs_write_atomic(path: &String, bytes: &[U8]) -> () IOError! {
+    if jet_std_files_writer_refusal(path) is Val(error) -> return Err(^error)
+    if jet_fault_should_fail("FS.Write") ->
+        return Err(IOError.other(.Write, Val(path.clone()), "fault injected: FS.Write"))
+    target_path :: OSPath.from(path)
+    parent :: target_path.parent().unwrap_or_else(fn() { OSPath.from(".") })
+    temp_path := None
+    temp_file := None
+    // GATE #4565: kernel primitive
+    for sequence in U64{0}..U64{128} {
+        process_id :: #Unsafe("read native process identity for create-new atomic sibling naming") { std.process.id() }
+        candidate :: parent.join(".jet_tmp_{process_id}_{sequence}")
+        match #Unsafe("create-new reserves one real sibling file exclusively without overwriting another writer") {
+            fs.OpenOptions.new().create_new(true).write(true).open(&candidate)
+        } {
+            Ok(file) -> { temp_path = Val(^candidate); temp_file = Val(^file); break }
+            Err(error) -> {
+                if error.kind() == .AlreadyExists -> continue
+                return Err(io_error_at(.Write, path, ^error))
+            }
+        }
+    }
+    temp_path :: temp_path ?? return Err(IOError.other(.Write, Val(path.clone()), "could not reserve an atomic-write temporary file"))
+    temp_file := temp_file.expect("atomic temporary file must exist")
+    existing_permissions :: #Unsafe("snapshot target permissions if the target exists") {
+        fs.metadata(&target_path).ok().map(fn(m) { m.permissions() })
+    }
+    match #Unsafe("write all content to the exclusively owned atomic sibling") { temp_file.write_all(bytes) } {
+        Err(error) -> {
+            #Unsafe("best-effort removal of our reserved sibling after failed write") { _ :: fs.remove_file(&temp_path) }
+            return Err(io_error_at(.Write, temp_path.to_string_lossy().to_string(), ^error))
+        }
+        Ok(_) -> {}
+    }
+    if existing_permissions is Val(permissions) {
+        match #Unsafe("preserve target permissions on the atomic replacement sibling") { temp_file.set_permissions(^permissions) } {
+            Err(error) -> {
+                #Unsafe("best-effort removal of our reserved sibling after permission failure") { _ :: fs.remove_file(&temp_path) }
+                return Err(io_error_at(.Write, temp_path.to_string_lossy().to_string(), ^error))
+            }
+            Ok(_) -> {}
+        }
+    }
+    match #Unsafe("flush native file content and metadata before renaming replacement") { temp_file.sync_all() } {
+        Err(error) -> {
+            #Unsafe("best-effort removal of our reserved sibling after sync failure") { _ :: fs.remove_file(&temp_path) }
+            return Err(io_error_at(.Flush, temp_path.to_string_lossy().to_string(), ^error))
+        }
+        Ok(_) -> {}
+    }
+    drop(^temp_file)
+    match #Unsafe("atomically rename the owned flushed sibling over target") { fs.rename(&temp_path, &target_path) } {
+        Err(error) -> {
+            #Unsafe("best-effort removal of our reserved sibling after rename failure") { _ :: fs.remove_file(&temp_path) }
+            return Err(io_error_at(.Write, path, ^error))
+        }
+        Ok(_) -> {}
+    }
+    if target.selected_family() == "unix" {
+        #Unsafe("sync parent directory after replacement on selected Unix targets") {
+            fs.File.open(parent).and_then(fn(dir) { dir.sync_all() })
+        }.map_err(fn(error) { io_error_at(.Flush, path, ^error) })?
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:143
+pub fn jet_std_io_binwrite(path: &String, bytes: &[U8]) -> () IOError! {
+    jet_std_fs_write_bytes(path, bytes)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:150
+pub fn jet_std_io_buffered() -> JetStdinReader { jet_std_io_stdin() }
 

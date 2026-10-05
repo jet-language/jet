@@ -1,0 +1,66 @@
+use core.crypto.runtime.top_crypto_entropy as entropy
+// CryptoEntropy.rs contains test hooks but no #[test] assertions. These use
+// precisely those hooks, never substitute a provider in production code.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:184-213
+#Test("entropy_short_read_and_interrupt_preserve_prefix_and_erase_suffix") {
+    bytes := [U8]{9, 9, 9, 9}
+    calls := 0
+    entropy.jet_crypto_entropy_fill_with(&bytes, fn(suffix) {
+        calls += 1
+        if calls == 1 { suffix[0] = 7; return entropy.JetCryptoEntropyStep.Filled(1) }
+        if calls == 2 { suffix[0] = 99; return entropy.JetCryptoEntropyStep.Interrupted }
+        assert(suffix == [U8]{0, 0, 0})
+        for byte in &suffix { *byte = 8 }
+        entropy.JetCryptoEntropyStep.Filled(suffix.len())
+    }) ?? panic("short read failed")
+    assert(calls == 3 && bytes == [U8]{7, 8, 8, 8})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:184-213
+#Test("entropy_zero_or_excess_provider_count_erases_entire_output") {
+    for count in [USize]{0, 4} {
+        bytes := [U8]{7, 8, 9}
+        match entropy.jet_crypto_entropy_fill_with(&bytes, fn(_) { entropy.JetCryptoEntropyStep.Filled(count) }) {
+            Ok(_) -> panic("invalid provider count accepted")
+            Err(error) -> assert(error == entropy.JetCryptoError.EntropyUnavailable)
+        }
+        assert(bytes == [U8]{0, 0, 0})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:313-369
+#Test("entropy_wasi_interrupt_releases_seventeen_zeroized_attempts") {
+    attempts := 0
+    entropy.jet_crypto_entropy_set_wasi_attempt_test_observer(fn(event, generation, bytes) {
+        if event == entropy.JetCryptoWasiAttemptEvent.Created { assert(generation == attempts); assert(bytes == [U8]{0, 0}) }
+        if event == entropy.JetCryptoWasiAttemptEvent.Zeroized { assert(bytes == [U8]{0, 0}) }
+        if event == entropy.JetCryptoWasiAttemptEvent.Released { assert(bytes.is_empty()); attempts += 1 }
+    })
+    match entropy.jet_crypto_entropy_wasi_with_for_test(2, fn(bytes) { bytes[0] = 255; U16{27} }) {
+        Ok(_) -> panic("WASI interruption budget was not bounded")
+        Err(error) -> assert(error == entropy.JetCryptoError.EntropyUnavailable)
+    }
+    entropy.jet_crypto_entropy_clear_wasi_attempt_test_observer()
+    assert(attempts == 17)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs:413-457,545-568
+#Test("entropy_length_precedence_and_uuid_version_variant_use_same_provider") {
+    match entropy.jet_crypto_entropy_bytes(-1) {
+        Err(entropy.JetCryptoError.InvalidLength(operation, parameter, expected, actual)) -> {
+            assert(operation == "core.crypto.random.bytes" && parameter == "count" && expected == "non-negative" && actual == 1)
+        }
+        _ -> panic("negative count error lost")
+    }
+    match entropy.jet_crypto_entropy_bytes(1048577) {
+        Err(entropy.JetCryptoError.OutputLength(_, minimum, maximum, actual)) -> assert(minimum == 0 && maximum == 1048576 && actual == 1048577)
+        _ -> panic("output bound lost")
+    }
+    assert((entropy.jet_crypto_entropy_bytes(0) ?? panic("empty entropy failed")).is_empty())
+    entropy.jet_crypto_entropy_set_test_provider(fn(bytes) {
+        for byte in &bytes { *byte = 255 }
+        entropy.JetCryptoEntropyStep.Filled(bytes.len())
+    })
+    v4 :: entropy.jet_crypto_uuid_v4_result() ?? panic("v4 failed")
+    v7 :: entropy.jet_crypto_uuid_v7_result(0x010203040506) ?? panic("v7 failed")
+    entropy.jet_crypto_entropy_clear_test_provider()
+    assert(v4 == "ffffffff-ffff-4fff-bfff-ffffffffffff")
+    assert(v7 == "01020304-0506-7fff-bfff-ffffffffffff")
+}

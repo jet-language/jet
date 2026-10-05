@@ -1,974 +1,522 @@
-// PORT-PENDING 0250 crates-jet-codegen-src-prelude-corelib-top-authsession: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:1-970
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── D-AUTH1=A (#506): sessions, password login, OAuth, magic links ───────────
-//RS // `app.auth` reuses these same Prelude symbols (one mechanism; I9).
-//RS 
-//RS use std::sync::{Mutex as JetAuthMutex, OnceLock as JetAuthOnceLock};
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetAuthSession {
-//RS     pub id: String,
-//RS     pub user_id: String,
-//RS     pub expires_at: i64,
-//RS     pub cookie: String,
-//RS }
-//RS 
-//RS impl std::fmt::Debug for JetAuthSession {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         f.debug_struct("JetAuthSession")
-//RS             .field("id", &"<redacted>")
-//RS             .field("user_id", &self.user_id)
-//RS             .field("expires_at", &self.expires_at)
-//RS             .field("cookie", &"<redacted>")
-//RS             .finish()
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetAuthApp {
-//RS     pub users_table: String,
-//RS     pub providers: Vec<String>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetAuthUser {
-//RS     user_id: String,
-//RS     password_hash: String,
-//RS     delivery_capability: Option<String>,
-//RS }
-//RS 
-//RS impl std::fmt::Debug for JetAuthUser {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         f.debug_struct("JetAuthUser")
-//RS             .field("user_id", &self.user_id)
-//RS             .field("password_hash", &"<redacted>")
-//RS             .field(
-//RS                 "delivery_capability",
-//RS                 &self.delivery_capability.as_ref().map(|_| "<redacted>"),
-//RS             )
-//RS             .finish()
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetAuthMagicToken {
-//RS     token: String,
-//RS     user_id: String,
-//RS     expires_at: i64,
-//RS     delivery_capability: String,
-//RS }
-//RS 
-//RS impl std::fmt::Debug for JetAuthMagicToken {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         f.debug_struct("JetAuthMagicToken")
-//RS             .field("token", &"<redacted>")
-//RS             .field("user_id", &self.user_id)
-//RS             .field("expires_at", &self.expires_at)
-//RS             .field("delivery_capability", &"<redacted>")
-//RS             .finish()
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Default)]
-//RS struct JetAuthUserStore {
-//RS     users: Vec<JetAuthUser>,
-//RS     sessions: Vec<JetAuthSession>,
-//RS     magic_tokens: Vec<JetAuthMagicToken>,
-//RS     oauth_states: Vec<JetAuthOAuthState>,
-//RS }
-//RS 
-//RS static JET_AUTH_STORE: JetAuthOnceLock<JetAuthMutex<JetAuthUserStore>> = JetAuthOnceLock::new();
-//RS 
-//RS fn jet_auth_store() -> &'static JetAuthMutex<JetAuthUserStore> {
-//RS     JET_AUTH_STORE.get_or_init(|| JetAuthMutex::new(JetAuthUserStore::default()))
-//RS }
-//RS 
-//RS fn jet_auth_valid_identifier(value: &str, max: usize) -> bool {
-//RS     !value.trim().is_empty()
-//RS         && value.len() <= max
-//RS         && value.chars().all(|c| !c.is_control())
-//RS }
-//RS 
-//RS // Secret-bearing session values must not use an early-exit string equality.
-//RS // The length is public framing; every byte position through the longer input
-//RS // is still visited before the result is returned.
-//RS fn jet_auth_constant_time_text_eq(left: &str, right: &str) -> bool {
-//RS     let mut difference = u8::from(left.len() != right.len());
-//RS     for index in 0..left.len().max(right.len()) {
-//RS         let a = left.as_bytes().get(index).copied().unwrap_or(0);
-//RS         let b = right.as_bytes().get(index).copied().unwrap_or(0);
-//RS         difference |= a ^ b;
-//RS     }
-//RS     difference == 0
-//RS }
-//RS 
-//RS fn jet_auth_delivery_capability(value: &str) -> Option<String> {
-//RS     if value.len() > 254 || value.matches('@').count() != 1 {
-//RS         return None;
-//RS     }
-//RS     let (local, domain) = value.split_once('@')?;
-//RS     if local.is_empty()
-//RS         || local.len() > 64
-//RS         || local.starts_with('.')
-//RS         || local.ends_with('.')
-//RS         || local.contains("..")
-//RS         || !local
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~.".contains(&byte))
-//RS     {
-//RS         return None;
-//RS     }
-//RS     if domain.is_empty() || domain.len() > 253 {
-//RS         return None;
-//RS     }
-//RS     if domain.split('.').any(|label| {
-//RS         label.is_empty()
-//RS             || label.len() > 63
-//RS             || label.starts_with('-')
-//RS             || label.ends_with('-')
-//RS             || !label
-//RS                 .bytes()
-//RS                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-//RS     }) {
-//RS         return None;
-//RS     }
-//RS     Some(value.to_string())
-//RS }
-//RS 
-//RS fn jet_auth_expiry(now_ms: i64, ttl_ms: i64) -> Result<i64, String> {
-//RS     if ttl_ms <= 0 {
-//RS         return Err("auth lifetime must be positive".to_string());
-//RS     }
-//RS     now_ms
-//RS         .checked_add(ttl_ms)
-//RS         .ok_or_else(|| "auth lifetime is out of range".to_string())
-//RS }
-//RS 
-//RS fn jet_auth_opaque_token(prefix: &str) -> Result<String, String> {
-//RS     let bytes = jet_crypto_entropy_bytes(32)
-//RS         .map_err(|_| "cryptographic entropy is unavailable".to_string())?;
-//RS     let mut token = String::with_capacity(prefix.len() + 1 + bytes.len() * 2);
-//RS     token.push_str(prefix);
-//RS     token.push('-');
-//RS     for byte in bytes {
-//RS         token.push_str(&format!("{byte:02x}"));
-//RS     }
-//RS     Ok(token)
-//RS }
-//RS #[derive(Clone)]
-//RS struct JetAuthOAuthState {
-//RS     state: String,
-//RS     provider: String,
-//RS     nonce: String,
-//RS     expires_at: i64,
-//RS }
-//RS 
-//RS #[derive(Default)]
-//RS struct JetAuthOAuthClaims {
-//RS     algorithm: Option<String>,
-//RS     nonce: Option<String>,
-//RS     issuer: Option<String>,
-//RS     audience: Option<String>,
-//RS     subject: Option<String>,
-//RS     expires_at: Option<i64>,
-//RS     issued_at: Option<i64>,
-//RS }
-//RS 
-//RS fn jet_auth_valid_oauth_provider(value: &str) -> bool {
-//RS     !value.is_empty()
-//RS         && value.len() <= 64
-//RS         && value
-//RS             .bytes()
-//RS             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-//RS }
-//RS 
-//RS fn jet_auth_oauth_env_suffix(provider: &str) -> Option<String> {
-//RS     jet_auth_valid_oauth_provider(provider).then(|| {
-//RS         provider
-//RS             .chars()
-//RS             .map(|character| character.to_ascii_uppercase())
-//RS             .collect()
-//RS     })
-//RS }
-//RS 
-//RS fn jet_auth_oauth_config(provider: &str) -> Result<(Vec<u8>, String, String), String> {
-//RS     let suffix = jet_auth_oauth_env_suffix(provider)
-//RS         .ok_or_else(|| "OAuth provider is invalid".to_string())?;
-//RS     let secret = std::env::var(format!("JET_OAUTH_{suffix}_SECRET"))
-//RS         .map_err(|_| "OAuth provider is not configured".to_string())?;
-//RS     if secret.as_bytes().len() < 32 {
-//RS         return Err("OAuth provider secret is too short".to_string());
-//RS     }
-//RS     let issuer = std::env::var(format!("JET_OAUTH_{suffix}_ISSUER"))
-//RS         .unwrap_or_else(|_| provider.to_string());
-//RS     let audience = std::env::var(format!("JET_OAUTH_{suffix}_AUDIENCE"))
-//RS         .unwrap_or_else(|_| provider.to_string());
-//RS     if !jet_auth_valid_identifier(&issuer, 1024) || !jet_auth_valid_identifier(&audience, 1024) {
-//RS         return Err("OAuth provider metadata is invalid".to_string());
-//RS     }
-//RS     Ok((secret.into_bytes(), issuer, audience))
-//RS }
-//RS 
-//RS fn jet_auth_now_ms() -> Result<i64, String> {
-//RS     let millis = std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .map_err(|_| "system clock is unavailable".to_string())?
-//RS         .as_millis();
-//RS     i64::try_from(millis).map_err(|_| "system clock is out of range".to_string())
-//RS }
-//RS 
-//RS fn jet_oauth_b64url_decode(text: &str) -> Result<Vec<u8>, String> {
-//RS     if text.is_empty() || text.len() > 16 * 1024 || text.len() % 4 == 1 {
-//RS         return Err("OAuth assertion encoding is invalid".to_string());
-//RS     }
-//RS     let mut out = Vec::with_capacity(text.len().saturating_mul(3) / 4);
-//RS     let mut accumulator = 0u32;
-//RS     let mut bits = 0u8;
-//RS     for byte in text.bytes() {
-//RS         let value = match byte {
-//RS             b'A'..=b'Z' => byte - b'A',
-//RS             b'a'..=b'z' => byte - b'a' + 26,
-//RS             b'0'..=b'9' => byte - b'0' + 52,
-//RS             b'-' => 62,
-//RS             b'_' => 63,
-//RS             _ => return Err("OAuth assertion encoding is invalid".to_string()),
-//RS         };
-//RS         accumulator = ((accumulator << 6) | u32::from(value)) & 0x00ff_ffff;
-//RS         bits += 6;
-//RS         if bits >= 8 {
-//RS             bits -= 8;
-//RS             out.push(((accumulator >> bits) & 0xff) as u8);
-//RS         }
-//RS     }
-//RS     if bits != 0 && (accumulator & ((1u32 << bits) - 1)) != 0 {
-//RS         return Err("OAuth assertion encoding is non-canonical".to_string());
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn jet_oauth_json_hex4(chars: &[char], position: &mut usize) -> Option<u32> {
-//RS     let mut value = 0u32;
-//RS     for _ in 0..4 {
-//RS         let digit = chars.get(*position)?.to_digit(16)?;
-//RS         *position += 1;
-//RS         value = value * 16 + digit;
-//RS     }
-//RS     Some(value)
-//RS }
-//RS 
-//RS fn jet_oauth_json_string(chars: &[char], position: &mut usize) -> Option<String> {
-//RS     if chars.get(*position) != Some(&'"') {
-//RS         return None;
-//RS     }
-//RS     *position += 1;
-//RS     let mut out = String::new();
-//RS     while let Some(character) = chars.get(*position).copied() {
-//RS         *position += 1;
-//RS         match character {
-//RS             '"' => return Some(out),
-//RS             '\\' => {
-//RS                 let escaped = chars.get(*position).copied()?;
-//RS                 *position += 1;
-//RS                 match escaped {
-//RS                     '"' => out.push('"'),
-//RS                     '\\' => out.push('\\'),
-//RS                     '/' => out.push('/'),
-//RS                     'b' => out.push('\u{0008}'),
-//RS                     'f' => out.push('\u{000c}'),
-//RS                     'n' => out.push('\n'),
-//RS                     'r' => out.push('\r'),
-//RS                     't' => out.push('\t'),
-//RS                     'u' => {
-//RS                         let high = jet_oauth_json_hex4(chars, position)?;
-//RS                         if (0xD800..=0xDBFF).contains(&high) {
-//RS                             if chars.get(*position) != Some(&'\\') {
-//RS                                 return None;
-//RS                             }
-//RS                             *position += 1;
-//RS                             if chars.get(*position) != Some(&'u') {
-//RS                                 return None;
-//RS                             }
-//RS                             *position += 1;
-//RS                             let low = jet_oauth_json_hex4(chars, position)?;
-//RS                             if !(0xDC00..=0xDFFF).contains(&low) {
-//RS                                 return None;
-//RS                             }
-//RS                             let combined = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
-//RS                             out.push(char::from_u32(combined)?);
-//RS                         } else if (0xDC00..=0xDFFF).contains(&high) {
-//RS                             return None;
-//RS                         } else {
-//RS                             out.push(char::from_u32(high)?);
-//RS                         }
-//RS                     }
-//RS                     _ => return None,
-//RS                 }
-//RS             }
-//RS             character if (character as u32) < 0x20 => return None,
-//RS             _ => out.push(character),
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn jet_oauth_json_whitespace(character: char) -> bool {
-//RS     matches!(character, ' ' | '\n' | '\r' | '\t')
-//RS }
-//RS 
-//RS fn jet_oauth_skip_whitespace(chars: &[char], position: &mut usize) {
-//RS     while chars
-//RS         .get(*position)
-//RS         .copied()
-//RS         .is_some_and(jet_oauth_json_whitespace)
-//RS     {
-//RS         *position += 1;
-//RS     }
-//RS }
-//RS 
-//RS fn jet_oauth_json_skip_value(chars: &[char], position: &mut usize) -> bool {
-//RS     let Some(first) = chars.get(*position).copied() else {
-//RS         return false;
-//RS     };
-//RS     if first == '"' {
-//RS         return jet_oauth_json_string(chars, position).is_some();
-//RS     }
-//RS     if first == '{' || first == '[' {
-//RS         let mut closers = vec![if first == '{' { '}' } else { ']' }];
-//RS         *position += 1;
-//RS         while let Some(character) = chars.get(*position).copied() {
-//RS             if character == '"' {
-//RS                 if jet_oauth_json_string(chars, position).is_none() {
-//RS                     return false;
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             if character == '{' {
-//RS                 closers.push('}');
-//RS                 *position += 1;
-//RS                 continue;
-//RS             }
-//RS             if character == '[' {
-//RS                 closers.push(']');
-//RS                 *position += 1;
-//RS                 continue;
-//RS             }
-//RS             if character == '}' || character == ']' {
-//RS                 if closers.last().copied() != Some(character) {
-//RS                     return false;
-//RS                 }
-//RS                 closers.pop();
-//RS                 *position += 1;
-//RS                 if closers.is_empty() {
-//RS                     return true;
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             *position += 1;
-//RS         }
-//RS         return false;
-//RS     }
-//RS     let start = *position;
-//RS     while let Some(character) = chars.get(*position).copied() {
-//RS         if jet_oauth_json_whitespace(character)
-//RS             || matches!(character, ',' | '}' | ']')
-//RS         {
-//RS             break;
-//RS         }
-//RS         *position += 1;
-//RS     }
-//RS     *position > start
-//RS }
-//RS 
-//RS fn jet_oauth_parse_i64(text: &str) -> Option<i64> {
-//RS     let (negative, digits) = text
-//RS         .strip_prefix('-')
-//RS         .map_or((false, text), |digits| (true, digits));
-//RS     if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-//RS         return None;
-//RS     }
-//RS     if negative && digits == "0" {
-//RS         return None;
-//RS     }
-//RS     let limit = if negative { 1u64 << 63 } else { i64::MAX as u64 };
-//RS     let magnitude = digits.bytes().try_fold(0u64, |value, byte| {
-//RS         let value = value
-//RS             .checked_mul(10)?
-//RS             .checked_add(u64::from(byte - b'0'))?;
-//RS         (value <= limit).then_some(value)
-//RS     })?;
-//RS     if negative {
-//RS         if magnitude == 1u64 << 63 {
-//RS             Some(i64::MIN)
-//RS         } else {
-//RS             i64::try_from(magnitude).ok()?.checked_neg()
-//RS         }
-//RS     } else {
-//RS         i64::try_from(magnitude).ok()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_oauth_parse_claims(text: &str) -> Result<JetAuthOAuthClaims, String> {
-//RS     if text.len() > 32 * 1024 {
-//RS         return Err("OAuth assertion payload is too large".to_string());
-//RS     }
-//RS     let chars: Vec<char> = text.chars().collect();
-//RS     let mut position = 0usize;
-//RS     jet_oauth_skip_whitespace(&chars, &mut position);
-//RS     if chars.get(position) != Some(&'{') {
-//RS         return Err("OAuth assertion payload is not an object".to_string());
-//RS     }
-//RS     position += 1;
-//RS     let mut claims = JetAuthOAuthClaims::default();
-//RS     loop {
-//RS         jet_oauth_skip_whitespace(&chars, &mut position);
-//RS         if chars.get(position) == Some(&'}') {
-//RS             position += 1;
-//RS             break;
-//RS         }
-//RS         let key = jet_oauth_json_string(&chars, &mut position)
-//RS             .ok_or_else(|| "OAuth assertion claim name is invalid".to_string())?;
-//RS         jet_oauth_skip_whitespace(&chars, &mut position);
-//RS         if chars.get(position) != Some(&':') {
-//RS             return Err("OAuth assertion claim separator is invalid".to_string());
-//RS         }
-//RS         position += 1;
-//RS         jet_oauth_skip_whitespace(&chars, &mut position);
-//RS         match key.as_str() {
-//RS             "alg" | "nonce" | "iss" | "aud" | "sub" => {
-//RS                 let value = jet_oauth_json_string(&chars, &mut position)
-//RS                     .ok_or_else(|| format!("OAuth claim `{key}` must be text"))?;
-//RS                 let slot = match key.as_str() {
-//RS                     "alg" => &mut claims.algorithm,
-//RS                     "nonce" => &mut claims.nonce,
-//RS                     "iss" => &mut claims.issuer,
-//RS                     "aud" => &mut claims.audience,
-//RS                     "sub" => &mut claims.subject,
-//RS                     _ => unreachable!(),
-//RS                 };
-//RS                 if slot.replace(value).is_some() {
-//RS                     return Err(format!("OAuth claim `{key}` is duplicated"));
-//RS                 }
-//RS             }
-//RS             "exp" | "iat" => {
-//RS                 let start = position;
-//RS                 while let Some(character) = chars.get(position).copied() {
-//RS                     if jet_oauth_json_whitespace(character)
-//RS                         || matches!(character, ',' | '}' | ']')
-//RS                     {
-//RS                         break;
-//RS                     }
-//RS                     position += 1;
-//RS                 }
-//RS                 let value = jet_oauth_parse_i64(
-//RS                     &chars[start..position].iter().copied().collect::<String>(),
-//RS                 )
-//RS                 .ok_or_else(|| format!("OAuth claim `{key}` must be an integer"))?;
-//RS                 let slot = if key == "exp" {
-//RS                     &mut claims.expires_at
-//RS                 } else {
-//RS                     &mut claims.issued_at
-//RS                 };
-//RS                 if slot.replace(value).is_some() {
-//RS                     return Err(format!("OAuth claim `{key}` is duplicated"));
-//RS                 }
-//RS             }
-//RS             _ => {
-//RS                 if !jet_oauth_json_skip_value(&chars, &mut position) {
-//RS                     return Err("OAuth assertion claim value is invalid".to_string());
-//RS                 }
-//RS             }
-//RS         }
-//RS         jet_oauth_skip_whitespace(&chars, &mut position);
-//RS         match chars.get(position).copied() {
-//RS             Some(',') => position += 1,
-//RS             Some('}') => {
-//RS                 position += 1;
-//RS                 break;
-//RS             }
-//RS             _ => return Err("OAuth assertion object is invalid".to_string()),
-//RS         }
-//RS     }
-//RS     jet_oauth_skip_whitespace(&chars, &mut position);
-//RS     if position != chars.len() {
-//RS         return Err("OAuth assertion has trailing data".to_string());
-//RS     }
-//RS     Ok(claims)
-//RS }
-//RS 
-//RS fn jet_auth_oauth_verify(
-//RS     entry: &JetAuthOAuthState,
-//RS     assertion: &str,
-//RS     now_ms: i64,
-//RS     secret: &[u8],
-//RS     issuer: &str,
-//RS     audience: &str,
-//RS ) -> Result<String, String> {
-//RS     if assertion.len() > 64 * 1024 {
-//RS         return Err("OAuth assertion is too large".to_string());
-//RS     }
-//RS     let mut parts = assertion.split('.');
-//RS     let header_part = parts
-//RS         .next()
-//RS         .ok_or_else(|| "OAuth assertion is malformed".to_string())?;
-//RS     let payload_part = parts
-//RS         .next()
-//RS         .ok_or_else(|| "OAuth assertion is malformed".to_string())?;
-//RS     let signature_part = parts
-//RS         .next()
-//RS         .ok_or_else(|| "OAuth assertion is malformed".to_string())?;
-//RS     if parts.next().is_some()
-//RS         || header_part.is_empty()
-//RS         || payload_part.is_empty()
-//RS         || signature_part.is_empty()
-//RS     {
-//RS         return Err("OAuth assertion is malformed".to_string());
-//RS     }
-//RS     let header = String::from_utf8(jet_oauth_b64url_decode(header_part)?)
-//RS         .map_err(|_| "OAuth assertion header is not UTF-8".to_string())?;
-//RS     let payload = String::from_utf8(jet_oauth_b64url_decode(payload_part)?)
-//RS         .map_err(|_| "OAuth assertion payload is not UTF-8".to_string())?;
-//RS     let signature = jet_oauth_b64url_decode(signature_part)?;
-//RS     let header_claims = jet_oauth_parse_claims(&header)?;
-//RS     if header_claims.algorithm.as_deref() != Some("HS256") {
-//RS         return Err("OAuth assertion algorithm is not allowed".to_string());
-//RS     }
-//RS     let expected = jet_hmac_sha256(
-//RS         secret,
-//RS         format!("{header_part}.{payload_part}").as_bytes(),
-//RS     );
-//RS     if !jet_ct_eq(&expected, &signature) {
-//RS         return Err("OAuth assertion signature is invalid".to_string());
-//RS     }
-//RS     let claims = jet_oauth_parse_claims(&payload)?;
-//RS     if claims.nonce.as_deref().is_none_or(|nonce| {
-//RS         !jet_auth_constant_time_text_eq(nonce, &entry.nonce)
-//RS     }) {
-//RS         return Err("OAuth assertion nonce is invalid".to_string());
-//RS     }
-//RS     if claims.issuer.as_deref() != Some(issuer) {
-//RS         return Err("OAuth assertion issuer is invalid".to_string());
-//RS     }
-//RS     if claims.audience.as_deref() != Some(audience) {
-//RS         return Err("OAuth assertion audience is invalid".to_string());
-//RS     }
-//RS     let now_s = now_ms
-//RS         .checked_div(1_000)
-//RS         .ok_or_else(|| "OAuth clock is invalid".to_string())?;
-//RS     let expires_at = claims
-//RS         .expires_at
-//RS         .ok_or_else(|| "OAuth assertion expiry is missing".to_string())?;
-//RS     if expires_at <= now_s {
-//RS         return Err("OAuth assertion is expired".to_string());
-//RS     }
-//RS     if claims
-//RS         .issued_at
-//RS         .is_some_and(|issued_at| issued_at > now_s.saturating_add(60))
-//RS     {
-//RS         return Err("OAuth assertion was issued in the future".to_string());
-//RS     }
-//RS     let subject = claims
-//RS         .subject
-//RS         .ok_or_else(|| "OAuth assertion subject is missing".to_string())?;
-//RS     if !jet_auth_valid_identifier(&subject, 512) {
-//RS         return Err("OAuth assertion subject is invalid".to_string());
-//RS     }
-//RS     Ok(subject)
-//RS }
-//RS 
-//RS fn jet_auth_valid_session_id(value: &str) -> bool {
-//RS     let bytes = value.as_bytes();
-//RS     bytes.len() == 69
-//RS         && bytes.starts_with(b"sess-")
-//RS         && bytes[5..]
-//RS             .iter()
-//RS             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-//RS }
-//RS 
-//RS 
-//RS /// D-AUTH1=A: the session cookie's `HttpOnly`/`Secure`/`SameSite`/`Path`
-//RS /// defaults are ONE fact. Password login, magic-link consume, and OAuth finish
-//RS /// all mint a session cookie; spelling the flags at each site meant a hardening
-//RS /// change could reach two of the three.
-//RS ///
-//RS /// Named `_mint` because `jet_auth_session_cookie` is already taken by the Core
-//RS /// accessor below, which is the registered symbol for `core.auth.session_cookie`
-//RS /// and returns a stored cookie rather than building one.
-//RS fn jet_auth_session_cookie_mint(id: &str) -> String {
-//RS     format!("jet_session={id}; HttpOnly; Secure; SameSite=Lax; Path=/")
-//RS }
-//RS 
-//RS fn jet_auth_session_value(
-//RS     user_id: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     let expires_at = jet_auth_expiry(now_ms, ttl_ms)?;
-//RS     let id = jet_auth_opaque_token("sess")?;
-//RS     let cookie = jet_auth_session_cookie_mint(&id);
-//RS     Ok(JetAuthSession {
-//RS         id,
-//RS         user_id,
-//RS         expires_at,
-//RS         cookie,
-//RS     })
-//RS }
-//RS 
-//RS fn jet_auth_session_show(session: &JetAuthSession) -> String {
-//RS     format!(
-//RS         "Session(id=<redacted>, user={}, exp={}, cookie_len={})",
-//RS         session.user_id,
-//RS         session.expires_at,
-//RS         session.cookie.len()
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn jet_auth_register_user(user_id: String, password_hash: String) -> Result<(), String> {
-//RS     if !jet_auth_valid_identifier(&user_id, 512) {
-//RS         return Err("user id is invalid".to_string());
-//RS     }
-//RS     if password_hash.trim().is_empty() || password_hash.len() > 4096 {
-//RS         return Err("password hash is invalid".to_string());
-//RS     }
-//RS     let delivery_capability = jet_auth_delivery_capability(&user_id);
-//RS     let Ok(mut store) = jet_auth_store().lock() else {
-//RS         return Err("auth store is unavailable".to_string());
-//RS     };
-//RS     if store.users.iter().any(|user| user.user_id == user_id) {
-//RS         return Err(format!("user `{user_id}` already registered"));
-//RS     }
-//RS     store.users.push(JetAuthUser {
-//RS         user_id,
-//RS         password_hash,
-//RS         delivery_capability,
-//RS     });
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_auth_password_login(
-//RS     user_id: String,
-//RS     password_hash: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     let session = jet_auth_session_value(user_id.clone(), now_ms, ttl_ms)?;
-//RS     let Ok(mut store) = jet_auth_store().lock() else {
-//RS         return Err("auth store is unavailable".to_string());
-//RS     };
-//RS     let ok = store
-//RS         .users
-//RS         .iter()
-//RS         .any(|user| {
-//RS             user.user_id == user_id
-//RS                 && jet_auth_constant_time_text_eq(&user.password_hash, &password_hash)
-//RS         });
-//RS     if !ok {
-//RS         return Err("invalid credentials".to_string());
-//RS     }
-//RS     store.sessions.push(session.clone());
-//RS     Ok(session)
-//RS }
-//RS 
-//RS fn jet_auth_session_validate(
-//RS     session_id: &String,
-//RS     now_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     if !jet_auth_valid_session_id(session_id) {
-//RS         return Err("missing: session".to_string());
-//RS     }
-//RS     let Ok(store) = jet_auth_store().lock() else {
-//RS         return Err("auth store is unavailable".to_string());
-//RS     };
-//RS     store
-//RS         .sessions
-//RS         .iter()
-//RS         .find(|session| jet_auth_constant_time_text_eq(&session.id, session_id))
-//RS         .cloned()
-//RS         .ok_or_else(|| "missing: session".to_string())
-//RS         .and_then(|session| {
-//RS             if now_ms >= session.expires_at {
-//RS                 Err("token expired".to_string())
-//RS             } else {
-//RS                 Ok(session)
-//RS             }
-//RS         })
-//RS }
-//RS 
-//RS fn jet_auth_magic_link_issue(
-//RS     user_id: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<String, String> {
-//RS     let expires_at = jet_auth_expiry(now_ms, ttl_ms)?;
-//RS     if !jet_auth_valid_identifier(&user_id, 512) {
-//RS         return Err("user id is invalid".to_string());
-//RS     }
-//RS     let delivery_capability = jet_auth_delivery_capability(&user_id)
-//RS         .ok_or_else(|| "magic link requires a delivery-capable identity".to_string())?;
-//RS     let Ok(mut store) = jet_auth_store().lock() else {
-//RS         return Err("auth store is unavailable".to_string());
-//RS     };
-//RS     if !store.users.iter().any(|user| {
-//RS         user.user_id == user_id
-//RS             && user.delivery_capability.as_deref() == Some(delivery_capability.as_str())
-//RS     }) {
-//RS         return Err("magic link requires a registered delivery identity".to_string());
-//RS     }
-//RS     let token = jet_auth_opaque_token("magic")?;
-//RS     store.magic_tokens.push(JetAuthMagicToken {
-//RS         token: token.clone(),
-//RS         user_id,
-//RS         expires_at,
-//RS         delivery_capability,
-//RS     });
-//RS     Ok(token)
-//RS }
-//RS 
-//RS pub(crate) fn jet_auth_magic_link_consume(
-//RS     token: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     let _ = jet_auth_expiry(now_ms, ttl_ms)?;
-//RS     if !jet_auth_valid_identifier(&token, 256) {
-//RS         return Err("token expired".to_string());
-//RS     }
-//RS     let Ok(mut store) = jet_auth_store().lock() else {
-//RS         return Err("auth store is unavailable".to_string());
-//RS     };
-//RS     let idx = store
-//RS         .magic_tokens
-//RS         .iter()
-//RS         .position(|entry| {
-//RS             jet_auth_constant_time_text_eq(&entry.token, &token) && now_ms < entry.expires_at
-//RS         })
-//RS         .ok_or_else(|| "token expired".to_string())?;
-//RS     let entry = store.magic_tokens[idx].clone();
-//RS     let Some(user) = store.users.iter().find(|user| user.user_id == entry.user_id) else {
-//RS         return Err("magic link identity is no longer registered".to_string());
-//RS     };
-//RS     if user.delivery_capability.as_deref() != Some(entry.delivery_capability.as_str()) {
-//RS         return Err("magic link delivery identity is unavailable".to_string());
-//RS     }
-//RS     let id = jet_auth_opaque_token("sess")?;
-//RS     store.magic_tokens.remove(idx);
-//RS     let expires_at = jet_auth_expiry(now_ms, ttl_ms)?;
-//RS     let session = JetAuthSession {
-//RS         id: id.clone(),
-//RS         user_id: entry.user_id,
-//RS         expires_at,
-//RS         cookie: jet_auth_session_cookie_mint(&id),
-//RS     };
-//RS     store.sessions.push(session.clone());
-//RS     Ok(session)
-//RS }
-//RS 
-//RS fn jet_auth_oauth_begin(provider: String) -> Result<String, String> {
-//RS     let _ = jet_auth_oauth_config(&provider)?;
-//RS     let now_ms = jet_auth_now_ms()?;
-//RS     let expires_at = now_ms
-//RS         .checked_add(10 * 60 * 1_000)
-//RS         .ok_or_else(|| "OAuth state lifetime is out of range".to_string())?;
-//RS     let state = jet_auth_opaque_token("oauth")?;
-//RS     // The public API returns only `state`; use that opaque value as the OIDC
-//RS     // nonce too so callers can place the same value in the provider request.
-//RS     let nonce = state.clone();
-//RS     let Ok(mut store) = jet_auth_store().lock() else {
-//RS         return Err("auth store is unavailable".to_string());
-//RS     };
-//RS     store.oauth_states.retain(|entry| entry.expires_at > now_ms);
-//RS     if store.oauth_states.len() >= 256 {
-//RS         store.oauth_states.remove(0);
-//RS     }
-//RS     store.oauth_states.push(JetAuthOAuthState {
-//RS         state: state.clone(),
-//RS         provider,
-//RS         nonce,
-//RS         expires_at,
-//RS     });
-//RS     Ok(state)
-//RS }
-//RS 
-//RS fn jet_auth_oauth_finish(
-//RS     state: String,
-//RS     assertion: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     if !jet_auth_valid_identifier(&state, 256) || assertion.is_empty() {
-//RS         return Err("OAuth completion is invalid".to_string());
-//RS     }
-//RS     let Ok(mut store) = jet_auth_store().lock() else {
-//RS         return Err("auth store is unavailable".to_string());
-//RS     };
-//RS     let index = store
-//RS         .oauth_states
-//RS         .iter()
-//RS         .position(|entry| {
-//RS             jet_auth_constant_time_text_eq(&entry.state, &state) && now_ms < entry.expires_at
-//RS         })
-//RS         .ok_or_else(|| "OAuth state is expired or unknown".to_string())?;
-//RS     let entry = store.oauth_states[index].clone();
-//RS     let (secret, issuer, audience) = jet_auth_oauth_config(&entry.provider)?;
-//RS     let subject = jet_auth_oauth_verify(
-//RS         &entry,
-//RS         &assertion,
-//RS         now_ms,
-//RS         &secret,
-//RS         &issuer,
-//RS         &audience,
-//RS     )?;
-//RS     let session = jet_auth_session_value(subject, now_ms, ttl_ms)?;
-//RS     store.oauth_states.remove(index);
-//RS     store.sessions.push(session.clone());
-//RS     Ok(session)
-//RS }
-//RS 
-//RS fn jet_auth_session_user(session: &JetAuthSession) -> String {
-//RS     session.user_id.clone()
-//RS }
-//RS 
-//RS fn jet_auth_session_cookie(session: &JetAuthSession) -> String {
-//RS     session.cookie.clone()
-//RS }
-//RS 
-//RS fn jet_auth_session_id(session: &JetAuthSession) -> String {
-//RS     session.id.clone()
-//RS }
-//RS 
-//RS fn jet_app_auth(users_table: String) -> JetAuthApp {
-//RS     JetAuthApp {
-//RS         users_table,
-//RS         providers: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_app_auth_oauth(mut auth: JetAuthApp, providers: String) -> JetAuthApp {
-//RS     for part in providers.split(|c| c == ',' || c == ' ') {
-//RS         let provider = part.trim();
-//RS         if jet_auth_valid_identifier(provider, 128)
-//RS             && !auth.providers.iter().any(|existing| existing == provider)
-//RS         {
-//RS             auth.providers.push(provider.to_string());
-//RS         }
-//RS     }
-//RS     auth
-//RS }
-//RS 
-//RS fn jet_app_auth_routes(auth: &JetAuthApp) -> String {
-//RS     let mut routes = vec![
-//RS         format!("POST /login -> password ({})", auth.users_table),
-//RS         "POST /logout -> revoke session".to_string(),
-//RS         "GET /magic -> begin magic link".to_string(),
-//RS         "POST /magic -> consume magic link".to_string(),
-//RS     ];
-//RS     for provider in &auth.providers {
-//RS         routes.push(format!("GET /oauth/{provider}/begin"));
-//RS         routes.push(format!("GET /oauth/{provider}/callback"));
-//RS     }
-//RS     format!("AuthRoutes({})", routes.join("; "))
-//RS }
-//RS 
-//RS fn jet_app_auth_show(auth: &JetAuthApp) -> String {
-//RS     format!(
-//RS         "Auth(users={}, providers=[{}])",
-//RS         auth.users_table,
-//RS         auth.providers.join(",")
-//RS     )
-//RS }
-//RS 
-//RS // Resident/interpreter adapters use these wrappers for the remaining auth
-//RS // calls; register/consume adapters call the canonical Prelude symbols above.
-//RS // All paths remain in this one policy and state seam.
-//RS pub fn auth_runtime_reset() {
-//RS     let Some(store) = JET_AUTH_STORE.get() else {
-//RS         return;
-//RS     };
-//RS     let mut store = match store.lock() {
-//RS         Ok(store) => store,
-//RS         Err(poisoned) => poisoned.into_inner(),
-//RS     };
-//RS     *store = JetAuthUserStore::default();
-//RS }
-//RS 
-//RS pub fn auth_register_user(user_id: String, password_hash: String) -> Result<(), String> {
-//RS     jet_auth_register_user(user_id, password_hash)
-//RS }
-//RS 
-//RS pub fn auth_password_login(
-//RS     user_id: String,
-//RS     password_hash: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     jet_auth_password_login(user_id, password_hash, now_ms, ttl_ms)
-//RS }
-//RS 
-//RS pub fn auth_session_validate(
-//RS     session_id: &String,
-//RS     now_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     jet_auth_session_validate(session_id, now_ms)
-//RS }
-//RS 
-//RS pub fn auth_magic_link_issue(
-//RS     user_id: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<String, String> {
-//RS     jet_auth_magic_link_issue(user_id, now_ms, ttl_ms)
-//RS }
-//RS 
-//RS pub fn auth_magic_link_consume(
-//RS     token: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     jet_auth_magic_link_consume(token, now_ms, ttl_ms)
-//RS }
-//RS 
-//RS pub fn auth_oauth_begin(provider: String) -> Result<String, String> {
-//RS     jet_auth_oauth_begin(provider)
-//RS }
-//RS 
-//RS pub fn auth_oauth_finish(
-//RS     state: String,
-//RS     subject: String,
-//RS     now_ms: i64,
-//RS     ttl_ms: i64,
-//RS ) -> Result<JetAuthSession, String> {
-//RS     jet_auth_oauth_finish(state, subject, now_ms, ttl_ms)
-//RS }
-//RS 
-//RS pub fn auth_session_show(session: &JetAuthSession) -> String {
-//RS     jet_auth_session_show(session)
-//RS }
-//RS 
-//RS pub fn auth_session_user(session: &JetAuthSession) -> String {
-//RS     jet_auth_session_user(session)
-//RS }
-//RS 
-//RS pub fn auth_session_cookie(session: &JetAuthSession) -> String {
-//RS     jet_auth_session_cookie(session)
-//RS }
-//RS 
-//RS pub fn auth_session_id(session: &JetAuthSession) -> String {
-//RS     jet_auth_session_id(session)
-//RS }
-//RS 
-//RS pub fn app_auth(users_table: String) -> JetAuthApp {
-//RS     jet_app_auth(users_table)
-//RS }
-//RS 
-//RS pub fn app_auth_oauth(auth: JetAuthApp, providers: String) -> JetAuthApp {
-//RS     jet_app_auth_oauth(auth, providers)
-//RS }
-//RS 
-//RS pub fn app_auth_routes(auth: &JetAuthApp) -> String {
-//RS     jet_app_auth_routes(auth)
-//RS }
-//RS 
-//RS pub fn app_auth_show(auth: &JetAuthApp) -> String {
-//RS     jet_app_auth_show(auth)
-//RS }
-// END-PORT-PENDING 0250 crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:1-970
+// D-AUTH1=A (#506): sessions, password login, OAuth and magic links share one state seam.
+use std.sync.[Mutex, OnceLock]
+use std.fmt.[Debug, Formatter]
+use std.env
+use std.time.[SystemTime, UNIX_EPOCH]
+use core.crypto.runtime.top_crypto_entropy.[jet_crypto_entropy_bytes]
+use core.crypto.runtime.top_sha256_raw.[jet_hmac_sha256, jet_ct_eq]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:6
+#Derive(Clone)
+pub struct JetAuthSession { pub id: String, pub user_id: String, pub expires_at: I64, pub cookie: String }
+impl Debug for JetAuthSession {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:15
+    fn fmt(self: &Self, f: &Formatter) -> std.fmt.Result {
+        f.debug_struct("JetAuthSession").field("id", &"<redacted>").field("user_id", &self.user_id)
+            .field("expires_at", &self.expires_at).field("cookie", &"<redacted>").finish()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:25
+#Derive(Clone, Debug)
+pub struct JetAuthApp { pub users_table: String, pub providers: [String] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:31
+#Derive(Clone)
+struct JetAuthUser { user_id: String, password_hash: String, delivery_capability: String? }
+impl Debug for JetAuthUser {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:39
+    fn fmt(self: &Self, f: &Formatter) -> std.fmt.Result {
+        f.debug_struct("JetAuthUser").field("user_id", &self.user_id).field("password_hash", &"<redacted>")
+            .field("delivery_capability", &self.delivery_capability.as_ref().map(fn(capability) { "<redacted>" })).finish()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:51
+#Derive(Clone)
+struct JetAuthMagicToken { token: String, user_id: String, expires_at: I64, delivery_capability: String }
+impl Debug for JetAuthMagicToken {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:60
+    fn fmt(self: &Self, f: &Formatter) -> std.fmt.Result {
+        f.debug_struct("JetAuthMagicToken").field("token", &"<redacted>").field("user_id", &self.user_id)
+            .field("expires_at", &self.expires_at).field("delivery_capability", &"<redacted>").finish()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:70
+#Derive(Default)
+struct JetAuthUserStore { users: [JetAuthUser], sessions: [JetAuthSession], magic_tokens: [JetAuthMagicToken], oauth_states: [JetAuthOAuthState] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:78
+// GATE #4565: kernel primitive
+static JET_AUTH_STORE: OnceLock<Mutex<JetAuthUserStore>> = #Unsafe("one synchronized process auth store initialized once") { OnceLock.new() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:80
+fn jet_auth_store() -> &Mutex<JetAuthUserStore> {
+    // GATE #4565: kernel primitive
+    #Unsafe("the once-owned store outlives every retained synchronized access") { JET_AUTH_STORE.get_or_init(fn() { Mutex.new(JetAuthUserStore.default()) }) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:84
+fn jet_auth_valid_identifier(value: String, max: USize) -> Bool {
+    !value.trim().is_empty() && value.len() <= max && value.chars().all(fn(c) { !c.is_control() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:93
+fn jet_auth_constant_time_text_eq(left: String, right: String) -> Bool {
+    difference := U8.from(left.len() != right.len())
+    for index in 0..left.len().max(right.len()) {
+        a :: left.as_bytes().get(index).copied().unwrap_or(0)
+        b :: right.as_bytes().get(index).copied().unwrap_or(0)
+        difference |= a ^ b
+    }
+    difference == 0
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:103
+fn jet_auth_delivery_capability(value: String) -> String? {
+    if value.len() > 254 || value.matches('@').count() != 1 { return None }
+    (local, domain) :: value.split_once('@')?
+    if local.is_empty() || local.len() > 64 || local.starts_with('.') || local.ends_with('.') || local.contains("..")
+        || !local.bytes().all(fn(byte) { byte.is_ascii_alphanumeric() || "!#$%&'*+-/=?^_`{{|}}~.".as_bytes().contains(&byte) }) { return None }
+    if domain.is_empty() || domain.len() > 253 { return None }
+    if domain.split('.').any(fn(label) {
+        label.is_empty() || label.len() > 63 || label.starts_with('-') || label.ends_with('-')
+            || !label.bytes().all(fn(byte) { byte.is_ascii_alphanumeric() || byte == U8{45} })
+    }) { return None }
+    Val(value.to_string())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:136
+fn jet_auth_expiry(now_ms: I64, ttl_ms: I64) -> I64 Err! {
+    if ttl_ms <= 0 { return Err("auth lifetime must be positive") }
+    now_ms.checked_add(ttl_ms).ok_or_else(fn() { "auth lifetime is out of range" })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:145
+fn jet_auth_opaque_token(prefix: String) -> String Err! {
+    bytes :: jet_crypto_entropy_bytes(32).map_err(fn(error) { "cryptographic entropy is unavailable" })?
+    token := String.with_capacity(prefix.len() + 1 + bytes.len() * 2)
+    token.push_str(prefix)
+    token.push('-')
+    for byte in bytes { token.push_str("{byte:02x}") }
+    Ok(^token)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:156
+#Derive(Clone)
+struct JetAuthOAuthState { state: String, provider: String, nonce: String, expires_at: I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:164
+#Derive(Default)
+struct JetAuthOAuthClaims {
+    algorithm: String?, nonce: String?, issuer: String?, audience: String?, subject: String?, expires_at: I64?, issued_at: I64?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:175
+fn jet_auth_valid_oauth_provider(value: String) -> Bool {
+    !value.is_empty() && value.len() <= 64 && value.bytes().all(fn(byte) { byte.is_ascii_alphanumeric() || byte == U8{45} || byte == U8{95} })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:183
+fn jet_auth_oauth_env_suffix(provider: String) -> String? {
+    jet_auth_valid_oauth_provider(provider).then(fn() { provider.chars().map(fn(character) { character.to_ascii_uppercase() }).collect() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:192
+fn jet_auth_oauth_config(provider: String) -> ([U8], String, String) Err! {
+    suffix :: jet_auth_oauth_env_suffix(provider).ok_or_else(fn() { "OAuth provider is invalid" })?
+    // GATE #4565: kernel primitive
+    #Unsafe("read provider credentials from the native process environment; never include secret in errors") {
+        secret :: env.var("JET_OAUTH_{suffix}_SECRET").map_err(fn(error) { "OAuth provider is not configured" })?
+        if secret.as_bytes().len() < 32 { return Err("OAuth provider secret is too short") }
+        issuer :: env.var("JET_OAUTH_{suffix}_ISSUER").unwrap_or_else(fn(error) { provider.to_string() })
+        audience :: env.var("JET_OAUTH_{suffix}_AUDIENCE").unwrap_or_else(fn(error) { provider.to_string() })
+        if !jet_auth_valid_identifier(issuer, 1024) || !jet_auth_valid_identifier(audience, 1024) { return Err("OAuth provider metadata is invalid") }
+        Ok((secret.into_bytes(), ^issuer, ^audience))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:210
+fn jet_auth_now_ms() -> I64 Err! {
+    // GATE #4565: kernel primitive
+    #Unsafe("observe native wall clock relative to Unix epoch and preserve checked range conversion") {
+        millis :: SystemTime.now().duration_since(UNIX_EPOCH).map_err(fn(error) { "system clock is unavailable" })?.as_millis()
+        I64.try_from(millis).map_err(fn(error) { "system clock is out of range" })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:218
+fn jet_oauth_b64url_decode(text: String) -> [U8] Err! {
+    if text.is_empty() || text.len() > 16 * 1024 || text.len() % 4 == 1 { return Err("OAuth assertion encoding is invalid") }
+    out := [U8].with_capacity(text.len().saturating_mul(3) / 4)
+    accumulator := U32{0}
+    bits := U8{0}
+    for byte in text.bytes() {
+        value :: match byte {
+            65..=90 -> byte - U8{65}
+            97..=122 -> byte - U8{97} + U8{26}
+            48..=57 -> byte - U8{48} + U8{52}
+            45 -> U8{62}
+            95 -> U8{63}
+            _ -> return Err("OAuth assertion encoding is invalid")
+        }
+        accumulator = ((accumulator << 6) | U32.from(value)) & 0x00ffffff
+        bits += 6
+        if bits >= 8 { bits -= 8; out.push(((accumulator >> bits) & 0xff) as U8) }
+    }
+    if bits != 0 && (accumulator & ((U32{1} << bits) - 1)) != 0 { return Err("OAuth assertion encoding is non-canonical") }
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:247
+fn jet_oauth_json_hex4(chars: [Char], position: &USize) -> U32? {
+    value := U32{0}
+    for index in 0..4 { digit :: chars.get(*position)?.to_digit(16)?; *position += 1; value = value * 16 + digit }
+    Val(value)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:257
+fn jet_oauth_json_string(chars: [Char], position: &USize) -> String? {
+    if chars.get(*position) != Val(&'"') { return None }
+    *position += 1
+    out := String.new()
+    loop {
+        character :: match chars.get(*position).copied() { Val(character) -> character, None -> break }
+        *position += 1
+        match character {
+            '"' -> return Val(^out)
+            '\\' -> {
+                escaped :: chars.get(*position).copied()?
+                *position += 1
+                match escaped {
+                    '"' -> out.push('"')
+                    '\\' -> out.push('\\')
+                    '/' -> out.push('/')
+                    'b' -> out.push(Char.from_u32(8).unwrap())
+                    'f' -> out.push(Char.from_u32(12).unwrap())
+                    'n' -> out.push('\n')
+                    'r' -> out.push('\r')
+                    't' -> out.push('\t')
+                    'u' -> {
+                        high :: jet_oauth_json_hex4(chars, position)?
+                        if (0xD800..=0xDBFF).contains(&high) {
+                            if chars.get(*position) != Val(&'\\') { return None }
+                            *position += 1
+                            if chars.get(*position) != Val(&'u') { return None }
+                            *position += 1
+                            low :: jet_oauth_json_hex4(chars, position)?
+                            if !(0xDC00..=0xDFFF).contains(&low) { return None }
+                            combined :: 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00)
+                            out.push(Char.from_u32(combined)?)
+                        } else if (0xDC00..=0xDFFF).contains(&high) { return None }
+                        else { out.push(Char.from_u32(high)?) }
+                    }
+                    _ -> return None
+                }
+            }
+            _ -> { if (character as U32) < 0x20 { return None }; out.push(character) }
+        }
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:312
+fn jet_oauth_json_whitespace(character: Char) -> Bool { character == ' ' || character == '\n' || character == '\r' || character == '\t' }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:316
+fn jet_oauth_skip_whitespace(chars: [Char], position: &USize) -> {
+    while chars.get(*position).copied().is_some_and(jet_oauth_json_whitespace) { *position += 1 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:326
+fn jet_oauth_json_skip_value(chars: [Char], position: &USize) -> Bool {
+    first :: match chars.get(*position).copied() { Val(first) -> first, None -> return false }
+    if first == '"' { return jet_oauth_json_string(chars, position).is_some() }
+    if first == '{' || first == '[' {
+        closers := [if first == '{' { '}' } else { ']' }]
+        *position += 1
+        loop {
+            character :: match chars.get(*position).copied() { Val(character) -> character, None -> break }
+            if character == '"' { if jet_oauth_json_string(chars, position).is_none() { return false }; continue }
+            if character == '{' { closers.push('}'); *position += 1; continue }
+            if character == '[' { closers.push(']'); *position += 1; continue }
+            if character == '}' || character == ']' {
+                if closers.last().copied() != Val(character) { return false }
+                _ :: closers.pop()
+                *position += 1
+                if closers.is_empty() { return true }
+                continue
+            }
+            *position += 1
+        }
+        return false
+    }
+    start :: *position
+    loop {
+        character :: match chars.get(*position).copied() { Val(character) -> character, None -> break }
+        if jet_oauth_json_whitespace(character) || character == ',' || character == '}' || character == ']' { break }
+        *position += 1
+    }
+    *position > start
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:380
+fn jet_oauth_parse_i64(text: String) -> I64? {
+    (negative, digits) :: text.strip_prefix('-').map_or((false, text), fn(digits) { (true, digits) })
+    if digits.is_empty() || !digits.bytes().all(fn(byte) { byte.is_ascii_digit() }) { return None }
+    if negative && digits == "0" { return None }
+    limit :: if negative { U64{1} << 63 } else { I64.MAX as U64 }
+    magnitude :: digits.bytes().try_fold(U64{0}, fn(value, byte) {
+        next :: value.checked_mul(10)?.checked_add(U64.from(byte - U8{48}))?
+        (next <= limit).then_some(next)
+    })?
+    if negative {
+        if magnitude == U64{1} << 63 { Val(I64.MIN) } else { I64.try_from(magnitude).ok()?.checked_neg() }
+    } else { I64.try_from(magnitude).ok() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:408
+fn jet_oauth_parse_claims(text: String) -> JetAuthOAuthClaims Err! {
+    if text.len() > 32 * 1024 { return Err("OAuth assertion payload is too large") }
+    chars: [Char] :: text.chars().collect()
+    position := USize{0}
+    jet_oauth_skip_whitespace(chars, &position)
+    if chars.get(position) != Val(&'{') { return Err("OAuth assertion payload is not an object") }
+    position += 1
+    claims := JetAuthOAuthClaims.default()
+    loop {
+        jet_oauth_skip_whitespace(chars, &position)
+        if chars.get(position) == Val(&'}') { position += 1; break }
+        key :: jet_oauth_json_string(chars, &position).ok_or_else(fn() { "OAuth assertion claim name is invalid" })?
+        jet_oauth_skip_whitespace(chars, &position)
+        if chars.get(position) != Val(&':') { return Err("OAuth assertion claim separator is invalid") }
+        position += 1
+        jet_oauth_skip_whitespace(chars, &position)
+        match key {
+            "alg" | "nonce" | "iss" | "aud" | "sub" -> {
+                value :: jet_oauth_json_string(chars, &position).ok_or_else(fn() { "OAuth claim `{key}` must be text" })?
+                slot :: match key {
+                    "alg" -> &claims.algorithm
+                    "nonce" -> &claims.nonce
+                    "iss" -> &claims.issuer
+                    "aud" -> &claims.audience
+                    "sub" -> &claims.subject
+                    _ -> unreachable()
+                }
+                if slot.replace(^value).is_some() { return Err("OAuth claim `{key}` is duplicated") }
+            }
+            "exp" | "iat" -> {
+                start :: position
+                loop {
+                    character :: match chars.get(position).copied() { Val(character) -> character, None -> break }
+                    if jet_oauth_json_whitespace(character) || character == ',' || character == '}' || character == ']' { break }
+                    position += 1
+                }
+                value :: jet_oauth_parse_i64(chars[start..position].iter().copied().collect::<String>()).ok_or_else(fn() { "OAuth claim `{key}` must be an integer" })?
+                slot :: if key == "exp" { &claims.expires_at } else { &claims.issued_at }
+                if slot.replace(value).is_some() { return Err("OAuth claim `{key}` is duplicated") }
+            }
+            _ -> { if !jet_oauth_json_skip_value(chars, &position) { return Err("OAuth assertion claim value is invalid") } }
+        }
+        jet_oauth_skip_whitespace(chars, &position)
+        match chars.get(position).copied() {
+            Val(',') -> position += 1
+            Val('}') -> { position += 1; break }
+            _ -> return Err("OAuth assertion object is invalid")
+        }
+    }
+    jet_oauth_skip_whitespace(chars, &position)
+    if position != chars.len() { return Err("OAuth assertion has trailing data") }
+    Ok(^claims)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:496
+fn jet_auth_oauth_verify(entry: &JetAuthOAuthState, assertion: String, now_ms: I64, secret: [U8], issuer: String, audience: String) -> String Err! {
+    if assertion.len() > 64 * 1024 { return Err("OAuth assertion is too large") }
+    parts := assertion.split('.')
+    header_part :: parts.next().ok_or_else(fn() { "OAuth assertion is malformed" })?
+    payload_part :: parts.next().ok_or_else(fn() { "OAuth assertion is malformed" })?
+    signature_part :: parts.next().ok_or_else(fn() { "OAuth assertion is malformed" })?
+    if parts.next().is_some() || header_part.is_empty() || payload_part.is_empty() || signature_part.is_empty() { return Err("OAuth assertion is malformed") }
+    header :: String.from_utf8(jet_oauth_b64url_decode(header_part)?).map_err(fn(error) { "OAuth assertion header is not UTF-8" })?
+    payload :: String.from_utf8(jet_oauth_b64url_decode(payload_part)?).map_err(fn(error) { "OAuth assertion payload is not UTF-8" })?
+    signature :: jet_oauth_b64url_decode(signature_part)?
+    header_claims :: jet_oauth_parse_claims(header)?
+    if header_claims.algorithm.as_deref() != Val("HS256") { return Err("OAuth assertion algorithm is not allowed") }
+    expected :: jet_hmac_sha256(secret, "{header_part}.{payload_part}".as_bytes())
+    if !jet_ct_eq(&expected, &signature) { return Err("OAuth assertion signature is invalid") }
+    claims :: jet_oauth_parse_claims(payload)?
+    if claims.nonce.as_deref().is_none_or(fn(nonce) { !jet_auth_constant_time_text_eq(nonce, entry.nonce) }) { return Err("OAuth assertion nonce is invalid") }
+    if claims.issuer.as_deref() != Val(issuer) { return Err("OAuth assertion issuer is invalid") }
+    if claims.audience.as_deref() != Val(audience) { return Err("OAuth assertion audience is invalid") }
+    now_s :: now_ms.checked_div(1000).ok_or_else(fn() { "OAuth clock is invalid" })?
+    expires_at :: claims.expires_at.ok_or_else(fn() { "OAuth assertion expiry is missing" })?
+    if expires_at <= now_s { return Err("OAuth assertion is expired") }
+    if claims.issued_at.is_some_and(fn(issued_at) { issued_at > now_s.saturating_add(60) }) { return Err("OAuth assertion was issued in the future") }
+    subject :: claims.subject.ok_or_else(fn() { "OAuth assertion subject is missing" })?
+    if !jet_auth_valid_identifier(subject, 512) { return Err("OAuth assertion subject is invalid") }
+    Ok(^subject)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:576
+fn jet_auth_valid_session_id(value: String) -> Bool {
+    bytes :: value.as_bytes()
+    bytes.len() == 69 && bytes.starts_with("sess-".as_bytes()) && bytes[5..].iter().all(fn(byte) { byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:594
+fn jet_auth_session_cookie_mint(id: String) -> String { "jet_session={id}; HttpOnly; Secure; SameSite=Lax; Path=/" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:598
+fn jet_auth_session_value(user_id: String, now_ms: I64, ttl_ms: I64) -> JetAuthSession Err! {
+    expires_at :: jet_auth_expiry(now_ms, ttl_ms)?
+    id :: jet_auth_opaque_token("sess")?
+    cookie :: jet_auth_session_cookie_mint(id)
+    Ok(JetAuthSession{id: ^id, user_id: ^user_id, expires_at, cookie: ^cookie})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:614
+fn jet_auth_session_show(session: &JetAuthSession) -> String {
+    "Session(id=<redacted>, user={session.user_id}, exp={session.expires_at}, cookie_len={session.cookie.len()})"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:623
+pub fn jet_auth_register_user(user_id: String, password_hash: String) -> () Err! {
+    if !jet_auth_valid_identifier(user_id, 512) { return Err("user id is invalid") }
+    if password_hash.trim().is_empty() || password_hash.len() > 4096 { return Err("password hash is invalid") }
+    delivery_capability :: jet_auth_delivery_capability(user_id)
+    // GATE #4565: kernel primitive
+    #Unsafe("auth users are changed only under the store mutex; poison remains an unavailable-store error") {
+        store := jet_auth_store().lock().map_err(fn(error) { "auth store is unavailable" })?
+        if store.users.iter().any(fn(user) { user.user_id == user_id }) { return Err("user `{user_id}` already registered") }
+        store.users.push(JetAuthUser{user_id: ^user_id, password_hash: ^password_hash, delivery_capability: ^delivery_capability})
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:645
+fn jet_auth_password_login(user_id: String, password_hash: String, now_ms: I64, ttl_ms: I64) -> JetAuthSession Err! {
+    session :: jet_auth_session_value(user_id.clone(), now_ms, ttl_ms)?
+    // GATE #4565: kernel primitive
+    #Unsafe("credential lookup and session insertion are serialized under the auth store mutex") {
+        store := jet_auth_store().lock().map_err(fn(error) { "auth store is unavailable" })?
+        ok :: store.users.iter().any(fn(user) { user.user_id == user_id && jet_auth_constant_time_text_eq(user.password_hash, password_hash) })
+        if !ok { return Err("invalid credentials") }
+        store.sessions.push(session.clone())
+        Ok(^session)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:669
+fn jet_auth_session_validate(session_id: &String, now_ms: I64) -> JetAuthSession Err! {
+    if !jet_auth_valid_session_id(session_id) { return Err("missing: session") }
+    // GATE #4565: kernel primitive
+    #Unsafe("lookup retained session while holding auth store lock; compare secret ID without early byte exit") {
+        store :: jet_auth_store().lock().map_err(fn(error) { "auth store is unavailable" })?
+        store.sessions.iter().find(fn(session) { jet_auth_constant_time_text_eq(session.id, session_id) }).cloned()
+            .ok_or_else(fn() { "missing: session" }).and_then(fn(session) {
+                if now_ms >= session.expires_at { Err("token expired") } else { Ok(^session) }
+            })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:694
+fn jet_auth_magic_link_issue(user_id: String, now_ms: I64, ttl_ms: I64) -> String Err! {
+    expires_at :: jet_auth_expiry(now_ms, ttl_ms)?
+    if !jet_auth_valid_identifier(user_id, 512) { return Err("user id is invalid") }
+    delivery_capability :: jet_auth_delivery_capability(user_id).ok_or_else(fn() { "magic link requires a delivery-capable identity" })?
+    // GATE #4565: kernel primitive
+    #Unsafe("bind token to registered delivery identity and insert atomically under store mutex") {
+        store := jet_auth_store().lock().map_err(fn(error) { "auth store is unavailable" })?
+        if !store.users.iter().any(fn(user) { user.user_id == user_id && user.delivery_capability.as_deref() == Val(delivery_capability.as_str()) }) {
+            return Err("magic link requires a registered delivery identity")
+        }
+        token :: jet_auth_opaque_token("magic")?
+        store.magic_tokens.push(JetAuthMagicToken{token: token.clone(), user_id: ^user_id, expires_at, delivery_capability: ^delivery_capability})
+        Ok(^token)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:724
+pub fn jet_auth_magic_link_consume(token: String, now_ms: I64, ttl_ms: I64) -> JetAuthSession Err! {
+    _ :: jet_auth_expiry(now_ms, ttl_ms)?
+    if !jet_auth_valid_identifier(token, 256) { return Err("token expired") }
+    // GATE #4565: kernel primitive
+    #Unsafe("consume token once only after identity validation and fresh entropy succeed, under auth store lock") {
+        store := jet_auth_store().lock().map_err(fn(error) { "auth store is unavailable" })?
+        idx :: store.magic_tokens.iter().position(fn(entry) { jet_auth_constant_time_text_eq(entry.token, token) && now_ms < entry.expires_at })
+            .ok_or_else(fn() { "token expired" })?
+        entry :: store.magic_tokens[idx].clone()
+        user :: store.users.iter().find(fn(user) { user.user_id == entry.user_id }).ok_or_else(fn() { "magic link identity is no longer registered" })?
+        if user.delivery_capability.as_deref() != Val(entry.delivery_capability.as_str()) { return Err("magic link delivery identity is unavailable") }
+        id :: jet_auth_opaque_token("sess")?
+        _ :: store.magic_tokens.remove(idx)
+        expires_at :: jet_auth_expiry(now_ms, ttl_ms)?
+        session :: JetAuthSession{id: id.clone(), user_id: ^entry.user_id, expires_at, cookie: jet_auth_session_cookie_mint(id)}
+        store.sessions.push(session.clone())
+        Ok(^session)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:763
+fn jet_auth_oauth_begin(provider: String) -> String Err! {
+    _ :: jet_auth_oauth_config(provider)?
+    now_ms :: jet_auth_now_ms()?
+    expires_at :: now_ms.checked_add(10 * 60 * 1000).ok_or_else(fn() { "OAuth state lifetime is out of range" })?
+    state :: jet_auth_opaque_token("oauth")?
+    // The returned state doubles as OIDC nonce in the provider request.
+    nonce :: state.clone()
+    // GATE #4565: kernel primitive
+    #Unsafe("prune and bound pending OAuth state under the one process store mutex") {
+        store := jet_auth_store().lock().map_err(fn(error) { "auth store is unavailable" })?
+        store.oauth_states.retain(fn(entry) { entry.expires_at > now_ms })
+        if store.oauth_states.len() >= 256 { _ :: store.oauth_states.remove(0) }
+        store.oauth_states.push(JetAuthOAuthState{state: state.clone(), provider: ^provider, nonce: ^nonce, expires_at})
+        Ok(^state)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:789
+fn jet_auth_oauth_finish(state: String, assertion: String, now_ms: I64, ttl_ms: I64) -> JetAuthSession Err! {
+    if !jet_auth_valid_identifier(state, 256) || assertion.is_empty() { return Err("OAuth completion is invalid") }
+    // GATE #4565: kernel primitive
+    #Unsafe("verify and consume pending OAuth state once; keep failed assertions retryable without consuming state") {
+        store := jet_auth_store().lock().map_err(fn(error) { "auth store is unavailable" })?
+        index :: store.oauth_states.iter().position(fn(entry) { jet_auth_constant_time_text_eq(entry.state, state) && now_ms < entry.expires_at })
+            .ok_or_else(fn() { "OAuth state is expired or unknown" })?
+        entry :: store.oauth_states[index].clone()
+        (secret, issuer, audience) :: jet_auth_oauth_config(entry.provider)?
+        subject :: jet_auth_oauth_verify(&entry, assertion, now_ms, secret, issuer, audience)?
+        session :: jet_auth_session_value(^subject, now_ms, ttl_ms)?
+        _ :: store.oauth_states.remove(index)
+        store.sessions.push(session.clone())
+        Ok(^session)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:824
+fn jet_auth_session_user(session: &JetAuthSession) -> String { session.user_id.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:828
+fn jet_auth_session_cookie(session: &JetAuthSession) -> String { session.cookie.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:832
+fn jet_auth_session_id(session: &JetAuthSession) -> String { session.id.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:836
+fn jet_app_auth(users_table: String) -> JetAuthApp { JetAuthApp{users_table: ^users_table, providers: []} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:843
+fn jet_app_auth_oauth(auth: JetAuthApp, providers: String) -> JetAuthApp {
+    for part in providers.split(fn(c) { c == ',' || c == ' ' }) {
+        provider := part.trim() // #4303
+        if jet_auth_valid_identifier(provider, 128) && !auth.providers.iter().any(fn(existing) { existing == provider }) { auth.providers.push(provider.to_string()) }
+    }
+    ^auth
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:855
+fn jet_app_auth_routes(auth: &JetAuthApp) -> String {
+    routes := ["POST /login -> password ({auth.users_table})", "POST /logout -> revoke session", "GET /magic -> begin magic link", "POST /magic -> consume magic link"]
+    for provider in &auth.providers { routes.push("GET /oauth/{provider}/begin"); routes.push("GET /oauth/{provider}/callback") }
+    "AuthRoutes({routes.join("; ")})"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:869
+fn jet_app_auth_show(auth: &JetAuthApp) -> String { "Auth(users={auth.users_table}, providers=[{auth.providers.join(",")}])" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:880
+pub fn auth_runtime_reset() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("reset existing process store under mutex; retain original poison recovery without clearing mutex poison") {
+        store :: match JET_AUTH_STORE.get() { Val(store) -> store, None -> return }
+        locked := match store.lock() { Ok(store) -> store, Err(poisoned) -> poisoned.into_inner() }
+        *locked = JetAuthUserStore.default()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:891
+pub fn auth_register_user(user_id: String, password_hash: String) -> () Err! { jet_auth_register_user(^user_id, ^password_hash) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:895
+pub fn auth_password_login(user_id: String, password_hash: String, now_ms: I64, ttl_ms: I64) -> JetAuthSession Err! { jet_auth_password_login(^user_id, ^password_hash, now_ms, ttl_ms) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:904
+pub fn auth_session_validate(session_id: &String, now_ms: I64) -> JetAuthSession Err! { jet_auth_session_validate(session_id, now_ms) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:911
+pub fn auth_magic_link_issue(user_id: String, now_ms: I64, ttl_ms: I64) -> String Err! { jet_auth_magic_link_issue(^user_id, now_ms, ttl_ms) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:919
+pub fn auth_magic_link_consume(token: String, now_ms: I64, ttl_ms: I64) -> JetAuthSession Err! { jet_auth_magic_link_consume(^token, now_ms, ttl_ms) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:927
+pub fn auth_oauth_begin(provider: String) -> String Err! { jet_auth_oauth_begin(^provider) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:931
+pub fn auth_oauth_finish(state: String, subject: String, now_ms: I64, ttl_ms: I64) -> JetAuthSession Err! { jet_auth_oauth_finish(^state, ^subject, now_ms, ttl_ms) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:940
+pub fn auth_session_show(session: &JetAuthSession) -> String { jet_auth_session_show(session) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:944
+pub fn auth_session_user(session: &JetAuthSession) -> String { jet_auth_session_user(session) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:948
+pub fn auth_session_cookie(session: &JetAuthSession) -> String { jet_auth_session_cookie(session) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:952
+pub fn auth_session_id(session: &JetAuthSession) -> String { jet_auth_session_id(session) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:956
+pub fn app_auth(users_table: String) -> JetAuthApp { jet_app_auth(^users_table) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:960
+pub fn app_auth_oauth(auth: JetAuthApp, providers: String) -> JetAuthApp { jet_app_auth_oauth(^auth, ^providers) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:964
+pub fn app_auth_routes(auth: &JetAuthApp) -> String { jet_app_auth_routes(auth) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:968
+pub fn app_auth_show(auth: &JetAuthApp) -> String { jet_app_auth_show(auth) }

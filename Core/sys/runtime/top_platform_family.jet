@@ -1,0 +1,8 @@
+use core.sys.target as target
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PlatformFamily.rs:3
+pub fn jet_std_os_family() -> String {
+    // GATE #4483: canonical selected-target fact, never the compiler host.
+    match target.selected_family() {
+        .Unix -> "unix", .Windows -> "windows", .Wasm -> "wasm", .Other -> "",
+    }
+}

@@ -1,0 +1,93 @@
+use core.process.runtime.top_process.[jet_process_limit_i64, jet_process_spec_timeout, jet_process_spec_output_limit, jet_process_spec_cpu_time_limit, jet_process_spec_memory_limit, jet_process_spec_open_file_limit, jet_process_spec_detached, jet_process_spec_terminal, jet_process_native_limits, jet_process_output_buffer_capacity, jet_process_pipeline_needs_relay, jet_process_resource_limits_check, jet_process_environment, jet_process_sandbox_env, jet_process_command_builder_with_identity]
+use core.prelude.runtime.std_common_types.[ProcessSpec, ProcessStreamMode]
+use core.prelude.runtime.std_common_types_02.Duration
+use core.process.runtime.top_process_spec.JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES
+use core.sys.target
+use jet_foundation.Numeric.JetInt
+use jet_foundation.Syntax.TEXT_NUL
+
+fn process_spec_control() -> ProcessSpec {
+    ProcessSpec{
+        cmd: ["echo"], cwd: None, env_clear: true, env_set: [], env_remove: [], stdin: None,
+        stdout: ProcessStreamMode.Capture, stderr: ProcessStreamMode.Capture,
+        timeout_ms: None, output_limit: Some(JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES),
+        cpu_time_limit_ms: None, memory_limit_bytes: None, open_file_limit: None,
+        detached: false, terminal: None, policy_wire: None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:56/63/75/82/89/96/104/170/177
+#Test("process_spec_limits_clamp_negative_values_and_retain_native_limit_projection") {
+    assert_eq(jet_process_limit_i64(&JetInt.from_i64(-7)), I64{0})
+    spec :: jet_process_spec_timeout(process_spec_control(), &Duration{ns: -1000000})
+    assert_eq(spec.timeout_ms, Some(I64{0}))
+    spec :: jet_process_spec_output_limit(^spec, JetInt.from_i64(-1))
+    spec :: jet_process_spec_cpu_time_limit(^spec, &Duration{ns: 250000000})
+    spec :: jet_process_spec_memory_limit(^spec, JetInt.from_i64(4096))
+    spec :: jet_process_spec_open_file_limit(^spec, JetInt.from_i64(32))
+    limits :: jet_process_native_limits(&spec)
+    assert_eq(spec.output_limit, Some(I64{0}))
+    assert_eq(limits.cpu_time_ms, Some(I64{250}))
+    assert_eq(limits.memory_bytes, Some(I64{4096}))
+    assert_eq(limits.open_files, Some(I64{32}))
+    spec :: jet_process_spec_terminal(jet_process_spec_detached(^spec))
+    assert(spec.detached)
+    assert(spec.terminal.is_some())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:217/625
+#Test("process_output_capacity_and_pipeline_relay_keep_default_kernel_bound") {
+    assert_eq(jet_process_output_buffer_capacity(None), Usize{16384})
+    assert_eq(jet_process_output_buffer_capacity(Some(0)), Usize{0})
+    assert_eq(jet_process_output_buffer_capacity(Some(7)), Usize{7})
+    assert_eq(jet_process_output_buffer_capacity(Some(65536)), Usize{16384})
+    spec := process_spec_control()
+    assert(!jet_process_pipeline_needs_relay(&spec))
+    spec.output_limit = None
+    assert(!jet_process_pipeline_needs_relay(&spec))
+    spec.output_limit = Some(0)
+    assert(jet_process_pipeline_needs_relay(&spec))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:115
+#Test("process_resource_limits_refuse_unsupported_targets_before_spawn") {
+    spec := process_spec_control()
+    assert(jet_process_resource_limits_check(&spec).is_ok())
+    spec.open_file_limit = Some(32)
+    os :: target.selected_os()
+    if os == .Linux {
+        assert(jet_process_resource_limits_check(&spec).is_ok())
+    } else {
+        assert(jet_process_resource_limits_check(&spec).is_err())
+    }
+    spec.open_file_limit = None
+    spec.cpu_time_limit_ms = Some(100)
+    if os == .Linux || os == .MacOS || os == .Windows {
+        assert(jet_process_resource_limits_check(&spec).is_ok())
+    } else {
+        assert(jet_process_resource_limits_check(&spec).is_err())
+    }
+    if os == .Windows {
+        spec.detached = true
+        assert(jet_process_resource_limits_check(&spec).is_err())
+        spec.detached = false
+        spec.policy_wire = Some("Exec")
+        assert(jet_process_resource_limits_check(&spec).is_err())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:237/280/366
+#Test("process_environment_validates_names_values_and_removal_order") {
+    spec := process_spec_control()
+    spec.env_set = [("JET_PORT_CONTROL", "one"), ("JET_PORT_CONTROL", "two")]
+    environment :: jet_process_environment(&spec).unwrap()
+    assert_eq(environment.len(), Usize{1})
+    sandbox :: jet_process_sandbox_env(&spec).unwrap()
+    assert_eq(sandbox.get("JET_PORT_CONTROL"), Some(&"two"))
+    spec.env_remove = ["JET_PORT_CONTROL"]
+    assert(jet_process_environment(&spec).unwrap().is_empty())
+    assert(jet_process_sandbox_env(&spec).unwrap().is_empty())
+    spec.env_set = [("BAD=NAME", "value")]
+    assert(jet_process_environment(&spec).is_err())
+    assert(jet_process_sandbox_env(&spec).is_err())
+    spec.env_set = [("NAME", TEXT_NUL)]
+    assert(jet_process_environment(&spec).is_err())
+    spec.cmd = []
+    assert(jet_process_command_builder_with_identity(&spec, None).is_err())
+}

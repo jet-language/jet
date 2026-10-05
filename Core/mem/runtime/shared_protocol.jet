@@ -1,4 +1,3 @@
-// PORT-PENDING 0188 crates-jet-codegen-src-prelude-sharedprotocol: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1-2254
 // One canonical lock/condition protocol. Payload storage belongs to engines,
 // which marshal values but never redefine ownership or lock policy.
 use std.sync.[Arc, Mutex, Condvar]
@@ -710,1215 +709,431 @@ impl Drop for JetSharedTransaction {
     }
 }
 
-//RS pub struct JetSharedPermit {
-//RS     protocol: std::sync::Arc<JetSharedProtocol>,
-//RS     editable: bool,
-//RS     held: std::sync::atomic::AtomicBool,
-//RS }
-//RS 
-//RS impl JetSharedPermit {
-//RS     pub fn editable(&self) -> bool {
-//RS         self.editable
-//RS     }
-//RS 
-//RS     pub fn held(&self) -> bool {
-//RS         self.held.load(std::sync::atomic::Ordering::Acquire)
-//RS     }
-//RS 
-//RS     pub fn release(&self) {
-//RS         if !self
-//RS             .held
-//RS             .swap(false, std::sync::atomic::Ordering::AcqRel)
-//RS         {
-//RS             return;
-//RS         }
-//RS         let mut state = self
-//RS             .protocol
-//RS             .state
-//RS             .lock()
-//RS             .unwrap_or_else(|error| error.into_inner());
-//RS         if self.editable {
-//RS             state.writer = false;
-//RS         } else {
-//RS             state.readers = state.readers.saturating_sub(1);
-//RS         }
-//RS         self.protocol.wake.notify_all();
-//RS     }
-//RS 
-//RS     pub fn reacquire(&self, mut cancelled: impl FnMut() -> bool) -> bool {
-//RS         if self.held() {
-//RS             return true;
-//RS         }
-//RS         let mut state = self
-//RS             .protocol
-//RS             .state
-//RS             .lock()
-//RS             .unwrap_or_else(|error| error.into_inner());
-//RS         if self.editable {
-//RS             state.writers_waiting += 1;
-//RS         }
-//RS         loop {
-//RS             if cancelled() {
-//RS                 if self.editable {
-//RS                     state.writers_waiting -= 1;
-//RS                     self.protocol.wake.notify_all();
-//RS                 }
-//RS                 return false;
-//RS             }
-//RS             let available = if self.editable {
-//RS                 !state.writer && state.readers == 0
-//RS             } else {
-//RS                 !state.writer && state.writers_waiting == 0
-//RS             };
-//RS             if available {
-//RS                 if self.editable {
-//RS                     state.writers_waiting -= 1;
-//RS                     state.writer = true;
-//RS                 } else {
-//RS                     state.readers += 1;
-//RS                 }
-//RS                 self.held
-//RS                     .store(true, std::sync::atomic::Ordering::Release);
-//RS                 return true;
-//RS             }
-//RS             let (next, _) = self
-//RS                 .protocol
-//RS                 .wake
-//RS                 .wait_timeout(state, std::time::Duration::from_millis(10))
-//RS                 .unwrap_or_else(|error| error.into_inner());
-//RS             state = next;
-//RS         }
-//RS     }
-//RS }
-//RS impl JetSharedCanonicalPermit for JetSharedPermit {
-//RS     fn editable(&self) -> bool {
-//RS         JetSharedPermit::editable(self)
-//RS     }
-//RS 
-//RS     fn held(&self) -> bool {
-//RS         JetSharedPermit::held(self)
-//RS     }
-//RS 
-//RS     fn release(&self) -> JetSharedPhysicalOperationOutcome<()> {
-//RS         JetSharedPermit::release(self);
-//RS         JetSharedPhysicalOperationOutcome::new(Ok(()), None)
-//RS     }
-//RS 
-//RS     fn release_during_drop(&self) {
-//RS         JetSharedPermit::release(self);
-//RS     }
-//RS 
-//RS     fn reacquire(&self, cancelled: &mut dyn FnMut() -> bool) -> bool {
-//RS         JetSharedPermit::reacquire(self, || cancelled())
-//RS     }
-//RS 
-//RS     fn into_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any> {
-//RS         self
-//RS     }
-//RS }
-//RS 
-//RS pub struct JetSharedGuardState {
-//RS     permit: std::sync::Arc<dyn JetSharedCanonicalPermit>,
-//RS     path: Vec<i64>,
-//RS     editable: bool,
-//RS     active: std::sync::atomic::AtomicBool,
-//RS }
-//RS 
-//RS impl JetSharedGuardState {
-//RS     pub fn permit_arc(&self) -> std::sync::Arc<dyn JetSharedCanonicalPermit> {
-//RS         self.permit.clone()
-//RS     }
-//RS 
-//RS     pub fn permit(&self) -> &dyn JetSharedCanonicalPermit {
-//RS         self.permit.as_ref()
-//RS     }
-//RS 
-//RS     pub fn editable(&self) -> bool {
-//RS         self.editable
-//RS     }
-//RS 
-//RS     pub fn held(&self) -> bool {
-//RS         self.active.load(std::sync::atomic::Ordering::Acquire) && self.permit.held()
-//RS     }
-//RS 
-//RS     pub fn path(&self) -> &[i64] {
-//RS         &self.path
-//RS     }
-//RS }
-//RS 
-//RS /// Build the checked path-tracking guard state around an already-acquired
-//RS /// canonical physical owner permit. This does not acquire a shell protocol.
-//RS pub fn jet_shared_guard_state_from_permit(
-//RS     permit: std::sync::Arc<dyn JetSharedCanonicalPermit>,
-//RS     editable: bool,
-//RS ) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
-//RS     if !permit.held() {
-//RS         return Err(JET_SHARED_GUARD_INVALID);
-//RS     }
-//RS     if editable && !permit.editable() {
-//RS         return Err(JET_SHARED_GUARD_EDIT_REQUIRED);
-//RS     }
-//RS     Ok(std::sync::Arc::new(JetSharedGuardState {
-//RS         permit,
-//RS         path: Vec::new(),
-//RS         editable,
-//RS         active: std::sync::atomic::AtomicBool::new(true),
-//RS     }))
-//RS }
-//RS 
-//RS impl Drop for JetSharedPermit {
-//RS     fn drop(&mut self) {
-//RS         self.release();
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS pub fn jet_shared_guard_acquire(
-//RS     protocol: &std::sync::Arc<JetSharedProtocol>,
-//RS     editable: bool,
-//RS     cancelled: impl FnMut() -> bool,
-//RS ) -> Option<std::sync::Arc<JetSharedGuardState>> {
-//RS     jet_shared_acquire(protocol, editable, cancelled).map(|permit| {
-//RS         let permit: std::sync::Arc<dyn JetSharedCanonicalPermit> = permit;
-//RS         jet_shared_guard_state_from_permit(permit, editable)
-//RS             .expect("new Shared guard permit is held with matching capability")
-//RS     })
-//RS }
-//RS 
-//RS /// Acquire owner permits through the same canonical owner ordering used by
-//RS /// transactions, then return one checked path state per original participant.
-//RS pub fn jet_shared_guard_acquire_ordered(
-//RS     participants: Vec<(usize, std::sync::Arc<JetSharedProtocol>, bool)>,
-//RS ) -> Vec<(usize, std::sync::Arc<JetSharedGuardState>)> {
-//RS     let owners = participants
-//RS         .into_iter()
-//RS         .map(|(index, protocol, editable)| {
-//RS             (
-//RS                 index,
-//RS                 protocol as std::sync::Arc<dyn JetSharedCanonicalOwner>,
-//RS                 editable,
-//RS             )
-//RS         })
-//RS         .collect();
-//RS     jet_shared_acquire_ordered_owners(owners)
-//RS         .expect("uncancelled ordered Shared owner acquisition succeeds")
-//RS         .into_iter()
-//RS         .map(|(index, editable, permit)| {
-//RS             (
-//RS                 index,
-//RS                 jet_shared_guard_state_from_permit(permit, editable)
-//RS                     .expect("ordered Shared permit is held with matching capability"),
-//RS             )
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub fn jet_shared_guard_map(
-//RS     guard: &JetSharedGuardState,
-//RS     field: i64,
-//RS     editable: bool,
-//RS ) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
-//RS     jet_shared_guard_map_path(guard, &[field], editable)
-//RS }
-//RS 
-//RS /// Map a checked guard through a complete stored-field suffix while retaining
-//RS /// its canonical permit and consuming the parent only after child creation.
-//RS pub fn jet_shared_guard_map_path(
-//RS     guard: &JetSharedGuardState,
-//RS     fields: &[i64],
-//RS     editable: bool,
-//RS ) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
-//RS     if !guard.held() {
-//RS         return Err(JET_SHARED_GUARD_INVALID);
-//RS     }
-//RS     if editable {
-//RS         jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
-//RS     }
-//RS 
-//RS     let mapped = std::sync::Arc::new(JetSharedGuardState {
-//RS         permit: std::sync::Arc::clone(&guard.permit),
-//RS         path: jet_shared_guard_path_with_suffix(guard, fields),
-//RS         editable,
-//RS         active: std::sync::atomic::AtomicBool::new(true),
-//RS     });
-//RS     guard
-//RS         .active
-//RS         .store(false, std::sync::atomic::Ordering::Release);
-//RS     Ok(mapped)
-//RS }
-//RS 
-//RS /// Split one checked guard into two disjoint projections while retaining the
-//RS /// original permit. Sema proves both field identities are stored and disjoint;
-//RS /// this protocol helper only records paths and consumes the parent after both
-//RS /// child states have been created.
-//RS pub fn jet_shared_guard_split(
-//RS     guard: &JetSharedGuardState,
-//RS     first: i64,
-//RS     second: i64,
-//RS     editable: bool,
-//RS ) -> Result<
-//RS     (
-//RS         std::sync::Arc<JetSharedGuardState>,
-//RS         std::sync::Arc<JetSharedGuardState>,
-//RS     ),
-//RS     &'static str,
-//RS > {
-//RS     jet_shared_guard_split_path(guard, &[first], &[second], editable)
-//RS }
-//RS 
-//RS /// Split a checked guard through two complete stored-field suffixes. Both
-//RS /// children retain the same permit and inherit the source path.
-//RS pub fn jet_shared_guard_split_path(
-//RS     guard: &JetSharedGuardState,
-//RS     first_fields: &[i64],
-//RS     second_fields: &[i64],
-//RS     editable: bool,
-//RS ) -> Result<
-//RS     (
-//RS         std::sync::Arc<JetSharedGuardState>,
-//RS         std::sync::Arc<JetSharedGuardState>,
-//RS     ),
-//RS     &'static str,
-//RS > {
-//RS     if !guard.held() {
-//RS         return Err(JET_SHARED_GUARD_INVALID);
-//RS     }
-//RS     if editable {
-//RS         jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
-//RS     }
-//RS 
-//RS     let first = std::sync::Arc::new(JetSharedGuardState {
-//RS         permit: std::sync::Arc::clone(&guard.permit),
-//RS         path: jet_shared_guard_path_with_suffix(guard, first_fields),
-//RS         editable,
-//RS         active: std::sync::atomic::AtomicBool::new(true),
-//RS     });
-//RS     let second = std::sync::Arc::new(JetSharedGuardState {
-//RS         permit: std::sync::Arc::clone(&guard.permit),
-//RS         path: jet_shared_guard_path_with_suffix(guard, second_fields),
-//RS         editable,
-//RS         active: std::sync::atomic::AtomicBool::new(true),
-//RS     });
-//RS     guard
-//RS         .active
-//RS         .store(false, std::sync::atomic::Ordering::Release);
-//RS     Ok((first, second))
-//RS }
-//RS 
-//RS fn jet_shared_guard_path_with_suffix(
-//RS     guard: &JetSharedGuardState,
-//RS     suffix: &[i64],
-//RS ) -> Vec<i64> {
-//RS     let mut path = Vec::with_capacity(guard.path.len() + suffix.len());
-//RS     path.extend_from_slice(&guard.path);
-//RS     path.extend_from_slice(suffix);
-//RS     path
-//RS }
-//RS 
-//RS pub fn jet_shared_guard_clone(
-//RS     guard: &JetSharedGuardState,
-//RS     editable: bool,
-//RS ) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
-//RS     if !guard.held() {
-//RS         return Err(JET_SHARED_GUARD_INVALID);
-//RS     }
-//RS     if editable {
-//RS         jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
-//RS     }
-//RS 
-//RS     Ok(std::sync::Arc::new(JetSharedGuardState {
-//RS         permit: std::sync::Arc::clone(&guard.permit),
-//RS         path: guard.path.clone(),
-//RS         editable,
-//RS         active: std::sync::atomic::AtomicBool::new(true),
-//RS     }))
-//RS }
-//RS 
-//RS pub fn jet_shared_guard_require_edit(
-//RS     guard: &JetSharedGuardState,
-//RS ) -> Result<(), &'static str> {
-//RS     if !guard.held() {
-//RS         return Err(JET_SHARED_GUARD_INVALID);
-//RS     }
-//RS     jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())
-//RS }
-//RS 
-//RS pub fn jet_shared_guard_require_edit_capability(
-//RS     editable: bool,
-//RS     permit: &dyn JetSharedCanonicalPermit,
-//RS ) -> Result<(), &'static str> {
-//RS     if !permit.held() {
-//RS         return Err(JET_SHARED_GUARD_INVALID);
-//RS     }
-//RS     if !editable || !permit.editable() {
-//RS         return Err(JET_SHARED_GUARD_EDIT_REQUIRED);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub trait JetConditionWaiter: Send + Sync {
-//RS     fn park(&self) -> Result<(), ()>;
-//RS     fn wake(&self);
-//RS     fn interrupted(&self) -> bool {
-//RS         false
-//RS     }
-//RS }
-//RS 
-//RS pub struct JetConditionProtocol {
-//RS     waiters: std::sync::Mutex<
-//RS         std::collections::VecDeque<(u64, std::sync::Arc<dyn JetConditionWaiter>)>,
-//RS     >,
-//RS     next_id: std::sync::atomic::AtomicU64,
-//RS     epoch: std::sync::atomic::AtomicU64,
-//RS     pending: std::sync::atomic::AtomicU64,
-//RS }
-//RS 
-//RS impl JetConditionProtocol {
-//RS     pub fn new() -> std::sync::Arc<Self> {
-//RS         std::sync::Arc::new(Self {
-//RS             waiters: std::sync::Mutex::new(std::collections::VecDeque::new()),
-//RS             next_id: std::sync::atomic::AtomicU64::new(1),
-//RS             epoch: std::sync::atomic::AtomicU64::new(0),
-//RS             pending: std::sync::atomic::AtomicU64::new(0),
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn register(
-//RS         self: &std::sync::Arc<Self>,
-//RS         waiter: std::sync::Arc<dyn JetConditionWaiter>,
-//RS     ) -> JetConditionRegistration {
-//RS         let id = self
-//RS             .next_id
-//RS             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS         let mut waiters = self
-//RS             .waiters
-//RS             .lock()
-//RS             .unwrap_or_else(|error| error.into_inner());
-//RS         let epoch = self
-//RS             .epoch
-//RS             .load(std::sync::atomic::Ordering::Relaxed);
-//RS         let stale = self
-//RS             .pending
-//RS             .fetch_update(
-//RS                 std::sync::atomic::Ordering::Relaxed,
-//RS                 std::sync::atomic::Ordering::Relaxed,
-//RS                 |pending| {
-//RS                     if pending > 0 {
-//RS                         Some(pending - 1)
-//RS                     } else {
-//RS                         None
-//RS                     }
-//RS                 },
-//RS             )
-//RS             .is_ok();
-//RS         waiters.push_back((id, waiter));
-//RS         JetConditionRegistration {
-//RS             condition: self.clone(),
-//RS             id,
-//RS             epoch,
-//RS             stale,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn notify_one(&self) {
-//RS         let waiter = {
-//RS             let mut waiters = self
-//RS                 .waiters
-//RS                 .lock()
-//RS                 .unwrap_or_else(|error| error.into_inner());
-//RS             self.epoch
-//RS                 .fetch_add(1, std::sync::atomic::Ordering::Release);
-//RS             let waiter = waiters.pop_front().map(|(_, waiter)| waiter);
-//RS             if waiter.is_none() {
-//RS                 self.pending.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS             }
-//RS             waiter
-//RS         };
-//RS         if let Some(waiter) = waiter {
-//RS             waiter.wake();
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn notify_all(&self) {
-//RS         let waiters = {
-//RS             let mut registered = self
-//RS                 .waiters
-//RS                 .lock()
-//RS                 .unwrap_or_else(|error| error.into_inner());
-//RS             self.epoch
-//RS                 .fetch_add(1, std::sync::atomic::Ordering::Release);
-//RS             let waiters = registered
-//RS                 .drain(..)
-//RS                 .map(|(_, waiter)| waiter)
-//RS                 .collect::<Vec<_>>();
-//RS             if waiters.is_empty() {
-//RS                 self.pending.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS             }
-//RS             waiters
-//RS         };
-//RS         for waiter in waiters {
-//RS             waiter.wake();
-//RS         }
-//RS     }
-//RS 
-//RS     fn unregister(&self, id: u64) {
-//RS         self.waiters
-//RS             .lock()
-//RS             .unwrap_or_else(|error| error.into_inner())
-//RS             .retain(|(candidate, _)| *candidate != id);
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_shared_condition_notify_one(
-//RS     condition: &std::sync::Arc<JetConditionProtocol>,
-//RS ) {
-//RS     condition.notify_one();
-//RS }
-//RS 
-//RS pub fn jet_shared_condition_notify_all(
-//RS     condition: &std::sync::Arc<JetConditionProtocol>,
-//RS ) {
-//RS     condition.notify_all();
-//RS }
-//RS 
-//RS pub struct JetConditionRegistration {
-//RS     condition: std::sync::Arc<JetConditionProtocol>,
-//RS     id: u64,
-//RS     epoch: u64,
-//RS     stale: bool,
-//RS }
-//RS 
-//RS impl JetConditionRegistration {
-//RS     fn saw_notification(&self) -> bool {
-//RS         self.stale
-//RS             || self
-//RS                 .condition
-//RS                 .epoch
-//RS                 .load(std::sync::atomic::Ordering::Acquire)
-//RS                 != self.epoch
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetConditionRegistration {
-//RS     fn drop(&mut self) {
-//RS         self.condition.unregister(self.id);
-//RS     }
-//RS }
-//RS 
-//RS pub enum JetConditionWaitError<E> {
-//RS     Predicate(E),
-//RS     Cancelled,
-//RS }
-//RS 
-//RS /// Handoff coordinated with a condition wait while its notification is
-//RS /// registered. The physical owner publishes/releases before the local permit
-//RS /// is released, and reacquires before local permit restoration.
-//RS pub trait JetSharedWaitHandoff {
-//RS     fn suspend(&mut self) -> Result<(), ()>;
-//RS     fn resume(&mut self, cancelled: bool) -> Result<bool, ()>;
-//RS     fn abort(&mut self) -> Result<(), ()>;
-//RS }
-//RS 
-//RS struct JetConditionWaitCleanup<'a> {
-//RS     registration: Option<JetConditionRegistration>,
-//RS     permit: &'a dyn JetSharedCanonicalPermit,
-//RS     waiter: &'a dyn JetConditionWaiter,
-//RS     released: bool,
-//RS }
-//RS 
-//RS impl JetConditionWaitCleanup<'_> {
-//RS     fn release(&mut self) {
-//RS         self.permit.release_during_drop();
-//RS         self.released = true;
-//RS     }
-//RS 
-//RS     fn abandon(&mut self) {
-//RS         self.registration.take();
-//RS         self.released = false;
-//RS     }
-//RS 
-//RS     fn finish(&mut self) -> Result<(), ()> {
-//RS         self.registration.take();
-//RS         if self.released {
-//RS             self.released = false;
-//RS             let mut cancelled = || self.waiter.interrupted();
-//RS             if !self.permit.reacquire(&mut cancelled) {
-//RS                 return Err(());
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for JetConditionWaitCleanup<'_> {
-//RS     fn drop(&mut self) {
-//RS         self.registration.take();
-//RS         if self.released {
-//RS             let mut cancelled = || self.waiter.interrupted();
-//RS             let _ = self.permit.reacquire(&mut cancelled);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_shared_condition_wait_registered(
-//RS     permit: &dyn JetSharedCanonicalPermit,
-//RS     registration: JetConditionRegistration,
-//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
-//RS ) -> Result<(), ()> {
-//RS     jet_shared_condition_wait_registered_with_handoff(permit, registration, waiter, None)
-//RS }
-//RS 
-//RS fn jet_shared_condition_wait_registered_with_handoff(
-//RS     permit: &dyn JetSharedCanonicalPermit,
-//RS     registration: JetConditionRegistration,
-//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
-//RS     handoff: Option<&mut dyn JetSharedWaitHandoff>,
-//RS ) -> Result<(), ()> {
-//RS     let mut cleanup = JetConditionWaitCleanup {
-//RS         registration: Some(registration),
-//RS         permit,
-//RS         waiter: waiter.as_ref(),
-//RS         released: false,
-//RS     };
-//RS     let mut handoff = handoff;
-//RS     if let Some(owner) = handoff.as_deref_mut() {
-//RS         if owner.suspend().is_err() {
-//RS             let _ = owner.abort();
-//RS             return Err(());
-//RS         }
-//RS     }
-//RS     let saw_notification = cleanup
-//RS         .registration
-//RS         .as_ref()
-//RS         .is_some_and(JetConditionRegistration::saw_notification);
-//RS     cleanup.release();
-//RS     let parked = if saw_notification {
-//RS         Ok(())
-//RS     } else {
-//RS         waiter.park()
-//RS     };
-//RS     let resumed = match handoff.as_deref_mut() {
-//RS         Some(owner) => owner.resume(parked.is_err()),
-//RS         None => Ok(true),
-//RS     };
-//RS     if !matches!(resumed, Ok(true)) {
-//RS         if let Some(owner) = handoff.as_deref_mut() {
-//RS             let _ = owner.abort();
-//RS         }
-//RS         cleanup.abandon();
-//RS         return Err(());
-//RS     }
-//RS     let reacquired = cleanup.finish();
-//RS     if reacquired.is_err() {
-//RS         if let Some(owner) = handoff.as_deref_mut() {
-//RS             let _ = owner.abort();
-//RS         }
-//RS         cleanup.abandon();
-//RS         return Err(());
-//RS     }
-//RS     drop(cleanup);
-//RS     parked.and(reacquired)
-//RS }
-//RS 
-//RS /// Park one condition-wait iteration after the caller checked its predicate.
-//RS /// Registration precedes physical handoff; notification is rechecked after
-//RS /// publication and before the local permit is released.
-//RS pub fn jet_shared_condition_wait_once(
-//RS     permit: &dyn JetSharedCanonicalPermit,
-//RS     condition: &std::sync::Arc<JetConditionProtocol>,
-//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
-//RS ) -> Result<(), ()> {
-//RS     jet_shared_condition_wait_once_with_handoff(permit, condition, waiter, None)
-//RS }
-//RS 
-//RS pub fn jet_shared_condition_wait_once_with_handoff(
-//RS     permit: &dyn JetSharedCanonicalPermit,
-//RS     condition: &std::sync::Arc<JetConditionProtocol>,
-//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
-//RS     handoff: Option<&mut dyn JetSharedWaitHandoff>,
-//RS ) -> Result<(), ()> {
-//RS     let registration = condition.register(waiter.clone());
-//RS     jet_shared_condition_wait_registered_with_handoff(permit, registration, waiter, handoff)
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum JetSharedGuardWaitError {
-//RS     Invalid,
-//RS     EditRequired,
-//RS     Cancelled,
-//RS }
-//RS 
-//RS impl JetSharedGuardWaitError {
-//RS     pub fn message(self) -> &'static str {
-//RS         match self {
-//RS             Self::Invalid => JET_SHARED_GUARD_INVALID,
-//RS             Self::EditRequired => JET_SHARED_GUARD_EDIT_REQUIRED,
-//RS             Self::Cancelled => JET_SHARED_GUARD_WAIT_CANCELLED,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn traps(self) -> bool {
-//RS         matches!(self, Self::Invalid)
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_shared_guard_wait_once(
-//RS     guard: Option<&JetSharedGuardState>,
-//RS     condition: Option<&std::sync::Arc<JetConditionProtocol>>,
-//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
-//RS ) -> Result<(), JetSharedGuardWaitError> {
-//RS     jet_shared_guard_wait_once_with_handoff(guard, condition, waiter, None)
-//RS }
-//RS 
-//RS pub fn jet_shared_guard_wait_once_with_handoff(
-//RS     guard: Option<&JetSharedGuardState>,
-//RS     condition: Option<&std::sync::Arc<JetConditionProtocol>>,
-//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
-//RS     handoff: Option<&mut dyn JetSharedWaitHandoff>,
-//RS ) -> Result<(), JetSharedGuardWaitError> {
-//RS     let guard = guard.ok_or(JetSharedGuardWaitError::Invalid)?;
-//RS     let condition = condition.ok_or(JetSharedGuardWaitError::Invalid)?;
-//RS     jet_shared_guard_require_edit(guard).map_err(|message| {
-//RS         if message == JET_SHARED_GUARD_INVALID {
-//RS             JetSharedGuardWaitError::Invalid
-//RS         } else {
-//RS             JetSharedGuardWaitError::EditRequired
-//RS         }
-//RS     })?;
-//RS     jet_shared_condition_wait_once_with_handoff(guard.permit(), condition, waiter, handoff)
-//RS         .map_err(|_| JetSharedGuardWaitError::Cancelled)
-//RS }
-//RS 
-//RS pub fn jet_shared_condition_wait<E>(
-//RS     permit: &dyn JetSharedCanonicalPermit,
-//RS     condition: &std::sync::Arc<JetConditionProtocol>,
-//RS     mut ready: impl FnMut() -> Result<bool, E>,
-//RS     mut waiter: impl FnMut() -> std::sync::Arc<dyn JetConditionWaiter>,
-//RS ) -> Result<(), JetConditionWaitError<E>> {
-//RS     loop {
-//RS         if ready().map_err(JetConditionWaitError::Predicate)? {
-//RS             return Ok(());
-//RS         }
-//RS         let waiter = waiter();
-//RS         let registration = condition.register(waiter.clone());
-//RS         if ready().map_err(JetConditionWaitError::Predicate)? {
-//RS             drop(registration);
-//RS             return Ok(());
-//RS         }
-//RS         let parked = jet_shared_condition_wait_registered(permit, registration, waiter);
-//RS         if parked.is_err() {
-//RS             return Err(JetConditionWaitError::Cancelled);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod shared_protocol_tests {
-//RS     use super::*;
-//RS 
-//RS     struct CountingWaiter(std::sync::atomic::AtomicUsize);
-//RS     struct PanicWaiter;
-//RS     struct BlockingWaiter {
-//RS         notified: std::sync::atomic::AtomicBool,
-//RS         lock: std::sync::Mutex<()>,
-//RS         wake: std::sync::Condvar,
-//RS     }
-//RS 
-//RS     impl CountingWaiter {
-//RS         fn new() -> Self {
-//RS             Self(std::sync::atomic::AtomicUsize::new(0))
-//RS         }
-//RS     }
-//RS 
-//RS     impl JetConditionWaiter for CountingWaiter {
-//RS         fn park(&self) -> Result<(), ()> {
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn wake(&self) {
-//RS             self.0
-//RS                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-//RS         }
-//RS     }
-//RS 
-//RS     impl JetConditionWaiter for PanicWaiter {
-//RS         fn park(&self) -> Result<(), ()> {
-//RS             panic!("waiter panic")
-//RS         }
-//RS 
-//RS         fn wake(&self) {}
-//RS     }
-//RS 
-//RS     impl BlockingWaiter {
-//RS         fn new() -> Self {
-//RS             Self {
-//RS                 notified: std::sync::atomic::AtomicBool::new(false),
-//RS                 lock: std::sync::Mutex::new(()),
-//RS                 wake: std::sync::Condvar::new(),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     impl JetConditionWaiter for BlockingWaiter {
-//RS         fn park(&self) -> Result<(), ()> {
-//RS             if self
-//RS                 .notified
-//RS                 .swap(false, std::sync::atomic::Ordering::Acquire)
-//RS             {
-//RS                 return Ok(());
-//RS             }
-//RS             let mut lock = self.lock.lock().unwrap();
-//RS             while !self
-//RS                 .notified
-//RS                 .swap(false, std::sync::atomic::Ordering::Acquire)
-//RS             {
-//RS                 lock = self.wake.wait(lock).unwrap();
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn wake(&self) {
-//RS             let _lock = self.lock.lock().unwrap();
-//RS             self.notified
-//RS                 .store(true, std::sync::atomic::Ordering::Release);
-//RS             self.wake.notify_one();
-//RS         }
-//RS     }
-//RS     #[derive(Default)]
-//RS     struct TransactionTestOwnerState {
-//RS         staged: bool,
-//RS         published: bool,
-//RS         discards: usize,
-//RS     }
-//RS 
-//RS     struct TransactionTestOwner {
-//RS         order: usize,
-//RS         state: std::sync::Arc<std::sync::Mutex<TransactionTestOwnerState>>,
-//RS     }
-//RS 
-//RS     struct TransactionTestPermit {
-//RS         state: std::sync::Arc<std::sync::Mutex<TransactionTestOwnerState>>,
-//RS         held: std::sync::atomic::AtomicBool,
-//RS     }
-//RS 
-//RS     impl JetSharedCanonicalOwner for TransactionTestOwner {
-//RS         fn owner_identity(&self) -> usize {
-//RS             self as *const Self as usize
-//RS         }
-//RS 
-//RS         fn protocol_order_key(&self) -> usize {
-//RS             self.order
-//RS         }
-//RS 
-//RS         fn acquire_permit(
-//RS             self: std::sync::Arc<Self>,
-//RS             _editable: bool,
-//RS         ) -> Result<std::sync::Arc<dyn JetSharedCanonicalPermit>, String> {
-//RS             Ok(std::sync::Arc::new(TransactionTestPermit {
-//RS                 state: self.state.clone(),
-//RS                 held: std::sync::atomic::AtomicBool::new(true),
-//RS             }))
-//RS         }
-//RS     }
-//RS 
-//RS     impl JetSharedCanonicalPermit for TransactionTestPermit {
-//RS         fn editable(&self) -> bool {
-//RS             true
-//RS         }
-//RS 
-//RS         fn held(&self) -> bool {
-//RS             self.held.load(std::sync::atomic::Ordering::Acquire)
-//RS         }
-//RS 
-//RS         fn release(&self) -> JetSharedPhysicalOperationOutcome<()> {
-//RS             self.held.store(false, std::sync::atomic::Ordering::Release);
-//RS             JetSharedPhysicalOperationOutcome::new(Ok(()), None)
-//RS         }
-//RS 
-//RS         fn release_during_drop(&self) {
-//RS             self.held.store(false, std::sync::atomic::Ordering::Release);
-//RS         }
-//RS 
-//RS         fn reacquire(&self, cancelled: &mut dyn FnMut() -> bool) -> bool {
-//RS             if cancelled() {
-//RS                 return false;
-//RS             }
-//RS             self.held.store(true, std::sync::atomic::Ordering::Release);
-//RS             true
-//RS         }
-//RS 
-//RS         fn discard_staged(&self) -> Result<(), String> {
-//RS             let mut state = self.state.lock().unwrap();
-//RS             state.staged = false;
-//RS             state.discards += 1;
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn into_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any> {
-//RS             self
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn transaction_stage_failure_discards_all_participants_before_rollback() {
-//RS         let first = std::sync::Arc::new(TransactionTestOwner {
-//RS             order: 1,
-//RS             state: std::sync::Arc::new(std::sync::Mutex::new(
-//RS                 TransactionTestOwnerState::default(),
-//RS             )),
-//RS         });
-//RS         let second = std::sync::Arc::new(TransactionTestOwner {
-//RS             order: 2,
-//RS             state: std::sync::Arc::new(std::sync::Mutex::new(
-//RS                 TransactionTestOwnerState::default(),
-//RS             )),
-//RS         });
-//RS         let first_owner: std::sync::Arc<dyn JetSharedCanonicalOwner> = first.clone();
-//RS         let second_owner: std::sync::Arc<dyn JetSharedCanonicalOwner> = second.clone();
-//RS         let applied = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS         let rolled_back = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS         let mut transaction = jet_shared_transaction_begin();
-//RS         for (owner, state, fail) in [
-//RS             (first_owner, first.state.clone(), false),
-//RS             (second_owner, second.state.clone(), true),
-//RS         ] {
-//RS             let staged_state = state.clone();
-//RS             transaction.record_edit_with_staged_commit(
-//RS                 owner,
-//RS                 Box::new(|| {}),
-//RS                 Box::new(move |_| {
-//RS                     staged_state.lock().unwrap().staged = true;
-//RS                     if fail {
-//RS                         Err("participant staging rejected".to_string())
-//RS                     } else {
-//RS                         Ok(())
-//RS                     }
-//RS                 }),
-//RS                 Box::new(move |_| {
-//RS                     state.lock().unwrap().published = true;
-//RS                 }),
-//RS             );
-//RS         }
-//RS         let rollback_flag = rolled_back.clone();
-//RS         transaction.record_rollback(Box::new(move || {
-//RS             rollback_flag.store(true, std::sync::atomic::Ordering::Release);
-//RS         }));
-//RS 
-//RS         let apply_flag = applied.clone();
-//RS         let result = transaction.try_commit_with(move || {
-//RS             apply_flag.store(true, std::sync::atomic::Ordering::Release);
-//RS         });
-//RS 
-//RS         assert_eq!(result, Err("participant staging rejected".to_string()));
-//RS         assert!(!applied.load(std::sync::atomic::Ordering::Acquire));
-//RS         assert!(rolled_back.load(std::sync::atomic::Ordering::Acquire));
-//RS         for owner in [first, second] {
-//RS             let state = owner.state.lock().unwrap();
-//RS             assert!(!state.staged);
-//RS             assert!(!state.published);
-//RS             assert_eq!(state.discards, 1);
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     #[test]
-//RS     fn full_path_map_and_split_preserve_parent_prefix_and_one_permit() {
-//RS         let protocol = JetSharedProtocol::new();
-//RS         let root = jet_shared_guard_acquire(&protocol, true, || false).unwrap();
-//RS         let mapped = jet_shared_guard_map_path(&root, &[4, 7], true).unwrap();
-//RS         assert!(!root.held());
-//RS         assert_eq!(mapped.path(), &[4, 7]);
-//RS 
-//RS         let (first, second) =
-//RS             jet_shared_guard_split_path(&mapped, &[10, 11], &[20, 21, 22], true).unwrap();
-//RS         assert!(!mapped.held());
-//RS         assert_eq!(first.path(), &[4, 7, 10, 11]);
-//RS         assert_eq!(second.path(), &[4, 7, 20, 21, 22]);
-//RS         assert!(first.held());
-//RS         assert!(second.held());
-//RS         assert!(std::sync::Arc::ptr_eq(&first.permit, &second.permit));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn failed_full_path_projection_keeps_parent_live() {
-//RS         let protocol = JetSharedProtocol::new();
-//RS         let root = jet_shared_guard_acquire(&protocol, false, || false).unwrap();
-//RS 
-//RS         assert!(matches!(
-//RS             jet_shared_guard_map_path(&root, &[3, 5], true),
-//RS             Err(message) if message == JET_SHARED_GUARD_EDIT_REQUIRED,
-//RS         ));
-//RS         assert!(root.held());
-//RS         assert!(root.path().is_empty());
-//RS     }
-//RS     #[test]
-//RS     fn ordered_acquisition_deduplicates_one_protocol() {
-//RS         let protocol = JetSharedProtocol::new();
-//RS         let permits =
-//RS             jet_shared_acquire_ordered(vec![protocol.clone(), protocol.clone()]);
-//RS         assert_eq!(permits.len(), 1);
-//RS         assert!(permits[0].editable());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn ordered_acquisition_uses_protocol_address_order() {
-//RS         let first = JetSharedProtocol::new();
-//RS         let second = JetSharedProtocol::new();
-//RS         let expected = std::cmp::min(
-//RS             std::sync::Arc::as_ptr(&first) as usize,
-//RS             std::sync::Arc::as_ptr(&second) as usize,
-//RS         );
-//RS         let permits = jet_shared_acquire_ordered(vec![second, first]);
-//RS         assert_eq!(
-//RS             std::sync::Arc::as_ptr(&permits[0].protocol) as usize,
-//RS             expected,
-//RS             "multi-cell commit locks must use stable address order"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn contended_transaction_waits_and_applies_its_body_once() {
-//RS         let protocol = JetSharedProtocol::new();
-//RS         let held = protocol.acquire(true, || false).unwrap();
-//RS         let log_lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
-//RS         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-//RS         let worker_protocol = protocol.clone();
-//RS         let worker_log_lines = log_lines.clone();
-//RS         let worker = std::thread::spawn(move || {
-//RS             let mut transaction = jet_shared_transaction_begin();
-//RS             transaction.record_edit(
-//RS                 worker_protocol,
-//RS                 Box::new(move || {
-//RS                     worker_log_lines.lock().unwrap().push("transaction-body");
-//RS                 }),
-//RS             );
-//RS             ready_tx.send(()).unwrap();
-//RS             transaction.commit();
-//RS         });
-//RS 
-//RS         ready_rx
-//RS             .recv_timeout(std::time::Duration::from_secs(1))
-//RS             .expect("transaction worker reached the lock wait");
-//RS         assert!(
-//RS             log_lines.lock().unwrap().is_empty(),
-//RS             "a blocked commit must not log"
-//RS         );
-//RS         drop(held);
-//RS         worker.join().unwrap();
-//RS         assert_eq!(
-//RS             *log_lines.lock().unwrap(),
-//RS             vec!["transaction-body"],
-//RS             "the committed transaction emits its body log exactly once"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn notify_one_claims_each_waiter_once() {
-//RS         let condition = JetConditionProtocol::new();
-//RS         let first = std::sync::Arc::new(CountingWaiter::new());
-//RS         let second = std::sync::Arc::new(CountingWaiter::new());
-//RS         let _first_registration = condition.register(first.clone());
-//RS         let _second_registration = condition.register(second.clone());
-//RS 
-//RS         condition.notify_one();
-//RS         condition.notify_one();
-//RS 
-//RS         assert_eq!(
-//RS             first.0.load(std::sync::atomic::Ordering::SeqCst),
-//RS             1
-//RS         );
-//RS         assert_eq!(
-//RS             second.0.load(std::sync::atomic::Ordering::SeqCst),
-//RS             1
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn panic_during_park_unregisters_and_reacquires() {
-//RS         let protocol = JetSharedProtocol::new();
-//RS         let condition = JetConditionProtocol::new();
-//RS         let permit = protocol.acquire(true, || false).unwrap();
-//RS 
-//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS             let _ = jet_shared_condition_wait(
-//RS                 permit.as_ref(),
-//RS                 &condition,
-//RS                 || Ok::<bool, ()>(false),
-//RS                 || std::sync::Arc::new(PanicWaiter),
-//RS             );
-//RS         }));
-//RS 
-//RS         assert!(result.is_err());
-//RS         assert!(permit.held());
-//RS         drop(permit);
-//RS         assert!(protocol.acquire(true, || false).is_some());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn notify_before_registration_becomes_a_spurious_wake() {
-//RS         let protocol = JetSharedProtocol::new();
-//RS         let condition = JetConditionProtocol::new();
-//RS         let permit = protocol.acquire(true, || false).unwrap();
-//RS         condition.notify_one();
-//RS 
-//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS             jet_shared_condition_wait_once(
-//RS                 permit.as_ref(),
-//RS                 &condition,
-//RS                 std::sync::Arc::new(PanicWaiter),
-//RS             )
-//RS         }));
-//RS 
-//RS         assert!(result.is_ok());
-//RS         assert!(permit.held());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn notify_between_registration_and_park_is_not_lost() {
-//RS         for _ in 0..64 {
-//RS             let protocol = JetSharedProtocol::new();
-//RS             let condition = JetConditionProtocol::new();
-//RS             let waiter = std::sync::Arc::new(BlockingWaiter::new());
-//RS             let rescue = waiter.clone();
-//RS             let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-//RS             let (registered_tx, registered_rx) = std::sync::mpsc::channel();
-//RS             let (park_tx, park_rx) = std::sync::mpsc::channel();
-//RS             let (done_tx, done_rx) = std::sync::mpsc::channel();
-//RS             let worker_condition = condition.clone();
-//RS             let worker_ready = ready.clone();
-//RS             let worker = std::thread::spawn(move || {
-//RS                 let permit = protocol.acquire(true, || false).unwrap();
-//RS                 let mut checks = 0usize;
-//RS                 let result = jet_shared_condition_wait(
-//RS                     permit.as_ref(),
-//RS                     &worker_condition,
-//RS                     || {
-//RS                         checks += 1;
-//RS                         if checks == 2 {
-//RS                             registered_tx.send(()).unwrap();
-//RS                             park_rx.recv().unwrap();
-//RS                             return Ok::<bool, ()>(false);
-//RS                         }
-//RS                         Ok(worker_ready.load(std::sync::atomic::Ordering::Acquire))
-//RS                     },
-//RS                     || waiter.clone(),
-//RS                 );
-//RS                 done_tx.send(result.is_ok()).unwrap();
-//RS             });
-//RS 
-//RS             registered_rx
-//RS                 .recv_timeout(std::time::Duration::from_secs(1))
-//RS                 .expect("waiter registers before the second predicate check");
-//RS             ready.store(true, std::sync::atomic::Ordering::Release);
-//RS             condition.notify_one();
-//RS             park_tx.send(()).unwrap();
-//RS             let done = done_rx.recv_timeout(std::time::Duration::from_secs(1));
-//RS             if done.is_err() {
-//RS                 rescue.wake();
-//RS             }
-//RS             assert_eq!(done.ok(), Some(true));
-//RS             worker.join().unwrap();
-//RS         }
-//RS     }
-//RS     struct OrderedHandoffWaiter(std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>);
-//RS 
-//RS     impl JetConditionWaiter for OrderedHandoffWaiter {
-//RS         fn park(&self) -> Result<(), ()> {
-//RS             self.0.lock().unwrap().push("park");
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn wake(&self) {
-//RS             self.0.lock().unwrap().push("wake");
-//RS         }
-//RS     }
-//RS 
-//RS     struct NotifyDuringHandoff {
-//RS         condition: std::sync::Arc<JetConditionProtocol>,
-//RS         events: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
-//RS     }
-//RS 
-//RS     impl JetSharedWaitHandoff for NotifyDuringHandoff {
-//RS         fn suspend(&mut self) -> Result<(), ()> {
-//RS             self.events.lock().unwrap().push("suspend");
-//RS             self.condition.notify_one();
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn resume(&mut self, cancelled: bool) -> Result<bool, ()> {
-//RS             self.events.lock().unwrap().push("resume");
-//RS             assert!(!cancelled);
-//RS             Ok(true)
-//RS         }
-//RS 
-//RS         fn abort(&mut self) -> Result<(), ()> {
-//RS             self.events.lock().unwrap().push("abort");
-//RS             Ok(())
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn condition_notification_during_physical_handoff_is_not_lost() {
-//RS         let protocol = JetSharedProtocol::new();
-//RS         let permit = protocol.acquire(true, || false).unwrap();
-//RS         let condition = JetConditionProtocol::new();
-//RS         let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-//RS         let waiter: std::sync::Arc<dyn JetConditionWaiter> =
-//RS             std::sync::Arc::new(OrderedHandoffWaiter(events.clone()));
-//RS         let mut handoff = NotifyDuringHandoff {
-//RS             condition: condition.clone(),
-//RS             events: events.clone(),
-//RS         };
-//RS 
-//RS         assert_eq!(
-//RS             jet_shared_condition_wait_once_with_handoff(
-//RS                 permit.as_ref(),
-//RS                 &condition,
-//RS                 waiter,
-//RS                 Some(&mut handoff),
-//RS             ),
-//RS             Ok(()),
-//RS         );
-//RS         assert_eq!(*events.lock().unwrap(), vec!["suspend", "wake", "resume"]);
-//RS         assert!(permit.held());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn ordered_guard_acquisition_preserves_indices_and_shares_duplicate_permits() {
-//RS         let first = JetSharedProtocol::new();
-//RS         let second = JetSharedProtocol::new();
-//RS         let guards = jet_shared_guard_acquire_ordered(vec![
-//RS             (11, second.clone(), false),
-//RS             (7, first.clone(), true),
-//RS             (12, first.clone(), false),
-//RS         ]);
-//RS 
-//RS         let mut indices = guards.iter().map(|(index, _)| *index).collect::<Vec<_>>();
-//RS         indices.sort_unstable();
-//RS         assert_eq!(indices, vec![7, 11, 12]);
-//RS         assert!(guards.iter().all(|(_, guard)| guard.held()));
-//RS         let mut editability = guards
-//RS             .iter()
-//RS             .map(|(index, guard)| (*index, guard.editable()))
-//RS             .collect::<Vec<_>>();
-//RS         editability.sort_unstable_by_key(|(index, _)| *index);
-//RS         assert_eq!(editability, vec![(7, true), (11, false), (12, false)]);
-//RS         let mut permit_editability = guards
-//RS             .iter()
-//RS             .map(|(index, guard)| (*index, guard.permit().editable()))
-//RS             .collect::<Vec<_>>();
-//RS         permit_editability.sort_unstable_by_key(|(index, _)| *index);
-//RS         assert_eq!(permit_editability, vec![(7, true), (11, false), (12, true)]);
-//RS         let first_guard = guards.iter().find(|(index, _)| *index == 7).unwrap();
-//RS         let duplicate_guard = guards.iter().find(|(index, _)| *index == 12).unwrap();
-//RS         assert!(std::sync::Arc::ptr_eq(
-//RS             &first_guard.1.permit_arc(),
-//RS             &duplicate_guard.1.permit_arc(),
-//RS         ));
-//RS         drop(guards);
-//RS         assert!(jet_shared_acquire(&first, true, || false).is_some());
-//RS         assert!(jet_shared_acquire(&second, true, || false).is_some());
-//RS     }
-//RS }
-// END-PORT-PENDING 0188 crates/jet-codegen/src/Prelude/SharedProtocol.rs:1-2254
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1045
+pub struct JetSharedPermit { protocol: Arc<JetSharedProtocol>, editable: Bool, held: AtomicBool }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1051
+impl JetSharedPermit {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1052
+    pub fn editable(self: &Self) -> Bool { self.editable }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1056
+    pub fn held(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("Acquire reads the canonical permit's native release state") { self.held.load(Ordering.Acquire) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1060
+    pub fn release(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("AcqRel makes release idempotent; the native lock restores reader/writer state before waking contenders") {
+            if !self.held.swap(false, Ordering.AcqRel) -> return
+            state := self.protocol.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            if self.editable { state.writer = false }
+            else { state.readers = state.readers.saturating_sub(1) }
+            self.protocol.wake.notify_all()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1080
+    pub fn reacquire(self: &Self, cancelled: fn() -> Bool) -> Bool {
+        if self.held() -> return true
+        // GATE #4565: kernel primitive
+        #Unsafe("native writer-preferring mutex/condition protocol reacquires the same permit and restores cancellation bookkeeping") {
+            state := self.protocol.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            if self.editable -> state.writers_waiting += 1
+            loop {
+                if cancelled() {
+                    if self.editable {
+                        state.writers_waiting -= 1
+                        self.protocol.wake.notify_all()
+                    }
+                    return false
+                }
+                available :: if self.editable { !state.writer && state.readers == 0 }
+                    else { !state.writer && state.writers_waiting == 0 }
+                if available {
+                    if self.editable { state.writers_waiting -= 1; state.writer = true }
+                    else { state.readers += 1 }
+                    self.held.store(true, Ordering.Release)
+                    return true
+                }
+                (next, _) :: self.protocol.wake.wait_timeout(^state, std.time.Duration.from_millis(10))
+                    .unwrap_or_else(fn(error) { error.into_inner() })
+                state = ^next
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1125
+impl JetSharedCanonicalPermit for JetSharedPermit {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1126
+    fn editable(self: &Self) -> Bool { JetSharedPermit.editable(self) }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1130
+    fn held(self: &Self) -> Bool { JetSharedPermit.held(self) }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1134
+    fn release(self: &Self) -> JetSharedPhysicalOperationOutcome<()> {
+        JetSharedPermit.release(self)
+        JetSharedPhysicalOperationOutcome.new(Ok(()), None)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1139
+    fn release_during_drop(self: &Self) -> { JetSharedPermit.release(self) }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1143
+    fn reacquire(self: &Self, cancelled: &fn() -> Bool) -> Bool {
+        JetSharedPermit.reacquire(self, fn() { cancelled() })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1147
+    fn into_any(self: Arc<Self>) -> Arc<Any> { self }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1152
+pub struct JetSharedGuardState {
+    permit: Arc<JetSharedCanonicalPermit>, path: [I64], editable: Bool, active: AtomicBool
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1159
+impl JetSharedGuardState {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1160
+    pub fn permit_arc(self: &Self) -> Arc<JetSharedCanonicalPermit> {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain the existing native permit without reacquiring its physical owner") { self.permit.clone() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1164
+    pub fn permit(self: &Self) -> &JetSharedCanonicalPermit { self.permit.as_ref() }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1168
+    pub fn editable(self: &Self) -> Bool { self.editable }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1172
+    pub fn held(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("Acquire observes checked guard consumption before consulting the canonical lease") {
+            self.active.load(Ordering.Acquire) && self.permit.held()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1176
+    pub fn path(self: &Self) -> &[I64] { &self.path }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1183
+// Wrap an acquired physical permit, never acquire a shell protocol.
+pub fn jet_shared_guard_state_from_permit(permit: Arc<JetSharedCanonicalPermit>, editable: Bool) -> Arc<JetSharedGuardState> Err! {
+    if !permit.held() -> return Err(JET_SHARED_GUARD_INVALID)
+    if editable && !permit.editable() -> return Err(JET_SHARED_GUARD_EDIT_REQUIRED)
+    // GATE #4565: kernel primitive
+    #Unsafe("construct active native guard state around the already-acquired permit") {
+        Ok(Arc.new(JetSharedGuardState{permit: ^permit, path: [], editable: editable, active: AtomicBool.new(true)}))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1201
+impl Drop for JetSharedPermit {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1202
+    fn drop(self: &Self) -> { self.release() }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1208
+pub fn jet_shared_guard_acquire(protocol: &Arc<JetSharedProtocol>, editable: Bool, cancelled: fn() -> Bool) -> Arc<JetSharedGuardState>? {
+    jet_shared_acquire(protocol, editable, ^cancelled).map(fn(permit) {
+        permit :: permit as Arc<JetSharedCanonicalPermit>
+        jet_shared_guard_state_from_permit(^permit, editable).expect("new Shared guard permit is held with matching capability")
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1222
+// Use the same canonical ordering as transactions, preserving original indices.
+pub fn jet_shared_guard_acquire_ordered(participants: [(Usize, Arc<JetSharedProtocol>, Bool)]) -> [(Usize, Arc<JetSharedGuardState>)] {
+    owners :: participants.into_iter().map(fn((index, protocol, editable)) {
+        (index, protocol as Arc<JetSharedCanonicalOwner>, editable)
+    }).collect()
+    jet_shared_acquire_ordered_owners(^owners).expect("uncancelled ordered Shared owner acquisition succeeds")
+        .into_iter().map(fn((index, editable, permit)) {
+            (index, jet_shared_guard_state_from_permit(^permit, editable).expect("ordered Shared permit is held with matching capability"))
+        }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1248
+pub fn jet_shared_guard_map(guard: &JetSharedGuardState, field: I64, editable: Bool) -> Arc<JetSharedGuardState> Err! {
+    jet_shared_guard_map_path(guard, &[field], editable)
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1258
+// Consume the parent only after the complete mapped path is constructed.
+pub fn jet_shared_guard_map_path(guard: &JetSharedGuardState, fields: &[I64], editable: Bool) -> Arc<JetSharedGuardState> Err! {
+    if !guard.held() -> return Err(JET_SHARED_GUARD_INVALID)
+    if editable -> jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?
+    // GATE #4565: kernel primitive
+    #Unsafe("retain the canonical native permit and Release-consume the parent only after creating the child") {
+        mapped :: Arc.new(JetSharedGuardState{permit: guard.permit.clone(),
+            path: jet_shared_guard_path_with_suffix(guard, fields), editable: editable, active: AtomicBool.new(true)})
+        guard.active.store(false, Ordering.Release)
+        Ok(mapped)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1286
+// Sema proves stored-field disjointness; the protocol records paths.
+pub fn jet_shared_guard_split(guard: &JetSharedGuardState, first: I64, second: I64, editable: Bool) -> (Arc<JetSharedGuardState>, Arc<JetSharedGuardState>) Err! {
+    jet_shared_guard_split_path(guard, &[first], &[second], editable)
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1303
+// Both children retain the same permit and inherit the source path.
+pub fn jet_shared_guard_split_path(guard: &JetSharedGuardState, first_fields: &[I64], second_fields: &[I64], editable: Bool) -> (Arc<JetSharedGuardState>, Arc<JetSharedGuardState>) Err! {
+    if !guard.held() -> return Err(JET_SHARED_GUARD_INVALID)
+    if editable -> jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?
+    // GATE #4565: kernel primitive
+    #Unsafe("construct both projected native guard states before Release-consuming their parent") {
+        first :: Arc.new(JetSharedGuardState{permit: guard.permit.clone(),
+            path: jet_shared_guard_path_with_suffix(guard, first_fields), editable: editable, active: AtomicBool.new(true)})
+        second :: Arc.new(JetSharedGuardState{permit: guard.permit.clone(),
+            path: jet_shared_guard_path_with_suffix(guard, second_fields), editable: editable, active: AtomicBool.new(true)})
+        guard.active.store(false, Ordering.Release)
+        Ok((first, second))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1340
+fn jet_shared_guard_path_with_suffix(guard: &JetSharedGuardState, suffix: &[I64]) -> [I64] {
+    path := [I64].with_capacity(guard.path.len() + suffix.len())
+    path.extend_from_slice(&guard.path)
+    path.extend_from_slice(suffix)
+    path
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1350
+pub fn jet_shared_guard_clone(guard: &JetSharedGuardState, editable: Bool) -> Arc<JetSharedGuardState> Err! {
+    if !guard.held() -> return Err(JET_SHARED_GUARD_INVALID)
+    if editable -> jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?
+    // GATE #4565: kernel primitive
+    #Unsafe("clone a checked path capability retaining the existing native canonical permit") {
+        Ok(Arc.new(JetSharedGuardState{permit: guard.permit.clone(), path: guard.path.clone(),
+            editable: editable, active: AtomicBool.new(true)}))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1369
+pub fn jet_shared_guard_require_edit(guard: &JetSharedGuardState) -> () Err! {
+    if !guard.held() -> return Err(JET_SHARED_GUARD_INVALID)
+    jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1378
+pub fn jet_shared_guard_require_edit_capability(editable: Bool, permit: &JetSharedCanonicalPermit) -> () Err! {
+    if !permit.held() -> return Err(JET_SHARED_GUARD_INVALID)
+    if !editable || !permit.editable() -> return Err(JET_SHARED_GUARD_EDIT_REQUIRED)
+    Ok(())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1391
+pub trait JetConditionWaiter: Send + Sync {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1392
+    fn park(self: &Self) -> () ()!
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1393
+    fn wake(self: &Self) ->
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1394
+    fn interrupted(self: &Self) -> Bool { false }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1399
+pub struct JetConditionProtocol {
+    waiters: Mutex<VecDeque<(U64, Arc<JetConditionWaiter>)>>,
+    next_id: AtomicU64, epoch: AtomicU64, pending: AtomicU64
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1408
+impl JetConditionProtocol {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1409
+    pub fn new() -> Arc<Self> {
+        // GATE #4565: kernel primitive
+        #Unsafe("construct canonical native condition queue and atomic notification counters") {
+            Arc.new(Self{waiters: Mutex.new(VecDeque.new()), next_id: AtomicU64.new(1),
+                epoch: AtomicU64.new(0), pending: AtomicU64.new(0)})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1418
+    pub fn register(self: &Arc<Self>, waiter: Arc<JetConditionWaiter>) -> JetConditionRegistration {
+        // GATE #4565: kernel primitive
+        #Unsafe("serialize registration with notifications and consume at most one pending notification") {
+            id :: self.next_id.fetch_add(1, Ordering.Relaxed)
+            waiters := self.waiters.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            epoch :: self.epoch.load(Ordering.Relaxed)
+            stale :: self.pending.fetch_update(Ordering.Relaxed, Ordering.Relaxed, fn(pending) {
+                if pending > 0 { Val(pending - 1) } else { None }
+            }).is_ok()
+            waiters.push_back((id, ^waiter))
+            JetConditionRegistration{condition: self.clone(), id: id, epoch: epoch, stale: stale}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1455
+    pub fn notify_one(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        waiter :: #Unsafe("increment notification epoch under queue lock, retaining an unmatched notification when empty") {
+            waiters := self.waiters.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            self.epoch.fetch_add(1, Ordering.Release)
+            waiter :: waiters.pop_front().map(fn((_, waiter)) { waiter })
+            if waiter.is_none() { self.pending.fetch_add(1, Ordering.Relaxed) }
+            waiter
+        }
+        if Val(waiter) :: waiter { waiter.wake() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1474
+    pub fn notify_all(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        waiters :: #Unsafe("drain registered native waiters under the queue lock and wake them only after unlocking") {
+            registered := self.waiters.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            self.epoch.fetch_add(1, Ordering.Release)
+            waiters :: registered.drain(..).map(fn((_, waiter)) { waiter }).collect<[Arc<JetConditionWaiter>]>()
+            if waiters.is_empty() { self.pending.fetch_add(1, Ordering.Relaxed) }
+            waiters
+        }
+        loop waiter in waiters { waiter.wake() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1496
+    fn unregister(self: &Self, id: U64) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("remove only the exact native registration identity while holding the condition queue lock") {
+            self.waiters.lock().unwrap_or_else(fn(error) { error.into_inner() }).retain(fn((candidate, _)) { *candidate != id })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1504
+pub fn jet_shared_condition_notify_one(condition: &Arc<JetConditionProtocol>) -> { condition.notify_one() }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1510
+pub fn jet_shared_condition_notify_all(condition: &Arc<JetConditionProtocol>) -> { condition.notify_all() }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1516
+pub struct JetConditionRegistration { condition: Arc<JetConditionProtocol>, id: U64, epoch: U64, stale: Bool }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1523
+impl JetConditionRegistration {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1524
+    fn saw_notification(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("Acquire notification epoch detects a wake racing with registration or physical handoff") {
+            self.stale || self.condition.epoch.load(Ordering.Acquire) != self.epoch
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1534
+impl Drop for JetConditionRegistration {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1535
+    fn drop(self: &Self) -> { self.condition.unregister(self.id) }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1540
+#Error
+pub enum JetConditionWaitError<E> { Predicate(E), Cancelled }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1548
+// Physical publish/release precedes local release; physical reacquisition
+// precedes restoration of the local permit.
+pub trait JetSharedWaitHandoff {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1549
+    fn suspend(self: &Self) -> () ()!
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1550
+    fn resume(self: &Self, cancelled: Bool) -> Bool ()!
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1551
+    fn abort(self: &Self) -> () ()!
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1554
+struct JetConditionWaitCleanup {
+    registration: JetConditionRegistration?, permit: &JetSharedCanonicalPermit,
+    waiter: &JetConditionWaiter, released: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1561
+impl JetConditionWaitCleanup {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1562
+    fn release(self: &Self) -> { self.permit.release_during_drop(); self.released = true }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1567
+    fn abandon(self: &Self) -> { drop(self.registration.take()); self.released = false }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1572
+    fn finish(self: &Self) -> () ()! {
+        drop(self.registration.take())
+        if self.released {
+            self.released = false
+            cancelled := fn() { self.waiter.interrupted() }
+            if !self.permit.reacquire(&cancelled) -> return Err(())
+        }
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1585
+impl Drop for JetConditionWaitCleanup {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1586
+    fn drop(self: &Self) -> {
+        drop(self.registration.take())
+        if self.released {
+            cancelled := fn() { self.waiter.interrupted() }
+            _ :: self.permit.reacquire(&cancelled)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1595
+fn jet_shared_condition_wait_registered(permit: &JetSharedCanonicalPermit, registration: JetConditionRegistration, waiter: Arc<JetConditionWaiter>) -> () ()! {
+    jet_shared_condition_wait_registered_with_handoff(permit, ^registration, ^waiter, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1603
+fn jet_shared_condition_wait_registered_with_handoff(permit: &JetSharedCanonicalPermit, registration: JetConditionRegistration, waiter: Arc<JetConditionWaiter>, handoff: (&JetSharedWaitHandoff)?) -> () ()! {
+    cleanup := JetConditionWaitCleanup{registration: Val(^registration), permit: permit, waiter: waiter.as_ref(), released: false}
+    if Val(owner) :: handoff.as_deref_mut() {
+        if owner.suspend().is_err() {
+            _ :: owner.abort()
+            return Err(())
+        }
+    }
+    saw_notification :: cleanup.registration.as_ref().is_some_and(JetConditionRegistration.saw_notification)
+    cleanup.release()
+    parked :: if saw_notification { Ok(()) } else { waiter.park() }
+    resumed :: match handoff.as_deref_mut() {
+        Val(owner) -> owner.resume(parked.is_err())
+        None -> Ok(true)
+    }
+    if !matches(resumed, Ok(true)) {
+        if Val(owner) :: handoff.as_deref_mut() { _ :: owner.abort() }
+        cleanup.abandon()
+        return Err(())
+    }
+    reacquired :: cleanup.finish()
+    if reacquired.is_err() {
+        if Val(owner) :: handoff.as_deref_mut() { _ :: owner.abort() }
+        cleanup.abandon()
+        return Err(())
+    }
+    drop(^cleanup)
+    parked.and(^reacquired)
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1658
+// Register before physical handoff; recheck notifications before local release.
+pub fn jet_shared_condition_wait_once(permit: &JetSharedCanonicalPermit, condition: &Arc<JetConditionProtocol>, waiter: Arc<JetConditionWaiter>) -> () ()! {
+    jet_shared_condition_wait_once_with_handoff(permit, condition, ^waiter, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1666
+pub fn jet_shared_condition_wait_once_with_handoff(permit: &JetSharedCanonicalPermit, condition: &Arc<JetConditionProtocol>, waiter: Arc<JetConditionWaiter>, handoff: (&JetSharedWaitHandoff)?) -> () ()! {
+    // GATE #4565: kernel primitive
+    registration :: condition.register(#Unsafe("retain the native waiter through registration and physical handoff") { waiter.clone() })
+    jet_shared_condition_wait_registered_with_handoff(permit, ^registration, ^waiter, ^handoff)
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1676
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+#Error
+pub enum JetSharedGuardWaitError { Invalid, EditRequired, Cancelled }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1683
+impl JetSharedGuardWaitError {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1684
+    pub fn message(self: Self) -> String {
+        match self {
+            .Invalid -> JET_SHARED_GUARD_INVALID
+            .EditRequired -> JET_SHARED_GUARD_EDIT_REQUIRED
+            .Cancelled -> JET_SHARED_GUARD_WAIT_CANCELLED
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1692
+    pub fn traps(self: Self) -> Bool { matches(self, .Invalid) }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1697
+pub fn jet_shared_guard_wait_once(guard: (&JetSharedGuardState)?, condition: (&Arc<JetConditionProtocol>)?, waiter: Arc<JetConditionWaiter>) -> () JetSharedGuardWaitError! {
+    jet_shared_guard_wait_once_with_handoff(^guard, ^condition, ^waiter, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1705
+pub fn jet_shared_guard_wait_once_with_handoff(guard: (&JetSharedGuardState)?, condition: (&Arc<JetConditionProtocol>)?, waiter: Arc<JetConditionWaiter>, handoff: (&JetSharedWaitHandoff)?) -> () JetSharedGuardWaitError! {
+    guard :: guard.ok_or(JetSharedGuardWaitError.Invalid)?
+    condition :: condition.ok_or(JetSharedGuardWaitError.Invalid)?
+    jet_shared_guard_require_edit(guard).map_err(fn(message) {
+        if message == JET_SHARED_GUARD_INVALID { JetSharedGuardWaitError.Invalid }
+        else { JetSharedGuardWaitError.EditRequired }
+    })?
+    jet_shared_condition_wait_once_with_handoff(guard.permit(), condition, ^waiter, ^handoff)
+        .map_err(fn(_) { JetSharedGuardWaitError.Cancelled })
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1724
+pub fn jet_shared_condition_wait<E>(permit: &JetSharedCanonicalPermit, condition: &Arc<JetConditionProtocol>, ready: fn() -> Bool E!, waiter: fn() -> Arc<JetConditionWaiter>) -> () JetConditionWaitError<E>! {
+    loop {
+        if ready().map_err(JetConditionWaitError.Predicate)? -> return Ok(())
+        waiter :: waiter()
+        // GATE #4565: kernel primitive
+        registration :: condition.register(#Unsafe("retain waiter during the predicate recheck to avoid missed native notifications") { waiter.clone() })
+        if ready().map_err(JetConditionWaitError.Predicate)? {
+            drop(^registration)
+            return Ok(())
+        }
+        parked :: jet_shared_condition_wait_registered(permit, ^registration, ^waiter)
+        if parked.is_err() -> return Err(JetConditionWaitError.Cancelled)
+    }
+}
+
 

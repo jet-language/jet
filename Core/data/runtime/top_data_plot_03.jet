@@ -1,1273 +1,535 @@
-// PORT-PENDING 0267 crates-jet-codegen-src-prelude-corelib-top-dataplot-slice-3627: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3627-4895
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn jet_data_plot_plan_json(plan: &JetDataPlotPlan) -> String {
-//RS     let mut out = String::from("{");
-//RS     out.push_str(&format!(
-//RS         "\"version\":{},\"source\":{},\"schema\":{},\"limits\":{{\"max_groups\":{},\"max_sort_rows\":{},\"max_join_rows\":{},\"max_output_rows\":{}}},\"mark\":\"{}\",\"encodings\":[",
-//RS         JET_DATA_PLOT_SCHEMA_VERSION,
-//RS         jet_data_plot_source_json(&plan.source),
-//RS         jet_data_plot_schema_json(&plan.schema),
-//RS         plan.limits.max_groups,
-//RS         plan.limits.max_sort_rows,
-//RS         plan.limits.max_join_rows,
-//RS         plan.limits.max_output_rows,
-//RS         plan.mark.as_str()
-//RS     ));
-//RS     out.push_str(
-//RS         &plan
-//RS             .encodings
-//RS             .iter()
-//RS             .map(jet_data_plot_encoding_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     out.push_str("],\"transforms\":[");
-//RS     out.push_str(
-//RS         &plan
-//RS             .transforms
-//RS             .iter()
-//RS             .map(jet_data_plot_transform_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     out.push_str("],\"scales\":[");
-//RS     out.push_str(
-//RS         &plan
-//RS             .scales
-//RS             .iter()
-//RS             .map(jet_data_plot_scale_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     out.push_str("],\"axes\":[");
-//RS     out.push_str(
-//RS         &plan
-//RS             .axes
-//RS             .iter()
-//RS             .map(jet_data_plot_axis_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     out.push_str("],\"legends\":[");
-//RS     out.push_str(
-//RS         &plan
-//RS             .legends
-//RS             .iter()
-//RS             .map(jet_data_plot_legend_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     out.push_str("],\"facets\":[");
-//RS     out.push_str(
-//RS         &plan
-//RS             .facets
-//RS             .iter()
-//RS             .map(jet_data_plot_facet_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     out.push_str("],\"layers\":[");
-//RS     out.push_str(
-//RS         &plan
-//RS             .layers
-//RS             .iter()
-//RS             .map(jet_data_plot_layer_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     out.push_str("],\"interactions\":[");
-//RS     out.push_str(
-//RS         &plan
-//RS             .interactions
-//RS             .iter()
-//RS             .map(|interaction| format!("\"{}\"", interaction.as_str()))
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     );
-//RS     out.push_str("],\"accessibility\":");
-//RS     out.push_str(&format!(
-//RS         "{{\"title\":\"{}\",\"description\":\"{}\",\"summary\":\"{}\",\"keyboard\":{},\"announce_selection\":{}}}",
-//RS         jet_data_plot_json_escape(&plan.accessibility.title),
-//RS         jet_data_plot_json_escape(&plan.accessibility.description),
-//RS         jet_data_plot_json_escape(&plan.accessibility.summary),
-//RS         plan.accessibility.keyboard,
-//RS         plan.accessibility.announce_selection
-//RS     ));
-//RS     out.push_str(&format!(
-//RS         ",\"layout\":{{\"width\":{},\"height\":{},\"margin_top\":{},\"margin_right\":{},\"margin_bottom\":{},\"margin_left\":{}}}}}",
-//RS         jet_data_plot_number(plan.layout.width),
-//RS         jet_data_plot_number(plan.layout.height),
-//RS         jet_data_plot_number(plan.layout.margin_top),
-//RS         jet_data_plot_number(plan.layout.margin_right),
-//RS         jet_data_plot_number(plan.layout.margin_bottom),
-//RS         jet_data_plot_number(plan.layout.margin_left)
-//RS     ));
-//RS     out
-//RS }
-//RS fn jet_data_plot_json_escape(value: &str) -> String {
-//RS     let mut out = String::with_capacity(value.len());
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             character if character.is_control() => {
-//RS                 out.push_str(&format!("\\u{:04x}", character as u32))
-//RS             }
-//RS             character => out.push(character),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn jet_data_plot_escape(value: &str) -> String {
-//RS     value
-//RS         .replace('\\', "\\\\")
-//RS         .replace(';', "\\;")
-//RS         .replace('|', "\\|")
-//RS         .replace(',', "\\,")
-//RS         .replace('=', "\\=")
-//RS }
-//RS 
-//RS fn jet_data_plot_number(value: f64) -> String {
-//RS     let value = jet_data_plot_normalize_zero(value);
-//RS     if value.is_finite() {
-//RS         value.to_string()
-//RS     } else if value.is_nan() {
-//RS         "NaN".to_string()
-//RS     } else if value.is_sign_positive() {
-//RS         "inf".to_string()
-//RS     } else {
-//RS         "-inf".to_string()
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_plot_normalize_zero(value: f64) -> f64 {
-//RS     if value == 0.0 {
-//RS         0.0
-//RS     } else {
-//RS         value
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_plot_source_json(source: &JetDataPlotSourceFacts) -> String {
-//RS     format!(
-//RS         "{{\"table_plan\":\"{}\",\"source\":\"{}\",\"schema\":\"{}\",\"row_type\":\"{}\",\"rows\":{},\"data_identity\":\"{}\",\"provenance\":\"{}\"}}",
-//RS         jet_data_plot_json_escape(&source.table_plan_identity),
-//RS         jet_data_plot_json_escape(&source.source_identity),
-//RS         jet_data_plot_json_escape(&source.schema_identity),
-//RS         jet_data_plot_json_escape(&source.row_type),
-//RS         source.rows,
-//RS         jet_data_plot_json_escape(&source.data_identity),
-//RS         jet_data_plot_json_escape(&source.provenance)
-//RS     )
-//RS }
-//RS fn jet_data_plot_limits_key(limits: &jet_std::DataLimits) -> String {
-//RS     format!(
-//RS         "groups={},sort={},join={},output={}",
-//RS         limits.max_groups, limits.max_sort_rows, limits.max_join_rows, limits.max_output_rows
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS fn jet_data_plot_schema_json(schema: &JetDataPlotSchema) -> String {
-//RS     format!(
-//RS         "{{\"identity\":\"{}\",\"row_type\":\"{}\",\"columns\":[{}]}}",
-//RS         jet_data_plot_json_escape(&schema.identity),
-//RS         jet_data_plot_json_escape(&schema.row_type),
-//RS         schema
-//RS             .columns
-//RS             .iter()
-//RS             .map(|field| {
-//RS                 format!(
-//RS                     "{{\"id\":\"{}\",\"name\":\"{}\",\"type\":\"{}\"}}",
-//RS                     jet_data_plot_json_escape(&field.id),
-//RS                     jet_data_plot_json_escape(&field.name),
-//RS                     jet_data_plot_json_escape(&field.type_name)
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_encoding_json(encoding: &JetDataPlotEncoding) -> String {
-//RS     format!(
-//RS         "{{\"channel\":\"{}\",\"field\":{},\"aggregate\":\"{}\"}}",
-//RS         encoding.channel.as_str(),
-//RS         jet_data_plot_field_json(&encoding.field),
-//RS         encoding.aggregate.as_str()
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_field_json(field: &JetDataPlotField) -> String {
-//RS     format!(
-//RS         "{{\"id\":\"{}\",\"name\":\"{}\",\"type\":\"{}\"}}",
-//RS         jet_data_plot_json_escape(&field.id),
-//RS         jet_data_plot_json_escape(&field.name),
-//RS         jet_data_plot_json_escape(&field.type_name)
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_value_json(value: &JetDataPlotValue) -> String {
-//RS     match value {
-//RS         JetDataPlotValue::Text(value) => {
-//RS             format!("{{\"kind\":\"text\",\"value\":\"{}\"}}", jet_data_plot_json_escape(value))
-//RS         }
-//RS         JetDataPlotValue::Integer(value) => {
-//RS             format!("{{\"kind\":\"integer\",\"value\":{value}}}")
-//RS         }
-//RS         JetDataPlotValue::Number(value) => format!(
-//RS             "{{\"kind\":\"number\",\"value\":{}}}",
-//RS             jet_data_plot_number(*value)
-//RS         ),
-//RS         JetDataPlotValue::Boolean(value) => {
-//RS             format!("{{\"kind\":\"boolean\",\"value\":{value}}}")
-//RS         }
-//RS         JetDataPlotValue::Null => "{\"kind\":\"null\",\"value\":null}".to_string(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_plot_values_json(values: &[(JetDataPlotField, JetDataPlotValue)]) -> String {
-//RS     format!(
-//RS         "[{}]",
-//RS         values
-//RS             .iter()
-//RS             .map(|(field, value)| {
-//RS                 format!(
-//RS                     "{{\"field\":{},\"value\":{}}}",
-//RS                     jet_data_plot_field_json(field),
-//RS                     jet_data_plot_value_json(value)
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_transform_json(transform: &JetDataPlotTransform) -> String {
-//RS     match transform {
-//RS         JetDataPlotTransform::Filter { field, op, value } => format!(
-//RS             "{{\"kind\":\"filter\",\"field\":{},\"op\":\"{}\",\"value\":{}}}",
-//RS             jet_data_plot_field_json(field),
-//RS             op.as_str(),
-//RS             jet_data_plot_value_json(value)
-//RS         ),
-//RS         JetDataPlotTransform::Sort {
-//RS             field,
-//RS             descending,
-//RS         } => format!(
-//RS             "{{\"kind\":\"sort\",\"field\":{},\"descending\":{descending}}}",
-//RS             jet_data_plot_field_json(field)
-//RS         ),
-//RS         JetDataPlotTransform::Bin { field, step } => format!(
-//RS             "{{\"kind\":\"bin\",\"field\":{},\"step\":{}}}",
-//RS             jet_data_plot_field_json(field),
-//RS             jet_data_plot_number(*step)
-//RS         ),
-//RS         JetDataPlotTransform::Aggregate {
-//RS             group_by,
-//RS             field,
-//RS             aggregate,
-//RS         } => format!(
-//RS             "{{\"kind\":\"aggregate\",\"group_by\":[{}],\"field\":{},\"aggregate\":\"{}\"}}",
-//RS             group_by
-//RS                 .iter()
-//RS                 .map(jet_data_plot_field_json)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(","),
-//RS             jet_data_plot_field_json(field),
-//RS             aggregate.as_str()
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_plot_domain_json(domain: &JetDataPlotDomain) -> String {
-//RS     match domain {
-//RS         JetDataPlotDomain::Auto => "\"auto\"".to_string(),
-//RS         JetDataPlotDomain::Numeric { min, max } => format!(
-//RS             "{{\"kind\":\"numeric\",\"min\":{},\"max\":{}}}",
-//RS             jet_data_plot_number(*min),
-//RS             jet_data_plot_number(*max)
-//RS         ),
-//RS         JetDataPlotDomain::Categories(values) => format!(
-//RS             "{{\"kind\":\"categories\",\"values\":[{}]}}",
-//RS             values
-//RS                 .iter()
-//RS                 .map(|value| format!("\"{}\"", jet_data_plot_json_escape(value)))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_plot_scale_json(scale: &JetDataPlotScale) -> String {
-//RS     format!(
-//RS         "{{\"channel\":\"{}\",\"kind\":\"{}\",\"domain\":{},\"clamp\":{},\"reverse\":{}}}",
-//RS         scale.channel.as_str(),
-//RS         scale.kind.as_str(),
-//RS         jet_data_plot_domain_json(&scale.domain),
-//RS         scale.clamp,
-//RS         scale.reverse
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_axis_json(axis: &JetDataPlotAxis) -> String {
-//RS     format!(
-//RS         "{{\"channel\":\"{}\",\"title\":\"{}\",\"visible\":{},\"grid\":{},\"ticks\":{}}}",
-//RS         axis.channel.as_str(),
-//RS         jet_data_plot_json_escape(&axis.title),
-//RS         axis.visible,
-//RS         axis.grid,
-//RS         axis.ticks
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_legend_json(legend: &JetDataPlotLegend) -> String {
-//RS     format!(
-//RS         "{{\"channel\":\"{}\",\"title\":\"{}\",\"position\":\"{}\",\"visible\":{}}}",
-//RS         legend.channel.as_str(),
-//RS         jet_data_plot_json_escape(&legend.title),
-//RS         legend.position.as_str(),
-//RS         legend.visible
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_facet_json(facet: &JetDataPlotFacet) -> String {
-//RS     format!(
-//RS         "{{\"field\":{},\"kind\":\"{}\",\"title\":\"{}\",\"columns\":{},\"rows\":{}}}",
-//RS         jet_data_plot_field_json(&facet.field),
-//RS         facet.kind.as_str(),
-//RS         jet_data_plot_json_escape(&facet.title),
-//RS         facet.columns,
-//RS         facet.rows
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_layer_json(layer: &JetDataPlotLayer) -> String {
-//RS     format!(
-//RS         "{{\"name\":\"{}\",\"mark\":\"{}\",\"opacity\":{},\"encodings\":[{}],\"transforms\":[{}]}}",
-//RS         jet_data_plot_json_escape(&layer.name),
-//RS         layer.mark.as_str(),
-//RS         jet_data_plot_number(layer.opacity),
-//RS         layer
-//RS             .encodings
-//RS             .iter()
-//RS             .map(jet_data_plot_encoding_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS         layer
-//RS             .transforms
-//RS             .iter()
-//RS             .map(jet_data_plot_transform_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_plot_render_svg(
-//RS     plan: &JetDataPlotPlan,
-//RS     rows: &[JetDataPlotDatum],
-//RS     capabilities: &[JetDataPlotCapability],
-//RS     selection: &[usize],
-//RS ) -> Result<String, JetDataPlotError> {
-//RS     let layout = &plan.layout;
-//RS     let buckets = jet_data_plot_facet_buckets(rows, &plan.facets);
-//RS     let bucket_count = buckets.len().max(1);
-//RS     let configured_columns = plan
-//RS         .facets
-//RS         .iter()
-//RS         .map(|facet| facet.columns)
-//RS         .find(|columns| *columns > 0)
-//RS         .map(|columns| columns as usize);
-//RS     let configured_rows = plan
-//RS         .facets
-//RS         .iter()
-//RS         .map(|facet| facet.rows)
-//RS         .find(|rows| *rows > 0)
-//RS         .map(|rows| rows as usize);
-//RS     let requested_columns = configured_columns.unwrap_or_else(|| {
-//RS         (bucket_count as f64).sqrt().ceil() as usize
-//RS     });
-//RS     let rows_count = configured_rows
-//RS         .unwrap_or_else(|| bucket_count.div_ceil(requested_columns.max(1)))
-//RS         .clamp(1, bucket_count);
-//RS     let columns = requested_columns
-//RS         .max(bucket_count.div_ceil(rows_count))
-//RS         .clamp(1, bucket_count);
-//RS     let chart_width = layout.width - layout.margin_left - layout.margin_right;
-//RS     let chart_height = layout.height - layout.margin_top - layout.margin_bottom;
-//RS     let cell_width = chart_width / columns as f64;
-//RS     let cell_height = chart_height / rows_count as f64;
-//RS     let label = if plan.accessibility.title.is_empty() {
-//RS         "Jet data plot"
-//RS     } else {
-//RS         plan.accessibility.title.as_str()
-//RS     };
-//RS     let interaction_contract = plan
-//RS         .interactions
-//RS         .iter()
-//RS         .map(|interaction| interaction.as_str())
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let capability_contract = capabilities
-//RS         .iter()
-//RS         .map(JetDataPlotCapability::canonical_key)
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let selected_contract = selection
-//RS         .iter()
-//RS         .map(|index| index.to_string())
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let mut out = format!(
-//RS         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\" role=\"img\" aria-label=\"{}\">",
-//RS         jet_data_plot_number(layout.width),
-//RS         jet_data_plot_number(layout.height),
-//RS         jet_data_plot_number(layout.width),
-//RS         jet_data_plot_number(layout.height),
-//RS         jet_data_plot_svg_escape(label)
-//RS     );
-//RS     if !plan.accessibility.title.is_empty() {
-//RS         out.push_str(&format!(
-//RS             "<title>{}</title>",
-//RS             jet_data_plot_svg_escape(&plan.accessibility.title)
-//RS         ));
-//RS     }
-//RS     if !plan.accessibility.description.is_empty() {
-//RS         out.push_str(&format!(
-//RS             "<desc>{}</desc>",
-//RS             jet_data_plot_svg_escape(&plan.accessibility.description)
-//RS         ));
-//RS     }
-//RS     out.push_str("<metadata>");
-//RS     out.push_str(&jet_data_plot_svg_escape(&jet_data_plot_plan_json(plan)));
-//RS     out.push_str("</metadata>");
-//RS     out.push_str(&format!(
-//RS         "<g data-source=\"{}\" data-table-plan=\"{}\" data-data-identity=\"{}\" data-interactions=\"{}\" data-capabilities=\"{}\" data-selection=\"{}\">",
-//RS         jet_data_plot_svg_escape(&plan.source.source_identity),
-//RS         jet_data_plot_svg_escape(&plan.source.table_plan_identity),
-//RS         jet_data_plot_svg_escape(&plan.source.data_identity),
-//RS         jet_data_plot_svg_escape(&interaction_contract),
-//RS         jet_data_plot_svg_escape(&capability_contract),
-//RS         jet_data_plot_svg_escape(&selected_contract)
-//RS     ));
-//RS     if !plan.accessibility.summary.is_empty() {
-//RS         out.push_str(&format!(
-//RS             "<text class=\"plot-summary\" x=\"{}\" y=\"{}\">{}</text>",
-//RS             jet_data_plot_number(layout.margin_left),
-//RS             jet_data_plot_number(layout.margin_top - 20.0),
-//RS             jet_data_plot_svg_escape(&plan.accessibility.summary)
-//RS         ));
-//RS     }
-//RS 
-//RS     let layer_count = plan.layers.len() + 1;
-//RS     let mut facet_index = 0;
-//RS     while facet_index < bucket_count {
-//RS         let (facet_row, facet_column, _facet_rows) = buckets
-//RS             .get(facet_index)
-//RS             .cloned()
-//RS             .unwrap_or_else(|| ("".to_string(), "".to_string(), Vec::new()));
-//RS         let column = facet_index % columns;
-//RS         let row = facet_index / columns;
-//RS         let left = layout.margin_left + column as f64 * cell_width;
-//RS         let top = layout.margin_top + row as f64 * cell_height;
-//RS         let area_left = left + 8.0;
-//RS         let area_top = top + 8.0;
-//RS         let area_width = (cell_width - 16.0).max(1.0);
-//RS         let area_height = (cell_height - 16.0).max(1.0);
-//RS         if !facet_row.is_empty() || !facet_column.is_empty() {
-//RS             out.push_str(&format!(
-//RS                 "<text class=\"facet\" x=\"{}\" y=\"{}\">{}</text>",
-//RS                 jet_data_plot_number(area_left),
-//RS                 jet_data_plot_number(area_top + 2.0),
-//RS                 jet_data_plot_svg_escape(&format!("{facet_row} {facet_column}"))
-//RS             ));
-//RS         }
-//RS         let mut layer_index = 0;
-//RS         while layer_index < layer_count {
-//RS             let layer = if layer_index == 0 {
-//RS                 None
-//RS             } else {
-//RS                 plan.layers.get(layer_index - 1)
-//RS             };
-//RS             let effective = layer
-//RS                 .map(|layer| jet_data_plot_effective_encodings(&plan.encodings, &layer.encodings))
-//RS                 .unwrap_or_else(|| plan.encodings.clone());
-//RS             let layer_rows = if let Some(layer) = layer {
-//RS                 jet_data_plot_layer_rows(rows, plan, Some(layer))?
-//RS             } else {
-//RS                 rows.to_vec()
-//RS             };
-//RS             let layer_rows = if plan.facets.is_empty() {
-//RS                 layer_rows
-//RS             } else {
-//RS                 jet_data_plot_facet_buckets(&layer_rows, &plan.facets)
-//RS                     .into_iter()
-//RS                     .find(|(row_key, column_key, _)| {
-//RS                         *row_key == facet_row && *column_key == facet_column
-//RS                     })
-//RS                     .map(|(_, _, rows)| rows)
-//RS                     .unwrap_or_default()
-//RS             };
-//RS             let mark = layer.map_or(plan.mark, |layer| layer.mark);
-//RS             let opacity = layer.map_or(1.0, |layer| layer.opacity);
-//RS             out.push_str(&format!(
-//RS                 "<g class=\"plot-layer\" data-layer=\"{}\" data-mark=\"{}\" opacity=\"{}\">",
-//RS                 layer_index,
-//RS                 mark.as_str(),
-//RS                 jet_data_plot_number(opacity)
-//RS             ));
-//RS             jet_data_plot_svg_draw_axes(
-//RS                 &mut out,
-//RS                 plan,
-//RS                 &effective,
-//RS                 &layer_rows,
-//RS                 area_left,
-//RS                 area_top,
-//RS                 area_width,
-//RS                 area_height,
-//RS             )?;
-//RS             jet_data_plot_svg_draw_marks(
-//RS                 &mut out,
-//RS                 plan,
-//RS                 &effective,
-//RS                 &layer_rows,
-//RS                 mark,
-//RS                 area_left,
-//RS                 area_top,
-//RS                 area_width,
-//RS                 area_height,
-//RS             )?;
-//RS             out.push_str("</g>");
-//RS             layer_index += 1;
-//RS         }
-//RS         facet_index += 1;
-//RS     }
-//RS     jet_data_plot_svg_draw_legends(&mut out, plan, rows)?;
-//RS     out.push_str("</g></svg>");
-//RS     let _ = capabilities;
-//RS     Ok(out)
-//RS }
-//RS fn jet_data_plot_svg_draw_legends(
-//RS     out: &mut String,
-//RS     plan: &JetDataPlotPlan,
-//RS     rows: &[JetDataPlotDatum],
-//RS ) -> Result<(), JetDataPlotError> {
-//RS     let mut top_x = plan.layout.margin_left;
-//RS     let mut bottom_x = plan.layout.margin_left;
-//RS     let mut right_y = plan.layout.margin_top;
-//RS     let mut left_y = plan.layout.margin_top;
-//RS     for legend in &plan.legends {
-//RS         if !legend.visible {
-//RS             continue;
-//RS         }
-//RS         let Some(encoding) = jet_data_plot_channel_encoding(&plan.encodings, legend.channel) else {
-//RS             continue;
-//RS         };
-//RS         let categories = jet_data_plot_categories(rows, &encoding.field, None);
-//RS         let (x, y, vertical) = match legend.position {
-//RS             JetDataPlotLegendPosition::Top => {
-//RS                 let position = (top_x, (plan.layout.margin_top - 6.0).max(12.0), false);
-//RS                 top_x += (legend.title.len() as f64 * 7.0).max(24.0) + 10.0;
-//RS                 position
-//RS             }
-//RS             JetDataPlotLegendPosition::Bottom => {
-//RS                 let position = (
-//RS                     bottom_x,
-//RS                     (plan.layout.height - plan.layout.margin_bottom + 20.0)
-//RS                         .min(plan.layout.height - 4.0),
-//RS                     false,
-//RS                 );
-//RS                 bottom_x += (legend.title.len() as f64 * 7.0).max(24.0) + 10.0;
-//RS                 position
-//RS             }
-//RS             JetDataPlotLegendPosition::Right => {
-//RS                 let position = (
-//RS                     (plan.layout.width - plan.layout.margin_right + 8.0)
-//RS                         .min(plan.layout.width - 8.0),
-//RS                     right_y,
-//RS                     true,
-//RS                 );
-//RS                 right_y += 20.0;
-//RS                 position
-//RS             }
-//RS             JetDataPlotLegendPosition::Left => {
-//RS                 let position = (
-//RS                     (plan.layout.margin_left - 120.0).max(8.0),
-//RS                     left_y,
-//RS                     true,
-//RS                 );
-//RS                 left_y += 20.0;
-//RS                 position
-//RS             }
-//RS         };
-//RS         out.push_str(&format!(
-//RS             "<g class=\"legend\" data-channel=\"{}\" data-position=\"{}\"><text x=\"{}\" y=\"{}\">{}</text>",
-//RS             legend.channel.as_str(),
-//RS             legend.position.as_str(),
-//RS             jet_data_plot_number(x),
-//RS             jet_data_plot_number(y),
-//RS             jet_data_plot_svg_escape(&legend.title)
-//RS         ));
-//RS         if vertical {
-//RS             let mut category_y = y + 10.0;
-//RS             for category in categories {
-//RS                 let key = JetDataPlotValue::Text(category.clone()).canonical_key();
-//RS                 out.push_str(&format!(
-//RS                     "<rect x=\"{}\" y=\"{}\" width=\"8\" height=\"8\" fill=\"{}\"/><text x=\"{}\" y=\"{}\">{}</text>",
-//RS                     jet_data_plot_number(x),
-//RS                     jet_data_plot_number(category_y),
-//RS                     jet_data_plot_palette_color(&key),
-//RS                     jet_data_plot_number(x + 12.0),
-//RS                     jet_data_plot_number(category_y + 8.0),
-//RS                     jet_data_plot_svg_escape(&category)
-//RS                 ));
-//RS                 category_y += 20.0;
-//RS             }
-//RS         } else {
-//RS             let mut category_x = x + (legend.title.len() as f64 * 7.0).max(24.0) + 10.0;
-//RS             for category in categories {
-//RS                 let key = JetDataPlotValue::Text(category.clone()).canonical_key();
-//RS                 out.push_str(&format!(
-//RS                     "<rect x=\"{}\" y=\"{}\" width=\"8\" height=\"8\" fill=\"{}\"/><text x=\"{}\" y=\"{}\">{}</text>",
-//RS                     jet_data_plot_number(category_x),
-//RS                     jet_data_plot_number(y - 8.0),
-//RS                     jet_data_plot_palette_color(&key),
-//RS                     jet_data_plot_number(category_x + 12.0),
-//RS                     jet_data_plot_number(y),
-//RS                     jet_data_plot_svg_escape(&category)
-//RS                 ));
-//RS                 category_x += (category.len() as f64 * 7.0).max(24.0) + 22.0;
-//RS             }
-//RS         }
-//RS         out.push_str("</g>");
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-//RS fn jet_data_plot_channel_encoding<'a>(
-//RS     encodings: &'a [JetDataPlotEncoding],
-//RS     channel: JetDataPlotChannel,
-//RS ) -> Option<&'a JetDataPlotEncoding> {
-//RS     encodings.iter().find(|encoding| encoding.channel == channel)
-//RS }
-//RS 
-//RS fn jet_data_plot_channel_scale<'a>(
-//RS     plan: &'a JetDataPlotPlan,
-//RS     channel: JetDataPlotChannel,
-//RS ) -> Option<&'a JetDataPlotScale> {
-//RS     plan.scales
-//RS         .iter()
-//RS         .find(|scale| scale.channel == channel)
-//RS }
-//RS 
-//RS fn jet_data_plot_channel_axis<'a>(
-//RS     plan: &'a JetDataPlotPlan,
-//RS     channel: JetDataPlotChannel,
-//RS ) -> Option<&'a JetDataPlotAxis> {
-//RS     plan.axes
-//RS         .iter()
-//RS         .find(|axis| axis.channel == channel)
-//RS }
-//RS 
-//RS fn jet_data_plot_numeric_bounds(
-//RS     rows: &[JetDataPlotDatum],
-//RS     field: &JetDataPlotField,
-//RS     scale: Option<&JetDataPlotScale>,
-//RS ) -> Result<(f64, f64), JetDataPlotError> {
-//RS     if let Some(JetDataPlotScale {
-//RS         domain: JetDataPlotDomain::Numeric { min, max },
-//RS         kind,
-//RS         ..
-//RS     }) = scale
-//RS     {
-//RS         if *kind == JetDataPlotScaleKind::Log {
-//RS             for row in rows {
-//RS                 let Some(value) =
-//RS                     jet_data_plot_datum_value(row, field).and_then(JetDataPlotValue::number)
-//RS                 else {
-//RS                     continue;
-//RS                 };
-//RS                 if !value.is_finite() || value <= 0.0 {
-//RS                     return Err(JetDataPlotError::invalid(
-//RS                         "plot.scale",
-//RS                         "log plot scale needs strictly positive finite data",
-//RS                     )
-//RS                     .with_field(field.name.clone())
-//RS                     .with_index(row.ordinal));
-//RS                 }
-//RS             }
-//RS         }
-//RS         return Ok((*min, *max));
-//RS     }
-//RS     let mut minimum = f64::INFINITY;
-//RS     let mut maximum = f64::NEG_INFINITY;
-//RS     for row in rows {
-//RS         let Some(value) = jet_data_plot_datum_value(row, field).and_then(JetDataPlotValue::number)
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         if !value.is_finite() {
-//RS             return Err(JetDataPlotError::non_finite(
-//RS                 "plot.scale",
-//RS                 "plot scale received a non-finite value",
-//RS             )
-//RS             .with_field(field.name.clone())
-//RS             .with_index(row.ordinal));
-//RS         }
-//RS         if scale.is_some_and(|scale| scale.kind == JetDataPlotScaleKind::Log) && value <= 0.0 {
-//RS             return Err(JetDataPlotError::invalid(
-//RS                 "plot.scale",
-//RS                 "log plot scale needs strictly positive data",
-//RS             )
-//RS             .with_field(field.name.clone())
-//RS             .with_index(row.ordinal));
-//RS         }
-//RS         minimum = minimum.min(value);
-//RS         maximum = maximum.max(value);
-//RS     }
-//RS     if !minimum.is_finite() || !maximum.is_finite() {
-//RS         return Ok((0.0, 1.0));
-//RS     }
-//RS     if minimum == maximum {
-//RS         let padding = minimum.abs().max(1.0) * 0.5;
-//RS         minimum -= padding;
-//RS         maximum += padding;
-//RS     }
-//RS     Ok((minimum, maximum))
-//RS }
-//RS 
-//RS fn jet_data_plot_categories(
-//RS     rows: &[JetDataPlotDatum],
-//RS     field: &JetDataPlotField,
-//RS     scale: Option<&JetDataPlotScale>,
-//RS ) -> Vec<String> {
-//RS     if let Some(JetDataPlotScale {
-//RS         domain: JetDataPlotDomain::Categories(values),
-//RS         ..
-//RS     }) = scale
-//RS     {
-//RS         return values.clone();
-//RS     }
-//RS     let mut categories = BTreeSet::new();
-//RS     for row in rows {
-//RS         if let Some(value) = jet_data_plot_datum_value(row, field) {
-//RS             categories.insert(value.display_text());
-//RS         }
-//RS     }
-//RS     categories.into_iter().collect()
-//RS }
-//RS 
-//RS fn jet_data_plot_svg_x(
-//RS     value: &JetDataPlotValue,
-//RS     scale: Option<&JetDataPlotScale>,
-//RS     categories: &[String],
-//RS     minimum: f64,
-//RS     maximum: f64,
-//RS     left: f64,
-//RS     width: f64,
-//RS ) -> f64 {
-//RS     let numeric = scale
-//RS         .map(|scale| scale.kind.needs_numeric())
-//RS         .unwrap_or_else(|| value.number().is_some());
-//RS     let reverse = scale.map(|scale| scale.reverse).unwrap_or(false);
-//RS     if numeric {
-//RS         let mut ratio = value.number().unwrap_or(minimum);
-//RS         if scale.is_some_and(|scale| scale.kind == JetDataPlotScaleKind::Log) {
-//RS             ratio = ratio.max(f64::MIN_POSITIVE).ln();
-//RS             let min_log = minimum.max(f64::MIN_POSITIVE).ln();
-//RS             let max_log = maximum.max(f64::MIN_POSITIVE).ln();
-//RS             ratio = (ratio - min_log) / (max_log - min_log).max(f64::EPSILON);
-//RS         } else {
-//RS             ratio = (ratio - minimum) / (maximum - minimum).max(f64::EPSILON);
-//RS         }
-//RS         let ratio = if scale.map(|scale| scale.clamp).unwrap_or(true) {
-//RS             ratio.clamp(0.0, 1.0)
-//RS         } else {
-//RS             ratio
-//RS         };
-//RS         let ratio = if reverse { 1.0 - ratio } else { ratio };
-//RS         left + ratio * width
-//RS     } else {
-//RS         let key = value.display_text();
-//RS         let index = categories.iter().position(|category| category == &key).unwrap_or(0);
-//RS         let step = width / categories.len().max(1) as f64;
-//RS         let position = index as f64 * step + step * 0.5;
-//RS         if reverse {
-//RS             left + width - position
-//RS         } else {
-//RS             left + position
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_plot_svg_y(
-//RS     value: &JetDataPlotValue,
-//RS     scale: Option<&JetDataPlotScale>,
-//RS     minimum: f64,
-//RS     maximum: f64,
-//RS     top: f64,
-//RS     height: f64,
-//RS ) -> f64 {
-//RS     let mut ratio = value.number().unwrap_or(minimum);
-//RS     if scale.is_some_and(|scale| scale.kind == JetDataPlotScaleKind::Log) {
-//RS         ratio = ratio.max(f64::MIN_POSITIVE).ln();
-//RS         let min_log = minimum.max(f64::MIN_POSITIVE).ln();
-//RS         let max_log = maximum.max(f64::MIN_POSITIVE).ln();
-//RS         ratio = (ratio - min_log) / (max_log - min_log).max(f64::EPSILON);
-//RS     } else {
-//RS         ratio = (ratio - minimum) / (maximum - minimum).max(f64::EPSILON);
-//RS     }
-//RS     let ratio = if scale.map(|scale| scale.clamp).unwrap_or(true) {
-//RS         ratio.clamp(0.0, 1.0)
-//RS     } else {
-//RS         ratio
-//RS     };
-//RS     if scale.is_some_and(|scale| scale.reverse) {
-//RS         top + ratio * height
-//RS     } else {
-//RS         top + (1.0 - ratio) * height
-//RS     }
-//RS }
-//RS fn jet_data_plot_svg_draw_axes(
-//RS     out: &mut String,
-//RS     plan: &JetDataPlotPlan,
-//RS     encodings: &[JetDataPlotEncoding],
-//RS     rows: &[JetDataPlotDatum],
-//RS     left: f64,
-//RS     top: f64,
-//RS     width: f64,
-//RS     height: f64,
-//RS ) -> Result<(), JetDataPlotError> {
-//RS     let x_encoding = jet_data_plot_channel_encoding(encodings, JetDataPlotChannel::X)
-//RS         .ok_or_else(|| JetDataPlotError::invalid("plot.svg", "plot mark has no x encoding"))?;
-//RS     let y_encoding = jet_data_plot_channel_encoding(encodings, JetDataPlotChannel::Y)
-//RS         .ok_or_else(|| JetDataPlotError::invalid("plot.svg", "plot mark has no y encoding"))?;
-//RS     let x_scale = jet_data_plot_channel_scale(plan, JetDataPlotChannel::X);
-//RS     let y_scale = jet_data_plot_channel_scale(plan, JetDataPlotChannel::Y);
-//RS     let x_categories = jet_data_plot_categories(rows, &x_encoding.field, x_scale);
-//RS     let x_numeric = x_scale
-//RS         .map(|scale| scale.kind.needs_numeric())
-//RS         .unwrap_or_else(|| {
-//RS             rows.iter().any(|row| {
-//RS                 jet_data_plot_datum_value(row, &x_encoding.field)
-//RS                     .is_some_and(|value| value.number().is_some())
-//RS             })
-//RS         });
-//RS     let (x_minimum, x_maximum) = if x_numeric {
-//RS         jet_data_plot_numeric_bounds(rows, &x_encoding.field, x_scale)?
-//RS     } else {
-//RS         (0.0, 1.0)
-//RS     };
-//RS     let (y_minimum, y_maximum) =
-//RS         jet_data_plot_numeric_bounds(rows, &y_encoding.field, y_scale)?;
-//RS     let x_axis = jet_data_plot_channel_axis(plan, JetDataPlotChannel::X);
-//RS     let y_axis = jet_data_plot_channel_axis(plan, JetDataPlotChannel::Y);
-//RS     if y_axis.is_none_or(|axis| axis.visible) {
-//RS         out.push_str(&format!(
-//RS             "<line class=\"axis y\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"/>",
-//RS             jet_data_plot_number(left),
-//RS             jet_data_plot_number(top),
-//RS             jet_data_plot_number(left),
-//RS             jet_data_plot_number(top + height)
-//RS         ));
-//RS     }
-//RS     if x_axis.is_none_or(|axis| axis.visible) {
-//RS         out.push_str(&format!(
-//RS             "<line class=\"axis x\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"/>",
-//RS             jet_data_plot_number(left),
-//RS             jet_data_plot_number(top + height),
-//RS             jet_data_plot_number(left + width),
-//RS             jet_data_plot_number(top + height)
-//RS         ));
-//RS     }
-//RS     let y_ticks = y_axis.map_or(5, |axis| axis.ticks).clamp(0, 32) as usize;
-//RS     for tick in 0..=y_ticks {
-//RS         let ratio = if y_ticks == 0 {
-//RS             0.0
-//RS         } else {
-//RS             tick as f64 / y_ticks as f64
-//RS         };
-//RS         let value = y_minimum + (y_maximum - y_minimum) * ratio;
-//RS         let position = jet_data_plot_svg_y(
-//RS             &JetDataPlotValue::Number(value),
-//RS             y_scale,
-//RS             y_minimum,
-//RS             y_maximum,
-//RS             top,
-//RS             height,
-//RS         );
-//RS         if y_axis.is_none_or(|axis| axis.grid) {
-//RS             out.push_str(&format!(
-//RS                 "<line class=\"grid\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"/>",
-//RS                 jet_data_plot_number(left),
-//RS                 jet_data_plot_number(position),
-//RS                 jet_data_plot_number(left + width),
-//RS                 jet_data_plot_number(position)
-//RS             ));
-//RS         }
-//RS         out.push_str(&format!(
-//RS             "<text class=\"tick y\" x=\"{}\" y=\"{}\">{}</text>",
-//RS             jet_data_plot_number(left - 6.0),
-//RS             jet_data_plot_number(position + 3.0),
-//RS             jet_data_plot_svg_escape(&jet_data_plot_number(value))
-//RS         ));
-//RS     }
-//RS     if x_numeric {
-//RS         let x_ticks = x_axis.map_or(5, |axis| axis.ticks).clamp(0, 32) as usize;
-//RS         for tick in 0..=x_ticks {
-//RS             let ratio = if x_ticks == 0 {
-//RS                 0.0
-//RS             } else {
-//RS                 tick as f64 / x_ticks as f64
-//RS             };
-//RS             let value = x_minimum + (x_maximum - x_minimum) * ratio;
-//RS             let position = jet_data_plot_svg_x(
-//RS                 &JetDataPlotValue::Number(value),
-//RS                 x_scale,
-//RS                 &x_categories,
-//RS                 x_minimum,
-//RS                 x_maximum,
-//RS                 left,
-//RS                 width,
-//RS             );
-//RS             out.push_str(&format!(
-//RS                 "<text class=\"tick x\" x=\"{}\" y=\"{}\">{}</text>",
-//RS                 jet_data_plot_number(position),
-//RS                 jet_data_plot_number(top + height + 18.0),
-//RS                 jet_data_plot_svg_escape(&jet_data_plot_number(value))
-//RS             ));
-//RS         }
-//RS     } else if !x_categories.is_empty() {
-//RS         for category in &x_categories {
-//RS             let position = jet_data_plot_svg_x(
-//RS                 &JetDataPlotValue::Text(category.clone()),
-//RS                 x_scale,
-//RS                 &x_categories,
-//RS                 x_minimum,
-//RS                 x_maximum,
-//RS                 left,
-//RS                 width,
-//RS             );
-//RS             out.push_str(&format!(
-//RS                 "<text class=\"tick x\" x=\"{}\" y=\"{}\">{}</text>",
-//RS                 jet_data_plot_number(position),
-//RS                 jet_data_plot_number(top + height + 18.0),
-//RS                 jet_data_plot_svg_escape(category)
-//RS             ));
-//RS         }
-//RS     }
-//RS     if let Some(axis) = x_axis {
-//RS         if !axis.title.is_empty() {
-//RS             out.push_str(&format!(
-//RS                 "<text class=\"axis-title x\" x=\"{}\" y=\"{}\">{}</text>",
-//RS                 jet_data_plot_number(left + width * 0.5),
-//RS                 jet_data_plot_number(top + height + 38.0),
-//RS                 jet_data_plot_svg_escape(&axis.title)
-//RS             ));
-//RS         }
-//RS     }
-//RS     if let Some(axis) = y_axis {
-//RS         if !axis.title.is_empty() {
-//RS             out.push_str(&format!(
-//RS                 "<text class=\"axis-title y\" x=\"{}\" y=\"{}\" transform=\"rotate(-90 {} {})\">{}</text>",
-//RS                 jet_data_plot_number(left - 46.0),
-//RS                 jet_data_plot_number(top + height * 0.5),
-//RS                 jet_data_plot_number(left - 46.0),
-//RS                 jet_data_plot_number(top + height * 0.5),
-//RS                 jet_data_plot_svg_escape(&axis.title)
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_data_plot_svg_draw_marks(
-//RS     out: &mut String,
-//RS     plan: &JetDataPlotPlan,
-//RS     encodings: &[JetDataPlotEncoding],
-//RS     rows: &[JetDataPlotDatum],
-//RS     mark: JetDataPlotMark,
-//RS     left: f64,
-//RS     top: f64,
-//RS     width: f64,
-//RS     height: f64,
-//RS ) -> Result<(), JetDataPlotError> {
-//RS     let x_encoding = jet_data_plot_channel_encoding(encodings, JetDataPlotChannel::X)
-//RS         .ok_or_else(|| JetDataPlotError::invalid("plot.svg", "plot mark has no x encoding"))?;
-//RS     let y_encoding = jet_data_plot_channel_encoding(encodings, JetDataPlotChannel::Y)
-//RS         .ok_or_else(|| JetDataPlotError::invalid("plot.svg", "plot mark has no y encoding"))?;
-//RS     let x_scale = jet_data_plot_channel_scale(plan, JetDataPlotChannel::X);
-//RS     let y_scale = jet_data_plot_channel_scale(plan, JetDataPlotChannel::Y);
-//RS     let categories = jet_data_plot_categories(rows, &x_encoding.field, x_scale);
-//RS     let x_numeric = x_scale
-//RS         .map(|scale| scale.kind.needs_numeric())
-//RS         .unwrap_or_else(|| {
-//RS             rows.iter().any(|row| {
-//RS                 jet_data_plot_datum_value(row, &x_encoding.field)
-//RS                     .is_some_and(|value| value.number().is_some())
-//RS             })
-//RS         });
-//RS     let (x_minimum, x_maximum) = if x_numeric {
-//RS         jet_data_plot_numeric_bounds(rows, &x_encoding.field, x_scale)?
-//RS     } else {
-//RS         (0.0, 1.0)
-//RS     };
-//RS     let (y_minimum, y_maximum) =
-//RS         jet_data_plot_numeric_bounds(rows, &y_encoding.field, y_scale)?;
-//RS     let color_encoding = jet_data_plot_channel_encoding(encodings, JetDataPlotChannel::Color);
-//RS     let size_encoding = jet_data_plot_channel_encoding(encodings, JetDataPlotChannel::Size);
-//RS     let text_encoding = jet_data_plot_channel_encoding(encodings, JetDataPlotChannel::Text);
-//RS     match mark {
-//RS         JetDataPlotMark::Line => {
-//RS             let mut paths: BTreeMap<String, Vec<(f64, f64)>> = BTreeMap::new();
-//RS             for row in rows {
-//RS                 let Some(x_value) = jet_data_plot_datum_value(row, &x_encoding.field) else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(y_value) = jet_data_plot_datum_value(row, &y_encoding.field) else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(y_number) = y_value.number() else {
-//RS                     continue;
-//RS                 };
-//RS                 let group = color_encoding
-//RS                     .and_then(|encoding| jet_data_plot_datum_value(row, &encoding.field))
-//RS                     .map(JetDataPlotValue::canonical_key)
-//RS                     .unwrap_or_else(|| "default".to_string());
-//RS                 let group = if let Some(encoding) =
-//RS                     jet_data_plot_channel_encoding(encodings, JetDataPlotChannel::Detail)
-//RS                 {
-//RS                     format!(
-//RS                         "{}|{}",
-//RS                         group,
-//RS                         jet_data_plot_datum_value(row, &encoding.field)
-//RS                             .map(JetDataPlotValue::canonical_key)
-//RS                             .unwrap_or_else(|| "null".to_string())
-//RS                     )
-//RS                 } else {
-//RS                     group
-//RS                 };
-//RS                 let x = jet_data_plot_svg_x(
-//RS                     x_value,
-//RS                     x_scale,
-//RS                     &categories,
-//RS                     x_minimum,
-//RS                     x_maximum,
-//RS                     left,
-//RS                     width,
-//RS                 );
-//RS                 let y = jet_data_plot_svg_y(
-//RS                     y_value,
-//RS                     y_scale,
-//RS                     y_minimum,
-//RS                     y_maximum,
-//RS                     top,
-//RS                     height,
-//RS                 );
-//RS                 if y_number.is_finite() {
-//RS                     paths.entry(group).or_default().push((x, y));
-//RS                 }
-//RS             }
-//RS             for (group, points) in paths {
-//RS                 if points.is_empty() {
-//RS                     continue;
-//RS                 }
-//RS                 let points = points
-//RS                     .iter()
-//RS                     .map(|(x, y)| {
-//RS                         format!("{} {}", jet_data_plot_number(*x), jet_data_plot_number(*y))
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(" ");
-//RS                 out.push_str(&format!(
-//RS                     "<polyline class=\"mark line\" data-series=\"{}\" points=\"{}\" fill=\"none\" stroke=\"{}\"/>",
-//RS                     jet_data_plot_svg_escape(&group),
-//RS                     points,
-//RS                     jet_data_plot_palette_color(&group)
-//RS                 ));
-//RS             }
-//RS             if let Some(encoding) = text_encoding {
-//RS                 for row in rows {
-//RS                     let Some(x_value) = jet_data_plot_datum_value(row, &x_encoding.field) else {
-//RS                         continue;
-//RS                     };
-//RS                     let Some(y_value) = jet_data_plot_datum_value(row, &y_encoding.field) else {
-//RS                         continue;
-//RS                     };
-//RS                     if y_value.number().is_none() {
-//RS                         continue;
-//RS                     }
-//RS                     let x = jet_data_plot_svg_x(
-//RS                         x_value,
-//RS                         x_scale,
-//RS                         &categories,
-//RS                         x_minimum,
-//RS                         x_maximum,
-//RS                         left,
-//RS                         width,
-//RS                     );
-//RS                     let y = jet_data_plot_svg_y(
-//RS                         y_value,
-//RS                         y_scale,
-//RS                         y_minimum,
-//RS                         y_maximum,
-//RS                         top,
-//RS                         height,
-//RS                     );
-//RS                     if let Some(value) = jet_data_plot_datum_value(row, &encoding.field) {
-//RS                         out.push_str(&format!(
-//RS                             "<text class=\"mark-label\" x=\"{}\" y=\"{}\">{}</text>",
-//RS                             jet_data_plot_number(x + 2.0),
-//RS                             jet_data_plot_number(y - 4.0),
-//RS                             jet_data_plot_svg_escape(&value.display_text())
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         JetDataPlotMark::Bar => {
-//RS             let count = rows.len().max(1) as f64;
-//RS             let band_width = width / count * 0.78;
-//RS             let baseline = jet_data_plot_svg_y(
-//RS                 &JetDataPlotValue::Number(0.0),
-//RS                 y_scale,
-//RS                 y_minimum,
-//RS                 y_maximum,
-//RS                 top,
-//RS                 height,
-//RS             );
-//RS             for (position, row) in rows.iter().enumerate() {
-//RS                 let Some(x_value) = jet_data_plot_datum_value(row, &x_encoding.field) else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(y_value) = jet_data_plot_datum_value(row, &y_encoding.field) else {
-//RS                     continue;
-//RS                 };
-//RS                 if y_value.number().is_none() {
-//RS                     continue;
-//RS                 }
-//RS                 let x = if x_numeric {
-//RS                     jet_data_plot_svg_x(
-//RS                         x_value,
-//RS                         x_scale,
-//RS                         &categories,
-//RS                         x_minimum,
-//RS                         x_maximum,
-//RS                         left,
-//RS                         width,
-//RS                     ) - band_width * 0.5
-//RS                 } else {
-//RS                     left + (position as f64 + 0.5) * width / count - band_width * 0.5
-//RS                 };
-//RS                 let y = jet_data_plot_svg_y(
-//RS                     y_value,
-//RS                     y_scale,
-//RS                     y_minimum,
-//RS                     y_maximum,
-//RS                     top,
-//RS                     height,
-//RS                 );
-//RS                 let top_edge = y.min(baseline);
-//RS                 let bar_height = (y - baseline).abs().max(1.0);
-//RS                 let color_key = color_encoding
-//RS                     .and_then(|encoding| jet_data_plot_datum_value(row, &encoding.field))
-//RS                     .map(JetDataPlotValue::canonical_key)
-//RS                     .unwrap_or_else(|| "default".to_string());
-//RS                 out.push_str(&format!(
-//RS                     "<rect class=\"mark bar\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
-//RS                     jet_data_plot_number(x),
-//RS                     jet_data_plot_number(top_edge),
-//RS                     jet_data_plot_number(band_width),
-//RS                     jet_data_plot_number(bar_height),
-//RS                     jet_data_plot_palette_color(&color_key)
-//RS                 ));
-//RS                 if let Some(encoding) = text_encoding {
-//RS                     if let Some(value) = jet_data_plot_datum_value(row, &encoding.field) {
-//RS                         out.push_str(&format!(
-//RS                             "<text class=\"mark-label\" x=\"{}\" y=\"{}\">{}</text>",
-//RS                             jet_data_plot_number(x + band_width * 0.5),
-//RS                             jet_data_plot_number(top_edge - 4.0),
-//RS                             jet_data_plot_svg_escape(&value.display_text())
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         JetDataPlotMark::Point => {
-//RS             for row in rows {
-//RS                 let Some(x_value) = jet_data_plot_datum_value(row, &x_encoding.field) else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(y_value) = jet_data_plot_datum_value(row, &y_encoding.field) else {
-//RS                     continue;
-//RS                 };
-//RS                 if y_value.number().is_none() {
-//RS                     continue;
-//RS                 }
-//RS                 let x = jet_data_plot_svg_x(
-//RS                     x_value,
-//RS                     x_scale,
-//RS                     &categories,
-//RS                     x_minimum,
-//RS                     x_maximum,
-//RS                     left,
-//RS                     width,
-//RS                 );
-//RS                 let y = jet_data_plot_svg_y(
-//RS                     y_value,
-//RS                     y_scale,
-//RS                     y_minimum,
-//RS                     y_maximum,
-//RS                     top,
-//RS                     height,
-//RS                 );
-//RS                 let radius = size_encoding
-//RS                     .and_then(|encoding| jet_data_plot_datum_value(row, &encoding.field))
-//RS                     .and_then(JetDataPlotValue::number)
-//RS                     .map(|value| 2.0 + value.abs().sqrt().min(7.0))
-//RS                     .unwrap_or(4.0);
-//RS                 let color_key = color_encoding
-//RS                     .and_then(|encoding| jet_data_plot_datum_value(row, &encoding.field))
-//RS                     .map(JetDataPlotValue::canonical_key)
-//RS                     .unwrap_or_else(|| "default".to_string());
-//RS                 out.push_str(&format!(
-//RS                     "<circle class=\"mark point\" cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\"/>",
-//RS                     jet_data_plot_number(x),
-//RS                     jet_data_plot_number(y),
-//RS                     jet_data_plot_number(radius),
-//RS                     jet_data_plot_palette_color(&color_key)
-//RS                 ));
-//RS                 if let Some(encoding) = text_encoding {
-//RS                     if let Some(value) = jet_data_plot_datum_value(row, &encoding.field) {
-//RS                         out.push_str(&format!(
-//RS                             "<text class=\"mark-label\" x=\"{}\" y=\"{}\">{}</text>",
-//RS                             jet_data_plot_number(x + radius + 2.0),
-//RS                             jet_data_plot_number(y - radius - 2.0),
-//RS                             jet_data_plot_svg_escape(&value.display_text())
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_data_plot_palette_color(key: &str) -> &'static str {
-//RS     const COLORS: [&str; 8] = [
-//RS         "#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2", "#db2777",
-//RS         "#4f46e5",
-//RS     ];
-//RS     let mut hash = 0_u64;
-//RS     for byte in key.bytes() {
-//RS         hash = hash.wrapping_mul(131).wrapping_add(u64::from(byte));
-//RS     }
-//RS     COLORS[(hash as usize) % COLORS.len()]
-//RS }
-// END-PORT-PENDING 0267 crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3627-4895
+use core.data.runtime.top_data_plot.[JET_DATA_PLOT_SCHEMA_VERSION, JetDataPlotPlan, JetDataPlotSourceFacts, JetDataPlotSchema, JetDataPlotEncoding, JetDataPlotField, JetDataPlotValue, JetDataPlotTransform, JetDataPlotDomain, JetDataPlotScale, JetDataPlotAxis, JetDataPlotLegend, JetDataPlotFacet, JetDataPlotLayer, JetDataPlotDatum, JetDataPlotCapability, JetDataPlotError, jet_data_plot_svg_escape]
+use core.data.runtime.top_data_plot_02.[jet_data_plot_facet_buckets, jet_data_plot_effective_encodings, jet_data_plot_layer_rows]
+use core.data.runtime.top_data_plot.[JetDataPlotChannel, JetDataPlotScaleKind, JetDataPlotMark]
+use core.data.runtime.top_data_plot_02.[jet_data_plot_datum_value]
+use jet_std.[DataLimits]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3627
+fn jet_data_plot_plan_json(plan: &JetDataPlotPlan) -> String {
+    out := "{"
+    out.push_str("\"version\":{JET_DATA_PLOT_SCHEMA_VERSION},\"source\":{jet_data_plot_source_json(&plan.source)},\"schema\":{jet_data_plot_schema_json(&plan.schema)},\"limits\":{{\"max_groups\":{plan.limits.max_groups},\"max_sort_rows\":{plan.limits.max_sort_rows},\"max_join_rows\":{plan.limits.max_join_rows},\"max_output_rows\":{plan.limits.max_output_rows}}},\"mark\":\"{plan.mark.as_str()}\",\"encodings\":[")
+    out.push_str(plan.encodings.iter().map(jet_data_plot_encoding_json).collect<[String]>().join(","))
+    out.push_str("],\"transforms\":[")
+    out.push_str(plan.transforms.iter().map(jet_data_plot_transform_json).collect<[String]>().join(","))
+    out.push_str("],\"scales\":[")
+    out.push_str(plan.scales.iter().map(jet_data_plot_scale_json).collect<[String]>().join(","))
+    out.push_str("],\"axes\":[")
+    out.push_str(plan.axes.iter().map(jet_data_plot_axis_json).collect<[String]>().join(","))
+    out.push_str("],\"legends\":[")
+    out.push_str(plan.legends.iter().map(jet_data_plot_legend_json).collect<[String]>().join(","))
+    out.push_str("],\"facets\":[")
+    out.push_str(plan.facets.iter().map(jet_data_plot_facet_json).collect<[String]>().join(","))
+    out.push_str("],\"layers\":[")
+    out.push_str(plan.layers.iter().map(jet_data_plot_layer_json).collect<[String]>().join(","))
+    out.push_str("],\"interactions\":[")
+    out.push_str(plan.interactions.iter().map(fn(interaction) { "\"{interaction.as_str()}\"" }).collect<[String]>().join(","))
+    out.push_str("],\"accessibility\":")
+    out.push_str("{{\"title\":\"{jet_data_plot_json_escape(&plan.accessibility.title)}\",\"description\":\"{jet_data_plot_json_escape(&plan.accessibility.description)}\",\"summary\":\"{jet_data_plot_json_escape(&plan.accessibility.summary)}\",\"keyboard\":{plan.accessibility.keyboard},\"announce_selection\":{plan.accessibility.announce_selection}}}")
+    out.push_str(",\"layout\":{{\"width\":{jet_data_plot_number(plan.layout.width)},\"height\":{jet_data_plot_number(plan.layout.height)},\"margin_top\":{jet_data_plot_number(plan.layout.margin_top)},\"margin_right\":{jet_data_plot_number(plan.layout.margin_right)},\"margin_bottom\":{jet_data_plot_number(plan.layout.margin_bottom)},\"margin_left\":{jet_data_plot_number(plan.layout.margin_left)}}}}}")
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3731
+fn jet_data_plot_json_escape(value: String) -> String {
+    out := String.with_capacity(value.len())
+    loop character in value.chars() {
+        match character {
+            '"' -> out.push_str("\\\"")
+            '\\' -> out.push_str("\\\\")
+            '\n' -> out.push_str("\\n")
+            '\r' -> out.push_str("\\r")
+            '\t' -> out.push_str("\\t")
+            character if character.is_control() -> {
+                code :: character as U32
+                out.push_str("\\u{code:04x}")
+            }
+            character -> out.push(character)
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3749
+fn jet_data_plot_escape(value: String) -> String {
+    value.replace('\\', "\\\\").replace(';', "\\;").replace('|', "\\|").replace(',', "\\,").replace('=', "\\=")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3758
+fn jet_data_plot_number(value: F64) -> String {
+    value :: jet_data_plot_normalize_zero(value)
+    if value.is_finite() { value.to_string() }
+    else if value.is_nan() { "NaN" }
+    else if value.is_sign_positive() { "inf" }
+    else { "-inf" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3771
+fn jet_data_plot_normalize_zero(value: F64) -> F64 { if value == 0.0 { 0.0 } else { value } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3779
+fn jet_data_plot_source_json(source: &JetDataPlotSourceFacts) -> String {
+    "{{\"table_plan\":\"{jet_data_plot_json_escape(&source.table_plan_identity)}\",\"source\":\"{jet_data_plot_json_escape(&source.source_identity)}\",\"schema\":\"{jet_data_plot_json_escape(&source.schema_identity)}\",\"row_type\":\"{jet_data_plot_json_escape(&source.row_type)}\",\"rows\":{source.rows},\"data_identity\":\"{jet_data_plot_json_escape(&source.data_identity)}\",\"provenance\":\"{jet_data_plot_json_escape(&source.provenance)}\"}}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3791
+fn jet_data_plot_limits_key(limits: &DataLimits) -> String {
+    "groups={limits.max_groups},sort={limits.max_sort_rows},join={limits.max_join_rows},output={limits.max_output_rows}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3799
+fn jet_data_plot_schema_json(schema: &JetDataPlotSchema) -> String {
+    columns :: schema.columns.iter().map(fn(field) {
+        "{{\"id\":\"{jet_data_plot_json_escape(&field.id)}\",\"name\":\"{jet_data_plot_json_escape(&field.name)}\",\"type\":\"{jet_data_plot_json_escape(&field.type_name)}\"}}"
+    }).collect<[String]>().join(",")
+    "{{\"identity\":\"{jet_data_plot_json_escape(&schema.identity)}\",\"row_type\":\"{jet_data_plot_json_escape(&schema.row_type)}\",\"columns\":[{columns}]}}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3820
+fn jet_data_plot_encoding_json(encoding: &JetDataPlotEncoding) -> String {
+    "{{\"channel\":\"{encoding.channel.as_str()}\",\"field\":{jet_data_plot_field_json(&encoding.field)},\"aggregate\":\"{encoding.aggregate.as_str()}\"}}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3829
+fn jet_data_plot_field_json(field: &JetDataPlotField) -> String {
+    "{{\"id\":\"{jet_data_plot_json_escape(&field.id)}\",\"name\":\"{jet_data_plot_json_escape(&field.name)}\",\"type\":\"{jet_data_plot_json_escape(&field.type_name)}\"}}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3838
+fn jet_data_plot_value_json(value: &JetDataPlotValue) -> String {
+    match value {
+        .Text(value) -> "{{\"kind\":\"text\",\"value\":\"{jet_data_plot_json_escape(value)}\"}}"
+        .Integer(value) -> "{{\"kind\":\"integer\",\"value\":{value}}}"
+        .Number(value) -> "{{\"kind\":\"number\",\"value\":{jet_data_plot_number(*value)}}}"
+        .Boolean(value) -> "{{\"kind\":\"boolean\",\"value\":{value}}}"
+        .Null -> "{\"kind\":\"null\",\"value\":null}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3857
+fn jet_data_plot_values_json(values: [(JetDataPlotField, JetDataPlotValue)]) -> String {
+    items :: values.iter().map(fn(pair) {
+        "{{\"field\":{jet_data_plot_field_json(&pair.0)},\"value\":{jet_data_plot_value_json(&pair.1)}}}"
+    }).collect<[String]>().join(",")
+    "[{items}]"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3874
+fn jet_data_plot_transform_json(transform: &JetDataPlotTransform) -> String {
+    match transform {
+        .Filter(field, op, value) -> "{{\"kind\":\"filter\",\"field\":{jet_data_plot_field_json(field)},\"op\":\"{op.as_str()}\",\"value\":{jet_data_plot_value_json(value)}}}"
+        .Sort(field, descending) -> "{{\"kind\":\"sort\",\"field\":{jet_data_plot_field_json(field)},\"descending\":{descending}}}"
+        .Bin(field, step) -> "{{\"kind\":\"bin\",\"field\":{jet_data_plot_field_json(field)},\"step\":{jet_data_plot_number(*step)}}}"
+        .Aggregate(group_by, field, aggregate) -> {
+            groups :: group_by.iter().map(jet_data_plot_field_json).collect<[String]>().join(",")
+            "{{\"kind\":\"aggregate\",\"group_by\":[{groups}],\"field\":{jet_data_plot_field_json(field)},\"aggregate\":\"{aggregate.as_str()}\"}}"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3911
+fn jet_data_plot_domain_json(domain: &JetDataPlotDomain) -> String {
+    match domain {
+        .Auto -> "\"auto\""
+        .Numeric(min, max) -> "{{\"kind\":\"numeric\",\"min\":{jet_data_plot_number(*min)},\"max\":{jet_data_plot_number(*max)}}}"
+        .Categories(values) -> {
+            items :: values.iter().map(fn(value) { "\"{jet_data_plot_json_escape(value)}\"" }).collect<[String]>().join(",")
+            "{{\"kind\":\"categories\",\"values\":[{items}]}}"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3930
+fn jet_data_plot_scale_json(scale: &JetDataPlotScale) -> String {
+    "{{\"channel\":\"{scale.channel.as_str()}\",\"kind\":\"{scale.kind.as_str()}\",\"domain\":{jet_data_plot_domain_json(&scale.domain)},\"clamp\":{scale.clamp},\"reverse\":{scale.reverse}}}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3941
+fn jet_data_plot_axis_json(axis: &JetDataPlotAxis) -> String {
+    "{{\"channel\":\"{axis.channel.as_str()}\",\"title\":\"{jet_data_plot_json_escape(&axis.title)}\",\"visible\":{axis.visible},\"grid\":{axis.grid},\"ticks\":{axis.ticks}}}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3952
+fn jet_data_plot_legend_json(legend: &JetDataPlotLegend) -> String {
+    "{{\"channel\":\"{legend.channel.as_str()}\",\"title\":\"{jet_data_plot_json_escape(&legend.title)}\",\"position\":\"{legend.position.as_str()}\",\"visible\":{legend.visible}}}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3962
+fn jet_data_plot_facet_json(facet: &JetDataPlotFacet) -> String {
+    "{{\"field\":{jet_data_plot_field_json(&facet.field)},\"kind\":\"{facet.kind.as_str()}\",\"title\":\"{jet_data_plot_json_escape(&facet.title)}\",\"columns\":{facet.columns},\"rows\":{facet.rows}}}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3973
+fn jet_data_plot_layer_json(layer: &JetDataPlotLayer) -> String {
+    encodings :: layer.encodings.iter().map(jet_data_plot_encoding_json).collect<[String]>().join(",")
+    transforms :: layer.transforms.iter().map(jet_data_plot_transform_json).collect<[String]>().join(",")
+    "{{\"name\":\"{jet_data_plot_json_escape(&layer.name)}\",\"mark\":\"{layer.mark.as_str()}\",\"opacity\":{jet_data_plot_number(layer.opacity)},\"encodings\":[{encodings}],\"transforms\":[{transforms}]}}"
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:3994
+fn jet_data_plot_render_svg(plan: &JetDataPlotPlan, rows: [JetDataPlotDatum], capabilities: [JetDataPlotCapability], selection: [USize]) -> String JetDataPlotError! {
+    layout :: &plan.layout
+    buckets :: jet_data_plot_facet_buckets(rows, &plan.facets)
+    bucket_count :: buckets.len().max(1)
+    configured_columns :: plan.facets.iter().map(fn(facet) { facet.columns }).find(fn(columns) { *columns > 0 }).map(fn(columns) { columns as USize })
+    configured_rows :: plan.facets.iter().map(fn(facet) { facet.rows }).find(fn(rows) { *rows > 0 }).map(fn(rows) { rows as USize })
+    requested_columns :: configured_columns.unwrap_or_else(fn() { (bucket_count as F64).sqrt().ceil() as USize })
+    rows_count :: configured_rows.unwrap_or_else(fn() { bucket_count.div_ceil(requested_columns.max(1)) }).clamp(1, bucket_count)
+    columns :: requested_columns.max(bucket_count.div_ceil(rows_count)).clamp(1, bucket_count)
+    chart_width :: layout.width - layout.margin_left - layout.margin_right
+    chart_height :: layout.height - layout.margin_top - layout.margin_bottom
+    cell_width :: chart_width / (columns as F64)
+    cell_height :: chart_height / (rows_count as F64)
+    label :: if plan.accessibility.title.is_empty() { "Jet data plot" } else { plan.accessibility.title.as_str() }
+    interaction_contract :: plan.interactions.iter().map(fn(interaction) { interaction.as_str() }).collect<[String]>().join(",")
+    capability_contract :: capabilities.iter().map(JetDataPlotCapability.canonical_key).collect<[String]>().join(",")
+    selected_contract :: selection.iter().map(fn(index) { index.to_string() }).collect<[String]>().join(",")
+    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{jet_data_plot_number(layout.width)}\" height=\"{jet_data_plot_number(layout.height)}\" viewBox=\"0 0 {jet_data_plot_number(layout.width)} {jet_data_plot_number(layout.height)}\" role=\"img\" aria-label=\"{jet_data_plot_svg_escape(label)}\">"
+    if !plan.accessibility.title.is_empty() { out.push_str("<title>{jet_data_plot_svg_escape(&plan.accessibility.title)}</title>") }
+    if !plan.accessibility.description.is_empty() { out.push_str("<desc>{jet_data_plot_svg_escape(&plan.accessibility.description)}</desc>") }
+    out.push_str("<metadata>")
+    out.push_str(jet_data_plot_svg_escape(&jet_data_plot_plan_json(plan)))
+    out.push_str("</metadata>")
+    out.push_str("<g data-source=\"{jet_data_plot_svg_escape(&plan.source.source_identity)}\" data-table-plan=\"{jet_data_plot_svg_escape(&plan.source.table_plan_identity)}\" data-data-identity=\"{jet_data_plot_svg_escape(&plan.source.data_identity)}\" data-interactions=\"{jet_data_plot_svg_escape(&interaction_contract)}\" data-capabilities=\"{jet_data_plot_svg_escape(&capability_contract)}\" data-selection=\"{jet_data_plot_svg_escape(&selected_contract)}\">")
+    if !plan.accessibility.summary.is_empty() {
+        out.push_str("<text class=\"plot-summary\" x=\"{jet_data_plot_number(layout.margin_left)}\" y=\"{jet_data_plot_number(layout.margin_top - 20.0)}\">{jet_data_plot_svg_escape(&plan.accessibility.summary)}</text>")
+    }
+    layer_count :: plan.layers.len() + 1
+    facet_index := 0
+    while facet_index < bucket_count {
+        // Only facet labels are borrowed here; the unused bucket row vector
+        // is never cloned just to extract those labels.
+        facet_row :: buckets.get(facet_index).map(fn(bucket) { bucket.0.as_str() }).unwrap_or("")
+        facet_column :: buckets.get(facet_index).map(fn(bucket) { bucket.1.as_str() }).unwrap_or("")
+        column :: facet_index % columns
+        row :: facet_index /% columns
+        left :: layout.margin_left + (column as F64) * cell_width
+        top :: layout.margin_top + (row as F64) * cell_height
+        area_left :: left + 8.0
+        area_top :: top + 8.0
+        area_width :: (cell_width - 16.0).max(1.0)
+        area_height :: (cell_height - 16.0).max(1.0)
+        if !facet_row.is_empty() || !facet_column.is_empty() {
+            caption :: "{facet_row} {facet_column}"
+            out.push_str("<text class=\"facet\" x=\"{jet_data_plot_number(area_left)}\" y=\"{jet_data_plot_number(area_top + 2.0)}\">{jet_data_plot_svg_escape(&caption)}</text>")
+        }
+        layer_index := 0
+        while layer_index < layer_count {
+            layer :: if layer_index == 0 { None } else { plan.layers.get(layer_index - 1) }
+            effective :: layer.map(fn(layer) { jet_data_plot_effective_encodings(&plan.encodings, &layer.encodings) }).unwrap_or_else(fn() { plan.encodings.clone() })
+            layer_rows :: if Val(layer) :: layer { jet_data_plot_layer_rows(rows, plan, Val(layer))? } else { rows.to_vec() }
+            layer_rows :: if plan.facets.is_empty() { ^layer_rows } else {
+                jet_data_plot_facet_buckets(layer_rows, &plan.facets).into_iter()
+                    .find(fn(bucket) { bucket.0 == facet_row && bucket.1 == facet_column })
+                    .map(fn(bucket) { ^bucket.2 }).unwrap_or_default()
+            }
+            mark :: layer.map_or(plan.mark, fn(layer) { layer.mark })
+            opacity :: layer.map_or(1.0, fn(layer) { layer.opacity })
+            out.push_str("<g class=\"plot-layer\" data-layer=\"{layer_index}\" data-mark=\"{mark.as_str()}\" opacity=\"{jet_data_plot_number(opacity)}\">")
+            jet_data_plot_svg_draw_axes(&out, plan, effective, layer_rows, area_left, area_top, area_width, area_height)?
+            jet_data_plot_svg_draw_marks(&out, plan, effective, layer_rows, mark, area_left, area_top, area_width, area_height)?
+            out.push_str("</g>")
+            layer_index += 1
+        }
+        facet_index += 1
+    }
+    jet_data_plot_svg_draw_legends(&out, plan, rows)?
+    out.push_str("</g></svg>")
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4178
+fn jet_data_plot_svg_draw_legends(out: &String, plan: &JetDataPlotPlan, rows: [JetDataPlotDatum]) -> () JetDataPlotError! {
+    top_x := plan.layout.margin_left
+    bottom_x := plan.layout.margin_left
+    right_y := plan.layout.margin_top
+    left_y := plan.layout.margin_top
+    loop legend in plan.legends {
+        if !legend.visible -> continue
+        encoding :: jet_data_plot_channel_encoding(plan.encodings, legend.channel) ?? continue
+        categories :: jet_data_plot_categories(rows, &encoding.field, None)
+        (x, y, vertical) :: match legend.position {
+            .Top -> {
+                position :: (top_x, (plan.layout.margin_top - 6.0).max(12.0), false)
+                top_x += (legend.title.len() as F64 * 7.0).max(24.0) + 10.0
+                position
+            }
+            .Bottom -> {
+                position :: (bottom_x, (plan.layout.height - plan.layout.margin_bottom + 20.0).min(plan.layout.height - 4.0), false)
+                bottom_x += (legend.title.len() as F64 * 7.0).max(24.0) + 10.0
+                position
+            }
+            .Right -> {
+                position :: ((plan.layout.width - plan.layout.margin_right + 8.0).min(plan.layout.width - 8.0), right_y, true)
+                right_y += 20.0
+                position
+            }
+            .Left -> {
+                position :: ((plan.layout.margin_left - 120.0).max(8.0), left_y, true)
+                left_y += 20.0
+                position
+            }
+        }
+        out.push_str("<g class=\"legend\" data-channel=\"{legend.channel.as_str()}\" data-position=\"{legend.position.as_str()}\"><text x=\"{jet_data_plot_number(x)}\" y=\"{jet_data_plot_number(y)}\">{jet_data_plot_svg_escape(&legend.title)}</text>")
+        if vertical {
+            category_y := y + 10.0
+            loop category in categories {
+                key :: JetDataPlotValue.Text(category.clone()).canonical_key()
+                out.push_str("<rect x=\"{jet_data_plot_number(x)}\" y=\"{jet_data_plot_number(category_y)}\" width=\"8\" height=\"8\" fill=\"{jet_data_plot_palette_color(&key)}\"/><text x=\"{jet_data_plot_number(x + 12.0)}\" y=\"{jet_data_plot_number(category_y + 8.0)}\">{jet_data_plot_svg_escape(&category)}</text>")
+                category_y += 20.0
+            }
+        } else {
+            category_x := x + (legend.title.len() as F64 * 7.0).max(24.0) + 10.0
+            loop category in categories {
+                key :: JetDataPlotValue.Text(category.clone()).canonical_key()
+                out.push_str("<rect x=\"{jet_data_plot_number(category_x)}\" y=\"{jet_data_plot_number(y - 8.0)}\" width=\"8\" height=\"8\" fill=\"{jet_data_plot_palette_color(&key)}\"/><text x=\"{jet_data_plot_number(category_x + 12.0)}\" y=\"{jet_data_plot_number(y)}\">{jet_data_plot_svg_escape(&category)}</text>")
+                category_x += (category.len() as F64 * 7.0).max(24.0) + 22.0
+            }
+        }
+        out.push_str("</g>")
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4276
+fn jet_data_plot_channel_encoding(encodings: [JetDataPlotEncoding], channel: JetDataPlotChannel) -> &JetDataPlotEncoding? from encodings {
+    encodings.iter().find(fn(encoding) { encoding.channel == channel })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4283
+fn jet_data_plot_channel_scale(plan: &JetDataPlotPlan, channel: JetDataPlotChannel) -> &JetDataPlotScale? from plan {
+    plan.scales.iter().find(fn(scale) { scale.channel == channel })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4292
+fn jet_data_plot_channel_axis(plan: &JetDataPlotPlan, channel: JetDataPlotChannel) -> &JetDataPlotAxis? from plan {
+    plan.axes.iter().find(fn(axis) { axis.channel == channel })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4301
+fn jet_data_plot_numeric_bounds(rows: [JetDataPlotDatum], field: &JetDataPlotField, scale: &JetDataPlotScale?) -> (F64, F64) JetDataPlotError! {
+    if Val(scale) :: scale {
+        if .Numeric(min, max) :: scale.domain {
+            if scale.kind == JetDataPlotScaleKind.Log {
+                loop row in rows {
+                    value :: jet_data_plot_datum_value(row, field).and_then(JetDataPlotValue.number) ?? continue
+                    if !value.is_finite() || value <= 0.0 {
+                        return Err(JetDataPlotError.invalid("plot.scale", "log plot scale needs strictly positive finite data").with_field(field.name.clone()).with_index(row.ordinal))
+                    }
+                }
+            }
+            return Ok((min, max))
+        }
+    }
+    minimum := F64.INFINITY
+    maximum := F64.NEG_INFINITY
+    loop row in rows {
+        value :: jet_data_plot_datum_value(row, field).and_then(JetDataPlotValue.number) ?? continue
+        if !value.is_finite() {
+            return Err(JetDataPlotError.non_finite("plot.scale", "plot scale received a non-finite value").with_field(field.name.clone()).with_index(row.ordinal))
+        }
+        if scale.is_some_and(fn(scale) { scale.kind == JetDataPlotScaleKind.Log }) && value <= 0.0 {
+            return Err(JetDataPlotError.invalid("plot.scale", "log plot scale needs strictly positive data").with_field(field.name.clone()).with_index(row.ordinal))
+        }
+        minimum = minimum.min(value)
+        maximum = maximum.max(value)
+    }
+    if !minimum.is_finite() || !maximum.is_finite() -> return Ok((0.0, 1.0))
+    if minimum == maximum {
+        padding :: minimum.abs().max(1.0) * 0.5
+        minimum -= padding
+        maximum += padding
+    }
+    Ok((minimum, maximum))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4368
+fn jet_data_plot_categories(rows: [JetDataPlotDatum], field: &JetDataPlotField, scale: &JetDataPlotScale?) -> [String] {
+    if Val(scale) :: scale {
+        if .Categories(values) :: scale.domain -> return values.clone()
+    }
+    categories := [String:Bool]{}
+    loop row in rows {
+        if Val(value) :: jet_data_plot_datum_value(row, field) { categories.insert(value.display_text(), true) }
+    }
+    keys := categories.keys().cloned().collect<[String]>()
+    keys.sort()
+    ^keys
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4389
+fn jet_data_plot_svg_x(value: &JetDataPlotValue, scale: &JetDataPlotScale?, categories: [String], minimum: F64, maximum: F64, left: F64, width: F64) -> F64 {
+    numeric :: scale.map(fn(scale) { scale.kind.needs_numeric() }).unwrap_or_else(fn() { value.number().is_some() })
+    reverse :: scale.map(fn(scale) { scale.reverse }).unwrap_or(false)
+    if numeric {
+        ratio := value.number().unwrap_or(minimum)
+        if scale.is_some_and(fn(scale) { scale.kind == JetDataPlotScaleKind.Log }) {
+            ratio = ratio.max(F64.MIN_POSITIVE).ln()
+            min_log :: minimum.max(F64.MIN_POSITIVE).ln()
+            max_log :: maximum.max(F64.MIN_POSITIVE).ln()
+            ratio = (ratio - min_log) / (max_log - min_log).max(F64.EPSILON)
+        } else {
+            ratio = (ratio - minimum) / (maximum - minimum).max(F64.EPSILON)
+        }
+        ratio :: if scale.map(fn(scale) { scale.clamp }).unwrap_or(true) { ratio.clamp(0.0, 1.0) } else { ratio }
+        ratio :: if reverse { 1.0 - ratio } else { ratio }
+        left + ratio * width
+    } else {
+        key :: value.display_text()
+        index :: categories.iter().position(fn(category) { category == &key }).unwrap_or(0)
+        step :: width / (categories.len().max(1) as F64)
+        position :: (index as F64) * step + step * 0.5
+        if reverse { left + width - position } else { left + position }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4432
+fn jet_data_plot_svg_y(value: &JetDataPlotValue, scale: &JetDataPlotScale?, minimum: F64, maximum: F64, top: F64, height: F64) -> F64 {
+    ratio := value.number().unwrap_or(minimum)
+    if scale.is_some_and(fn(scale) { scale.kind == JetDataPlotScaleKind.Log }) {
+        ratio = ratio.max(F64.MIN_POSITIVE).ln()
+        min_log :: minimum.max(F64.MIN_POSITIVE).ln()
+        max_log :: maximum.max(F64.MIN_POSITIVE).ln()
+        ratio = (ratio - min_log) / (max_log - min_log).max(F64.EPSILON)
+    } else {
+        ratio = (ratio - minimum) / (maximum - minimum).max(F64.EPSILON)
+    }
+    ratio :: if scale.map(fn(scale) { scale.clamp }).unwrap_or(true) { ratio.clamp(0.0, 1.0) } else { ratio }
+    if scale.is_some_and(fn(scale) { scale.reverse }) { top + ratio * height } else { top + (1.0 - ratio) * height }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4460
+fn jet_data_plot_svg_draw_axes(out: &String, plan: &JetDataPlotPlan, encodings: [JetDataPlotEncoding], rows: [JetDataPlotDatum], left: F64, top: F64, width: F64, height: F64) -> () JetDataPlotError! {
+    x_encoding :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.X) ?? return Err(JetDataPlotError.invalid("plot.svg", "plot mark has no x encoding"))
+    y_encoding :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.Y) ?? return Err(JetDataPlotError.invalid("plot.svg", "plot mark has no y encoding"))
+    x_scale :: jet_data_plot_channel_scale(plan, JetDataPlotChannel.X)
+    y_scale :: jet_data_plot_channel_scale(plan, JetDataPlotChannel.Y)
+    x_categories :: jet_data_plot_categories(rows, &x_encoding.field, x_scale)
+    x_numeric :: x_scale.map(fn(scale) { scale.kind.needs_numeric() }).unwrap_or_else(fn() {
+        rows.iter().any(fn(row) { jet_data_plot_datum_value(row, &x_encoding.field).is_some_and(fn(value) { value.number().is_some() }) })
+    })
+    (x_minimum, x_maximum) :: if x_numeric { jet_data_plot_numeric_bounds(rows, &x_encoding.field, x_scale)? } else { (0.0, 1.0) }
+    (y_minimum, y_maximum) :: jet_data_plot_numeric_bounds(rows, &y_encoding.field, y_scale)?
+    x_axis :: jet_data_plot_channel_axis(plan, JetDataPlotChannel.X)
+    y_axis :: jet_data_plot_channel_axis(plan, JetDataPlotChannel.Y)
+    if y_axis.is_none_or(fn(axis) { axis.visible }) {
+        out.push_str("<line class=\"axis y\" x1=\"{jet_data_plot_number(left)}\" y1=\"{jet_data_plot_number(top)}\" x2=\"{jet_data_plot_number(left)}\" y2=\"{jet_data_plot_number(top + height)}\"/>")
+    }
+    if x_axis.is_none_or(fn(axis) { axis.visible }) {
+        out.push_str("<line class=\"axis x\" x1=\"{jet_data_plot_number(left)}\" y1=\"{jet_data_plot_number(top + height)}\" x2=\"{jet_data_plot_number(left + width)}\" y2=\"{jet_data_plot_number(top + height)}\"/>")
+    }
+    y_ticks :: y_axis.map_or(5, fn(axis) { axis.ticks }).clamp(0, 32) as USize
+    loop tick in 0..=y_ticks {
+        ratio :: if y_ticks == 0 { 0.0 } else { (tick as F64) / (y_ticks as F64) }
+        value :: y_minimum + (y_maximum - y_minimum) * ratio
+        position :: jet_data_plot_svg_y(&JetDataPlotValue.Number(value), y_scale, y_minimum, y_maximum, top, height)
+        if y_axis.is_none_or(fn(axis) { axis.grid }) {
+            out.push_str("<line class=\"grid\" x1=\"{jet_data_plot_number(left)}\" y1=\"{jet_data_plot_number(position)}\" x2=\"{jet_data_plot_number(left + width)}\" y2=\"{jet_data_plot_number(position)}\"/>")
+        }
+        label :: jet_data_plot_number(value)
+        out.push_str("<text class=\"tick y\" x=\"{jet_data_plot_number(left - 6.0)}\" y=\"{jet_data_plot_number(position + 3.0)}\">{jet_data_plot_svg_escape(&label)}</text>")
+    }
+    if x_numeric {
+        x_ticks :: x_axis.map_or(5, fn(axis) { axis.ticks }).clamp(0, 32) as USize
+        loop tick in 0..=x_ticks {
+            ratio :: if x_ticks == 0 { 0.0 } else { (tick as F64) / (x_ticks as F64) }
+            value :: x_minimum + (x_maximum - x_minimum) * ratio
+            position :: jet_data_plot_svg_x(&JetDataPlotValue.Number(value), x_scale, x_categories, x_minimum, x_maximum, left, width)
+            label :: jet_data_plot_number(value)
+            out.push_str("<text class=\"tick x\" x=\"{jet_data_plot_number(position)}\" y=\"{jet_data_plot_number(top + height + 18.0)}\">{jet_data_plot_svg_escape(&label)}</text>")
+        }
+    } else if !x_categories.is_empty() {
+        loop category in x_categories {
+            position :: jet_data_plot_svg_x(&JetDataPlotValue.Text(category.clone()), x_scale, x_categories, x_minimum, x_maximum, left, width)
+            out.push_str("<text class=\"tick x\" x=\"{jet_data_plot_number(position)}\" y=\"{jet_data_plot_number(top + height + 18.0)}\">{jet_data_plot_svg_escape(&category)}</text>")
+        }
+    }
+    if Val(axis) :: x_axis {
+        if !axis.title.is_empty() {
+            out.push_str("<text class=\"axis-title x\" x=\"{jet_data_plot_number(left + width * 0.5)}\" y=\"{jet_data_plot_number(top + height + 38.0)}\">{jet_data_plot_svg_escape(&axis.title)}</text>")
+        }
+    }
+    if Val(axis) :: y_axis {
+        if !axis.title.is_empty() {
+            out.push_str("<text class=\"axis-title y\" x=\"{jet_data_plot_number(left - 46.0)}\" y=\"{jet_data_plot_number(top + height * 0.5)}\" transform=\"rotate(-90 {jet_data_plot_number(left - 46.0)} {jet_data_plot_number(top + height * 0.5)})\">{jet_data_plot_svg_escape(&axis.title)}</text>")
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4613
+fn jet_data_plot_svg_draw_marks(out: &String, plan: &JetDataPlotPlan, encodings: [JetDataPlotEncoding], rows: [JetDataPlotDatum], mark: JetDataPlotMark, left: F64, top: F64, width: F64, height: F64) -> () JetDataPlotError! {
+    x_encoding :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.X) ?? return Err(JetDataPlotError.invalid("plot.svg", "plot mark has no x encoding"))
+    y_encoding :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.Y) ?? return Err(JetDataPlotError.invalid("plot.svg", "plot mark has no y encoding"))
+    x_scale :: jet_data_plot_channel_scale(plan, JetDataPlotChannel.X)
+    y_scale :: jet_data_plot_channel_scale(plan, JetDataPlotChannel.Y)
+    categories :: jet_data_plot_categories(rows, &x_encoding.field, x_scale)
+    x_numeric :: x_scale.map(fn(scale) { scale.kind.needs_numeric() }).unwrap_or_else(fn() {
+        rows.iter().any(fn(row) { jet_data_plot_datum_value(row, &x_encoding.field).is_some_and(fn(value) { value.number().is_some() }) })
+    })
+    (x_minimum, x_maximum) :: if x_numeric { jet_data_plot_numeric_bounds(rows, &x_encoding.field, x_scale)? } else { (0.0, 1.0) }
+    (y_minimum, y_maximum) :: jet_data_plot_numeric_bounds(rows, &y_encoding.field, y_scale)?
+    color_encoding :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.Color)
+    size_encoding :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.Size)
+    text_encoding :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.Text)
+    match mark {
+        .Line -> {
+            paths := [String:[(F64, F64)]]{}
+            loop row in rows {
+                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? continue
+                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? continue
+                y_number :: y_value.number() ?? continue
+                group :: color_encoding.and_then(fn(encoding) { jet_data_plot_datum_value(row, &encoding.field) }).map(JetDataPlotValue.canonical_key).unwrap_or_else(fn() { "default" })
+                group :: if Val(encoding) :: jet_data_plot_channel_encoding(encodings, JetDataPlotChannel.Detail) {
+                    detail :: jet_data_plot_datum_value(row, &encoding.field).map(JetDataPlotValue.canonical_key).unwrap_or_else(fn() { "null" })
+                    "{group}|{detail}"
+                } else { ^group }
+                x :: jet_data_plot_svg_x(x_value, x_scale, categories, x_minimum, x_maximum, left, width)
+                y :: jet_data_plot_svg_y(y_value, y_scale, y_minimum, y_maximum, top, height)
+                if y_number.is_finite() { paths.entry(group).or_default().push((x, y)) }
+            }
+            groups := paths.keys().cloned().collect<[String]>()
+            groups.sort()
+            loop group in groups {
+                points :: paths.get(&group) ?? panic("plot series key disappeared")
+                if points.is_empty() -> continue
+                text :: points.iter().map(fn(point) { "{jet_data_plot_number(point.0)} {jet_data_plot_number(point.1)}" }).collect<[String]>().join(" ")
+                out.push_str("<polyline class=\"mark line\" data-series=\"{jet_data_plot_svg_escape(&group)}\" points=\"{text}\" fill=\"none\" stroke=\"{jet_data_plot_palette_color(&group)}\"/>")
+            }
+            if Val(encoding) :: text_encoding {
+                loop row in rows {
+                    x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? continue
+                    y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? continue
+                    if y_value.number().is_none() -> continue
+                    x :: jet_data_plot_svg_x(x_value, x_scale, categories, x_minimum, x_maximum, left, width)
+                    y :: jet_data_plot_svg_y(y_value, y_scale, y_minimum, y_maximum, top, height)
+                    if Val(value) :: jet_data_plot_datum_value(row, &encoding.field) {
+                        label :: value.display_text()
+                        out.push_str("<text class=\"mark-label\" x=\"{jet_data_plot_number(x + 2.0)}\" y=\"{jet_data_plot_number(y - 4.0)}\">{jet_data_plot_svg_escape(&label)}</text>")
+                    }
+                }
+            }
+        }
+        .Bar -> {
+            count :: rows.len().max(1) as F64
+            band_width :: width / count * 0.78
+            baseline :: jet_data_plot_svg_y(&JetDataPlotValue.Number(0.0), y_scale, y_minimum, y_maximum, top, height)
+            loop (position, row) in rows.iter().enumerate() {
+                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? continue
+                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? continue
+                if y_value.number().is_none() -> continue
+                x :: if x_numeric {
+                    jet_data_plot_svg_x(x_value, x_scale, categories, x_minimum, x_maximum, left, width) - band_width * 0.5
+                } else { left + (position as F64 + 0.5) * width / count - band_width * 0.5 }
+                y :: jet_data_plot_svg_y(y_value, y_scale, y_minimum, y_maximum, top, height)
+                top_edge :: y.min(baseline)
+                bar_height :: (y - baseline).abs().max(1.0)
+                color_key :: color_encoding.and_then(fn(encoding) { jet_data_plot_datum_value(row, &encoding.field) }).map(JetDataPlotValue.canonical_key).unwrap_or_else(fn() { "default" })
+                out.push_str("<rect class=\"mark bar\" x=\"{jet_data_plot_number(x)}\" y=\"{jet_data_plot_number(top_edge)}\" width=\"{jet_data_plot_number(band_width)}\" height=\"{jet_data_plot_number(bar_height)}\" fill=\"{jet_data_plot_palette_color(&color_key)}\"/>")
+                if Val(encoding) :: text_encoding {
+                    if Val(value) :: jet_data_plot_datum_value(row, &encoding.field) {
+                        label :: value.display_text()
+                        out.push_str("<text class=\"mark-label\" x=\"{jet_data_plot_number(x + band_width * 0.5)}\" y=\"{jet_data_plot_number(top_edge - 4.0)}\">{jet_data_plot_svg_escape(&label)}</text>")
+                    }
+                }
+            }
+        }
+        .Point -> {
+            loop row in rows {
+                x_value :: jet_data_plot_datum_value(row, &x_encoding.field) ?? continue
+                y_value :: jet_data_plot_datum_value(row, &y_encoding.field) ?? continue
+                if y_value.number().is_none() -> continue
+                x :: jet_data_plot_svg_x(x_value, x_scale, categories, x_minimum, x_maximum, left, width)
+                y :: jet_data_plot_svg_y(y_value, y_scale, y_minimum, y_maximum, top, height)
+                radius :: size_encoding.and_then(fn(encoding) { jet_data_plot_datum_value(row, &encoding.field) }).and_then(JetDataPlotValue.number).map(fn(value) { 2.0 + value.abs().sqrt().min(7.0) }).unwrap_or(4.0)
+                color_key :: color_encoding.and_then(fn(encoding) { jet_data_plot_datum_value(row, &encoding.field) }).map(JetDataPlotValue.canonical_key).unwrap_or_else(fn() { "default" })
+                out.push_str("<circle class=\"mark point\" cx=\"{jet_data_plot_number(x)}\" cy=\"{jet_data_plot_number(y)}\" r=\"{jet_data_plot_number(radius)}\" fill=\"{jet_data_plot_palette_color(&color_key)}\"/>")
+                if Val(encoding) :: text_encoding {
+                    if Val(value) :: jet_data_plot_datum_value(row, &encoding.field) {
+                        label :: value.display_text()
+                        out.push_str("<text class=\"mark-label\" x=\"{jet_data_plot_number(x + radius + 2.0)}\" y=\"{jet_data_plot_number(y - radius - 2.0)}\">{jet_data_plot_svg_escape(&label)}</text>")
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:4885
+fn jet_data_plot_palette_color(key: String) -> String {
+    COLORS :: [String#8]{"#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#4f46e5"}
+    hash := U64{0}
+    loop byte in key.bytes() { hash = hash.wrapping_mul(U64{131}).wrapping_add(U64.from_u8(byte)) }
+    COLORS[(hash as USize) % COLORS.len()]
+}

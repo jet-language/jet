@@ -1,0 +1,35 @@
+use core.ui.host.ui_gtk.[JetGtkBackend, jet_ui_gtk]
+use core.ui.runtime.ui_02.[jet_ui_text_input, JetInputEvent, JetEventResult, JetSize]
+use core.ui.runtime.ui.[jet_ui_constraint, jet_ui_rect]
+use jet_ui_host.[JetUiImeMode]
+
+// UiGtk.rs has no inline Rust tests. These controls use the actual retained
+// backend's display-free seam; they do not replace GTK with a fake provider.
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1328,1357-1365,1970-1979
+#Test("gtk_backend_constructs_without_initializing_display_and_measures_canonical_tree") {
+    backend :: jet_ui_gtk()
+    node :: jet_ui_text_input("é𐐀", JetUiImeMode.Disabled)
+    size :: backend.measure_node(node.clone(), jet_ui_constraint(0.0, 0.0, 320.0, 240.0))
+    assert(size.width == 2.0 && size.height == 1.0)
+    backend.layout_node(node, jet_ui_rect(0.0, 0.0, size.width, size.height))
+    assert(backend.focused_label() == "")
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1385-1406,2021-2039
+#Test("gtk_backend_display_free_focus_uses_shared_tab_navigation") {
+    backend :: JetGtkBackend.new()
+    backend.set_focus_group([jet_ui_text_input("first", JetUiImeMode.Disabled), jet_ui_text_input("second", JetUiImeMode.Disabled)])
+    assert(backend.focused_label() == "first")
+    assert(backend.dispatch_event(JetInputEvent.Key(code: "TAB")) == JetEventResult.Handled)
+    assert(backend.focused_label() == "second")
+    backend.set_focus_group([])
+    assert(backend.focused_label() == "")
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:2021-2039
+#Test("gtk_backend_event_policy_rejects_empty_keys_and_nonpositive_sizes") {
+    backend :: JetGtkBackend.new()
+    assert(backend.dispatch_event(JetInputEvent.Key(code: "")) == JetEventResult.Ignored)
+    assert(backend.dispatch_event(JetInputEvent.Key(code: "Enter")) == JetEventResult.Handled)
+    assert(backend.dispatch_event(JetInputEvent.Resize(size: JetSize{width: 0.0, height: 1.0})) == JetEventResult.Ignored)
+    assert(backend.dispatch_event(JetInputEvent.Resize(size: JetSize{width: 1.0, height: -1.0})) == JetEventResult.Ignored)
+    assert(backend.dispatch_event(JetInputEvent.Resize(size: JetSize{width: 1.0, height: 1.0})) == JetEventResult.Handled)
+}

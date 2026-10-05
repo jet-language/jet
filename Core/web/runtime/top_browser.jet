@@ -1,5 +1,3 @@
-// PORT-PENDING 0251 crates-jet-codegen-src-prelude-corelib-top-browser: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1-2195
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
 // Profiles pin native WebDriver BiDi wire contracts; contexts are isolated.
 // Traces retain method/sequence facts only, never endpoint/params/result/page data.
 // CDP is capability-checked protocol("cdp") expert supplement.
@@ -192,1853 +190,807 @@ impl JetWsConn {
         Ok(())
     }
 }
-//RS fn jet_browser_parse_message(text: &str) -> Result<jet_std::DataTree, JetBrowserError> {
-//RS     let value =
-//RS         jet_std::parse_json_strict(text).map_err(|_| JetBrowserError::new("protocol"))?;
-//RS     if matches!(value, jet_std::DataTree::Object(_)) {
-//RS         Ok(value)
-//RS     } else {
-//RS         Err(JetBrowserError::new("protocol"))
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_remaining_ms(deadline: std::time::Instant) -> Result<i64, JetBrowserError> {
-//RS     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-//RS     if remaining.is_zero() {
-//RS         return Err(JetBrowserError::new("timeout"));
-//RS     }
-//RS     Ok(i64::try_from(remaining.as_millis().max(1)).unwrap_or(i64::MAX))
-//RS }
-//RS 
-//RS fn jet_browser_recv_json(
-//RS     state: &mut JetBrowserState,
-//RS     deadline: std::time::Instant,
-//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
-//RS     state
-//RS         .conn
-//RS         .set_timeout(jet_browser_remaining_ms(deadline)?)
-//RS         .map_err(jet_browser_ws_error)?;
-//RS     let message = jet_ws_recv(&state.conn).map_err(jet_browser_ws_error)?;
-//RS     let text = jet_ws_message_text(&message).map_err(jet_browser_ws_error)?;
-//RS     jet_browser_parse_message(&text)
-//RS }
-//RS 
-//RS fn jet_browser_event_network_facts(
-//RS     value: &jet_std::DataTree,
-//RS ) -> (String, String, String, bool, i64) {
-//RS     let Some(params) = jet_browser_get(value, "params") else {
-//RS         return (String::new(), String::new(), String::new(), false, 0);
-//RS     };
-//RS     let is_blocked = matches!(
-//RS         jet_browser_get(params, "isBlocked"),
-//RS         Some(jet_std::DataTree::Bool(true))
-//RS     );
-//RS     let request = jet_browser_get(params, "request");
-//RS     let request_id = request
-//RS         .and_then(|request| jet_browser_string(request, "request").ok())
-//RS         .unwrap_or_default();
-//RS     let request_method = request
-//RS         .and_then(|request| jet_browser_string(request, "method").ok())
-//RS         .unwrap_or_default();
-//RS     let url_hash = request
-//RS         .and_then(|request| jet_browser_string(request, "url").ok())
-//RS         .or_else(|| jet_browser_string(params, "url").ok())
-//RS         .map(|url| jet_browser_fact_hash(&url))
-//RS         .unwrap_or_default();
-//RS     let status_code = jet_browser_get(params, "response")
-//RS         .and_then(|response| match jet_browser_get(response, "status") {
-//RS             Some(jet_std::DataTree::Int(value)) if (0..=599).contains(value) => Some(*value),
-//RS             Some(jet_std::DataTree::Float(value))
-//RS                 if value.is_finite() && value.fract() == 0.0 && (0.0..=599.0).contains(value) =>
-//RS             {
-//RS                 Some(*value as i64)
-//RS             }
-//RS             Some(jet_std::DataTree::Number(value)) => value
-//RS                 .parse::<i64>()
-//RS                 .ok()
-//RS                 .filter(|value| (0..=599).contains(value)),
-//RS             _ => None,
-//RS         })
-//RS         .unwrap_or(0);
-//RS     (request_id, request_method, url_hash, is_blocked, status_code)
-//RS }
-//RS 
-//RS fn jet_browser_event_download_facts(value: &jet_std::DataTree) -> (String, String) {
-//RS     let Some(params) = jet_browser_get(value, "params") else {
-//RS         return (String::new(), String::new());
-//RS     };
-//RS     let download_id = jet_browser_string(params, "download").unwrap_or_default();
-//RS     let suggested_filename_hash = jet_browser_string(params, "suggestedFilename")
-//RS         .map(|name| jet_browser_fact_hash(&name))
-//RS         .unwrap_or_default();
-//RS     (download_id, suggested_filename_hash)
-//RS }
-//RS 
-//RS fn jet_browser_capture_event(
-//RS     state: &mut JetBrowserState,
-//RS     value: &jet_std::DataTree,
-//RS ) -> Result<bool, JetBrowserError> {
-//RS     let Some(jet_std::DataTree::Text(kind) | jet_std::DataTree::TypedText(kind)) =
-//RS         jet_browser_get(value, "type")
-//RS     else {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     };
-//RS     if kind != "event" {
-//RS         return Ok(false);
-//RS     }
-//RS     let method = jet_browser_string(value, "method")?;
-//RS     let (request_id, request_method, url_hash, is_blocked, status_code) =
-//RS         jet_browser_event_network_facts(value);
-//RS     let (download_id, suggested_filename_hash) = jet_browser_event_download_facts(value);
-//RS     jet_browser_trace_push(state, format!("event:{}", jet_browser_fact_hash(&method)));
-//RS     if state.events.len() == JET_BROWSER_EVENT_LIMIT {
-//RS         state.events.pop_front();
-//RS     }
-//RS     state.events.push_back(JetBrowserEvent {
-//RS         method,
-//RS         request_id,
-//RS         request_method,
-//RS         url_hash,
-//RS         is_blocked,
-//RS         status_code,
-//RS         download_id,
-//RS         suggested_filename_hash,
-//RS     });
-//RS     Ok(true)
-//RS }
-//RS 
-//RS fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
-//RS     const BIDI_2024_11: &[&str] = &[
-//RS         "session.status",
-//RS         "session.new",
-//RS         "session.end",
-//RS         "session.subscribe",
-//RS         "browser.createUserContext",
-//RS         "browser.removeUserContext",
-//RS         "browser.setDownloadBehavior",
-//RS         "browsingContext.create",
-//RS         "browsingContext.close",
-//RS         "browsingContext.getTree",
-//RS         "browsingContext.navigate",
-//RS         "browsingContext.reload",
-//RS         "browsingContext.locateNodes",
-//RS         "browsingContext.captureScreenshot",
-//RS         "browsingContext.print",
-//RS         "input.performActions",
-//RS         "input.releaseActions",
-//RS         "input.setFiles",
-//RS         "network.addIntercept",
-//RS         "network.continueRequest",
-//RS         "network.failRequest",
-//RS         "network.provideResponse",
-//RS         "network.removeIntercept",
-//RS         "storage.getCookies",
-//RS         "storage.setCookie",
-//RS         "storage.deleteCookies",
-//RS         "script.callFunction",
-//RS         "script.disown",
-//RS         "script.evaluate",
-//RS         "script.getRealms",
-//RS         "goog:cdp.sendCommand",
-//RS     ];
-//RS     match profile {
-//RS         "bidi-2024.11" => BIDI_2024_11.contains(&method),
-//RS         "bidi-2025.5" => {
-//RS             BIDI_2024_11.contains(&method)
-//RS                 || matches!(
-//RS                     method,
-//RS                     "permissions.setPermission"
-//RS                         | "webExtension.install"
-//RS                         | "webExtension.uninstall"
-//RS                 )
-//RS         }
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_command_with_timeout(
-//RS     browser: &JetBrowser,
-//RS     method: &str,
-//RS     params: jet_std::DataTree,
-//RS     timeout_ms: i64,
-//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
-//RS     let mut state = browser.state.borrow_mut();
-//RS     if state.closed {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     if !jet_browser_profile_allows(&state.profile, method) {
-//RS         return Err(JetBrowserError::new("unsupported protocol"));
-//RS     }
-//RS     if method == "goog:cdp.sendCommand" && !state.cdp {
-//RS         return Err(JetBrowserError::new("unsupported protocol"));
-//RS     }
-//RS     let deadline =
-//RS         std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
-//RS     state
-//RS         .conn
-//RS         .set_timeout(jet_browser_remaining_ms(deadline)?)
-//RS         .map_err(jet_browser_ws_error)?;
-//RS     let id = state.next_id;
-//RS     state.next_id += 1;
-//RS     let request = jet_browser_object(vec![
-//RS         ("id", jet_std::DataTree::Int(id)),
-//RS         ("method", jet_browser_text(method)),
-//RS         ("params", params),
-//RS     ]);
-//RS     let text = jet_std::render_json(&request, false, 0);
-//RS     let method_hash = jet_browser_fact_hash(method);
-//RS     jet_browser_trace_push(&mut state, format!("send:{id}:{method_hash}"));
-//RS     jet_ws_send_text(&state.conn, &text).map_err(jet_browser_ws_error)?;
-//RS     loop {
-//RS         let response = jet_browser_recv_json(&mut state, deadline)?;
-//RS         if jet_browser_capture_event(&mut state, &response)? {
-//RS             continue;
-//RS         }
-//RS         if jet_browser_id(&response) != Some(id) {
-//RS             return Err(JetBrowserError::new("protocol"));
-//RS         }
-//RS         let response_type = jet_browser_string(&response, "type")?;
-//RS         if response_type == "error" || jet_browser_get(&response, "error").is_some() {
-//RS             jet_browser_trace_push(&mut state, format!("error:{id}:{method_hash}"));
-//RS             return Err(JetBrowserError::new("protocol"));
-//RS         }
-//RS         if response_type != "success" {
-//RS             return Err(JetBrowserError::new("protocol"));
-//RS         }
-//RS         let Some(result) = jet_browser_get(&response, "result").cloned() else {
-//RS             return Err(JetBrowserError::new("protocol"));
-//RS         };
-//RS         jet_browser_trace_push(&mut state, format!("recv:{id}:{method_hash}"));
-//RS         return Ok(result);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_command(
-//RS     browser: &JetBrowser,
-//RS     method: &str,
-//RS     params: jet_std::DataTree,
-//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
-//RS     let timeout_ms = browser.state.borrow().timeout_ms;
-//RS     jet_browser_command_with_timeout(browser, method, params, timeout_ms)
-//RS }
-//RS 
-//RS fn jet_browser_profile(name: &String) -> Result<JetBrowserProfile, JetBrowserError> {
-//RS     let version = match name.as_str() {
-//RS         "bidi-2025.5" => "2025.5",
-//RS         "bidi-2024.11" => "2024.11",
-//RS         _ => return Err(JetBrowserError::new("invalid profile")),
-//RS     };
-//RS     Ok(JetBrowserProfile {
-//RS         name: name.clone(),
-//RS         version: version.to_string(),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_browser_timeout(milliseconds: i64) -> Result<JetBrowserTimeout, JetBrowserError> {
-//RS     if !(1..=600_000).contains(&milliseconds) {
-//RS         return Err(JetBrowserError::new("invalid timeout"));
-//RS     }
-//RS     Ok(JetBrowserTimeout { milliseconds })
-//RS }
-//RS 
-//RS fn jet_browser_project_root() -> String {
-//RS     std::env::var("JET_PROJECT_ROOT").unwrap_or_else(|_| ".".to_string())
-//RS }
-//RS 
-//RS fn jet_browser_parse_locked(raw: &str, engine: &str) -> Result<JetBrowserLocked, JetBrowserError> {
-//RS     let mut current: Option<JetBrowserLocked> = None;
-//RS     let mut in_browser = false;
-//RS     let mut found: Option<JetBrowserLocked> = None;
-//RS     for line in raw.lines() {
-//RS         let line = line.trim();
-//RS         if line.is_empty() || line.starts_with('#') {
-//RS             continue;
-//RS         }
-//RS         if line.starts_with('[') {
-//RS             if in_browser {
-//RS                 if let Some(entry) = current.take() {
-//RS                     if entry.engine == engine {
-//RS                         found = Some(entry);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             in_browser = line == "[[browser]]";
-//RS             if in_browser {
-//RS                 current = Some(JetBrowserLocked {
-//RS                     engine: String::new(),
-//RS                     version: String::new(),
-//RS                     binary: String::new(),
-//RS                     protocol: String::new(),
-//RS                     size: 0,
-//RS                     output_hash: String::new(),
-//RS                 });
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if !in_browser {
-//RS             continue;
-//RS         }
-//RS         let Some(entry) = current.as_mut() else {
-//RS             continue;
-//RS         };
-//RS         let Some((key, val)) = line.split_once('=') else {
-//RS             continue;
-//RS         };
-//RS         let key = key.trim();
-//RS         let val = val.trim().trim_matches('"');
-//RS         match key {
-//RS             "engine" => entry.engine = val.to_string(),
-//RS             "version" => entry.version = val.to_string(),
-//RS             "binary" => entry.binary = val.to_string(),
-//RS             "protocol" => entry.protocol = val.to_string(),
-//RS             "size" => {
-//RS                 entry.size = val.parse().map_err(|_| JetBrowserError::new("invalid lock"))?;
-//RS             }
-//RS             "output-hash" => entry.output_hash = val.to_string(),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     if in_browser {
-//RS         if let Some(entry) = current.take() {
-//RS             if entry.engine == engine {
-//RS                 found = Some(entry);
-//RS             }
-//RS         }
-//RS     }
-//RS     let locked = found.ok_or_else(|| JetBrowserError::new("missing lock"))?;
-//RS     if locked.engine.is_empty()
-//RS         || locked.binary.is_empty()
-//RS         || locked.protocol.is_empty()
-//RS         || locked.output_hash.is_empty()
-//RS     {
-//RS         return Err(JetBrowserError::new("invalid lock"));
-//RS     }
-//RS     Ok(locked)
-//RS }
-//RS 
-//RS fn jet_browser_locked(engine: &String) -> Result<JetBrowserLocked, JetBrowserError> {
-//RS     let engine_name = match engine.as_str() {
-//RS         "chromium" | "firefox" | "webkit" => engine.as_str(),
-//RS         _ => return Err(JetBrowserError::new("unknown engine")),
-//RS     };
-//RS     let root = jet_browser_project_root();
-//RS     let lock_path = std::path::Path::new(&root).join(".jet/lock");
-//RS     let raw = std::fs::read_to_string(&lock_path).map_err(|_| JetBrowserError::new("missing lock"))?;
-//RS     let locked = jet_browser_parse_locked(&raw, engine_name)?;
-//RS     let path = std::path::Path::new(&locked.binary);
-//RS     if !path.is_file() {
-//RS         return Err(JetBrowserError::new("missing binary"));
-//RS     }
-//RS     let size = std::fs::metadata(path)
-//RS         .map_err(|_| JetBrowserError::new("missing binary"))?
-//RS         .len() as i64;
-//RS     if size != locked.size {
-//RS         return Err(JetBrowserError::new("size mismatch"));
-//RS     }
-//RS     Ok(locked)
-//RS }
-//RS 
-//RS fn jet_browser_locked_engine(locked: &JetBrowserLocked) -> String {
-//RS     locked.engine.clone()
-//RS }
-//RS 
-//RS fn jet_browser_locked_version(locked: &JetBrowserLocked) -> String {
-//RS     locked.version.clone()
-//RS }
-//RS 
-//RS fn jet_browser_locked_binary(locked: &JetBrowserLocked) -> String {
-//RS     locked.binary.clone()
-//RS }
-//RS 
-//RS fn jet_browser_locked_protocol(locked: &JetBrowserLocked) -> String {
-//RS     locked.protocol.clone()
-//RS }
-//RS 
-//RS fn jet_browser_locked_verify(locked: &JetBrowserLocked) -> Result<(), JetBrowserError> {
-//RS     let path = std::path::Path::new(&locked.binary);
-//RS     if !path.is_file() {
-//RS         return Err(JetBrowserError::new("missing binary"));
-//RS     }
-//RS     let size = std::fs::metadata(path)
-//RS         .map_err(|_| JetBrowserError::new("missing binary"))?
-//RS         .len() as i64;
-//RS     if size != locked.size {
-//RS         return Err(JetBrowserError::new("size mismatch"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_browser_connect(endpoint: &String) -> Result<JetBrowser, JetBrowserError> {
-//RS     let profile = jet_browser_profile(&"bidi-2025.5".to_string())?;
-//RS     let timeout = JetBrowserTimeout {
-//RS         milliseconds: 30_000,
-//RS     };
-//RS     jet_browser_connect_profile(endpoint, &profile, timeout)
-//RS }
-//RS 
-//RS fn jet_browser_connect_profile(
-//RS     endpoint: &String,
-//RS     profile: &JetBrowserProfile,
-//RS     timeout: JetBrowserTimeout,
-//RS ) -> Result<JetBrowser, JetBrowserError> {
-//RS     let conn = jet_ws_connect(endpoint).map_err(jet_browser_ws_error)?;
-//RS     conn.set_timeout(timeout.milliseconds)
-//RS         .map_err(jet_browser_ws_error)?;
-//RS     let browser = JetBrowser {
-//RS         state: std::rc::Rc::new(std::cell::RefCell::new(JetBrowserState {
-//RS             conn,
-//RS             next_id: 1,
-//RS             closed: false,
-//RS             session_started: false,
-//RS             timeout_ms: timeout.milliseconds,
-//RS             profile: profile.name.clone(),
-//RS             cdp: false,
-//RS             trace: vec!["connect".to_string()],
-//RS             trace_bytes: "connect".len(),
-//RS             events: std::collections::VecDeque::new(),
-//RS             test_actions: None,
-//RS         })),
-//RS     };
-//RS     let status = jet_browser_command(
-//RS         &browser,
-//RS         "session.status",
-//RS         jet_browser_object(Vec::new()),
-//RS     )?;
-//RS     if !matches!(
-//RS         jet_browser_get(&status, "ready"),
-//RS         Some(jet_std::DataTree::Bool(true))
-//RS     )
-//RS         || !matches!(
-//RS             jet_browser_get(&status, "message"),
-//RS             Some(jet_std::DataTree::Text(_) | jet_std::DataTree::TypedText(_))
-//RS         )
-//RS     {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let new_session = jet_browser_command(
-//RS         &browser,
-//RS         "session.new",
-//RS         jet_browser_object(vec![(
-//RS             "capabilities",
-//RS             jet_browser_object(vec![("alwaysMatch", jet_browser_object(Vec::new()))]),
-//RS         )]),
-//RS     )?;
-//RS     browser.state.borrow_mut().session_started = true;
-//RS     let _session_id = jet_browser_string(&new_session, "sessionId")?;
-//RS     let capabilities = jet_browser_get(&new_session, "capabilities")
-//RS         .filter(|value| matches!(value, jet_std::DataTree::Object(_)))
-//RS         .ok_or_else(|| JetBrowserError::new("protocol"))?;
-//RS     let cdp = jet_browser_get(capabilities, "goog:cdp")
-//RS         .is_some_and(|value| matches!(value, jet_std::DataTree::Bool(true)));
-//RS     browser.state.borrow_mut().cdp = cdp;
-//RS     Ok(browser)
-//RS }
-//RS 
-//RS fn jet_browser_abilities(browser: &JetBrowser) -> JetBrowserAbilities {
-//RS     let state = browser.state.borrow();
-//RS     JetBrowserAbilities {
-//RS         bidi: true,
-//RS         cdp: state.cdp,
-//RS         profile: state.profile.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_context(browser: &JetBrowser) -> Result<JetBrowserContext, JetBrowserError> {
-//RS     let result = jet_browser_command(
-//RS         browser,
-//RS         "browser.createUserContext",
-//RS         jet_browser_object(Vec::new()),
-//RS     )?;
-//RS     Ok(JetBrowserContext {
-//RS         state: std::rc::Rc::new(JetBrowserContextState {
-//RS             browser: browser.clone(),
-//RS             id: jet_browser_string(&result, "userContext")?,
-//RS             closed: std::cell::Cell::new(false),
-//RS         }),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_browser_subscribe(
-//RS     browser: &JetBrowser,
-//RS     event: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     let events = jet_std::DataTree::Array(vec![jet_browser_text(event)]);
-//RS     jet_browser_command(
-//RS         browser,
-//RS         "session.subscribe",
-//RS         jet_browser_object(vec![("events", events)]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_next_event(
-//RS     browser: &JetBrowser,
-//RS     timeout: JetBrowserTimeout,
-//RS ) -> Result<JetBrowserEvent, JetBrowserError> {
-//RS     let mut state = browser.state.borrow_mut();
-//RS     if state.closed {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     if let Some(event) = state.events.pop_front() {
-//RS         return Ok(event);
-//RS     }
-//RS     let deadline = std::time::Instant::now()
-//RS         + std::time::Duration::from_millis(timeout.milliseconds as u64);
-//RS     loop {
-//RS         let value = jet_browser_recv_json(&mut state, deadline)?;
-//RS         if jet_browser_capture_event(&mut state, &value)? {
-//RS             return state
-//RS                 .events
-//RS                 .pop_front()
-//RS                 .ok_or_else(|| JetBrowserError::new("protocol"));
-//RS         }
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_phase_ok(phase: &str) -> bool {
-//RS     matches!(
-//RS         phase,
-//RS         "beforeRequestSent" | "responseStarted" | "authRequired"
-//RS     )
-//RS }
-//RS 
-//RS fn jet_browser_add_intercept(
-//RS     browser: &JetBrowser,
-//RS     phase: &String,
-//RS ) -> Result<JetBrowserIntercept, JetBrowserError> {
-//RS     if !jet_browser_phase_ok(phase) {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let result = jet_browser_command(
-//RS         browser,
-//RS         "network.addIntercept",
-//RS         jet_browser_object(vec![(
-//RS             "phases",
-//RS             jet_std::DataTree::Array(vec![jet_browser_text(phase)]),
-//RS         )]),
-//RS     )?;
-//RS     Ok(JetBrowserIntercept {
-//RS         state: std::rc::Rc::new(JetBrowserInterceptState {
-//RS             browser: browser.clone(),
-//RS             id: jet_browser_string(&result, "intercept")?,
-//RS             removed: std::cell::Cell::new(false),
-//RS         }),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_browser_add_intercept_url(
-//RS     browser: &JetBrowser,
-//RS     phase: &String,
-//RS     url_pattern: &String,
-//RS ) -> Result<JetBrowserIntercept, JetBrowserError> {
-//RS     if !jet_browser_phase_ok(phase) || url_pattern.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let pattern = jet_browser_object(vec![
-//RS         ("type", jet_browser_text("string")),
-//RS         ("pattern", jet_browser_text(url_pattern)),
-//RS     ]);
-//RS     let result = jet_browser_command(
-//RS         browser,
-//RS         "network.addIntercept",
-//RS         jet_browser_object(vec![
-//RS             (
-//RS                 "phases",
-//RS                 jet_std::DataTree::Array(vec![jet_browser_text(phase)]),
-//RS             ),
-//RS             ("urlPatterns", jet_std::DataTree::Array(vec![pattern])),
-//RS         ]),
-//RS     )?;
-//RS     Ok(JetBrowserIntercept {
-//RS         state: std::rc::Rc::new(JetBrowserInterceptState {
-//RS             browser: browser.clone(),
-//RS             id: jet_browser_string(&result, "intercept")?,
-//RS             removed: std::cell::Cell::new(false),
-//RS         }),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_browser_intercept_remove(intercept: &JetBrowserIntercept) -> Result<(), JetBrowserError> {
-//RS     if intercept.state.removed.get() {
-//RS         return Ok(());
-//RS     }
-//RS     jet_browser_command(
-//RS         &intercept.state.browser,
-//RS         "network.removeIntercept",
-//RS         jet_browser_object(vec![("intercept", jet_browser_text(&intercept.state.id))]),
-//RS     )?;
-//RS     intercept.state.removed.set(true);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_browser_continue_request(
-//RS     browser: &JetBrowser,
-//RS     request_id: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if request_id.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     jet_browser_command(
-//RS         browser,
-//RS         "network.continueRequest",
-//RS         jet_browser_object(vec![("request", jet_browser_text(request_id))]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_fail_request(
-//RS     browser: &JetBrowser,
-//RS     request_id: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if request_id.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     jet_browser_command(
-//RS         browser,
-//RS         "network.failRequest",
-//RS         jet_browser_object(vec![
-//RS             ("request", jet_browser_text(request_id)),
-//RS             ("errorReason", jet_browser_text("Failed")),
-//RS         ]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_fulfill_request(
-//RS     browser: &JetBrowser,
-//RS     request_id: &String,
-//RS     status: i64,
-//RS     body: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if request_id.is_empty() || !(100..=599).contains(&status) {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let body_value = jet_browser_object(vec![
-//RS         ("type", jet_browser_text("string")),
-//RS         ("value", jet_browser_text(body)),
-//RS     ]);
-//RS     jet_browser_command(
-//RS         browser,
-//RS         "network.provideResponse",
-//RS         jet_browser_object(vec![
-//RS             ("request", jet_browser_text(request_id)),
-//RS             ("statusCode", jet_std::DataTree::Int(status)),
-//RS             ("body", body_value),
-//RS         ]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): allow downloads into an absolute destination folder.
-//RS fn jet_browser_allow_downloads(
-//RS     browser: &JetBrowser,
-//RS     folder: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if folder.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     jet_browser_command(
-//RS         browser,
-//RS         "browser.setDownloadBehavior",
-//RS         jet_browser_object(vec![(
-//RS             "downloadBehavior",
-//RS             jet_browser_object(vec![
-//RS                 ("type", jet_browser_text("allowed")),
-//RS                 ("destinationFolder", jet_browser_text(folder)),
-//RS             ]),
-//RS         )]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_protocol(
-//RS     browser: &JetBrowser,
-//RS     kind: &String,
-//RS ) -> Result<JetBrowserProtocol, JetBrowserError> {
-//RS     let state = browser.state.borrow();
-//RS     if state.closed {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     let supported = match kind.as_str() {
-//RS         "bidi" => true,
-//RS         "cdp" => state.cdp,
-//RS         _ => false,
-//RS     };
-//RS     if !supported {
-//RS         return Err(JetBrowserError::new("unsupported protocol"));
-//RS     }
-//RS     Ok(JetBrowserProtocol {
-//RS         browser: browser.clone(),
-//RS         kind: kind.clone(),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_browser_trace(browser: &JetBrowser) -> JetBrowserTrace {
-//RS     JetBrowserTrace {
-//RS         entries: browser.state.borrow().trace.clone(),
-//RS     }
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1193): privacy defaults for the connected session.
-//RS fn jet_browser_privacy(_browser: &JetBrowser) -> JetBrowserPrivacy {
-//RS     JetBrowserPrivacy {
-//RS         isolated_profiles: true,
-//RS         redact_receipts: true,
-//RS         shared_profiles: false,
-//RS     }
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1193): normal receipt — redacted facts only.
-//RS fn jet_browser_receipt(browser: &JetBrowser) -> JetBrowserReceipt {
-//RS     let state = browser.state.borrow();
-//RS     JetBrowserReceipt {
-//RS         entries: state.trace.clone(),
-//RS         isolated: true,
-//RS         cleaned: state.closed,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_close(browser: &JetBrowser) -> Result<(), JetBrowserError> {
-//RS     let state = browser.state.borrow();
-//RS     if state.closed {
-//RS         return Ok(());
-//RS     }
-//RS     if !state.session_started {
-//RS         drop(state);
-//RS         browser.state.borrow_mut().closed = true;
-//RS         return Ok(());
-//RS     }
-//RS     drop(state);
-//RS     jet_browser_command(browser, "session.end", jet_browser_object(Vec::new()))?;
-//RS     browser.state.borrow_mut().closed = true;
-//RS     Ok(())
-//RS }
-//RS 
-//RS impl Drop for JetBrowser {
-//RS     fn drop(&mut self) {
-//RS         if std::rc::Rc::strong_count(&self.state) == 1 {
-//RS             let _ = jet_browser_close(self);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_context_create_tab(
-//RS     context: &JetBrowserContext,
-//RS ) -> Result<JetBrowserPage, JetBrowserError> {
-//RS     if context.state.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     let result = jet_browser_command(
-//RS         &context.state.browser,
-//RS         "browsingContext.create",
-//RS         jet_browser_object(vec![
-//RS             ("type", jet_browser_text("tab")),
-//RS             ("userContext", jet_browser_text(&context.state.id)),
-//RS         ]),
-//RS     )?;
-//RS     Ok(JetBrowserPage {
-//RS         state: std::rc::Rc::new(JetBrowserPageState {
-//RS             browser: context.state.browser.clone(),
-//RS             context: context.state.clone(),
-//RS             id: jet_browser_string(&result, "context")?,
-//RS             closed: std::cell::Cell::new(false),
-//RS         }),
-//RS     })
-//RS }
-//RS 
-//RS /// Beginner page handle — one BiDi tab under the isolated user context.
-//RS fn jet_browser_context_page(
-//RS     context: &JetBrowserContext,
-//RS ) -> Result<JetBrowserPage, JetBrowserError> {
-//RS     jet_browser_context_create_tab(context)
-//RS }
-//RS 
-//RS /// Explicit tab create — same BiDi browsing context as `page()`.
-//RS fn jet_browser_context_tab(
-//RS     context: &JetBrowserContext,
-//RS ) -> Result<JetBrowserPage, JetBrowserError> {
-//RS     jet_browser_context_create_tab(context)
-//RS }
-//RS 
-//RS fn jet_browser_context_close(context: &JetBrowserContext) -> Result<(), JetBrowserError> {
-//RS     jet_browser_context_state_close(&context.state)
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1193): contexts are always isolated BiDi user contexts.
-//RS fn jet_browser_context_isolated(_context: &JetBrowserContext) -> bool {
-//RS     true
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1193): hashed user-context id for receipts (never raw).
-//RS fn jet_browser_context_user_hash(context: &JetBrowserContext) -> String {
-//RS     jet_browser_fact_hash(&context.state.id)
-//RS }
-//RS 
-//RS fn jet_browser_context_state_close(
-//RS     context: &JetBrowserContextState,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if context.closed.get() {
-//RS         return Ok(());
-//RS     }
-//RS     if context.browser.state.borrow().closed {
-//RS         context.closed.set(true);
-//RS         return Ok(());
-//RS     }
-//RS     jet_browser_command(
-//RS         &context.browser,
-//RS         "browser.removeUserContext",
-//RS         jet_browser_object(vec![("userContext", jet_browser_text(&context.id))]),
-//RS     )?;
-//RS     context.closed.set(true);
-//RS     Ok(())
-//RS }
-//RS 
-//RS impl Drop for JetBrowserContextState {
-//RS     fn drop(&mut self) {
-//RS         let _ = jet_browser_context_state_close(self);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_navigation_url(url: &String) -> String {
-//RS     if url.contains("://") || url.starts_with("about:") || url.starts_with("data:") {
-//RS         return url.clone();
-//RS     }
-//RS     let base = std::env::var("JET_TEST_WEB_SERVER_URL")
-//RS         .or_else(|_| std::env::var("JET_BROWSER_TEST_SERVER_URL"))
-//RS         .unwrap_or_default();
-//RS     if base.is_empty() {
-//RS         return url.clone();
-//RS     }
-//RS     format!(
-//RS         "{}/{}",
-//RS         base.trim_end_matches('/'),
-//RS         url.trim_start_matches('/')
-//RS     )
-//RS }
-//RS 
-//RS fn jet_browser_page_goto(
-//RS     page: &JetBrowserPage,
-//RS     url: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     let target_url = jet_browser_navigation_url(url);
-//RS     jet_browser_record_action(
-//RS         &page.state.browser,
-//RS         format!("goto:{}", jet_browser_fact_hash(url)),
-//RS     );
-//RS     jet_browser_command(
-//RS         &page.state.browser,
-//RS         "browsingContext.navigate",
-//RS         jet_browser_object(vec![
-//RS             ("context", jet_browser_text(&page.state.id)),
-//RS             ("url", jet_browser_text(&target_url)),
-//RS             ("wait", jet_browser_text("complete")),
-//RS         ]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_page_partition(page: &JetBrowserPage) -> jet_std::DataTree {
-//RS     jet_browser_object(vec![
-//RS         ("type", jet_browser_text("context")),
-//RS         ("context", jet_browser_text(&page.state.id)),
-//RS     ])
-//RS }
-//RS 
-//RS fn jet_browser_bytes_value(text: &str) -> jet_std::DataTree {
-//RS     jet_browser_object(vec![
-//RS         ("type", jet_browser_text("string")),
-//RS         ("value", jet_browser_text(text)),
-//RS     ])
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): viewport PNG screenshot as base64 (never traced).
-//RS fn jet_browser_page_screenshot(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     let result = jet_browser_command(
-//RS         &page.state.browser,
-//RS         "browsingContext.captureScreenshot",
-//RS         jet_browser_object(vec![
-//RS             ("context", jet_browser_text(&page.state.id)),
-//RS             (
-//RS                 "format",
-//RS                 jet_browser_object(vec![("type", jet_browser_text("image/png"))]),
-//RS             ),
-//RS         ]),
-//RS     )?;
-//RS     jet_browser_string(&result, "data")
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): print-to-PDF as base64 (never traced).
-//RS fn jet_browser_page_pdf(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     let result = jet_browser_command(
-//RS         &page.state.browser,
-//RS         "browsingContext.print",
-//RS         jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
-//RS     )?;
-//RS     jet_browser_string(&result, "data")
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): set a cookie in the page's storage partition.
-//RS fn jet_browser_page_set_cookie(
-//RS     page: &JetBrowserPage,
-//RS     name: &String,
-//RS     value: &String,
-//RS     domain: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     if name.is_empty() || domain.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     jet_browser_command(
-//RS         &page.state.browser,
-//RS         "storage.setCookie",
-//RS         jet_browser_object(vec![
-//RS             (
-//RS                 "cookie",
-//RS                 jet_browser_object(vec![
-//RS                     ("name", jet_browser_text(name)),
-//RS                     ("value", jet_browser_bytes_value(value)),
-//RS                     ("domain", jet_browser_text(domain)),
-//RS                 ]),
-//RS             ),
-//RS             ("partition", jet_browser_page_partition(page)),
-//RS         ]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_cookie_string_value(
-//RS     cookie: &jet_std::DataTree,
-//RS ) -> Result<String, JetBrowserError> {
-//RS     let Some(value) = jet_browser_get(cookie, "value") else {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     };
-//RS     match jet_browser_get(value, "type") {
-//RS         Some(jet_std::DataTree::Text(kind)) if kind == "string" || kind == "base64" => {
-//RS             jet_browser_string(value, "value")
-//RS         }
-//RS         _ => Err(JetBrowserError::new("protocol")),
-//RS     }
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): read one cookie value by name (caller-owned; not traced).
-//RS fn jet_browser_page_cookie(
-//RS     page: &JetBrowserPage,
-//RS     name: &String,
-//RS ) -> Result<Option<String>, JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     if name.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let result = jet_browser_command(
-//RS         &page.state.browser,
-//RS         "storage.getCookies",
-//RS         jet_browser_object(vec![
-//RS             (
-//RS                 "filter",
-//RS                 jet_browser_object(vec![("name", jet_browser_text(name))]),
-//RS             ),
-//RS             ("partition", jet_browser_page_partition(page)),
-//RS         ]),
-//RS     )?;
-//RS     let Some(jet_std::DataTree::Array(cookies)) = jet_browser_get(&result, "cookies") else {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     };
-//RS     match cookies.first() {
-//RS         None => Ok(None),
-//RS         Some(cookie) => Ok(Some(jet_browser_cookie_string_value(cookie)?)),
-//RS     }
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): delete cookies in the page partition.
-//RS fn jet_browser_page_clear_cookies(page: &JetBrowserPage) -> Result<(), JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     jet_browser_command(
-//RS         &page.state.browser,
-//RS         "storage.deleteCookies",
-//RS         jet_browser_object(vec![("partition", jet_browser_page_partition(page))]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_storage_kind_ok(kind: &str) -> bool {
-//RS     matches!(kind, "local" | "session")
-//RS }
-//RS 
-//RS fn jet_browser_page_storage_call(
-//RS     page: &JetBrowserPage,
-//RS     function: &str,
-//RS     args: Vec<jet_std::DataTree>,
-//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     jet_browser_command(
-//RS         &page.state.browser,
-//RS         "script.callFunction",
-//RS         jet_browser_object(vec![
-//RS             ("functionDeclaration", jet_browser_text(function)),
-//RS             ("awaitPromise", jet_std::DataTree::Bool(false)),
-//RS             (
-//RS                 "target",
-//RS                 jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
-//RS             ),
-//RS             ("arguments", jet_std::DataTree::Array(args)),
-//RS         ]),
-//RS     )
-//RS }
-//RS 
-//RS fn jet_browser_remote_string(
-//RS     result: &jet_std::DataTree,
-//RS ) -> Result<Option<String>, JetBrowserError> {
-//RS     let Some(value) = jet_browser_get(result, "result") else {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     };
-//RS     match jet_browser_get(value, "type") {
-//RS         Some(jet_std::DataTree::Text(kind)) if kind == "null" || kind == "undefined" => Ok(None),
-//RS         Some(jet_std::DataTree::Text(kind)) if kind == "string" => {
-//RS             Ok(Some(jet_browser_string(value, "value")?))
-//RS         }
-//RS         _ => Err(JetBrowserError::new("protocol")),
-//RS     }
-//RS }
-//RS 
-//RS /// Browser-test facts use the ordinary BiDi script route. The expression is
-//RS /// fixed by the caller and its result is kept out of the protocol trace.
-//RS fn jet_browser_page_evaluate_text(
-//RS     page: &JetBrowserPage,
-//RS     expression: &str,
-//RS ) -> Result<String, JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     let result = jet_browser_command(
-//RS         &page.state.browser,
-//RS         "script.evaluate",
-//RS         jet_browser_object(vec![
-//RS             ("expression", jet_browser_text(expression)),
-//RS             ("awaitPromise", jet_std::DataTree::Bool(false)),
-//RS             ("resultOwnership", jet_browser_text("none")),
-//RS             (
-//RS                 "target",
-//RS                 jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
-//RS             ),
-//RS         ]),
-//RS     )?;
-//RS     jet_browser_remote_string(&result)?.ok_or_else(|| JetBrowserError::new("protocol"))
-//RS }
-//RS 
-//RS fn jet_browser_page_url(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
-//RS     jet_browser_page_evaluate_text(page, "String(location.href)")
-//RS }
-//RS 
-//RS fn jet_browser_page_title(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
-//RS     jet_browser_page_evaluate_text(page, "String(document.title || '')")
-//RS }
-//RS 
-//RS fn jet_browser_page_text(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
-//RS     jet_browser_page_evaluate_text(
-//RS         page,
-//RS         "document.body ? String(document.body.innerText || '') : ''",
-//RS     )
-//RS }
-//RS 
-//RS fn jet_browser_page_dom(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
-//RS     jet_browser_page_evaluate_text(
-//RS         page,
-//RS         "document.documentElement ? document.documentElement.outerHTML : ''",
-//RS     )
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): read local/session storage (kind: "local"|"session").
-//RS fn jet_browser_page_storage_get(
-//RS     page: &JetBrowserPage,
-//RS     kind: &String,
-//RS     key: &String,
-//RS ) -> Result<Option<String>, JetBrowserError> {
-//RS     if !jet_browser_storage_kind_ok(kind) || key.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let store = if kind == "local" {
-//RS         "localStorage"
-//RS     } else {
-//RS         "sessionStorage"
-//RS     };
-//RS     let function = format!("function(key) {{ return {store}.getItem(key); }}");
-//RS     let result = jet_browser_page_storage_call(
-//RS         page,
-//RS         &function,
-//RS         vec![jet_browser_object(vec![
-//RS             ("type", jet_browser_text("string")),
-//RS             ("value", jet_browser_text(key)),
-//RS         ])],
-//RS     )?;
-//RS     jet_browser_remote_string(&result)
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): write local/session storage.
-//RS fn jet_browser_page_storage_set(
-//RS     page: &JetBrowserPage,
-//RS     kind: &String,
-//RS     key: &String,
-//RS     value: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if !jet_browser_storage_kind_ok(kind) || key.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let store = if kind == "local" {
-//RS         "localStorage"
-//RS     } else {
-//RS         "sessionStorage"
-//RS     };
-//RS     let function = format!("function(key, value) {{ {store}.setItem(key, value); }}");
-//RS     jet_browser_page_storage_call(
-//RS         page,
-//RS         &function,
-//RS         vec![
-//RS             jet_browser_object(vec![
-//RS                 ("type", jet_browser_text("string")),
-//RS                 ("value", jet_browser_text(key)),
-//RS             ]),
-//RS             jet_browser_object(vec![
-//RS                 ("type", jet_browser_text("string")),
-//RS                 ("value", jet_browser_text(value)),
-//RS             ]),
-//RS         ],
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): clear local/session storage.
-//RS fn jet_browser_page_storage_clear(
-//RS     page: &JetBrowserPage,
-//RS     kind: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if !jet_browser_storage_kind_ok(kind) {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let store = if kind == "local" {
-//RS         "localStorage"
-//RS     } else {
-//RS         "sessionStorage"
-//RS     };
-//RS     let function = format!("function() {{ {store}.clear(); }}");
-//RS     jet_browser_page_storage_call(page, &function, Vec::new()).map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_css_attr_equals(attr: &str, value: &str) -> String {
-//RS     let mut escaped = String::with_capacity(value.len());
-//RS     for ch in value.chars() {
-//RS         match ch {
-//RS             '\\' | '"' => {
-//RS                 escaped.push('\\');
-//RS                 escaped.push(ch);
-//RS             }
-//RS             _ => escaped.push(ch),
-//RS         }
-//RS     }
-//RS     format!("[{attr}=\"{escaped}\"]")
-//RS }
-//RS 
-//RS fn jet_browser_page_get_by_role(
-//RS     page: &JetBrowserPage,
-//RS     role: &String,
-//RS     name: &String,
-//RS ) -> JetBrowserLocator {
-//RS     jet_browser_record_action(
-//RS         &page.state.browser,
-//RS         format!(
-//RS             "locator:role:{}:{}",
-//RS             jet_browser_fact_hash(role),
-//RS             jet_browser_fact_hash(name)
-//RS         ),
-//RS     );
-//RS     JetBrowserLocator {
-//RS         page: page.state.clone(),
-//RS         locator_type: "accessibility".to_string(),
-//RS         role: role.clone(),
-//RS         name: name.clone(),
-//RS         value: String::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &String) -> JetBrowserLocator {
-//RS     jet_browser_record_action(
-//RS         &page.state.browser,
-//RS         format!("locator:text:{}", jet_browser_fact_hash(text)),
-//RS     );
-//RS     JetBrowserLocator {
-//RS         page: page.state.clone(),
-//RS         locator_type: "innerText".to_string(),
-//RS         role: String::new(),
-//RS         name: String::new(),
-//RS         value: text.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_page_get_by_label(page: &JetBrowserPage, name: &String) -> JetBrowserLocator {
-//RS     jet_browser_record_action(
-//RS         &page.state.browser,
-//RS         format!("locator:label:{}", jet_browser_fact_hash(name)),
-//RS     );
-//RS     JetBrowserLocator {
-//RS         page: page.state.clone(),
-//RS         locator_type: "accessibility".to_string(),
-//RS         role: String::new(),
-//RS         name: name.clone(),
-//RS         value: String::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_page_get_by_placeholder(
-//RS     page: &JetBrowserPage,
-//RS     text: &String,
-//RS ) -> JetBrowserLocator {
-//RS     jet_browser_record_action(
-//RS         &page.state.browser,
-//RS         format!("locator:placeholder:{}", jet_browser_fact_hash(text)),
-//RS     );
-//RS     JetBrowserLocator {
-//RS         page: page.state.clone(),
-//RS         locator_type: "css".to_string(),
-//RS         role: String::new(),
-//RS         name: String::new(),
-//RS         value: jet_browser_css_attr_equals("placeholder", text),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &String) -> JetBrowserLocator {
-//RS     jet_browser_record_action(
-//RS         &page.state.browser,
-//RS         format!("locator:test-id:{}", jet_browser_fact_hash(id)),
-//RS     );
-//RS     JetBrowserLocator {
-//RS         page: page.state.clone(),
-//RS         locator_type: "css".to_string(),
-//RS         role: String::new(),
-//RS         name: String::new(),
-//RS         value: jet_browser_css_attr_equals("data-testid", id),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &String) -> JetBrowserLocator {
-//RS     jet_browser_record_action(
-//RS         &page.state.browser,
-//RS         format!("locator:css:{}", jet_browser_fact_hash(selector)),
-//RS     );
-//RS     JetBrowserLocator {
-//RS         page: page.state.clone(),
-//RS         locator_type: "css".to_string(),
-//RS         role: String::new(),
-//RS         name: String::new(),
-//RS         value: selector.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_locator_wire(
-//RS     locator: &JetBrowserLocator,
-//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
-//RS     match locator.locator_type.as_str() {
-//RS         "accessibility" => {
-//RS             let mut value = Vec::new();
-//RS             if !locator.role.is_empty() {
-//RS                 value.push(("role", jet_browser_text(&locator.role)));
-//RS             }
-//RS             if !locator.name.is_empty() {
-//RS                 value.push(("name", jet_browser_text(&locator.name)));
-//RS             }
-//RS             if value.is_empty() {
-//RS                 return Err(JetBrowserError::new("protocol"));
-//RS             }
-//RS             Ok(jet_browser_object(vec![
-//RS                 ("type", jet_browser_text("accessibility")),
-//RS                 ("value", jet_browser_object(value)),
-//RS             ]))
-//RS         }
-//RS         "css" | "innerText" => Ok(jet_browser_object(vec![
-//RS             ("type", jet_browser_text(&locator.locator_type)),
-//RS             ("value", jet_browser_text(&locator.value)),
-//RS         ])),
-//RS         _ => Err(JetBrowserError::new("protocol")),
-//RS     }
-//RS }
-//RS fn jet_browser_locator_fingerprint(locator: &JetBrowserLocator) -> String {
-//RS     let mut identity = locator.locator_type.clone();
-//RS     identity.push(':');
-//RS     identity.push_str(&locator.role);
-//RS     identity.push(':');
-//RS     identity.push_str(&locator.name);
-//RS     identity.push(':');
-//RS     identity.push_str(&locator.value);
-//RS     jet_browser_fact_hash(&identity)
-//RS }
-//RS 
-//RS fn jet_browser_record_locator_action(locator: &JetBrowserLocator, action: &str) {
-//RS     jet_browser_record_action(
-//RS         &locator.page.browser,
-//RS         format!(
-//RS             "locator-action:{}:{}",
-//RS             action,
-//RS             jet_browser_locator_fingerprint(locator)
-//RS         ),
-//RS     );
-//RS }
-//RS 
-//RS fn jet_browser_frame_from_page(
-//RS     page: &JetBrowserPage,
-//RS     id: String,
-//RS ) -> JetBrowserFrame {
-//RS     JetBrowserFrame {
-//RS         state: std::rc::Rc::new(JetBrowserFrameState {
-//RS             browser: page.state.browser.clone(),
-//RS             page: page.state.clone(),
-//RS             id,
-//RS             closed: std::cell::Cell::new(false),
-//RS         }),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_page_main_frame(
-//RS     page: &JetBrowserPage,
-//RS ) -> Result<JetBrowserFrame, JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     Ok(jet_browser_frame_from_page(page, page.state.id.clone()))
-//RS }
-//RS 
-//RS fn jet_browser_collect_frame_ids(
-//RS     node: &jet_std::DataTree,
-//RS     out: &mut Vec<String>,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     out.push(jet_browser_string(node, "context")?);
-//RS     match jet_browser_get(node, "children") {
-//RS         None => Ok(()),
-//RS         Some(jet_std::DataTree::Array(children)) => {
-//RS             for child in children {
-//RS                 jet_browser_collect_frame_ids(child, out)?;
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS         Some(_) => Err(JetBrowserError::new("protocol")),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_page_frames(
-//RS     page: &JetBrowserPage,
-//RS ) -> Result<Vec<JetBrowserFrame>, JetBrowserError> {
-//RS     if page.state.closed.get() || page.state.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     let result = jet_browser_command(
-//RS         &page.state.browser,
-//RS         "browsingContext.getTree",
-//RS         jet_browser_object(vec![("root", jet_browser_text(&page.state.id))]),
-//RS     )?;
-//RS     let Some(jet_std::DataTree::Array(contexts)) = jet_browser_get(&result, "contexts") else {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     };
-//RS     let mut ids = Vec::new();
-//RS     for node in contexts {
-//RS         jet_browser_collect_frame_ids(node, &mut ids)?;
-//RS     }
-//RS     Ok(ids
-//RS         .into_iter()
-//RS         .map(|id| jet_browser_frame_from_page(page, id))
-//RS         .collect())
-//RS }
-//RS 
-//RS fn jet_browser_frame_close(frame: &JetBrowserFrame) -> Result<(), JetBrowserError> {
-//RS     if frame.state.closed.get() {
-//RS         return Ok(());
-//RS     }
-//RS     if frame.state.page.closed.get()
-//RS         || frame.state.page.context.closed.get()
-//RS         || frame.state.browser.state.borrow().closed
-//RS     {
-//RS         frame.state.closed.set(true);
-//RS         return Ok(());
-//RS     }
-//RS     jet_browser_command(
-//RS         &frame.state.browser,
-//RS         "browsingContext.close",
-//RS         jet_browser_object(vec![("context", jet_browser_text(&frame.state.id))]),
-//RS     )?;
-//RS     frame.state.closed.set(true);
-//RS     if frame.state.id == frame.state.page.id {
-//RS         frame.state.page.closed.set(true);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_browser_page_close(page: &JetBrowserPage) -> Result<(), JetBrowserError> {
-//RS     jet_browser_page_state_close(&page.state)
-//RS }
-//RS 
-//RS fn jet_browser_page_state_close(page: &JetBrowserPageState) -> Result<(), JetBrowserError> {
-//RS     if page.closed.get() {
-//RS         return Ok(());
-//RS     }
-//RS     if page.context.closed.get() || page.browser.state.borrow().closed {
-//RS         page.closed.set(true);
-//RS         return Ok(());
-//RS     }
-//RS     jet_browser_command(
-//RS         &page.browser,
-//RS         "browsingContext.close",
-//RS         jet_browser_object(vec![("context", jet_browser_text(&page.id))]),
-//RS     )?;
-//RS     page.closed.set(true);
-//RS     Ok(())
-//RS }
-//RS 
-//RS impl Drop for JetBrowserPageState {
-//RS     fn drop(&mut self) {
-//RS         let _ = jet_browser_page_state_close(self);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_locator_query(
-//RS     locator: &JetBrowserLocator,
-//RS ) -> Result<Option<String>, JetBrowserError> {
-//RS     let timeout_ms = locator.page.browser.state.borrow().timeout_ms;
-//RS     jet_browser_locator_query_with_timeout(locator, timeout_ms)
-//RS }
-//RS 
-//RS fn jet_browser_locator_query_with_timeout(
-//RS     locator: &JetBrowserLocator,
-//RS     timeout_ms: i64,
-//RS ) -> Result<Option<String>, JetBrowserError> {
-//RS     if locator.page.closed.get() || locator.page.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     let result = jet_browser_command_with_timeout(
-//RS         &locator.page.browser,
-//RS         "browsingContext.locateNodes",
-//RS         jet_browser_object(vec![
-//RS             ("context", jet_browser_text(&locator.page.id)),
-//RS             ("locator", jet_browser_locator_wire(locator)?),
-//RS             ("maxNodeCount", jet_std::DataTree::Float(1.0)),
-//RS         ]),
-//RS         timeout_ms,
-//RS     )?;
-//RS     let Some(jet_std::DataTree::Array(nodes)) = jet_browser_get(&result, "nodes") else {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     };
-//RS     match nodes.first() {
-//RS         None => Ok(None),
-//RS         Some(node) => Ok(Some(jet_browser_string(node, "sharedId")?)),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_locator_wait(
-//RS     locator: &JetBrowserLocator,
-//RS     timeout: JetBrowserTimeout,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     jet_browser_record_locator_action(locator, "wait");
-//RS     let deadline =
-//RS         std::time::Instant::now() + std::time::Duration::from_millis(timeout.milliseconds as u64);
-//RS     loop {
-//RS         let remaining = jet_browser_remaining_ms(deadline)?;
-//RS         if jet_browser_locator_query_with_timeout(locator, remaining)?.is_some() {
-//RS             return Ok(());
-//RS         }
-//RS         std::thread::sleep(std::time::Duration::from_millis(10));
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_locator_wait_gone(
-//RS     locator: &JetBrowserLocator,
-//RS     timeout: JetBrowserTimeout,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     jet_browser_record_locator_action(locator, "wait-gone");
-//RS     let deadline =
-//RS         std::time::Instant::now() + std::time::Duration::from_millis(timeout.milliseconds as u64);
-//RS     loop {
-//RS         let remaining = jet_browser_remaining_ms(deadline)?;
-//RS         if jet_browser_locator_query_with_timeout(locator, remaining)?.is_none() {
-//RS             return Ok(());
-//RS         }
-//RS         std::thread::sleep(std::time::Duration::from_millis(10));
-//RS     }
-//RS }
-//RS 
-//RS fn jet_browser_locator_resolve(
-//RS     locator: &JetBrowserLocator,
-//RS ) -> Result<String, JetBrowserError> {
-//RS     if locator.page.closed.get() || locator.page.context.closed.get() {
-//RS         return Err(JetBrowserError::new("closed"));
-//RS     }
-//RS     jet_browser_locator_query(locator)?.ok_or_else(|| JetBrowserError::new("timeout"))
-//RS }
-//RS 
-//RS fn jet_browser_locator_pointer(
-//RS     locator: &JetBrowserLocator,
-//RS     shared_id: &str,
-//RS     down_up: bool,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     let origin = jet_browser_object(vec![
-//RS         ("type", jet_browser_text("element")),
-//RS         (
-//RS             "element",
-//RS             jet_browser_object(vec![("sharedId", jet_browser_text(shared_id))]),
-//RS         ),
-//RS     ]);
-//RS     let mut actions = vec![jet_browser_object(vec![
-//RS         ("type", jet_browser_text("pointerMove")),
-//RS         ("x", jet_std::DataTree::Float(0.0)),
-//RS         ("y", jet_std::DataTree::Float(0.0)),
-//RS         ("origin", origin),
-//RS     ])];
-//RS     if down_up {
-//RS         actions.push(jet_browser_object(vec![
-//RS             ("type", jet_browser_text("pointerDown")),
-//RS             ("button", jet_std::DataTree::Float(0.0)),
-//RS         ]));
-//RS         actions.push(jet_browser_object(vec![
-//RS             ("type", jet_browser_text("pointerUp")),
-//RS             ("button", jet_std::DataTree::Float(0.0)),
-//RS         ]));
-//RS     }
-//RS     let source = jet_browser_object(vec![
-//RS         ("type", jet_browser_text("pointer")),
-//RS         ("id", jet_browser_text("mouse")),
-//RS         (
-//RS             "parameters",
-//RS             jet_browser_object(vec![("pointerType", jet_browser_text("mouse"))]),
-//RS         ),
-//RS         ("actions", jet_std::DataTree::Array(actions)),
-//RS     ]);
-//RS     jet_browser_command(
-//RS         &locator.page.browser,
-//RS         "input.performActions",
-//RS         jet_browser_object(vec![
-//RS             ("context", jet_browser_text(&locator.page.id)),
-//RS             ("actions", jet_std::DataTree::Array(vec![source])),
-//RS         ]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
-//RS     jet_browser_record_locator_action(locator, "click");
-//RS     let shared_id = jet_browser_locator_resolve(locator)?;
-//RS     jet_browser_locator_pointer(locator, &shared_id, true)
-//RS }
-//RS 
-//RS fn jet_browser_locator_hover(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
-//RS     jet_browser_record_locator_action(locator, "hover");
-//RS     let shared_id = jet_browser_locator_resolve(locator)?;
-//RS     jet_browser_locator_pointer(locator, &shared_id, false)
-//RS }
-//RS 
-//RS fn jet_browser_locator_fill(
-//RS     locator: &JetBrowserLocator,
-//RS     text: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     jet_browser_record_locator_action(
-//RS         locator,
-//RS         &format!("fill:{}", jet_browser_fact_hash(text)),
-//RS     );
-//RS     let shared_id = jet_browser_locator_resolve(locator)?;
-//RS     // Clear then assign through the DOM value path — no page data enters the trace.
-//RS     let function = "function(el, value) {\
-//RS         el.focus();\
-//RS         if ('value' in el) { el.value = ''; el.value = value; }\
-//RS         else if (el.isContentEditable) { el.textContent = value; }\
-//RS         el.dispatchEvent(new Event('input', { bubbles: true }));\
-//RS         el.dispatchEvent(new Event('change', { bubbles: true }));\
-//RS     }"
-//RS     .to_string();
-//RS     jet_browser_command(
-//RS         &locator.page.browser,
-//RS         "script.callFunction",
-//RS         jet_browser_object(vec![
-//RS             ("functionDeclaration", jet_browser_text(&function)),
-//RS             ("awaitPromise", jet_std::DataTree::Bool(false)),
-//RS             (
-//RS                 "target",
-//RS                 jet_browser_object(vec![("context", jet_browser_text(&locator.page.id))]),
-//RS             ),
-//RS             (
-//RS                 "arguments",
-//RS                 jet_std::DataTree::Array(vec![
-//RS                     jet_browser_object(vec![
-//RS                         ("type", jet_browser_text("node")),
-//RS                         ("sharedId", jet_browser_text(&shared_id)),
-//RS                     ]),
-//RS                     jet_browser_object(vec![
-//RS                         ("type", jet_browser_text("string")),
-//RS                         ("value", jet_browser_text(text)),
-//RS                     ]),
-//RS                 ]),
-//RS             ),
-//RS         ]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_locator_press(
-//RS     locator: &JetBrowserLocator,
-//RS     key: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     jet_browser_record_locator_action(
-//RS         locator,
-//RS         &format!("press:{}", jet_browser_fact_hash(key)),
-//RS     );
-//RS     let shared_id = jet_browser_locator_resolve(locator)?;
-//RS     jet_browser_locator_pointer(locator, &shared_id, true)?;
-//RS     let actions = jet_std::DataTree::Array(vec![
-//RS         jet_browser_object(vec![
-//RS             ("type", jet_browser_text("keyDown")),
-//RS             ("value", jet_browser_text(key)),
-//RS         ]),
-//RS         jet_browser_object(vec![
-//RS             ("type", jet_browser_text("keyUp")),
-//RS             ("value", jet_browser_text(key)),
-//RS         ]),
-//RS     ]);
-//RS     let source = jet_browser_object(vec![
-//RS         ("type", jet_browser_text("key")),
-//RS         ("id", jet_browser_text("keyboard")),
-//RS         ("actions", actions),
-//RS     ]);
-//RS     jet_browser_command(
-//RS         &locator.page.browser,
-//RS         "input.performActions",
-//RS         jet_browser_object(vec![
-//RS             ("context", jet_browser_text(&locator.page.id)),
-//RS             ("actions", jet_std::DataTree::Array(vec![source])),
-//RS         ]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1191): set file input paths via BiDi input.setFiles.
-//RS fn jet_browser_locator_set_files(
-//RS     locator: &JetBrowserLocator,
-//RS     path: &String,
-//RS ) -> Result<(), JetBrowserError> {
-//RS     if path.is_empty() {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     jet_browser_record_locator_action(
-//RS         locator,
-//RS         &format!("set-files:{}", jet_browser_fact_hash(path)),
-//RS     );
-//RS     let shared_id = jet_browser_locator_resolve(locator)?;
-//RS     jet_browser_command(
-//RS         &locator.page.browser,
-//RS         "input.setFiles",
-//RS         jet_browser_object(vec![
-//RS             ("context", jet_browser_text(&locator.page.id)),
-//RS             (
-//RS                 "element",
-//RS                 jet_browser_object(vec![("sharedId", jet_browser_text(&shared_id))]),
-//RS             ),
-//RS             (
-//RS                 "files",
-//RS                 jet_std::DataTree::Array(vec![jet_browser_text(path)]),
-//RS             ),
-//RS         ]),
-//RS     )
-//RS     .map(|_| ())
-//RS }
-//RS 
-//RS fn jet_browser_event_kind(event: &JetBrowserEvent) -> String {
-//RS     event.method.clone()
-//RS }
-//RS 
-//RS fn jet_browser_event_request_id(event: &JetBrowserEvent) -> String {
-//RS     event.request_id.clone()
-//RS }
-//RS 
-//RS fn jet_browser_event_request_method(event: &JetBrowserEvent) -> String {
-//RS     event.request_method.clone()
-//RS }
-//RS 
-//RS fn jet_browser_event_url_hash(event: &JetBrowserEvent) -> String {
-//RS     event.url_hash.clone()
-//RS }
-//RS 
-//RS fn jet_browser_event_is_blocked(event: &JetBrowserEvent) -> bool {
-//RS     event.is_blocked
-//RS }
-//RS 
-//RS fn jet_browser_event_status_code(event: &JetBrowserEvent) -> i64 {
-//RS     event.status_code
-//RS }
-//RS 
-//RS fn jet_browser_event_download_id(event: &JetBrowserEvent) -> String {
-//RS     event.download_id.clone()
-//RS }
-//RS 
-//RS fn jet_browser_event_suggested_filename_hash(event: &JetBrowserEvent) -> String {
-//RS     event.suggested_filename_hash.clone()
-//RS }
-//RS 
-//RS /// CDP methods are `Domain.command` (PascalCase domain). BiDi module paths
-//RS /// stay lowercase (`session.status`); this check keeps CDP from becoming a
-//RS /// silent second spelling for portable BiDi commands.
-//RS fn jet_browser_cdp_method_ok(method: &str) -> bool {
-//RS     let Some((domain, command)) = method.split_once('.') else {
-//RS         return false;
-//RS     };
-//RS     if method.bytes().filter(|b| *b == b'.').count() != 1
-//RS         || domain.is_empty()
-//RS         || command.is_empty()
-//RS         || method.contains(':')
-//RS     {
-//RS         return false;
-//RS     }
-//RS     let mut domain_chars = domain.chars();
-//RS     let Some(first) = domain_chars.next() else {
-//RS         return false;
-//RS     };
-//RS     first.is_ascii_uppercase()
-//RS         && domain_chars.all(|c| c.is_ascii_alphanumeric())
-//RS         && command
-//RS             .chars()
-//RS             .next()
-//RS             .is_some_and(|c| c.is_ascii_alphabetic())
-//RS         && command.chars().all(|c| c.is_ascii_alphanumeric())
-//RS }
-//RS 
-//RS /// D-BROWSER-AUTO1=A (#1192): checked expert CDP / raw BiDi protocol send.
-//RS /// CDP is capability-gated via `protocol("cdp")` only — BiDi cannot smuggle
-//RS /// `goog:cdp.*`, and CDP methods must match audited `Domain.command` shape.
-//RS fn jet_browser_protocol_send(
-//RS     protocol: &JetBrowserProtocol,
-//RS     method: &String,
-//RS     params_json: &String,
-//RS ) -> Result<String, JetBrowserError> {
-//RS     let params =
-//RS         jet_std::parse_json_strict(params_json).map_err(|_| JetBrowserError::new("protocol"))?;
-//RS     if !matches!(params, jet_std::DataTree::Object(_)) {
-//RS         return Err(JetBrowserError::new("protocol"));
-//RS     }
-//RS     let result = if protocol.kind == "bidi" {
-//RS         if method.starts_with("goog:cdp.") {
-//RS             return Err(JetBrowserError::new("unsupported protocol"));
-//RS         }
-//RS         jet_browser_command(&protocol.browser, method, params)?
-//RS     } else if protocol.kind == "cdp" {
-//RS         if !protocol.browser.state.borrow().cdp {
-//RS             return Err(JetBrowserError::new("unsupported protocol"));
-//RS         }
-//RS         if !jet_browser_cdp_method_ok(method) {
-//RS             return Err(JetBrowserError::new("protocol"));
-//RS         }
-//RS         jet_browser_command(
-//RS             &protocol.browser,
-//RS             "goog:cdp.sendCommand",
-//RS             jet_browser_object(vec![
-//RS                 ("method", jet_browser_text(method)),
-//RS                 ("params", params),
-//RS             ]),
-//RS         )?
-//RS     } else {
-//RS         return Err(JetBrowserError::new("unsupported protocol"));
-//RS     };
-//RS     Ok(jet_std::render_json(&result, false, 0))
-//RS }
-//RS 
-//RS fn jet_browser_abilities_bidi(caps: &JetBrowserAbilities) -> bool {
-//RS     caps.bidi
-//RS }
-//RS 
-//RS fn jet_browser_abilities_cdp(caps: &JetBrowserAbilities) -> bool {
-//RS     caps.cdp
-//RS }
-//RS 
-//RS fn jet_browser_abilities_profile(caps: &JetBrowserAbilities) -> String {
-//RS     caps.profile.clone()
-//RS }
-//RS 
-//RS fn jet_browser_trace_entry_count(trace: &JetBrowserTrace) -> i64 {
-//RS     trace.entries.len() as i64
-//RS }
-//RS 
-//RS fn jet_browser_trace_redacted(trace: &JetBrowserTrace) -> bool {
-//RS     let total: usize = trace.entries.iter().map(String::len).sum();
-//RS     total <= JET_BROWSER_TRACE_LIMIT_BYTES
-//RS         && trace.entries.iter().all(|entry| {
-//RS             if entry == "connect" {
-//RS                 return true;
-//RS             }
-//RS             let mut parts = entry.split(':');
-//RS             let Some(kind) = parts.next() else {
-//RS                 return false;
-//RS             };
-//RS             match kind {
-//RS                 "event" => parts.next().is_some_and(|hash| {
-//RS                     hash.len() == 16
-//RS                         && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-//RS                         && parts.next().is_none()
-//RS                 }),
-//RS                 "send" | "recv" | "error" => {
-//RS                     parts.next().is_some_and(|id| {
-//RS                         !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())
-//RS                     }) && parts.next().is_some_and(|hash| {
-//RS                         hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-//RS                     }) && parts.next().is_none()
-//RS                 }
-//RS                 _ => false,
-//RS             }
-//RS         })
-//RS }
-//RS 
-//RS fn jet_browser_trace_summary(trace: &JetBrowserTrace) -> String {
-//RS     trace.entries.join(",")
-//RS }
-//RS 
-//RS fn jet_browser_privacy_isolated_profiles(privacy: &JetBrowserPrivacy) -> bool {
-//RS     privacy.isolated_profiles
-//RS }
-//RS 
-//RS fn jet_browser_privacy_redact_receipts(privacy: &JetBrowserPrivacy) -> bool {
-//RS     privacy.redact_receipts
-//RS }
-//RS 
-//RS fn jet_browser_privacy_shared_profiles(privacy: &JetBrowserPrivacy) -> bool {
-//RS     privacy.shared_profiles
-//RS }
-//RS 
-//RS fn jet_browser_receipt_entry_count(receipt: &JetBrowserReceipt) -> i64 {
-//RS     receipt.entries.len() as i64
-//RS }
-//RS 
-//RS fn jet_browser_receipt_redacted(receipt: &JetBrowserReceipt) -> bool {
-//RS     jet_browser_trace_redacted(&JetBrowserTrace {
-//RS         entries: receipt.entries.clone(),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_browser_receipt_isolated(receipt: &JetBrowserReceipt) -> bool {
-//RS     receipt.isolated
-//RS }
-//RS 
-//RS fn jet_browser_receipt_cleaned(receipt: &JetBrowserReceipt) -> bool {
-//RS     receipt.cleaned
-//RS }
-//RS 
-//RS fn jet_browser_receipt_summary(receipt: &JetBrowserReceipt) -> String {
-//RS     receipt.entries.join(",")
-//RS }
-// END-PORT-PENDING 0251 crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1-2195
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:348
+fn jet_browser_parse_message(text: &String) -> DataTree JetBrowserError! {
+    value :: parse_json_strict(text).map_err(fn(_) { JetBrowserError.new("protocol") })?
+    if value is DataTree.Object(_) { Ok(^value) } else { Err(JetBrowserError.new("protocol")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:358
+// GATE #4565: kernel primitive
+fn jet_browser_remaining_ms(deadline: time.Instant) -> I64 JetBrowserError! {
+    remaining :: #Unsafe("read real monotonic time against one absolute command deadline") { deadline.saturating_duration_since(time.Instant.now()) }
+    if remaining.is_zero() { return Err(JetBrowserError.new("timeout")) }
+    Ok(I64.try_from(remaining.as_millis().max(1)).unwrap_or(I64.MAX))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:366
+fn jet_browser_recv_json(state: &JetBrowserState, deadline: time.Instant) -> DataTree JetBrowserError! {
+    state.conn.set_timeout(jet_browser_remaining_ms(deadline)?).map_err(jet_browser_ws_error)?
+    message :: jet_ws_recv(&state.conn).map_err(jet_browser_ws_error)?
+    text :: jet_ws_message_text(&message).map_err(jet_browser_ws_error)?
+    jet_browser_parse_message(&text)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:379
+fn jet_browser_event_network_facts(value: &DataTree) -> (String, String, String, Bool, I64) {
+    params :: jet_browser_get(value, "params") ?? return ("", "", "", false, 0)
+    is_blocked :: match jet_browser_get(params, "isBlocked") { Val(.Bool(true)) -> true, _ -> false }
+    request :: jet_browser_get(params, "request")
+    request_id :: request.and_then(fn(request) { jet_browser_string(request, "request").ok() }).unwrap_or_default()
+    request_method :: request.and_then(fn(request) { jet_browser_string(request, "method").ok() }).unwrap_or_default()
+    url_hash :: request.and_then(fn(request) { jet_browser_string(request, "url").ok() })
+        .or_else(fn() { jet_browser_string(params, "url").ok() }).map(fn(url) { jet_browser_fact_hash(&url) }).unwrap_or_default()
+    status_code :: jet_browser_get(params, "response").and_then(fn(response) {
+        match jet_browser_get(response, "status") {
+            Val(.Int(value)) if *value >= 0 && *value <= 599 -> Val(*value as I64)
+            Val(.Float(value)) if value.is_finite() && value.fract() == 0.0 && *value >= 0.0 && *value <= 599.0 -> Val(*value as I64)
+            Val(.Number(value)) -> value.parse<I64>().ok().filter(fn(value) { *value >= 0 && *value <= 599 })
+            _ -> None
+        }
+    }).unwrap_or(0)
+    (^request_id, ^request_method, ^url_hash, is_blocked, status_code)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:419
+fn jet_browser_event_download_facts(value: &DataTree) -> (String, String) {
+    params :: jet_browser_get(value, "params") ?? return ("", "")
+    download_id :: jet_browser_string(params, "download").unwrap_or_default()
+    suggested_filename_hash :: jet_browser_string(params, "suggestedFilename").map(fn(name) { jet_browser_fact_hash(&name) }).unwrap_or_default()
+    (^download_id, ^suggested_filename_hash)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:430
+fn jet_browser_capture_event(state: &JetBrowserState, value: &DataTree) -> Bool JetBrowserError! {
+    kind :: match jet_browser_get(value, "type") {
+        Val(.Text(kind)) | Val(.TypedText(kind)) -> kind
+        _ -> return Err(JetBrowserError.new("protocol"))
+    }
+    if kind != "event" { return Ok(false) }
+    method :: jet_browser_string(value, "method")?
+    (request_id, request_method, url_hash, is_blocked, status_code) :: jet_browser_event_network_facts(value)
+    (download_id, suggested_filename_hash) :: jet_browser_event_download_facts(value)
+    jet_browser_trace_push(state, "event:{jet_browser_fact_hash(&method)}")
+    if state.events.len() == JET_BROWSER_EVENT_LIMIT { _ :: state.events.pop_front() }
+    state.events.push_back(JetBrowserEvent{method: ^method, request_id: ^request_id, request_method: ^request_method,
+        url_hash: ^url_hash, is_blocked: is_blocked, status_code: status_code, download_id: ^download_id, suggested_filename_hash: ^suggested_filename_hash})
+    Ok(true)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:463
+fn jet_browser_profile_allows(profile: &String, method: &String) -> Bool {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:464
+    const BIDI_2024_11: [String] = [
+        "session.status", "session.new", "session.end", "session.subscribe",
+        "browser.createUserContext", "browser.removeUserContext", "browser.setDownloadBehavior",
+        "browsingContext.create", "browsingContext.close", "browsingContext.getTree",
+        "browsingContext.navigate", "browsingContext.reload", "browsingContext.locateNodes",
+        "browsingContext.captureScreenshot", "browsingContext.print", "input.performActions",
+        "input.releaseActions", "input.setFiles", "network.addIntercept", "network.continueRequest",
+        "network.failRequest", "network.provideResponse", "network.removeIntercept", "storage.getCookies",
+        "storage.setCookie", "storage.deleteCookies", "script.callFunction", "script.disown",
+        "script.evaluate", "script.getRealms", "goog:cdp.sendCommand"
+    ]
+    match profile {
+        "bidi-2024.11" -> BIDI_2024_11.contains(&method)
+        "bidi-2025.5" -> BIDI_2024_11.contains(&method) || method == "permissions.setPermission" || method == "webExtension.install" || method == "webExtension.uninstall"
+        _ -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:512
+fn jet_browser_command_with_timeout(browser: &JetBrowser, method: &String, params: DataTree, timeout_ms: I64) -> DataTree JetBrowserError! {
+    state := browser.state.borrow_mut()
+    if state.closed { return Err(JetBrowserError.new("closed")) }
+    if not jet_browser_profile_allows(&state.profile, method) { return Err(JetBrowserError.new("unsupported protocol")) }
+    if method == "goog:cdp.sendCommand" && not state.cdp { return Err(JetBrowserError.new("unsupported protocol")) }
+    // GATE #4565: kernel primitive
+    deadline :: #Unsafe("one absolute native monotonic deadline bounds entire BiDi command") { time.Instant.now() + time.Duration.from_millis(timeout_ms as U64) }
+    state.conn.set_timeout(jet_browser_remaining_ms(deadline)?).map_err(jet_browser_ws_error)?
+    id :: state.next_id
+    state.next_id += 1
+    request :: jet_browser_object([("id", DataTree.Int(Int{id})), ("method", jet_browser_text(method)), ("params", ^params)])
+    text :: render_json(&request, false, 0)
+    method_hash :: jet_browser_fact_hash(method)
+    jet_browser_trace_push(&state, "send:{id}:{method_hash}")
+    jet_ws_send_text(&state.conn, &text).map_err(jet_browser_ws_error)?
+    loop {
+        response :: jet_browser_recv_json(&state, deadline)?
+        if jet_browser_capture_event(&state, &response)? { continue }
+        if jet_browser_id(&response) != Val(id) { return Err(JetBrowserError.new("protocol")) }
+        response_type :: jet_browser_string(&response, "type")?
+        if response_type == "error" || jet_browser_get(&response, "error").is_some() {
+            jet_browser_trace_push(&state, "error:{id}:{method_hash}")
+            return Err(JetBrowserError.new("protocol"))
+        }
+        if response_type != "success" { return Err(JetBrowserError.new("protocol")) }
+        result :: jet_browser_get(&response, "result").cloned() ?? return Err(JetBrowserError.new("protocol"))
+        jet_browser_trace_push(&state, "recv:{id}:{method_hash}")
+        return Ok(^result)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:569
+fn jet_browser_command(browser: &JetBrowser, method: &String, params: DataTree) -> DataTree JetBrowserError! {
+    timeout_ms :: browser.state.borrow().timeout_ms
+    jet_browser_command_with_timeout(browser, method, ^params, timeout_ms)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:578
+fn jet_browser_profile(name: &String) -> JetBrowserProfile JetBrowserError! {
+    version :: match name.as_str() {
+        "bidi-2025.5" -> "2025.5"
+        "bidi-2024.11" -> "2024.11"
+        _ -> return Err(JetBrowserError.new("invalid profile"))
+    }
+    Ok(JetBrowserProfile{name: name.clone(), version: version.to_string()})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:590
+fn jet_browser_timeout(milliseconds: I64) -> JetBrowserTimeout JetBrowserError! {
+    if milliseconds < 1 || milliseconds > 600000 { return Err(JetBrowserError.new("invalid timeout")) }
+    Ok(JetBrowserTimeout{milliseconds: milliseconds})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:597
+// GATE #4565: kernel primitive
+fn jet_browser_project_root() -> String {
+    #Unsafe("read actual native project-root environment with exact reference fallback") { env.var("JET_PROJECT_ROOT").unwrap_or_else(fn(_) { ".".to_string() }) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:601
+fn jet_browser_parse_locked(raw: &String, engine: &String) -> JetBrowserLocked JetBrowserError! {
+    current := None
+    in_browser := false
+    found := None
+    for line in raw.lines() {
+        line := line.trim() // #4303
+        if line.is_empty() || line.starts_with('#') { continue }
+        if line.starts_with('[') {
+            if in_browser {
+                if current.take() is Val(entry) { if entry.engine == engine { found = Val(^entry) } }
+            }
+            in_browser = line == "[[browser]]"
+            if in_browser { current = Val(JetBrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: ""}) }
+            continue
+        }
+        if not in_browser { continue }
+        entry := current.as_mut() ?? continue
+        (key, val) :: line.split_once('=') ?? continue
+        key := key.trim() // #4303
+        val := val.trim().trim_matches('"') // #4303
+        match key {
+            "engine" -> entry.engine = val.to_string()
+            "version" -> entry.version = val.to_string()
+            "binary" -> entry.binary = val.to_string()
+            "protocol" -> entry.protocol = val.to_string()
+            "size" -> entry.size = val.parse<I64>().map_err(fn(_) { JetBrowserError.new("invalid lock") })?
+            "output-hash" -> entry.output_hash = val.to_string()
+            _ -> {}
+        }
+    }
+    if in_browser { if current.take() is Val(entry) { if entry.engine == engine { found = Val(^entry) } } }
+    locked :: found.ok_or_else(fn() { JetBrowserError.new("missing lock") })?
+    if locked.engine.is_empty() || locked.binary.is_empty() || locked.protocol.is_empty() || locked.output_hash.is_empty() { return Err(JetBrowserError.new("invalid lock")) }
+    Ok(^locked)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:672
+// GATE #4565: kernel primitive
+#Unsafe("selected filesystem reads lock and verifies actual binary existence and size without executing it")
+fn jet_browser_locked(engine: &String) -> JetBrowserLocked JetBrowserError! {
+    engine_name :: match engine.as_str() { "chromium" | "firefox" | "webkit" -> engine.as_str(), _ -> return Err(JetBrowserError.new("unknown engine")) }
+    root :: jet_browser_project_root()
+    lock_path :: OSPath.from(&root).join(".jet/lock")
+    raw :: fs.read_to_string(&lock_path).map_err(fn(_) { JetBrowserError.new("missing lock") })?
+    locked :: jet_browser_parse_locked(&raw, engine_name)?
+    path :: OSPath.from(&locked.binary)
+    if not path.is_file() { return Err(JetBrowserError.new("missing binary")) }
+    size :: fs.metadata(path).map_err(fn(_) { JetBrowserError.new("missing binary") })?.len() as I64
+    if size != locked.size { return Err(JetBrowserError.new("size mismatch")) }
+    Ok(^locked)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:694
+fn jet_browser_locked_engine(locked: &JetBrowserLocked) -> String { locked.engine.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:698
+fn jet_browser_locked_version(locked: &JetBrowserLocked) -> String { locked.version.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:702
+fn jet_browser_locked_binary(locked: &JetBrowserLocked) -> String { locked.binary.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:706
+fn jet_browser_locked_protocol(locked: &JetBrowserLocked) -> String { locked.protocol.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:710
+// GATE #4565: kernel primitive
+#Unsafe("reverify native binary metadata with original missing-binary/size error precedence")
+fn jet_browser_locked_verify(locked: &JetBrowserLocked) -> Unit JetBrowserError! {
+    path :: OSPath.from(&locked.binary)
+    if not path.is_file() { return Err(JetBrowserError.new("missing binary")) }
+    size :: fs.metadata(path).map_err(fn(_) { JetBrowserError.new("missing binary") })?.len() as I64
+    if size != locked.size { return Err(JetBrowserError.new("size mismatch")) }
+    Ok(())
+}
+
+use core.net.runtime.top_ws_client.[jet_ws_connect]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:724
+fn jet_browser_connect(endpoint: &String) -> JetBrowser JetBrowserError! {
+    profile :: jet_browser_profile("bidi-2025.5")?
+    timeout :: JetBrowserTimeout{milliseconds: 30000}
+    jet_browser_connect_profile(endpoint, &profile, timeout)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:732
+fn jet_browser_connect_profile(endpoint: &String, profile: &JetBrowserProfile, timeout: JetBrowserTimeout) -> JetBrowser JetBrowserError! {
+    conn :: jet_ws_connect(endpoint).map_err(jet_browser_ws_error)?
+    conn.set_timeout(timeout.milliseconds).map_err(jet_browser_ws_error)?
+    browser :: JetBrowser{state: Rc.new(RefCell.new(JetBrowserState{conn: ^conn, next_id: 1,
+        closed: false, session_started: false, timeout_ms: timeout.milliseconds, profile: profile.name.clone(),
+        cdp: false, trace: ["connect"], trace_bytes: "connect".len(), events: VecDeque.new(), test_actions: None}))}
+    status :: jet_browser_command(&browser, "session.status", jet_browser_object([]))?
+    ready :: match jet_browser_get(&status, "ready") { Val(.Bool(true)) -> true, _ -> false }
+    message :: match jet_browser_get(&status, "message") { Val(.Text(_)) | Val(.TypedText(_)) -> true, _ -> false }
+    if not ready || not message { return Err(JetBrowserError.new("protocol")) }
+    new_session :: jet_browser_command(&browser, "session.new",
+        jet_browser_object([("capabilities", jet_browser_object([("alwaysMatch", jet_browser_object([]))]))]))?
+    browser.state.borrow_mut().session_started = true
+    _session_id :: jet_browser_string(&new_session, "sessionId")?
+    capabilities :: jet_browser_get(&new_session, "capabilities").filter(fn(value) { match value { .Object(_) -> true, _ -> false } })
+        .ok_or_else(fn() { JetBrowserError.new("protocol") })?
+    cdp :: jet_browser_get(capabilities, "goog:cdp").is_some_and(fn(value) { match value { .Bool(true) -> true, _ -> false } })
+    browser.state.borrow_mut().cdp = cdp
+    Ok(^browser)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:790
+fn jet_browser_abilities(browser: &JetBrowser) -> JetBrowserAbilities {
+    state :: browser.state.borrow()
+    JetBrowserAbilities{bidi: true, cdp: state.cdp, profile: state.profile.clone()}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:799
+fn jet_browser_context(browser: &JetBrowser) -> JetBrowserContext JetBrowserError! {
+    result :: jet_browser_command(browser, "browser.createUserContext", jet_browser_object([]))?
+    Ok(JetBrowserContext{state: Rc.new(JetBrowserContextState{browser: browser.clone(),
+        id: jet_browser_string(&result, "userContext")?, closed: Cell.new(false)})})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:814
+fn jet_browser_subscribe(browser: &JetBrowser, event: &String) -> Unit JetBrowserError! {
+    events :: DataTree.Array([jet_browser_text(event)])
+    jet_browser_command(browser, "session.subscribe", jet_browser_object([("events", ^events)])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:827
+fn jet_browser_next_event(browser: &JetBrowser, timeout: JetBrowserTimeout) -> JetBrowserEvent JetBrowserError! {
+    state := browser.state.borrow_mut()
+    if state.closed { return Err(JetBrowserError.new("closed")) }
+    if state.events.pop_front() is Val(event) { return Ok(^event) }
+    // GATE #4565: kernel primitive
+    deadline :: #Unsafe("one absolute native deadline bounds next event receipt") { time.Instant.now() + time.Duration.from_millis(timeout.milliseconds as U64) }
+    loop {
+        value :: jet_browser_recv_json(&state, deadline)?
+        if jet_browser_capture_event(&state, &value)? { return state.events.pop_front().ok_or_else(fn() { JetBrowserError.new("protocol") }) }
+        return Err(JetBrowserError.new("protocol"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:852
+fn jet_browser_phase_ok(phase: &String) -> Bool { phase == "beforeRequestSent" || phase == "responseStarted" || phase == "authRequired" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:859
+fn jet_browser_add_intercept(browser: &JetBrowser, phase: &String) -> JetBrowserIntercept JetBrowserError! {
+    if not jet_browser_phase_ok(phase) { return Err(JetBrowserError.new("protocol")) }
+    result :: jet_browser_command(browser, "network.addIntercept", jet_browser_object([("phases", DataTree.Array([jet_browser_text(phase)]))]))?
+    Ok(JetBrowserIntercept{state: Rc.new(JetBrowserInterceptState{browser: browser.clone(),
+        id: jet_browser_string(&result, "intercept")?, removed: Cell.new(false)})})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:883
+fn jet_browser_add_intercept_url(browser: &JetBrowser, phase: &String, url_pattern: &String) -> JetBrowserIntercept JetBrowserError! {
+    if not jet_browser_phase_ok(phase) || url_pattern.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    pattern :: jet_browser_object([("type", jet_browser_text("string")), ("pattern", jet_browser_text(url_pattern))])
+    result :: jet_browser_command(browser, "network.addIntercept", jet_browser_object([
+        ("phases", DataTree.Array([jet_browser_text(phase)])), ("urlPatterns", DataTree.Array([^pattern]))]))?
+    Ok(JetBrowserIntercept{state: Rc.new(JetBrowserInterceptState{browser: browser.clone(),
+        id: jet_browser_string(&result, "intercept")?, removed: Cell.new(false)})})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:915
+fn jet_browser_intercept_remove(intercept: &JetBrowserIntercept) -> Unit JetBrowserError! {
+    if intercept.state.removed.get() { return Ok(()) }
+    _ :: jet_browser_command(&intercept.state.browser, "network.removeIntercept",
+        jet_browser_object([("intercept", jet_browser_text(&intercept.state.id))]))?
+    intercept.state.removed.set(true)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:928
+fn jet_browser_continue_request(browser: &JetBrowser, request_id: &String) -> Unit JetBrowserError! {
+    if request_id.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    jet_browser_command(browser, "network.continueRequest", jet_browser_object([("request", jet_browser_text(request_id))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:943
+fn jet_browser_fail_request(browser: &JetBrowser, request_id: &String) -> Unit JetBrowserError! {
+    if request_id.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    jet_browser_command(browser, "network.failRequest", jet_browser_object([
+        ("request", jet_browser_text(request_id)), ("errorReason", jet_browser_text("Failed"))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:961
+fn jet_browser_fulfill_request(browser: &JetBrowser, request_id: &String, status: I64, body: &String) -> Unit JetBrowserError! {
+    if request_id.is_empty() || status < 100 || status > 599 { return Err(JetBrowserError.new("protocol")) }
+    body_value :: jet_browser_object([("type", jet_browser_text("string")), ("value", jet_browser_text(body))])
+    jet_browser_command(browser, "network.provideResponse", jet_browser_object([
+        ("request", jet_browser_text(request_id)), ("statusCode", DataTree.Int(Int{status})), ("body", ^body_value)])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:987
+fn jet_browser_allow_downloads(browser: &JetBrowser, folder: &String) -> Unit JetBrowserError! {
+    if folder.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    jet_browser_command(browser, "browser.setDownloadBehavior", jet_browser_object([("downloadBehavior",
+        jet_browser_object([("type", jet_browser_text("allowed")), ("destinationFolder", jet_browser_text(folder))]))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1008
+fn jet_browser_protocol(browser: &JetBrowser, kind: &String) -> JetBrowserProtocol JetBrowserError! {
+    state :: browser.state.borrow()
+    if state.closed { return Err(JetBrowserError.new("closed")) }
+    supported :: match kind.as_str() { "bidi" -> true, "cdp" -> state.cdp, _ -> false }
+    if not supported { return Err(JetBrowserError.new("unsupported protocol")) }
+    Ok(JetBrowserProtocol{browser: browser.clone(), kind: kind.clone()})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1030
+fn jet_browser_trace(browser: &JetBrowser) -> JetBrowserTrace { JetBrowserTrace{entries: browser.state.borrow().trace.clone()} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1037
+fn jet_browser_privacy(_browser: &JetBrowser) -> JetBrowserPrivacy {
+    JetBrowserPrivacy{isolated_profiles: true, redact_receipts: true, shared_profiles: false}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1046
+fn jet_browser_receipt(browser: &JetBrowser) -> JetBrowserReceipt {
+    state :: browser.state.borrow()
+    JetBrowserReceipt{entries: state.trace.clone(), isolated: true, cleaned: state.closed}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1055
+fn jet_browser_close(browser: &JetBrowser) -> Unit JetBrowserError! {
+    state :: browser.state.borrow()
+    if state.closed { return Ok(()) }
+    if not state.session_started { drop(^state); browser.state.borrow_mut().closed = true; return Ok(()) }
+    drop(^state)
+    _ :: jet_browser_command(browser, "session.end", jet_browser_object([]))?
+    browser.state.borrow_mut().closed = true
+    Ok(())
+}
+impl Drop for JetBrowser {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1072
+    fn drop(self: &Self) -> { if Rc.strong_count(&self.state) == 1 { _ :: jet_browser_close(self) } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1079
+fn jet_browser_context_create_tab(context: &JetBrowserContext) -> JetBrowserPage JetBrowserError! {
+    if context.state.closed.get() { return Err(JetBrowserError.new("closed")) }
+    result :: jet_browser_command(&context.state.browser, "browsingContext.create",
+        jet_browser_object([("type", jet_browser_text("tab")), ("userContext", jet_browser_text(&context.state.id))]))?
+    Ok(JetBrowserPage{state: Rc.new(JetBrowserPageState{browser: context.state.browser.clone(),
+        context: context.state.clone(), id: jet_browser_string(&result, "context")?, closed: Cell.new(false)})})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1104
+fn jet_browser_context_page(context: &JetBrowserContext) -> JetBrowserPage JetBrowserError! { jet_browser_context_create_tab(context) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1111
+fn jet_browser_context_tab(context: &JetBrowserContext) -> JetBrowserPage JetBrowserError! { jet_browser_context_create_tab(context) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1117
+fn jet_browser_context_close(context: &JetBrowserContext) -> Unit JetBrowserError! { jet_browser_context_state_close(&context.state) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1122
+fn jet_browser_context_isolated(_context: &JetBrowserContext) -> Bool { true }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1127
+fn jet_browser_context_user_hash(context: &JetBrowserContext) -> String { jet_browser_fact_hash(&context.state.id) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1131
+fn jet_browser_context_state_close(context: &JetBrowserContextState) -> Unit JetBrowserError! {
+    if context.closed.get() { return Ok(()) }
+    if context.browser.state.borrow().closed { context.closed.set(true); return Ok(()) }
+    _ :: jet_browser_command(&context.browser, "browser.removeUserContext", jet_browser_object([("userContext", jet_browser_text(&context.id))]))?
+    context.closed.set(true)
+    Ok(())
+}
+impl Drop for JetBrowserContextState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1151
+    fn drop(self: &Self) -> { _ :: jet_browser_context_state_close(self) }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1156
+// GATE #4565: kernel primitive
+fn jet_browser_navigation_url(url: &String) -> String {
+    if url.contains("://") || url.starts_with("about:") || url.starts_with("data:") { return url.clone() }
+    base :: #Unsafe("resolve test-relative URL from actual test server environment precedence") {
+        env.var("JET_TEST_WEB_SERVER_URL").or_else(fn(_) { env.var("JET_BROWSER_TEST_SERVER_URL") }).unwrap_or_default()
+    }
+    if base.is_empty() { return url.clone() }
+    "{base.trim_end_matches('/')}/{url.trim_start_matches('/')}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1173
+fn jet_browser_page_goto(page: &JetBrowserPage, url: &String) -> Unit JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    target_url :: jet_browser_navigation_url(url)
+    jet_browser_record_action(&page.state.browser, "goto:{jet_browser_fact_hash(url)}")
+    jet_browser_command(&page.state.browser, "browsingContext.navigate", jet_browser_object([
+        ("context", jet_browser_text(&page.state.id)), ("url", jet_browser_text(&target_url)), ("wait", jet_browser_text("complete"))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1197
+fn jet_browser_page_partition(page: &JetBrowserPage) -> DataTree {
+    jet_browser_object([("type", jet_browser_text("context")), ("context", jet_browser_text(&page.state.id))])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1204
+fn jet_browser_bytes_value(text: &String) -> DataTree {
+    jet_browser_object([("type", jet_browser_text("string")), ("value", jet_browser_text(text))])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1212
+fn jet_browser_page_screenshot(page: &JetBrowserPage) -> String JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    result :: jet_browser_command(&page.state.browser, "browsingContext.captureScreenshot", jet_browser_object([
+        ("context", jet_browser_text(&page.state.id)), ("format", jet_browser_object([("type", jet_browser_text("image/png"))]))]))?
+    jet_browser_string(&result, "data")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1231
+fn jet_browser_page_pdf(page: &JetBrowserPage) -> String JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    result :: jet_browser_command(&page.state.browser, "browsingContext.print", jet_browser_object([("context", jet_browser_text(&page.state.id))]))?
+    jet_browser_string(&result, "data")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1244
+fn jet_browser_page_set_cookie(page: &JetBrowserPage, name: &String, value: &String, domain: &String) -> Unit JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    if name.is_empty() || domain.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    jet_browser_command(&page.state.browser, "storage.setCookie", jet_browser_object([
+        ("cookie", jet_browser_object([("name", jet_browser_text(name)), ("value", jet_browser_bytes_value(value)), ("domain", jet_browser_text(domain))])),
+        ("partition", jet_browser_page_partition(page))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1274
+fn jet_browser_cookie_string_value(cookie: &DataTree) -> String JetBrowserError! {
+    value :: jet_browser_get(cookie, "value") ?? return Err(JetBrowserError.new("protocol"))
+    match jet_browser_get(value, "type") {
+        Val(.Text(kind)) if kind == "string" || kind == "base64" -> jet_browser_string(value, "value")
+        _ -> Err(JetBrowserError.new("protocol"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1289
+fn jet_browser_page_cookie(page: &JetBrowserPage, name: &String) -> String? JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    if name.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    result :: jet_browser_command(&page.state.browser, "storage.getCookies", jet_browser_object([
+        ("filter", jet_browser_object([("name", jet_browser_text(name))])), ("partition", jet_browser_page_partition(page))]))?
+    cookies :: match jet_browser_get(&result, "cookies") { Val(.Array(cookies)) -> cookies, _ -> return Err(JetBrowserError.new("protocol")) }
+    match cookies.first() { None -> Ok(None), Val(cookie) -> Ok(Val(jet_browser_cookie_string_value(cookie)?)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1320
+fn jet_browser_page_clear_cookies(page: &JetBrowserPage) -> Unit JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    jet_browser_command(&page.state.browser, "storage.deleteCookies", jet_browser_object([("partition", jet_browser_page_partition(page))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1332
+fn jet_browser_storage_kind_ok(kind: &String) -> Bool { kind == "local" || kind == "session" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1336
+fn jet_browser_page_storage_call(page: &JetBrowserPage, function: &String, args: [DataTree]) -> DataTree JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    jet_browser_command(&page.state.browser, "script.callFunction", jet_browser_object([
+        ("functionDeclaration", jet_browser_text(function)), ("awaitPromise", DataTree.Bool(false)),
+        ("target", jet_browser_object([("context", jet_browser_text(&page.state.id))])), ("arguments", DataTree.Array(^args))]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1359
+fn jet_browser_remote_string(result: &DataTree) -> String? JetBrowserError! {
+    value :: jet_browser_get(result, "result") ?? return Err(JetBrowserError.new("protocol"))
+    match jet_browser_get(value, "type") {
+        Val(.Text(kind)) if kind == "null" || kind == "undefined" -> Ok(None)
+        Val(.Text(kind)) if kind == "string" -> Ok(Val(jet_browser_string(value, "value")?))
+        _ -> Err(JetBrowserError.new("protocol"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1376
+fn jet_browser_page_evaluate_text(page: &JetBrowserPage, expression: &String) -> String JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    result :: jet_browser_command(&page.state.browser, "script.evaluate", jet_browser_object([
+        ("expression", jet_browser_text(expression)), ("awaitPromise", DataTree.Bool(false)), ("resultOwnership", jet_browser_text("none")),
+        ("target", jet_browser_object([("context", jet_browser_text(&page.state.id))]))]))?
+    jet_browser_remote_string(&result)?.ok_or_else(fn() { JetBrowserError.new("protocol") })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1399
+fn jet_browser_page_url(page: &JetBrowserPage) -> String JetBrowserError! { jet_browser_page_evaluate_text(page, "String(location.href)") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1403
+fn jet_browser_page_title(page: &JetBrowserPage) -> String JetBrowserError! { jet_browser_page_evaluate_text(page, "String(document.title || '')") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1407
+fn jet_browser_page_text(page: &JetBrowserPage) -> String JetBrowserError! { jet_browser_page_evaluate_text(page, "document.body ? String(document.body.innerText || '') : ''") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1414
+fn jet_browser_page_dom(page: &JetBrowserPage) -> String JetBrowserError! { jet_browser_page_evaluate_text(page, "document.documentElement ? document.documentElement.outerHTML : ''") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1422
+fn jet_browser_page_storage_get(page: &JetBrowserPage, kind: &String, key: &String) -> String? JetBrowserError! {
+    if not jet_browser_storage_kind_ok(kind) || key.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    store :: if kind == "local" { "localStorage" } else { "sessionStorage" }
+    function :: "function(key) {{ return {store}.getItem(key); }}"
+    result :: jet_browser_page_storage_call(page, &function, [jet_browser_object([("type", jet_browser_text("string")), ("value", jet_browser_text(key))])])?
+    jet_browser_remote_string(&result)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1448
+fn jet_browser_page_storage_set(page: &JetBrowserPage, kind: &String, key: &String, value: &String) -> Unit JetBrowserError! {
+    if not jet_browser_storage_kind_ok(kind) || key.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    store :: if kind == "local" { "localStorage" } else { "sessionStorage" }
+    function :: "function(key, value) {{ {store}.setItem(key, value); }}"
+    jet_browser_page_storage_call(page, &function, [
+        jet_browser_object([("type", jet_browser_text("string")), ("value", jet_browser_text(key))]),
+        jet_browser_object([("type", jet_browser_text("string")), ("value", jet_browser_text(value))])]).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1481
+fn jet_browser_page_storage_clear(page: &JetBrowserPage, kind: &String) -> Unit JetBrowserError! {
+    if not jet_browser_storage_kind_ok(kind) { return Err(JetBrowserError.new("protocol")) }
+    store :: if kind == "local" { "localStorage" } else { "sessionStorage" }
+    function :: "function() {{ {store}.clear(); }}"
+    jet_browser_page_storage_call(page, &function, []).map(fn(_) { () })
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1497
+fn jet_browser_css_attr_equals(attr: &String, value: &String) -> String {
+    escaped := String.with_capacity(value.len())
+    for ch in value.chars() {
+        match ch { '\\' | '"' -> { escaped.push('\\'); escaped.push(ch) }, _ -> escaped.push(ch) }
+    }
+    "[{attr}=\"{escaped}\"]"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1511
+fn jet_browser_page_get_by_role(page: &JetBrowserPage, role: &String, name: &String) -> JetBrowserLocator {
+    jet_browser_record_action(&page.state.browser, "locator:role:{jet_browser_fact_hash(role)}:{jet_browser_fact_hash(name)}")
+    JetBrowserLocator{page: page.state.clone(), locator_type: "accessibility", role: role.clone(), name: name.clone(), value: ""}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1533
+fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &String) -> JetBrowserLocator {
+    jet_browser_record_action(&page.state.browser, "locator:text:{jet_browser_fact_hash(text)}")
+    JetBrowserLocator{page: page.state.clone(), locator_type: "innerText", role: "", name: "", value: text.clone()}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1547
+fn jet_browser_page_get_by_label(page: &JetBrowserPage, name: &String) -> JetBrowserLocator {
+    jet_browser_record_action(&page.state.browser, "locator:label:{jet_browser_fact_hash(name)}")
+    JetBrowserLocator{page: page.state.clone(), locator_type: "accessibility", role: "", name: name.clone(), value: ""}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1561
+fn jet_browser_page_get_by_placeholder(page: &JetBrowserPage, text: &String) -> JetBrowserLocator {
+    jet_browser_record_action(&page.state.browser, "locator:placeholder:{jet_browser_fact_hash(text)}")
+    JetBrowserLocator{page: page.state.clone(), locator_type: "css", role: "", name: "", value: jet_browser_css_attr_equals("placeholder", text)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1578
+fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &String) -> JetBrowserLocator {
+    jet_browser_record_action(&page.state.browser, "locator:test-id:{jet_browser_fact_hash(id)}")
+    JetBrowserLocator{page: page.state.clone(), locator_type: "css", role: "", name: "", value: jet_browser_css_attr_equals("data-testid", id)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1592
+fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &String) -> JetBrowserLocator {
+    jet_browser_record_action(&page.state.browser, "locator:css:{jet_browser_fact_hash(selector)}")
+    JetBrowserLocator{page: page.state.clone(), locator_type: "css", role: "", name: "", value: selector.clone()}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1606
+fn jet_browser_locator_wire(locator: &JetBrowserLocator) -> DataTree JetBrowserError! {
+    match locator.locator_type.as_str() {
+        "accessibility" -> {
+            value := []
+            if not locator.role.is_empty() { value.push(("role", jet_browser_text(&locator.role))) }
+            if not locator.name.is_empty() { value.push(("name", jet_browser_text(&locator.name))) }
+            if value.is_empty() { return Err(JetBrowserError.new("protocol")) }
+            Ok(jet_browser_object([("type", jet_browser_text("accessibility")), ("value", jet_browser_object(^value))]))
+        }
+        "css" | "innerText" -> Ok(jet_browser_object([("type", jet_browser_text(&locator.locator_type)), ("value", jet_browser_text(&locator.value))]))
+        _ -> Err(JetBrowserError.new("protocol"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1633
+fn jet_browser_locator_fingerprint(locator: &JetBrowserLocator) -> String {
+    identity := locator.locator_type.clone()
+    identity.push(':'); identity.push_str(&locator.role)
+    identity.push(':'); identity.push_str(&locator.name)
+    identity.push(':'); identity.push_str(&locator.value)
+    jet_browser_fact_hash(&identity)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1644
+fn jet_browser_record_locator_action(locator: &JetBrowserLocator, action: &String) -> {
+    jet_browser_record_action(&locator.page.browser, "locator-action:{action}:{jet_browser_locator_fingerprint(locator)}")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1655
+fn jet_browser_frame_from_page(page: &JetBrowserPage, id: String) -> JetBrowserFrame {
+    JetBrowserFrame{state: Rc.new(JetBrowserFrameState{browser: page.state.browser.clone(), page: page.state.clone(), id: ^id, closed: Cell.new(false)})}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1669
+fn jet_browser_page_main_frame(page: &JetBrowserPage) -> JetBrowserFrame JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    Ok(jet_browser_frame_from_page(page, page.state.id.clone()))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1678
+fn jet_browser_collect_frame_ids(node: &DataTree, out: &[String]) -> Unit JetBrowserError! {
+    out.push(jet_browser_string(node, "context")?)
+    match jet_browser_get(node, "children") {
+        None -> Ok(())
+        Val(.Array(children)) -> { for child in children { jet_browser_collect_frame_ids(child, out)? }; Ok(()) }
+        Val(_) -> Err(JetBrowserError.new("protocol"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1695
+fn jet_browser_page_frames(page: &JetBrowserPage) -> [JetBrowserFrame] JetBrowserError! {
+    if page.state.closed.get() || page.state.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    result :: jet_browser_command(&page.state.browser, "browsingContext.getTree", jet_browser_object([("root", jet_browser_text(&page.state.id))]))?
+    contexts :: match jet_browser_get(&result, "contexts") { Val(.Array(contexts)) -> contexts, _ -> return Err(JetBrowserError.new("protocol")) }
+    ids := []
+    for node in contexts { jet_browser_collect_frame_ids(node, &ids)? }
+    Ok(ids.into_iter().map(fn(id) { jet_browser_frame_from_page(page, ^id) }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1719
+fn jet_browser_frame_close(frame: &JetBrowserFrame) -> Unit JetBrowserError! {
+    if frame.state.closed.get() { return Ok(()) }
+    if frame.state.page.closed.get() || frame.state.page.context.closed.get() || frame.state.browser.state.borrow().closed {
+        frame.state.closed.set(true)
+        return Ok(())
+    }
+    _ :: jet_browser_command(&frame.state.browser, "browsingContext.close", jet_browser_object([("context", jet_browser_text(&frame.state.id))]))?
+    frame.state.closed.set(true)
+    if frame.state.id == frame.state.page.id { frame.state.page.closed.set(true) }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1742
+fn jet_browser_page_close(page: &JetBrowserPage) -> Unit JetBrowserError! { jet_browser_page_state_close(&page.state) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1746
+fn jet_browser_page_state_close(page: &JetBrowserPageState) -> Unit JetBrowserError! {
+    if page.closed.get() { return Ok(()) }
+    if page.context.closed.get() || page.browser.state.borrow().closed { page.closed.set(true); return Ok(()) }
+    _ :: jet_browser_command(&page.browser, "browsingContext.close", jet_browser_object([("context", jet_browser_text(&page.id))]))?
+    page.closed.set(true)
+    Ok(())
+}
+impl Drop for JetBrowserPageState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1764
+    fn drop(self: &Self) -> { _ :: jet_browser_page_state_close(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1769
+fn jet_browser_locator_query(locator: &JetBrowserLocator) -> String? JetBrowserError! {
+    timeout_ms :: locator.page.browser.state.borrow().timeout_ms
+    jet_browser_locator_query_with_timeout(locator, timeout_ms)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1776
+fn jet_browser_locator_query_with_timeout(locator: &JetBrowserLocator, timeout_ms: I64) -> String? JetBrowserError! {
+    if locator.page.closed.get() || locator.page.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    result :: jet_browser_command_with_timeout(&locator.page.browser, "browsingContext.locateNodes", jet_browser_object([
+        ("context", jet_browser_text(&locator.page.id)), ("locator", jet_browser_locator_wire(locator)?), ("maxNodeCount", DataTree.Float(1.0))]), timeout_ms)?
+    nodes :: match jet_browser_get(&result, "nodes") { Val(.Array(nodes)) -> nodes, _ -> return Err(JetBrowserError.new("protocol")) }
+    match nodes.first() { None -> Ok(None), Val(node) -> Ok(Val(jet_browser_string(node, "sharedId")?)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1802
+// GATE #4565: kernel primitive
+#Unsafe("locator wait uses native absolute deadline and actual 10ms sleep, no fabricated readiness")
+fn jet_browser_locator_wait(locator: &JetBrowserLocator, timeout: JetBrowserTimeout) -> Unit JetBrowserError! {
+    jet_browser_record_locator_action(locator, "wait")
+    deadline :: time.Instant.now() + time.Duration.from_millis(timeout.milliseconds as U64)
+    loop {
+        remaining :: jet_browser_remaining_ms(deadline)?
+        if jet_browser_locator_query_with_timeout(locator, remaining)?.is_some() { return Ok(()) }
+        std.thread.sleep(time.Duration.from_millis(10))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1818
+// GATE #4565: kernel primitive
+#Unsafe("gone wait shares one absolute native deadline and reference polling cadence")
+fn jet_browser_locator_wait_gone(locator: &JetBrowserLocator, timeout: JetBrowserTimeout) -> Unit JetBrowserError! {
+    jet_browser_record_locator_action(locator, "wait-gone")
+    deadline :: time.Instant.now() + time.Duration.from_millis(timeout.milliseconds as U64)
+    loop {
+        remaining :: jet_browser_remaining_ms(deadline)?
+        if jet_browser_locator_query_with_timeout(locator, remaining)?.is_none() { return Ok(()) }
+        std.thread.sleep(time.Duration.from_millis(10))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1834
+fn jet_browser_locator_resolve(locator: &JetBrowserLocator) -> String JetBrowserError! {
+    if locator.page.closed.get() || locator.page.context.closed.get() { return Err(JetBrowserError.new("closed")) }
+    jet_browser_locator_query(locator)?.ok_or_else(fn() { JetBrowserError.new("timeout") })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1843
+fn jet_browser_locator_pointer(locator: &JetBrowserLocator, shared_id: &String, down_up: Bool) -> Unit JetBrowserError! {
+    origin :: jet_browser_object([("type", jet_browser_text("element")), ("element", jet_browser_object([("sharedId", jet_browser_text(shared_id))]))])
+    actions := [jet_browser_object([("type", jet_browser_text("pointerMove")), ("x", DataTree.Float(0.0)), ("y", DataTree.Float(0.0)), ("origin", ^origin)])]
+    if down_up {
+        actions.push(jet_browser_object([("type", jet_browser_text("pointerDown")), ("button", DataTree.Float(0.0))]))
+        actions.push(jet_browser_object([("type", jet_browser_text("pointerUp")), ("button", DataTree.Float(0.0))]))
+    }
+    source :: jet_browser_object([("type", jet_browser_text("pointer")), ("id", jet_browser_text("mouse")),
+        ("parameters", jet_browser_object([("pointerType", jet_browser_text("mouse"))])), ("actions", DataTree.Array(^actions))])
+    jet_browser_command(&locator.page.browser, "input.performActions", jet_browser_object([
+        ("context", jet_browser_text(&locator.page.id)), ("actions", DataTree.Array([^source]))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1891
+fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Unit JetBrowserError! {
+    jet_browser_record_locator_action(locator, "click")
+    shared_id :: jet_browser_locator_resolve(locator)?
+    jet_browser_locator_pointer(locator, &shared_id, true)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1897
+fn jet_browser_locator_hover(locator: &JetBrowserLocator) -> Unit JetBrowserError! {
+    jet_browser_record_locator_action(locator, "hover")
+    shared_id :: jet_browser_locator_resolve(locator)?
+    jet_browser_locator_pointer(locator, &shared_id, false)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1903
+fn jet_browser_locator_fill(locator: &JetBrowserLocator, text: &String) -> Unit JetBrowserError! {
+    jet_browser_record_locator_action(locator, "fill:{jet_browser_fact_hash(text)}")
+    shared_id :: jet_browser_locator_resolve(locator)?
+    // Clear then assign DOM value; no page data enters trace.
+    function :: "function(el, value) {{el.focus();if ('value' in el) {{ el.value = ''; el.value = value; }}else if (el.isContentEditable) {{ el.textContent = value; }}el.dispatchEvent(new Event('input', {{ bubbles: true }}));el.dispatchEvent(new Event('change', {{ bubbles: true }}));}}"
+    jet_browser_command(&locator.page.browser, "script.callFunction", jet_browser_object([
+        ("functionDeclaration", jet_browser_text(&function)), ("awaitPromise", DataTree.Bool(false)),
+        ("target", jet_browser_object([("context", jet_browser_text(&locator.page.id))])),
+        ("arguments", DataTree.Array([
+            jet_browser_object([("type", jet_browser_text("node")), ("sharedId", jet_browser_text(&shared_id))]),
+            jet_browser_object([("type", jet_browser_text("string")), ("value", jet_browser_text(text))])]))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1949
+fn jet_browser_locator_press(locator: &JetBrowserLocator, key: &String) -> Unit JetBrowserError! {
+    jet_browser_record_locator_action(locator, "press:{jet_browser_fact_hash(key)}")
+    shared_id :: jet_browser_locator_resolve(locator)?
+    jet_browser_locator_pointer(locator, &shared_id, true)?
+    actions :: DataTree.Array([jet_browser_object([("type", jet_browser_text("keyDown")), ("value", jet_browser_text(key))]),
+        jet_browser_object([("type", jet_browser_text("keyUp")), ("value", jet_browser_text(key))])])
+    source :: jet_browser_object([("type", jet_browser_text("key")), ("id", jet_browser_text("keyboard")), ("actions", ^actions)])
+    jet_browser_command(&locator.page.browser, "input.performActions", jet_browser_object([
+        ("context", jet_browser_text(&locator.page.id)), ("actions", DataTree.Array([^source]))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1986
+fn jet_browser_locator_set_files(locator: &JetBrowserLocator, path: &String) -> Unit JetBrowserError! {
+    if path.is_empty() { return Err(JetBrowserError.new("protocol")) }
+    jet_browser_record_locator_action(locator, "set-files:{jet_browser_fact_hash(path)}")
+    shared_id :: jet_browser_locator_resolve(locator)?
+    jet_browser_command(&locator.page.browser, "input.setFiles", jet_browser_object([
+        ("context", jet_browser_text(&locator.page.id)), ("element", jet_browser_object([("sharedId", jet_browser_text(&shared_id))])),
+        ("files", DataTree.Array([jet_browser_text(path)]))])).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2016
+fn jet_browser_event_kind(event: &JetBrowserEvent) -> String { event.method.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2020
+fn jet_browser_event_request_id(event: &JetBrowserEvent) -> String { event.request_id.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2024
+fn jet_browser_event_request_method(event: &JetBrowserEvent) -> String { event.request_method.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2028
+fn jet_browser_event_url_hash(event: &JetBrowserEvent) -> String { event.url_hash.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2032
+fn jet_browser_event_is_blocked(event: &JetBrowserEvent) -> Bool { event.is_blocked }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2036
+fn jet_browser_event_status_code(event: &JetBrowserEvent) -> I64 { event.status_code }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2040
+fn jet_browser_event_download_id(event: &JetBrowserEvent) -> String { event.download_id.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2044
+fn jet_browser_event_suggested_filename_hash(event: &JetBrowserEvent) -> String { event.suggested_filename_hash.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2051
+// CDP Domain.command shape cannot silently become a second BiDi spelling.
+fn jet_browser_cdp_method_ok(method: &String) -> Bool {
+    (domain, command) :: method.split_once('.') ?? return false
+    if method.bytes().filter(fn(b) { *b == 46 }).count() != 1 || domain.is_empty() || command.is_empty() || method.contains(':') { return false }
+    domain_chars := domain.chars()
+    first :: domain_chars.next() ?? return false
+    first.is_ascii_uppercase() && domain_chars.all(fn(c) { c.is_ascii_alphanumeric() }) &&
+        command.chars().next().is_some_and(fn(c) { c.is_ascii_alphabetic() }) && command.chars().all(fn(c) { c.is_ascii_alphanumeric() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2078
+fn jet_browser_protocol_send(protocol: &JetBrowserProtocol, method: &String, params_json: &String) -> String JetBrowserError! {
+    params :: parse_json_strict(params_json).map_err(fn(_) { JetBrowserError.new("protocol") })?
+    if params is not DataTree.Object(_) { return Err(JetBrowserError.new("protocol")) }
+    result :: if protocol.kind == "bidi" {
+        if method.starts_with("goog:cdp.") { return Err(JetBrowserError.new("unsupported protocol")) }
+        jet_browser_command(&protocol.browser, method, ^params)?
+    } else if protocol.kind == "cdp" {
+        if not protocol.browser.state.borrow().cdp { return Err(JetBrowserError.new("unsupported protocol")) }
+        if not jet_browser_cdp_method_ok(method) { return Err(JetBrowserError.new("protocol")) }
+        jet_browser_command(&protocol.browser, "goog:cdp.sendCommand", jet_browser_object([("method", jet_browser_text(method)), ("params", ^params)]))?
+    } else { return Err(JetBrowserError.new("unsupported protocol")) }
+    Ok(render_json(&result, false, 0))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2114
+fn jet_browser_abilities_bidi(caps: &JetBrowserAbilities) -> Bool { caps.bidi }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2118
+fn jet_browser_abilities_cdp(caps: &JetBrowserAbilities) -> Bool { caps.cdp }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2122
+fn jet_browser_abilities_profile(caps: &JetBrowserAbilities) -> String { caps.profile.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2126
+fn jet_browser_trace_entry_count(trace: &JetBrowserTrace) -> I64 { trace.entries.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2130
+fn jet_browser_trace_redacted(trace: &JetBrowserTrace) -> Bool {
+    total :: trace.entries.iter().map(fn(entry) { entry.len() }).sum<USize>()
+    total <= JET_BROWSER_TRACE_LIMIT_BYTES && trace.entries.iter().all(fn(entry) {
+        if entry == "connect" { return true }
+        parts := entry.split(':')
+        kind :: parts.next() ?? return false
+        match kind {
+            "event" -> parts.next().is_some_and(fn(hash) { hash.len() == 16 && hash.bytes().all(fn(byte) { byte.is_ascii_hexdigit() }) && parts.next().is_none() })
+            "send" | "recv" | "error" -> parts.next().is_some_and(fn(id) { not id.is_empty() && id.bytes().all(fn(byte) { byte.is_ascii_digit() }) }) &&
+                parts.next().is_some_and(fn(hash) { hash.len() == 16 && hash.bytes().all(fn(byte) { byte.is_ascii_hexdigit() }) }) && parts.next().is_none()
+            _ -> false
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2159
+fn jet_browser_trace_summary(trace: &JetBrowserTrace) -> String { trace.entries.join(",") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2163
+fn jet_browser_privacy_isolated_profiles(privacy: &JetBrowserPrivacy) -> Bool { privacy.isolated_profiles }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2167
+fn jet_browser_privacy_redact_receipts(privacy: &JetBrowserPrivacy) -> Bool { privacy.redact_receipts }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2171
+fn jet_browser_privacy_shared_profiles(privacy: &JetBrowserPrivacy) -> Bool { privacy.shared_profiles }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2175
+fn jet_browser_receipt_entry_count(receipt: &JetBrowserReceipt) -> I64 { receipt.entries.len() as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2179
+fn jet_browser_receipt_redacted(receipt: &JetBrowserReceipt) -> Bool { jet_browser_trace_redacted(&JetBrowserTrace{entries: receipt.entries.clone()}) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2185
+fn jet_browser_receipt_isolated(receipt: &JetBrowserReceipt) -> Bool { receipt.isolated }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2189
+fn jet_browser_receipt_cleaned(receipt: &JetBrowserReceipt) -> Bool { receipt.cleaned }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:2193
+fn jet_browser_receipt_summary(receipt: &JetBrowserReceipt) -> String { receipt.entries.join(",") }
 

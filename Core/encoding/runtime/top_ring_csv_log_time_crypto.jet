@@ -1,76 +1,40 @@
-// PORT-PENDING 0282 crates-jet-codegen-src-prelude-corelib-top-handlesraylib-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:1-72
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── E2-M9: First-party ring libraries ────────────────────────────────────────
-//RS // Pure-Rust, zero external crates (I6). CSV, TOML, YAML, log, time, crypto.
-//RS 
-//RS // ── jet.csv ───────────────────────────────────────────────────────────────────
-//RS fn jet_ring_csv_records(
-//RS     text: &String,
-//RS     delimiter: &String,
-//RS     header: bool,
-//RS     skip_blank: bool,
-//RS ) -> Result<Vec<jet_csv_kernel::CsvRecord>, String> {
-//RS     jet_csv_kernel::parse(text, jet_csv_options(delimiter, header, skip_blank)?)
-//RS }
-//RS 
-//RS fn jet_ring_csv_parse(
-//RS     text: &String,
-//RS     delimiter: &String,
-//RS     header: bool,
-//RS     skip_blank: bool,
-//RS ) -> Result<Vec<Vec<String>>, String> {
-//RS     jet_ring_csv_records(text, delimiter, header, skip_blank)
-//RS         .map(|records| records.into_iter().map(|record| record.fields).collect())
-//RS }
-//RS 
-//RS fn jet_ring_csv_rows(
-//RS     text: &String,
-//RS     delimiter: &String,
-//RS     header: bool,
-//RS     skip_blank: bool,
-//RS ) -> Result<Vec<jet_std::CSVRow>, String> {
-//RS     jet_ring_csv_records(text, delimiter, header, skip_blank).map(|records| {
-//RS         records
-//RS             .into_iter()
-//RS             .map(|record| jet_std::CSVRow {
-//RS                 fields: record.fields,
-//RS                 line: record.line,
-//RS             })
-//RS             .collect()
-//RS     })
-//RS }
-//RS 
-//RS fn jet_ring_csv_render(rows: &Vec<Vec<String>>) -> String {
-//RS     jet_csv_kernel::render(rows)
-//RS }
-//RS 
-//RS // D-SHAPE-CTORVERB1=C: generic TTL uses ExpiringValue.new. The checked MIR
-//RS // route passes the TTL and the Clock by reference.
-//RS fn jet_expiring_new<T: Clone>(
-//RS     value: T,
-//RS     ttl: &jet_std::Duration,
-//RS     clock: &jet_std::Clock,
-//RS ) -> JetExpiring<T> {
-//RS     JetExpiring::new(value, clock.now().saturating_add(ttl.as_millis()))
-//RS }
-//RS fn jet_expiring_get<T: Clone>(exp: &JetExpiring<T>, clock: &jet_std::Clock) -> Result<T, JetExpired> {
-//RS     exp.get(clock.now())
-//RS }
-//RS // D-TTLVAL1=A: the secret wrapper observes the caller's Clock, so later ticks
-//RS // on that clock expire it.
-//RS fn jet_expiring_secret_new<T>(
-//RS     value: T,
-//RS     ttl: &jet_std::Duration,
-//RS     clock: &jet_std::Clock,
-//RS ) -> JetExpiringSecret<T> {
-//RS     let observer = clock.observer();
-//RS     JetExpiringSecret::new(value, ttl.as_millis(), move || observer.now())
-//RS }
-//RS fn jet_expiring_secret_with<T, F, R>(exp: &JetExpiringSecret<T>, callback: F) -> Result<R, JetExpired>
-//RS where
-//RS     F: FnOnce(&T) -> R,
-//RS {
-//RS     exp.with(callback)
-//RS }
-// END-PORT-PENDING 0282 crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:1-72
+use jet_foundation.CsvKernel as jet_csv_kernel
+use jet_foundation.CsvKernel.[CsvRecord]
+use core.encoding.runtime.top_encoding_stream_02.[jet_csv_options]
+use core.encoding.csv.[CSVRow]
+use core.prelude.runtime.kernel_values.[JetExpiring]
+use core.prelude.runtime.std_common_types_02.[Clock, Duration]
+use core.crypto.runtime.kernel_expiring_secret.[JetExpiringSecret]
+use core.prelude.runtime.kernel_values.[JetExpired]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:5
+fn jet_ring_csv_records(text: &String, delimiter: &String, header: Bool, skip_blank: Bool) -> [CsvRecord] Err! {
+    jet_csv_kernel.parse(text, jet_csv_options(delimiter, header, skip_blank)?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:14
+fn jet_ring_csv_parse(text: &String, delimiter: &String, header: Bool, skip_blank: Bool) -> [[String]] Err! {
+    jet_ring_csv_records(text, delimiter, header, skip_blank).map(fn(records) {
+        records.into_iter().map(fn(record) { ^record.fields }).collect()
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:24
+fn jet_ring_csv_rows(text: &String, delimiter: &String, header: Bool, skip_blank: Bool) -> [CSVRow] Err! {
+    jet_ring_csv_records(text, delimiter, header, skip_blank).map(fn(records) {
+        records.into_iter().map(fn(record) { CSVRow{fields: ^record.fields, line: record.line} }).collect()
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:41
+fn jet_ring_csv_render(rows: &[[String]]) -> String { jet_csv_kernel.render(rows) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:47
+fn jet_expiring_new<T: Clone>(value: T, ttl: &Duration, clock: &Clock) -> JetExpiring<T> {
+    JetExpiring.new(^value, clock.now().saturating_add(ttl.as_millis()))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:54
+fn jet_expiring_get<T: Clone>(exp: &JetExpiring<T>, clock: &Clock) -> T JetExpired! { exp.get(clock.now()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:59
+fn jet_expiring_secret_new<T>(value: T, ttl: &Duration, clock: &Clock) -> JetExpiringSecret<T> {
+    observer :: clock.observer()
+    JetExpiringSecret.new(^value, ttl.as_millis(), fn() { observer.now() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:67
+fn jet_expiring_secret_with<T, R>(exp: &JetExpiringSecret<T>, callback: fn(&T) -> R) -> R JetExpired! { exp.with(^callback) }

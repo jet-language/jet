@@ -1,232 +1,144 @@
-// PORT-PENDING 0258 crates-jet-codegen-src-prelude-corelib-top-compute-module-group-slice-9065: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9065-10497
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn jet_compute_jvp(
-//RS     state: &JetComputeVjpState,
-//RS     input_tangents: Vec<JetTensor>,
-//RS ) -> Result<JetTensor, JetComputeError> {
-//RS     let (nodes, inputs) = {
-//RS         let tape = state
-//RS             .tape
-//RS             .lock()
-//RS             .map_err(|_| JetComputeError::Unsupported("autodiff tape is poisoned".to_string()))?;
-//RS         (tape.nodes.clone(), tape.inputs.clone())
-//RS     };
-//RS     if input_tangents.len() != inputs.len() {
-//RS         return Err(JetComputeError::RankMismatch(
-//RS             "JVP tangent count must equal the function input count".to_string(),
-//RS         ));
-//RS     }
-//RS     for (input, tangent) in inputs.iter().zip(input_tangents.iter()) {
-//RS         if input.shape != tangent.shape {
-//RS             return Err(JetComputeError::RankMismatch(
-//RS                 "JVP tangent shapes must match their primal inputs".to_string(),
-//RS             ));
-//RS         }
-//RS         jet_compute_require_same_contract(input, tangent, "JVP tangent")?;
-//RS     }
-//RS     let mut tangents: Vec<Option<JetTensor>> = vec![None; nodes.len()];
-//RS     for (index, tangent) in input_tangents.into_iter().enumerate() {
-//RS         if let Some(slot) = tangents.get_mut(index) {
-//RS             *slot = Some(jet_compute_remove_trace_level(&tangent, &state.tape));
-//RS         }
-//RS     }
-//RS     for (index, node) in nodes.iter().enumerate().skip(inputs.len()) {
-//RS         let Some(rule) = &node.rule else {
-//RS             continue;
-//RS         };
-//RS         let mut node_tangents = Vec::with_capacity(node.parents.len());
-//RS         for (parent, value) in node.parents.iter().zip(node.values.iter()) {
-//RS             node_tangents.push(
-//RS                 parent
-//RS                     .and_then(|parent| tangents.get(parent).and_then(Option::as_ref).cloned())
-//RS                     .unwrap_or(jet_compute_zero_like(value)?),
-//RS             );
-//RS         }
-//RS         tangents[index] = Some(jet_compute_jvp_rule(
-//RS             rule,
-//RS             &node.values,
-//RS             &node.output,
-//RS             &node_tangents,
-//RS         )?);
-//RS     }
-//RS     match state.output_node {
-//RS         Some(node) => tangents
-//RS             .get(node)
-//RS             .and_then(Option::clone)
-//RS             .ok_or_else(|| JetComputeError::Unsupported("JVP output tangent is unavailable".to_string())),
-//RS         None => jet_compute_zero_like(&state.value),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_compute_vjp_matmul(
-//RS     a: &JetTensor,
-//RS     b: &JetTensor,
-//RS     cot: &JetTensor,
-//RS ) -> Result<(JetTensor, JetTensor), JetComputeError> {
-//RS     jet_compute_validate_tensor(a)?;
-//RS     jet_compute_validate_tensor(b)?;
-//RS     jet_compute_validate_tensor(cot)?;
-//RS     if a.shape.len() != 2
-//RS         || b.shape.len() != 2
-//RS         || cot.shape.len() != 2
-//RS         || a.shape[1] != b.shape[0]
-//RS         || cot.shape[0] != a.shape[0]
-//RS         || cot.shape[1] != b.shape[1]
-//RS     {
-//RS         return Err(JetComputeError::RankMismatch(
-//RS             "matmul cotangent shape must equal the matmul output".to_string(),
-//RS         ));
-//RS     }
-//RS     jet_compute_require_same_contract(a, b, "matmul cotangent")?;
-//RS     jet_compute_require_same_contract(a, cot, "matmul cotangent")?;
-//RS     let b_t = jet_compute_transpose(b)?;
-//RS     let a_t = jet_compute_transpose(a)?;
-//RS     Ok((
-//RS         jet_compute_inherit_placement(jet_compute_matmul(cot, &b_t)?, a),
-//RS         jet_compute_inherit_placement(jet_compute_matmul(&a_t, cot)?, b),
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_compute_f32_projection(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
-//RS     jet_compute_validate_tensor(tensor)?;
-//RS     let values = jet_compute_tensor_values(tensor)
-//RS         .into_iter()
-//RS         .map(|value| jet_compute_f32_value(value, "f32 autodiff input"))
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     let mut projected = jet_compute_tensor_from_shape_like(tensor, tensor.shape.clone(), 0.0)?;
-//RS     projected.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
-//RS     if !jet_compute_is_accelerator(projected.device) {
-//RS         projected.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
-//RS         projected.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
-//RS             .iter()
-//RS             .map(|ability| (*ability).to_string())
-//RS             .collect();
-//RS         projected.last_placement.reason = "autodiff f32 projection".to_string();
-//RS     }
-//RS     jet_compute_validate_tensor(&projected)?;
-//RS     Ok(projected)
-//RS }
-//RS 
-//RS fn jet_compute_vjp_matmul_f32_tile(
-//RS     a: &JetTensor,
-//RS     b: &JetTensor,
-//RS     cot: &JetTensor,
-//RS ) -> Result<(JetTensor, JetTensor), JetComputeError> {
-//RS     jet_compute_validate_tensor(a)?;
-//RS     jet_compute_validate_tensor(b)?;
-//RS     jet_compute_validate_tensor(cot)?;
-//RS     if a.shape.len() != 2
-//RS         || b.shape.len() != 2
-//RS         || cot.shape.len() != 2
-//RS         || a.shape[1] != b.shape[0]
-//RS         || cot.shape[0] != a.shape[0]
-//RS         || cot.shape[1] != b.shape[1]
-//RS     {
-//RS         return Err(JetComputeError::RankMismatch(
-//RS             "matmul_f32_tile cotangent shape must equal the matmul output".to_string(),
-//RS         ));
-//RS     }
-//RS     if a.device != b.device || a.device != cot.device {
-//RS         return Err(JetComputeError::Device(
-//RS             "matmul_f32_tile cotangent devices must match the inputs".to_string(),
-//RS         ));
-//RS     }
-//RS     let a32 = jet_compute_f32_projection(a)?;
-//RS     let b32 = jet_compute_f32_projection(b)?;
-//RS     let cot32 = jet_compute_f32_projection(cot)?;
-//RS     let b_transposed = jet_compute_transpose(&b32)?;
-//RS     let a_transposed = jet_compute_transpose(&a32)?;
-//RS     let a_gradient = jet_compute_matmul_f32_tile(&cot32, &b_transposed)?;
-//RS     let b_gradient = jet_compute_matmul_f32_tile(&a_transposed, &cot32)?;
-//RS     Ok((
-//RS         jet_compute_tensor_from_values_like(a, &jet_compute_tensor_values(&a_gradient))?,
-//RS         jet_compute_tensor_from_values_like(b, &jet_compute_tensor_values(&b_gradient))?,
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_compute_jvp_matmul_f32_tile(
-//RS     a: &JetTensor,
-//RS     b: &JetTensor,
-//RS     a_tangent: &JetTensor,
-//RS     b_tangent: &JetTensor,
-//RS ) -> Result<JetTensor, JetComputeError> {
-//RS     jet_compute_validate_tensor(a)?;
-//RS     jet_compute_validate_tensor(b)?;
-//RS     jet_compute_validate_tensor(a_tangent)?;
-//RS     jet_compute_validate_tensor(b_tangent)?;
-//RS     if a.shape != a_tangent.shape || b.shape != b_tangent.shape {
-//RS         return Err(JetComputeError::RankMismatch(
-//RS             "matmul_f32_tile tangent shapes must match the inputs".to_string(),
-//RS         ));
-//RS     }
-//RS     if a.device != b.device
-//RS         || a.device != a_tangent.device
-//RS         || b.device != b_tangent.device
-//RS     {
-//RS         return Err(JetComputeError::Device(
-//RS             "matmul_f32_tile tangent devices must match the inputs".to_string(),
-//RS         ));
-//RS     }
-//RS     let a32 = jet_compute_f32_projection(a)?;
-//RS     let b32 = jet_compute_f32_projection(b)?;
-//RS     let a_tangent32 = jet_compute_f32_projection(a_tangent)?;
-//RS     let b_tangent32 = jet_compute_f32_projection(b_tangent)?;
-//RS     let left = jet_compute_matmul_f32_tile(&a_tangent32, &b32)?;
-//RS     let right = jet_compute_matmul_f32_tile(&a32, &b_tangent32)?;
-//RS     jet_compute_binary("add", &left, &right)
-//RS }
-//RS 
-//RS fn jet_compute_f32_value(value: f64, context: &str) -> Result<f32, JetComputeError> {
-//RS     let narrowed = value as f32;
-//RS     if !narrowed.is_finite() {
-//RS         return Err(JetComputeError::Arithmetic(format!(
-//RS             "{context} is outside the finite F32 range"
-//RS         )));
-//RS     }
-//RS     Ok(narrowed)
-//RS }
-//RS 
-//RS fn jet_compute_validate_profile_value(
-//RS     profile: &str,
-//RS     value: f64,
-//RS     context: &str,
-//RS ) -> Result<(), JetComputeError> {
-//RS     if profile == CPU_ORACLE_F32_PROFILE {
-//RS         let narrowed = jet_compute_f32_value(value, context)?;
-//RS         if f64::from(narrowed) != value {
-//RS             return Err(JetComputeError::Arithmetic(format!(
-//RS                 "{context} is not canonical for the F32 precision profile"
-//RS             )));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_compute_validate_serialized_profile_values(
-//RS     profile: &str,
-//RS     values: &[f64],
-//RS ) -> Result<(), JetComputeError> {
-//RS     if profile == CPU_ORACLE_F32_PROFILE {
-//RS         for value in values {
-//RS             let narrowed = jet_compute_f32_value(*value, "serialized Tensor value")?;
-//RS             if f64::from(narrowed) != *value {
-//RS                 return Err(JetComputeError::Serialization(
-//RS                     "serialized Tensor value is not canonical for its F32 profile".to_string(),
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_compute_wire_checksum(body: &str) -> String {
-//RS     let mut hash = 0xcbf29ce484222325_u64;
-//RS     for byte in body.as_bytes() {
-//RS         hash ^= u64::from(*byte);
-//RS         hash = hash.wrapping_mul(0x100000001b3_u64);
-//RS     }
-//RS     format!("{hash:016x}")
-//RS }
+use core.compute.runtime.top_compute.*
+use core.compute.runtime.top_compute_03.[JetComputeVjpState, JetTensor, JetComputeError, JetComputeTapeRule]
+use core.compute.runtime.top_compute_04.*
+use core.compute.runtime.top_compute_05.*
+use core.encoding.runtime.kernel_encoding_base.jet_std_hex_encode
+use std.sync.Arc
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9065
+// GATE #4565: kernel primitive
+#Unsafe("snapshot the shared autodiff tape under its mutex; preserve poison failure and retained tensor ownership")
+fn jet_compute_jvp(state: JetComputeVjpState, input_tangents: ^[JetTensor]) -> JetTensor JetComputeError! {
+    (nodes, inputs) :: {
+        tape :: state.tape.lock().map_err(_ -> JetComputeError.Unsupported("autodiff tape is poisoned"))?
+        (tape.nodes.clone(), tape.inputs.clone())
+    }
+    if input_tangents.len() != inputs.len() -> return Err(JetComputeError.RankMismatch("JVP tangent count must equal the function input count"))
+    for (input, tangent) in inputs.iter().zip(input_tangents.iter()) {
+        if input.shape != tangent.shape -> return Err(JetComputeError.RankMismatch("JVP tangent shapes must match their primal inputs"))
+        jet_compute_require_same_contract(input, tangent, "JVP tangent")?
+    }
+    tangents := [JetTensor?].filled(nodes.len(), None)
+    for (index, tangent) in input_tangents.into_iter().enumerate() {
+        if index < tangents.len() -> tangents[index] = Val(jet_compute_remove_trace_level(tangent, state.tape))
+    }
+    for (index, node) in nodes.iter().enumerate().skip(inputs.len()) {
+        rule :: match node.rule.as_ref() { Val(rule) -> rule, None -> continue }
+        node_tangents := [JetTensor].with_capacity(node.parents.len())
+        for (parent, value) in node.parents.iter().zip(node.values.iter()) {
+            node_tangents.push(parent.and_then(parent -> tangents.get(parent).and_then(value -> value.as_ref()).cloned()).unwrap_or(jet_compute_zero_like(value)?))
+        }
+        tangents[index] = Val(jet_compute_jvp_rule(rule, node.values, node.output, node_tangents)?)
+    }
+    match state.output_node {
+        Val(node) -> tangents.get(node).and_then(value -> value.clone()).ok_or_else(fn() { JetComputeError.Unsupported("JVP output tangent is unavailable") })
+        None -> jet_compute_zero_like(state.value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9123
+fn jet_compute_vjp_matmul(a: JetTensor, b: JetTensor, cot: JetTensor) -> (JetTensor, JetTensor) JetComputeError! {
+    jet_compute_validate_tensor(a)?
+    jet_compute_validate_tensor(b)?
+    jet_compute_validate_tensor(cot)?
+    if a.shape.len() != 2 || b.shape.len() != 2 || cot.shape.len() != 2 || a.shape[1] != b.shape[0] || cot.shape[0] != a.shape[0] || cot.shape[1] != b.shape[1] {
+        return Err(JetComputeError.RankMismatch("matmul cotangent shape must equal the matmul output"))
+    }
+    jet_compute_require_same_contract(a, b, "matmul cotangent")?
+    jet_compute_require_same_contract(a, cot, "matmul cotangent")?
+    b_t :: jet_compute_transpose(b)?
+    a_t :: jet_compute_transpose(a)?
+    Ok((jet_compute_inherit_placement(^jet_compute_matmul(cot, b_t)?, a), jet_compute_inherit_placement(^jet_compute_matmul(a_t, cot)?, b)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9152
+// GATE #4565: kernel primitive
+#Unsafe("retain projected tensor storage in the canonical shared allocation")
+fn jet_compute_f32_projection(tensor: JetTensor) -> JetTensor JetComputeError! {
+    jet_compute_validate_tensor(tensor)?
+    values :: jet_compute_tensor_values(tensor).into_iter().map(value -> jet_compute_f32_value(value, "f32 autodiff input")).collect::<[F32] JetComputeError!>()?
+    projected := jet_compute_tensor_from_shape_like(tensor, tensor.shape.clone(), F64{0.0})?
+    projected.data = Arc.new(values.into_iter().map(value -> F64.from(value)).collect())
+    if !jet_compute_is_accelerator(projected.device) {
+        projected.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string()
+        projected.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES.iter().map(ability -> ability.to_string()).collect()
+        projected.last_placement.reason = "autodiff f32 projection"
+    }
+    jet_compute_validate_tensor(projected)?
+    Ok(^projected)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9172
+fn jet_compute_vjp_matmul_f32_tile(a: JetTensor, b: JetTensor, cot: JetTensor) -> (JetTensor, JetTensor) JetComputeError! {
+    jet_compute_validate_tensor(a)?
+    jet_compute_validate_tensor(b)?
+    jet_compute_validate_tensor(cot)?
+    if a.shape.len() != 2 || b.shape.len() != 2 || cot.shape.len() != 2 || a.shape[1] != b.shape[0] || cot.shape[0] != a.shape[0] || cot.shape[1] != b.shape[1] {
+        return Err(JetComputeError.RankMismatch("matmul_f32_tile cotangent shape must equal the matmul output"))
+    }
+    if a.device != b.device || a.device != cot.device -> return Err(JetComputeError.Device("matmul_f32_tile cotangent devices must match the inputs"))
+    a32 :: jet_compute_f32_projection(a)?
+    b32 :: jet_compute_f32_projection(b)?
+    cot32 :: jet_compute_f32_projection(cot)?
+    b_transposed :: jet_compute_transpose(b32)?
+    a_transposed :: jet_compute_transpose(a32)?
+    a_gradient :: jet_compute_matmul_f32_tile(cot32, b_transposed)?
+    b_gradient :: jet_compute_matmul_f32_tile(a_transposed, cot32)?
+    Ok((jet_compute_tensor_from_values_like(a, jet_compute_tensor_values(a_gradient))?, jet_compute_tensor_from_values_like(b, jet_compute_tensor_values(b_gradient))?))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9209
+fn jet_compute_jvp_matmul_f32_tile(a: JetTensor, b: JetTensor, a_tangent: JetTensor, b_tangent: JetTensor) -> JetTensor JetComputeError! {
+    jet_compute_validate_tensor(a)?
+    jet_compute_validate_tensor(b)?
+    jet_compute_validate_tensor(a_tangent)?
+    jet_compute_validate_tensor(b_tangent)?
+    if a.shape != a_tangent.shape || b.shape != b_tangent.shape -> return Err(JetComputeError.RankMismatch("matmul_f32_tile tangent shapes must match the inputs"))
+    if a.device != b.device || a.device != a_tangent.device || b.device != b_tangent.device {
+        return Err(JetComputeError.Device("matmul_f32_tile tangent devices must match the inputs"))
+    }
+    a32 :: jet_compute_f32_projection(a)?
+    b32 :: jet_compute_f32_projection(b)?
+    a_tangent32 :: jet_compute_f32_projection(a_tangent)?
+    b_tangent32 :: jet_compute_f32_projection(b_tangent)?
+    left :: jet_compute_matmul_f32_tile(a_tangent32, b32)?
+    right :: jet_compute_matmul_f32_tile(a32, b_tangent32)?
+    jet_compute_binary("add", left, right)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9241
+fn jet_compute_f32_value(value: F64, context: String) -> F32 JetComputeError! {
+    narrowed :: value as F32
+    if !narrowed.is_finite() -> return Err(JetComputeError.Arithmetic("{context} is outside the finite F32 range"))
+    Ok(narrowed)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9251
+fn jet_compute_validate_profile_value(profile: String, value: F64, context: String) -> () JetComputeError! {
+    if profile == CPU_ORACLE_F32_PROFILE {
+        narrowed :: jet_compute_f32_value(value, context)?
+        if F64.from(narrowed) != value -> return Err(JetComputeError.Arithmetic("{context} is not canonical for the F32 precision profile"))
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9267
+fn jet_compute_validate_serialized_profile_values(profile: String, values: [F64]) -> () JetComputeError! {
+    if profile == CPU_ORACLE_F32_PROFILE {
+        for value in values {
+            narrowed :: jet_compute_f32_value(value, "serialized Tensor value")?
+            if F64.from(narrowed) != value {
+                return Err(JetComputeError.Serialization("serialized Tensor value is not canonical for its F32 profile"))
+            }
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9284
+fn jet_compute_wire_checksum(body: String) -> String Never! {
+    hash := U64{0xcbf29ce484222325}
+    for byte in body.as_bytes() {
+        hash = hash ~| U64{byte}
+        hash = hash.wrapping_mul(U64{0x100000001b3})
+    }
+    bytes :: hash.to_be_bytes()
+    jet_std_hex_encode(bytes[0..<bytes.len()])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9293-9771
+// CUT #3955: AI/ML library removed by owner ruling
 //RS 
 //RS // ── #1142: ML training/inference + model serialization over the Tensor oracle ─
 //RS 
@@ -707,731 +619,391 @@
 //RS     ))
 //RS }
 //RS 
-//RS fn jet_compute_serialize(tensor: &JetTensor) -> Result<String, JetComputeError> {
-//RS     jet_compute_validate_tensor(tensor)?;
-//RS     if tensor.trace.is_some() {
-//RS         return Err(JetComputeError::Unsupported(
-//RS             "Tensor serialization does not accept traced tensors".to_string(),
-//RS         ));
-//RS     }
-//RS     if jet_compute_is_accelerator(tensor.device) {
-//RS         return Err(JetComputeError::Unsupported(
-//RS             "accelerator Tensor serialization requires an explicit transfer to CPU".to_string(),
-//RS         ));
-//RS     }
-//RS     let values = jet_compute_tensor_values(tensor);
-//RS     let shape = tensor
-//RS         .shape
-//RS         .iter()
-//RS         .map(|d| d.to_string())
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let data = values
-//RS         .iter()
-//RS         // Debug formatting is Rust's shortest round-tripping f64 spelling.
-//RS         // Keep it stable across the AOT/JIT/interpreter Prelude boundary.
-//RS         .map(|v| format!("{v:?}"))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let profile = tensor.last_placement.profile.as_str();
-//RS     jet_compute_validate_serialized_profile_values(profile, &values)?;
-//RS     let body = format!("shape={shape};data={data};profile={profile}");
-//RS     let checksum = jet_compute_wire_checksum(&body);
-//RS     Ok(format!("{body};checksum={checksum}"))
-//RS }
-//RS 
-//RS fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeError> {
-//RS     let mut fields = payload.split(';');
-//RS     let Some(shape_part) = fields.next() else {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
-//RS         ));
-//RS     };
-//RS     let Some(data_part) = fields.next() else {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
-//RS         ));
-//RS     };
-//RS     let Some(profile_part) = fields.next() else {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
-//RS         ));
-//RS     };
-//RS     let Some(checksum_part) = fields.next() else {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
-//RS         ));
-//RS     };
-//RS     if fields.next().is_some()
-//RS         || !data_part.starts_with("data=")
-//RS         || !profile_part.starts_with("profile=")
-//RS         || !checksum_part.starts_with("checksum=")
-//RS     {
-//RS         return Err(JetComputeError::Serialization(
-//RS             "deserialize contains duplicate or unknown fields".to_string(),
-//RS         ));
-//RS     }
-//RS     let shape_str = shape_part
-//RS         .strip_prefix("shape=")
-//RS         .ok_or_else(|| JetComputeError::Serialization("missing shape=".to_string()))?;
-//RS     if shape_str.is_empty() {
-//RS         return Err(JetComputeError::Serialization(
-//RS             "serialized Tensor shape cannot be empty".to_string(),
-//RS         ));
-//RS     }
-//RS     let shape: Vec<i64> = shape_str
-//RS         .split(',')
-//RS         .map(|p| {
-//RS             if p.is_empty() {
-//RS                 return Err(JetComputeError::Serialization(
-//RS                     "serialized Tensor shape contains an empty axis".to_string(),
-//RS                 ));
-//RS             }
-//RS             let axis = p.parse::<i64>().map_err(|_| {
-//RS                 JetComputeError::Serialization(format!("bad shape axis `{p}`"))
-//RS             })?;
-//RS             if axis.to_string() != p {
-//RS                 return Err(JetComputeError::Serialization(format!(
-//RS                     "non-canonical shape axis `{p}`"
-//RS                 )));
-//RS             }
-//RS             Ok(axis)
-//RS         })
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     let data_str = data_part.strip_prefix("data=").unwrap_or("");
-//RS     let data: Vec<f64> = if data_str.is_empty() {
-//RS         Vec::new()
-//RS     } else {
-//RS         data_str
-//RS             .split(',')
-//RS             .map(|p| {
-//RS                 if p.is_empty() {
-//RS                     return Err(JetComputeError::Serialization(
-//RS                         "serialized Tensor data contains an empty value".to_string(),
-//RS                     ));
-//RS                 }
-//RS                 let value = p.parse::<f64>().map_err(|_| {
-//RS                     JetComputeError::Serialization(format!("bad data value `{p}`"))
-//RS                 })?;
-//RS                 if !value.is_finite() {
-//RS                     return Err(JetComputeError::Serialization(
-//RS                         "serialized Tensor contains a non-finite value".to_string(),
-//RS                     ));
-//RS                 }
-//RS                 if format!("{value:?}") != p {
-//RS                     return Err(JetComputeError::Serialization(format!(
-//RS                         "non-canonical data value `{p}`"
-//RS                     )));
-//RS                 }
-//RS                 Ok(value)
-//RS             })
-//RS             .collect::<Result<Vec<_>, _>>()?
-//RS     };
-//RS     let profile = profile_part.strip_prefix("profile=").unwrap_or("");
-//RS     let Some(abilities) = jet_compute_registered_abilities(profile) else {
-//RS         return Err(JetComputeError::Serialization(format!(
-//RS             "unsupported Tensor precision profile `{profile}`"
-//RS         )));
-//RS     };
-//RS     jet_compute_validate_serialized_profile_values(profile, &data)?;
-//RS     let checksum = checksum_part.strip_prefix("checksum=").unwrap_or("");
-//RS     if checksum.len() != 16
-//RS         || !checksum
-//RS             .bytes()
-//RS             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
-//RS     {
-//RS         return Err(JetComputeError::Serialization(
-//RS             "serialized Tensor checksum is not canonical".to_string(),
-//RS         ));
-//RS     }
-//RS     let body = format!("{shape_part};{data_part};{profile_part}");
-//RS     if jet_compute_wire_checksum(&body) != checksum {
-//RS         return Err(JetComputeError::Serialization(
-//RS             "serialized Tensor checksum does not match its contents".to_string(),
-//RS         ));
-//RS     }
-//RS     let expected = jet_compute_storage_len(&shape)?;
-//RS     if expected != data.len() {
-//RS         return Err(JetComputeError::Serialization(format!(
-//RS             "deserialize storage length mismatch: shape wants {expected}, got {}",
-//RS             data.len()
-//RS         )));
-//RS     }
-//RS     let mut tensor = jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu)?;
-//RS     tensor.data = std::sync::Arc::new(data);
-//RS     tensor.last_placement.profile = profile.to_string();
-//RS     tensor.last_placement.abilities = abilities
-//RS         .iter()
-//RS         .map(|ability| (*ability).to_string())
-//RS         .collect();
-//RS     tensor.last_placement.reason = "deserialized canonical Tensor".to_string();
-//RS     jet_compute_validate_tensor(&tensor)?;
-//RS     Ok(tensor)
-//RS }
-//RS 
-//RS // ── #1137 sparse CSR + #1143 CPU SIMD tile + #1147 profile ──────────────────
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct JetSparseCsr {
-//RS     rows: i64,
-//RS     cols: i64,
-//RS     row_ptr: Vec<i64>,
-//RS     col_idx: Vec<i64>,
-//RS     values: Vec<f64>,
-//RS }
-//RS 
-//RS impl JetShow for JetSparseCsr {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "SparseCsr({}x{}, nnz={})",
-//RS             self.rows,
-//RS             self.cols,
-//RS             self.values.len()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS fn jet_compute_to_sparse(tensor: &JetTensor) -> Result<JetSparseCsr, JetComputeError> {
-//RS     if tensor.trace.is_some() {
-//RS         return Err(JetComputeError::Unsupported(
-//RS             "to_sparse has no registered autodiff rule".to_string(),
-//RS         ));
-//RS     }
-//RS     if tensor.shape.len() != 2 {
-//RS         return Err(JetComputeError::RankMismatch(
-//RS             "to_sparse requires a rank-2 tensor".to_string(),
-//RS         ));
-//RS     }
-//RS     jet_compute_validate_tensor(tensor)?;
-//RS     if jet_compute_is_accelerator(tensor.device) {
-//RS         return Err(JetComputeError::Unsupported(
-//RS             "accelerator backend does not support sparse conversion; transfer to CPU explicitly"
-//RS                 .to_string(),
-//RS         ));
-//RS     }
-//RS     let rows = tensor.shape[0];
-//RS     let cols = tensor.shape[1];
-//RS     let mut row_ptr = vec![0i64];
-//RS     let mut col_idx = Vec::new();
-//RS     let mut values = Vec::new();
-//RS     for r in 0..rows {
-//RS         for c in 0..cols {
-//RS             let v = jet_compute_get_raw(tensor, &vec![r, c])?;
-//RS             if v != 0.0 {
-//RS                 col_idx.push(c);
-//RS                 values.push(v);
-//RS             }
-//RS         }
-//RS         row_ptr.push(i64::try_from(values.len()).map_err(|_| {
-//RS             JetComputeError::InvalidShape("sparse nnz is too large".to_string())
-//RS         })?);
-//RS     }
-//RS     Ok(JetSparseCsr {
-//RS         rows,
-//RS         cols,
-//RS         row_ptr,
-//RS         col_idx,
-//RS         values,
-//RS     })
-//RS }
-//RS 
-//RS fn jet_compute_sparse_nnz(sparse: &JetSparseCsr) -> i64 {
-//RS     i64::try_from(sparse.values.len()).unwrap_or(i64::MAX)
-//RS }
-//RS 
-//RS fn jet_compute_sparse_mv(
-//RS     sparse: &JetSparseCsr,
-//RS     vector: &JetTensor,
-//RS ) -> Result<JetTensor, JetComputeError> {
-//RS     if vector.trace.is_some() {
-//RS         return Err(JetComputeError::Unsupported(
-//RS             "sparse_mv has no registered autodiff rule".to_string(),
-//RS         ));
-//RS     }
-//RS     jet_compute_validate_sparse(sparse)?;
-//RS     jet_compute_validate_tensor(vector)?;
-//RS     if jet_compute_is_accelerator(vector.device) {
-//RS         return Err(JetComputeError::Unsupported(
-//RS             "accelerator backend does not support sparse_mv; transfer the vector to CPU explicitly"
-//RS                 .to_string(),
-//RS         ));
-//RS     }
-//RS     if vector.shape.len() != 1 || vector.shape[0] != sparse.cols {
-//RS         return Err(JetComputeError::RankMismatch(format!(
-//RS             "sparse_mv expects a length-{} vector",
-//RS             sparse.cols
-//RS         )));
-//RS     }
-//RS     let mut out = jet_compute_zeros(&vec![sparse.rows])?;
-//RS     for r in 0..sparse.rows {
-//RS         let row = usize::try_from(r).map_err(|_| {
-//RS             JetComputeError::InvalidShape("sparse row index is too large".to_string())
-//RS         })?;
-//RS         let start = usize::try_from(sparse.row_ptr[row]).map_err(|_| {
-//RS             JetComputeError::InvalidShape("sparse row pointer is invalid".to_string())
-//RS         })?;
-//RS         let end = usize::try_from(sparse.row_ptr[row + 1]).map_err(|_| {
-//RS             JetComputeError::InvalidShape("sparse row pointer is invalid".to_string())
-//RS         })?;
-//RS         let mut acc = 0.0;
-//RS         for k in start..end {
-//RS             let c = sparse.col_idx[k];
-//RS             acc += sparse.values[k] * jet_compute_get_raw(vector, &[c])?;
-//RS             if !acc.is_finite() {
-//RS                 return Err(JetComputeError::Arithmetic(
-//RS                     "sparse matrix-vector multiplication produced a non-finite value"
-//RS                         .to_string(),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         jet_compute_set(&mut out, &vec![r], acc)?;
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn jet_compute_validate_sparse(sparse: &JetSparseCsr) -> Result<(), JetComputeError> {
-//RS     if sparse.rows < 0 || sparse.cols < 0 {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "sparse dimensions must be non-negative".to_string(),
-//RS         ));
-//RS     }
-//RS     let rows = usize::try_from(sparse.rows).map_err(|_| {
-//RS         JetComputeError::InvalidShape("sparse row count is too large".to_string())
-//RS     })?;
-//RS     if sparse.row_ptr.len() != rows.saturating_add(1)
-//RS         || sparse.col_idx.len() != sparse.values.len()
-//RS     {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "sparse CSR arrays have inconsistent lengths".to_string(),
-//RS         ));
-//RS     }
-//RS     let nnz = i64::try_from(sparse.values.len()).map_err(|_| {
-//RS         JetComputeError::InvalidShape("sparse nnz is too large".to_string())
-//RS     })?;
-//RS     if sparse.row_ptr.first().copied() != Some(0)
-//RS         || sparse.row_ptr.last().copied() != Some(nnz)
-//RS         || sparse
-//RS             .row_ptr
-//RS             .windows(2)
-//RS             .any(|pair| pair[0] < 0 || pair[1] < pair[0] || pair[1] > nnz)
-//RS         || sparse
-//RS             .col_idx
-//RS             .iter()
-//RS             .any(|col| *col < 0 || *col >= sparse.cols)
-//RS         || sparse.values.iter().any(|value| !value.is_finite())
-//RS     {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "sparse CSR invariants are invalid".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_compute_sparse_show(sparse: &JetSparseCsr) -> String {
-//RS     sparse.jet_show()
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS enum JetComputeSimdBackend {
-//RS     Avx2,
-//RS     Sse2,
-//RS     Scalar,
-//RS }
-//RS 
-//RS impl JetComputeSimdBackend {
-//RS     fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Avx2 => "avx2",
-//RS             Self::Sse2 => "sse2",
-//RS             Self::Scalar => "scalar",
-//RS         }
-//RS     }
-//RS 
-//RS     fn width(self) -> usize {
-//RS         match self {
-//RS             Self::Avx2 => 8,
-//RS             Self::Sse2 => 4,
-//RS             Self::Scalar => 1,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_compute_simd_backend() -> JetComputeSimdBackend {
-//RS     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-//RS     {
-//RS         return jet_compute_simd_backend_for_features(
-//RS             is_x86_feature_detected!("avx2"),
-//RS             is_x86_feature_detected!("sse2"),
-//RS         );
-//RS     }
-//RS     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-//RS     {
-//RS         jet_compute_simd_backend_for_features(false, false)
-//RS     }
-//RS }
-//RS 
-//RS fn jet_compute_simd_backend_for_features(avx2: bool, sse2: bool) -> JetComputeSimdBackend {
-//RS     if avx2 {
-//RS         return JetComputeSimdBackend::Avx2;
-//RS     }
-//RS     if sse2 {
-//RS         return JetComputeSimdBackend::Sse2;
-//RS     }
-//RS     JetComputeSimdBackend::Scalar
-//RS }
-//RS 
-//RS #[inline(never)]
-//RS fn jet_compute_f32_dot_scalar(a: &[f32], b: &[f32]) -> f32 {
-//RS     a.iter()
-//RS         .zip(b.iter())
-//RS         .fold(0.0_f32, |sum, (left, right)| sum + left * right)
-//RS }
-//RS 
-//RS fn jet_compute_simd_backend_available(backend: JetComputeSimdBackend) -> bool {
-//RS     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-//RS     {
-//RS         match backend {
-//RS             JetComputeSimdBackend::Avx2 => is_x86_feature_detected!("avx2"),
-//RS             JetComputeSimdBackend::Sse2 => is_x86_feature_detected!("sse2"),
-//RS             JetComputeSimdBackend::Scalar => true,
-//RS         }
-//RS     }
-//RS     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-//RS     {
-//RS         matches!(backend, JetComputeSimdBackend::Scalar)
-//RS     }
-//RS }
-//RS 
-//RS // JET_VETTED_UNSAFE_BEGIN: jet_compute_cpu_simd
-//RS #[cfg(target_arch = "x86_64")]
-//RS #[target_feature(enable = "avx2")]
-//RS unsafe fn jet_compute_f32_dot_avx2(a: &[f32], b: &[f32]) -> f32 {
-//RS     use std::arch::x86_64::{
-//RS         _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps,
-//RS     };
-//RS 
-//RS     let mut acc = _mm256_setzero_ps();
-//RS     let mut index = 0usize;
-//RS     let limit = a.len() / 8 * 8;
-//RS     while index < limit {
-//RS         let left = _mm256_loadu_ps(a.as_ptr().add(index));
-//RS         let right = _mm256_loadu_ps(b.as_ptr().add(index));
-//RS         acc = _mm256_add_ps(acc, _mm256_mul_ps(left, right));
-//RS         index += 8;
-//RS     }
-//RS     let mut lanes = [0.0_f32; 8];
-//RS     _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
-//RS     let mut sum = 0.0_f32;
-//RS     for lane in lanes {
-//RS         sum += lane;
-//RS     }
-//RS     while index < a.len() {
-//RS         sum += a[index] * b[index];
-//RS         index += 1;
-//RS     }
-//RS     sum
-//RS }
-//RS 
-//RS #[cfg(target_arch = "x86")]
-//RS #[target_feature(enable = "avx2")]
-//RS unsafe fn jet_compute_f32_dot_avx2(a: &[f32], b: &[f32]) -> f32 {
-//RS     use std::arch::x86::{
-//RS         _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps,
-//RS     };
-//RS 
-//RS     let mut acc = _mm256_setzero_ps();
-//RS     let mut index = 0usize;
-//RS     let limit = a.len() / 8 * 8;
-//RS     while index < limit {
-//RS         let left = _mm256_loadu_ps(a.as_ptr().add(index));
-//RS         let right = _mm256_loadu_ps(b.as_ptr().add(index));
-//RS         acc = _mm256_add_ps(acc, _mm256_mul_ps(left, right));
-//RS         index += 8;
-//RS     }
-//RS     let mut lanes = [0.0_f32; 8];
-//RS     _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
-//RS     let mut sum = 0.0_f32;
-//RS     for lane in lanes {
-//RS         sum += lane;
-//RS     }
-//RS     while index < a.len() {
-//RS         sum += a[index] * b[index];
-//RS         index += 1;
-//RS     }
-//RS     sum
-//RS }
-//RS 
-//RS #[cfg(target_arch = "x86_64")]
-//RS #[target_feature(enable = "sse2")]
-//RS unsafe fn jet_compute_f32_dot_sse2(a: &[f32], b: &[f32]) -> f32 {
-//RS     use std::arch::x86_64::{
-//RS         _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps,
-//RS     };
-//RS 
-//RS     let mut acc = _mm_setzero_ps();
-//RS     let mut index = 0usize;
-//RS     let limit = a.len() / 4 * 4;
-//RS     while index < limit {
-//RS         let left = _mm_loadu_ps(a.as_ptr().add(index));
-//RS         let right = _mm_loadu_ps(b.as_ptr().add(index));
-//RS         acc = _mm_add_ps(acc, _mm_mul_ps(left, right));
-//RS         index += 4;
-//RS     }
-//RS     let mut lanes = [0.0_f32; 4];
-//RS     _mm_storeu_ps(lanes.as_mut_ptr(), acc);
-//RS     let mut sum = 0.0_f32;
-//RS     for lane in lanes {
-//RS         sum += lane;
-//RS     }
-//RS     while index < a.len() {
-//RS         sum += a[index] * b[index];
-//RS         index += 1;
-//RS     }
-//RS     sum
-//RS }
-//RS 
-//RS #[cfg(target_arch = "x86")]
-//RS #[target_feature(enable = "sse2")]
-//RS unsafe fn jet_compute_f32_dot_sse2(a: &[f32], b: &[f32]) -> f32 {
-//RS     use std::arch::x86::{
-//RS         _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps,
-//RS     };
-//RS 
-//RS     let mut acc = _mm_setzero_ps();
-//RS     let mut index = 0usize;
-//RS     let limit = a.len() / 4 * 4;
-//RS     while index < limit {
-//RS         let left = _mm_loadu_ps(a.as_ptr().add(index));
-//RS         let right = _mm_loadu_ps(b.as_ptr().add(index));
-//RS         acc = _mm_add_ps(acc, _mm_mul_ps(left, right));
-//RS         index += 4;
-//RS     }
-//RS     let mut lanes = [0.0_f32; 4];
-//RS     _mm_storeu_ps(lanes.as_mut_ptr(), acc);
-//RS     let mut sum = 0.0_f32;
-//RS     for lane in lanes {
-//RS         sum += lane;
-//RS     }
-//RS     while index < a.len() {
-//RS         sum += a[index] * b[index];
-//RS         index += 1;
-//RS     }
-//RS     sum
-//RS }
-//RS fn jet_compute_f32_dot(
-//RS     backend: JetComputeSimdBackend,
-//RS     a: &[f32],
-//RS     b: &[f32],
-//RS ) -> Result<f32, JetComputeError> {
-//RS     if a.len() != b.len() {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "SIMD dot-product inputs have different lengths".to_string(),
-//RS         ));
-//RS     }
-//RS     let value = match backend {
-//RS         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-//RS         JetComputeSimdBackend::Avx2 => unsafe { jet_compute_f32_dot_avx2(a, b) },
-//RS         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-//RS         JetComputeSimdBackend::Sse2 => unsafe { jet_compute_f32_dot_sse2(a, b) },
-//RS         JetComputeSimdBackend::Scalar => jet_compute_f32_dot_scalar(a, b),
-//RS         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-//RS         _ => jet_compute_f32_dot_scalar(a, b),
-//RS     };
-//RS     if value.is_finite() {
-//RS         Ok(value)
-//RS     } else {
-//RS         Err(JetComputeError::Arithmetic(
-//RS             "f32 SIMD dot product overflowed".to_string(),
-//RS         ))
-//RS     }
-//RS }
-//RS // JET_VETTED_UNSAFE_END: jet_compute_cpu_simd
-//RS 
-//RS /// CPU-SIMD profile path (#1143): blocked matmul in f32 arithmetic. The dot
-//RS /// product uses runtime-dispatched safe intrinsics where available, then an
-//RS /// ordered scalar tail. Lane products are reduced in lane order so the SIMD
-//RS /// backend preserves the reproducible CPU-oracle reduction contract.
-//RS fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
-//RS     if a.shape.len() != 2 || b.shape.len() != 2 {
-//RS         return Err(JetComputeError::RankMismatch(
-//RS             "matmul_f32_tile requires rank-2 tensors".to_string(),
-//RS         ));
-//RS     }
-//RS     jet_compute_validate_tensor(a)?;
-//RS     jet_compute_validate_tensor(b)?;
-//RS     let (m, k) = (a.shape[0], a.shape[1]);
-//RS     let (k2, n) = (b.shape[0], b.shape[1]);
-//RS     if m < 0 || k < 0 || k2 < 0 || n < 0 {
-//RS         return Err(JetComputeError::InvalidShape(
-//RS             "matmul_f32_tile dimensions must be non-negative".to_string(),
-//RS         ));
-//RS     }
-//RS     if k != k2 {
-//RS         return Err(JetComputeError::RankMismatch(format!(
-//RS             "matmul_f32_tile inner dims {} and {} disagree",
-//RS             k, k2
-//RS         )));
-//RS     }
-//RS     if a.device == JetComputeDevice::Metal {
-//RS         jet_compute_require_same_contract(a, b, "matmul_f32_tile")?;
-//RS         let rows = usize::try_from(m).map_err(|_| {
-//RS             JetComputeError::InvalidShape("Metal f32 tile row count is too large".to_string())
-//RS         })?;
-//RS         let inner = usize::try_from(k).map_err(|_| {
-//RS             JetComputeError::InvalidShape("Metal f32 tile inner dimension is too large".to_string())
-//RS         })?;
-//RS         let cols = usize::try_from(n).map_err(|_| {
-//RS             JetComputeError::InvalidShape("Metal f32 tile column count is too large".to_string())
-//RS         })?;
-//RS         let left = jet_compute_metal_values(a, "f32 tile input")?;
-//RS         let right = jet_compute_metal_values(b, "f32 tile input")?;
-//RS         let data = jet_compute_metal::matmul(&left, &right, rows, inner, cols)?;
-//RS         let mut out = jet_compute_metal_result_like(a, vec![m, n], data)?;
-//RS         out.last_placement.reason =
-//RS             "algorithm=metal-matmul; arithmetic=f32; reduction=ordered; dispatch=metal".to_string();
-//RS         return jet_compute_record(
-//RS             out,
-//RS             &[a, b],
-//RS             vec![a.clone(), b.clone()],
-//RS             JetComputeTapeRule::MatmulF32Tile,
-//RS         );
-//RS     }
-//RS     if a.device == JetComputeDevice::Cuda {
-//RS         jet_compute_require_same_contract(a, b, "matmul_f32_tile")?;
-//RS         let rows = usize::try_from(m).map_err(|_| {
-//RS             JetComputeError::InvalidShape("CUDA f32 tile row count is too large".to_string())
-//RS         })?;
-//RS         let inner = usize::try_from(k).map_err(|_| {
-//RS             JetComputeError::InvalidShape("CUDA f32 tile inner dimension is too large".to_string())
-//RS         })?;
-//RS         let cols = usize::try_from(n).map_err(|_| {
-//RS             JetComputeError::InvalidShape("CUDA f32 tile column count is too large".to_string())
-//RS         })?;
-//RS         let left = jet_compute_cuda_values(a, "f32 tile input")?;
-//RS         let right = jet_compute_cuda_values(b, "f32 tile input")?;
-//RS         let data = jet_compute_cuda::matmul(&left, &right, rows, inner, cols)?;
-//RS         let mut out = jet_compute_cuda_result_like(a, vec![m, n], data)?;
-//RS         out.last_placement.reason =
-//RS             "algorithm=cuda-matmul; arithmetic=f32; reduction=ordered; dispatch=cuda".to_string();
-//RS         return jet_compute_record(
-//RS             out,
-//RS             &[a, b],
-//RS             vec![a.clone(), b.clone()],
-//RS             JetComputeTapeRule::MatmulF32Tile,
-//RS         );
-//RS     }
-//RS     if a.device == JetComputeDevice::Vulkan {
-//RS         jet_compute_require_same_contract(a, b, "matmul_f32_tile")?;
-//RS         let rows = usize::try_from(m).map_err(|_| {
-//RS             JetComputeError::InvalidShape("Vulkan f32 tile row count is too large".to_string())
-//RS         })?;
-//RS         let inner = usize::try_from(k).map_err(|_| {
-//RS             JetComputeError::InvalidShape("Vulkan f32 tile inner dimension is too large".to_string())
-//RS         })?;
-//RS         let cols = usize::try_from(n).map_err(|_| {
-//RS             JetComputeError::InvalidShape("Vulkan f32 tile column count is too large".to_string())
-//RS         })?;
-//RS         let left = jet_compute_vulkan_values(a, "f32 tile input")?;
-//RS         let right = jet_compute_vulkan_values(b, "f32 tile input")?;
-//RS         let data = jet_compute_vulkan::matmul(&left, &right, rows, inner, cols)?;
-//RS         let mut out = jet_compute_vulkan_result_like(a, vec![m, n], data)?;
-//RS         out.last_placement.reason =
-//RS             "algorithm=vulkan-matmul; arithmetic=f32; reduction=ordered; dispatch=vulkan".to_string();
-//RS         return jet_compute_record(
-//RS             out,
-//RS             &[a, b],
-//RS             vec![a.clone(), b.clone()],
-//RS             JetComputeTapeRule::MatmulF32Tile,
-//RS         );
-//RS     }
-//RS     if a.device == JetComputeDevice::WebGpu {
-//RS         return Err(JetComputeError::Unsupported(
-//RS             "WebGPU backend requires a browser WebGPU host".to_string(),
-//RS         ));
-//RS     }
-//RS     let output_shape = vec![m, n];
-//RS     let m = usize::try_from(m)
-//RS         .map_err(|_| JetComputeError::InvalidShape("f32 tile row count is too large".to_string()))?;
-//RS     let k = usize::try_from(k)
-//RS         .map_err(|_| JetComputeError::InvalidShape("f32 tile inner dimension is too large".to_string()))?;
-//RS     let n = usize::try_from(n)
-//RS         .map_err(|_| JetComputeError::InvalidShape("f32 tile column count is too large".to_string()))?;
-//RS     let a_values = jet_compute_tensor_values(a)
-//RS         .into_iter()
-//RS         .map(|value| jet_compute_f32_value(value, "f32 tile input"))
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     let b_values = jet_compute_tensor_values(b)
-//RS         .into_iter()
-//RS         .map(|value| jet_compute_f32_value(value, "f32 tile input"))
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     let packed_b_len = n.checked_mul(k).ok_or_else(|| {
-//RS         JetComputeError::InvalidShape("f32 tile packed-B storage length overflow".to_string())
-//RS     })?;
-//RS     let mut packed_b = vec![0.0_f32; packed_b_len];
-//RS     for row in 0..k {
-//RS         for column in 0..n {
-//RS             packed_b[column * k + row] = b_values[row * n + column];
-//RS         }
-//RS     }
-//RS     let output_len = m.checked_mul(n).ok_or_else(|| {
-//RS         JetComputeError::InvalidShape("f32 tile output storage length overflow".to_string())
-//RS     })?;
-//RS     let backend = jet_compute_simd_backend();
-//RS     let mut output = vec![0.0_f64; output_len];
-//RS     const TILE: usize = 8;
-//RS     for row_tile in (0..m).step_by(TILE) {
-//RS         let row_end = row_tile.saturating_add(TILE).min(m);
-//RS         for column_tile in (0..n).step_by(TILE) {
-//RS             let column_end = column_tile.saturating_add(TILE).min(n);
-//RS             for row in row_tile..row_end {
-//RS                 let left = &a_values[row * k..(row + 1) * k];
-//RS                 for column in column_tile..column_end {
-//RS                     let right = &packed_b[column * k..(column + 1) * k];
-//RS                     let value = jet_compute_f32_dot(backend, left, right)?;
-//RS                     output[row * n + column] = f64::from(value);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut out = jet_compute_tensor_from_shape(
-//RS         output_shape,
-//RS         0.0,
-//RS         JetComputeDevice::Cpu,
-//RS     )?;
-//RS     out.data = std::sync::Arc::new(output);
-//RS     out.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
-//RS     out.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
-//RS         .iter()
-//RS         .map(|ability| (*ability).to_string())
-//RS         .collect();
-//RS     out.last_placement.reason = format!(
-//RS         "algorithm=blocked-matmul; tile={TILE}; arithmetic=f32; reduction=ordered; dispatch={}; vector_width={}; tail=scalar",
-//RS         backend.name(),
-//RS         backend.width(),
-//RS     );
-//RS     jet_compute_record(
-//RS         out,
-//RS         &[a, b],
-//RS         vec![a.clone(), b.clone()],
-//RS         JetComputeTapeRule::MatmulF32Tile,
-//RS     )
-//RS }
-//RS 
-//RS fn jet_compute_profile_f32_strict() -> String {
-//RS     let backend = jet_compute_simd_backend();
-//RS     format!(
-//RS         "backend={};version={};profile={};algorithm=blocked-matmul;tile=8;dispatch={};vector_width={};tail=scalar;cache={}",
-//RS         CPU_ORACLE_BACKEND,
-//RS         CPU_ORACLE_VERSION,
-//RS         CPU_ORACLE_F32_PROFILE,
-//RS         backend.name(),
-//RS         backend.width(),
-//RS         CPU_ORACLE_CACHE,
-//RS     )
-//RS }
-//RS 
-//RS fn jet_compute_profile_show() -> String {
-//RS     jet_compute_profile_f32_strict()
-//RS }
-// END-PORT-PENDING 0258 crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9065-10497
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9772
+fn jet_compute_serialize(tensor: &JetTensor) -> String JetComputeError! {
+    jet_compute_validate_tensor(tensor)?
+    if tensor.trace.is_some() -> return Err(JetComputeError.Unsupported("Tensor serialization does not accept traced tensors"))
+    if jet_compute_is_accelerator(tensor.device) -> return Err(JetComputeError.Unsupported("accelerator Tensor serialization requires an explicit transfer to CPU"))
+    values :: jet_compute_tensor_values(tensor)
+    shape :: tensor.shape.iter().map(d -> d.to_string()).collect<[String]>().join(",")
+    // Debug formatting preserves shortest round-tripping f64 spelling.
+    data :: values.iter().map(v -> "{v:?}").collect<[String]>().join(",")
+    profile :: tensor.last_placement.profile.as_str()
+    jet_compute_validate_serialized_profile_values(profile, &values)?
+    body :: "shape={shape};data={data};profile={profile}"
+    checksum :: jet_compute_wire_checksum(&body)
+    Ok("{body};checksum={checksum}")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9805
+fn jet_compute_deserialize(payload: &String) -> JetTensor JetComputeError! {
+    fields := payload.split(';')
+    shape_part :: fields.next() ?? return Err(JetComputeError.InvalidShape("deserialize expects shape=…;data=…;profile=…;checksum=…"))
+    data_part :: fields.next() ?? return Err(JetComputeError.InvalidShape("deserialize expects shape=…;data=…;profile=…;checksum=…"))
+    profile_part :: fields.next() ?? return Err(JetComputeError.InvalidShape("deserialize expects shape=…;data=…;profile=…;checksum=…"))
+    checksum_part :: fields.next() ?? return Err(JetComputeError.InvalidShape("deserialize expects shape=…;data=…;profile=…;checksum=…"))
+    if fields.next().is_some() || !data_part.starts_with("data=") || !profile_part.starts_with("profile=") || !checksum_part.starts_with("checksum=") {
+        return Err(JetComputeError.Serialization("deserialize contains duplicate or unknown fields"))
+    }
+    shape_str :: shape_part.strip_prefix("shape=").ok_or_else(fn() { JetComputeError.Serialization("missing shape=") })?
+    if shape_str.is_empty() -> return Err(JetComputeError.Serialization("serialized Tensor shape cannot be empty"))
+    shape :: shape_str.split(',').map(fn(p) {
+        if p.is_empty() -> return Err(JetComputeError.Serialization("serialized Tensor shape contains an empty axis"))
+        axis :: p.parse<I64>().map_err(_ -> JetComputeError.Serialization("bad shape axis `{p}`"))?
+        if axis.to_string() != p -> return Err(JetComputeError.Serialization("non-canonical shape axis `{p}`"))
+        Ok(axis)
+    }).collect<[I64] JetComputeError!>()?
+    data_str :: data_part.strip_prefix("data=").unwrap_or("")
+    data :: if data_str.is_empty() { [] } else {
+        data_str.split(',').map(fn(p) {
+            if p.is_empty() -> return Err(JetComputeError.Serialization("serialized Tensor data contains an empty value"))
+            value :: p.parse<F64>().map_err(_ -> JetComputeError.Serialization("bad data value `{p}`"))?
+            if !value.is_finite() -> return Err(JetComputeError.Serialization("serialized Tensor contains a non-finite value"))
+            if "{value:?}" != p -> return Err(JetComputeError.Serialization("non-canonical data value `{p}`"))
+            Ok(value)
+        }).collect<[F64] JetComputeError!>()?
+    }
+    profile :: profile_part.strip_prefix("profile=").unwrap_or("")
+    abilities :: jet_compute_registered_abilities(profile) ?? return Err(JetComputeError.Serialization("unsupported Tensor precision profile `{profile}`"))
+    jet_compute_validate_serialized_profile_values(profile, &data)?
+    checksum :: checksum_part.strip_prefix("checksum=").unwrap_or("")
+    if checksum.len() != 16 || !checksum.bytes().all(byte -> (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102})) {
+        return Err(JetComputeError.Serialization("serialized Tensor checksum is not canonical"))
+    }
+    body :: "{shape_part};{data_part};{profile_part}"
+    if jet_compute_wire_checksum(&body) != checksum -> return Err(JetComputeError.Serialization("serialized Tensor checksum does not match its contents"))
+    expected :: jet_compute_storage_len(&shape)?
+    if expected != data.len() -> return Err(JetComputeError.Serialization("deserialize storage length mismatch: shape wants {expected}, got {data.len()}"))
+    tensor := jet_compute_tensor_from_shape(^shape, F64{0.0}, JetComputeDevice.Cpu)?
+    // GATE #4565: kernel primitive
+    #Unsafe("retain the validated owned deserialized tensor backing storage") { tensor.data = Arc.new(^data) }
+    tensor.last_placement.profile = profile.to_string()
+    tensor.last_placement.abilities = abilities.iter().map(ability -> ability.to_string()).collect()
+    tensor.last_placement.reason = "deserialized canonical Tensor"
+    jet_compute_validate_tensor(&tensor)?
+    Ok(^tensor)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9934
+// Sparse CSR, CPU SIMD tile and precision profile.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9936
+#Derive(Clone, Debug, PartialEq)
+pub struct JetSparseCsr {
+    rows: I64,
+    cols: I64,
+    row_ptr: [I64],
+    col_idx: [I64],
+    values: [F64],
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9945
+impl JetShow for JetSparseCsr {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9946
+    fn jet_show(self: &Self) -> String { "SparseCsr({self.rows}x{self.cols}, nnz={self.values.len()})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9956
+fn jet_compute_to_sparse(tensor: &JetTensor) -> JetSparseCsr JetComputeError! {
+    if tensor.trace.is_some() -> return Err(JetComputeError.Unsupported("to_sparse has no registered autodiff rule"))
+    if tensor.shape.len() != 2 -> return Err(JetComputeError.RankMismatch("to_sparse requires a rank-2 tensor"))
+    jet_compute_validate_tensor(tensor)?
+    if jet_compute_is_accelerator(tensor.device) -> return Err(JetComputeError.Unsupported("accelerator backend does not support sparse conversion; transfer to CPU explicitly"))
+    rows :: tensor.shape[0]
+    cols :: tensor.shape[1]
+    row_ptr := [I64{0}]
+    col_idx := [I64].new()
+    values := [F64].new()
+    for r in 0..<rows {
+        for c in 0..<cols {
+            v :: jet_compute_get_raw(tensor, &[r, c])?
+            if v != F64{0.0} { col_idx.push(c); values.push(v) }
+        }
+        row_ptr.push(I64.try_from(values.len()).map_err(_ -> JetComputeError.InvalidShape("sparse nnz is too large"))?)
+    }
+    Ok(JetSparseCsr{rows: rows, cols: cols, row_ptr: ^row_ptr, col_idx: ^col_idx, values: ^values})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10000
+fn jet_compute_sparse_nnz(sparse: &JetSparseCsr) -> I64 { I64.try_from(sparse.values.len()).unwrap_or(I64.MAX) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10004
+fn jet_compute_sparse_mv(sparse: &JetSparseCsr, vector: &JetTensor) -> JetTensor JetComputeError! {
+    if vector.trace.is_some() -> return Err(JetComputeError.Unsupported("sparse_mv has no registered autodiff rule"))
+    jet_compute_validate_sparse(sparse)?
+    jet_compute_validate_tensor(vector)?
+    if jet_compute_is_accelerator(vector.device) -> return Err(JetComputeError.Unsupported("accelerator backend does not support sparse_mv; transfer the vector to CPU explicitly"))
+    if vector.shape.len() != 1 || vector.shape[0] != sparse.cols -> return Err(JetComputeError.RankMismatch("sparse_mv expects a length-{sparse.cols} vector"))
+    out := jet_compute_zeros(&[sparse.rows])?
+    for r in 0..<sparse.rows {
+        row :: USize.try_from(r).map_err(_ -> JetComputeError.InvalidShape("sparse row index is too large"))?
+        start :: USize.try_from(sparse.row_ptr[row]).map_err(_ -> JetComputeError.InvalidShape("sparse row pointer is invalid"))?
+        end :: USize.try_from(sparse.row_ptr[row + 1]).map_err(_ -> JetComputeError.InvalidShape("sparse row pointer is invalid"))?
+        acc := F64{0.0}
+        for k in start..<end {
+            c :: sparse.col_idx[k]
+            acc += sparse.values[k] * jet_compute_get_raw(vector, &[c])?
+            if !acc.is_finite() -> return Err(JetComputeError.Arithmetic("sparse matrix-vector multiplication produced a non-finite value"))
+        }
+        jet_compute_set(&out, &[r], acc)?
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10054
+fn jet_compute_validate_sparse(sparse: &JetSparseCsr) -> () JetComputeError! {
+    if sparse.rows < 0 || sparse.cols < 0 -> return Err(JetComputeError.InvalidShape("sparse dimensions must be non-negative"))
+    rows :: USize.try_from(sparse.rows).map_err(_ -> JetComputeError.InvalidShape("sparse row count is too large"))?
+    if sparse.row_ptr.len() != rows.saturating_add(1) || sparse.col_idx.len() != sparse.values.len() -> return Err(JetComputeError.InvalidShape("sparse CSR arrays have inconsistent lengths"))
+    nnz :: I64.try_from(sparse.values.len()).map_err(_ -> JetComputeError.InvalidShape("sparse nnz is too large"))?
+    if sparse.row_ptr.first().copied() != Val(I64{0}) || sparse.row_ptr.last().copied() != Val(nnz)
+        || sparse.row_ptr.windows(2).any(pair -> pair[0] < 0 || pair[1] < pair[0] || pair[1] > nnz)
+        || sparse.col_idx.iter().any(col -> col < 0 || col >= sparse.cols)
+        || sparse.values.iter().any(value -> !value.is_finite()) {
+        return Err(JetComputeError.InvalidShape("sparse CSR invariants are invalid"))
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10092
+fn jet_compute_sparse_show(sparse: &JetSparseCsr) -> String { sparse.jet_show() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10097
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+enum JetComputeSimdBackend { Avx2, Sse2, Scalar }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10103
+impl JetComputeSimdBackend {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10104
+    fn name(self: Self) -> String {
+        match self { .Avx2 -> "avx2", .Sse2 -> "sse2", .Scalar -> "scalar" }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10112
+    fn width(self: Self) -> USize { match self { .Avx2 -> 8, .Sse2 -> 4, .Scalar -> 1 } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10121
+fn jet_compute_simd_backend() -> JetComputeSimdBackend {
+    arch :: core.sys.target.selected_arch()
+    if arch == "x86" || arch == "x86_64" {
+        // GATE #4565: kernel primitive
+        return #Unsafe("runtime CPU feature detection includes OS enabled AVX state on selected x86 target") {
+            jet_compute_simd_backend_for_features(std.arch.is_x86_feature_detected("avx2"), std.arch.is_x86_feature_detected("sse2"))
+        }
+    }
+    jet_compute_simd_backend_for_features(false, false)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10135
+fn jet_compute_simd_backend_for_features(avx2: Bool, sse2: Bool) -> JetComputeSimdBackend {
+    if avx2 -> return .Avx2
+    if sse2 -> return .Sse2
+    .Scalar
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10145
+// Rust attribute: inline(never); preserve ordered scalar reduction.
+fn jet_compute_f32_dot_scalar(a: View<F32>, b: View<F32>) -> F32 {
+    a.iter().zip(b.iter()).fold(F32{0.0}, fn(sum, pair) { sum + pair.0 * pair.1 })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10152
+fn jet_compute_simd_backend_available(backend: JetComputeSimdBackend) -> Bool {
+    arch :: core.sys.target.selected_arch()
+    if arch == "x86" || arch == "x86_64" {
+        // GATE #4565: kernel primitive
+        return #Unsafe("query runtime x86 features and OS-enabled vector state before intrinsic dispatch") {
+            match backend {
+                .Avx2 -> std.arch.is_x86_feature_detected("avx2")
+                .Sse2 -> std.arch.is_x86_feature_detected("sse2")
+                .Scalar -> true
+            }
+        }
+    }
+    matches(backend, .Scalar)
+}
+// JET_VETTED_UNSAFE_BEGIN: jet_compute_cpu_simd
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10167
+// GATE #4565: kernel primitive
+// selected target x86_64; caller establishes AVX2 support and equal input lengths.
+#Unsafe("AVX2 unaligned loads read full in-bounds eight-float chunks; stack store has eight initialized lanes")
+fn jet_compute_f32_dot_avx2(a: View<F32>, b: View<F32>) -> F32 {
+    use std.arch.x86_64.[_mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps]
+    acc := _mm256_setzero_ps()
+    index := USize{0}
+    limit :: a.len() / 8 * 8
+    loop index < limit {
+        left :: _mm256_loadu_ps(a.as_ptr().add(index))
+        right :: _mm256_loadu_ps(b.as_ptr().add(index))
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(left, right))
+        index += 8
+    }
+    lanes := [F32; 8].filled(F32{0.0})
+    _mm256_storeu_ps(lanes.as_mut_ptr(), acc)
+    sum := F32{0.0}
+    for lane in lanes { sum += lane }
+    loop index < a.len() { sum += a[index] * b[index]; index += 1 }
+    sum
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10197
+// GATE #4565: kernel primitive
+// selected target x86; same original AVX2 body under its x86 intrinsic owner.
+#Unsafe("x86 AVX2 full chunks are within both borrowed inputs; caller has checked CPU and OS support")
+fn jet_compute_f32_dot_avx2_x86(a: View<F32>, b: View<F32>) -> F32 {
+    use std.arch.x86.[_mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps]
+    acc := _mm256_setzero_ps()
+    index := USize{0}
+    limit :: a.len() / 8 * 8
+    loop index < limit {
+        left :: _mm256_loadu_ps(a.as_ptr().add(index))
+        right :: _mm256_loadu_ps(b.as_ptr().add(index))
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(left, right))
+        index += 8
+    }
+    lanes := [F32; 8].filled(F32{0.0})
+    _mm256_storeu_ps(lanes.as_mut_ptr(), acc)
+    sum := F32{0.0}
+    for lane in lanes { sum += lane }
+    loop index < a.len() { sum += a[index] * b[index]; index += 1 }
+    sum
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10226
+// GATE #4565: kernel primitive
+#Unsafe("selected x86_64 SSE2 full four-float chunks are in-bounds; caller has established SSE2 support")
+fn jet_compute_f32_dot_sse2(a: View<F32>, b: View<F32>) -> F32 {
+    use std.arch.x86_64.[_mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps]
+    acc := _mm_setzero_ps()
+    index := USize{0}
+    limit :: a.len() / 4 * 4
+    loop index < limit {
+        left :: _mm_loadu_ps(a.as_ptr().add(index))
+        right :: _mm_loadu_ps(b.as_ptr().add(index))
+        acc = _mm_add_ps(acc, _mm_mul_ps(left, right))
+        index += 4
+    }
+    lanes := [F32; 4].filled(F32{0.0})
+    _mm_storeu_ps(lanes.as_mut_ptr(), acc)
+    sum := F32{0.0}
+    for lane in lanes { sum += lane }
+    loop index < a.len() { sum += a[index] * b[index]; index += 1 }
+    sum
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10255
+// GATE #4565: kernel primitive
+#Unsafe("selected x86 SSE2 full four-float chunks are in-bounds; caller has established SSE2 support")
+fn jet_compute_f32_dot_sse2_x86(a: View<F32>, b: View<F32>) -> F32 {
+    use std.arch.x86.[_mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps]
+    acc := _mm_setzero_ps()
+    index := USize{0}
+    limit :: a.len() / 4 * 4
+    loop index < limit {
+        left :: _mm_loadu_ps(a.as_ptr().add(index))
+        right :: _mm_loadu_ps(b.as_ptr().add(index))
+        acc = _mm_add_ps(acc, _mm_mul_ps(left, right))
+        index += 4
+    }
+    lanes := [F32; 4].filled(F32{0.0})
+    _mm_storeu_ps(lanes.as_mut_ptr(), acc)
+    sum := F32{0.0}
+    for lane in lanes { sum += lane }
+    loop index < a.len() { sum += a[index] * b[index]; index += 1 }
+    sum
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10283
+fn jet_compute_f32_dot(backend: JetComputeSimdBackend, a: View<F32>, b: View<F32>) -> F32 JetComputeError! {
+    if a.len() != b.len() -> return Err(JetComputeError.InvalidShape("SIMD dot-product inputs have different lengths"))
+    arch :: core.sys.target.selected_arch()
+    // GATE #4565: kernel primitive
+    value :: #Unsafe("matching-length borrowed inputs; backend is chosen by runtime feature detection before vector execution") {
+        match backend {
+            .Avx2 -> if arch == "x86_64" { jet_compute_f32_dot_avx2(a, b) }
+                else if arch == "x86" { jet_compute_f32_dot_avx2_x86(a, b) }
+                else { jet_compute_f32_dot_scalar(a, b) }
+            .Sse2 -> if arch == "x86_64" { jet_compute_f32_dot_sse2(a, b) }
+                else if arch == "x86" { jet_compute_f32_dot_sse2_x86(a, b) }
+                else { jet_compute_f32_dot_scalar(a, b) }
+            .Scalar -> jet_compute_f32_dot_scalar(a, b)
+        }
+    }
+    if value.is_finite() { Ok(value) } else { Err(JetComputeError.Arithmetic("f32 SIMD dot product overflowed")) }
+}
+// JET_VETTED_UNSAFE_END: jet_compute_cpu_simd
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10312
+// CPU-SIMD profile: blocked F32 matmul, runtime intrinsics, ordered lanes and scalar tail.
+fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> JetTensor JetComputeError! {
+    if a.shape.len() != 2 || b.shape.len() != 2 -> return Err(JetComputeError.RankMismatch("matmul_f32_tile requires rank-2 tensors"))
+    jet_compute_validate_tensor(a)?
+    jet_compute_validate_tensor(b)?
+    (m, k) :: (a.shape[0], a.shape[1])
+    (k2, n) :: (b.shape[0], b.shape[1])
+    if m < 0 || k < 0 || k2 < 0 || n < 0 -> return Err(JetComputeError.InvalidShape("matmul_f32_tile dimensions must be non-negative"))
+    if k != k2 -> return Err(JetComputeError.RankMismatch("matmul_f32_tile inner dims {k} and {k2} disagree"))
+    if a.device == JetComputeDevice.Metal {
+        jet_compute_require_same_contract(a, b, "matmul_f32_tile")?
+        rows :: USize.try_from(m).map_err(_ -> JetComputeError.InvalidShape("Metal f32 tile row count is too large"))?
+        inner :: USize.try_from(k).map_err(_ -> JetComputeError.InvalidShape("Metal f32 tile inner dimension is too large"))?
+        cols :: USize.try_from(n).map_err(_ -> JetComputeError.InvalidShape("Metal f32 tile column count is too large"))?
+        left :: jet_compute_metal_values(a, "f32 tile input")?
+        right :: jet_compute_metal_values(b, "f32 tile input")?
+        data :: jet_compute_metal.matmul(&left, &right, rows, inner, cols)?
+        out := jet_compute_metal_result_like(a, [m, n], ^data)?
+        out.last_placement.reason = "algorithm=metal-matmul; arithmetic=f32; reduction=ordered; dispatch=metal"
+        return jet_compute_record(^out, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.MatmulF32Tile)
+    }
+    if a.device == JetComputeDevice.Cuda {
+        jet_compute_require_same_contract(a, b, "matmul_f32_tile")?
+        rows :: USize.try_from(m).map_err(_ -> JetComputeError.InvalidShape("CUDA f32 tile row count is too large"))?
+        inner :: USize.try_from(k).map_err(_ -> JetComputeError.InvalidShape("CUDA f32 tile inner dimension is too large"))?
+        cols :: USize.try_from(n).map_err(_ -> JetComputeError.InvalidShape("CUDA f32 tile column count is too large"))?
+        left :: jet_compute_cuda_values(a, "f32 tile input")?
+        right :: jet_compute_cuda_values(b, "f32 tile input")?
+        data :: jet_compute_cuda.matmul(&left, &right, rows, inner, cols)?
+        out := jet_compute_cuda_result_like(a, [m, n], ^data)?
+        out.last_placement.reason = "algorithm=cuda-matmul; arithmetic=f32; reduction=ordered; dispatch=cuda"
+        return jet_compute_record(^out, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.MatmulF32Tile)
+    }
+    if a.device == JetComputeDevice.Vulkan {
+        jet_compute_require_same_contract(a, b, "matmul_f32_tile")?
+        rows :: USize.try_from(m).map_err(_ -> JetComputeError.InvalidShape("Vulkan f32 tile row count is too large"))?
+        inner :: USize.try_from(k).map_err(_ -> JetComputeError.InvalidShape("Vulkan f32 tile inner dimension is too large"))?
+        cols :: USize.try_from(n).map_err(_ -> JetComputeError.InvalidShape("Vulkan f32 tile column count is too large"))?
+        left :: jet_compute_vulkan_values(a, "f32 tile input")?
+        right :: jet_compute_vulkan_values(b, "f32 tile input")?
+        data :: jet_compute_vulkan.matmul(&left, &right, rows, inner, cols)?
+        out := jet_compute_vulkan_result_like(a, [m, n], ^data)?
+        out.last_placement.reason = "algorithm=vulkan-matmul; arithmetic=f32; reduction=ordered; dispatch=vulkan"
+        return jet_compute_record(^out, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.MatmulF32Tile)
+    }
+    if a.device == JetComputeDevice.WebGpu -> return Err(JetComputeError.Unsupported("WebGPU backend requires a browser WebGPU host"))
+    output_shape :: [m, n]
+    rows :: USize.try_from(m).map_err(_ -> JetComputeError.InvalidShape("f32 tile row count is too large"))?
+    inner :: USize.try_from(k).map_err(_ -> JetComputeError.InvalidShape("f32 tile inner dimension is too large"))?
+    cols :: USize.try_from(n).map_err(_ -> JetComputeError.InvalidShape("f32 tile column count is too large"))?
+    a_values :: jet_compute_tensor_values(a).into_iter().map(value -> jet_compute_f32_value(value, "f32 tile input")).collect<[F32] JetComputeError!>()?
+    b_values :: jet_compute_tensor_values(b).into_iter().map(value -> jet_compute_f32_value(value, "f32 tile input")).collect<[F32] JetComputeError!>()?
+    packed_b_len :: cols.checked_mul(inner).ok_or_else(fn() { JetComputeError.InvalidShape("f32 tile packed-B storage length overflow") })?
+    packed_b := [F32].filled(packed_b_len, F32{0.0})
+    for row in 0..<inner {
+        for column in 0..<cols { packed_b[column * inner + row] = b_values[row * cols + column] }
+    }
+    output_len :: rows.checked_mul(cols).ok_or_else(fn() { JetComputeError.InvalidShape("f32 tile output storage length overflow") })?
+    backend :: jet_compute_simd_backend()
+    output := [F64].filled(output_len, F64{0.0})
+    TILE: USize :: 8
+    for row_tile in (0..<rows).step_by(TILE) {
+        row_end :: row_tile.saturating_add(TILE).min(rows)
+        for column_tile in (0..<cols).step_by(TILE) {
+            column_end :: column_tile.saturating_add(TILE).min(cols)
+            for row in row_tile..<row_end {
+                left :: a_values.slice(row * inner, (row + 1) * inner)
+                for column in column_tile..<column_end {
+                    right :: packed_b.slice(column * inner, (column + 1) * inner)
+                    value :: jet_compute_f32_dot(backend, left, right)?
+                    output[row * cols + column] = F64.from(value)
+                }
+            }
+        }
+    }
+    out := jet_compute_tensor_from_shape(^output_shape, F64{0.0}, JetComputeDevice.Cpu)?
+    // GATE #4565: kernel primitive
+    #Unsafe("retain initialized blocked-matmul output without duplicating its backing allocation") { out.data = Arc.new(^output) }
+    out.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string()
+    out.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES.iter().map(ability -> ability.to_string()).collect()
+    out.last_placement.reason = "algorithm=blocked-matmul; tile={TILE}; arithmetic=f32; reduction=ordered; dispatch={backend.name()}; vector_width={backend.width()}; tail=scalar"
+    jet_compute_record(^out, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.MatmulF32Tile)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10482
+fn jet_compute_profile_f32_strict() -> String {
+    backend :: jet_compute_simd_backend()
+    "backend={CPU_ORACLE_BACKEND};version={CPU_ORACLE_VERSION};profile={CPU_ORACLE_F32_PROFILE};algorithm=blocked-matmul;tile=8;dispatch={backend.name()};vector_width={backend.width()};tail=scalar;cache={CPU_ORACLE_CACHE}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10495
+fn jet_compute_profile_show() -> String { jet_compute_profile_f32_strict() }
 

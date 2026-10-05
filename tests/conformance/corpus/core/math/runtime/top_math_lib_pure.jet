@@ -1,0 +1,54 @@
+use core.math.runtime.top_math_lib_pure.*
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:14/26/33/45
+#Test("complex_arithmetic_uses_shared_pair_policy_and_signed_display") {
+    left :: JetComplex.from_parts(1.0, 2.0)
+    right :: JetComplex.from_parts(3.0, -4.0)
+    product :: left.mul(&right)
+    assert_eq(product.real, 11.0)
+    assert_eq(product.imaginary, 2.0)
+    quotient :: product.div(&right)
+    assert_eq(quotient.real, 1.0)
+    assert_eq(quotient.imaginary, 2.0)
+    assert_eq(right.to_string_rep(), "3 - 4i")
+    assert_eq(JetComplex.from_parts(0.0, -0.0).to_string_rep(), "0 - 0i")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:143/165/194/208
+#Test("statistics_compensated_sum_and_prefix_sequences_preserve_order") {
+    assert_eq(jet_std_math_fsum([1.0e16, 1.0, 1.0, -1.0e16]), 2.0)
+    assert_eq(jet_stats_cumsum([1.0, 2.0, 3.0]), [1.0, 3.0, 6.0])
+    assert_eq(jet_stats_cumprod([2.0, 3.0, 4.0]), [2.0, 6.0, 24.0])
+    assert_eq(jet_stats_moving_average([1.0, 3.0, 5.0], 2), [1.0, 2.0, 4.0])
+    assert_eq(jet_stats_ewma([2.0, 4.0, 8.0], 0.5), [2.0, 3.0, 5.5])
+    assert(jet_stats_zscore([2.0, 2.0]).is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:269/335/342/355/369
+#Test("statistics_quantiles_and_tied_modes_preserve_first_occurrence") {
+    assert_eq(jet_stats_quantile([4.0, 1.0, 3.0, 2.0], 0.25), Val(1.75))
+    assert_eq(jet_stats_median_low([4.0, 1.0, 3.0, 2.0]), Val(2.0))
+    assert_eq(jet_stats_median_high([4.0, 1.0, 3.0, 2.0]), Val(3.0))
+    assert_eq(jet_stats_mode([3.0, 2.0, 3.0, 2.0]), Val(3.0))
+    assert_eq(jet_stats_multimode([3.0, 2.0, 3.0, 2.0]), [3.0, 2.0])
+    assert_eq(jet_stats_quantile([], 0.5), None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:388/393/409/424/595
+#Test("statistics_sample_population_and_histogram_denominators_remain_distinct") {
+    assert_eq(jet_stats_pvariance([1.0, 3.0]), Val(1.0))
+    assert_eq(jet_stats_variance([1.0, 3.0]), Val(2.0))
+    assert_eq(jet_stats_covariance([1.0, 3.0], [2.0, 6.0]), Val(4.0))
+    assert_eq(jet_stats_covariance_population([1.0, 3.0], [2.0, 6.0]), Val(2.0))
+    assert_eq(jet_stats_histogram([2.0, 2.0, 2.0], 3), [I64{3}, I64{0}, I64{0}])
+    assert_eq(jet_stats_histogram([0.0, 1.0, 2.0], 2), [I64{1}, I64{2}])
+    assert_eq(jet_stats_covariance([1.0], [2.0]), None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs:783/787/795/799/812/820
+#Test("math_word_bits_rounding_and_remainder_semantics_remain_distinct") {
+    assert_eq(jet_std_math_div_mod(-7, 3), (I64{-3}, I64{2}))
+    assert_eq(jet_std_math_div_rem(-7, 3), (I64{-2}, I64{-1}))
+    assert_eq(jet_std_math_round(2.5), I64{3})
+    assert_eq(jet_std_math_round(-2.5), I64{-3})
+    assert_eq(jet_std_math_min_f64(F64.NAN, 7.0), 7.0)
+    assert_eq(jet_std_math_to_bits(-0.0), I64.MIN)
+    assert(jet_std_math_from_bits(I64.MIN).is_sign_negative())
+    assert_eq(jet_std_math_to_bits(jet_std_math_from_bits(I64{0x3ff0000000000000})), I64{0x3ff0000000000000})
+}

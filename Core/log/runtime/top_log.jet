@@ -1,893 +1,576 @@
-// PORT-PENDING 0286 crates-jet-codegen-src-prelude-corelib-top-log: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:1-889
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── core.log ───────────────────────────────────────────────────────────────────
-//RS // E2-M12 D-OBS3: structured JSON logs (OTel-aligned field names).
-//RS // Each log record is a JSON object on stderr:
-//RS //   {"level":"info","body":"...","ts":<unix-ms>}
-//RS // When a trace_id is set (log.set_trace_id), it appears as "trace_id":"...".
-//RS // Log level: 0=debug, 1=info, 2=warn, 3=error, 4=critical, 5=fatal. Default is info (1).
-//RS // D-LOGFMT1=A: format 0=auto (TTY→text, else JSON), 1=json, 2=text.
-//RS const JET_LOG_TELEMETRY_SOURCE: &str = "core.log";
-//RS const JET_LOG_TELEMETRY_FILE: &str = "Prelude/CoreLib/Top/Log.rs";
-//RS const JET_LOG_TELEMETRY_TEXT_BYTES: usize = 512;
-//RS const JET_LOG_TELEMETRY_MAX_FIELDS: usize = 16;
-//RS const JET_LOG_TELEMETRY_MAX_METRICS: usize = 64;
-//RS const JET_LOG_TELEMETRY_MAX_LINKED_LOGS: usize = 32;
-//RS const JET_LOG_TELEMETRY_SLOW_WORK_NS: u64 = 100_000_000;
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetLogSpanObservation {
-//RS     id: i64,
-//RS     name: String,
-//RS     parent_id: Option<i64>,
-//RS     trace_id: Option<String>,
-//RS     start_ns: u64,
-//RS     linked_logs: Vec<u64>,
-//RS }
-//RS 
-//RS struct JetLogMetricState {
-//RS     name: String,
-//RS     next_index: u64,
-//RS }
-//RS 
-//RS static JET_LOG_TELEMETRY_NEXT_LOG_INDEX: std::sync::atomic::AtomicU64 =
-//RS     std::sync::atomic::AtomicU64::new(1);
-//RS static JET_LOG_TELEMETRY_NEXT_SLOW_INDEX: std::sync::atomic::AtomicU64 =
-//RS     std::sync::atomic::AtomicU64::new(1);
-//RS static JET_LOG_TELEMETRY_METRICS: std::sync::LazyLock<
-//RS     std::sync::Mutex<Vec<JetLogMetricState>>,
-//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
-//RS 
-//RS thread_local! {
-//RS     static JET_LOG_LEVEL: std::cell::Cell<u8> = std::cell::Cell::new(1);
-//RS     static JET_LOG_DISABLED: std::cell::Cell<bool> = std::cell::Cell::new(false);
-//RS     static JET_LOG_FORMAT: std::cell::Cell<u8> = std::cell::Cell::new(0);
-//RS     static JET_LOG_SINK_PATH: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
-//RS     static JET_LOG_SPANS: std::cell::RefCell<Vec<jet_std::LogSpan>> = std::cell::RefCell::new(Vec::new());
-//RS     static JET_LOG_SPAN_OBSERVATIONS: std::cell::RefCell<Vec<JetLogSpanObservation>> =
-//RS         std::cell::RefCell::new(Vec::new());
-//RS     static JET_LOG_SAMPLE_EVERY: std::cell::Cell<i64> = std::cell::Cell::new(1);
-//RS     static JET_LOG_SAMPLE_COUNT: std::cell::Cell<i64> = std::cell::Cell::new(0);
-//RS     static JET_LOG_NEXT_SPAN: std::cell::Cell<i64> = std::cell::Cell::new(1);
-//RS }
-//RS 
-//RS fn jet_log_level_rank(level: &str) -> Option<u8> {
-//RS     match level {
-//RS         "debug" => Some(0),
-//RS         "info" => Some(1),
-//RS         "warn" | "warning" => Some(2),
-//RS         "error" => Some(3),
-//RS         "critical" => Some(4),
-//RS         "fatal" => Some(5),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_set_level(level: &String) {
-//RS     let n: u8 = jet_log_level_rank(level).unwrap_or(1);
-//RS     JET_LOG_LEVEL.with(|l| l.set(n));
-//RS }
-//RS 
-//RS fn jet_ring_log_disable() {
-//RS     JET_LOG_DISABLED.with(|d| d.set(true));
-//RS }
-//RS 
-//RS fn jet_ring_log_flush() {
-//RS     let _ = std::io::Write::flush(&mut std::io::stderr());
-//RS     JET_LOG_SINK_PATH.with(|path| {
-//RS         let path = path.borrow();
-//RS         if path.is_empty() {
-//RS             return;
-//RS         }
-//RS         if let Ok(mut file) = std::fs::OpenOptions::new()
-//RS             .append(true)
-//RS             .create(true)
-//RS             .open(path.as_str())
-//RS         {
-//RS             let _ = std::io::Write::flush(&mut file);
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS fn jet_ring_log_enabled(level: &String) -> bool {
-//RS     if JET_LOG_DISABLED.with(|d| d.get()) {
-//RS         return false;
-//RS     }
-//RS     let Some(rank) = jet_log_level_rank(level) else {
-//RS         return false;
-//RS     };
-//RS     JET_LOG_LEVEL.with(|l| l.get() <= rank)
-//RS }
-//RS 
-//RS 
-//RS // D-LOGFMT1=A: explicit format override.
-//RS fn jet_ring_log_setup(format: &String) {
-//RS     let n: u8 = match format.as_str() {
-//RS         "json" => 1,
-//RS         "text" => 2,
-//RS         _ => 0,
-//RS     };
-//RS     JET_LOG_FORMAT.with(|f| f.set(n));
-//RS }
-//RS 
-//RS fn jet_ring_log_set_sink(kind: &String, path: &String) {
-//RS     let n: u8 = match kind.as_str() {
-//RS         "jsonl" | "json" => 1,
-//RS         "text" => 2,
-//RS         _ => 1,
-//RS     };
-//RS     JET_LOG_FORMAT.with(|f| f.set(n));
-//RS     JET_LOG_SINK_PATH.with(|p| *p.borrow_mut() = path.clone());
-//RS }
-//RS 
-//RS fn jet_ring_log_otlp_file(path: &String) {
-//RS     jet_ring_log_set_sink(&"jsonl".to_string(), path);
-//RS }
-//RS 
-//RS fn jet_ring_log_sample_every(n: i64) {
-//RS     JET_LOG_SAMPLE_EVERY.with(|s| s.set(n.max(1)));
-//RS     JET_LOG_SAMPLE_COUNT.with(|c| c.set(0));
-//RS }
-//RS 
-//RS fn jet_ring_log_field(key: &String, value: &String) -> jet_std::LogField {
-//RS     jet_std::LogField {
-//RS         key: key.clone(),
-//RS         value: value.clone(),
-//RS         kind: "string".to_string(),
-//RS         redacted: false,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_int(key: &String, value: i64) -> jet_std::LogField {
-//RS     jet_std::LogField {
-//RS         key: key.clone(),
-//RS         value: value.to_string(),
-//RS         kind: "int".to_string(),
-//RS         redacted: false,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_float(key: &String, value: f64) -> jet_std::LogField {
-//RS     jet_std::LogField {
-//RS         key: key.clone(),
-//RS         value: value.to_string(),
-//RS         kind: "float".to_string(),
-//RS         redacted: false,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_bool(key: &String, value: bool) -> jet_std::LogField {
-//RS     jet_std::LogField {
-//RS         key: key.clone(),
-//RS         value: value.to_string(),
-//RS         kind: "bool".to_string(),
-//RS         redacted: false,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_redact(key: &String) -> jet_std::LogField {
-//RS     jet_std::LogField {
-//RS         key: key.clone(),
-//RS         value: "[redacted]".to_string(),
-//RS         kind: "redacted".to_string(),
-//RS         redacted: true,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_counter(name: &String, value: i64) -> jet_std::LogField {
-//RS     jet_log_publish_metric(name, value);
-//RS     jet_std::LogField {
-//RS         key: format!("metric.counter.{}", name),
-//RS         value: value.to_string(),
-//RS         kind: "counter".to_string(),
-//RS         redacted: false,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_span(name: &String) -> jet_std::LogSpan {
-//RS     let id = JET_LOG_NEXT_SPAN.with(|n| {
-//RS         let id = n.get();
-//RS         n.set(id + 1);
-//RS         id
-//RS     });
-//RS     jet_std::LogSpan {
-//RS         id,
-//RS         name: name.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_enter(span: &jet_std::LogSpan) {
-//RS     JET_LOG_SPANS.with(|s| s.borrow_mut().push(span.clone()));
-//RS 
-//RS     let parent_id =
-//RS         JET_LOG_SPAN_OBSERVATIONS.with(|spans| spans.borrow().last().map(|state| state.id));
-//RS     let trace_id = JET_LOG_TRACE_ID.with(|trace| {
-//RS         let trace = jet_log_telemetry_text(&trace.borrow());
-//RS         (!trace.is_empty()).then_some(trace)
-//RS     });
-//RS     let observation = JetLogSpanObservation {
-//RS         id: span.id,
-//RS         name: jet_log_telemetry_text(&span.name),
-//RS         parent_id,
-//RS         trace_id,
-//RS         start_ns: jet_log_telemetry_monotonic_now_ns(),
-//RS         linked_logs: Vec::new(),
-//RS     };
-//RS     JET_LOG_SPAN_OBSERVATIONS.with(|spans| {
-//RS         let mut spans = spans.borrow_mut();
-//RS         if spans.len() < JET_LOG_TELEMETRY_MAX_LINKED_LOGS {
-//RS             spans.push(observation);
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS fn jet_ring_log_close(span: &jet_std::LogSpan) {
-//RS     JET_LOG_SPANS.with(|s| {
-//RS         let mut spans = s.borrow_mut();
-//RS         if let Some(pos) = spans.iter().rposition(|x| x.id == span.id) {
-//RS             spans.remove(pos);
-//RS         }
-//RS     });
-//RS     let observation = JET_LOG_SPAN_OBSERVATIONS.with(|spans| {
-//RS         let mut spans = spans.borrow_mut();
-//RS         spans
-//RS             .iter()
-//RS             .rposition(|state| state.id == span.id)
-//RS             .map(|pos| spans.remove(pos))
-//RS     });
-//RS     if let Some(observation) = observation {
-//RS         jet_log_publish_span(&observation, jet_log_telemetry_monotonic_now_ns());
-//RS     }
-//RS }
-//RS 
-//RS fn jet_log_telemetry_text(value: &str) -> String {
-//RS     let mut out = String::new();
-//RS     for ch in value.chars() {
-//RS         if ch.is_control() {
-//RS             continue;
-//RS         }
-//RS         let width = ch.len_utf8();
-//RS         if out.len().saturating_add(width) > JET_LOG_TELEMETRY_TEXT_BYTES {
-//RS             break;
-//RS         }
-//RS         out.push(ch);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn jet_log_telemetry_json_string(value: &str) -> String {
-//RS     let max_len = JET_LOG_TELEMETRY_TEXT_BYTES.saturating_add(2);
-//RS     let mut out = String::with_capacity(value.len().min(JET_LOG_TELEMETRY_TEXT_BYTES) + 2);
-//RS     out.push('"');
-//RS     for ch in value.chars() {
-//RS         if ch.is_control() {
-//RS             let escaped = format!("\\u{:04x}", ch as u32);
-//RS             if out.len().saturating_add(escaped.len()).saturating_add(1) > max_len {
-//RS                 break;
-//RS             }
-//RS             out.push_str(&escaped);
-//RS             continue;
-//RS         }
-//RS         let fragment = match ch {
-//RS             '"' => "\\\"",
-//RS             '\\' => "\\\\",
-//RS             '\n' => "\\n",
-//RS             '\r' => "\\r",
-//RS             '\t' => "\\t",
-//RS             '\u{08}' => "\\b",
-//RS             '\u{0c}' => "\\f",
-//RS             ch => {
-//RS                 if out.len().saturating_add(ch.len_utf8()).saturating_add(1) > max_len {
-//RS                     break;
-//RS                 }
-//RS                 out.push(ch);
-//RS                 continue;
-//RS             }
-//RS         };
-//RS         if out.len().saturating_add(fragment.len()).saturating_add(1) > max_len {
-//RS             break;
-//RS         }
-//RS         out.push_str(fragment);
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS 
-//RS fn jet_log_telemetry_context_json(
-//RS     trace_id: Option<&str>,
-//RS     span_id: Option<&str>,
-//RS ) -> String {
-//RS     match (trace_id, span_id) {
-//RS         (Some(trace_id), Some(span_id)) => format!(
-//RS             ",\"trace_id\":{},\"span_id\":{}",
-//RS             jet_log_telemetry_json_string(trace_id),
-//RS             jet_log_telemetry_json_string(span_id)
-//RS         ),
-//RS         _ => String::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_log_telemetry_wall_now_ns() -> u64 {
-//RS     std::time::SystemTime::now()
-//RS         .duration_since(std::time::UNIX_EPOCH)
-//RS         .map(|duration| duration.as_nanos().min(u64::MAX as u128) as u64)
-//RS         .unwrap_or(0)
-//RS }
-//RS 
-//RS fn jet_log_telemetry_monotonic_now_ns() -> u64 {
-//RS     static EPOCH: std::sync::LazyLock<std::time::Instant> =
-//RS         std::sync::LazyLock::new(std::time::Instant::now);
-//RS     EPOCH
-//RS         .elapsed()
-//RS         .as_nanos()
-//RS         .min(u64::MAX as u128) as u64
-//RS }
-//RS 
-//RS fn jet_log_current_span() -> Option<JetLogSpanObservation> {
-//RS     JET_LOG_SPAN_OBSERVATIONS.with(|spans| spans.borrow().last().cloned())
-//RS }
-//RS 
-//RS fn jet_log_metric_slot(name: &str) -> Option<(bool, u64)> {
-//RS     let mut metrics = match JET_LOG_TELEMETRY_METRICS.lock() {
-//RS         Ok(metrics) => metrics,
-//RS         Err(poisoned) => poisoned.into_inner(),
-//RS     };
-//RS     if let Some(metric) = metrics.iter_mut().find(|metric| metric.name == name) {
-//RS         let index = metric.next_index;
-//RS         metric.next_index = metric.next_index.saturating_add(1).max(1);
-//RS         return Some((false, index));
-//RS     }
-//RS     if metrics.len() >= JET_LOG_TELEMETRY_MAX_METRICS {
-//RS         return None;
-//RS     }
-//RS     metrics.push(JetLogMetricState {
-//RS         name: name.to_string(),
-//RS         next_index: 2,
-//RS     });
-//RS     Some((true, 1))
-//RS }
-//RS 
-//RS fn jet_log_publish_metric(name: &String, value: i64) {
-//RS     let name = jet_log_telemetry_text(name);
-//RS     if name.is_empty() {
-//RS         return;
-//RS     }
-//RS     let Some((first, index)) = jet_log_metric_slot(&name) else {
-//RS         return;
-//RS     };
-//RS     let timestamp_ns = jet_log_telemetry_wall_now_ns();
-//RS     if first {
-//RS         let fields = format!(
-//RS             "{{\"name\":{},\"kind\":\"counter\",\"unit\":\"count\",\"description\":\"core.log counter\",\"source_id\":{},\"source_file\":{},\"source_line\":179,\"source_column\":1,\"source_function\":\"jet_ring_log_counter\"}}",
-//RS             jet_log_telemetry_json_string(&name),
-//RS             jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE),
-//RS             jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE),
-//RS         );
-//RS         if let Ok(event) = JetDevtoolsEvent::from_parts(
-//RS             0,
-//RS             JET_LOG_TELEMETRY_SOURCE,
-//RS             "Metric",
-//RS             &name,
-//RS             fields,
-//RS         ) {
-//RS             jet_devtools_publish_event(event);
-//RS         }
-//RS     }
-//RS     let span = jet_log_current_span();
-//RS     let span_id = span.as_ref().map(|span| span.id.to_string());
-//RS     let trace_id = span.as_ref().and_then(|span| span.trace_id.as_deref());
-//RS     let fields = format!(
-//RS         "{{\"index\":{},\"timestamp_ns\":{},\"instrument\":{},\"source_id\":{},\"source_file\":{},\"source_line\":179,\"source_column\":1,\"source_function\":\"jet_ring_log_counter\",\"tags\":[]{} }}",
-//RS         index,
-//RS         timestamp_ns,
-//RS         jet_log_telemetry_json_string(&name),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE),
-//RS         jet_log_telemetry_context_json(trace_id, span_id.as_deref()),
-//RS     );
-//RS     let payload = format!(
-//RS         "{{\"value\":{}}}",
-//RS         value,
-//RS     );
-//RS     if let Ok(event) = JetDevtoolsEvent::from_parts_with_payload(
-//RS         timestamp_ns / 1_000_000,
-//RS         JET_LOG_TELEMETRY_SOURCE,
-//RS         "Metric",
-//RS         &name,
-//RS         fields,
-//RS         Some(payload),
-//RS     ) {
-//RS         jet_devtools_publish_event(event);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_log_telemetry_log_fields(fields: &[jet_std::LogField]) -> String {
-//RS     let mut metadata: Vec<(String, bool)> = Vec::new();
-//RS     for field in fields.iter().take(JET_LOG_TELEMETRY_MAX_FIELDS) {
-//RS         let key = jet_log_telemetry_text(&field.key);
-//RS         if key.is_empty() {
-//RS             continue;
-//RS         }
-//RS         if let Some((_, redacted)) = metadata.iter_mut().find(|(existing, _)| existing == &key) {
-//RS             *redacted |= field.redacted;
-//RS         } else {
-//RS             metadata.push((key, field.redacted));
-//RS         }
-//RS     }
-//RS     metadata.sort_by(|left, right| left.0.cmp(&right.0));
-//RS     let fields = metadata
-//RS         .into_iter()
-//RS         .map(|(key, redacted)| {
-//RS             if redacted {
-//RS                 format!(
-//RS                     "{{\"key\":{},\"redacted\":true}}",
-//RS                     jet_log_telemetry_json_string(&key)
-//RS                 )
-//RS             } else {
-//RS                 format!("{{\"key\":{}}}", jet_log_telemetry_json_string(&key))
-//RS             }
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!("[{}]", fields)
-//RS }
-//RS fn jet_log_telemetry_payload_fields(fields: &[jet_std::LogField]) -> String {
-//RS     let values = fields
-//RS         .iter()
-//RS         .take(JET_LOG_TELEMETRY_MAX_FIELDS)
-//RS         .filter_map(|field| {
-//RS             let key = jet_log_telemetry_text(&field.key);
-//RS             if key.is_empty() || field.redacted {
-//RS                 return None;
-//RS             }
-//RS             let value = match field.kind.as_str() {
-//RS                 "int" | "counter" => field.value.parse::<i64>().ok().map(|value| value.to_string()),
-//RS                 "float" => field
-//RS                     .value
-//RS                     .parse::<f64>()
-//RS                     .ok()
-//RS                     .filter(|value| value.is_finite())
-//RS                     .map(|value| value.to_string()),
-//RS                 "bool" if matches!(field.value.as_str(), "true" | "false") => {
-//RS                     Some(field.value.clone())
-//RS                 }
-//RS                 _ => Some(jet_log_telemetry_json_string(&field.value)),
-//RS             }?;
-//RS             Some(format!(
-//RS                 "{{\"key\":{},\"value\":{}}}",
-//RS                 jet_log_telemetry_json_string(&key),
-//RS                 value,
-//RS             ))
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!("[{}]", values)
-//RS }
-//RS 
-//RS 
-//RS fn jet_log_publish_record(
-//RS     level: &str,
-//RS     message: &str,
-//RS     timestamp_ns: u64,
-//RS     fields: &[jet_std::LogField],
-//RS     index: u64,
-//RS     span: Option<&JetLogSpanObservation>,
-//RS ) -> bool {
-//RS     let span_id = span.map(|span| span.id.to_string());
-//RS     let trace_id = span.and_then(|span| span.trace_id.as_deref());
-//RS     let telemetry_fields = format!(
-//RS         "{{\"index\":{},\"timestamp_ns\":{},\"level\":{},\"source_id\":{},\"source_file\":{},\"source_line\":724,\"source_column\":1,\"source_function\":\"jet_log_emit\",\"fields\":{}{} }}",
-//RS         index,
-//RS         timestamp_ns,
-//RS         jet_log_telemetry_json_string(level),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE),
-//RS         jet_log_telemetry_log_fields(fields),
-//RS         jet_log_telemetry_context_json(trace_id, span_id.as_deref()),
-//RS     );
-//RS     let payload = format!(
-//RS         "{{\"body\":{},\"fields\":{}}}",
-//RS         jet_log_telemetry_json_string(message),
-//RS         jet_log_telemetry_payload_fields(fields),
-//RS     );
-//RS     let Ok(event) = JetDevtoolsEvent::from_parts_with_payload(
-//RS         timestamp_ns / 1_000_000,
-//RS         JET_LOG_TELEMETRY_SOURCE,
-//RS         "Log",
-//RS         &index.to_string(),
-//RS         telemetry_fields,
-//RS         Some(payload),
-//RS     ) else {
-//RS         return false;
-//RS     };
-//RS     jet_devtools_publish_event(event);
-//RS     true
-//RS }
-//RS 
-//RS fn jet_log_note_active_span(
-//RS     span_id: i64,
-//RS     log_index: u64,
-//RS ) -> Option<JetLogSpanObservation> {
-//RS     JET_LOG_SPAN_OBSERVATIONS.with(|spans| {
-//RS         let mut spans = spans.borrow_mut();
-//RS         let state = spans.last_mut()?;
-//RS         if state.id != span_id {
-//RS             return None;
-//RS         }
-//RS         if state.linked_logs.len() < JET_LOG_TELEMETRY_MAX_LINKED_LOGS {
-//RS             state.linked_logs.push(log_index);
-//RS         }
-//RS         Some(state.clone())
-//RS     })
-//RS }
-//RS 
-//RS fn jet_log_publish_link(
-//RS     span: &JetLogSpanObservation,
-//RS     level: &str,
-//RS     timestamp_ns: u64,
-//RS     log_index: u64,
-//RS ) {
-//RS     let Some(trace_id) = span.trace_id.as_deref() else {
-//RS         return;
-//RS     };
-//RS     let fields = format!(
-//RS         "{{\"span_index\":{},\"log_index\":{},\"trace_id\":{},\"span_id\":{},\"span_source_id\":{},\"log_source_id\":{},\"timestamp_ns\":{},\"level\":{}}}",
-//RS         span.id.max(0),
-//RS         log_index,
-//RS         jet_log_telemetry_json_string(trace_id),
-//RS         jet_log_telemetry_json_string(&span.id.to_string()),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE),
-//RS         timestamp_ns,
-//RS         jet_log_telemetry_json_string(level),
-//RS     );
-//RS     if let Ok(event) = JetDevtoolsEvent::from_parts(
-//RS         timestamp_ns / 1_000_000,
-//RS         JET_LOG_TELEMETRY_SOURCE,
-//RS         "TraceLink",
-//RS         &format!("{}:{}", span.id.max(0), log_index),
-//RS         fields,
-//RS     ) {
-//RS         jet_devtools_publish_event(event);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_log_publish_span(span: &JetLogSpanObservation, end_ns: u64) {
-//RS     let Some(trace_id) = span.trace_id.as_deref() else {
-//RS         return;
-//RS     };
-//RS     let span_index = span.id.max(0) as u64;
-//RS     let end_ns = end_ns.max(span.start_ns);
-//RS     let duration_ns = end_ns.saturating_sub(span.start_ns);
-//RS     let linked_logs = span
-//RS         .linked_logs
-//RS         .iter()
-//RS         .map(u64::to_string)
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let span_id = span.id.to_string();
-//RS     let parent_span_id = span.parent_id.map(|parent| parent.to_string());
-//RS     let parent_field = parent_span_id
-//RS         .as_deref()
-//RS         .map(jet_log_telemetry_json_string)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let fields = format!(
-//RS         "{{\"index\":{},\"name\":{},\"kind\":\"internal\",\"parent_span_id\":{},\"start_ns\":{},\"status\":\"ok\",\"trace_id\":{},\"span_id\":{},\"source_id\":{},\"source_file\":{},\"source_line\":201,\"source_column\":1,\"source_function\":\"jet_ring_log_enter\",\"linked_log_indexes\":[{}],\"end_ns\":{},\"duration_ns\":{}}}",
-//RS         span_index,
-//RS         jet_log_telemetry_json_string(&span.name),
-//RS         parent_field,
-//RS         span.start_ns,
-//RS         jet_log_telemetry_json_string(trace_id),
-//RS         jet_log_telemetry_json_string(&span_id),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE),
-//RS         linked_logs,
-//RS         end_ns,
-//RS         duration_ns,
-//RS     );
-//RS     if let Ok(event) = JetDevtoolsEvent::from_parts(
-//RS         span.start_ns / 1_000_000,
-//RS         JET_LOG_TELEMETRY_SOURCE,
-//RS         "Trace",
-//RS         &span_id,
-//RS         fields,
-//RS     ) {
-//RS         jet_devtools_publish_event(event);
-//RS     }
-//RS     if duration_ns < JET_LOG_TELEMETRY_SLOW_WORK_NS {
-//RS         return;
-//RS     }
-//RS     let slow_index = JET_LOG_TELEMETRY_NEXT_SLOW_INDEX
-//RS         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS     let slow_fields = format!(
-//RS         "{{\"index\":{},\"operation\":{},\"threshold_ns\":{},\"duration_ns\":{},\"start_ns\":{},\"end_ns\":{},\"trace_id\":{},\"span_id\":{},\"source_id\":{},\"source_file\":{},\"source_line\":201,\"source_column\":1,\"source_function\":\"jet_ring_log_enter\"}}",
-//RS         slow_index,
-//RS         jet_log_telemetry_json_string(&span.name),
-//RS         JET_LOG_TELEMETRY_SLOW_WORK_NS,
-//RS         duration_ns,
-//RS         span.start_ns,
-//RS         end_ns,
-//RS         jet_log_telemetry_json_string(trace_id),
-//RS         jet_log_telemetry_json_string(&span_id),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE),
-//RS         jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE),
-//RS     );
-//RS     if let Ok(event) = JetDevtoolsEvent::from_parts(
-//RS         end_ns / 1_000_000,
-//RS         JET_LOG_TELEMETRY_SOURCE,
-//RS         "SlowWork",
-//RS         &slow_index.to_string(),
-//RS         slow_fields,
-//RS     ) {
-//RS         jet_devtools_publish_event(event);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_log_format_active() -> u8 {
-//RS     let explicit = JET_LOG_FORMAT.with(|f| f.get());
-//RS     if explicit != 0 {
-//RS         return explicit;
-//RS     }
-//RS     // Auto-detect: text if stderr is a terminal, JSON otherwise.
-//RS     use std::io::IsTerminal;
-//RS     if std::io::stderr().is_terminal() {
-//RS         2
-//RS     } else {
-//RS         1
-//RS     }
-//RS }
-//RS 
-//RS fn jet_log_json_escape(s: &str) -> String {
-//RS     let mut out = String::with_capacity(s.len());
-//RS     for ch in s.chars() {
-//RS         match ch {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             c => out.push(c),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn jet_log_fields_json(fields: &[jet_std::LogField]) -> String {
-//RS     let mut out = String::new();
-//RS     for field in fields {
-//RS         out.push_str(",\"");
-//RS         out.push_str(&jet_log_json_escape(&field.key));
-//RS         out.push_str("\":");
-//RS         if field.kind == "int"
-//RS             || field.kind == "float"
-//RS             || field.kind == "bool"
-//RS             || field.kind == "counter"
-//RS         {
-//RS             out.push_str(&field.value);
-//RS         } else {
-//RS             out.push('"');
-//RS             out.push_str(&jet_log_json_escape(&field.value));
-//RS             out.push('"');
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn jet_log_spans_json() -> String {
-//RS     JET_LOG_SPANS.with(|s| {
-//RS         let spans = s.borrow();
-//RS         if spans.is_empty() {
-//RS             return String::new();
-//RS         }
-//RS         let names = spans
-//RS             .iter()
-//RS             .map(|span| format!("\"{}\"", jet_log_json_escape(&span.name)))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         format!(",\"spans\":[{}]", names)
-//RS     })
-//RS }
-//RS 
-//RS fn jet_log_write(line: &str) {
-//RS     let path = JET_LOG_SINK_PATH.with(|p| p.borrow().clone());
-//RS     if path.is_empty() {
-//RS         jet_log_write_line(line);
-//RS     } else if let Ok(mut f) = std::fs::OpenOptions::new()
-//RS         .create(true)
-//RS         .append(true)
-//RS         .open(path)
-//RS     {
-//RS         use std::io::Write;
-//RS         let _ = writeln!(f, "{}", line);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_log_emit_json(level: &str, msg: &str, ts: i64, fields: &[jet_std::LogField]) {
-//RS     let trace = JET_LOG_TRACE_ID.with(|t| t.borrow().clone());
-//RS     let fields_json = jet_log_fields_json(fields);
-//RS     let spans_json = jet_log_spans_json();
-//RS     let line = if trace.is_empty() {
-//RS         format!(
-//RS             "{{\"level\":\"{}\",\"body\":\"{}\",\"ts\":{}{}{} }}",
-//RS             level,
-//RS             jet_log_json_escape(msg),
-//RS             ts,
-//RS             fields_json,
-//RS             spans_json
-//RS         )
-//RS     } else {
-//RS         format!(
-//RS             "{{\"level\":\"{}\",\"body\":\"{}\",\"trace_id\":\"{}\",\"ts\":{}{}{} }}",
-//RS             level,
-//RS             jet_log_json_escape(msg),
-//RS             jet_log_json_escape(&trace),
-//RS             ts,
-//RS             fields_json,
-//RS             spans_json
-//RS         )
-//RS     };
-//RS     jet_log_write(&line.replace(" }", "}"));
-//RS }
-//RS 
-//RS fn jet_log_emit_text(level: &str, msg: &str, ts: i64, fields: &[jet_std::LogField]) {
-//RS     let secs = ts / 1000;
-//RS     let (y, mo, d, h, mi, s) = unix_to_ymdhms(secs);
-//RS     let level_tag = match level {
-//RS         "debug" => "DEBUG",
-//RS         "info" => "INFO",
-//RS         "warn" => "WARN",
-//RS         "error" => "ERROR",
-//RS         "critical" => "CRITICAL",
-//RS         "fatal" => "FATAL",
-//RS         _ => level,
-//RS     };
-//RS     let trace = JET_LOG_TRACE_ID.with(|t| t.borrow().clone());
-//RS     let field_text = if fields.is_empty() {
-//RS         String::new()
-//RS     } else {
-//RS         format!(
-//RS             " {}",
-//RS             fields
-//RS                 .iter()
-//RS                 .map(|f| format!("{}={}", f.key, f.value))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(" ")
-//RS         )
-//RS     };
-//RS     let line = if trace.is_empty() {
-//RS         format!(
-//RS             "[{}] {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z | {}{}",
-//RS             level_tag, y, mo, d, h, mi, s, msg, field_text
-//RS         )
-//RS     } else {
-//RS         format!(
-//RS             "[{}] {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z trace={} | {}{}",
-//RS             level_tag, y, mo, d, h, mi, s, trace, msg, field_text
-//RS         )
-//RS     };
-//RS     jet_log_write(&line);
-//RS }
-//RS 
-//RS fn jet_log_emit(level: &str, msg: &str, fields: &[jet_std::LogField]) {
-//RS     if JET_LOG_DISABLED.with(|d| d.get()) {
-//RS         return;
-//RS     }
-//RS     let keep = JET_LOG_SAMPLE_EVERY.with(|every| {
-//RS         JET_LOG_SAMPLE_COUNT.with(|count| {
-//RS             let next = count.get() + 1;
-//RS             count.set(next);
-//RS             every.get() <= 1 || (next - 1) % every.get() == 0
-//RS         })
-//RS     });
-//RS     if !keep {
-//RS         return;
-//RS     }
-//RS     let timestamp_ns = jet_log_telemetry_wall_now_ns();
-//RS     let ts = (timestamp_ns / 1_000_000) as i64;
-//RS     let index = JET_LOG_TELEMETRY_NEXT_LOG_INDEX
-//RS         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS     let span = jet_log_current_span();
-//RS     if jet_log_publish_record(level, msg, timestamp_ns, fields, index, span.as_ref()) {
-//RS         if let Some(span) = span.as_ref() {
-//RS             if let Some(updated) = jet_log_note_active_span(span.id, index) {
-//RS                 jet_log_publish_link(&updated, level, timestamp_ns, index);
-//RS             }
-//RS         }
-//RS     }
-//RS     if jet_log_format_active() == 2 {
-//RS         jet_log_emit_text(level, msg, ts, fields);
-//RS     } else {
-//RS         jet_log_emit_json(level, msg, ts, fields);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ring_log_debug(msg: &String) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 0 {
-//RS         jet_log_emit("debug", msg, &[]);
-//RS     }
-//RS }
-//RS fn jet_ring_log_info(msg: &String) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 1 {
-//RS         jet_log_emit("info", msg, &[]);
-//RS     }
-//RS }
-//RS fn jet_ring_log_warn(msg: &String) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 2 {
-//RS         jet_log_emit("warn", msg, &[]);
-//RS     }
-//RS }
-//RS fn jet_ring_log_error(msg: &String) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 3 {
-//RS         jet_log_emit("error", msg, &[]);
-//RS     }
-//RS }
-//RS fn jet_ring_log_critical(msg: &String) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 4 {
-//RS         jet_log_emit("critical", msg, &[]);
-//RS     }
-//RS }
-//RS fn jet_ring_log_fatal(msg: &String) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 5 {
-//RS         jet_log_emit("fatal", msg, &[]);
-//RS     }
-//RS     jet_ring_log_flush();
-//RS     jet_log_process_exit(1);
-//RS }
-//RS 
-//RS fn jet_ring_log_debug_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 0 {
-//RS         jet_log_emit("debug", msg, fields);
-//RS     }
-//RS }
-//RS fn jet_ring_log_info_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 1 {
-//RS         jet_log_emit("info", msg, fields);
-//RS     }
-//RS }
-//RS fn jet_ring_log_warn_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 2 {
-//RS         jet_log_emit("warn", msg, fields);
-//RS     }
-//RS }
-//RS fn jet_ring_log_error_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
-//RS     if JET_LOG_LEVEL.with(|l| l.get()) <= 3 {
-//RS         jet_log_emit("error", msg, fields);
-//RS     }
-//RS }
-//RS 
-//RS fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
-//RS     let mut days = secs / 86400;
-//RS     let time_of_day = (secs % 86400).unsigned_abs();
-//RS     let h = (time_of_day / 3600) as u32;
-//RS     let mi = ((time_of_day % 3600) / 60) as u32;
-//RS     let s = (time_of_day % 60) as u32;
-//RS     let mut year: i32 = 1970;
-//RS     loop {
-//RS         let dy = if is_leap(year) { 366 } else { 365 };
-//RS         if days < dy {
-//RS             break;
-//RS         }
-//RS         days -= dy;
-//RS         year += 1;
-//RS     }
-//RS     let month_days: [i64; 12] = if is_leap(year) {
-//RS         [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-//RS     } else {
-//RS         [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-//RS     };
-//RS     let mut month: u32 = 1;
-//RS     for &md in &month_days {
-//RS         if days < md {
-//RS             break;
-//RS         }
-//RS         days -= md;
-//RS         month += 1;
-//RS     }
-//RS     (year, month, (days + 1) as u32, h, mi, s)
-//RS }
-//RS 
-//RS fn is_leap(y: i32) -> bool {
-//RS     (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
-//RS }
-// END-PORT-PENDING 0286 crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:1-889
+// core.log: retained structured log, metric and span observations.
+use core.cell.[Cell, RefCell, ThreadLocal]
+use std.sync.[LazyLock, Mutex]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.time.[SystemTime, Instant, UNIX_EPOCH]
+use std.fs.[OpenOptions]
+use std.io
+use core.log.[LogField]
+use core.prelude.runtime.std_common_types_02.[LogSpan]
+use core.log.runtime.kernel_log_state.[JET_LOG_TRACE_ID]
+use jet_foundation.Devtools.[JetDevtoolsEvent]
+use jet_std.[jet_devtools_publish_event]
+use core.prelude.runtime.native_core_host.[jet_log_write_line, jet_log_process_exit]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:8
+const JET_LOG_TELEMETRY_SOURCE: String = "core.log"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:9
+const JET_LOG_TELEMETRY_FILE: String = "Prelude/CoreLib/Top/Log.rs"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:10
+const JET_LOG_TELEMETRY_TEXT_BYTES: USize = 512
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:11
+const JET_LOG_TELEMETRY_MAX_FIELDS: USize = 16
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:12
+const JET_LOG_TELEMETRY_MAX_METRICS: USize = 64
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:13
+const JET_LOG_TELEMETRY_MAX_LINKED_LOGS: USize = 32
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:14
+const JET_LOG_TELEMETRY_SLOW_WORK_NS: U64 = 100_000_000
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:16
+#Clone
+struct JetLogSpanObservation {
+    id: I64
+    name: String
+    parent_id: I64?
+    trace_id: String?
+    start_ns: U64
+    linked_logs: [U64]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:26
+struct JetLogMetricState { name: String, next_index: U64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:31
+// GATE #4565: kernel primitive
+static JET_LOG_TELEMETRY_NEXT_LOG_INDEX: AtomicU64 = #Unsafe("process-wide relaxed log sequence") { AtomicU64.new(1) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:33
+// GATE #4565: kernel primitive
+static JET_LOG_TELEMETRY_NEXT_SLOW_INDEX: AtomicU64 = #Unsafe("process-wide relaxed slow-work sequence") { AtomicU64.new(1) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:35
+// GATE #4565: kernel primitive
+static JET_LOG_TELEMETRY_METRICS: LazyLock<Mutex<[JetLogMetricState]>> = #Unsafe("initialize one mutex-protected bounded metric registry") {
+    LazyLock.new(() -> Mutex.new([JetLogMetricState]{}))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:39
+// GATE #4565: kernel primitive — all logger configuration and spans belong to the executing thread.
+const JET_LOG_LEVEL: ThreadLocal<Cell<U8>> = ThreadLocal.new(fn() { Cell.new(U8{1}) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:41
+const JET_LOG_DISABLED: ThreadLocal<Cell<Bool>> = ThreadLocal.new(fn() { Cell.new(false) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:42
+const JET_LOG_FORMAT: ThreadLocal<Cell<U8>> = ThreadLocal.new(fn() { Cell.new(U8{0}) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:43
+const JET_LOG_SINK_PATH: ThreadLocal<RefCell<String>> = ThreadLocal.new(fn() { RefCell.new(String.new()) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:44
+const JET_LOG_SPANS: ThreadLocal<RefCell<[LogSpan]>> = ThreadLocal.new(fn() { RefCell.new([LogSpan]{}) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:45
+const JET_LOG_SPAN_OBSERVATIONS: ThreadLocal<RefCell<[JetLogSpanObservation]>> = ThreadLocal.new(fn() { RefCell.new([JetLogSpanObservation]{}) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:47
+const JET_LOG_SAMPLE_EVERY: ThreadLocal<Cell<I64>> = ThreadLocal.new(fn() { Cell.new(I64{1}) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:48
+const JET_LOG_SAMPLE_COUNT: ThreadLocal<Cell<I64>> = ThreadLocal.new(fn() { Cell.new(I64{0}) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:49
+const JET_LOG_NEXT_SPAN: ThreadLocal<Cell<I64>> = ThreadLocal.new(fn() { Cell.new(I64{1}) })
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:52
+pub fn jet_log_level_rank(level: String) -> U8? {
+    match level {
+        "debug" -> Val(U8{0}), "info" -> Val(U8{1}),
+        "warn" | "warning" -> Val(U8{2}), "error" -> Val(U8{3}),
+        "critical" -> Val(U8{4}), "fatal" -> Val(U8{5}), _ -> None,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:64
+pub fn jet_ring_log_set_level(level: String) -> {
+    n :: jet_log_level_rank(level).unwrap_or(1)
+    // GATE #4565: kernel primitive
+    #Unsafe("set executing thread level") { JET_LOG_LEVEL.with(l -> l.set(n)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:69
+pub fn jet_ring_log_disable() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("disable executing thread logger") { JET_LOG_DISABLED.with(d -> d.set(true)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:73
+pub fn jet_ring_log_flush() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("flush stderr and the configured append-only file; ignore native IO failures as in Rust") {
+        _ :: io.stderr().flush()
+        JET_LOG_SINK_PATH.with(path -> {
+            path :: path.borrow()
+            if path.is_empty() -> return
+            if OpenOptions.new().append(true).create(true).open(OSPath.new(path)) is Ok(file) {
+                _ :: &file.flush()
+            }
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:90
+pub fn jet_ring_log_enabled(level: String) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("read thread-local disable and level cells") {
+        if JET_LOG_DISABLED.with(d -> d.get()) -> return false
+        rank :: match jet_log_level_rank(level) { Val(rank) -> rank, None -> return false }
+        JET_LOG_LEVEL.with(l -> l.get() <= rank)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:102
+pub fn jet_ring_log_setup(format: String) -> {
+    n :: match format { "json" -> U8{1}, "text" -> U8{2}, _ -> U8{0} }
+    // GATE #4565: kernel primitive
+    #Unsafe("set thread-local format override") { JET_LOG_FORMAT.with(f -> f.set(n)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:111
+pub fn jet_ring_log_set_sink(kind: String, path: String) -> {
+    n :: match kind { "jsonl" | "json" -> U8{1}, "text" -> U8{2}, _ -> U8{1} }
+    // GATE #4565: kernel primitive
+    #Unsafe("replace thread-local format and owned sink path") {
+        JET_LOG_FORMAT.with(f -> f.set(n))
+        JET_LOG_SINK_PATH.with(p -> { _ :: p.replace(~path) })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:121
+pub fn jet_ring_log_otlp_file(path: String) -> { jet_ring_log_set_sink("jsonl", path) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:125
+pub fn jet_ring_log_sample_every(n: I64) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("reset thread-local sampling cadence") {
+        JET_LOG_SAMPLE_EVERY.with(s -> s.set(n.max(1)))
+        JET_LOG_SAMPLE_COUNT.with(c -> c.set(0))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:130
+pub fn jet_ring_log_field(key: String, value: String) -> LogField {
+    LogField{key: ~key, value: ~value, kind: "string", redacted: false}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:139
+pub fn jet_ring_log_int(key: String, value: I64) -> LogField {
+    LogField{key: ~key, value: value.to_string(), kind: "int", redacted: false}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:148
+pub fn jet_ring_log_float(key: String, value: F64) -> LogField {
+    LogField{key: ~key, value: value.to_string(), kind: "float", redacted: false}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:157
+pub fn jet_ring_log_bool(key: String, value: Bool) -> LogField {
+    LogField{key: ~key, value: value.to_string(), kind: "bool", redacted: false}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:166
+pub fn jet_ring_log_redact(key: String) -> LogField {
+    LogField{key: ~key, value: "[redacted]", kind: "redacted", redacted: true}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:175
+pub fn jet_ring_log_counter(name: String, value: I64) -> LogField {
+    jet_log_publish_metric(name, value)
+    LogField{key: "metric.counter.{name}", value: value.to_string(), kind: "counter", redacted: false}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:185
+pub fn jet_ring_log_span(name: String) -> LogSpan {
+    // GATE #4565: kernel primitive
+    id :: #Unsafe("advance thread-local span identifier") {
+        JET_LOG_NEXT_SPAN.with(n -> { id :: n.get(); n.set(id + 1); id })
+    }
+    LogSpan{id: id, name: ~name}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:197
+pub fn jet_ring_log_enter(span: LogSpan) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain current span stack and bounded observation in executing thread") {
+        JET_LOG_SPANS.with(s -> &s.borrow_mut().push(~span))
+        parent_id :: JET_LOG_SPAN_OBSERVATIONS.with(spans -> spans.borrow().last().map(state -> state.id))
+        trace_id :: JET_LOG_TRACE_ID.with(trace -> {
+            text :: jet_log_telemetry_text(trace.borrow())
+            if text.is_empty() -> None else -> Val(^text)
+        })
+        observation :: JetLogSpanObservation{id: span.id, name: jet_log_telemetry_text(span.name),
+            parent_id: parent_id, trace_id: ^trace_id, start_ns: jet_log_telemetry_monotonic_now_ns(), linked_logs: [U64]{}}
+        JET_LOG_SPAN_OBSERVATIONS.with(spans -> {
+            spans := spans.borrow_mut()
+            if spans.len() < JET_LOG_TELEMETRY_MAX_LINKED_LOGS -> &spans.push(^observation)
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:222
+pub fn jet_ring_log_close(span: LogSpan) -> {
+    // GATE #4565: kernel primitive
+    observation :: #Unsafe("remove last matching span from both thread-owned stacks") {
+        JET_LOG_SPANS.with(s -> {
+            spans := s.borrow_mut()
+            if spans.iter().rposition(x -> x.id == span.id) is Val(pos) { _ :: &spans.remove(pos) }
+        })
+        JET_LOG_SPAN_OBSERVATIONS.with(spans -> {
+            spans := spans.borrow_mut()
+            spans.iter().rposition(state -> state.id == span.id).map(pos -> &spans.remove(pos))
+        })
+    }
+    if observation is Val(observation) -> jet_log_publish_span(observation, jet_log_telemetry_monotonic_now_ns())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:241
+pub fn jet_log_telemetry_text(value: String) -> String {
+    out := String.new()
+    loop ch in value.chars() {
+        if ch.is_control() -> continue
+        width :: ch.len_utf8()
+        if out.len().saturating_add(width) > JET_LOG_TELEMETRY_TEXT_BYTES -> break
+        &out.push(ch)
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:256
+pub fn jet_log_telemetry_json_string(value: String) -> String {
+    max_len :: JET_LOG_TELEMETRY_TEXT_BYTES.saturating_add(2)
+    out := String.with_capacity(value.len().min(JET_LOG_TELEMETRY_TEXT_BYTES) + 2)
+    &out.push('"')
+    loop ch in value.chars() {
+        if ch.is_control() {
+            escaped :: "\\u{ch as U32:04x}"
+            if out.len().saturating_add(escaped.len()).saturating_add(1) > max_len -> break
+            &out.push_str(escaped)
+            continue
+        }
+        fragment :: match ch {
+            '"' -> "\\\"", '\\' -> "\\\\", '\n' -> "\\n", '\r' -> "\\r", '\t' -> "\\t",
+            '\u{08}' -> "\\b", '\u{0c}' -> "\\f",
+            _ -> {
+                if out.len().saturating_add(ch.len_utf8()).saturating_add(1) > max_len -> break
+                &out.push(ch)
+                continue
+            },
+        }
+        if out.len().saturating_add(fragment.len()).saturating_add(1) > max_len -> break
+        &out.push_str(fragment)
+    }
+    &out.push('"')
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:294
+pub fn jet_log_telemetry_context_json(trace_id: String?, span_id: String?) -> String {
+    match (trace_id, span_id) {
+        (Val(trace), Val(span)) -> ",\"trace_id\":{jet_log_telemetry_json_string(trace)},\"span_id\":{jet_log_telemetry_json_string(span)}",
+        _ -> String.new(),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:308
+fn jet_log_telemetry_wall_now_ns() -> U64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("read actual wall time, clamp to U64 and retain zero for pre-epoch failure") {
+        SystemTime.now().duration_since(UNIX_EPOCH).map(duration -> duration.as_nanos().min(U64.MAX as U128) as U64).unwrap_or(0)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:315
+fn jet_log_telemetry_monotonic_now_ns() -> U64 {
+    // GATE #4565: kernel primitive
+    static EPOCH: LazyLock<Instant> = #Unsafe("initialize process monotonic log epoch once") { LazyLock.new(() -> Instant.now()) }
+    #Unsafe("read elapsed monotonic nanoseconds and clamp to U64") { EPOCH.elapsed().as_nanos().min(U64.MAX as U128) as U64 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:324
+fn jet_log_current_span() -> JetLogSpanObservation? {
+    // GATE #4565: kernel primitive
+    #Unsafe("snapshot top thread-owned span observation") { JET_LOG_SPAN_OBSERVATIONS.with(spans -> spans.borrow().last().cloned()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:328
+fn jet_log_metric_slot(name: String) -> (Bool, U64)? {
+    // GATE #4565: kernel primitive
+    #Unsafe("hold bounded metric registry mutex, preserving Rust poison recovery") {
+        metrics := match JET_LOG_TELEMETRY_METRICS.lock() { Ok(metrics) -> metrics, Err(poisoned) -> poisoned.into_inner() }
+        loop i in 0..<metrics.len() {
+            if metrics[i].name == name {
+                index :: metrics[i].next_index
+                metrics[i].next_index = index.saturating_add(1).max(1)
+                return Val((false, index))
+            }
+        }
+        if metrics.len() >= JET_LOG_TELEMETRY_MAX_METRICS -> return None
+        &metrics.push(JetLogMetricState{name: ~name, next_index: 2})
+        Val((true, U64{1}))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:348
+fn jet_log_publish_metric(name: String, value: I64) -> {
+    name :: jet_log_telemetry_text(name)
+    if name.is_empty() -> return
+    (first, index) :: match jet_log_metric_slot(name) { Val(slot) -> slot, None -> return }
+    timestamp_ns :: jet_log_telemetry_wall_now_ns()
+    if first {
+        fields :: "{{\"name\":{jet_log_telemetry_json_string(name)},\"kind\":\"counter\",\"unit\":\"count\",\"description\":\"core.log counter\",\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":179,\"source_column\":1,\"source_function\":\"jet_ring_log_counter\"}}"
+        if JetDevtoolsEvent.from_parts(0, JET_LOG_TELEMETRY_SOURCE, "Metric", name, ^fields) is Ok(event) { jet_devtools_publish_event(^event) }
+    }
+    span :: jet_log_current_span()
+    span_id :: span.as_ref().map(span -> span.id.to_string())
+    trace_id :: span.as_ref().and_then(span -> span.trace_id.as_ref())
+    fields :: "{{\"index\":{index},\"timestamp_ns\":{timestamp_ns},\"instrument\":{jet_log_telemetry_json_string(name)},\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":179,\"source_column\":1,\"source_function\":\"jet_ring_log_counter\",\"tags\":[]{jet_log_telemetry_context_json(trace_id, span_id.as_ref())} }}"
+    payload :: "{{\"value\":{value}}}"
+    if JetDevtoolsEvent.from_parts_with_payload(timestamp_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "Metric", name, ^fields, Val(^payload)) is Ok(event) { jet_devtools_publish_event(^event) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:402
+pub fn jet_log_telemetry_log_fields(fields: [LogField]) -> String {
+    metadata := [(String, Bool)]{}
+    loop field in fields.iter().take(JET_LOG_TELEMETRY_MAX_FIELDS) {
+        key :: jet_log_telemetry_text(field.key)
+        if key.is_empty() -> continue
+        if metadata.iter().position(pair -> pair.0 == key) is Val(pos) {
+            metadata[pos].1 = metadata[pos].1 || field.redacted
+        } else { &metadata.push((^key, field.redacted)) }
+    }
+    &metadata.sort_by((left, right) -> left.0.cmp(right.0))
+    fragments := [String]{}
+    loop (key, redacted) in metadata {
+        if redacted -> &fragments.push("{{\"key\":{jet_log_telemetry_json_string(key)},\"redacted\":true}}")
+        else -> &fragments.push("{{\"key\":{jet_log_telemetry_json_string(key)}}}")
+    }
+    "[{fragments.join(",")}]"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:432
+pub fn jet_log_telemetry_payload_fields(fields: [LogField]) -> String {
+    values := [String]{}
+    loop field in fields.iter().take(JET_LOG_TELEMETRY_MAX_FIELDS) {
+        key :: jet_log_telemetry_text(field.key)
+        if key.is_empty() || field.redacted -> continue
+        value :: match field.kind {
+            "int" | "counter" -> field.value.parse<I64>().ok().map(value -> value.to_string()),
+            "float" -> field.value.parse<F64>().ok().filter(value -> value.is_finite()).map(value -> value.to_string()),
+            "bool" if field.value == "true" || field.value == "false" -> Val(~field.value),
+            _ -> Val(jet_log_telemetry_json_string(field.value)),
+        }
+        if value is Val(value) -> &values.push("{{\"key\":{jet_log_telemetry_json_string(key)},\"value\":{value}}}")
+    }
+    "[{values.join(",")}]"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:466
+fn jet_log_publish_record(level: String, message: String, timestamp_ns: U64, fields: [LogField], index: U64, span: JetLogSpanObservation?) -> Bool {
+    span_id :: span.as_ref().map(span -> span.id.to_string())
+    trace_id :: span.as_ref().and_then(span -> span.trace_id.as_ref())
+    telemetry_fields :: "{{\"index\":{index},\"timestamp_ns\":{timestamp_ns},\"level\":{jet_log_telemetry_json_string(level)},\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":724,\"source_column\":1,\"source_function\":\"jet_log_emit\",\"fields\":{jet_log_telemetry_log_fields(fields)}{jet_log_telemetry_context_json(trace_id, span_id.as_ref())} }}"
+    payload :: "{{\"body\":{jet_log_telemetry_json_string(message)},\"fields\":{jet_log_telemetry_payload_fields(fields)}}}"
+    event :: match JetDevtoolsEvent.from_parts_with_payload(timestamp_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "Log", index.to_string(), ^telemetry_fields, Val(^payload)) {
+        Ok(event) -> event, Err(_) -> return false,
+    }
+    jet_devtools_publish_event(^event)
+    true
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:505
+fn jet_log_note_active_span(span_id: I64, log_index: U64) -> JetLogSpanObservation? {
+    // GATE #4565: kernel primitive
+    #Unsafe("link successful publication only to current matching thread span") {
+        JET_LOG_SPAN_OBSERVATIONS.with(spans -> {
+            spans := spans.borrow_mut()
+            if spans.is_empty() -> return None
+            i :: spans.len() - 1
+            if spans[i].id != span_id -> return None
+            if spans[i].linked_logs.len() < JET_LOG_TELEMETRY_MAX_LINKED_LOGS -> &spans[i].linked_logs.push(log_index)
+            Val(~spans[i])
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:522
+fn jet_log_publish_link(span: JetLogSpanObservation, level: String, timestamp_ns: U64, log_index: U64) -> {
+    trace_id :: match span.trace_id.as_ref() { Val(trace) -> trace, None -> return }
+    fields :: "{{\"span_index\":{span.id.max(0)},\"log_index\":{log_index},\"trace_id\":{jet_log_telemetry_json_string(trace_id)},\"span_id\":{jet_log_telemetry_json_string(span.id.to_string())},\"span_source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"log_source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"timestamp_ns\":{timestamp_ns},\"level\":{jet_log_telemetry_json_string(level)}}}"
+    if JetDevtoolsEvent.from_parts(timestamp_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "TraceLink", "{span.id.max(0)}:{log_index}", ^fields) is Ok(event) { jet_devtools_publish_event(^event) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:553
+fn jet_log_publish_span(span: JetLogSpanObservation, end_ns: U64) -> {
+    trace_id :: match span.trace_id.as_ref() { Val(trace) -> trace, None -> return }
+    span_index :: span.id.max(0) as U64
+    end_ns :: end_ns.max(span.start_ns)
+    duration_ns :: end_ns.saturating_sub(span.start_ns)
+    linked_logs :: span.linked_logs.iter().map(index -> index.to_string()).collect<[String]>().join(",")
+    span_id :: span.id.to_string()
+    parent_span_id :: span.parent_id.map(parent -> parent.to_string())
+    parent_field :: parent_span_id.as_ref().map(jet_log_telemetry_json_string).unwrap_or_else(() -> "null")
+    fields :: "{{\"index\":{span_index},\"name\":{jet_log_telemetry_json_string(span.name)},\"kind\":\"internal\",\"parent_span_id\":{parent_field},\"start_ns\":{span.start_ns},\"status\":\"ok\",\"trace_id\":{jet_log_telemetry_json_string(trace_id)},\"span_id\":{jet_log_telemetry_json_string(span_id)},\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":201,\"source_column\":1,\"source_function\":\"jet_ring_log_enter\",\"linked_log_indexes\":[{linked_logs}],\"end_ns\":{end_ns},\"duration_ns\":{duration_ns}}}"
+    if JetDevtoolsEvent.from_parts(span.start_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "Trace", span_id, ^fields) is Ok(event) { jet_devtools_publish_event(^event) }
+    if duration_ns < JET_LOG_TELEMETRY_SLOW_WORK_NS -> return
+    // GATE #4565: kernel primitive
+    slow_index :: #Unsafe("advance relaxed process-wide slow-work sequence") { JET_LOG_TELEMETRY_NEXT_SLOW_INDEX.fetch_add(1, Ordering.Relaxed) }
+    slow_fields :: "{{\"index\":{slow_index},\"operation\":{jet_log_telemetry_json_string(span.name)},\"threshold_ns\":{JET_LOG_TELEMETRY_SLOW_WORK_NS},\"duration_ns\":{duration_ns},\"start_ns\":{span.start_ns},\"end_ns\":{end_ns},\"trace_id\":{jet_log_telemetry_json_string(trace_id)},\"span_id\":{jet_log_telemetry_json_string(span_id)},\"source_id\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_SOURCE)},\"source_file\":{jet_log_telemetry_json_string(JET_LOG_TELEMETRY_FILE)},\"source_line\":201,\"source_column\":1,\"source_function\":\"jet_ring_log_enter\"}}"
+    if JetDevtoolsEvent.from_parts(end_ns / 1_000_000, JET_LOG_TELEMETRY_SOURCE, "SlowWork", slow_index.to_string(), ^slow_fields) is Ok(event) { jet_devtools_publish_event(^event) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:624
+fn jet_log_format_active() -> U8 {
+    // GATE #4565: kernel primitive
+    #Unsafe("read format override or detect whether actual stderr is a terminal") {
+        explicit :: JET_LOG_FORMAT.with(f -> f.get())
+        if explicit != 0 -> return explicit
+        if io.stderr().is_terminal() -> U8{2} else -> U8{1}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:638
+pub fn jet_log_json_escape(s: String) -> String {
+    out := String.with_capacity(s.len())
+    loop ch in s.chars() {
+        match ch {
+            '"' -> &out.push_str("\\\""), '\\' -> &out.push_str("\\\\"),
+            '\n' -> &out.push_str("\\n"), '\r' -> &out.push_str("\\r"), '\t' -> &out.push_str("\\t"),
+            c -> &out.push(c),
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:653
+pub fn jet_log_fields_json(fields: [LogField]) -> String {
+    out := String.new()
+    loop field in fields {
+        &out.push_str(",\"")
+        &out.push_str(jet_log_json_escape(field.key))
+        &out.push_str("\":")
+        if field.kind == "int" || field.kind == "float" || field.kind == "bool" || field.kind == "counter" {
+            &out.push_str(field.value)
+        } else {
+            &out.push('"')
+            &out.push_str(jet_log_json_escape(field.value))
+            &out.push('"')
+        }
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:674
+fn jet_log_spans_json() -> String {
+    // GATE #4565: kernel primitive
+    #Unsafe("render thread-owned span names in stack order") {
+        JET_LOG_SPANS.with(s -> {
+            spans :: s.borrow()
+            if spans.is_empty() -> return String.new()
+            names :: spans.iter().map(span -> "\"{jet_log_json_escape(span.name)}\"").collect<[String]>().join(",")
+            ",\"spans\":[{names}]"
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:689
+fn jet_log_write(line: String) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("write actual stderr provider or create/append selected native file; preserve ignored IO errors") {
+        path :: JET_LOG_SINK_PATH.with(p -> p.borrow().clone())
+        if path.is_empty() { jet_log_write_line(line) }
+        else if OpenOptions.new().create(true).append(true).open(OSPath.new(path)) is Ok(file) {
+            _ :: &file.write_all("{line}\n".as_bytes())
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:703
+fn jet_log_emit_json(level: String, msg: String, ts: I64, fields: [LogField]) -> {
+    // GATE #4565: kernel primitive
+    trace :: #Unsafe("snapshot current thread trace text") { JET_LOG_TRACE_ID.with(t -> t.borrow().clone()) }
+    fields_json :: jet_log_fields_json(fields)
+    spans_json :: jet_log_spans_json()
+    line :: if trace.is_empty() -> "{{\"level\":\"{level}\",\"body\":\"{jet_log_json_escape(msg)}\",\"ts\":{ts}{fields_json}{spans_json} }}"
+        else -> "{{\"level\":\"{level}\",\"body\":\"{jet_log_json_escape(msg)}\",\"trace_id\":\"{jet_log_json_escape(trace)}\",\"ts\":{ts}{fields_json}{spans_json} }}"
+    jet_log_write(line.replace(" }", "}"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:730
+fn jet_log_emit_text(level: String, msg: String, ts: I64, fields: [LogField]) -> {
+    secs :: ts / 1000
+    (y, mo, d, h, mi, s) :: unix_to_ymdhms(secs)
+    level_tag :: match level {
+        "debug" -> "DEBUG", "info" -> "INFO", "warn" -> "WARN", "error" -> "ERROR", "critical" -> "CRITICAL", "fatal" -> "FATAL", _ -> level,
+    }
+    // GATE #4565: kernel primitive
+    trace :: #Unsafe("snapshot current thread trace text") { JET_LOG_TRACE_ID.with(t -> t.borrow().clone()) }
+    field_text :: if fields.is_empty() -> String.new()
+        else -> " {fields.iter().map(f -> "{f.key}={f.value}").collect<[String]>().join(" ")}"
+    line :: if trace.is_empty() -> "[{level_tag}] {y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z | {msg}{field_text}"
+        else -> "[{level_tag}] {y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z trace={trace} | {msg}{field_text}"
+    jet_log_write(line)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:769
+fn jet_log_emit(level: String, msg: String, fields: [LogField]) -> {
+    // GATE #4565: kernel primitive
+    keep :: #Unsafe("check thread-local disable and advance sampling counter before publication") {
+        if JET_LOG_DISABLED.with(d -> d.get()) -> return
+        JET_LOG_SAMPLE_EVERY.with(every -> JET_LOG_SAMPLE_COUNT.with(count -> {
+            next :: count.get() + 1
+            count.set(next)
+            every.get() <= 1 || (next - 1) % every.get() == 0
+        }))
+    }
+    if !keep -> return
+    timestamp_ns :: jet_log_telemetry_wall_now_ns()
+    ts :: (timestamp_ns / 1_000_000) as I64
+    // GATE #4565: kernel primitive
+    index :: #Unsafe("advance relaxed process log sequence") { JET_LOG_TELEMETRY_NEXT_LOG_INDEX.fetch_add(1, Ordering.Relaxed) }
+    span :: jet_log_current_span()
+    if jet_log_publish_record(level, msg, timestamp_ns, fields, index, span.as_ref()) {
+        if span is Val(span) {
+            if jet_log_note_active_span(span.id, index) is Val(updated) -> jet_log_publish_link(updated, level, timestamp_ns, index)
+        }
+    }
+    if jet_log_format_active() == 2 -> jet_log_emit_text(level, msg, ts, fields)
+    else -> jet_log_emit_json(level, msg, ts, fields)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:802
+pub fn jet_ring_log_debug(msg: String) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 0 -> jet_log_emit("debug", msg, [LogField]{})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:807
+pub fn jet_ring_log_info(msg: String) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 1 -> jet_log_emit("info", msg, [LogField]{})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:812
+pub fn jet_ring_log_warn(msg: String) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 2 -> jet_log_emit("warn", msg, [LogField]{})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:817
+pub fn jet_ring_log_error(msg: String) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 3 -> jet_log_emit("error", msg, [LogField]{})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:822
+pub fn jet_ring_log_critical(msg: String) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 4 -> jet_log_emit("critical", msg, [LogField]{})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:827
+pub fn jet_ring_log_fatal(msg: String) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 5 -> jet_log_emit("fatal", msg, [LogField]{})
+    jet_ring_log_flush()
+    // GATE #4565: kernel primitive
+    #Unsafe("terminate actual process after flushing fatal record") { jet_log_process_exit(1) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:835
+pub fn jet_ring_log_debug_fields(msg: String, fields: [LogField]) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 0 -> jet_log_emit("debug", msg, fields)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:840
+pub fn jet_ring_log_info_fields(msg: String, fields: [LogField]) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 1 -> jet_log_emit("info", msg, fields)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:845
+pub fn jet_ring_log_warn_fields(msg: String, fields: [LogField]) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 2 -> jet_log_emit("warn", msg, fields)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:850
+pub fn jet_ring_log_error_fields(msg: String, fields: [LogField]) -> {
+    // GATE #4565: kernel primitive
+    if #Unsafe("read thread log threshold") { JET_LOG_LEVEL.with(l -> l.get()) } <= 3 -> jet_log_emit("error", msg, fields)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:856
+pub fn unix_to_ymdhms(secs: I64) -> (I32, U32, U32, U32, U32, U32) {
+    days := secs / 86400
+    time_of_day :: (secs % 86400).unsigned_abs()
+    h :: (time_of_day / 3600) as U32
+    mi :: ((time_of_day % 3600) / 60) as U32
+    s :: (time_of_day % 60) as U32
+    year := I32{1970}
+    loop {
+        dy :: if is_leap(year) -> I64{366} else -> I64{365}
+        if days < dy -> break
+        days -= dy
+        year += 1
+    }
+    month_days :: if is_leap(year) -> [I64]{31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+        else -> [I64]{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+    month := U32{1}
+    loop md in month_days {
+        if days < md -> break
+        days -= md
+        month += 1
+    }
+    (year, month, (days + 1) as U32, h, mi, s)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:887
+pub fn is_leap(y: I32) -> Bool { (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0) }

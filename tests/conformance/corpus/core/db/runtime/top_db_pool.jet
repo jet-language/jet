@@ -1,0 +1,46 @@
+use core.db.runtime.top_db_pool.[JetDbPoolState, JetDbPoolLifecycle, jet_db_pool_error]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:142/149/153/158
+#Test("db_pool_waiters_claim_fifo_and_cancel_without_overtaking") {
+    state := JetDbPoolState<I64>.new(2)
+    first :: state.enqueue_waiter()
+    second :: state.enqueue_waiter()
+    third :: state.enqueue_waiter()
+    assert(state.waiter_is_turn(first))
+    assert(not state.waiter_is_turn(second))
+    state.remove_waiter(second)
+    state.claim_waiter(first)
+    assert(state.waiter_is_turn(third))
+    state.claim_waiter(third)
+    assert(state.waiters.is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:135/164/174
+#Test("db_pool_drain_requires_idle_leased_and_opening_counts_to_clear") {
+    state := JetDbPoolState<I64>.new(3)
+    state.available.push(I64{9})
+    state.leased = 1
+    state.opening = 1
+    assert_eq(state.reserved(), 3)
+    assert(state.receipt().ready)
+    state.lifecycle = JetDbPoolLifecycle.Draining
+    state.mark_drained()
+    assert_eq(state.lifecycle, JetDbPoolLifecycle.Draining)
+    assert(not state.receipt().ready)
+    _ :: state.available.pop()
+    state.leased = 0
+    state.mark_drained()
+    assert_eq(state.lifecycle, JetDbPoolLifecycle.Draining)
+    state.opening = 0
+    state.mark_drained()
+    assert_eq(state.lifecycle, JetDbPoolLifecycle.Drained)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:174/30
+#Test("db_pool_receipt_saturates_event_counts_and_preserves_render_contract") {
+    state := JetDbPoolState<I64>.new(2)
+    state.acquires = U64.MAX
+    receipt :: state.receipt()
+    assert_eq(receipt.acquires, I64.MAX)
+    state.acquires = 0
+    assert_eq(state.receipt().render(), "db.pool lifecycle=open max=2 available=0 leased=0 opening=0 ready=0 acquires=0 releases=0 timeouts=0 open_failures=0 unhealthy=0 replacements=0 replacement_failures=0")
+    assert_eq(jet_db_pool_error("database pool is drained").message, "database pool is drained")
+}

@@ -1,0 +1,121 @@
+use core.http.runtime.top_http_server.[JetHTTPDeflateBits, JetHTTPDeflateTable, JetHTTPChunkState, jet_http_gzip_decode, jet_http_decode_request_bytes, jet_http_crc32, JetHTTPShutdownReport, jet_http_shutdown_report_field]
+use core.http.runtime.top_http_server.[jet_http_route_schema_matches, jet_http_accept_quality, jet_http_error_page_accepts_json, jet_error_page_bounded, jet_error_page_identifier, jet_error_page_safe_text, jet_error_page_link, jet_error_page_json_quote, jet_error_page_html_escape, jet_http_srv_response_owned, JetErrorPageProjection]
+use core.encoding.runtime.std_data_tree.DataTree
+use core.encoding.runtime.std_json_codec.parse_json_strict
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:75/81/93
+#Test("http_deflate_bits_are_lsb_first_and_bounds_checked") {
+    input :: [U8{0x35}, U8{0xa7}]
+    bits := JetHTTPDeflateBits{input: &input, bit: 0}
+    assert_eq(bits.peek(4).unwrap(), U32{5})
+    assert_eq(bits.bit, Usize{0})
+    assert_eq(bits.read(4).unwrap(), U32{5})
+    bits.align()
+    assert_eq(bits.read(8).unwrap(), U32{0xa7})
+    assert_eq(bits.read(1).unwrap_err().status, I64{400})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:104
+#Test("http_deflate_rejects_oversubscribed_and_incomplete_code_tables") {
+    assert_eq(JetHTTPDeflateTable.new(&[U8{1}, U8{1}, U8{1}], false).unwrap_err().status, I64{400})
+    assert_eq(JetHTTPDeflateTable.new(&[U8{2}], false).unwrap_err().status, I64{400})
+    assert_eq(JetHTTPDeflateTable.new(&[U8{0}], true).unwrap_err().status, I64{400})
+    assert_eq(JetHTTPDeflateTable.new(&[U8{1}], false).unwrap().max_bits, Usize{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:335/346/398
+#Test("http_gzip_stored_member_checks_crc_size_limit_and_concatenation") {
+    member :: [U8{31}, U8{139}, U8{8}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{255},
+        U8{1}, U8{1}, U8{0}, U8{254}, U8{255}, U8{97}, U8{0x43}, U8{0xbe}, U8{0xb7}, U8{0xe8}, U8{1}, U8{0}, U8{0}, U8{0}]
+    assert_eq(jet_http_crc32(&[U8{97}]), U32{0xe8b7be43})
+    assert_eq(jet_http_gzip_decode(&member, 1).unwrap(), [U8{97}])
+    assert_eq(jet_http_gzip_decode(&member, 0).unwrap_err().status, I64{413})
+    concatenated := member.clone()
+    concatenated.extend(member.clone())
+    assert_eq(jet_http_gzip_decode(&concatenated, 2).unwrap(), [U8{97}, U8{97}])
+    corrupt := member.clone()
+    corrupt[16] ^= 1
+    assert_eq(jet_http_gzip_decode(&corrupt, 1).unwrap_err().status, I64{400})
+    assert_eq(jet_http_gzip_decode(&[], 1).unwrap_err().status, I64{400})
+    assert_eq(jet_http_decode_request_bytes([U8{97}], 0, 0).unwrap(), [U8{97}])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:474
+#Test("http_chunk_state_tracks_incremental_payload_without_copying") {
+    state := JetHTTPChunkState.new(3, [])
+    prefix :: "3\r\nab".bytes().collect()
+    assert_eq(state.advance(&prefix).unwrap(), None)
+    complete :: "3\r\nabc\r\n0\r\n\r\n".bytes().collect()
+    assert_eq(state.advance(&complete).unwrap(), Some(complete.len()))
+    assert_eq(state.decoded_len, Usize{3})
+    assert_eq(state.chunks, [(Usize{3}, Usize{3})])
+    limited := JetHTTPChunkState.new(2, [])
+    assert_eq(limited.advance(&complete).unwrap_err().status, I64{413})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:614
+#Test("http_shutdown_report_projection_preserves_all_fields") {
+    report :: JetHTTPShutdownReport{user_accepted: 1, user_overloaded: 2, user_completed: 3, user_cancelled: 4}
+    assert_eq(jet_http_shutdown_report_field(&report, 0), I64{1})
+    assert_eq(jet_http_shutdown_report_field(&report, 1), I64{2})
+    assert_eq(jet_http_shutdown_report_field(&report, 2), I64{3})
+    assert_eq(jet_http_shutdown_report_field(&report, 3), I64{4})
+    assert_eq(jet_http_shutdown_report_field(&report, 4), I64{0})
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:890
+#Test("http_route_schema_checks_combinators_required_fields_and_additional_properties") {
+    schema :: parse_json_strict(&"{\"type\":\"object\",\"properties\":{\"n\":{\"type\":\"integer\"}},\"required\":[\"n\"],\"additionalProperties\":false}").unwrap()
+    good :: parse_json_strict(&"{\"n\":7}").unwrap()
+    missing :: parse_json_strict(&"{}").unwrap()
+    extra :: parse_json_strict(&"{\"n\":7,\"x\":1}").unwrap()
+    wrong :: parse_json_strict(&"{\"n\":\"7\"}").unwrap()
+    assert(jet_http_route_schema_matches(&good, &schema))
+    assert(!jet_http_route_schema_matches(&missing, &schema))
+    assert(!jet_http_route_schema_matches(&extra, &schema))
+    assert(!jet_http_route_schema_matches(&wrong, &schema))
+    ambiguous :: parse_json_strict(&"{\"oneOf\":[{\"type\":\"integer\"},{\"type\":\"number\"}]}").unwrap()
+    union :: parse_json_strict(&"{\"anyOf\":[{\"type\":\"integer\"},{\"type\":\"string\"}]}").unwrap()
+    assert(!jet_http_route_schema_matches(&DataTree.Int(7), &ambiguous))
+    assert(jet_http_route_schema_matches(&DataTree.Int(7), &union))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1306/1354/1362/1447/1469/1489
+#Test("http_error_page_bounds_redacts_and_escapes_without_splitting_utf8") {
+    assert_eq(jet_error_page_bounded(" éé ", 4), "é")
+    assert_eq(jet_error_page_bounded("a\nb", 3), "a b")
+    assert_eq(jet_error_page_safe_text("Authorization: hidden", 100), "[redacted]")
+    assert_eq(jet_error_page_identifier("bad\"id", "fallback"), "fallback")
+    assert_eq(jet_error_page_identifier(" trace-7 ", "fallback"), "trace-7")
+    assert_eq(jet_error_page_link("javascript:alert(1)"), None)
+    assert_eq(jet_error_page_link("/request/7"), Some("/request/7"))
+    assert_eq(jet_error_page_link("/request?token=private"), None)
+    assert_eq(jet_error_page_json_quote("\"\\\n"), "\"\\\"\\\\\\n\"")
+    assert_eq(jet_error_page_html_escape("<&\"'>"), "&lt;&amp;&quot;&#39;&gt;")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1730/1761
+#Test("http_error_page_negotiation_preserves_quality_specificity_and_client_order") {
+    assert_eq(jet_http_accept_quality("0.125"), U16{125})
+    assert_eq(jet_http_accept_quality("0.5"), U16{500})
+    assert_eq(jet_http_accept_quality("1.000"), U16{1000})
+    assert_eq(jet_http_accept_quality("1.001"), U16{0})
+    assert_eq(jet_http_accept_quality("0.0001"), U16{0})
+    assert(!jet_http_error_page_accepts_json(None))
+    assert(jet_http_error_page_accepts_json(Some(&"application/json,text/html")))
+    assert(!jet_http_error_page_accepts_json(Some(&"text/html,application/json")))
+    assert(jet_http_error_page_accepts_json(Some(&"*/*,application/json")))
+    assert(!jet_http_error_page_accepts_json(Some(&"application/json;q=0,text/html;q=0.1")))
+    assert(jet_http_error_page_accepts_json(Some(&"text/html;q=0.5,application/json;q=0.9")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1241/1529/1582
+#Test("http_error_page_projection_renders_same_ids_and_response_status_falls_back") {
+    projection :: JetErrorPageProjection{
+        status: 500, failure_id: "fail-7", request_id: "req-7", message: "<failure>",
+        code: None, source_frame: None, context: [], correlation_links: []
+    }
+    json :: projection.json()
+    html :: projection.html()
+    assert(json.contains("\"request_id\":\"req-7\""))
+    assert(json.contains("\"failure_id\":\"fail-7\""))
+    assert(html.contains("req-7"))
+    assert(html.contains("fail-7"))
+    assert(html.contains("&lt;failure&gt;"))
+    assert(!html.contains("<failure>"))
+    assert_eq(jet_http_srv_response_owned(600, "discarded").status, I64{500})
+    assert_eq(jet_http_srv_response_owned(201, "kept").status, I64{201})
+}

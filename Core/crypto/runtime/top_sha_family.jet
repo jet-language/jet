@@ -1,472 +1,211 @@
-// PORT-PENDING 0259 crates-jet-codegen-src-prelude-corelib-top-cryptoentropy-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:1-468
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Dependency-free SHA-1, SHA-2, SHA-3, PBKDF2, and incremental hashing.
-//RS 
-//RS const SHA256_IV: [u32; 8] = [
-//RS     0x6a09e667,
-//RS     0xbb67ae85,
-//RS     0x3c6ef372,
-//RS     0xa54ff53a,
-//RS     0x510e527f,
-//RS     0x9b05688c,
-//RS     0x1f83d9ab,
-//RS     0x5be0cd19,
-//RS ];
-//RS 
-//RS const SHA224_IV: [u32; 8] = [
-//RS     0xc1059ed8,
-//RS     0x367cd507,
-//RS     0x3070dd17,
-//RS     0xf70e5939,
-//RS     0xffc00b31,
-//RS     0x68581511,
-//RS     0x64f98fa7,
-//RS     0xbefa4fa4,
-//RS ];
-//RS 
-//RS const SHA512_IV: [u64; 8] = [
-//RS     0x6a09e667f3bcc908,
-//RS     0xbb67ae8584caa73b,
-//RS     0x3c6ef372fe94f82b,
-//RS     0xa54ff53a5f1d36f1,
-//RS     0x510e527fade682d1,
-//RS     0x9b05688c2b3e6c1f,
-//RS     0x1f83d9abfb41bd6b,
-//RS     0x5be0cd19137e2179,
-//RS ];
-//RS 
-//RS const SHA384_IV: [u64; 8] = [
-//RS     0xcbbb9d5dc1059ed8,
-//RS     0x629a292a367cd507,
-//RS     0x9159015a3070dd17,
-//RS     0x152fecd8f70e5939,
-//RS     0x67332667ffc00b31,
-//RS     0x8eb44a8768581511,
-//RS     0xdb0c2e0d64f98fa7,
-//RS     0x47b5481dbefa4fa4,
-//RS ];
-//RS 
-//RS const SHA256_K: [u32; 64] = [
-//RS     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
-//RS     0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
-//RS     0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
-//RS     0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-//RS     0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
-//RS     0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-//RS     0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
-//RS     0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-//RS     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-//RS     0xc67178f2,
-//RS ];
-//RS 
-//RS const SHA512_K: [u64; 80] = [
-//RS     0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc,
-//RS     0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118,
-//RS     0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2,
-//RS     0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694,
-//RS     0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65,
-//RS     0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5,
-//RS     0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4,
-//RS     0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70,
-//RS     0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df,
-//RS     0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b,
-//RS     0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30,
-//RS     0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8,
-//RS     0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8,
-//RS     0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3,
-//RS     0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec,
-//RS     0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b,
-//RS     0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178,
-//RS     0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b,
-//RS     0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c,
-//RS     0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817,
-//RS ];
-//RS 
-//RS fn sha_hex_encode(bytes: &[u8]) -> String {
-//RS     const HEX: &[u8; 16] = b"0123456789abcdef";
-//RS     let mut out = String::with_capacity(bytes.len() * 2);
-//RS     for byte in bytes {
-//RS         out.push(HEX[usize::from(*byte >> 4)] as char);
-//RS         out.push(HEX[usize::from(*byte & 0x0f)] as char);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn sha1_raw(data: &[u8]) -> [u8; 20] {
-//RS     let mut state = [
-//RS         0x67452301u32,
-//RS         0xefcdab89,
-//RS         0x98badcfe,
-//RS         0x10325476,
-//RS         0xc3d2e1f0,
-//RS     ];
-//RS     let mut message = data.to_vec();
-//RS     let bit_len = (data.len() as u64).wrapping_mul(8);
-//RS     message.push(0x80);
-//RS     while message.len() % 64 != 56 {
-//RS         message.push(0);
-//RS     }
-//RS     message.extend_from_slice(&bit_len.to_be_bytes());
-//RS     for block in message.chunks(64) {
-//RS         let mut w = [0u32; 80];
-//RS         for index in 0..16 {
-//RS             w[index] = u32::from_be_bytes(block[index * 4..index * 4 + 4].try_into().unwrap());
-//RS         }
-//RS         for index in 16..80 {
-//RS             w[index] = (w[index - 3] ^ w[index - 8] ^ w[index - 14] ^ w[index - 16]).rotate_left(1);
-//RS         }
-//RS         let [mut a, mut b, mut c, mut d, mut e] = state;
-//RS         for index in 0..80 {
-//RS             let (function, constant) = match index {
-//RS                 0..=19 => ((b & c) | (!b & d), 0x5a827999),
-//RS                 20..=39 => (b ^ c ^ d, 0x6ed9eba1),
-//RS                 40..=59 => ((b & c) | (b & d) | (c & d), 0x8f1bbcdc),
-//RS                 _ => (b ^ c ^ d, 0xca62c1d6),
-//RS             };
-//RS             let temp = a
-//RS                 .rotate_left(5)
-//RS                 .wrapping_add(function)
-//RS                 .wrapping_add(e)
-//RS                 .wrapping_add(constant)
-//RS                 .wrapping_add(w[index]);
-//RS             e = d;
-//RS             d = c;
-//RS             c = b.rotate_left(30);
-//RS             b = a;
-//RS             a = temp;
-//RS         }
-//RS         state[0] = state[0].wrapping_add(a);
-//RS         state[1] = state[1].wrapping_add(b);
-//RS         state[2] = state[2].wrapping_add(c);
-//RS         state[3] = state[3].wrapping_add(d);
-//RS         state[4] = state[4].wrapping_add(e);
-//RS     }
-//RS     let mut out = [0u8; 20];
-//RS     for (index, word) in state.iter().enumerate() {
-//RS         out[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn sha256_compress(state: &mut [u32; 8], block: &[u8]) {
-//RS     let mut w = [0u32; 64];
-//RS     for index in 0..16 {
-//RS         w[index] = u32::from_be_bytes(block[index * 4..index * 4 + 4].try_into().unwrap());
-//RS     }
-//RS     for index in 16..64 {
-//RS         let a = w[index - 15];
-//RS         let b = w[index - 2];
-//RS         let s0 = a.rotate_right(7) ^ a.rotate_right(18) ^ (a >> 3);
-//RS         let s1 = b.rotate_right(17) ^ b.rotate_right(19) ^ (b >> 10);
-//RS         w[index] = w[index - 16]
-//RS             .wrapping_add(s0)
-//RS             .wrapping_add(w[index - 7])
-//RS             .wrapping_add(s1);
-//RS     }
-//RS     let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
-//RS     for index in 0..64 {
-//RS         let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-//RS         let ch = (e & f) ^ (!e & g);
-//RS         let temp1 = h
-//RS             .wrapping_add(s1)
-//RS             .wrapping_add(ch)
-//RS             .wrapping_add(SHA256_K[index])
-//RS             .wrapping_add(w[index]);
-//RS         let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-//RS         let maj = (a & b) ^ (a & c) ^ (b & c);
-//RS         let temp2 = s0.wrapping_add(maj);
-//RS         h = g;
-//RS         g = f;
-//RS         f = e;
-//RS         e = d.wrapping_add(temp1);
-//RS         d = c;
-//RS         c = b;
-//RS         b = a;
-//RS         a = temp1.wrapping_add(temp2);
-//RS     }
-//RS     state[0] = state[0].wrapping_add(a);
-//RS     state[1] = state[1].wrapping_add(b);
-//RS     state[2] = state[2].wrapping_add(c);
-//RS     state[3] = state[3].wrapping_add(d);
-//RS     state[4] = state[4].wrapping_add(e);
-//RS     state[5] = state[5].wrapping_add(f);
-//RS     state[6] = state[6].wrapping_add(g);
-//RS     state[7] = state[7].wrapping_add(h);
-//RS }
-//RS 
-//RS fn sha256_raw_with_iv(data: &[u8], initial: [u32; 8]) -> [u8; 32] {
-//RS     let mut state = initial;
-//RS     let mut message = data.to_vec();
-//RS     let bit_len = (data.len() as u64).wrapping_mul(8);
-//RS     message.push(0x80);
-//RS     while message.len() % 64 != 56 {
-//RS         message.push(0);
-//RS     }
-//RS     message.extend_from_slice(&bit_len.to_be_bytes());
-//RS     for block in message.chunks(64) {
-//RS         sha256_compress(&mut state, block);
-//RS     }
-//RS     let mut out = [0u8; 32];
-//RS     for (index, word) in state.iter().enumerate() {
-//RS         out[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn sha512_compress(state: &mut [u64; 8], block: &[u8]) {
-//RS     let mut w = [0u64; 80];
-//RS     for index in 0..16 {
-//RS         w[index] = u64::from_be_bytes(block[index * 8..index * 8 + 8].try_into().unwrap());
-//RS     }
-//RS     for index in 16..80 {
-//RS         let a = w[index - 15];
-//RS         let b = w[index - 2];
-//RS         let s0 = a.rotate_right(1) ^ a.rotate_right(8) ^ (a >> 7);
-//RS         let s1 = b.rotate_right(19) ^ b.rotate_right(61) ^ (b >> 6);
-//RS         w[index] = w[index - 16]
-//RS             .wrapping_add(s0)
-//RS             .wrapping_add(w[index - 7])
-//RS             .wrapping_add(s1);
-//RS     }
-//RS     let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
-//RS     for index in 0..80 {
-//RS         let s1 = e.rotate_right(14) ^ e.rotate_right(18) ^ e.rotate_right(41);
-//RS         let ch = (e & f) ^ (!e & g);
-//RS         let temp1 = h
-//RS             .wrapping_add(s1)
-//RS             .wrapping_add(ch)
-//RS             .wrapping_add(SHA512_K[index])
-//RS             .wrapping_add(w[index]);
-//RS         let s0 = a.rotate_right(28) ^ a.rotate_right(34) ^ a.rotate_right(39);
-//RS         let maj = (a & b) ^ (a & c) ^ (b & c);
-//RS         let temp2 = s0.wrapping_add(maj);
-//RS         h = g;
-//RS         g = f;
-//RS         f = e;
-//RS         e = d.wrapping_add(temp1);
-//RS         d = c;
-//RS         c = b;
-//RS         b = a;
-//RS         a = temp1.wrapping_add(temp2);
-//RS     }
-//RS     state[0] = state[0].wrapping_add(a);
-//RS     state[1] = state[1].wrapping_add(b);
-//RS     state[2] = state[2].wrapping_add(c);
-//RS     state[3] = state[3].wrapping_add(d);
-//RS     state[4] = state[4].wrapping_add(e);
-//RS     state[5] = state[5].wrapping_add(f);
-//RS     state[6] = state[6].wrapping_add(g);
-//RS     state[7] = state[7].wrapping_add(h);
-//RS }
-//RS 
-//RS fn sha512_raw_with_iv(data: &[u8], initial: [u64; 8]) -> [u8; 64] {
-//RS     let mut state = initial;
-//RS     let mut message = data.to_vec();
-//RS     let bit_len = (data.len() as u128).wrapping_mul(8);
-//RS     message.push(0x80);
-//RS     while message.len() % 128 != 112 {
-//RS         message.push(0);
-//RS     }
-//RS     message.extend_from_slice(&bit_len.to_be_bytes());
-//RS     for block in message.chunks(128) {
-//RS         sha512_compress(&mut state, block);
-//RS     }
-//RS     let mut out = [0u8; 64];
-//RS     for (index, word) in state.iter().enumerate() {
-//RS         out[index * 8..index * 8 + 8].copy_from_slice(&word.to_be_bytes());
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn keccak_f(state: &mut [u64; 25]) {
-//RS     const ROTATION: [[u32; 5]; 5] = [
-//RS         [0, 36, 3, 41, 18],
-//RS         [1, 44, 10, 45, 2],
-//RS         [62, 6, 43, 15, 61],
-//RS         [28, 55, 25, 21, 56],
-//RS         [27, 20, 39, 8, 14],
-//RS     ];
-//RS     const ROUND: [u64; 24] = [
-//RS         0x0000000000000001,
-//RS         0x0000000000008082,
-//RS         0x800000000000808a,
-//RS         0x8000000080008000,
-//RS         0x000000000000808b,
-//RS         0x0000000080000001,
-//RS         0x8000000080008081,
-//RS         0x8000000000008009,
-//RS         0x000000000000008a,
-//RS         0x0000000000000088,
-//RS         0x0000000080008009,
-//RS         0x000000008000000a,
-//RS         0x000000008000808b,
-//RS         0x800000000000008b,
-//RS         0x8000000000008089,
-//RS         0x8000000000008003,
-//RS         0x8000000000008002,
-//RS         0x8000000000000080,
-//RS         0x000000000000800a,
-//RS         0x800000008000000a,
-//RS         0x8000000080008081,
-//RS         0x8000000000008080,
-//RS         0x0000000080000001,
-//RS         0x8000000080008008,
-//RS     ];
-//RS     for constant in ROUND {
-//RS         let mut column = [0u64; 5];
-//RS         for x in 0..5 {
-//RS             column[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
-//RS         }
-//RS         let mut delta = [0u64; 5];
-//RS         for x in 0..5 {
-//RS             delta[x] = column[(x + 4) % 5] ^ column[(x + 1) % 5].rotate_left(1);
-//RS         }
-//RS         for y in 0..5 {
-//RS             for x in 0..5 {
-//RS                 state[x + 5 * y] ^= delta[x];
-//RS             }
-//RS         }
-//RS         let mut permuted = [0u64; 25];
-//RS         for y in 0..5 {
-//RS             for x in 0..5 {
-//RS                 let new_x = y;
-//RS                 let new_y = (2 * x + 3 * y) % 5;
-//RS                 permuted[new_x + 5 * new_y] = state[x + 5 * y].rotate_left(ROTATION[x][y]);
-//RS             }
-//RS         }
-//RS         for y in 0..5 {
-//RS             for x in 0..5 {
-//RS                 state[x + 5 * y] = permuted[x + 5 * y]
-//RS                     ^ ((!permuted[(x + 1) % 5 + 5 * y]) & permuted[(x + 2) % 5 + 5 * y]);
-//RS             }
-//RS         }
-//RS         state[0] ^= constant;
-//RS     }
-//RS }
-//RS 
-//RS fn sha3_raw(data: &[u8], rate: usize, output_len: usize) -> Vec<u8> {
-//RS     let mut state = [0u64; 25];
-//RS     let mut message = data.to_vec();
-//RS     message.push(0x06);
-//RS     while message.len() % rate != rate - 1 {
-//RS         message.push(0);
-//RS     }
-//RS     message.push(0x80);
-//RS     for block in message.chunks(rate) {
-//RS         for index in 0..rate / 8 {
-//RS             state[index] ^= u64::from_le_bytes(block[index * 8..index * 8 + 8].try_into().unwrap());
-//RS         }
-//RS         keccak_f(&mut state);
-//RS     }
-//RS     let mut out = Vec::with_capacity(output_len);
-//RS     for lane in state.iter().take(rate / 8) {
-//RS         out.extend_from_slice(&lane.to_le_bytes());
-//RS     }
-//RS     out.truncate(output_len);
-//RS     out
-//RS }
-//RS 
-//RS pub fn jet_crypto_sha1_hex(data: &Vec<u8>) -> String {
-//RS     sha_hex_encode(&sha1_raw(data))
-//RS }
-//RS 
-//RS pub fn jet_crypto_sha224_hex(data: &Vec<u8>) -> String {
-//RS     sha_hex_encode(&sha256_raw_with_iv(data, SHA224_IV)[..28])
-//RS }
-//RS 
-//RS pub fn jet_crypto_sha384_hex(data: &Vec<u8>) -> String {
-//RS     sha_hex_encode(&sha512_raw_with_iv(data, SHA384_IV)[..48])
-//RS }
-//RS 
-//RS pub fn jet_crypto_sha3_224_hex(data: &Vec<u8>) -> String {
-//RS     sha_hex_encode(&sha3_raw(data, 144, 28))
-//RS }
-//RS 
-//RS pub fn jet_crypto_sha3_256_hex(data: &Vec<u8>) -> String {
-//RS     sha_hex_encode(&sha3_raw(data, 136, 32))
-//RS }
-//RS 
-//RS pub fn jet_crypto_sha3_384_hex(data: &Vec<u8>) -> String {
-//RS     sha_hex_encode(&sha3_raw(data, 104, 48))
-//RS }
-//RS 
-//RS pub fn jet_crypto_sha3_512_hex(data: &Vec<u8>) -> String {
-//RS     sha_hex_encode(&sha3_raw(data, 72, 64))
-//RS }
-//RS 
-//RS pub fn jet_crypto_pbkdf2_hmac(
-//RS     password: &Vec<u8>,
-//RS     salt: &Vec<u8>,
-//RS     iterations: i64,
-//RS     key_len: i64,
-//RS ) -> Vec<u8> {
-//RS     let Ok(key_len) = usize::try_from(key_len) else {
-//RS         return Vec::new();
-//RS     };
-//RS     if iterations <= 0 || key_len > 64 * 1024 * 1024 {
-//RS         return Vec::new();
-//RS     }
-//RS     let block_count = key_len.div_ceil(32);
-//RS     let Ok(block_count) = u32::try_from(block_count) else {
-//RS         return Vec::new();
-//RS     };
-//RS     let mut output = Vec::with_capacity(key_len);
-//RS     for block in 1..=block_count {
-//RS         let mut input = salt.clone();
-//RS         input.extend_from_slice(&block.to_be_bytes());
-//RS         let mut u = jet_hmac_sha256(password, &input);
-//RS         let mut mixed = u;
-//RS         for _ in 1..iterations {
-//RS             u = jet_hmac_sha256(password, &u);
-//RS             for (left, right) in mixed.iter_mut().zip(u) {
-//RS                 *left ^= right;
-//RS             }
-//RS         }
-//RS         output.extend_from_slice(&mixed);
-//RS     }
-//RS     output.truncate(key_len);
-//RS     output
-//RS }
-//RS 
-//RS pub struct JetCryptoHasher {
-//RS     state: [u32; 8],
-//RS     buffer: Vec<u8>,
-//RS     length: u64,
-//RS }
-//RS 
-//RS pub fn jet_crypto_hasher_new() -> JetCryptoHasher {
-//RS     JetCryptoHasher {
-//RS         state: SHA256_IV,
-//RS         buffer: Vec::new(),
-//RS         length: 0,
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_crypto_hasher_update(hasher: &mut JetCryptoHasher, data: &Vec<u8>) {
-//RS     hasher.length = hasher.length.wrapping_add(data.len() as u64);
-//RS     hasher.buffer.extend_from_slice(data);
-//RS     while hasher.buffer.len() >= 64 {
-//RS         let block: Vec<u8> = hasher.buffer.drain(..64).collect();
-//RS         sha256_compress(&mut hasher.state, &block);
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_crypto_hasher_digest(hasher: &JetCryptoHasher) -> String {
-//RS     let mut state = hasher.state;
-//RS     let mut tail = hasher.buffer.clone();
-//RS     tail.push(0x80);
-//RS     while tail.len() % 64 != 56 {
-//RS         tail.push(0);
-//RS     }
-//RS     tail.extend_from_slice(&hasher.length.wrapping_mul(8).to_be_bytes());
-//RS     for block in tail.chunks(64) {
-//RS         sha256_compress(&mut state, block);
-//RS     }
-//RS     let mut output = [0u8; 32];
-//RS     for (index, word) in state.iter().enumerate() {
-//RS         output[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
-//RS     }
-//RS     sha_hex_encode(&output)
-//RS }
-// END-PORT-PENDING 0259 crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:1-468
-
+use core.crypto as crypto
+use core.crypto.runtime.kernel_sha256 as sha256
+use core.encoding.[bytes_to_hex]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:3
+// SHA256_IV maps to kernel_sha256.sha256_bytes's eight-word inline state.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:14
+// SHA224_IV maps to kernel_sha256.sha224_bytes's eight-word inline state.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:25
+// SHA512_IV maps to core.crypto.C_SHA512_IV.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:36
+// SHA384_IV maps to core.crypto.C_SHA384_IV.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:47
+// SHA256_K maps to kernel_sha256.C_SHA256_K: one static fixed table.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:60
+// SHA512_K maps to core.crypto.C_SHA512_K: same ordered eighty constants.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:83
+// sha_hex_encode maps to core.encoding.bytes_to_hex (borrowed lowercase bytes).
+// Its HEX alphabet is owned by core.encoding.hex_nibble.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:93
+// sha1_raw maps to core.crypto.sha1_raw: big-endian SHA-1 padding, same initial
+// five words, 80-word XOR/rotate schedule, four round functions/constants and
+// modulo-2^32 feed-forward. Public jet_crypto_sha1_hex uses core.crypto.sha1.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:149
+// sha256_compress maps to kernel_sha256.sha256_compress: same schedule,
+// wrapping rounds and feed-forward; scratch borrows the caller's fixed words.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:195
+// sha256_raw_with_iv maps to kernel_sha256.sha256_hash plus digest emission
+// in sha256_bytes/sha224_bytes. The kernel synthesizes message padding from a
+// borrowed input instead of duplicating/growing the Rust message allocation.
+// Kernel framing uses exactly the Rust modulo-2^64 bit length.
+// These private primitives and constants remain at their existing owners,
+// not a second SHAFamily implementation or forwarding compatibility aliases.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:214
+// sha512_compress maps to core.crypto.sha512_block: identical 80-word
+// schedule, U64 wrapping rounds, and feed-forward. Its borrowed scratch is
+// reused across blocks; the canonical owner also owns SHA512_K.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:260
+// Unlike the existing sha512_raw, retain the entire modulo-2^128 bit trailer.
+fn sha512_raw_with_iv(data: [U8], initial: [Int]) -> [U8] {
+    message := [U8]{}
+    loop byte in data -> &message.push(byte)
+    bits :: U128{data.len()}.wrapping_mul(U128{8})
+    &message.push(U8{0x80})
+    loop message.len() % 128 != 112 -> &message.push(U8{0})
+    loop i in 0..<16 -> &message.push(U8.from_u128((bits >> ((15 - i) * 8)) & U128{255}) ?? panic("SHA-512 length byte narrowing failed"))
+    state := [U64#8]{U64{initial[0]}, U64{initial[1]}, U64{initial[2]}, U64{initial[3]}, U64{initial[4]}, U64{initial[5]}, U64{initial[6]}, U64{initial[7]}}
+    schedule := [U64#80]{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    }
+    // Integration keeps sha512_block at its existing owner and admits this
+    // inline scratch plus its static Int constants, narrowing a round word
+    // to U64 in the kernel rather than allocating a converted constant list.
+    loop off in 0..<message.len(), 128 -> crypto.sha512_block(&state, &schedule, crypto.C_SHA512_K, message, off)
+    out := [U8]{}
+    loop word in state {
+        loop i in 0..<8 -> &out.push(U8.from_u64((word >> ((7 - i) * 8)) & U64{255}) ?? panic("SHA-512 digest byte narrowing failed"))
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:279
+// keccak_f maps to core.crypto.keccak_f: theta, rho/pi, chi, iota in the
+// same round order. ROTATION maps to C_KECCAK_ROT (flattened x+5*y);
+// ROUND maps to C_KECCAK_RC. The canonical mask keeps each lane at 64 bits.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:345
+// Preserve the Rust two-byte padding even when data.len()%rate == rate-1:
+// 0x06 completes that block; 0x80 terminates a separate following block.
+fn sha3_raw(data: [U8], rate: Int, output_len: Int) -> [U8] {
+    state := [Int]{}
+    loop _ in 0..<25 -> &state.push(0)
+    end :: ((data.len() + 1) /% rate + 1) * rate
+    loop off in 0..<end, rate {
+        loop lane in 0..<(rate /% 8) {
+            word := 0
+            loop byte in 0..<8 {
+                index :: off + lane * 8 + byte
+                value :: if index < data.len() -> Int.from_u8(data[index])
+                    else if index == data.len() -> 0x06
+                    else if index == end - 1 -> 0x80
+                    else -> 0
+                word = word | (value << (byte * 8))
+            }
+            state[lane] = state[lane] ~| word
+        }
+        crypto.keccak_f(&state)
+    }
+    out := [U8]{}
+    loop index in 0..<output_len {
+        &out.push(U8{(state[index /% 8] >> ((index % 8) * 8)) & 255})
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:367
+// jet_crypto_sha1_hex maps to core.crypto.sha1.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:371
+// jet_crypto_sha224_hex maps to core.crypto.sha224.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:375
+pub fn jet_crypto_sha384_hex(data: [U8]) -> String {
+    digest :: sha512_raw_with_iv(data, crypto.C_SHA384_IV)
+    bytes_to_hex(digest[0..<48])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:379
+pub fn jet_crypto_sha3_224_hex(data: [U8]) -> String {
+    digest :: sha3_raw(data, 144, 28)
+    bytes_to_hex(digest[0..<digest.len()])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:383
+pub fn jet_crypto_sha3_256_hex(data: [U8]) -> String {
+    digest :: sha3_raw(data, 136, 32)
+    bytes_to_hex(digest[0..<digest.len()])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:387
+pub fn jet_crypto_sha3_384_hex(data: [U8]) -> String {
+    digest :: sha3_raw(data, 104, 48)
+    bytes_to_hex(digest[0..<digest.len()])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:391
+pub fn jet_crypto_sha3_512_hex(data: [U8]) -> String {
+    digest :: sha3_raw(data, 72, 64)
+    bytes_to_hex(digest[0..<digest.len()])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:395
+// This Rust API returns an empty owner for invalid parameters, not CryptoError.
+pub fn jet_crypto_pbkdf2_hmac(password: [U8], salt: [U8], iterations: I64, key_len: I64) -> [U8] {
+    if key_len < 0 || iterations <= 0 || key_len > 64 * 1024 * 1024 -> return [U8]{}
+    count :: USize.from_i64(key_len) ?? return [U8]{}
+    block_count :: U32.from_usize(count.div_ceil(32)) ?? return [U8]{}
+    output := [U8]{}
+    loop block in U32{1}..=block_count {
+        input := [U8]{}
+        loop byte in salt -> &input.push(byte)
+        loop i in 0..<4 -> &input.push(U8.from_u32((block >> ((3 - i) * 8)) & U32{255}) ?? panic("PBKDF2 block byte narrowing failed"))
+        u := crypto.hmac_sha256_raw(password, input)
+        mixed := u.clone()
+        loop _ in 1..<iterations {
+            u = crypto.hmac_sha256_raw(password, u)
+            loop i in 0..<32 -> mixed[i] = mixed[i] ~| u[i]
+        }
+        loop byte in mixed {
+            if output.len() == count -> break
+            &output.push(byte)
+        }
+    }
+    output
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:429
+pub struct JetCryptoHasher {
+    state: [U32#8]
+    buffer: [U8]
+    length: U64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:435
+pub fn jet_crypto_hasher_new() -> JetCryptoHasher {
+    JetCryptoHasher{
+        state: [U32#8]{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
+        buffer: [U8]{}
+        length: U64{0}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:443
+pub fn jet_crypto_hasher_update(hasher: &JetCryptoHasher, data: [U8]) -> {
+    hasher.length = hasher.length.wrapping_add(U64{data.len()})
+    w := [U32#64]{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    }
+    off := 0
+    if !hasher.buffer.is_empty() {
+        loop off < data.len() && hasher.buffer.len() < 64 {
+            &hasher.buffer.push(data[off])
+            off += 1
+        }
+        if hasher.buffer.len() < 64 -> return
+        sha256.sha256_compress(&hasher.state, &w, hasher.buffer, 0, 64, U64{0})
+        &hasher.buffer.clear()
+    }
+    // Compress complete borrowed input blocks directly; never repeatedly
+    // drain/shift a growing message buffer as the Rust implementation did.
+    loop off + 64 <= data.len() {
+        sha256.sha256_compress(&hasher.state, &w, data, off, data.len(), U64{0})
+        off += 64
+    }
+    loop off < data.len() {
+        &hasher.buffer.push(data[off])
+        off += 1
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs:452
+pub fn jet_crypto_hasher_digest(hasher: &JetCryptoHasher) -> String {
+    state := hasher.state.clone()
+    tail := hasher.buffer.clone()
+    &tail.push(U8{0x80})
+    loop tail.len() % 64 != 56 -> &tail.push(U8{0})
+    bits :: hasher.length.wrapping_mul(U64{8})
+    loop i in 0..<8 -> &tail.push(U8.from_u64((bits >> ((7 - i) * 8)) & U64{255}) ?? panic("SHA-256 length byte narrowing failed"))
+    w := [U32#64]{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    }
+    loop off in 0..<tail.len(), 64 -> sha256.sha256_compress(&state, &w, tail, off, tail.len(), U64{0})
+    output := [U8#32]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    loop i in 0..<32 -> output[i] = sha256.sha256_digest_byte(state[i /% 4], 24 - (i % 4) * 8)
+    bytes_to_hex(output[0..<32])
+}

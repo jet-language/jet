@@ -1,73 +1,73 @@
-// PORT-PENDING 0252 crates-jet-codegen-src-prelude-corelib-top-commandsuite-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:1-69
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-TESTDATA1: deterministic, locale-aware fake data for `core.testing`.
-//RS // Tables stay small, vendored, and ordered. Every domain consumes a fixed
-//RS // number of SplitMix64 draws so seeded output stays portable across tiers.
-//RS 
-//RS const EN_FIRST: &[&str] = &["Alice", "Bob", "Clara", "Diego"];
-//RS const EN_LAST: &[&str] = &["Smith", "Jones", "Taylor", "Brown"];
-//RS const EN_HOSTS: &[&str] = &["example.test", "mail.test", "demo.test"];
-//RS const EN_STREETS: &[&str] = &["Oak Street", "Pine Street", "Maple Street", "Cedar Street"];
-//RS const EN_CITIES: &[&str] = &["Austin", "Boston", "Denver", "Portland"];
-//RS 
-//RS const DE_FIRST: &[&str] = &["Anna", "Bruno", "Clara", "Dieter"];
-//RS const DE_LAST: &[&str] = &["Schmidt", "Fischer", "Weber", "Wagner"];
-//RS const DE_HOSTS: &[&str] = &["beispiel.test", "mail.test", "demo.test"];
-//RS const DE_STREETS: &[&str] = &["Bahnhofstraße", "Hauptstraße", "Lindenweg", "Gartenweg"];
-//RS const DE_CITIES: &[&str] = &["Berlin", "Bremen", "Dresden", "Hamburg"];
-//RS 
-//RS fn fake_tables(fake: &jet_std::Fake) -> (&'static [&'static str], &'static [&'static str], &'static [&'static str], &'static [&'static str], &'static [&'static str]) {
-//RS     if fake.locale == 1 {
-//RS         (DE_FIRST, DE_LAST, DE_HOSTS, DE_STREETS, DE_CITIES)
-//RS     } else {
-//RS         (EN_FIRST, EN_LAST, EN_HOSTS, EN_STREETS, EN_CITIES)
-//RS     }
-//RS }
-//RS 
-//RS fn fake_pick<'a>(state: &mut u64, values: &'a [&'a str]) -> &'a str {
-//RS     values[jet_seeded_rng_int(state, 0, values.len() as i64 - 1) as usize]
-//RS }
-//RS 
-//RS pub(crate) fn jet_testing_fake_new(seed: i64) -> jet_std::Fake {
-//RS     jet_std::Fake {
-//RS         state: seed as u64,
-//RS         locale: 0,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_fake_locale(fake: &jet_std::Fake, locale: &String) -> jet_std::Fake {
-//RS     let code = match locale.as_str() {
-//RS         "en" => 0,
-//RS         "de" => 1,
-//RS         other => panic!("unsupported fake-data locale `{other}`; supported locales: en, de"),
-//RS     };
-//RS     jet_std::Fake {
-//RS         state: fake.state ^ (code as u64).wrapping_mul(0xD1B5_4A32_D192_ED03),
-//RS         locale: code,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_fake_name(fake: &mut jet_std::Fake) -> String {
-//RS     let (first, last, _, _, _) = fake_tables(fake);
-//RS     format!("{} {}", fake_pick(&mut fake.state, first), fake_pick(&mut fake.state, last))
-//RS }
-//RS 
-//RS pub(crate) fn jet_fake_email(fake: &mut jet_std::Fake) -> String {
-//RS     let (first, last, hosts, _, _) = fake_tables(fake);
-//RS     let first = fake_pick(&mut fake.state, first).to_ascii_lowercase();
-//RS     let last = fake_pick(&mut fake.state, last).to_ascii_lowercase();
-//RS     format!("{first}.{last}@{}", fake_pick(&mut fake.state, hosts))
-//RS }
-//RS 
-//RS pub(crate) fn jet_fake_host(fake: &mut jet_std::Fake) -> String {
-//RS     let (_, _, hosts, _, _) = fake_tables(fake);
-//RS     format!("www.{}", fake_pick(&mut fake.state, hosts))
-//RS }
-//RS 
-//RS pub(crate) fn jet_fake_address(fake: &mut jet_std::Fake) -> String {
-//RS     let (_, _, _, streets, cities) = fake_tables(fake);
-//RS     let number = jet_seeded_rng_int(&mut fake.state, 1, 999);
-//RS     format!("{number} {}, {}", fake_pick(&mut fake.state, streets), fake_pick(&mut fake.state, cities))
-//RS }
-// END-PORT-PENDING 0252 crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:1-69
+use core.prelude.runtime.std_common_types_02.Fake
+use core.math.runtime.kernel_seeded_random.[jet_seeded_rng_int, seeded_rng_unsigned]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:1
+// Ordered vendored tables; every domain retains the reference SplitMix64 draw order.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:5
+EN_FIRST :: ["Alice", "Bob", "Clara", "Diego"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:6
+EN_LAST :: ["Smith", "Jones", "Taylor", "Brown"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:7
+EN_HOSTS :: ["example.test", "mail.test", "demo.test"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:8
+EN_STREETS :: ["Oak Street", "Pine Street", "Maple Street", "Cedar Street"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:9
+EN_CITIES :: ["Austin", "Boston", "Denver", "Portland"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:11
+DE_FIRST :: ["Anna", "Bruno", "Clara", "Dieter"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:12
+DE_LAST :: ["Schmidt", "Fischer", "Weber", "Wagner"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:13
+DE_HOSTS :: ["beispiel.test", "mail.test", "demo.test"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:14
+DE_STREETS :: ["Bahnhofstraße", "Hauptstraße", "Lindenweg", "Gartenweg"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:15
+DE_CITIES :: ["Berlin", "Bremen", "Dresden", "Hamburg"]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:17
+fn fake_tables(fake: Fake) -> ([String], [String], [String], [String], [String]) {
+    if fake.locale == U8{1} { (DE_FIRST, DE_LAST, DE_HOSTS, DE_STREETS, DE_CITIES) }
+    else { (EN_FIRST, EN_LAST, EN_HOSTS, EN_STREETS, EN_CITIES) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:25
+fn fake_pick(state: &U64, values: [String]) -> String Never! {
+    values[USize{jet_seeded_rng_int(&state, I64{0}, I64{values.len()} - 1)}]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:29
+pub fn jet_testing_fake_new(seed: I64) -> Fake Never! { Fake{state: seeded_rng_unsigned(seed), locale: U8{0}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:36
+pub fn jet_fake_locale(fake: Fake, locale: String) -> Fake Never! {
+    code :: match locale.as_str() {
+        "en" -> U8{0}
+        "de" -> U8{1}
+        other -> panic("unsupported fake-data locale `{other}`; supported locales: en, de")
+    }
+    Fake{state: fake.state ~| U64{code}.wrapping_mul(U64{0xD1B54A32D192ED03}), locale: code}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:48
+pub fn jet_fake_name(fake: &Fake) -> String Never! {
+    (first, last, _, _, _) :: fake_tables(fake)
+    first :: fake_pick(&fake.state, first)
+    last :: fake_pick(&fake.state, last)
+    "{first} {last}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:53
+pub fn jet_fake_email(fake: &Fake) -> String Never! {
+    (first, last, hosts, _, _) :: fake_tables(fake)
+    first :: fake_pick(&fake.state, first).to_ascii_lowercase()
+    last :: fake_pick(&fake.state, last).to_ascii_lowercase()
+    host :: fake_pick(&fake.state, hosts)
+    "{first}.{last}@{host}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:60
+pub fn jet_fake_host(fake: &Fake) -> String Never! {
+    (_, _, hosts, _, _) :: fake_tables(fake)
+    "www.{fake_pick(&fake.state, hosts)}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:65
+pub fn jet_fake_address(fake: &Fake) -> String Never! {
+    (_, _, _, streets, cities) :: fake_tables(fake)
+    number :: jet_seeded_rng_int(&fake.state, I64{1}, I64{999})
+    street :: fake_pick(&fake.state, streets)
+    city :: fake_pick(&fake.state, cities)
+    "{number} {street}, {city}"
+}

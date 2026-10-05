@@ -1,0 +1,48 @@
+use core.http.runtime.top_http_server_03.[jet_http_parse_content_length, jet_http_parse_authority, jet_http_absolute_target, jet_http_chunk_size, jet_http_chunk_extensions_valid, jet_http_validate_headers, jet_http_srv_read_error_response]
+use core.http.runtime.top_http_server.JetHTTPReadError
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4387
+#Test("http_content_length_agreement_and_exact_digits") {
+    assert(jet_http_parse_content_length("7, 7", None).unwrap() == 7)
+    assert(jet_http_parse_content_length("7", Val(7)).unwrap() == 7)
+    match jet_http_parse_content_length("7, 8", None) {
+        Err(error) -> assert(error.message == "conflicting content-length headers")
+        Ok(_) -> assert(false)
+    }
+    assert(jet_http_parse_content_length("+7", None).is_err())
+    assert(jet_http_parse_content_length("7,", None).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4575
+#Test("http_authority_normalization_and_target_matching") {
+    host :: jet_http_parse_authority(" EXAMPLE.com:80 ").unwrap()
+    assert(host.host == "example.com")
+    assert(host.port == Val(80))
+    assert(jet_http_absolute_target("GET", "http://example.com/?x=1", Val(&host), true).unwrap() == "/?x=1")
+    assert(jet_http_absolute_target("GET", "http://other.example/", Val(&host), true).is_err())
+    assert(jet_http_absolute_target("GET", "*", Val(&host), true).is_err())
+    assert(jet_http_absolute_target("OPTIONS", "*", Val(&host), true).unwrap() == "*")
+    assert(jet_http_parse_authority("user@example.com").is_none())
+    assert(jet_http_parse_authority("example.com:65536").is_none())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4755
+#Test("http_chunk_extensions_quoted_and_token_forms") {
+    assert(jet_http_chunk_size(b"A;flag;name=token").unwrap() == 10)
+    assert(jet_http_chunk_size(b"a ; name = \"quoted\\\"value\"").unwrap() == 10)
+    assert(!jet_http_chunk_extensions_valid(b";name=\"unterminated"))
+    assert(!jet_http_chunk_extensions_valid(b";=missing"))
+    assert(!jet_http_chunk_extensions_valid(b";name="))
+    assert(jet_http_chunk_size(b"xyz").is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:4858
+#Test("http_header_smuggling_and_host_controls") {
+    assert(jet_http_validate_headers(b"GET / HTTP/1.1\r\nHost: example.com").is_ok())
+    assert(jet_http_validate_headers(b"GET / HTTP/1.1").is_err())
+    assert(jet_http_validate_headers(b"POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 0\r\nTransfer-Encoding: chunked").is_err())
+    assert(jet_http_validate_headers(b"GET / HTTP/1.1\r\nHost: example.com\r\nHost: other.example").is_err())
+    assert(jet_http_validate_headers(b"GET / HTTP/1.1\r\nHost: example.com\r\n folded: bad").is_err())
+    error :: JetHTTPReadError{status: 408, message: "request timed out"}
+    assert(jet_http_srv_read_error_response(&error) == "HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+}

@@ -1,13 +1,14 @@
-use core.ui.runtime.ui.[jet_ui_bind_tree_clicks, jet_ui_node_id, JetPaintCmd, jet_ui_paint_tree]
-use core.ui.runtime.ui_02.[JetBackend, JetEventResult, JetInputEvent, JetRect, JetSize, JetSizeConstraint, JetUiNode, JetUiNodeKind, JetUiAriaRole, jet_ui_advance_focus, jet_ui_constraint, jet_ui_dispatch, jet_ui_measure_tree, jet_ui_rect]
-use jet_ui_host.[jet_ui_accessibility_attach, jet_ui_accessibility_project, JetUiAccessibility, JetUiAccessibilityProjection, JetUiAccessibilityTarget, JetUiCapability, JetUiCapabilityFacts, JetUiCancellation, JetUiClipboardText, JetUiClipboardWrite, JetUiDragEvent, JetUiDragOperation, JetUiDragPhase, JetUiDropItem, JetUiFileDialogKind, JetUiFileDialogRequest, JetUiFileDialogSelection, JetUiFsAccess, JetUiHost, JetUiHostError, JetUiImeComposition, JetUiImeEvent, JetUiImeMode, JetUiImePhase, JetUiNodeId, JetUiServiceResult, JetUiShortcut, JetUiShortcutBinding, JetUiShortcutDispatch, JetUiShortcutRegistry, JetUiTextRange]
-use jet_font.[jet_font_shape_with_fallback, jet_font_vetted_bytes, JetFontFace, JetGlyphRun]
-use core.fmt.[JetShow]
+use core.ui.runtime.ui.[jet_ui_bind_tree_clicks, jet_ui_node_id, jet_ui_constraint, jet_ui_dispatch, jet_ui_rect]
+use core.ui.runtime.ui_02.[JetBackend, JetEventResult, JetInputEvent, JetRect, JetSize, JetSizeConstraint, JetUiNode, JetUiNodeKind, JetUiAriaRole, JetPaintCmd, jet_ui_paint_tree, jet_ui_advance_focus, jet_ui_measure_tree]
+use jet_ui_host.[jet_ui_accessibility_attach, jet_ui_accessibility_project, JetUiAccessibility, JetUiAccessibilityProjection, JetUiAccessibilityTarget, JetUiCapability, JetUiCapabilityFacts, JetUiCancellation, JetUiClipboardText, JetUiClipboardWrite, JetUiDragEvent, JetUiDragOperation, JetUiDragPhase, JetUiDropItem, JetUiFileDialogKind, JetUiFileDialogRequest, JetUiFileDialogSelection, JetUiGrantedPath, JetUiFsAccess, JetUiHost, JetUiHostError, JetUiImeComposition, JetUiImeEvent, JetUiImeMode, JetUiImePhase, JetUiNodeId, JetUiShortcut, JetUiShortcutBinding, JetUiShortcutDispatch, JetUiShortcutRegistry, JetUiTextRange]
 use core.ffi.[CStr, CString, c_void]
 use core.mem.[Ptr]
 use core.mem as memory
 use core.sync.[Arc, LazyLock, Mutex]
 use core.sys.target.[selected_os, selected_family]
+use core.alloc.[Box]
+use core.collections.[VecDeque]
+use jet_ui_host.[JetUiShortcutModifiers]
 use jet_foundation.[TEXT_NUL]
 
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1
@@ -400,1631 +401,1073 @@ fn gdk_keyval_name(keyval: U32) -> Ptr<I8> { if gtk_api() is Val(api) { return #
 // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:422
 fn g_value_get_string(value: Ptr<GValue>) -> Ptr<I8> { if gtk_api() is Val(api) { return #Unsafe("GLib value string C ABI") { api.g_value_get_string(value) } }; Ptr.null() }
 
-// PORT-PENDING 0193 crates-jet-codegen-src-prelude-uigtk: crates/jet-codegen/src/Prelude/UiGtk.rs:424-2048
-//RS     /// Trampoline for a GTK "clicked" signal. Each connection owns one boxed
-//RS     /// `Arc<dyn Fn() + Send + Sync>`; the registry retains another `Arc` for path recreation.
-//RS     extern "C" fn jet_gtk_click_trampoline(_widget: *mut GtkWidget, data: gpointer) {
-//RS         if data.is_null() {
-//RS             return;
-//RS         }
-//RS         // SAFETY: `data` is a boxed `Arc<dyn Fn() + Send + Sync>` owned by this signal
-//RS         // connection. GTK runs its destroy notifier before releasing it.
-//RS         unsafe {
-//RS             let cb = &*(data as *const Arc<dyn Fn() + Send + Sync>);
-//RS             cb();
-//RS         }
-//RS     }
-//RS     struct ClipboardRead {
-//RS         done: bool,
-//RS         text: Option<String>,
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_clipboard_read_ready(
-//RS         source: gpointer,
-//RS         result: *mut GAsyncResult,
-//RS         data: gpointer,
-//RS     ) {
-//RS         if data.is_null() {
-//RS             return;
-//RS         }
-//RS         // SAFETY: the callback runs synchronously with the stack value owned
-//RS         // by `read_clipboard_text`; the GTK async operation is drained before
-//RS         // that value leaves scope.
-//RS         let state = unsafe { &mut *(data as *mut ClipboardRead) };
-//RS         let mut error = std::ptr::null_mut();
-//RS         let text = unsafe {
-//RS             gdk_clipboard_read_text_finish(
-//RS                 source as *mut GdkClipboard,
-//RS                 result,
-//RS                 &mut error,
-//RS             )
-//RS         };
-//RS         if !text.is_null() {
-//RS             let value = unsafe { CStr::from_ptr(text) }
-//RS                 .to_string_lossy()
-//RS                 .into_owned();
-//RS             unsafe { g_free(text as gpointer) };
-//RS             state.text = Some(value);
-//RS         }
-//RS         state.done = true;
-//RS     }
-//RS     #[derive(Clone, Copy)]
-//RS     enum FileDialogMode {
-//RS         Open,
-//RS         OpenMultiple,
-//RS         Save,
-//RS     }
-//RS 
-//RS     struct FileDialogRead {
-//RS         done: bool,
-//RS         mode: FileDialogMode,
-//RS         files: Vec<String>,
-//RS         cancelled: bool,
-//RS         error: Option<String>,
-//RS     }
-//RS 
-//RS     unsafe fn gtk_file_path(file: *mut GFile) -> Option<String> {
-//RS         if file.is_null() {
-//RS             return None;
-//RS         }
-//RS         let path = g_file_get_path(file);
-//RS         let value = (!path.is_null())
-//RS             .then(|| CStr::from_ptr(path).to_string_lossy().into_owned());
-//RS         if !path.is_null() {
-//RS             g_free(path as gpointer);
-//RS         }
-//RS         g_object_unref(file as gpointer);
-//RS         value
-//RS     }
-//RS 
-//RS     unsafe fn gtk_file_model_paths(model: *mut GListModel) -> Vec<String> {
-//RS         if model.is_null() {
-//RS             return Vec::new();
-//RS         }
-//RS         let count = g_list_model_get_n_items(model);
-//RS         let mut paths = Vec::with_capacity(count as usize);
-//RS         for index in 0..count {
-//RS             let file = g_list_model_get_item(model, index) as *mut GFile;
-//RS             if let Some(path) = gtk_file_path(file) {
-//RS                 paths.push(path);
-//RS             }
-//RS         }
-//RS         g_object_unref(model as gpointer);
-//RS         paths
-//RS     }
-//RS 
-//RS     unsafe fn gtk_file_error(error: *mut GError) -> (bool, String) {
-//RS         let domain = g_quark_from_static_string(G_IO_ERROR_QUARK.as_ptr() as *const c_char);
-//RS         let cancelled = g_error_matches(error as *const GError, domain, G_IO_ERROR_CANCELLED) != 0;
-//RS         if cancelled {
-//RS             return (true, String::new());
-//RS         }
-//RS         let record = &*(error as *const NativeGError);
-//RS         let text = if record.message.is_null() {
-//RS             "GTK file dialog failed".to_string()
-//RS         } else {
-//RS             CStr::from_ptr(record.message)
-//RS                 .to_string_lossy()
-//RS                 .chars()
-//RS                 .take(512)
-//RS                 .collect::<String>()
-//RS         };
-//RS         (false, format!("GTK file dialog failed: {text}"))
-//RS     }
-//RS     extern "C" fn jet_gtk_file_dialog_ready(
-//RS         source: gpointer,
-//RS 
-//RS         result: *mut GAsyncResult,
-//RS         data: gpointer,
-//RS     ) {
-//RS         if data.is_null() {
-//RS             return;
-//RS         }
-//RS         // SAFETY: the callback runs while `run_file_dialog` owns the stack
-//RS         // state and drains the GLib context before returning.
-//RS         let state = unsafe { &mut *(data as *mut FileDialogRead) };
-//RS         let mut error = std::ptr::null_mut();
-//RS         let files = unsafe {
-//RS             match state.mode {
-//RS                 FileDialogMode::Open => {
-//RS                     let file = gtk_file_dialog_open_finish(
-//RS                         source as *mut GtkFileDialog,
-//RS                         result,
-//RS                         &mut error,
-//RS                     );
-//RS                     gtk_file_path(file).map(|path| vec![path])
-//RS                 }
-//RS                 FileDialogMode::OpenMultiple => Some(gtk_file_model_paths(
-//RS                     gtk_file_dialog_open_multiple_finish(
-//RS                         source as *mut GtkFileDialog,
-//RS                         result,
-//RS                         &mut error,
-//RS                     ),
-//RS                 )),
-//RS                 FileDialogMode::Save => {
-//RS                     let file = gtk_file_dialog_save_finish(
-//RS                         source as *mut GtkFileDialog,
-//RS                         result,
-//RS                         &mut error,
-//RS                     );
-//RS                     gtk_file_path(file).map(|path| vec![path])
-//RS                 }
-//RS             }
-//RS         };
-//RS         if !error.is_null() {
-//RS             let (cancelled, message) = unsafe { gtk_file_error(error) };
-//RS             state.cancelled = cancelled;
-//RS             if !cancelled {
-//RS                 state.error = Some(message);
-//RS             }
-//RS             unsafe { g_error_free(error) };
-//RS         }
-//RS         state.files = files.unwrap_or_default();
-//RS         state.done = true;
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_drop_callback(data: gpointer, _closure: *mut GClosure) {
-//RS         if data.is_null() {
-//RS             return;
-//RS         }
-//RS         // SAFETY: `on_click` allocated exactly one Box at this pointer; GTK
-//RS         // invokes this notifier once when the signal/widget is destroyed.
-//RS         unsafe {
-//RS             drop(Box::from_raw(data as *mut Arc<dyn Fn() + Send + Sync>));
-//RS         }
-//RS     }
-//RS     struct GtkImeBinding {
-//RS         state: *mut GtkState,
-//RS         target: JetUiNodeId,
-//RS         path: String,
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_binding_drop(data: gpointer, _closure: *mut GClosure) {
-//RS         if data.is_null() {
-//RS             return;
-//RS         }
-//RS         // SAFETY: each signal owns one boxed binding and invokes this
-//RS         // destroy notifier exactly once.
-//RS         unsafe {
-//RS             drop(Box::from_raw(data as *mut GtkImeBinding));
-//RS         }
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_insert_text_trampoline(
-//RS         _editable: *mut GtkWidget,
-//RS         text: *const c_char,
-//RS         _length: c_int,
-//RS         data: gpointer,
-//RS     ) {
-//RS         if data.is_null() || text.is_null() {
-//RS             return;
-//RS         }
-//RS         // SAFETY: GTK owns `text` for the duration of this signal callback;
-//RS         // the binding remains owned by the widget signal.
-//RS         let binding = unsafe { &*(data as *const GtkImeBinding) };
-//RS         let enabled = unsafe {
-//RS             (*binding.state)
-//RS                 .ime_enabled
-//RS                 .get(&binding.path)
-//RS                 .copied()
-//RS                 .unwrap_or(false)
-//RS         };
-//RS         if !enabled {
-//RS             return;
-//RS         }
-//RS         let text = unsafe { CStr::from_ptr(text) }
-//RS             .to_string_lossy()
-//RS             .into_owned();
-//RS         let end = text.chars().count();
-//RS         let selection = JetUiTextRange::new(0, end).unwrap_or_default();
-//RS         unsafe {
-//RS             (*binding.state).ime_events.push_back(JetUiImeEvent {
-//RS                 target: binding.target.clone(),
-//RS                 phase: JetUiImePhase::Commit,
-//RS                 composition: Some(JetUiImeComposition {
-//RS                     text,
-//RS                     selection,
-//RS                     marked: None,
-//RS                 }),
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     struct GtkDragBinding {
-//RS         state: *mut GtkState,
-//RS         target: JetUiNodeId,
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_drag_binding_drop(data: gpointer, _closure: *mut GClosure) {
-//RS         if data.is_null() {
-//RS             return;
-//RS         }
-//RS         // SAFETY: each drag signal owns one boxed binding.
-//RS         unsafe {
-//RS             drop(Box::from_raw(data as *mut GtkDragBinding));
-//RS         }
-//RS     }
-//RS 
-//RS     fn jet_gtk_queue_drag(
-//RS         binding: &GtkDragBinding,
-//RS         phase: JetUiDragPhase,
-//RS         items: Vec<JetUiDropItem>,
-//RS     ) {
-//RS         unsafe {
-//RS             (*binding.state).drag_events.push_back(JetUiDragEvent {
-//RS                 target: binding.target.clone(),
-//RS                 phase,
-//RS                 operation: JetUiDragOperation::Copy,
-//RS                 items,
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_drag_enter_trampoline(
-//RS         _target: *mut GtkWidget,
-//RS         _x: c_double,
-//RS         _y: c_double,
-//RS         data: gpointer,
-//RS     ) -> u32 {
-//RS         if data.is_null() {
-//RS             return 0;
-//RS         }
-//RS         let binding = unsafe { &*(data as *const GtkDragBinding) };
-//RS         jet_gtk_queue_drag(binding, JetUiDragPhase::Enter, Vec::new());
-//RS         1
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_drag_motion_trampoline(
-//RS         _target: *mut GtkWidget,
-//RS         _x: c_double,
-//RS         _y: c_double,
-//RS         data: gpointer,
-//RS     ) -> u32 {
-//RS         if data.is_null() {
-//RS             return 0;
-//RS         }
-//RS         let binding = unsafe { &*(data as *const GtkDragBinding) };
-//RS         jet_gtk_queue_drag(binding, JetUiDragPhase::Over, Vec::new());
-//RS         1
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_drag_leave_trampoline(_target: *mut GtkWidget, data: gpointer) {
-//RS         if data.is_null() {
-//RS             return;
-//RS         }
-//RS         let binding = unsafe { &*(data as *const GtkDragBinding) };
-//RS         jet_gtk_queue_drag(binding, JetUiDragPhase::Leave, Vec::new());
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_drop_trampoline(
-//RS         _target: *mut GtkWidget,
-//RS         value: *const GValue,
-//RS         _x: c_double,
-//RS         _y: c_double,
-//RS         data: gpointer,
-//RS     ) -> gboolean {
-//RS         if data.is_null() {
-//RS             return 0;
-//RS         }
-//RS         let binding = unsafe { &*(data as *const GtkDragBinding) };
-//RS         let items = if value.is_null() {
-//RS             Vec::new()
-//RS         } else {
-//RS             let text = unsafe { g_value_get_string(value) };
-//RS             if text.is_null() {
-//RS                 Vec::new()
-//RS             } else {
-//RS                 let text = unsafe { CStr::from_ptr(text) }
-//RS                     .to_string_lossy()
-//RS                     .into_owned();
-//RS                 if text.starts_with("file://") {
-//RS                     vec![JetUiDropItem::URI(text)]
-//RS                 } else {
-//RS                     vec![JetUiDropItem::Text(text)]
-//RS                 }
-//RS             }
-//RS         };
-//RS         jet_gtk_queue_drag(binding, JetUiDragPhase::Drop, items);
-//RS         1
-//RS     }
-//RS 
-//RS     extern "C" fn jet_gtk_shortcut_trampoline(
-//RS         _controller: *mut GtkWidget,
-//RS         keyval: u32,
-//RS         _keycode: u32,
-//RS         modifiers: u32,
-//RS         data: gpointer,
-//RS     ) -> gboolean {
-//RS         if data.is_null() {
-//RS             return 0;
-//RS         }
-//RS         let state = unsafe { &mut *(data as *mut GtkState) };
-//RS         let key_name = unsafe { gdk_keyval_name(keyval) };
-//RS         if key_name.is_null() {
-//RS             return 0;
-//RS         }
-//RS         let key = unsafe { CStr::from_ptr(key_name) }
-//RS             .to_string_lossy()
-//RS             .into_owned();
-//RS         let mut modifier_bits = 0u8;
-//RS         if modifiers & (1 << 0) != 0 {
-//RS             modifier_bits |= 1 << 2;
-//RS         }
-//RS         if modifiers & (1 << 2) != 0 {
-//RS             modifier_bits |= 1;
-//RS         }
-//RS         if modifiers & (1 << 3) != 0 {
-//RS             modifier_bits |= 1 << 1;
-//RS         }
-//RS         if modifiers & (1 << 26) != 0 {
-//RS             modifier_bits |= 1 << 3;
-//RS         }
-//RS         // `.cmd()` is the logical platform-command modifier. Keep the
-//RS         // physical candidate so explicit `.control`/`.meta` bindings still
-//RS         // work, then try the logical candidate first (Ctrl on Unix/Windows,
-//RS         // Meta on macOS).
-//RS         let physical = super::JetUiShortcutModifiers::from_bits(modifier_bits);
-//RS         let mut logical_bits = modifier_bits;
-//RS         if cfg!(target_os = "macos") && modifier_bits & (1 << 3) != 0 {
-//RS             logical_bits = (logical_bits & !(1 << 3)) | (1 << 4);
-//RS         } else if !cfg!(target_os = "macos") && modifier_bits & 1 != 0 {
-//RS             logical_bits = (logical_bits & !1) | (1 << 4);
-//RS         }
-//RS         let candidates = [
-//RS             super::JetUiShortcutModifiers::from_bits(logical_bits),
-//RS             physical,
-//RS         ];
-//RS         let mut handled_shortcut = None;
-//RS         for candidate_modifiers in candidates {
-//RS             let Ok(candidate) = JetUiShortcut::new(&key, candidate_modifiers) else {
-//RS                 continue;
-//RS             };
-//RS             if !matches!(
-//RS                 state.shortcuts.dispatch(&candidate),
-//RS                 JetUiShortcutDispatch::Unhandled
-//RS             ) {
-//RS                 handled_shortcut = Some(candidate);
-//RS                 break;
-//RS             }
-//RS         }
-//RS         let Some(shortcut) = handled_shortcut else {
-//RS             return 0;
-//RS         };
-//RS         state.trace(&format!("shortcut-dispatch {}", shortcut.key));
-//RS         1
-//RS     }
-//RS 
-//RS     #[derive(Clone, Copy, Debug, PartialEq)]
-//RS     enum GtkAvailability {
-//RS         Uninitialized,
-//RS         Ready,
-//RS         GtkUnavailable,
-//RS         HeadlessOptIn,
-//RS         UnsupportedDisplay,
-//RS     }
-//RS 
-//RS     #[derive(Clone, Copy, Debug, PartialEq)]
-//RS     enum GtkWidgetKind {
-//RS         Box,
-//RS         Label,
-//RS         Button,
-//RS         Entry,
-//RS     }
-//RS 
-//RS     struct GtkWidgetRecord {
-//RS         path: String,
-//RS         parent: *mut GtkWidget,
-//RS         widget: *mut GtkWidget,
-//RS         kind: GtkWidgetKind,
-//RS         label: String,
-//RS         css_class: Option<String>,
-//RS     }
-//RS 
-//RS     // Reconciled widgets are addressed by a stable tree path; direct widget
-//RS     // handles retain the native pointer for the lifetime of the backend.
-//RS     enum GtkWidgetHandleTarget {
-//RS         Direct(*mut GtkWidget),
-//RS         TreePath(String),
-//RS     }
-//RS 
-//RS     struct GtkWidgetHandle {
-//RS         target: GtkWidgetHandleTarget,
-//RS         kind: GtkWidgetKind,
-//RS     }
-//RS 
-//RS     struct GtkClickBinding {
-//RS         path: String,
-//RS         callback: Arc<dyn Fn() + Send + Sync>,
-//RS         connected_widget: *mut GtkWidget,
-//RS     }
-//RS 
-//RS     struct GtkState {
-//RS         // Seam parity (display-free): keeps `GtkBackend` a full `JetBackend` so
-//RS         // the null/tui measure→layout→paint path is available on it too.
-//RS         measured: Option<JetSize>,
-//RS         layout_frame: Option<JetRect>,
-//RS         commands: Vec<JetPaintCmd>,
-//RS         last_event: Option<JetEventResult>,
-//RS         focus_nodes: Vec<JetUiNode>,
-//RS         focus_paths: Vec<String>,
-//RS         focused_index: Option<usize>,
-//RS         // Retained native widgets.
-//RS         inited: bool,
-//RS         display_ok: bool,
-//RS         window: *mut GtkWidget,
-//RS         vbox: *mut GtkWidget,
-//RS         widget_handles: Vec<GtkWidgetHandle>,
-//RS         click_bindings: Vec<GtkClickBinding>,
-//RS         tree_widgets: Vec<GtkWidgetRecord>,
-//RS         availability: GtkAvailability,
-//RS         capabilities: JetUiCapabilityFacts,
-//RS         shortcuts: JetUiShortcutRegistry,
-//RS         /// Current IME policy by retained tree path. Signal bindings stay
-//RS         /// installed across reactive paints and consult this map before
-//RS         /// enqueueing a native composition event.
-//RS         ime_enabled: std::collections::HashMap<String, bool>,
-//RS         ime_events: std::collections::VecDeque<JetUiImeEvent>,
-//RS         drag_events: std::collections::VecDeque<JetUiDragEvent>,
-//RS         native_controllers: bool,
-//RS     }
-//RS 
-//RS     // SAFETY: GTK widgets stay on the creating thread; Send/Sync only satisfy
-//RS     // `jet_ui_reactive_render`'s closure bound (headless runs never cross threads).
-//RS     unsafe impl Send for GtkState {}
-//RS     unsafe impl Sync for GtkState {}
-//RS 
-//RS     fn gtk_set_accessible_property(
-//RS         widget: *mut GtkWidget,
-//RS         property: c_int,
-//RS         value: Option<&str>,
-//RS     ) {
-//RS         let value = value.and_then(|text| CString::new(text).ok());
-//RS         let value_ptr = value
-//RS             .as_ref()
-//RS             .map_or(std::ptr::null(), |text| text.as_ptr());
-//RS         // GtkAccessible properties are not ordinary GObject properties.
-//RS         // Update the interface directly so GTK exports the values through
-//RS         // AT-SPI. The dynamically loaded pointer uses the fixed prefix plus
-//RS         // the ABI-required integer sentinel; no Rust variadic definition or
-//RS         // function-pointer signature cast is needed.
-//RS         let Some(api) = gtk_api() else {
-//RS             return;
-//RS         };
-//RS         unsafe {
-//RS             (api.gtk_accessible_update_property)(
-//RS                 widget as *mut GtkAccessible,
-//RS                 property,
-//RS                 value_ptr,
-//RS                 -1i32,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     fn gtk_apply_accessibility(widget: *mut GtkWidget, node: &JetUiNode) {
-//RS         if widget.is_null() {
-//RS             return;
-//RS         }
-//RS         let (name, description) = node
-//RS             .accessibility
-//RS             .as_ref()
-//RS             .map_or((None, None), |metadata| {
-//RS                 (metadata.name.as_deref(), metadata.description.as_deref())
-//RS             });
-//RS         gtk_set_accessible_property(widget, GTK_ACCESSIBLE_PROPERTY_LABEL, name);
-//RS         gtk_set_accessible_property(
-//RS             widget,
-//RS             GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
-//RS             description,
-//RS         );
-//RS     }
-//RS     impl GtkState {
-//RS         /// Initialize GTK once and create the window + vertical container.
-//RS         /// No-op (and `display_ok = false`) under `JET_UI_HEADLESS` or with no
-//RS         /// display, so every later widget op degrades to nothing.
-//RS         ///
-//RS         /// SAFETY: `gtk_init_check` guards all subsequent GTK calls on a live
-//RS         /// display; the window/box pointers come from GTK constructors.
-//RS         fn ensure_init(&mut self) {
-//RS             if self.inited {
-//RS                 return;
-//RS             }
-//RS             self.inited = true;
-//RS             if std::env::var_os("JET_UI_HEADLESS").is_some() {
-//RS                 self.display_ok = false;
-//RS                 self.capabilities = JetUiCapabilityFacts::empty();
-//RS                 self.availability = GtkAvailability::HeadlessOptIn;
-//RS                 return;
-//RS             }
-//RS             if gtk_api().is_none() {
-//RS                 self.display_ok = false;
-//RS                 self.capabilities = JetUiCapabilityFacts::empty();
-//RS                 self.availability = GtkAvailability::GtkUnavailable;
-//RS                 return;
-//RS             }
-//RS             if gtk_init_check() == 0 {
-//RS                 self.display_ok = false;
-//RS                 self.capabilities = JetUiCapabilityFacts::empty();
-//RS                 self.availability = GtkAvailability::UnsupportedDisplay;
-//RS                 return;
-//RS             }
-//RS             self.display_ok = true;
-//RS             self.availability = GtkAvailability::Ready;
-//RS             self.window = gtk_window_new();
-//RS             self.vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-//RS             gtk_window_set_child(self.window, self.vbox);
-//RS             gtk_window_set_default_size(self.window, 320, 240);
-//RS             if !self.window.is_null() && !self.vbox.is_null() {
-//RS                 self.capabilities.grant(JetUiCapability::Accessibility);
-//RS                 self.capabilities.grant(JetUiCapability::FileDialog);
-//RS                 self.capabilities.grant(JetUiCapability::IME);
-//RS                 self.capabilities.grant(JetUiCapability::DragDrop);
-//RS                 self.capabilities.grant(JetUiCapability::Shortcuts);
-//RS                 let display = gdk_display_get_default();
-//RS                 if !display.is_null() && !gdk_display_get_clipboard(display).is_null() {
-//RS                     self.capabilities.grant(JetUiCapability::Clipboard);
-//RS                 }
-//RS             }
-//RS             self.connect_native_controllers();
-//RS 
-//RS         }
-//RS         fn connect_native_controllers(&mut self) {
-//RS             if self.native_controllers || !self.display_ok || self.window.is_null() {
-//RS                 return;
-//RS             }
-//RS             let controller = unsafe { gtk_event_controller_key_new() };
-//RS             if controller.is_null() {
-//RS                 return;
-//RS             }
-//RS             let signal = CString::new("key-pressed").expect("static GTK signal name");
-//RS             // SAFETY: the GTK window owns the controller; the state lives at
-//RS             // a stable address behind JetGtkBackend's Arc for its lifetime.
-//RS             unsafe {
-//RS                 g_signal_connect_data(
-//RS                     controller as gpointer,
-//RS                     signal.as_ptr(),
-//RS                     jet_gtk_shortcut_trampoline as gpointer,
-//RS                     self as *mut GtkState as gpointer,
-//RS                     None,
-//RS                     0,
-//RS                 );
-//RS                 gtk_widget_add_controller(self.window, controller);
-//RS             }
-//RS             self.native_controllers = true;
-//RS         }
-//RS 
-//RS         fn connect_native_input(&mut self, widget: *mut GtkWidget, node: &JetUiNode, path: &str) {
-//RS             if !self.display_ok || widget.is_null() {
-//RS                 return;
-//RS             }
-//RS             let Ok(identity) = jet_ui_node_id(node, path) else {
-//RS                 return;
-//RS             };
-//RS             if matches!(Self::widget_kind(node), GtkWidgetKind::Entry) {
-//RS                 // GTK's GtkEditable emits this for text committed by native
-//RS                 // keyboard/IME input; the queue is populated at that signal,
-//RS                 // not by a synthetic polling fallback.
-//RS                 let binding = Box::into_raw(Box::new(GtkImeBinding {
-//RS                     state: self as *mut GtkState,
-//RS                     target: identity.clone(),
-//RS                     path: path.to_string(),
-//RS                 }));
-//RS                 let signal = CString::new("insert-text").expect("static GTK signal name");
-//RS                 unsafe {
-//RS                     g_signal_connect_data(
-//RS                         widget as gpointer,
-//RS                         signal.as_ptr(),
-//RS                         jet_gtk_insert_text_trampoline as gpointer,
-//RS                         binding as gpointer,
-//RS                         Some(jet_gtk_binding_drop),
-//RS                         0,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             if node.on_drop.is_some() {
-//RS                 let type_name = CString::new("gchararray").expect("static GType name");
-//RS                 let value_type = unsafe { g_type_from_name(type_name.as_ptr()) };
-//RS                 let controller = unsafe { gtk_drop_target_new(value_type, 7) };
-//RS                 if controller.is_null() {
-//RS                     return;
-//RS                 }
-//RS                 unsafe { gtk_widget_add_controller(widget, controller as *mut GtkEventController) };
-//RS                 let signals: [(&str, gpointer); 4] = [
-//RS                     ("enter", jet_gtk_drag_enter_trampoline as gpointer),
-//RS                     ("motion", jet_gtk_drag_motion_trampoline as gpointer),
-//RS                     ("leave", jet_gtk_drag_leave_trampoline as gpointer),
-//RS                     ("drop", jet_gtk_drop_trampoline as gpointer),
-//RS                 ];
-//RS                 for (signal_name, callback) in signals {
-//RS                     let binding = Box::into_raw(Box::new(GtkDragBinding {
-//RS                         state: self as *mut GtkState,
-//RS                         target: identity.clone(),
-//RS                     }));
-//RS                     let signal = CString::new(signal_name).expect("static GTK signal name");
-//RS                     unsafe {
-//RS                         g_signal_connect_data(
-//RS                             controller as gpointer,
-//RS                             signal.as_ptr(),
-//RS                             callback,
-//RS                             binding as gpointer,
-//RS                             Some(jet_gtk_drag_binding_drop),
-//RS                             0,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         fn trace(&self, message: &str) {
-//RS             if std::env::var_os("JET_UI_GTK_TRACE").is_some() {
-//RS                 eprintln!("GTK_UI {message}");
-//RS             }
-//RS         }
-//RS 
-//RS         fn widget_kind(node: &JetUiNode) -> GtkWidgetKind {
-//RS 
-//RS             match node.kind {
-//RS                 JetUiNodeKind::Box => GtkWidgetKind::Box,
-//RS                 JetUiNodeKind::Button => GtkWidgetKind::Button,
-//RS                 JetUiNodeKind::TextInput => GtkWidgetKind::Entry,
-//RS                 _ => match node.role {
-//RS                     Some(JetUiAriaRole::Button) => GtkWidgetKind::Button,
-//RS                     Some(JetUiAriaRole::TextInput) => GtkWidgetKind::Entry,
-//RS                     Some(JetUiAriaRole::Container) => GtkWidgetKind::Box,
-//RS                     _ => GtkWidgetKind::Label,
-//RS                 },
-//RS             }
-//RS         }
-//RS 
-//RS         fn remove_tree_widget(&mut self, index: usize) {
-//RS             let record = self.tree_widgets.remove(index);
-//RS             self.ime_enabled.remove(&record.path);
-//RS             for binding in &mut self.click_bindings {
-//RS                 if binding.path == record.path {
-//RS                     binding.connected_widget = std::ptr::null_mut();
-//RS                 }
-//RS             }
-//RS             if self.display_ok && !record.parent.is_null() && !record.widget.is_null() {
-//RS                 unsafe { gtk_box_remove(record.parent, record.widget) };
-//RS             }
-//RS             self.trace(&format!("remove {}", record.path));
-//RS         }
-//RS 
-//RS         fn remove_tree_subtree(&mut self, path: &str) {
-//RS             let child_prefix = format!("{path}/");
-//RS             for index in (0..self.tree_widgets.len()).rev() {
-//RS                 let record_path = &self.tree_widgets[index].path;
-//RS                 if record_path == path || record_path.starts_with(&child_prefix) {
-//RS                     self.remove_tree_widget(index);
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         fn reconcile_node(
-//RS             &mut self,
-//RS             node: &JetUiNode,
-//RS             parent: *mut GtkWidget,
-//RS             path: &str,
-//RS             live: &mut Vec<String>,
-//RS             focus_nodes: &mut Vec<JetUiNode>,
-//RS             focus_paths: &mut Vec<String>,
-//RS         ) {
-//RS             let kind = Self::widget_kind(node);
-//RS             if let Some(index) = self.tree_widgets.iter().position(|record| record.path == path) {
-//RS                 if self.tree_widgets[index].kind != kind || self.tree_widgets[index].parent != parent {
-//RS                     self.remove_tree_subtree(path);
-//RS                 }
-//RS             }
-//RS             if kind == GtkWidgetKind::Entry {
-//RS                 self.ime_enabled
-//RS                     .insert(path.to_string(), node.ime != Some(JetUiImeMode::Disabled));
-//RS             }
-//RS             let (index, created) = if let Some(index) = self.tree_widgets.iter().position(|record| record.path == path) {
-//RS                 (index, false)
-//RS             } else {
-//RS                 let text = CString::new(node.label.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
-//RS                 let widget = if self.display_ok {
-//RS                     unsafe {
-//RS                         let widget = match kind {
-//RS                             GtkWidgetKind::Box => gtk_box_new(GTK_ORIENTATION_VERTICAL, 8),
-//RS                             GtkWidgetKind::Label => gtk_label_new(text.as_ptr()),
-//RS                             GtkWidgetKind::Button => gtk_button_new_with_label(text.as_ptr()),
-//RS                             GtkWidgetKind::Entry => gtk_entry_new(),
-//RS                         };
-//RS                         gtk_box_append(parent, widget);
-//RS                         widget
-//RS                     }
-//RS                 } else {
-//RS                     std::ptr::null_mut()
-//RS                 };
-//RS                 self.tree_widgets.push(GtkWidgetRecord {
-//RS                     path: path.to_string(),
-//RS                     parent,
-//RS                     widget,
-//RS                     kind,
-//RS                     label: String::new(),
-//RS                     css_class: None,
-//RS                 });
-//RS                 self.trace(&format!("create {} {:?}", path, kind));
-//RS                 (self.tree_widgets.len() - 1, true)
-//RS             };
-//RS 
-//RS             live.push(path.to_string());
-//RS             let widget = self.tree_widgets[index].widget;
-//RS             if created && kind == GtkWidgetKind::Button {
-//RS                 // D-WEB-CLICK-PORT1=D / D-UI-EVT-DISP1=E: one click path —
-//RS                 // portable node slots dispatch by identity; legacy
-//RS                 // `backend.on_click` bindings still attach on the same widget.
-//RS                 match jet_ui_node_id(node, path) {
-//RS                     Ok(identity) => Self::connect_click_callback(
-//RS                         widget,
-//RS                         Arc::new(move || jet_ui_dispatch(&identity)),
-//RS                     ),
-//RS                     Err(error) => self.trace(&format!("click identity rejected: {error:?}")),
-//RS                 }
-//RS                 self.attach_click_bindings(path, widget);
-//RS             }
-//RS             if created && (kind == GtkWidgetKind::Entry || node.on_drop.is_some()) {
-//RS                 self.connect_native_input(widget, node, path);
-//RS             }
-//RS             if self.display_ok && !widget.is_null() {
-//RS                 let text = CString::new(node.label.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
-//RS                 unsafe {
-//RS                     match kind {
-//RS                         GtkWidgetKind::Label => gtk_label_set_text(widget, text.as_ptr()),
-//RS                         GtkWidgetKind::Button => gtk_button_set_label(widget, text.as_ptr()),
-//RS                         GtkWidgetKind::Entry => gtk_editable_set_text(widget, text.as_ptr()),
-//RS                         GtkWidgetKind::Box => {}
-//RS                     }
-//RS                     gtk_widget_set_size_request(widget, node.width as c_int, node.height as c_int);
-//RS                 }
-//RS             }
-//RS             gtk_apply_accessibility(widget, node);
-//RS             self.tree_widgets[index].label = node.label.clone();
-//RS             let old_class = self.tree_widgets[index].css_class.take();
-//RS             let new_class = node.color.as_ref().map(|color| format!("jetfill{}", color.trim_start_matches('#')));
-//RS             if self.display_ok && !widget.is_null() && old_class != new_class {
-//RS                 if let Some(old) = old_class.as_ref().and_then(|class| CString::new(class.as_str()).ok()) {
-//RS                     unsafe { gtk_widget_remove_css_class(widget, old.as_ptr()) };
-//RS                 }
-//RS                 if let (Some(color), Some(class)) = (node.color.as_ref(), new_class.as_ref()) {
-//RS                     let css = format!(".{class} {{ background-color: {color}; }}");
-//RS                     if let (Ok(cclass), Ok(ccss)) = (CString::new(class.as_str()), CString::new(css)) {
-//RS                         unsafe {
-//RS                             let provider = gtk_css_provider_new();
-//RS                             gtk_css_provider_load_from_string(provider, ccss.as_ptr());
-//RS                             let display = gdk_display_get_default();
-//RS                             if !display.is_null() {
-//RS                                 gtk_style_context_add_provider_for_display(display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-//RS                             }
-//RS                             gtk_widget_add_css_class(widget, cclass.as_ptr());
-//RS                             g_object_unref(provider as gpointer);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             self.tree_widgets[index].css_class = new_class;
-//RS             self.trace(&format!("update {} {}", path, node.label));
-//RS 
-//RS             if node.role.as_ref().is_some_and(JetUiAriaRole::is_interactive) {
-//RS                 focus_nodes.push(node.clone());
-//RS                 focus_paths.push(path.to_string());
-//RS             }
-//RS             if kind == GtkWidgetKind::Box {
-//RS                 for (child_index, child) in node.children.iter().enumerate() {
-//RS                     self.reconcile_node(
-//RS                         child,
-//RS                         widget,
-//RS                         &format!("{path}/{child_index}"),
-//RS                         live,
-//RS                         focus_nodes,
-//RS                         focus_paths,
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         fn focus_current_widget(&self) {
-//RS             let Some(path) = self.focused_index.and_then(|index| self.focus_paths.get(index)) else {
-//RS                 return;
-//RS             };
-//RS             let Some(record) = self.tree_widgets.iter().find(|record| &record.path == path) else {
-//RS                 return;
-//RS             };
-//RS             if self.display_ok && !record.widget.is_null() {
-//RS                 unsafe { gtk_widget_grab_focus(record.widget) };
-//RS             }
-//RS             self.trace(&format!("focus {path}"));
-//RS         }
-//RS 
-//RS         fn resolve_widget_handle(&self, id: i64) -> Option<(*mut GtkWidget, GtkWidgetKind)> {
-//RS             let handle = self.widget_handles.get(id as usize)?;
-//RS             let widget = match &handle.target {
-//RS                 GtkWidgetHandleTarget::Direct(widget) => *widget,
-//RS                 GtkWidgetHandleTarget::TreePath(path) => self
-//RS                     .tree_widgets
-//RS                     .iter()
-//RS                     .find(|record| record.path == *path && record.kind == handle.kind)
-//RS                     .map(|record| record.widget)?,
-//RS             };
-//RS             (!widget.is_null()).then_some((widget, handle.kind))
-//RS         }
-//RS 
-//RS         fn connect_click_callback(widget: *mut GtkWidget, callback: Arc<dyn Fn() + Send + Sync>) {
-//RS             let boxed = Box::into_raw(Box::new(callback));
-//RS             let signal = CString::new("clicked").unwrap();
-//RS             // SAFETY: `widget` is a live GTK button. The connection owns
-//RS             // `boxed`, and GTK invokes the destroy notifier exactly once.
-//RS             unsafe {
-//RS                 g_signal_connect_data(
-//RS                     widget as gpointer,
-//RS                     signal.as_ptr(),
-//RS                     jet_gtk_click_trampoline as gpointer,
-//RS                     boxed as gpointer,
-//RS                     Some(jet_gtk_drop_callback),
-//RS                     0,
-//RS                 );
-//RS             }
-//RS         }
-//RS 
-//RS         fn attach_click_bindings(&mut self, path: &str, widget: *mut GtkWidget) {
-//RS             if widget.is_null() {
-//RS                 return;
-//RS             }
-//RS             let mut connected = 0;
-//RS             for binding in &mut self.click_bindings {
-//RS                 if binding.path == path && binding.connected_widget != widget {
-//RS                     Self::connect_click_callback(widget, Arc::clone(&binding.callback));
-//RS                     binding.connected_widget = widget;
-//RS                     connected += 1;
-//RS                 }
-//RS             }
-//RS             if connected > 0 {
-//RS                 self.trace(&format!("click-connect {path} {connected}"));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     impl Drop for GtkState {
-//RS         fn drop(&mut self) {
-//RS             if !self.window.is_null() {
-//RS                 // SAFETY: state owns its initial GTK window reference. GTK
-//RS                 // tears down children and their signal destroy notifiers.
-//RS                 unsafe {
-//RS                     g_object_unref(self.window as gpointer);
-//RS                 }
-//RS                 self.window = std::ptr::null_mut();
-//RS             }
-//RS             self.trace("cleanup");
-//RS         }
-//RS     }
-//RS 
-//RS     /// The native GTK4 backend. Constructing it is free; the first `label` /
-//RS     /// `button` call opens GTK and the window (when a display exists).
-//RS     #[derive(Clone)]
-//RS     pub struct JetGtkBackend {
-//RS         state: Arc<Mutex<GtkState>>,
-//RS     }
-//RS 
-//RS     impl JetGtkBackend {
-//RS         pub fn new() -> Self {
-//RS             JetGtkBackend {
-//RS                 state: Arc::new(Mutex::new(GtkState {
-//RS                     measured: None,
-//RS                     layout_frame: None,
-//RS                     commands: Vec::new(),
-//RS                     last_event: None,
-//RS                     focus_nodes: Vec::new(),
-//RS                     focus_paths: Vec::new(),
-//RS                     focused_index: None,
-//RS                     inited: false,
-//RS                     display_ok: false,
-//RS                     window: std::ptr::null_mut(),
-//RS                     vbox: std::ptr::null_mut(),
-//RS                     widget_handles: Vec::new(),
-//RS                     click_bindings: Vec::new(),
-//RS                     tree_widgets: Vec::new(),
-//RS                     availability: GtkAvailability::Uninitialized,
-//RS                     capabilities: JetUiCapabilityFacts::empty(),
-//RS                     shortcuts: JetUiShortcutRegistry::default(),
-//RS                     ime_events: std::collections::VecDeque::new(),
-//RS                     ime_enabled: std::collections::HashMap::new(),
-//RS                     drag_events: std::collections::VecDeque::new(),
-//RS                     native_controllers: false,
-//RS                 })),
-//RS             }
-//RS         }
-//RS 
-//RS         // ── Seam parity: display-free measure/layout/paint/on_event ──
-//RS         pub fn measure_node(&self, node: JetUiNode, constraint: JetSizeConstraint) -> JetSize {
-//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             JetBackend::measure(&mut *state, &node, constraint)
-//RS         }
-//RS         pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
-//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             JetBackend::layout(&mut *state, &node, frame);
-//RS         }
-//RS         pub fn paint_node(&self, node: JetUiNode) {
-//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             JetBackend::paint(&mut *state, &node);
-//RS         }
-//RS         /// D-UI-MOUNT1=A: measure → layout → paint in one call.
-//RS         pub fn mount_node(&self, node: JetUiNode, constraint: JetSizeConstraint) {
-//RS             {
-//RS                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS                 state.commands.clear();
-//RS             }
-//RS             let size = self.measure_node(node.clone(), constraint);
-//RS             self.layout_node(
-//RS                 node.clone(),
-//RS                 jet_ui_rect(0.0, 0.0, size.width, size.height),
-//RS             );
-//RS             self.paint_node(node);
-//RS         }
-//RS         pub fn mount_node_default(&self, node: JetUiNode) {
-//RS             self.mount_node(node, jet_ui_constraint(0.0, 0.0, 320.0, 240.0));
-//RS         }
-//RS         pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
-//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             JetBackend::on_event(&mut *state, event)
-//RS         }
-//RS         pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
-//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             state.focused_index = if nodes.is_empty() { None } else { Some(0) };
-//RS             state.focus_paths = nodes
-//RS                 .iter()
-//RS                 .filter_map(|node| state.tree_widgets.iter().find(|record| record.label == node.label).map(|record| record.path.clone()))
-//RS                 .collect();
-//RS             state.focus_nodes = nodes;
-//RS             state.focus_current_widget();
-//RS         }
-//RS         pub fn focused_label(&self) -> String {
-//RS             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             state
-//RS                 .focused_index
-//RS                 .and_then(|i| state.focus_nodes.get(i))
-//RS                 .map(|n| n.label.clone())
-//RS                 .unwrap_or_default()
-//RS         }
-//RS 
-//RS         // ── Retained widget API ──
-//RS 
-//RS         /// Create a text label, append it to the window, and return its handle.
-//RS         pub fn label(&self, text: &str) -> i64 {
-//RS             self.add_widget(text, false)
-//RS         }
-//RS 
-//RS         /// Create a clickable button, append it, and return its handle.
-//RS         pub fn button(&self, text: &str) -> i64 {
-//RS             self.add_widget(text, true)
-//RS         }
-//RS 
-//RS         fn add_widget(&self, text: &str, is_button: bool) -> i64 {
-//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             state.ensure_init();
-//RS             let id = state.widget_handles.len() as i64;
-//RS             let tree_kind = if is_button { GtkWidgetKind::Button } else { GtkWidgetKind::Label };
-//RS             if let Some(path) = state
-//RS                 .tree_widgets
-//RS                 .iter()
-//RS                 .find(|record| record.kind == tree_kind && record.label == text)
-//RS                 .map(|record| record.path.clone())
-//RS             {
-//RS                 state.widget_handles.push(GtkWidgetHandle {
-//RS                     target: GtkWidgetHandleTarget::TreePath(path),
-//RS                     kind: tree_kind,
-//RS                 });
-//RS                 state.trace(&format!("bind {text}"));
-//RS                 return id;
-//RS             }
-//RS             let widget = if state.display_ok {
-//RS                 let ctext = CString::new(text).unwrap_or_else(|_| CString::new("").unwrap());
-//RS                 // SAFETY: display is live (ensure_init); pointers are GTK handles.
-//RS                 unsafe {
-//RS                     let widget = if is_button {
-//RS                         gtk_button_new_with_label(ctext.as_ptr())
-//RS                     } else {
-//RS                         gtk_label_new(ctext.as_ptr())
-//RS                     };
-//RS                     gtk_box_append(state.vbox, widget);
-//RS                     widget
-//RS                 }
-//RS             } else {
-//RS                 std::ptr::null_mut()
-//RS             };
-//RS             state.widget_handles.push(GtkWidgetHandle {
-//RS                 target: GtkWidgetHandleTarget::Direct(widget),
-//RS                 kind: tree_kind,
-//RS             });
-//RS             id
-//RS         }
-//RS 
-//RS         /// Update a widget's text in place (the reactive counter's live update).
-//RS         pub fn set_text(&self, id: i64, text: &str) {
-//RS             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             let Some((widget, kind)) = state.resolve_widget_handle(id) else {
-//RS                 state.trace(&format!("handle-miss {id}"));
-//RS                 return;
-//RS             };
-//RS             let ctext = CString::new(text).unwrap_or_else(|_| CString::new("").unwrap());
-//RS             // SAFETY: display is live and `widget` is a GTK label/button handle.
-//RS             unsafe {
-//RS                 if kind == GtkWidgetKind::Button {
-//RS                     gtk_button_set_label(widget, ctext.as_ptr());
-//RS                 } else {
-//RS                     gtk_label_set_text(widget, ctext.as_ptr());
-//RS                 }
-//RS             }
-//RS             state.trace(&format!("handle-set-text {id} {text}"));
-//RS         }
-//RS 
-//RS         /// Apply a Px minimum size (D-STYLEUNIT1's `Px` reaching native layout).
-//RS         pub fn set_size(&self, id: i64, width: i64, height: i64) {
-//RS             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             let Some((widget, _)) = state.resolve_widget_handle(id) else {
-//RS                 state.trace(&format!("handle-miss {id}"));
-//RS                 return;
-//RS             };
-//RS             // SAFETY: display is live and `widget` is a GTK widget handle.
-//RS             unsafe {
-//RS                 gtk_widget_set_size_request(widget, width as c_int, height as c_int);
-//RS             }
-//RS         }
-//RS 
-//RS         /// Apply a `#RRGGBB` fill via a scoped CSS provider (D-STYLESHAPE1 Color
-//RS         /// reaching the native paint pipeline).
-//RS         pub fn set_color(&self, id: i64, color: &str) {
-//RS             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             let Some((widget, _)) = state.resolve_widget_handle(id) else {
-//RS                 state.trace(&format!("handle-miss {id}"));
-//RS                 return;
-//RS             };
-//RS             let class_name = format!("jetfill{}", color.trim_start_matches('#'));
-//RS             let css = format!(".{class_name} {{ background-color: {color}; }}");
-//RS             let (Ok(cclass), Ok(ccss)) = (CString::new(class_name), CString::new(css)) else {
-//RS                 return;
-//RS             };
-//RS             // SAFETY: display is live; provider/display are GTK handles.
-//RS             unsafe {
-//RS                 let provider = gtk_css_provider_new();
-//RS                 gtk_css_provider_load_from_string(provider, ccss.as_ptr());
-//RS                 let display = gdk_display_get_default();
-//RS                 if !display.is_null() {
-//RS                     gtk_style_context_add_provider_for_display(
-//RS                         display,
-//RS                         provider,
-//RS                         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION,
-//RS                     );
-//RS                 }
-//RS                 gtk_widget_add_css_class(widget, cclass.as_ptr());
-//RS                 g_object_unref(provider as gpointer);
-//RS             }
-//RS         }
-//RS 
-//RS         /// Wire a button's "clicked" signal to a Jet handler.
-//RS         pub fn on_click<F: Fn() + Send + Sync + 'static>(&self, id: i64, handler: F) {
-//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS             let Some((widget, GtkWidgetKind::Button)) = state.resolve_widget_handle(id) else {
-//RS                 state.trace(&format!("handle-miss {id}"));
-//RS                 return;
-//RS             };
-//RS             let callback = Arc::new(handler) as Arc<dyn Fn() + Send + Sync>;
-//RS             let path = state.widget_handles.get(id as usize).and_then(|handle| {
-//RS                 if let GtkWidgetHandleTarget::TreePath(path) = &handle.target {
-//RS                     Some(path.clone())
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS 
-//RS             });
-//RS             if let Some(path) = path {
-//RS                 state.click_bindings.push(GtkClickBinding {
-//RS                     path: path.clone(),
-//RS                     callback,
-//RS                     connected_widget: std::ptr::null_mut(),
-//RS                 });
-//RS                 state.attach_click_bindings(&path, widget);
-//RS             } else {
-//RS                 GtkState::connect_click_callback(widget, callback);
-//RS             }
-//RS         }
-//RS 
-//RS         /// Present the window and run the GLib main loop until it closes. No-op
-//RS         /// without a display (`JET_UI_HEADLESS` / headless CI), so the program
-//RS         /// terminates instead of blocking.
-//RS         pub fn present(&self, title: &str) {
-//RS             // Read what we need, then drop the borrow BEFORE the blocking loop so
-//RS             // click handlers (`set_text`, etc.) can re-borrow the state.
-//RS             let (display_ok, window, availability) = {
-//RS                 let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-//RS                 (state.display_ok, state.window, state.availability)
-//RS             };
-//RS             if !display_ok || window.is_null() {
-//RS                 match availability {
-//RS                     GtkAvailability::GtkUnavailable => {
-//RS                         eprintln!(
-//RS                             "UI_UNSUPPORTED[gtk.runtime]: GTK4 runtime is unavailable; install GTK4 or set JET_UI_HEADLESS=1 only for an explicit headless run"
-//RS                         );
-//RS                     }
-//RS                     GtkAvailability::UnsupportedDisplay => {
-//RS                         eprintln!(
-//RS                             "UI_UNSUPPORTED[gtk.display]: no GTK display is available; set JET_UI_HEADLESS=1 only for an explicit headless run"
-//RS                         );
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS                 return;
-//RS             }
-//RS             // SAFETY: display is live and `window` is a GTK window handle.
-//RS             unsafe {
-//RS                 if let Ok(ctitle) = CString::new(title) {
-//RS                     gtk_window_set_title(window, ctitle.as_ptr());
-//RS                 }
-//RS                 gtk_window_present(window);
-//RS                 let main_loop = g_main_loop_new(std::ptr::null_mut(), 0);
-//RS                 g_main_loop_run(main_loop);
-//RS                 g_main_loop_unref(main_loop);
-//RS             }
-//RS         }
-//RS     }
-//RS     fn gtk_file_dialog_setup(
-//RS         dialog: *mut GtkFileDialog,
-//RS         parent: *mut GtkWidget,
-//RS         request: &JetUiFileDialogRequest,
-//RS     ) -> Result<(), JetUiHostError> {
-//RS         if dialog.is_null() || parent.is_null() {
-//RS             return Err(JetUiHostError::CapabilityUnavailable {
-//RS                 capability: "UI.FileDialog",
-//RS             });
-//RS         }
-//RS         let title = CString::new(request.title.as_str()).map_err(|_| {
-//RS             JetUiHostError::InvalidRequest("file dialog title must not contain NUL".to_string())
-//RS         })?;
-//RS         unsafe {
-//RS             gtk_file_dialog_set_title(dialog, title.as_ptr());
-//RS             gtk_file_dialog_set_modal(dialog, 1);
-//RS         }
-//RS 
-//RS         if let Some(directory) = request.initial_directory.as_ref() {
-//RS             let path = CString::new(directory.path()).map_err(|_| {
-//RS                 JetUiHostError::InvalidRequest(
-//RS                     "file dialog initial directory must not contain NUL".to_string(),
-//RS                 )
-//RS             })?;
-//RS             let folder = unsafe { g_file_new_for_path(path.as_ptr()) };
-//RS             if folder.is_null() {
-//RS                 return Err(JetUiHostError::InvalidRequest(
-//RS                     "GTK rejected the file dialog initial directory".to_string(),
-//RS                 ));
-//RS             }
-//RS             unsafe {
-//RS                 gtk_file_dialog_set_initial_folder(dialog, folder);
-//RS                 g_object_unref(folder as gpointer);
-//RS             }
-//RS         }
-//RS 
-//RS         if request.filters.is_empty() {
-//RS             return Ok(());
-//RS         }
-//RS         let object_type = unsafe { gtk_file_filter_get_type() };
-//RS         if object_type == 0 {
-//RS             return Err(JetUiHostError::CapabilityUnavailable {
-//RS                 capability: "UI.FileDialog",
-//RS             });
-//RS         }
-//RS         let store = unsafe { g_list_store_new(object_type) };
-//RS         if store.is_null() {
-//RS             return Err(JetUiHostError::CapabilityUnavailable {
-//RS                 capability: "UI.FileDialog",
-//RS             });
-//RS         }
-//RS         for specification in &request.filters {
-//RS             let filter = unsafe { gtk_file_filter_new() };
-//RS             if filter.is_null() {
-//RS                 unsafe { g_object_unref(store as gpointer) };
-//RS                 return Err(JetUiHostError::CapabilityUnavailable {
-//RS                     capability: "UI.FileDialog",
-//RS                 });
-//RS             }
-//RS             if let Ok(label) = CString::new(specification.label.as_str()) {
-//RS                 if !specification.label.is_empty() {
-//RS                     unsafe { gtk_file_filter_set_name(filter, label.as_ptr()) };
-//RS                 }
-//RS             }
-//RS             for extension in &specification.extensions {
-//RS                 let extension = extension.trim_start_matches('.');
-//RS                 let pattern = if extension.starts_with('*') {
-//RS                     extension.to_string()
-//RS                 } else {
-//RS                     format!("*.{extension}")
-//RS                 };
-//RS                 if let Ok(pattern) = CString::new(pattern) {
-//RS                     unsafe { gtk_file_filter_add_pattern(filter, pattern.as_ptr()) };
-//RS                 }
-//RS             }
-//RS             for mime in &specification.mime_types {
-//RS                 if let Ok(mime) = CString::new(mime.as_str()) {
-//RS                     unsafe { gtk_file_filter_add_mime_type(filter, mime.as_ptr()) };
-//RS                 }
-//RS             }
-//RS             unsafe {
-//RS                 g_list_store_append(store, filter as gpointer);
-//RS                 g_object_unref(filter as gpointer);
-//RS             }
-//RS         }
-//RS         unsafe {
-//RS             gtk_file_dialog_set_filters(dialog, store as *mut GListModel);
-//RS             g_object_unref(store as gpointer);
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn gtk_run_file_dialog(
-//RS         window: *mut GtkWidget,
-//RS         request: &JetUiFileDialogRequest,
-//RS     ) -> JetUiServiceResult<JetUiFileDialogSelection> {
-//RS         let dialog = unsafe { gtk_file_dialog_new() };
-//RS         if dialog.is_null() {
-//RS             return Err(JetUiHostError::CapabilityUnavailable {
-//RS                 capability: "UI.FileDialog",
-//RS             });
-//RS         }
-//RS         if let Err(error) = gtk_file_dialog_setup(dialog, window, request) {
-//RS             unsafe { g_object_unref(dialog as gpointer) };
-//RS             return Err(error);
-//RS         }
-//RS         let mode = match (request.kind, request.allow_multiple) {
-//RS             (JetUiFileDialogKind::Open, true) => FileDialogMode::OpenMultiple,
-//RS             (JetUiFileDialogKind::Open, false) => FileDialogMode::Open,
-//RS             (JetUiFileDialogKind::Save, false) => FileDialogMode::Save,
-//RS             (JetUiFileDialogKind::Save, true) => {
-//RS                 unsafe { g_object_unref(dialog as gpointer) };
-//RS                 return Err(JetUiHostError::InvalidRequest(
-//RS                     "save dialogs cannot select multiple files".to_string(),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         let mut pending = FileDialogRead {
-//RS             done: false,
-//RS             mode,
-//RS             files: Vec::new(),
-//RS             cancelled: false,
-//RS             error: None,
-//RS         };
-//RS         unsafe {
-//RS             match mode {
-//RS                 FileDialogMode::Open => gtk_file_dialog_open(
-//RS                     dialog,
-//RS                     window,
-//RS                     std::ptr::null_mut(),
-//RS                     jet_gtk_file_dialog_ready,
-//RS                     (&mut pending as *mut FileDialogRead).cast(),
-//RS                 ),
-//RS                 FileDialogMode::OpenMultiple => gtk_file_dialog_open_multiple(
-//RS                     dialog,
-//RS                     window,
-//RS                     std::ptr::null_mut(),
-//RS                     jet_gtk_file_dialog_ready,
-//RS                     (&mut pending as *mut FileDialogRead).cast(),
-//RS                 ),
-//RS                 FileDialogMode::Save => gtk_file_dialog_save(
-//RS                     dialog,
-//RS                     window,
-//RS                     std::ptr::null_mut(),
-//RS                     jet_gtk_file_dialog_ready,
-//RS                     (&mut pending as *mut FileDialogRead).cast(),
-//RS                 ),
-//RS             }
-//RS             while !pending.done {
-//RS                 let _ = g_main_context_iteration(std::ptr::null_mut(), 1);
-//RS             }
-//RS             g_object_unref(dialog as gpointer);
-//RS         }
-//RS         if let Some(message) = pending.error {
-//RS             return Err(JetUiHostError::HostFailure {
-//RS                 service: "UI.FileDialog",
-//RS                 message,
-//RS             });
-//RS         }
-//RS         if pending.cancelled || pending.files.is_empty() {
-//RS             return Err(JetUiHostError::Cancelled(JetUiCancellation::User));
-//RS         }
-//RS         let access = match request.kind {
-//RS             JetUiFileDialogKind::Open => JetUiFsAccess::Read,
-//RS             JetUiFileDialogKind::Save => JetUiFsAccess::Write,
-//RS         };
-//RS         let files = pending
-//RS             .files
-//RS             .iter()
-//RS             .map(|path| request.grant.scope(path, access))
-//RS             .collect::<Result<Vec<_>, _>>();
-//RS         match files.and_then(JetUiFileDialogSelection::new) {
-//RS             Ok(selection) => Ok(selection),
-//RS             Err(error) => Err(error),
-//RS         }
-//RS     }
-//RS     impl JetUiHost for JetGtkBackend {
-//RS         fn capability_facts(&self) -> JetUiCapabilityFacts {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             state.capabilities
-//RS         }
-//RS 
-//RS         fn attach_accessibility(
-//RS             &self,
-//RS             node: &mut dyn JetUiAccessibilityTarget,
-//RS             accessibility: JetUiAccessibility,
-//RS         ) -> JetUiServiceResult<()> {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Accessibility) {
-//RS                 return Err(error);
-//RS             }
-//RS             match jet_ui_accessibility_attach(node, accessibility) {
-//RS                 Ok(()) => Ok(()),
-//RS                 Err(error) => Err(error),
-//RS             }
-//RS         }
-//RS 
-//RS         fn project_accessibility(
-//RS             &self,
-//RS             node: &dyn JetUiAccessibilityTarget,
-//RS             node_id: JetUiNodeId,
-//RS         ) -> JetUiServiceResult<Option<JetUiAccessibilityProjection>> {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Accessibility) {
-//RS                 return Err(error);
-//RS             }
-//RS             Ok(jet_ui_accessibility_project(node, node_id))
-//RS         }
-//RS 
-//RS         fn open_file(
-//RS             &mut self,
-//RS             request: JetUiFileDialogRequest,
-//RS         ) -> JetUiServiceResult<JetUiFileDialogSelection> {
-//RS             if let Err(error) = request.validate() {
-//RS                 return Err(error);
-//RS             }
-//RS             let (window, display_ok, capabilities) = {
-//RS                 let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS                 state.ensure_init();
-//RS                 (state.window, state.display_ok, state.capabilities)
-//RS             };
-//RS             if let Err(error) = capabilities.require(JetUiCapability::FileDialog) {
-//RS                 return Err(error);
-//RS             }
-//RS             if !display_ok || window.is_null() {
-//RS                 return Err(JetUiHostError::Cancelled(JetUiCancellation::Headless));
-//RS             }
-//RS             gtk_run_file_dialog(window, &request)
-//RS         }
-//RS 
-//RS         fn save_file(
-//RS             &mut self,
-//RS             request: JetUiFileDialogRequest,
-//RS         ) -> JetUiServiceResult<JetUiFileDialogSelection> {
-//RS             if let Err(error) = request.validate() {
-//RS                 return Err(error);
-//RS             }
-//RS             let (window, display_ok, capabilities) = {
-//RS                 let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS                 state.ensure_init();
-//RS                 (state.window, state.display_ok, state.capabilities)
-//RS             };
-//RS             if let Err(error) = capabilities.require(JetUiCapability::FileDialog) {
-//RS                 return Err(error);
-//RS             }
-//RS             if !display_ok || window.is_null() {
-//RS                 return Err(JetUiHostError::Cancelled(JetUiCancellation::Headless));
-//RS             }
-//RS             gtk_run_file_dialog(window, &request)
-//RS         }
-//RS 
-//RS         fn read_clipboard_text(&mut self) -> JetUiServiceResult<JetUiClipboardText> {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Clipboard) {
-//RS                 return Err(error);
-//RS             }
-//RS             let display = unsafe { gdk_display_get_default() };
-//RS             if display.is_null() {
-//RS                 return Err(JetUiHostError::CapabilityUnavailable {
-//RS                     capability: "UI.Clipboard",
-//RS                 });
-//RS             }
-//RS             let clipboard = unsafe { gdk_display_get_clipboard(display) };
-//RS             if clipboard.is_null() {
-//RS                 return Err(JetUiHostError::CapabilityUnavailable {
-//RS                     capability: "UI.Clipboard",
-//RS                 });
-//RS             }
-//RS             let mut pending = ClipboardRead {
-//RS                 done: false,
-//RS                 text: None,
-//RS             };
-//RS             unsafe {
-//RS                 gdk_clipboard_read_text_async(
-//RS                     clipboard,
-//RS                     std::ptr::null_mut(),
-//RS                     jet_gtk_clipboard_read_ready,
-//RS                     (&mut pending as *mut ClipboardRead).cast(),
-//RS                 );
-//RS                 while !pending.done {
-//RS                     let _ = g_main_context_iteration(std::ptr::null_mut(), 1);
-//RS                 }
-//RS             }
-//RS             match pending.text {
-//RS                 Some(text) => Ok(JetUiClipboardText {
-//RS                     text,
-//RS                     selection: None,
-//RS                 }),
-//RS                 None => Err(JetUiHostError::CapabilityUnavailable {
-//RS                     capability: "UI.Clipboard",
-//RS                 }),
-//RS             }
-//RS         }
-//RS 
-//RS         fn write_clipboard_text(&mut self, text: String) -> JetUiServiceResult<JetUiClipboardWrite> {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Clipboard) {
-//RS                 return Err(error);
-//RS             }
-//RS             let Ok(text_c) = CString::new(text.as_str()) else {
-//RS                 return Err(JetUiHostError::InvalidRequest(
-//RS                     "clipboard text must not contain NUL".to_string(),
-//RS                 ));
-//RS             };
-//RS             let display = unsafe { gdk_display_get_default() };
-//RS             if display.is_null() {
-//RS                 return Err(JetUiHostError::CapabilityUnavailable {
-//RS                     capability: "UI.Clipboard",
-//RS                 });
-//RS             }
-//RS             let clipboard = unsafe { gdk_display_get_clipboard(display) };
-//RS             if clipboard.is_null() {
-//RS                 return Err(JetUiHostError::CapabilityUnavailable {
-//RS                     capability: "UI.Clipboard",
-//RS                 });
-//RS             }
-//RS             unsafe { gdk_clipboard_set_text(clipboard, text_c.as_ptr()) };
-//RS             Ok(JetUiClipboardWrite {
-//RS                 characters: text.chars().count(),
-//RS             })
-//RS         }
-//RS 
-//RS         fn poll_ime_event(&mut self) -> JetUiServiceResult<Option<JetUiImeEvent>> {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             if let Err(error) = state.capabilities.require(JetUiCapability::IME) {
-//RS                 return Err(error);
-//RS             }
-//RS             Ok(state.ime_events.pop_front())
-//RS         }
-//RS 
-//RS         fn poll_drag_event(&mut self) -> JetUiServiceResult<Option<JetUiDragEvent>> {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             if let Err(error) = state.capabilities.require(JetUiCapability::DragDrop) {
-//RS                 return Err(error);
-//RS             }
-//RS             Ok(state.drag_events.pop_front())
-//RS         }
-//RS 
-//RS         fn register_shortcut(
-//RS             &mut self,
-//RS             binding: JetUiShortcutBinding,
-//RS         ) -> JetUiServiceResult<JetUiShortcutBinding> {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Shortcuts) {
-//RS                 return Err(error);
-//RS             }
-//RS             match state.shortcuts.register(binding) {
-//RS                 Ok(binding) => Ok(binding),
-//RS                 Err(error) => Err(error),
-//RS             }
-//RS         }
-//RS 
-//RS         fn dispatch_shortcut(
-//RS             &mut self,
-//RS             shortcut: JetUiShortcut,
-//RS         ) -> JetUiServiceResult<JetUiShortcutDispatch> {
-//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-//RS             state.ensure_init();
-//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Shortcuts) {
-//RS                 return Err(error);
-//RS             }
-//RS             Ok(state.shortcuts.dispatch(&shortcut))
-//RS         }
-//RS 
-//RS     }
-//RS 
-//RS 
-//RS     impl Default for JetGtkBackend {
-//RS         fn default() -> Self {
-//RS             Self::new()
-//RS         }
-//RS     }
-//RS 
-//RS     impl JetBackend for GtkState {
-//RS         fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
-//RS             let size = jet_ui_measure_tree(node, constraint);
-//RS             self.measured = Some(size);
-//RS             size
-//RS         }
-//RS 
-//RS         fn layout(&mut self, node: &JetUiNode, frame: JetRect) {
-//RS             let _ = node;
-//RS             self.layout_frame = Some(frame);
-//RS         }
-//RS 
-//RS         fn paint(&mut self, node: &JetUiNode) {
-//RS             let frame = self.layout_frame.unwrap_or(JetRect {
-//RS                 x: 0.0,
-//RS                 y: 0.0,
-//RS                 width: node.width,
-//RS                 height: node.height,
-//RS             });
-//RS             jet_ui_paint_tree(node, frame, &mut self.commands);
-//RS             self.ensure_init();
-//RS             let previous_focus = self
-//RS                 .focused_index
-//RS                 .and_then(|index| self.focus_paths.get(index))
-//RS                 .cloned();
-//RS             let mut live = Vec::new();
-//RS             let mut focus_nodes = Vec::new();
-//RS             let mut focus_paths = Vec::new();
-//RS             self.reconcile_node(
-//RS                 node,
-//RS                 self.vbox,
-//RS                 "root",
-//RS                 &mut live,
-//RS                 &mut focus_nodes,
-//RS                 &mut focus_paths,
-//RS             );
-//RS             // D-UI-EVT-DISP1=E: refresh identity→slot bindings after reconcile.
-//RS             jet_ui_bind_tree_clicks(node, "root");
-//RS             for index in (0..self.tree_widgets.len()).rev() {
-//RS                 if !live.contains(&self.tree_widgets[index].path) {
-//RS                     self.remove_tree_widget(index);
-//RS                 }
-//RS             }
-//RS             self.focused_index = previous_focus
-//RS                 .as_ref()
-//RS                 .and_then(|path| focus_paths.iter().position(|candidate| candidate == path))
-//RS                 .or_else(|| (!focus_paths.is_empty()).then_some(0));
-//RS             self.focus_nodes = focus_nodes;
-//RS             self.focus_paths = focus_paths;
-//RS             self.focus_current_widget();
-//RS         }
-//RS 
-//RS         fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
-//RS             if let JetInputEvent::Key { code } = &event {
-//RS                 if let Some(result) =
-//RS                     jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code, 0)
-//RS                 {
-//RS                     self.focus_current_widget();
-//RS                     self.last_event = Some(result);
-//RS                     return result;
-//RS                 }
-//RS             }
-//RS             let result = match &event {
-//RS                 JetInputEvent::Key { code } if code.is_empty() => JetEventResult::Ignored,
-//RS                 JetInputEvent::Resize { size } if size.width <= 0.0 || size.height <= 0.0 => {
-//RS                     JetEventResult::Ignored
-//RS                 }
-//RS                 _ => JetEventResult::Handled,
-//RS             };
-//RS             self.last_event = Some(result);
-//RS             result
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn jet_ui_gtk() -> JetGtkBackend {
-//RS         JetGtkBackend::new()
-//RS     }
-//RS }
-//RS 
-//RS pub use jet_gtk::{jet_ui_gtk, JetGtkBackend};
-// END-PORT-PENDING 0193 crates/jet-codegen/src/Prelude/UiGtk.rs:1-2048
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:426
+#FFI(c)
+fn jet_gtk_click_trampoline(_widget: Ptr<GtkWidget>, data: gpointer) -> {
+    if data.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("signal owns a boxed shared callback until its destroy notifier") {
+        cb :: &*data.cast<Arc<fn() -> () + Send + Sync>>()
+        cb()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:437
+struct ClipboardRead { done: Bool; text: String? }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:442
+#FFI(c)
+fn jet_gtk_clipboard_read_ready(source: gpointer, result: Ptr<GAsyncResult>, data: gpointer) -> {
+    if data.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("clipboard read drains this callback before its stack state leaves scope") {
+        state := &*data.cast<ClipboardRead>()
+        error := Ptr<GError>.null()
+        text :: gdk_clipboard_read_text_finish(source.cast<GdkClipboard>(), result, Ptr.from_ref(&error))
+        if !text.is_null() {
+            value :: CStr.from_ptr(text).to_string_lossy().into_owned()
+            g_free(text.cast<c_void>())
+            state.text = Val(^value)
+        }
+        state.done = true
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:471
+#Clone
+#Copy
+enum FileDialogMode { Open; OpenMultiple; Save }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:478
+struct FileDialogRead { done: Bool; mode: FileDialogMode; files: [String]; cancelled: Bool; error: String? }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:486
+fn gtk_file_path(file: Ptr<GFile>) -> String? {
+    if file.is_null() -> return None
+    // GATE #4565: kernel primitive
+    #Unsafe("consume the allocated GIO path and retained file exactly once") {
+        path :: g_file_get_path(file)
+        value :: if path.is_null() { None } else { Val(CStr.from_ptr(path).to_string_lossy().into_owned()) }
+        if !path.is_null() { g_free(path.cast<c_void>()) }
+        g_object_unref(file.cast<c_void>())
+        value
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:500
+fn gtk_file_model_paths(model: Ptr<GListModel>) -> [String] {
+    if model.is_null() -> return []
+    // GATE #4565: kernel primitive
+    #Unsafe("consume each retained GFile item then release its retained model") {
+        count :: g_list_model_get_n_items(model)
+        paths := [String].with_capacity(count as USize)
+        for index in 0..count {
+            if gtk_file_path(g_list_model_get_item(model, index).cast<GFile>()) is Val(path) { paths.push(^path) }
+        }
+        g_object_unref(model.cast<c_void>())
+        ^paths
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:516
+fn gtk_file_error(error: Ptr<GError>) -> (Bool, String) {
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow live GError C layout; its caller owns release") {
+        domain :: g_quark_from_static_string(G_IO_ERROR_QUARK.as_ptr().cast<I8>())
+        cancelled :: g_error_matches(error, domain, G_IO_ERROR_CANCELLED) != 0
+        if cancelled -> return (true, "")
+        record :: &*error.cast<NativeGError>()
+        text :: if record.message.is_null() { "GTK file dialog failed" } else {
+            CStr.from_ptr(record.message).to_string_lossy().chars().take(512).collect_string()
+        }
+        (false, "GTK file dialog failed: {text}")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:534
+#FFI(c)
+fn jet_gtk_file_dialog_ready(source: gpointer, result: Ptr<GAsyncResult>, data: gpointer) -> {
+    if data.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("dialog drains GLib context while owning this stack callback state") {
+        state := &*data.cast<FileDialogRead>()
+        error := Ptr<GError>.null()
+        files :: when state.mode {
+            .Open -> gtk_file_path(gtk_file_dialog_open_finish(source.cast<GtkFileDialog>(), result, Ptr.from_ref(&error))).map(fn(path) { [^path] })
+            .OpenMultiple -> Val(gtk_file_model_paths(gtk_file_dialog_open_multiple_finish(source.cast<GtkFileDialog>(), result, Ptr.from_ref(&error))))
+            .Save -> gtk_file_path(gtk_file_dialog_save_finish(source.cast<GtkFileDialog>(), result, Ptr.from_ref(&error))).map(fn(path) { [^path] })
+        }
+        if !error.is_null() {
+            (cancelled, message) :: gtk_file_error(error)
+            state.cancelled = cancelled
+            if !cancelled { state.error = Val(^message) }
+            g_error_free(error)
+        }
+        state.files = files.unwrap_or_default()
+        state.done = true
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:586
+#FFI(c)
+fn jet_gtk_drop_callback(data: gpointer, _closure: Ptr<GClosure>) -> {
+    if data.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("GTK destroys the exact Box allocated by on_click once") {
+        drop(Box.from_raw(data.cast<Arc<fn() -> () + Send + Sync>>()))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:596
+struct GtkImeBinding { state: Ptr<GtkState>; target: JetUiNodeId; path: String }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:602
+#FFI(c)
+fn jet_gtk_binding_drop(data: gpointer, _closure: Ptr<GClosure>) -> {
+    if data.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("signal destroys its one boxed IME binding") { drop(Box.from_raw(data.cast<GtkImeBinding>())) }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:613
+#FFI(c)
+fn jet_gtk_insert_text_trampoline(_editable: Ptr<GtkWidget>, text: Ptr<I8>, _length: I32, data: gpointer) -> {
+    if data.is_null() || text.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("GTK lends callback text; signal retains binding and stable backend state") {
+        binding :: &*data.cast<GtkImeBinding>()
+        enabled :: (*binding.state).ime_enabled.get(&binding.path).copied().unwrap_or(false)
+        if !enabled -> return
+        value :: CStr.from_ptr(text).to_string_lossy().into_owned()
+        end :: value.chars().count()
+        selection :: JetUiTextRange.new(0, end).unwrap_or_default()
+        (*binding.state).ime_events.push_back(JetUiImeEvent{
+            target: binding.target.clone(), phase: .Commit,
+            composition: Val(JetUiImeComposition{text: ^value, selection: selection, marked: None})
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:653
+struct GtkDragBinding { state: Ptr<GtkState>; target: JetUiNodeId }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:658
+#FFI(c)
+fn jet_gtk_drag_binding_drop(data: gpointer, _closure: Ptr<GClosure>) -> {
+    if data.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("drag signal owns one boxed binding") { drop(Box.from_raw(data.cast<GtkDragBinding>())) }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:668
+fn jet_gtk_queue_drag(binding: &GtkDragBinding, phase: JetUiDragPhase, items: [JetUiDropItem]) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("signal binding points to retained state on its creating thread") {
+        (*binding.state).drag_events.push_back(JetUiDragEvent{
+            target: binding.target.clone(), phase: phase, operation: .Copy, items: ^items
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:683
+#FFI(c)
+fn jet_gtk_drag_enter_trampoline(_target: Ptr<GtkWidget>, _x: F64, _y: F64, data: gpointer) -> U32 {
+    if data.is_null() -> return 0
+    // GATE #4565: kernel primitive
+    #Unsafe("GTK retains drag binding") { jet_gtk_queue_drag(&*data.cast<GtkDragBinding>(), .Enter, []) }
+    1
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:697
+#FFI(c)
+fn jet_gtk_drag_motion_trampoline(_target: Ptr<GtkWidget>, _x: F64, _y: F64, data: gpointer) -> U32 {
+    if data.is_null() -> return 0
+    // GATE #4565: kernel primitive
+    #Unsafe("GTK retains drag binding") { jet_gtk_queue_drag(&*data.cast<GtkDragBinding>(), .Over, []) }
+    1
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:711
+#FFI(c)
+fn jet_gtk_drag_leave_trampoline(_target: Ptr<GtkWidget>, data: gpointer) -> {
+    if data.is_null() -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("GTK retains drag binding") { jet_gtk_queue_drag(&*data.cast<GtkDragBinding>(), .Leave, []) }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:719
+#FFI(c)
+fn jet_gtk_drop_trampoline(_target: Ptr<GtkWidget>, value: Ptr<GValue>, _x: F64, _y: F64, data: gpointer) -> gboolean {
+    if data.is_null() -> return 0
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow GValue string during callback; retain only copied Jet text") {
+        binding :: &*data.cast<GtkDragBinding>()
+        items :: if value.is_null() { [] } else {
+            text :: g_value_get_string(value)
+            if text.is_null() { [] } else {
+                owned :: CStr.from_ptr(text).to_string_lossy().into_owned()
+                if owned.starts_with("file://") { [JetUiDropItem.URI(^owned)] } else { [JetUiDropItem.Text(^owned)] }
+            }
+        }
+        jet_gtk_queue_drag(binding, .Drop, ^items)
+    }
+    1
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:751
+#FFI(c)
+fn jet_gtk_shortcut_trampoline(_controller: Ptr<GtkWidget>, keyval: U32, _keycode: U32, modifiers: U32, data: gpointer) -> gboolean {
+    if data.is_null() -> return 0
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow backend and GDK key name on GTK thread") {
+        state := &*data.cast<GtkState>()
+        key_name :: gdk_keyval_name(keyval)
+        if key_name.is_null() -> return 0
+        key :: CStr.from_ptr(key_name).to_string_lossy().into_owned()
+        modifier_bits := U8{0}
+        if modifiers & (1 << 0) != 0 { modifier_bits |= 1 << 2 }
+        if modifiers & (1 << 2) != 0 { modifier_bits |= 1 }
+        if modifiers & (1 << 3) != 0 { modifier_bits |= 1 << 1 }
+        if modifiers & (1 << 26) != 0 { modifier_bits |= 1 << 3 }
+        physical :: JetUiShortcutModifiers.from_bits(modifier_bits)
+        logical_bits := modifier_bits
+        if selected_os() == "macos" && modifier_bits & (1 << 3) != 0 {
+            logical_bits = (logical_bits & !(1 << 3)) | (1 << 4)
+        } else if selected_os() != "macos" && modifier_bits & 1 != 0 {
+            logical_bits = (logical_bits & !1) | (1 << 4)
+        }
+        candidates :: [JetUiShortcutModifiers.from_bits(logical_bits), physical]
+        handled_shortcut := None
+        for candidate_modifiers in candidates {
+            candidate :: try { JetUiShortcut.new(&key, candidate_modifiers) } catch { continue }
+            if !(state.shortcuts.dispatch(&candidate) is .Unhandled) {
+                handled_shortcut = Val(^candidate)
+                break
+            }
+        }
+        if handled_shortcut is Val(shortcut) {
+            state.trace("shortcut-dispatch {shortcut.key}")
+            return 1
+        }
+        0
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:817
+#Clone
+#Copy
+#Debug
+#Eq
+enum GtkAvailability { Uninitialized; Ready; GtkUnavailable; HeadlessOptIn; UnsupportedDisplay }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:826
+#Clone
+#Copy
+#Debug
+#Eq
+enum GtkWidgetKind { Box; Label; Button; Entry }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:834
+struct GtkWidgetRecord {
+    path: String
+    parent: Ptr<GtkWidget>
+    widget: Ptr<GtkWidget>
+    kind: GtkWidgetKind
+    label: String
+    css_class: String?
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:845
+enum GtkWidgetHandleTarget { Direct(widget: Ptr<GtkWidget>); TreePath(path: String) }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:850
+struct GtkWidgetHandle { target: GtkWidgetHandleTarget; kind: GtkWidgetKind }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:855
+struct GtkClickBinding {
+    path: String
+    callback: Arc<fn() -> () + Send + Sync>
+    connected_widget: Ptr<GtkWidget>
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:861
+struct GtkState {
+    measured: JetSize?
+    layout_frame: JetRect?
+    commands: [JetPaintCmd]
+    last_event: JetEventResult?
+    focus_nodes: [JetUiNode]
+    focus_paths: [String]
+    focused_index: USize?
+    inited: Bool
+    display_ok: Bool
+    window: Ptr<GtkWidget>
+    vbox: Ptr<GtkWidget>
+    widget_handles: [GtkWidgetHandle]
+    click_bindings: [GtkClickBinding]
+    tree_widgets: [GtkWidgetRecord]
+    availability: GtkAvailability
+    capabilities: JetUiCapabilityFacts
+    shortcuts: JetUiShortcutRegistry
+    ime_enabled: [String:Bool]
+    ime_events: VecDeque<JetUiImeEvent>
+    drag_events: VecDeque<JetUiDragEvent>
+    native_controllers: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:891
+// GATE #4565: kernel primitive — Send/Sync admission only satisfies reactive
+// closure bounds. Widgets and GtkState remain on their creating thread.
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:896
+fn gtk_set_accessible_property(widget: Ptr<GtkWidget>, property: I32, value: String?) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("optional C string lives across GTK accessible ABI call with integer sentinel -1") {
+        c_value :: value.and_then(fn(text) { CString.new(text).ok() })
+        value_ptr :: c_value.as_ref().map_or(Ptr<I8>.null(), fn(text) { text.as_ptr() })
+        if gtk_api() is Val(api) {
+            api.gtk_accessible_update_property(widget.cast<GtkAccessible>(), property, value_ptr, -1)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:923
+fn gtk_apply_accessibility(widget: Ptr<GtkWidget>, node: &JetUiNode) -> {
+    if widget.is_null() -> return
+    (name, description) :: node.accessibility.as_ref().map_or((None, None), fn(metadata) {
+        (metadata.name.as_deref(), metadata.description.as_deref())
+    })
+    gtk_set_accessible_property(widget, GTK_ACCESSIBLE_PROPERTY_LABEL, name)
+    gtk_set_accessible_property(widget, GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, description)
+}
+impl GtkState {
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:947
+    fn ensure_init(self: &GtkState) -> {
+        if self.inited -> return
+        self.inited = true
+        // GATE #4565: kernel primitive
+        headless :: #Unsafe("read host environment presence without losing non-UTF8 values") { core.env.var_os("JET_UI_HEADLESS").is_some() }
+        if headless {
+            self.display_ok = false
+            self.capabilities = JetUiCapabilityFacts.empty()
+            self.availability = .HeadlessOptIn
+            return
+        }
+        if gtk_api().is_none() {
+            self.display_ok = false
+            self.capabilities = JetUiCapabilityFacts.empty()
+            self.availability = .GtkUnavailable
+            return
+        }
+        if gtk_init_check() == 0 {
+            self.display_ok = false
+            self.capabilities = JetUiCapabilityFacts.empty()
+            self.availability = .UnsupportedDisplay
+            return
+        }
+        self.display_ok = true
+        self.availability = .Ready
+        self.window = gtk_window_new()
+        self.vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8)
+        gtk_window_set_child(self.window, self.vbox)
+        gtk_window_set_default_size(self.window, 320, 240)
+        if !self.window.is_null() && !self.vbox.is_null() {
+            self.capabilities.grant(.Accessibility)
+            self.capabilities.grant(.FileDialog)
+            self.capabilities.grant(.IME)
+            self.capabilities.grant(.DragDrop)
+            self.capabilities.grant(.Shortcuts)
+            display :: gdk_display_get_default()
+            if !display.is_null() && !gdk_display_get_clipboard(display).is_null() {
+                self.capabilities.grant(.Clipboard)
+            }
+        }
+        self.connect_native_controllers()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:990
+    fn connect_native_controllers(self: &GtkState) -> {
+        if self.native_controllers || !self.display_ok || self.window.is_null() -> return
+        controller :: gtk_event_controller_key_new()
+        if controller.is_null() -> return
+        // GATE #4565: kernel primitive
+        #Unsafe("window owns controller; callback data points at stable Arc-backed state") {
+            signal :: CString.new("key-pressed").expect("static GTK signal name")
+            _ :: g_signal_connect_data(controller.cast<c_void>(), signal.as_ptr(),
+                jet_gtk_shortcut_trampoline as gpointer, Ptr.from_ref(self).cast<c_void>(), None, 0)
+            gtk_widget_add_controller(self.window, controller)
+        }
+        self.native_controllers = true
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1015
+    fn connect_native_input(self: &GtkState, widget: Ptr<GtkWidget>, node: &JetUiNode, path: String) -> {
+        if !self.display_ok || widget.is_null() -> return
+        identity :: try { jet_ui_node_id(node, path) } catch { return }
+        // GATE #4565: kernel primitive
+        #Unsafe("each native signal owns its binding; callbacks borrow stable backend state") {
+            if GtkState.widget_kind(node) == .Entry {
+                binding :: Box.into_raw(Box.new(GtkImeBinding{
+                    state: Ptr.from_ref(self), target: identity.clone(), path: path.to_string()
+                }))
+                signal :: CString.new("insert-text").expect("static GTK signal name")
+                _ :: g_signal_connect_data(widget.cast<c_void>(), signal.as_ptr(),
+                    jet_gtk_insert_text_trampoline as gpointer, binding.cast<c_void>(), Val(jet_gtk_binding_drop), 0)
+            }
+            if node.on_drop.is_some() {
+                type_name :: CString.new("gchararray").expect("static GType name")
+                value_type :: g_type_from_name(type_name.as_ptr())
+                controller :: gtk_drop_target_new(value_type, 7)
+                if controller.is_null() -> return
+                gtk_widget_add_controller(widget, controller.cast<GtkEventController>())
+                signals :: [
+                    ("enter", jet_gtk_drag_enter_trampoline as gpointer),
+                    ("motion", jet_gtk_drag_motion_trampoline as gpointer),
+                    ("leave", jet_gtk_drag_leave_trampoline as gpointer),
+                    ("drop", jet_gtk_drop_trampoline as gpointer)
+                ]
+                for (signal_name, callback) in signals {
+                    binding :: Box.into_raw(Box.new(GtkDragBinding{state: Ptr.from_ref(self), target: identity.clone()}))
+                    signal :: CString.new(signal_name).expect("static GTK signal name")
+                    _ :: g_signal_connect_data(controller.cast<c_void>(), signal.as_ptr(), callback,
+                        binding.cast<c_void>(), Val(jet_gtk_drag_binding_drop), 0)
+                }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1076
+    fn trace(self: &GtkState, message: String) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("optional real host GTK tracing writes stderr") {
+            if core.env.var_os("JET_UI_GTK_TRACE").is_some() { core.io.eprintln("GTK_UI {message}") }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1082
+    fn widget_kind(node: &JetUiNode) -> GtkWidgetKind {
+        when node.kind {
+            .Box -> .Box
+            .Button -> .Button
+            .TextInput -> .Entry
+            _ -> when node.role {
+                Val(.Button) -> .Button
+                Val(.TextInput) -> .Entry
+                Val(.Container) -> .Box
+                _ -> .Label
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1097
+    fn remove_tree_widget(self: &GtkState, index: USize) -> {
+        record :: self.tree_widgets.remove(index)
+        _ :: self.ime_enabled.remove(&record.path)
+        for binding in &self.click_bindings {
+            if binding.path == record.path { binding.connected_widget = Ptr.null() }
+        }
+        if self.display_ok && !record.parent.is_null() && !record.widget.is_null() {
+            gtk_box_remove(record.parent, record.widget)
+        }
+        self.trace("remove {record.path}")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1111
+    fn remove_tree_subtree(self: &GtkState, path: String) -> {
+        child_prefix :: "{path}/"
+        for index in (0..self.tree_widgets.len()).rev() {
+            record_path :: &self.tree_widgets[index].path
+            if record_path == path || record_path.starts_with(&child_prefix) { self.remove_tree_widget(index) }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1121
+    fn reconcile_node(self: &GtkState, node: &JetUiNode, parent: Ptr<GtkWidget>, path: String,
+        live: &[String], focus_nodes: &[JetUiNode], focus_paths: &[String]) -> {
+        kind :: GtkState.widget_kind(node)
+        if self.tree_widgets.iter().position(fn(record) { record.path == path }) is Val(index) {
+            if self.tree_widgets[index].kind != kind || self.tree_widgets[index].parent != parent {
+                self.remove_tree_subtree(path)
+            }
+        }
+        if kind == .Entry {
+            _ :: self.ime_enabled.insert(path.to_string(), node.ime != Val(JetUiImeMode.Disabled))
+        }
+        (index, created) :: if self.tree_widgets.iter().position(fn(record) { record.path == path }) is Val(existing) {
+            (existing, false)
+        } else {
+            // GATE #4565: kernel primitive
+            widget :: #Unsafe("temporary C label is borrowed only by GTK constructors; parent owns child") {
+                text :: CString.new(node.label.as_str()).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+                if self.display_ok {
+                    child :: when kind {
+                        .Box -> gtk_box_new(GTK_ORIENTATION_VERTICAL, 8)
+                        .Label -> gtk_label_new(text.as_ptr())
+                        .Button -> gtk_button_new_with_label(text.as_ptr())
+                        .Entry -> gtk_entry_new()
+                    }
+                    gtk_box_append(parent, child)
+                    child
+                } else { Ptr<GtkWidget>.null() }
+            }
+            self.tree_widgets.push(GtkWidgetRecord{
+                path: path.to_string(), parent: parent, widget: widget, kind: kind, label: "", css_class: None
+            })
+            self.trace("create {path} {kind:?}")
+            (self.tree_widgets.len() - 1, true)
+        }
+        live.push(path.to_string())
+        widget :: self.tree_widgets[index].widget
+        if created && kind == .Button {
+            try {
+                identity :: jet_ui_node_id(node, path)
+                GtkState.connect_click_callback(widget, Arc.new(fn() { jet_ui_dispatch(&identity) }))
+            } catch error { self.trace("click identity rejected: {error:?}") }
+            self.attach_click_bindings(path, widget)
+        }
+        if created && (kind == .Entry || node.on_drop.is_some()) { self.connect_native_input(widget, node, path) }
+        if self.display_ok && !widget.is_null() {
+            // GATE #4565: kernel primitive
+            #Unsafe("borrow C text while updating live retained GTK widget") {
+                text :: CString.new(node.label.as_str()).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+                when kind {
+                    .Label -> gtk_label_set_text(widget, text.as_ptr())
+                    .Button -> gtk_button_set_label(widget, text.as_ptr())
+                    .Entry -> gtk_editable_set_text(widget, text.as_ptr())
+                    .Box -> {}
+                }
+                gtk_widget_set_size_request(widget, node.width as I32, node.height as I32)
+            }
+        }
+        gtk_apply_accessibility(widget, node)
+        self.tree_widgets[index].label = node.label.clone()
+        old_class :: self.tree_widgets[index].css_class.take()
+        new_class :: node.color.as_ref().map(fn(color) {
+            trimmed := color.trim_start_matches('#') // #4303
+            "jetfill{trimmed}"
+        })
+        if self.display_ok && !widget.is_null() && old_class != new_class {
+            // GATE #4565: kernel primitive
+            #Unsafe("C CSS loans end after GTK copies; provider initial reference is released") {
+                if old_class.as_ref().and_then(fn(css_class) { CString.new(css_class.as_str()).ok() }) is Val(old) {
+                    gtk_widget_remove_css_class(widget, old.as_ptr())
+                }
+                if (node.color.as_ref(), new_class.as_ref()) is (Val(color), Val(css_class)) {
+                    css :: ".{css_class} {{ background-color: {color}; }}"
+                    if (CString.new(css_class.as_str()).ok(), CString.new(css).ok()) is (Val(cclass), Val(ccss)) {
+                        provider :: gtk_css_provider_new()
+                        gtk_css_provider_load_from_string(provider, ccss.as_ptr())
+                        display :: gdk_display_get_default()
+                        if !display.is_null() {
+                            gtk_style_context_add_provider_for_display(display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION)
+                        }
+                        gtk_widget_add_css_class(widget, cclass.as_ptr())
+                        g_object_unref(provider.cast<c_void>())
+                    }
+                }
+            }
+        }
+        self.tree_widgets[index].css_class = ^new_class
+        self.trace("update {path} {node.label}")
+        if node.role.as_ref().is_some_and(JetUiAriaRole.is_interactive) {
+            focus_nodes.push(node.clone())
+            focus_paths.push(path.to_string())
+        }
+        if kind == .Box {
+            for (child_index, child) in node.children.iter().enumerate() {
+                self.reconcile_node(child, widget, "{path}/{child_index}", live, focus_nodes, focus_paths)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1245
+    fn focus_current_widget(self: &GtkState) -> {
+        if self.focused_index.and_then(fn(index) { self.focus_paths.get(index) }) is Val(path) {
+            if self.tree_widgets.iter().find(fn(record) { &record.path == path }) is Val(record) {
+                if self.display_ok && !record.widget.is_null() { _ :: gtk_widget_grab_focus(record.widget) }
+                self.trace("focus {path}")
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1258
+    fn resolve_widget_handle(self: &GtkState, id: I64) -> (Ptr<GtkWidget>, GtkWidgetKind)? {
+        handle :: self.widget_handles.get(id as USize)?
+        widget :: when &handle.target {
+            .Direct(widget) -> *widget
+            .TreePath(path) -> self.tree_widgets.iter().find(fn(record) { record.path == *path && record.kind == handle.kind }).map(fn(record) { record.widget })?
+        }
+        if widget.is_null() { None } else { Val((widget, handle.kind)) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1271
+    fn connect_click_callback(widget: Ptr<GtkWidget>, callback: Arc<fn() -> () + Send + Sync>) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("live GTK button owns this boxed callback; notifier consumes it exactly once") {
+            boxed :: Box.into_raw(Box.new(^callback))
+            signal :: CString.new("clicked").unwrap()
+            _ :: g_signal_connect_data(widget.cast<c_void>(), signal.as_ptr(),
+                jet_gtk_click_trampoline as gpointer, boxed.cast<c_void>(), Val(jet_gtk_drop_callback), 0)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1288
+    fn attach_click_bindings(self: &GtkState, path: String, widget: Ptr<GtkWidget>) -> {
+        if widget.is_null() -> return
+        connected := 0
+        for binding in &self.click_bindings {
+            if binding.path == path && binding.connected_widget != widget {
+                GtkState.connect_click_callback(widget, Arc.clone(&binding.callback))
+                binding.connected_widget = widget
+                connected += 1
+            }
+        }
+        if connected > 0 { self.trace("click-connect {path} {connected}") }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1306
+impl Drop for GtkState {
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1307
+    fn drop(self: &GtkState) -> {
+        if !self.window.is_null() {
+            // GATE #4565: kernel primitive
+            #Unsafe("state releases initial GTK window reference; GTK destroys children and signal bindings") {
+                g_object_unref(self.window.cast<c_void>())
+            }
+            self.window = Ptr.null()
+        }
+        self.trace("cleanup")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1322
+#Clone
+pub struct JetGtkBackend { state: Arc<Mutex<GtkState>> }
+impl JetGtkBackend {
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1328
+    pub fn new() -> JetGtkBackend {
+        // GATE #4565: kernel primitive
+        #Unsafe("shared mutex-backed stable GTK state remains alive for its callbacks") {
+            JetGtkBackend{state: Arc.new(Mutex.new(GtkState{
+                measured: None, layout_frame: None, commands: [], last_event: None,
+                focus_nodes: [], focus_paths: [], focused_index: None,
+                inited: false, display_ok: false, window: Ptr.null(), vbox: Ptr.null(),
+                widget_handles: [], click_bindings: [], tree_widgets: [], availability: .Uninitialized,
+                capabilities: JetUiCapabilityFacts.empty(), shortcuts: JetUiShortcutRegistry.default(),
+                ime_events: VecDeque.new(), ime_enabled: [:], drag_events: VecDeque.new(),
+                native_controllers: false
+            }))}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1357
+    pub fn measure_node(self: &JetGtkBackend, node: JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive GTK state loan; retain poisoned-lock recovery") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            JetBackend.measure(&*state, &node, constraint)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1361
+    pub fn layout_node(self: &JetGtkBackend, node: JetUiNode, frame: JetRect) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive GTK state loan with poisoned-lock recovery") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            JetBackend.layout(&*state, &node, frame)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1365
+    pub fn paint_node(self: &JetGtkBackend, node: JetUiNode) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive GTK state loan with poisoned-lock recovery") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            JetBackend.paint(&*state, &node)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1370
+    pub fn mount_node(self: &JetGtkBackend, node: JetUiNode, constraint: JetSizeConstraint) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("release state lock before measure/layout/paint reacquire it") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.commands.clear()
+        }
+        size :: self.measure_node(node.clone(), constraint)
+        self.layout_node(node.clone(), jet_ui_rect(0.0, 0.0, size.width, size.height))
+        self.paint_node(^node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1382
+    pub fn mount_node_default(self: &JetGtkBackend, node: JetUiNode) -> {
+        self.mount_node(^node, jet_ui_constraint(0.0, 0.0, 320.0, 240.0))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1385
+    pub fn dispatch_event(self: &JetGtkBackend, event: JetInputEvent) -> JetEventResult {
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive state event dispatch with poisoned-lock recovery") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            JetBackend.on_event(&*state, ^event)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1389
+    pub fn set_focus_group(self: &JetGtkBackend, nodes: [JetUiNode]) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive retained state focus update with poisoned-lock recovery") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.focused_index = if nodes.is_empty() { None } else { Val(0) }
+            state.focus_paths = nodes.iter().filter_map(fn(node) {
+                state.tree_widgets.iter().find(fn(record) { record.label == node.label }).map(fn(record) { record.path.clone() })
+            }).collect()
+            state.focus_nodes = ^nodes
+            state.focus_current_widget()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1399
+    pub fn focused_label(self: &JetGtkBackend) -> String {
+        // GATE #4565: kernel primitive
+        #Unsafe("borrow focused node under retained state lock") {
+            state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.focused_index.and_then(fn(i) { state.focus_nodes.get(i) }).map(fn(node) { node.label.clone() }).unwrap_or_default()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1411
+    pub fn label(self: &JetGtkBackend, text: String) -> I64 { self.add_widget(text, false) }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1416
+    pub fn button(self: &JetGtkBackend, text: String) -> I64 { self.add_widget(text, true) }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1420
+    fn add_widget(self: &JetGtkBackend, text: String, is_button: Bool) -> I64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("retained mutex state owns direct widgets; parent GTK box owns their native references") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            id :: state.widget_handles.len() as I64
+            tree_kind :: if is_button { GtkWidgetKind.Button } else { GtkWidgetKind.Label }
+            if state.tree_widgets.iter().find(fn(record) { record.kind == tree_kind && record.label == text }).map(fn(record) { record.path.clone() }) is Val(path) {
+                state.widget_handles.push(GtkWidgetHandle{target: .TreePath(^path), kind: tree_kind})
+                state.trace("bind {text}")
+                return id
+            }
+            widget :: if state.display_ok {
+                ctext :: CString.new(text).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+                child :: if is_button { gtk_button_new_with_label(ctext.as_ptr()) } else { gtk_label_new(ctext.as_ptr()) }
+                gtk_box_append(state.vbox, child)
+                child
+            } else { Ptr<GtkWidget>.null() }
+            state.widget_handles.push(GtkWidgetHandle{target: .Direct(widget), kind: tree_kind})
+            id
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1461
+    pub fn set_text(self: &JetGtkBackend, id: I64, text: String) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("borrow widget and C text under retained state lock") {
+            state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            if state.resolve_widget_handle(id) is Val((widget, kind)) {
+                ctext :: CString.new(text).unwrap_or_else(fn(_) { CString.new("").unwrap() })
+                if kind == .Button { gtk_button_set_label(widget, ctext.as_ptr()) } else { gtk_label_set_text(widget, ctext.as_ptr()) }
+                state.trace("handle-set-text {id} {text}")
+            } else { state.trace("handle-miss {id}") }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1480
+    pub fn set_size(self: &JetGtkBackend, id: I64, width: I64, height: I64) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("borrow retained widget under state lock") {
+            state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            if state.resolve_widget_handle(id) is Val((widget, _)) {
+                gtk_widget_set_size_request(widget, width as I32, height as I32)
+            } else { state.trace("handle-miss {id}") }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1494
+    pub fn set_color(self: &JetGtkBackend, id: I64, color: String) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("borrow live widget and temporary C CSS; release provider initial reference") {
+            state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            if state.resolve_widget_handle(id) is Val((widget, _)) {
+                trimmed := color.trim_start_matches('#') // #4303
+                class_name :: "jetfill{trimmed}"
+                css :: ".{class_name} {{ background-color: {color}; }}"
+                if (CString.new(class_name).ok(), CString.new(css).ok()) is (Val(cclass), Val(ccss)) {
+                    provider :: gtk_css_provider_new()
+                    gtk_css_provider_load_from_string(provider, ccss.as_ptr())
+                    display :: gdk_display_get_default()
+                    if !display.is_null() {
+                        gtk_style_context_add_provider_for_display(display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION)
+                    }
+                    gtk_widget_add_css_class(widget, cclass.as_ptr())
+                    g_object_unref(provider.cast<c_void>())
+                }
+            } else { state.trace("handle-miss {id}") }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1523
+    pub fn on_click(self: &JetGtkBackend, id: I64, handler: fn() -> () + Send + Sync) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain shared callback under state lock and transfer each signal its own boxed owner") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            if state.resolve_widget_handle(id) is Val((widget, GtkWidgetKind.Button)) {
+                callback :: Arc.new(^handler)
+                path :: state.widget_handles.get(id as USize).and_then(fn(handle) {
+                    when &handle.target { .TreePath(path) -> Val(path.clone()); _ -> None }
+                })
+                if path is Val(tree_path) {
+                    state.click_bindings.push(GtkClickBinding{path: tree_path.clone(), callback: ^callback, connected_widget: Ptr.null()})
+                    state.attach_click_bindings(&tree_path, widget)
+                } else { GtkState.connect_click_callback(widget, ^callback) }
+            } else { state.trace("handle-miss {id}") }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1553
+    pub fn present(self: &JetGtkBackend, title: String) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("release mutex before blocking GLib loop so click handlers can acquire retained state") {
+            (display_ok, window, availability) :: {
+                state :: self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+                (state.display_ok, state.window, state.availability)
+            }
+            if !display_ok || window.is_null() {
+                when availability {
+                    .GtkUnavailable -> core.io.eprintln("UI_UNSUPPORTED[gtk.runtime]: GTK4 runtime is unavailable; install GTK4 or set JET_UI_HEADLESS=1 only for an explicit headless run")
+                    .UnsupportedDisplay -> core.io.eprintln("UI_UNSUPPORTED[gtk.display]: no GTK display is available; set JET_UI_HEADLESS=1 only for an explicit headless run")
+                    _ -> {}
+                }
+                return
+            }
+            if CString.new(title).ok() is Val(ctitle) { gtk_window_set_title(window, ctitle.as_ptr()) }
+            gtk_window_present(window)
+            main_loop :: g_main_loop_new(Ptr.null(), 0)
+            g_main_loop_run(main_loop)
+            g_main_loop_unref(main_loop)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1588
+fn gtk_file_dialog_setup(dialog: Ptr<GtkFileDialog>, parent: Ptr<GtkWidget>, request: &JetUiFileDialogRequest) -> () JetUiHostError! {
+    if dialog.is_null() || parent.is_null() -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.FileDialog"})
+    // GATE #4565: kernel primitive
+    #Unsafe("GTK borrows temporary C strings; release every retained GIO folder/filter/store reference") {
+        title :: CString.new(request.title.as_str()).map_err(fn(_) { JetUiHostError.InvalidRequest("file dialog title must not contain NUL") })?
+        gtk_file_dialog_set_title(dialog, title.as_ptr())
+        gtk_file_dialog_set_modal(dialog, 1)
+        if request.initial_directory.as_ref() is Val(directory) {
+            path :: CString.new(directory.path()).map_err(fn(_) { JetUiHostError.InvalidRequest("file dialog initial directory must not contain NUL") })?
+            folder :: g_file_new_for_path(path.as_ptr())
+            if folder.is_null() -> return Err(JetUiHostError.InvalidRequest("GTK rejected the file dialog initial directory"))
+            gtk_file_dialog_set_initial_folder(dialog, folder)
+            g_object_unref(folder.cast<c_void>())
+        }
+        if request.filters.is_empty() -> return Ok(())
+        object_type :: gtk_file_filter_get_type()
+        if object_type == 0 -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.FileDialog"})
+        store :: g_list_store_new(object_type)
+        if store.is_null() -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.FileDialog"})
+        for specification in &request.filters {
+            filter :: gtk_file_filter_new()
+            if filter.is_null() {
+                g_object_unref(store.cast<c_void>())
+                return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.FileDialog"})
+            }
+            if CString.new(specification.label.as_str()).ok() is Val(label) {
+                if !specification.label.is_empty() { gtk_file_filter_set_name(filter, label.as_ptr()) }
+            }
+            for source_extension in &specification.extensions {
+                extension := source_extension.trim_start_matches('.') // #4303
+                pattern :: if extension.starts_with('*') { extension.to_string() } else { "*.{extension}" }
+                if CString.new(pattern).ok() is Val(cpattern) { gtk_file_filter_add_pattern(filter, cpattern.as_ptr()) }
+            }
+            for mime in &specification.mime_types {
+                if CString.new(mime.as_str()).ok() is Val(cmime) { gtk_file_filter_add_mime_type(filter, cmime.as_ptr()) }
+            }
+            g_list_store_append(store, filter.cast<c_void>())
+            g_object_unref(filter.cast<c_void>())
+        }
+        gtk_file_dialog_set_filters(dialog, store.cast<GListModel>())
+        g_object_unref(store.cast<c_void>())
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1680
+fn gtk_run_file_dialog(window: Ptr<GtkWidget>, request: &JetUiFileDialogRequest) -> JetUiFileDialogSelection JetUiHostError! {
+    dialog :: gtk_file_dialog_new()
+    if dialog.is_null() -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.FileDialog"})
+    match gtk_file_dialog_setup(dialog, window, request) {
+        Err(error) -> { g_object_unref(dialog.cast<c_void>()); return Err(^error) }
+        Ok(_) -> {}
+    }
+    mode :: when (request.kind, request.allow_multiple) {
+        (.Open, true) -> FileDialogMode.OpenMultiple
+        (.Open, false) -> FileDialogMode.Open
+        (.Save, false) -> FileDialogMode.Save
+        (.Save, true) -> {
+            g_object_unref(dialog.cast<c_void>())
+            return Err(JetUiHostError.InvalidRequest("save dialogs cannot select multiple files"))
+        }
+    }
+    pending := FileDialogRead{done: false, mode: mode, files: [], cancelled: false, error: None}
+    // GATE #4565: kernel primitive
+    #Unsafe("drain GTK async callback before stack pending state leaves scope; release dialog afterward") {
+        data :: Ptr.from_ref(&pending).cast<c_void>()
+        when mode {
+            .Open -> gtk_file_dialog_open(dialog, window, Ptr.null(), jet_gtk_file_dialog_ready, data)
+            .OpenMultiple -> gtk_file_dialog_open_multiple(dialog, window, Ptr.null(), jet_gtk_file_dialog_ready, data)
+            .Save -> gtk_file_dialog_save(dialog, window, Ptr.null(), jet_gtk_file_dialog_ready, data)
+        }
+        while !pending.done { _ :: g_main_context_iteration(Ptr.null(), 1) }
+        g_object_unref(dialog.cast<c_void>())
+    }
+    if pending.error is Val(message) -> return Err(JetUiHostError.HostFailure{service: "UI.FileDialog", message: ^message})
+    if pending.cancelled || pending.files.is_empty() -> return Err(JetUiHostError.Cancelled(.User))
+    access :: when request.kind { .Open -> JetUiFsAccess.Read; .Save -> JetUiFsAccess.Write }
+    files := [JetUiGrantedPath].with_capacity(pending.files.len())
+    for path in &pending.files { files.push(request.grant.scope(path, access)?) }
+    JetUiFileDialogSelection.new(^files)
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1764
+impl JetUiHost for JetGtkBackend {
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1765
+    fn capability_facts(self: &JetGtkBackend) -> JetUiCapabilityFacts {
+        // GATE #4565: kernel primitive
+        #Unsafe("initialize retained GTK state under recoverable lock") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1771
+    fn attach_accessibility(self: &JetGtkBackend, node: &JetUiAccessibilityTarget, accessibility: JetUiAccessibility) -> () JetUiHostError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("require accessibility capability under initialized state lock") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities.require(.Accessibility)?
+            jet_ui_accessibility_attach(node, ^accessibility)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1787
+    fn project_accessibility(self: &JetGtkBackend, node: &JetUiAccessibilityTarget, node_id: JetUiNodeId) -> JetUiAccessibilityProjection? JetUiHostError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("require accessibility capability under initialized state lock") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities.require(.Accessibility)?
+            Ok(jet_ui_accessibility_project(node, ^node_id))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1800
+    fn open_file(self: &JetGtkBackend, request: JetUiFileDialogRequest) -> JetUiFileDialogSelection JetUiHostError! {
+        request.validate()?
+        // GATE #4565: kernel primitive
+        (window, display_ok, capabilities) :: #Unsafe("release state mutex before modal native dialog loop") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            (state.window, state.display_ok, state.capabilities)
+        }
+        capabilities.require(.FileDialog)?
+        if !display_ok || window.is_null() -> return Err(JetUiHostError.Cancelled(.Headless))
+        gtk_run_file_dialog(window, &request)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1821
+    fn save_file(self: &JetGtkBackend, request: JetUiFileDialogRequest) -> JetUiFileDialogSelection JetUiHostError! {
+        request.validate()?
+        // GATE #4565: kernel primitive
+        (window, display_ok, capabilities) :: #Unsafe("release state mutex before modal native dialog loop") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            (state.window, state.display_ok, state.capabilities)
+        }
+        capabilities.require(.FileDialog)?
+        if !display_ok || window.is_null() -> return Err(JetUiHostError.Cancelled(.Headless))
+        gtk_run_file_dialog(window, &request)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1842
+    fn read_clipboard_text(self: &JetGtkBackend) -> JetUiClipboardText JetUiHostError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("drain real GDK clipboard async operation before callback stack state expires") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities.require(.Clipboard)?
+            display :: gdk_display_get_default()
+            if display.is_null() -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.Clipboard"})
+            clipboard :: gdk_display_get_clipboard(display)
+            if clipboard.is_null() -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.Clipboard"})
+            pending := ClipboardRead{done: false, text: None}
+            gdk_clipboard_read_text_async(clipboard, Ptr.null(), jet_gtk_clipboard_read_ready, Ptr.from_ref(&pending).cast<c_void>())
+            while !pending.done { _ :: g_main_context_iteration(Ptr.null(), 1) }
+            when pending.text {
+                Val(text) -> Ok(JetUiClipboardText{text: ^text, selection: None})
+                None -> Err(JetUiHostError.CapabilityUnavailable{capability: "UI.Clipboard"})
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1886
+    fn write_clipboard_text(self: &JetGtkBackend, text: String) -> JetUiClipboardWrite JetUiHostError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("GDK copies temporary C clipboard text under initialized retained state lock") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities.require(.Clipboard)?
+            text_c :: CString.new(text.as_str()).map_err(fn(_) { JetUiHostError.InvalidRequest("clipboard text must not contain NUL") })?
+            display :: gdk_display_get_default()
+            if display.is_null() -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.Clipboard"})
+            clipboard :: gdk_display_get_clipboard(display)
+            if clipboard.is_null() -> return Err(JetUiHostError.CapabilityUnavailable{capability: "UI.Clipboard"})
+            gdk_clipboard_set_text(clipboard, text_c.as_ptr())
+            Ok(JetUiClipboardWrite{characters: text.chars().count()})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1915
+    fn poll_ime_event(self: &JetGtkBackend) -> JetUiImeEvent? JetUiHostError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("consume only actual native IME queue events under retained state lock") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities.require(.IME)?
+            Ok(state.ime_events.pop_front())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1924
+    fn poll_drag_event(self: &JetGtkBackend) -> JetUiDragEvent? JetUiHostError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("consume only actual native drag queue events under retained state lock") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities.require(.DragDrop)?
+            Ok(state.drag_events.pop_front())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1933
+    fn register_shortcut(self: &JetGtkBackend, binding: JetUiShortcutBinding) -> JetUiShortcutBinding JetUiHostError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("register canonical shortcut in retained state under recoverable lock") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities.require(.Shortcuts)?
+            state.shortcuts.register(^binding)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1948
+    fn dispatch_shortcut(self: &JetGtkBackend, shortcut: JetUiShortcut) -> JetUiShortcutDispatch JetUiHostError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("dispatch canonical shortcut in initialized retained state") {
+            state := self.state.lock().unwrap_or_else(fn(error) { error.into_inner() })
+            state.ensure_init()
+            state.capabilities.require(.Shortcuts)?
+            Ok(state.shortcuts.dispatch(&shortcut))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1963
+impl Default for JetGtkBackend {
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1964
+    fn default() -> JetGtkBackend { JetGtkBackend.new() }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1969
+impl JetBackend for GtkState {
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1970
+    fn measure(self: &GtkState, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+        size :: jet_ui_measure_tree(node, constraint)
+        self.measured = Val(size)
+        size
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1976
+    fn layout(self: &GtkState, _node: &JetUiNode, frame: JetRect) -> { self.layout_frame = Val(frame) }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:1981
+    fn paint(self: &GtkState, node: &JetUiNode) -> {
+        frame :: self.layout_frame.unwrap_or(JetRect{x: 0.0, y: 0.0, width: node.width, height: node.height})
+        jet_ui_paint_tree(node, frame, &self.commands)
+        self.ensure_init()
+        previous_focus :: self.focused_index.and_then(fn(index) { self.focus_paths.get(index) }).cloned()
+        live := [String]{}
+        focus_nodes := [JetUiNode]{}
+        focus_paths := [String]{}
+        self.reconcile_node(node, self.vbox, "root", &live, &focus_nodes, &focus_paths)
+        jet_ui_bind_tree_clicks(node, "root")
+        for index in (0..self.tree_widgets.len()).rev() {
+            if !live.contains(&self.tree_widgets[index].path) { self.remove_tree_widget(index) }
+        }
+        self.focused_index = previous_focus.as_ref().and_then(fn(path) {
+            focus_paths.iter().position(fn(candidate) { candidate == path })
+        }).or_else(fn() { if focus_paths.is_empty() { None } else { Val(0) } })
+        self.focus_nodes = ^focus_nodes
+        self.focus_paths = ^focus_paths
+        self.focus_current_widget()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:2021
+    fn on_event(self: &GtkState, event: JetInputEvent) -> JetEventResult {
+        if &event is .Key(code) {
+            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) is Val(result) {
+                self.focus_current_widget()
+                self.last_event = Val(result)
+                return result
+            }
+        }
+        result :: when &event {
+            .Key(code) if code.is_empty() -> JetEventResult.Ignored
+            .Resize(size) if size.width <= 0.0 || size.height <= 0.0 -> JetEventResult.Ignored
+            _ -> JetEventResult.Handled
+        }
+        self.last_event = Val(result)
+        result
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:2043
+pub fn jet_ui_gtk() -> JetGtkBackend { JetGtkBackend.new() }
+// Rust: crates/jet-codegen/src/Prelude/UiGtk.rs:2048
+// The canonical owner exports jet_ui_gtk and JetGtkBackend directly; no re-export shim.
 

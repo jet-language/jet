@@ -1,0 +1,39 @@
+use core.data.[DataLimits, DataErrorKind]
+use core.encoding.runtime.std_data_tree.DataTree
+use core.data.runtime.top_data_flow_02.[jet_data_loader_quote, jet_data_loader_canonical_tree,
+    jet_data_loader_csv_tree, jet_data_loader_jsonl_tree, jet_data_loader_format_for_locator]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3039/3059
+#Test("loader_canonical_json_sorts_object_keys_and_escapes_controls") {
+    tree :: DataTree.Object([("z", DataTree.Null), ("a", DataTree.Text("line\n\t\"\\"))])
+    assert_eq(jet_data_loader_canonical_tree(&tree), "{\"a\":\"line\\n\\t\\\"\\\\\",\"z\":null}")
+    assert_eq(jet_data_loader_quote(""), "\"\"")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3117
+#Test("loader_csv_fills_short_rows_and_rejects_duplicate_headers") {
+    limits :: DataLimits.safe()
+    tree :: jet_data_loader_csv_tree("a,b\nx\n", &limits).unwrap()
+    assert_eq(tree, DataTree.Array([DataTree.Object([("a", DataTree.Text("x")), ("b", DataTree.Null)])]))
+    error :: jet_data_loader_csv_tree("a,a\nx,y\n", &limits).unwrap_err()
+    assert_eq(error.kind, DataErrorKind.Decode)
+    assert_eq(error.operation, "data.loader.csv")
+    assert_eq(error.reason, "duplicate CSV header `a`")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:3181
+#Test("loader_jsonl_skips_blank_records_and_fails_crossing_output_limit") {
+    limits := DataLimits.safe()
+    limits.max_output_rows = 1
+    tree :: jet_data_loader_jsonl_tree("\n {\"a\":true}\n \n", &limits).unwrap()
+    assert_eq(tree, DataTree.Array([DataTree.Object([("a", DataTree.Bool(true))])]))
+    error :: jet_data_loader_jsonl_tree("{}\n{}\n", &limits).unwrap_err()
+    assert_eq(error.kind, DataErrorKind.Limit)
+    assert_eq(error.reason, "max_output_rows 1 exceeded")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:2899
+#Test("loader_format_ignores_query_and_fragment_but_not_missing_extension") {
+    assert_eq(jet_data_loader_format_for_locator("https://example.test/a.CSV?x=1#part").unwrap(), core.data.DataFormat.CSV)
+    assert_eq(jet_data_loader_format_for_locator("/data/records.ndjson").unwrap(), core.data.DataFormat.JSONL)
+    error :: jet_data_loader_format_for_locator("/data/records").unwrap_err()
+    assert_eq(error.kind, DataErrorKind.Bridge)
+    assert_eq(error.reason, "source has no core format; import a provider package")
+}

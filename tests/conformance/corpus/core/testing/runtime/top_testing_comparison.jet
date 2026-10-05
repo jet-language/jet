@@ -1,0 +1,30 @@
+use core.encoding.runtime.std_data_tree.DataTree
+use core.testing.runtime.top_testing_comparison.[jet_testing_compare, jet_testing_assert_equal, jet_testing_status]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingComparison.rs:68-149
+#Test("plain_comparison_reports_real_match_difference_and_empty_nonproof") {
+    cases :: [DataTree.Int(Int{1}), DataTree.Int(Int{2})]
+    matched :: jet_testing_compare(cases, fn(value) { value }, fn(value) { value }, "typed_equality")
+    assert(jet_testing_status(matched) == "matched")
+    assert(jet_testing_assert_equal(matched))
+    assert(!matched.universal_proof)
+    assert(matched.first_difference == I64{-1})
+    different :: jet_testing_compare(cases, fn(value) { value }, fn(value) { DataTree.Null }, "typed_equality")
+    assert(!jet_testing_assert_equal(different))
+    assert(different.first_difference == I64{0})
+    assert(different.reference == cases)
+    assert(different.candidate == [DataTree.Null, DataTree.Null])
+    empty :: jet_testing_compare([DataTree]{}, fn(value) { value }, fn(value) { value }, "typed_equality")
+    assert(!jet_testing_assert_equal(empty))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingComparison.rs:75-85
+#Test("recorded_relations_do_not_invoke_plain_callables") {
+    for relation in ["ordered_effects", "typed_failure"] {
+        result :: jet_testing_compare([DataTree.Null], fn(value) { panic("reference must not run") }, fn(value) { panic("candidate must not run") }, relation)
+        assert(result.status == "unsupported")
+        assert(result.reason == "relation requires recorded observations")
+        assert(result.reference.is_empty())
+        assert(result.candidate.is_empty())
+        assert(!jet_testing_assert_equal(result))
+    }
+}

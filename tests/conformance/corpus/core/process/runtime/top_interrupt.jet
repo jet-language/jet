@@ -1,0 +1,52 @@
+use core.process.runtime.top_interrupt.*
+use std.sync.Mutex
+use std.sync.atomic.Ordering
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:383
+// All tests share the real single process queue and therefore one serial lock.
+// GATE #4565: kernel primitive
+#Static LOCK :: #Unsafe("initialize the original queue-test serialization mutex") { Mutex<()>.new(()) }
+fn with_queue<R>(body: fn() -> R) -> R {
+    // GATE #4565: kernel primitive
+    guard :: #Unsafe("serialize tests over the one production signal carrier") { LOCK.lock().unwrap_or_else(fn(error) { error.into_inner() }) }
+    jet_interrupt_clear()
+    result :: body()
+    jet_interrupt_clear()
+    ^result
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:392
+fn note() -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("original test marks the actual process Ctrl-C count without installing OS handlers") {
+        _ :: JET_INTERRUPT_STATE.pending_interrupts.fetch_add(1, Ordering.Relaxed)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:399
+#Test("dispatch_is_count_first_then_registration_order") {
+    with_queue(fn() {
+        note()
+        note()
+        seen := [Char]{}
+        jet_interrupt_dispatch(['a', 'b'], fn(handler) { &seen.push(handler) })
+        assert(seen == ['a', 'b', 'a', 'b'])
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:410
+#Test("a_drain_with_no_handlers_leaves_the_interrupt_for_the_tier_that_has_one") {
+    with_queue(fn() {
+        note()
+        empty :: [Char#0]{}
+        jet_interrupt_dispatch(&empty, fn(_) { panic("an empty drain must not invoke") })
+        seen := [Char]{}
+        jet_interrupt_dispatch(['a'], fn(handler) { &seen.push(handler) })
+        assert(seen == ['a'], "an empty drain stole the one process interrupt count")
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:426
+#Test("clear_drops_a_previous_runs_interrupt") {
+    with_queue(fn() {
+        note()
+        jet_interrupt_clear()
+        jet_interrupt_dispatch(['a'], fn(_) { panic("a cleared interrupt was delivered") })
+    })
+}

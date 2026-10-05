@@ -1,0 +1,48 @@
+use core.web.runtime.top_live_query.[JetLiveFootprint, jet_app_live_keyed, jet_app_live_keyed_query, jet_app_live_get, jet_app_live_snapshot, jet_app_live_close, jet_app_live_refresh, jet_app_invalidate_key, jet_app_subscribe, jet_app_signal_push, jet_app_live_is_external_query]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs:50-88
+#Test("live_footprints_normalize_and_match_only_dotted_ancestry") {
+    footprint :: JetLiveFootprint.parse("db.users.name;db.users;db.users").unwrap()
+    assert_eq(footprint.display(), "db.users,db.users.name")
+    assert(footprint.intersects(&JetLiveFootprint.parse("db").unwrap()))
+    assert(footprint.intersects(&JetLiveFootprint.parse("db.users.name.first").unwrap()))
+    assert(!footprint.intersects(&JetLiveFootprint.parse("db.user").unwrap()))
+    assert_eq(JetLiveFootprint.parse("db.users,,db.posts"), None)
+    assert_eq(JetLiveFootprint.parse(""), None)
+    assert_eq(JetLiveFootprint.parse("db*users"), None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs:221-290/871-885
+#Test("live_explicit_key_reuses_canonical_value_and_rejects_footprint_conflict") {
+    first :: jet_app_live_keyed("conformance-live-key", "conformance.users", "original", None, None)
+    assert(first.id != 0)
+    same :: jet_app_live_keyed("conformance-live-key", "conformance.users", "not-published", None, None)
+    assert_eq(same.id, first.id)
+    assert_eq(jet_app_live_get(&same), "original")
+    conflict :: jet_app_live_keyed("conformance-live-key", "conformance.posts", "ignored", None, None)
+    assert_eq(conflict.id, first.id)
+    assert_eq(conflict.lifecycle.error, "E2473: query key is already registered with footprint `conformance.users`; requested `conformance.posts`")
+    assert_eq(jet_app_live_get(&first), "original")
+    assert_eq(jet_app_live_close(&first), I64{1})
+    assert_eq(jet_app_live_get(&same), "LiveError(live query is closed)")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs:315-340/789-811
+#Test("live_refresh_runs_real_registered_callback_and_publishes_latest_generation") {
+    query :: jet_app_live_keyed_query("conformance-live-refresh", "conformance.refresh", "initial", fn() -> String Err! { Ok("refreshed") })
+    assert_eq(jet_app_invalidate_key("conformance-live-refresh"), I64{1})
+    updated :: jet_app_live_snapshot(&query)
+    assert_eq(jet_app_live_get(&updated), "refreshed")
+    assert(!updated.lifecycle.dirty)
+    assert(!updated.lifecycle.refreshing)
+    assert_eq(updated.lifecycle.invalidation_cause, "key:conformance-live-refresh")
+    assert_eq(jet_app_live_refresh(&query), I64{1})
+    assert_eq(jet_app_live_close(&query), I64{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs:558-570/838-869
+#Test("live_subscription_push_uses_canonical_external_query") {
+    query :: jet_app_subscribe("conformance-feed")
+    assert(jet_app_live_is_external_query(&query))
+    pushed :: jet_app_signal_push(&query, "event")
+    assert_eq(jet_app_live_get(&pushed), "event")
+    assert_eq(pushed.lifecycle.invalidation_cause, "signal-push")
+    assert_eq(jet_app_live_close(&query), I64{1})
+}

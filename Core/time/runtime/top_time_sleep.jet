@@ -1,64 +1,29 @@
-// PORT-PENDING 0289 crates-jet-codegen-src-prelude-corelib-top-mathrandomtime-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:1-60
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // One deadline-aware sleep kernel. AOT, the resident scheduler, and the
-//RS // interpreter adapters all call this source; their only tier-specific pieces
-//RS // are the scheduler and deadline-boundary functions supplied by the host.
-//RS 
-//RS #[cfg(test)]
-//RS thread_local! {
-//RS     static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS pub fn jet_deadline_remaining_ms() -> Option<i64> {
-//RS     if TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.get()) {
-//RS         return Some(0);
-//RS     }
-//RS     jet_ctx_deadline_ms().map(|d| d.saturating_sub(jet_std_time_now()))
-//RS }
-//RS 
-//RS #[cfg(not(test))]
-//RS pub fn jet_deadline_remaining_ms() -> Option<i64> {
-//RS     jet_ctx_deadline_ms().map(|d| d.saturating_sub(jet_std_time_now()))
-//RS }
-//RS 
-//RS /// Generic consumers use the shared wait policy after their operation. This
-//RS /// adapter supplies only the observed deadline and scheduler shield facts.
-//RS fn jet_deadline_check(wait_kind: &str) {
-//RS     let deadline =
-//RS         jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), wait_kind);
-//RS     if let Err(jet_std::JetTaskWaitInterrupt::Deadline(_)) =
-//RS         jet_std::jet_task_wait_policy(deadline, false, jet_scheduler_shielded())
-//RS     {
-//RS         jet_deadline_exceeded(wait_kind);
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_std_time_sleep(millis: i64) {
-//RS     jet_task_sleep_ms_defaulted(millis);
-//RS }
-//RS 
-//RS /// D-TYPE2-TIME1=A: one shared boundary from the canonical Duration carrier
-//RS /// to the scheduler's millisecond ABI. Engines call this Prelude function;
-//RS /// they do not re-encode the Time unit themselves.
-//RS pub fn jet_std_time_duration_to_millis(nanos: i64) -> i64 {
-//RS     nanos.saturating_div(1_000_000)
-//RS }
-//RS 
-//RS /// D-TYPE2-TIME1=A: install a task deadline from the canonical Duration
-//RS /// carrier. The deadline policy stays in this shared Prelude kernel; engines
-//RS /// only marshal the carrier and call this function.
-//RS pub fn jet_task_timeout_duration_ns(nanos: i64) {
-//RS     let millis = jet_std_time_duration_to_millis(nanos);
-//RS     let millis = jet_task_delay_ms_defaulted(millis) as i64;
-//RS     jet_ctx_set_deadline_min(jet_std_time_now().saturating_add(millis));
-//RS }
-//RS 
-//RS /// D-TYPE2-TIME1=A: the core sleep call receives the canonical Duration
-//RS /// carrier and delegates the exact wait policy to the shared scheduler.
-//RS pub fn jet_std_time_sleep_duration_ns(nanos: i64) {
-//RS     jet_task_sleep_duration_ns_defaulted(nanos);
-//RS }
-//RS 
-// END-PORT-PENDING 0289 crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:1-60
+// One deadline-aware sleep kernel shared by AOT, scheduler, and interpreter adapters.
+use core.time.runtime.deadline.[jet_ctx_deadline_ms, jet_ctx_set_deadline_min, jet_std_time_now]
+use core.time.runtime.top_math_random_time.[jet_deadline_exceeded]
+use jet_std.[jet_task_deadline_if_expired, jet_task_wait_policy, JetTaskWaitInterrupt]
+use jet_std.[jet_scheduler_shielded, jet_task_sleep_ms_defaulted, jet_task_delay_ms_defaulted, jet_task_sleep_duration_ns_defaulted]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:18
+pub fn jet_deadline_remaining_ms() -> I64? {
+    jet_ctx_deadline_ms().map(d -> d.saturating_sub(jet_std_time_now()))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:25
+fn jet_deadline_check(wait_kind: String) -> Unit {
+    deadline :: jet_task_deadline_if_expired(jet_deadline_remaining_ms(), wait_kind)
+    if Err(JetTaskWaitInterrupt.Deadline(_)) = jet_task_wait_policy(deadline, false, jet_scheduler_shielded()) {
+        jet_deadline_exceeded(wait_kind)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:35
+pub fn jet_std_time_sleep(millis: I64) -> Unit { jet_task_sleep_ms_defaulted(millis) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:42
+pub fn jet_std_time_duration_to_millis(nanos: I64) -> I64 { nanos.saturating_div(1_000_000) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:49
+pub fn jet_task_timeout_duration_ns(nanos: I64) -> Unit {
+    millis :: jet_std_time_duration_to_millis(nanos)
+    delay :: jet_task_delay_ms_defaulted(millis) as I64
+    jet_ctx_set_deadline_min(jet_std_time_now().saturating_add(delay))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:57
+pub fn jet_std_time_sleep_duration_ns(nanos: I64) -> Unit { jet_task_sleep_duration_ns_defaulted(nanos) }

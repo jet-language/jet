@@ -1,1181 +1,672 @@
-// PORT-PENDING 0292 crates-jet-codegen-src-prelude-corelib-top-nethttp-slice-1812: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1812-4273
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn jet_net_tls_peer_identity(stream: &JetTLSStream) -> JetTLSPeerIdentity {
-//RS     stream
-//RS         .peer_identity
-//RS         .clone()
-//RS         .expect("verified TLS stream always retains peer identity")
-//RS }
-//RS 
-//RS fn jet_net_tls_ready(
-//RS     stream: &JetTLSStream,
-//RS     interest: JetNetReadyInterest,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<JetNetReady, jet_std::IOError> {
-//RS     let operation = if matches!(interest, JetNetReadyInterest::Write) {
-//RS         jet_std::IOOperation::Write
-//RS     } else {
-//RS         jet_std::IOOperation::Read
-//RS     };
-//RS     let _deadline =
-//RS         jet_net_explicit_deadline(deadline, "tls ready").map_err(jet_net_to_io_error)?;
-//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS         return Err(jet_net_to_io_error(jet_net_deadline_timeout("tls ready")));
-//RS     }
-//RS     let want_read = matches!(
-//RS         interest,
-//RS         JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite
-//RS     );
-//RS     let want_write = matches!(
-//RS         interest,
-//RS         JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite
-//RS     );
-//RS     loop {
-//RS         let readable =
-//RS             want_read && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?;
-//RS         if readable {
-//RS             return Ok(JetNetReady {
-//RS                 readable: true,
-//RS                 writable: false,
-//RS             });
-//RS         }
-//RS         let (tls_read, tls_write) = jet_net_tls_io_result((stream.wants)(stream.id), operation)?;
-//RS         let (raw_readable, raw_writable) = jet_net_tcp_scheduler_ready_wait(
-//RS             &stream.socket,
-//RS             want_read || tls_read,
-//RS             want_write || tls_write,
-//RS             "tls ready",
-//RS         )
-//RS         .map_err(jet_net_to_io_error)?;
-//RS         let readable = want_read
-//RS             && raw_readable
-//RS             && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?;
-//RS         let writable = want_write && raw_writable;
-//RS         if readable || writable {
-//RS             return Ok(JetNetReady { readable, writable });
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) -> Result<(), JetNetError> {
-//RS     if let Some(remaining) = jet_deadline_remaining_ms() {
-//RS         if remaining <= 0 {
-//RS             return Err(jet_net_deadline_timeout(op));
-//RS         }
-//RS         let dur = Some(std::time::Duration::from_millis(remaining as u64));
-//RS         stream
-//RS             .set_read_timeout(dur)
-//RS             .map_err(|error| jet_net_io_error(&format!("{} read timeout", op), None, error))?;
-//RS         stream
-//RS             .set_write_timeout(dur)
-//RS             .map_err(|error| jet_net_io_error(&format!("{} write timeout", op), None, error))?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_ip_addr(text: &String) -> Result<JetIpAddr, JetNetError> {
-//RS     jet_net_pure_parse_ip(text)
-//RS         .map(|inner| JetIpAddr { inner })
-//RS         .map_err(|e| {
-//RS             JetNetError::InvalidInput(jet_net_detail(
-//RS                 "parse IP address",
-//RS                 Some(text.clone()),
-//RS                 None,
-//RS                 format!("invalid IP address `{}`: {}", text, e),
-//RS                 None,
-//RS             ))
-//RS         })
-//RS }
-//RS 
-//RS fn jet_net_ip_to_string(ip: &JetIpAddr) -> String {
-//RS     ip.inner.to_string()
-//RS }
-//RS 
-//RS fn jet_net_ip_is_ipv4(ip: &JetIpAddr) -> bool {
-//RS     jet_net_pure_ip_is_ipv4(&ip.inner)
-//RS }
-//RS 
-//RS fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNetError> {
-//RS     if port < 0 || port > u16::MAX as i64 {
-//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
-//RS             "resolve socket address",
-//RS             Some(host.clone()),
-//RS             None,
-//RS             format!("invalid port `{}`: expected 0..65535", port),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     let text = format!("{}:{}", host, port);
-//RS     let resolved = match jet_net_pure_parse_socket_addr(&text) {
-//RS         Ok(address) => Ok(address),
-//RS         Err(_) => {
-//RS             use std::net::ToSocketAddrs;
-//RS             match text.to_socket_addrs() {
-//RS                 Ok(iter) => iter,
-//RS                 Err(e) => return Err(jet_net_io_error("resolve socket address", Some(text), e)),
-//RS             }
-//RS             .next()
-//RS             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address"))
-//RS         }
-//RS     };
-//RS     resolved
-//RS         .map(|inner| JetSocketAddr { inner })
-//RS         .map_err(|e| jet_net_io_error("resolve socket address", Some(text), e))
-//RS }
-//RS 
-//RS fn jet_net_socket_addr_parse(text: &String) -> Result<JetSocketAddr, JetNetError> {
-//RS     jet_net_pure_parse_socket_addr(text)
-//RS         .map(|inner| JetSocketAddr { inner })
-//RS         .map_err(|e| {
-//RS             JetNetError::InvalidInput(jet_net_detail(
-//RS                 "parse socket address",
-//RS                 Some(text.clone()),
-//RS                 None,
-//RS                 format!("invalid socket address `{}`: {}", text, e),
-//RS                 None,
-//RS             ))
-//RS         })
-//RS }
-//RS 
-//RS fn jet_net_socket_host(addr: &JetSocketAddr) -> String {
-//RS     jet_net_pure_socket_host(&addr.inner)
-//RS }
-//RS 
-//RS fn jet_net_socket_port(addr: &JetSocketAddr) -> i64 {
-//RS     jet_net_pure_socket_port(&addr.inner)
-//RS }
-//RS 
-//RS fn jet_net_socket_to_string(addr: &JetSocketAddr) -> String {
-//RS     jet_net_pure_socket_to_string(&addr.inner)
-//RS }
-//RS 
-//RS fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> Result<JetTCPListener, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     let inner = std::net::TcpListener::bind(addr.inner)
-//RS         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))?;
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     inner
-//RS         .set_nonblocking(true)
-//RS         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))?;
-//RS     Ok(JetTCPListener { inner })
-//RS }
-//RS 
-//RS fn jet_net_tcp_connect_addr(addr: &JetSocketAddr) -> Result<JetTCPStream, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     jet_net_connect_addr_worker(addr.inner)
-//RS }
-//RS 
-//RS fn jet_net_tcp_connect_timeout(addr: &JetSocketAddr, ms: i64) -> Result<JetTCPStream, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     jet_net_timeout(ms).map_err(|m| {
-//RS         JetNetError::InvalidInput(jet_net_detail(
-//RS             "tcp connect",
-//RS             Some(addr.inner.to_string()),
-//RS             None,
-//RS             m,
-//RS             None,
-//RS         ))
-//RS     })?;
-//RS     let _deadline = jet_net_operation_deadline(Some(ms));
-//RS     jet_net_connect_addr_worker(addr.inner)
-//RS }
-//RS 
-//RS fn jet_net_tcp_connect_happy(
-//RS     host: &String,
-//RS     port: i64,
-//RS     ms: i64,
-//RS ) -> Result<JetTCPStream, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     if port < 0 || port > u16::MAX as i64 {
-//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
-//RS             "tcp connect",
-//RS             Some(host.clone()),
-//RS             None,
-//RS             format!("invalid port `{}`: expected 0..65535", port),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     jet_net_timeout(ms).map_err(|m| {
-//RS         JetNetError::InvalidInput(jet_net_detail(
-//RS             "tcp connect",
-//RS             Some(host.clone()),
-//RS             None,
-//RS             m,
-//RS             None,
-//RS         ))
-//RS     })?;
-//RS     let _deadline = jet_net_operation_deadline(Some(ms));
-//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS         return Err(jet_net_deadline_timeout("tcp connect"));
-//RS     }
-//RS     let query = host.clone();
-//RS     let (resolve_sender, resolve_receiver) = std::sync::mpsc::sync_channel(1);
-//RS     std::thread::spawn(move || {
-//RS         use std::net::ToSocketAddrs;
-//RS         let result = (query.as_str(), port as u16)
-//RS             .to_socket_addrs()
-//RS             .map(|addrs| addrs.collect::<Vec<_>>());
-//RS         let _ = resolve_sender.send(result);
-//RS     });
-//RS     let addrs = loop {
-//RS         match resolve_receiver.try_recv() {
-//RS             Ok(Ok(addrs)) => break addrs,
-//RS             Ok(Err(error)) => {
-//RS                 return Err(jet_net_io_error(
-//RS                     "resolve socket address",
-//RS                     Some(host.clone()),
-//RS                     error,
-//RS                 ))
-//RS             }
-//RS             Err(std::sync::mpsc::TryRecvError::Empty) => jet_net_scheduler_park("tcp connect", 5)?,
-//RS             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-//RS                 return Err(JetNetError::Other(jet_net_detail(
-//RS                     "tcp connect",
-//RS                     Some(host.clone()),
-//RS                     None,
-//RS                     "socket address resolver stopped without a result".to_string(),
-//RS                     None,
-//RS                 )));
-//RS             }
-//RS         }
-//RS     };
-//RS     if addrs.is_empty() {
-//RS         return Err(JetNetError::AddressUnavailable(jet_net_detail(
-//RS             "tcp connect",
-//RS             Some(host.clone()),
-//RS             None,
-//RS             format!("tcp connect failed: no address for `{}`", host),
-//RS             None,
-//RS         )));
-//RS     }
-//RS 
-//RS     let first_is_v6 = addrs[0].is_ipv6();
-//RS     let mut v6 = addrs.iter().copied().filter(std::net::SocketAddr::is_ipv6);
-//RS     let mut v4 = addrs.iter().copied().filter(std::net::SocketAddr::is_ipv4);
-//RS     let mut ordered = Vec::with_capacity(addrs.len());
-//RS     loop {
-//RS         let next = if ordered.len() % 2 == 0 {
-//RS             if first_is_v6 {
-//RS                 v6.next().or_else(|| v4.next())
-//RS             } else {
-//RS                 v4.next().or_else(|| v6.next())
-//RS             }
-//RS         } else if first_is_v6 {
-//RS             v4.next().or_else(|| v6.next())
-//RS         } else {
-//RS             v6.next().or_else(|| v4.next())
-//RS         };
-//RS         match next {
-//RS             Some(addr) => ordered.push(addr),
-//RS             None => break,
-//RS         }
-//RS     }
-//RS 
-//RS     let (sender, receiver) = std::sync::mpsc::channel();
-//RS     let mut next = 0usize;
-//RS     let mut in_flight = 0usize;
-//RS     let mut last = None;
-//RS     let mut next_launch = std::time::Instant::now();
-//RS     loop {
-//RS         if next < ordered.len() && std::time::Instant::now() >= next_launch {
-//RS             let addr = ordered[next];
-//RS             let remaining = jet_deadline_remaining_ms().unwrap_or(0);
-//RS             if remaining <= 0 {
-//RS                 return Err(jet_net_deadline_timeout("tcp connect"));
-//RS             }
-//RS             let attempt_sender = sender.clone();
-//RS             std::thread::spawn(move || {
-//RS                 let timeout = std::time::Duration::from_millis(remaining as u64);
-//RS                 let _ = attempt_sender
-//RS                     .send((addr, std::net::TcpStream::connect_timeout(&addr, timeout)));
-//RS             });
-//RS             next += 1;
-//RS             in_flight += 1;
-//RS             next_launch = std::time::Instant::now() + std::time::Duration::from_millis(250);
-//RS         }
-//RS         match receiver.try_recv() {
-//RS             Ok((_addr, Ok(stream))) => return jet_net_tcp_stream(stream),
-//RS             Ok((addr, Err(error))) => {
-//RS                 in_flight -= 1;
-//RS                 last = Some((addr, error));
-//RS                 next_launch = std::time::Instant::now();
-//RS             }
-//RS             Err(std::sync::mpsc::TryRecvError::Empty) => {}
-//RS             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-//RS                 unreachable!("connect sender retained")
-//RS             }
-//RS         }
-//RS         if next == ordered.len() && in_flight == 0 {
-//RS             let (addr, error) = last.expect("at least one connection attempt completed");
-//RS             return Err(jet_net_io_error(
-//RS                 "tcp connect",
-//RS                 Some(addr.to_string()),
-//RS                 error,
-//RS             ));
-//RS         }
-//RS         jet_net_scheduler_park("tcp connect", 5)?;
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_listener_local_socket_addr(
-//RS     listener: &JetTCPListener,
-//RS ) -> Result<JetSocketAddr, JetNetError> {
-//RS     listener
-//RS         .inner
-//RS         .local_addr()
-//RS         .map(|inner| JetSocketAddr { inner })
-//RS         .map_err(|e| jet_net_io_error("tcp listener local address", None, e))
-//RS }
-//RS 
-//RS fn jet_net_tcp_local_socket_addr(stream: &JetTCPStream) -> Result<JetSocketAddr, JetNetError> {
-//RS     stream
-//RS         .inner
-//RS         .local_addr()
-//RS         .map(|inner| JetSocketAddr { inner })
-//RS         .map_err(|e| jet_net_io_error("tcp local address", None, e))
-//RS }
-//RS 
-//RS fn jet_net_tcp_peer_socket_addr(stream: &JetTCPStream) -> Result<JetSocketAddr, JetNetError> {
-//RS     stream
-//RS         .inner
-//RS         .peer_addr()
-//RS         .map(|inner| JetSocketAddr { inner })
-//RS         .map_err(|e| jet_net_io_error("tcp peer address", None, e))
-//RS }
-//RS 
-//RS fn jet_net_tcp_listen(addr: &String) -> Result<JetTCPListener, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     let inner = std::net::TcpListener::bind(addr.as_str())
-//RS         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     inner
-//RS         .set_nonblocking(true)
-//RS         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
-//RS     Ok(JetTCPListener { inner })
-//RS }
-//RS 
-//RS fn jet_net_tcp_accept(listener: &JetTCPListener) -> Result<JetTCPStream, JetNetError> {
-//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
-//RS     {
-//RS         listener
-//RS             .inner
-//RS             .set_nonblocking(true)
-//RS             .map_err(|error| jet_net_io_error("tcp accept setup", None, error))?;
-//RS         loop {
-//RS             match listener.inner.accept() {
-//RS                 Ok((stream, _)) => return jet_net_tcp_stream(stream),
-//RS                 Err(error)
-//RS                     if matches!(
-//RS                         error.kind(),
-//RS                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-//RS                     ) =>
-//RS                 {
-//RS                     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS                         return Err(jet_net_deadline_timeout("tcp accept"));
-//RS                     }
-//RS                     if jet_scheduler_wait_point_cancelled() {
-//RS                         return Err(JetNetError::Cancelled(jet_net_detail(
-//RS                             "tcp accept",
-//RS                             None,
-//RS                             None,
-//RS                             "tcp accept cancelled".to_string(),
-//RS                             None,
-//RS                         )));
-//RS                     }
-//RS                     std::thread::sleep(std::time::Duration::from_millis(2));
-//RS                 }
-//RS                 Err(error) => return Err(jet_net_io_error("tcp accept", None, error)),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     loop {
-//RS         match listener.inner.accept() {
-//RS             Ok((stream, _)) => return jet_net_tcp_stream(stream),
-//RS             Err(error)
-//RS                 if matches!(
-//RS                     error.kind(),
-//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-//RS                 ) =>
-//RS             {
-//RS                 jet_net_tcp_listener_scheduler_wait(&listener.inner, "tcp accept")?;
-//RS             }
-//RS             Err(error) => return Err(jet_net_io_error("tcp accept", None, error)),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tcp_accept_deadline(
-//RS     listener: &JetTCPListener,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<JetTCPStream, JetNetError> {
-//RS     let deadline_ms = deadline.as_millis();
-//RS     jet_net_timeout(deadline_ms).map_err(|message| {
-//RS         JetNetError::InvalidInput(jet_net_detail("tcp accept", None, None, message, None))
-//RS     })?;
-//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
-//RS     jet_net_tcp_accept(listener)
-//RS }
-//RS 
-//RS fn jet_net_tcp_connect(addr: &String) -> Result<JetTCPStream, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
-//RS     {
-//RS         return std::net::TcpStream::connect(addr.as_str())
-//RS             .map_err(|error| jet_net_io_error("tcp connect", Some(addr.clone()), error))
-//RS             .and_then(jet_net_tcp_stream);
-//RS     }
-//RS 
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     {
-//RS         let address = addr.clone();
-//RS         let worker_address = address.clone();
-//RS         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-//RS         std::thread::spawn(move || {
-//RS             let _ = sender.send(std::net::TcpStream::connect(worker_address.as_str()));
-//RS         });
-//RS         jet_net_wait_for_connect(receiver, Some(address))
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tcp_read(stream: &mut JetTCPStream) -> Result<String, JetNetError> {
-//RS     jet_net_tcp_read_text(stream, 8192)
-//RS }
-//RS 
-//RS fn jet_net_tcp_read_bytes(stream: &mut JetTCPStream, limit: i64) -> Result<Vec<u8>, JetNetError> {
-//RS     use std::io::Read;
-//RS     if stream.closed || stream.read_shutdown {
-//RS         return Err(jet_net_closed("tcp read"));
-//RS     }
-//RS     if limit < 0 {
-//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
-//RS             "tcp read",
-//RS             None,
-//RS             None,
-//RS             "tcp read limit must be non-negative".to_string(),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     let cap = std::cmp::min(limit as usize, 16 * 1024 * 1024);
-//RS     if cap == 0 {
-//RS         return Ok(Vec::new());
-//RS     }
-//RS     let _deadline = jet_net_operation_deadline(stream.read_timeout_ms);
-//RS     jet_net_apply_tcp_deadlines(&stream.inner, "tcp read")?;
-//RS     let mut bytes = vec![0u8; cap];
-//RS     loop {
-//RS         match stream.inner.read(&mut bytes) {
-//RS             Ok(n) => {
-//RS                 bytes.truncate(n);
-//RS                 return Ok(bytes);
-//RS             }
-//RS             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-//RS                 jet_net_scheduler_wait(&stream.inner, true, false, "tcp read")?;
-//RS             }
-//RS             Err(e) => return Err(jet_net_io_error("tcp read", None, e)),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tcp_read_bytes_deadline(
-//RS     stream: &mut JetTCPStream,
-//RS     limit: i64,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<Vec<u8>, JetNetError> {
-//RS     let deadline_ms = deadline.as_millis();
-//RS     jet_net_timeout(deadline_ms).map_err(|message| {
-//RS         JetNetError::InvalidInput(jet_net_detail("tcp read", None, None, message, None))
-//RS     })?;
-//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
-//RS     jet_net_tcp_read_bytes(stream, limit)
-//RS }
-//RS 
-//RS fn jet_net_tcp_read_text(stream: &mut JetTCPStream, limit: i64) -> Result<String, JetNetError> {
-//RS     let bytes = jet_net_tcp_read_bytes(stream, limit)?;
-//RS     String::from_utf8(bytes).map_err(|error| {
-//RS         JetNetError::InvalidInput(jet_net_detail(
-//RS             "tcp read text",
-//RS             None,
-//RS             None,
-//RS             format!("tcp read text failed: invalid UTF-8: {}", error),
-//RS             None,
-//RS         ))
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_tcp_read_text_deadline(
-//RS     stream: &mut JetTCPStream,
-//RS     limit: i64,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<String, JetNetError> {
-//RS     let bytes = jet_net_tcp_read_bytes_deadline(stream, limit, deadline)?;
-//RS     String::from_utf8(bytes).map_err(|error| {
-//RS         JetNetError::InvalidInput(jet_net_detail(
-//RS             "tcp read text",
-//RS             None,
-//RS             None,
-//RS             format!("tcp read text failed: {}", error),
-//RS             None,
-//RS         ))
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_tcp_write_bytes_with_current_deadline(
-//RS     stream: &mut JetTCPStream,
-//RS     data: &[u8],
-//RS ) -> Result<i64, JetNetError> {
-//RS     use std::io::Write;
-//RS     if stream.closed || stream.write_shutdown {
-//RS         return Err(jet_net_closed("tcp write"));
-//RS     }
-//RS     jet_net_apply_tcp_deadlines(&stream.inner, "tcp write")?;
-//RS     loop {
-//RS         match stream.inner.write(data) {
-//RS             Ok(n) => return Ok(n as i64),
-//RS             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-//RS                 jet_net_scheduler_wait(&stream.inner, false, true, "tcp write")?;
-//RS             }
-//RS             Err(e) => return Err(jet_net_io_error("tcp write", None, e)),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tcp_write_bytes(stream: &mut JetTCPStream, data: &Vec<u8>) -> Result<i64, JetNetError> {
-//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
-//RS     jet_net_tcp_write_bytes_with_current_deadline(stream, data)
-//RS }
-//RS 
-//RS fn jet_net_tcp_write_bytes_deadline(
-//RS     stream: &mut JetTCPStream,
-//RS     data: &Vec<u8>,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<i64, JetNetError> {
-//RS     let deadline_ms = deadline.as_millis();
-//RS     jet_net_timeout(deadline_ms).map_err(|message| {
-//RS         JetNetError::InvalidInput(jet_net_detail("tcp write", None, None, message, None))
-//RS     })?;
-//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
-//RS     jet_net_tcp_write_bytes(stream, data)
-//RS }
-//RS 
-//RS fn jet_net_tcp_write_all_bytes(
-//RS     stream: &mut JetTCPStream,
-//RS     data: &Vec<u8>,
-//RS ) -> Result<(), JetNetError> {
-//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
-//RS     let mut offset = 0usize;
-//RS     while offset < data.len() {
-//RS         let wrote =
-//RS             jet_net_tcp_write_bytes_with_current_deadline(stream, &data[offset..])? as usize;
-//RS         if wrote == 0 {
-//RS             return Err(JetNetError::ConnectionReset(jet_net_detail(
-//RS                 "tcp write all",
-//RS                 None,
-//RS                 None,
-//RS                 "tcp write all failed: zero bytes written".to_string(),
-//RS                 None,
-//RS             )));
-//RS         }
-//RS         offset += wrote;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_tcp_write_all_bytes_deadline(
-//RS     stream: &mut JetTCPStream,
-//RS     data: &Vec<u8>,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<(), JetNetError> {
-//RS     let deadline_ms = deadline.as_millis();
-//RS     jet_net_timeout(deadline_ms).map_err(|message| {
-//RS         JetNetError::InvalidInput(jet_net_detail("tcp write all", None, None, message, None))
-//RS     })?;
-//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
-//RS     jet_net_tcp_write_all_bytes(stream, data)
-//RS }
-//RS 
-//RS fn jet_net_tcp_write_text(stream: &mut JetTCPStream, text: &String) -> Result<(), JetNetError> {
-//RS     jet_net_tcp_write_all_bytes(stream, &text.as_bytes().to_vec())
-//RS }
-//RS 
-//RS fn jet_net_tcp_write_text_deadline(
-//RS     stream: &mut JetTCPStream,
-//RS     text: &String,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<(), JetNetError> {
-//RS     jet_net_tcp_write_all_bytes_deadline(stream, &text.as_bytes().to_vec(), deadline)
-//RS }
-//RS 
-//RS fn jet_net_tcp_shutdown(stream: &mut JetTCPStream, how: JetNetShutdown) -> Result<(), JetNetError> {
-//RS     if stream.closed {
-//RS         return Err(jet_net_closed("tcp shutdown"));
-//RS     }
-//RS     let shutdown = match how {
-//RS         JetNetShutdown::Read => std::net::Shutdown::Read,
-//RS         JetNetShutdown::Write => std::net::Shutdown::Write,
-//RS         JetNetShutdown::Both => std::net::Shutdown::Both,
-//RS     };
-//RS     stream
-//RS         .inner
-//RS         .shutdown(shutdown)
-//RS         .map_err(|e| jet_net_io_error("tcp shutdown", None, e))?;
-//RS     match how {
-//RS         JetNetShutdown::Read => stream.read_shutdown = true,
-//RS         JetNetShutdown::Write => stream.write_shutdown = true,
-//RS         JetNetShutdown::Both => {
-//RS             stream.read_shutdown = true;
-//RS             stream.write_shutdown = true;
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_tcp_close(stream: &mut JetTCPStream) -> Result<(), JetNetError> {
-//RS     if stream.closed {
-//RS         return Ok(());
-//RS     }
-//RS     match stream.inner.shutdown(std::net::Shutdown::Both) {
-//RS         Ok(()) => {}
-//RS         Err(error) if matches!(error.kind(), std::io::ErrorKind::NotConnected) => {}
-//RS         Err(error) => return Err(jet_net_io_error("tcp close", None, error)),
-//RS     }
-//RS     stream.closed = true;
-//RS     stream.read_shutdown = true;
-//RS     stream.write_shutdown = true;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_tcp_ready(
-//RS     stream: &mut JetTCPStream,
-//RS     interest: JetNetReadyInterest,
-//RS     deadline_ms: i64,
-//RS ) -> Result<JetNetReady, JetNetError> {
-//RS     if stream.closed {
-//RS         return Err(jet_net_closed("tcp ready"));
-//RS     }
-//RS     let _ = jet_net_timeout(deadline_ms).map_err(|message| {
-//RS         JetNetError::InvalidInput(jet_net_detail("tcp ready", None, None, message, None))
-//RS     })?;
-//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
-//RS     let read = matches!(
-//RS         interest,
-//RS         JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite
-//RS     );
-//RS     let write = matches!(
-//RS         interest,
-//RS         JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite
-//RS     );
-//RS     let (readable, writable) =
-//RS         jet_net_tcp_scheduler_ready_wait(&stream.inner, read, write, "tcp ready")?;
-//RS     Ok(JetNetReady { readable, writable })
-//RS }
-//RS 
-//RS fn jet_net_tcp_ready_deadline(
-//RS     stream: &mut JetTCPStream,
-//RS     interest: JetNetReadyInterest,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<JetNetReady, JetNetError> {
-//RS     jet_net_tcp_ready(stream, interest, deadline.as_millis())
-//RS }
-//RS 
-//RS fn jet_net_ready_readable(ready: &JetNetReady) -> bool {
-//RS     ready.readable
-//RS }
-//RS 
-//RS fn jet_net_ready_writable(ready: &JetNetReady) -> bool {
-//RS     ready.writable
-//RS }
-//RS 
-//RS fn jet_net_tcp_write(stream: &mut JetTCPStream, data: &String) -> Result<(), JetNetError> {
-//RS     jet_net_tcp_write_text(stream, data)
-//RS }
-//RS 
-//RS fn jet_net_tcp_local_addr(stream: &JetTCPStream) -> Result<String, JetNetError> {
-//RS     stream
-//RS         .inner
-//RS         .local_addr()
-//RS         .map(|a| a.to_string())
-//RS         .map_err(|e| jet_net_io_error("tcp local address", None, e))
-//RS }
-//RS 
-//RS fn jet_net_tcp_peer_addr(stream: &JetTCPStream) -> Result<String, JetNetError> {
-//RS     stream
-//RS         .inner
-//RS         .peer_addr()
-//RS         .map(|a| a.to_string())
-//RS         .map_err(|e| jet_net_io_error("tcp peer address", None, e))
-//RS }
-//RS 
-//RS fn jet_net_listener_local_addr(listener: &JetTCPListener) -> Result<String, JetNetError> {
-//RS     listener
-//RS         .inner
-//RS         .local_addr()
-//RS         .map(|a| a.to_string())
-//RS         .map_err(|e| jet_net_io_error("tcp listener local address", None, e))
-//RS }
-//RS 
-//RS fn jet_net_set_timeout(stream: &mut JetTCPStream, ms: i64) -> Result<(), JetNetError> {
-//RS     let _ = jet_net_timeout(ms).map_err(|m| {
-//RS         JetNetError::InvalidInput(jet_net_detail("set tcp timeout", None, None, m, None))
-//RS     })?;
-//RS     stream.read_timeout_ms = Some(ms);
-//RS     stream.write_timeout_ms = Some(ms);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_set_read_timeout(stream: &mut JetTCPStream, ms: i64) -> Result<(), JetNetError> {
-//RS     let _ = jet_net_timeout(ms).map_err(|m| {
-//RS         JetNetError::InvalidInput(jet_net_detail("set tcp read timeout", None, None, m, None))
-//RS     })?;
-//RS     stream.read_timeout_ms = Some(ms);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_set_write_timeout(stream: &mut JetTCPStream, ms: i64) -> Result<(), JetNetError> {
-//RS     let _ = jet_net_timeout(ms).map_err(|m| {
-//RS         JetNetError::InvalidInput(jet_net_detail("set tcp write timeout", None, None, m, None))
-//RS     })?;
-//RS     stream.write_timeout_ms = Some(ms);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_nodelay(stream: &JetTCPStream) -> Result<bool, JetNetError> {
-//RS     if stream.closed {
-//RS         return Err(jet_net_closed("tcp nodelay"));
-//RS     }
-//RS     stream
-//RS         .inner
-//RS         .nodelay()
-//RS         .map_err(|e| jet_net_io_error("tcp nodelay", None, e))
-//RS }
-//RS 
-//RS fn jet_net_set_nodelay(stream: &JetTCPStream, enabled: bool) -> Result<(), JetNetError> {
-//RS     if stream.closed {
-//RS         return Err(jet_net_closed("set tcp nodelay"));
-//RS     }
-//RS     stream
-//RS         .inner
-//RS         .set_nodelay(enabled)
-//RS         .map_err(|e| jet_net_io_error("set tcp nodelay", None, e))
-//RS }
-//RS 
-//RS fn jet_net_ttl(stream: &JetTCPStream) -> Result<i64, JetNetError> {
-//RS     if stream.closed {
-//RS         return Err(jet_net_closed("tcp ttl"));
-//RS     }
-//RS     stream
-//RS         .inner
-//RS         .ttl()
-//RS         .map(|v| v as i64)
-//RS         .map_err(|e| jet_net_io_error("tcp ttl", None, e))
-//RS }
-//RS 
-//RS fn jet_net_set_ttl(stream: &JetTCPStream, ttl: i64) -> Result<(), JetNetError> {
-//RS     if stream.closed {
-//RS         return Err(jet_net_closed("set tcp ttl"));
-//RS     }
-//RS     if !(0..=u32::MAX as i64).contains(&ttl) {
-//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
-//RS             "set tcp ttl",
-//RS             None,
-//RS             None,
-//RS             "ttl must fit u32".to_string(),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     stream
-//RS         .inner
-//RS         .set_ttl(ttl as u32)
-//RS         .map_err(|e| jet_net_io_error("set tcp ttl", None, e))
-//RS }
-//RS 
-//RS /// TCP streams are always SOCK_STREAM; returned for ledger socket_type parity.
-//RS fn jet_net_socket_type(_stream: &JetTCPStream) -> String {
-//RS     "stream".to_string()
-//RS }
-//RS 
-//RS /// Copy file bytes onto an open TCP stream (observable sendfile; not the syscall).
-//RS fn jet_net_sendfile(stream: &mut JetTCPStream, path: &String) -> Result<i64, JetNetError> {
-//RS     if stream.closed || stream.write_shutdown {
-//RS         return Err(jet_net_closed("tcp sendfile"));
-//RS     }
-//RS     let mut file = std::fs::File::open(path.as_str())
-//RS         .map_err(|e| jet_net_io_error("tcp sendfile open", Some(path.clone()), e))?;
-//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
-//RS     let mut written: u64 = 0;
-//RS     let mut buf = [0u8; 8192];
-//RS     loop {
-//RS         let n = std::io::Read::read(&mut file, &mut buf)
-//RS             .map_err(|e| jet_net_io_error("tcp sendfile read", Some(path.clone()), e))?;
-//RS         if n == 0 {
-//RS             break;
-//RS         }
-//RS         let chunk = buf[..n].to_vec();
-//RS         jet_net_tcp_write_all_bytes(stream, &chunk)?;
-//RS         written += n as u64;
-//RS     }
-//RS     Ok(written.min(i64::MAX as u64) as i64)
-//RS }
-//RS 
-//RS const JET_NET_SERVICES: &[(&str, i64)] = &[
-//RS     ("ftp", 21),
-//RS     ("ssh", 22),
-//RS     ("telnet", 23),
-//RS     ("smtp", 25),
-//RS     ("dns", 53),
-//RS     ("domain", 53),
-//RS     ("http", 80),
-//RS     ("pop3", 110),
-//RS     ("imap", 143),
-//RS     ("https", 443),
-//RS     ("smtps", 465),
-//RS     ("submission", 587),
-//RS     ("imaps", 993),
-//RS     ("pop3s", 995),
-//RS ];
-//RS 
-//RS pub(crate) fn jet_net_getservbyname(name: &String) -> Result<i64, JetNetError> {
-//RS     let key = name.to_ascii_lowercase();
-//RS     JET_NET_SERVICES
-//RS         .iter()
-//RS         .find(|(n, _)| *n == key)
-//RS         .map(|(_, port)| *port)
-//RS         .ok_or_else(|| {
-//RS             JetNetError::InvalidInput(jet_net_detail(
-//RS                 "getservbyname",
-//RS                 None,
-//RS                 None,
-//RS                 format!("unknown service `{name}`"),
-//RS                 None,
-//RS             ))
-//RS         })
-//RS }
-//RS 
-//RS pub(crate) fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
-//RS     JET_NET_SERVICES
-//RS         .iter()
-//RS         .find(|(_, p)| *p == port)
-//RS         .map(|(n, _)| (*n).to_string())
-//RS         .ok_or_else(|| {
-//RS             JetNetError::InvalidInput(jet_net_detail(
-//RS                 "getservbyport",
-//RS                 None,
-//RS                 None,
-//RS                 format!("unknown port `{port}`"),
-//RS                 None,
-//RS             ))
-//RS         })
-//RS }
-//RS 
-//RS fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     let inner = std::net::UdpSocket::bind(addr.as_str())
-//RS         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     inner
-//RS         .set_nonblocking(true)
-//RS         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
-//RS     let inner = std::sync::Arc::new(inner);
-//RS     Ok(JetUDPSocket {
-//RS         inner: inner.clone(),
-//RS         timeout_ms: std::sync::Arc::new(std::sync::Mutex::new(None)),
-//RS         closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-//RS         #[cfg(unix)]
-//RS         scheduler: jet_net_scheduler_handle(inner.as_ref()),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUDPSocket, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     let inner = std::net::UdpSocket::bind(addr.inner)
-//RS         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     inner
-//RS         .set_nonblocking(true)
-//RS         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
-//RS     let inner = std::sync::Arc::new(inner);
-//RS     Ok(JetUDPSocket {
-//RS         inner: inner.clone(),
-//RS         timeout_ms: std::sync::Arc::new(std::sync::Mutex::new(None)),
-//RS         closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-//RS         #[cfg(unix)]
-//RS         scheduler: jet_net_scheduler_handle(inner.as_ref()),
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
-//RS fn jet_net_udp_apply_timeout(
-//RS     socket: &JetUDPSocket,
-//RS     read: bool,
-//RS     operation: &str,
-//RS ) -> Result<(), JetNetError> {
-//RS     let Some(remaining) = jet_deadline_remaining_ms() else {
-//RS         return Ok(());
-//RS     };
-//RS     if remaining <= 0 {
-//RS         return Err(jet_net_deadline_timeout(operation));
-//RS     }
-//RS     let timeout = Some(std::time::Duration::from_millis(remaining as u64));
-//RS     let result = if read {
-//RS         socket.inner.set_read_timeout(timeout)
-//RS     } else {
-//RS         socket.inner.set_write_timeout(timeout)
-//RS     };
-//RS     result.map_err(|error| jet_net_io_error(&format!("{} timeout setup", operation), None, error))
-//RS }
-//RS 
-//RS fn jet_net_udp_open(socket: &JetUDPSocket, operation: &str) -> Result<(), JetNetError> {
-//RS     if socket.closed.load(std::sync::atomic::Ordering::Acquire) {
-//RS         Err(jet_net_closed(operation))
-//RS     } else {
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_udp_local_addr(socket: &JetUDPSocket) -> Result<JetSocketAddr, JetNetError> {
-//RS     jet_net_udp_open(socket, "udp local address")?;
-//RS     socket
-//RS         .inner
-//RS         .local_addr()
-//RS         .map(|inner| JetSocketAddr { inner })
-//RS         .map_err(|e| jet_net_io_error("udp local address", None, e))
-//RS }
-//RS 
-//RS fn jet_net_udp_set_timeout(socket: &JetUDPSocket, ms: i64) -> Result<(), JetNetError> {
-//RS     jet_net_udp_open(socket, "set udp timeout")?;
-//RS     let _ = jet_net_timeout(ms).map_err(|m| {
-//RS         JetNetError::InvalidInput(jet_net_detail("set udp timeout", None, None, m, None))
-//RS     })?;
-//RS     *socket.timeout_ms.lock().unwrap() = Some(ms);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_udp_send_to(
-//RS     socket: &JetUDPSocket,
-//RS     data: &String,
-//RS     addr: &JetSocketAddr,
-//RS ) -> Result<i64, JetNetError> {
-//RS     jet_net_udp_send_slice(socket, data.as_bytes(), addr)
-//RS }
-//RS 
-//RS fn jet_net_udp_recv_from(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPacket, JetNetError> {
-//RS     jet_net_udp_open(socket, "udp receive")?;
-//RS     if limit <= 0 {
-//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
-//RS             "udp receive",
-//RS             None,
-//RS             None,
-//RS             "udp receive limit must be positive".to_string(),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
-//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
-//RS     jet_net_udp_apply_timeout(socket, true, "udp receive")?;
-//RS     let cap = std::cmp::min(limit as usize, 1 << 20);
-//RS     let mut buf = vec![0u8; 65535];
-//RS     loop {
-//RS         match socket.inner.recv_from(&mut buf) {
-//RS             Ok((n, addr)) => {
-//RS                 return Ok({
-//RS                     let original_len = n;
-//RS                     buf.truncate(std::cmp::min(n, cap));
-//RS                     JetUDPPacket {
-//RS                         data: buf,
-//RS                         addr: JetSocketAddr { inner: addr },
-//RS                         original_len: original_len as i64,
-//RS                         truncated: original_len > cap,
-//RS                     }
-//RS                 })
-//RS             }
-//RS             Err(error)
-//RS                 if matches!(
-//RS                     error.kind(),
-//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-//RS                 ) =>
-//RS             {
-//RS                 jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?;
-//RS             }
-//RS             Err(error) => return Err(jet_net_io_error("udp receive", None, error)),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_udp_packet_data(packet: &JetUDPPacket) -> String {
-//RS     String::from_utf8_lossy(&packet.data).to_string()
-//RS }
-//RS 
-//RS fn jet_net_udp_packet_addr(packet: &JetUDPPacket) -> JetSocketAddr {
-//RS     packet.addr.clone()
-//RS }
-//RS 
-//RS fn jet_net_udp_send_bytes_to(
-//RS     socket: &JetUDPSocket,
-//RS     data: &Vec<u8>,
-//RS     addr: &JetSocketAddr,
-//RS ) -> Result<i64, JetNetError> {
-//RS     jet_net_udp_send_slice(socket, data, addr)
-//RS }
-//RS 
-//RS fn jet_net_udp_send_slice(
-//RS     socket: &JetUDPSocket,
-//RS     data: &[u8],
-//RS     addr: &JetSocketAddr,
-//RS ) -> Result<i64, JetNetError> {
-//RS     jet_net_udp_open(socket, "udp send")?;
-//RS     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
-//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
-//RS     jet_net_udp_apply_timeout(socket, false, "udp send")?;
-//RS     loop {
-//RS         match socket.inner.send_to(data, addr.inner) {
-//RS             Ok(n) if n == data.len() => return Ok(n as i64),
-//RS             Ok(n) => {
-//RS                 return Err(JetNetError::Protocol(jet_net_detail(
-//RS                     "udp send",
-//RS                     Some(addr.inner.to_string()),
-//RS                     None,
-//RS                     format!("udp send wrote {} of {} datagram bytes", n, data.len()),
-//RS                     None,
-//RS                 )))
-//RS             }
-//RS             Err(error)
-//RS                 if matches!(
-//RS                     error.kind(),
-//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-//RS                 ) =>
-//RS             {
-//RS                 jet_net_udp_scheduler_wait(socket, false, true, "udp send")?;
-//RS             }
-//RS             Err(error) => {
-//RS                 return Err(jet_net_io_error(
-//RS                     "udp send",
-//RS                     Some(addr.inner.to_string()),
-//RS                     error,
-//RS                 ))
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_udp_receive(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPacket, JetNetError> {
-//RS     jet_net_udp_open(socket, "udp receive")?;
-//RS     if limit < 0 {
-//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
-//RS             "udp receive",
-//RS             None,
-//RS             None,
-//RS             "udp receive limit must be non-negative".to_string(),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
-//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
-//RS     jet_net_udp_apply_timeout(socket, true, "udp receive")?;
-//RS     let cap = std::cmp::min(limit as usize, 65535);
-//RS     let mut bytes = vec![0u8; 65535];
-//RS     let (original_len, addr) = loop {
-//RS         match socket.inner.recv_from(&mut bytes) {
-//RS             Ok(packet) => break packet,
-//RS             Err(error)
-//RS                 if matches!(
-//RS                     error.kind(),
-//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-//RS                 ) =>
-//RS             {
-//RS                 jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?;
-//RS             }
-//RS             Err(error) => return Err(jet_net_io_error("udp receive", None, error)),
-//RS         }
-//RS     };
-//RS     bytes.truncate(std::cmp::min(original_len, cap));
-//RS     Ok(JetUDPPacket {
-//RS         data: bytes,
-//RS         addr: JetSocketAddr { inner: addr },
-//RS         original_len: original_len as i64,
-//RS         truncated: original_len > cap,
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_udp_receive_deadline(
-//RS     socket: &JetUDPSocket,
-//RS     limit: i64,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<JetUDPPacket, JetNetError> {
-//RS     let _deadline = jet_net_explicit_deadline(deadline, "udp receive")?;
-//RS     jet_net_udp_receive(socket, limit)
-//RS }
-//RS 
-//RS fn jet_net_udp_send_bytes_to_deadline(
-//RS     socket: &JetUDPSocket,
-//RS     data: &Vec<u8>,
-//RS     addr: &JetSocketAddr,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<i64, JetNetError> {
-//RS     let _deadline = jet_net_explicit_deadline(deadline, "udp send")?;
-//RS     jet_net_udp_send_bytes_to(socket, data, addr)
-//RS }
-//RS 
-//RS fn jet_net_udp_close(socket: &JetUDPSocket) -> Result<(), JetNetError> {
-//RS     if !socket
-//RS         .closed
-//RS         .swap(true, std::sync::atomic::Ordering::AcqRel)
-//RS     {
-//RS         #[cfg(unix)]
-//RS         socket.scheduler.close();
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_net_udp_ready(
-//RS     socket: &JetUDPSocket,
-//RS     interest: JetNetReadyInterest,
-//RS     deadline: &jet_std::Duration,
-//RS ) -> Result<JetNetReady, JetNetError> {
-//RS     jet_net_udp_open(socket, "udp ready")?;
-//RS     jet_net_timeout(deadline.as_millis()).map_err(|message| {
-//RS         JetNetError::InvalidInput(jet_net_detail("udp ready", None, None, message, None))
-//RS     })?;
-//RS     let _deadline = jet_net_operation_deadline(Some(deadline.as_millis()));
-//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS         return Err(jet_net_deadline_timeout("udp ready"));
-//RS     }
-//RS     #[cfg(not(unix))]
-//RS     return Err(JetNetError::Unsupported(jet_net_detail(
-//RS         "udp ready",
-//RS         None,
-//RS         None,
-//RS         "udp readiness backend is unavailable on this target".to_string(),
-//RS         None,
-//RS     )));
-//RS     #[cfg(unix)]
-//RS     {
-//RS         let want_read = matches!(
-//RS             interest,
-//RS             JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite
-//RS         );
-//RS         let want_write = matches!(
-//RS             interest,
-//RS             JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite
-//RS         );
-//RS         let (readable, writable) =
-//RS             jet_net_udp_scheduler_ready_wait(socket, want_read, want_write, "udp ready")?;
-//RS         Ok(JetNetReady { readable, writable })
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_udp_packet_bytes(packet: &JetUDPPacket) -> Vec<u8> {
-//RS     packet.data.clone()
-//RS }
-//RS 
-//RS fn jet_net_udp_packet_original_len(packet: &JetUDPPacket) -> i64 {
-//RS     packet.original_len
-//RS }
-//RS 
-//RS fn jet_net_udp_packet_truncated(packet: &JetUDPPacket) -> bool {
-//RS     packet.truncated
-//RS }
-//RS 
+use core.net.runtime.top_net_http.[JetTLSStream, JetTLSPeerIdentity, JetNetReadyInterest, JetNetReady, JetNetError, JetIpAddr, JetSocketAddr, JetTCPListener, JetTCPStream, jet_net_explicit_deadline, jet_net_to_io_error, jet_net_deadline_timeout, jet_net_tls_io_result, jet_net_tcp_scheduler_ready_wait, jet_net_io_error, jet_net_detail, jet_net_timeout, jet_net_operation_deadline, jet_net_connect_addr_worker, jet_net_scheduler_park, jet_net_tcp_stream, jet_net_tcp_listener_scheduler_wait, jet_net_wait_for_connect]
+use core.net.runtime.kernel_net_pure.[jet_net_pure_parse_ip, jet_net_pure_ip_is_ipv4, jet_net_pure_parse_socket_addr, jet_net_pure_socket_host, jet_net_pure_socket_port, jet_net_pure_socket_to_string]
+use core.time.runtime.deadline.jet_deadline_remaining_ms
+use core.tasks.runtime.scheduler.[jet_scheduler_world_reject_uncontrolled, jet_scheduler_wait_point_cancelled]
+use core.prelude.runtime.std_common_types_02.Duration as JetDuration
+use core.prelude.runtime.std_open.[IOError, IOOperation]
+use core.sys.target as target
+use std.net.[TcpListener, TcpStream, SocketAddr, ToSocketAddrs]
+use std.time.[Duration as NativeDuration, Instant]
+use std.io.[Error as NativeIOError, ErrorKind]
+use std.sync.mpsc
+use std.thread
+use core.net.runtime.top_net_http.[JetNetShutdown, JetUDPSocket, JetUDPPacket, jet_net_closed, jet_net_scheduler_wait, jet_net_scheduler_handle, jet_net_udp_scheduler_wait, jet_net_udp_scheduler_ready_wait]
+use std.net.[Shutdown, UdpSocket]
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicBool, Ordering]
+use std.io.[Read, Write]
+use std.fs.File
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1812
+fn jet_net_tls_peer_identity(stream: &JetTLSStream) -> JetTLSPeerIdentity {
+    stream.peer_identity.clone().expect("verified TLS stream always retains peer identity")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1819
+// GATE #4565: kernel primitive
+#Unsafe("invoke audited TLS callbacks and wait on the existing raw socket scheduler boundary")
+fn jet_net_tls_ready(stream: &JetTLSStream, interest: JetNetReadyInterest, deadline: &JetDuration) -> JetNetReady IOError! {
+    operation :: if interest is .Write { IOOperation.Write } else { IOOperation.Read }
+    _deadline :: jet_net_explicit_deadline(deadline, "tls ready").map_err(jet_net_to_io_error)?
+    if jet_deadline_remaining_ms() is Val(ms) && ms <= 0 {
+        return Err(jet_net_to_io_error(jet_net_deadline_timeout("tls ready")))
+    }
+    want_read :: interest is .Read || interest is .ReadWrite
+    want_write :: interest is .Write || interest is .ReadWrite
+    loop {
+        readable :: want_read && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?
+        if readable -> return Ok(JetNetReady{readable: true, writable: false})
+        (tls_read, tls_write) :: jet_net_tls_io_result((stream.wants)(stream.id), operation)?
+        (raw_readable, raw_writable) :: jet_net_tcp_scheduler_ready_wait(&stream.socket, want_read || tls_read, want_write || tls_write, "tls ready").map_err(jet_net_to_io_error)?
+        readable :: want_read && raw_readable && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?
+        writable :: want_write && raw_writable
+        if readable || writable -> return Ok(JetNetReady{readable: readable, writable: writable})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1869
+// GATE #4565: kernel primitive
+#Unsafe("apply actual TCP read/write timeouts from the canonical ambient deadline")
+fn jet_net_apply_tcp_deadlines(stream: &TcpStream, op: String) -> Unit JetNetError! {
+    if jet_deadline_remaining_ms() is Val(remaining) {
+        if remaining <= 0 -> return Err(jet_net_deadline_timeout(op))
+        dur :: Val(NativeDuration.from_millis(remaining as U64))
+        stream.set_read_timeout(dur).map_err(fn(error) { jet_net_io_error("{op} read timeout", None, ^error) })?
+        stream.set_write_timeout(dur).map_err(fn(error) { jet_net_io_error("{op} write timeout", None, ^error) })?
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1885
+fn jet_net_ip_addr(text: String) -> JetIpAddr JetNetError! {
+    jet_net_pure_parse_ip(text).map(fn(inner) { JetIpAddr{inner: inner} }).map_err(fn(error) {
+        JetNetError.InvalidInput(jet_net_detail("parse IP address", Val(text.clone()), None, "invalid IP address `{text}`: {error}", None))
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1899
+fn jet_net_ip_to_string(ip: &JetIpAddr) -> String { ip.inner.to_string() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1903
+fn jet_net_ip_is_ipv4(ip: &JetIpAddr) -> Bool { jet_net_pure_ip_is_ipv4(ip.inner) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1907
+// GATE #4565: kernel primitive
+#Unsafe("resolve only when pure socket parsing fails, using the actual native address provider")
+fn jet_net_socket_addr(host: String, port: I64) -> JetSocketAddr JetNetError! {
+    if port < 0 || port > 65535 {
+        return Err(JetNetError.InvalidInput(jet_net_detail("resolve socket address", Val(host.clone()), None, "invalid port `{port}`: expected 0..65535", None)))
+    }
+    text :: "{host}:{port}"
+    resolved :: match jet_net_pure_parse_socket_addr(text) {
+        Ok(address) -> Ok(address)
+        Err(_) -> {
+            iter := text.to_socket_addrs().map_err(fn(error) { jet_net_io_error("resolve socket address", Val(text.clone()), ^error) })?
+            &iter.next().ok_or_else(fn() { NativeIOError.new(ErrorKind.NotFound, "no address") })
+        }
+    }
+    resolved.map(fn(inner) { JetSocketAddr{inner: inner} }).map_err(fn(error) { jet_net_io_error("resolve socket address", Val(^text), ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1935
+fn jet_net_socket_addr_parse(text: String) -> JetSocketAddr JetNetError! {
+    jet_net_pure_parse_socket_addr(text).map(fn(inner) { JetSocketAddr{inner: inner} }).map_err(fn(error) {
+        JetNetError.InvalidInput(jet_net_detail("parse socket address", Val(text.clone()), None, "invalid socket address `{text}`: {error}", None))
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1949
+fn jet_net_socket_host(addr: &JetSocketAddr) -> String { jet_net_pure_socket_host(addr.inner) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1953
+fn jet_net_socket_port(addr: &JetSocketAddr) -> I64 { jet_net_pure_socket_port(addr.inner) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1957
+fn jet_net_socket_to_string(addr: &JetSocketAddr) -> String { jet_net_pure_socket_to_string(addr.inner) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1961
+// GATE #4565: kernel primitive
+#Unsafe("bind the real native listener and set nonblocking mode only on scheduler-backed targets")
+fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> JetTCPListener JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    inner :: TcpListener.bind(addr.inner).map_err(fn(error) { jet_net_io_error("tcp listen", Val(addr.inner.to_string()), ^error) })?
+    // GATE #4483: original wasm32-wasip2 adapter stays blocking.
+    if !(target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32") {
+        inner.set_nonblocking(true).map_err(fn(error) { jet_net_io_error("tcp listen", Val(addr.inner.to_string()), ^error) })?
+    }
+    Ok(JetTCPListener{inner: ^inner})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1972
+fn jet_net_tcp_connect_addr(addr: &JetSocketAddr) -> JetTCPStream JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    jet_net_connect_addr_worker(addr.inner)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1977
+fn jet_net_tcp_connect_timeout(addr: &JetSocketAddr, ms: I64) -> JetTCPStream JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    _ :: jet_net_timeout(ms).map_err(fn(message) {
+        JetNetError.InvalidInput(jet_net_detail("tcp connect", Val(addr.inner.to_string()), None, ^message, None))
+    })?
+    _deadline :: jet_net_operation_deadline(Val(ms))
+    jet_net_connect_addr_worker(addr.inner)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1992
+// GATE #4565: kernel primitive
+#Unsafe("resolve and race actual native TCP connections using bounded resolver channel, real workers and monotonic launch clock")
+fn jet_net_tcp_connect_happy(host: String, port: I64, ms: I64) -> JetTCPStream JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    if port < 0 || port > 65535 {
+        return Err(JetNetError.InvalidInput(jet_net_detail("tcp connect", Val(host.clone()), None, "invalid port `{port}`: expected 0..65535", None)))
+    }
+    _ :: jet_net_timeout(ms).map_err(fn(message) {
+        JetNetError.InvalidInput(jet_net_detail("tcp connect", Val(host.clone()), None, ^message, None))
+    })?
+    _deadline :: jet_net_operation_deadline(Val(ms))
+    if jet_deadline_remaining_ms() is Val(remaining) && remaining <= 0 -> return Err(jet_net_deadline_timeout("tcp connect"))
+    query :: host.clone()
+    (resolve_sender, resolve_receiver) :: mpsc.sync_channel(1)
+    _ :: thread.spawn(fn() {
+        result :: (query.as_str(), port as U16).to_socket_addrs().map(fn(addrs) { addrs.collect<[SocketAddr]>() })
+        _ :: resolve_sender.send(^result)
+    })
+    addrs :: loop {
+        match resolve_receiver.try_recv() {
+            Ok(Ok(addrs)) -> break ^addrs
+            Ok(Err(error)) -> return Err(jet_net_io_error("resolve socket address", Val(host.clone()), ^error))
+            Err(.Empty) -> jet_net_scheduler_park("tcp connect", 5)?
+            Err(.Disconnected) -> return Err(JetNetError.Other(jet_net_detail("tcp connect", Val(host.clone()), None, "socket address resolver stopped without a result", None)))
+        }
+    }
+    if addrs.is_empty() {
+        return Err(JetNetError.AddressUnavailable(jet_net_detail("tcp connect", Val(host.clone()), None, "tcp connect failed: no address for `{host}`", None)))
+    }
+    first_is_v6 :: addrs[0].is_ipv6()
+    v6 := addrs.iter().copied().filter(fn(addr) { addr.is_ipv6() })
+    v4 := addrs.iter().copied().filter(fn(addr) { addr.is_ipv4() })
+    ordered := [SocketAddr].with_capacity(addrs.len())
+    loop {
+        next :: if ordered.len() % 2 == 0 {
+            if first_is_v6 { &v6.next().or_else(fn() { &v4.next() }) } else { &v4.next().or_else(fn() { &v6.next() }) }
+        } else if first_is_v6 { &v4.next().or_else(fn() { &v6.next() }) } else { &v6.next().or_else(fn() { &v4.next() }) }
+        match next { Val(addr) -> &ordered.push(addr), None -> break }
+    }
+    (sender, receiver) :: mpsc.channel()
+    next := 0
+    in_flight := 0
+    last: (SocketAddr, NativeIOError)? := None
+    next_launch := Instant.now()
+    loop {
+        if next < ordered.len() && Instant.now() >= next_launch {
+            addr :: ordered[next]
+            remaining :: jet_deadline_remaining_ms().unwrap_or(0)
+            if remaining <= 0 -> return Err(jet_net_deadline_timeout("tcp connect"))
+            attempt_sender :: sender.clone()
+            _ :: thread.spawn(fn() {
+                timeout :: NativeDuration.from_millis(remaining as U64)
+                _ :: attempt_sender.send((addr, TcpStream.connect_timeout(&addr, timeout)))
+            })
+            next = next + 1
+            in_flight = in_flight + 1
+            next_launch = Instant.now() + NativeDuration.from_millis(250)
+        }
+        match receiver.try_recv() {
+            Ok((_, Ok(stream))) -> return jet_net_tcp_stream(^stream)
+            Ok((addr, Err(error))) -> {
+                in_flight = in_flight - 1
+                last = Val((addr, ^error))
+                next_launch = Instant.now()
+            }
+            Err(.Empty) -> {}
+            Err(.Disconnected) -> panic("connect sender retained")
+        }
+        if next == ordered.len() && in_flight == 0 {
+            (addr, error) :: last.expect("at least one connection attempt completed")
+            return Err(jet_net_io_error("tcp connect", Val(addr.to_string()), ^error))
+        }
+        jet_net_scheduler_park("tcp connect", 5)?
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2129
+// GATE #4565: kernel primitive
+#Unsafe("read actual bound listener address")
+fn jet_net_listener_local_socket_addr(listener: &JetTCPListener) -> JetSocketAddr JetNetError! {
+    listener.inner.local_addr().map(fn(inner) { JetSocketAddr{inner: inner} }).map_err(fn(error) { jet_net_io_error("tcp listener local address", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2139
+// GATE #4565: kernel primitive
+#Unsafe("read actual TCP local address")
+fn jet_net_tcp_local_socket_addr(stream: &JetTCPStream) -> JetSocketAddr JetNetError! {
+    stream.inner.local_addr().map(fn(inner) { JetSocketAddr{inner: inner} }).map_err(fn(error) { jet_net_io_error("tcp local address", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2147
+// GATE #4565: kernel primitive
+#Unsafe("read actual TCP peer address")
+fn jet_net_tcp_peer_socket_addr(stream: &JetTCPStream) -> JetSocketAddr JetNetError! {
+    stream.inner.peer_addr().map(fn(inner) { JetSocketAddr{inner: inner} }).map_err(fn(error) { jet_net_io_error("tcp peer address", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2155
+// GATE #4565: kernel primitive
+#Unsafe("bind actual native listener; preserve shared WASI blocking adapter semantics")
+fn jet_net_tcp_listen(addr: String) -> JetTCPListener JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    inner :: TcpListener.bind(addr.as_str()).map_err(fn(error) { jet_net_io_error("tcp listen", Val(addr.clone()), ^error) })?
+    // GATE #4483: selected target cfg branch.
+    if !(target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32") {
+        inner.set_nonblocking(true).map_err(fn(error) { jet_net_io_error("tcp listen", Val(addr.clone()), ^error) })?
+    }
+    Ok(JetTCPListener{inner: ^inner})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2166
+// GATE #4565: kernel primitive
+#Unsafe("accept actual native sockets; selected WASI polling preserves deadline/cancellation checks and native targets use scheduler")
+fn jet_net_tcp_accept(listener: &JetTCPListener) -> JetTCPStream JetNetError! {
+    // GATE #4483: exact wasm32-wasip2 branch.
+    if target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
+        listener.inner.set_nonblocking(true).map_err(fn(error) { jet_net_io_error("tcp accept setup", None, ^error) })?
+        loop {
+            match listener.inner.accept() {
+                Ok((stream, _)) -> return jet_net_tcp_stream(^stream)
+                Err(error) if error.kind() == ErrorKind.WouldBlock || error.kind() == ErrorKind.Interrupted -> {
+                    if jet_deadline_remaining_ms() is Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("tcp accept"))
+                    if jet_scheduler_wait_point_cancelled() -> return Err(JetNetError.Cancelled(jet_net_detail("tcp accept", None, None, "tcp accept cancelled", None)))
+                    thread.sleep(NativeDuration.from_millis(2))
+                }
+                Err(error) -> return Err(jet_net_io_error("tcp accept", None, ^error))
+            }
+        }
+    }
+    loop {
+        match listener.inner.accept() {
+            Ok((stream, _)) -> return jet_net_tcp_stream(^stream)
+            Err(error) if error.kind() == ErrorKind.WouldBlock || error.kind() == ErrorKind.Interrupted -> jet_net_tcp_listener_scheduler_wait(&listener.inner, "tcp accept")?
+            Err(error) -> return Err(jet_net_io_error("tcp accept", None, ^error))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2218
+fn jet_net_tcp_accept_deadline(listener: &JetTCPListener, deadline: &JetDuration) -> JetTCPStream JetNetError! {
+    deadline_ms :: deadline.as_millis()
+    _ :: jet_net_timeout(deadline_ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("tcp accept", None, None, ^message, None)) })?
+    _deadline :: jet_net_operation_deadline(Val(deadline_ms))
+    jet_net_tcp_accept(listener)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2230
+// GATE #4565: kernel primitive
+#Unsafe("native worker owns blocking connect; WASI uses the shared real socket adapter directly")
+fn jet_net_tcp_connect(addr: String) -> JetTCPStream JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    // GATE #4483: original wasm32-wasip2 branch.
+    if target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
+        return TcpStream.connect(addr.as_str()).map_err(fn(error) { jet_net_io_error("tcp connect", Val(addr.clone()), ^error) }).and_then(jet_net_tcp_stream)
+    }
+    address :: addr.clone()
+    worker_address :: address.clone()
+    (sender, receiver) :: mpsc.sync_channel(1)
+    _ :: thread.spawn(fn() { _ :: sender.send(TcpStream.connect(worker_address.as_str())) })
+    jet_net_wait_for_connect(^receiver, Val(^address))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2251
+fn jet_net_tcp_read(stream: &JetTCPStream) -> String JetNetError! { jet_net_tcp_read_text(&stream, 8192) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2255
+// GATE #4565: kernel primitive
+#Unsafe("read actual native TCP bytes and wait for scheduler readiness")
+fn jet_net_tcp_read_bytes(stream: &JetTCPStream, limit: I64) -> [U8] JetNetError! {
+    if stream.closed || stream.read_shutdown -> return Err(jet_net_closed("tcp read"))
+    if limit < 0 -> return Err(JetNetError.InvalidInput(jet_net_detail("tcp read", None, None, "tcp read limit must be non-negative", None)))
+    cap :: min(limit as USize, 16 * 1024 * 1024)
+    if cap == 0 -> return Ok([])
+    _deadline :: jet_net_operation_deadline(stream.read_timeout_ms)
+    jet_net_apply_tcp_deadlines(&stream.inner, "tcp read")?
+    bytes := [U8].repeat(0, cap)
+    loop {
+        match &stream.inner.read(&bytes) {
+            Ok(n) -> { &bytes.truncate(n); return Ok(^bytes) }
+            Err(error) if error.kind() is .WouldBlock -> jet_net_scheduler_wait(&stream.inner, true, false, "tcp read")?
+            Err(error) -> return Err(jet_net_io_error("tcp read", None, ^error))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2290
+fn jet_net_tcp_read_bytes_deadline(stream: &JetTCPStream, limit: I64, deadline: &JetDuration) -> [U8] JetNetError! {
+    deadline_ms :: deadline.as_millis()
+    jet_net_timeout(deadline_ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("tcp read", None, None, ^message, None)) })?
+    _deadline :: jet_net_operation_deadline(Val(deadline_ms))
+    jet_net_tcp_read_bytes(&stream, limit)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2303
+fn jet_net_tcp_read_text(stream: &JetTCPStream, limit: I64) -> String JetNetError! {
+    bytes :: jet_net_tcp_read_bytes(&stream, limit)?
+    String.from_utf8(^bytes).map_err(fn(error) { JetNetError.InvalidInput(jet_net_detail("tcp read text", None, None, "tcp read text failed: invalid UTF-8: {error}", None)) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2316
+fn jet_net_tcp_read_text_deadline(stream: &JetTCPStream, limit: I64, deadline: &JetDuration) -> String JetNetError! {
+    bytes :: jet_net_tcp_read_bytes_deadline(&stream, limit, deadline)?
+    String.from_utf8(^bytes).map_err(fn(error) { JetNetError.InvalidInput(jet_net_detail("tcp read text", None, None, "tcp read text failed: {error}", None)) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2333
+// GATE #4565: kernel primitive
+#Unsafe("write actual native TCP bytes and wait for scheduler readiness")
+fn jet_net_tcp_write_bytes_with_current_deadline(stream: &JetTCPStream, data: &[U8]) -> I64 JetNetError! {
+    if stream.closed || stream.write_shutdown -> return Err(jet_net_closed("tcp write"))
+    jet_net_apply_tcp_deadlines(&stream.inner, "tcp write")?
+    loop {
+        match &stream.inner.write(data) {
+            Ok(n) -> return Ok(n as I64)
+            Err(error) if error.kind() is .WouldBlock -> jet_net_scheduler_wait(&stream.inner, false, true, "tcp write")?
+            Err(error) -> return Err(jet_net_io_error("tcp write", None, ^error))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2353
+fn jet_net_tcp_write_bytes(stream: &JetTCPStream, data: &[U8]) -> I64 JetNetError! {
+    _deadline :: jet_net_operation_deadline(stream.write_timeout_ms)
+    jet_net_tcp_write_bytes_with_current_deadline(&stream, data)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2358
+fn jet_net_tcp_write_bytes_deadline(stream: &JetTCPStream, data: &[U8], deadline: &JetDuration) -> I64 JetNetError! {
+    deadline_ms :: deadline.as_millis()
+    jet_net_timeout(deadline_ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("tcp write", None, None, ^message, None)) })?
+    _deadline :: jet_net_operation_deadline(Val(deadline_ms))
+    jet_net_tcp_write_bytes(&stream, data)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2371
+fn jet_net_tcp_write_all_bytes(stream: &JetTCPStream, data: &[U8]) -> Unit JetNetError! {
+    _deadline :: jet_net_operation_deadline(stream.write_timeout_ms)
+    offset := USize{0}
+    loop offset < data.len() {
+        wrote :: jet_net_tcp_write_bytes_with_current_deadline(&stream, &data[offset..])? as USize
+        if wrote == 0 -> return Err(JetNetError.ConnectionReset(jet_net_detail("tcp write all", None, None, "tcp write all failed: zero bytes written", None)))
+        offset = offset + wrote
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2394
+fn jet_net_tcp_write_all_bytes_deadline(stream: &JetTCPStream, data: &[U8], deadline: &JetDuration) -> Unit JetNetError! {
+    deadline_ms :: deadline.as_millis()
+    jet_net_timeout(deadline_ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("tcp write all", None, None, ^message, None)) })?
+    _deadline :: jet_net_operation_deadline(Val(deadline_ms))
+    jet_net_tcp_write_all_bytes(&stream, data)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2407
+fn jet_net_tcp_write_text(stream: &JetTCPStream, text: &String) -> Unit JetNetError! { jet_net_tcp_write_all_bytes(&stream, text.as_bytes()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2411
+fn jet_net_tcp_write_text_deadline(stream: &JetTCPStream, text: &String, deadline: &JetDuration) -> Unit JetNetError! { jet_net_tcp_write_all_bytes_deadline(&stream, text.as_bytes(), deadline) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2419
+// GATE #4565: kernel primitive
+#Unsafe("shutdown the actual TCP socket before recording directional shutdown state")
+fn jet_net_tcp_shutdown(stream: &JetTCPStream, how: JetNetShutdown) -> Unit JetNetError! {
+    if stream.closed -> return Err(jet_net_closed("tcp shutdown"))
+    shutdown :: match how { .Read -> Shutdown.Read, .Write -> Shutdown.Write, .Both -> Shutdown.Both }
+    stream.inner.shutdown(shutdown).map_err(fn(error) { jet_net_io_error("tcp shutdown", None, ^error) })?
+    match how {
+        .Read -> stream.read_shutdown = true
+        .Write -> stream.write_shutdown = true
+        .Both -> { stream.read_shutdown = true; stream.write_shutdown = true }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2443
+// GATE #4565: kernel primitive
+#Unsafe("close actual TCP socket, preserving errors except already disconnected")
+fn jet_net_tcp_close(stream: &JetTCPStream) -> Unit JetNetError! {
+    if stream.closed -> return Ok(())
+    match stream.inner.shutdown(Shutdown.Both) {
+        Ok(_) -> {}
+        Err(error) if error.kind() is .NotConnected -> {}
+        Err(error) -> return Err(jet_net_io_error("tcp close", None, ^error))
+    }
+    stream.closed = true
+    stream.read_shutdown = true
+    stream.write_shutdown = true
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2458
+fn jet_net_tcp_ready(stream: &JetTCPStream, interest: JetNetReadyInterest, deadline_ms: I64) -> JetNetReady JetNetError! {
+    if stream.closed -> return Err(jet_net_closed("tcp ready"))
+    _ :: jet_net_timeout(deadline_ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("tcp ready", None, None, ^message, None)) })?
+    _deadline :: jet_net_operation_deadline(Val(deadline_ms))
+    read :: interest is .Read || interest is .ReadWrite
+    write :: interest is .Write || interest is .ReadWrite
+    (readable, writable) :: jet_net_tcp_scheduler_ready_wait(&stream.inner, read, write, "tcp ready")?
+    Ok(JetNetReady{readable: readable, writable: writable})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2483
+fn jet_net_tcp_ready_deadline(stream: &JetTCPStream, interest: JetNetReadyInterest, deadline: &JetDuration) -> JetNetReady JetNetError! { jet_net_tcp_ready(&stream, interest, deadline.as_millis()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2491
+fn jet_net_ready_readable(ready: &JetNetReady) -> Bool { ready.readable }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2495
+fn jet_net_ready_writable(ready: &JetNetReady) -> Bool { ready.writable }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2499
+fn jet_net_tcp_write(stream: &JetTCPStream, data: &String) -> Unit JetNetError! { jet_net_tcp_write_text(&stream, data) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2503
+// GATE #4565: kernel primitive
+#Unsafe("query actual TCP local address")
+fn jet_net_tcp_local_addr(stream: &JetTCPStream) -> String JetNetError! {
+    stream.inner.local_addr().map(fn(addr) { addr.to_string() }).map_err(fn(error) { jet_net_io_error("tcp local address", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2511
+// GATE #4565: kernel primitive
+#Unsafe("query actual TCP peer address")
+fn jet_net_tcp_peer_addr(stream: &JetTCPStream) -> String JetNetError! {
+    stream.inner.peer_addr().map(fn(addr) { addr.to_string() }).map_err(fn(error) { jet_net_io_error("tcp peer address", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2519
+// GATE #4565: kernel primitive
+#Unsafe("query actual listener local address")
+fn jet_net_listener_local_addr(listener: &JetTCPListener) -> String JetNetError! {
+    listener.inner.local_addr().map(fn(addr) { addr.to_string() }).map_err(fn(error) { jet_net_io_error("tcp listener local address", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2527
+fn jet_net_set_timeout(stream: &JetTCPStream, ms: I64) -> Unit JetNetError! {
+    _ :: jet_net_timeout(ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("set tcp timeout", None, None, ^message, None)) })?
+    stream.read_timeout_ms = Val(ms)
+    stream.write_timeout_ms = Val(ms)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2536
+fn jet_net_set_read_timeout(stream: &JetTCPStream, ms: I64) -> Unit JetNetError! {
+    _ :: jet_net_timeout(ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("set tcp read timeout", None, None, ^message, None)) })?
+    stream.read_timeout_ms = Val(ms)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2544
+fn jet_net_set_write_timeout(stream: &JetTCPStream, ms: I64) -> Unit JetNetError! {
+    _ :: jet_net_timeout(ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("set tcp write timeout", None, None, ^message, None)) })?
+    stream.write_timeout_ms = Val(ms)
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2552
+// GATE #4565: kernel primitive
+#Unsafe("query actual TCP_NODELAY socket option")
+fn jet_net_nodelay(stream: &JetTCPStream) -> Bool JetNetError! {
+    if stream.closed -> return Err(jet_net_closed("tcp nodelay"))
+    stream.inner.nodelay().map_err(fn(error) { jet_net_io_error("tcp nodelay", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2562
+// GATE #4565: kernel primitive
+#Unsafe("set actual TCP_NODELAY socket option")
+fn jet_net_set_nodelay(stream: &JetTCPStream, enabled: Bool) -> Unit JetNetError! {
+    if stream.closed -> return Err(jet_net_closed("set tcp nodelay"))
+    stream.inner.set_nodelay(enabled).map_err(fn(error) { jet_net_io_error("set tcp nodelay", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2572
+// GATE #4565: kernel primitive
+#Unsafe("query actual TCP TTL socket option")
+fn jet_net_ttl(stream: &JetTCPStream) -> I64 JetNetError! {
+    if stream.closed -> return Err(jet_net_closed("tcp ttl"))
+    stream.inner.ttl().map(fn(value) { value as I64 }).map_err(fn(error) { jet_net_io_error("tcp ttl", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2583
+// GATE #4565: kernel primitive
+#Unsafe("set actual TCP TTL socket option after range validation")
+fn jet_net_set_ttl(stream: &JetTCPStream, ttl: I64) -> Unit JetNetError! {
+    if stream.closed -> return Err(jet_net_closed("set tcp ttl"))
+    if ttl < 0 || ttl > U32.MAX as I64 -> return Err(JetNetError.InvalidInput(jet_net_detail("set tcp ttl", None, None, "ttl must fit u32", None)))
+    stream.inner.set_ttl(ttl as U32).map_err(fn(error) { jet_net_io_error("set tcp ttl", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2603
+// TCP streams are always SOCK_STREAM; returned for ledger socket_type parity.
+fn jet_net_socket_type(_stream: &JetTCPStream) -> String { "stream" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2608
+// Copy file bytes onto an open TCP stream (observable sendfile; not the syscall).
+// GATE #4565: kernel primitive
+#Unsafe("open and read the actual file, writing through the deadline-aware TCP boundary")
+fn jet_net_sendfile(stream: &JetTCPStream, path: &String) -> I64 JetNetError! {
+    if stream.closed || stream.write_shutdown -> return Err(jet_net_closed("tcp sendfile"))
+    file := File.open(path.as_str()).map_err(fn(error) { jet_net_io_error("tcp sendfile open", Val(path.clone()), ^error) })?
+    _deadline :: jet_net_operation_deadline(stream.write_timeout_ms)
+    written := U64{0}
+    buf := [U8].repeat(0, 8192)
+    loop {
+        n :: &file.read(&buf).map_err(fn(error) { jet_net_io_error("tcp sendfile read", Val(path.clone()), ^error) })?
+        if n == 0 -> break
+        jet_net_tcp_write_all_bytes(&stream, &buf[..n])?
+        written = written + n as U64
+    }
+    Ok(min(written, I64.MAX as U64) as I64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2630
+JET_NET_SERVICES :: [("ftp", I64{21}), ("ssh", I64{22}), ("telnet", I64{23}), ("smtp", I64{25}), ("dns", I64{53}), ("domain", I64{53}), ("http", I64{80}), ("pop3", I64{110}), ("imap", I64{143}), ("https", I64{443}), ("smtps", I64{465}), ("submission", I64{587}), ("imaps", I64{993}), ("pop3s", I64{995})]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2647
+fn jet_net_getservbyname(name: &String) -> I64 JetNetError! {
+    key :: name.to_ascii_lowercase()
+    JET_NET_SERVICES.iter().find(fn(entry) { entry.0 == key }).map(fn(entry) { entry.1 }).ok_or_else(fn() { JetNetError.InvalidInput(jet_net_detail("getservbyname", None, None, "unknown service `{name}`", None)) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2664
+fn jet_net_getservbyport(port: I64) -> String JetNetError! {
+    JET_NET_SERVICES.iter().find(fn(entry) { entry.1 == port }).map(fn(entry) { entry.0.to_string() }).ok_or_else(fn() { JetNetError.InvalidInput(jet_net_detail("getservbyport", None, None, "unknown port `{port}`", None)) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2680
+// GATE #4565: kernel primitive
+#Unsafe("bind actual UDP socket, retaining shared close/timeout state and Unix scheduler descriptor")
+fn jet_net_udp_bind(addr: &String) -> JetUDPSocket JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    inner :: UdpSocket.bind(addr.as_str()).map_err(fn(error) { jet_net_io_error("udp bind", Val(addr.clone()), ^error) })?
+    if !(target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32") {
+        inner.set_nonblocking(true).map_err(fn(error) { jet_net_io_error("udp bind", Val(addr.clone()), ^error) })?
+    }
+    inner :: Arc.new(^inner)
+    socket := JetUDPSocket{inner: inner.clone(), timeout_ms: Arc.new(Mutex.new(None)), closed: Arc.new(AtomicBool.new(false))}
+    if target.selected_family() == "unix" -> socket.scheduler = jet_net_scheduler_handle(inner.as_ref())
+    Ok(^socket)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2698
+// GATE #4565: kernel primitive
+#Unsafe("bind actual UDP socket address, retaining shared close/timeout state and Unix scheduler descriptor")
+fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> JetUDPSocket JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    inner :: UdpSocket.bind(addr.inner).map_err(fn(error) { jet_net_io_error("udp bind", Val(addr.inner.to_string()), ^error) })?
+    if !(target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32") {
+        inner.set_nonblocking(true).map_err(fn(error) { jet_net_io_error("udp bind", Val(addr.inner.to_string()), ^error) })?
+    }
+    inner :: Arc.new(^inner)
+    socket := JetUDPSocket{inner: inner.clone(), timeout_ms: Arc.new(Mutex.new(None)), closed: Arc.new(AtomicBool.new(false))}
+    if target.selected_family() == "unix" -> socket.scheduler = jet_net_scheduler_handle(inner.as_ref())
+    Ok(^socket)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2717
+// GATE #4565: kernel primitive
+#Unsafe("apply real WASI UDP native timeout from ambient deadline")
+fn jet_net_udp_apply_timeout(socket: &JetUDPSocket, read: Bool, operation: String) -> Unit JetNetError! {
+    remaining :: match jet_deadline_remaining_ms() { Val(ms) -> ms, None -> return Ok(()) }
+    if remaining <= 0 -> return Err(jet_net_deadline_timeout(operation))
+    timeout :: Val(NativeDuration.from_millis(remaining as U64))
+    result :: if read { socket.inner.set_read_timeout(timeout) } else { socket.inner.set_write_timeout(timeout) }
+    result.map_err(fn(error) { jet_net_io_error("{operation} timeout setup", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2737
+// GATE #4565: kernel primitive
+#Unsafe("observe shared UDP close flag with acquire ordering")
+fn jet_net_udp_open(socket: &JetUDPSocket, operation: String) -> Unit JetNetError! {
+    if socket.closed.load(Ordering.Acquire) { Err(jet_net_closed(operation)) } else { Ok(()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2745
+// GATE #4565: kernel primitive
+#Unsafe("query actual UDP local address")
+fn jet_net_udp_local_addr(socket: &JetUDPSocket) -> JetSocketAddr JetNetError! {
+    jet_net_udp_open(socket, "udp local address")?
+    socket.inner.local_addr().map(fn(inner) { JetSocketAddr{inner: inner} }).map_err(fn(error) { jet_net_io_error("udp local address", None, ^error) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2754
+// GATE #4565: kernel primitive
+#Unsafe("update mutex-protected shared UDP timeout")
+fn jet_net_udp_set_timeout(socket: &JetUDPSocket, ms: I64) -> Unit JetNetError! {
+    jet_net_udp_open(socket, "set udp timeout")?
+    _ :: jet_net_timeout(ms).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("set udp timeout", None, None, ^message, None)) })?
+    guard := socket.timeout_ms.lock().unwrap()
+    &guard.set(Val(ms))
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2763
+fn jet_net_udp_send_to(socket: &JetUDPSocket, data: &String, addr: &JetSocketAddr) -> I64 JetNetError! { jet_net_udp_send_slice(socket, data.as_bytes(), addr) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2771
+// GATE #4565: kernel primitive
+#Unsafe("receive actual datagram, preserving original size before truncation")
+fn jet_net_udp_recv_from(socket: &JetUDPSocket, limit: I64) -> JetUDPPacket JetNetError! {
+    jet_net_udp_open(socket, "udp receive")?
+    if limit <= 0 -> return Err(JetNetError.InvalidInput(jet_net_detail("udp receive", None, None, "udp receive limit must be positive", None)))
+    _deadline :: jet_net_operation_deadline(socket.timeout_ms.lock().unwrap().get())
+    if target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32" -> jet_net_udp_apply_timeout(socket, true, "udp receive")?
+    cap :: min(limit as USize, 1 << 20)
+    buf := [U8].repeat(0, 65535)
+    loop {
+        match socket.inner.recv_from(&buf) {
+            Ok((n, addr)) -> {
+                &buf.truncate(min(n, cap))
+                return Ok(JetUDPPacket{data: ^buf, addr: JetSocketAddr{inner: addr}, original_len: n as I64, truncated: n > cap})
+            }
+            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?
+            Err(error) -> return Err(jet_net_io_error("udp receive", None, ^error))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2814
+fn jet_net_udp_packet_data(packet: &JetUDPPacket) -> String { String.from_utf8_lossy(&packet.data).to_string() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2818
+fn jet_net_udp_packet_addr(packet: &JetUDPPacket) -> JetSocketAddr { packet.addr.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2822
+fn jet_net_udp_send_bytes_to(socket: &JetUDPSocket, data: &[U8], addr: &JetSocketAddr) -> I64 JetNetError! { jet_net_udp_send_slice(socket, data, addr) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2830
+// GATE #4565: kernel primitive
+#Unsafe("send actual datagram atomically, waiting on actual scheduler readiness")
+fn jet_net_udp_send_slice(socket: &JetUDPSocket, data: &[U8], addr: &JetSocketAddr) -> I64 JetNetError! {
+    jet_net_udp_open(socket, "udp send")?
+    _deadline :: jet_net_operation_deadline(socket.timeout_ms.lock().unwrap().get())
+    if target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32" -> jet_net_udp_apply_timeout(socket, false, "udp send")?
+    loop {
+        match socket.inner.send_to(data, addr.inner) {
+            Ok(n) if n == data.len() -> return Ok(n as I64)
+            Ok(n) -> return Err(JetNetError.Protocol(jet_net_detail("udp send", Val(addr.inner.to_string()), None, "udp send wrote {n} of {data.len()} datagram bytes", None)))
+            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_udp_scheduler_wait(socket, false, true, "udp send")?
+            Err(error) -> return Err(jet_net_io_error("udp send", Val(addr.inner.to_string()), ^error))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2870
+// GATE #4565: kernel primitive
+#Unsafe("receive actual UDP datagram including zero-size output limit and retain original length")
+fn jet_net_udp_receive(socket: &JetUDPSocket, limit: I64) -> JetUDPPacket JetNetError! {
+    jet_net_udp_open(socket, "udp receive")?
+    if limit < 0 -> return Err(JetNetError.InvalidInput(jet_net_detail("udp receive", None, None, "udp receive limit must be non-negative", None)))
+    _deadline :: jet_net_operation_deadline(socket.timeout_ms.lock().unwrap().get())
+    if target.selected_os() == "wasi" && target.selected_env() == "p2" && target.selected_arch() == "wasm32" -> jet_net_udp_apply_timeout(socket, true, "udp receive")?
+    cap :: min(limit as USize, 65535)
+    bytes := [U8].repeat(0, 65535)
+    (original_len, addr) :: loop {
+        match socket.inner.recv_from(&bytes) {
+            Ok(packet) -> break packet
+            Err(error) if error.kind() is .WouldBlock || error.kind() is .Interrupted -> jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?
+            Err(error) -> return Err(jet_net_io_error("udp receive", None, ^error))
+        }
+    }
+    &bytes.truncate(min(original_len, cap))
+    Ok(JetUDPPacket{data: ^bytes, addr: JetSocketAddr{inner: addr}, original_len: original_len as I64, truncated: original_len > cap})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2909
+fn jet_net_udp_receive_deadline(socket: &JetUDPSocket, limit: I64, deadline: &JetDuration) -> JetUDPPacket JetNetError! {
+    _deadline :: jet_net_explicit_deadline(deadline, "udp receive")?
+    jet_net_udp_receive(socket, limit)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2918
+fn jet_net_udp_send_bytes_to_deadline(socket: &JetUDPSocket, data: &[U8], addr: &JetSocketAddr, deadline: &JetDuration) -> I64 JetNetError! {
+    _deadline :: jet_net_explicit_deadline(deadline, "udp send")?
+    jet_net_udp_send_bytes_to(socket, data, addr)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2928
+// GATE #4565: kernel primitive
+#Unsafe("publish UDP close once with acquire-release ordering and close retained Unix scheduler handle")
+fn jet_net_udp_close(socket: &JetUDPSocket) -> Unit JetNetError! {
+    if !socket.closed.swap(true, Ordering.AcqRel) && target.selected_family() == "unix" -> socket.scheduler.close()
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2939
+fn jet_net_udp_ready(socket: &JetUDPSocket, interest: JetNetReadyInterest, deadline: &JetDuration) -> JetNetReady JetNetError! {
+    jet_net_udp_open(socket, "udp ready")?
+    jet_net_timeout(deadline.as_millis()).map_err(fn(message) { JetNetError.InvalidInput(jet_net_detail("udp ready", None, None, ^message, None)) })?
+    _deadline :: jet_net_operation_deadline(Val(deadline.as_millis()))
+    if jet_deadline_remaining_ms() is Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("udp ready"))
+    if target.selected_family() != "unix" -> return Err(JetNetError.Unsupported(jet_net_detail("udp ready", None, None, "udp readiness backend is unavailable on this target", None)))
+    want_read :: interest is .Read || interest is .ReadWrite
+    want_write :: interest is .Write || interest is .ReadWrite
+    (readable, writable) :: jet_net_udp_scheduler_ready_wait(socket, want_read, want_write, "udp ready")?
+    Ok(JetNetReady{readable: readable, writable: writable})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2976
+fn jet_net_udp_packet_bytes(packet: &JetUDPPacket) -> [U8] { packet.data.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2980
+fn jet_net_udp_packet_original_len(packet: &JetUDPPacket) -> I64 { packet.original_len }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2984
+fn jet_net_udp_packet_truncated(packet: &JetUDPPacket) -> Bool { packet.truncated }
+// PORT-PENDING 0292 crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:2988-4273
 //RS #[cfg(unix)]
 //RS fn jet_net_unix_listen(path: &String) -> Result<JetUnixListener, JetNetError> {
 //RS     jet_scheduler_world_reject_uncontrolled("network");

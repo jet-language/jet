@@ -1,0 +1,18 @@
+use core.compute.runtime.top_solver.[jet_solver_new, jet_solver_require, jet_solver_failure_count, jet_solver_status]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Solver.rs:3-28
+#Test("solver_counts_every_requirement_and_preserves_seed") {
+    solver := jet_solver_new(I64{-17})
+    assert(solver.seed == I64{-17})
+    assert(solver.checked == I64{0})
+    assert(jet_solver_status(solver) == "ok")
+    jet_solver_require(&solver, true)
+    assert(solver.checked == I64{1})
+    assert(jet_solver_failure_count(solver) == I64{0})
+    jet_solver_require(&solver, false)
+    jet_solver_require(&solver, true)
+    assert(solver.checked == I64{3})
+    assert(jet_solver_failure_count(solver) == I64{1})
+    assert(jet_solver_status(solver) == "failed")
+    assert(solver.seed == I64{-17})
+}

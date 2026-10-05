@@ -1,4 +1,11 @@
 use core.mem.runtime.shared_protocol.[JetSharedAtomic, JetSharedScalarKind, jet_shared_scalar_kind, jet_shared_guard_validate_char, JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED]
+use core.mem.runtime.shared_protocol.[JetSharedProtocol, JetSharedCanonicalOwner, JetSharedCanonicalPermit, JetSharedPhysicalOperationOutcome, JetConditionProtocol, JetConditionWaiter, JetSharedWaitHandoff, jet_shared_transaction_begin, jet_shared_guard_acquire, jet_shared_guard_map_path, jet_shared_guard_split_path, jet_shared_acquire_ordered, jet_shared_acquire, jet_shared_guard_acquire_ordered, jet_shared_condition_wait, jet_shared_condition_wait_once, jet_shared_condition_wait_once_with_handoff, JET_SHARED_GUARD_EDIT_REQUIRED]
+use std.sync.[Arc, Mutex, Condvar, mpsc]
+use std.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use std.any.Any
+use std.boxed.Box
+use std.[thread, panic]
+use std.time.Duration
 
 // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:20
 #Test("Shared character storage accepts scalars and rejects invalid code points") {
@@ -32,4 +39,401 @@ use core.mem.runtime.shared_protocol.[JetSharedAtomic, JetSharedScalarKind, jet_
     assert_eq(jet_shared_scalar_kind<Bool>(), Val(JetSharedScalarKind.Bool))
     assert_eq(jet_shared_scalar_kind<Char>(), Val(JetSharedScalarKind.Char))
     assert_eq(jet_shared_scalar_kind<String>(), None)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1751
+struct CountingWaiter { count: AtomicUsize }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1752
+struct PanicWaiter {}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1753
+struct BlockingWaiter { notified: AtomicBool, lock: Mutex<()>, wake: Condvar }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1759
+impl CountingWaiter {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1760
+    fn new() -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("native atomic counter observes each test waiter wake") { Self{count: AtomicUsize.new(0)} }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1765
+impl JetConditionWaiter for CountingWaiter {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1766
+    fn park(self: &Self) -> () ()! { Ok(()) }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1770
+    fn wake(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("count actual native notification delivery with SeqCst ordering") { self.count.fetch_add(1, Ordering.SeqCst) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1776
+impl JetConditionWaiter for PanicWaiter {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1777
+    fn park(self: &Self) -> () ()! { panic("waiter panic") }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1781
+    fn wake(self: &Self) -> {}
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1784
+impl BlockingWaiter {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1785
+    fn new() -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("test waiter uses a real native lock and condition, preserving early notifications") {
+            Self{notified: AtomicBool.new(false), lock: Mutex.new(()), wake: Condvar.new()}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1794
+impl JetConditionWaiter for BlockingWaiter {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1795
+    fn park(self: &Self) -> () ()! {
+        // GATE #4565: kernel primitive
+        #Unsafe("consume a native wake atomically or block under the waiter mutex until one arrives") {
+            if self.notified.swap(false, Ordering.Acquire) -> return Ok(())
+            lock := self.lock.lock().unwrap()
+            loop !self.notified.swap(false, Ordering.Acquire) { lock = self.wake.wait(^lock).unwrap() }
+            Ok(())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1812
+    fn wake(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("publish the native wake while holding the mutex used by park") {
+            _lock :: self.lock.lock().unwrap()
+            self.notified.store(true, Ordering.Release)
+            self.wake.notify_one()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1819
+#Derive(Default)
+struct TransactionTestOwnerState { staged: Bool, published: Bool, discards: Usize }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1826
+struct TransactionTestOwner { order: Usize, state: Arc<Mutex<TransactionTestOwnerState>> }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1831
+struct TransactionTestPermit { state: Arc<Mutex<TransactionTestOwnerState>>, held: AtomicBool }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1836
+impl JetSharedCanonicalOwner for TransactionTestOwner {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1837
+    fn owner_identity(self: &Self) -> Usize {
+        // GATE #4565: kernel primitive
+        #Unsafe("test owner identity is its stable native object address, not its ordering key") { std.ptr.from_ref(self).addr() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1841
+    fn protocol_order_key(self: &Self) -> Usize { self.order }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1845
+    fn acquire_permit(self: Arc<Self>, _editable: Bool) -> Arc<JetSharedCanonicalPermit> Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("test permit retains native owner state and starts held") {
+            Ok(Arc.new(TransactionTestPermit{state: self.state.clone(), held: AtomicBool.new(true)}))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1856
+impl JetSharedCanonicalPermit for TransactionTestPermit {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1857
+    fn editable(self: &Self) -> Bool { true }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1861
+    fn held(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        #Unsafe("read the native test permit's held state") { self.held.load(Ordering.Acquire) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1865
+    fn release(self: &Self) -> JetSharedPhysicalOperationOutcome<()> {
+        // GATE #4565: kernel primitive
+        #Unsafe("publish release of the native test permit") { self.held.store(false, Ordering.Release) }
+        JetSharedPhysicalOperationOutcome.new(Ok(()), None)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1870
+    fn release_during_drop(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("publish drop-time release of the native test permit") { self.held.store(false, Ordering.Release) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1874
+    fn reacquire(self: &Self, cancelled: &fn() -> Bool) -> Bool {
+        if cancelled() -> return false
+        // GATE #4565: kernel primitive
+        #Unsafe("restore the native test permit only when not cancelled") { self.held.store(true, Ordering.Release) }
+        true
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1882
+    fn discard_staged(self: &Self) -> () Err! {
+        // GATE #4565: kernel primitive
+        #Unsafe("observe discard-before-rollback through the native test state mutex") {
+            state := self.state.lock().unwrap()
+            state.staged = false
+            state.discards += 1
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1889
+    fn into_any(self: Arc<Self>) -> Arc<Any> { self }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1894
+#Test("transaction_stage_failure_discards_all_participants_before_rollback") {
+    // GATE #4565: kernel primitive
+    #Unsafe("native mutex and atomic observations preserve the original failure/discard test ordering") {
+        first :: Arc.new(TransactionTestOwner{order: 1, state: Arc.new(Mutex.new(TransactionTestOwnerState.default()))})
+        second :: Arc.new(TransactionTestOwner{order: 2, state: Arc.new(Mutex.new(TransactionTestOwnerState.default()))})
+        first_owner :: first.clone() as Arc<JetSharedCanonicalOwner>
+        second_owner :: second.clone() as Arc<JetSharedCanonicalOwner>
+        applied :: Arc.new(AtomicBool.new(false))
+        rolled_back :: Arc.new(AtomicBool.new(false))
+        transaction := jet_shared_transaction_begin()
+        loop (owner, state, fail) in [(first_owner, first.state.clone(), false), (second_owner, second.state.clone(), true)] {
+            staged_state :: state.clone()
+            transaction.record_edit_with_staged_commit(^owner, Box.new(fn() {}),
+                Box.new(fn(_) {
+                    staged_state.lock().unwrap().staged = true
+                    if fail { Err("participant staging rejected") } else { Ok(()) }
+                }), Box.new(fn(_) { state.lock().unwrap().published = true }))
+        }
+        rollback_flag :: rolled_back.clone()
+        transaction.record_rollback(Box.new(fn() { rollback_flag.store(true, Ordering.Release) }))
+        apply_flag :: applied.clone()
+        result :: transaction.try_commit_with(fn() { apply_flag.store(true, Ordering.Release) })
+        assert_eq(result, Err("participant staging rejected"))
+        assert(!applied.load(Ordering.Acquire))
+        assert(rolled_back.load(Ordering.Acquire))
+        loop owner in [first, second] {
+            state :: owner.state.lock().unwrap()
+            assert(!state.staged)
+            assert(!state.published)
+            assert_eq(state.discards, 1)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1956
+#Test("full_path_map_and_split_preserve_parent_prefix_and_one_permit") {
+    protocol :: JetSharedProtocol.new()
+    root :: jet_shared_guard_acquire(&protocol, true, fn() { false }).unwrap()
+    mapped :: jet_shared_guard_map_path(&root, &[4, 7], true).unwrap()
+    assert(!root.held())
+    assert_eq(mapped.path(), &[4, 7])
+    (first, second) :: jet_shared_guard_split_path(&mapped, &[10, 11], &[20, 21, 22], true).unwrap()
+    assert(!mapped.held())
+    assert_eq(first.path(), &[4, 7, 10, 11])
+    assert_eq(second.path(), &[4, 7, 20, 21, 22])
+    assert(first.held())
+    assert(second.held())
+    // GATE #4565: kernel primitive
+    #Unsafe("compare native permit identity through the public checked guard accessor") { assert(Arc.ptr_eq(&first.permit_arc(), &second.permit_arc())) }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1974
+#Test("failed_full_path_projection_keeps_parent_live") {
+    protocol :: JetSharedProtocol.new()
+    root :: jet_shared_guard_acquire(&protocol, false, fn() { false }).unwrap()
+    assert_eq(jet_shared_guard_map_path(&root, &[3, 5], true).err(), Val(JET_SHARED_GUARD_EDIT_REQUIRED))
+    assert(root.held())
+    assert(root.path().is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1986
+#Test("ordered_acquisition_deduplicates_one_protocol") {
+    protocol :: JetSharedProtocol.new()
+    // GATE #4565: kernel primitive
+    permits :: #Unsafe("two native Arc aliases must acquire one physical permit") { jet_shared_acquire_ordered([protocol.clone(), protocol.clone()]) }
+    assert_eq(permits.len(), 1)
+    assert(permits[0].editable())
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1995
+#Test("ordered_acquisition_uses_protocol_address_order") {
+    first :: JetSharedProtocol.new()
+    second :: JetSharedProtocol.new()
+    // GATE #4565: kernel primitive
+    #Unsafe("canonical owner identity projects the same stable native address used for acquisition order") {
+        expected :: std.cmp.min(first.owner_identity(), second.owner_identity())
+        permits :: jet_shared_acquire_ordered([second, first])
+        assert_eq(permits[0].protocol.owner_identity(), expected, "multi-cell commit locks must use stable address order")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2011
+#Test("contended_transaction_waits_and_applies_its_body_once") {
+    // GATE #4565: kernel primitive
+    #Unsafe("real native thread, channel and mutex retain the original blocked-commit scheduling control") {
+        protocol :: JetSharedProtocol.new()
+        held :: protocol.acquire(true, fn() { false }).unwrap()
+        log_lines :: Arc.new(Mutex.new([String]{}))
+        (ready_tx, ready_rx) :: mpsc.channel()
+        worker_protocol :: protocol.clone()
+        worker_log_lines :: log_lines.clone()
+        worker :: thread.spawn(fn() {
+            transaction := jet_shared_transaction_begin()
+            transaction.record_edit(^worker_protocol, Box.new(fn() { worker_log_lines.lock().unwrap().push("transaction-body") }))
+            ready_tx.send(()).unwrap()
+            transaction.commit()
+        })
+        ready_rx.recv_timeout(Duration.from_secs(1)).expect("transaction worker reached the lock wait")
+        assert(log_lines.lock().unwrap().is_empty(), "a blocked commit must not log")
+        drop(^held)
+        worker.join().unwrap()
+        assert_eq(*log_lines.lock().unwrap(), ["transaction-body"], "the committed transaction emits its body log exactly once")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2047
+#Test("notify_one_claims_each_waiter_once") {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain two distinct native waiter registrations and observe exactly one wake per waiter") {
+        condition :: JetConditionProtocol.new()
+        first :: Arc.new(CountingWaiter.new())
+        second :: Arc.new(CountingWaiter.new())
+        _first_registration :: condition.register(first.clone())
+        _second_registration :: condition.register(second.clone())
+        condition.notify_one()
+        condition.notify_one()
+        assert_eq(first.count.load(Ordering.SeqCst), 1)
+        assert_eq(second.count.load(Ordering.SeqCst), 1)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2068
+#Test("panic_during_park_unregisters_and_reacquires") {
+    // GATE #4565: kernel primitive
+    #Unsafe("native unwind exercises registration drop and permit reacquisition rather than replacing panic with an error") {
+        protocol :: JetSharedProtocol.new()
+        condition :: JetConditionProtocol.new()
+        permit :: protocol.acquire(true, fn() { false }).unwrap()
+        result :: panic.catch_unwind(panic.AssertUnwindSafe(fn() {
+            _ :: jet_shared_condition_wait<()>(permit.as_ref(), &condition,
+                fn() -> Bool ()! { Ok(false) }, fn() { Arc.new(PanicWaiter{}) })
+        }))
+        assert(result.is_err())
+        assert(permit.held())
+        drop(^permit)
+        assert(protocol.acquire(true, fn() { false }).is_some())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2089
+#Test("notify_before_registration_becomes_a_spurious_wake") {
+    // GATE #4565: kernel primitive
+    #Unsafe("native unwind control proves a retained early notification bypasses the panicking park") {
+        protocol :: JetSharedProtocol.new()
+        condition :: JetConditionProtocol.new()
+        permit :: protocol.acquire(true, fn() { false }).unwrap()
+        condition.notify_one()
+        result :: panic.catch_unwind(panic.AssertUnwindSafe(fn() {
+            jet_shared_condition_wait_once(permit.as_ref(), &condition, Arc.new(PanicWaiter{}))
+        }))
+        assert(result.is_ok())
+        assert(permit.held())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2108
+#Test("notify_between_registration_and_park_is_not_lost") {
+    // GATE #4565: kernel primitive
+    #Unsafe("native channels force notification between registration and park across 64 real waiter schedules") {
+        loop _ in 0..64 {
+            protocol :: JetSharedProtocol.new()
+            condition :: JetConditionProtocol.new()
+            waiter :: Arc.new(BlockingWaiter.new())
+            rescue :: waiter.clone()
+            ready :: Arc.new(AtomicBool.new(false))
+            (registered_tx, registered_rx) :: mpsc.channel()
+            (park_tx, park_rx) :: mpsc.channel()
+            (done_tx, done_rx) :: mpsc.channel()
+            worker_condition :: condition.clone()
+            worker_ready :: ready.clone()
+            worker :: thread.spawn(fn() {
+                permit :: protocol.acquire(true, fn() { false }).unwrap()
+                checks := Usize{0}
+                result :: jet_shared_condition_wait<()>(permit.as_ref(), &worker_condition,
+                    fn() -> Bool ()! {
+                        checks += 1
+                        if checks == 2 {
+                            registered_tx.send(()).unwrap()
+                            park_rx.recv().unwrap()
+                            return Ok(false)
+                        }
+                        Ok(worker_ready.load(Ordering.Acquire))
+                    }, fn() { waiter.clone() })
+                done_tx.send(result.is_ok()).unwrap()
+            })
+            registered_rx.recv_timeout(Duration.from_secs(1)).expect("waiter registers before the second predicate check")
+            ready.store(true, Ordering.Release)
+            condition.notify_one()
+            park_tx.send(()).unwrap()
+            done :: done_rx.recv_timeout(Duration.from_secs(1))
+            if done.is_err() { rescue.wake() }
+            assert_eq(done.ok(), Val(true))
+            worker.join().unwrap()
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2155
+struct OrderedHandoffWaiter { events: Arc<Mutex<[String]>> }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2157
+impl JetConditionWaiter for OrderedHandoffWaiter {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2158
+    fn park(self: &Self) -> () ()! {
+        // GATE #4565: kernel primitive
+        #Unsafe("record the actual native handoff park ordering under the event mutex") { self.events.lock().unwrap().push("park") }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2163
+    fn wake(self: &Self) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("record the actual native handoff notification ordering under the event mutex") { self.events.lock().unwrap().push("wake") }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2168
+struct NotifyDuringHandoff { condition: Arc<JetConditionProtocol>, events: Arc<Mutex<[String]>> }
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2173
+impl JetSharedWaitHandoff for NotifyDuringHandoff {
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2174
+    fn suspend(self: &Self) -> () ()! {
+        // GATE #4565: kernel primitive
+        #Unsafe("log physical suspension before delivering the racing native notification") { self.events.lock().unwrap().push("suspend") }
+        self.condition.notify_one()
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2180
+    fn resume(self: &Self, cancelled: Bool) -> Bool ()! {
+        // GATE #4565: kernel primitive
+        #Unsafe("log physical reacquisition before restoration of the local native permit") { self.events.lock().unwrap().push("resume") }
+        assert(!cancelled)
+        Ok(true)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2186
+    fn abort(self: &Self) -> () ()! {
+        // GATE #4565: kernel primitive
+        #Unsafe("record an actual handoff abort in the shared native event log") { self.events.lock().unwrap().push("abort") }
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2192
+#Test("condition_notification_during_physical_handoff_is_not_lost") {
+    // GATE #4565: kernel primitive
+    #Unsafe("native event log observes notification during real protocol suspension without calling park") {
+        protocol :: JetSharedProtocol.new()
+        permit :: protocol.acquire(true, fn() { false }).unwrap()
+        condition :: JetConditionProtocol.new()
+        events :: Arc.new(Mutex.new([String]{}))
+        waiter :: Arc.new(OrderedHandoffWaiter{events: events.clone()}) as Arc<JetConditionWaiter>
+        handoff := NotifyDuringHandoff{condition: condition.clone(), events: events.clone()}
+        assert_eq(jet_shared_condition_wait_once_with_handoff(permit.as_ref(), &condition, ^waiter, Val(&handoff)), Ok(()))
+        assert_eq(*events.lock().unwrap(), ["suspend", "wake", "resume"])
+        assert(permit.held())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/SharedProtocol.rs:2218
+#Test("ordered_guard_acquisition_preserves_indices_and_shares_duplicate_permits") {
+    // GATE #4565: kernel primitive
+    #Unsafe("native alias identity observes shared duplicate permits while retaining each guard's own capability") {
+        first :: JetSharedProtocol.new()
+        second :: JetSharedProtocol.new()
+        guards :: jet_shared_guard_acquire_ordered([(11, second.clone(), false), (7, first.clone(), true), (12, first.clone(), false)])
+        indices := guards.iter().map(fn((index, _)) { *index }).collect<[Usize]>()
+        indices.sort_unstable()
+        assert_eq(indices, [7, 11, 12])
+        assert(guards.iter().all(fn((_, guard)) { guard.held() }))
+        editability := guards.iter().map(fn((index, guard)) { (*index, guard.editable()) }).collect<[(Usize, Bool)]>()
+        editability.sort_unstable_by_key(fn((index, _)) { *index })
+        assert_eq(editability, [(7, true), (11, false), (12, false)])
+        permit_editability := guards.iter().map(fn((index, guard)) { (*index, guard.permit().editable()) }).collect<[(Usize, Bool)]>()
+        permit_editability.sort_unstable_by_key(fn((index, _)) { *index })
+        assert_eq(permit_editability, [(7, true), (11, false), (12, true)])
+        first_guard :: guards.iter().find(fn((index, _)) { *index == 7 }).unwrap()
+        duplicate_guard :: guards.iter().find(fn((index, _)) { *index == 12 }).unwrap()
+        assert(Arc.ptr_eq(&first_guard.1.permit_arc(), &duplicate_guard.1.permit_arc()))
+        drop(^guards)
+        assert(jet_shared_acquire(&first, true, fn() { false }).is_some())
+        assert(jet_shared_acquire(&second, true, fn() { false }).is_some())
+    }
 }

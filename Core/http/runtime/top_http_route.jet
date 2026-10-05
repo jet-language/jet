@@ -1,332 +1,225 @@
-// PORT-PENDING 0276 crates-jet-codegen-src-prelude-corelib-top-httpclient-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:1-328
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-HTTP-ROUTE-SYNTAX2=A: one route grammar for every HTTP entry point.
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub enum JetHTTPRouteSegment {
-//RS     Static(String),
-//RS     Param(String),
-//RS     CatchAll(String),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct JetHTTPRoutePattern {
-//RS     segments: Vec<JetHTTPRouteSegment>,
-//RS }
-//RS 
-//RS fn jet_http_route_name(name: &str) -> bool {
-//RS     let mut chars = name.chars();
-//RS     matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
-//RS         && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
-//RS }
-//RS 
-//RS 
-//RS fn jet_http_route_decode_segment(segment: &str) -> Result<String, String> {
-//RS     let decoded = jet_std::jet_url_percent_decode_str(segment)?;
-//RS     if decoded.contains('/') {
-//RS         return Err("encoded slash is ambiguous".to_string());
-//RS     }
-//RS     if decoded == "." || decoded == ".." {
-//RS         return Err("dot traversal segment is not allowed".to_string());
-//RS     }
-//RS     Ok(decoded)
-//RS }
-//RS pub(crate) fn jet_http_route_decode_path_segment<'a>(
-//RS     segment: &'a str,
-//RS ) -> Result<std::borrow::Cow<'a, str>, String> {
-//RS     if !segment.as_bytes().contains(&b'%') {
-//RS         if segment == "." || segment == ".." {
-//RS             return Err("dot traversal segment is not allowed".to_string());
-//RS         }
-//RS         return Ok(std::borrow::Cow::Borrowed(segment));
-//RS     }
-//RS     jet_http_route_decode_segment(segment).map(std::borrow::Cow::Owned)
-//RS }
-//RS 
-//RS fn jet_http_route_parse(pattern: &str) -> Result<JetHTTPRoutePattern, String> {
-//RS     if !pattern.starts_with('/') {
-//RS         return Err(format!("E2805: invalid HTTP route `{pattern}`: routes must start with `/`"));
-//RS     }
-//RS     let mut names = std::collections::BTreeSet::new();
-//RS     let mut segments = Vec::new();
-//RS     let raw_segments: Vec<&str> = pattern.split('/').skip(1).collect();
-//RS     for (index, segment) in raw_segments.iter().enumerate() {
-//RS         if segment.is_empty() {
-//RS             if raw_segments.len() == 1 {
-//RS                 continue;
-//RS             }
-//RS             return Err(format!("E2805: invalid HTTP route `{pattern}`: empty path segments are not allowed"));
-//RS         }
-//RS         if segment.contains('{') || segment.contains('}') {
-//RS             return Err(format!("E2805: invalid HTTP route `{pattern}`: use `:name` or final `*name`; braces are not route markers"));
-//RS         }
-//RS         if *segment == "*" {
-//RS             return Err(format!("E2805: invalid HTTP route `{pattern}`: write a named catch-all such as `*wildcard`"));
-//RS         }
-//RS         let parsed = if let Some(name) = segment.strip_prefix(':') {
-//RS             if !jet_http_route_name(name) {
-//RS                 return Err(format!("E2805: invalid HTTP route `{pattern}`: parameter names must match `[A-Za-z_][A-Za-z0-9_]*`"));
-//RS             }
-//RS             if !names.insert(name.to_string()) {
-//RS                 return Err(format!("E2805: invalid HTTP route `{pattern}`: duplicate parameter `{name}`"));
-//RS             }
-//RS             JetHTTPRouteSegment::Param(name.to_string())
-//RS         } else if let Some(name) = segment.strip_prefix('*') {
-//RS             if index + 1 != raw_segments.len() {
-//RS                 return Err(format!("E2805: invalid HTTP route `{pattern}`: `*name` catch-all must be final"));
-//RS             }
-//RS             if !jet_http_route_name(name) {
-//RS                 return Err(format!("E2805: invalid HTTP route `{pattern}`: catch-all names must match `[A-Za-z_][A-Za-z0-9_]*`"));
-//RS             }
-//RS             if !names.insert(name.to_string()) {
-//RS                 return Err(format!("E2805: invalid HTTP route `{pattern}`: duplicate parameter `{name}`"));
-//RS             }
-//RS             JetHTTPRouteSegment::CatchAll(name.to_string())
-//RS         } else {
-//RS             JetHTTPRouteSegment::Static(jet_http_route_decode_segment(segment).map_err(|reason| {
-//RS                 format!("E2805: invalid HTTP route `{pattern}`: {reason}")
-//RS             })?)
-//RS         };
-//RS         segments.push(parsed);
-//RS     }
-//RS     Ok(JetHTTPRoutePattern { segments })
-//RS }
-//RS  
-//RS /// Parse one route pattern for every HTTP-facing adapter.  Keeping this
-//RS /// constructor beside the grammar lets typed projections carry the parsed
-//RS /// pattern instead of reparsing a rendered OpenAPI path.
-//RS pub fn jet_http_route_pattern(pattern: &str) -> Result<JetHTTPRoutePattern, String> {
-//RS     jet_http_route_parse(pattern)
-//RS }
-//RS 
-//RS fn jet_http_route_encode_component(value: &str, query: bool, allow_slash: bool) -> String {
-//RS     let encoded = jet_std::jet_url_percent_encode(value, allow_slash);
-//RS     if query {
-//RS         encoded.replace("%20", "+")
-//RS     } else {
-//RS         encoded
-//RS     }
-//RS }
-//RS 
-//RS pub fn jet_http_route_encode_segment(value: &str, allow_slash: bool) -> String {
-//RS     jet_http_route_encode_component(value, false, allow_slash)
-//RS }
-//RS 
-//RS pub fn jet_http_route_openapi_path(pattern: &JetHTTPRoutePattern) -> String {
-//RS     let mut path = String::from("/");
-//RS     for (index, segment) in pattern.segments.iter().enumerate() {
-//RS         if index > 0 {
-//RS             path.push('/');
-//RS         }
-//RS         match segment {
-//RS             JetHTTPRouteSegment::Static(value) => {
-//RS                 path.push_str(&jet_http_route_encode_segment(value, false));
-//RS             }
-//RS             JetHTTPRouteSegment::Param(name) | JetHTTPRouteSegment::CatchAll(name) => {
-//RS                 path.push('{');
-//RS                 path.push_str(name);
-//RS                 path.push('}');
-//RS             }
-//RS         }
-//RS     }
-//RS     path
-//RS }
-//RS 
-//RS fn jet_http_route_path<'a>(path: &'a str) -> Result<Vec<std::borrow::Cow<'a, str>>, String> {
-//RS     let path = path.split('?').next().unwrap_or(path);
-//RS     if !path.starts_with('/') {
-//RS         return Err("request path must start with `/`".to_string());
-//RS     }
-//RS     let mut segments = path.split('/').skip(1);
-//RS     let Some(first) = segments.next() else {
-//RS         return Ok(Vec::new());
-//RS     };
-//RS     if first.is_empty() && segments.next().is_none() {
-//RS         return Ok(Vec::new());
-//RS     }
-//RS     let mut decoded = Vec::new();
-//RS     decoded.push(jet_http_route_decode_path_segment(first)?);
-//RS     for segment in segments {
-//RS         decoded.push(jet_http_route_decode_path_segment(segment)?);
-//RS     }
-//RS     Ok(decoded)
-//RS }
-//RS pub(crate) fn jet_http_route_validate_path(path: &str) -> Result<(), String> {
-//RS     let path = path.split('?').next().unwrap_or(path);
-//RS     if !path.starts_with('/') {
-//RS         return Err("request path must start with `/`".to_string());
-//RS     }
-//RS     if path == "/" {
-//RS         return Ok(());
-//RS     }
-//RS     for segment in path.split('/').skip(1) {
-//RS         jet_http_route_decode_path_segment(segment)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub(crate) fn jet_http_route_matches_path(pattern: &JetHTTPRoutePattern, path: &str) -> bool {
-//RS     let path = path.split('?').next().unwrap_or(path);
-//RS     let path_len = if path == "/" {
-//RS         0
-//RS     } else {
-//RS         path.split('/').skip(1).count()
-//RS     };
-//RS     let has_catch_all = matches!(pattern.segments.last(), Some(JetHTTPRouteSegment::CatchAll(_)));
-//RS     let required = pattern.segments.len() - usize::from(has_catch_all);
-//RS     if path_len < required || !has_catch_all && path_len != required {
-//RS         return false;
-//RS     }
-//RS     for (index, candidate) in path.split('/').skip(1).enumerate() {
-//RS         if index >= required {
-//RS             continue;
-//RS         }
-//RS         let Some(segment) = pattern.segments.get(index) else {
-//RS             return false;
-//RS         };
-//RS         if let JetHTTPRouteSegment::Static(expected) = segment {
-//RS             let equal = if candidate.as_bytes().contains(&b'%') {
-//RS                 jet_http_route_decode_path_segment(candidate)
-//RS                     .is_ok_and(|decoded| decoded.as_ref() == expected)
-//RS             } else {
-//RS                 candidate == expected
-//RS             };
-//RS             if !equal {
-//RS                 return false;
-//RS             }
-//RS         }
-//RS     }
-//RS     true
-//RS }
-//RS 
-//RS pub(crate) fn jet_http_route_params_path(
-//RS     pattern: &JetHTTPRoutePattern,
-//RS     path: &str,
-//RS ) -> Result<std::collections::BTreeMap<String, String>, String> {
-//RS     let path = path.split('?').next().unwrap_or(path);
-//RS     let mut params = std::collections::BTreeMap::new();
-//RS     let mut segments = path.split('/').skip(1);
-//RS     for segment in &pattern.segments {
-//RS         match segment {
-//RS             JetHTTPRouteSegment::Param(name) => {
-//RS                 if let Some(value) = segments.next() {
-//RS                     params.insert(
-//RS                         name.clone(),
-//RS                         jet_http_route_decode_path_segment(value)?.into_owned(),
-//RS                     );
-//RS                 }
-//RS             }
-//RS             JetHTTPRouteSegment::CatchAll(name) => {
-//RS                 let mut value = String::new();
-//RS                 for (offset, segment) in segments.enumerate() {
-//RS                     if offset > 0 {
-//RS                         value.push('/');
-//RS                     }
-//RS                     value.push_str(
-//RS                         jet_http_route_decode_path_segment(segment)?.as_ref(),
-//RS                     );
-//RS                 }
-//RS                 params.insert(name.clone(), value);
-//RS                 break;
-//RS             }
-//RS             JetHTTPRouteSegment::Static(_) => {
-//RS                 let _ = segments.next();
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(params)
-//RS }
-//RS 
-//RS 
-//RS pub(crate) fn jet_http_route_matches<'a>(
-//RS     pattern: &JetHTTPRoutePattern,
-//RS     path: &[std::borrow::Cow<'a, str>],
-//RS ) -> bool {
-//RS     let has_catch_all = matches!(pattern.segments.last(), Some(JetHTTPRouteSegment::CatchAll(_)));
-//RS     let required = pattern.segments.len() - usize::from(has_catch_all);
-//RS     if path.len() < required || !has_catch_all && path.len() != required {
-//RS         return false;
-//RS     }
-//RS     pattern.segments.iter().enumerate().all(|(index, segment)| {
-//RS         match segment {
-//RS             JetHTTPRouteSegment::Static(expected) => {
-//RS                 path.get(index).is_some_and(|candidate| candidate.as_ref() == expected)
-//RS             }
-//RS             JetHTTPRouteSegment::Param(_) | JetHTTPRouteSegment::CatchAll(_) => true,
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS pub(crate) fn jet_http_route_params<'a>(
-//RS     pattern: &JetHTTPRoutePattern,
-//RS     path: &[std::borrow::Cow<'a, str>],
-//RS ) -> std::collections::BTreeMap<String, String> {
-//RS     let mut params = std::collections::BTreeMap::new();
-//RS     for (index, segment) in pattern.segments.iter().enumerate() {
-//RS         match segment {
-//RS             JetHTTPRouteSegment::Param(name) => {
-//RS                 if let Some(value) = path.get(index) {
-//RS                     params.insert(name.clone(), value.as_ref().to_string());
-//RS                 }
-//RS             }
-//RS             JetHTTPRouteSegment::CatchAll(name) => {
-//RS                 let mut value = String::new();
-//RS                 for (offset, segment) in path[index..].iter().enumerate() {
-//RS                     if offset > 0 {
-//RS                         value.push('/');
-//RS                     }
-//RS                     value.push_str(segment.as_ref());
-//RS                 }
-//RS                 params.insert(name.clone(), value);
-//RS                 break;
-//RS             }
-//RS             JetHTTPRouteSegment::Static(_) => {}
-//RS         }
-//RS     }
-//RS     params
-//RS }
-//RS 
-//RS pub(crate) fn jet_http_route_match<'a>(
-//RS     pattern: &JetHTTPRoutePattern,
-//RS     path: &[std::borrow::Cow<'a, str>],
-//RS ) -> Option<std::collections::BTreeMap<String, String>> {
-//RS     jet_http_route_matches(pattern, path).then(|| jet_http_route_params(pattern, path))
-//RS }
-//RS 
-//RS 
-//RS fn jet_http_route_rank(segment: &JetHTTPRouteSegment) -> u8 {
-//RS     match segment {
-//RS         JetHTTPRouteSegment::Static(_) => 2,
-//RS         JetHTTPRouteSegment::Param(_) => 1,
-//RS         JetHTTPRouteSegment::CatchAll(_) => 0,
-//RS     }
-//RS }
-//RS 
-//RS pub(crate) fn jet_http_route_selection_cmp(
-//RS     left: &JetHTTPRoutePattern,
-//RS     left_order: usize,
-//RS     right: &JetHTTPRoutePattern,
-//RS     right_order: usize,
-//RS ) -> std::cmp::Ordering {
-//RS     for (left, right) in left.segments.iter().zip(&right.segments) {
-//RS         let order = jet_http_route_rank(left).cmp(&jet_http_route_rank(right));
-//RS         if order != std::cmp::Ordering::Equal {
-//RS             return order;
-//RS         }
-//RS     }
-//RS     // If both matched and one pattern ends first, it is the exact route while
-//RS     // the longer pattern can only add an empty catch-all. Exact wins.
-//RS     right.segments.len().cmp(&left.segments.len())
-//RS         // Equivalent shapes use first registration, identically in both routers.
-//RS         .then_with(|| right_order.cmp(&left_order))
-//RS }
-//RS 
-//RS pub(crate) fn jet_http_route_shape(pattern: &JetHTTPRoutePattern) -> String {
-//RS     pattern.segments.iter().map(|segment| match segment {
-//RS         JetHTTPRouteSegment::Static(value) => format!("s{}:{value}", value.len()),
-//RS         JetHTTPRouteSegment::Param(_) => "p".to_string(),
-//RS         JetHTTPRouteSegment::CatchAll(_) => "w".to_string(),
-//RS     }).collect::<Vec<_>>().join("/")
-//RS }
-// END-PORT-PENDING 0276 crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:1-328
+use core.net.runtime.std_url_mime.[jet_url_percent_decode_str, jet_url_percent_encode]
+use std.borrow.Cow
+use std.collections.[BTreeMap, BTreeSet]
+use std.cmp.Ordering
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:1
+// One route grammar for every HTTP entry point; decoded views retain their loan.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:3
+#Derive(Clone, Debug, PartialEq, Eq)
+pub enum JetHTTPRouteSegment { Static(String), Param(String), CatchAll(String) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:10
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct JetHTTPRoutePattern { segments: [JetHTTPRouteSegment] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:15
+fn jet_http_route_name(name: String) -> Bool {
+    chars := name.chars()
+    first :: chars.next().is_some_and(fn(c) { c == '_' || c.is_ascii_alphabetic() })
+    first && chars.all(fn(c) { c == '_' || c.is_ascii_alphanumeric() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:22
+fn jet_http_route_decode_segment(segment: String) -> String Err! {
+    decoded :: jet_url_percent_decode_str(segment)?
+    if decoded.contains("/") -> return Err("encoded slash is ambiguous")
+    if decoded == "." || decoded == ".." -> return Err("dot traversal segment is not allowed")
+    Ok(^decoded)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:32
+fn jet_http_route_decode_path_segment(segment: String) -> Cow<String> Err! {
+    if !segment.as_bytes().contains(U8{37}) {
+        if segment == "." || segment == ".." -> return Err("dot traversal segment is not allowed")
+        return Ok(Cow.Borrowed(segment))
+    }
+    jet_http_route_decode_segment(segment).map(fn(decoded) { Cow.Owned(^decoded) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:44
+fn jet_http_route_parse(pattern: String) -> JetHTTPRoutePattern Err! {
+    if !pattern.starts_with("/") -> return Err("E2805: invalid HTTP route `{pattern}`: routes must start with `/`")
+    names := BTreeSet.new()
+    segments := [JetHTTPRouteSegment]{}
+    raw_segments :: pattern.split('/').skip(1).collect<[String]>()
+    loop (index, segment) in raw_segments.iter().enumerate() {
+        if segment.is_empty() {
+            if raw_segments.len() == 1 -> continue
+            return Err("E2805: invalid HTTP route `{pattern}`: empty path segments are not allowed")
+        }
+        if segment.contains("{") || segment.contains("}") {
+            return Err("E2805: invalid HTTP route `{pattern}`: use `:name` or final `*name`; braces are not route markers")
+        }
+        if segment == "*" -> return Err("E2805: invalid HTTP route `{pattern}`: write a named catch-all such as `*wildcard`")
+        parsed :: if Val(name) :: segment.strip_prefix(":") {
+            if !jet_http_route_name(name) {
+                return Err("E2805: invalid HTTP route `{pattern}`: parameter names must match `[A-Za-z_][A-Za-z0-9_]*`")
+            }
+            if !names.insert(name.to_string()) -> return Err("E2805: invalid HTTP route `{pattern}`: duplicate parameter `{name}`")
+            JetHTTPRouteSegment.Param(name.to_string())
+        } else if Val(name) :: segment.strip_prefix("*") {
+            if index + 1 != raw_segments.len() -> return Err("E2805: invalid HTTP route `{pattern}`: `*name` catch-all must be final")
+            if !jet_http_route_name(name) {
+                return Err("E2805: invalid HTTP route `{pattern}`: catch-all names must match `[A-Za-z_][A-Za-z0-9_]*`")
+            }
+            if !names.insert(name.to_string()) -> return Err("E2805: invalid HTTP route `{pattern}`: duplicate parameter `{name}`")
+            JetHTTPRouteSegment.CatchAll(name.to_string())
+        } else {
+            JetHTTPRouteSegment.Static(jet_http_route_decode_segment(segment).map_err(fn(reason) {
+                "E2805: invalid HTTP route `{pattern}`: {reason}"
+            })?)
+        }
+        &segments.push(^parsed)
+    }
+    Ok(JetHTTPRoutePattern{segments: ^segments})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:96
+pub fn jet_http_route_pattern(pattern: String) -> JetHTTPRoutePattern Err! { jet_http_route_parse(pattern) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:100
+fn jet_http_route_encode_component(value: String, query: Bool, allow_slash: Bool) -> String {
+    encoded :: jet_url_percent_encode(value, allow_slash)
+    if query -> encoded.replace("%20", "+")
+    else -> ^encoded
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:109
+pub fn jet_http_route_encode_segment(value: String, allow_slash: Bool) -> String { jet_http_route_encode_component(value, false, allow_slash) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:113
+pub fn jet_http_route_openapi_path(pattern: &JetHTTPRoutePattern) -> String {
+    path := "/"
+    loop (index, segment) in pattern.segments.iter().enumerate() {
+        if index > 0 -> &path.push_str("/")
+        match segment {
+            .Static(value) -> &path.push_str(jet_http_route_encode_segment(value, false))
+            .Param(name) | .CatchAll(name) -> {
+                &path.push_str("{")
+                &path.push_str(name)
+                &path.push_str("}")
+            }
+        }
+    }
+    ^path
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:133
+fn jet_http_route_path(path: String) -> [Cow<String>] Err! {
+    path :: path.split('?').next().unwrap_or(path)
+    if !path.starts_with("/") -> return Err("request path must start with `/`")
+    segments := path.split('/').skip(1)
+    first :: segments.next()
+    if first.is_none() -> return Ok([])
+    first :: first.unwrap()
+    if first.is_empty() && segments.next().is_none() -> return Ok([])
+    decoded := [Cow<String>]{}
+    &decoded.push(jet_http_route_decode_path_segment(first)?)
+    loop segment in segments -> &decoded.push(jet_http_route_decode_path_segment(segment)?)
+    Ok(^decoded)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:152
+fn jet_http_route_validate_path(path: String) -> () Err! {
+    path :: path.split('?').next().unwrap_or(path)
+    if !path.starts_with("/") -> return Err("request path must start with `/`")
+    if path == "/" -> return Ok(())
+    loop segment in path.split('/').skip(1) -> _ :: jet_http_route_decode_path_segment(segment)?
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:166
+fn jet_http_route_matches_path(pattern: &JetHTTPRoutePattern, path: String) -> Bool {
+    path :: path.split('?').next().unwrap_or(path)
+    path_len :: if path == "/" -> 0 else -> path.split('/').skip(1).count()
+    has_catch_all :: pattern.segments.last().is_some_and(fn(v) { match v { .CatchAll(_) -> true, _ -> false } })
+    required :: pattern.segments.len() - (if has_catch_all -> 1 else -> 0)
+    if path_len < required || !has_catch_all && path_len != required -> return false
+    loop (index, candidate) in path.split('/').skip(1).enumerate() {
+        if index >= required -> continue
+        segment :: pattern.segments.get(index)
+        if segment.is_none() -> return false
+        if .Static(expected) :: segment.unwrap() {
+            equal :: if candidate.as_bytes().contains(U8{37}) {
+                jet_http_route_decode_path_segment(candidate).is_ok_and(fn(decoded) { decoded.as_ref() == expected })
+            } else { candidate == expected }
+            if !equal -> return false
+        }
+    }
+    true
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:200
+fn jet_http_route_params_path(pattern: &JetHTTPRoutePattern, path: String) -> BTreeMap<String, String> Err! {
+    path :: path.split('?').next().unwrap_or(path)
+    params := BTreeMap.new()
+    segments := path.split('/').skip(1)
+    loop segment in &pattern.segments {
+        match segment {
+            .Param(name) -> {
+                if Val(value) :: segments.next() -> &params.insert(name.clone(), jet_http_route_decode_path_segment(value)?.into_owned())
+            }
+            .CatchAll(name) -> {
+                value := ""
+                loop (offset, segment) in segments.enumerate() {
+                    if offset > 0 -> &value.push_str("/")
+                    &value.push_str(jet_http_route_decode_path_segment(segment)?.as_ref())
+                }
+                &params.insert(name.clone(), ^value)
+                break
+            }
+            .Static(_) -> { _ :: segments.next() }
+        }
+    }
+    Ok(^params)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:239
+fn jet_http_route_matches(pattern: &JetHTTPRoutePattern, path: [Cow<String>]) -> Bool {
+    has_catch_all :: pattern.segments.last().is_some_and(fn(v) { match v { .CatchAll(_) -> true, _ -> false } })
+    required :: pattern.segments.len() - (if has_catch_all -> 1 else -> 0)
+    if path.len() < required || !has_catch_all && path.len() != required -> return false
+    pattern.segments.iter().enumerate().all(fn((index, segment)) {
+        match segment {
+            .Static(expected) -> path.get(index).is_some_and(fn(candidate) { candidate.as_ref() == expected })
+            .Param(_) | .CatchAll(_) -> true
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:258
+fn jet_http_route_params(pattern: &JetHTTPRoutePattern, path: [Cow<String>]) -> BTreeMap<String, String> {
+    params := BTreeMap.new()
+    loop (index, segment) in pattern.segments.iter().enumerate() {
+        match segment {
+            .Param(name) -> {
+                if Val(value) :: path.get(index) -> &params.insert(name.clone(), value.as_ref().to_string())
+            }
+            .CatchAll(name) -> {
+                value := ""
+                loop (offset, segment) in path[index..].iter().enumerate() {
+                    if offset > 0 -> &value.push_str("/")
+                    &value.push_str(segment.as_ref())
+                }
+                &params.insert(name.clone(), ^value)
+                break
+            }
+            .Static(_) -> {}
+        }
+    }
+    ^params
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:287
+fn jet_http_route_match(pattern: &JetHTTPRoutePattern, path: [Cow<String>]) -> BTreeMap<String, String>? {
+    jet_http_route_matches(pattern, path).then(fn() { jet_http_route_params(pattern, path) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:295
+fn jet_http_route_rank(segment: &JetHTTPRouteSegment) -> U8 {
+    match segment { .Static(_) -> U8{2}, .Param(_) -> U8{1}, .CatchAll(_) -> U8{0} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:303
+fn jet_http_route_selection_cmp(left: &JetHTTPRoutePattern, left_order: USize, right: &JetHTTPRoutePattern, right_order: USize) -> Ordering {
+    loop (left, right) in left.segments.iter().zip(&right.segments) {
+        order :: jet_http_route_rank(left).cmp(&jet_http_route_rank(right))
+        if order != .Equal -> return order
+    }
+    // Exact wins over an empty catch-all; equivalent shapes prefer first registration.
+    right.segments.len().cmp(&left.segments.len()).then_with(fn() { right_order.cmp(&left_order) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:322
+fn jet_http_route_shape(pattern: &JetHTTPRoutePattern) -> String {
+    pattern.segments.iter().map(fn(segment) {
+        match segment {
+            .Static(value) -> "s{value.as_bytes().len()}:{value}"
+            .Param(_) -> "p"
+            .CatchAll(_) -> "w"
+        }
+    }).collect<[String]>().join("/")
+}
 

@@ -1,0 +1,41 @@
+use core.testing.runtime.top_fake_data.[jet_testing_fake_new, jet_fake_locale, jet_fake_name, jet_fake_email, jet_fake_host, jet_fake_address]
+use core.math.runtime.kernel_seeded_random.jet_seeded_rng_int
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:29-48
+#Test("fake_locale_derives_state_without_mutating_original") {
+    fake :: jet_testing_fake_new(I64{-1})
+    assert(fake.state == U64.MAX)
+    assert(fake.locale == U8{0})
+    english :: jet_fake_locale(fake, "en")
+    assert(english.state == fake.state)
+    german :: jet_fake_locale(fake, "de")
+    assert(german.state == (fake.state ~| U64{0xD1B54A32D192ED03}))
+    assert(german.locale == U8{1})
+    assert(fake.locale == U8{0})
+    assert(fake.state == U64.MAX)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:48-69
+#Test("fake_domains_preserve_seeded_draw_count_and_order") {
+    fake := jet_testing_fake_new(I64{123})
+    state := fake.state
+    _ :: jet_seeded_rng_int(&state, I64{0}, I64{3})
+    _ :: jet_seeded_rng_int(&state, I64{0}, I64{3})
+    _ :: jet_fake_name(&fake)
+    assert(fake.state == state)
+    _ :: jet_seeded_rng_int(&state, I64{0}, I64{3})
+    _ :: jet_seeded_rng_int(&state, I64{0}, I64{3})
+    _ :: jet_seeded_rng_int(&state, I64{0}, I64{2})
+    email :: jet_fake_email(&fake)
+    assert(email.contains('@'))
+    assert(fake.state == state)
+    _ :: jet_seeded_rng_int(&state, I64{0}, I64{2})
+    host :: jet_fake_host(&fake)
+    assert(host.starts_with("www."))
+    assert(fake.state == state)
+    _ :: jet_seeded_rng_int(&state, I64{1}, I64{999})
+    _ :: jet_seeded_rng_int(&state, I64{0}, I64{3})
+    _ :: jet_seeded_rng_int(&state, I64{0}, I64{3})
+    address :: jet_fake_address(&fake)
+    assert(address.contains(", "))
+    assert(fake.state == state)
+}

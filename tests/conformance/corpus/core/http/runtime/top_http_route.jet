@@ -1,0 +1,45 @@
+use core.http.runtime.top_http_route.*
+use std.cmp.Ordering
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:44-94
+#Test("http_route_parser_rejects_ambiguous_and_duplicate_segments") {
+    assert(jet_http_route_pattern("no-leading-slash").is_err())
+    assert(jet_http_route_pattern("/a//b").is_err())
+    assert(jet_http_route_pattern("/:same/*same").is_err())
+    assert(jet_http_route_pattern("/*tail/after").is_err())
+    assert(jet_http_route_pattern("/{id}").is_err())
+    assert(jet_http_route_pattern("/a%2fb").is_err())
+    assert(jet_http_route_pattern("/%2e%2e").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:113-150,200-293
+#Test("http_route_preserves_percent_decoding_query_boundary_and_catch_all") {
+    pattern :: jet_http_route_pattern("/users/:name/*tail").unwrap()
+    assert(jet_http_route_openapi_path(&pattern) == "/users/{name}/{tail}")
+    assert(jet_http_route_matches_path(&pattern, "/users/A%20B/a/b?ignored=yes"))
+    params :: jet_http_route_params_path(&pattern, "/users/A%20B/a/b?ignored=yes").unwrap()
+    assert(params.get("name").unwrap() == "A B")
+    assert(params.get("tail").unwrap() == "a/b")
+    path :: jet_http_route_path("/users/A%20B/a/b?ignored=yes").unwrap()
+    assert(jet_http_route_matches(&pattern, &path))
+    assert(jet_http_route_match(&pattern, &path).unwrap() == params)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:152-164
+#Test("http_route_path_validation_rejects_traversal_even_in_parameters") {
+    assert(jet_http_route_validate_path("/users/%2e%2e").is_err())
+    assert(jet_http_route_validate_path("/users/a%2Fb").is_err())
+    assert(jet_http_route_validate_path("/users/A%20B").is_ok())
+    assert(jet_http_route_validate_path("/").is_ok())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs:295-328
+#Test("http_route_selection_prefers_static_exact_then_first_registration") {
+    literal :: jet_http_route_pattern("/users/me").unwrap()
+    parameter :: jet_http_route_pattern("/users/:id").unwrap()
+    renamed :: jet_http_route_pattern("/users/:other").unwrap()
+    catch_all :: jet_http_route_pattern("/users/:id/*rest").unwrap()
+    assert(jet_http_route_selection_cmp(&literal, 10, &parameter, 0) == Ordering.Greater)
+    assert(jet_http_route_selection_cmp(&parameter, 0, &renamed, 1) == Ordering.Greater)
+    assert(jet_http_route_selection_cmp(&parameter, 2, &catch_all, 0) == Ordering.Greater)
+    assert(jet_http_route_shape(&parameter) == jet_http_route_shape(&renamed))
+    unicode :: jet_http_route_pattern("/é").unwrap()
+    assert(jet_http_route_shape(&unicode) == "s2:é")
+}

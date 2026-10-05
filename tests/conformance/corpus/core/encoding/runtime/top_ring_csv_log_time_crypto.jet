@@ -1,0 +1,33 @@
+use core.encoding.runtime.top_ring_csv_log_time_crypto.[jet_ring_csv_parse, jet_ring_csv_rows, jet_ring_csv_render, jet_expiring_new, jet_expiring_get]
+use core.prelude.runtime.std_common_types_02.[Clock, Duration]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:5/14/24
+#Test("ring_csv_field_and_physical_line_projection_share_one_parser") {
+    text :: "name,value\n\n\"a\nb\",x\n"
+    rows :: jet_ring_csv_rows(&text, &",", true, true).unwrap()
+    fields :: jet_ring_csv_parse(&text, &",", true, true).unwrap()
+    assert_eq(rows.len(), 1)
+    assert_eq(rows[0].line, 3)
+    assert_eq(rows[0].fields, fields[0])
+    assert_eq(fields[0][0], "a\nb")
+    assert_eq(fields[0][1], "x")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:41
+#Test("ring_csv_render_preserves_quote_comma_and_multiline_fields") {
+    fields :: [["a,b", "x\"y", "z\nq"]]
+    encoded :: jet_ring_csv_render(&fields)
+    assert_eq(jet_ring_csv_parse(&encoded, &",", false, false).unwrap(), fields)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:47/54
+#Test("ring_expiring_deadline_is_inclusive_and_saturating") {
+    clock :: Clock.manual(10)
+    exp :: jet_expiring_new(I64{7}, &Duration{ns: 2_000_000}, &clock)
+    clock.set(12)
+    assert_eq(jet_expiring_get(&exp, &clock).unwrap(), I64{7})
+    clock.set(13)
+    assert(jet_expiring_get(&exp, &clock).is_err())
+    clock.set(I64.MAX - 1)
+    saturated :: jet_expiring_new(I64{8}, &Duration{ns: 5_000_000}, &clock)
+    clock.set(I64.MAX)
+    assert_eq(jet_expiring_get(&saturated, &clock).unwrap(), I64{8})
+}

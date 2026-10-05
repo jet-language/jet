@@ -1,0 +1,54 @@
+use core.data.runtime.top_data_stats.[jet_data_sum_checked, jet_data_mean_checked, jet_data_variance_checked,
+    jet_data_quantile_checked, jet_data_median_checked, jet_data_rolling_mean_checked, jet_data_kernel_limits,
+    jet_data_join_indices, jet_data_pivot_sum_values, jet_data_normalize_bridge_provider, jet_data_require_bridge,
+    jet_data_bridge_status, jet_data_svg_escape, jet_data_bar_text_checked, jet_data_bar_svg_checked]
+use core.prelude.runtime.std_common_types.GroupValue
+use core.data.DataErrorKind
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:221-425
+// Behavioral controls: this Rust module contains no inline tests.
+#Test("statistics_compensation_population_variance_and_quantile") {
+    assert(jet_data_sum_checked([F64]{1.0e16, 1.0, -1.0e16}).unwrap() == 1.0)
+    assert(jet_data_variance_checked([F64]{1.0, 2.0, 3.0}).unwrap() == 2.0 / 3.0)
+    assert(jet_data_quantile_checked([F64]{4.0, 1.0, 3.0, 2.0}, 0.5).unwrap() == 2.5)
+    assert(jet_data_rolling_mean_checked([F64]{1.0, 3.0, 5.0}, 2).unwrap() == [F64]{1.0, 2.0, 4.0})
+    assert(jet_data_rolling_mean_checked([F64]{}, 0).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:221-349
+#Test("statistics_error_precedence_and_index_preserved") {
+    assert(jet_data_sum_checked([F64]{}).unwrap() == 0.0)
+    assert(jet_data_mean_checked([F64]{}).err().unwrap().kind == DataErrorKind.Empty)
+    error :: jet_data_quantile_checked([F64]{}, -1.0).err().unwrap()
+    assert(error.kind == DataErrorKind.InvalidArgument)
+    error :: jet_data_sum_checked([F64]{0.0, F64.INFINITY}).err().unwrap()
+    assert(error.kind == DataErrorKind.NonFinite)
+    assert(error.operation == "sum")
+    assert(error.index == Val(1))
+    assert(jet_data_median_checked([F64]{}).err().unwrap().operation == "median")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:96-219
+#Test("join_duplicate_order_absence_and_pivot_pair_key_order") {
+    limits :: jet_data_kernel_limits(10, 10, 10, 10)
+    joined :: jet_data_join_indices([String]{"b", "a", "z"}, [String]{"a", "b", "b"}, true, &limits).unwrap()
+    assert(joined.len() == 4)
+    assert(joined[0].left == 0 && joined[0].right == Val(1))
+    assert(joined[1].left == 0 && joined[1].right == Val(2))
+    assert(joined[2].left == 1 && joined[2].right == Val(0))
+    assert(joined[3].left == 2 && joined[3].right == None)
+    small :: jet_data_kernel_limits(10, 10, 1, 10)
+    assert(jet_data_join_indices([String]{"b"}, [String]{"b", "b"}, false, &small).err().unwrap().kind == DataErrorKind.Limit)
+    pivot :: jet_data_pivot_sum_values([("b", "x", 3.0), ("a", "x", 2.0), ("a", "x", 4.0)], &limits).unwrap()
+    assert(pivot[0].row_key == "a" && pivot[0].count == 2 && pivot[0].sum == 6.0 && pivot[0].mean == 3.0)
+    assert(pivot[1].row_key == "b")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs:427-462,553-641,707-712
+#Test("bridge_status_fail_closed_and_plot_validation") {
+    assert(jet_data_normalize_bridge_provider("  CUDA.*. ") == Val("gpu.*"))
+    assert(jet_data_bridge_status("py.*").path == "unavailable")
+    assert(jet_data_require_bridge("python").err().unwrap().kind == DataErrorKind.Bridge)
+    assert(jet_data_require_bridge("unknown").err().unwrap().kind == DataErrorKind.InvalidArgument)
+    assert(jet_data_svg_escape("<&\">") == "&lt;&amp;&quot;&gt;")
+    groups :: [GroupValue<String, I64>]{GroupValue{key: "x", value: -1}}
+    assert(jet_data_bar_text_checked(groups).err().unwrap().index == Val(0))
+    assert(jet_data_bar_svg_checked(groups).err().unwrap().kind == DataErrorKind.InvalidArgument)
+}

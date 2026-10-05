@@ -1,0 +1,41 @@
+use core.process.runtime.top_process_policy.*
+use core.process.runtime.top_process_spec as spec_owner
+use std.env
+use std.fs
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs:449-456
+#Test("process_resolve_empty_command_is_invalid_input_before_native_lookup") {
+    spec :: spec_owner.jet_std_process_cmd_owned([])
+    result :: jet_process_resolve_executable(spec)
+    assert(result.is_err())
+    match result.unwrap_err() {
+        .InvalidInput(context) -> {
+            assert(context.operation == .Resolve)
+            assert(context.resource.is_none())
+            assert(context.cause == Val("process command needs at least one word"))
+        }
+        _ -> panic("empty argv lost its InvalidInput kind")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs:457-465
+#Test("process_resolve_direct_path_uses_real_canonicalization_without_path_snapshot") {
+    // GATE #4565: kernel primitive
+    (candidate, expected) :: #Unsafe("exercise actual current-directory canonicalization, never a mock filesystem provider") {
+        candidate :: env.current_dir().unwrap().join(".")
+        expected :: fs.canonicalize(&candidate).unwrap().to_string_lossy().to_string()
+        (candidate.to_string_lossy().to_string(), expected)
+    }
+    spec :: spec_owner.jet_std_process_cmd_owned([candidate])
+    assert(jet_process_resolve_executable(spec).unwrap() == expected)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs:523-530,551-560
+#Test("process_plan_rejects_unbound_policy_and_reports_unavailable_digest") {
+    spec :: spec_owner.jet_std_process_cmd_owned(["checked-command"])
+    assert(jet_process_plan_authority_check(spec).is_err())
+    result :: jet_process_plan_backend_check(spec, "unavailable", "checked-digest")
+    assert(result.is_err())
+    match result.unwrap_err() {
+        .Other(context) -> assert(context.cause == Val("authority-bound process plan refused before spawn: isolation backend unavailable (policy digest checked-digest)"))
+        _ -> panic("unavailable backend lost the original Other error kind")
+    }
+}

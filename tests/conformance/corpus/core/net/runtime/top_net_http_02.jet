@@ -1,0 +1,45 @@
+use core.net.runtime.top_net_http_02.[jet_net_ip_addr, jet_net_ip_to_string, jet_net_ip_is_ipv4, jet_net_socket_addr, jet_net_socket_addr_parse, jet_net_socket_host, jet_net_socket_port, jet_net_socket_to_string, jet_net_tcp_listen_addr, jet_net_listener_local_socket_addr]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1885-1905
+#Test("net_ip_projection_reuses_pure_ipv4_and_ipv6_address_semantics") {
+    ipv4 :: jet_net_ip_addr("127.0.0.1")!
+    assert(jet_net_ip_is_ipv4(&ipv4))
+    assert_eq(jet_net_ip_to_string(&ipv4), "127.0.0.1")
+    ipv6 :: jet_net_ip_addr("::1")!
+    assert(!jet_net_ip_is_ipv4(&ipv6))
+    assert_eq(jet_net_ip_to_string(&ipv6), "::1")
+    match jet_net_ip_addr("invalid-address") {
+        Err(.InvalidInput(detail)) -> {
+            assert_eq(detail.operation, "parse IP address")
+            assert_eq(detail.address, Val("invalid-address"))
+        }
+        _ -> assert(false)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1907-1959
+#Test("net_socket_port_validation_precedes_native_resolution") {
+    loop port in [I64{-1}, I64{65536}] {
+        match jet_net_socket_addr("not-a-resolvable-host", port) {
+            Err(.InvalidInput(detail)) -> {
+                assert_eq(detail.operation, "resolve socket address")
+                assert_eq(detail.message, "invalid port `{port}`: expected 0..65535")
+            }
+            _ -> assert(false)
+        }
+    }
+    addr :: jet_net_socket_addr_parse("[::1]:4321")!
+    assert_eq(jet_net_socket_host(&addr), "::1")
+    assert_eq(jet_net_socket_port(&addr), I64{4321})
+    assert_eq(jet_net_socket_to_string(&addr), "[::1]:4321")
+    pure :: jet_net_socket_addr("127.0.0.1", I64{65535})!
+    assert_eq(jet_net_socket_port(&pure), I64{65535})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1961-1970/2129-2137
+#Test("net_tcp_listener_reports_actual_ephemeral_bound_address") {
+    addr :: jet_net_socket_addr_parse("127.0.0.1:0")!
+    listener :: jet_net_tcp_listen_addr(&addr)!
+    bound :: jet_net_listener_local_socket_addr(&listener)!
+    assert_eq(jet_net_socket_host(&bound), "127.0.0.1")
+    assert(jet_net_socket_port(&bound) > 0)
+    assert(jet_net_socket_port(&bound) <= 65535)
+}

@@ -1,0 +1,85 @@
+use core.math.runtime.top_linalg_fns.*
+use core.math.runtime.kernel_simd_lanes.jet_simd_lane_index
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:74-91
+#Test("linalg_float_fixed_lane_constructors_and_reductions") {
+    v :: jet_math_F32x4_new(F32{1}, F32{2}, F32{3}, F32{4})
+    assert(jet_math_F32x4_to_array(&v) == [F32#4]{F32{1}, F32{2}, F32{3}, F32{4}})
+    assert(jet_math_F32x4_lane(&v, 2, "test", 1) == F32{3})
+    assert(jet_math_F32x4_sum(&v) == F32{10})
+    assert(jet_math_F32x4_product(&v) == F32{24})
+    assert(jet_math_F32x4_min(&v) == F32{1})
+    assert(jet_math_F32x4_max(&v) == F32{4})
+    assert(jet_math_F32x4_reduce_add(&v) == jet_math_F32x4_sum(&v))
+    assert(jet_math_F32x4_reduce_mul(&v) == jet_math_F32x4_product(&v))
+    assert(jet_math_F32x4_reduce_min(&v) == jet_math_F32x4_min(&v))
+    assert(jet_math_F32x4_reduce_max(&v) == jet_math_F32x4_max(&v))
+    assert(jet_math_F32x4_reduce_avg(&v) == F32{2.5})
+    pair :: jet_math_F64x2_new(1.25, 2.75)
+    assert(jet_math_F64x2_to_array(&pair) == [F64#2]{1.25, 2.75})
+    assert(jet_math_F64x2_reduce_add(&pair) == 4.0)
+    assert(jet_math_F64x2_reduce_avg(&pair) == 2.0)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:92-100,36-42
+#Test("linalg_float_eight_lane_splat_and_source_index_checks") {
+    splat :: jet_math_F32x8_splat(F32{2})
+    assert(jet_math_F32x8_sum(&splat) == F32{16})
+    assert(jet_math_F32x8_product(&splat) == F32{256})
+    assert(jet_math_F32x8_reduce_avg(&splat) == F32{2})
+    assert(jet_math_F32x8_from_array(jet_math_F32x8_to_array(&splat)) == splat)
+    assert(jet_simd_lane_index(-1, "F32x8", 8).is_err())
+    assert(jet_simd_lane_index(8, "F32x8", 8).is_err())
+    assert(jet_math_F32x8_lane(&splat, 7, "test", 1) == F32{2})
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:102-125
+#Test("linalg_native_f64x4_projects_exact_four_lane_values") {
+    native :: jet_math_F64x4_new(1.0, -0.0, 3.0, 4.0)
+    lanes :: jet_math_F64x4_to_array(&native)
+    assert(lanes[0] == 1.0)
+    assert(lanes[1].is_sign_negative())
+    assert(jet_math_F64x4_lane(&native, 3, "test", 1) == 4.0)
+    rebuilt :: jet_math_F64x4_from_array(lanes)
+    assert(jet_math_F64x4_lane(&rebuilt, 2, "test", 1) == 3.0)
+    splat :: jet_math_F64x4_splat(5.0)
+    assert(jet_math_F64x4_to_array(&splat) == [F64#4]{5.0, 5.0, 5.0, 5.0})
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:127-202
+#Test("linalg_native_f64x4_constant_lane_scale_gather_and_reductions") {
+    value :: jet_math_F64x4_new(1.0, 4.0, 9.0, 16.0)
+    scale_source :: jet_math_F64x4_new(2.0, 3.0, 4.0, 5.0)
+    assert(jet_math_F64x4_lane_const<2>(&value) == 9.0)
+    scaled :: jet_math_F64x4_mul_lane_scale<1>(&value, 2.0, &scale_source)
+    assert(jet_math_F64x4_to_array(&scaled) == [F64#4]{6.0, 24.0, 54.0, 96.0})
+    gathered :: jet_math_F64x4_gather_lane<1>(&value, &scale_source, &value, &scale_source)
+    assert(jet_math_F64x4_to_array(&gathered) == [F64#4]{4.0, 3.0, 4.0, 3.0})
+    roots :: jet_math_F64x4_sqrt(&value)
+    assert(jet_math_F64x4_to_array(&roots) == [F64#4]{1.0, 2.0, 3.0, 4.0})
+    assert(jet_math_F64x4_sum(&roots) == 10.0)
+    assert(jet_math_F64x4_product(&roots) == 24.0)
+    assert(jet_math_F64x4_min(&roots) == 1.0)
+    assert(jet_math_F64x4_max(&roots) == 4.0)
+    assert(jet_math_F64x4_reduce_add(&roots) == 10.0)
+    assert(jet_math_F64x4_reduce_mul(&roots) == 24.0)
+    assert(jet_math_F64x4_reduce_min(&roots) == 1.0)
+    assert(jet_math_F64x4_reduce_max(&roots) == 4.0)
+    assert(jet_math_F64x4_reduce_avg(&roots) == 2.5)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:203-206
+#Test("linalg_signed_128bit_lane_families_keep_fixed_width_policy") {
+    bytes :: jet_math_I8x16_splat(I8{2})
+    assert(jet_math_I8x16_sum(&bytes) == I8{32})
+    assert(jet_math_I8x16_lane(&bytes, 15, "test", 1) == I8{2})
+    shorts :: jet_math_I16x8_new(I16{1}, I16{2}, I16{3}, I16{4}, I16{5}, I16{6}, I16{7}, I16{8})
+    assert(jet_math_I16x8_sum(&shorts) == I16{36})
+    ints :: jet_math_I32x4_new(I32{1}, I32{2}, I32{3}, I32{4})
+    assert(jet_math_I32x4_product(&ints) == I32{24})
+    assert(jet_math_I32x4_reduce_avg(&ints) == I32{2})
+    pair :: jet_math_I64x2_new(I64{-5}, I64{9})
+    assert(jet_math_I64x2_to_array(&pair) == [I64#2]{I64{-5}, I64{9}})
+    assert(jet_math_I64x2_min(&pair) == I64{-5})
+    assert(jet_math_I64x2_max(&pair) == I64{9})
+    assert(jet_math_I64x2_reduce_add(&pair) == I64{4})
+}

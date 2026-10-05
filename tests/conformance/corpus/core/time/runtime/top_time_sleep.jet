@@ -1,0 +1,17 @@
+use core.time.runtime.deadline.[jet_ctx_deadline_ms, jet_std_time_now]
+use std.cell.[Cell, ThreadLocal]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:5
+// GATE #4565: kernel primitive
+TEST_DEADLINE_EXCEEDED :: #Unsafe("test deadline flag belongs only to the executing thread") {
+    ThreadLocal.new(fn() { Cell.new(false) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:11
+pub fn jet_deadline_remaining_ms() -> I64? {
+    // GATE #4565: kernel primitive
+    exceeded :: #Unsafe("read current test thread deadline override") {
+        TEST_DEADLINE_EXCEEDED.with(deadline -> deadline.get())
+    }
+    if exceeded -> return Val(I64{0})
+    jet_ctx_deadline_ms().map(d -> d.saturating_sub(jet_std_time_now()))
+}

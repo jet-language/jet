@@ -1,0 +1,38 @@
+use core.sys.runtime.top_os_extra.*
+use core.sys.target as target
+use core.prelude.runtime.std_open.[IOError]
+use jet_foundation.Syntax.[TEXT_NUL]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs:128-159.
+#Test("os_expand_retains_byte_to_scalar_behavior") {
+    assert(jet_std_os_expand("plain") == "plain")
+    assert(jet_std_os_expand("é") == "Ã©")
+    assert(jet_std_os_expand("a$!") == "a!")
+    assert(jet_std_os_expand("${}") == "")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs:636-648.
+#Test("os_exitcode_decodes_exit_not_signal") {
+    if target.selected_family() == .Unix {
+        assert(jet_std_os_exitcode(0) == 0)
+        assert(jet_std_os_exitcode(7 << 8) == 7)
+        assert(jet_std_os_exitcode(15) == -1)
+        assert(jet_std_os_exitcode((255 << 8) | 0x80) == 255)
+    } else { assert(jet_std_os_exitcode(12345) == 12345) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs:436-455,526-545,611-634.
+#Test("os_nul_validation_precedes_native_side_effects") {
+    if target.selected_family() == .Unix {
+        match jet_std_os_initgroups("a{TEXT_NUL}b", 0) {
+            Err(IOError.Other(context)) -> assert(context.cause == Val("username contains NUL")),
+            _ -> assert(false),
+        }
+        match jet_std_os_mkfifo("a{TEXT_NUL}b", 0) {
+            Err(IOError.Other(context)) -> { assert(context.resource == Val("a{TEXT_NUL}b")); assert(context.cause == Val("path contains NUL")) },
+            _ -> assert(false),
+        }
+        match jet_std_os_utime("a{TEXT_NUL}b", 0, 0) {
+            Err(IOError.Other(context)) -> assert(context.cause == Val("path contains NUL")),
+            _ -> assert(false),
+        }
+    }
+}

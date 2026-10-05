@@ -1,0 +1,109 @@
+use core.compute.runtime.top_compute.*
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:10-36
+#Test("compute_device_descriptors_preserve_explicit_backend_identity") {
+    assert(JetComputeDevice.Auto != JetComputeDevice.Cpu)
+    assert(JetComputeDevice.Metal != JetComputeDevice.Cuda)
+    assert(JetComputeDevice.Vulkan != JetComputeDevice.WebGpu)
+    assert_eq(MAX_TENSOR_ELEMENTS, USize{16777216})
+    assert_eq(CPU_ORACLE_BACKEND, "cpu-oracle")
+    assert_eq(CPU_ORACLE_VERSION, "builtin")
+    assert_eq(CPU_ORACLE_CACHE, "none")
+    assert_eq(METAL_BACKEND, "metal")
+    assert_eq(METAL_VERSION, "system")
+    assert_eq(METAL_CACHE, "runtime")
+    assert_eq(CUDA_BACKEND, "cuda")
+    assert_eq(CUDA_VERSION, "driver")
+    assert_eq(CUDA_CACHE, "runtime")
+    assert_eq(VULKAN_BACKEND, "vulkan")
+    assert_eq(VULKAN_VERSION, "system")
+    assert_eq(VULKAN_CACHE, "runtime")
+    assert_eq(WEBGPU_BACKEND, "webgpu")
+    assert_eq(WEBGPU_VERSION, "browser")
+    assert_eq(WEBGPU_CACHE, "runtime")
+    assert_eq(CPU_ORACLE_F64_PROFILE, "F64Strict+Reproducible")
+    assert_eq(CPU_ORACLE_F32_PROFILE, "F32Strict+Reproducible")
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:37-101
+#Test("compute_capability_receipts_preserve_order_and_backend_specific_claims") {
+    assert_eq(CPU_ORACLE_F64_CAPABILITIES, &[
+        "ranked-storage", "strided-view", "checked-bounds", "reproducible-reduction", "differential-oracle"
+    ])
+    assert_eq(CPU_ORACLE_F32_CAPABILITIES, &[
+        "ranked-storage", "strided-view", "checked-bounds", "f32-arithmetic",
+        "cpu-simd-dispatch", "simd-tail", "blocked-matmul", "differential-oracle"
+    ])
+    expected :: &[
+        "ranked-storage", "strided-view", "checked-bounds", "f32-arithmetic",
+        "reproducible-reduction", "elementwise", "matmul", "device-buffer", "stream", "differential-oracle"
+    ]
+    assert_eq(METAL_F32_CAPABILITIES, expected)
+    assert_eq(CUDA_F32_CAPABILITIES, expected)
+    assert_eq(VULKAN_F32_CAPABILITIES, expected)
+    assert_eq(WEBGPU_F32_CAPABILITIES, expected)
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:106
+#Test("compute_vulkan_shader_preserves_spirv_header_and_terminator") {
+    assert_eq(VULKAN_SHADER[0], U32{119734787})
+    assert_eq(VULKAN_SHADER[1], U32{65536})
+    assert_eq(VULKAN_SHADER[2], U32{524299})
+    assert_eq(VULKAN_SHADER[3], U32{479})
+    assert_eq(VULKAN_SHADER[4], U32{0})
+    assert_eq(VULKAN_SHADER[VULKAN_SHADER.len() - 2], U32{65789})
+    assert_eq(VULKAN_SHADER[VULKAN_SHADER.len() - 1], U32{65592})
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1653
+#Test("compute_cuda_status_preserves_exact_error") {
+    assert(jet_compute_cuda.check(0, "kernel synchronization").is_ok())
+    match jet_compute_cuda.check(719, "kernel synchronization") {
+        Err(JetComputeError.Device(message)) -> assert_eq(message, "CUDA kernel synchronization failed (driver status 719)")
+        else -> panic("CUDA nonzero driver status must be a Device error")
+    }
+}
+
+// Real selected-provider control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:824-925,1036
+#Test("compute_metal_general_kernels_use_real_provider") {
+    prep if core.sys.target.selected_os() == .MacOS || core.sys.target.selected_os() == .IOS {
+        assert_eq(jet_compute_metal.copy(&[]).unwrap(), [])
+        match jet_compute_metal.binary(0, &[1.0], &[1.0, 2.0]) {
+            Err(JetComputeError.InvalidShape(message)) -> assert_eq(message, "Metal binary inputs have different lengths")
+            else -> panic("Metal length validation must precede launch")
+        }
+        if jet_compute_metal.available() {
+            assert_eq(jet_compute_metal.copy(&[1.0, -2.0, 3.0]).unwrap(), [1.0, -2.0, 3.0])
+            assert_eq(jet_compute_metal.binary(0, &[1.0, 2.0], &[3.0, 4.0]).unwrap(), [4.0, 6.0])
+            assert_eq(jet_compute_metal.unary(0, &[1.0, -2.0]).unwrap(), [-1.0, 2.0])
+            assert_eq(jet_compute_metal.matmul(&[1.0, 2.0, 3.0, 4.0], &[5.0, 6.0, 7.0, 8.0], 2, 2, 2).unwrap(),
+                [19.0, 22.0, 43.0, 50.0])
+            assert_eq(jet_compute_metal.sum(&[1.0, 2.0, 3.0]).unwrap(), [6.0])
+            assert_eq(jet_compute_metal.scale(&[1.0, -2.0], 2.0).unwrap(), [2.0, -4.0])
+        }
+    } else {
+        assert(!jet_compute_metal.available())
+        match jet_compute_metal.copy(&[1.0]) {
+            Err(JetComputeError.Unsupported(message)) -> assert_eq(message, "Metal backend is unavailable on this target")
+            else -> panic("non-Apple Metal must fail closed, never run the CPU oracle")
+        }
+    }
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1160
+#Test("compute_cuda_ptx_keeps_general_kernels_without_training_entries") {
+    use jet_foundation.Syntax.TEXT_NUL
+    assert(jet_compute_cuda.PTX.starts_with(".version 6.0"))
+    assert(jet_compute_cuda.PTX.contains(".target sm_50"))
+    assert(jet_compute_cuda.PTX.contains(".entry jet_copy("))
+    assert(jet_compute_cuda.PTX.contains(".entry jet_binary("))
+    assert(jet_compute_cuda.PTX.contains(".entry jet_unary("))
+    assert(jet_compute_cuda.PTX.contains(".entry jet_matmul("))
+    assert(jet_compute_cuda.PTX.contains(".entry jet_sum("))
+    assert(jet_compute_cuda.PTX.contains(".entry jet_scale("))
+    assert(!jet_compute_cuda.PTX.contains(".entry jet_mse("))
+    assert(!jet_compute_cuda.PTX.contains(".entry jet_mse_grad("))
+    assert(!jet_compute_cuda.PTX.contains(".entry jet_mse_jvp("))
+    assert(!jet_compute_cuda.PTX.contains(".entry jet_sgd("))
+    assert(jet_compute_cuda.PTX.ends_with(TEXT_NUL))
+}

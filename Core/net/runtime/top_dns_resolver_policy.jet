@@ -1,42 +1,32 @@
-// PORT-PENDING 0260 crates-jet-codegen-src-prelude-corelib-top-dnsresolverpolicy: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:1-38
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn jet_net_dns_socket_addr(host: &str) -> Option<String> {
-//RS     let host = host.trim().trim_matches(|c| c == '[' || c == ']');
-//RS     host.parse::<std::net::IpAddr>()
-//RS         .ok()
-//RS         .map(|ip| std::net::SocketAddr::new(ip, 53).to_string())
-//RS }
-//RS 
-//RS fn jet_net_dns_parse_resolv_conf(text: &str) -> Vec<String> {
-//RS     text.lines()
-//RS         .filter_map(|line| {
-//RS             let mut parts = line.split('#').next()?.split_whitespace();
-//RS             (parts.next() == Some("nameserver"))
-//RS                 .then(|| parts.next())
-//RS                 .flatten()
-//RS                 .and_then(jet_net_dns_socket_addr)
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn jet_net_dns_parse_scutil(text: &str) -> Vec<String> {
-//RS     text.lines()
-//RS         .filter_map(|line| {
-//RS             let (label, value) = line.trim().split_once(':')?;
-//RS             let label = label.trim();
-//RS             let index = label.strip_prefix("nameserver[")?.strip_suffix(']')?;
-//RS             (!index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
-//RS                 .then(|| jet_net_dns_socket_addr(value))
-//RS                 .flatten()
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn jet_net_dns_parse_windows_addresses(text: &str) -> Vec<String> {
-//RS     text.lines()
-//RS         .flat_map(|line| line.split(|c: char| c.is_whitespace() || c == ',' || c == '{' || c == '}'))
-//RS         .filter_map(jet_net_dns_socket_addr)
-//RS         .collect()
-//RS }
-// END-PORT-PENDING 0260 crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:1-38
+use core.net.runtime.kernel_net_pure.[jet_net_pure_parse_ip, jet_net_pure_socket_to_string]
+use std.net.SocketAddr
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:1
+fn jet_net_dns_socket_addr(host: String) -> String? {
+    host := host.trim().trim_matches(fn(c) { c == '[' || c == ']' }) // #4303
+    jet_net_pure_parse_ip(host).ok().map(fn(ip) { jet_net_pure_socket_to_string(SocketAddr.new(ip, U16{53})) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:8
+fn jet_net_dns_parse_resolv_conf(text: String) -> [String] {
+    text.lines().filter_map(fn(line) -> String? {
+        parts := line.split('#').next()?.split_whitespace()
+        (parts.next() == Val("nameserver")).then(fn() { parts.next() })
+            .flatten().and_then(jet_net_dns_socket_addr)
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:20
+fn jet_net_dns_parse_scutil(text: String) -> [String] {
+    text.lines().filter_map(fn(line) -> String? {
+        (label, value) :: line.trim().split_once(':')?
+        label := label.trim() // #4303
+        index :: label.strip_prefix("nameserver[")?.strip_suffix(']')?
+        (!index.is_empty() && index.bytes().all(fn(byte) { byte.is_ascii_digit() }))
+            .then(fn() { jet_net_dns_socket_addr(value) }).flatten()
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs:33
+fn jet_net_dns_parse_windows_addresses(text: String) -> [String] {
+    text.lines().flat_map(fn(line) { line.split(fn(c: Char) { c.is_whitespace() || c == ',' || c == '{' || c == '}' }) })
+        .filter_map(jet_net_dns_socket_addr).collect()
+}
 

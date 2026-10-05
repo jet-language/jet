@@ -1,540 +1,506 @@
-// PORT-PENDING 0284 crates-jet-codegen-src-prelude-corelib-top-linalgfns: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:1-882
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── D-SIMD2 / D-SIMD3 / D-LINALG1: math value-type free functions ────────────
-//RS // Constructors (`_new`), statics (`splat`/`from_array`), instance methods, lane
-//RS // reads, and reductions. Codegen names these `jet_math_<Type>_<fn>` and always
-//RS // passes the receiver as `&recv` (value types — every op returns a fresh value).
-//RS // Fixed arrays plus aggressive inlining give portable AOT LLVM a vectorizable
-//RS // shape. Host-native F64x4 uses the private AVX carrier from the shared
-//RS // Prelude; reductions still marshal through its scalar left-to-right fold so
-//RS // every tier keeps the same result.
-//RS 
-//RS macro_rules! jet_simd_lane_fns {
-//RS     (
-//RS         $T:ident,
-//RS         $new:ident, $splat:ident, $from_array:ident, $to_array:ident,
-//RS         $lane:ident, $sum:ident, $product:ident, $min:ident, $max:ident,
-//RS         $reduce_add:ident, $reduce_mul:ident, $reduce_min:ident,
-//RS         $reduce_max:ident, $reduce_avg:ident,
-//RS         $scalar:ty, $n:literal, $( $arg:ident ),+
-//RS     ) => {
-//RS         #[inline(always)]
-//RS         fn $new($( $arg: $scalar ),+) -> jet_std::$T {
-//RS             jet_std::$T([$( $arg ),+])
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $splat(x: $scalar) -> jet_std::$T {
-//RS             jet_std::$T(crate::jet_simd_splat_array(x))
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $from_array(a: [$scalar; $n]) -> jet_std::$T {
-//RS             jet_std::$T(a)
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $to_array(v: &jet_std::$T) -> [$scalar; $n] {
-//RS             v.0
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $lane(v: &jet_std::$T, i: i64, file: &str, line: u32) -> $scalar {
-//RS             let index = match crate::jet_simd_lane_index(i, stringify!($T), $n) {
-//RS                 Ok(index) => index,
-//RS                 Err(message) => jet_panic(file, line, &message),
-//RS             };
-//RS             v.0[index]
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $sum(v: &jet_std::$T) -> $scalar {
-//RS             crate::jet_simd_sum_array(&v.0)
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $product(v: &jet_std::$T) -> $scalar {
-//RS             crate::jet_simd_product_array(&v.0)
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $min(v: &jet_std::$T) -> $scalar {
-//RS             crate::jet_simd_min_array(&v.0)
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $max(v: &jet_std::$T) -> $scalar {
-//RS             crate::jet_simd_max_array(&v.0)
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $reduce_add(v: &jet_std::$T) -> $scalar { $sum(v) }
-//RS         #[inline(always)]
-//RS         fn $reduce_mul(v: &jet_std::$T) -> $scalar { $product(v) }
-//RS         #[inline(always)]
-//RS         fn $reduce_min(v: &jet_std::$T) -> $scalar { $min(v) }
-//RS         #[inline(always)]
-//RS         fn $reduce_max(v: &jet_std::$T) -> $scalar { $max(v) }
-//RS         #[inline(always)]
-//RS         fn $reduce_avg(v: &jet_std::$T) -> $scalar {
-//RS             crate::jet_simd_avg_array(&v.0)
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS jet_simd_lane_fns!(
-//RS     F32x4,
-//RS     jet_math_F32x4_new, jet_math_F32x4_splat, jet_math_F32x4_from_array,
-//RS     jet_math_F32x4_to_array, jet_math_F32x4_lane, jet_math_F32x4_sum,
-//RS     jet_math_F32x4_product, jet_math_F32x4_min, jet_math_F32x4_max,
-//RS     jet_math_F32x4_reduce_add, jet_math_F32x4_reduce_mul,
-//RS     jet_math_F32x4_reduce_min, jet_math_F32x4_reduce_max,
-//RS     jet_math_F32x4_reduce_avg, f32, 4, a, b, c, d
-//RS );
-//RS jet_simd_lane_fns!(
-//RS     F64x2,
-//RS     jet_math_F64x2_new, jet_math_F64x2_splat, jet_math_F64x2_from_array,
-//RS     jet_math_F64x2_to_array, jet_math_F64x2_lane, jet_math_F64x2_sum,
-//RS     jet_math_F64x2_product, jet_math_F64x2_min, jet_math_F64x2_max,
-//RS     jet_math_F64x2_reduce_add, jet_math_F64x2_reduce_mul,
-//RS     jet_math_F64x2_reduce_min, jet_math_F64x2_reduce_max,
-//RS     jet_math_F64x2_reduce_avg, f64, 2, a, b
-//RS );
-//RS jet_simd_lane_fns!(
-//RS     F32x8,
-//RS     jet_math_F32x8_new, jet_math_F32x8_splat, jet_math_F32x8_from_array,
-//RS     jet_math_F32x8_to_array, jet_math_F32x8_lane, jet_math_F32x8_sum,
-//RS     jet_math_F32x8_product, jet_math_F32x8_min, jet_math_F32x8_max,
-//RS     jet_math_F32x8_reduce_add, jet_math_F32x8_reduce_mul,
-//RS     jet_math_F32x8_reduce_min, jet_math_F32x8_reduce_max,
-//RS     jet_math_F32x8_reduce_avg, f32, 8, a, b, c, d, e, f, g, h
-//RS );
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_new(a: f64, b: f64, c: f64, d: f64) -> jet_std::F64x4 {
-//RS     jet_std::F64x4(crate::jet_simd_f64x4_new_native([a, b, c, d]))
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_splat(x: f64) -> jet_std::F64x4 {
-//RS     jet_std::F64x4(crate::jet_simd_f64x4_splat_native(x))
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_from_array(a: [f64; 4]) -> jet_std::F64x4 {
-//RS     jet_std::F64x4(crate::jet_simd_f64x4_new_native(a))
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_to_array(v: &jet_std::F64x4) -> [f64; 4] {
-//RS     crate::jet_simd_f64x4_to_array_native(v.0)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_lane(v: &jet_std::F64x4, i: i64, file: &str, line: u32) -> f64 {
-//RS     let index = match crate::jet_simd_lane_index(i, "F64x4", 4) {
-//RS         Ok(index) => index,
-//RS         Err(message) => jet_panic(file, line, &message),
-//RS     };
-//RS     crate::jet_simd_f64x4_lane_native(v.0, index)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_lane_const<const INDEX: usize>(v: &jet_std::F64x4) -> f64 {
-//RS     crate::jet_simd_f64x4_lane_const_native::<INDEX>(v.0)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_mul_lane_scale<const INDEX: usize>(
-//RS     value: &jet_std::F64x4,
-//RS     scale: f64,
-//RS     lane_source: &jet_std::F64x4,
-//RS ) -> jet_std::F64x4 {
-//RS     jet_std::F64x4(crate::jet_simd_f64x4_mul_lane_scale_native::<INDEX>(
-//RS         value.0,
-//RS         scale,
-//RS         lane_source.0,
-//RS     ))
-//RS }
-//RS 
-//RS 
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_gather_lane<const INDEX: usize>(
-//RS     first: &jet_std::F64x4,
-//RS     second: &jet_std::F64x4,
-//RS     third: &jet_std::F64x4,
-//RS     fourth: &jet_std::F64x4,
-//RS ) -> jet_std::F64x4 {
-//RS     jet_std::F64x4(crate::jet_simd_f64x4_gather_lane_native::<INDEX>(
-//RS         first.0, second.0, third.0, fourth.0,
-//RS     ))
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_sqrt(v: &jet_std::F64x4) -> jet_std::F64x4 {
-//RS     jet_std::F64x4(crate::jet_simd_f64x4_sqrt_native_carrier(v.0))
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_sum(v: &jet_std::F64x4) -> f64 {
-//RS     let values = jet_math_F64x4_to_array(v);
-//RS     crate::jet_simd_sum_array(&values)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_product(v: &jet_std::F64x4) -> f64 {
-//RS     let values = jet_math_F64x4_to_array(v);
-//RS     crate::jet_simd_product_array(&values)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_min(v: &jet_std::F64x4) -> f64 {
-//RS     let values = jet_math_F64x4_to_array(v);
-//RS     crate::jet_simd_min_array(&values)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_max(v: &jet_std::F64x4) -> f64 {
-//RS     let values = jet_math_F64x4_to_array(v);
-//RS     crate::jet_simd_max_array(&values)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_reduce_add(v: &jet_std::F64x4) -> f64 {
-//RS     jet_math_F64x4_sum(v)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_reduce_mul(v: &jet_std::F64x4) -> f64 {
-//RS     jet_math_F64x4_product(v)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_reduce_min(v: &jet_std::F64x4) -> f64 {
-//RS     jet_math_F64x4_min(v)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_reduce_max(v: &jet_std::F64x4) -> f64 {
-//RS     jet_math_F64x4_max(v)
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_F64x4_reduce_avg(v: &jet_std::F64x4) -> f64 {
-//RS     let values = jet_math_F64x4_to_array(v);
-//RS     crate::jet_simd_avg_array(&values)
-//RS }
-//RS 
-//RS jet_simd_lane_fns!(I8x16, jet_math_I8x16_new, jet_math_I8x16_splat, jet_math_I8x16_from_array, jet_math_I8x16_to_array, jet_math_I8x16_lane, jet_math_I8x16_sum, jet_math_I8x16_product, jet_math_I8x16_min, jet_math_I8x16_max, jet_math_I8x16_reduce_add, jet_math_I8x16_reduce_mul, jet_math_I8x16_reduce_min, jet_math_I8x16_reduce_max, jet_math_I8x16_reduce_avg, i8, 16, a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p);
-//RS jet_simd_lane_fns!(I16x8, jet_math_I16x8_new, jet_math_I16x8_splat, jet_math_I16x8_from_array, jet_math_I16x8_to_array, jet_math_I16x8_lane, jet_math_I16x8_sum, jet_math_I16x8_product, jet_math_I16x8_min, jet_math_I16x8_max, jet_math_I16x8_reduce_add, jet_math_I16x8_reduce_mul, jet_math_I16x8_reduce_min, jet_math_I16x8_reduce_max, jet_math_I16x8_reduce_avg, i16, 8, a,b,c,d,e,f,g,h);
-//RS jet_simd_lane_fns!(I32x4, jet_math_I32x4_new, jet_math_I32x4_splat, jet_math_I32x4_from_array, jet_math_I32x4_to_array, jet_math_I32x4_lane, jet_math_I32x4_sum, jet_math_I32x4_product, jet_math_I32x4_min, jet_math_I32x4_max, jet_math_I32x4_reduce_add, jet_math_I32x4_reduce_mul, jet_math_I32x4_reduce_min, jet_math_I32x4_reduce_max, jet_math_I32x4_reduce_avg, i32, 4, a,b,c,d);
-//RS jet_simd_lane_fns!(I64x2, jet_math_I64x2_new, jet_math_I64x2_splat, jet_math_I64x2_from_array, jet_math_I64x2_to_array, jet_math_I64x2_lane, jet_math_I64x2_sum, jet_math_I64x2_product, jet_math_I64x2_min, jet_math_I64x2_max, jet_math_I64x2_reduce_add, jet_math_I64x2_reduce_mul, jet_math_I64x2_reduce_min, jet_math_I64x2_reduce_max, jet_math_I64x2_reduce_avg, i64, 2, a,b);
-//RS jet_simd_lane_fns!(U8x16, jet_math_U8x16_new, jet_math_U8x16_splat, jet_math_U8x16_from_array, jet_math_U8x16_to_array, jet_math_U8x16_lane, jet_math_U8x16_sum, jet_math_U8x16_product, jet_math_U8x16_min, jet_math_U8x16_max, jet_math_U8x16_reduce_add, jet_math_U8x16_reduce_mul, jet_math_U8x16_reduce_min, jet_math_U8x16_reduce_max, jet_math_U8x16_reduce_avg, u8, 16, a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p);
-//RS jet_simd_lane_fns!(U16x8, jet_math_U16x8_new, jet_math_U16x8_splat, jet_math_U16x8_from_array, jet_math_U16x8_to_array, jet_math_U16x8_lane, jet_math_U16x8_sum, jet_math_U16x8_product, jet_math_U16x8_min, jet_math_U16x8_max, jet_math_U16x8_reduce_add, jet_math_U16x8_reduce_mul, jet_math_U16x8_reduce_min, jet_math_U16x8_reduce_max, jet_math_U16x8_reduce_avg, u16, 8, a,b,c,d,e,f,g,h);
-//RS jet_simd_lane_fns!(U32x4, jet_math_U32x4_new, jet_math_U32x4_splat, jet_math_U32x4_from_array, jet_math_U32x4_to_array, jet_math_U32x4_lane, jet_math_U32x4_sum, jet_math_U32x4_product, jet_math_U32x4_min, jet_math_U32x4_max, jet_math_U32x4_reduce_add, jet_math_U32x4_reduce_mul, jet_math_U32x4_reduce_min, jet_math_U32x4_reduce_max, jet_math_U32x4_reduce_avg, u32, 4, a,b,c,d);
-//RS jet_simd_lane_fns!(U64x2, jet_math_U64x2_new, jet_math_U64x2_splat, jet_math_U64x2_from_array, jet_math_U64x2_to_array, jet_math_U64x2_lane, jet_math_U64x2_sum, jet_math_U64x2_product, jet_math_U64x2_min, jet_math_U64x2_max, jet_math_U64x2_reduce_add, jet_math_U64x2_reduce_mul, jet_math_U64x2_reduce_min, jet_math_U64x2_reduce_max, jet_math_U64x2_reduce_avg, u64, 2, a,b);
-//RS jet_simd_lane_fns!(I8x32, jet_math_I8x32_new, jet_math_I8x32_splat, jet_math_I8x32_from_array, jet_math_I8x32_to_array, jet_math_I8x32_lane, jet_math_I8x32_sum, jet_math_I8x32_product, jet_math_I8x32_min, jet_math_I8x32_max, jet_math_I8x32_reduce_add, jet_math_I8x32_reduce_mul, jet_math_I8x32_reduce_min, jet_math_I8x32_reduce_max, jet_math_I8x32_reduce_avg, i8, 32, a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,aa,ab,ac,ad,ae,af);
-//RS jet_simd_lane_fns!(I16x16, jet_math_I16x16_new, jet_math_I16x16_splat, jet_math_I16x16_from_array, jet_math_I16x16_to_array, jet_math_I16x16_lane, jet_math_I16x16_sum, jet_math_I16x16_product, jet_math_I16x16_min, jet_math_I16x16_max, jet_math_I16x16_reduce_add, jet_math_I16x16_reduce_mul, jet_math_I16x16_reduce_min, jet_math_I16x16_reduce_max, jet_math_I16x16_reduce_avg, i16, 16, a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p);
-//RS jet_simd_lane_fns!(I32x8, jet_math_I32x8_new, jet_math_I32x8_splat, jet_math_I32x8_from_array, jet_math_I32x8_to_array, jet_math_I32x8_lane, jet_math_I32x8_sum, jet_math_I32x8_product, jet_math_I32x8_min, jet_math_I32x8_max, jet_math_I32x8_reduce_add, jet_math_I32x8_reduce_mul, jet_math_I32x8_reduce_min, jet_math_I32x8_reduce_max, jet_math_I32x8_reduce_avg, i32, 8, a,b,c,d,e,f,g,h);
-//RS jet_simd_lane_fns!(I64x4, jet_math_I64x4_new, jet_math_I64x4_splat, jet_math_I64x4_from_array, jet_math_I64x4_to_array, jet_math_I64x4_lane, jet_math_I64x4_sum, jet_math_I64x4_product, jet_math_I64x4_min, jet_math_I64x4_max, jet_math_I64x4_reduce_add, jet_math_I64x4_reduce_mul, jet_math_I64x4_reduce_min, jet_math_I64x4_reduce_max, jet_math_I64x4_reduce_avg, i64, 4, a,b,c,d);
-//RS jet_simd_lane_fns!(U8x32, jet_math_U8x32_new, jet_math_U8x32_splat, jet_math_U8x32_from_array, jet_math_U8x32_to_array, jet_math_U8x32_lane, jet_math_U8x32_sum, jet_math_U8x32_product, jet_math_U8x32_min, jet_math_U8x32_max, jet_math_U8x32_reduce_add, jet_math_U8x32_reduce_mul, jet_math_U8x32_reduce_min, jet_math_U8x32_reduce_max, jet_math_U8x32_reduce_avg, u8, 32, a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,aa,ab,ac,ad,ae,af);
-//RS jet_simd_lane_fns!(U16x16, jet_math_U16x16_new, jet_math_U16x16_splat, jet_math_U16x16_from_array, jet_math_U16x16_to_array, jet_math_U16x16_lane, jet_math_U16x16_sum, jet_math_U16x16_product, jet_math_U16x16_min, jet_math_U16x16_max, jet_math_U16x16_reduce_add, jet_math_U16x16_reduce_mul, jet_math_U16x16_reduce_min, jet_math_U16x16_reduce_max, jet_math_U16x16_reduce_avg, u16, 16, a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p);
-//RS jet_simd_lane_fns!(U32x8, jet_math_U32x8_new, jet_math_U32x8_splat, jet_math_U32x8_from_array, jet_math_U32x8_to_array, jet_math_U32x8_lane, jet_math_U32x8_sum, jet_math_U32x8_product, jet_math_U32x8_min, jet_math_U32x8_max, jet_math_U32x8_reduce_add, jet_math_U32x8_reduce_mul, jet_math_U32x8_reduce_min, jet_math_U32x8_reduce_max, jet_math_U32x8_reduce_avg, u32, 8, a,b,c,d,e,f,g,h);
-//RS jet_simd_lane_fns!(U64x4, jet_math_U64x4_new, jet_math_U64x4_splat, jet_math_U64x4_from_array, jet_math_U64x4_to_array, jet_math_U64x4_lane, jet_math_U64x4_sum, jet_math_U64x4_product, jet_math_U64x4_min, jet_math_U64x4_max, jet_math_U64x4_reduce_add, jet_math_U64x4_reduce_mul, jet_math_U64x4_reduce_min, jet_math_U64x4_reduce_max, jet_math_U64x4_reduce_avg, u64, 4, a,b,c,d);
-//RS macro_rules! jet_simd_binary_fns {
-//RS     ($T:ident, $add:ident, $sub:ident, $mul:ident, $div:ident) => {
-//RS         #[inline(always)]
-//RS         fn $add(left: &jet_std::$T, right: jet_std::$T) -> jet_std::$T {
-//RS             *left + right
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $sub(left: &jet_std::$T, right: jet_std::$T) -> jet_std::$T {
-//RS             *left - right
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $mul(left: &jet_std::$T, right: jet_std::$T) -> jet_std::$T {
-//RS             *left * right
-//RS         }
-//RS         #[inline(always)]
-//RS         fn $div(left: &jet_std::$T, right: jet_std::$T) -> jet_std::$T {
-//RS             *left / right
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS jet_simd_binary_fns!(F32x4, jet_math_F32x4_add, jet_math_F32x4_sub, jet_math_F32x4_mul, jet_math_F32x4_div);
-//RS jet_simd_binary_fns!(F64x2, jet_math_F64x2_add, jet_math_F64x2_sub, jet_math_F64x2_mul, jet_math_F64x2_div);
-//RS jet_simd_binary_fns!(F32x8, jet_math_F32x8_add, jet_math_F32x8_sub, jet_math_F32x8_mul, jet_math_F32x8_div);
-//RS jet_simd_binary_fns!(F64x4, jet_math_F64x4_add, jet_math_F64x4_sub, jet_math_F64x4_mul, jet_math_F64x4_div);
-//RS jet_simd_binary_fns!(I8x16, jet_math_I8x16_add, jet_math_I8x16_sub, jet_math_I8x16_mul, jet_math_I8x16_div);
-//RS jet_simd_binary_fns!(I16x8, jet_math_I16x8_add, jet_math_I16x8_sub, jet_math_I16x8_mul, jet_math_I16x8_div);
-//RS jet_simd_binary_fns!(I32x4, jet_math_I32x4_add, jet_math_I32x4_sub, jet_math_I32x4_mul, jet_math_I32x4_div);
-//RS jet_simd_binary_fns!(I64x2, jet_math_I64x2_add, jet_math_I64x2_sub, jet_math_I64x2_mul, jet_math_I64x2_div);
-//RS jet_simd_binary_fns!(U8x16, jet_math_U8x16_add, jet_math_U8x16_sub, jet_math_U8x16_mul, jet_math_U8x16_div);
-//RS jet_simd_binary_fns!(U16x8, jet_math_U16x8_add, jet_math_U16x8_sub, jet_math_U16x8_mul, jet_math_U16x8_div);
-//RS jet_simd_binary_fns!(U32x4, jet_math_U32x4_add, jet_math_U32x4_sub, jet_math_U32x4_mul, jet_math_U32x4_div);
-//RS jet_simd_binary_fns!(U64x2, jet_math_U64x2_add, jet_math_U64x2_sub, jet_math_U64x2_mul, jet_math_U64x2_div);
-//RS jet_simd_binary_fns!(I8x32, jet_math_I8x32_add, jet_math_I8x32_sub, jet_math_I8x32_mul, jet_math_I8x32_div);
-//RS jet_simd_binary_fns!(I16x16, jet_math_I16x16_add, jet_math_I16x16_sub, jet_math_I16x16_mul, jet_math_I16x16_div);
-//RS jet_simd_binary_fns!(I32x8, jet_math_I32x8_add, jet_math_I32x8_sub, jet_math_I32x8_mul, jet_math_I32x8_div);
-//RS jet_simd_binary_fns!(I64x4, jet_math_I64x4_add, jet_math_I64x4_sub, jet_math_I64x4_mul, jet_math_I64x4_div);
-//RS jet_simd_binary_fns!(U8x32, jet_math_U8x32_add, jet_math_U8x32_sub, jet_math_U8x32_mul, jet_math_U8x32_div);
-//RS jet_simd_binary_fns!(U16x16, jet_math_U16x16_add, jet_math_U16x16_sub, jet_math_U16x16_mul, jet_math_U16x16_div);
-//RS jet_simd_binary_fns!(U32x8, jet_math_U32x8_add, jet_math_U32x8_sub, jet_math_U32x8_mul, jet_math_U32x8_div);
-//RS jet_simd_binary_fns!(U64x4, jet_math_U64x4_add, jet_math_U64x4_sub, jet_math_U64x4_mul, jet_math_U64x4_div);
-//RS 
-//RS // Vectors.
-//RS fn jet_math_Vec2_new(x: f64, y: f64) -> jet_std::Vec2 {
-//RS     jet_std::Vec2([x, y])
-//RS }
-//RS fn jet_math_Vec3_new(x: f64, y: f64, z: f64) -> jet_std::Vec3 {
-//RS     jet_std::Vec3([x, y, z])
-//RS }
-//RS fn jet_math_Vec4_new(x: f64, y: f64, z: f64, w: f64) -> jet_std::Vec4 {
-//RS     jet_std::Vec4([x, y, z, w])
-//RS }
-//RS fn jet_math_Vec2_splat(x: f64) -> jet_std::Vec2 {
-//RS     jet_std::Vec2([x; 2])
-//RS }
-//RS fn jet_math_Vec3_splat(x: f64) -> jet_std::Vec3 {
-//RS     jet_std::Vec3([x; 3])
-//RS }
-//RS fn jet_math_Vec4_splat(x: f64) -> jet_std::Vec4 {
-//RS     jet_std::Vec4([x; 4])
-//RS }
-//RS fn jet_math_Vec2_from_array(a: [f64; 2]) -> jet_std::Vec2 {
-//RS     jet_std::Vec2(a)
-//RS }
-//RS fn jet_math_Vec3_from_array(a: [f64; 3]) -> jet_std::Vec3 {
-//RS     jet_std::Vec3(a)
-//RS }
-//RS fn jet_math_Vec4_from_array(a: [f64; 4]) -> jet_std::Vec4 {
-//RS     jet_std::Vec4(a)
-//RS }
-//RS fn jet_math_Vec2_to_array(v: &jet_std::Vec2) -> [f64; 2] {
-//RS     v.0
-//RS }
-//RS fn jet_math_Vec3_to_array(v: &jet_std::Vec3) -> [f64; 3] {
-//RS     v.0
-//RS }
-//RS fn jet_math_Vec4_to_array(v: &jet_std::Vec4) -> [f64; 4] {
-//RS     v.0
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec2_lane(v: &jet_std::Vec2, i: i64, file: &str, line: u32) -> f64 {
-//RS     let index = match crate::jet_simd_lane_index(i, "Vec2", 2) {
-//RS         Ok(index) => index,
-//RS         Err(message) => jet_panic(file, line, &message),
-//RS     };
-//RS     v.0[index]
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec3_lane(v: &jet_std::Vec3, i: i64, file: &str, line: u32) -> f64 {
-//RS     let index = match crate::jet_simd_lane_index(i, "Vec3", 3) {
-//RS         Ok(index) => index,
-//RS         Err(message) => jet_panic(file, line, &message),
-//RS     };
-//RS     v.0[index]
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec4_lane(v: &jet_std::Vec4, i: i64, file: &str, line: u32) -> f64 {
-//RS     let index = match crate::jet_simd_lane_index(i, "Vec4", 4) {
-//RS         Ok(index) => index,
-//RS         Err(message) => jet_panic(file, line, &message),
-//RS     };
-//RS     v.0[index]
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS fn jet_math_Vec2_add(left: &jet_std::Vec2, right: jet_std::Vec2) -> jet_std::Vec2 {
-//RS     *left + right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec2_sub(left: &jet_std::Vec2, right: jet_std::Vec2) -> jet_std::Vec2 {
-//RS     *left - right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec2_mul(left: &jet_std::Vec2, right: jet_std::Vec2) -> jet_std::Vec2 {
-//RS     *left * right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec3_add(left: &jet_std::Vec3, right: jet_std::Vec3) -> jet_std::Vec3 {
-//RS     *left + right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec3_sub(left: &jet_std::Vec3, right: jet_std::Vec3) -> jet_std::Vec3 {
-//RS     *left - right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec3_hadamard_mul(
-//RS     left: &jet_std::Vec3,
-//RS     right: jet_std::Vec3,
-//RS ) -> jet_std::Vec3 {
-//RS     *left * right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec4_add(left: &jet_std::Vec4, right: jet_std::Vec4) -> jet_std::Vec4 {
-//RS     *left + right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec4_sub(left: &jet_std::Vec4, right: jet_std::Vec4) -> jet_std::Vec4 {
-//RS     *left - right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec4_mul(left: &jet_std::Vec4, right: jet_std::Vec4) -> jet_std::Vec4 {
-//RS     *left * right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec3_mul(v: &jet_std::Vec3, s: f64) -> jet_std::Vec3 {
-//RS     jet_std::Vec3([v.0[0] * s, v.0[1] * s, v.0[2] * s])
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Vec3_div(v: &jet_std::Vec3, s: f64) -> jet_std::Vec3 {
-//RS     jet_std::Vec3([v.0[0] / s, v.0[1] / s, v.0[2] / s])
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Float_div_Vec3(s: f64, v: &jet_std::Vec3) -> jet_std::Vec3 {
-//RS     jet_std::Vec3([s / v.0[0], s / v.0[1], s / v.0[2]])
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Float_mul_Vec3(s: f64, v: &jet_std::Vec3) -> jet_std::Vec3 {
-//RS     jet_math_Vec3_mul(v, s)
-//RS }
-//RS 
-//RS 
-//RS fn jet_math_Vec2_dot(v: &jet_std::Vec2, o: jet_std::Vec2) -> f64 {
-//RS     v.0[0] * o.0[0] + v.0[1] * o.0[1]
-//RS }
-//RS fn jet_math_Vec3_dot(v: &jet_std::Vec3, o: jet_std::Vec3) -> f64 {
-//RS     v.0[0] * o.0[0] + v.0[1] * o.0[1] + v.0[2] * o.0[2]
-//RS }
-//RS fn jet_math_Vec4_dot(v: &jet_std::Vec4, o: jet_std::Vec4) -> f64 {
-//RS     (0..4).map(|i| v.0[i] * o.0[i]).sum()
-//RS }
-//RS fn jet_math_Vec3_cross(v: &jet_std::Vec3, o: jet_std::Vec3) -> jet_std::Vec3 {
-//RS     jet_std::Vec3([
-//RS         v.0[1] * o.0[2] - v.0[2] * o.0[1],
-//RS         v.0[2] * o.0[0] - v.0[0] * o.0[2],
-//RS         v.0[0] * o.0[1] - v.0[1] * o.0[0],
-//RS     ])
-//RS }
-//RS fn jet_math_Vec2_length(v: &jet_std::Vec2) -> f64 {
-//RS     jet_math_Vec2_dot(v, *v).sqrt()
-//RS }
-//RS fn jet_math_Vec3_length(v: &jet_std::Vec3) -> f64 {
-//RS     jet_math_Vec3_dot(v, *v).sqrt()
-//RS }
-//RS fn jet_math_Vec4_length(v: &jet_std::Vec4) -> f64 {
-//RS     jet_math_Vec4_dot(v, *v).sqrt()
-//RS }
-//RS fn jet_math_Vec2_normalize(v: &jet_std::Vec2) -> jet_std::Vec2 {
-//RS     let l = jet_math_Vec2_length(v);
-//RS     if l == 0.0 {
-//RS         *v
-//RS     } else {
-//RS         jet_std::Vec2([v.0[0] / l, v.0[1] / l])
-//RS     }
-//RS }
-//RS fn jet_math_Vec3_normalize(v: &jet_std::Vec3) -> jet_std::Vec3 {
-//RS     let l = jet_math_Vec3_length(v);
-//RS     if l == 0.0 {
-//RS         *v
-//RS     } else {
-//RS         jet_std::Vec3([v.0[0] / l, v.0[1] / l, v.0[2] / l])
-//RS     }
-//RS }
-//RS fn jet_math_Vec4_normalize(v: &jet_std::Vec4) -> jet_std::Vec4 {
-//RS     let l = jet_math_Vec4_length(v);
-//RS     if l == 0.0 {
-//RS         *v
-//RS     } else {
-//RS         let mut r = v.0;
-//RS         for i in 0..4 {
-//RS             r[i] /= l;
-//RS         }
-//RS         jet_std::Vec4(r)
-//RS     }
-//RS }
-//RS 
-//RS // Matrices (column-major). Constructors take N*N components in column-major order.
-//RS fn jet_math_Mat3_new(
-//RS     m0: f64,
-//RS     m1: f64,
-//RS     m2: f64,
-//RS     m3: f64,
-//RS     m4: f64,
-//RS     m5: f64,
-//RS     m6: f64,
-//RS     m7: f64,
-//RS     m8: f64,
-//RS ) -> jet_std::Mat3 {
-//RS     jet_std::Mat3([m0, m1, m2, m3, m4, m5, m6, m7, m8])
-//RS }
-//RS fn jet_math_Mat4_new(
-//RS     m0: f64,
-//RS     m1: f64,
-//RS     m2: f64,
-//RS     m3: f64,
-//RS     m4: f64,
-//RS     m5: f64,
-//RS     m6: f64,
-//RS     m7: f64,
-//RS     m8: f64,
-//RS     m9: f64,
-//RS     m10: f64,
-//RS     m11: f64,
-//RS     m12: f64,
-//RS     m13: f64,
-//RS     m14: f64,
-//RS     m15: f64,
-//RS ) -> jet_std::Mat4 {
-//RS     jet_std::Mat4([
-//RS         m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15,
-//RS     ])
-//RS }
-//RS fn jet_math_Mat3_from_array(a: [f64; 9]) -> jet_std::Mat3 {
-//RS     jet_std::Mat3(a)
-//RS }
-//RS fn jet_math_Mat4_from_array(a: [f64; 16]) -> jet_std::Mat4 {
-//RS     jet_std::Mat4(a)
-//RS }
-//RS fn jet_math_Mat3_to_array(m: &jet_std::Mat3) -> [f64; 9] {
-//RS     m.0
-//RS }
-//RS fn jet_math_Mat4_to_array(m: &jet_std::Mat4) -> [f64; 16] {
-//RS     m.0
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Mat3_add(left: &jet_std::Mat3, right: jet_std::Mat3) -> jet_std::Mat3 {
-//RS     *left + right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Mat3_sub(left: &jet_std::Mat3, right: jet_std::Mat3) -> jet_std::Mat3 {
-//RS     *left - right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Mat3_mul(left: &jet_std::Mat3, right: jet_std::Mat3) -> jet_std::Mat3 {
-//RS     *left * right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Mat4_add(left: &jet_std::Mat4, right: jet_std::Mat4) -> jet_std::Mat4 {
-//RS     *left + right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Mat4_sub(left: &jet_std::Mat4, right: jet_std::Mat4) -> jet_std::Mat4 {
-//RS     *left - right
-//RS }
-//RS #[inline(always)]
-//RS fn jet_math_Mat4_mul(left: &jet_std::Mat4, right: jet_std::Mat4) -> jet_std::Mat4 {
-//RS     *left * right
-//RS }
-//RS fn jet_math_Mat3_matmul(m: &jet_std::Mat3, o: jet_std::Mat3) -> jet_std::Mat3 {
-//RS     *m * o
-//RS }
-//RS fn jet_math_Mat4_matmul(m: &jet_std::Mat4, o: jet_std::Mat4) -> jet_std::Mat4 {
-//RS     *m * o
-//RS }
-//RS fn jet_math_Mat3_transform(m: &jet_std::Mat3, v: jet_std::Vec3) -> jet_std::Vec3 {
-//RS     *m * v
-//RS }
-//RS fn jet_math_Mat4_transform(m: &jet_std::Mat4, v: jet_std::Vec4) -> jet_std::Vec4 {
-//RS     *m * v
-//RS }
-//RS fn jet_math_Mat3_transpose(m: &jet_std::Mat3) -> jet_std::Mat3 {
-//RS     let mut r = [0.0f64; 9];
-//RS     for c in 0..3 {
-//RS         for row in 0..3 {
-//RS             r[c * 3 + row] = m.0[row * 3 + c];
-//RS         }
-//RS     }
-//RS     jet_std::Mat3(r)
-//RS }
-//RS fn jet_math_Mat4_transpose(m: &jet_std::Mat4) -> jet_std::Mat4 {
-//RS     let mut r = [0.0f64; 16];
-//RS     for c in 0..4 {
-//RS         for row in 0..4 {
-//RS             r[c * 4 + row] = m.0[row * 4 + c];
-//RS         }
-//RS     }
-//RS     jet_std::Mat4(r)
-//RS }
+use core.math.runtime.std_math_task_mem.[F32x4, F64x2, F32x8, F64x4]
+use core.math.runtime.kernel_simd_lanes.*
+use core.prelude.runtime.kernel_panic.jet_panic
+use core.array.Array
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:1
+// D-SIMD2 / D-SIMD3 / D-LINALG1: value wrappers retain fixed storage; every
+// receiver is borrowed, and reductions reuse the shared scalar policy.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:74 (macro body20)
+#Inline(Always)
+fn jet_math_F32x4_new(a: F32, b: F32, c: F32, d: F32) -> F32x4 { F32x4{value: [F32#4]{a,b,c,d}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:74 (macro body24)
+#Inline(Always)
+fn jet_math_F32x4_splat(x: F32) -> F32x4 { F32x4{value: [F32#4]{x,x,x,x}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:83 (macro body20)
+#Inline(Always)
+fn jet_math_F64x2_new(a: F64, b: F64) -> F64x2 { F64x2{value: [F64#2]{a,b}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:83 (macro body24)
+#Inline(Always)
+fn jet_math_F64x2_splat(x: F64) -> F64x2 { F64x2{value: [F64#2]{x,x}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:92 (macro body20)
+#Inline(Always)
+fn jet_math_F32x8_new(a: F32, b: F32, c: F32, d: F32, e: F32, f: F32, g: F32, h: F32) -> F32x8 { F32x8{value: [F32#8]{a,b,c,d,e,f,g,h}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:92 (macro body24)
+#Inline(Always)
+fn jet_math_F32x8_splat(x: F32) -> F32x8 { F32x8{value: [F32#8]{x,x,x,x,x,x,x,x}} }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:10-100
+// Expand the original three float lane families using the same prep symbol
+// substitution convention as the canonical MathTaskMem carrier owner.
+prep loop (T, E, N, name, from_array, to_array, lane, sum, product, min, max, reduce_add, reduce_mul, reduce_min, reduce_max, reduce_avg) in [
+    (F32x4,F32,4,"F32x4",jet_math_F32x4_from_array,jet_math_F32x4_to_array,jet_math_F32x4_lane,jet_math_F32x4_sum,jet_math_F32x4_product,jet_math_F32x4_min,jet_math_F32x4_max,jet_math_F32x4_reduce_add,jet_math_F32x4_reduce_mul,jet_math_F32x4_reduce_min,jet_math_F32x4_reduce_max,jet_math_F32x4_reduce_avg),
+    (F64x2,F64,2,"F64x2",jet_math_F64x2_from_array,jet_math_F64x2_to_array,jet_math_F64x2_lane,jet_math_F64x2_sum,jet_math_F64x2_product,jet_math_F64x2_min,jet_math_F64x2_max,jet_math_F64x2_reduce_add,jet_math_F64x2_reduce_mul,jet_math_F64x2_reduce_min,jet_math_F64x2_reduce_max,jet_math_F64x2_reduce_avg),
+    (F32x8,F32,8,"F32x8",jet_math_F32x8_from_array,jet_math_F32x8_to_array,jet_math_F32x8_lane,jet_math_F32x8_sum,jet_math_F32x8_product,jet_math_F32x8_min,jet_math_F32x8_max,jet_math_F32x8_reduce_add,jet_math_F32x8_reduce_mul,jet_math_F32x8_reduce_min,jet_math_F32x8_reduce_max,jet_math_F32x8_reduce_avg)
+] {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:28
+    #Inline(Always)
+    fn from_array(a: Array<E,N>) -> T { T{value: a} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:32
+    #Inline(Always)
+    fn to_array(v: &T) -> Array<E,N> { v.value }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:36
+    #Inline(Always)
+    fn lane(v: &T, i: I64, file: &String, line: U32) -> E {
+        index :: match jet_simd_lane_index(i, name, N) { Ok(index) -> index, Err(message) -> jet_panic(file, line, &message) }
+        v.value[index]
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:44
+    #Inline(Always)
+    fn sum(v: &T) -> E { jet_simd_sum_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:48
+    #Inline(Always)
+    fn product(v: &T) -> E { jet_simd_product_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:52
+    #Inline(Always)
+    fn min(v: &T) -> E { jet_simd_min_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:56
+    #Inline(Always)
+    fn max(v: &T) -> E { jet_simd_max_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:60
+    #Inline(Always)
+    fn reduce_add(v: &T) -> E { sum(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:62
+    #Inline(Always)
+    fn reduce_mul(v: &T) -> E { product(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:64
+    #Inline(Always)
+    fn reduce_min(v: &T) -> E { min(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:66
+    #Inline(Always)
+    fn reduce_max(v: &T) -> E { max(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:68
+    #Inline(Always)
+    fn reduce_avg(v: &T) -> E { jet_simd_avg_array(&v.value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:102
+#Inline(Always)
+#Unsafe("target-selected native four-lane F64 carrier construction")
+fn jet_math_F64x4_new(a: F64, b: F64, c: F64, d: F64) -> F64x4 {
+    // GATE #4565: kernel primitive
+    F64x4{value: jet_simd_f64x4_new_native([F64#4]{a,b,c,d})}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:106
+#Inline(Always)
+#Unsafe("target-selected native four-lane F64 splat")
+fn jet_math_F64x4_splat(x: F64) -> F64x4 {
+    // GATE #4565: kernel primitive
+    F64x4{value: jet_simd_f64x4_splat_native(x)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:110
+#Inline(Always)
+#Unsafe("target-selected native four-lane F64 fixed array construction")
+fn jet_math_F64x4_from_array(a: Array<F64,4>) -> F64x4 {
+    // GATE #4565: kernel primitive
+    F64x4{value: jet_simd_f64x4_new_native(a)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:114
+#Inline(Always)
+#Unsafe("target-selected native four-lane F64 fixed array projection")
+fn jet_math_F64x4_to_array(v: &F64x4) -> Array<F64,4> {
+    // GATE #4565: kernel primitive
+    jet_simd_f64x4_to_array_native(v.value)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:118
+#Inline(Always)
+#Unsafe("checked lane projection from target-selected native F64 carrier")
+fn jet_math_F64x4_lane(v: &F64x4, i: I64, file: &String, line: U32) -> F64 {
+    index :: match jet_simd_lane_index(i, "F64x4", 4) { Ok(index) -> index, Err(message) -> jet_panic(file, line, &message) }
+    // GATE #4565: kernel primitive
+    jet_simd_f64x4_lane_native(v.value, index)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:127
+#Inline(Always)
+#Unsafe("constant checked lane of target-selected native F64 carrier")
+fn jet_math_F64x4_lane_const<const INDEX: USize>(v: &F64x4) -> F64 {
+    // GATE #4565: kernel primitive
+    jet_simd_f64x4_lane_const_native<INDEX>(v.value)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:131
+#Inline(Always)
+#Unsafe("native SIMD scale and constant-lane multiply retain fixed register carrier")
+fn jet_math_F64x4_mul_lane_scale<const INDEX: USize>(value: &F64x4, scale: F64, lane_source: &F64x4) -> F64x4 {
+    // GATE #4565: kernel primitive
+    F64x4{value: jet_simd_f64x4_mul_lane_scale_native<INDEX>(value.value, scale, lane_source.value)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:145
+#Inline(Always)
+#Unsafe("gather one constant lane from each of four retained native F64 carriers")
+fn jet_math_F64x4_gather_lane<const INDEX: USize>(first: &F64x4, second: &F64x4, third: &F64x4, fourth: &F64x4) -> F64x4 {
+    // GATE #4565: kernel primitive
+    F64x4{value: jet_simd_f64x4_gather_lane_native<INDEX>(first.value, second.value, third.value, fourth.value)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:157
+#Inline(Always)
+#Unsafe("native SIMD square root without scalar or heap carrier substitution")
+fn jet_math_F64x4_sqrt(v: &F64x4) -> F64x4 {
+    // GATE #4565: kernel primitive
+    F64x4{value: jet_simd_f64x4_sqrt_native_carrier(v.value)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:162
+#Inline(Always)
+fn jet_math_F64x4_sum(v: &F64x4) -> F64 { values :: jet_math_F64x4_to_array(v); jet_simd_sum_array(&values) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:167
+#Inline(Always)
+fn jet_math_F64x4_product(v: &F64x4) -> F64 { values :: jet_math_F64x4_to_array(v); jet_simd_product_array(&values) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:172
+#Inline(Always)
+fn jet_math_F64x4_min(v: &F64x4) -> F64 { values :: jet_math_F64x4_to_array(v); jet_simd_min_array(&values) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:177
+#Inline(Always)
+fn jet_math_F64x4_max(v: &F64x4) -> F64 { values :: jet_math_F64x4_to_array(v); jet_simd_max_array(&values) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:182
+#Inline(Always)
+fn jet_math_F64x4_reduce_add(v: &F64x4) -> F64 { jet_math_F64x4_sum(v) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:186
+#Inline(Always)
+fn jet_math_F64x4_reduce_mul(v: &F64x4) -> F64 { jet_math_F64x4_product(v) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:190
+#Inline(Always)
+fn jet_math_F64x4_reduce_min(v: &F64x4) -> F64 { jet_math_F64x4_min(v) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:194
+#Inline(Always)
+fn jet_math_F64x4_reduce_max(v: &F64x4) -> F64 { jet_math_F64x4_max(v) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:198
+#Inline(Always)
+fn jet_math_F64x4_reduce_avg(v: &F64x4) -> F64 { values :: jet_math_F64x4_to_array(v); jet_simd_avg_array(&values) }
+
+use core.math.runtime.std_math_task_mem.[I8x16, I16x8, I32x4, I64x2]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:203 (macro body20)
+#Inline(Always)
+fn jet_math_I8x16_new(a: I8, b: I8, c: I8, d: I8, e: I8, f: I8, g: I8, h: I8, i: I8, j: I8, k: I8, l: I8, m: I8, n: I8, o: I8, p: I8) -> I8x16 { I8x16{value: [I8#16]{a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:204 (macro body20)
+#Inline(Always)
+fn jet_math_I16x8_new(a: I16, b: I16, c: I16, d: I16, e: I16, f: I16, g: I16, h: I16) -> I16x8 { I16x8{value: [I16#8]{a,b,c,d,e,f,g,h}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:205 (macro body20)
+#Inline(Always)
+fn jet_math_I32x4_new(a: I32, b: I32, c: I32, d: I32) -> I32x4 { I32x4{value: [I32#4]{a,b,c,d}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:206 (macro body20)
+#Inline(Always)
+fn jet_math_I64x2_new(a: I64, b: I64) -> I64x2 { I64x2{value: [I64#2]{a,b}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:203-206 (macro bodies24-70)
+prep loop (T, E, N, name, splat, from_array, to_array, lane, sum, product, min, max, reduce_add, reduce_mul, reduce_min, reduce_max, reduce_avg) in [
+    (I8x16,I8,16,"I8x16",jet_math_I8x16_splat,jet_math_I8x16_from_array,jet_math_I8x16_to_array,jet_math_I8x16_lane,jet_math_I8x16_sum,jet_math_I8x16_product,jet_math_I8x16_min,jet_math_I8x16_max,jet_math_I8x16_reduce_add,jet_math_I8x16_reduce_mul,jet_math_I8x16_reduce_min,jet_math_I8x16_reduce_max,jet_math_I8x16_reduce_avg),
+    (I16x8,I16,8,"I16x8",jet_math_I16x8_splat,jet_math_I16x8_from_array,jet_math_I16x8_to_array,jet_math_I16x8_lane,jet_math_I16x8_sum,jet_math_I16x8_product,jet_math_I16x8_min,jet_math_I16x8_max,jet_math_I16x8_reduce_add,jet_math_I16x8_reduce_mul,jet_math_I16x8_reduce_min,jet_math_I16x8_reduce_max,jet_math_I16x8_reduce_avg),
+    (I32x4,I32,4,"I32x4",jet_math_I32x4_splat,jet_math_I32x4_from_array,jet_math_I32x4_to_array,jet_math_I32x4_lane,jet_math_I32x4_sum,jet_math_I32x4_product,jet_math_I32x4_min,jet_math_I32x4_max,jet_math_I32x4_reduce_add,jet_math_I32x4_reduce_mul,jet_math_I32x4_reduce_min,jet_math_I32x4_reduce_max,jet_math_I32x4_reduce_avg),
+    (I64x2,I64,2,"I64x2",jet_math_I64x2_splat,jet_math_I64x2_from_array,jet_math_I64x2_to_array,jet_math_I64x2_lane,jet_math_I64x2_sum,jet_math_I64x2_product,jet_math_I64x2_min,jet_math_I64x2_max,jet_math_I64x2_reduce_add,jet_math_I64x2_reduce_mul,jet_math_I64x2_reduce_min,jet_math_I64x2_reduce_max,jet_math_I64x2_reduce_avg)
+] {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:24
+    #Inline(Always)
+    fn splat(x: E) -> T { T{value: jet_simd_splat_array(x)} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:28
+    #Inline(Always)
+    fn from_array(a: Array<E,N>) -> T { T{value: a} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:32
+    #Inline(Always)
+    fn to_array(v: &T) -> Array<E,N> { v.value }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:36
+    #Inline(Always)
+    fn lane(v: &T, i: I64, file: &String, line: U32) -> E {
+        index :: match jet_simd_lane_index(i, name, N) { Ok(index) -> index, Err(message) -> jet_panic(file, line, &message) }
+        v.value[index]
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:44
+    #Inline(Always)
+    fn sum(v: &T) -> E { jet_simd_sum_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:48
+    #Inline(Always)
+    fn product(v: &T) -> E { jet_simd_product_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:52
+    #Inline(Always)
+    fn min(v: &T) -> E { jet_simd_min_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:56
+    #Inline(Always)
+    fn max(v: &T) -> E { jet_simd_max_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:60
+    #Inline(Always)
+    fn reduce_add(v: &T) -> E { sum(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:62
+    #Inline(Always)
+    fn reduce_mul(v: &T) -> E { product(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:64
+    #Inline(Always)
+    fn reduce_min(v: &T) -> E { min(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:66
+    #Inline(Always)
+    fn reduce_max(v: &T) -> E { max(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:68
+    #Inline(Always)
+    fn reduce_avg(v: &T) -> E { jet_simd_avg_array(&v.value) }
+}
+use core.math.runtime.std_math_task_mem.[U8x16,U16x8,U32x4,U64x2,I8x32,I16x16,I32x8,I64x4,U8x32,U16x16,U32x8,U64x4,Vec2,Vec3,Vec4,Mat3,Mat4]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:207 (macro body20)
+#Inline(Always)
+fn jet_math_U8x16_new(a: U8,b: U8,c: U8,d: U8,e: U8,f: U8,g: U8,h: U8,i: U8,j: U8,k: U8,l: U8,m: U8,n: U8,o: U8,p: U8) -> U8x16 { U8x16{value: [U8#16]{a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:208 (macro body20)
+#Inline(Always)
+fn jet_math_U16x8_new(a: U16,b: U16,c: U16,d: U16,e: U16,f: U16,g: U16,h: U16) -> U16x8 { U16x8{value: [U16#8]{a,b,c,d,e,f,g,h}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:209 (macro body20)
+#Inline(Always)
+fn jet_math_U32x4_new(a: U32,b: U32,c: U32,d: U32) -> U32x4 { U32x4{value: [U32#4]{a,b,c,d}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:210 (macro body20)
+#Inline(Always)
+fn jet_math_U64x2_new(a: U64,b: U64) -> U64x2 { U64x2{value: [U64#2]{a,b}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:211 (macro body20)
+#Inline(Always)
+fn jet_math_I8x32_new(a: I8,b: I8,c: I8,d: I8,e: I8,f: I8,g: I8,h: I8,i: I8,j: I8,k: I8,l: I8,m: I8,n: I8,o: I8,p: I8,q: I8,r: I8,s: I8,t: I8,u: I8,v: I8,w: I8,x: I8,y: I8,z: I8,aa: I8,ab: I8,ac: I8,ad: I8,ae: I8,af: I8) -> I8x32 { I8x32{value: [I8#32]{a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,aa,ab,ac,ad,ae,af}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:212 (macro body20)
+#Inline(Always)
+fn jet_math_I16x16_new(a: I16,b: I16,c: I16,d: I16,e: I16,f: I16,g: I16,h: I16,i: I16,j: I16,k: I16,l: I16,m: I16,n: I16,o: I16,p: I16) -> I16x16 { I16x16{value: [I16#16]{a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:213 (macro body20)
+#Inline(Always)
+fn jet_math_I32x8_new(a: I32,b: I32,c: I32,d: I32,e: I32,f: I32,g: I32,h: I32) -> I32x8 { I32x8{value: [I32#8]{a,b,c,d,e,f,g,h}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:214 (macro body20)
+#Inline(Always)
+fn jet_math_I64x4_new(a: I64,b: I64,c: I64,d: I64) -> I64x4 { I64x4{value: [I64#4]{a,b,c,d}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:215 (macro body20)
+#Inline(Always)
+fn jet_math_U8x32_new(a: U8,b: U8,c: U8,d: U8,e: U8,f: U8,g: U8,h: U8,i: U8,j: U8,k: U8,l: U8,m: U8,n: U8,o: U8,p: U8,q: U8,r: U8,s: U8,t: U8,u: U8,v: U8,w: U8,x: U8,y: U8,z: U8,aa: U8,ab: U8,ac: U8,ad: U8,ae: U8,af: U8) -> U8x32 { U8x32{value: [U8#32]{a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,aa,ab,ac,ad,ae,af}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:216 (macro body20)
+#Inline(Always)
+fn jet_math_U16x16_new(a: U16,b: U16,c: U16,d: U16,e: U16,f: U16,g: U16,h: U16,i: U16,j: U16,k: U16,l: U16,m: U16,n: U16,o: U16,p: U16) -> U16x16 { U16x16{value: [U16#16]{a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:217 (macro body20)
+#Inline(Always)
+fn jet_math_U32x8_new(a: U32,b: U32,c: U32,d: U32,e: U32,f: U32,g: U32,h: U32) -> U32x8 { U32x8{value: [U32#8]{a,b,c,d,e,f,g,h}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:218 (macro body20)
+#Inline(Always)
+fn jet_math_U64x4_new(a: U64,b: U64,c: U64,d: U64) -> U64x4 { U64x4{value: [U64#4]{a,b,c,d}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:207-218 (macro bodies24-70)
+prep loop (T,E,N,name,splat,from_array,to_array,lane,sum,product,min,max,reduce_add,reduce_mul,reduce_min,reduce_max,reduce_avg) in [
+    (U8x16,U8,16,"U8x16",jet_math_U8x16_splat,jet_math_U8x16_from_array,jet_math_U8x16_to_array,jet_math_U8x16_lane,jet_math_U8x16_sum,jet_math_U8x16_product,jet_math_U8x16_min,jet_math_U8x16_max,jet_math_U8x16_reduce_add,jet_math_U8x16_reduce_mul,jet_math_U8x16_reduce_min,jet_math_U8x16_reduce_max,jet_math_U8x16_reduce_avg),
+    (U16x8,U16,8,"U16x8",jet_math_U16x8_splat,jet_math_U16x8_from_array,jet_math_U16x8_to_array,jet_math_U16x8_lane,jet_math_U16x8_sum,jet_math_U16x8_product,jet_math_U16x8_min,jet_math_U16x8_max,jet_math_U16x8_reduce_add,jet_math_U16x8_reduce_mul,jet_math_U16x8_reduce_min,jet_math_U16x8_reduce_max,jet_math_U16x8_reduce_avg),
+    (U32x4,U32,4,"U32x4",jet_math_U32x4_splat,jet_math_U32x4_from_array,jet_math_U32x4_to_array,jet_math_U32x4_lane,jet_math_U32x4_sum,jet_math_U32x4_product,jet_math_U32x4_min,jet_math_U32x4_max,jet_math_U32x4_reduce_add,jet_math_U32x4_reduce_mul,jet_math_U32x4_reduce_min,jet_math_U32x4_reduce_max,jet_math_U32x4_reduce_avg),
+    (U64x2,U64,2,"U64x2",jet_math_U64x2_splat,jet_math_U64x2_from_array,jet_math_U64x2_to_array,jet_math_U64x2_lane,jet_math_U64x2_sum,jet_math_U64x2_product,jet_math_U64x2_min,jet_math_U64x2_max,jet_math_U64x2_reduce_add,jet_math_U64x2_reduce_mul,jet_math_U64x2_reduce_min,jet_math_U64x2_reduce_max,jet_math_U64x2_reduce_avg),
+    (I8x32,I8,32,"I8x32",jet_math_I8x32_splat,jet_math_I8x32_from_array,jet_math_I8x32_to_array,jet_math_I8x32_lane,jet_math_I8x32_sum,jet_math_I8x32_product,jet_math_I8x32_min,jet_math_I8x32_max,jet_math_I8x32_reduce_add,jet_math_I8x32_reduce_mul,jet_math_I8x32_reduce_min,jet_math_I8x32_reduce_max,jet_math_I8x32_reduce_avg),
+    (I16x16,I16,16,"I16x16",jet_math_I16x16_splat,jet_math_I16x16_from_array,jet_math_I16x16_to_array,jet_math_I16x16_lane,jet_math_I16x16_sum,jet_math_I16x16_product,jet_math_I16x16_min,jet_math_I16x16_max,jet_math_I16x16_reduce_add,jet_math_I16x16_reduce_mul,jet_math_I16x16_reduce_min,jet_math_I16x16_reduce_max,jet_math_I16x16_reduce_avg),
+    (I32x8,I32,8,"I32x8",jet_math_I32x8_splat,jet_math_I32x8_from_array,jet_math_I32x8_to_array,jet_math_I32x8_lane,jet_math_I32x8_sum,jet_math_I32x8_product,jet_math_I32x8_min,jet_math_I32x8_max,jet_math_I32x8_reduce_add,jet_math_I32x8_reduce_mul,jet_math_I32x8_reduce_min,jet_math_I32x8_reduce_max,jet_math_I32x8_reduce_avg),
+    (I64x4,I64,4,"I64x4",jet_math_I64x4_splat,jet_math_I64x4_from_array,jet_math_I64x4_to_array,jet_math_I64x4_lane,jet_math_I64x4_sum,jet_math_I64x4_product,jet_math_I64x4_min,jet_math_I64x4_max,jet_math_I64x4_reduce_add,jet_math_I64x4_reduce_mul,jet_math_I64x4_reduce_min,jet_math_I64x4_reduce_max,jet_math_I64x4_reduce_avg),
+    (U8x32,U8,32,"U8x32",jet_math_U8x32_splat,jet_math_U8x32_from_array,jet_math_U8x32_to_array,jet_math_U8x32_lane,jet_math_U8x32_sum,jet_math_U8x32_product,jet_math_U8x32_min,jet_math_U8x32_max,jet_math_U8x32_reduce_add,jet_math_U8x32_reduce_mul,jet_math_U8x32_reduce_min,jet_math_U8x32_reduce_max,jet_math_U8x32_reduce_avg),
+    (U16x16,U16,16,"U16x16",jet_math_U16x16_splat,jet_math_U16x16_from_array,jet_math_U16x16_to_array,jet_math_U16x16_lane,jet_math_U16x16_sum,jet_math_U16x16_product,jet_math_U16x16_min,jet_math_U16x16_max,jet_math_U16x16_reduce_add,jet_math_U16x16_reduce_mul,jet_math_U16x16_reduce_min,jet_math_U16x16_reduce_max,jet_math_U16x16_reduce_avg),
+    (U32x8,U32,8,"U32x8",jet_math_U32x8_splat,jet_math_U32x8_from_array,jet_math_U32x8_to_array,jet_math_U32x8_lane,jet_math_U32x8_sum,jet_math_U32x8_product,jet_math_U32x8_min,jet_math_U32x8_max,jet_math_U32x8_reduce_add,jet_math_U32x8_reduce_mul,jet_math_U32x8_reduce_min,jet_math_U32x8_reduce_max,jet_math_U32x8_reduce_avg),
+    (U64x4,U64,4,"U64x4",jet_math_U64x4_splat,jet_math_U64x4_from_array,jet_math_U64x4_to_array,jet_math_U64x4_lane,jet_math_U64x4_sum,jet_math_U64x4_product,jet_math_U64x4_min,jet_math_U64x4_max,jet_math_U64x4_reduce_add,jet_math_U64x4_reduce_mul,jet_math_U64x4_reduce_min,jet_math_U64x4_reduce_max,jet_math_U64x4_reduce_avg)
+] {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:24
+    #Inline(Always)
+    fn splat(x: E) -> T { T{value: jet_simd_splat_array(x)} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:28
+    #Inline(Always)
+    fn from_array(a: Array<E,N>) -> T { T{value: a} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:32
+    #Inline(Always)
+    fn to_array(v: &T) -> Array<E,N> { v.value }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:36
+    #Inline(Always)
+    fn lane(v: &T, i: I64, file: &String, line: U32) -> E {
+        index :: match jet_simd_lane_index(i,name,N) { Ok(index) -> index, Err(message) -> jet_panic(file,line,&message) }
+        v.value[index]
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:44
+    #Inline(Always)
+    fn sum(v: &T) -> E { jet_simd_sum_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:48
+    #Inline(Always)
+    fn product(v: &T) -> E { jet_simd_product_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:52
+    #Inline(Always)
+    fn min(v: &T) -> E { jet_simd_min_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:56
+    #Inline(Always)
+    fn max(v: &T) -> E { jet_simd_max_array(&v.value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:60
+    #Inline(Always)
+    fn reduce_add(v: &T) -> E { sum(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:62
+    #Inline(Always)
+    fn reduce_mul(v: &T) -> E { product(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:64
+    #Inline(Always)
+    fn reduce_min(v: &T) -> E { min(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:66
+    #Inline(Always)
+    fn reduce_max(v: &T) -> E { max(v) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:68
+    #Inline(Always)
+    fn reduce_avg(v: &T) -> E { jet_simd_avg_array(&v.value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:219-259
+prep loop (T,add,sub,mul,div) in [
+    (F32x4,jet_math_F32x4_add,jet_math_F32x4_sub,jet_math_F32x4_mul,jet_math_F32x4_div),
+    (F64x2,jet_math_F64x2_add,jet_math_F64x2_sub,jet_math_F64x2_mul,jet_math_F64x2_div),
+    (F32x8,jet_math_F32x8_add,jet_math_F32x8_sub,jet_math_F32x8_mul,jet_math_F32x8_div),
+    (F64x4,jet_math_F64x4_add,jet_math_F64x4_sub,jet_math_F64x4_mul,jet_math_F64x4_div),
+    (I8x16,jet_math_I8x16_add,jet_math_I8x16_sub,jet_math_I8x16_mul,jet_math_I8x16_div),
+    (I16x8,jet_math_I16x8_add,jet_math_I16x8_sub,jet_math_I16x8_mul,jet_math_I16x8_div),
+    (I32x4,jet_math_I32x4_add,jet_math_I32x4_sub,jet_math_I32x4_mul,jet_math_I32x4_div),
+    (I64x2,jet_math_I64x2_add,jet_math_I64x2_sub,jet_math_I64x2_mul,jet_math_I64x2_div),
+    (U8x16,jet_math_U8x16_add,jet_math_U8x16_sub,jet_math_U8x16_mul,jet_math_U8x16_div),
+    (U16x8,jet_math_U16x8_add,jet_math_U16x8_sub,jet_math_U16x8_mul,jet_math_U16x8_div),
+    (U32x4,jet_math_U32x4_add,jet_math_U32x4_sub,jet_math_U32x4_mul,jet_math_U32x4_div),
+    (U64x2,jet_math_U64x2_add,jet_math_U64x2_sub,jet_math_U64x2_mul,jet_math_U64x2_div),
+    (I8x32,jet_math_I8x32_add,jet_math_I8x32_sub,jet_math_I8x32_mul,jet_math_I8x32_div),
+    (I16x16,jet_math_I16x16_add,jet_math_I16x16_sub,jet_math_I16x16_mul,jet_math_I16x16_div),
+    (I32x8,jet_math_I32x8_add,jet_math_I32x8_sub,jet_math_I32x8_mul,jet_math_I32x8_div),
+    (I64x4,jet_math_I64x4_add,jet_math_I64x4_sub,jet_math_I64x4_mul,jet_math_I64x4_div),
+    (U8x32,jet_math_U8x32_add,jet_math_U8x32_sub,jet_math_U8x32_mul,jet_math_U8x32_div),
+    (U16x16,jet_math_U16x16_add,jet_math_U16x16_sub,jet_math_U16x16_mul,jet_math_U16x16_div),
+    (U32x8,jet_math_U32x8_add,jet_math_U32x8_sub,jet_math_U32x8_mul,jet_math_U32x8_div),
+    (U64x4,jet_math_U64x4_add,jet_math_U64x4_sub,jet_math_U64x4_mul,jet_math_U64x4_div)
+] {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:222
+    #Inline(Always)
+    fn add(left: &T, right: T) -> T { *left + right }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:226
+    #Inline(Always)
+    fn sub(left: &T, right: T) -> T { *left - right }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:230
+    #Inline(Always)
+    fn mul(left: &T, right: T) -> T { *left * right }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:234
+    #Inline(Always)
+    fn div(left: &T, right: T) -> T { *left / right }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:262
+fn jet_math_Vec2_new(x: F64,y: F64) -> Vec2 { Vec2{value: [F64#2]{x,y}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:265
+fn jet_math_Vec3_new(x: F64,y: F64,z: F64) -> Vec3 { Vec3{value: [F64#3]{x,y,z}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:268
+fn jet_math_Vec4_new(x: F64,y: F64,z: F64,w: F64) -> Vec4 { Vec4{value: [F64#4]{x,y,z,w}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:271
+fn jet_math_Vec2_splat(x: F64) -> Vec2 { Vec2{value: [F64#2]{x,x}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:274
+fn jet_math_Vec3_splat(x: F64) -> Vec3 { Vec3{value: [F64#3]{x,x,x}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:277
+fn jet_math_Vec4_splat(x: F64) -> Vec4 { Vec4{value: [F64#4]{x,x,x,x}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:280
+fn jet_math_Vec2_from_array(a: Array<F64,2>) -> Vec2 { Vec2{value: a} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:283
+fn jet_math_Vec3_from_array(a: Array<F64,3>) -> Vec3 { Vec3{value: a} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:286
+fn jet_math_Vec4_from_array(a: Array<F64,4>) -> Vec4 { Vec4{value: a} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:289
+fn jet_math_Vec2_to_array(v: &Vec2) -> Array<F64,2> { v.value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:292
+fn jet_math_Vec3_to_array(v: &Vec3) -> Array<F64,3> { v.value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:295
+fn jet_math_Vec4_to_array(v: &Vec4) -> Array<F64,4> { v.value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:299-321
+prep loop (T,N,name,lane) in [(Vec2,2,"Vec2",jet_math_Vec2_lane),(Vec3,3,"Vec3",jet_math_Vec3_lane),(Vec4,4,"Vec4",jet_math_Vec4_lane)] {
+    #Inline(Always)
+    fn lane(v: &T,i: I64,file: &String,line: U32) -> F64 {
+        index :: match jet_simd_lane_index(i,name,N) { Ok(index) -> index, Err(message) -> jet_panic(file,line,&message) }
+        v.value[index]
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:324-362
+prep loop (T,add,sub,mul) in [
+    (Vec2,jet_math_Vec2_add,jet_math_Vec2_sub,jet_math_Vec2_mul),
+    (Vec3,jet_math_Vec3_add,jet_math_Vec3_sub,jet_math_Vec3_hadamard_mul),
+    (Vec4,jet_math_Vec4_add,jet_math_Vec4_sub,jet_math_Vec4_mul)
+] {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:324,336,351
+    #Inline(Always)
+    fn add(left: &T,right: T) -> T { *left + right }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:328,340,355
+    #Inline(Always)
+    fn sub(left: &T,right: T) -> T { *left - right }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:332,344,359
+    #Inline(Always)
+    fn mul(left: &T,right: T) -> T { *left * right }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:363
+#Inline(Always)
+fn jet_math_Vec3_mul(v: &Vec3,s: F64) -> Vec3 { Vec3{value: [F64#3]{v.value[0]*s,v.value[1]*s,v.value[2]*s}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:367
+#Inline(Always)
+fn jet_math_Vec3_div(v: &Vec3,s: F64) -> Vec3 { Vec3{value: [F64#3]{v.value[0]/s,v.value[1]/s,v.value[2]/s}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:371
+#Inline(Always)
+fn jet_math_Float_div_Vec3(s: F64,v: &Vec3) -> Vec3 { Vec3{value: [F64#3]{s/v.value[0],s/v.value[1],s/v.value[2]}} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:375
+#Inline(Always)
+fn jet_math_Float_mul_Vec3(s: F64,v: &Vec3) -> Vec3 { jet_math_Vec3_mul(v,s) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:380
+fn jet_math_Vec2_dot(v: &Vec2,o: Vec2) -> F64 { v.value[0]*o.value[0] + v.value[1]*o.value[1] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:383
+fn jet_math_Vec3_dot(v: &Vec3,o: Vec3) -> F64 { v.value[0]*o.value[0] + v.value[1]*o.value[1] + v.value[2]*o.value[2] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:386
+fn jet_math_Vec4_dot(v: &Vec4,o: Vec4) -> F64 {
+    sum := 0.0
+    for i in 0..4 { sum += v.value[i]*o.value[i] }
+    sum
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:389
+fn jet_math_Vec3_cross(v: &Vec3,o: Vec3) -> Vec3 {
+    Vec3{value: [F64#3]{v.value[1]*o.value[2]-v.value[2]*o.value[1],v.value[2]*o.value[0]-v.value[0]*o.value[2],v.value[0]*o.value[1]-v.value[1]*o.value[0]}}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:396
+fn jet_math_Vec2_length(v: &Vec2) -> F64 { jet_math_Vec2_dot(v,*v).sqrt() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:399
+fn jet_math_Vec3_length(v: &Vec3) -> F64 { jet_math_Vec3_dot(v,*v).sqrt() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:402
+fn jet_math_Vec4_length(v: &Vec4) -> F64 { jet_math_Vec4_dot(v,*v).sqrt() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:405
+fn jet_math_Vec2_normalize(v: &Vec2) -> Vec2 {
+    l :: jet_math_Vec2_length(v)
+    if l == 0.0 { *v } else { Vec2{value: [F64#2]{v.value[0]/l,v.value[1]/l}} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:413
+fn jet_math_Vec3_normalize(v: &Vec3) -> Vec3 {
+    l :: jet_math_Vec3_length(v)
+    if l == 0.0 { *v } else { Vec3{value: [F64#3]{v.value[0]/l,v.value[1]/l,v.value[2]/l}} }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:421
+fn jet_math_Vec4_normalize(v: &Vec4) -> Vec4 {
+    l :: jet_math_Vec4_length(v)
+    if l == 0.0 { *v } else {
+        r := v.value
+        for i in 0..4 { r[i] /= l }
+        Vec4{value: r}
+    }
+}
+// Matrices are column-major; constructors keep the source component order.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:435
+fn jet_math_Mat3_new(m0: F64,m1: F64,m2: F64,m3: F64,m4: F64,m5: F64,m6: F64,m7: F64,m8: F64) -> Mat3 {
+    Mat3{value: [F64#9]{m0,m1,m2,m3,m4,m5,m6,m7,m8}}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:448
+fn jet_math_Mat4_new(m0: F64,m1: F64,m2: F64,m3: F64,m4: F64,m5: F64,m6: F64,m7: F64,m8: F64,m9: F64,m10: F64,m11: F64,m12: F64,m13: F64,m14: F64,m15: F64) -> Mat4 {
+    Mat4{value: [F64#16]{m0,m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15}}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:470
+fn jet_math_Mat3_from_array(a: Array<F64,9>) -> Mat3 { Mat3{value: a} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:473
+fn jet_math_Mat4_from_array(a: Array<F64,16>) -> Mat4 { Mat4{value: a} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:476
+fn jet_math_Mat3_to_array(m: &Mat3) -> Array<F64,9> { m.value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:479
+fn jet_math_Mat4_to_array(m: &Mat4) -> Array<F64,16> { m.value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:483-535
+prep loop (T,V,N,S,add,sub,mul,matmul,transform,transpose) in [
+    (Mat3,Vec3,3,9,jet_math_Mat3_add,jet_math_Mat3_sub,jet_math_Mat3_mul,jet_math_Mat3_matmul,jet_math_Mat3_transform,jet_math_Mat3_transpose),
+    (Mat4,Vec4,4,16,jet_math_Mat4_add,jet_math_Mat4_sub,jet_math_Mat4_mul,jet_math_Mat4_matmul,jet_math_Mat4_transform,jet_math_Mat4_transpose)
+] {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:483,495
+    #Inline(Always)
+    fn add(left: &T,right: T) -> T { *left + right }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:487,499
+    #Inline(Always)
+    fn sub(left: &T,right: T) -> T { *left - right }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:491,503
+    #Inline(Always)
+    fn mul(left: &T,right: T) -> T { *left * right }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:506,509
+    fn matmul(m: &T,o: T) -> T { *m * o }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:512,515
+    fn transform(m: &T,v: V) -> V { *m * v }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:518,527
+    fn transpose(m: &T) -> T {
+        r := jet_simd_splat_array<F64,S>(0.0)
+        for c in 0..N { for row in 0..N { r[c*N+row] = m.value[row*N+c] } }
+        T{value: r}
+    }
+}
+// PORT-PENDING 0284 crates/jet-codegen/src/Prelude/CoreLib/Top/LinalgFns.rs:536-882
 //RS // D-SPACE-GEOMETRY1=A: compact carriers for typed coordinate spaces.  Space
 //RS // parameters are erased by codegen; dynamic frame ids stay on values so a
 //RS // transform cannot silently consume a value from a different live frame.

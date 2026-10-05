@@ -1,5 +1,6 @@
 use core.ui.runtime.ui_02.[JetUiAriaRole, JetUiNodeKind, JetTuiEvent, JetSize, jet_ui_text_input, jet_ui_node_accessibility]
 use jet_ui_host.[JetUiImeMode, JetUiAccessibility]
+use core.ui.runtime.ui_02.[JetTuiColorProfile, JetTuiCapabilities, JetTuiStyle, JetTuiColor, JetTuiList, JetTuiListState, JetRect, JetNullBackend, JetInputEvent, JetEventResult, JetTuiWidget, JetTuiStatefulWidget, jet_tui_display_width, jet_tui_truncate, jet_tui_pad]
 
 // Rust: crates/jet-codegen/src/Prelude/Ui.rs:49
 #Test("ui_interactive_roles_are_only_button_and_text_input") {
@@ -27,4 +28,37 @@ use jet_ui_host.[JetUiImeMode, JetUiAccessibility]
     assert(JetTuiEvent.timer("tick", -1) == JetTuiEvent.Timer(id: "tick", elapsed_ms: -1))
     assert(JetTuiEvent.io("socket", [0, 255]) == JetTuiEvent.IO(channel: "socket", payload: [0, 255]))
     assert(JetTuiEvent.focus(false) == JetTuiEvent.Focus(focused: false))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:449-643
+#Test("tui_profile_and_style_share_portable_presentation_kernel") {
+    plain :: JetTuiCapabilities.plain(0, 0)
+    assert(plain.width == 1 && plain.height == 1 && !plain.color && !plain.unicode)
+    assert(JetTuiColorProfile.TrueColor.name() == "truecolor")
+    style :: JetTuiStyle.new().foreground(JetTuiColor.RGB(255, 0, 0)).bold(true)
+    assert(style.render("→界", &plain) == ">?")
+    assert(jet_tui_display_width("a界́") == 3)
+    assert(jet_tui_truncate("a界b", 2) == "a")
+    assert(jet_tui_pad("界", 4) == "界  ")
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:789-820
+#Test("tui_list_scrolls_selected_row_into_same_canonical_tree") {
+    list :: JetTuiList.new(["zero", "one", "two", "three"])
+    state := JetTuiListState{}
+    state.select(3)
+    node :: list.render(JetRect{x: 0.0, y: 0.0, width: 8.0, height: 2.0}, &state)
+    assert(state.selected() == 3 && state.offset() == 2)
+    assert(node.kind == JetUiNodeKind.Box && node.children.len() == 2)
+    assert(node.children[0].label == "  two" && node.children[1].label == "> three")
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1528-1647
+#Test("null_backend_shared_focus_routes_tab_and_preserves_empty_group") {
+    backend :: JetNullBackend.new()
+    backend.set_focus_group([jet_ui_text_input("first", JetUiImeMode.Disabled), jet_ui_text_input("second", JetUiImeMode.Disabled)])
+    assert(backend.focused_label() == "first")
+    assert(backend.dispatch_event(JetInputEvent.Key(code: "TAB")) == JetEventResult.Handled)
+    assert(backend.focused_label() == "second")
+    backend.set_focus_group([])
+    assert(backend.focused_label() == "")
+    assert(backend.dispatch_event(JetInputEvent.Key(code: "")) == JetEventResult.Ignored)
 }

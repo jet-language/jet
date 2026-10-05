@@ -1,0 +1,39 @@
+use core.db.runtime.top_handles_raylib.[jet_raylib_color, jet_raylib_c_color, jet_raylib_key_code, jet_raylib_load_sound, jet_raylib_play_sound, jet_raylib_cstring]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:527/531/914
+#Test("raylib_color_preserves_logical_values_and_clamps_only_c_projection") {
+    logical :: jet_raylib_color(-10, 256, 40, 999)
+    assert_eq(logical.r, -10)
+    assert_eq(logical.g, 256)
+    native :: jet_raylib_c_color(&logical)
+    assert_eq(native.r, U8{0})
+    assert_eq(native.g, U8{255})
+    assert_eq(native.b, U8{40})
+    assert_eq(native.a, U8{255})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:918
+#Test("raylib_key_codes_preserve_named_case_pairs_and_unknown_sentinel") {
+    assert_eq(jet_raylib_key_code(&"Space"), I32{32})
+    assert_eq(jet_raylib_key_code(&"esc"), I32{256})
+    assert_eq(jet_raylib_key_code(&"Enter"), I32{257})
+    assert_eq(jet_raylib_key_code(&"w"), I32{87})
+    assert_eq(jet_raylib_key_code(&"SPACE"), I32{-1})
+    assert_eq(jet_raylib_key_code(&""), I32{-1})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:1020/1025
+#Test("raylib_sound_acceptance_depends_only_on_nonempty_path") {
+    absent :: jet_raylib_load_sound(&"")
+    present :: jet_raylib_load_sound(&"asset.wav")
+    assert(not jet_raylib_play_sound(&absent))
+    assert(jet_raylib_play_sound(&present))
+    assert_eq(present.path, "asset.wav")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HandlesRaylib.rs:608
+#Test("raylib_c_text_removes_interior_zero_bytes_before_native_call") {
+    text :: "ab{Char.from_u32(0).unwrap()}cd"
+    // GATE #4565: kernel primitive
+    #Unsafe("inspect the actual owned native CString without invoking a provider") {
+        native :: jet_raylib_cstring(&text)
+        assert_eq(native.as_bytes(), &[U8; 4]{97,98,99,100})
+    }
+}

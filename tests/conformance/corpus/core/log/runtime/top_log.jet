@@ -1,0 +1,46 @@
+use core.log.runtime.top_log.*
+use core.log.[LogField]
+
+// Behavioral controls for Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:52-62.
+#Test("log_level_ranks_preserve_alias_and_unknown") {
+    assert(jet_log_level_rank("debug") == Val(U8{0}))
+    assert(jet_log_level_rank("info") == Val(U8{1}))
+    assert(jet_log_level_rank("warning") == jet_log_level_rank("warn"))
+    assert(jet_log_level_rank("fatal") == Val(U8{5}))
+    assert(jet_log_level_rank("INFO") == None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:241-292.
+#Test("log_telemetry_sanitization_and_utf8_byte_limit") {
+    assert(jet_log_telemetry_text("a\nb\tc") == "abc")
+    assert(jet_log_telemetry_json_string("a\nb\t") == "\"a\\u000ab\\u0009\"")
+    text := String.new()
+    loop _ in 0..<511 -> &text.push('a')
+    &text.push('é')
+    assert(jet_log_telemetry_text(text).len() == 511)
+    assert(jet_log_telemetry_json_string(text).len() == 513)
+    assert(jet_log_json_escape("\"\\\n\r\t") == "\\\"\\\\\\n\\r\\t")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:402-464.
+#Test("log_metadata_deduplicates_sorts_and_or_redacts") {
+    fields :: [LogField]{jet_ring_log_field("z", "last"), jet_ring_log_int("a", 4), jet_ring_log_redact("a"), jet_ring_log_field("", "skip")}
+    assert(jet_log_telemetry_log_fields(fields) == "[{\"key\":\"a\",\"redacted\":true},{\"key\":\"z\"}]")
+    assert(jet_log_telemetry_payload_fields(fields) == "[{\"key\":\"z\",\"value\":\"last\"},{\"key\":\"a\",\"value\":4}]")
+    malformed :: [LogField]{LogField{key: "bad", value: "not-int", kind: "int", redacted: false}, jet_ring_log_float("nan", F64.NAN), jet_ring_log_bool("ok", true)}
+    assert(jet_log_telemetry_payload_fields(malformed) == "[{\"key\":\"ok\",\"value\":true}]")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:294-306,653-672.
+#Test("log_context_requires_both_and_sink_fields_retain_types") {
+    assert(jet_log_telemetry_context_json(Val("trace"), None) == "")
+    assert(jet_log_telemetry_context_json(None, Val("1")) == "")
+    assert(jet_log_telemetry_context_json(Val("trace"), Val("1")) == ",\"trace_id\":\"trace\",\"span_id\":\"1\"")
+    assert(jet_log_fields_json([LogField]{jet_ring_log_int("n", -2), jet_ring_log_redact("secret")}) == ",\"n\":-2,\"secret\":\"[redacted]\"")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Log.rs:856-889.
+#Test("log_calendar_retains_rust_epoch_leap_and_negative_behavior") {
+    assert(unix_to_ymdhms(0) == (I32{1970}, U32{1}, U32{1}, U32{0}, U32{0}, U32{0}))
+    assert(unix_to_ymdhms(-1) == (I32{1970}, U32{1}, U32{1}, U32{0}, U32{0}, U32{1}))
+    assert(is_leap(2000))
+    assert(!is_leap(1900))
+    assert(is_leap(2024))
+    assert(!is_leap(2023))
+}

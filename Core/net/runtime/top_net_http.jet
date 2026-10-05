@@ -1,1457 +1,817 @@
 // PORT-PENDING 0291 crates-jet-codegen-src-prelude-corelib-top-nethttp-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1-1811
 // Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // ── E2-M10: networking (core.net + core.http) ─────────────────────────────────
-//RS // All networking uses std::net only — zero external crates in the prelude (I6).
-//RS // wasm32-wasip2's std::net implementation is the shared wasi:sockets adapter;
-//RS // Jet does not duplicate socket semantics in a target host.
-//RS // TLS (D-NET1) uses the shared native callback bridge below; AOT and JIT hosts
-//RS // marshal into these Prelude operations rather than implementing a second TLS policy.
-//RS 
-//RS pub struct JetTCPListener {
-//RS     inner: std::net::TcpListener,
-//RS }
-//RS 
-//RS impl Clone for JetTCPListener {
-//RS     fn clone(&self) -> Self {
-//RS         Self {
-//RS             inner: self
-//RS                 .inner
-//RS                 .try_clone()
-//RS                 .expect("TcpListener try_clone for spawn capture"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub struct JetTCPStream {
-//RS     inner: std::net::TcpStream,
-//RS     closed: bool,
-//RS     read_shutdown: bool,
-//RS     write_shutdown: bool,
-//RS     read_timeout_ms: Option<i64>,
-//RS     write_timeout_ms: Option<i64>,
-//RS }
-//RS 
-//RS // D-NETIO-CONTRACT2=B: one nominal byte-stream contract. Network-specific
-//RS // state stays on JetTCPStream; generic consumers see only IOError.
-//RS trait JetIOReader {
-//RS     fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IOError>;
-//RS }
-//RS 
-//RS trait JetIOWriter {
-//RS     fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IOError>;
-//RS     fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IOError>;
-//RS }
-//RS 
-//RS fn jet_net_to_io_error(error: JetNetError) -> jet_std::IOError {
-//RS     let operation = match jet_net_error_operation(&error).as_str() {
-//RS         operation if operation.contains("read") => jet_std::IOOperation::Read,
-//RS         operation if operation.contains("write") || operation.contains("send") => {
-//RS             jet_std::IOOperation::Write
-//RS         }
-//RS         operation if operation.contains("connect") => jet_std::IOOperation::Connect,
-//RS         operation if operation.contains("accept") => jet_std::IOOperation::Accept,
-//RS         operation if operation.contains("close") || operation.contains("shutdown") => {
-//RS             jet_std::IOOperation::Close
-//RS         }
-//RS         operation if operation.contains("resolve") || operation.contains("dns") => {
-//RS             jet_std::IOOperation::Resolve
-//RS         }
-//RS         _ => jet_std::IOOperation::Codec,
-//RS     };
-//RS     let resource = jet_net_error_address(&error).or_else(|| jet_net_error_name(&error));
-//RS     let context = jet_std::IOContext::new(
-//RS         operation,
-//RS         resource,
-//RS         jet_net_error_os_code(&error),
-//RS         Some(error.jet_show()),
-//RS     );
-//RS     match error {
-//RS         JetNetError::InvalidInput(_) => jet_std::IOError::InvalidInput(context),
-//RS         JetNetError::PermissionDenied(_) => jet_std::IOError::PermissionDenied(context),
-//RS         JetNetError::Timeout(_) => jet_std::IOError::TimedOut(context),
-//RS         JetNetError::Cancelled(_) => jet_std::IOError::Cancelled(context),
-//RS         JetNetError::Closed(_) | JetNetError::NotConnected(_) => jet_std::IOError::Closed(context),
-//RS         JetNetError::Protocol(_) => jet_std::IOError::Protocol(context),
-//RS         _ => jet_std::IOError::Other(context),
-//RS     }
-//RS }
-//RS 
-//RS impl JetIOReader for JetTCPStream {
-//RS     fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IOError> {
-//RS         if limit <= 0 {
-//RS             return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Read,
-//RS                 None,
-//RS                 None,
-//RS                 Some("tcp read limit must be positive".to_string()),
-//RS             )));
-//RS         }
-//RS         jet_net_tcp_read_bytes(self, limit).map_err(jet_net_to_io_error)
-//RS     }
-//RS }
-//RS 
-//RS impl JetIOWriter for JetTCPStream {
-//RS     fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IOError> {
-//RS         jet_net_tcp_write_bytes(self, bytes).map_err(jet_net_to_io_error)
-//RS     }
-//RS 
-//RS     fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
-//RS         jet_net_tcp_write_all_bytes(self, bytes).map_err(jet_net_to_io_error)
-//RS     }
-//RS }
-//RS 
-//RS impl JetIOReader for JetUnixStream {
-//RS     fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IOError> {
-//RS         if limit <= 0 {
-//RS             return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Read,
-//RS                 None,
-//RS                 None,
-//RS                 Some("unix read limit must be positive".to_string()),
-//RS             )));
-//RS         }
-//RS         jet_net_unix_read_bytes(self, limit).map_err(jet_net_to_io_error)
-//RS     }
-//RS }
-//RS 
-//RS impl JetIOWriter for JetUnixStream {
-//RS     fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IOError> {
-//RS         jet_net_unix_write_bytes(self, bytes).map_err(jet_net_to_io_error)
-//RS     }
-//RS 
-//RS     fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
-//RS         jet_net_unix_write_all_bytes(self, bytes).map_err(jet_net_to_io_error)
-//RS     }
-//RS }
-//RS 
-//RS impl JetIOReader for JetTLSStream {
-//RS     fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IOError> {
-//RS         if limit <= 0 {
-//RS             return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS                 jet_std::IOOperation::Read,
-//RS                 None,
-//RS                 None,
-//RS                 Some("tls read limit must be positive".to_string()),
-//RS             )));
-//RS         }
-//RS         jet_net_tls_read_bytes(self, limit)
-//RS     }
-//RS }
-//RS 
-//RS impl JetIOWriter for JetTLSStream {
-//RS     fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IOError> {
-//RS         jet_net_tls_write_bytes(self, bytes)
-//RS     }
-//RS 
-//RS     fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
-//RS         jet_net_tls_write_all_bytes(self, bytes)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct JetNetErrorDetail {
-//RS     operation: String,
-//RS     address: Option<String>,
-//RS     name: Option<String>,
-//RS     message: String,
-//RS     os_code: Option<i64>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum JetNetDnsError {
-//RS     NotFound(String),
-//RS     Failure(String),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum JetNetError {
-//RS     InvalidInput(JetNetErrorDetail),
-//RS     PermissionDenied(JetNetErrorDetail),
-//RS     AddressInUse(JetNetErrorDetail),
-//RS     AddressUnavailable(JetNetErrorDetail),
-//RS     ConnectionRefused(JetNetErrorDetail),
-//RS     ConnectionReset(JetNetErrorDetail),
-//RS     NotConnected(JetNetErrorDetail),
-//RS     Closed(JetNetErrorDetail),
-//RS     Timeout(JetNetErrorDetail),
-//RS     Cancelled(JetNetErrorDetail),
-//RS     Unsupported(JetNetErrorDetail),
-//RS     DNS(JetNetDnsError),
-//RS     TLS(JetNetErrorDetail),
-//RS     Protocol(JetNetErrorDetail),
-//RS     Other(JetNetErrorDetail),
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq)]
-//RS pub enum JetNetShutdown {
-//RS     Read,
-//RS     Write,
-//RS     Both,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq)]
-//RS pub enum JetNetReadyInterest {
-//RS     Read,
-//RS     Write,
-//RS     ReadWrite,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct JetNetReady {
-//RS     readable: bool,
-//RS     writable: bool,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetIpAddr {
-//RS     inner: std::net::IpAddr,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetSocketAddr {
-//RS     inner: std::net::SocketAddr,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetUDPSocket {
-//RS     inner: std::sync::Arc<std::net::UdpSocket>,
-//RS     timeout_ms: std::sync::Arc<std::sync::Mutex<Option<i64>>>,
-//RS     closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
-//RS     #[cfg(unix)]
-//RS     scheduler: std::sync::Arc<JetSchedulerRawIoHandle>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetUDPPacket {
-//RS     data: Vec<u8>,
-//RS     addr: JetSocketAddr,
-//RS     original_len: i64,
-//RS     truncated: bool,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct JetDNSSrv {
-//RS     priority: i64,
-//RS     weight: i64,
-//RS     port: i64,
-//RS     target: String,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub struct JetUnixListener {
-//RS     inner: std::sync::Arc<std::os::unix::net::UnixListener>,
-//RS     scheduler: std::sync::Arc<JetSchedulerRawIoHandle>,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS impl Clone for JetUnixListener {
-//RS     fn clone(&self) -> Self {
-//RS         Self {
-//RS             inner: self.inner.clone(),
-//RS             scheduler: self.scheduler.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub struct JetUnixStream {
-//RS     inner: std::os::unix::net::UnixStream,
-//RS     scheduler: std::sync::Arc<JetSchedulerRawIoHandle>,
-//RS     closed: bool,
-//RS     read_shutdown: bool,
-//RS     write_shutdown: bool,
-//RS     read_timeout_ms: Option<i64>,
-//RS     write_timeout_ms: Option<i64>,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_net_scheduler_handle<T: std::os::fd::AsRawFd>(
-//RS     handle: &T,
-//RS ) -> std::sync::Arc<JetSchedulerRawIoHandle> {
-//RS     jet_scheduler_raw_io_handle(handle.as_raw_fd())
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS pub struct JetUnixListener;
-//RS 
-//RS #[cfg(not(unix))]
-//RS pub struct JetUnixStream;
-//RS 
-//RS pub struct JetTLSStream {
-//RS     id: i64,
-//RS     socket: std::net::TcpStream,
-//RS     read_timeout_ms: Option<i64>,
-//RS     write_timeout_ms: Option<i64>,
-//RS     wants: fn(i64) -> Result<(bool, bool), String>,
-//RS     read_ready: fn(i64) -> Result<bool, String>,
-//RS     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
-//RS     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
-//RS     close_step: fn(i64) -> Result<bool, String>,
-//RS     close_write_step: fn(i64) -> Result<bool, String>,
-//RS     peer_snapshot: fn(i64) -> Result<JetTLSPeerSnapshot, String>,
-//RS     peer_identity: Option<JetTLSPeerIdentity>,
-//RS }
-//RS 
-//RS type JetTLSPeerSnapshot = (
-//RS     String,
-//RS     Vec<Vec<u8>>,
-//RS     Vec<Vec<u8>>,
-//RS     Vec<Vec<String>>,
-//RS     Vec<i64>,
-//RS     Vec<i64>,
-//RS     Vec<String>,
-//RS     Vec<String>,
-//RS     String,
-//RS     i64,
-//RS );
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetTLSRootCertificates {
-//RS     pem: Vec<u8>,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetTLSClientIdentity {
-//RS     cert_chain: Vec<u8>,
-//RS     private_key: JetCryptoSecretBytes,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub enum JetTLSTrust {
-//RS     System,
-//RS     SystemPlus(JetTLSRootCertificates),
-//RS     CustomOnly(JetTLSRootCertificates),
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum JetTLSVersion {
-//RS     TLS12,
-//RS     TLS13,
-//RS }
-//RS 
-//RS /// D-CORESURF-SMALL1 / I9: the one `JetShow` rendering of a negotiated TLS
-//RS /// protocol version — its declared variant name. Every tier reads this one
-//RS /// renderer: AOT emits `print(x)` as `(x).jet_show()`, `jet-jit`'s
-//RS /// `net_http_rt` includes this file so the resident host and the interpreter
-//RS /// bridge call the same impl, and the Cranelift show table takes its variant
-//RS /// spellings from this declaration (`jet-jit/build.rs` prelude enum meta). No
-//RS /// engine re-encodes the spelling.
-//RS impl JetShow for JetTLSVersion {
-//RS     fn jet_show(&self) -> String {
-//RS         match self {
-//RS             JetTLSVersion::TLS12 => "TLS12",
-//RS             JetTLSVersion::TLS13 => "TLS13",
-//RS         }
-//RS         .to_string()
-//RS     }
-//RS }
-//RS impl JetDisplay for JetTLSVersion {
-//RS     fn jet_display(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetTLSClientConfig {
-//RS     trust: JetTLSTrust,
-//RS     identity: Option<JetTLSClientIdentity>,
-//RS     min_version: JetTLSVersion,
-//RS     max_version: JetTLSVersion,
-//RS     alpn: Vec<String>,
-//RS }
-//RS 
-//RS fn jet_tls_client_config_default() -> JetTLSClientConfig {
-//RS     JetTLSClientConfig {
-//RS         trust: JetTLSTrust::System,
-//RS         identity: None,
-//RS         min_version: JetTLSVersion::TLS12,
-//RS         max_version: JetTLSVersion::TLS13,
-//RS         alpn: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_tls_client_config_with_alpn(
-//RS     mut config: JetTLSClientConfig,
-//RS     protocols: &Vec<String>,
-//RS ) -> Result<JetTLSClientConfig, jet_std::IOError> {
-//RS     if protocols
-//RS         .iter()
-//RS         .any(|protocol| protocol.is_empty() || protocol.len() > u8::MAX as usize)
-//RS     {
-//RS         return Err(jet_tls_config_error(
-//RS             "ClientConfig.with_alpn",
-//RS             "TLS ALPN protocols must contain 1 to 255 bytes".to_string(),
-//RS         ));
-//RS     }
-//RS     config.alpn = protocols.clone();
-//RS     Ok(config)
-//RS }
-//RS 
-//RS fn jet_tls_config_error(operation: &str, message: String) -> jet_std::IOError {
-//RS     jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-//RS         jet_std::IOOperation::Connect,
-//RS         Some("tls client configuration".to_string()),
-//RS         None,
-//RS         Some(format!("{} failed: {}", operation, message)),
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_tls_root_certificates_from_pem(
-//RS     pem: &Vec<u8>,
-//RS     validate: fn(&Vec<u8>) -> Result<(), String>,
-//RS ) -> Result<JetTLSRootCertificates, jet_std::IOError> {
-//RS     validate(pem).map_err(|message| jet_tls_config_error("RootCertificates.from_pem", message))?;
-//RS     Ok(JetTLSRootCertificates { pem: pem.clone() })
-//RS }
-//RS 
-//RS fn jet_tls_client_identity_from_pem(
-//RS     cert_chain: &Vec<u8>,
-//RS     private_key: &Vec<u8>,
-//RS     validate: fn(&Vec<u8>, &Vec<u8>) -> Result<(), String>,
-//RS ) -> Result<JetTLSClientIdentity, jet_std::IOError> {
-//RS     validate(cert_chain, private_key)
-//RS         .map_err(|message| jet_tls_config_error("ClientIdentity.from_pem", message))?;
-//RS     Ok(JetTLSClientIdentity {
-//RS         cert_chain: cert_chain.clone(),
-//RS         private_key: JetCryptoSecretBytes::new(private_key.clone()),
-//RS     })
-//RS }
-//RS 
-//RS fn jet_tls_client_config_with_trust(
-//RS     mut config: JetTLSClientConfig,
-//RS     trust: JetTLSTrust,
-//RS ) -> Result<JetTLSClientConfig, jet_std::IOError> {
-//RS     config.trust = trust;
-//RS     Ok(config)
-//RS }
-//RS 
-//RS fn jet_tls_client_config_with_client_identity(
-//RS     mut config: JetTLSClientConfig,
-//RS     identity: &JetTLSClientIdentity,
-//RS ) -> Result<JetTLSClientConfig, jet_std::IOError> {
-//RS     config.identity = Some(identity.clone());
-//RS     Ok(config)
-//RS }
-//RS 
-//RS fn jet_tls_client_config_with_version_bounds(
-//RS     mut config: JetTLSClientConfig,
-//RS     min: JetTLSVersion,
-//RS     max: JetTLSVersion,
-//RS ) -> Result<JetTLSClientConfig, jet_std::IOError> {
-//RS     let value = |version| match version {
-//RS         JetTLSVersion::TLS12 => 12,
-//RS         JetTLSVersion::TLS13 => 13,
-//RS     };
-//RS     if value(min) > value(max) {
-//RS         return Err(jet_tls_config_error(
-//RS             "ClientConfig.with_version_bounds",
-//RS             "minimum TLS version exceeds maximum".to_string(),
-//RS         ));
-//RS     }
-//RS     config.min_version = min;
-//RS     config.max_version = max;
-//RS     Ok(config)
-//RS }
-//RS 
-//RS fn jet_tls_client_config_http_parts(
-//RS     config: &JetTLSClientConfig,
-//RS ) -> (i64, Vec<u8>, Vec<u8>, Vec<u8>, i64, i64) {
-//RS     let (trust, roots) = match &config.trust {
-//RS         JetTLSTrust::System => (0i64, Vec::new()),
-//RS         JetTLSTrust::SystemPlus(roots) => (1i64, roots.pem.clone()),
-//RS         JetTLSTrust::CustomOnly(roots) => (2i64, roots.pem.clone()),
-//RS     };
-//RS     let empty = Vec::new();
-//RS     let (cert, key) = config
-//RS         .identity
-//RS         .as_ref()
-//RS         .map(|identity| {
-//RS             (
-//RS                 identity.cert_chain.clone(),
-//RS                 identity.private_key.as_vec().clone(),
-//RS             )
-//RS         })
-//RS         .unwrap_or((empty.clone(), empty));
-//RS     let version = |version| match version {
-//RS         JetTLSVersion::TLS12 => 12i64,
-//RS         JetTLSVersion::TLS13 => 13i64,
-//RS     };
-//RS     (
-//RS         trust,
-//RS         roots,
-//RS         cert,
-//RS         key,
-//RS         version(config.min_version),
-//RS         version(config.max_version),
-//RS     )
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetTLSCertificate {
-//RS     pub der: Vec<u8>,
-//RS     pub sha256: Vec<u8>,
-//RS     pub spki_sha256: Vec<u8>,
-//RS     pub dns_names: Vec<String>,
-//RS     pub valid_from_unix_ms: i64,
-//RS     pub valid_until_unix_ms: i64,
-//RS     pub subject: String,
-//RS     pub issuer: String,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetTLSPeerIdentity {
-//RS     pub verified_server_name: String,
-//RS     pub leaf: JetTLSCertificate,
-//RS     pub certificate_chain: Vec<JetTLSCertificate>,
-//RS     pub cipher_suite: String,
-//RS     pub tls_version: JetTLSVersion,
-//RS }
-//RS 
-//RS impl JetShow for JetTCPListener {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "TcpListener({})",
-//RS             self.inner
-//RS                 .local_addr()
-//RS                 .map(|a| a.to_string())
-//RS                 .unwrap_or_else(|error| format!("address unavailable: {}", error))
-//RS         )
-//RS     }
-//RS }
-//RS impl JetShow for JetTCPStream {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "TcpStream({})",
-//RS             self.inner
-//RS                 .peer_addr()
-//RS                 .map(|a| a.to_string())
-//RS                 .unwrap_or_else(|error| format!("peer unavailable: {}", error))
-//RS         )
-//RS     }
-//RS }
-//RS impl JetShow for JetNetError {
-//RS     fn jet_show(&self) -> String {
-//RS         let (variant, detail_message, dns_variant, dns_value) = match self {
-//RS             JetNetError::InvalidInput(detail) => (0, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::PermissionDenied(detail) => (1, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::AddressInUse(detail) => (2, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::AddressUnavailable(detail) => {
-//RS                 (3, Some(detail.message.as_str()), None, None)
-//RS             }
-//RS             JetNetError::ConnectionRefused(detail) => {
-//RS                 (4, Some(detail.message.as_str()), None, None)
-//RS             }
-//RS             JetNetError::ConnectionReset(detail) => (5, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::NotConnected(detail) => (6, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::Closed(detail) => (7, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::Timeout(detail) => (8, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::Cancelled(detail) => (9, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::Unsupported(detail) => (10, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::TLS(detail) => (11, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::Protocol(detail) => (12, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::Other(detail) => (13, Some(detail.message.as_str()), None, None),
-//RS             JetNetError::DNS(JetNetDnsError::NotFound(name)) => {
-//RS                 (14, None, Some(0), Some(name.as_str()))
-//RS             }
-//RS             JetNetError::DNS(JetNetDnsError::Failure(message)) => {
-//RS                 (14, None, Some(1), Some(message.as_str()))
-//RS             }
-//RS         };
-//RS         jet_net_error_kernel_show(variant, detail_message, dns_variant, dns_value)
-//RS     }
-//RS }
-//RS impl JetDebug for JetNetError {
-//RS     fn jet_debug(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS // D-FAIL-CONV2=A: one display hook backs both the shipped impl NetError -> Err
-//RS // and user interpolation.
-//RS impl JetDisplay for JetNetError {
-//RS     fn jet_display(&self) -> String {
-//RS         <Self as JetShow>::jet_show(self)
-//RS     }
-//RS }
-//RS impl JetShow for JetIpAddr {
-//RS     fn jet_show(&self) -> String {
-//RS         self.inner.to_string()
-//RS     }
-//RS }
-//RS impl JetShow for JetSocketAddr {
-//RS     fn jet_show(&self) -> String {
-//RS         self.inner.to_string()
-//RS     }
-//RS }
-//RS impl JetShow for JetUDPSocket {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "UdpSocket({})",
-//RS             self.inner
-//RS                 .local_addr()
-//RS                 .map(|a| a.to_string())
-//RS                 .unwrap_or_else(|error| format!("address unavailable: {}", error))
-//RS         )
-//RS     }
-//RS }
-//RS impl JetShow for JetUDPPacket {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "UDPPacket({} bytes from {})",
-//RS             self.data.len(),
-//RS             self.addr.inner
-//RS         )
-//RS     }
-//RS }
-//RS impl JetShow for JetDNSSrv {
-//RS     fn jet_show(&self) -> String {
-//RS         format!(
-//RS             "DNSSRV(priority={}, weight={}, port={}, target={})",
-//RS             self.priority, self.weight, self.port, self.target
-//RS         )
-//RS     }
-//RS }
-//RS impl JetShow for JetUnixListener {
-//RS     fn jet_show(&self) -> String {
-//RS         "UnixListener".to_string()
-//RS     }
-//RS }
-//RS impl JetShow for JetUnixStream {
-//RS     fn jet_show(&self) -> String {
-//RS         "UnixStream".to_string()
-//RS     }
-//RS }
-//RS impl JetShow for JetTLSStream {
-//RS     fn jet_show(&self) -> String {
-//RS         format!("TLSStream({})", self.id)
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_timeout(ms: i64) -> Result<std::time::Duration, String> {
-//RS     if ms < 0 {
-//RS         return Err("network timeout must be non-negative".to_string());
-//RS     }
-//RS     Ok(std::time::Duration::from_millis(ms as u64))
-//RS }
-//RS 
-//RS fn jet_net_detail(
-//RS     operation: &str,
-//RS     address: Option<String>,
-//RS     name: Option<String>,
-//RS     message: String,
-//RS     os_code: Option<i64>,
-//RS ) -> JetNetErrorDetail {
-//RS     JetNetErrorDetail {
-//RS         operation: operation.to_string(),
-//RS         address,
-//RS         name,
-//RS         message,
-//RS         os_code,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_invalid_input(operation: &str, resource: &str) -> JetNetError {
-//RS     JetNetError::InvalidInput(jet_net_detail(
-//RS         operation,
-//RS         None,
-//RS         None,
-//RS         format!("invalid {resource}"),
-//RS         None,
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_net_io_error(
-//RS     operation: &str,
-//RS     address: Option<String>,
-//RS     error: std::io::Error,
-//RS ) -> JetNetError {
-//RS     let detail = jet_net_detail(
-//RS         operation,
-//RS         address,
-//RS         None,
-//RS         format!("{} failed: {}", operation, error),
-//RS         error.raw_os_error().map(|code| code as i64),
-//RS     );
-//RS     match error.kind() {
-//RS         std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
-//RS             JetNetError::InvalidInput(detail)
-//RS         }
-//RS         std::io::ErrorKind::PermissionDenied => JetNetError::PermissionDenied(detail),
-//RS         std::io::ErrorKind::AddrInUse => JetNetError::AddressInUse(detail),
-//RS         std::io::ErrorKind::AddrNotAvailable => JetNetError::AddressUnavailable(detail),
-//RS         std::io::ErrorKind::ConnectionRefused => JetNetError::ConnectionRefused(detail),
-//RS         std::io::ErrorKind::ConnectionReset
-//RS         | std::io::ErrorKind::ConnectionAborted
-//RS         | std::io::ErrorKind::BrokenPipe => JetNetError::ConnectionReset(detail),
-//RS         std::io::ErrorKind::NotConnected => JetNetError::NotConnected(detail),
-//RS         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
-//RS             JetNetError::Timeout(detail)
-//RS         }
-//RS         std::io::ErrorKind::Unsupported => JetNetError::Unsupported(detail),
-//RS         _ => JetNetError::Other(detail),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_closed(operation: &str) -> JetNetError {
-//RS     JetNetError::Closed(jet_net_detail(
-//RS         operation,
-//RS         None,
-//RS         None,
-//RS         format!("{} failed: socket is closed", operation),
-//RS         None,
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_net_tls_result<T>(result: Result<T, String>, operation: &str) -> Result<T, JetNetError> {
-//RS     result.map_err(|message| {
-//RS         let detail = jet_net_detail(operation, None, None, message.clone(), None);
-//RS         if message.starts_with("TLS protocol truncation:") {
-//RS             JetNetError::Protocol(detail)
-//RS         } else if message.contains("closed") {
-//RS             JetNetError::Closed(detail)
-//RS         } else if message.contains("timed out") || message.contains("deadline") {
-//RS             JetNetError::Timeout(detail)
-//RS         } else {
-//RS             JetNetError::TLS(detail)
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_tls_io_result<T>(
-//RS     result: Result<T, String>,
-//RS     operation: jet_std::IOOperation,
-//RS ) -> Result<T, jet_std::IOError> {
-//RS     result.map_err(|message| {
-//RS         let context = jet_std::IOContext::new(
-//RS             operation,
-//RS             Some("TLS stream".to_string()),
-//RS             None,
-//RS             Some(message.clone()),
-//RS         );
-//RS         if message.starts_with("TLS protocol truncation:")
-//RS             || message.starts_with("TLS protocol error:")
-//RS         {
-//RS             jet_std::IOError::Protocol(context)
-//RS         } else if message.contains("closed") {
-//RS             jet_std::IOError::Closed(context)
-//RS         } else if message.contains("timed out") || message.contains("deadline") {
-//RS             jet_std::IOError::TimedOut(context)
-//RS         } else if message.contains("cancelled") {
-//RS             jet_std::IOError::Cancelled(context)
-//RS         } else {
-//RS             jet_std::IOError::Other(context)
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_dns_result<T>(result: Result<T, String>, name: &str) -> Result<T, JetNetError> {
-//RS     result.map_err(|message| {
-//RS         if message.starts_with("DNS name not found") {
-//RS             JetNetError::DNS(JetNetDnsError::NotFound(name.to_string()))
-//RS         } else if message.starts_with("network operation cancelled") {
-//RS             JetNetError::Cancelled(jet_net_detail(
-//RS                 "dns",
-//RS                 None,
-//RS                 Some(name.to_string()),
-//RS                 message,
-//RS                 None,
-//RS             ))
-//RS         } else if message.starts_with("network protocol error") {
-//RS             JetNetError::Protocol(jet_net_detail(
-//RS                 "dns",
-//RS                 None,
-//RS                 Some(name.to_string()),
-//RS                 message,
-//RS                 None,
-//RS             ))
-//RS         } else if message.contains("timed out") || message.contains("timeout") {
-//RS             JetNetError::Timeout(jet_net_detail(
-//RS                 "dns",
-//RS                 None,
-//RS                 Some(name.to_string()),
-//RS                 message,
-//RS                 None,
-//RS             ))
-//RS         } else {
-//RS             JetNetError::DNS(JetNetDnsError::Failure(message))
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_error_detail(error: &JetNetError) -> Option<&JetNetErrorDetail> {
-//RS     match error {
-//RS         JetNetError::InvalidInput(d)
-//RS         | JetNetError::PermissionDenied(d)
-//RS         | JetNetError::AddressInUse(d)
-//RS         | JetNetError::AddressUnavailable(d)
-//RS         | JetNetError::ConnectionRefused(d)
-//RS         | JetNetError::ConnectionReset(d)
-//RS         | JetNetError::NotConnected(d)
-//RS         | JetNetError::Closed(d)
-//RS         | JetNetError::Timeout(d)
-//RS         | JetNetError::Cancelled(d)
-//RS         | JetNetError::Unsupported(d)
-//RS         | JetNetError::TLS(d)
-//RS         | JetNetError::Protocol(d)
-//RS         | JetNetError::Other(d) => Some(d),
-//RS         JetNetError::DNS(_) => None,
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_error_operation(error: &JetNetError) -> String {
-//RS     jet_net_error_detail(error)
-//RS         .map(|d| d.operation.clone())
-//RS         .unwrap_or_else(|| "dns".to_string())
-//RS }
-//RS fn jet_net_error_address(error: &JetNetError) -> Option<String> {
-//RS     jet_net_error_detail(error).and_then(|d| d.address.clone())
-//RS }
-//RS fn jet_net_error_name(error: &JetNetError) -> Option<String> {
-//RS     match error {
-//RS         JetNetError::DNS(JetNetDnsError::NotFound(name)) => Some(name.clone()),
-//RS         _ => jet_net_error_detail(error).and_then(|d| d.name.clone()),
-//RS     }
-//RS }
-//RS fn jet_net_error_message(error: &JetNetError) -> String {
-//RS     error.jet_show()
-//RS }
-//RS fn jet_net_error_os_code(error: &JetNetError) -> Option<i64> {
-//RS     jet_net_error_detail(error).and_then(|d| d.os_code)
-//RS }
-//RS 
-//RS // Canonical CoreLib shape used by every engine adapter to marshal `NetError`.
-//RS // Ordinals follow the surface enum order, not the Rust declaration order.
-//RS enum JetNetErrorSurfacePayload {
-//RS     Detail(JetNetErrorDetail),
-//RS     DNS {
-//RS         variant: &'static str,
-//RS         ordinal: i64,
-//RS         value: String,
-//RS     },
-//RS }
-//RS 
-//RS struct JetNetErrorSurfaceParts {
-//RS     variant: &'static str,
-//RS     ordinal: i64,
-//RS     payload: JetNetErrorSurfacePayload,
-//RS }
-//RS 
-//RS fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
-//RS     let detail = |variant, ordinal, value| JetNetErrorSurfaceParts {
-//RS         variant,
-//RS         ordinal,
-//RS         payload: JetNetErrorSurfacePayload::Detail(value),
-//RS     };
-//RS     match error {
-//RS         JetNetError::InvalidInput(value) => detail("InvalidInput", 0, value),
-//RS         JetNetError::PermissionDenied(value) => detail("PermissionDenied", 1, value),
-//RS         JetNetError::AddressInUse(value) => detail("AddressInUse", 2, value),
-//RS         JetNetError::AddressUnavailable(value) => detail("AddressUnavailable", 3, value),
-//RS         JetNetError::ConnectionRefused(value) => detail("ConnectionRefused", 4, value),
-//RS         JetNetError::ConnectionReset(value) => detail("ConnectionReset", 5, value),
-//RS         JetNetError::NotConnected(value) => detail("NotConnected", 6, value),
-//RS         JetNetError::Closed(value) => detail("Closed", 7, value),
-//RS         JetNetError::Timeout(value) => detail("Timeout", 8, value),
-//RS         JetNetError::Cancelled(value) => detail("Cancelled", 9, value),
-//RS         JetNetError::Unsupported(value) => detail("Unsupported", 10, value),
-//RS         JetNetError::TLS(value) => detail("TLS", 11, value),
-//RS         JetNetError::Protocol(value) => detail("Protocol", 12, value),
-//RS         JetNetError::Other(value) => detail("Other", 13, value),
-//RS         JetNetError::DNS(JetNetDnsError::NotFound(value)) => JetNetErrorSurfaceParts {
-//RS             variant: "DNS",
-//RS             ordinal: 14,
-//RS             payload: JetNetErrorSurfacePayload::DNS {
-//RS                 variant: "NotFound",
-//RS                 ordinal: 0,
-//RS                 value,
-//RS             },
-//RS         },
-//RS         JetNetError::DNS(JetNetDnsError::Failure(value)) => JetNetErrorSurfaceParts {
-//RS             variant: "DNS",
-//RS             ordinal: 14,
-//RS             payload: JetNetErrorSurfacePayload::DNS {
-//RS                 variant: "Failure",
-//RS                 ordinal: 1,
-//RS                 value,
-//RS             },
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn jet_net_tcp_stream(inner: std::net::TcpStream) -> Result<JetTCPStream, JetNetError> {
-//RS     // WASI Preview 2 exposes blocking std::net operations through
-//RS     // wasi:sockets. It has no native Jet scheduler/poller to register with;
-//RS     // keep the shared Prelude contract and let the socket adapter block.
-//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
-//RS     inner
-//RS         .set_nonblocking(false)
-//RS         .map_err(|error| jet_net_io_error("tcp socket setup", None, error))?;
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     inner
-//RS         .set_nonblocking(true)
-//RS         .map_err(|error| jet_net_io_error("tcp scheduler registration", None, error))?;
-//RS     Ok(JetTCPStream {
-//RS         inner,
-//RS         closed: false,
-//RS         read_shutdown: false,
-//RS         write_shutdown: false,
-//RS         read_timeout_ms: None,
-//RS         write_timeout_ms: None,
-//RS     })
-//RS }
-//RS 
-//RS fn jet_net_operation_deadline(timeout_ms: Option<i64>) -> Option<JetDeadlineGuard> {
-//RS     let timeout_ms = timeout_ms?;
-//RS     let configured = jet_std_time_now().saturating_add(timeout_ms);
-//RS     let deadline = jet_ctx_deadline_ms().map_or(configured, |ambient| ambient.min(configured));
-//RS     Some(jet_ctx_push_deadline(deadline))
-//RS }
-//RS 
-//RS fn jet_net_explicit_deadline(
-//RS     deadline: &jet_std::Duration,
-//RS     operation: &str,
-//RS ) -> Result<Option<JetDeadlineGuard>, JetNetError> {
-//RS     jet_net_timeout(deadline.as_millis()).map_err(|message| {
-//RS         JetNetError::InvalidInput(jet_net_detail(operation, None, None, message, None))
-//RS     })?;
-//RS     Ok(jet_net_operation_deadline(Some(deadline.as_millis())))
-//RS }
-//RS 
-//RS fn jet_net_deadline_timeout(operation: &str) -> JetNetError {
-//RS     JetNetError::Timeout(jet_net_detail(
-//RS         operation,
-//RS         None,
-//RS         None,
-//RS         format!("deadline exceeded while waiting in {}", operation),
-//RS         None,
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_net_scheduler_park(operation: &str, millis: u64) -> Result<(), JetNetError> {
-//RS     match jet_scheduler_wait_without_unwind(|| jet_scheduler_park_ms("network wait", millis)) {
-//RS         JetSchedulerWait::Ready(()) => Ok(()),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_wait_for_connect(
-//RS     receiver: std::sync::mpsc::Receiver<Result<std::net::TcpStream, std::io::Error>>,
-//RS     address: Option<String>,
-//RS ) -> Result<JetTCPStream, JetNetError> {
-//RS     loop {
-//RS         match receiver.try_recv() {
-//RS             Ok(Ok(stream)) => return jet_net_tcp_stream(stream),
-//RS             Ok(Err(error)) => return Err(jet_net_io_error("tcp connect", address, error)),
-//RS             Err(std::sync::mpsc::TryRecvError::Empty) => {
-//RS                 jet_net_scheduler_park("tcp connect", 5)?;
-//RS             }
-//RS             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-//RS                 return Err(JetNetError::Other(jet_net_detail(
-//RS                     "tcp connect",
-//RS                     address,
-//RS                     None,
-//RS                     "tcp connect worker stopped without a result".to_string(),
-//RS                     None,
-//RS                 )));
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_connect_addr_worker(addr: std::net::SocketAddr) -> Result<JetTCPStream, JetNetError> {
-//RS     jet_scheduler_world_reject_uncontrolled("network");
-//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS         return Err(jet_net_deadline_timeout("tcp connect"));
-//RS     }
-//RS     let timeout =
-//RS         jet_deadline_remaining_ms().map(|ms| std::time::Duration::from_millis(ms.max(1) as u64));
-//RS 
-//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
-//RS     {
-//RS         let address = addr.to_string();
-//RS         let result = match timeout {
-//RS             Some(timeout) => std::net::TcpStream::connect_timeout(&addr, timeout),
-//RS             None => std::net::TcpStream::connect(addr),
-//RS         };
-//RS         return result
-//RS             .map_err(|error| jet_net_io_error("tcp connect", Some(address), error))
-//RS             .and_then(jet_net_tcp_stream);
-//RS     }
-//RS 
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     let address = addr.to_string();
-//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
-//RS     {
-//RS         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-//RS         std::thread::spawn(move || {
-//RS             let result = match timeout {
-//RS                 Some(timeout) => std::net::TcpStream::connect_timeout(&addr, timeout),
-//RS                 None => std::net::TcpStream::connect(addr),
-//RS             };
-//RS             let _ = sender.send(result);
-//RS         });
-//RS         jet_net_wait_for_connect(receiver, Some(address))
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_scheduler_wait(
-//RS     stream: &std::net::TcpStream,
-//RS     read: bool,
-//RS     write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(), JetNetError> {
-//RS     match jet_scheduler_wait_without_unwind(|| {
-//RS         #[cfg(unix)]
-//RS         {
-//RS             // TCP listeners and streams must share the raw-fd poller. The
-//RS             // clone-based poller can leave a loopback task's request read
-//RS             // parked after accept.
-//RS             let _ = jet_scheduler_tcp_stream_ready_wait(stream, read, write, operation);
-//RS         }
-//RS         #[cfg(not(unix))]
-//RS         {
-//RS             jet_scheduler_io_wait(stream, read, write, operation);
-//RS         }
-//RS     }) {
-//RS         JetSchedulerWait::Ready(()) => Ok(()),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_net_tcp_scheduler_ready_wait(
-//RS     stream: &std::net::TcpStream,
-//RS     read: bool,
-//RS     write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(bool, bool), JetNetError> {
-//RS     match jet_scheduler_wait_without_unwind(|| {
-//RS         jet_scheduler_tcp_stream_ready_wait(stream, read, write, operation)
-//RS     }) {
-//RS         JetSchedulerWait::Ready(observed) => Ok(observed),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn jet_net_tcp_scheduler_ready_wait(
-//RS     _stream: &std::net::TcpStream,
-//RS     _read: bool,
-//RS     _write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(bool, bool), JetNetError> {
-//RS     Err(JetNetError::Unsupported(jet_net_detail(
-//RS         operation,
-//RS         None,
-//RS         None,
-//RS         "observed TCP readiness is not available on this platform".to_string(),
-//RS         None,
-//RS     )))
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_net_unix_scheduler_wait(
-//RS     stream: &JetUnixStream,
-//RS     read: bool,
-//RS     write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(), JetNetError> {
-//RS     match jet_scheduler_wait_without_unwind(|| {
-//RS         jet_scheduler_unix_stream_io_wait(&stream.scheduler, read, write, operation)
-//RS     }) {
-//RS         JetSchedulerWait::Ready(()) if stream.closed => Err(jet_net_closed(operation)),
-//RS         JetSchedulerWait::Ready(()) => Ok(()),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_net_unix_scheduler_ready_wait(
-//RS     stream: &JetUnixStream,
-//RS     read: bool,
-//RS     write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(bool, bool), JetNetError> {
-//RS     match jet_scheduler_wait_without_unwind(|| {
-//RS         jet_scheduler_unix_stream_ready_wait(&stream.scheduler, read, write, operation)
-//RS     }) {
-//RS         JetSchedulerWait::Ready(_) if stream.closed => Err(jet_net_closed(operation)),
-//RS         JetSchedulerWait::Ready(observed) => Ok(observed),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_tcp_listener_scheduler_wait(
-//RS     listener: &std::net::TcpListener,
-//RS     operation: &str,
-//RS ) -> Result<(), JetNetError> {
-//RS     match jet_scheduler_wait_without_unwind(|| {
-//RS         jet_scheduler_tcp_listener_io_wait(listener, operation)
-//RS     }) {
-//RS         JetSchedulerWait::Ready(()) => Ok(()),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_net_unix_listener_scheduler_wait(
-//RS     listener: &JetUnixListener,
-//RS     operation: &str,
-//RS ) -> Result<(), JetNetError> {
-//RS     if jet_scheduler_wait_point_cancelled() {
-//RS         return Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS         return Err(jet_net_deadline_timeout(operation));
-//RS     }
-//RS     match jet_scheduler_wait_without_unwind(|| {
-//RS         jet_scheduler_unix_listener_io_wait(&listener.scheduler, operation)
-//RS     }) {
-//RS         JetSchedulerWait::Ready(()) if jet_scheduler_wait_point_cancelled() => {
-//RS             Err(JetNetError::Cancelled(jet_net_detail(
-//RS                 operation,
-//RS                 None,
-//RS                 None,
-//RS                 format!("{} cancelled", operation),
-//RS                 None,
-//RS             )))
-//RS         }
-//RS         JetSchedulerWait::Ready(()) if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) => {
-//RS             Err(jet_net_deadline_timeout(operation))
-//RS         }
-//RS         JetSchedulerWait::Ready(()) => Ok(()),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_net_udp_scheduler_wait(
-//RS     socket: &JetUDPSocket,
-//RS     read: bool,
-//RS     write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(), JetNetError> {
-//RS     if jet_scheduler_wait_point_cancelled() {
-//RS         return Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS         return Err(jet_net_deadline_timeout(operation));
-//RS     }
-//RS     let waited = jet_scheduler_wait_without_unwind(|| {
-//RS         #[cfg(unix)]
-//RS         jet_scheduler_udp_io_wait(&socket.scheduler, read, write, operation);
-//RS         #[cfg(not(unix))]
-//RS         {
-//RS             let _ = (socket, read, write);
-//RS             jet_scheduler_park_ms("udp readiness", 5);
-//RS         }
-//RS     });
-//RS     match waited {
-//RS         JetSchedulerWait::Ready(()) if socket.closed.load(std::sync::atomic::Ordering::Acquire) => {
-//RS             Err(jet_net_closed(operation))
-//RS         }
-//RS         JetSchedulerWait::Ready(()) if jet_scheduler_wait_point_cancelled() => {
-//RS             Err(JetNetError::Cancelled(jet_net_detail(
-//RS                 operation,
-//RS                 None,
-//RS                 None,
-//RS                 format!("{} cancelled", operation),
-//RS                 None,
-//RS             )))
-//RS         }
-//RS         JetSchedulerWait::Ready(()) if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) => {
-//RS             Err(jet_net_deadline_timeout(operation))
-//RS         }
-//RS         JetSchedulerWait::Ready(()) => Ok(()),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn jet_net_udp_scheduler_ready_wait(
-//RS     socket: &JetUDPSocket,
-//RS     read: bool,
-//RS     write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(bool, bool), JetNetError> {
-//RS     if jet_scheduler_wait_point_cancelled() {
-//RS         return Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         )));
-//RS     }
-//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-//RS         return Err(jet_net_deadline_timeout(operation));
-//RS     }
-//RS     match jet_scheduler_wait_without_unwind(|| {
-//RS         jet_scheduler_udp_ready_wait(&socket.scheduler, read, write, operation)
-//RS     }) {
-//RS         JetSchedulerWait::Ready(_) if socket.closed.load(std::sync::atomic::Ordering::Acquire) => {
-//RS             Err(jet_net_closed(operation))
-//RS         }
-//RS         JetSchedulerWait::Ready(_observed) if jet_scheduler_wait_point_cancelled() => {
-//RS             Err(JetNetError::Cancelled(jet_net_detail(
-//RS                 operation,
-//RS                 None,
-//RS                 None,
-//RS                 format!("{} cancelled", operation),
-//RS                 None,
-//RS             )))
-//RS         }
-//RS         JetSchedulerWait::Ready(_) if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) => {
-//RS             Err(jet_net_deadline_timeout(operation))
-//RS         }
-//RS         JetSchedulerWait::Ready(observed) => Ok(observed),
-//RS         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} cancelled", operation),
-//RS             None,
-//RS         ))),
-//RS         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
-//RS         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-//RS             operation,
-//RS             None,
-//RS             None,
-//RS             format!("{} scheduler wait failed: {}", operation, message),
-//RS             None,
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn jet_net_udp_scheduler_ready_wait(
-//RS     _socket: &JetUDPSocket,
-//RS     _read: bool,
-//RS     _write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(bool, bool), JetNetError> {
-//RS     Err(JetNetError::Unsupported(jet_net_detail(
-//RS         operation,
-//RS         None,
-//RS         None,
-//RS         "observed UDP readiness is not available on this platform".to_string(),
-//RS         None,
-//RS     )))
-//RS }
-//RS 
-//RS fn jet_net_tls_scheduler_wait(
-//RS     stream: &JetTLSStream,
-//RS     fallback_read: bool,
-//RS     fallback_write: bool,
-//RS     operation: &str,
-//RS ) -> Result<(), JetNetError> {
-//RS     let (mut read, mut write) = jet_net_tls_result((stream.wants)(stream.id), operation)?;
-//RS     if !read && !write {
-//RS         read = fallback_read;
-//RS         write = fallback_write;
-//RS     }
-//RS     jet_net_scheduler_wait(&stream.socket, read, write, operation)
-//RS }
-//RS 
-//RS fn jet_net_tls_io_scheduler_wait(
-//RS     stream: &JetTLSStream,
-//RS     fallback_read: bool,
-//RS     fallback_write: bool,
-//RS     operation: jet_std::IOOperation,
-//RS ) -> Result<(), jet_std::IOError> {
-//RS     let (mut read, mut write) = jet_net_tls_io_result((stream.wants)(stream.id), operation)?;
-//RS     if !read && !write {
-//RS         read = fallback_read;
-//RS         write = fallback_write;
-//RS     }
-//RS     let label = match operation {
-//RS         jet_std::IOOperation::Read => "tls read",
-//RS         jet_std::IOOperation::Write => "tls write",
-//RS         jet_std::IOOperation::Close => "tls close",
-//RS         _ => "tls I/O",
-//RS     };
-//RS     jet_net_scheduler_wait(&stream.socket, read, write, label).map_err(jet_net_to_io_error)
-//RS }
-//RS 
-//RS // AOT has an owned typed TCP stream and an FFI crate containing the existing
-//RS // rustls state machine. Instantiate the shared scheduler with that provider.
-//RS #[allow(unused_macros)]
-//RS macro_rules! jet_net_tls_client_bridge {
-//RS     ($bridge:ident) => {
-//RS         fn jet_net_tls_client(
-//RS             stream: JetTCPStream,
-//RS             server_name: &String,
-//RS         ) -> Result<JetTLSStream, jet_std::IOError> {
-//RS             jet_net_tls_client_scheduler(
-//RS                 stream,
-//RS                 server_name,
-//RS                 $bridge::jet_net_tls_begin_impl,
-//RS                 $bridge::jet_net_tls_handshake_step_impl,
-//RS                 $bridge::jet_net_tls_abort_impl,
-//RS                 $bridge::jet_net_tls_wants_impl,
-//RS                 $bridge::jet_net_tls_read_ready_impl,
-//RS                 $bridge::jet_net_tls_read_step_impl,
-//RS                 $bridge::jet_net_tls_write_step_impl,
-//RS                 $bridge::jet_net_tls_close_step_impl,
-//RS                 $bridge::jet_net_tls_close_write_step_impl,
-//RS                 $bridge::jet_net_tls_peer_identity_impl,
-//RS             )
-//RS             .map_err(jet_net_to_io_error)
-//RS         }
-//RS     };
-//RS }
-//RS 
-//RS fn jet_net_tls_client_scheduler(
-//RS     stream: JetTCPStream,
-//RS     server_name: &String,
-//RS     begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
-//RS     handshake_step: fn(i64) -> Result<bool, String>,
-//RS     abort: fn(i64),
-//RS     wants: fn(i64) -> Result<(bool, bool), String>,
-//RS     read_ready: fn(i64) -> Result<bool, String>,
-//RS     read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
-//RS     write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
-//RS     close_step: fn(i64) -> Result<bool, String>,
-//RS     close_write_step: fn(i64) -> Result<bool, String>,
-//RS     peer_snapshot: fn(i64) -> Result<JetTLSPeerSnapshot, String>,
-//RS ) -> Result<JetTLSStream, JetNetError> {
-//RS     jet_net_tls_client_scheduler_with_begin(
-//RS         stream,
-//RS         |inner| begin(inner, server_name),
-//RS         handshake_step,
-//RS         abort,
-//RS         wants,
-//RS         read_ready,
-//RS         read_step,
-//RS         write_step,
-//RS         close_step,
-//RS         close_write_step,
-//RS         peer_snapshot,
-//RS     )
-//RS }
+use std.net as native_net
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.AtomicBool
+use std.os.unix.net as native_unix
+use std.os.fd.AsRawFd
+use core.sys.target as target
+use jet_std.[IOError, IOContext, IOOperation]
+use std.io as native_io
+use std.time.[Duration, Instant]
+use core.net.runtime.kernel_net_error.jet_net_error_kernel_show
+use core.crypto.runtime.top_crypto.JetCryptoSecretBytes
+
+// Networking shares the OS socket substrate. TLS callbacks carry one policy.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:8
+pub struct JetTCPListener { inner: native_net.TcpListener }
+impl Clone for JetTCPListener {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:13
+    fn clone(self: &Self) -> Self {
+        // GATE #4565: kernel primitive
+        Self{inner: #Unsafe("duplicate the listener's owned OS socket for spawn capture") {
+            self.inner.try_clone().expect("TcpListener try_clone for spawn capture")
+        }}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:23
+pub struct JetTCPStream {
+    inner: native_net.TcpStream
+    closed: Bool
+    read_shutdown: Bool
+    write_shutdown: Bool
+    read_timeout_ms: I64?
+    write_timeout_ms: I64?
+}
+// D-NETIO-CONTRACT2=B: one nominal byte-stream contract.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:34
+trait JetIOReader {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:35
+    fn read(self: &Self, limit: I64) -> [U8] IOError!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:38
+trait JetIOWriter {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:39
+    fn write(self: &Self, bytes: &[U8]) -> I64 IOError!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:40
+    fn write_all(self: &Self, bytes: &[U8]) -> () IOError!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:43
+fn jet_net_to_io_error(error: JetNetError) -> IOError {
+    text :: jet_net_error_operation(&error)
+    operation :: if text.contains("read") -> IOOperation.Read
+        else if text.contains("write") || text.contains("send") -> IOOperation.Write
+        else if text.contains("connect") -> IOOperation.Connect
+        else if text.contains("accept") -> IOOperation.Accept
+        else if text.contains("close") || text.contains("shutdown") -> IOOperation.Close
+        else if text.contains("resolve") || text.contains("dns") -> IOOperation.Resolve
+        else -> IOOperation.Codec
+    resource :: jet_net_error_address(&error).or_else(fn() -> jet_net_error_name(&error))
+    context :: IOContext.new(operation, resource, jet_net_error_os_code(&error), Val(error.jet_show()))
+    match error {
+        .InvalidInput(_) -> IOError.InvalidInput(^context)
+        .PermissionDenied(_) -> IOError.PermissionDenied(^context)
+        .Timeout(_) -> IOError.TimedOut(^context)
+        .Cancelled(_) -> IOError.Cancelled(^context)
+        .Closed(_) | .NotConnected(_) -> IOError.Closed(^context)
+        .Protocol(_) -> IOError.Protocol(^context)
+        _ -> IOError.Other(^context)
+    }
+}
+impl JetIOReader for JetTCPStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:78
+    fn read(self: &Self, limit: I64) -> [U8] IOError! {
+        if limit <= 0 -> return Err(IOError.InvalidInput(IOContext.new(IOOperation.Read, None, None, Val("tcp read limit must be positive"))))
+        jet_net_tcp_read_bytes(self, limit).map_err(jet_net_to_io_error)
+    }
+}
+impl JetIOWriter for JetTCPStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:92
+    fn write(self: &Self, bytes: &[U8]) -> I64 IOError! {
+        jet_net_tcp_write_bytes(self, bytes).map_err(jet_net_to_io_error)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:96
+    fn write_all(self: &Self, bytes: &[U8]) -> () IOError! {
+        jet_net_tcp_write_all_bytes(self, bytes).map_err(jet_net_to_io_error)
+    }
+}
+impl JetIOReader for JetUnixStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:102
+    fn read(self: &Self, limit: I64) -> [U8] IOError! {
+        if limit <= 0 -> return Err(IOError.InvalidInput(IOContext.new(IOOperation.Read, None, None, Val("unix read limit must be positive"))))
+        jet_net_unix_read_bytes(self, limit).map_err(jet_net_to_io_error)
+    }
+}
+impl JetIOWriter for JetUnixStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:116
+    fn write(self: &Self, bytes: &[U8]) -> I64 IOError! {
+        jet_net_unix_write_bytes(self, bytes).map_err(jet_net_to_io_error)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:120
+    fn write_all(self: &Self, bytes: &[U8]) -> () IOError! {
+        jet_net_unix_write_all_bytes(self, bytes).map_err(jet_net_to_io_error)
+    }
+}
+impl JetIOReader for JetTLSStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:126
+    fn read(self: &Self, limit: I64) -> [U8] IOError! {
+        if limit <= 0 -> return Err(IOError.InvalidInput(IOContext.new(IOOperation.Read, None, None, Val("tls read limit must be positive"))))
+        jet_net_tls_read_bytes(self, limit)
+    }
+}
+impl JetIOWriter for JetTLSStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:140
+    fn write(self: &Self, bytes: &[U8]) -> I64 IOError! { jet_net_tls_write_bytes(self, bytes) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:144
+    fn write_all(self: &Self, bytes: &[U8]) -> () IOError! { jet_net_tls_write_all_bytes(self, bytes) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:150
+#Derive(Clone, Debug, PartialEq)
+pub struct JetNetErrorDetail { operation: String, address: String?, name: String?, message: String, os_code: I64? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:159
+#Derive(Clone, Debug, PartialEq)
+pub enum JetNetDnsError { NotFound(String), Failure(String) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:165
+#Error
+#Derive(Clone, Debug, PartialEq)
+pub enum JetNetError {
+    InvalidInput(JetNetErrorDetail)
+    PermissionDenied(JetNetErrorDetail)
+    AddressInUse(JetNetErrorDetail)
+    AddressUnavailable(JetNetErrorDetail)
+    ConnectionRefused(JetNetErrorDetail)
+    ConnectionReset(JetNetErrorDetail)
+    NotConnected(JetNetErrorDetail)
+    Closed(JetNetErrorDetail)
+    Timeout(JetNetErrorDetail)
+    Cancelled(JetNetErrorDetail)
+    Unsupported(JetNetErrorDetail)
+    DNS(JetNetDnsError)
+    TLS(JetNetErrorDetail)
+    Protocol(JetNetErrorDetail)
+    Other(JetNetErrorDetail)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:184
+#Derive(Clone, Copy, Debug, PartialEq)
+pub enum JetNetShutdown { Read, Write, Both }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:191
+#Derive(Clone, Copy, Debug, PartialEq)
+pub enum JetNetReadyInterest { Read, Write, ReadWrite }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:198
+#Derive(Clone, Debug, PartialEq)
+pub struct JetNetReady { readable: Bool, writable: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:204
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetIpAddr { inner: native_net.IpAddr }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:209
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct JetSocketAddr { inner: native_net.SocketAddr }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:214
+#Derive(Clone)
+pub struct JetUDPSocket {
+    inner: Arc<native_net.UdpSocket>
+    timeout_ms: Arc<Mutex<I64?>>
+    closed: Arc<AtomicBool>
+    // Unix-only raw readiness registration; non-Unix native layout omits it.
+    scheduler: Arc<JetSchedulerRawIoHandle>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:223
+#Derive(Clone, Debug)
+pub struct JetUDPPacket { data: [U8], addr: JetSocketAddr, original_len: I64, truncated: Bool }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:231
+#Derive(Clone, Debug)
+pub struct JetDNSSrv { priority: I64, weight: I64, port: I64, target: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:238
+// Native layout has these fields on Unix; Rust:273 has the non-Unix unit layout.
+pub struct JetUnixListener { inner: Arc<native_unix.UnixListener>, scheduler: Arc<JetSchedulerRawIoHandle> }
+impl Clone for JetUnixListener {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:246
+    fn clone(self: &Self) -> Self {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain the Unix listener and its raw readiness registration together") {
+            Self{inner: self.inner.clone(), scheduler: self.scheduler.clone()}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:254
+// Native layout is a unit carrier on non-Unix (Rust:276).
+pub struct JetUnixStream {
+    inner: native_unix.UnixStream
+    scheduler: Arc<JetSchedulerRawIoHandle>
+    closed: Bool
+    read_shutdown: Bool
+    write_shutdown: Bool
+    read_timeout_ms: I64?
+    write_timeout_ms: I64?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:266
+fn jet_net_scheduler_handle<T: AsRawFd>(handle: &T) -> Arc<JetSchedulerRawIoHandle> {
+    // GATE #4565: kernel primitive
+    #Unsafe("borrow the live socket descriptor to register scheduler readiness") {
+        jet_scheduler_raw_io_handle(handle.as_raw_fd())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:278
+pub struct JetTLSStream {
+    id: I64
+    socket: native_net.TcpStream
+    read_timeout_ms: I64?
+    write_timeout_ms: I64?
+    wants: fn(I64) -> (Bool, Bool) Err!
+    read_ready: fn(I64) -> Bool Err!
+    read_step: fn(I64, I64) -> [U8]? Err!
+    write_step: fn(I64, &[U8]) -> I64? Err!
+    close_step: fn(I64) -> Bool Err!
+    close_write_step: fn(I64) -> Bool Err!
+    peer_snapshot: fn(I64) -> JetTLSPeerSnapshot Err!
+    peer_identity: JetTLSPeerIdentity?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:293
+type JetTLSPeerSnapshot = (String, [[U8]], [[U8]], [[String]], [I64], [I64], [String], [String], String, I64)
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:306
+#Derive(Clone)
+pub struct JetTLSRootCertificates { pem: [U8] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:311
+#Derive(Clone)
+pub struct JetTLSClientIdentity { cert_chain: [U8], private_key: JetCryptoSecretBytes }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:317
+#Derive(Clone)
+pub enum JetTLSTrust { System, SystemPlus(JetTLSRootCertificates), CustomOnly(JetTLSRootCertificates) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:324
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum JetTLSVersion { TLS12, TLS13 }
+// One declared-variant renderer for negotiated protocol versions.
+impl JetShow for JetTLSVersion {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:338
+    fn jet_show(self: &Self) -> String { match self { .TLS12 -> "TLS12", .TLS13 -> "TLS13" } }
+}
+impl JetDisplay for JetTLSVersion {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:347
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:352
+#Derive(Clone)
+pub struct JetTLSClientConfig { trust: JetTLSTrust, identity: JetTLSClientIdentity?, min_version: JetTLSVersion, max_version: JetTLSVersion, alpn: [String] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:361
+fn jet_tls_client_config_default() -> JetTLSClientConfig {
+    JetTLSClientConfig{trust: .System, identity: None, min_version: .TLS12, max_version: .TLS13, alpn: []}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:371
+fn jet_tls_client_config_with_alpn(config: JetTLSClientConfig, protocols: &[String]) -> JetTLSClientConfig IOError! {
+    if protocols.iter().any(fn(protocol) -> protocol.is_empty() || protocol.len() > 255) {
+        return Err(jet_tls_config_error("ClientConfig.with_alpn", "TLS ALPN protocols must contain 1 to 255 bytes"))
+    }
+    config := ^config
+    config.alpn = protocols.clone()
+    Ok(^config)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:388
+fn jet_tls_config_error(operation: String, message: String) -> IOError {
+    IOError.InvalidInput(IOContext.new(IOOperation.Connect, Val("tls client configuration"), None, Val("{operation} failed: {message}")))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:397
+fn jet_tls_root_certificates_from_pem(pem: &[U8], validate: fn(&[U8]) -> () Err!) -> JetTLSRootCertificates IOError! {
+    validate(pem).map_err(fn(message) -> jet_tls_config_error("RootCertificates.from_pem", message))?
+    Ok(JetTLSRootCertificates{pem: pem.clone()})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:405
+fn jet_tls_client_identity_from_pem(cert_chain: &[U8], private_key: &[U8], validate: fn(&[U8], &[U8]) -> () Err!) -> JetTLSClientIdentity IOError! {
+    validate(cert_chain, private_key).map_err(fn(message) -> jet_tls_config_error("ClientIdentity.from_pem", message))?
+    Ok(JetTLSClientIdentity{cert_chain: cert_chain.clone(), private_key: JetCryptoSecretBytes.new(private_key.clone())})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:418
+fn jet_tls_client_config_with_trust(config: JetTLSClientConfig, trust: JetTLSTrust) -> JetTLSClientConfig IOError! {
+    config := ^config
+    config.trust = ^trust
+    Ok(^config)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:426
+fn jet_tls_client_config_with_client_identity(config: JetTLSClientConfig, identity: &JetTLSClientIdentity) -> JetTLSClientConfig IOError! {
+    config := ^config
+    config.identity = Val(identity.clone())
+    Ok(^config)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:434
+fn jet_tls_client_config_with_version_bounds(config: JetTLSClientConfig, min: JetTLSVersion, max: JetTLSVersion) -> JetTLSClientConfig IOError! {
+    value :: fn(version) -> match version { .TLS12 -> 12, .TLS13 -> 13 }
+    if value(min) > value(max) -> return Err(jet_tls_config_error("ClientConfig.with_version_bounds", "minimum TLS version exceeds maximum"))
+    config := ^config
+    config.min_version = min
+    config.max_version = max
+    Ok(^config)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:454
+fn jet_tls_client_config_http_parts(config: &JetTLSClientConfig) -> (I64, [U8], [U8], [U8], I64, I64) {
+    (trust, roots) :: match config.trust {
+        .System -> (I64{0}, [U8]{})
+        .SystemPlus(roots) -> (I64{1}, roots.pem.clone())
+        .CustomOnly(roots) -> (I64{2}, roots.pem.clone())
+    }
+    empty :: [U8]{}
+    (cert, key) :: config.identity.as_ref().map(fn(identity) -> (identity.cert_chain.clone(), identity.private_key.as_vec().clone())).unwrap_or((empty.clone(), ^empty))
+    version :: fn(version) -> match version { .TLS12 -> I64{12}, .TLS13 -> I64{13} }
+    (trust, ^roots, ^cert, ^key, version(config.min_version), version(config.max_version))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:487
+#Derive(Clone)
+pub struct JetTLSCertificate {
+    pub der: [U8]
+    pub sha256: [U8]
+    pub spki_sha256: [U8]
+    pub dns_names: [String]
+    pub valid_from_unix_ms: I64
+    pub valid_until_unix_ms: I64
+    pub subject: String
+    pub issuer: String
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:499
+#Derive(Clone)
+pub struct JetTLSPeerIdentity {
+    pub verified_server_name: String
+    pub leaf: JetTLSCertificate
+    pub certificate_chain: [JetTLSCertificate]
+    pub cipher_suite: String
+    pub tls_version: JetTLSVersion
+}
+impl JetShow for JetTCPListener {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:509
+    fn jet_show(self: &Self) -> String {
+        // GATE #4565: kernel primitive
+        address :: #Unsafe("query the listener's live socket address without transferring ownership") {
+            self.inner.local_addr().map(fn(a) -> a.to_string()).unwrap_or_else(fn(error) -> "address unavailable: {error}")
+        }
+        "TcpListener({address})"
+    }
+}
+impl JetShow for JetTCPStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:520
+    fn jet_show(self: &Self) -> String {
+        // GATE #4565: kernel primitive
+        address :: #Unsafe("query the connected socket peer without transferring ownership") {
+            self.inner.peer_addr().map(fn(a) -> a.to_string()).unwrap_or_else(fn(error) -> "peer unavailable: {error}")
+        }
+        "TcpStream({address})"
+    }
+}
+impl JetShow for JetNetError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:531
+    fn jet_show(self: &Self) -> String {
+        (variant, detail_message, dns_variant, dns_value) :: match self {
+            .InvalidInput(d) -> (0, Val(d.message), None, None)
+            .PermissionDenied(d) -> (1, Val(d.message), None, None)
+            .AddressInUse(d) -> (2, Val(d.message), None, None)
+            .AddressUnavailable(d) -> (3, Val(d.message), None, None)
+            .ConnectionRefused(d) -> (4, Val(d.message), None, None)
+            .ConnectionReset(d) -> (5, Val(d.message), None, None)
+            .NotConnected(d) -> (6, Val(d.message), None, None)
+            .Closed(d) -> (7, Val(d.message), None, None)
+            .Timeout(d) -> (8, Val(d.message), None, None)
+            .Cancelled(d) -> (9, Val(d.message), None, None)
+            .Unsupported(d) -> (10, Val(d.message), None, None)
+            .TLS(d) -> (11, Val(d.message), None, None)
+            .Protocol(d) -> (12, Val(d.message), None, None)
+            .Other(d) -> (13, Val(d.message), None, None)
+            .DNS(.NotFound(name)) -> (14, None, Val(0), Val(name))
+            .DNS(.Failure(message)) -> (14, None, Val(1), Val(message))
+        }
+        jet_net_error_kernel_show(variant, detail_message, dns_variant, dns_value)
+    }
+}
+impl JetDebug for JetNetError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:562
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+// D-FAIL-CONV2=A: one display hook backs NetError -> Err and interpolation.
+impl JetDisplay for JetNetError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:569
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+impl JetShow for JetIpAddr {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:574
+    fn jet_show(self: &Self) -> String { self.inner.to_string() }
+}
+impl JetShow for JetSocketAddr {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:579
+    fn jet_show(self: &Self) -> String { self.inner.to_string() }
+}
+impl JetShow for JetUDPSocket {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:584
+    fn jet_show(self: &Self) -> String {
+        // GATE #4565: kernel primitive
+        address :: #Unsafe("query the retained UDP socket local address") {
+            self.inner.local_addr().map(fn(a) -> a.to_string()).unwrap_or_else(fn(error) -> "address unavailable: {error}")
+        }
+        "UdpSocket({address})"
+    }
+}
+impl JetShow for JetUDPPacket {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:595
+    fn jet_show(self: &Self) -> String { "UDPPacket({self.data.len()} bytes from {self.addr.inner})" }
+}
+impl JetShow for JetDNSSrv {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:604
+    fn jet_show(self: &Self) -> String { "DNSSRV(priority={self.priority}, weight={self.weight}, port={self.port}, target={self.target})" }
+}
+impl JetShow for JetUnixListener {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:612
+    fn jet_show(self: &Self) -> String { "UnixListener" }
+}
+impl JetShow for JetUnixStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:617
+    fn jet_show(self: &Self) -> String { "UnixStream" }
+}
+impl JetShow for JetTLSStream {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:622
+    fn jet_show(self: &Self) -> String { "TLSStream({self.id})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:627
+fn jet_net_timeout(ms: I64) -> Duration Err! {
+    if ms < 0 -> return Err("network timeout must be non-negative")
+    Ok(Duration.from_millis(ms as U64))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:634
+fn jet_net_detail(operation: String, address: String?, name: String?, message: String, os_code: I64?) -> JetNetErrorDetail {
+    JetNetErrorDetail{operation: operation, address: ^address, name: ^name, message: ^message, os_code: os_code}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:650
+fn jet_net_invalid_input(operation: String, resource: String) -> JetNetError {
+    JetNetError.InvalidInput(jet_net_detail(operation, None, None, "invalid {resource}", None))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:660
+fn jet_net_io_error(operation: String, address: String?, error: native_io.Error) -> JetNetError {
+    detail :: jet_net_detail(operation, ^address, None, "{operation} failed: {error}", error.raw_os_error().map(fn(code) -> code as I64))
+    match error.kind() {
+        .InvalidInput | .InvalidData -> JetNetError.InvalidInput(^detail)
+        .PermissionDenied -> JetNetError.PermissionDenied(^detail)
+        .AddrInUse -> JetNetError.AddressInUse(^detail)
+        .AddrNotAvailable -> JetNetError.AddressUnavailable(^detail)
+        .ConnectionRefused -> JetNetError.ConnectionRefused(^detail)
+        .ConnectionReset | .ConnectionAborted | .BrokenPipe -> JetNetError.ConnectionReset(^detail)
+        .NotConnected -> JetNetError.NotConnected(^detail)
+        .TimedOut | .WouldBlock -> JetNetError.Timeout(^detail)
+        .Unsupported -> JetNetError.Unsupported(^detail)
+        _ -> JetNetError.Other(^detail)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:692
+fn jet_net_closed(operation: String) -> JetNetError {
+    JetNetError.Closed(jet_net_detail(operation, None, None, "{operation} failed: socket is closed", None))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:702
+fn jet_net_tls_result<T>(result: T Err!, operation: String) -> T JetNetError! {
+    result.map_err(fn(message) {
+        detail :: jet_net_detail(operation, None, None, message.clone(), None)
+        if message.starts_with("TLS protocol truncation:") -> JetNetError.Protocol(^detail)
+        else if message.contains("closed") -> JetNetError.Closed(^detail)
+        else if message.contains("timed out") || message.contains("deadline") -> JetNetError.Timeout(^detail)
+        else -> JetNetError.TLS(^detail)
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:717
+fn jet_net_tls_io_result<T>(result: T Err!, operation: IOOperation) -> T IOError! {
+    result.map_err(fn(message) {
+        context :: IOContext.new(operation, Val("TLS stream"), None, Val(message.clone()))
+        if message.starts_with("TLS protocol truncation:") || message.starts_with("TLS protocol error:") -> IOError.Protocol(^context)
+        else if message.contains("closed") -> IOError.Closed(^context)
+        else if message.contains("timed out") || message.contains("deadline") -> IOError.TimedOut(^context)
+        else if message.contains("cancelled") -> IOError.Cancelled(^context)
+        else -> IOError.Other(^context)
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:744
+fn jet_net_dns_result<T>(result: T Err!, name: String) -> T JetNetError! {
+    result.map_err(fn(message) {
+        if message.starts_with("DNS name not found") -> JetNetError.DNS(.NotFound(name))
+        else if message.starts_with("network operation cancelled") -> JetNetError.Cancelled(jet_net_detail("dns", None, Val(name), ^message, None))
+        else if message.starts_with("network protocol error") -> JetNetError.Protocol(jet_net_detail("dns", None, Val(name), ^message, None))
+        else if message.contains("timed out") || message.contains("timeout") -> JetNetError.Timeout(jet_net_detail("dns", None, Val(name), ^message, None))
+        else -> JetNetError.DNS(.Failure(^message))
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:778
+fn jet_net_error_detail(error: &JetNetError) -> &JetNetErrorDetail? {
+    match error {
+        .InvalidInput(d) | .PermissionDenied(d) | .AddressInUse(d) | .AddressUnavailable(d)
+        | .ConnectionRefused(d) | .ConnectionReset(d) | .NotConnected(d) | .Closed(d)
+        | .Timeout(d) | .Cancelled(d) | .Unsupported(d) | .TLS(d) | .Protocol(d) | .Other(d) -> Val(d)
+        .DNS(_) -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:798
+fn jet_net_error_operation(error: &JetNetError) -> String {
+    jet_net_error_detail(error).map(fn(d) -> d.operation.clone()).unwrap_or_else(fn() -> "dns")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:803
+fn jet_net_error_address(error: &JetNetError) -> String? {
+    jet_net_error_detail(error).and_then(fn(d) -> d.address.clone())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:806
+fn jet_net_error_name(error: &JetNetError) -> String? {
+    match error {
+        .DNS(.NotFound(name)) -> Val(name.clone())
+        _ -> jet_net_error_detail(error).and_then(fn(d) -> d.name.clone())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:812
+fn jet_net_error_message(error: &JetNetError) -> String { error.jet_show() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:815
+fn jet_net_error_os_code(error: &JetNetError) -> I64? { jet_net_error_detail(error).and_then(fn(d) -> d.os_code) }
+// Canonical surface ordinals, not Rust enum declaration positions.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:821
+enum JetNetErrorSurfacePayload {
+    Detail(JetNetErrorDetail)
+    DNS { variant: String, ordinal: I64, value: String }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:830
+struct JetNetErrorSurfaceParts { variant: String, ordinal: I64, payload: JetNetErrorSurfacePayload }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:836
+fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
+    detail :: fn(variant, ordinal, value) -> JetNetErrorSurfaceParts{variant: variant, ordinal: ordinal, payload: .Detail(^value)}
+    match error {
+        .InvalidInput(value) -> detail("InvalidInput", 0, ^value)
+        .PermissionDenied(value) -> detail("PermissionDenied", 1, ^value)
+        .AddressInUse(value) -> detail("AddressInUse", 2, ^value)
+        .AddressUnavailable(value) -> detail("AddressUnavailable", 3, ^value)
+        .ConnectionRefused(value) -> detail("ConnectionRefused", 4, ^value)
+        .ConnectionReset(value) -> detail("ConnectionReset", 5, ^value)
+        .NotConnected(value) -> detail("NotConnected", 6, ^value)
+        .Closed(value) -> detail("Closed", 7, ^value)
+        .Timeout(value) -> detail("Timeout", 8, ^value)
+        .Cancelled(value) -> detail("Cancelled", 9, ^value)
+        .Unsupported(value) -> detail("Unsupported", 10, ^value)
+        .TLS(value) -> detail("TLS", 11, ^value)
+        .Protocol(value) -> detail("Protocol", 12, ^value)
+        .Other(value) -> detail("Other", 13, ^value)
+        .DNS(.NotFound(value)) -> JetNetErrorSurfaceParts{variant: "DNS", ordinal: 14, payload: .DNS{variant: "NotFound", ordinal: 0, value: ^value}}
+        .DNS(.Failure(value)) -> JetNetErrorSurfaceParts{variant: "DNS", ordinal: 14, payload: .DNS{variant: "Failure", ordinal: 1, value: ^value}}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:879
+fn jet_net_tcp_stream(inner: native_net.TcpStream) -> JetTCPStream JetNetError! {
+    // GATE #4483: exact selected WASI Preview 2 target facts.
+    if target.selected_os() == .Wasi && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
+        // GATE #4565: kernel primitive
+        #Unsafe("WASI sockets use their shared blocking adapter, not the native scheduler") {
+            inner.set_nonblocking(false)
+        }.map_err(fn(error) -> jet_net_io_error("tcp socket setup", None, error))?
+    } else {
+        // GATE #4565: kernel primitive
+        #Unsafe("native TCP operations park through scheduler readiness after WouldBlock") {
+            inner.set_nonblocking(true)
+        }.map_err(fn(error) -> jet_net_io_error("tcp scheduler registration", None, error))?
+    }
+    Ok(JetTCPStream{inner: ^inner, closed: false, read_shutdown: false, write_shutdown: false, read_timeout_ms: None, write_timeout_ms: None})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:901
+fn jet_net_operation_deadline(timeout_ms: I64?) -> JetDeadlineGuard? {
+    timeout_ms :: timeout_ms?
+    configured :: jet_std_time_now().saturating_add(timeout_ms)
+    deadline :: jet_ctx_deadline_ms().map_or(configured, fn(ambient) -> ambient.min(configured))
+    Val(jet_ctx_push_deadline(deadline))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:908
+fn jet_net_explicit_deadline(deadline: &jet_std.Duration, operation: String) -> JetDeadlineGuard? JetNetError! {
+    jet_net_timeout(deadline.as_millis()).map_err(fn(message) -> JetNetError.InvalidInput(jet_net_detail(operation, None, None, ^message, None)))?
+    Ok(jet_net_operation_deadline(Val(deadline.as_millis())))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:918
+fn jet_net_deadline_timeout(operation: String) -> JetNetError {
+    JetNetError.Timeout(jet_net_detail(operation, None, None, "deadline exceeded while waiting in {operation}", None))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:928
+fn jet_net_scheduler_park(operation: String, millis: U64) -> () JetNetError! {
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("park on the audited scheduler boundary while preserving cancellation and deadline outcomes") {
+        jet_scheduler_wait_without_unwind(fn() -> jet_scheduler_park_ms("network wait", millis))
+    }
+    match waited {
+        .Ready(()) -> Ok(())
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:949
+fn jet_net_wait_for_connect(receiver: std.sync.mpsc.Receiver<native_net.TcpStream native_io.Error!>, address: String?) -> JetTCPStream JetNetError! {
+    loop {
+        // GATE #4565: kernel primitive
+        result :: #Unsafe("receive at most one worker result without blocking the scheduler thread") { receiver.try_recv() }
+        match result {
+            .Ok(.Ok(stream)) -> return jet_net_tcp_stream(^stream)
+            .Ok(.Err(error)) -> return Err(jet_net_io_error("tcp connect", ^address, error))
+            .Err(.Empty) -> { jet_net_scheduler_park("tcp connect", 5)? }
+            .Err(.Disconnected) -> {
+                return Err(JetNetError.Other(jet_net_detail("tcp connect", ^address, None, "tcp connect worker stopped without a result", None)))
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:973
+fn jet_net_connect_addr_worker(addr: native_net.SocketAddr) -> JetTCPStream JetNetError! {
+    jet_scheduler_world_reject_uncontrolled("network")
+    if jet_deadline_remaining_ms() == Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout("tcp connect"))
+    timeout :: jet_deadline_remaining_ms().map(fn(ms) -> Duration.from_millis(ms.max(1) as U64))
+    // GATE #4483: exact selected WASI Preview 2 target facts.
+    if target.selected_os() == .Wasi && target.selected_env() == "p2" && target.selected_arch() == "wasm32" {
+        address :: addr.to_string()
+        // GATE #4565: kernel primitive
+        result :: #Unsafe("perform connect through the shared WASI socket adapter, honoring the remaining deadline") {
+            match timeout {
+                Val(timeout) -> native_net.TcpStream.connect_timeout(&addr, timeout)
+                None -> native_net.TcpStream.connect(addr)
+            }
+        }
+        return result.map_err(fn(error) -> jet_net_io_error("tcp connect", Val(address), error)).and_then(jet_net_tcp_stream)
+    }
+    address :: addr.to_string()
+    // GATE #4565: kernel primitive
+    (sender, receiver) :: #Unsafe("allocate a bounded single-result connect worker channel") { std.sync.mpsc.sync_channel(1) }
+    // GATE #4565: kernel primitive
+    _ :: #Unsafe("move socket address, timeout and sender into an OS worker; receiver cancellation drops late results") {
+        std.thread.spawn(fn() {
+            result :: match timeout {
+                Val(timeout) -> native_net.TcpStream.connect_timeout(&addr, timeout)
+                None -> native_net.TcpStream.connect(addr)
+            }
+            _ :: sender.send(^result)
+        })
+    }
+    jet_net_wait_for_connect(^receiver, Val(address))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1009
+fn jet_net_scheduler_wait(stream: &native_net.TcpStream, read: Bool, write: Bool, operation: String) -> () JetNetError! {
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("scheduler waits share the raw descriptor poller on Unix; other targets use the native IO wait") {
+        jet_scheduler_wait_without_unwind(fn() {
+            // GATE #4483: selected family, never host facts.
+            if target.selected_family() == .Unix {
+                _ :: jet_scheduler_tcp_stream_ready_wait(stream, read, write, operation)
+            } else {
+                jet_scheduler_io_wait(stream, read, write, operation)
+            }
+        })
+    }
+    match waited {
+        .Ready(()) -> Ok(())
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1048
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1077
+fn jet_net_tcp_scheduler_ready_wait(stream: &native_net.TcpStream, read: Bool, write: Bool, operation: String) -> (Bool, Bool) JetNetError! {
+    // GATE #4483: both cfg arms use the selected target.
+    if target.selected_family() != .Unix {
+        return Err(JetNetError.Unsupported(jet_net_detail(operation, None, None, "observed TCP readiness is not available on this platform", None)))
+    }
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("observe TCP readiness through the common raw descriptor poller") {
+        jet_scheduler_wait_without_unwind(fn() -> jet_scheduler_tcp_stream_ready_wait(stream, read, write, operation))
+    }
+    match waited {
+        .Ready(observed) -> Ok(observed)
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1093
+fn jet_net_unix_scheduler_wait(stream: &JetUnixStream, read: Bool, write: Bool, operation: String) -> () JetNetError! {
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("borrow the retained Unix readiness handle across the scheduler park") {
+        jet_scheduler_wait_without_unwind(fn() -> jet_scheduler_unix_stream_io_wait(&stream.scheduler, read, write, operation))
+    }
+    match waited {
+        .Ready(()) -> { if stream.closed -> Err(jet_net_closed(operation)) else -> Ok(()) }
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1123
+fn jet_net_unix_scheduler_ready_wait(stream: &JetUnixStream, read: Bool, write: Bool, operation: String) -> (Bool, Bool) JetNetError! {
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("observe Unix readiness while retaining the scheduler registration") {
+        jet_scheduler_wait_without_unwind(fn() -> jet_scheduler_unix_stream_ready_wait(&stream.scheduler, read, write, operation))
+    }
+    match waited {
+        .Ready(observed) -> { if stream.closed -> Err(jet_net_closed(operation)) else -> Ok(observed) }
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1152
+fn jet_net_tcp_listener_scheduler_wait(listener: &native_net.TcpListener, operation: String) -> () JetNetError! {
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("park on TCP listener readiness through the audited scheduler boundary") {
+        jet_scheduler_wait_without_unwind(fn() -> jet_scheduler_tcp_listener_io_wait(listener, operation))
+    }
+    match waited {
+        .Ready(()) -> Ok(())
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1179
+fn jet_net_unix_listener_scheduler_wait(listener: &JetUnixListener, operation: String) -> () JetNetError! {
+    if jet_scheduler_wait_point_cancelled() -> return Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+    if jet_deadline_remaining_ms() == Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout(operation))
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("retain the Unix listener readiness registration while parked") {
+        jet_scheduler_wait_without_unwind(fn() -> jet_scheduler_unix_listener_io_wait(&listener.scheduler, operation))
+    }
+    match waited {
+        .Ready(()) -> {
+            if jet_scheduler_wait_point_cancelled() -> return Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+            if jet_deadline_remaining_ms() == Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout(operation))
+            Ok(())
+        }
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1229
+fn jet_net_udp_scheduler_wait(socket: &JetUDPSocket, read: Bool, write: Bool, operation: String) -> () JetNetError! {
+    if jet_scheduler_wait_point_cancelled() -> return Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+    if jet_deadline_remaining_ms() == Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout(operation))
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("Unix UDP waits use the retained descriptor; other targets park briefly before retrying the OS operation") {
+        jet_scheduler_wait_without_unwind(fn() {
+            // GATE #4483: selected target family.
+            if target.selected_family() == .Unix {
+                jet_scheduler_udp_io_wait(&socket.scheduler, read, write, operation)
+            } else {
+                jet_scheduler_park_ms("udp readiness", 5)
+            }
+        })
+    }
+    match waited {
+        .Ready(()) -> {
+            // GATE #4565: kernel primitive
+            if #Unsafe("acquire the shared UDP close state after readiness") { socket.closed.load(std.sync.atomic.Ordering.Acquire) } -> return Err(jet_net_closed(operation))
+            if jet_scheduler_wait_point_cancelled() -> return Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+            if jet_deadline_remaining_ms() == Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout(operation))
+            Ok(())
+        }
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1292
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1348
+fn jet_net_udp_scheduler_ready_wait(socket: &JetUDPSocket, read: Bool, write: Bool, operation: String) -> (Bool, Bool) JetNetError! {
+    // GATE #4483: retain the non-Unix Unsupported arm and its precedence.
+    if target.selected_family() != .Unix -> return Err(JetNetError.Unsupported(jet_net_detail(operation, None, None, "observed UDP readiness is not available on this platform", None)))
+    if jet_scheduler_wait_point_cancelled() -> return Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+    if jet_deadline_remaining_ms() == Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout(operation))
+    // GATE #4565: kernel primitive
+    waited :: #Unsafe("observe readiness from the retained UDP descriptor registration") {
+        jet_scheduler_wait_without_unwind(fn() -> jet_scheduler_udp_ready_wait(&socket.scheduler, read, write, operation))
+    }
+    match waited {
+        .Ready(observed) -> {
+            // GATE #4565: kernel primitive
+            if #Unsafe("acquire the shared close state before reporting observed UDP readiness") { socket.closed.load(std.sync.atomic.Ordering.Acquire) } -> return Err(jet_net_closed(operation))
+            if jet_scheduler_wait_point_cancelled() -> return Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+            if jet_deadline_remaining_ms() == Val(ms) && ms <= 0 -> return Err(jet_net_deadline_timeout(operation))
+            Ok(observed)
+        }
+        .Cancelled -> Err(JetNetError.Cancelled(jet_net_detail(operation, None, None, "{operation} cancelled", None)))
+        .Deadline(_) -> Err(jet_net_deadline_timeout(operation))
+        .Panicked(message) -> Err(JetNetError.Other(jet_net_detail(operation, None, None, "{operation} scheduler wait failed: {message}", None)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1363
+fn jet_net_tls_scheduler_wait(stream: &JetTLSStream, fallback_read: Bool, fallback_write: Bool, operation: String) -> () JetNetError! {
+    (read, write) := jet_net_tls_result(stream.wants(stream.id), operation)?
+    if !read && !write { read = fallback_read; write = fallback_write }
+    jet_net_scheduler_wait(&stream.socket, read, write, operation)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1377
+fn jet_net_tls_io_scheduler_wait(stream: &JetTLSStream, fallback_read: Bool, fallback_write: Bool, operation: IOOperation) -> () IOError! {
+    (read, write) := jet_net_tls_io_result(stream.wants(stream.id), operation)?
+    if !read && !write { read = fallback_read; write = fallback_write }
+    label :: match operation { .Read -> "tls read", .Write -> "tls write", .Close -> "tls close", _ -> "tls I/O" }
+    jet_net_scheduler_wait(&stream.socket, read, write, label).map_err(jet_net_to_io_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1402
+// The original macro selects one audited native TLS provider, not a second policy.
+fn jet_net_tls_client(stream: JetTCPStream, server_name: &String) -> JetTLSStream IOError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("instantiate the shared TLS scheduler with the canonical native TLS state machine callbacks") {
+        jet_net_tls_client_scheduler(^stream, server_name,
+            jet_net_tls_begin_impl, jet_net_tls_handshake_step_impl, jet_net_tls_abort_impl,
+            jet_net_tls_wants_impl, jet_net_tls_read_ready_impl, jet_net_tls_read_step_impl,
+            jet_net_tls_write_step_impl, jet_net_tls_close_step_impl, jet_net_tls_close_write_step_impl,
+            jet_net_tls_peer_identity_impl)
+    }.map_err(jet_net_to_io_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1425
+fn jet_net_tls_client_scheduler(stream: JetTCPStream, server_name: &String,
+    begin: fn(native_net.TcpStream, &String) -> I64 Err!,
+    handshake_step: fn(I64) -> Bool Err!, abort: fn(I64) -> (),
+    wants: fn(I64) -> (Bool, Bool) Err!, read_ready: fn(I64) -> Bool Err!,
+    read_step: fn(I64, I64) -> [U8]? Err!, write_step: fn(I64, &[U8]) -> I64? Err!,
+    close_step: fn(I64) -> Bool Err!, close_write_step: fn(I64) -> Bool Err!,
+    peer_snapshot: fn(I64) -> JetTLSPeerSnapshot Err!) -> JetTLSStream JetNetError! {
+    jet_net_tls_client_scheduler_with_begin(^stream, fn(inner) -> begin(^inner, server_name),
+        handshake_step, abort, wants, read_ready, read_step, write_step, close_step, close_write_step, peer_snapshot)
+}
 //RS 
 //RS fn jet_net_tls_client_scheduler_with_begin<F>(
 //RS     stream: JetTCPStream,

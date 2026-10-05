@@ -1,339 +1,227 @@
-// PORT-PENDING 0288 crates-jet-codegen-src-prelude-corelib-top-mathlibpure-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:1-335
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Math and random helpers for `core.math` and `core.math.random`.
-//RS //
-//RS // These used to live in Top/Process.rs, which only emits for `core.process`
-//RS // or the filesystem runtime. A math-only program therefore generated calls to
-//RS // symbols that were never included, which rustc rejected as an I2 violation.
-//RS // They are gated on `needs_math` here, beside the rest of the math surface.
-//RS 
-//RS #[inline(always)]
-//RS fn jet_std_math_sqrt(x: f64) -> f64 {
-//RS     x.sqrt()
-//RS }
-//RS fn jet_std_math_sin(x: f64) -> f64 {
-//RS     x.sin()
-//RS }
-//RS fn jet_std_math_cos(x: f64) -> f64 {
-//RS     x.cos()
-//RS }
-//RS fn jet_std_math_tan(x: f64) -> f64 {
-//RS     x.tan()
-//RS }
-//RS fn jet_std_math_asin(x: f64) -> f64 {
-//RS     x.asin()
-//RS }
-//RS fn jet_std_math_acos(x: f64) -> f64 {
-//RS     x.acos()
-//RS }
-//RS fn jet_std_math_atan(x: f64) -> f64 {
-//RS     x.atan()
-//RS }
-//RS fn jet_std_math_sinh(x: f64) -> f64 {
-//RS     x.sinh()
-//RS }
-//RS fn jet_std_math_cosh(x: f64) -> f64 {
-//RS     x.cosh()
-//RS }
-//RS fn jet_std_math_tanh(x: f64) -> f64 {
-//RS     x.tanh()
-//RS }
-//RS fn jet_std_math_ln(x: f64) -> f64 {
-//RS     x.ln()
-//RS }
-//RS fn jet_std_math_log10(x: f64) -> f64 {
-//RS     x.log10()
-//RS }
-//RS fn jet_std_math_log2(x: f64) -> f64 {
-//RS     x.log2()
-//RS }
-//RS fn jet_std_math_trunc(x: f64) -> f64 {
-//RS     x.trunc()
-//RS }
-//RS fn jet_std_math_fract(x: f64) -> f64 {
-//RS     x.fract()
-//RS }
-//RS fn jet_std_math_atan2(y: f64, x: f64) -> f64 {
-//RS     y.atan2(x)
-//RS }
-//RS fn jet_std_math_hypot(a: f64, b: f64) -> f64 {
-//RS     a.hypot(b)
-//RS }
-//RS fn jet_std_math_pow(a: f64, b: f64) -> f64 {
-//RS     a.powf(b)
-//RS }
-//RS fn jet_std_math_floor(x: f64) -> f64 {
-//RS     x.floor()
-//RS }
-//RS fn jet_std_math_ceil(x: f64) -> f64 {
-//RS     x.ceil()
-//RS }
-//RS fn jet_std_math_sign(x: f64) -> i64 {
-//RS     if x > 0.0 {
-//RS         1
-//RS     } else if x < 0.0 {
-//RS         -1
-//RS     } else {
-//RS         0
-//RS     }
-//RS }
-//RS fn jet_std_math_checked_pow(base: i64, exp: i64) -> Option<i64> {
-//RS     if exp < 0 {
-//RS         return None;
-//RS     }
-//RS     base.checked_pow(exp as u32)
-//RS }
-//RS fn jet_std_math_int_pow(base: i64, exp: i64) -> i64 {
-//RS     if exp < 0 {
-//RS         return 0;
-//RS     }
-//RS     base.saturating_pow(exp as u32)
-//RS }
-//RS // D-FLOATW1 (ratified 2026-06-22): F32 variants — sqrt(F32)->F32, pow(F32,F32)->F32 etc.
-//RS // F32 is a real precision choice, not just storage; no silent widening to f64 (I3).
-//RS fn jet_std_math_sqrt_f32(x: f32) -> f32 {
-//RS     x.sqrt()
-//RS }
-//RS fn jet_std_math_pow_f32(a: f32, b: f32) -> f32 {
-//RS     a.powf(b)
-//RS }
-//RS fn jet_std_math_floor_f32(x: f32) -> f32 {
-//RS     x.floor()
-//RS }
-//RS fn jet_std_math_ceil_f32(x: f32) -> f32 {
-//RS     x.ceil()
-//RS }
-//RS 
-//RS thread_local! { static JET_RNG: std::cell::Cell<u64> = std::cell::Cell::new(0x4d595df4d0f33173); }
-//RS fn jet_rng_next() -> u64 {
-//RS     // D-TEST-WORLD1=A: ordinary non-cryptographic random draws use the
-//RS     // active world's isolated stream; production ambient behavior remains the
-//RS     // fallback outside a world.
-//RS     if let Some(value) = jet_scheduler_world_rng_next() {
-//RS         return value;
-//RS     }
-//RS     JET_RNG.with(|cell| {
-//RS         let mut x = cell.get();
-//RS         x ^= x << 7;
-//RS         x ^= x >> 9;
-//RS         x = x.wrapping_mul(0x9e3779b97f4a7c15);
-//RS         cell.set(x);
-//RS         x
-//RS     })
-//RS }
-//RS fn jet_std_random_seed(n: i64) {
-//RS     if jet_scheduler_world_rng_seed(n) {
-//RS         return;
-//RS     }
-//RS     JET_RNG.with(|cell| cell.set(n as u64));
-//RS }
-//RS fn jet_std_random_getrandbits(k: i64) -> i64 {
-//RS     let bits = k.clamp(0, 63) as u32;
-//RS     if bits == 0 {
-//RS         0
-//RS     } else {
-//RS         (jet_rng_next() >> (64 - bits)) as i64
-//RS     }
-//RS }
-//RS fn jet_std_random_randrange(start: i64, stop: i64) -> i64 {
-//RS     if stop <= start {
-//RS         return start;
-//RS     }
-//RS     jet_std_random_int(start, stop - 1)
-//RS }
-//RS fn jet_std_random_int(low: i64, high: i64) -> i64 {
-//RS     if high <= low {
-//RS         return low;
-//RS     }
-//RS     low + (jet_rng_next() % ((high - low + 1) as u64)) as i64
-//RS }
-//RS fn jet_std_random_float() -> f64 {
-//RS     (jet_rng_next() as f64) / (u64::MAX as f64)
-//RS }
-//RS fn jet_std_random_float_open() -> f64 {
-//RS     let x = jet_std_random_float();
-//RS     if x <= 0.0 { f64::MIN_POSITIVE } else { x }
-//RS }
-//RS fn jet_std_random_float_range(low: f64, high: f64) -> f64 {
-//RS     if !(high > low) {
-//RS         return low;
-//RS     }
-//RS     low + (high - low) * jet_std_random_float()
-//RS }
-//RS fn jet_std_random_bool(p: f64) -> bool {
-//RS     if p <= 0.0 || p.is_nan() {
-//RS         false
-//RS     } else if p >= 1.0 {
-//RS         true
-//RS     } else {
-//RS         jet_std_random_float() < p
-//RS     }
-//RS }
-//RS fn jet_std_random_normal(mean: f64, stddev: f64) -> f64 {
-//RS     let u1 = jet_std_random_float_open();
-//RS     let u2 = jet_std_random_float();
-//RS     let z0 = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
-//RS     mean + z0 * stddev.max(0.0)
-//RS }
-//RS fn jet_std_random_exponential(lambda: f64) -> f64 {
-//RS     if lambda <= 0.0 || lambda.is_nan() {
-//RS         return 0.0;
-//RS     }
-//RS     -jet_std_random_float_open().ln() / lambda
-//RS }
-//RS fn jet_std_random_choices<T: Clone>(xs: &Vec<T>, n: i64) -> Vec<T> {
-//RS     let mut out = Vec::new();
-//RS     if xs.is_empty() {
-//RS         return out;
-//RS     }
-//RS     for _ in 0..n.max(0) {
-//RS         if let Some(value) = jet_std_random_pick(xs) {
-//RS             out.push(value);
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_std_random_triangular(low: f64, high: f64, mode: f64) -> f64 {
-//RS     if high <= low {
-//RS         return low;
-//RS     }
-//RS     let peak = mode.clamp(low, high);
-//RS     let u = jet_std_random_float();
-//RS     let cut = (peak - low) / (high - low);
-//RS     if u <= cut {
-//RS         low + (u * (high - low) * (peak - low)).sqrt()
-//RS     } else {
-//RS         high - ((1.0 - u) * (high - low) * (high - peak)).sqrt()
-//RS     }
-//RS }
-//RS fn jet_std_random_gamma(alpha: f64, beta: f64) -> f64 {
-//RS     if alpha <= 0.0 || beta <= 0.0 {
-//RS         return 0.0;
-//RS     }
-//RS     if alpha < 1.0 {
-//RS         return jet_std_random_gamma(alpha + 1.0, beta)
-//RS             * (jet_std_random_float_open().ln() / alpha).exp();
-//RS     }
-//RS     let d = alpha - 1.0 / 3.0;
-//RS     let c = 1.0 / (9.0 * d).sqrt();
-//RS     loop {
-//RS         let x = jet_std_random_normal(0.0, 1.0);
-//RS         let v0 = 1.0 + c * x;
-//RS         if v0 <= 0.0 {
-//RS             continue;
-//RS         }
-//RS         let v = v0 * v0 * v0;
-//RS         let u = jet_std_random_float_open();
-//RS         if u < 1.0 - 0.0331 * x.powi(4)
-//RS             || u.ln() < 0.5 * x * x + d * (1.0 - v + v.ln())
-//RS         {
-//RS             return beta * d * v;
-//RS         }
-//RS     }
-//RS }
-//RS fn jet_std_random_beta(alpha: f64, beta: f64) -> f64 {
-//RS     if alpha <= 0.0 || beta <= 0.0 {
-//RS         return 0.0;
-//RS     }
-//RS     let a = jet_std_random_gamma(alpha, 1.0);
-//RS     let b = jet_std_random_gamma(beta, 1.0);
-//RS     if a + b <= 0.0 { 0.0 } else { a / (a + b) }
-//RS }
-//RS fn jet_std_random_lognormal(mean: f64, sigma: f64) -> f64 {
-//RS     jet_std_random_normal(mean, sigma).exp()
-//RS }
-//RS fn jet_std_random_pareto(alpha: f64) -> f64 {
-//RS     if alpha <= 0.0 {
-//RS         0.0
-//RS     } else {
-//RS         (-jet_std_random_float_open().ln() / alpha).exp()
-//RS     }
-//RS }
-//RS fn jet_std_random_weibull(alpha: f64, beta: f64) -> f64 {
-//RS     if alpha <= 0.0 || beta <= 0.0 {
-//RS         0.0
-//RS     } else {
-//RS         alpha * (-jet_std_random_float_open().ln()).powf(1.0 / beta)
-//RS     }
-//RS }
-//RS fn jet_std_random_vonmises(mu: f64, kappa: f64) -> f64 {
-//RS     if kappa <= 0.0 {
-//RS         std::f64::consts::TAU * jet_std_random_float()
-//RS     } else {
-//RS         mu + jet_std_random_normal(0.0, 1.0 / kappa.sqrt())
-//RS     }
-//RS }
-//RS fn jet_std_random_binomial(n: i64, p: f64) -> i64 {
-//RS     if n <= 0 || p <= 0.0 {
-//RS         return 0;
-//RS     }
-//RS     if p >= 1.0 {
-//RS         return n;
-//RS     }
-//RS     (0..n)
-//RS         .filter(|_| jet_std_random_float() < p)
-//RS         .count() as i64
-//RS }
-//RS fn jet_std_random_pick<T: Clone>(xs: &Vec<T>) -> Option<T> {
-//RS     if xs.is_empty() {
-//RS         None
-//RS     } else {
-//RS         Some(xs[jet_std_random_int(0, xs.len() as i64 - 1) as usize].clone())
-//RS     }
-//RS }
-//RS fn jet_std_random_weighted_pick<T: Clone>(xs: &Vec<T>, weights: &Vec<f64>) -> Option<T> {
-//RS     if xs.is_empty() || xs.len() != weights.len() {
-//RS         return None;
-//RS     }
-//RS     let mut total = 0.0;
-//RS     for &w in weights {
-//RS         if w.is_finite() && w > 0.0 {
-//RS             total += w;
-//RS         }
-//RS     }
-//RS     if total <= 0.0 {
-//RS         return None;
-//RS     }
-//RS     let mut needle = jet_std_random_float_range(0.0, total);
-//RS     for (item, &weight) in xs.iter().zip(weights.iter()) {
-//RS         let w = if weight.is_finite() && weight > 0.0 { weight } else { 0.0 };
-//RS         if needle < w {
-//RS             return Some(item.clone());
-//RS         }
-//RS         needle -= w;
-//RS     }
-//RS     xs.last().cloned()
-//RS }
-//RS fn jet_std_random_sample<T: Clone>(xs: &Vec<T>, k: i64) -> Vec<T> {
-//RS     let want = (k.max(0) as usize).min(xs.len());
-//RS     let mut pool = xs.clone();
-//RS     for i in 0..want {
-//RS         let j = jet_std_random_int(i as i64, pool.len() as i64 - 1) as usize;
-//RS         pool.swap(i, j);
-//RS     }
-//RS     pool.truncate(want);
-//RS     pool
-//RS }
-//RS fn jet_std_random_shuffle<T>(xs: &mut Vec<T>) {
-//RS     let len = xs.len();
-//RS     for i in (1..len).rev() {
-//RS         let j = jet_std_random_int(0, i as i64) as usize;
-//RS         xs.swap(i, j);
-//RS     }
-//RS }
-//RS // D-RANDSPLIT1=A: PRNG bytes via the ambient SplitMix64 state — fast, seedable,
-//RS // NOT cryptographically secure. Use for simulation, testing, or shuffles only.
-//RS fn jet_std_random_bytes(n: i64) -> Vec<u8> {
-//RS     let n = n.max(0) as usize;
-//RS     let mut out = Vec::with_capacity(n);
-//RS     for _ in 0..n {
-//RS         out.push(jet_rng_next() as u8);
-//RS     }
-//RS     out
-//RS }
-//RS fn jet_std_random_split(seed: i64) -> jet_std::Rng {
-//RS     let mixed = (seed as u64) ^ jet_rng_next().rotate_left(17);
-//RS     jet_std::Rng { state: mixed }
-//RS }
-// END-PORT-PENDING 0288 crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:1-335
+use core.cell.[Cell, ThreadLocal]
+use core.tasks.runtime.scheduler.[jet_scheduler_world_rng_next, jet_scheduler_world_rng_seed]
+use core.prelude.runtime.std_common_types_02.[Rng]
+use std.f64.consts.[TAU]
 
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:9
+#Inline
+fn jet_std_math_sqrt(x: F64) -> F64 { x.sqrt() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:12
+fn jet_std_math_sin(x: F64) -> F64 { x.sin() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:15
+fn jet_std_math_cos(x: F64) -> F64 { x.cos() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:18
+fn jet_std_math_tan(x: F64) -> F64 { x.tan() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:21
+fn jet_std_math_asin(x: F64) -> F64 { x.asin() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:24
+fn jet_std_math_acos(x: F64) -> F64 { x.acos() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:27
+fn jet_std_math_atan(x: F64) -> F64 { x.atan() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:30
+fn jet_std_math_sinh(x: F64) -> F64 { x.sinh() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:33
+fn jet_std_math_cosh(x: F64) -> F64 { x.cosh() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:36
+fn jet_std_math_tanh(x: F64) -> F64 { x.tanh() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:39
+fn jet_std_math_ln(x: F64) -> F64 { x.ln() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:42
+fn jet_std_math_log10(x: F64) -> F64 { x.log10() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:45
+fn jet_std_math_log2(x: F64) -> F64 { x.log2() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:48
+fn jet_std_math_trunc(x: F64) -> F64 { x.trunc() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:51
+fn jet_std_math_fract(x: F64) -> F64 { x.fract() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:54
+fn jet_std_math_atan2(y: F64, x: F64) -> F64 { y.atan2(x) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:57
+fn jet_std_math_hypot(a: F64, b: F64) -> F64 { a.hypot(b) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:60
+fn jet_std_math_pow(a: F64, b: F64) -> F64 { a.powf(b) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:63
+fn jet_std_math_floor(x: F64) -> F64 { x.floor() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:66
+fn jet_std_math_ceil(x: F64) -> F64 { x.ceil() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:69
+fn jet_std_math_sign(x: F64) -> I64 { if x > 0.0 -> 1 else if x < 0.0 -> -1 else -> 0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:78
+fn jet_std_math_checked_pow(base: I64, exp: I64) -> I64? {
+    if exp < 0 -> return None
+    base.checked_pow(exp as U32)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:84
+fn jet_std_math_int_pow(base: I64, exp: I64) -> I64 {
+    if exp < 0 -> return 0
+    base.saturating_pow(exp as U32)
+}
+// F32 is a real precision choice: none of these helpers widens to F64.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:92
+fn jet_std_math_sqrt_f32(x: F32) -> F32 { x.sqrt() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:95
+fn jet_std_math_pow_f32(a: F32, b: F32) -> F32 { a.powf(b) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:98
+fn jet_std_math_floor_f32(x: F32) -> F32 { x.floor() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:101
+fn jet_std_math_ceil_f32(x: F32) -> F32 { x.ceil() }
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:105
+// GATE #4565: kernel primitive — calling-thread ambient PRNG storage.
+JET_RNG :: ThreadLocal<Cell<U64>>.new(fn() { Cell.new(U64{0x4d595df4d0f33173}) })
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:106
+fn jet_rng_next() -> U64 {
+    if Val(value) :: jet_scheduler_world_rng_next() -> return value
+    // GATE #4565: kernel primitive
+    #Unsafe("mutate only the calling thread's fallback RNG when no isolated test world is active") {
+        JET_RNG.with(fn(cell) {
+            x := cell.get()
+            x ^= x << 7
+            x ^= x >> 9
+            x = x.wrapping_mul(U64{0x9e3779b97f4a7c15})
+            cell.set(x)
+            x
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:122
+fn jet_std_random_seed(n: I64) -> {
+    if jet_scheduler_world_rng_seed(n) -> return
+    // GATE #4565: kernel primitive
+    #Unsafe("seed only the calling thread's ambient stream outside a test world") { JET_RNG.with(fn(cell) { cell.set(n as U64) }) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:128
+fn jet_std_random_getrandbits(k: I64) -> I64 {
+    bits :: k.clamp(0, 63) as U32
+    if bits == 0 -> 0 else -> (jet_rng_next() >> (64 - bits)) as I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:136
+fn jet_std_random_randrange(start: I64, stop: I64) -> I64 {
+    if stop <= start -> return start
+    jet_std_random_int(start, stop - 1)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:142
+fn jet_std_random_int(low: I64, high: I64) -> I64 {
+    if high <= low -> return low
+    low + (jet_rng_next() % ((high - low + 1) as U64)) as I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:148
+fn jet_std_random_float() -> F64 { (jet_rng_next() as F64) / (U64.MAX as F64) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:151
+fn jet_std_random_float_open() -> F64 { x :: jet_std_random_float(); if x <= 0.0 -> F64.MIN_POSITIVE else -> x }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:155
+fn jet_std_random_float_range(low: F64, high: F64) -> F64 {
+    if !(high > low) -> return low
+    low + (high - low) * jet_std_random_float()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:161
+fn jet_std_random_bool(p: F64) -> Bool {
+    if p <= 0.0 || p.is_nan() -> false else if p >= 1.0 -> true else -> jet_std_random_float() < p
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:170
+fn jet_std_random_normal(mean: F64, stddev: F64) -> F64 {
+    u1 :: jet_std_random_float_open()
+    u2 :: jet_std_random_float()
+    z0 :: (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
+    mean + z0 * stddev.max(0.0)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:176
+fn jet_std_random_exponential(lambda: F64) -> F64 {
+    if lambda <= 0.0 || lambda.is_nan() -> return 0.0
+    -jet_std_random_float_open().ln() / lambda
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:182
+fn jet_std_random_choices<T: Clone>(xs: &[T], n: I64) -> [T] {
+    out := [T]{}
+    if xs.is_empty() -> return out
+    for _ in 0..<n.max(0) {
+        if Val(value) :: jet_std_random_pick(xs) -> out.push(^value)
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:194
+fn jet_std_random_triangular(low: F64, high: F64, mode: F64) -> F64 {
+    if high <= low -> return low
+    peak :: mode.clamp(low, high)
+    u :: jet_std_random_float()
+    cut :: (peak - low) / (high - low)
+    if u <= cut -> low + (u * (high - low) * (peak - low)).sqrt()
+    else -> high - ((1.0 - u) * (high - low) * (high - peak)).sqrt()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:207
+fn jet_std_random_gamma(alpha: F64, beta: F64) -> F64 {
+    if alpha <= 0.0 || beta <= 0.0 -> return 0.0
+    if alpha < 1.0 -> return jet_std_random_gamma(alpha + 1.0, beta) * (jet_std_random_float_open().ln() / alpha).exp()
+    d :: alpha - 1.0 / 3.0
+    c :: 1.0 / (9.0 * d).sqrt()
+    loop {
+        x :: jet_std_random_normal(0.0, 1.0)
+        v0 :: 1.0 + c * x
+        if v0 <= 0.0 -> continue
+        v :: v0 * v0 * v0
+        u :: jet_std_random_float_open()
+        if u < 1.0 - 0.0331 * x.powi(4) || u.ln() < 0.5 * x * x + d * (1.0 - v + v.ln()) -> return beta * d * v
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:232
+fn jet_std_random_beta(alpha: F64, beta: F64) -> F64 {
+    if alpha <= 0.0 || beta <= 0.0 -> return 0.0
+    a :: jet_std_random_gamma(alpha, 1.0)
+    b :: jet_std_random_gamma(beta, 1.0)
+    if a + b <= 0.0 -> 0.0 else -> a / (a + b)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:240
+fn jet_std_random_lognormal(mean: F64, sigma: F64) -> F64 { jet_std_random_normal(mean, sigma).exp() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:243
+fn jet_std_random_pareto(alpha: F64) -> F64 { if alpha <= 0.0 -> 0.0 else -> (-jet_std_random_float_open().ln() / alpha).exp() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:250
+fn jet_std_random_weibull(alpha: F64, beta: F64) -> F64 { if alpha <= 0.0 || beta <= 0.0 -> 0.0 else -> alpha * (-jet_std_random_float_open().ln()).powf(1.0 / beta) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:257
+fn jet_std_random_vonmises(mu: F64, kappa: F64) -> F64 { if kappa <= 0.0 -> TAU * jet_std_random_float() else -> mu + jet_std_random_normal(0.0, 1.0 / kappa.sqrt()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:264
+fn jet_std_random_binomial(n: I64, p: F64) -> I64 {
+    if n <= 0 || p <= 0.0 -> return 0
+    if p >= 1.0 -> return n
+    (0..<n).filter(fn(_) { jet_std_random_float() < p }).count() as I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:275
+fn jet_std_random_pick<T: Clone>(xs: &[T]) -> T? {
+    if xs.is_empty() -> None else -> Val(xs[jet_std_random_int(0, xs.len() as I64 - 1) as USize].clone())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:282
+fn jet_std_random_weighted_pick<T: Clone>(xs: &[T], weights: &[F64]) -> T? {
+    if xs.is_empty() || xs.len() != weights.len() -> return None
+    total := 0.0
+    for w in weights { if w.is_finite() && w > 0.0 -> total += w }
+    if total <= 0.0 -> return None
+    needle := jet_std_random_float_range(0.0, total)
+    for (item, weight) in xs.iter().zip(weights.iter()) {
+        w :: if weight.is_finite() && *weight > 0.0 -> *weight else -> 0.0
+        if needle < w -> return Val(item.clone())
+        needle -= w
+    }
+    xs.last().cloned()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:305
+fn jet_std_random_sample<T: Clone>(xs: &[T], k: I64) -> [T] {
+    want :: (k.max(0) as USize).min(xs.len())
+    pool := xs.clone()
+    for i in 0..<want { j :: jet_std_random_int(i as I64, pool.len() as I64 - 1) as USize; pool.swap(i, j) }
+    pool.truncate(want)
+    pool
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:315
+fn jet_std_random_shuffle<T>(xs: &[T]) -> {
+    len :: xs.len()
+    for i in (1..<len).rev() { j :: jet_std_random_int(0, i as I64) as USize; xs.swap(i, j) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:324
+// Seedable simulation bytes are NOT cryptographically secure.
+fn jet_std_random_bytes(n: I64) -> [U8] {
+    n :: n.max(0) as USize
+    out := [U8].with_capacity(n)
+    for _ in 0..<n { out.push(jet_rng_next() as U8) }
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs:332
+fn jet_std_random_split(seed: I64) -> Rng { Rng{state: (seed as U64) ^ jet_rng_next().rotate_left(17)} }

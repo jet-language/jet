@@ -1,0 +1,72 @@
+// Shared stdin line/byte semantics; hosts marshal, never reimplement this policy.
+use core.prelude.runtime.std_open.[IOError, IOOperation]
+use core.testing.runtime.fault_injection.[jet_fault_should_fail]
+use core.term.runtime.term.[jet_term_write_stdout, jet_term_read_stdin_line, jet_term_read_text]
+use std.io
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:6
+pub fn jet_std_io_input(prompt: String?) -> String IOError! {
+    if prompt is Val(p) {
+        if jet_fault_should_fail("IO.Write") -> return Err(IOError.other(.Write, Val("stdout"), "fault injected: IO.Write"))
+        if jet_fault_should_fail("IO.Flush") -> return Err(IOError.other(.Flush, Val("stdout"), "fault injected: IO.Flush"))
+        jet_term_write_stdout(p, true).map_err(e -> IOError.other(.Flush, None, e)) ?? return Err(err)
+    }
+    if jet_fault_should_fail("IO.Read") -> return Err(IOError.other(.Read, Val("stdin"), "fault injected: IO.Read"))
+    // Canonical reader owns line read and trailing-newline trim; EOF becomes empty text.
+    line :: jet_term_read_stdin_line().map_err(e -> IOError.other(.Read, Val("stdin"), e)) ?? return Err(err)
+    Ok(jet_term_read_text(^line))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:42
+pub fn jet_std_io_readline() -> String IOError! { jet_std_io_input(None) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:46
+pub fn jet_std_io_read_all_input() -> String IOError! {
+    if jet_fault_should_fail("IO.Read") -> return Err(IOError.other(.Read, Val("stdin"), "fault injected: IO.Read"))
+    input := String.new()
+    // GATE #4565: kernel primitive
+    #Unsafe("read actual stdin to owned UTF8 text, retaining native invalid-data errors") {
+        io.stdin().read_to_string(&input).map_err(error -> IOError.other(.Read, Val("stdin"), error)) ?? return Err(err)
+    }
+    Ok(^input)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:68
+pub fn jet_std_io_read_until(delim: String) -> String IOError! {
+    if delim.is_empty() -> return Err(IOError.other(.Read, Val("stdin"), io.Error.new(io.ErrorKind.InvalidInput, "empty delimiter")))
+    if jet_fault_should_fail("IO.Read") -> return Err(IOError.other(.Read, Val("stdin"), "fault injected: IO.Read"))
+    needle :: delim.as_bytes()
+    // GATE #4565: kernel primitive
+    #Unsafe("hold actual stdin lock during byte-at-a-time delimiter scan; preserve exact read-error ordering") {
+        stdin := io.stdin().lock()
+        out := [U8]{}
+        window := [U8]{}
+        buf := [U8#1]{0}
+        loop {
+            match &stdin.read(&buf) {
+                Ok(0) -> break,
+                Ok(_) -> {
+                    &out.push(buf[0])
+                    &window.push(buf[0])
+                    if window.len() > needle.len() { _ :: &window.remove(0) }
+                    if window.as_slice() == needle {
+                        &out.truncate(out.len() - needle.len())
+                        break
+                    }
+                },
+                Err(e) -> return Err(IOError.other(.Read, Val("stdin"), e)),
+            }
+        }
+        String.from_utf8(^out).map_err(e -> IOError.other(.Read, Val("stdin"), io.Error.new(io.ErrorKind.InvalidData, e)))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:121
+pub fn jet_std_io_take(n: I64) -> [U8] IOError! {
+    if n < 0 -> return Err(IOError.other(.Read, Val("stdin"), io.Error.new(io.ErrorKind.InvalidInput, "negative take")))
+    if jet_fault_should_fail("IO.Read") -> return Err(IOError.other(.Read, Val("stdin"), "fault injected: IO.Read"))
+    buf := [U8]{}
+    &buf.resize(n as USize, U8{0})
+    // GATE #4565: kernel primitive
+    read :: #Unsafe("one native stdin read into exactly initialized n-byte storage; no read-exact loop") {
+        io.stdin().lock().read(&buf).map_err(e -> IOError.other(.Read, Val("stdin"), e)) ?? return Err(err)
+    }
+    &buf.truncate(read)
+    Ok(^buf)
+}

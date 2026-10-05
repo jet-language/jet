@@ -6,6 +6,8 @@ use core.sys.[env, io]
 use jet_ui_host.[JetUiShortcutRegistry, JetUiShortcutModifiers, JetUiShortcutModifier]
 use core.sync.mpsc.[Receiver, TryRecvError, channel]
 use core.sys.thread
+use core.sync.[Arc, Mutex]
+use core.ui.runtime.ui.[jet_ui_text, jet_ui_box, jet_ui_rect, jet_ui_constraint, jet_ui_node_role, jet_ui_register_drop, jet_ui_bind_tree_clicks]
 use jet_devtools.[JetDevtoolsEnvelope, JetDevtoolsViewState]
 use jet_font.[JetFontFace, JetGlyphRun, jet_font_shape]
 
@@ -610,615 +612,345 @@ impl<M, Msg: Send, Update: FnMut(M, Msg) -> (M, JetTuiCommand<Msg>), View: Fn(&M
     // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1188
     pub fn new(model: ^M, update: ^Update, view: ^View) -> Self { Self.with_backend(^model, ^update, ^view, JetTuiBackend.new()) }
 }
-// PORT-PENDING 0192 crates-jet-codegen-src-prelude-ui-slice-1: crates/jet-codegen/src/Prelude/Ui.rs:1193-1801
-//RS pub fn jet_tui_text_widget(text: &str) -> JetTuiTextWidget {
-//RS     JetTuiTextWidget::new(text)
-//RS }
-//RS 
-//RS pub fn jet_tui_list(items: Vec<String>) -> JetUiNode {
-//RS     let capabilities = jet_tui_capabilities();
-//RS     let area = jet_ui_rect(
-//RS         0.0,
-//RS         0.0,
-//RS         capabilities.width as f64,
-//RS         capabilities.height as f64,
-//RS     );
-//RS     JetTuiList::new(items).render(area, &mut JetTuiListState::default())
-//RS }
-//RS 
-//RS pub fn jet_tui_table(headers: Vec<String>, rows: Vec<Vec<String>>) -> JetUiNode {
-//RS     let capabilities = jet_tui_capabilities();
-//RS     let area = jet_ui_rect(
-//RS         0.0,
-//RS         0.0,
-//RS         capabilities.width as f64,
-//RS         capabilities.height as f64,
-//RS     );
-//RS     JetTuiTable::new(headers, rows).render(area)
-//RS }
-//RS 
-//RS pub fn jet_ui_tui_bindings(
-//RS     bindings: Vec<JetUiShortcutBinding>,
-//RS ) -> Result<JetTuiBindings, JetUiHostError> {
-//RS     let mut result = JetTuiBindings::default();
-//RS     for binding in bindings {
-//RS         result.register(binding)?;
-//RS     }
-//RS     Ok(result)
-//RS }
-//RS 
-//RS pub fn jet_ui_tui_help(bindings: &JetTuiBindings, width: f64) -> JetUiNode {
-//RS     bindings.help_node(width.max(0.0).floor() as usize)
-//RS }
-//RS pub fn jet_tui_key_event(code: &str) -> JetTuiEvent {
-//RS     JetTuiEvent::key(code)
-//RS }
-//RS 
-//RS pub fn jet_tui_key_event_modifiers(code: &str, modifiers: i64) -> JetTuiEvent {
-//RS     JetTuiEvent::key_with_modifiers(code, modifiers as u8)
-//RS }
-//RS 
-//RS pub fn jet_tui_resize_event(width: f64, height: f64) -> JetTuiEvent {
-//RS     JetTuiEvent::resize(width, height)
-//RS }
-//RS 
-//RS pub fn jet_tui_timer_event(id: &str, elapsed_ms: i64) -> JetTuiEvent {
-//RS     JetTuiEvent::timer(id, elapsed_ms)
-//RS }
-//RS 
-//RS pub fn jet_tui_io_event(channel: &str, payload: Vec<u8>) -> JetTuiEvent {
-//RS     JetTuiEvent::io(channel, payload)
-//RS }
-//RS 
-//RS pub fn jet_tui_focus_event(focused: bool) -> JetTuiEvent {
-//RS     JetTuiEvent::focus(focused)
-//RS }
-//RS 
-//RS pub fn jet_tui_interrupt_event() -> JetTuiEvent {
-//RS     JetTuiEvent::Interrupt
-//RS }
-//RS 
-//RS pub fn jet_tui_close_event() -> JetTuiEvent {
-//RS     JetTuiEvent::Close
-//RS }
-//RS 
-//RS pub fn jet_tui_color_ansi16(index: i64) -> JetTuiColor {
-//RS     JetTuiColor::from_kernel(jet_tui_kernel::color_ansi16(index))
-//RS }
-//RS 
-//RS pub fn jet_tui_color_ansi256(index: i64) -> JetTuiColor {
-//RS     JetTuiColor::from_kernel(jet_tui_kernel::color_ansi256(index))
-//RS }
-//RS 
-//RS pub fn jet_tui_color_rgb(red: i64, green: i64, blue: i64) -> JetTuiColor {
-//RS     JetTuiColor::from_kernel(jet_tui_kernel::color_rgb(red, green, blue))
-//RS }
-//RS 
-//RS pub fn jet_tui_style() -> JetTuiStyle {
-//RS     JetTuiStyle::new()
-//RS }
-//RS 
-//RS pub fn jet_tui_style_foreground(style: JetTuiStyle, color: JetTuiColor) -> JetTuiStyle {
-//RS     style.foreground(color)
-//RS }
-//RS 
-//RS pub fn jet_tui_style_background(style: JetTuiStyle, color: JetTuiColor) -> JetTuiStyle {
-//RS     style.background(color)
-//RS }
-//RS 
-//RS pub fn jet_tui_style_bold(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
-//RS     style.bold(enabled)
-//RS }
-//RS 
-//RS pub fn jet_tui_style_dim(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
-//RS     style.dim(enabled)
-//RS }
-//RS 
-//RS pub fn jet_tui_style_underline(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
-//RS     style.underline(enabled)
-//RS }
-//RS 
-//RS pub fn jet_tui_style_text(
-//RS     text: &str,
-//RS     style: JetTuiStyle,
-//RS     capabilities: JetTuiCapabilities,
-//RS ) -> String {
-//RS     style.render(text, &capabilities)
-//RS }
-//RS 
-//RS pub fn jet_tui_display_width_int(text: &str) -> i64 {
-//RS     jet_tui_display_width(text) as i64
-//RS }
-//RS 
-//RS pub fn jet_tui_length(value: f64) -> JetTuiConstraint {
-//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::length(value))
-//RS }
-//RS 
-//RS pub fn jet_tui_min(value: f64) -> JetTuiConstraint {
-//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::min(value))
-//RS }
-//RS 
-//RS pub fn jet_tui_max(value: f64) -> JetTuiConstraint {
-//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::max(value))
-//RS }
-//RS 
-//RS pub fn jet_tui_percent(value: f64) -> JetTuiConstraint {
-//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::percent(value))
-//RS }
-//RS 
-//RS pub fn jet_tui_fill(weight: f64) -> JetTuiConstraint {
-//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::fill(weight))
-//RS }
-//RS 
-//RS pub fn jet_tui_horizontal() -> JetTuiDirection {
-//RS     JetTuiDirection::Horizontal
-//RS }
-//RS 
-//RS pub fn jet_tui_vertical() -> JetTuiDirection {
-//RS     JetTuiDirection::Vertical
-//RS }
-//RS 
-//RS pub fn jet_tui_list_state() -> JetTuiListState {
-//RS     JetTuiListState::default()
-//RS }
-//RS 
-//RS pub fn jet_tui_list_state_select(mut state: JetTuiListState, index: i64) -> JetTuiListState {
-//RS     state.select(index.max(0) as usize);
-//RS     state
-//RS }
-//RS 
-//RS pub fn jet_tui_list_state_selected(state: JetTuiListState) -> i64 {
-//RS     state.selected() as i64
-//RS }
-//RS 
-//RS pub fn jet_tui_list_state_offset(mut state: JetTuiListState, offset: i64) -> JetTuiListState {
-//RS     state.scroll_to(offset.max(0) as usize);
-//RS     state
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq)]
-//RS pub enum JetEventResult {
-//RS     Handled,
-//RS     Ignored,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum JetPaintCmd {
-//RS     FillRect { rect: JetRect, color: String },
-//RS     Text {
-//RS         rect: JetRect,
-//RS         text: String,
-//RS         style: Option<JetTuiStyle>,
-//RS     },
-//RS }
-//RS 
-//RS struct JetNullBackendState {
-//RS     measured: Option<JetSize>,
-//RS     layout_frame: Option<JetRect>,
-//RS     commands: Vec<JetPaintCmd>,
-//RS     last_event: Option<JetEventResult>,
-//RS     // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing over a flat list
-//RS     // of interactive nodes. `focused_index` is `Some` whenever `focus_nodes`
-//RS     // is non-empty (registration always focuses the first node).
-//RS     focus_nodes: Vec<JetUiNode>,
-//RS     focused_index: Option<usize>,
-//RS }
-//RS 
-//RS /// D-A11YGATE1=B: advance focus on a `Tab` key. Returns `Some(Handled)` when
-//RS /// the key was consumed by focus routing; `None` means "not a focus event,
-//RS /// fall through to normal key handling".
-//RS fn jet_ui_advance_focus(
-//RS     focus_nodes: &[JetUiNode],
-//RS     focused_index: &mut Option<usize>,
-//RS     code: &str,
-//RS     _modifiers: u8,
-//RS ) -> Option<JetEventResult> {
-//RS     if !code.eq_ignore_ascii_case("tab") || focus_nodes.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let next = match *focused_index {
-//RS         Some(i) => (i + 1) % focus_nodes.len(),
-//RS         None => 0,
-//RS     };
-//RS     *focused_index = Some(next);
-//RS     Some(JetEventResult::Handled)
-//RS }
-//RS 
-//RS /// Card #1658 (corpus say-it-once): the default mount viewport (classic
-//RS /// 80x24 terminal), named once so no host hand-types the literal. Every
-//RS /// `mount_node_default` — Rust and DomRuntime.js — renders from this pair.
-//RS pub const DEFAULT_MOUNT_COLS: f64 = 80.0;
-//RS pub const DEFAULT_MOUNT_ROWS: f64 = 24.0;
-//RS 
-//RS /// Portable backend seam between Jet UI and platform renderers.
-//RS pub trait JetBackend {
-//RS     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize;
-//RS     fn layout(&mut self, node: &JetUiNode, frame: JetRect);
-//RS     fn paint(&mut self, node: &JetUiNode);
-//RS     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult;
-//RS 
-//RS     /// Rich TUI events stay typed through the backend seam. Legacy backends
-//RS     /// still receive the portable key/resize subset, while TUI adapters may
-//RS     /// inspect modifiers and non-terminal events before choosing a result.
-//RS     fn on_tui_event(&mut self, event: JetTuiEvent) -> JetEventResult {
-//RS         match event {
-//RS             JetTuiEvent::Key { code, .. } => self.on_event(JetInputEvent::Key { code }),
-//RS             JetTuiEvent::Resize { size } => self.on_event(JetInputEvent::Resize { size }),
-//RS             JetTuiEvent::Timer { .. }
-//RS             | JetTuiEvent::IO { .. }
-//RS             | JetTuiEvent::Focus { .. }
-//RS             | JetTuiEvent::Interrupt
-//RS             | JetTuiEvent::Close => JetEventResult::Handled,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ui_measure_tree(node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
-//RS     let natural = if node.kind == JetUiNodeKind::Box {
-//RS         JetSize {
-//RS             width: node
-//RS                 .children
-//RS                 .iter()
-//RS                 .map(|child| child.width)
-//RS                 .fold(0.0_f64, f64::max),
-//RS             height: node.children.iter().map(|child| child.height).sum(),
-//RS         }
-//RS     } else {
-//RS         JetSize {
-//RS             width: node.width,
-//RS             height: node.height,
-//RS         }
-//RS     };
-//RS     JetSize {
-//RS         width: natural
-//RS             .width
-//RS             .clamp(constraint.min_width, constraint.max_width),
-//RS         height: natural
-//RS             .height
-//RS             .clamp(constraint.min_height, constraint.max_height),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ui_collect_focus(node: &JetUiNode, out: &mut Vec<JetUiNode>) {
-//RS     if node.role.as_ref().is_some_and(JetUiAriaRole::is_interactive) {
-//RS         out.push(node.clone());
-//RS     }
-//RS     for child in &node.children {
-//RS         jet_ui_collect_focus(child, out);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ui_visit_tree(node: &JetUiNode, frame: JetRect, visit: &mut dyn FnMut(&JetUiNode, JetRect)) {
-//RS     if node.kind == JetUiNodeKind::Box {
-//RS         let mut y = frame.y;
-//RS         for child in &node.children {
-//RS             let child_frame = JetRect {
-//RS                 x: frame.x,
-//RS                 y,
-//RS                 width: frame.width,
-//RS                 height: child.height,
-//RS             };
-//RS             jet_ui_visit_tree(child, child_frame, visit);
-//RS             y += child.height;
-//RS         }
-//RS     } else {
-//RS         visit(node, frame);
-//RS     }
-//RS }
-//RS 
-//RS fn jet_ui_paint_tree(node: &JetUiNode, frame: JetRect, commands: &mut Vec<JetPaintCmd>) {
-//RS     jet_ui_visit_tree(node, frame, &mut |leaf, leaf_frame| {
-//RS         if leaf.kind != JetUiNodeKind::Text {
-//RS             commands.push(JetPaintCmd::FillRect {
-//RS                 rect: leaf_frame,
-//RS                 color: leaf
-//RS                     .color
-//RS                     .clone()
-//RS                     .unwrap_or_else(|| "#000000".to_string()),
-//RS             });
-//RS         }
-//RS         commands.push(JetPaintCmd::Text {
-//RS             rect: leaf_frame,
-//RS             text: leaf.label.clone(),
-//RS             style: leaf.style.clone(),
-//RS         });
-//RS     });
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetNullBackend {
-//RS     state: std::sync::Arc<std::sync::Mutex<JetNullBackendState>>,
-//RS }
-//RS 
-//RS impl JetNullBackend {
-//RS     pub fn new() -> Self {
-//RS         JetNullBackend {
-//RS             state: std::sync::Arc::new(std::sync::Mutex::new(JetNullBackendState {
-//RS                 measured: None,
-//RS                 layout_frame: None,
-//RS                 commands: Vec::new(),
-//RS                 last_event: None,
-//RS                 focus_nodes: Vec::new(),
-//RS                 focused_index: None,
-//RS             })),
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-A11YGATE1=B: register the interactive focus order. Always focuses
-//RS     /// the first node when the list is non-empty.
-//RS     pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
-//RS         let mut state = self.state.lock().unwrap();
-//RS         state.focused_index = if nodes.is_empty() { None } else { Some(0) };
-//RS         state.focus_nodes = nodes;
-//RS     }
-//RS 
-//RS     /// D-A11YGATE1=B: the accessible label of the currently focused node, or
-//RS     /// `""` when nothing is focused.
-//RS     pub fn focused_label(&self) -> String {
-//RS         let state = self.state.lock().unwrap();
-//RS         state
-//RS             .focused_index
-//RS             .and_then(|i| state.focus_nodes.get(i))
-//RS             .map(|n| n.label.clone())
-//RS             .unwrap_or_default()
-//RS     }
-//RS 
-//RS     pub fn measure_node(
-//RS         &self,
-//RS         node: JetUiNode,
-//RS         constraint: JetSizeConstraint,
-//RS     ) -> JetSize {
-//RS         let mut state = self.state.lock().unwrap();
-//RS         JetBackend::measure(&mut *state, &node, constraint)
-//RS     }
-//RS 
-//RS     pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
-//RS         let mut state = self.state.lock().unwrap();
-//RS         JetBackend::layout(&mut *state, &node, frame);
-//RS     }
-//RS 
-//RS     pub fn paint_node(&self, node: JetUiNode) {
-//RS         let mut state = self.state.lock().unwrap();
-//RS         JetBackend::paint(&mut *state, &node);
-//RS     }
-//RS 
-//RS     /// D-UI-MOUNT1=A: measure → layout → paint in one call.
-//RS     pub fn mount_node(&self, node: JetUiNode, constraint: JetSizeConstraint) {
-//RS         {
-//RS             let mut state = self.state.lock().unwrap();
-//RS             state.commands.clear();
-//RS         }
-//RS         let size = self.measure_node(node.clone(), constraint);
-//RS         self.layout_node(
-//RS             node.clone(),
-//RS             jet_ui_rect(0.0, 0.0, size.width, size.height),
-//RS         );
-//RS         self.paint_node(node);
-//RS     }
-//RS 
-//RS     /// Default viewport for the two-arg beginner mount (`backend.mount(tree)`).
-//RS     pub fn mount_node_default(&self, node: JetUiNode) {
-//RS         self.mount_node(
-//RS             node,
-//RS             jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS),
-//RS         );
-//RS     }
-//RS 
-//RS     pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
-//RS         let mut state = self.state.lock().unwrap();
-//RS         JetBackend::on_event(&mut *state, event)
-//RS     }
-//RS 
-//RS     pub fn paint_commands(&self) -> Vec<String> {
-//RS         self.state
-//RS             .lock()
-//RS             .unwrap()
-//RS             .commands
-//RS             .iter()
-//RS             .map(|cmd| match cmd {
-//RS                 JetPaintCmd::FillRect { rect, color } => {
-//RS                     format!("fill({}, {})", rect.jet_show(), color)
-//RS                 }
-//RS                 JetPaintCmd::Text { rect, text, .. } => {
-//RS                     format!("text({}, {})", rect.jet_show(), text)
-//RS                 }
-//RS             })
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS impl Default for JetNullBackend {
-//RS     fn default() -> Self {
-//RS         Self::new()
-//RS     }
-//RS }
-//RS 
-//RS impl JetBackend for JetNullBackendState {
-//RS     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
-//RS         let size = jet_ui_measure_tree(node, constraint);
-//RS         self.measured = Some(size);
-//RS         size
-//RS     }
-//RS 
-//RS     fn layout(&mut self, node: &JetUiNode, frame: JetRect) {
-//RS         let _ = node;
-//RS         self.layout_frame = Some(frame);
-//RS     }
-//RS 
-//RS     fn paint(&mut self, node: &JetUiNode) {
-//RS         let frame = self.layout_frame.unwrap_or(JetRect {
-//RS             x: 0.0,
-//RS             y: 0.0,
-//RS             width: node.width,
-//RS             height: node.height,
-//RS         });
-//RS         jet_ui_paint_tree(node, frame, &mut self.commands);
-//RS         // D-UI-EVT-DISP1=E: bind portable on_click slots by identity. Headless
-//RS         // / TUI backends that cannot produce clicks still register (D-WEB-CLICK-PORT1=D
-//RS         // no-op until an event arrives).
-//RS         jet_ui_bind_tree_clicks(node, "null#0");
-//RS         let mut focus = Vec::new();
-//RS         jet_ui_collect_focus(node, &mut focus);
-//RS         if !focus.is_empty() {
-//RS             self.focused_index = Some(0);
-//RS             self.focus_nodes = focus;
-//RS         }
-//RS     }
-//RS 
-//RS     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
-//RS         if let JetInputEvent::Key { code } = &event {
-//RS             if let Some(result) =
-//RS                 jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code, 0)
-//RS             {
-//RS                 self.last_event = Some(result);
-//RS                 return result;
-//RS             }
-//RS         }
-//RS         let result = match &event {
-//RS             JetInputEvent::Key { code } if code.is_empty() => JetEventResult::Ignored,
-//RS             JetInputEvent::Resize { size } if size.width <= 0.0 || size.height <= 0.0 => {
-//RS                 JetEventResult::Ignored
-//RS             }
-//RS             _ => JetEventResult::Handled,
-//RS         };
-//RS         self.last_event = Some(result);
-//RS         result
-//RS     }
-//RS }
-//RS 
-//RS // ── TUI backend — deterministic character-grid output ───────────────────────────
-//RS 
-//RS struct JetTuiBackendState {
-//RS     measured: Option<JetSize>,
-//RS     layout_frame: Option<JetRect>,
-//RS     grid: Vec<Vec<char>>,
-//RS     grid_cols: usize,
-//RS     grid_rows: usize,
-//RS     render_count: usize,
-//RS     last_event: Option<JetEventResult>,
-//RS     capabilities: JetTuiCapabilities,
-//RS     /// Keep the semantic tree so direct resize events can repaint without
-//RS     /// asking a platform backend to invent a second view representation.
-//RS     last_node: Option<JetUiNode>,
-//RS     // D-A11YGATE1=B (c134 Phase 6): see `JetNullBackendState`.
-//RS     focus_nodes: Vec<JetUiNode>,
-//RS     focused_index: Option<usize>,
-//RS }
-//RS 
-//RS fn tui_grid_dims(frame: &JetRect) -> (usize, usize) {
-//RS     let cols = frame.width.max(1.0).floor() as usize;
-//RS     let rows = frame.height.max(1.0).floor() as usize;
-//RS     (cols, rows)
-//RS }
-//RS 
-//RS fn tui_blank_grid(cols: usize, rows: usize) -> Vec<Vec<char>> {
-//RS     (0..rows).map(|_| vec![' '; cols]).collect()
-//RS }
-//RS 
-//RS fn tui_write_label(
-//RS     grid: &mut [Vec<char>],
-//RS     frame: &JetRect,
-//RS     label: &str,
-//RS     style: Option<&JetTuiStyle>,
-//RS     capabilities: &JetTuiCapabilities,
-//RS ) {
-//RS     let (cols, rows) = (grid.first().map(|r| r.len()).unwrap_or(0), grid.len());
-//RS     let start_col = frame.x.max(0.0) as usize;
-//RS     let start_row = frame.y.max(0.0) as usize;
-//RS     let rendered = style
-//RS         .map(|style| style.render(label, capabilities))
-//RS         .unwrap_or_else(|| label.to_string());
-//RS     let label = if capabilities.unicode {
-//RS         jet_tui_strip_ansi(&rendered)
-//RS     } else {
-//RS         jet_tui_ascii(&jet_tui_strip_ansi(&rendered))
-//RS     };
-//RS     let mut col = start_col;
-//RS     for ch in label.chars() {
-//RS         let width = jet_tui_char_width(ch);
-//RS         if width == 0 {
-//RS             continue;
-//RS         }
-//RS         if col < cols && start_row < rows {
-//RS             grid[start_row][col] = ch;
-//RS             if width == 2 && col + 1 < cols {
-//RS                 grid[start_row][col + 1] = ' ';
-//RS             }
-//RS         }
-//RS         col = col.saturating_add(width);
-//RS         if col >= cols {
-//RS             break;
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS pub struct JetTuiBackend {
-//RS     state: std::sync::Arc<std::sync::Mutex<JetTuiBackendState>>,
-//RS }
-//RS impl JetTuiBackend {
-//RS     pub fn new() -> Self {
-//RS         Self::with_capabilities(jet_tui_capabilities())
-//RS     }
-//RS 
-//RS     pub fn with_capabilities(capabilities: JetTuiCapabilities) -> Self {
-//RS         JetTuiBackend {
-//RS             state: std::sync::Arc::new(std::sync::Mutex::new(JetTuiBackendState {
-//RS                 measured: None,
-//RS                 layout_frame: None,
-//RS                 grid: Vec::new(),
-//RS                 grid_cols: 0,
-//RS                 grid_rows: 0,
-//RS                 render_count: 0,
-//RS                 last_event: None,
-//RS                 capabilities,
-//RS                 last_node: None,
-//RS                 focus_nodes: Vec::new(),
-//RS                 focused_index: None,
-//RS             })),
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     /// D-A11YGATE1=B: register the interactive focus order. Always focuses
-//RS     /// the first node when the list is non-empty.
-//RS     pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
-//RS         let mut state = self.state.lock().unwrap();
-//RS         state.focused_index = if nodes.is_empty() { None } else { Some(0) };
-//RS         state.focus_nodes = nodes;
-//RS     }
-//RS 
-//RS     /// D-A11YGATE1=B: the accessible label of the currently focused node, or
-//RS     /// `""` when nothing is focused.
-//RS     pub fn focused_label(&self) -> String {
-//RS         let state = self.state.lock().unwrap();
-//RS         state
-//RS             .focused_index
-//RS             .and_then(|i| state.focus_nodes.get(i))
-//RS             .map(|n| n.label.clone())
-//RS             .unwrap_or_default()
-//RS     }
-//RS     pub fn capabilities(&self) -> JetTuiCapabilities {
-//RS         self.state.lock().unwrap().capabilities.clone()
-//RS     }
-//RS 
-//RS     pub fn set_capabilities(&self, capabilities: JetTuiCapabilities) {
-//RS         self.state.lock().unwrap().capabilities = capabilities;
-//RS     }
-//RS 
-//RS     pub fn measure_node(
-//RS         &self,
-//RS         node: JetUiNode,
-//RS         constraint: JetSizeConstraint,
-//RS     ) -> JetSize {
-//RS         let mut state = self.state.lock().unwrap();
-//RS         JetBackend::measure(&mut *state, &node, constraint)
-//RS     }
-//RS 
-//RS     pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
-//RS         let mut state = self.state.lock().unwrap();
-//RS         JetBackend::layout(&mut *state, &node, frame);
-//RS     }
-//RS 
-// END-PORT-PENDING 0192 crates/jet-codegen/src/Prelude/Ui.rs:1-1801
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1193
+pub fn jet_tui_text_widget(text: String) -> JetTuiTextWidget { JetTuiTextWidget.new(text) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1197
+pub fn jet_tui_list(items: ^[String]) -> JetUiNode {
+    capabilities :: jet_tui_capabilities()
+    area :: jet_ui_rect(0.0, 0.0, F64{capabilities.width}, F64{capabilities.height})
+    state := JetTuiListState{}
+    JetTuiList.new(^items).render(area, &state)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1208
+pub fn jet_tui_table(headers: ^[String], rows: ^[[String]]) -> JetUiNode {
+    capabilities :: jet_tui_capabilities()
+    area :: jet_ui_rect(0.0, 0.0, F64{capabilities.width}, F64{capabilities.height})
+    JetTuiTable.new(^headers, ^rows).render(area)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1219
+pub fn jet_ui_tui_bindings(bindings: ^[JetUiShortcutBinding]) -> JetTuiBindings JetUiHostError! {
+    result := JetTuiBindings{}
+    loop binding in bindings { _ :: result.register(^binding)? }
+    Ok(^result)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1229
+pub fn jet_ui_tui_help(bindings: &JetTuiBindings, width: F64) -> JetUiNode { bindings.help_node(USize{width.max(0.0).floor()}) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1232
+pub fn jet_tui_key_event(code: String) -> JetTuiEvent { JetTuiEvent.key(code) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1236
+pub fn jet_tui_key_event_modifiers(code: String, modifiers: I64) -> JetTuiEvent { JetTuiEvent.key_with_modifiers(code, U8{modifiers}) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1240
+pub fn jet_tui_resize_event(width: F64, height: F64) -> JetTuiEvent { JetTuiEvent.resize(width, height) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1244
+pub fn jet_tui_timer_event(id: String, elapsed_ms: I64) -> JetTuiEvent { JetTuiEvent.timer(id, elapsed_ms) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1248
+pub fn jet_tui_io_event(channel: String, payload: ^[U8]) -> JetTuiEvent { JetTuiEvent.io(channel, ^payload) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1252
+pub fn jet_tui_focus_event(focused: Bool) -> JetTuiEvent { JetTuiEvent.focus(focused) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1256
+pub fn jet_tui_interrupt_event() -> JetTuiEvent { JetTuiEvent.Interrupt }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1260
+pub fn jet_tui_close_event() -> JetTuiEvent { JetTuiEvent.Close }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1264
+pub fn jet_tui_color_ansi16(index: I64) -> JetTuiColor { JetTuiColor.from_kernel(tui_kernel.color_ansi16(index)) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1268
+pub fn jet_tui_color_ansi256(index: I64) -> JetTuiColor { JetTuiColor.from_kernel(tui_kernel.color_ansi256(index)) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1272
+pub fn jet_tui_color_rgb(red: I64, green: I64, blue: I64) -> JetTuiColor { JetTuiColor.from_kernel(tui_kernel.color_rgb(red, green, blue)) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1276
+pub fn jet_tui_style() -> JetTuiStyle { JetTuiStyle.new() }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1280
+pub fn jet_tui_style_foreground(style: ^JetTuiStyle, color: JetTuiColor) -> JetTuiStyle { style.foreground(color) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1284
+pub fn jet_tui_style_background(style: ^JetTuiStyle, color: JetTuiColor) -> JetTuiStyle { style.background(color) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1288
+pub fn jet_tui_style_bold(style: ^JetTuiStyle, enabled: Bool) -> JetTuiStyle { style.bold(enabled) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1292
+pub fn jet_tui_style_dim(style: ^JetTuiStyle, enabled: Bool) -> JetTuiStyle { style.dim(enabled) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1296
+pub fn jet_tui_style_underline(style: ^JetTuiStyle, enabled: Bool) -> JetTuiStyle { style.underline(enabled) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1300
+pub fn jet_tui_style_text(text: String, style: JetTuiStyle, capabilities: JetTuiCapabilities) -> String { style.render(text, &capabilities) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1308
+pub fn jet_tui_display_width_int(text: String) -> I64 { I64{jet_tui_display_width(text)} }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1312
+pub fn jet_tui_length(value: F64) -> JetTuiConstraint { JetTuiConstraint.from_kernel(tui_kernel.length(Float{value})) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1316
+pub fn jet_tui_min(value: F64) -> JetTuiConstraint { JetTuiConstraint.from_kernel(tui_kernel.min(Float{value})) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1320
+pub fn jet_tui_max(value: F64) -> JetTuiConstraint { JetTuiConstraint.from_kernel(tui_kernel.max(Float{value})) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1324
+pub fn jet_tui_percent(value: F64) -> JetTuiConstraint { JetTuiConstraint.from_kernel(tui_kernel.percent(Float{value})) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1328
+pub fn jet_tui_fill(weight: F64) -> JetTuiConstraint { JetTuiConstraint.from_kernel(tui_kernel.fill(Float{weight})) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1332
+pub fn jet_tui_horizontal() -> JetTuiDirection { JetTuiDirection.Horizontal }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1336
+pub fn jet_tui_vertical() -> JetTuiDirection { JetTuiDirection.Vertical }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1340
+pub fn jet_tui_list_state() -> JetTuiListState { JetTuiListState{} }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1344
+pub fn jet_tui_list_state_select(state: ^JetTuiListState, index: I64) -> JetTuiListState { state := ^state; state.select(USize{index.max(0)}); ^state }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1349
+pub fn jet_tui_list_state_selected(state: JetTuiListState) -> I64 { I64{state.selected()} }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1353
+pub fn jet_tui_list_state_offset(state: ^JetTuiListState, offset: I64) -> JetTuiListState { state := ^state; state.scroll_to(USize{offset.max(0)}); ^state }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1359
+#Equatable
+pub enum JetEventResult { Handled, Ignored }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1365
+#Equatable
+pub enum JetPaintCmd { FillRect(rect: JetRect, color: String), Text(rect: JetRect, text: String, style: JetTuiStyle?) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1374
+struct JetNullBackendState {
+    measured: JetSize?, layout_frame: JetRect?, commands: [JetPaintCmd], last_event: JetEventResult?,
+    // Non-empty focus registration always focuses the first node.
+    focus_nodes: [JetUiNode], focused_index: USize?,
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1389
+// None means not a focus-routing event: normal key handling continues.
+fn jet_ui_advance_focus(focus_nodes: &[JetUiNode], focused_index: &USize?, code: String, _modifiers: U8) -> JetEventResult? {
+    if !code.eq_ignore_ascii_case("tab") || focus_nodes.is_empty() { return None }
+    next :: match *focused_index { Val(i) -> (i + 1) % focus_nodes.len(), None -> 0 }
+    *focused_index = Val(next)
+    Val(JetEventResult.Handled)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1409
+// One default mount viewport shared by every host.
+pub const DEFAULT_MOUNT_COLS: F64 = 80.0
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1410
+pub const DEFAULT_MOUNT_ROWS: F64 = 24.0
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1413
+pub trait JetBackend {
+    fn measure(self: &Self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize
+    fn layout(self: &Self, node: &JetUiNode, frame: JetRect) ->
+    fn paint(self: &Self, node: &JetUiNode) ->
+    fn on_event(self: &Self, event: ^JetInputEvent) -> JetEventResult
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1422
+    fn on_tui_event(self: &Self, event: ^JetTuiEvent) -> JetEventResult {
+        match event {
+            .Key(code, _) -> self.on_event(JetInputEvent.Key(code: ^code))
+            .Resize(size) -> self.on_event(JetInputEvent.Resize(size: size))
+            .Timer(_, _) | .IO(_, _) | .Focus(_) | .Interrupt | .Close -> JetEventResult.Handled
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1435
+fn jet_ui_measure_tree(node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+    natural :: if node.kind == JetUiNodeKind.Box {
+        JetSize{width: node.children.iter().map(fn(child) { child.width }).fold(0.0, fn(a, b) { a.max(b) }), height: node.children.iter().map(fn(child) { child.height }).sum()}
+    } else { JetSize{width: node.width, height: node.height} }
+    JetSize{width: natural.width.clamp(constraint.min_width, constraint.max_width), height: natural.height.clamp(constraint.min_height, constraint.max_height)}
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1461
+fn jet_ui_collect_focus(node: &JetUiNode, out: &[JetUiNode]) -> {
+    if node.role.as_ref().is_some_and(fn(role) { role.is_interactive() }) { out.push(node.clone()) }
+    loop child in node.children { jet_ui_collect_focus(child, out) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1470
+fn jet_ui_visit_tree(node: &JetUiNode, frame: JetRect, visit: &fn(&JetUiNode, JetRect)) -> {
+    if node.kind == JetUiNodeKind.Box {
+        y := frame.y
+        loop child in node.children {
+            child_frame :: JetRect{x: frame.x, y: y, width: frame.width, height: child.height}
+            jet_ui_visit_tree(child, child_frame, visit)
+            y += child.height
+        }
+    } else { visit(node, frame) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1488
+fn jet_ui_paint_tree(node: &JetUiNode, frame: JetRect, commands: &[JetPaintCmd]) -> {
+    visit := fn(leaf, leaf_frame) {
+        if leaf.kind != JetUiNodeKind.Text { commands.push(JetPaintCmd.FillRect(rect: leaf_frame, color: leaf.color.clone().unwrap_or_else(fn() { "#000000".to_string() }))) }
+        commands.push(JetPaintCmd.Text(rect: leaf_frame, text: leaf.label.clone(), style: leaf.style.clone()))
+    }
+    jet_ui_visit_tree(node, frame, &visit)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1508
+pub struct JetNullBackend { state: Arc<Mutex<JetNullBackendState>> }
+impl JetNullBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1513
+    pub fn new() -> Self {
+        // GATE #4565: kernel primitive
+        Self{state: #Unsafe("retain shared null-backend state with a real mutex") { Arc.new(Mutex.new(JetNullBackendState{measured: None, layout_frame: None, commands: [], last_event: None, focus_nodes: [], focused_index: None})) }}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1528
+    pub fn set_focus_group(self: &Self, nodes: ^[JetUiNode]) -> {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold null-backend focus state mutex") { self.state.lock().unwrap() }
+        state.focused_index = if nodes.is_empty() { None } else { Val(0) }
+        state.focus_nodes = ^nodes
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1536
+    pub fn focused_label(self: &Self) -> String {
+        // GATE #4565: kernel primitive
+        state :: #Unsafe("hold null-backend focus state mutex for label snapshot") { self.state.lock().unwrap() }
+        state.focused_index.and_then(fn(i) { state.focus_nodes.get(i) }).map(fn(n) { n.label.clone() }).unwrap_or_default()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1545
+    pub fn measure_node(self: &Self, node: JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold null-backend state across measurement") { self.state.lock().unwrap() }
+        JetBackend.measure(&state, &node, constraint)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1554
+    pub fn layout_node(self: &Self, node: JetUiNode, frame: JetRect) -> {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold null-backend state across layout") { self.state.lock().unwrap() }
+        JetBackend.layout(&state, &node, frame)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1559
+    pub fn paint_node(self: &Self, node: JetUiNode) -> {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold null-backend state across paint") { self.state.lock().unwrap() }
+        JetBackend.paint(&state, &node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1565
+    pub fn mount_node(self: &Self, node: ^JetUiNode, constraint: JetSizeConstraint) -> {
+        {
+            // GATE #4565: kernel primitive
+            state := #Unsafe("clear previous null-backend commands under mutex") { self.state.lock().unwrap() }
+            state.commands.clear()
+        }
+        size :: self.measure_node(node.clone(), constraint)
+        self.layout_node(node.clone(), jet_ui_rect(0.0, 0.0, size.width, size.height))
+        self.paint_node(^node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1579
+    pub fn mount_node_default(self: &Self, node: ^JetUiNode) -> { self.mount_node(^node, jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS)) }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1586
+    pub fn dispatch_event(self: &Self, event: ^JetInputEvent) -> JetEventResult {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold null-backend state while routing event") { self.state.lock().unwrap() }
+        JetBackend.on_event(&state, ^event)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1591
+    pub fn paint_commands(self: &Self) -> [String] {
+        // GATE #4565: kernel primitive
+        state :: #Unsafe("hold null-backend state while snapshotting paint commands") { self.state.lock().unwrap() }
+        state.commands.iter().map(fn(cmd) {
+            match cmd { .FillRect(rect, color) -> "fill({rect.jet_show()}, {color})", .Text(rect, text, _) -> "text({rect.jet_show()}, {text})" }
+        }).collect<[String]>()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1609
+impl Default for JetNullBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1610
+    fn default() -> Self { Self.new() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1615
+impl JetBackend for JetNullBackendState {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1616
+    fn measure(self: &Self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+        size :: jet_ui_measure_tree(node, constraint)
+        self.measured = Val(size)
+        size
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1622
+    fn layout(self: &Self, node: &JetUiNode, frame: JetRect) -> { _ :: node; self.layout_frame = Val(frame) }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1627
+    fn paint(self: &Self, node: &JetUiNode) -> {
+        frame :: self.layout_frame.unwrap_or(JetRect{x: 0.0, y: 0.0, width: node.width, height: node.height})
+        jet_ui_paint_tree(node, frame, &self.commands)
+        // Portable click identities are registered even in a headless backend.
+        jet_ui_bind_tree_clicks(node, "null#0")
+        focus := [JetUiNode]{}
+        jet_ui_collect_focus(node, &focus)
+        if !focus.is_empty() { self.focused_index = Val(0); self.focus_nodes = ^focus }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1647
+    fn on_event(self: &Self, event: ^JetInputEvent) -> JetEventResult {
+        if event is .Key(code) {
+            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) is Val(result) {
+                self.last_event = Val(result)
+                return result
+            }
+        }
+        result :: match event {
+            .Key(code) -> if code.is_empty() { JetEventResult.Ignored } else { JetEventResult.Handled }
+            .Resize(size) -> if size.width <= 0.0 || size.height <= 0.0 { JetEventResult.Ignored } else { JetEventResult.Handled }
+        }
+        self.last_event = Val(result)
+        result
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1670
+// Deterministic character-grid output.
+struct JetTuiBackendState {
+    measured: JetSize?, layout_frame: JetRect?, grid: [[Char]], grid_cols: USize, grid_rows: USize,
+    render_count: USize, last_event: JetEventResult?, capabilities: JetTuiCapabilities,
+    // Retain the semantic tree so direct resize repaints the same view.
+    last_node: JetUiNode?, focus_nodes: [JetUiNode], focused_index: USize?,
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1687
+fn tui_grid_dims(frame: &JetRect) -> (USize, USize) { (USize{frame.width.max(1.0).floor()}, USize{frame.height.max(1.0).floor()}) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1693
+fn tui_blank_grid(cols: USize, rows: USize) -> [[Char]] { (0..rows).map(fn(_) { [' '].repeat(cols) }).collect<[[Char]]>() }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1697
+fn tui_write_label(grid: &[[Char]], frame: &JetRect, label: String, style: (&JetTuiStyle)?, capabilities: &JetTuiCapabilities) -> {
+    (cols, rows) :: (grid.first().map(fn(r) { r.len() }).unwrap_or(0), grid.len())
+    start_col :: USize{frame.x.max(0.0)}
+    start_row :: USize{frame.y.max(0.0)}
+    rendered :: style.map(fn(style) { style.render(label, capabilities) }).unwrap_or_else(fn() { label.to_string() })
+    label :: if capabilities.unicode { jet_tui_strip_ansi(rendered) } else { jet_tui_ascii(jet_tui_strip_ansi(rendered)) }
+    col := start_col
+    loop ch in label.chars() {
+        width :: jet_tui_char_width(ch)
+        if width == 0 { next }
+        if col < cols && start_row < rows {
+            grid[start_row][col] = ch
+            if width == 2 && col + 1 < cols { grid[start_row][col + 1] = ' ' }
+        }
+        col = col.saturating_add(width)
+        if col >= cols { break }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1735
+pub struct JetTuiBackend { state: Arc<Mutex<JetTuiBackendState>> }
+impl JetTuiBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1739
+    pub fn new() -> Self { Self.with_capabilities(jet_tui_capabilities()) }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1743
+    pub fn with_capabilities(capabilities: ^JetTuiCapabilities) -> Self {
+        // GATE #4565: kernel primitive
+        Self{state: #Unsafe("retain shared TUI state with a real mutex") {
+            Arc.new(Mutex.new(JetTuiBackendState{measured: None, layout_frame: None, grid: [], grid_cols: 0, grid_rows: 0, render_count: 0, last_event: None, capabilities: ^capabilities, last_node: None, focus_nodes: [], focused_index: None}))
+        }}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1764
+    pub fn set_focus_group(self: &Self, nodes: ^[JetUiNode]) -> {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold TUI focus state mutex") { self.state.lock().unwrap() }
+        state.focused_index = if nodes.is_empty() { None } else { Val(0) }
+        state.focus_nodes = ^nodes
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1772
+    pub fn focused_label(self: &Self) -> String {
+        // GATE #4565: kernel primitive
+        state :: #Unsafe("hold TUI focus state mutex for label snapshot") { self.state.lock().unwrap() }
+        state.focused_index.and_then(fn(i) { state.focus_nodes.get(i) }).map(fn(n) { n.label.clone() }).unwrap_or_default()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1780
+    pub fn capabilities(self: &Self) -> JetTuiCapabilities {
+        // GATE #4565: kernel primitive
+        #Unsafe("snapshot actual TUI capabilities under mutex") { self.state.lock().unwrap().capabilities.clone() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1784
+    pub fn set_capabilities(self: &Self, capabilities: ^JetTuiCapabilities) -> {
+        // GATE #4565: kernel primitive
+        #Unsafe("replace actual TUI capabilities under mutex") { self.state.lock().unwrap().capabilities = ^capabilities }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1788
+    pub fn measure_node(self: &Self, node: JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold TUI state across measurement") { self.state.lock().unwrap() }
+        JetBackend.measure(&state, &node, constraint)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1797
+    pub fn layout_node(self: &Self, node: JetUiNode, frame: JetRect) -> {
+        // GATE #4565: kernel primitive
+        state := #Unsafe("hold TUI state across layout") { self.state.lock().unwrap() }
+        JetBackend.layout(&state, &node, frame)
+    }
+}
 

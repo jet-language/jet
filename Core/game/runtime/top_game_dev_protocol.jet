@@ -1,1793 +1,899 @@
-// PORT-PENDING 0274 crates-jet-codegen-src-prelude-corelib-top-gamedevprotocol-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1-1789
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // core.game development messages are typed views over the shared game facts.
-//RS //
-//RS // The Devtools envelope owns transport, protocol/version, event sequencing,
-//RS // and serialization. The frame profiler owns frame identity and bounded
-//RS // history. The overlay, world inspector, and hot-swap modules own their state
-//RS // transitions. This adapter only groups those values for CoreLib callers.
-//RS 
-//RS /// Target-neutral game development policy. Hosts fold their actual release
-//RS /// policy into this carrier before constructing a session; generated AOT code
-//RS /// supplies the same value through `JET_GAME_DEBUG_DATA_ENABLED`.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub struct GameDevPolicy {
-//RS     pub debug_data_enabled: bool,
-//RS }
-//RS 
-//RS impl GameDevPolicy {
-//RS     pub const fn new(debug_data_enabled: bool) -> Self {
-//RS         Self { debug_data_enabled }
-//RS     }
-//RS 
-//RS     pub const fn game_debug_data_enabled(self) -> bool {
-//RS         self.debug_data_enabled
-//RS     }
-//RS }
-//RS 
-//RS impl Default for GameDevPolicy {
-//RS     fn default() -> Self {
-//RS         Self::new(false)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct GameDevStopped {
-//RS     pub reason: String,
-//RS     pub frame_index: u64,
-//RS }
-//RS 
-//RS impl GameDevStopped {
-//RS     pub fn new(reason: impl Into<String>, frame_index: u64) -> Self {
-//RS         Self {
-//RS             reason: reason.into(),
-//RS             frame_index,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"reason\":{},\"frame_index\":{}}}",
-//RS             game_dev_json_string(&self.reason),
-//RS             self.frame_index,
-//RS         )
-//RS     }
-//RS }
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum GameDevRunMode {
-//RS     PlayInEditor,
-//RS     SimulateInEditor,
-//RS     Headless,
-//RS }
-//RS 
-//RS impl GameDevRunMode {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::PlayInEditor => "play_in_editor",
-//RS             Self::SimulateInEditor => "simulate_in_editor",
-//RS             Self::Headless => "headless",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn is_headless(self) -> bool {
-//RS         matches!(self, Self::Headless)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum GameDevPhase {
-//RS     Editing,
-//RS     Playing,
-//RS     Simulating,
-//RS     Paused,
-//RS     FrameAdvance,
-//RS }
-//RS 
-//RS impl GameDevPhase {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Editing => "editing",
-//RS             Self::Playing => "playing",
-//RS             Self::Simulating => "simulating",
-//RS             Self::Paused => "paused",
-//RS             Self::FrameAdvance => "frame_advance",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn is_running(self) -> bool {
-//RS         matches!(self, Self::Playing | Self::Simulating)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum GameDevTransitionOperation {
-//RS     Play,
-//RS     Simulate,
-//RS     Pause,
-//RS     Resume,
-//RS     FrameAdvance,
-//RS     Edit,
-//RS     Eject,
-//RS     Keep,
-//RS     Discard,
-//RS     SelectCategory,
-//RS }
-//RS 
-//RS impl GameDevTransitionOperation {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Play => "play",
-//RS             Self::Simulate => "simulate",
-//RS             Self::Pause => "pause",
-//RS             Self::Resume => "resume",
-//RS             Self::FrameAdvance => "frame_advance",
-//RS             Self::Edit => "edit",
-//RS             Self::Eject => "eject",
-//RS             Self::Keep => "keep",
-//RS             Self::Discard => "discard",
-//RS             Self::SelectCategory => "select_category",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum GameDevTransitionStatus {
-//RS     Applied,
-//RS     Rejected,
-//RS }
-//RS 
-//RS impl GameDevTransitionStatus {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Applied => "applied",
-//RS             Self::Rejected => "rejected",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct GameDevTransition {
-//RS     pub sequence: u64,
-//RS     pub operation: GameDevTransitionOperation,
-//RS     pub before: GameDevPhase,
-//RS     pub after: GameDevPhase,
-//RS     pub status: GameDevTransitionStatus,
-//RS     pub run_mode: GameDevRunMode,
-//RS     pub frame_index: u64,
-//RS     pub source_revision: String,
-//RS     pub selected_world_id: Option<String>,
-//RS     pub selected_actor_id: Option<String>,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS impl GameDevTransition {
-//RS     pub fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"sequence\":{},\"operation\":{},\"before\":{},\"after\":{},\
-//RS \"status\":{},\"run_mode\":{},\"frame_index\":{},\"source_revision\":{},\
-//RS \"selected_world_id\":{},\"selected_actor_id\":{},\"reason\":{}}}",
-//RS             self.sequence,
-//RS             game_dev_json_string(self.operation.as_str()),
-//RS             game_dev_json_string(self.before.as_str()),
-//RS             game_dev_json_string(self.after.as_str()),
-//RS             game_dev_json_string(self.status.as_str()),
-//RS             game_dev_json_string(self.run_mode.as_str()),
-//RS             self.frame_index,
-//RS             game_dev_json_string(&self.source_revision),
-//RS             game_dev_json_option(self.selected_world_id.as_deref()),
-//RS             game_dev_json_option(self.selected_actor_id.as_deref()),
-//RS             game_dev_json_string(&self.reason),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct GameDevPhaseResult {
-//RS     pub phase: GameDevPhase,
-//RS     pub status: GameDevTransitionStatus,
-//RS     pub detail: String,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct GameDevLaunchProfile {
-//RS     pub target: String,
-//RS     pub run_mode: GameDevRunMode,
-//RS     pub headless_compatible: bool,
-//RS     pub phases: Vec<GameDevPhaseResult>,
-//RS }
-//RS 
-//RS impl GameDevLaunchProfile {
-//RS     pub fn new(target: impl Into<String>, run_mode: GameDevRunMode) -> Self {
-//RS         Self {
-//RS             target: target.into(),
-//RS             run_mode,
-//RS             headless_compatible: true,
-//RS             phases: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn record_phase(
-//RS         &mut self,
-//RS         phase: GameDevPhase,
-//RS         status: GameDevTransitionStatus,
-//RS         detail: impl Into<String>,
-//RS     ) {
-//RS         if self.phases.len() < 256 {
-//RS             self.phases.push(GameDevPhaseResult {
-//RS                 phase,
-//RS                 status,
-//RS                 detail: detail.into(),
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn headless_variant(&self) -> Self {
-//RS         let mut profile = self.clone();
-//RS         profile.run_mode = GameDevRunMode::Headless;
-//RS         profile
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         let phases = self
-//RS             .phases
-//RS             .iter()
-//RS             .map(|phase| {
-//RS                 format!(
-//RS                     "{{\"phase\":{},\"status\":{},\"detail\":{}}}",
-//RS                     game_dev_json_string(phase.phase.as_str()),
-//RS                     game_dev_json_string(phase.status.as_str()),
-//RS                     game_dev_json_string(&phase.detail),
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         format!(
-//RS             "{{\"target\":{},\"run_mode\":{},\"headless_compatible\":{},\"phases\":[{}]}}",
-//RS             game_dev_json_string(&self.target),
-//RS             game_dev_json_string(self.run_mode.as_str()),
-//RS             self.headless_compatible,
-//RS             phases,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// A first-party development extension is a checked protocol value, not a
-//RS /// host-supplied category string. Release profiles do not register it.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct GameDevExtension {
-//RS     category: &'static str,
-//RS     extension: &'static str,
-//RS     profile: String,
-//RS }
-//RS 
-//RS impl GameDevExtension {
-//RS     pub const GAMEPLAY_DEBUGGER_CATEGORY: &'static str = "Gameplay Debugger";
-//RS     pub const GAMEPLAY_DEBUGGER_NAME: &'static str = "jet.gameplay.debugger";
-//RS 
-//RS     /// Build the Gameplay Debugger extension under an explicit target policy.
-//RS     ///
-//RS     /// The policy is carried by the host/session rather than inferred from the
-//RS     /// compiler build profile. A release session has no extension value to
-//RS     /// expose or serialize.
-//RS     pub fn checked_gameplay_debugger_with_policy(
-//RS         profile: impl Into<String>,
-//RS         policy: GameDevPolicy,
-//RS     ) -> Result<Option<Self>, String> {
-//RS         if !policy.game_debug_data_enabled() {
-//RS             return Err(
-//RS                 "Gameplay Debugger is unavailable outside a development profile".to_string(),
-//RS             );
-//RS         }
-//RS         let profile = profile.into();
-//RS         if profile.trim().is_empty() || profile.chars().any(char::is_control) {
-//RS             return Err("game dev extension profile must be non-empty and printable".to_string());
-//RS         }
-//RS         if profile == "release" {
-//RS             return Ok(None);
-//RS         }
-//RS         Ok(Some(Self {
-//RS             category: Self::GAMEPLAY_DEBUGGER_CATEGORY,
-//RS             extension: Self::GAMEPLAY_DEBUGGER_NAME,
-//RS             profile,
-//RS         }))
-//RS     }
-//RS 
-//RS     /// Build the Gameplay Debugger with no authorized target policy.
-//RS     /// Callers must opt into the policy-aware constructor explicitly.
-//RS     pub fn checked_gameplay_debugger(
-//RS         profile: impl Into<String>,
-//RS     ) -> Result<Option<Self>, String> {
-//RS         Self::checked_gameplay_debugger_with_policy(profile, GameDevPolicy::new(false))
-//RS     }
-//RS 
-//RS 
-//RS     pub const fn category(&self) -> &'static str {
-//RS         self.category
-//RS     }
-//RS 
-//RS     pub const fn extension(&self) -> &'static str {
-//RS         self.extension
-//RS     }
-//RS 
-//RS     pub fn profile(&self) -> &str {
-//RS         &self.profile
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"category\":{},\"extension\":{},\"profile\":{},\
-//RS \"development_only\":true,\"capabilities\":[\"Devtools.GameInspect\",\"Devtools.GameControl\"]}}",
-//RS             game_dev_json_string(self.category),
-//RS             game_dev_json_string(self.extension),
-//RS             game_dev_json_string(&self.profile),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub enum GameDevEvent {
-//RS     Frame(JetGameFrameIdentity),
-//RS     FrameSample(JetGameFrameSample),
-//RS     Diagnostic(JetGameErrorPause),
-//RS     Control(GameDevControl),
-//RS     Transition(GameDevTransition),
-//RS     GameplayDebugger(GameDevExtension),
-//RS     Profile(JetGameFrameReceipt),
-//RS     ReloadStatus(JetGameReloadFact),
-//RS     ProfileComparison(GameProfileComparison),
-//RS     Overlay(JetGameOverlayTransitionFact),
-//RS     OverlayAutocomplete(JetGameOverlayAutocompleteFact),
-//RS     OverlayCommand(JetGameOverlayCommandRow),
-//RS     OverlayOutput(JetGameOverlayOutputRow),
-//RS     OverlayMetric {
-//RS         value: JetGameOverlayMetricValue,
-//RS         frame: Option<JetGameFrameIdentity>,
-//RS     },
-//RS     DrawEvent(JetGameDrawEvent),
-//RS     World(JetGameWorldFact),
-//RS     WorldSelection(JetGameWorldSelectionProjection),
-//RS     WorldEdit(JetGameWorldEditRequest),
-//RS     WorldEvaluation(JetGamePausedEvalResult),
-//RS     AssetWatch(JetGameAssetWatchFacts),
-//RS     AssetImportReport(JetGameAssetImportReport),
-//RS     AssetReload(JetGameAssetTransactionReceipt),
-//RS     GameSwap(JetGameSwapOutcome),
-//RS     HotSwap(JetGameHotSwapReceipt),
-//RS     HotSwapExplanation(JetGameHotSwapExplanation),
-//RS     Crash(JetGameCrashBundle),
-//RS     Stopped(GameDevStopped),
-//RS }
-//RS 
-//RS impl GameDevEvent {
-//RS     pub const fn kind(&self) -> &'static str {
-//RS         match self {
-//RS             Self::Frame(_) => "Frame",
-//RS             Self::FrameSample(_) => "GameFrameSample",
-//RS             Self::Control(_) => "Control",
-//RS             Self::Transition(_) => "GameTransition",
-//RS             Self::Diagnostic(_) => "Diagnostic",
-//RS             Self::GameplayDebugger(_) => "GameplayDebugger",
-//RS             Self::Profile(_) => "Profile",
-//RS             Self::ReloadStatus(_) => "ReloadStatus",
-//RS             Self::ProfileComparison(_) => "ProfileComparison",
-//RS             Self::Overlay(_) => "Overlay",
-//RS             Self::OverlayAutocomplete(_) => "OverlayAutocomplete",
-//RS             Self::OverlayCommand(_) => "OverlayCommand",
-//RS             Self::OverlayOutput(_) => "OverlayOutput",
-//RS             Self::OverlayMetric { .. } => "OverlayMetric",
-//RS             Self::DrawEvent(_) => "GameDrawEvent",
-//RS             Self::World(_) => "World",
-//RS             Self::WorldSelection(_) => "WorldSelection",
-//RS             Self::WorldEdit(_) => "WorldEdit",
-//RS             Self::WorldEvaluation(_) => "WorldEvaluation",
-//RS             Self::AssetWatch(_) => "AssetWatch",
-//RS             Self::AssetImportReport(_) => "AssetImportReport",
-//RS             Self::AssetReload(_) => "AssetReload",
-//RS             Self::GameSwap(_) => "GameSwap",
-//RS             Self::HotSwap(_) => "HotSwap",
-//RS             Self::HotSwapExplanation(_) => "HotSwapExplanation",
-//RS             Self::Crash(_) => "Crash",
-//RS             Self::Stopped(_) => "Stopped",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Build the canonical devtools events for one watcher/import projection.
-//RS ///
-//RS /// Hosts supply the already-authorized asset roots and typed watcher events.
-//RS /// Coalescing, skipped-count bounds, import planning, and wire projection stay
-//RS /// in this protocol module so a host cannot create a second asset report.
-//RS pub fn project_asset_watch_import_events(
-//RS     timestamp_ms: u64,
-//RS     source: impl Into<String>,
-//RS     roots: JetGameAssetRootSet,
-//RS     events: &[JetGameAssetWatchEvent],
-//RS     skipped_count: usize,
-//RS ) -> Result<Vec<JetDevtoolsEvent>, String> {
-//RS     let source = source.into();
-//RS     let facts = JetGameAssetWatchFacts::coalesce_with_skipped(&roots, events, skipped_count)
-//RS         .map_err(|error| error.to_string())?;
-//RS     let report = GameAssetImportAdapter::new(roots).import_report(&facts);
-//RS     Ok(vec![
-//RS         GameDevEvent::AssetWatch(facts).to_devtools_event(timestamp_ms, source.clone())?,
-//RS         GameDevEvent::AssetImportReport(report).to_devtools_event(timestamp_ms, source)?,
-//RS     ])
-//RS }
-//RS 
-//RS impl GameDevEvent {
-//RS     /// Convert a typed producer event to the one shared devtools envelope
-//RS     /// event. Hosts consume this method rather than inventing a second game
-//RS     /// wire format.
-//RS     pub fn to_devtools_event(
-//RS         &self,
-//RS         timestamp_ms: u64,
-//RS         source: impl Into<String>,
-//RS     ) -> Result<JetDevtoolsEvent, String> {
-//RS         let source = source.into();
-//RS         if let Some(body) = game_dev_typed_trace_body(self) {
-//RS             return JetDevtoolsEvent::try_new(timestamp_ms, source, body);
-//RS         }
-//RS         if let Some(body) = game_dev_swap_body(self) {
-//RS             return JetDevtoolsEvent::try_new(timestamp_ms, source, body);
-//RS         }
-//RS         let (entity, fields, payload) = match self {
-//RS             Self::Frame(frame) => (
-//RS                 frame.scene.clone(),
-//RS                 format!(
-//RS                     "{{\"frame_id\":{},\"scene\":{},\"frame_index\":{},\"build\":{},\
-//RS \"revision\":{},\"trace_id\":{}}}",
-//RS                     frame.frame_id,
-//RS                     game_dev_json_string(&frame.scene),
-//RS                     frame.frame_index,
-//RS                     game_dev_json_string(&frame.build),
-//RS                     game_dev_json_string(&frame.revision),
-//RS                     game_dev_json_string(&frame.trace_id),
-//RS                 ),
-//RS                 None,
-//RS             ),
-//RS             Self::FrameSample(_) | Self::DrawEvent(_) | Self::GameSwap(_) => {
-//RS                 unreachable!("typed game events are handled before field projection")
-//RS             }
-//RS             Self::Diagnostic(pause) => (
-//RS                 pause.source.source_id.clone(),
-//RS                 format!(
-//RS                     "{{\"code\":{},\"message\":{},\"source\":{}}}",
-//RS                     game_dev_json_string(&pause.code),
-//RS                     game_dev_json_string(&pause.message),
-//RS                     game_dev_source_span_json(&pause.source),
-//RS                 ),
-//RS                 None,
-//RS             ),
-//RS             Self::Transition(transition) => (
-//RS                 "game".to_string(),
-//RS                 format!(
-//RS                     "{{\"operation\":{},\"before\":{},\"after\":{},\"status\":{},\
-//RS \"run_mode\":{},\"frame_index\":{},\"source_revision\":{}}}",
-//RS                     game_dev_json_string(transition.operation.as_str()),
-//RS                     game_dev_json_string(transition.before.as_str()),
-//RS                     game_dev_json_string(transition.after.as_str()),
-//RS                     game_dev_json_string(transition.status.as_str()),
-//RS                     game_dev_json_string(transition.run_mode.as_str()),
-//RS                     transition.frame_index,
-//RS                     game_dev_json_string(&transition.source_revision),
-//RS                 ),
-//RS                 Some(transition.render_json()),
-//RS             ),
-//RS             Self::Control(control) => ("game".to_string(), control.render_json(), None),
-//RS             Self::GameplayDebugger(extension) => (
-//RS                 "game.gameplay_debugger".to_string(),
-//RS                 format!(
-//RS                     "{{\"category\":{},\"extension\":{},\"profile\":{},\
-//RS \"development_only\":true}}",
-//RS                     game_dev_json_string(extension.category()),
-//RS                     game_dev_json_string(extension.extension()),
-//RS                     game_dev_json_string(extension.profile()),
-//RS                 ),
-//RS                 Some(extension.render_json()),
-//RS             ),
-//RS             Self::Profile(receipt) => (
-//RS                 receipt
-//RS                     .frame
-//RS                     .as_ref()
-//RS                     .map(|frame| frame.scene.clone())
-//RS                     .unwrap_or_else(|| "game".to_string()),
-//RS                 format!(
-//RS                     "{{\"sequence\":{},\"kind\":{},\"before\":{},\"after\":{},\
-//RS \"dropped_samples\":{}}}",
-//RS                     receipt.sequence,
-//RS                     game_dev_json_string(receipt.kind.as_str()),
-//RS                     game_dev_json_string(receipt.before.as_str()),
-//RS                     game_dev_json_string(receipt.after.as_str()),
-//RS                     receipt.dropped_samples,
-//RS                 ),
-//RS                 None,
-//RS             ),
-//RS             Self::ReloadStatus(fact) => (
-//RS                 "game.reload".to_string(),
-//RS                 format!(
-//RS                     "{{\"frame_id\":{},\"domain\":{},\"status\":{},\"reason\":{}}}",
-//RS                     fact.frame.frame_id,
-//RS                     game_dev_json_string(&fact.domain),
-//RS                     game_dev_json_string(fact.status.as_str()),
-//RS                     game_dev_json_string(&fact.reason),
-//RS                 ),
-//RS                 Some(fact.render_json()),
-//RS             ),
-//RS             Self::ProfileComparison(comparison) => (
-//RS                 comparison.left.identity.scene.clone(),
-//RS                 format!(
-//RS                     "{{\"scene\":{},\"target\":{},\"delta_function_ns\":{},\
-//RS \"regression\":{}}}",
-//RS                     game_dev_json_string(&comparison.left.identity.scene),
-//RS                     game_dev_json_string(&comparison.left.identity.target),
-//RS                     comparison.total_function_ns_delta,
-//RS                     comparison.is_regression(),
-//RS                 ),
-//RS                 Some(format!(
-//RS                     "{{\"left\":{},\"right\":{}}}",
-//RS                     game_profile_snapshot_json(&comparison.left),
-//RS                     game_profile_snapshot_json(&comparison.right),
-//RS                 )),
-//RS             ),
-//RS             Self::Overlay(fact) => (
-//RS                 "game.overlay".to_string(),
-//RS                 format!(
-//RS                     "{{\"sequence\":{},\"kind\":{},\"before\":{},\"after\":{},\
-//RS \"visible\":{},\"input_capture\":{},\"filter\":{},\"error_pause_enabled\":{},\
-//RS \"frame\":{}}}",
-//RS                     fact.sequence,
-//RS                     game_dev_json_string(fact.kind.as_str()),
-//RS                     game_dev_json_string(fact.before.as_str()),
-//RS                     game_dev_json_string(fact.after.as_str()),
-//RS                     fact.visibility.visible,
-//RS                     game_dev_json_string(fact.visibility.input_capture.as_str()),
-//RS                     game_dev_json_string(fact.filter.as_str()),
-//RS                     fact.error_pause_enabled,
-//RS                     fact.frame
-//RS                         .as_ref()
-//RS                         .map(game_dev_frame_identity_json)
-//RS                         .unwrap_or_else(|| "null".to_string()),
-//RS                 ),
-//RS                 Some(fact.render_json()),
-//RS             ),
-//RS             Self::OverlayAutocomplete(fact) => (
-//RS                 "game.overlay".to_string(),
-//RS                 format!(
-//RS                     "{{\"query\":{},\"match_count\":{}}}",
-//RS                     game_dev_json_string(&fact.query),
-//RS                     fact.matches.len(),
-//RS                 ),
-//RS                 Some(fact.render_json()),
-//RS             ),
-//RS             Self::OverlayCommand(command) => (
-//RS                 "game.overlay".to_string(),
-//RS                 format!(
-//RS                     "{{\"id\":{},\"timestamp_ns\":{},\"text\":{}}}",
-//RS                     command.id,
-//RS                     command.timestamp_ns,
-//RS                     game_dev_json_string(&command.text),
-//RS                 ),
-//RS                 None,
-//RS             ),
-//RS             Self::OverlayOutput(row) => {
-//RS                 let payload = row
-//RS                     .published_text()
-//RS                     .map(|_| row.render_json());
-//RS                 (
-//RS                     "game.overlay".to_string(),
-//RS                     format!(
-//RS                         "{{\"id\":{},\"timestamp_ns\":{},\"category\":{},\
-//RS \"message\":{},\"source_id\":{},\"trace_id\":{},\"published\":{}}}",
-//RS                         row.id,
-//RS                         row.timestamp_ns,
-//RS                         game_dev_json_string(row.category.as_str()),
-//RS                         game_dev_json_string(&row.message),
-//RS                         game_dev_json_option(row.source_id.as_deref()),
-//RS                         game_dev_json_option(row.trace_id.as_deref()),
-//RS                         row.published_text().is_some(),
-//RS                     ),
-//RS                     payload,
-//RS                 )
-//RS             }
-//RS             Self::OverlayMetric { value, frame } => (
-//RS                 "game.overlay".to_string(),
-//RS                 format!(
-//RS                     "{{\"metric\":{},\"value\":{},\"sampled_at_ns\":{},\"frame\":{}}}",
-//RS                     game_dev_json_string(value.metric.as_str()),
-//RS                     value.value,
-//RS                     value.sampled_at_ns,
-//RS                     frame
-//RS                         .as_ref()
-//RS                         .map(game_dev_frame_identity_json)
-//RS                         .unwrap_or_else(|| "null".to_string()),
-//RS                 ),
-//RS                 None,
-//RS             ),
-//RS             Self::World(world) => (
-//RS                 world.world_id.clone(),
-//RS                 format!(
-//RS                     "{{\"world_id\":{},\"frame_id\":{},\"source_id\":{},\"revision\":{}}}",
-//RS                     game_dev_json_string(&world.world_id),
-//RS                     world.frame_id,
-//RS                     game_dev_json_string(&world.source_id),
-//RS                     game_dev_json_string(&world.revision),
-//RS                 ),
-//RS                 Some(world.render_json()),
-//RS             ),
-//RS             Self::WorldSelection(selection) => (
-//RS                 selection.world_id.clone(),
-//RS                 format!(
-//RS                     "{{\"world_id\":{},\"frame_id\":{},\"source_id\":{},\"revision\":{}}}",
-//RS                     game_dev_json_string(&selection.world_id),
-//RS                     selection.frame_id,
-//RS                     game_dev_json_string(&selection.source_id),
-//RS                     game_dev_json_string(&selection.revision),
-//RS                 ),
-//RS                 Some(selection.render_json()),
-//RS             ),
-//RS             Self::WorldEdit(request) => (
-//RS                 "game.world".to_string(),
-//RS                 format!(
-//RS                     "{{\"field\":{},\"target_count\":{}}}",
-//RS                     game_dev_json_string(&request.field_patch.field),
-//RS                     request.targets.len(),
-//RS                 ),
-//RS                 Some(request.render_json()),
-//RS             ),
-//RS             Self::WorldEvaluation(result) => (
-//RS                 "game.world".to_string(),
-//RS                 format!(
-//RS                     "{{\"request_id\":{},\"status\":{},\"type_name\":{}}}",
-//RS                     game_dev_json_string(&result.request_id),
-//RS                     game_dev_json_string(&result.status),
-//RS                     game_dev_json_string(&result.type_name),
-//RS                 ),
-//RS                 Some(result.render_json()),
-//RS             ),
-//RS             Self::AssetWatch(facts) => (
-//RS                 "game.assets".to_string(),
-//RS                 format!(
-//RS                     "{{\"created\":{},\"changed\":{},\"deleted\":{},\"events\":{},\
-//RS \"skipped_count\":{}}}",
-//RS                     facts.created.len(),
-//RS                     facts.changed.len(),
-//RS                     facts.deleted.len(),
-//RS                     facts.events.len(),
-//RS                     facts.skipped_count,
-//RS                 ),
-//RS                 Some(facts.render_json()),
-//RS             ),
-//RS             Self::AssetImportReport(report) => (
-//RS                 "game.assets".to_string(),
-//RS                 format!(
-//RS                     "{{\"imported\":{},\"dependencies\":{},\"created\":{},\
-//RS \"deleted\":{},\"skipped\":{},\"skipped_count\":{},\"diagnostics\":{}}}",
-//RS                     report.imported.len(),
-//RS                     report.dependencies.len(),
-//RS                     report.created.len(),
-//RS                     report.deleted.len(),
-//RS                     report.skipped.len(),
-//RS                     report.skipped_count,
-//RS                     report.diagnostics.len(),
-//RS                 ),
-//RS                 Some(report.render_json()),
-//RS             ),
-//RS             Self::AssetReload(receipt) => (
-//RS                 "game.assets".to_string(),
-//RS                 format!(
-//RS                     "{{\"transaction_id\":{},\"status\":{},\"entries\":{},\
-//RS \"revision_before\":{},\"revision_after\":{}}}",
-//RS                     receipt.transaction_id,
-//RS                     game_dev_json_string(receipt.status.as_str()),
-//RS                     receipt.entries.len(),
-//RS                     receipt.revision_before,
-//RS                     receipt.revision_after,
-//RS                 ),
-//RS                 Some(receipt.render_json()),
-//RS             ),
-//RS             Self::HotSwap(receipt) => (
-//RS                 "game.hotswap".to_string(),
-//RS                 format!(
-//RS                     "{{\"transaction_id\":{},\"phase\":{},\"committed\":{},\
-//RS \"rolled_back\":{},\"from\":{},\"to\":{}}}",
-//RS                     receipt.transaction_id,
-//RS                     game_dev_json_string(receipt.phase.as_str()),
-//RS                     receipt.is_committed(),
-//RS                     receipt.is_rolled_back(),
-//RS                     receipt.from_identity.render_json(),
-//RS                     receipt.to_identity.render_json(),
-//RS                 ),
-//RS                 Some(receipt.render_json()),
-//RS             ),
-//RS             Self::HotSwapExplanation(explanation) => (
-//RS                 "game.hotswap".to_string(),
-//RS                 format!(
-//RS                     "{{\"compatible\":{},\"code\":{},\"message\":{},\
-//RS \"transaction_id\":{}}}",
-//RS                     explanation.compatible,
-//RS                     game_dev_json_string(&explanation.code),
-//RS                     game_dev_json_string(&explanation.message),
-//RS                     explanation
-//RS                         .transaction_id
-//RS                         .map(|value| value.to_string())
-//RS                         .unwrap_or_else(|| "null".to_string()),
-//RS                 ),
-//RS                 Some(explanation.render_json()),
-//RS             ),
-//RS             Self::Crash(bundle) => (
-//RS                 "game.crash".to_string(),
-//RS                 format!(
-//RS                     "{{\"frame_id\":{},\"reason\":{},\"target\":{},\
-//RS \"upload_policy\":{}}}",
-//RS                     bundle.frame.frame_id,
-//RS                     game_dev_json_string(&bundle.reason),
-//RS                     game_dev_json_string(&bundle.target),
-//RS                     game_dev_json_string(bundle.upload_policy.as_str()),
-//RS                 ),
-//RS                 Some(bundle.render_json()),
-//RS             ),
-//RS             Self::Stopped(stopped) => (
-//RS                 "game".to_string(),
-//RS                 format!(
-//RS                     "{{\"reason\":{},\"frame_index\":{}}}",
-//RS                     game_dev_json_string(&stopped.reason),
-//RS                     stopped.frame_index,
-//RS                 ),
-//RS                 Some(stopped.render_json()),
-//RS             ),
-//RS         };
-//RS         JetDevtoolsEvent::from_parts_with_payload(
-//RS             timestamp_ms,
-//RS             source,
-//RS             self.kind(),
-//RS             entity,
-//RS             fields,
-//RS             payload,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum GameDevInput {
-//RS     Key { code: String, pressed: bool },
-//RS     Button { name: String, pressed: bool },
-//RS     Axis { name: String, value: i64 },
-//RS }
-//RS 
-//RS impl GameDevInput {
-//RS     pub fn key(code: impl Into<String>, pressed: bool) -> Self {
-//RS         Self::Key {
-//RS             code: code.into(),
-//RS             pressed,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn button(name: impl Into<String>, pressed: bool) -> Self {
-//RS         Self::Button {
-//RS             name: name.into(),
-//RS             pressed,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn axis(name: impl Into<String>, value: i64) -> Self {
-//RS         Self::Axis {
-//RS             name: name.into(),
-//RS             value,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         match self {
-//RS             Self::Key { code, pressed } => format!(
-//RS                 "{{\"kind\":\"key\",\"code\":{},\"pressed\":{}}}",
-//RS                 game_dev_json_string(code),
-//RS                 pressed,
-//RS             ),
-//RS             Self::Button { name, pressed } => format!(
-//RS                 "{{\"kind\":\"button\",\"name\":{},\"pressed\":{}}}",
-//RS                 game_dev_json_string(name),
-//RS                 pressed,
-//RS             ),
-//RS             Self::Axis { name, value } => format!(
-//RS                 "{{\"kind\":\"axis\",\"name\":{},\"value\":{}}}",
-//RS                 game_dev_json_string(name),
-//RS                 value,
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum GameDevControl {
-//RS     Play,
-//RS     Simulate,
-//RS     Pause,
-//RS     Step,
-//RS     FrameAdvance,
-//RS     Resume,
-//RS     Edit,
-//RS     Eject { world_id: String, actor_id: String },
-//RS     Keep(JetGameWorldEditRequest),
-//RS     Discard,
-//RS     SelectGameplayCategory(String),
-//RS     Input(GameDevInput),
-//RS     Console(String),
-//RS     Autocomplete {
-//RS         query: String,
-//RS         commands: Vec<String>,
-//RS     },
-//RS     ToggleOverlay,
-//RS     SetOverlayVisible(bool),
-//RS     SetInputCapture(bool),
-//RS     SetErrorPauseEnabled(bool),
-//RS     SetFilter(JetGameOverlayFilter),
-//RS     ToggleFilter(JetGameOverlayOutputCategory),
-//RS     SelectMetric(JetGameOverlayMetric),
-//RS     DeselectMetric(JetGameOverlayMetric),
-//RS     SelectWorld(JetGameWorldSelection),
-//RS     EditWorld(JetGameWorldEditRequest),
-//RS     EvaluateWorld(JetGamePausedEvalRequest),
-//RS }
-//RS 
-//RS impl GameDevControl {
-//RS     pub fn render_json(&self) -> String {
-//RS         match self {
-//RS             Self::Pause => "{\"kind\":\"pause\"}".to_string(),
-//RS             Self::Step => "{\"kind\":\"step\"}".to_string(),
-//RS             Self::Resume => "{\"kind\":\"resume\"}".to_string(),
-//RS             Self::Input(input) => format!(
-//RS                 "{{\"kind\":\"input\",\"input\":{}}}",
-//RS                 input.render_json()
-//RS             ),
-//RS             Self::Console(command) => format!(
-//RS                 "{{\"kind\":\"console\",\"command\":{}}}",
-//RS                 game_dev_json_string(command)
-//RS             ),
-//RS             Self::Autocomplete { query, commands } => {
-//RS                 let commands = commands
-//RS                     .iter()
-//RS                     .map(|command| game_dev_json_string(command))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",");
-//RS                 format!(
-//RS                     "{{\"kind\":\"autocomplete\",\"query\":{},\"commands\":[{}]}}",
-//RS                     game_dev_json_string(query),
-//RS                     commands,
-//RS                 )
-//RS             }
-//RS             Self::Play => "{\"kind\":\"play\"}".to_string(),
-//RS             Self::Simulate => "{\"kind\":\"simulate\"}".to_string(),
-//RS             Self::FrameAdvance => "{\"kind\":\"frame_advance\"}".to_string(),
-//RS             Self::Edit => "{\"kind\":\"edit\"}".to_string(),
-//RS             Self::Eject { world_id, actor_id } => format!(
-//RS                 "{{\"kind\":\"eject\",\"world_id\":{},\"actor_id\":{}}}",
-//RS                 game_dev_json_string(world_id),
-//RS                 game_dev_json_string(actor_id),
-//RS             ),
-//RS             Self::Keep(request) => format!(
-//RS                 "{{\"kind\":\"keep\",\"request\":{}}}",
-//RS                 request.render_json()
-//RS             ),
-//RS             Self::Discard => "{\"kind\":\"discard\"}".to_string(),
-//RS             Self::SelectGameplayCategory(category) => format!(
-//RS                 "{{\"kind\":\"select_category\",\"category\":{}}}",
-//RS                 game_dev_json_string(category)
-//RS             ),
-//RS             Self::ToggleOverlay => "{\"kind\":\"toggle_overlay\"}".to_string(),
-//RS             Self::SetOverlayVisible(visible) => {
-//RS                 format!("{{\"kind\":\"set_overlay_visible\",\"visible\":{visible}}}")
-//RS             }
-//RS             Self::SetInputCapture(capture) => {
-//RS                 format!("{{\"kind\":\"set_input_capture\",\"capture\":{capture}}}")
-//RS             }
-//RS             Self::SetFilter(filter) => format!(
-//RS                 "{{\"kind\":\"set_filter\",\"filter\":{}}}",
-//RS                 game_dev_json_string(filter.as_str())
-//RS             ),
-//RS             Self::ToggleFilter(category) => format!(
-//RS                 "{{\"kind\":\"toggle_filter\",\"category\":{}}}",
-//RS                 game_dev_json_string(category.as_str())
-//RS             ),
-//RS             Self::SetErrorPauseEnabled(enabled) => format!(
-//RS                 "{{\"kind\":\"set_error_pause_enabled\",\"enabled\":{enabled}}}"
-//RS             ),
-//RS             Self::SelectMetric(metric) => format!(
-//RS                 "{{\"kind\":\"select_metric\",\"metric\":{}}}",
-//RS                 game_dev_json_string(metric.as_str())
-//RS             ),
-//RS             Self::DeselectMetric(metric) => format!(
-//RS                 "{{\"kind\":\"deselect_metric\",\"metric\":{}}}",
-//RS                 game_dev_json_string(metric.as_str())
-//RS             ),
-//RS             Self::SelectWorld(selection) => format!(
-//RS                 "{{\"kind\":\"select_world\",\"selection\":{}}}",
-//RS                 selection.render_json()
-//RS             ),
-//RS             Self::EditWorld(request) => format!(
-//RS                 "{{\"kind\":\"edit_world\",\"request\":{}}}",
-//RS                 request.render_json()
-//RS             ),
-//RS             Self::EvaluateWorld(request) => format!(
-//RS                 "{{\"kind\":\"evaluate_world\",\"request\":{}}}",
-//RS                 request.render_json()
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The four-part run key is kept exactly as supplied by the host. `session`
-//RS /// is deliberately part of the adapter value even though the canonical frame
-//RS /// trace carries source/build/revision: a profile ring is never shared by two
-//RS /// Devtools sessions.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct GameDevRunIdentity {
-//RS     pub session: String,
-//RS     pub source: String,
-//RS     pub build: String,
-//RS     pub revision: String,
-//RS }
-//RS 
-//RS impl GameDevRunIdentity {
-//RS     pub fn new(
-//RS         session: impl Into<String>,
-//RS         source: impl Into<String>,
-//RS         build: impl Into<String>,
-//RS         revision: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             session: session.into(),
-//RS             source: source.into(),
-//RS             build: build.into(),
-//RS             revision: revision.into(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn trace_identity(&self) -> JetGameTraceIdentity {
-//RS         JetGameTraceIdentity::new(
-//RS             self.build.clone(),
-//RS             self.revision.clone(),
-//RS             self.source.clone(),
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), JetGameFrameProfilerError> {
-//RS         jet_game_frame_profiler_require_text(&self.session, "session")?;
-//RS         self.trace_identity().validate()
-//RS     }
-//RS }
-//RS 
-//RS /// One bounded profiler session. All sequencing, identity checks, pause
-//RS /// transitions, and retention are delegated to the canonical profiler.
-//RS #[derive(Clone, Debug)]
-//RS pub struct GameDevProfileRing {
-//RS     identity: GameDevRunIdentity,
-//RS     profiler: JetGameFrameProfiler,
-//RS }
-//RS 
-//RS impl GameDevProfileRing {
-//RS     pub fn new(
-//RS         identity: GameDevRunIdentity,
-//RS     ) -> Result<Self, JetGameFrameProfilerError> {
-//RS         identity.validate()?;
-//RS         let profiler = JetGameFrameProfiler::new(identity.trace_identity());
-//RS         Ok(Self { identity, profiler })
-//RS     }
-//RS 
-//RS     pub fn with_capacity(
-//RS         identity: GameDevRunIdentity,
-//RS         capacity: usize,
-//RS     ) -> Result<Self, JetGameFrameProfilerError> {
-//RS         identity.validate()?;
-//RS         let profiler = JetGameFrameProfiler::with_capacity(identity.trace_identity(), capacity);
-//RS         Ok(Self { identity, profiler })
-//RS     }
-//RS 
-//RS     pub fn identity(&self) -> &GameDevRunIdentity {
-//RS         &self.identity
-//RS     }
-//RS 
-//RS     pub fn profiler(&self) -> &JetGameFrameProfiler {
-//RS         &self.profiler
-//RS     }
-//RS 
-//RS     pub fn profiler_mut(&mut self) -> &mut JetGameFrameProfiler {
-//RS         &mut self.profiler
-//RS     }
-//RS     pub fn set_context(
-//RS         &mut self,
-//RS         context: JetGameTraceContext,
-//RS     ) -> Result<(), JetGameFrameProfilerError> {
-//RS         self.profiler.set_context(context)
-//RS     }
-//RS 
-//RS     pub fn context(&self) -> Option<&JetGameTraceContext> {
-//RS         self.profiler.context()
-//RS     }
-//RS 
-//RS     pub fn next_sequence(&self) -> u64 {
-//RS         self.profiler.history().next_sequence()
-//RS     }
-//RS 
-//RS     pub fn publish(
-//RS         &mut self,
-//RS         fact: JetGameSampleFact,
-//RS     ) -> Result<JetGameFrameReceipt, JetGameFrameProfilerError> {
-//RS         self.profiler.record(fact)
-//RS     }
-//RS 
-//RS     pub fn publish_frame(
-//RS         &mut self,
-//RS         sample: JetGameFrameSample,
-//RS     ) -> Result<JetGameFrameReceipt, JetGameFrameProfilerError> {
-//RS         self.profiler.record_frame(sample)
-//RS     }
-//RS 
-//RS     pub fn publish_phase(
-//RS         &mut self,
-//RS         sample: JetGamePhaseSample,
-//RS     ) -> Result<JetGameFrameReceipt, JetGameFrameProfilerError> {
-//RS         self.profiler.record_phase(sample)
-//RS     }
-//RS 
-//RS     pub fn publish_function(
-//RS         &mut self,
-//RS         sample: JetGameFunctionSample,
-//RS     ) -> Result<JetGameFrameReceipt, JetGameFrameProfilerError> {
-//RS         self.profiler.record_function(sample)
-//RS     }
-//RS 
-//RS     pub fn publish_draw(
-//RS         &mut self,
-//RS         event: JetGameDrawEvent,
-//RS     ) -> Result<JetGameFrameReceipt, JetGameFrameProfilerError> {
-//RS         self.profiler.record_draw(event)
-//RS     }
-//RS 
-//RS     pub fn pause(&mut self) -> JetGameFrameReceipt {
-//RS         self.profiler.pause()
-//RS     }
-//RS 
-//RS     pub fn resume(&mut self) -> JetGameFrameReceipt {
-//RS         self.profiler.resume()
-//RS     }
-//RS 
-//RS     pub fn error_pause(
-//RS         &mut self,
-//RS         source: JetGameSourceSpan,
-//RS         code: impl Into<String>,
-//RS         message: impl Into<String>,
-//RS     ) -> Result<JetGameFrameReceipt, JetGameFrameProfilerError> {
-//RS         self.profiler.error_pause(source, code, message)
-//RS     }
-//RS 
-//RS     pub fn draw_cursor(
-//RS         &self,
-//RS         frame: JetGameFrameIdentity,
-//RS     ) -> Result<JetGameDrawCursor, JetGameFrameProfilerError> {
-//RS         self.profiler.draw_cursor(frame)
-//RS     }
-//RS 
-//RS     pub fn snapshot(
-//RS         &self,
-//RS         identity: GameProfileIdentity,
-//RS     ) -> Result<GameProfileSnapshot, GameProfileComparisonError> {
-//RS         GameProfileSnapshot::from_ring(self, identity)
-//RS     }
-//RS 
-//RS     pub fn bottleneck(&self, limit: usize) -> JetGameBottleneckProjection {
-//RS         self.profiler.bottleneck(limit)
-//RS     }
-//RS 
-//RS }
-//RS /// Identity carried by a completed profile.  Build identity is intentionally
-//RS /// not used as a comparison join key: comparing two builds is the point.  The
-//RS /// scene, target, and exact asset identities must match before their profiles
-//RS /// can be compared.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct GameProfileIdentity {
-//RS     pub scene: String,
-//RS     pub build: String,
-//RS     pub target: String,
-//RS     pub assets: Vec<JetGameAssetNodeIdentity>,
-//RS }
-//RS 
-//RS impl GameProfileIdentity {
-//RS     pub fn new(
-//RS         scene: impl Into<String>,
-//RS         build: impl Into<String>,
-//RS         target: impl Into<String>,
-//RS         assets: Vec<JetGameAssetNodeIdentity>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             scene: scene.into(),
-//RS             build: build.into(),
-//RS             target: target.into(),
-//RS             assets,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum GameProfileComparisonError {
-//RS     Incomplete {
-//RS         side: &'static str,
-//RS         state: JetGameFrameProfilerState,
-//RS     },
-//RS     IncompatibleIdentity {
-//RS         field: &'static str,
-//RS         left: String,
-//RS         right: String,
-//RS     },
-//RS }
-//RS 
-//RS impl GameProfileComparisonError {
-//RS     pub const fn code(&self) -> &'static str {
-//RS         match self {
-//RS             Self::Incomplete { .. } => "profile_incomplete",
-//RS             Self::IncompatibleIdentity { .. } => "profile_identity_mismatch",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn message(&self) -> String {
-//RS         match self {
-//RS             Self::Incomplete { side, state } => {
-//RS                 format!("{side} profile is not complete; profiler state is {}", state.as_str())
-//RS             }
-//RS             Self::IncompatibleIdentity { field, left, right } => {
-//RS                 format!("profile identity mismatch for {field}: `{left}` versus `{right}`")
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A frozen, typed projection of one paused profiler session.  It owns no
-//RS /// ambient storage; taking a snapshot copies only canonical profiler facts.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct GameProfileSnapshot {
-//RS     pub identity: GameProfileIdentity,
-//RS     pub run: GameDevRunIdentity,
-//RS     pub trace_identity: JetGameTraceIdentity,
-//RS     pub projection: JetGameBottleneckProjection,
-//RS }
-//RS 
-//RS impl GameProfileSnapshot {
-//RS     pub fn from_profiler(
-//RS         profiler: &JetGameFrameProfiler,
-//RS         run: GameDevRunIdentity,
-//RS         identity: GameProfileIdentity,
-//RS     ) -> Result<Self, GameProfileComparisonError> {
-//RS         if profiler.state() != JetGameFrameProfilerState::Paused {
-//RS             return Err(GameProfileComparisonError::Incomplete {
-//RS                 side: "profile",
-//RS                 state: profiler.state(),
-//RS             });
-//RS         }
-//RS         let trace_identity = profiler.trace_identity().clone();
-//RS         if run.build != trace_identity.build {
-//RS             return Err(GameProfileComparisonError::IncompatibleIdentity {
-//RS                 field: "build",
-//RS                 left: run.build,
-//RS                 right: trace_identity.build,
-//RS             });
-//RS         }
-//RS         if run.revision != trace_identity.revision {
-//RS             return Err(GameProfileComparisonError::IncompatibleIdentity {
-//RS                 field: "revision",
-//RS                 left: run.revision,
-//RS                 right: trace_identity.revision,
-//RS             });
-//RS         }
-//RS         if run.source != trace_identity.trace_id {
-//RS             return Err(GameProfileComparisonError::IncompatibleIdentity {
-//RS                 field: "source",
-//RS                 left: run.source,
-//RS                 right: trace_identity.trace_id,
-//RS             });
-//RS         }
-//RS         if trace_identity.build != identity.build {
-//RS             return Err(GameProfileComparisonError::IncompatibleIdentity {
-//RS                 field: "build",
-//RS                 left: identity.build,
-//RS                 right: trace_identity.build,
-//RS             });
-//RS         }
-//RS         let projection = profiler.bottleneck(JET_GAME_FRAME_PROFILER_MAX_BOTTLENECKS);
-//RS         Ok(Self {
-//RS             identity,
-//RS             run,
-//RS             trace_identity,
-//RS             projection,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn from_ring(
-//RS         ring: &GameDevProfileRing,
-//RS         identity: GameProfileIdentity,
-//RS     ) -> Result<Self, GameProfileComparisonError> {
-//RS         Self::from_profiler(&ring.profiler, ring.identity.clone(), identity)
-//RS     }
-//RS }
-//RS 
-//RS /// Comparison of two completed profiles from independent sessions.  The
-//RS /// sessions and their source/revision keys remain visible in both snapshots;
-//RS /// no ring or profiler state is shared across the comparison.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct GameProfileComparison {
-//RS     pub left: GameProfileSnapshot,
-//RS     pub right: GameProfileSnapshot,
-//RS     pub total_function_ns_delta: i128,
-//RS }
-//RS 
-//RS impl GameProfileComparison {
-//RS     pub fn compare(
-//RS         left: GameProfileSnapshot,
-//RS         right: GameProfileSnapshot,
-//RS     ) -> Result<Self, GameProfileComparisonError> {
-//RS         if left.identity.scene != right.identity.scene {
-//RS             return Err(GameProfileComparisonError::IncompatibleIdentity {
-//RS                 field: "scene",
-//RS                 left: left.identity.scene.clone(),
-//RS                 right: right.identity.scene.clone(),
-//RS             });
-//RS         }
-//RS         if left.identity.target != right.identity.target {
-//RS             return Err(GameProfileComparisonError::IncompatibleIdentity {
-//RS                 field: "target",
-//RS                 left: left.identity.target.clone(),
-//RS                 right: right.identity.target.clone(),
-//RS             });
-//RS         }
-//RS         if left.identity.assets != right.identity.assets {
-//RS             let left_assets = left
-//RS                 .identity
-//RS                 .assets
-//RS                 .iter()
-//RS                 .map(JetGameAssetNodeIdentity::key)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             let right_assets = right
-//RS                 .identity
-//RS                 .assets
-//RS                 .iter()
-//RS                 .map(JetGameAssetNodeIdentity::key)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             return Err(GameProfileComparisonError::IncompatibleIdentity {
-//RS                 field: "assets",
-//RS                 left: left_assets,
-//RS                 right: right_assets,
-//RS             });
-//RS         }
-//RS         let total_function_ns_delta =
-//RS             i128::from(right.projection.total_function_ns)
-//RS                 - i128::from(left.projection.total_function_ns);
-//RS         Ok(Self {
-//RS             left,
-//RS             right,
-//RS             total_function_ns_delta,
-//RS         })
-//RS     }
-//RS 
-//RS     pub const fn is_regression(&self) -> bool {
-//RS         self.total_function_ns_delta > 0
-//RS     }
-//RS }
-//RS 
-//RS const JET_GAME_DEVTOOLS_COMMAND_FRAME_MAX: usize = 256;
-//RS 
-//RS fn jet_game_control_object(
-//RS     value: &jet_std::DataTree,
-//RS ) -> Result<&[(String, jet_std::DataTree)], String> {
-//RS     match value {
-//RS         jet_std::DataTree::Object(fields) => Ok(fields),
-//RS         _ => Err("game control command payload must be an object".to_string()),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_game_control_field<'a>(
-//RS     fields: &'a [(String, jet_std::DataTree)],
-//RS     name: &str,
-//RS ) -> Option<&'a jet_std::DataTree> {
-//RS     fields
-//RS         .iter()
-//RS         .find_map(|(field_name, value)| (field_name == name).then_some(value))
-//RS }
-//RS 
-//RS fn jet_game_control_required_text(
-//RS     fields: &[(String, jet_std::DataTree)],
-//RS     name: &str,
-//RS ) -> Result<String, String> {
-//RS     match jet_game_control_field(fields, name) {
-//RS         Some(jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value))
-//RS             if !value.is_empty() =>
-//RS         {
-//RS             Ok(value.clone())
-//RS         }
-//RS         Some(_) => Err(format!("game control field `{name}` must be non-empty text")),
-//RS         None => Err(format!("game control field `{name}` is required")),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_game_control_optional_text(
-//RS     fields: &[(String, jet_std::DataTree)],
-//RS     name: &str,
-//RS ) -> Result<Option<String>, String> {
-//RS     match jet_game_control_field(fields, name) {
-//RS         None | Some(jet_std::DataTree::Null) => Ok(None),
-//RS         Some(jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value))
-//RS             if !value.is_empty() =>
-//RS         {
-//RS             Ok(Some(value.clone()))
-//RS         }
-//RS         Some(_) => Err(format!("game control field `{name}` must be text or null")),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_game_control_optional_u64(
-//RS     fields: &[(String, jet_std::DataTree)],
-//RS     name: &str,
-//RS ) -> Result<Option<u64>, String> {
-//RS     match jet_game_control_field(fields, name) {
-//RS         None | Some(jet_std::DataTree::Null) => Ok(None),
-//RS         Some(jet_std::DataTree::Int(value)) if *value >= 0 => Ok(Some(*value as u64)),
-//RS         Some(jet_std::DataTree::Number(value)) => value
-//RS             .parse::<u64>()
-//RS             .map(Some)
-//RS             .map_err(|_| format!("game control field `{name}` is outside u64")),
-//RS         Some(_) => Err(format!("game control field `{name}` must be an unsigned integer")),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_game_decode_control_request(
-//RS     session_id: &str,
-//RS     payload: &str,
-//RS ) -> Result<JetDevtoolsGameControlRequest, String> {
-//RS     let value = jet_std::parse_json_strict(payload)
-//RS         .map_err(|_| "invalid game control payload".to_string())?;
-//RS     let fields = jet_game_control_object(&value)?;
-//RS     let expected = [
-//RS         "session_id",
-//RS         "request_id",
-//RS         "kind",
-//RS         "source_id",
-//RS         "revision",
-//RS         "world_id",
-//RS         "actor_id",
-//RS         "component_id",
-//RS         "authored_instance_id",
-//RS         "source_span_start",
-//RS         "source_span_end",
-//RS         "field",
-//RS         "value",
-//RS         "category",
-//RS         "expression",
-//RS         "required_authority",
-//RS         "frame_id",
-//RS         "budget",
-//RS     ];
-//RS     if fields.len() != expected.len()
-//RS         || !fields
-//RS             .iter()
-//RS             .map(|(key, _)| key)
-//RS             .all(|key| expected.iter().any(|expected_key| key == expected_key))
-//RS     {
-//RS         return Err("game control payload has unexpected fields".to_string());
-//RS     }
-//RS     let payload_session = jet_game_control_required_text(fields, "session_id")?;
-//RS     if payload_session != session_id {
-//RS         return Err("game control payload session identity mismatch".to_string());
-//RS     }
-//RS     let request_id = jet_game_control_required_text(fields, "request_id")?;
-//RS     let kind = JetDevtoolsGameControlKind::from_str(
-//RS         &jet_game_control_required_text(fields, "kind")?,
-//RS     )?;
-//RS     let mut request = JetDevtoolsGameControlRequest::new(payload_session, request_id, kind)?;
-//RS     request.source_id = jet_game_control_optional_text(fields, "source_id")?;
-//RS     request.revision = jet_game_control_optional_text(fields, "revision")?;
-//RS     request.world_id = jet_game_control_optional_text(fields, "world_id")?;
-//RS     request.actor_id = jet_game_control_optional_text(fields, "actor_id")?;
-//RS     request.component_id = jet_game_control_optional_text(fields, "component_id")?;
-//RS     request.authored_instance_id =
-//RS         jet_game_control_optional_text(fields, "authored_instance_id")?;
-//RS     request.source_span_start = jet_game_control_optional_u64(fields, "source_span_start")?;
-//RS     request.source_span_end = jet_game_control_optional_u64(fields, "source_span_end")?;
-//RS     request.field = jet_game_control_optional_text(fields, "field")?;
-//RS     request.value = jet_game_control_optional_text(fields, "value")?;
-//RS     request.category = jet_game_control_optional_text(fields, "category")?;
-//RS     request.expression = jet_game_control_optional_text(fields, "expression")?;
-//RS     request.required_authority =
-//RS         jet_game_control_optional_text(fields, "required_authority")?;
-//RS     request.frame_id = jet_game_control_optional_u64(fields, "frame_id")?;
-//RS     request.budget = jet_game_control_optional_u64(fields, "budget")?;
-//RS     request.validate()?;
-//RS     Ok(request)
-//RS }
-//RS 
-//RS fn jet_game_ingest_devtools_command_frame(
-//RS     frame: &str,
-//RS     expected_session_id: &str,
-//RS ) -> Result<usize, String> {
-//RS     let value = jet_std::parse_json_strict(frame)
-//RS         .map_err(|_| "invalid game control command frame".to_string())?;
-//RS     let fields = jet_game_control_object(&value)?;
-//RS     let protocol = jet_game_control_required_text(fields, "protocol")?;
-//RS     if protocol != JET_DEVTOOLS_PROTOCOL {
-//RS         return Err("game control command frame protocol mismatch".to_string());
-//RS     }
-//RS     let session_id = jet_game_control_required_text(fields, "session_id")?;
-//RS     if session_id != expected_session_id {
-//RS         return Err("game control command frame session identity mismatch".to_string());
-//RS     }
-//RS     let _ = jet_game_control_optional_u64(fields, "started_at_ms")?
-//RS         .ok_or_else(|| "game control command frame requires started_at_ms".to_string())?;
-//RS     let direction = jet_game_control_required_text(fields, "direction")?;
-//RS     if direction != "host_to_runtime" {
-//RS         return Err("game control command frame direction mismatch".to_string());
-//RS     }
-//RS     let commands = match jet_game_control_field(fields, "commands") {
-//RS         Some(jet_std::DataTree::Array(commands)) => commands,
-//RS         _ => return Err("game control command frame requires commands".to_string()),
-//RS     };
-//RS     if commands.len() > JET_GAME_DEVTOOLS_COMMAND_FRAME_MAX {
-//RS         return Err("game control command frame exceeds command limit".to_string());
-//RS     }
-//RS     let mut accepted: usize = 0;
-//RS     for command in commands {
-//RS         let command_fields = jet_game_control_object(command)?;
-//RS         let kind = jet_game_control_required_text(command_fields, "kind")?;
-//RS         if kind != "GameControl" {
-//RS             return Err(format!("unsupported game control command `{kind}`"));
-//RS         }
-//RS         let payload = jet_game_control_field(command_fields, "payload")
-//RS             .ok_or_else(|| "game control command is missing payload".to_string())?;
-//RS         let payload = jet_std::render_json(payload, false, 0);
-//RS         let request = jet_game_decode_control_request(&session_id, &payload)?;
-//RS         jet_devtools_enqueue_game_control(request)?;
-//RS         accepted = accepted.saturating_add(1);
-//RS     }
-//RS     Ok(accepted)
-//RS }
-//RS 
-//RS fn jet_game_devtools_callback(session_id: &str, payload: &str) -> Result<(), String> {
-//RS     let request = jet_game_decode_control_request(session_id, payload)?;
-//RS     jet_devtools_enqueue_game_control(request)
-//RS }
-//RS 
-//RS static JET_GAME_DEVTOOLS_CALLBACK_GUARD: std::sync::LazyLock<
-//RS     Option<JetDevtoolsGameControlCallbackGuard>,
-//RS > = std::sync::LazyLock::new(|| {
-//RS     jet_devtools_install_game_control_callback(jet_game_devtools_callback).ok()
-//RS });
-//RS 
-//RS fn jet_game_install_devtools_callback() {
-//RS     // Callers invoke this only after constructing an authorized session. The
-//RS     // session policy, not a compiler build flag, owns whether game controls
-//RS     // are reachable.
-//RS     let _ = &*JET_GAME_DEVTOOLS_CALLBACK_GUARD;
-//RS }
-//RS 
-//RS fn jet_game_control_request(
-//RS     request: JetDevtoolsGameControlRequest,
-//RS     session: &GameDevSession,
-//RS ) -> Result<GameDevControl, String> {
-//RS     let identity = session.profiler.identity();
-//RS     if request.session_id != identity.session {
-//RS         return Err("game control request session identity mismatch".to_string());
-//RS     }
-//RS     if let Some(source_id) = request.source_id.as_deref() {
-//RS         if source_id != identity.source {
-//RS             return Err("game control request source identity mismatch".to_string());
-//RS         }
-//RS     }
-//RS     if let Some(revision) = request.revision.as_deref() {
-//RS         if revision != identity.revision {
-//RS             return Err("game control request revision identity mismatch".to_string());
-//RS         }
-//RS     }
-//RS     match request.kind {
-//RS         JetDevtoolsGameControlKind::Play => Ok(GameDevControl::Play),
-//RS         JetDevtoolsGameControlKind::Simulate => Ok(GameDevControl::Simulate),
-//RS         JetDevtoolsGameControlKind::Pause => Ok(GameDevControl::Pause),
-//RS         JetDevtoolsGameControlKind::Step => Ok(GameDevControl::Step),
-//RS         JetDevtoolsGameControlKind::Resume => Ok(GameDevControl::Resume),
-//RS         JetDevtoolsGameControlKind::FrameAdvance => Ok(GameDevControl::FrameAdvance),
-//RS         JetDevtoolsGameControlKind::Edit => Ok(GameDevControl::Edit),
-//RS         JetDevtoolsGameControlKind::Discard => Ok(GameDevControl::Discard),
-//RS         JetDevtoolsGameControlKind::SelectCategory => Ok(
-//RS             GameDevControl::SelectGameplayCategory(
-//RS                 request
-//RS                     .category
-//RS                     .ok_or_else(|| "select_category requires category".to_string())?,
-//RS             ),
-//RS         ),
-//RS         JetDevtoolsGameControlKind::SelectWorld => {
-//RS             let world_id = request
-//RS                 .world_id
-//RS                 .ok_or_else(|| "select_world requires world_id".to_string())?;
-//RS             let selection = JetGameWorldSelection::new(
-//RS                 world_id,
-//RS                 request.actor_id,
-//RS                 request.component_id,
-//RS                 request.field,
-//RS             )
-//RS             .map_err(|error| error.to_string())?;
-//RS             Ok(GameDevControl::SelectWorld(selection))
-//RS         }
-//RS         JetDevtoolsGameControlKind::EvaluateWorld => {
-//RS             let world_id = request
-//RS                 .world_id
-//RS                 .ok_or_else(|| "evaluate_world requires world_id".to_string())?;
-//RS             let frame_id = request
-//RS                 .frame_id
-//RS                 .ok_or_else(|| "evaluate_world requires frame_id".to_string())?;
-//RS             let actor_id = request
-//RS                 .actor_id
-//RS                 .ok_or_else(|| "evaluate_world requires actor_id".to_string())?;
-//RS             let component_id = request
-//RS                 .component_id
-//RS                 .ok_or_else(|| "evaluate_world requires component_id".to_string())?;
-//RS             let expression = request
-//RS                 .expression
-//RS                 .ok_or_else(|| "evaluate_world requires expression".to_string())?;
-//RS             let required_authority = request
-//RS                 .required_authority
-//RS                 .ok_or_else(|| "evaluate_world requires required_authority".to_string())?;
-//RS             let budget = request
-//RS                 .budget
-//RS                 .ok_or_else(|| "evaluate_world requires budget".to_string())?;
-//RS             JetGamePausedEvalRequest::new(
-//RS                 request.request_id,
-//RS                 identity.session.clone(),
-//RS                 world_id,
-//RS                 frame_id,
-//RS                 actor_id,
-//RS                 component_id,
-//RS                 expression,
-//RS                 required_authority,
-//RS                 budget,
-//RS             )
-//RS             .map_err(|error| error.to_string())?
-//RS             .with_tier("game")
-//RS             .map(GameDevControl::EvaluateWorld)
-//RS             .map_err(|error| error.to_string())
-//RS         }
-//RS         JetDevtoolsGameControlKind::Eject => Ok(GameDevControl::Eject {
-//RS             world_id: request
-//RS                 .world_id
-//RS                 .ok_or_else(|| "eject requires world_id".to_string())?,
-//RS             actor_id: request
-//RS                 .actor_id
-//RS                 .ok_or_else(|| "eject requires actor_id".to_string())?,
-//RS         }),
-//RS         JetDevtoolsGameControlKind::Keep | JetDevtoolsGameControlKind::EditWorld => {
-//RS             let source_id = request
-//RS                 .source_id
-//RS                 .ok_or_else(|| "world edit requires source_id".to_string())?;
-//RS             let revision = request
-//RS                 .revision
-//RS                 .ok_or_else(|| "world edit requires revision".to_string())?;
-//RS             let authored_instance_id = request
-//RS                 .authored_instance_id
-//RS                 .ok_or_else(|| "world edit requires authored_instance_id".to_string())?;
-//RS             let start = request
-//RS                 .source_span_start
-//RS                 .ok_or_else(|| "world edit requires source_span_start".to_string())?;
-//RS             let end = request
-//RS                 .source_span_end
-//RS                 .ok_or_else(|| "world edit requires source_span_end".to_string())?;
-//RS             let field = request
-//RS                 .field
-//RS                 .ok_or_else(|| "world edit requires field".to_string())?;
-//RS             let value = request
-//RS                 .value
-//RS                 .ok_or_else(|| "world edit requires value".to_string())?;
-//RS             let span = JetGameWorldSourceSpan::new(
-//RS                 usize::try_from(start)
-//RS                     .map_err(|_| "world edit source span is too large".to_string())?,
-//RS                 usize::try_from(end)
-//RS                     .map_err(|_| "world edit source span is too large".to_string())?,
-//RS             )
-//RS             .map_err(|error| error.to_string())?;
-//RS             let target =
-//RS                 JetGameWorldEditTarget::new(source_id, revision, authored_instance_id, span)
-//RS                     .map_err(|error| error.to_string())?
-//RS                     .with_session_identity(identity.session.clone(), "game")
-//RS                     .map_err(|error| error.to_string())?;
-//RS             let edit = JetGameWorldEditRequest::new(vec![target], field, value)
-//RS                 .map_err(|error| error.to_string())?;
-//RS             if matches!(request.kind, JetDevtoolsGameControlKind::Keep) {
-//RS                 Ok(GameDevControl::Keep(edit))
-//RS             } else {
-//RS                 Ok(GameDevControl::EditWorld(edit))
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A live typed game-dev session. The envelope remains the only transport
-//RS /// owner; all game state is supplied by the canonical Core modules.
-//RS #[derive(Clone, Debug)]
-//RS pub struct GameDevSession {
-//RS     pub envelope: JetDevtoolsEnvelope,
-//RS     pub lifecycle: JetDevtoolsLifecycleState,
-//RS     pub profiler: GameDevProfileRing,
-//RS     pub overlay: JetGameOverlayState,
-//RS     pub inspector: JetGameWorldInspector,
-//RS     pub asset_roots: JetGameAssetRootSet,
-//RS     pub policy: GameDevPolicy,
-//RS     pub swap_session: JetGameDevSession,
-//RS     asset_import: GameAssetImportAdapter,
-//RS     asset_runtime: GameAssetRuntimeAdapter,
-//RS     pub last_asset_watch: Option<JetGameAssetWatchFacts>,
-//RS     pub last_asset_import_report: Option<JetGameAssetImportReport>,
-//RS     pub hot_swap_live: Option<JetGameHotSwapSnapshot>,
-//RS     pub last_input: Option<GameDevInput>,
-//RS     pub phase: GameDevPhase,
-//RS     pub run_mode: GameDevRunMode,
-//RS     pub frame_index: u64,
-//RS     pub selected_world_id: Option<String>,
-//RS     pub selected_actor_id: Option<String>,
-//RS     pub selected_debugger_category: Option<String>,
-//RS     pub launch_profile: GameDevLaunchProfile,
-//RS     pending_world_edits: Vec<JetGameWorldEditRequest>,
-//RS     next_transition_sequence: u64,
-//RS     frame_advance_pending: bool,
-//RS     draw_cursor: Option<JetGameDrawCursor>,
-//RS }
-//RS 
-//RS impl GameDevSession {
-//RS     pub fn new(
-//RS         identity: GameDevRunIdentity,
-//RS         started_at_ms: u64,
-//RS     ) -> Result<Self, JetGameFrameProfilerError> {
-//RS         Self::new_with_policy(identity, started_at_ms, GameDevPolicy::new(false))
-//RS     }
-//RS 
-//RS     pub fn new_with_policy(
-//RS         identity: GameDevRunIdentity,
-//RS         started_at_ms: u64,
-//RS         policy: GameDevPolicy,
-//RS     ) -> Result<Self, JetGameFrameProfilerError> {
-//RS         if !policy.game_debug_data_enabled() {
-//RS             return Err(JetGameFrameProfilerError::InvalidTraceContext {
-//RS                 reason: "game development data is disabled for this profile",
-//RS             });
-//RS         }
-//RS         let profiler = GameDevProfileRing::new(identity.clone())?;
-//RS         let launch_profile =
-//RS             GameDevLaunchProfile::new(identity.source.clone(), GameDevRunMode::Headless);
-//RS         let asset_roots = JetGameAssetRootSet::default();
-//RS         let mut inspector = JetGameWorldInspector::default();
-//RS         inspector.set_session_identity(identity.session.clone(), "game");
-//RS         let mut envelope = JetDevtoolsEnvelope::new(identity.session.clone(), started_at_ms);
-//RS         envelope.lifecycle = JetDevtoolsLifecycleState::Ready;
-//RS         envelope.freshness = JetDevtoolsFreshnessFact::fresh(started_at_ms);
-//RS         envelope.source_identity = Some(JetDevtoolsSourceIdentityFact::new(
-//RS             Some(identity.source.clone()),
-//RS             Some(identity.build.clone()),
-//RS             Some(identity.revision.clone()),
-//RS             None,
-//RS         ));
-//RS         Ok(Self {
-//RS             envelope,
-//RS             lifecycle: JetDevtoolsLifecycleState::Ready,
-//RS             profiler,
-//RS             overlay: JetGameOverlayState::new(),
-//RS             inspector,
-//RS             swap_session: JetGameDevSession::new(),
-//RS             asset_import: GameAssetImportAdapter::new(asset_roots.clone()),
-//RS             asset_runtime: GameAssetRuntimeAdapter::new(),
-//RS             asset_roots,
-//RS             policy,
-//RS             last_asset_watch: None,
-//RS             last_asset_import_report: None,
-//RS             hot_swap_live: None,
-//RS             last_input: None,
-//RS             phase: GameDevPhase::Editing,
-//RS             run_mode: GameDevRunMode::Headless,
-//RS             frame_index: 0,
-//RS             selected_world_id: None,
-//RS             selected_actor_id: None,
-//RS             selected_debugger_category: None,
-//RS             launch_profile,
-//RS             pending_world_edits: Vec::new(),
-//RS             next_transition_sequence: 1,
-//RS             frame_advance_pending: false,
-//RS             draw_cursor: None,
-//RS         })
-//RS     }
-//RS     pub const fn game_debug_data_enabled(&self) -> bool {
-//RS         self.policy.game_debug_data_enabled()
-//RS     }
-//RS 
-//RS     /// Transfer host commands from both the in-process callback and the
-//RS     /// separate-process relay into the one typed queue, then apply them
-//RS     /// through `dispatch_control`, the sole transition/effect owner.
-//RS     pub fn dispatch_pending_devtools_controls(
-//RS         &mut self,
-//RS         timestamp_ms: u64,
-//RS     ) -> Result<usize, String> {
-//RS         const MAX_CONTROLS_PER_TICK: usize = 32;
-//RS         for frame in jet_devtools_take_game_control_relays(&self.envelope.session_id)? {
-//RS             jet_game_ingest_devtools_command_frame(&frame, &self.envelope.session_id)?;
-//RS         }
-//RS         let pending = jet_devtools_command_count(&self.envelope.session_id)
-//RS             .min(MAX_CONTROLS_PER_TICK);
-//RS         let mut dispatched = 0usize;
-//RS         for _ in 0..pending {
-//RS             let Some(request) = jet_devtools_poll_game_control(&self.envelope.session_id) else {
-//RS                 break;
-//RS             };
-//RS             let control = jet_game_control_request(request, self)?;
-//RS             self.dispatch_control(timestamp_ms, control)?;
-//RS             dispatched = dispatched.saturating_add(1);
-//RS         }
-//RS         Ok(dispatched)
-//RS     }
-//RS 
-//RS     /// Register the checked Gameplay Debugger extension for a development
-//RS     /// profile. Release policies reject the request before any extension
-//RS     /// value or event payload is constructed.
-//RS     pub fn register_gameplay_debugger(
-//RS         &mut self,
-//RS         timestamp_ms: u64,
-//RS         profile: impl Into<String>,
-//RS     ) -> Result<Option<u64>, String> {
-//RS         if !self.policy.game_debug_data_enabled() {
-//RS             return Err(
-//RS                 "Gameplay Debugger is unavailable outside a development profile".to_string(),
-//RS             );
-//RS         }
-//RS         if self.lifecycle == JetDevtoolsLifecycleState::Stopped {
-//RS             return Err("game dev session is stopped".to_string());
-//RS         }
-//RS         let Some(extension) =
-//RS             GameDevExtension::checked_gameplay_debugger_with_policy(profile, self.policy)?
-//RS         else {
-//RS             return Ok(None);
-//RS         };
-//RS         let source = self.profiler.identity().source.clone();
-//RS         self.push_game_event(
-//RS             timestamp_ms,
-//RS             source,
-//RS             GameDevEvent::GameplayDebugger(extension),
-//RS         )
-//RS         .map(Some)
-//RS     }
-//RS 
-//RS     pub fn record(
-//RS         &mut self,
-//RS         fact: JetGameSampleFact,
-//RS     ) -> Result<JetGameFrameReceipt, JetGameFrameProfilerError> {
-//RS         self.profiler.publish(fact)
-//RS     }
-//RS     pub fn set_trace_context(
-//RS         &mut self,
-//RS         context: JetGameTraceContext,
-//RS     ) -> Result<(), String> {
-//RS         self.profiler
-//RS             .set_context(context)
-//RS             .map_err(|error| error.to_string())
-//RS     }
-//RS 
-//RS     pub fn trace_context(&self) -> Option<&JetGameTraceContext> {
-//RS         self.profiler.context()
-//RS     }
-//RS     pub fn publish_reload_status(
-//RS         &mut self,
-//RS         timestamp_ms: u64,
-//RS         fact: JetGameReloadFact,
-//RS     ) -> Result<u64, String> {
-//RS         if self.lifecycle == JetDevtoolsLifecycleState::Stopped {
-//RS             return Err("game dev session is stopped".to_string());
-//RS         }
-//RS         fact.validate().map_err(|error| error.to_string())?;
-//RS         let source = self.profiler.identity().source.clone();
-//RS         self.push_game_event(timestamp_ms, source, GameDevEvent::ReloadStatus(fact))
-//RS     }
-//RS 
-//RS     /// Record one profiler fact and publish both its frame and receipt through
-//RS     /// the shared envelope. The frame is copied before recording because the
-//RS     /// profiler is the owner of sequence and pause validation.
-// END-PORT-PENDING 0274 crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1-1789
+use core.game.runtime.top_game_dev_protocol_02.[game_dev_json_string, game_dev_json_option]
+use core.game.runtime.kernel_game_frame_profiler.[JetGameFrameIdentity, JetGameFrameSample, JetGameErrorPause, JetGameFrameReceipt, JetGameReloadFact, JetGameDrawEvent, JetGameCrashBundle]
+use core.game.runtime.kernel_game_overlay.[JetGameOverlayTransitionFact, JetGameOverlayAutocompleteFact, JetGameOverlayCommandRow, JetGameOverlayOutputRow, JetGameOverlayMetricValue]
+use core.game.runtime.kernel_game_world_inspector.[JetGameWorldFact, JetGameWorldSelectionProjection, JetGameWorldEditRequest, JetGamePausedEvalResult]
+use core.game.runtime.kernel_game_asset_pipeline.[JetGameAssetWatchFacts, JetGameAssetImportReport, JetGameAssetTransactionReceipt, JetGameAssetRootSet, JetGameAssetWatchEvent]
+use core.game.runtime.kernel_game_hot_swap.[JetGameHotSwapReceipt, JetGameHotSwapExplanation]
+use core.game.runtime.top_game_assets_import.[GameAssetImportAdapter]
+use jet_foundation.Game.[JetGameSwapOutcome]
+use jet_foundation.Devtools.[JetDevtoolsEvent]
+use core.game.runtime.top_game_dev_protocol_02.[game_dev_typed_trace_body, game_dev_swap_body,
+    game_dev_source_span_json, game_dev_frame_identity_json, game_profile_snapshot_json]
+use core.game.runtime.kernel_game_overlay.[JetGameOverlayFilter, JetGameOverlayOutputCategory, JetGameOverlayMetric]
+use core.game.runtime.kernel_game_world_inspector.[JetGameWorldSelection, JetGamePausedEvalRequest]
+use core.game.runtime.kernel_game_frame_profiler.[JetGameTraceIdentity, JetGameTraceContext, JetGameFrameProfiler, JetGameFrameProfilerError, JetGameFrameProfilerState, JetGameSampleFact, JetGamePhaseSample, JetGameFunctionSample, JetGameSourceSpan, JetGameDrawCursor, JetGameBottleneckProjection, require_text]
+use core.game.runtime.kernel_game_asset_pipeline.JetGameAssetNodeIdentity
+use core.game.runtime.kernel_game_overlay.JetGameOverlayState
+use core.game.runtime.kernel_game_world_inspector.[JetGameWorldInspector, JetGameWorldSourceSpan, JetGameWorldEditTarget]
+use core.game.runtime.kernel_game_hot_swap.JetGameHotSwapSnapshot
+use core.game.runtime.top_game_assets_runtime.GameAssetRuntimeAdapter
+use jet_foundation.Game.JetGameDevSession
+use jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsLifecycleState, JetDevtoolsFreshnessFact, JetDevtoolsSourceIdentityFact, JetDevtoolsGameControlRequest, JetDevtoolsGameControlKind, JetDevtoolsGameControlCallbackGuard, JET_DEVTOOLS_PROTOCOL, jet_devtools_enqueue_game_control, jet_devtools_install_game_control_callback, jet_devtools_take_game_control_relays, jet_devtools_command_count, jet_devtools_poll_game_control]
+use core.encoding.runtime.std_data_tree.[DataTree, render_datatree_json]
+use core.encoding.runtime.std_json_codec.parse_json_strict
+use std.sync.LazyLock
+use core.sys as sys
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1
+// Devtools owns transport/protocol/sequencing/serialization; the profiler,
+// overlay, world inspector and hot-swap modules own their shared state.
+// This adapter groups typed facts without a second game protocol.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:11
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub struct GameDevPolicy { pub debug_data_enabled: Bool }
+impl GameDevPolicy {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:17
+    pub fn new(debug_data_enabled: Bool) -> Self { Self{debug_data_enabled: debug_data_enabled} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:21
+    pub fn game_debug_data_enabled(self) -> Bool { self.debug_data_enabled }
+}
+impl Default for GameDevPolicy {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:27
+    fn default() -> Self { Self.new(false) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:32
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct GameDevStopped { pub reason: String, pub frame_index: U64 }
+impl GameDevStopped {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:39
+    pub fn new<T: Into<String>>(reason: T, frame_index: U64) -> Self { Self{reason: reason.into(), frame_index: frame_index} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:46
+    pub fn render_json(self: &Self) -> String { "{{\"reason\":{game_dev_json_string(&self.reason)},\"frame_index\":{self.frame_index}}}" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:54
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum GameDevRunMode { PlayInEditor, SimulateInEditor, Headless }
+impl GameDevRunMode {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:62
+    pub fn as_str(self) -> String { match self { .PlayInEditor -> "play_in_editor", .SimulateInEditor -> "simulate_in_editor", .Headless -> "headless" } }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:70
+    pub fn is_headless(self) -> Bool { self is .Headless }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:75
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum GameDevPhase { Editing, Playing, Simulating, Paused, FrameAdvance }
+impl GameDevPhase {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:85
+    pub fn as_str(self) -> String {
+        match self { .Editing -> "editing", .Playing -> "playing", .Simulating -> "simulating", .Paused -> "paused", .FrameAdvance -> "frame_advance" }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:95
+    pub fn is_running(self) -> Bool { self is .Playing || self is .Simulating }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:100
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum GameDevTransitionOperation { Play, Simulate, Pause, Resume, FrameAdvance, Edit, Eject, Keep, Discard, SelectCategory }
+impl GameDevTransitionOperation {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:115
+    pub fn as_str(self) -> String {
+        match self {
+            .Play -> "play", .Simulate -> "simulate", .Pause -> "pause", .Resume -> "resume", .FrameAdvance -> "frame_advance",
+            .Edit -> "edit", .Eject -> "eject", .Keep -> "keep", .Discard -> "discard", .SelectCategory -> "select_category"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:131
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum GameDevTransitionStatus { Applied, Rejected }
+impl GameDevTransitionStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:138
+    pub fn as_str(self) -> String { match self { .Applied -> "applied", .Rejected -> "rejected" } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:146
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct GameDevTransition {
+    pub sequence: U64
+    pub operation: GameDevTransitionOperation
+    pub before: GameDevPhase
+    pub after: GameDevPhase
+    pub status: GameDevTransitionStatus
+    pub run_mode: GameDevRunMode
+    pub frame_index: U64
+    pub source_revision: String
+    pub selected_world_id: String?
+    pub selected_actor_id: String?
+    pub reason: String
+}
+impl GameDevTransition {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:162
+    pub fn render_json(self: &Self) -> String {
+        "{{\"sequence\":{self.sequence},\"operation\":{game_dev_json_string(self.operation.as_str())},\"before\":{game_dev_json_string(self.before.as_str())},\"after\":{game_dev_json_string(self.after.as_str())},\"status\":{game_dev_json_string(self.status.as_str())},\"run_mode\":{game_dev_json_string(self.run_mode.as_str())},\"frame_index\":{self.frame_index},\"source_revision\":{game_dev_json_string(&self.source_revision)},\"selected_world_id\":{game_dev_json_option(self.selected_world_id.as_deref())},\"selected_actor_id\":{game_dev_json_option(self.selected_actor_id.as_deref())},\"reason\":{game_dev_json_string(&self.reason)}}}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:182
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct GameDevPhaseResult { pub phase: GameDevPhase, pub status: GameDevTransitionStatus, pub detail: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:189
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct GameDevLaunchProfile {
+    pub target: String
+    pub run_mode: GameDevRunMode
+    pub headless_compatible: Bool
+    pub phases: [GameDevPhaseResult]
+}
+impl GameDevLaunchProfile {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:198
+    pub fn new<T: Into<String>>(target: T, run_mode: GameDevRunMode) -> Self {
+        Self{target: target.into(), run_mode: run_mode, headless_compatible: true, phases: []}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:207
+    pub fn record_phase<T: Into<String>>(self: &Self, phase: GameDevPhase, status: GameDevTransitionStatus, detail: T) -> {
+        if self.phases.len() < 256 { self.phases.push(GameDevPhaseResult{phase: phase, status: status, detail: detail.into()}) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:222
+    pub fn headless_variant(self: &Self) -> Self {
+        profile := self.clone()
+        profile.run_mode = GameDevRunMode.Headless
+        ^profile
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:228
+    pub fn render_json(self: &Self) -> String {
+        phases :: self.phases.iter().map(fn(phase) {
+            "{{\"phase\":{game_dev_json_string(phase.phase.as_str())},\"status\":{game_dev_json_string(phase.status.as_str())},\"detail\":{game_dev_json_string(&phase.detail)}}}"
+        }).collect<[String]>().join(",")
+        "{{\"target\":{game_dev_json_string(&self.target)},\"run_mode\":{game_dev_json_string(self.run_mode.as_str())},\"headless_compatible\":{self.headless_compatible},\"phases\":[{phases}]}}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:252
+// First-party extensions are checked values; release profiles never register.
+#Derive(Clone, Debug, PartialEq)
+pub struct GameDevExtension { category: String, extension: String, profile: String }
+impl GameDevExtension {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:262
+    pub const GAMEPLAY_DEBUGGER_CATEGORY: String = "Gameplay Debugger"
+    pub const GAMEPLAY_DEBUGGER_NAME: String = "jet.gameplay.debugger"
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:270
+    pub fn checked_gameplay_debugger_with_policy<T: Into<String>>(profile: T, policy: GameDevPolicy) -> Self? Err! {
+        if !policy.game_debug_data_enabled() -> return Err("Gameplay Debugger is unavailable outside a development profile")
+        profile :: profile.into()
+        trimmed := profile.trim() // #4303
+        if trimmed.is_empty() || profile.chars().any(fn(character) { character.is_control() }) {
+            return Err("game dev extension profile must be non-empty and printable")
+        }
+        if profile == "release" -> return Ok(None)
+        Ok(Val(Self{category: Self.GAMEPLAY_DEBUGGER_CATEGORY, extension: Self.GAMEPLAY_DEBUGGER_NAME, profile: ^profile}))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:295
+    pub fn checked_gameplay_debugger<T: Into<String>>(profile: T) -> Self? Err! {
+        Self.checked_gameplay_debugger_with_policy(profile, GameDevPolicy.new(false))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:302
+    pub fn category(self: &Self) -> String { self.category }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:306
+    pub fn extension(self: &Self) -> String { self.extension }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:310
+    pub fn profile(self: &Self) -> String { self.profile }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:314
+    pub fn render_json(self: &Self) -> String {
+        "{{\"category\":{game_dev_json_string(self.category)},\"extension\":{game_dev_json_string(self.extension)},\"profile\":{game_dev_json_string(&self.profile)},\"development_only\":true,\"capabilities\":[\"Devtools.GameInspect\",\"Devtools.GameControl\"]}}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:325
+#Derive(Clone, Debug, PartialEq)
+pub enum GameDevEvent {
+    Frame(JetGameFrameIdentity)
+    FrameSample(JetGameFrameSample)
+    Diagnostic(JetGameErrorPause)
+    Control(GameDevControl)
+    Transition(GameDevTransition)
+    GameplayDebugger(GameDevExtension)
+    Profile(JetGameFrameReceipt)
+    ReloadStatus(JetGameReloadFact)
+    ProfileComparison(GameProfileComparison)
+    Overlay(JetGameOverlayTransitionFact)
+    OverlayAutocomplete(JetGameOverlayAutocompleteFact)
+    OverlayCommand(JetGameOverlayCommandRow)
+    OverlayOutput(JetGameOverlayOutputRow)
+    OverlayMetric(value: JetGameOverlayMetricValue, frame: JetGameFrameIdentity?)
+    DrawEvent(JetGameDrawEvent)
+    World(JetGameWorldFact)
+    WorldSelection(JetGameWorldSelectionProjection)
+    WorldEdit(JetGameWorldEditRequest)
+    WorldEvaluation(JetGamePausedEvalResult)
+    AssetWatch(JetGameAssetWatchFacts)
+    AssetImportReport(JetGameAssetImportReport)
+    AssetReload(JetGameAssetTransactionReceipt)
+    GameSwap(JetGameSwapOutcome)
+    HotSwap(JetGameHotSwapReceipt)
+    HotSwapExplanation(JetGameHotSwapExplanation)
+    Crash(JetGameCrashBundle)
+    Stopped(GameDevStopped)
+}
+impl GameDevEvent {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:360
+    pub fn kind(self: &Self) -> String {
+        match self {
+            .Frame(_) -> "Frame", .FrameSample(_) -> "GameFrameSample", .Control(_) -> "Control",
+            .Transition(_) -> "GameTransition", .Diagnostic(_) -> "Diagnostic", .GameplayDebugger(_) -> "GameplayDebugger",
+            .Profile(_) -> "Profile", .ReloadStatus(_) -> "ReloadStatus", .ProfileComparison(_) -> "ProfileComparison",
+            .Overlay(_) -> "Overlay", .OverlayAutocomplete(_) -> "OverlayAutocomplete", .OverlayCommand(_) -> "OverlayCommand",
+            .OverlayOutput(_) -> "OverlayOutput", .OverlayMetric(_, _) -> "OverlayMetric", .DrawEvent(_) -> "GameDrawEvent",
+            .World(_) -> "World", .WorldSelection(_) -> "WorldSelection", .WorldEdit(_) -> "WorldEdit", .WorldEvaluation(_) -> "WorldEvaluation",
+            .AssetWatch(_) -> "AssetWatch", .AssetImportReport(_) -> "AssetImportReport", .AssetReload(_) -> "AssetReload",
+            .GameSwap(_) -> "GameSwap", .HotSwap(_) -> "HotSwap", .HotSwapExplanation(_) -> "HotSwapExplanation",
+            .Crash(_) -> "Crash", .Stopped(_) -> "Stopped"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:398
+// Hosts provide already-authorized roots/events; coalescing/import/projection
+// stays in this one protocol owner rather than a second host report.
+pub fn project_asset_watch_import_events<T: Into<String>>(timestamp_ms: U64, source: T, roots: JetGameAssetRootSet, events: [JetGameAssetWatchEvent], skipped_count: USize) -> [JetDevtoolsEvent] Err! {
+    source :: source.into()
+    facts :: JetGameAssetWatchFacts.coalesce_with_skipped(&roots, events, skipped_count).map_err(fn(error) { error.to_string() })?
+    report :: GameAssetImportAdapter.new(^roots).import_report(&facts)
+    Ok([JetDevtoolsEvent]{
+        GameDevEvent.AssetWatch(^facts).to_devtools_event(timestamp_ms, source.clone())?,
+        GameDevEvent.AssetImportReport(^report).to_devtools_event(timestamp_ms, ^source)?
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:417
+impl GameDevEvent {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:419
+    // Typed producer facts project into the one shared devtools envelope.
+    pub fn to_devtools_event<T: Into<String>>(self: &Self,
+        timestamp_ms: U64, source: T) -> JetDevtoolsEvent Err! {
+        source :: source.into()
+        if game_dev_typed_trace_body(self) == Some(body) {
+            return JetDevtoolsEvent.try_new(timestamp_ms, ^source, ^body)
+        }
+        if game_dev_swap_body(self) == Some(body) {
+            return JetDevtoolsEvent.try_new(timestamp_ms, ^source, ^body)
+        }
+        (entity, fields, payload) :: match self {
+            .Frame(frame) -> (
+                frame.scene.clone(),
+                "{{\"frame_id\":{frame.frame_id},\"scene\":{game_dev_json_string(&frame.scene)},\"frame_index\":{frame.frame_index},\"build\":{game_dev_json_string(&frame.build)},\"revision\":{game_dev_json_string(&frame.revision)},\"trace_id\":{game_dev_json_string(&frame.trace_id)}}}",
+                None)
+            .FrameSample(_) | .DrawEvent(_) | .GameSwap(_) ->
+                unreachable("typed game events are handled before field projection")
+            .Diagnostic(pause) -> (
+                pause.source.source_id.clone(),
+                "{{\"code\":{game_dev_json_string(&pause.code)},\"message\":{game_dev_json_string(&pause.message)},\"source\":{game_dev_source_span_json(&pause.source)}}}",
+                None)
+            .Transition(transition) -> (
+                "game",
+                "{{\"operation\":{game_dev_json_string(transition.operation.as_str())},\"before\":{game_dev_json_string(transition.before.as_str())},\"after\":{game_dev_json_string(transition.after.as_str())},\"status\":{game_dev_json_string(transition.status.as_str())},\"run_mode\":{game_dev_json_string(transition.run_mode.as_str())},\"frame_index\":{transition.frame_index},\"source_revision\":{game_dev_json_string(&transition.source_revision)}}}",
+                Some(transition.render_json()))
+            .Control(control) -> ("game", control.render_json(), None)
+            .GameplayDebugger(extension) -> (
+                "game.gameplay_debugger",
+                "{{\"category\":{game_dev_json_string(extension.category())},\"extension\":{game_dev_json_string(extension.extension())},\"profile\":{game_dev_json_string(extension.profile())},\"development_only\":true}}",
+                Some(extension.render_json()))
+            .Profile(receipt) -> (
+                receipt.frame.as_ref().map(fn(frame) { frame.scene.clone() }).unwrap_or_else(fn() { "game" }),
+                "{{\"sequence\":{receipt.sequence},\"kind\":{game_dev_json_string(receipt.kind.as_str())},\"before\":{game_dev_json_string(receipt.before.as_str())},\"after\":{game_dev_json_string(receipt.after.as_str())},\"dropped_samples\":{receipt.dropped_samples}}}",
+                None)
+            .ReloadStatus(fact) -> (
+                "game.reload",
+                "{{\"frame_id\":{fact.frame.frame_id},\"domain\":{game_dev_json_string(&fact.domain)},\"status\":{game_dev_json_string(fact.status.as_str())},\"reason\":{game_dev_json_string(&fact.reason)}}}",
+                Some(fact.render_json()))
+            .ProfileComparison(comparison) -> (
+                comparison.left.identity.scene.clone(),
+                "{{\"scene\":{game_dev_json_string(&comparison.left.identity.scene)},\"target\":{game_dev_json_string(&comparison.left.identity.target)},\"delta_function_ns\":{comparison.total_function_ns_delta},\"regression\":{comparison.is_regression()}}}",
+                Some("{{\"left\":{game_profile_snapshot_json(&comparison.left)},\"right\":{game_profile_snapshot_json(&comparison.right)}}}"))
+            .Overlay(fact) -> {
+                frame :: fact.frame.as_ref().map(game_dev_frame_identity_json).unwrap_or_else(fn() { "null" })
+                ("game.overlay",
+                    "{{\"sequence\":{fact.sequence},\"kind\":{game_dev_json_string(fact.kind.as_str())},\"before\":{game_dev_json_string(fact.before.as_str())},\"after\":{game_dev_json_string(fact.after.as_str())},\"visible\":{fact.visibility.visible},\"input_capture\":{game_dev_json_string(fact.visibility.input_capture.as_str())},\"filter\":{game_dev_json_string(fact.filter.as_str())},\"error_pause_enabled\":{fact.error_pause_enabled},\"frame\":{frame}}}",
+                    Some(fact.render_json()))
+            }
+            .OverlayAutocomplete(fact) -> (
+                "game.overlay",
+                "{{\"query\":{game_dev_json_string(&fact.query)},\"match_count\":{fact.matches.len()}}}",
+                Some(fact.render_json()))
+            .OverlayCommand(command) -> (
+                "game.overlay",
+                "{{\"id\":{command.id},\"timestamp_ns\":{command.timestamp_ns},\"text\":{game_dev_json_string(&command.text)}}}",
+                None)
+            .OverlayOutput(row) -> {
+                payload :: row.published_text().map(fn(_) { row.render_json() })
+                ("game.overlay",
+                    "{{\"id\":{row.id},\"timestamp_ns\":{row.timestamp_ns},\"category\":{game_dev_json_string(row.category.as_str())},\"message\":{game_dev_json_string(&row.message)},\"source_id\":{game_dev_json_option(row.source_id.as_deref())},\"trace_id\":{game_dev_json_option(row.trace_id.as_deref())},\"published\":{row.published_text().is_some()}}}",
+                    ^payload)
+            }
+            .OverlayMetric{value, frame} -> {
+                frame :: frame.as_ref().map(game_dev_frame_identity_json).unwrap_or_else(fn() { "null" })
+                ("game.overlay",
+                    "{{\"metric\":{game_dev_json_string(value.metric.as_str())},\"value\":{value.value},\"sampled_at_ns\":{value.sampled_at_ns},\"frame\":{frame}}}",
+                    None)
+            }
+            .World(world) -> (
+                world.world_id.clone(),
+                "{{\"world_id\":{game_dev_json_string(&world.world_id)},\"frame_id\":{world.frame_id},\"source_id\":{game_dev_json_string(&world.source_id)},\"revision\":{game_dev_json_string(&world.revision)}}}",
+                Some(world.render_json()))
+            .WorldSelection(selection) -> (
+                selection.world_id.clone(),
+                "{{\"world_id\":{game_dev_json_string(&selection.world_id)},\"frame_id\":{selection.frame_id},\"source_id\":{game_dev_json_string(&selection.source_id)},\"revision\":{game_dev_json_string(&selection.revision)}}}",
+                Some(selection.render_json()))
+            .WorldEdit(request) -> (
+                "game.world",
+                "{{\"field\":{game_dev_json_string(&request.field_patch.field)},\"target_count\":{request.targets.len()}}}",
+                Some(request.render_json()))
+            .WorldEvaluation(result) -> (
+                "game.world",
+                "{{\"request_id\":{game_dev_json_string(&result.request_id)},\"status\":{game_dev_json_string(&result.status)},\"type_name\":{game_dev_json_string(&result.type_name)}}}",
+                Some(result.render_json()))
+            .AssetWatch(facts) -> (
+                "game.assets",
+                "{{\"created\":{facts.created.len()},\"changed\":{facts.changed.len()},\"deleted\":{facts.deleted.len()},\"events\":{facts.events.len()},\"skipped_count\":{facts.skipped_count}}}",
+                Some(facts.render_json()))
+            .AssetImportReport(report) -> (
+                "game.assets",
+                "{{\"imported\":{report.imported.len()},\"dependencies\":{report.dependencies.len()},\"created\":{report.created.len()},\"deleted\":{report.deleted.len()},\"skipped\":{report.skipped.len()},\"skipped_count\":{report.skipped_count},\"diagnostics\":{report.diagnostics.len()}}}",
+                Some(report.render_json()))
+            .AssetReload(receipt) -> (
+                "game.assets",
+                "{{\"transaction_id\":{receipt.transaction_id},\"status\":{game_dev_json_string(receipt.status.as_str())},\"entries\":{receipt.entries.len()},\"revision_before\":{receipt.revision_before},\"revision_after\":{receipt.revision_after}}}",
+                Some(receipt.render_json()))
+            .HotSwap(receipt) -> (
+                "game.hotswap",
+                "{{\"transaction_id\":{receipt.transaction_id},\"phase\":{game_dev_json_string(receipt.phase.as_str())},\"committed\":{receipt.is_committed()},\"rolled_back\":{receipt.is_rolled_back()},\"from\":{receipt.from_identity.render_json()},\"to\":{receipt.to_identity.render_json()}}}",
+                Some(receipt.render_json()))
+            .HotSwapExplanation(explanation) -> {
+                transaction_id :: explanation.transaction_id.map(fn(value) { value.to_string() }).unwrap_or_else(fn() { "null" })
+                ("game.hotswap",
+                    "{{\"compatible\":{explanation.compatible},\"code\":{game_dev_json_string(&explanation.code)},\"message\":{game_dev_json_string(&explanation.message)},\"transaction_id\":{transaction_id}}}",
+                    Some(explanation.render_json()))
+            }
+            .Crash(bundle) -> (
+                "game.crash",
+                "{{\"frame_id\":{bundle.frame.frame_id},\"reason\":{game_dev_json_string(&bundle.reason)},\"target\":{game_dev_json_string(&bundle.target)},\"upload_policy\":{game_dev_json_string(bundle.upload_policy.as_str())}}}",
+                Some(bundle.render_json()))
+            .Stopped(stopped) -> (
+                "game",
+                "{{\"reason\":{game_dev_json_string(&stopped.reason)},\"frame_index\":{stopped.frame_index}}}",
+                Some(stopped.render_json()))
+        }
+        JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, ^source, self.kind(), ^entity, ^fields, ^payload)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:748
+#Derive(Clone, Debug, Eq, PartialEq)
+pub enum GameDevInput {
+    Key{code: String, pressed: Bool}
+    Button{name: String, pressed: Bool}
+    Axis{name: String, value: I64}
+}
+impl GameDevInput {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:756
+    pub fn key<T: Into<String>>(code: T, pressed: Bool) -> Self {
+        Self.Key{code: code.into(), pressed: pressed}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:763
+    pub fn button<T: Into<String>>(name: T, pressed: Bool) -> Self {
+        Self.Button{name: name.into(), pressed: pressed}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:770
+    pub fn axis<T: Into<String>>(name: T, value: I64) -> Self {
+        Self.Axis{name: name.into(), value: value}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:777
+    pub fn render_json(self: &Self) -> String {
+        match self {
+            .Key{code, pressed} -> "{{\"kind\":\"key\",\"code\":{game_dev_json_string(code)},\"pressed\":{pressed}}}"
+            .Button{name, pressed} -> "{{\"kind\":\"button\",\"name\":{game_dev_json_string(name)},\"pressed\":{pressed}}}"
+            .Axis{name, value} -> "{{\"kind\":\"axis\",\"name\":{game_dev_json_string(name)},\"value\":{value}}}"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:799
+#Derive(Clone, Debug, Eq, PartialEq)
+pub enum GameDevControl {
+    Play, Simulate, Pause, Step, FrameAdvance, Resume, Edit
+    Eject{world_id: String, actor_id: String}
+    Keep(JetGameWorldEditRequest)
+    Discard
+    SelectGameplayCategory(String)
+    Input(GameDevInput)
+    Console(String)
+    Autocomplete{query: String, commands: [String]}
+    ToggleOverlay
+    SetOverlayVisible(Bool)
+    SetInputCapture(Bool)
+    SetErrorPauseEnabled(Bool)
+    SetFilter(JetGameOverlayFilter)
+    ToggleFilter(JetGameOverlayOutputCategory)
+    SelectMetric(JetGameOverlayMetric)
+    DeselectMetric(JetGameOverlayMetric)
+    SelectWorld(JetGameWorldSelection)
+    EditWorld(JetGameWorldEditRequest)
+    EvaluateWorld(JetGamePausedEvalRequest)
+}
+impl GameDevControl {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:831
+    pub fn render_json(self: &Self) -> String {
+        match self {
+            .Pause -> "{\"kind\":\"pause\"}"
+            .Step -> "{\"kind\":\"step\"}"
+            .Resume -> "{\"kind\":\"resume\"}"
+            .Input(input) -> "{{\"kind\":\"input\",\"input\":{input.render_json()}}}"
+            .Console(command) -> "{{\"kind\":\"console\",\"command\":{game_dev_json_string(command)}}}"
+            .Autocomplete{query, commands} -> {
+                commands :: commands.iter().map(fn(command) { game_dev_json_string(command) }).collect<[String]>().join(",")
+                "{{\"kind\":\"autocomplete\",\"query\":{game_dev_json_string(query)},\"commands\":[{commands}]}}"
+            }
+            .Play -> "{\"kind\":\"play\"}"
+            .Simulate -> "{\"kind\":\"simulate\"}"
+            .FrameAdvance -> "{\"kind\":\"frame_advance\"}"
+            .Edit -> "{\"kind\":\"edit\"}"
+            .Eject{world_id, actor_id} -> "{{\"kind\":\"eject\",\"world_id\":{game_dev_json_string(world_id)},\"actor_id\":{game_dev_json_string(actor_id)}}}"
+            .Keep(request) -> "{{\"kind\":\"keep\",\"request\":{request.render_json()}}}"
+            .Discard -> "{\"kind\":\"discard\"}"
+            .SelectGameplayCategory(category) -> "{{\"kind\":\"select_category\",\"category\":{game_dev_json_string(category)}}}"
+            .ToggleOverlay -> "{\"kind\":\"toggle_overlay\"}"
+            .SetOverlayVisible(visible) -> "{{\"kind\":\"set_overlay_visible\",\"visible\":{visible}}}"
+            .SetInputCapture(capture) -> "{{\"kind\":\"set_input_capture\",\"capture\":{capture}}}"
+            .SetFilter(filter) -> "{{\"kind\":\"set_filter\",\"filter\":{game_dev_json_string(filter.as_str())}}}"
+            .ToggleFilter(category) -> "{{\"kind\":\"toggle_filter\",\"category\":{game_dev_json_string(category.as_str())}}}"
+            .SetErrorPauseEnabled(enabled) -> "{{\"kind\":\"set_error_pause_enabled\",\"enabled\":{enabled}}}"
+            .SelectMetric(metric) -> "{{\"kind\":\"select_metric\",\"metric\":{game_dev_json_string(metric.as_str())}}}"
+            .DeselectMetric(metric) -> "{{\"kind\":\"deselect_metric\",\"metric\":{game_dev_json_string(metric.as_str())}}}"
+            .SelectWorld(selection) -> "{{\"kind\":\"select_world\",\"selection\":{selection.render_json()}}}"
+            .EditWorld(request) -> "{{\"kind\":\"edit_world\",\"request\":{request.render_json()}}}"
+            .EvaluateWorld(request) -> "{{\"kind\":\"evaluate_world\",\"request\":{request.render_json()}}}"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:916
+// Sessions retain the host's complete four-part run key; rings never share sessions.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct GameDevRunIdentity {
+    pub session: String
+    pub source: String
+    pub build: String
+    pub revision: String
+}
+impl GameDevRunIdentity {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:929
+    pub fn new<S: Into<String>, O: Into<String>, B: Into<String>, R: Into<String>>(session: S, source: O, build: B, revision: R) -> Self {
+        Self{session: session.into(), source: source.into(), build: build.into(), revision: revision.into()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:943
+    pub fn trace_identity(self: &Self) -> JetGameTraceIdentity {
+        JetGameTraceIdentity.new(self.build.clone(), self.revision.clone(), self.source.clone())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:951
+    pub fn validate(self: &Self) -> Unit JetGameFrameProfilerError! {
+        require_text(self.session, "session")?
+        self.trace_identity().validate()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:957
+// Sequencing, identity validation, pause transitions and retention belong to the profiler.
+#Derive(Clone, Debug)
+pub struct GameDevProfileRing { identity: GameDevRunIdentity, profiler: JetGameFrameProfiler }
+impl GameDevProfileRing {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:966
+    pub fn new(identity: GameDevRunIdentity) -> Self JetGameFrameProfilerError! {
+        identity.validate()?
+        profiler :: JetGameFrameProfiler.new(identity.trace_identity())
+        Ok(Self{identity: ^identity, profiler: ^profiler})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:974
+    pub fn with_capacity(identity: GameDevRunIdentity, capacity: Int) -> Self JetGameFrameProfilerError! {
+        identity.validate()?
+        profiler :: JetGameFrameProfiler.with_capacity(identity.trace_identity(), capacity)
+        Ok(Self{identity: ^identity, profiler: ^profiler})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:983
+    pub fn identity(self: &Self) -> &GameDevRunIdentity { &self.identity }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:987
+    pub fn profiler(self: &Self) -> &JetGameFrameProfiler { &self.profiler }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:991
+    pub fn profiler_mut(self: &Self) -> &JetGameFrameProfiler { &self.profiler }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:994
+    pub fn set_context(self: &Self, context: JetGameTraceContext) -> Unit JetGameFrameProfilerError! { &self.profiler.set_context(^context) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1001
+    pub fn context(self: &Self) -> &JetGameTraceContext? {
+        match self.profiler.context { Val(context) -> Val(&context), None -> None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1005
+    pub fn next_sequence(self: &Self) -> U64 { self.profiler.history.next_sequence }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1009
+    pub fn publish(self: &Self, fact: JetGameSampleFact) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.profiler.record(^fact) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1016
+    pub fn publish_frame(self: &Self, sample: JetGameFrameSample) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.profiler.record_frame(^sample) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1023
+    pub fn publish_phase(self: &Self, sample: JetGamePhaseSample) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.profiler.record_phase(^sample) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1030
+    pub fn publish_function(self: &Self, sample: JetGameFunctionSample) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.profiler.record_function(^sample) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1037
+    pub fn publish_draw(self: &Self, event: JetGameDrawEvent) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.profiler.record_draw(^event) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1044
+    pub fn pause(self: &Self) -> JetGameFrameReceipt { &self.profiler.pause() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1048
+    pub fn resume(self: &Self) -> JetGameFrameReceipt { &self.profiler.resume() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1052
+    pub fn error_pause<C: Into<String>, M: Into<String>>(self: &Self, source: JetGameSourceSpan, code: C, message: M) -> JetGameFrameReceipt JetGameFrameProfilerError! {
+        &self.profiler.pause_on_error(^source, code.into(), message.into())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1061
+    pub fn draw_cursor(self: &Self, frame: JetGameFrameIdentity) -> JetGameDrawCursor JetGameFrameProfilerError! { self.profiler.draw_cursor(^frame) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1068
+    pub fn snapshot(self: &Self, identity: GameProfileIdentity) -> GameProfileSnapshot GameProfileComparisonError! { GameProfileSnapshot.from_ring(self, ^identity) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1075
+    pub fn bottleneck(self: &Self, limit: Int) -> JetGameBottleneckProjection { self.profiler.bottleneck(limit) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1080
+// Build is deliberately not a comparison join key; scene, target and exact assets are.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct GameProfileIdentity { pub scene: String, pub build: String, pub target: String, pub assets: [JetGameAssetNodeIdentity] }
+impl GameProfileIdentity {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1093
+    pub fn new<S: Into<String>, B: Into<String>, T: Into<String>>(scene: S, build: B, target: T, assets: [JetGameAssetNodeIdentity]) -> Self {
+        Self{scene: scene.into(), build: build.into(), target: target.into(), assets: ^assets}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1108
+#Error
+#Derive(Clone, Debug, Eq, PartialEq)
+pub enum GameProfileComparisonError {
+    Incomplete(side: String, state: JetGameFrameProfilerState)
+    IncompatibleIdentity(field: String, left: String, right: String)
+}
+impl GameProfileComparisonError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1122
+    pub fn code(self: &Self) -> String {
+        match self { .Incomplete(_, _) -> "profile_incomplete", .IncompatibleIdentity(_, _, _) -> "profile_identity_mismatch" }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1129
+    pub fn message(self: &Self) -> String {
+        match self {
+            .Incomplete(side, state) -> "{side} profile is not complete; profiler state is {state.as_str()}"
+            .IncompatibleIdentity(field, left, right) -> "profile identity mismatch for {field}: `{left}` versus `{right}`"
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1141
+// Frozen projection owns only copied canonical profiler facts.
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct GameProfileSnapshot {
+    pub identity: GameProfileIdentity
+    pub run: GameDevRunIdentity
+    pub trace_identity: JetGameTraceIdentity
+    pub projection: JetGameBottleneckProjection
+}
+impl GameProfileSnapshot {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1152
+    pub fn from_profiler(profiler: &JetGameFrameProfiler, run: GameDevRunIdentity, identity: GameProfileIdentity) -> Self GameProfileComparisonError! {
+        if profiler.state != JetGameFrameProfilerState.Paused {
+            return Err(GameProfileComparisonError.Incomplete("profile", profiler.state))
+        }
+        trace_identity :: profiler.trace_identity.clone()
+        if run.build != trace_identity.build {
+            return Err(GameProfileComparisonError.IncompatibleIdentity("build", ^run.build, ^trace_identity.build))
+        }
+        if run.revision != trace_identity.revision {
+            return Err(GameProfileComparisonError.IncompatibleIdentity("revision", ^run.revision, ^trace_identity.revision))
+        }
+        if run.source != trace_identity.trace_id {
+            return Err(GameProfileComparisonError.IncompatibleIdentity("source", ^run.source, ^trace_identity.trace_id))
+        }
+        if trace_identity.build != identity.build {
+            return Err(GameProfileComparisonError.IncompatibleIdentity("build", ^identity.build, ^trace_identity.build))
+        }
+        projection :: profiler.bottleneck(128)
+        Ok(Self{identity: ^identity, run: ^run, trace_identity: ^trace_identity, projection: ^projection})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1201
+    pub fn from_ring(ring: &GameDevProfileRing, identity: GameProfileIdentity) -> Self GameProfileComparisonError! {
+        Self.from_profiler(&ring.profiler, ring.identity.clone(), ^identity)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1209
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct GameProfileComparison { pub left: GameProfileSnapshot, pub right: GameProfileSnapshot, pub total_function_ns_delta: I128 }
+impl GameProfileComparison {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1220
+    pub fn compare(left: GameProfileSnapshot, right: GameProfileSnapshot) -> Self GameProfileComparisonError! {
+        if left.identity.scene != right.identity.scene {
+            return Err(GameProfileComparisonError.IncompatibleIdentity("scene", left.identity.scene.clone(), right.identity.scene.clone()))
+        }
+        if left.identity.target != right.identity.target {
+            return Err(GameProfileComparisonError.IncompatibleIdentity("target", left.identity.target.clone(), right.identity.target.clone()))
+        }
+        if left.identity.assets != right.identity.assets {
+            left_assets :: left.identity.assets.iter().map(fn(asset) { asset.key() }).collect<[String]>().join(",")
+            right_assets :: right.identity.assets.iter().map(fn(asset) { asset.key() }).collect<[String]>().join(",")
+            return Err(GameProfileComparisonError.IncompatibleIdentity("assets", ^left_assets, ^right_assets))
+        }
+        delta :: I128{right.projection.total_function_ns} - I128{left.projection.total_function_ns}
+        Ok(Self{left: ^left, right: ^right, total_function_ns_delta: delta})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1269
+    pub fn is_regression(self: &Self) -> Bool { self.total_function_ns_delta > 0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1274
+const JET_GAME_DEVTOOLS_COMMAND_FRAME_MAX: Int = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1276
+fn jet_game_control_object(value: &DataTree) -> &[(String, DataTree)] Err! {
+    match value {
+        .Object(fields) -> Ok(&fields)
+        _ -> Err("game control command payload must be an object")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1285
+fn jet_game_control_field(fields: &[(String, DataTree)], name: String) -> &DataTree? {
+    loop (field_name, value) in fields { if field_name == name -> return Val(&value) }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1294
+fn jet_game_control_required_text(fields: &[(String, DataTree)], name: String) -> String Err! {
+    match jet_game_control_field(fields, name) {
+        Val(.Text(value) | .TypedText(value)) if !value.is_empty() -> Ok(value.clone())
+        Val(_) -> Err("game control field `{name}` must be non-empty text")
+        None -> Err("game control field `{name}` is required")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1309
+fn jet_game_control_optional_text(fields: &[(String, DataTree)], name: String) -> String? Err! {
+    match jet_game_control_field(fields, name) {
+        None | Val(.Null) -> Ok(None)
+        Val(.Text(value) | .TypedText(value)) if !value.is_empty() -> Ok(Val(value.clone()))
+        Val(_) -> Err("game control field `{name}` must be text or null")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1324
+fn jet_game_control_optional_u64(fields: &[(String, DataTree)], name: String) -> U64? Err! {
+    match jet_game_control_field(fields, name) {
+        None | Val(.Null) -> Ok(None)
+        Val(.Int(value)) if value >= 0 -> Ok(Val(value as U64))
+        Val(.Number(value)) -> value.parse<U64>().map(fn(number) { Val(number) }).map_err(fn(_) { "game control field `{name}` is outside u64" })
+        Val(_) -> Err("game control field `{name}` must be an unsigned integer")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1339
+fn jet_game_decode_control_request(session_id: String, payload: String) -> JetDevtoolsGameControlRequest Err! {
+    value :: parse_json_strict(payload).map_err(fn(_) { "invalid game control payload" })?
+    fields :: jet_game_control_object(&value)?
+    expected :: ["session_id", "request_id", "kind", "source_id", "revision", "world_id", "actor_id", "component_id", "authored_instance_id", "source_span_start", "source_span_end", "field", "value", "category", "expression", "required_authority", "frame_id", "budget"]
+    if fields.len() != expected.len() || !fields.iter().all(fn((key, _)) { expected.iter().any(fn(expected_key) { key == expected_key }) }) {
+        return Err("game control payload has unexpected fields")
+    }
+    payload_session :: jet_game_control_required_text(fields, "session_id")?
+    if payload_session != session_id -> return Err("game control payload session identity mismatch")
+    request_id :: jet_game_control_required_text(fields, "request_id")?
+    kind :: JetDevtoolsGameControlKind.from_str(jet_game_control_required_text(fields, "kind")?)?
+    request := JetDevtoolsGameControlRequest.new(^payload_session, ^request_id, kind)?
+    request.source_id = jet_game_control_optional_text(fields, "source_id")?
+    request.revision = jet_game_control_optional_text(fields, "revision")?
+    request.world_id = jet_game_control_optional_text(fields, "world_id")?
+    request.actor_id = jet_game_control_optional_text(fields, "actor_id")?
+    request.component_id = jet_game_control_optional_text(fields, "component_id")?
+    request.authored_instance_id = jet_game_control_optional_text(fields, "authored_instance_id")?
+    request.source_span_start = jet_game_control_optional_u64(fields, "source_span_start")?
+    request.source_span_end = jet_game_control_optional_u64(fields, "source_span_end")?
+    request.field = jet_game_control_optional_text(fields, "field")?
+    request.value = jet_game_control_optional_text(fields, "value")?
+    request.category = jet_game_control_optional_text(fields, "category")?
+    request.expression = jet_game_control_optional_text(fields, "expression")?
+    request.required_authority = jet_game_control_optional_text(fields, "required_authority")?
+    request.frame_id = jet_game_control_optional_u64(fields, "frame_id")?
+    request.budget = jet_game_control_optional_u64(fields, "budget")?
+    request.validate()?
+    Ok(^request)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1404
+fn jet_game_ingest_devtools_command_frame(frame: String, expected_session_id: String) -> Int Err! {
+    value :: parse_json_strict(frame).map_err(fn(_) { "invalid game control command frame" })?
+    fields :: jet_game_control_object(&value)?
+    protocol :: jet_game_control_required_text(fields, "protocol")?
+    if protocol != JET_DEVTOOLS_PROTOCOL -> return Err("game control command frame protocol mismatch")
+    session_id :: jet_game_control_required_text(fields, "session_id")?
+    if session_id != expected_session_id -> return Err("game control command frame session identity mismatch")
+    _ :: jet_game_control_optional_u64(fields, "started_at_ms")?.ok_or_else(fn() { "game control command frame requires started_at_ms" })?
+    direction :: jet_game_control_required_text(fields, "direction")?
+    if direction != "host_to_runtime" -> return Err("game control command frame direction mismatch")
+    commands :: match jet_game_control_field(fields, "commands") {
+        Val(.Array(commands)) -> &commands
+        _ -> return Err("game control command frame requires commands")
+    }
+    if commands.len() > JET_GAME_DEVTOOLS_COMMAND_FRAME_MAX -> return Err("game control command frame exceeds command limit")
+    accepted: Int := 0
+    loop command in commands {
+        command_fields :: jet_game_control_object(command)?
+        kind :: jet_game_control_required_text(command_fields, "kind")?
+        if kind != "GameControl" -> return Err("unsupported game control command `{kind}`")
+        payload :: jet_game_control_field(command_fields, "payload").ok_or_else(fn() { "game control command is missing payload" })?
+        payload :: render_datatree_json(payload, false, 0)
+        request :: jet_game_decode_control_request(session_id, payload)?
+        jet_devtools_enqueue_game_control(^request)?
+        accepted = accepted.saturating_add(1)
+    }
+    Ok(accepted)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1449
+fn jet_game_devtools_callback(session_id: String, payload: String) -> Unit Err! {
+    request :: jet_game_decode_control_request(session_id, payload)?
+    jet_devtools_enqueue_game_control(^request)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1454
+// GATE #4565: kernel primitive
+static JET_GAME_DEVTOOLS_CALLBACK_GUARD: LazyLock<JetDevtoolsGameControlCallbackGuard?> =
+    #Unsafe("initialize and retain the single process-lifetime game-control callback guard") {
+        LazyLock.new(fn() { jet_devtools_install_game_control_callback(jet_game_devtools_callback).ok() })
+    }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1460
+fn jet_game_install_devtools_callback() -> {
+    // Only authorized sessions call this; the session policy owns control reachability.
+    // GATE #4565: kernel primitive
+    #Unsafe("force the lazy callback installation without releasing its process-lifetime guard") {
+        _ :: LazyLock.force(&JET_GAME_DEVTOOLS_CALLBACK_GUARD)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1467
+fn jet_game_control_request(request: JetDevtoolsGameControlRequest, session: &GameDevSession) -> GameDevControl Err! {
+    identity :: session.profiler.identity()
+    if request.session_id != identity.session -> return Err("game control request session identity mismatch")
+    if request.source_id is Val(source_id) {
+        if source_id != identity.source -> return Err("game control request source identity mismatch")
+    }
+    if request.revision is Val(revision) {
+        if revision != identity.revision -> return Err("game control request revision identity mismatch")
+    }
+    match request.kind {
+        .Play -> Ok(GameDevControl.Play)
+        .Simulate -> Ok(GameDevControl.Simulate)
+        .Pause -> Ok(GameDevControl.Pause)
+        .Step -> Ok(GameDevControl.Step)
+        .Resume -> Ok(GameDevControl.Resume)
+        .FrameAdvance -> Ok(GameDevControl.FrameAdvance)
+        .Edit -> Ok(GameDevControl.Edit)
+        .Discard -> Ok(GameDevControl.Discard)
+        .SelectCategory -> Ok(GameDevControl.SelectGameplayCategory(request.category.ok_or_else(fn() { "select_category requires category" })?))
+        .SelectWorld -> {
+            world_id :: request.world_id.ok_or_else(fn() { "select_world requires world_id" })?
+            selection :: JetGameWorldSelection.new(^world_id, ^request.actor_id, ^request.component_id, ^request.field).map_err(fn(error) { error.to_string() })?
+            Ok(GameDevControl.SelectWorld(^selection))
+        }
+        .EvaluateWorld -> {
+            world_id :: request.world_id.ok_or_else(fn() { "evaluate_world requires world_id" })?
+            frame_id :: request.frame_id.ok_or_else(fn() { "evaluate_world requires frame_id" })?
+            actor_id :: request.actor_id.ok_or_else(fn() { "evaluate_world requires actor_id" })?
+            component_id :: request.component_id.ok_or_else(fn() { "evaluate_world requires component_id" })?
+            expression :: request.expression.ok_or_else(fn() { "evaluate_world requires expression" })?
+            required_authority :: request.required_authority.ok_or_else(fn() { "evaluate_world requires required_authority" })?
+            budget :: request.budget.ok_or_else(fn() { "evaluate_world requires budget" })?
+            JetGamePausedEvalRequest.new(^request.request_id, identity.session.clone(), ^world_id, frame_id, ^actor_id, ^component_id, ^expression, ^required_authority, budget)
+                .map_err(fn(error) { error.to_string() })?.with_tier("game")
+                .map(fn(evaluation) { GameDevControl.EvaluateWorld(^evaluation) }).map_err(fn(error) { error.to_string() })
+        }
+        .Eject -> Ok(GameDevControl.Eject{
+            world_id: request.world_id.ok_or_else(fn() { "eject requires world_id" })?,
+            actor_id: request.actor_id.ok_or_else(fn() { "eject requires actor_id" })?})
+        .Keep | .EditWorld -> {
+            source_id :: request.source_id.ok_or_else(fn() { "world edit requires source_id" })?
+            revision :: request.revision.ok_or_else(fn() { "world edit requires revision" })?
+            authored_instance_id :: request.authored_instance_id.ok_or_else(fn() { "world edit requires authored_instance_id" })?
+            start :: request.source_span_start.ok_or_else(fn() { "world edit requires source_span_start" })?
+            end :: request.source_span_end.ok_or_else(fn() { "world edit requires source_span_end" })?
+            field :: request.field.ok_or_else(fn() { "world edit requires field" })?
+            value :: request.value.ok_or_else(fn() { "world edit requires value" })?
+            // GATE #4483: selected target width, never the compiler host width.
+            maximum :: sys.usize_max()
+            if start > maximum -> return Err("world edit source span is too large")
+            if end > maximum -> return Err("world edit source span is too large")
+            span :: JetGameWorldSourceSpan.new(Int.from_u64(start), Int.from_u64(end)).map_err(fn(error) { error.to_string() })?
+            target :: JetGameWorldEditTarget.new(^source_id, ^revision, ^authored_instance_id, ^span).map_err(fn(error) { error.to_string() })?
+                .with_session_identity(identity.session.clone(), "game").map_err(fn(error) { error.to_string() })?
+            edit :: JetGameWorldEditRequest.new([^target], ^field, ^value).map_err(fn(error) { error.to_string() })?
+            if request.kind is .Keep { Ok(GameDevControl.Keep(^edit)) } else { Ok(GameDevControl.EditWorld(^edit)) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1605
+// The envelope is the sole transport owner; game state lives in canonical Core modules.
+#Derive(Clone, Debug)
+pub struct GameDevSession {
+    pub envelope: JetDevtoolsEnvelope
+    pub lifecycle: JetDevtoolsLifecycleState
+    pub profiler: GameDevProfileRing
+    pub overlay: JetGameOverlayState
+    pub inspector: JetGameWorldInspector
+    pub asset_roots: JetGameAssetRootSet
+    pub policy: GameDevPolicy
+    pub swap_session: JetGameDevSession
+    asset_import: GameAssetImportAdapter
+    asset_runtime: GameAssetRuntimeAdapter
+    pub last_asset_watch: JetGameAssetWatchFacts?
+    pub last_asset_import_report: JetGameAssetImportReport?
+    pub hot_swap_live: JetGameHotSwapSnapshot?
+    pub last_input: GameDevInput?
+    pub phase: GameDevPhase
+    pub run_mode: GameDevRunMode
+    pub frame_index: U64
+    pub selected_world_id: String?
+    pub selected_actor_id: String?
+    pub selected_debugger_category: String?
+    pub launch_profile: GameDevLaunchProfile
+    pending_world_edits: [JetGameWorldEditRequest]
+    next_transition_sequence: U64
+    frame_advance_pending: Bool
+    draw_cursor: JetGameDrawCursor?
+}
+impl GameDevSession {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1637
+    pub fn new(identity: GameDevRunIdentity, started_at_ms: U64) -> Self JetGameFrameProfilerError! {
+        Self.new_with_policy(^identity, started_at_ms, GameDevPolicy.new(false))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1644
+    pub fn new_with_policy(identity: GameDevRunIdentity, started_at_ms: U64, policy: GameDevPolicy) -> Self JetGameFrameProfilerError! {
+        if !policy.game_debug_data_enabled() {
+            return Err(JetGameFrameProfilerError.InvalidTraceContext("game development data is disabled for this profile"))
+        }
+        profiler :: GameDevProfileRing.new(identity.clone())?
+        launch_profile :: GameDevLaunchProfile.new(identity.source.clone(), GameDevRunMode.Headless)
+        asset_roots :: JetGameAssetRootSet.default()
+        inspector := JetGameWorldInspector.default()
+        &inspector.set_session_identity(identity.session.clone(), "game")
+        envelope := JetDevtoolsEnvelope.new(identity.session.clone(), started_at_ms)
+        envelope.lifecycle = JetDevtoolsLifecycleState.Ready
+        envelope.freshness = JetDevtoolsFreshnessFact.fresh(started_at_ms)
+        envelope.source_identity = Val(JetDevtoolsSourceIdentityFact.new(Val(identity.source.clone()), Val(identity.build.clone()), Val(identity.revision.clone()), None))
+        Ok(Self{envelope: ^envelope, lifecycle: JetDevtoolsLifecycleState.Ready, profiler: ^profiler,
+            overlay: JetGameOverlayState.new(), inspector: ^inspector, swap_session: JetGameDevSession.new(),
+            asset_import: GameAssetImportAdapter.new(asset_roots.clone()), asset_runtime: GameAssetRuntimeAdapter.new(),
+            asset_roots: ^asset_roots, policy: policy, last_asset_watch: None, last_asset_import_report: None,
+            hot_swap_live: None, last_input: None, phase: GameDevPhase.Editing, run_mode: GameDevRunMode.Headless,
+            frame_index: 0, selected_world_id: None, selected_actor_id: None, selected_debugger_category: None,
+            launch_profile: ^launch_profile, pending_world_edits: [], next_transition_sequence: 1,
+            frame_advance_pending: false, draw_cursor: None})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1697
+    pub fn game_debug_data_enabled(self: &Self) -> Bool { self.policy.game_debug_data_enabled() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1704
+    // Both callback and separate-process relay commands reach the single transition owner.
+    pub fn dispatch_pending_devtools_controls(self: &Self, timestamp_ms: U64) -> Int Err! {
+        const MAX_CONTROLS_PER_TICK: Int = 32
+        loop frame in jet_devtools_take_game_control_relays(self.envelope.session_id)? {
+            _ :: jet_game_ingest_devtools_command_frame(frame, self.envelope.session_id)?
+        }
+        pending :: jet_devtools_command_count(self.envelope.session_id).min(MAX_CONTROLS_PER_TICK)
+        dispatched: Int := 0
+        loop _ in 0..<pending {
+            request :: jet_devtools_poll_game_control(self.envelope.session_id) ?? break
+            control :: jet_game_control_request(^request, self)?
+            _ :: &self.dispatch_control(timestamp_ms, ^control)?
+            dispatched = dispatched.saturating_add(1)
+        }
+        Ok(dispatched)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1729
+    // Reject release policies before constructing extension values or events.
+    pub fn register_gameplay_debugger<T: Into<String>>(self: &Self, timestamp_ms: U64, profile: T) -> U64? Err! {
+        if !self.policy.game_debug_data_enabled() -> return Err("Gameplay Debugger is unavailable outside a development profile")
+        if self.lifecycle == JetDevtoolsLifecycleState.Stopped -> return Err("game dev session is stopped")
+        extension :: GameDevExtension.checked_gameplay_debugger_with_policy(profile, self.policy)? ?? return Ok(None)
+        source :: self.profiler.identity().source.clone()
+        &self.push_game_event(timestamp_ms, ^source, GameDevEvent.GameplayDebugger(^extension)).map(fn(sequence) { Val(sequence) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1756
+    pub fn record(self: &Self, fact: JetGameSampleFact) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.profiler.publish(^fact) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1762
+    pub fn set_trace_context(self: &Self, context: JetGameTraceContext) -> Unit Err! {
+        &self.profiler.set_context(^context).map_err(fn(error) { error.to_string() })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1771
+    pub fn trace_context(self: &Self) -> &JetGameTraceContext? { self.profiler.context() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1774
+    pub fn publish_reload_status(self: &Self, timestamp_ms: U64, fact: JetGameReloadFact) -> U64 Err! {
+        if self.lifecycle == JetDevtoolsLifecycleState.Stopped -> return Err("game dev session is stopped")
+        fact.validate().map_err(fn(error) { error.to_string() })?
+        source :: self.profiler.identity().source.clone()
+        &self.push_game_event(timestamp_ms, ^source, GameDevEvent.ReloadStatus(^fact))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:1787
+// Recording/publishing the next fact is continued by the next same-owner packet.
 

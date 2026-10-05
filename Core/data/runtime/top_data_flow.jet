@@ -1,1797 +1,906 @@
-// PORT-PENDING 0261 crates-jet-codegen-src-prelude-corelib-top-dataflow-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1-1793
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-DATAFLOW1=A: typed pull streams, DataLimits, DataError analytics (edition 2027).
-//RS 
-//RS /// D-COLUMNAR-BOUNDARY1=A: the checked Arrow owner is connected to the safe
-//RS /// `JetStd` carrier only in the demand-emitted Arrow flow. The always-present
-//RS /// type surface stores an operation object; this module supplies the checked
-//RS /// Foundation owner and its row adapter without exposing C pointers.
-//RS impl<T> jet_std::DataArrowBatch<T>
-//RS where
-//RS     T: crate::jet_arrow_data::ArrowRow + Clone + 'static,
-//RS {
-//RS     pub fn new(owner: crate::jet_arrow_data::ColumnBatch<T>) -> Self {
-//RS         Self::from_ops(Box::new(owner))
-//RS     }
-//RS }
-//RS 
-//RS impl<T> jet_std::DataArrowOps<T> for crate::jet_arrow_data::ColumnBatch<T>
-//RS where
-//RS     T: crate::jet_arrow_data::ArrowRow + Clone + 'static,
-//RS {
-//RS     fn row_count(&self) -> usize {
-//RS         self.report.rows
-//RS     }
-//RS 
-//RS     fn row(&self, index: usize) -> Result<T, String> {
-//RS         crate::jet_arrow_data::ArrowImported::<T>::row(self, index)
-//RS             .map_err(|error| error.to_string())
-//RS     }
-//RS }
-//RS 
-//RS /// Plotting accepts ordinary typed lists.  The list is the canonical materialized
-//RS /// value; schema/source facts are derived from its checked row type.
-//RS impl<T: 'static> JetDataPlotRows for Vec<T> {
-//RS     type Row = T;
-//RS 
-//RS     fn jet_data_plot_parts(
-//RS         self,
-//RS     ) -> (
-//RS         Vec<Self::Row>,
-//RS         JetDataPlotSourceFacts,
-//RS         JetDataPlotSchema,
-//RS         jet_std::DataLimits,
-//RS     ) {
-//RS         let row_type = std::any::type_name::<T>();
-//RS         let identity = format!("data.list:{row_type}");
-//RS         let schema = JetDataPlotSchema::new(identity.clone(), row_type, Vec::new());
-//RS         let source = JetDataPlotSourceFacts::new(
-//RS             identity.clone(),
-//RS             identity.clone(),
-//RS             identity.clone(),
-//RS             row_type,
-//RS             self.len() as i64,
-//RS             identity,
-//RS             "data.list",
-//RS         );
-//RS         (self, source, schema, jet_std::DataLimits::safe())
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_from_encoding(
-//RS     operation: &str,
-//RS     row: JetOutcome<i64, JetAbsent>,
-//RS     enc: jet_std::EncodingError,
-//RS ) -> jet_std::DataError {
-//RS     let kind = match enc.kind {
-//RS         jet_std::EncodingErrorKind::Limit => jet_std::DataErrorKind::Limit,
-//RS         jet_std::EncodingErrorKind::IO => jet_std::DataErrorKind::IO,
-//RS         jet_std::EncodingErrorKind::State => jet_std::DataErrorKind::State,
-//RS         _ => jet_std::DataErrorKind::Decode,
-//RS     };
-//RS     jet_std::DataError {
-//RS         kind,
-//RS         operation: operation.to_string(),
-//RS         row,
-//RS         column: enc.column,
-//RS         index: Err(JetAbsent),
-//RS         reason: enc.reason.clone(),
-//RS         cause: Ok(enc),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_limits_validate(limits: &jet_std::DataLimits) -> Result<(), jet_std::DataError> {
-//RS     jet_encoding_validate_limits(&limits.encoding).map_err(|enc| {
-//RS         jet_data_from_encoding("DataLimits", Err(JetAbsent), enc)
-//RS     })?;
-//RS     jet_data_kernel_validate_limits(&jet_data_kernel_limits(
-//RS         limits.max_groups,
-//RS         limits.max_sort_rows,
-//RS         limits.max_join_rows,
-//RS         limits.max_output_rows,
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_data_canonical_unary_plan<T>(
-//RS     operation: JetTableOperation,
-//RS     operation_name: &str,
-//RS     rows: usize,
-//RS     result_type: JetTableTypeId,
-//RS     output_columns: Vec<JetTableColumn>,
-//RS ) -> Result<JetTablePlan, jet_std::DataError> {
-//RS     let row_type = JetTableTypeId::new(std::any::type_name::<T>());
-//RS     let input_schema = JetTableSchema::new(row_type.clone(), Vec::new());
-//RS     let source = JetTableSource::new(
-//RS         format!("data.{operation_name}.source"),
-//RS         input_schema.clone(),
-//RS     )
-//RS     .with_rows(rows as u128);
-//RS     let mut plan = JetTablePlan::from_source(format!("data.{operation_name}"), source);
-//RS     let output_schema = if operation == JetTableOperation::Sort {
-//RS         input_schema.clone()
-//RS     } else {
-//RS         JetTableSchema::new(result_type.clone(), output_columns)
-//RS     };
-//RS     let callable_result = if operation == JetTableOperation::Sort {
-//RS         JetTableTypeId::string()
-//RS     } else {
-//RS         result_type
-//RS     };
-//RS     let callable = JetTableCallable::new(
-//RS         format!("data.{operation_name}"),
-//RS         row_type,
-//RS         callable_result,
-//RS     );
-//RS     let node = match operation {
-//RS         JetTableOperation::Sort => plan
-//RS             .append_sort(output_schema, callable)
-//RS             .map_err(|error| jet_data_error(
-//RS                 jet_std::DataErrorKind::InvalidArgument,
-//RS                 operation_name,
-//RS                 format!("canonical table plan rejected: {error}"),
-//RS             ))?,
-//RS         JetTableOperation::Group => {
-//RS             let input = plan.output;
-//RS             plan.append(
-//RS                 JetTableOperation::Group,
-//RS                 vec![input],
-//RS                 output_schema,
-//RS                 Some(callable),
-//RS             )
-//RS             .map_err(|error| jet_data_error(
-//RS                 jet_std::DataErrorKind::InvalidArgument,
-//RS                 operation_name,
-//RS                 format!("canonical table plan rejected: {error}"),
-//RS             ))?
-//RS         }
-//RS         _ => {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::InvalidArgument,
-//RS                 operation_name,
-//RS                 "unsupported canonical unary operation",
-//RS             ));
-//RS         }
-//RS     };
-//RS     plan.nodes[node.index()].note = format!("rows={rows}");
-//RS     plan.validate().map_err(|error| {
-//RS         jet_data_error(
-//RS             jet_std::DataErrorKind::InvalidArgument,
-//RS             operation_name,
-//RS             format!("canonical table plan rejected: {error}"),
-//RS         )
-//RS     })?;
-//RS     Ok(plan)
-//RS }
-//RS 
-//RS fn jet_data_canonical_join_plan<T, U>(
-//RS     operation_name: &str,
-//RS     kind: JetTableJoinKind,
-//RS     left_rows: usize,
-//RS     right_rows: usize,
-//RS ) -> Result<JetTablePlan, jet_std::DataError> {
-//RS     let row_type = JetTableTypeId::new(std::any::type_name::<T>());
-//RS     let input_schema = JetTableSchema::new(row_type, Vec::new());
-//RS     let source = JetTableSource::new(
-//RS         format!("data.{operation_name}.left"),
-//RS         input_schema,
-//RS     )
-//RS     .with_rows(left_rows as u128);
-//RS     let mut plan = JetTablePlan::from_source(format!("data.{operation_name}"), source);
-//RS     let left_type = JetTableTypeId::new(std::any::type_name::<T>());
-//RS     let right_type = JetTableTypeId::new(std::any::type_name::<U>());
-//RS     let right_schema = JetTableSchema::new(right_type.clone(), Vec::new());
-//RS     let right_source = JetTableSource::new(
-//RS         format!("data.{operation_name}.right"),
-//RS         right_schema,
-//RS     )
-//RS     .with_rows(right_rows as u128);
-//RS     let right = plan
-//RS         .append_source(right_source)
-//RS         .map_err(|error| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::InvalidArgument,
-//RS                 operation_name,
-//RS                 format!("canonical table plan rejected: {error}"),
-//RS             )
-//RS         })?;
-//RS     let output_schema = JetTableSchema::new(
-//RS         JetTableTypeId::new(format!(
-//RS             "DataJoin<{},{}>",
-//RS             left_type.as_str(),
-//RS             right_type.as_str()
-//RS         )),
-//RS         vec![
-//RS             JetTableColumn::new("left", left_type),
-//RS             JetTableColumn::new(
-//RS                 "right",
-//RS                 if kind == JetTableJoinKind::Left {
-//RS                     JetTableTypeId::new(format!("JetOutcome<{},JetAbsent>", right_type.as_str()))
-//RS                 } else {
-//RS                     right_type
-//RS                 },
-//RS             ),
-//RS         ],
-//RS     );
-//RS     let node = plan
-//RS         .append_join(right, output_schema, kind, Vec::new())
-//RS         .map_err(|error| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::InvalidArgument,
-//RS                 operation_name,
-//RS                 format!("canonical table plan rejected: {error}"),
-//RS             )
-//RS         })?;
-//RS     // Join output cardinality depends on adapter-owned key values; keep that
-//RS     // result explicitly unavailable even though both scan bounds are known.
-//RS     plan.nodes[node.index()].facts = JetTableFacts::unknown(2);
-//RS     plan.nodes[node.index()].note =
-//RS         format!("left_rows={left_rows};right_rows={right_rows};right_type={}", std::any::type_name::<U>());
-//RS     plan.validate().map_err(|error| {
-//RS         jet_data_error(
-//RS             jet_std::DataErrorKind::InvalidArgument,
-//RS             operation_name,
-//RS             format!("canonical table plan rejected: {error}"),
-//RS         )
-//RS     })?;
-//RS     Ok(plan)
-//RS }
-//RS fn jet_data_plan_inspect(
-//RS     plan: &JetTablePlan,
-//RS     operation: &str,
-//RS ) -> Result<(), jet_std::DataError> {
-//RS     plan.inspect().map(|_| ()).map_err(|error| {
-//RS         jet_data_error(
-//RS             jet_std::DataErrorKind::InvalidArgument,
-//RS             operation,
-//RS             format!("canonical table inspection rejected: {error}"),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS 
-//RS 
-//RS fn jet_data_pivot_sum_checked<T, FR, FC, FV>(
-//RS     rows: &Vec<T>,
-//RS     row_key: FR,
-//RS     col_key: FC,
-//RS     value: FV,
-//RS     limits: &jet_std::DataLimits,
-//RS ) -> Result<Vec<jet_std::DataPivotCell>, jet_std::DataError>
-//RS where
-//RS     T: Clone,
-//RS     FR: Fn(T) -> String,
-//RS     FC: Fn(T) -> String,
-//RS     FV: Fn(T) -> f64,
-//RS {
-//RS     jet_data_limits_validate(limits)?;
-//RS     let plan = jet_data_canonical_unary_plan::<T>(
-//RS         JetTableOperation::Group,
-//RS         "pivot_sum",
-//RS         rows.len(),
-//RS         JetTableTypeId::new("DataPivotCell"),
-//RS         vec![
-//RS             JetTableColumn::new("row_key", JetTableTypeId::string()),
-//RS             JetTableColumn::new("column_key", JetTableTypeId::string()),
-//RS             JetTableColumn::new("count", JetTableTypeId::integer()),
-//RS             JetTableColumn::new("sum", JetTableTypeId::float()),
-//RS             JetTableColumn::new("mean", JetTableTypeId::float()),
-//RS         ],
-//RS     )?;
-//RS     jet_data_plan_inspect(&plan, "pivot_sum")?;
-//RS     let keyed_rows = rows
-//RS         .iter()
-//RS         .cloned()
-//RS         .map(|row| (row_key(row.clone()), col_key(row.clone()), value(row)))
-//RS         .collect::<Vec<_>>();
-//RS     let cells = jet_data_pivot_sum_values(
-//RS         &keyed_rows,
-//RS         &jet_data_kernel_limits(
-//RS             limits.max_groups,
-//RS             limits.max_sort_rows,
-//RS             limits.max_join_rows,
-//RS             limits.max_output_rows,
-//RS         ),
-//RS     )?;
-//RS     Ok(cells
-//RS         .into_iter()
-//RS         .map(|cell| jet_std::DataPivotCell {
-//RS             row_key: cell.row_key,
-//RS             column_key: cell.column_key,
-//RS             count: cell.count,
-//RS             sum: cell.sum,
-//RS             mean: cell.mean,
-//RS         })
-//RS         .collect())
-//RS }
-//RS fn jet_data_pivot_sum_checked_default<T, FR, FC, FV>(
-//RS     rows: &Vec<T>,
-//RS     row_key: FR,
-//RS     col_key: FC,
-//RS     value: FV,
-//RS ) -> Result<Vec<jet_std::DataPivotCell>, jet_std::DataError>
-//RS where
-//RS     T: Clone,
-//RS     FR: Fn(T) -> String,
-//RS     FC: Fn(T) -> String,
-//RS     FV: Fn(T) -> f64,
-//RS {
-//RS     jet_data_pivot_sum_checked(
-//RS         rows,
-//RS         row_key,
-//RS         col_key,
-//RS         value,
-//RS         &jet_std::DataLimits::safe(),
-//RS     )
-//RS }
-//RS 
-//RS 
-//RS 
-//RS fn jet_data_inner_join_checked<T, U, FL, FR>(
-//RS     left: &Vec<T>,
-//RS     right: &Vec<U>,
-//RS     left_key: FL,
-//RS     right_key: FR,
-//RS     limits: &jet_std::DataLimits,
-//RS ) -> Result<Vec<jet_std::DataJoin<T, U>>, jet_std::DataError>
-//RS where
-//RS     T: Clone,
-//RS     U: Clone,
-//RS     FL: Fn(T) -> String,
-//RS     FR: Fn(U) -> String,
-//RS {
-//RS     jet_data_limits_validate(limits)?;
-//RS     let plan = jet_data_canonical_join_plan::<T, U>(
-//RS         "inner_join",
-//RS         JetTableJoinKind::Inner,
-//RS         left.len(),
-//RS         right.len(),
-//RS     )?;
-//RS     jet_data_plan_inspect(&plan, "inner_join")?;
-//RS     let left_keys = left
-//RS         .iter()
-//RS         .cloned()
-//RS         .map(|row| left_key(row))
-//RS         .collect::<Vec<_>>();
-//RS     let right_keys = right
-//RS         .iter()
-//RS         .cloned()
-//RS         .map(|row| right_key(row))
-//RS         .collect::<Vec<_>>();
-//RS     let indices = jet_data_join_indices(
-//RS         &left_keys,
-//RS         &right_keys,
-//RS         false,
-//RS         &jet_data_kernel_limits(
-//RS             limits.max_groups,
-//RS             limits.max_sort_rows,
-//RS             limits.max_join_rows,
-//RS             limits.max_output_rows,
-//RS         ),
-//RS     )?;
-//RS     let mut joined = Vec::with_capacity(indices.len());
-//RS     for index in indices {
-//RS         let Some(right_index) = index.right else {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::State,
-//RS                 "inner_join",
-//RS                 "inner join kernel returned an absent right row",
-//RS             ));
-//RS         };
-//RS         joined.push(jet_std::DataJoin {
-//RS             left: left[index.left].clone(),
-//RS             right: right[right_index].clone(),
-//RS         });
-//RS     }
-//RS     Ok(joined)
-//RS }
-//RS 
-//RS fn jet_data_inner_join_checked_default<T, U, FL, FR>(
-//RS     left: &Vec<T>,
-//RS     right: &Vec<U>,
-//RS     left_key: FL,
-//RS     right_key: FR,
-//RS ) -> Result<Vec<jet_std::DataJoin<T, U>>, jet_std::DataError>
-//RS where
-//RS     T: Clone,
-//RS     U: Clone,
-//RS     FL: Fn(T) -> String,
-//RS     FR: Fn(U) -> String,
-//RS {
-//RS     jet_data_inner_join_checked(left, right, left_key, right_key, &jet_std::DataLimits::safe())
-//RS }
-//RS 
-//RS fn jet_data_left_join_checked<T, U, FL, FR>(
-//RS     left: &Vec<T>,
-//RS     right: &Vec<U>,
-//RS     left_key: FL,
-//RS     right_key: FR,
-//RS     limits: &jet_std::DataLimits,
-//RS ) -> Result<Vec<jet_std::DataJoin<T, JetOutcome<U, JetAbsent>>>, jet_std::DataError>
-//RS where
-//RS     T: Clone,
-//RS     U: Clone,
-//RS     FL: Fn(T) -> String,
-//RS     FR: Fn(U) -> String,
-//RS {
-//RS     jet_data_limits_validate(limits)?;
-//RS     let plan = jet_data_canonical_join_plan::<T, U>(
-//RS         "left_join",
-//RS         JetTableJoinKind::Left,
-//RS         left.len(),
-//RS         right.len(),
-//RS     )?;
-//RS     jet_data_plan_inspect(&plan, "left_join")?;
-//RS     let left_keys = left
-//RS         .iter()
-//RS         .cloned()
-//RS         .map(|row| left_key(row))
-//RS         .collect::<Vec<_>>();
-//RS     let right_keys = right
-//RS         .iter()
-//RS         .cloned()
-//RS         .map(|row| right_key(row))
-//RS         .collect::<Vec<_>>();
-//RS     let indices = jet_data_join_indices(
-//RS         &left_keys,
-//RS         &right_keys,
-//RS         true,
-//RS         &jet_data_kernel_limits(
-//RS             limits.max_groups,
-//RS             limits.max_sort_rows,
-//RS             limits.max_join_rows,
-//RS             limits.max_output_rows,
-//RS         ),
-//RS     )?;
-//RS     Ok(indices
-//RS         .into_iter()
-//RS         .map(|index| jet_std::DataJoin {
-//RS             left: left[index.left].clone(),
-//RS             right: index
-//RS                 .right
-//RS                 .map(|right_index| right[right_index].clone())
-//RS                 .ok_or(JetAbsent),
-//RS         })
-//RS         .collect())
-//RS }
-//RS 
-//RS fn jet_data_left_join_checked_default<T, U, FL, FR>(
-//RS     left: &Vec<T>,
-//RS     right: &Vec<U>,
-//RS     left_key: FL,
-//RS     right_key: FR,
-//RS ) -> Result<Vec<jet_std::DataJoin<T, JetOutcome<U, JetAbsent>>>, jet_std::DataError>
-//RS where
-//RS     T: Clone,
-//RS     U: Clone,
-//RS     FL: Fn(T) -> String,
-//RS     FR: Fn(U) -> String,
-//RS {
-//RS     jet_data_left_join_checked(left, right, left_key, right_key, &jet_std::DataLimits::safe())
-//RS }
-//RS 
-//RS fn jet_data_collect_rows_checked<T: Clone>(
-//RS     rows_source: &jet_std::DataQueryRows<T>,
-//RS     limits: &jet_std::DataLimits,
-//RS ) -> Result<Vec<T>, jet_std::DataError> {
-//RS     jet_data_limits_validate(limits)?;
-//RS     let max_output_rows = usize::try_from(limits.max_output_rows).map_err(|_| {
-//RS         jet_data_error(
-//RS             jet_std::DataErrorKind::Limit,
-//RS             "query.collect",
-//RS             "max_output_rows cannot be represented by this target",
-//RS         )
-//RS     })?;
-//RS     let mut cursor = rows_source.cursor();
-//RS     let mut rows = Vec::with_capacity(max_output_rows.min(256));
-//RS     loop {
-//RS         let remaining = max_output_rows.saturating_sub(rows.len());
-//RS         let request = remaining.saturating_add(1).min(256);
-//RS         let batch = cursor
-//RS             .next_batch_with_sort_limit(request, Some(limits.max_sort_rows))
-//RS             .map_err(|limit| {
-//RS                 jet_data_error(
-//RS                     jet_std::DataErrorKind::Limit,
-//RS                     limit.operation,
-//RS                     format!("max_sort_rows {} exceeded", limit.limit),
-//RS                 )
-//RS             })?;
-//RS         if batch.len() > remaining {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::Limit,
-//RS                 "query.collect",
-//RS                 format!("max_output_rows {} exceeded", limits.max_output_rows),
-//RS             ));
-//RS         }
-//RS         let exhausted = batch.len() < request;
-//RS         rows.try_reserve_exact(batch.len()).map_err(|_| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::Limit,
-//RS                 "query.collect",
-//RS                 "output allocation exceeded the configured bound",
-//RS             )
-//RS         })?;
-//RS         rows.extend(batch);
-//RS         if exhausted {
-//RS             break;
-//RS         }
-//RS     }
-//RS     Ok(rows)
-//RS }
-//RS 
-//RS /// D-QUERY-RETAIN1=A: construct the single deferred query carrier from an
-//RS /// ordinary list.  The list remains owned by the query and is not reopened.
-//RS fn jet_data_query<T: Clone + 'static>(
-//RS     rows: &Vec<T>,
-//RS ) -> jet_std::DataQuery<T> {
-//RS     let plan = jet_table_plan_from_descriptors(
-//RS         std::any::type_name::<T>(),
-//RS         &[],
-//RS         rows.len() as u128,
-//RS     )
-//RS     .unwrap_or_else(|error| panic!("invalid compiler query metadata: {error}"));
-//RS     jet_std::DataQuery::from_rows(rows.clone(), 0, plan)
-//RS }
-//RS fn jet_data_track<T, K, F>(
-//RS     rows: &Vec<T>,
-//RS     key: F,
-//RS ) -> Result<jet_std::DataTracked<T, K>, jet_std::DataError>
-//RS where
-//RS     T: Clone + 'static,
-//RS     K: Clone + PartialEq + 'static,
-//RS     F: Fn(T) -> K + 'static,
-//RS {
-//RS     jet_std::DataTracked::new(rows.clone(), key)
-//RS }
-//RS 
-//RS fn jet_data_query_tracked<T, K>(
-//RS     tracked: &jet_std::DataTracked<T, K>,
-//RS ) -> jet_std::DataQuery<T>
-//RS where
-//RS     T: Clone + 'static,
-//RS     K: Clone + PartialEq + 'static,
-//RS {
-//RS     jet_std::DataQuery::from_tracked(tracked)
-//RS }
-//RS fn jet_data_track_insert<T, K>(
-//RS     tracked: &jet_std::DataTracked<T, K>,
-//RS     row: T,
-//RS ) -> Result<(), jet_std::DataError>
-//RS where
-//RS     T: Clone + 'static,
-//RS     K: Clone + PartialEq + 'static,
-//RS {
-//RS     tracked.insert(row)
-//RS }
-//RS 
-//RS fn jet_data_track_replace<T, K>(
-//RS     tracked: &jet_std::DataTracked<T, K>,
-//RS     key: K,
-//RS     row: T,
-//RS ) -> Result<(), jet_std::DataError>
-//RS where
-//RS     T: Clone + 'static,
-//RS     K: Clone + PartialEq + 'static,
-//RS {
-//RS     tracked.replace(key, row)
-//RS }
-//RS 
-//RS fn jet_data_track_remove<T, K>(
-//RS     tracked: &jet_std::DataTracked<T, K>,
-//RS     key: K,
-//RS ) -> Result<(), jet_std::DataError>
-//RS where
-//RS     T: Clone + 'static,
-//RS     K: Clone + PartialEq + 'static,
-//RS {
-//RS     tracked.remove(key)
-//RS }
-//RS 
-//RS 
-//RS /// D-QUERY-RETAIN1=A / D-DATAFLOW1=A: a one-shot `DataStream` becomes a
-//RS /// single-use query. The reader is consumed by the first `collect`; a second
-//RS /// collect reports a `State` error instead of reopening the source.
-//RS fn jet_data_query_stream<T: __jet_Decode + Clone + 'static>(
-//RS     stream: jet_std::DataStream,
-//RS ) -> jet_std::DataQuery<T> {
-//RS     let mut stream = stream;
-//RS     jet_std::DataQuery::from_computation(vec!["stream".to_string()], move || {
-//RS         jet_data_stream_collect::<T>(&mut stream)
-//RS     })
-//RS }
-//RS 
-//RS fn jet_data_query_plan<T>(query: &jet_std::DataQuery<T>) -> Vec<String> {
-//RS     query.plan()
-//RS }
-//RS 
-//RS fn jet_data_grouped_steps<T, K>(
-//RS     grouped: &jet_std::DataGroupedQuery<T, K>,
-//RS     reducer: &str,
-//RS ) -> Vec<String> {
-//RS     let mut steps = grouped.query.plan();
-//RS     steps.push("group_by".to_string());
-//RS     steps.push(reducer.to_string());
-//RS     steps
-//RS }
-//RS 
-//RS fn jet_data_query_filter<T: Clone + 'static, F>(
-//RS     query: &jet_std::DataQuery<T>,
-//RS     predicate: F,
-//RS ) -> jet_std::DataQuery<T>
-//RS where
-//RS     F: Fn(T) -> bool + 'static,
-//RS {
-//RS     query.filter(predicate)
-//RS }
-//RS 
-//RS fn jet_data_query_sort_by<T: Clone + 'static, F>(
-//RS     query: &jet_std::DataQuery<T>,
-//RS     key: F,
-//RS ) -> jet_std::DataQuery<T>
-//RS where
-//RS     F: Fn(T) -> String + 'static,
-//RS {
-//RS     query.sort_by(key)
-//RS }
-//RS 
-//RS fn jet_data_query_apply_operations<T: Clone>(
-//RS     rows: &mut Vec<T>,
-//RS     operations: &[jet_std::DataQueryOperation<T>],
-//RS     limits: &jet_std::DataLimits,
-//RS ) -> Result<(), jet_std::DataError> {
-//RS     for operation in operations {
-//RS         match operation {
-//RS             jet_std::DataQueryOperation::Filter(predicate) => {
-//RS                 rows.retain(|row| predicate(row.clone()));
-//RS             }
-//RS             jet_std::DataQueryOperation::SortBy(key) => {
-//RS                 if rows.len() as i64 > limits.max_sort_rows {
-//RS                     return Err(jet_data_error(
-//RS                         jet_std::DataErrorKind::Limit,
-//RS                         "query.sort_by",
-//RS                         format!("max_sort_rows {} exceeded", limits.max_sort_rows),
-//RS                     ));
-//RS                 }
-//RS                 rows.sort_by_key(|row| key(row.clone()));
-//RS             }
-//RS         }
-//RS     }
-//RS     if rows.len() as i64 > limits.max_output_rows {
-//RS         return Err(jet_data_error(
-//RS             jet_std::DataErrorKind::Limit,
-//RS             "query.collect",
-//RS             format!("max_output_rows {} exceeded", limits.max_output_rows),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn jet_data_query_collect<T: Clone + 'static>(
-//RS     query: &jet_std::DataQuery<T>,
-//RS ) -> Result<Vec<T>, jet_std::DataError> {
-//RS     let limits = jet_std::DataLimits::safe();
-//RS     if let Some(rows_source) = query.rows_frame() {
-//RS         return jet_data_collect_rows_checked(&rows_source, &limits);
-//RS     }
-//RS     if query.is_recomputed() {
-//RS         let compute = query.recomputation().ok_or_else(|| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::State,
-//RS                 "query.collect",
-//RS                 "recomputable query has no producer",
-//RS             )
-//RS         })?;
-//RS         let mut rows = compute?;
-//RS         jet_data_query_apply_operations(&mut rows, &query.operations, &limits)?;
-//RS         return Ok(rows);
-//RS     }
-//RS     if query.is_computed() {
-//RS         let compute = query.take_computation().ok_or_else(|| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::State,
-//RS                 "query.collect",
-//RS                 "query has already been collected",
-//RS             )
-//RS         })?;
-//RS         let mut rows = compute()?;
-//RS         jet_data_query_apply_operations(&mut rows, &query.operations, &limits)?;
-//RS         return Ok(rows);
-//RS     }
-//RS     Err(jet_data_error(
-//RS         jet_std::DataErrorKind::State,
-//RS         "query.collect",
-//RS         "query source is unavailable",
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_data_query_watch<T: Clone + 'static>(
-//RS     query: &jet_std::DataQuery<T>,
-//RS ) -> Result<jet_std::DataWatch<T>, jet_std::DataError> {
-//RS     jet_std::DataWatch::from_query(query.clone())
-//RS }
-//RS 
-//RS fn jet_data_watch_get<T: Clone + 'static>(
-//RS     watch: &jet_std::DataWatch<T>,
-//RS ) -> Result<Vec<T>, jet_std::DataError> {
-//RS     watch.get()
-//RS }
-//RS 
-//RS fn jet_data_watch_status<T: Clone + 'static>(
-//RS     watch: &jet_std::DataWatch<T>,
-//RS ) -> jet_std::DataWatchStatus {
-//RS     watch.status()
-//RS }
-//RS 
-//RS fn jet_data_watch_cancel<T: Clone + 'static>(watch: &jet_std::DataWatch<T>) {
-//RS     watch.cancel();
-//RS }
-//RS 
-//RS fn jet_data_query_group_by<T: Clone + 'static, K, F>(
-//RS     query: &jet_std::DataQuery<T>,
-//RS     key: F,
-//RS ) -> jet_std::DataGroupedQuery<T, K>
-//RS where
-//RS     K: 'static,
-//RS     F: Fn(T) -> K + 'static,
-//RS {
-//RS     jet_std::DataGroupedQuery {
-//RS         query: query.clone(),
-//RS         key: std::sync::Arc::new(key),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_group_sum_materialized<T, K, V, FK, FV>(
-//RS     query: &jet_std::DataQuery<T>,
-//RS     key: &FK,
-//RS     value: &FV,
-//RS ) -> Result<Vec<jet_std::GroupValue<K, V>>, jet_std::DataError>
-//RS where
-//RS     T: Clone + 'static,
-//RS     K: Clone + PartialEq + 'static,
-//RS     V: Clone + std::ops::Add<Output = V> + 'static,
-//RS     FK: ?Sized + Fn(T) -> K,
-//RS     FV: ?Sized + Fn(T) -> Result<V, jet_std::DataError>,
-//RS {
-//RS     let rows = jet_data_query_collect(query)?;
-//RS     let limits = jet_std::DataLimits::safe();
-//RS     let mut groups: Vec<(K, V)> = Vec::new();
-//RS     for row in rows {
-//RS         let group_key = key(row.clone());
-//RS         let group_value = value(row)?;
-//RS         if let Some((_, total)) = groups.iter_mut().find(|(existing, _)| existing == &group_key)
-//RS         {
-//RS             *total = total.clone() + group_value;
-//RS         } else {
-//RS             if groups.len() as i64 >= limits.max_groups {
-//RS                 return Err(jet_data_error(
-//RS                     jet_std::DataErrorKind::Limit,
-//RS                     "query.group_by.sum",
-//RS                     format!("max_groups {} exceeded", limits.max_groups),
-//RS                 ));
-//RS             }
-//RS             groups.push((group_key, group_value));
-//RS         }
-//RS     }
-//RS     if groups.len() as i64 > limits.max_output_rows {
-//RS         return Err(jet_data_error(
-//RS             jet_std::DataErrorKind::Limit,
-//RS             "query.group_by.sum",
-//RS             format!("max_output_rows {} exceeded", limits.max_output_rows),
-//RS         ));
-//RS     }
-//RS     Ok(groups
-//RS         .into_iter()
-//RS         .map(|(key, value)| jet_std::GroupValue { key, value })
-//RS         .collect())
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetDataGroupBucket<K, V> {
-//RS     key: K,
-//RS     rank: (Option<String>, u64),
-//RS     members: Vec<(u64, V, Option<String>)>,
-//RS }
-//RS #[derive(Clone)]
-//RS struct JetDataGroupWatchState<K, V> {
-//RS     buckets: Vec<JetDataGroupBucket<K, V>>,
-//RS     revision: u64,
-//RS     values: Vec<jet_std::GroupValue<K, V>>,
-//RS }
-//RS 
-//RS struct JetDataGroupWatchSource<T, K, V> {
-//RS     source: std::rc::Rc<dyn jet_std::DataTrackedReader<T>>,
-//RS     operations: Vec<jet_std::DataQueryOperation<T>>,
-//RS     key: std::sync::Arc<dyn Fn(T) -> K>,
-//RS     value: std::sync::Arc<dyn Fn(T) -> Result<V, jet_std::DataError>>,
-//RS     aggregate: std::sync::Arc<
-//RS         dyn Fn(&[V]) -> Result<V, jet_std::DataError>,
-//RS     >,
-//RS     operation: &'static str,
-//RS     mode: &'static str,
-//RS     recomputed: bool,
-//RS     state: std::cell::RefCell<Option<JetDataGroupWatchState<K, V>>>,
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, K: Clone + PartialEq + 'static, V: Clone + 'static>
-//RS     JetDataGroupWatchSource<T, K, V>
-//RS {
-//RS     fn accepts(&self, row: &T) -> (bool, Option<String>) {
-//RS         let mut sort_key = None;
-//RS         for operation in &self.operations {
-//RS             match operation {
-//RS                 jet_std::DataQueryOperation::Filter(predicate) => {
-//RS                     if !(predicate)(row.clone()) {
-//RS                         return (false, None);
-//RS                     }
-//RS                 }
-//RS                 jet_std::DataQueryOperation::SortBy(key) => {
-//RS                     // Group membership is independent of order, but preserve
-//RS                     // the checked callback's evaluation contract and final key.
-//RS                     sort_key = Some(key(row.clone()));
-//RS                 }
-//RS             }
-//RS         }
-//RS         (true, sort_key)
-//RS     }
-//RS     fn check_sort_limit(&self) -> Result<(), jet_std::DataError> {
-//RS         if self
-//RS             .operations
-//RS             .iter()
-//RS             .any(|operation| matches!(operation, jet_std::DataQueryOperation::SortBy(_)))
-//RS         {
-//RS             let limit = jet_std::DataLimits::safe().max_sort_rows;
-//RS             if self.source.retained_rows() as i64 > limit {
-//RS                 return Err(jet_data_error(
-//RS                     jet_std::DataErrorKind::Limit,
-//RS                     self.operation,
-//RS                     format!("max_sort_rows {limit} exceeded"),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn add(
-//RS         &self,
-//RS         state: &mut JetDataGroupWatchState<K, V>,
-//RS         order: u64,
-//RS         row: T,
-//RS     ) -> Result<(), jet_std::DataError> {
-//RS         let (accepted, sort_key) = self.accepts(&row);
-//RS         if !accepted {
-//RS             return Ok(());
-//RS         }
-//RS         let group_key = (self.key)(row.clone());
-//RS         let group_value = (self.value)(row)?;
-//RS         let rank = (sort_key.clone(), order);
-//RS         if let Some(bucket) = state
-//RS             .buckets
-//RS             .iter_mut()
-//RS             .find(|bucket| bucket.key == group_key)
-//RS         {
-//RS             let position = bucket
-//RS                 .members
-//RS                 .iter()
-//RS                 .position(|(id, _, _)| *id > order)
-//RS                 .unwrap_or(bucket.members.len());
-//RS             bucket.members.insert(position, (order, group_value, sort_key));
-//RS             if rank < bucket.rank {
-//RS                 bucket.rank = rank;
-//RS             }
-//RS             return Ok(());
-//RS         }
-//RS         let limits = jet_std::DataLimits::safe();
-//RS         if state.buckets.len() as i64 >= limits.max_groups {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::Limit,
-//RS                 self.operation,
-//RS                 format!("max_groups {} exceeded", limits.max_groups),
-//RS             ));
-//RS         }
-//RS         state.buckets.push(JetDataGroupBucket {
-//RS             key: group_key,
-//RS             rank,
-//RS             members: vec![(order, group_value, sort_key)],
-//RS         });
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn remove(&self, state: &mut JetDataGroupWatchState<K, V>, order: u64) {
-//RS         let mut empty = None;
-//RS         for (index, bucket) in state.buckets.iter_mut().enumerate() {
-//RS             if let Some(member) = bucket
-//RS                 .members
-//RS                 .iter()
-//RS                 .position(|(id, _, _)| *id == order)
-//RS             {
-//RS                 bucket.members.remove(member);
-//RS                 if bucket.members.is_empty() {
-//RS                     empty = Some(index);
-//RS                 } else {
-//RS                     bucket.rank = bucket
-//RS                         .members
-//RS                         .iter()
-//RS                         .map(|(id, _, key)| (key.clone(), *id))
-//RS                         .min()
-//RS                         .expect("non-empty group has a rank");
-//RS                 }
-//RS                 break;
-//RS             }
-//RS         }
-//RS         if let Some(index) = empty {
-//RS             state.buckets.remove(index);
-//RS         }
-//RS     }
-//RS 
-//RS     fn materialize(
-//RS         &self,
-//RS         state: &JetDataGroupWatchState<K, V>,
-//RS     ) -> Result<Vec<jet_std::GroupValue<K, V>>, jet_std::DataError> {
-//RS         let limits = jet_std::DataLimits::safe();
-//RS         if state.buckets.len() as i64 > limits.max_output_rows {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::Limit,
-//RS                 self.operation,
-//RS                 format!("max_output_rows {} exceeded", limits.max_output_rows),
-//RS             ));
-//RS         }
-//RS         let mut buckets = state.buckets.iter().collect::<Vec<_>>();
-//RS         buckets.sort_by(|left, right| left.rank.cmp(&right.rank));
-//RS         buckets
-//RS             .into_iter()
-//RS             .map(|bucket| {
-//RS                 Ok(jet_std::GroupValue {
-//RS                     key: bucket.key.clone(),
-//RS                     value: (self.aggregate)(
-//RS                         &bucket
-//RS                             .members
-//RS                             .iter()
-//RS                             .map(|(_, value, _)| value.clone())
-//RS                             .collect::<Vec<_>>(),
-//RS                     )?,
-//RS                 })
-//RS             })
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn entries(
-//RS         &self,
-//RS         values: Vec<jet_std::GroupValue<K, V>>,
-//RS     ) -> Vec<jet_std::DataWatchEntry<jet_std::GroupValue<K, V>>> {
-//RS         values
-//RS             .into_iter()
-//RS             .enumerate()
-//RS             .map(|(order, value)| jet_std::DataWatchEntry {
-//RS                 order: order as u64,
-//RS                 key: None,
-//RS                 value,
-//RS             })
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, K: Clone + PartialEq + 'static, V: Clone + 'static>
-//RS     jet_std::DataWatchSource<jet_std::GroupValue<K, V>>
-//RS     for JetDataGroupWatchSource<T, K, V>
-//RS {
-//RS     fn initial(
-//RS         &self,
-//RS     ) -> Result<
-//RS         jet_std::DataWatchMaterialized<jet_std::GroupValue<K, V>>,
-//RS         jet_std::DataError,
-//RS     > {
-//RS         self.check_sort_limit()?;
-//RS         let (source_revision, entries) = self.source.snapshot_entries_at_revision();
-//RS         let mut state = JetDataGroupWatchState {
-//RS             buckets: Vec::new(),
-//RS             revision: source_revision,
-//RS             values: Vec::new(),
-//RS         };
-//RS         for (order, row) in entries {
-//RS             self.add(&mut state, order, row)?;
-//RS         }
-//RS         state.values = self.materialize(&state)?;
-//RS         let revision = state.revision;
-//RS         let entries = self.entries(state.values.clone());
-//RS         *self.state.borrow_mut() = Some(state);
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries,
-//RS             revision,
-//RS             mode: self.mode,
-//RS             recomputed: false,
-//RS             changed: true,
-//RS             retained_rows: self.source.retained_rows(),
-//RS         })
-//RS     }
-//RS 
-//RS     fn refresh(
-//RS         &self,
-//RS         revision: u64,
-//RS         prior: &[jet_std::DataWatchEntry<jet_std::GroupValue<K, V>>],
-//RS     ) -> Result<
-//RS         jet_std::DataWatchMaterialized<jet_std::GroupValue<K, V>>,
-//RS         jet_std::DataError,
-//RS     > {
-//RS         self.check_sort_limit()?;
-//RS         let mut state = self.state.borrow_mut();
-//RS         let state = state.as_mut().ok_or_else(|| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::State,
-//RS                 self.operation,
-//RS                 "group watch was not initialized",
-//RS             )
-//RS         })?;
-//RS         if revision > state.revision {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::StaleRevision,
-//RS                 self.operation,
-//RS                 "watch revision is newer than its maintained group state",
-//RS             ));
-//RS         }
-//RS         if self.source.revision() == state.revision {
-//RS             return Ok(jet_std::DataWatchMaterialized {
-//RS                 entries: self.entries(state.values.clone()),
-//RS                 revision: state.revision,
-//RS                 mode: self.mode,
-//RS                 recomputed: false,
-//RS                 changed: false,
-//RS                 retained_rows: self.source.retained_rows(),
-//RS             });
-//RS         }
-//RS         let changes = self.source.changes_since(state.revision)?;
-//RS         let mut next = state.clone();
-//RS         for change in changes {
-//RS             match change.kind {
-//RS                 jet_std::DataTrackedChangeKind::Insert { row } => {
-//RS                     self.add(&mut next, change.order, row)?;
-//RS                 }
-//RS                 jet_std::DataTrackedChangeKind::Replace { after, .. } => {
-//RS                     self.remove(&mut next, change.order);
-//RS                     self.add(&mut next, change.order, after)?;
-//RS                 }
-//RS                 jet_std::DataTrackedChangeKind::Remove { .. } => {
-//RS                     self.remove(&mut next, change.order);
-//RS                 }
-//RS             }
-//RS         }
-//RS         next.revision = self.source.revision();
-//RS         let values = self.materialize(&next)?;
-//RS         next.values = values;
-//RS         let entries = self.entries(next.values.clone());
-//RS         let next_revision = next.revision;
-//RS         *state = next;
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries,
-//RS             revision: next_revision,
-//RS             mode: self.mode,
-//RS             recomputed: self.recomputed,
-//RS             changed: true,
-//RS             retained_rows: self.source.retained_rows(),
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS /// A stable snapshot adapter used when one side of a maintained join is
-//RS /// ordinary query data. It materializes that side once, then lets the keyed
-//RS /// join source react only to the maintained side's revisions.
-//RS fn jet_data_static_query_entries<T: Clone + 'static>(
-//RS     query: &jet_std::DataQuery<T>,
-//RS     cache: &std::cell::RefCell<Option<Vec<jet_std::DataWatchEntry<T>>>>,
-//RS ) -> Result<Vec<jet_std::DataWatchEntry<T>>, jet_std::DataError> {
-//RS     if let Some(entries) = cache.borrow().as_ref() {
-//RS         return Ok(entries.clone());
-//RS     }
-//RS     let rows = jet_data_query_collect(query)?;
-//RS     let entries = rows
-//RS         .into_iter()
-//RS         .enumerate()
-//RS         .map(|(order, value)| jet_std::DataWatchEntry {
-//RS             order: order as u64,
-//RS             key: None,
-//RS             value,
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     *cache.borrow_mut() = Some(entries.clone());
-//RS     Ok(entries)
-//RS }
-//RS 
-//RS struct JetDataStaticWatchSource<T> {
-//RS     query: jet_std::DataQuery<T>,
-//RS     entries: std::rc::Rc<std::cell::RefCell<Option<Vec<jet_std::DataWatchEntry<T>>>>>,
-//RS }
-//RS 
-//RS impl<T: Clone + 'static> jet_std::DataWatchSource<T> for JetDataStaticWatchSource<T> {
-//RS     fn initial(&self) -> Result<jet_std::DataWatchMaterialized<T>, jet_std::DataError> {
-//RS         let entries = jet_data_static_query_entries(&self.query, &self.entries)?;
-//RS         let retained_rows = entries.len();
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries,
-//RS             revision: 0,
-//RS             mode: "incremental",
-//RS             recomputed: false,
-//RS             changed: true,
-//RS             retained_rows,
-//RS         })
-//RS     }
-//RS 
-//RS     fn refresh(
-//RS         &self,
-//RS         _revision: u64,
-//RS         prior: &[jet_std::DataWatchEntry<T>],
-//RS     ) -> Result<jet_std::DataWatchMaterialized<T>, jet_std::DataError> {
-//RS         let entries = self.entries.borrow().clone().ok_or_else(|| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::State,
-//RS                 "data.query.watch",
-//RS                 "static join input was not initialized",
-//RS             )
-//RS         })?;
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries: prior.to_vec(),
-//RS             revision: 0,
-//RS             mode: "incremental",
-//RS             recomputed: false,
-//RS             changed: false,
-//RS             retained_rows: entries.len(),
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS enum JetDataJoinKind {
-//RS     Inner,
-//RS     Left,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct JetDataJoinWatchState<T, U, O> {
-//RS     left: Vec<jet_std::DataWatchEntry<T>>,
-//RS     right: Vec<jet_std::DataWatchEntry<U>>,
-//RS     output: Vec<jet_std::DataWatchEntry<O>>,
-//RS     left_revision: u64,
-//RS     right_revision: u64,
-//RS     publication_revision: u64,
-//RS }
-//RS 
-//RS struct JetDataJoinWatchSource<T, U, O> {
-//RS     left_source: std::rc::Rc<dyn jet_std::DataWatchSource<T>>,
-//RS     right_source: std::rc::Rc<dyn jet_std::DataWatchSource<U>>,
-//RS     left_key: std::sync::Arc<dyn Fn(T) -> String>,
-//RS     right_key: std::sync::Arc<dyn Fn(U) -> String>,
-//RS     join: std::sync::Arc<dyn Fn(T, Option<U>) -> O>,
-//RS     kind: JetDataJoinKind,
-//RS     operation: &'static str,
-//RS     state: std::cell::RefCell<Option<JetDataJoinWatchState<T, U, O>>>,
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, U: Clone + 'static, O: Clone + 'static>
-//RS     JetDataJoinWatchSource<T, U, O>
-//RS {
-//RS     fn output_entries(
-//RS         &self,
-//RS         left: &[jet_std::DataWatchEntry<T>],
-//RS         right: &[jet_std::DataWatchEntry<U>],
-//RS     ) -> Result<Vec<jet_std::DataWatchEntry<O>>, jet_std::DataError> {
-//RS         let limits = jet_std::DataLimits::safe();
-//RS         if left.len() as i64 > limits.max_join_rows {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::Limit,
-//RS                 self.operation,
-//RS                 format!("max_join_rows {} exceeded while reading left input", limits.max_join_rows),
-//RS             ));
-//RS         }
-//RS         if right.len() as i64 > limits.max_join_rows {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::Limit,
-//RS                 self.operation,
-//RS                 format!("max_join_rows {} exceeded while indexing right input", limits.max_join_rows),
-//RS             ));
-//RS         }
-//RS         let mut index: std::collections::BTreeMap<
-//RS             String,
-//RS             Vec<&jet_std::DataWatchEntry<U>>,
-//RS         > = std::collections::BTreeMap::new();
-//RS         for entry in right {
-//RS             index
-//RS                 .entry((self.right_key)(entry.value.clone()))
-//RS                 .or_default()
-//RS                 .push(entry);
-//RS         }
-//RS         let mut output = Vec::new();
-//RS         for left_entry in left {
-//RS             let key = (self.left_key)(left_entry.value.clone());
-//RS             let matches = index.get(&key).cloned().unwrap_or_default();
-//RS             if matches.is_empty() {
-//RS                 if matches!(self.kind, JetDataJoinKind::Left) {
-//RS                     if output.len() as i64 >= limits.max_output_rows {
-//RS                         return Err(jet_data_error(
-//RS                             jet_std::DataErrorKind::Limit,
-//RS                             self.operation,
-//RS                             format!("max_output_rows {} exceeded", limits.max_output_rows),
-//RS                         ));
-//RS                     }
-//RS                     output.push(jet_std::DataWatchEntry {
-//RS                         order: output.len() as u64,
-//RS                         key: None,
-//RS                         value: (self.join)(left_entry.value.clone(), None),
-//RS                     });
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             for right_entry in matches {
-//RS                 if output.len() as i64 >= limits.max_output_rows {
-//RS                     return Err(jet_data_error(
-//RS                         jet_std::DataErrorKind::Limit,
-//RS                         self.operation,
-//RS                         format!("max_output_rows {} exceeded", limits.max_output_rows),
-//RS                     ));
-//RS                 }
-//RS                 output.push(jet_std::DataWatchEntry {
-//RS                     order: output.len() as u64,
-//RS                     key: None,
-//RS                     value: (self.join)(
-//RS                         left_entry.value.clone(),
-//RS                         Some(right_entry.value.clone()),
-//RS                     ),
-//RS                 });
-//RS             }
-//RS         }
-//RS         Ok(output)
-//RS     }
-//RS 
-//RS     fn retained_rows(
-//RS         &self,
-//RS         left: usize,
-//RS         right: usize,
-//RS     ) -> Result<usize, jet_std::DataError> {
-//RS         let retained = left.checked_add(right).ok_or_else(|| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::Limit,
-//RS                 self.operation,
-//RS                 "join retained row count overflow",
-//RS             )
-//RS         })?;
-//RS         Ok(retained)
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, U: Clone + 'static, O: Clone + 'static>
-//RS     jet_std::DataWatchSource<O> for JetDataJoinWatchSource<T, U, O>
-//RS {
-//RS     fn initial(&self) -> Result<jet_std::DataWatchMaterialized<O>, jet_std::DataError> {
-//RS         let left = self.left_source.initial()?;
-//RS         let right = self.right_source.initial()?;
-//RS         let output = self.output_entries(&left.entries, &right.entries)?;
-//RS         let publication_revision = left.revision.max(right.revision);
-//RS         let state = JetDataJoinWatchState {
-//RS             left: left.entries.clone(),
-//RS             right: right.entries.clone(),
-//RS             output: output.clone(),
-//RS             left_revision: left.revision,
-//RS             right_revision: right.revision,
-//RS             publication_revision,
-//RS         };
-//RS         let retained_rows = self.retained_rows(left.retained_rows, right.retained_rows)?;
-//RS         *self.state.borrow_mut() = Some(state);
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries: output,
-//RS             revision: publication_revision,
-//RS             mode: if left.mode == "recomputed" || right.mode == "recomputed" {
-//RS                 "recomputed"
-//RS             } else {
-//RS                 "incremental"
-//RS             },
-//RS             recomputed: left.recomputed || right.recomputed,
-//RS             changed: true,
-//RS             retained_rows,
-//RS         })
-//RS     }
-//RS 
-//RS     fn refresh(
-//RS         &self,
-//RS         _revision: u64,
-//RS         _prior: &[jet_std::DataWatchEntry<O>],
-//RS     ) -> Result<jet_std::DataWatchMaterialized<O>, jet_std::DataError> {
-//RS         let mut holder = self.state.borrow_mut();
-//RS         let state = holder.as_mut().ok_or_else(|| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::State,
-//RS                 self.operation,
-//RS                 "join watch was not initialized",
-//RS             )
-//RS         })?;
-//RS         let left = self.left_source.refresh(state.left_revision, &state.left)?;
-//RS         let right = self.right_source.refresh(state.right_revision, &state.right)?;
-//RS         let changed = left.changed || right.changed;
-//RS         let mut next = state.clone();
-//RS         if changed {
-//RS             next.left = left.entries.clone();
-//RS             next.right = right.entries.clone();
-//RS             next.left_revision = left.revision;
-//RS             next.right_revision = right.revision;
-//RS             next.publication_revision =
-//RS                 next.publication_revision.checked_add(1).ok_or_else(|| {
-//RS                     jet_data_error(
-//RS                         jet_std::DataErrorKind::Overflow,
-//RS                         self.operation,
-//RS                         "join publication revision exhausted",
-//RS                     )
-//RS                 })?;
-//RS             next.output = self.output_entries(&next.left, &next.right)?;
-//RS         }
-//RS         let retained_rows = self.retained_rows(left.retained_rows, right.retained_rows)?;
-//RS         let entries = next.output.clone();
-//RS         let publication_revision = next.publication_revision;
-//RS         *state = next;
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries,
-//RS             revision: publication_revision,
-//RS             mode: if left.mode == "recomputed" || right.mode == "recomputed" {
-//RS                 "recomputed"
-//RS             } else {
-//RS                 "incremental"
-//RS             },
-//RS             recomputed: left.recomputed || right.recomputed,
-//RS             changed,
-//RS             retained_rows,
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_join_query<T, U, O, FL, FR, J>(
-//RS     left: &jet_std::DataQuery<T>,
-//RS     right: &jet_std::DataQuery<U>,
-//RS     left_key: FL,
-//RS     right_key: FR,
-//RS     kind: JetDataJoinKind,
-//RS     join: J,
-//RS     operation: &'static str,
-//RS ) -> jet_std::DataQuery<O>
-//RS where
-//RS     T: Clone + 'static,
-//RS     U: Clone + 'static,
-//RS     O: Clone + 'static,
-//RS     FL: Fn(T) -> String + 'static,
-//RS     FR: Fn(U) -> String + 'static,
-//RS     J: Fn(T, Option<U>) -> O + 'static,
-//RS {
-//RS     let left_source = left.maintained_watch_source();
-//RS     let right_source = right.maintained_watch_source();
-//RS     let left_static_entries = if left_source.is_none() {
-//RS         Some(std::rc::Rc::new(std::cell::RefCell::new(None)))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let right_static_entries = if right_source.is_none() {
-//RS         Some(std::rc::Rc::new(std::cell::RefCell::new(None)))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let tracking = left.tracking.clone().or_else(|| right.tracking.clone());
-//RS     let mut steps = left.plan();
-//RS     steps.push(operation.strip_prefix("query.").unwrap_or(operation).to_string());
-//RS     let left_input = left.clone();
-//RS     let right_input = right.clone();
-//RS     let left_key = std::sync::Arc::new(left_key);
-//RS     let right_key = std::sync::Arc::new(right_key);
-//RS     let join = std::sync::Arc::new(join);
-//RS     let compute_left_key = left_key.clone();
-//RS     let compute_right_key = right_key.clone();
-//RS     let compute_join = join.clone();
-//RS     let compute_left_static_entries = left_static_entries.clone();
-//RS     let compute_right_static_entries = right_static_entries.clone();
-//RS     let result = jet_data_reducer_query(tracking, steps, move || {
-//RS         let join = compute_join.clone();
-//RS         let left_rows = if let Some(cache) = &compute_left_static_entries {
-//RS             jet_data_static_query_entries(&left_input, cache)?
-//RS                 .into_iter()
-//RS                 .map(|entry| entry.value)
-//RS                 .collect()
-//RS         } else {
-//RS             jet_data_query_collect(&left_input)?
-//RS         };
-//RS         let right_rows = if let Some(cache) = &compute_right_static_entries {
-//RS             jet_data_static_query_entries(&right_input, cache)?
-//RS                 .into_iter()
-//RS                 .map(|entry| entry.value)
-//RS                 .collect()
-//RS         } else {
-//RS             jet_data_query_collect(&right_input)?
-//RS         };
-//RS         let limits = jet_std::DataLimits::safe();
-//RS         match kind {
-//RS             JetDataJoinKind::Inner => {
-//RS                 let left_key = compute_left_key.clone();
-//RS                 let right_key = compute_right_key.clone();
-//RS                 let join = join.clone();
-//RS                 let rows = jet_data_inner_join_checked(
-//RS                     &left_rows,
-//RS                     &right_rows,
-//RS                     move |row| left_key(row),
-//RS                     move |row| right_key(row),
-//RS                     &limits,
-//RS                 )?;
-//RS                 Ok(rows
-//RS                     .into_iter()
-//RS                     .map(|row| join(row.left, Some(row.right)))
-//RS                     .collect())
-//RS             }
-//RS             JetDataJoinKind::Left => {
-//RS                 let left_key = compute_left_key.clone();
-//RS                 let right_key = compute_right_key.clone();
-//RS                 let join = join.clone();
-//RS                 let rows = jet_data_left_join_checked(
-//RS                     &left_rows,
-//RS                     &right_rows,
-//RS                     move |row| left_key(row),
-//RS                     move |row| right_key(row),
-//RS                     &limits,
-//RS                 )?;
-//RS                 Ok(rows
-//RS                     .into_iter()
-//RS                     .map(|row| join(row.left, row.right.ok()))
-//RS                     .collect())
-//RS             }
-//RS         }
-//RS     });
-//RS     if left_source.is_some() || right_source.is_some() {
-//RS         let left_source = left_source.unwrap_or_else(|| {
-//RS             let entries = match left_static_entries {
-//RS                 Some(entries) => entries,
-//RS                 None => unreachable!("missing static left join cache"),
-//RS             };
-//RS             std::rc::Rc::new(JetDataStaticWatchSource {
-//RS                 query: left.clone(),
-//RS                 entries,
-//RS             }) as std::rc::Rc<dyn jet_std::DataWatchSource<T>>
-//RS         });
-//RS         let right_source = right_source.unwrap_or_else(|| {
-//RS             let entries = match right_static_entries {
-//RS                 Some(entries) => entries,
-//RS                 None => unreachable!("missing static right join cache"),
-//RS             };
-//RS             std::rc::Rc::new(JetDataStaticWatchSource {
-//RS                 query: right.clone(),
-//RS                 entries,
-//RS             }) as std::rc::Rc<dyn jet_std::DataWatchSource<U>>
-//RS         });
-//RS         result.with_watch_source(std::rc::Rc::new(JetDataJoinWatchSource {
-//RS             left_source,
-//RS             right_source,
-//RS             left_key,
-//RS             right_key,
-//RS             join,
-//RS             kind,
-//RS             operation,
-//RS             state: std::cell::RefCell::new(None),
-//RS         }))
-//RS     } else {
-//RS         result
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_query_inner_join<T, U, FL, FR>(
-//RS     left: &jet_std::DataQuery<T>,
-//RS     right: &jet_std::DataQuery<U>,
-//RS     left_key: FL,
-//RS     right_key: FR,
-//RS ) -> jet_std::DataQuery<jet_std::DataJoin<T, U>>
-//RS where
-//RS     T: Clone + 'static,
-//RS     U: Clone + 'static,
-//RS     FL: Fn(T) -> String + 'static,
-//RS     FR: Fn(U) -> String + 'static,
-//RS {
-//RS     jet_data_join_query(
-//RS         left,
-//RS         right,
-//RS         left_key,
-//RS         right_key,
-//RS         JetDataJoinKind::Inner,
-//RS         |left, right| jet_std::DataJoin {
-//RS             left,
-//RS             right: right.expect("inner join invariant"),
-//RS         },
-//RS         "query.inner_join",
-//RS     )
-//RS }
-//RS 
-//RS fn jet_data_query_left_join<T, U, FL, FR>(
-//RS     left: &jet_std::DataQuery<T>,
-//RS     right: &jet_std::DataQuery<U>,
-//RS     left_key: FL,
-//RS     right_key: FR,
-//RS ) -> jet_std::DataQuery<jet_std::DataJoin<T, JetOutcome<U, JetAbsent>>>
-//RS where
-//RS     T: Clone + 'static,
-//RS     U: Clone + 'static,
-//RS     FL: Fn(T) -> String + 'static,
-//RS     FR: Fn(U) -> String + 'static,
-//RS {
-//RS     jet_data_join_query(
-//RS         left,
-//RS         right,
-//RS         left_key,
-//RS         right_key,
-//RS         JetDataJoinKind::Left,
-//RS         |left, right| jet_std::DataJoin {
-//RS             left,
-//RS             right: right.ok_or(JetAbsent),
-//RS         },
-//RS         "query.left_join",
-//RS     )
-//RS }
-//RS 
-//RS struct JetDataMapWatchSource<T, U> {
-//RS     source: std::rc::Rc<dyn jet_std::DataWatchSource<T>>,
-//RS     base: std::cell::RefCell<Option<Vec<jet_std::DataWatchEntry<T>>>>,
-//RS     map: std::sync::Arc<dyn Fn(T) -> Result<U, jet_std::DataError>>,
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, U: Clone + 'static> JetDataMapWatchSource<T, U> {
-//RS     fn map_entries(
-//RS         &self,
-//RS         entries: Vec<jet_std::DataWatchEntry<T>>,
-//RS     ) -> Result<Vec<jet_std::DataWatchEntry<U>>, jet_std::DataError> {
-//RS         entries
-//RS             .into_iter()
-//RS             .map(|entry| {
-//RS                 Ok(jet_std::DataWatchEntry {
-//RS                     order: entry.order,
-//RS                     key: None,
-//RS                     value: (self.map)(entry.value)?,
-//RS                 })
-//RS             })
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, U: Clone + 'static> jet_std::DataWatchSource<U>
-//RS     for JetDataMapWatchSource<T, U>
-//RS {
-//RS     fn initial(&self) -> Result<jet_std::DataWatchMaterialized<U>, jet_std::DataError> {
-//RS         let materialized = self.source.initial()?;
-//RS         let entries = self.map_entries(materialized.entries.clone())?;
-//RS         *self.base.borrow_mut() = Some(materialized.entries);
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries,
-//RS             revision: materialized.revision,
-//RS             mode: materialized.mode,
-//RS             recomputed: materialized.recomputed,
-//RS             changed: materialized.changed,
-//RS             retained_rows: materialized.retained_rows,
-//RS         })
-//RS     }
-//RS 
-//RS     fn refresh(
-//RS         &self,
-//RS         revision: u64,
-//RS         prior: &[jet_std::DataWatchEntry<U>],
-//RS     ) -> Result<jet_std::DataWatchMaterialized<U>, jet_std::DataError> {
-//RS         let base = self.base.borrow().clone().ok_or_else(|| {
-//RS             jet_std::DataError::simple(
-//RS                 jet_std::DataErrorKind::State,
-//RS                 "data.query.watch",
-//RS                 "mapped watch was not initialized",
-//RS             )
-//RS         })?;
-//RS         let materialized = self.source.refresh(revision, &base)?;
-//RS         if !materialized.changed && materialized.revision == revision {
-//RS             return Ok(jet_std::DataWatchMaterialized {
-//RS                 entries: prior.to_vec(),
-//RS                 revision: materialized.revision,
-//RS                 mode: materialized.mode,
-//RS                 recomputed: false,
-//RS                 changed: false,
-//RS                 retained_rows: materialized.retained_rows,
-//RS             });
-//RS         }
-//RS         let next_base = materialized.entries.clone();
-//RS         let entries = self.map_entries(next_base.clone())?;
-//RS         *self.base.borrow_mut() = Some(next_base);
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries,
-//RS             revision: materialized.revision,
-//RS             mode: materialized.mode,
-//RS             recomputed: materialized.recomputed,
-//RS             changed: materialized.changed,
-//RS             retained_rows: materialized.retained_rows,
-//RS         })
-//RS     }
-//RS }
-//RS fn jet_data_extreme_key_finite<K: 'static>(key: &K) -> bool {
-//RS     let key = key as &dyn std::any::Any;
-//RS     key.downcast_ref::<f64>()
-//RS         .map(|value| value.is_finite())
-//RS         .or_else(|| key.downcast_ref::<f32>().map(|value| value.is_finite()))
-//RS         .unwrap_or(true)
-//RS }
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS enum JetDataExtreme {
-//RS     Min,
-//RS     Max,
-//RS }
-//RS 
-//RS struct JetDataExtremeWatchSource<T, K> {
-//RS     source: std::rc::Rc<dyn jet_std::DataWatchSource<T>>,
-//RS     base: std::cell::RefCell<Option<Vec<jet_std::DataWatchEntry<T>>>>,
-//RS     key: std::sync::Arc<dyn Fn(T) -> K>,
-//RS     extreme: JetDataExtreme,
-//RS     operation: &'static str,
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, K: Clone + PartialOrd + 'static>
-//RS     JetDataExtremeWatchSource<T, K>
-//RS {
-//RS     fn select(
-//RS         &self,
-//RS         entries: &[jet_std::DataWatchEntry<T>],
-//RS     ) -> Result<(K, u64), jet_std::DataError> {
-//RS         let mut selected: Option<(K, u64)> = None;
-//RS         for entry in entries {
-//RS             let candidate = (self.key)(entry.value.clone());
-//RS             if !jet_data_extreme_key_finite(&candidate) {
-//RS                 return Err(jet_data_error(
-//RS                     jet_std::DataErrorKind::NonFinite,
-//RS                     self.operation,
-//RS                     "extreme key must be finite",
-//RS                 ));
-//RS             }
-//RS             let replace = match &selected {
-//RS                 None => true,
-//RS                 Some((current, current_order)) => {
-//RS                     let ordering = candidate.partial_cmp(current).ok_or_else(|| {
-//RS                         jet_data_error(
-//RS                             jet_std::DataErrorKind::NonFinite,
-//RS                             self.operation,
-//RS                             "extreme key is not ordered",
-//RS                         )
-//RS                     })?;
-//RS                     match self.extreme {
-//RS                         JetDataExtreme::Min => {
-//RS                             ordering == std::cmp::Ordering::Less
-//RS                                 || (ordering == std::cmp::Ordering::Equal
-//RS                                     && entry.order < *current_order)
-//RS                         }
-//RS                         JetDataExtreme::Max => {
-//RS                             ordering == std::cmp::Ordering::Greater
-//RS                                 || (ordering == std::cmp::Ordering::Equal
-//RS                                     && entry.order < *current_order)
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             };
-//RS             if replace {
-//RS                 selected = Some((candidate, entry.order));
-//RS             }
-//RS         }
-//RS         selected.ok_or_else(|| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::Empty,
-//RS                 self.operation,
-//RS                 "empty query has no extreme",
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     fn materialize(
-//RS         &self,
-//RS         materialized: jet_std::DataWatchMaterialized<T>,
-//RS     ) -> Result<jet_std::DataWatchMaterialized<K>, jet_std::DataError> {
-//RS         let (value, order) = self.select(&materialized.entries)?;
-//RS         Ok(jet_std::DataWatchMaterialized {
-//RS             entries: vec![jet_std::DataWatchEntry {
-//RS                 order,
-//RS                 key: None,
-//RS                 value,
-//RS             }],
-//RS             revision: materialized.revision,
-//RS             mode: materialized.mode,
-//RS             recomputed: materialized.recomputed,
-//RS             changed: materialized.changed,
-//RS             retained_rows: materialized.retained_rows,
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS impl<T: Clone + 'static, K: Clone + PartialOrd + 'static> jet_std::DataWatchSource<K>
-//RS     for JetDataExtremeWatchSource<T, K>
-//RS {
-//RS     fn initial(&self) -> Result<jet_std::DataWatchMaterialized<K>, jet_std::DataError> {
-//RS         let materialized = self.source.initial()?;
-//RS         *self.base.borrow_mut() = Some(materialized.entries.clone());
-//RS         self.materialize(materialized)
-//RS     }
-//RS 
-//RS     fn refresh(
-//RS         &self,
-//RS         revision: u64,
-//RS         prior: &[jet_std::DataWatchEntry<K>],
-//RS     ) -> Result<jet_std::DataWatchMaterialized<K>, jet_std::DataError> {
-//RS         let base = self.base.borrow().clone().ok_or_else(|| {
-//RS             jet_std::DataError::simple(
-//RS                 jet_std::DataErrorKind::State,
-//RS                 "data.query.watch",
-//RS                 "extreme watch was not initialized",
-//RS             )
-//RS         })?;
-//RS         let materialized = self.source.refresh(revision, &base)?;
-//RS         if !materialized.changed && materialized.revision == revision {
-//RS             return Ok(jet_std::DataWatchMaterialized {
-//RS                 entries: prior.to_vec(),
-//RS                 revision: materialized.revision,
-//RS                 mode: materialized.mode,
-//RS                 recomputed: false,
-//RS                 changed: false,
-//RS                 retained_rows: materialized.retained_rows,
-//RS             });
-//RS         }
-//RS         let next_base = materialized.entries.clone();
-//RS         let output = self.materialize(materialized)?;
-//RS         *self.base.borrow_mut() = Some(next_base);
-//RS         Ok(output)
-//RS     }
-//RS }
-//RS 
-//RS fn jet_data_extreme_materialized<T, K, F>(
-//RS     rows: Vec<T>,
-//RS     key: &F,
-//RS     extreme: JetDataExtreme,
-//RS     operation: &'static str,
-//RS ) -> Result<Vec<K>, jet_std::DataError>
-//RS where
-//RS     T: Clone,
-//RS     K: Clone + PartialOrd + 'static,
-//RS     F: ?Sized + Fn(T) -> K,
-//RS {
-//RS     let mut selected: Option<(K, u64)> = None;
-//RS     for (order, row) in rows.into_iter().enumerate() {
-//RS         let candidate = key(row);
-//RS         if !jet_data_extreme_key_finite(&candidate) {
-//RS             return Err(jet_data_error(
-//RS                 jet_std::DataErrorKind::NonFinite,
-//RS                 operation,
-//RS                 "extreme key must be finite",
-//RS             ));
-//RS         }
-//RS         let replace = match &selected {
-//RS             None => true,
-//RS             Some((current, current_order)) => {
-//RS                 let ordering = candidate.partial_cmp(current).ok_or_else(|| {
-//RS                     jet_data_error(
-//RS                         jet_std::DataErrorKind::NonFinite,
-//RS                         operation,
-//RS                         "extreme key is not ordered",
-//RS                     )
-//RS                 })?;
-//RS                 match extreme {
-//RS                     JetDataExtreme::Min => {
-//RS                         ordering == std::cmp::Ordering::Less
-//RS                             || (ordering == std::cmp::Ordering::Equal
-//RS                                 && (order as u64) < *current_order)
-//RS                     }
-//RS                     JetDataExtreme::Max => {
-//RS                         ordering == std::cmp::Ordering::Greater
-//RS                             || (ordering == std::cmp::Ordering::Equal
-//RS                                 && (order as u64) < *current_order)
-//RS                     }
-//RS                 }
-//RS             }
-//RS         };
-//RS         if replace {
-//RS             selected = Some((candidate, order as u64));
-//RS         }
-//RS     }
-//RS     selected
-//RS         .map(|(value, _)| vec![value])
-//RS         .ok_or_else(|| {
-//RS             jet_data_error(
-//RS                 jet_std::DataErrorKind::Empty,
-//RS                 operation,
-//RS                 "empty query has no extreme",
-//RS             )
-//RS         })
-//RS }
-//RS 
-// END-PORT-PENDING 0261 crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1-1793
+use core.data.[DataError, DataErrorKind, DataLimits]
+use core.encoding.[EncodingError, EncodingErrorKind]
+use core.prelude.runtime.std_common_types.[DataArrowBatch, DataArrowOps, DataPivotCell, DataQueryRows]
+use core.prelude.runtime.std_common_types_02.DataJoin
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+use core.data.runtime.kernel_lazy_table_plan.[JetTableOperation, JetTableTypeId, JetTableColumn, JetTableSchema, JetTableSource, JetTablePlan, JetTableCallable, JetTableJoinKind, JetTableFacts]
+use core.data.runtime.top_data_plot_02.JetDataPlotRows
+use core.data.runtime.top_data_plot.[JetDataPlotSourceFacts, JetDataPlotSchema]
+use core.data.runtime.top_data_stats.[jet_data_error, jet_data_kernel_limits, jet_data_kernel_validate_limits, jet_data_pivot_sum_values, jet_data_join_indices]
+use core.encoding.runtime.top_encoding_stream.jet_encoding_validate_limits
+use jet_arrow_data.[ArrowRow, ColumnBatch, ArrowImported]
+use std.boxed.Box
+use std.any
+use core.prelude.runtime.std_common_types.[DataTracked, DataStream, DataQueryOperation, GroupValue]
+use core.prelude.runtime.std_common_types_02.[DataQuery, DataGroupedQuery, DataWatch, DataWatchStatus]
+use core.encoding.runtime.top_encoding_traits.__jet_Decode
+use core.data.runtime.top_data_flow_02.jet_data_stream_collect
+use core.data.runtime.kernel_lazy_table_plan.jet_table_plan_from_descriptors
+use std.sync.Arc
+use std.ops.Add
+use core.prelude.runtime.std_common_types.[DataTrackedReader, DataTrackedChangeKind, DataWatchEntry, DataWatchMaterialized, DataWatchSource]
+use core.data.runtime.top_data_flow_02.jet_data_reducer_query
+use std.rc.Rc
+use std.cell.RefCell
+use std.cmp.Ordering
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1
+// One typed pull-stream/DataLimits/DataError analytics owner.
+// The demand-emitted checked Arrow owner supplies safe row operations;
+// the always-present carrier exposes no foreign C pointers.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:7
+impl<T: ArrowRow + Clone> DataArrowBatch<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:11
+    pub fn new(owner: ColumnBatch<T>) -> Self { Self.from_ops(Box.new(^owner)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:16
+impl<T: ArrowRow + Clone> DataArrowOps<T> for ColumnBatch<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:20
+    fn row_count(self: &Self) -> Usize { self.report.rows }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:24
+    fn row(self: &Self, index: Usize) -> T Err! {
+        ArrowImported<T>.row(self, index).map_err(fn(error) { error.to_string() })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:32
+// Ordinary typed lists are canonical materialized plotting values.
+impl<T> JetDataPlotRows for [T] {
+    type Row = T
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:35
+    fn jet_data_plot_parts(self: Self) -> ([Self.Row], JetDataPlotSourceFacts, JetDataPlotSchema, DataLimits) {
+        // GATE #4565: kernel primitive
+        row_type :: #Unsafe("native static type identity describes the checked plotting row without inspecting payload storage") { any.type_name<T>() }
+        identity :: "data.list:{row_type}"
+        schema :: JetDataPlotSchema.new(identity.clone(), row_type, [])
+        source :: JetDataPlotSourceFacts.new(identity.clone(), identity.clone(), identity.clone(),
+            row_type, self.len() as I64, identity, "data.list")
+        (^self, source, schema, DataLimits.safe())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:59
+fn jet_data_from_encoding(operation: String, row: JetOutcome<I64, JetAbsent>, enc: EncodingError) -> DataError {
+    kind :: match enc.kind {
+        .Limit -> DataErrorKind.Limit
+        .IO -> DataErrorKind.IO
+        .State -> DataErrorKind.State
+        _ -> DataErrorKind.Decode
+    }
+    DataError{kind: kind, operation: operation, row: row.ok().map(fn(value) { Int{value} }),
+        column: enc.column, index: None, reason: enc.reason.clone(), cause: Val(^enc)}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:81
+fn jet_data_limits_validate(limits: &DataLimits) -> () DataError! {
+    jet_encoding_validate_limits(&limits.encoding).map_err(fn(enc) { jet_data_from_encoding("DataLimits", Err(JetAbsent{}), ^enc) })?
+    jet_data_kernel_validate_limits(&jet_data_kernel_limits(limits.max_groups, limits.max_sort_rows, limits.max_join_rows, limits.max_output_rows))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:93
+fn jet_data_canonical_unary_plan<T>(operation: JetTableOperation, operation_name: String, rows: Usize, result_type: JetTableTypeId, output_columns: [JetTableColumn]) -> JetTablePlan DataError! {
+    // GATE #4565: kernel primitive
+    row_type :: JetTableTypeId.new(#Unsafe("use the checked native static row type identity for canonical table descriptors") { any.type_name<T>() })
+    input_schema :: JetTableSchema.new(row_type.clone(), [])
+    source :: JetTableSource.new("data.{operation_name}.source", input_schema.clone()).with_rows(rows as U128)
+    plan := JetTablePlan.from_source("data.{operation_name}", ^source)
+    output_schema :: if operation == JetTableOperation.Sort { input_schema.clone() }
+        else { JetTableSchema.new(result_type.clone(), ^output_columns) }
+    callable_result :: if operation == JetTableOperation.Sort { JetTableTypeId.string() } else { result_type }
+    callable :: JetTableCallable.new("data.{operation_name}", ^row_type, ^callable_result)
+    node :: match operation {
+        .Sort -> plan.append_sort(^output_schema, ^callable).map_err(fn(error) {
+            jet_data_error(DataErrorKind.InvalidArgument, operation_name, "canonical table plan rejected: {error}")
+        })?
+        .Group -> {
+            input :: plan.output
+            plan.append(JetTableOperation.Group, [input], ^output_schema, Val(^callable)).map_err(fn(error) {
+                jet_data_error(DataErrorKind.InvalidArgument, operation_name, "canonical table plan rejected: {error}")
+            })?
+        }
+        _ -> return Err(jet_data_error(DataErrorKind.InvalidArgument, operation_name, "unsupported canonical unary operation"))
+    }
+    plan.nodes[node.index()].note = "rows={rows}"
+    plan.validate().map_err(fn(error) {
+        jet_data_error(DataErrorKind.InvalidArgument, operation_name, "canonical table plan rejected: {error}")
+    })?
+    Ok(^plan)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:164
+fn jet_data_canonical_join_plan<T, U>(operation_name: String, kind: JetTableJoinKind, left_rows: Usize, right_rows: Usize) -> JetTablePlan DataError! {
+    // GATE #4565: kernel primitive
+    (left_name, right_name) :: #Unsafe("native static type identities define canonical join schemas, never payload addresses") { (any.type_name<T>(), any.type_name<U>()) }
+    row_type :: JetTableTypeId.new(left_name)
+    input_schema :: JetTableSchema.new(row_type, [])
+    source :: JetTableSource.new("data.{operation_name}.left", ^input_schema).with_rows(left_rows as U128)
+    plan := JetTablePlan.from_source("data.{operation_name}", ^source)
+    left_type :: JetTableTypeId.new(left_name)
+    right_type :: JetTableTypeId.new(right_name)
+    right_schema :: JetTableSchema.new(right_type.clone(), [])
+    right_source :: JetTableSource.new("data.{operation_name}.right", ^right_schema).with_rows(right_rows as U128)
+    right :: plan.append_source(^right_source).map_err(fn(error) {
+        jet_data_error(DataErrorKind.InvalidArgument, operation_name, "canonical table plan rejected: {error}")
+    })?
+    left_text :: left_type.as_str()
+    right_text :: right_type.as_str()
+    output_schema :: JetTableSchema.new(JetTableTypeId.new("DataJoin<{left_text},{right_text}>"), [
+        JetTableColumn.new("left", ^left_type),
+        JetTableColumn.new("right", if kind == JetTableJoinKind.Left { JetTableTypeId.new("JetOutcome<{right_text},JetAbsent>") } else { right_type })
+    ])
+    node :: plan.append_join(right, ^output_schema, kind, []).map_err(fn(error) {
+        jet_data_error(DataErrorKind.InvalidArgument, operation_name, "canonical table plan rejected: {error}")
+    })?
+    // Adapter keys determine cardinality; scan bounds do not determine output.
+    plan.nodes[node.index()].facts = JetTableFacts.unknown(2)
+    plan.nodes[node.index()].note = "left_rows={left_rows};right_rows={right_rows};right_type={right_name}"
+    plan.validate().map_err(fn(error) {
+        jet_data_error(DataErrorKind.InvalidArgument, operation_name, "canonical table plan rejected: {error}")
+    })?
+    Ok(^plan)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:236
+fn jet_data_plan_inspect(plan: &JetTablePlan, operation: String) -> () DataError! {
+    plan.inspect().map(fn(_) { () }).map_err(fn(error) {
+        jet_data_error(DataErrorKind.InvalidArgument, operation, "canonical table inspection rejected: {error}")
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:251
+fn jet_data_pivot_sum_checked<T: Clone>(rows: &[T], row_key: fn(T) -> String, col_key: fn(T) -> String, value: fn(T) -> F64, limits: &DataLimits) -> [DataPivotCell] DataError! {
+    jet_data_limits_validate(limits)?
+    plan :: jet_data_canonical_unary_plan<T>(JetTableOperation.Group, "pivot_sum", rows.len(), JetTableTypeId.new("DataPivotCell"), [
+        JetTableColumn.new("row_key", JetTableTypeId.string()), JetTableColumn.new("column_key", JetTableTypeId.string()),
+        JetTableColumn.new("count", JetTableTypeId.integer()), JetTableColumn.new("sum", JetTableTypeId.float()), JetTableColumn.new("mean", JetTableTypeId.float())
+    ])?
+    jet_data_plan_inspect(&plan, "pivot_sum")?
+    keyed_rows :: rows.iter().cloned().map(fn(row) { (row_key(row.clone()), col_key(row.clone()), value(row)) }).collect()
+    cells :: jet_data_pivot_sum_values(&keyed_rows, &jet_data_kernel_limits(limits.max_groups, limits.max_sort_rows, limits.max_join_rows, limits.max_output_rows))?
+    Ok(cells.into_iter().map(fn(cell) {
+        DataPivotCell{row_key: cell.row_key, column_key: cell.column_key, count: cell.count, sum: cell.sum, mean: cell.mean}
+    }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:304
+fn jet_data_pivot_sum_checked_default<T: Clone>(rows: &[T], row_key: fn(T) -> String, col_key: fn(T) -> String, value: fn(T) -> F64) -> [DataPivotCell] DataError! {
+    jet_data_pivot_sum_checked(rows, ^row_key, ^col_key, ^value, &DataLimits.safe())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:327
+fn jet_data_inner_join_checked<T: Clone, U: Clone>(left: &[T], right: &[U], left_key: fn(T) -> String, right_key: fn(U) -> String, limits: &DataLimits) -> [DataJoin<T, U>] DataError! {
+    jet_data_limits_validate(limits)?
+    plan :: jet_data_canonical_join_plan<T, U>("inner_join", JetTableJoinKind.Inner, left.len(), right.len())?
+    jet_data_plan_inspect(&plan, "inner_join")?
+    left_keys :: left.iter().cloned().map(fn(row) { left_key(row) }).collect()
+    right_keys :: right.iter().cloned().map(fn(row) { right_key(row) }).collect()
+    indices :: jet_data_join_indices(&left_keys, &right_keys, false,
+        &jet_data_kernel_limits(limits.max_groups, limits.max_sort_rows, limits.max_join_rows, limits.max_output_rows))?
+    joined := [DataJoin<T, U>].with_capacity(indices.len())
+    loop index in indices {
+        right_index :: index.right.ok_or_else(fn() { jet_data_error(DataErrorKind.State, "inner_join", "inner join kernel returned an absent right row") })?
+        joined.push(DataJoin{left: left[index.left].clone(), right: right[right_index].clone()})
+    }
+    Ok(^joined)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:386
+fn jet_data_inner_join_checked_default<T: Clone, U: Clone>(left: &[T], right: &[U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
+    jet_data_inner_join_checked(left, right, ^left_key, ^right_key, &DataLimits.safe())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:401
+fn jet_data_left_join_checked<T: Clone, U: Clone>(left: &[T], right: &[U], left_key: fn(T) -> String, right_key: fn(U) -> String, limits: &DataLimits) -> [DataJoin<T, JetOutcome<U, JetAbsent>>] DataError! {
+    jet_data_limits_validate(limits)?
+    plan :: jet_data_canonical_join_plan<T, U>("left_join", JetTableJoinKind.Left, left.len(), right.len())?
+    jet_data_plan_inspect(&plan, "left_join")?
+    left_keys :: left.iter().cloned().map(fn(row) { left_key(row) }).collect()
+    right_keys :: right.iter().cloned().map(fn(row) { right_key(row) }).collect()
+    indices :: jet_data_join_indices(&left_keys, &right_keys, true,
+        &jet_data_kernel_limits(limits.max_groups, limits.max_sort_rows, limits.max_join_rows, limits.max_output_rows))?
+    Ok(indices.into_iter().map(fn(index) {
+        DataJoin{left: left[index.left].clone(), right: index.right.map(fn(right_index) { right[right_index].clone() }).ok_or(JetAbsent{})}
+    }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:455
+fn jet_data_left_join_checked_default<T: Clone, U: Clone>(left: &[T], right: &[U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, JetOutcome<U, JetAbsent>>] DataError! {
+    jet_data_left_join_checked(left, right, ^left_key, ^right_key, &DataLimits.safe())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:470
+fn jet_data_collect_rows_checked<T: Clone>(rows_source: &DataQueryRows<T>, limits: &DataLimits) -> [T] DataError! {
+    jet_data_limits_validate(limits)?
+    max_output_rows :: Usize.try_from(limits.max_output_rows).map_err(fn(_) {
+        jet_data_error(DataErrorKind.Limit, "query.collect", "max_output_rows cannot be represented by this target")
+    })?
+    cursor := rows_source.cursor()
+    rows := [T].with_capacity(max_output_rows.min(256))
+    loop {
+        remaining :: max_output_rows.saturating_sub(rows.len())
+        request :: remaining.saturating_add(1).min(256)
+        batch :: cursor.next_batch_with_sort_limit(request, Val(limits.max_sort_rows)).map_err(fn(limit) {
+            jet_data_error(DataErrorKind.Limit, limit.operation, "max_sort_rows {limit.limit} exceeded")
+        })?
+        if batch.len() > remaining {
+            return Err(jet_data_error(DataErrorKind.Limit, "query.collect", "max_output_rows {limits.max_output_rows} exceeded"))
+        }
+        exhausted :: batch.len() < request
+        // GATE #4565: kernel primitive
+        #Unsafe("fallible bounded native reservation propagates allocation failure without publishing partial query output") {
+            rows.try_reserve_exact(batch.len()).map_err(fn(_) {
+                jet_data_error(DataErrorKind.Limit, "query.collect", "output allocation exceeded the configured bound")
+            })?
+        }
+        rows.extend(^batch)
+        if exhausted -> break
+    }
+    Ok(^rows)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:521
+// Retain one deferred list query; never reopen the owned list.
+fn jet_data_query<T: Clone>(rows: &[T]) -> DataQuery<T> {
+    // GATE #4565: kernel primitive
+    row_type :: #Unsafe("static native row type identity supplies checked compiler query metadata") { any.type_name<T>() }
+    plan :: jet_table_plan_from_descriptors(row_type, &[], rows.len() as U128)
+        .unwrap_or_else(fn(error) { panic("invalid compiler query metadata: {error}") })
+    DataQuery.from_rows(rows.clone(), 0, ^plan)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:532
+fn jet_data_track<T: Clone, K: Clone + PartialEq>(rows: &[T], key: fn(T) -> K) -> DataTracked<T, K> DataError! {
+    DataTracked.new(rows.clone(), ^key)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:544
+fn jet_data_query_tracked<T: Clone, K: Clone + PartialEq>(tracked: &DataTracked<T, K>) -> DataQuery<T> { DataQuery.from_tracked(tracked) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:553
+fn jet_data_track_insert<T: Clone, K: Clone + PartialEq>(tracked: &DataTracked<T, K>, row: T) -> () DataError! { tracked.insert(^row) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:564
+fn jet_data_track_replace<T: Clone, K: Clone + PartialEq>(tracked: &DataTracked<T, K>, key: K, row: T) -> () DataError! { tracked.replace(^key, ^row) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:576
+fn jet_data_track_remove<T: Clone, K: Clone + PartialEq>(tracked: &DataTracked<T, K>, key: K) -> () DataError! { tracked.remove(^key) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:591
+// A one-shot stream becomes a single-use query: subsequent collect is State.
+fn jet_data_query_stream<T: __jet_Decode + Clone>(stream: DataStream) -> DataQuery<T> {
+    stream := ^stream
+    DataQuery.from_computation(["stream"], fn() { jet_data_stream_collect<T>(&stream) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:600
+fn jet_data_query_plan<T>(query: &DataQuery<T>) -> [String] { query.plan() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:604
+fn jet_data_grouped_steps<T, K>(grouped: &DataGroupedQuery<T, K>, reducer: String) -> [String] {
+    steps := grouped.query.plan()
+    steps.push("group_by")
+    steps.push(^reducer)
+    steps
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:614
+fn jet_data_query_filter<T: Clone>(query: &DataQuery<T>, predicate: fn(T) -> Bool) -> DataQuery<T> { query.filter(^predicate) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:624
+fn jet_data_query_sort_by<T: Clone>(query: &DataQuery<T>, key: fn(T) -> String) -> DataQuery<T> { query.sort_by(^key) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:634
+fn jet_data_query_apply_operations<T: Clone>(rows: &[T], operations: &[DataQueryOperation<T>], limits: &DataLimits) -> () DataError! {
+    loop operation in operations {
+        match operation {
+            .Filter(predicate) -> rows.retain(fn(row) { predicate(row.clone()) })
+            .SortBy(key) -> {
+                if rows.len() as I64 > limits.max_sort_rows {
+                    return Err(jet_data_error(DataErrorKind.Limit, "query.sort_by", "max_sort_rows {limits.max_sort_rows} exceeded"))
+                }
+                rows.sort_by_key(fn(row) { key(row.clone()) })
+            }
+        }
+    }
+    if rows.len() as I64 > limits.max_output_rows {
+        return Err(jet_data_error(DataErrorKind.Limit, "query.collect", "max_output_rows {limits.max_output_rows} exceeded"))
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:666
+fn jet_data_query_collect<T: Clone>(query: &DataQuery<T>) -> [T] DataError! {
+    limits :: DataLimits.safe()
+    if Val(rows_source) :: query.rows_frame() { return jet_data_collect_rows_checked(&rows_source, &limits) }
+    if query.is_recomputed() {
+        compute :: query.recomputation().ok_or_else(fn() {
+            jet_data_error(DataErrorKind.State, "query.collect", "recomputable query has no producer")
+        })?
+        rows := compute?
+        jet_data_query_apply_operations(&rows, &query.operations, &limits)?
+        return Ok(^rows)
+    }
+    if query.is_computed() {
+        compute :: query.take_computation().ok_or_else(fn() {
+            jet_data_error(DataErrorKind.State, "query.collect", "query has already been collected")
+        })?
+        rows := compute()?
+        jet_data_query_apply_operations(&rows, &query.operations, &limits)?
+        return Ok(^rows)
+    }
+    Err(jet_data_error(DataErrorKind.State, "query.collect", "query source is unavailable"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:704
+fn jet_data_query_watch<T: Clone>(query: &DataQuery<T>) -> DataWatch<T> DataError! { DataWatch.from_query(query.clone()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:710
+fn jet_data_watch_get<T: Clone>(watch: &DataWatch<T>) -> [T] DataError! { watch.get() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:716
+fn jet_data_watch_status<T: Clone>(watch: &DataWatch<T>) -> DataWatchStatus { watch.status() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:722
+fn jet_data_watch_cancel<T: Clone>(watch: &DataWatch<T>) -> { watch.cancel() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:726
+fn jet_data_query_group_by<T: Clone, K>(query: &DataQuery<T>, key: fn(T) -> K) -> DataGroupedQuery<T, K> {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain one native shared callback for the grouped query without duplicating its source ownership") {
+        DataGroupedQuery{query: query.clone(), key: Arc.new(^key)}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:740
+fn jet_data_group_sum_materialized<T: Clone, K: Clone + PartialEq, V: Clone + Add<Output=V>>(query: &DataQuery<T>, key: &fn(T) -> K, value: &fn(T) -> V DataError!) -> [GroupValue<K, V>] DataError! {
+    rows :: jet_data_query_collect(query)?
+    limits :: DataLimits.safe()
+    groups := [(K, V)]{}
+    loop row in rows {
+        group_key :: key(row.clone())
+        group_value :: value(row)?
+        if Val((_, total)) :: groups.iter_mut().find(fn((existing, _)) { existing == &group_key }) {
+            *total = total.clone() + ^group_value
+        } else {
+            if groups.len() as I64 >= limits.max_groups {
+                return Err(jet_data_error(DataErrorKind.Limit, "query.group_by.sum", "max_groups {limits.max_groups} exceeded"))
+            }
+            groups.push((^group_key, ^group_value))
+        }
+    }
+    if groups.len() as I64 > limits.max_output_rows {
+        return Err(jet_data_error(DataErrorKind.Limit, "query.group_by.sum", "max_output_rows {limits.max_output_rows} exceeded"))
+    }
+    Ok(groups.into_iter().map(fn((key, value)) { GroupValue{key: ^key, value: ^value} }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:785
+#Derive(Clone)
+struct JetDataGroupBucket<K, V> {
+    key: K
+    rank: (String?, U64)
+    members: [(U64, V, String?)]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:791
+#Derive(Clone)
+struct JetDataGroupWatchState<K, V> {
+    buckets: [JetDataGroupBucket<K, V>]
+    revision: U64
+    values: [GroupValue<K, V>]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:798
+struct JetDataGroupWatchSource<T, K, V> {
+    source: Rc<DataTrackedReader<T>>
+    operations: [DataQueryOperation<T>]
+    key: Arc<fn(T) -> K>
+    value: Arc<fn(T) -> V DataError!>
+    aggregate: Arc<fn(&[V]) -> V DataError!>
+    operation: String
+    mode: String
+    recomputed: Bool
+    state: RefCell<JetDataGroupWatchState<K, V>?>
+}
+impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:815
+    fn accepts(self, row: &T) -> (Bool, String?) {
+        sort_key := None
+        loop operation in &self.operations {
+            match operation {
+                .Filter(predicate) -> { if !predicate(row.clone()) -> return (false, None) }
+                .SortBy(key) -> {
+                    // Preserve checked callback evaluation and the final sort key.
+                    sort_key = Some(key(row.clone()))
+                }
+            }
+        }
+        (true, ^sort_key)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:833
+    fn check_sort_limit(self) -> () DataError! {
+        if self.operations.iter().any(fn(operation) {
+            match operation { .SortBy(_) -> true, _ -> false }
+        }) {
+            limit :: DataLimits.safe().max_sort_rows
+            if self.source.retained_rows() as I64 > limit {
+                return Err(jet_data_error(DataErrorKind.Limit, self.operation, "max_sort_rows {limit} exceeded"))
+            }
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:851
+    fn add(self, state: &JetDataGroupWatchState<K, V>, order: U64, row: T) -> () DataError! {
+        (accepted, sort_key) :: self.accepts(&row)
+        if !accepted -> return Ok(())
+        group_key :: self.key(row.clone())
+        group_value :: self.value(^row)?
+        rank :: (sort_key.clone(), order)
+        if Val(bucket) :: state.buckets.iter_mut().find(fn(bucket) { bucket.key == group_key }) {
+            position :: bucket.members.iter().position(fn((id, _, _)) { *id > order }).unwrap_or(bucket.members.len())
+            bucket.members.insert(position, (order, ^group_value, ^sort_key))
+            if rank < bucket.rank -> bucket.rank = ^rank
+            return Ok(())
+        }
+        limits :: DataLimits.safe()
+        if state.buckets.len() as I64 >= limits.max_groups {
+            return Err(jet_data_error(DataErrorKind.Limit, self.operation, "max_groups {limits.max_groups} exceeded"))
+        }
+        state.buckets.push(JetDataGroupBucket{key: ^group_key, rank: ^rank, members: [(order, ^group_value, ^sort_key)]})
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:896
+    fn remove(self, state: &JetDataGroupWatchState<K, V>, order: U64) -> {
+        empty := None
+        loop (index, bucket) in state.buckets.iter_mut().enumerate() {
+            if Val(member) :: bucket.members.iter().position(fn((id, _, _)) { *id == order }) {
+                bucket.members.remove(member)
+                if bucket.members.is_empty() { empty = Some(index) }
+                else {
+                    bucket.rank = bucket.members.iter().map(fn((id, _, key)) { (key.clone(), *id) })
+                        .min().expect("non-empty group has a rank")
+                }
+                break
+            }
+        }
+        if Val(index) :: empty -> state.buckets.remove(index)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:923
+    fn materialize(self, state: &JetDataGroupWatchState<K, V>) -> [GroupValue<K, V>] DataError! {
+        limits :: DataLimits.safe()
+        if state.buckets.len() as I64 > limits.max_output_rows {
+            return Err(jet_data_error(DataErrorKind.Limit, self.operation, "max_output_rows {limits.max_output_rows} exceeded"))
+        }
+        buckets := state.buckets.iter().collect()
+        buckets.sort_by(fn(left, right) { left.rank.cmp(&right.rank) })
+        buckets.into_iter().map(fn(bucket) {
+            Ok(GroupValue{key: bucket.key.clone(),
+                value: self.aggregate(&bucket.members.iter().map(fn((_, value, _)) { value.clone() }).collect())?})
+        }).collect()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:954
+    fn entries(self, values: [GroupValue<K, V>]) -> [DataWatchEntry<GroupValue<K, V>>] {
+        values.into_iter().enumerate().map(fn((order, value)) {
+            DataWatchEntry{order: order as U64, key: None, value: ^value}
+        }).collect()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:970
+impl<T: Clone, K: Clone + PartialEq, V: Clone> JetDataGroupWatchSource<T, K, V>.DataWatchSource<GroupValue<K, V>> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:974
+    fn initial(self) -> DataWatchMaterialized<GroupValue<K, V>> DataError! {
+        self.check_sort_limit()?
+        (source_revision, entries) :: self.source.snapshot_entries_at_revision()
+        state := JetDataGroupWatchState{buckets: [], revision: source_revision, values: []}
+        loop (order, row) in entries -> self.add(&state, order, ^row)?
+        state.values = self.materialize(&state)?
+        revision :: state.revision
+        entries :: self.entries(state.values.clone())
+        // GATE #4565: kernel primitive
+        #Unsafe("publish group state through the existing single-thread RefCell borrow boundary") {
+            *self.state.borrow_mut() = Some(^state)
+        }
+        Ok(DataWatchMaterialized{entries: ^entries, revision: revision, mode: self.mode,
+            recomputed: false, changed: true, retained_rows: self.source.retained_rows()})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1004
+    fn refresh(self, revision: U64, prior: &[DataWatchEntry<GroupValue<K, V>>]) -> DataWatchMaterialized<GroupValue<K, V>> DataError! {
+        self.check_sort_limit()?
+        // GATE #4565: kernel primitive
+        #Unsafe("hold exclusive RefCell group state borrow while applying a revision transaction") {
+            holder := self.state.borrow_mut()
+            state :: holder.as_mut().ok_or_else(fn() {
+                jet_data_error(DataErrorKind.State, self.operation, "group watch was not initialized")
+            })?
+            if revision > state.revision {
+                return Err(jet_data_error(DataErrorKind.StaleRevision, self.operation, "watch revision is newer than its maintained group state"))
+            }
+            if self.source.revision() == state.revision {
+                return Ok(DataWatchMaterialized{entries: self.entries(state.values.clone()), revision: state.revision,
+                    mode: self.mode, recomputed: false, changed: false, retained_rows: self.source.retained_rows()})
+            }
+            changes :: self.source.changes_since(state.revision)?
+            next := state.clone()
+            loop change in changes {
+                match change.kind {
+                    .Insert{row} -> self.add(&next, change.order, ^row)?
+                    .Replace{after, ..} -> {
+                        self.remove(&next, change.order)
+                        self.add(&next, change.order, ^after)?
+                    }
+                    .Remove{..} -> self.remove(&next, change.order)
+                }
+            }
+            next.revision = self.source.revision()
+            values :: self.materialize(&next)?
+            next.values = ^values
+            entries :: self.entries(next.values.clone())
+            next_revision :: next.revision
+            *state = ^next
+            Ok(DataWatchMaterialized{entries: ^entries, revision: next_revision, mode: self.mode,
+                recomputed: self.recomputed, changed: true, retained_rows: self.source.retained_rows()})
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1071
+// A stable snapshot adapter materializes an ordinary join side once.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1074
+fn jet_data_static_query_entries<T: Clone>(query: &DataQuery<T>, cache: &RefCell<[DataWatchEntry<T>]?>) -> [DataWatchEntry<T>] DataError! {
+    // GATE #4565: kernel primitive
+    #Unsafe("read and publish the one-time join snapshot through native single-thread RefCell") {
+        if Val(entries) :: cache.borrow().as_ref() -> return Ok(entries.clone())
+        rows :: jet_data_query_collect(query)?
+        entries :: rows.into_iter().enumerate().map(fn((order, value)) {
+            DataWatchEntry{order: order as U64, key: None, value: ^value}
+        }).collect()
+        *cache.borrow_mut() = Some(entries.clone())
+        Ok(^entries)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1095
+struct JetDataStaticWatchSource<T> {
+    query: DataQuery<T>
+    entries: Rc<RefCell<[DataWatchEntry<T>]?>>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1100
+impl<T: Clone> JetDataStaticWatchSource<T>.DataWatchSource<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1101
+    fn initial(self) -> DataWatchMaterialized<T> DataError! {
+        entries :: jet_data_static_query_entries(&self.query, &self.entries)?
+        retained_rows :: entries.len()
+        Ok(DataWatchMaterialized{entries: ^entries, revision: 0, mode: "incremental",
+            recomputed: false, changed: true, retained_rows: retained_rows})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1114
+    fn refresh(self, _revision: U64, prior: &[DataWatchEntry<T>]) -> DataWatchMaterialized<T> DataError! {
+        // GATE #4565: kernel primitive
+        entries :: #Unsafe("borrow the cached static join snapshot without rematerializing its input") {
+            self.entries.borrow().clone()
+        }.ok_or_else(fn() {
+            jet_data_error(DataErrorKind.State, "data.query.watch", "static join input was not initialized")
+        })?
+        Ok(DataWatchMaterialized{entries: prior.to_list(), revision: 0, mode: "incremental",
+            recomputed: false, changed: false, retained_rows: entries.len()})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1137
+#Derive(Clone, Copy)
+enum JetDataJoinKind { Inner, Left }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1143
+#Derive(Clone)
+struct JetDataJoinWatchState<T, U, O> {
+    left: [DataWatchEntry<T>]
+    right: [DataWatchEntry<U>]
+    output: [DataWatchEntry<O>]
+    left_revision: U64
+    right_revision: U64
+    publication_revision: U64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1153
+struct JetDataJoinWatchSource<T, U, O> {
+    left_source: Rc<DataWatchSource<T>>
+    right_source: Rc<DataWatchSource<U>>
+    left_key: Arc<fn(T) -> String>
+    right_key: Arc<fn(U) -> String>
+    join: Arc<fn(T, U?) -> O>
+    kind: JetDataJoinKind
+    operation: String
+    state: RefCell<JetDataJoinWatchState<T, U, O>?>
+}
+impl<T: Clone, U: Clone, O: Clone> JetDataJoinWatchSource<T, U, O> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1167
+    fn output_entries(self, left: &[DataWatchEntry<T>], right: &[DataWatchEntry<U>]) -> [DataWatchEntry<O>] DataError! {
+        limits :: DataLimits.safe()
+        if left.len() as I64 > limits.max_join_rows {
+            return Err(jet_data_error(DataErrorKind.Limit, self.operation,
+                "max_join_rows {limits.max_join_rows} exceeded while reading left input"))
+        }
+        if right.len() as I64 > limits.max_join_rows {
+            return Err(jet_data_error(DataErrorKind.Limit, self.operation,
+                "max_join_rows {limits.max_join_rows} exceeded while indexing right input"))
+        }
+        index := [String:[&DataWatchEntry<U>]]{}
+        loop entry in right -> index.entry(self.right_key(entry.value.clone())).or_default().push(entry)
+        output := [DataWatchEntry<O>]{}
+        loop left_entry in left {
+            key :: self.left_key(left_entry.value.clone())
+            matches :: index.get(&key).cloned().unwrap_or_default()
+            if matches.is_empty() {
+                if self.kind == JetDataJoinKind.Left {
+                    if output.len() as I64 >= limits.max_output_rows {
+                        return Err(jet_data_error(DataErrorKind.Limit, self.operation, "max_output_rows {limits.max_output_rows} exceeded"))
+                    }
+                    output.push(DataWatchEntry{order: output.len() as U64, key: None,
+                        value: self.join(left_entry.value.clone(), None)})
+                }
+                continue
+            }
+            loop right_entry in matches {
+                if output.len() as I64 >= limits.max_output_rows {
+                    return Err(jet_data_error(DataErrorKind.Limit, self.operation, "max_output_rows {limits.max_output_rows} exceeded"))
+                }
+                output.push(DataWatchEntry{order: output.len() as U64, key: None,
+                    value: self.join(left_entry.value.clone(), Some(right_entry.value.clone()))})
+            }
+        }
+        Ok(^output)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1239
+    fn retained_rows(self, left: Usize, right: Usize) -> Usize DataError! {
+        retained :: left.checked_add(right).ok_or_else(fn() {
+            jet_data_error(DataErrorKind.Limit, self.operation, "join retained row count overflow")
+        })?
+        Ok(retained)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1255
+impl<T: Clone, U: Clone, O: Clone> JetDataJoinWatchSource<T, U, O>.DataWatchSource<O> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1258
+    fn initial(self) -> DataWatchMaterialized<O> DataError! {
+        left :: self.left_source.initial()?
+        right :: self.right_source.initial()?
+        output :: self.output_entries(&left.entries, &right.entries)?
+        publication_revision :: left.revision.max(right.revision)
+        state :: JetDataJoinWatchState{left: left.entries.clone(), right: right.entries.clone(),
+            output: output.clone(), left_revision: left.revision, right_revision: right.revision,
+            publication_revision: publication_revision}
+        retained_rows :: self.retained_rows(left.retained_rows, right.retained_rows)?
+        // GATE #4565: kernel primitive
+        #Unsafe("publish native RefCell join state only after both inputs and output succeed") {
+            *self.state.borrow_mut() = Some(^state)
+        }
+        Ok(DataWatchMaterialized{entries: ^output, revision: publication_revision,
+            mode: if left.mode == "recomputed" || right.mode == "recomputed" { "recomputed" } else { "incremental" },
+            recomputed: left.recomputed || right.recomputed, changed: true, retained_rows: retained_rows})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1287
+    fn refresh(self, _revision: U64, _prior: &[DataWatchEntry<O>]) -> DataWatchMaterialized<O> DataError! {
+        // GATE #4565: kernel primitive
+        #Unsafe("exclusive RefCell join-state borrow commits only a complete revision transaction") {
+            holder := self.state.borrow_mut()
+            state :: holder.as_mut().ok_or_else(fn() {
+                jet_data_error(DataErrorKind.State, self.operation, "join watch was not initialized")
+            })?
+            left :: self.left_source.refresh(state.left_revision, &state.left)?
+            right :: self.right_source.refresh(state.right_revision, &state.right)?
+            changed :: left.changed || right.changed
+            next := state.clone()
+            if changed {
+                next.left = left.entries.clone()
+                next.right = right.entries.clone()
+                next.left_revision = left.revision
+                next.right_revision = right.revision
+                next.publication_revision = next.publication_revision.checked_add(1).ok_or_else(fn() {
+                    jet_data_error(DataErrorKind.Overflow, self.operation, "join publication revision exhausted")
+                })?
+                next.output = self.output_entries(&next.left, &next.right)?
+            }
+            retained_rows :: self.retained_rows(left.retained_rows, right.retained_rows)?
+            entries :: next.output.clone()
+            publication_revision :: next.publication_revision
+            *state = ^next
+            Ok(DataWatchMaterialized{entries: ^entries, revision: publication_revision,
+                mode: if left.mode == "recomputed" || right.mode == "recomputed" { "recomputed" } else { "incremental" },
+                recomputed: left.recomputed || right.recomputed, changed: changed, retained_rows: retained_rows})
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1338
+fn jet_data_join_query<T: Clone, U: Clone, O: Clone>(left: &DataQuery<T>, right: &DataQuery<U>, left_key: fn(T) -> String, right_key: fn(U) -> String, kind: JetDataJoinKind, join: fn(T, U?) -> O, operation: String) -> DataQuery<O> {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain native Rc snapshot cells and Arc callbacks at the existing maintained query ownership boundary") {
+        left_source :: left.maintained_watch_source()
+        right_source :: right.maintained_watch_source()
+        left_static_entries :: if left_source.is_none() { Some(Rc.new(RefCell.new(None))) } else { None }
+        right_static_entries :: if right_source.is_none() { Some(Rc.new(RefCell.new(None))) } else { None }
+        tracking :: left.tracking.clone().or_else(fn() { right.tracking.clone() })
+        steps := left.plan()
+        steps.push(operation.strip_prefix("query.").unwrap_or(operation).to_string())
+        left_input :: left.clone()
+        right_input :: right.clone()
+        left_key :: Arc.new(^left_key)
+        right_key :: Arc.new(^right_key)
+        join :: Arc.new(^join)
+        compute_left_key :: left_key.clone()
+        compute_right_key :: right_key.clone()
+        compute_join :: join.clone()
+        compute_left_static_entries :: left_static_entries.clone()
+        compute_right_static_entries :: right_static_entries.clone()
+        result :: jet_data_reducer_query(^tracking, ^steps, fn() {
+            join :: compute_join.clone()
+            left_rows :: if Val(cache) :: &compute_left_static_entries {
+                jet_data_static_query_entries(&left_input, cache)?.into_iter().map(fn(entry) { ^entry.value }).collect()
+            } else { jet_data_query_collect(&left_input)? }
+            right_rows :: if Val(cache) :: &compute_right_static_entries {
+                jet_data_static_query_entries(&right_input, cache)?.into_iter().map(fn(entry) { ^entry.value }).collect()
+            } else { jet_data_query_collect(&right_input)? }
+            limits :: DataLimits.safe()
+            match kind {
+                .Inner -> {
+                    left_key :: compute_left_key.clone()
+                    right_key :: compute_right_key.clone()
+                    join :: join.clone()
+                    rows :: jet_data_inner_join_checked(&left_rows, &right_rows,
+                        fn(row) { left_key(^row) }, fn(row) { right_key(^row) }, &limits)?
+                    Ok(rows.into_iter().map(fn(row) { join(^row.left, Some(^row.right)) }).collect())
+                }
+                .Left -> {
+                    left_key :: compute_left_key.clone()
+                    right_key :: compute_right_key.clone()
+                    join :: join.clone()
+                    rows :: jet_data_left_join_checked(&left_rows, &right_rows,
+                        fn(row) { left_key(^row) }, fn(row) { right_key(^row) }, &limits)?
+                    Ok(rows.into_iter().map(fn(row) { join(^row.left, row.right.ok()) }).collect())
+                }
+            }
+        })
+        if left_source.is_some() || right_source.is_some() {
+            left_source :: left_source.unwrap_or_else(fn() {
+                entries :: match left_static_entries {
+                    Some(entries) -> ^entries
+                    None -> unreachable("missing static left join cache")
+                }
+                Rc.new(JetDataStaticWatchSource{query: left.clone(), entries: ^entries}) as Rc<DataWatchSource<T>>
+            })
+            right_source :: right_source.unwrap_or_else(fn() {
+                entries :: match right_static_entries {
+                    Some(entries) -> ^entries
+                    None -> unreachable("missing static right join cache")
+                }
+                Rc.new(JetDataStaticWatchSource{query: right.clone(), entries: ^entries}) as Rc<DataWatchSource<U>>
+            })
+            result.with_watch_source(Rc.new(JetDataJoinWatchSource{left_source: ^left_source, right_source: ^right_source,
+                left_key: ^left_key, right_key: ^right_key, join: ^join, kind: kind, operation: operation, state: RefCell.new(None)}))
+        } else { ^result }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1470
+fn jet_data_query_inner_join<T: Clone, U: Clone>(left: &DataQuery<T>, right: &DataQuery<U>, left_key: fn(T) -> String, right_key: fn(U) -> String) -> DataQuery<DataJoin<T, U>> {
+    jet_data_join_query(left, right, ^left_key, ^right_key, JetDataJoinKind.Inner,
+        fn(left, right) { DataJoin{left: ^left, right: right.expect("inner join invariant")} }, "query.inner_join")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1496
+fn jet_data_query_left_join<T: Clone, U: Clone>(left: &DataQuery<T>, right: &DataQuery<U>, left_key: fn(T) -> String, right_key: fn(U) -> String) -> DataQuery<DataJoin<T, JetOutcome<U, JetAbsent>>> {
+    jet_data_join_query(left, right, ^left_key, ^right_key, JetDataJoinKind.Left,
+        fn(left, right) { DataJoin{left: ^left, right: right.ok_or(JetAbsent)} }, "query.left_join")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1522
+struct JetDataMapWatchSource<T, U> {
+    source: Rc<DataWatchSource<T>>
+    base: RefCell<[DataWatchEntry<T>]?>
+    map: Arc<fn(T) -> U DataError!>
+}
+impl<T: Clone, U: Clone> JetDataMapWatchSource<T, U> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1529
+    fn map_entries(self, entries: [DataWatchEntry<T>]) -> [DataWatchEntry<U>] DataError! {
+        entries.into_iter().map(fn(entry) {
+            Ok(DataWatchEntry{order: entry.order, key: None, value: self.map(^entry.value)?})
+        }).collect()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1546
+impl<T: Clone, U: Clone> JetDataMapWatchSource<T, U>.DataWatchSource<U> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1549
+    fn initial(self) -> DataWatchMaterialized<U> DataError! {
+        materialized :: self.source.initial()?
+        entries :: self.map_entries(materialized.entries.clone())?
+        // GATE #4565: kernel primitive
+        #Unsafe("retain mapped input entries in native RefCell only after mapping succeeds") {
+            *self.base.borrow_mut() = Some(^materialized.entries)
+        }
+        Ok(DataWatchMaterialized{entries: ^entries, revision: materialized.revision, mode: materialized.mode,
+            recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1563
+    fn refresh(self, revision: U64, prior: &[DataWatchEntry<U>]) -> DataWatchMaterialized<U> DataError! {
+        // GATE #4565: kernel primitive
+        base :: #Unsafe("read maintained map input through native RefCell") { self.base.borrow().clone() }
+            .ok_or_else(fn() { DataError.simple(DataErrorKind.State, "data.query.watch", "mapped watch was not initialized") })?
+        materialized :: self.source.refresh(revision, &base)?
+        if !materialized.changed && materialized.revision == revision {
+            return Ok(DataWatchMaterialized{entries: prior.to_list(), revision: materialized.revision,
+                mode: materialized.mode, recomputed: false, changed: false, retained_rows: materialized.retained_rows})
+        }
+        next_base :: materialized.entries.clone()
+        entries :: self.map_entries(next_base.clone())?
+        // GATE #4565: kernel primitive
+        #Unsafe("commit mapped RefCell input only after every output callback succeeds") { *self.base.borrow_mut() = Some(^next_base) }
+        Ok(DataWatchMaterialized{entries: ^entries, revision: materialized.revision, mode: materialized.mode,
+            recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1599
+fn jet_data_extreme_key_finite<K>(key: &K) -> Bool {
+    // GATE #4565: kernel primitive
+    #Unsafe("checked native Any downcasts inspect only matching f64/f32 key types") {
+        key :: key as &any.Any
+        key.downcast_ref<F64>().map(fn(value) { value.is_finite() })
+            .or_else(fn() { key.downcast_ref<F32>().map(fn(value) { value.is_finite() }) }).unwrap_or(true)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1607
+#Derive(Clone, Copy)
+enum JetDataExtreme { Min, Max }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1613
+struct JetDataExtremeWatchSource<T, K> {
+    source: Rc<DataWatchSource<T>>
+    base: RefCell<[DataWatchEntry<T>]?>
+    key: Arc<fn(T) -> K>
+    extreme: JetDataExtreme
+    operation: String
+}
+impl<T: Clone, K: Clone + PartialOrd> JetDataExtremeWatchSource<T, K> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1624
+    fn select(self, entries: &[DataWatchEntry<T>]) -> (K, U64) DataError! {
+        selected := None
+        loop entry in entries {
+            candidate :: self.key(entry.value.clone())
+            if !jet_data_extreme_key_finite(&candidate) {
+                return Err(jet_data_error(DataErrorKind.NonFinite, self.operation, "extreme key must be finite"))
+            }
+            replace :: match &selected {
+                None -> true
+                Some((current, current_order)) -> {
+                    ordering :: candidate.partial_cmp(current).ok_or_else(fn() {
+                        jet_data_error(DataErrorKind.NonFinite, self.operation, "extreme key is not ordered")
+                    })?
+                    match self.extreme {
+                        .Min -> ordering == Ordering.Less || (ordering == Ordering.Equal && entry.order < *current_order)
+                        .Max -> ordering == Ordering.Greater || (ordering == Ordering.Equal && entry.order < *current_order)
+                    }
+                }
+            }
+            if replace -> selected = Some((^candidate, entry.order))
+        }
+        selected.ok_or_else(fn() { jet_data_error(DataErrorKind.Empty, self.operation, "empty query has no extreme") })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1675
+    fn materialize(self, materialized: DataWatchMaterialized<T>) -> DataWatchMaterialized<K> DataError! {
+        (value, order) :: self.select(&materialized.entries)?
+        Ok(DataWatchMaterialized{entries: [DataWatchEntry{order: order, key: None, value: ^value}],
+            revision: materialized.revision, mode: materialized.mode, recomputed: materialized.recomputed,
+            changed: materialized.changed, retained_rows: materialized.retained_rows})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1695
+impl<T: Clone, K: Clone + PartialOrd> JetDataExtremeWatchSource<T, K>.DataWatchSource<K> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1698
+    fn initial(self) -> DataWatchMaterialized<K> DataError! {
+        materialized :: self.source.initial()?
+        // GATE #4565: kernel primitive
+        #Unsafe("retain original extreme input state through the native RefCell boundary") {
+            *self.base.borrow_mut() = Some(materialized.entries.clone())
+        }
+        self.materialize(^materialized)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1704
+    fn refresh(self, revision: U64, prior: &[DataWatchEntry<K>]) -> DataWatchMaterialized<K> DataError! {
+        // GATE #4565: kernel primitive
+        base :: #Unsafe("read the prior extreme source snapshot through native RefCell") { self.base.borrow().clone() }
+            .ok_or_else(fn() { DataError.simple(DataErrorKind.State, "data.query.watch", "extreme watch was not initialized") })?
+        materialized :: self.source.refresh(revision, &base)?
+        if !materialized.changed && materialized.revision == revision {
+            return Ok(DataWatchMaterialized{entries: prior.to_list(), revision: materialized.revision,
+                mode: materialized.mode, recomputed: false, changed: false, retained_rows: materialized.retained_rows})
+        }
+        next_base :: materialized.entries.clone()
+        output :: self.materialize(^materialized)?
+        // GATE #4565: kernel primitive
+        #Unsafe("commit extreme input state only after selecting a valid output key") { *self.base.borrow_mut() = Some(^next_base) }
+        Ok(^output)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFlow.rs:1734
+fn jet_data_extreme_materialized<T: Clone, K: Clone + PartialOrd>(rows: [T], key: &fn(T) -> K, extreme: JetDataExtreme, operation: String) -> [K] DataError! {
+    selected := None
+    loop (order, row) in rows.into_iter().enumerate() {
+        candidate :: key(^row)
+        if !jet_data_extreme_key_finite(&candidate) {
+            return Err(jet_data_error(DataErrorKind.NonFinite, operation, "extreme key must be finite"))
+        }
+        replace :: match &selected {
+            None -> true
+            Some((current, current_order)) -> {
+                ordering :: candidate.partial_cmp(current).ok_or_else(fn() {
+                    jet_data_error(DataErrorKind.NonFinite, operation, "extreme key is not ordered")
+                })?
+                match extreme {
+                    .Min -> ordering == Ordering.Less || (ordering == Ordering.Equal && order as U64 < *current_order)
+                    .Max -> ordering == Ordering.Greater || (ordering == Ordering.Equal && order as U64 < *current_order)
+                }
+            }
+        }
+        if replace -> selected = Some((^candidate, order as U64))
+    }
+    selected.map(fn((value, _)) { [^value] })
+        .ok_or_else(fn() { jet_data_error(DataErrorKind.Empty, operation, "empty query has no extreme") })
+}
 

@@ -1,136 +1,89 @@
-// PORT-PENDING 0281 crates-jet-codegen-src-prelude-corelib-top-httpserver-module-group-slice-5239: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:1-132
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // D-DX-QUEUE1=A: native bindings are thin adapters over the canonical queue
-//RS // state machine. They preserve the four-slot route ABI used by JIT while the
-//RS // shared ServiceAuthority fragment remains independent of native codec traits.
-//RS /// Native service start keeps the generated callable name while supplying the
-//RS /// checked JobSpec queue adapter to the shared service lifecycle.
-//RS fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
-//RS     jet_services_start_with_worker_dispatcher(tree, |_name, handler, endpoint| {
-//RS         let scope = jet_services_execution_scope(endpoint)?;
-//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS             handler();
-//RS             jet_job_service_queue_tick_registered(endpoint, 16).map(|_| ())
-//RS         }));
-//RS         drop(scope);
-//RS         match result {
-//RS             Ok(result) => result,
-//RS             Err(_) => Err(JetServiceError::Unknown(
-//RS                 "service worker callback panicked".to_string(),
-//RS             )),
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS /// The shared CBOR codec normalizes kernel failures into `EncodingError`.
-//RS /// Keep that conversion at the queue boundary so a payload encoding failure
-//RS /// becomes the queue's typed service error instead of a panic or an unwrap.
-//RS fn jet_job_queue_cbor_error(error: jet_std::EncodingError) -> JetServiceError {
-//RS     let location = if error.path.is_empty() {
-//RS         format!("byte {}", error.byte_offset)
-//RS     } else {
-//RS         format!("{} at byte {}", error.path, error.byte_offset)
-//RS     };
-//RS     JetServiceError::Policy(format!(
-//RS         "job payload cannot be encoded as canonical CBOR ({:?}, {location}): {}",
-//RS         error.kind, error.reason
-//RS     ))
-//RS }
-//RS 
-//RS fn jet_job_queue_encode_payload<T: __jet_Encode>(
-//RS     job: &str,
-//RS     payload: &T,
-//RS ) -> Result<JetJobPayload, JetServiceError> {
-//RS     let bytes =
-//RS         jet_enc_cbor_to_bytes_canonical(payload).map_err(jet_job_queue_cbor_error)?;
-//RS     // Source-level enqueue does not publish payload bytes. Publication remains
-//RS     // an explicit queue-policy decision and is still bounded by the queue.
-//RS     JetJobPayload::new(job, bytes, false)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_enqueue<T: __jet_Encode>(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     job: &str,
-//RS     payload: &T,
-//RS     key: Option<String>,
-//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS     let payload = jet_job_queue_encode_payload(job, payload)?;
-//RS     let request = match key {
-//RS         Some(key) => JetJobEnqueue::new(job, payload).with_key(key),
-//RS         None => JetJobEnqueue::new(job, payload),
-//RS     };
-//RS     queue.enqueue(request)
-//RS }
-//RS 
-//RS pub fn jet_job_queue_delay<T: __jet_Encode>(
-//RS     queue: &mut JetJobQueue<'static>,
-//RS     job: String,
-//RS     payload: T,
-//RS     duration: std::time::Duration,
-//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
-//RS     let payload = jet_job_queue_encode_payload(&job, &payload)?;
-//RS     let milliseconds = i64::try_from(duration.as_millis())
-//RS         .map_err(|_| service_authority_error("queue delay duration is outside the supported range"))?;
-//RS     queue.enqueue_delayed(job, payload, milliseconds, None, None)
-//RS }
-//RS 
-//RS /// Run one tick from a generated static checked JobSpec table.
-//RS pub fn jet_job_service_queue_tick_specs(
-//RS     endpoint: &JetServiceEndpoint,
-//RS     jobs: &[JetJobSpec],
-//RS     limit: usize,
-//RS ) -> Result<usize, JetServiceError> {
-//RS     if limit == 0
-//RS         || !jobs
-//RS             .iter()
-//RS             .any(|job| job.payload_type.is_some() && job.queue_invoke.is_some())
-//RS     {
-//RS         return Ok(0);
-//RS     }
-//RS     jet_job_service_queue_tick_dispatch(endpoint, limit, |job_type, payload| {
-//RS         let Some(job) = jobs.iter().find(|job| {
-//RS             job.entry.name == job_type
-//RS                 && job.payload_type == Some(payload.type_id.as_str())
-//RS         }) else {
-//RS             return Err(JetJobError {
-//RS                 type_id: payload.type_id.clone(),
-//RS                 reason: "unknown_job_payload".to_string(),
-//RS                 detail: Some(format!(
-//RS                     "no checked #Job `{job_type}` accepts payload schema `{}`",
-//RS                     payload.type_id
-//RS                 )),
-//RS             });
-//RS         };
-//RS         let Some(invoke) = job.queue_invoke else {
-//RS             return Err(JetJobError {
-//RS                 type_id: payload.type_id.clone(),
-//RS                 reason: "missing_invocation_adapter".to_string(),
-//RS                 detail: Some(format!(
-//RS                     "checked #Job `{}` has no queue adapter",
-//RS                     job.entry.name
-//RS                 )),
-//RS             });
-//RS         };
-//RS         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| invoke(payload)))
-//RS             .map_err(|_| JetJobError {
-//RS                 type_id: payload.type_id.clone(),
-//RS                 reason: "panic".to_string(),
-//RS                 detail: Some(format!("checked #Job `{}` panicked", job.entry.name)),
-//RS             })
-//RS             .and_then(|result| result)
-//RS     })
-//RS }
-//RS 
-//RS pub fn jet_job_service_queue_tick_registered(
-//RS     endpoint: &JetServiceEndpoint,
-//RS     limit: usize,
-//RS ) -> Result<usize, JetServiceError> {
-//RS     let Some(jobs) = jet_job_active_specs() else {
-//RS         return Err(JetServiceError::Unavailable(
-//RS             "checked job registry is not active for service queue dispatch".to_string(),
-//RS         ));
-//RS     };
-//RS     jet_job_service_queue_tick_specs(endpoint, jobs, limit)
-//RS }
-// END-PORT-PENDING 0281 crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:1-132
+use core.jobs.runtime.job_queue_types.[JetJobPayload, JetJobError]
+use core.jobs.runtime.job.[JetJobSpec, jet_job_active_specs]
+use core.service.runtime.top_service_authority.*
+use core.service.runtime.top_service_authority_02.*
+use core.service.runtime.top_service_authority_03.*
+use core.service.runtime.top_services.[JetServiceTree, jet_services_start_with_worker_dispatcher]
+use core.encoding.runtime.top_encoding_traits.__jet_Encode
+use core.encoding.runtime.top_encoding_codecs.jet_enc_cbor_to_bytes_canonical
+use core.encoding.runtime.std_data_tree.EncodingError
+use std.time.Duration
 
+// D-DX-QUEUE1=A: native bindings adapt the canonical queue state machine.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:6
+fn jet_services_start(tree: &JetServiceTree) -> () JetServiceError! {
+    jet_services_start_with_worker_dispatcher(tree, fn(name, handler, endpoint) {
+        scope :: jet_services_execution_scope(endpoint)?
+        // GATE #4565: kernel primitive
+        result :: #Unsafe("catch worker callback unwind while canonical execution scope remains active") {
+            std.panic.catch_unwind(std.panic.AssertUnwindSafe(fn() {
+                handler()
+                jet_job_service_queue_tick_registered(endpoint, 16).map(fn(_) { () })
+            }))
+        }
+        drop(^scope)
+        match result {
+            Ok(result) -> ^result
+            Err(_) -> Err(JetServiceError.Unknown("service worker callback panicked"))
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:26
+fn jet_job_queue_cbor_error(error: EncodingError) -> JetServiceError {
+    location :: if error.path.is_empty() -> "byte {error.byte_offset}"
+        else -> "{error.path} at byte {error.byte_offset}"
+    JetServiceError.Policy("job payload cannot be encoded as canonical CBOR ({error.kind:?}, {location}): {error.reason}")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:38
+fn jet_job_queue_encode_payload<T: __jet_Encode>(job: &String, payload: &T) -> JetJobPayload JetServiceError! {
+    bytes :: jet_enc_cbor_to_bytes_canonical(payload).map_err(jet_job_queue_cbor_error)?
+    // Enqueue does not publish payload bytes; publication is explicit bounded queue policy.
+    JetJobPayload.new(job, ^bytes, false)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:49
+pub fn jet_job_queue_enqueue<T: __jet_Encode>(queue: &JetJobQueue, job: &String, payload: &T, key: String?) -> JetJobQueueReceipt JetServiceError! {
+    payload :: jet_job_queue_encode_payload(job, payload)?
+    request :: match key {
+        Val(key) -> JetJobEnqueue.new(job, ^payload).with_key(^key)
+        None -> JetJobEnqueue.new(job, ^payload)
+    }
+    queue.enqueue(^request)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:63
+pub fn jet_job_queue_delay<T: __jet_Encode>(queue: &JetJobQueue, job: String, payload: T, duration: Duration) -> JetJobQueueReceipt JetServiceError! {
+    payload :: jet_job_queue_encode_payload(&job, &payload)?
+    milliseconds :: I64.try_from(duration.as_millis())
+        .map_err(fn(_) { service_authority_error("queue delay duration is outside the supported range") })?
+    queue.enqueue_delayed(^job, ^payload, milliseconds, None, None)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:76
+pub fn jet_job_service_queue_tick_specs(endpoint: &JetServiceEndpoint, jobs: &[JetJobSpec], limit: USize) -> USize JetServiceError! {
+    if limit == 0 || !jobs.iter().any(fn(job) { job.payload_type.is_some() && job.queue_invoke.is_some() }) -> return Ok(0)
+    jet_job_service_queue_tick_dispatch(endpoint, limit, fn(job_type, payload) {
+        job :: match jobs.iter().find(fn(job) { job.entry.name == job_type && job.payload_type == Val(payload.type_id) }) {
+            Val(job) -> job
+            None -> return Err(JetJobError{type_id: payload.type_id.clone(), reason: "unknown_job_payload",
+                detail: Val("no checked #Job `{job_type}` accepts payload schema `{payload.type_id}`")})
+        }
+        invoke :: match job.queue_invoke {
+            Val(invoke) -> invoke
+            None -> return Err(JetJobError{type_id: payload.type_id.clone(), reason: "missing_invocation_adapter",
+                detail: Val("checked #Job `{job.entry.name}` has no queue adapter")})
+        }
+        // GATE #4565: kernel primitive
+        #Unsafe("checked invocation borrows payload for its complete call and unwinds into the typed queue error rail") {
+            std.panic.catch_unwind(std.panic.AssertUnwindSafe(fn() { invoke(payload) }))
+                .map_err(fn(_) { JetJobError{type_id: payload.type_id.clone(), reason: "panic",
+                    detail: Val("checked #Job `{job.entry.name}` panicked")} })
+                .and_then(fn(result) { ^result })
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs:122
+pub fn jet_job_service_queue_tick_registered(endpoint: &JetServiceEndpoint, limit: USize) -> USize JetServiceError! {
+    jobs :: match jet_job_active_specs() {
+        Val(jobs) -> jobs
+        None -> return Err(JetServiceError.Unavailable("checked job registry is not active for service queue dispatch"))
+    }
+    jet_job_service_queue_tick_specs(endpoint, jobs, limit)
+}
