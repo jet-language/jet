@@ -238,48 +238,10 @@ fn jet_time_time(hour: Int, minute: Int, second: Int) -> JetLocalTime {
 fn jet_time_days_in_month(year: Int, month: Int) -> I64 { JetDate.days_in_month_of(jet_time_int_input(year), jet_time_int_input(month)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:394
 fn jet_time_is_leap_year(year: Int) -> Bool { JetDate.is_leap(jet_time_int_input(year)) }
-
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:397-792
-// core.time.calendar is the one calendar implementation (as core.text.fmt is
-// for formatting); these adapters keep the compiler-referenced jet_calendar_*
-// names and carriers until the compiler routes core.time.calendar itself.
-use core.time.calendar as calendar
-fn jet_calendar_isleap(year: Int) -> Bool { calendar.isleap(year) }
-fn jet_calendar_leapdays(first: I64, second: I64) -> Int { calendar.leapdays(Int{first}, Int{second}) }
-fn jet_calendar_weekday(year: I64, month: I64, day: I64) -> Int { calendar.weekday(Int{year}, Int{month}, Int{day}) }
-fn jet_calendar_monthrange(year: I64, month: I64) -> (days: Int, weekday: Int) { calendar.monthrange(Int{year}, Int{month}) }
-fn jet_calendar_monthcalendar(year: I64, month: I64) -> [[Int]] { calendar.monthcalendar(Int{year}, Int{month}) }
-fn jet_calendar_monthcalendar_start(year: I64, month: I64, firstweekday: I64) -> [[Int]] {
-    calendar.monthcalendar_start(Int{year}, Int{month}, Int{firstweekday})
-}
-fn jet_calendar_yearcalendar(year: I64) -> [[[Int]]] { calendar.yearcalendar(Int{year}) }
-fn jet_calendar_weekheader(width: I64, firstweekday: I64) -> [String] { calendar.weekheader(Int{width}, Int{firstweekday}) }
-fn jet_calendar_formatmonth(year: I64, month: I64, width: I64) -> String { calendar.formatmonth(Int{year}, Int{month}, Int{width}) }
-fn jet_calendar_formatyear(year: I64) -> String { calendar.formatyear(Int{year}) }
-fn jet_calendar_day_name(weekday: I64) -> String { calendar.day_name(Int{weekday}) }
-fn jet_calendar_day_abbr(weekday: I64) -> String { calendar.day_abbr(Int{weekday}) }
-fn jet_calendar_month_name(month: I64) -> String { calendar.month_name(Int{month}) }
-fn jet_calendar_month_abbr(month: I64) -> String { calendar.month_abbr(Int{month}) }
-fn jet_calendar_timegm(year: I64, month: I64, day: I64, hour: I64, minute: I64, second: I64) -> Int {
-    calendar.timegm(Int{year}, Int{month}, Int{day}, Int{hour}, Int{minute}, Int{second})
-}
-
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:428-617
-// core.collections owns the binary-heap operations (same sift order: the
-// parent stays on ties, then the left child). The named result tuples print
-// as the Rust JetShow impls did: "(heap,value) { heap: [...], value: ... }".
-use core.collections as collections
-fn jet_coll_ints(values: [I64]) -> [Int] {
-    ints :: loop value in values -> Int{value}
-    ints
-}
-fn jet_coll_heappop(values: [I64]) -> (heap: [Int], value: Int?) { collections.heappop(jet_coll_ints(values)) }
-fn jet_coll_heappushpop(values: [I64], value: I64) -> (heap: [Int], value: Int) {
-    collections.heappushpop(jet_coll_ints(values), Int{value})
-}
-fn jet_coll_heapreplace(values: [I64], value: I64) -> (heap: [Int], value: Int?) {
-    collections.heapreplace(jet_coll_ints(values), Int{value})
-}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:397-792 (jet_calendar_*,
+// jet_coll_heap*): no port. core.time.calendar and core.collections own those
+// members in source on every tier (AOT probe: weekheader(5, 0) prints "  Mon"),
+// so their dispatcher rows never reach a runtime symbol.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:793
 fn jet_time_period(years: Int, months: Int, days: Int) -> JetPeriod { JetPeriod.new(jet_time_int_input(years), jet_time_int_input(months), jet_time_int_input(days)) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:800
@@ -517,12 +479,9 @@ fn jet_url_join(base: String, rel: String) -> String { url.jet_url_join_text(bas
 fn jet_url_parse_qsl(query: String) -> [[String]] { url.jet_url_parse_qsl_rows(query) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1297
 fn jet_url_urlencode(pairs: [[String]]) -> String { url.jet_url_query_rows(pairs) }
-// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1300,1325. core.net.url
-// owns the split at the first '#'; its named tuples replace the Rust
-// (String, String) pairs and their hand-written JetShow impls.
-use core.net.url as public_url
-fn jet_url_split_fragment(text: String) -> (fragment: String, url: String) { public_url.split_fragment(text) }
-fn jet_url_urldefrag(text: String) -> (url: String, fragment: String) { public_url.urldefrag(text) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1300,1325
+// (jet_url_split_fragment, jet_url_urldefrag): no port; core.net.url owns
+// split_fragment and urldefrag in source.
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1304
 fn jet_url_quote(text: String) -> String { url.jet_url_quote(text) }
 // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1307
