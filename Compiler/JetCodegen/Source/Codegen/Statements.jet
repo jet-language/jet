@@ -343,11 +343,20 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, group: TLocal, limi
     jet_codegen_leave_scope(&builder, scope)
 }
 
-fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, scope: MIRScopeID, body: [TStmt], span: Span) {
+fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, scope: MIRScopeID, body: [TStmt], span: Span, expect_fail: Bool) {
     jet_codegen_lower_block(&builder, body)
     exit := jet_codegen_new_block(&builder, span, "scope-member.exit")
     join := jet_codegen_new_block(&builder, span, "scope-member.join")
-    if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: exit})
+    // Rust lower_scope_member_body: an `.expect_fail` body that ends in an
+    // unconditional stop jumps to its exit after the stop. The stop never
+    // returns, so the jump never runs; it keeps the exit reachable, which is
+    // where a caught stop resumes and which gives the backend's catch match
+    // an arm for the scope.
+    ends_in_stop := false
+    if builder.block_positions.get(builder.current.value) == .Val(at) {
+        if builder.blocks[at].terminator == .Unreachable(reason) -> ends_in_stop = reason == "checked unconditional stop"
+    }
+    if jet_codegen_current_is_open(builder) || (expect_fail && ends_in_stop) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: exit})
     jet_codegen_switch_block(&builder, exit)
     jet_codegen_leave_scope(&builder, scope)
     if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join})
@@ -363,20 +372,20 @@ fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, kind: TScopeMembe
         .ExpectFail(expected, message) -> {
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, expected)
             jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.ExpectFail{expected_code: expected, expected_message: message})
-            jet_codegen_lower_scope_member_body(&builder, scope, body, span)
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, true)
             return
         }
         .Timeout(duration) -> {
             value := jet_codegen_lower_expr(&builder, duration)
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, Val("timeout"))
             jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.Timeout{duration: value})
-            jet_codegen_lower_scope_member_body(&builder, scope, body, span)
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, false)
             return
         }
         .Measure -> {
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, Val("measure"))
             jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.Measure)
-            jet_codegen_lower_scope_member_body(&builder, scope, body, span)
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, false)
             return
         }
         .Skip -> {
