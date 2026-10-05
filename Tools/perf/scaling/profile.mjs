@@ -85,8 +85,8 @@ export const profileRun = {
   wrap: dir => [PERF, 'record', '-q', '-F', '199', '-k', 'CLOCK_REALTIME', '--call-graph', 'fp', '-m', '16', '-o', path.join(dir, 'perf.data'), '--'],
 
   // Per phase: samples, top self symbols, top inclusive compiler functions.
-  async attribute(dir, phases, { repo, top = 12, ok = true } = {}) {
-    const intervals = phaseIntervals(readTrace(path.join(dir, 'trace.json')));
+  async attribute(dir, phases, { repo, top = 12, ok = true, traceFile = path.join(dir, 'trace.json') } = {}) {
+    const intervals = phaseIntervals(readTrace(traceFile));
     const wanted = new Set(phases);
     const stats = new Map(phases.map(phase => [phase, { samples: 0, self: new Map(), inclusive: new Map() }]));
     const phaseAt = t => {

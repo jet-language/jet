@@ -27,6 +27,10 @@ within the runner's one-hour deadline. A timeout fails with its open phase.
 Every baseline, rung and profile compile is atomically checkpointed. Repeat
 the identical command to resume without retrying completed rungs (including
 failures); changed options or compilers require a new work directory.
+`--work-dir` contains evidence only (receipts, reports, traces and logs).
+Generated projects, compiler stores/output and `perf.data` go under
+`--build-root` (default `/mnt/jetscratch/scaling-gate`), keyed by evidence
+directory; each point records its `build_dir` for artifact cleanup after landing.
 To queue bounded jobs, run `enqueue.mjs` with the same options and
 `JET_SCALING_QUEUE_STAMP` naming the replaced job whose mtime must be retained.
 It writes one `PerfScalingGate-<kind>-<shape>.sh` per shape; all hold the same

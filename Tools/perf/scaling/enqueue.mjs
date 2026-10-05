@@ -23,7 +23,7 @@ if (!config) {
     const compilers = config.compilers.flatMap(c => ['--compiler', `${c.label}=${c.kind}:${c.path ?? c.template}`]);
     const args = [...compilers, '--shape', shape, '--steps', config.steps, '--domain-ladder', config.domainLadder.join(','),
       '--memory-max', config.memoryMax, '--timeout', config.timeoutS, '--stop-after', config.stopAfterS,
-      '--seed', config.seed, '--jet-command', config.jetCommand, '--work-dir', config.workDir];
+      '--seed', config.seed, '--jet-command', config.jetCommand, '--work-dir', config.workDir, '--build-root', config.buildRoot];
     for (const layout of config.layouts) args.push('--layout', layout);
     if (config.bases[shape]) args.push('--base', `${shape}=${config.bases[shape]}`);
     if (config.ladders[shape]) args.push('--ladder', `${shape}=${config.ladders[shape].join(',')}`);

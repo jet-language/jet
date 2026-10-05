@@ -48,6 +48,7 @@ test('resume preserves completed rungs, including timeouts, without retrying the
     receipt.series.push({ shape: 'modules', compiler: 'fixture', layout: 'single', baseline: { ok: true, metrics: {} }, points: [timedOut], truncated: null });
     assert.equal(resumeReceipt(config, {}, receipt), receipt);
     assert.throws(() => resumeReceipt({ ...config, seed: 2 }, {}, receipt), /invocation differs/);
+    assert.throws(() => resumeReceipt({ ...config, buildRoot: '/different-build-root' }, {}, receipt), /invocation differs/);
     // The checkpoint has a failed rung but no series verdict yet: do not retry it.
     receipt.invocation = resumeReceipt(config, floors()).invocation;
     fs.writeFileSync(config.receipt, JSON.stringify(receipt));

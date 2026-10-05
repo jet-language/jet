@@ -18,6 +18,7 @@
 // or counter failure; 2: invalid invocation.
 
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -215,7 +216,7 @@ function argvFor(config, compiler, run) {
   if (compiler.kind === 'bootstrap') {
     const env = { HOME: os.homedir(), PATH: process.env.PATH, LC_ALL: 'C', JET_BOOTSTRAP_MODE: 'runner', JET_BOOTSTRAP_FACTORY_TIER: 'aot',
       JET_BOOTSTRAP_SOURCE_ROOT: run.project, JET_BOOTSTRAP_ENTRY: 'main.jet', JET_BOOTSTRAP_OUTPUT: path.join(run.dir, 'out.rs'),
-      JET_BOOTSTRAP_RECEIPT: path.join(run.dir, 'receipt'), RUST_MIN_STACK: '8388608', ...common };
+      JET_BOOTSTRAP_RECEIPT: run.receipt, RUST_MIN_STACK: '8388608', ...common };
     return { argv: scope(['env', '-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), compiler.path]), env: process.env };
   }
   if (compiler.kind === 'jet') {
@@ -233,7 +234,7 @@ function argvFor(config, compiler, run) {
 // `Error [CODE]` lines of `jet`.
 function outcome(compiler, run, code, text) {
   if (compiler.kind === 'bootstrap') {
-    const receipt = fs.existsSync(path.join(run.dir, 'receipt')) ? fs.readFileSync(path.join(run.dir, 'receipt'), 'utf8') : '';
+    const receipt = fs.existsSync(run.receipt) ? fs.readFileSync(run.receipt, 'utf8') : '';
     const errors = receipt.split('\n').filter(line => line.startsWith('report_json=')).map(line => { try { return JSON.parse(line.slice(12)); } catch { return {}; } })
       .filter(report => !String(report.code ?? '').startsWith('L')).length;
     return { complete: /^complete=true$/m.test(receipt), errors };
@@ -244,13 +245,19 @@ function outcome(compiler, run, code, text) {
 // One measured compile of one corpus.
 async function measure(config, compiler, built, dir) {
   fs.rmSync(dir, { recursive: true, force: true });
-  const run = { dir, project: path.join(dir, 'project'), store: path.join(dir, 'store'), trace: path.join(dir, 'trace.json'), n: built.n };
+  fs.mkdirSync(dir, { recursive: true });
+  // Keep only receipts/traces/logs in the evidence tree. Projects, stores,
+  // emitted Rust, executable outputs and perf.data live on the scratch drive.
+  const buildDir = path.join(config.buildRoot, createHash('sha256').update(path.resolve(dir)).digest('hex'));
+  fs.rmSync(buildDir, { recursive: true, force: true });
+  const run = { dir: buildDir, project: path.join(buildDir, 'project'), store: path.join(buildDir, 'store'),
+    trace: path.join(dir, 'trace.json'), receipt: path.join(dir, 'receipt'), n: built.n };
   writeFiles(built.files, run.project);
   fs.mkdirSync(run.store, { recursive: true });
   const { argv, env } = argvFor(config, compiler, run);
   const stdoutPath = path.join(dir, 'stdout.log');
   const stderrPath = path.join(dir, 'stderr.log');
-  const measured = await runMeasured(config.profile ? [...config.profile.wrap(dir), ...argv] : argv,
+  const measured = await runMeasured(config.profile ? [...config.profile.wrap(buildDir), ...argv] : argv,
     { cwd: run.project, env, stdoutPath, stderrPath, timeoutMs: config.timeoutS * 1000 });
   const text = `${fs.readFileSync(stdoutPath, 'utf8')}\n${fs.readFileSync(stderrPath, 'utf8')}`;
   const problems = [];
@@ -280,7 +287,7 @@ async function measure(config, compiler, built, dir) {
   if (expectErrors > 0 && result.errors < expectErrors) problems.push(`reported ${result.errors} of ${expectErrors} expected diagnostics; see ${dir}`);
   metrics.diagnostics = result.errors;
   return { n: built.n, x: built.kind === 'domain' ? built.code_lines : built.n, code_lines: built.code_lines, source_sha256: built.source_sha256,
-    ok: problems.length === 0, problems, open_phases: open, timeout_phase: timeoutPhase, metrics, dir, exit: measured.code };
+    ok: problems.length === 0, problems, open_phases: open, timeout_phase: timeoutPhase, metrics, dir, build_dir: buildDir, exit: measured.code };
 }
 
 function ladderFor(config, shape) {
@@ -297,7 +304,7 @@ export function resumeReceipt(config, limits, previous = null) {
     compilers: config.compilers, shapes: config.shapes, layouts: config.layouts,
     ladders: Object.fromEntries(config.shapes.map(shape => [shape, ladderFor(config, shape)])),
     seed: config.seed, memoryMax: config.memoryMax, timeoutS: config.timeoutS,
-    stopAfterS: config.stopAfterS, profileTop: config.profileTop, families: FAMILIES, floors: limits,
+    stopAfterS: config.stopAfterS, profileTop: config.profileTop, buildRoot: config.buildRoot, families: FAMILIES, floors: limits,
   });
   if (previous) {
     if (previous.invocation !== invocation) throw new Error('Receipt invocation differs; use a new --work-dir');
@@ -306,7 +313,7 @@ export function resumeReceipt(config, limits, previous = null) {
   return {
     schema: 'jet.scaling-gate/v3', invocation, startedAt: new Date().toISOString(), workDir: config.workDir, host: os.hostname(),
     compilers: config.compilers, families: FAMILIES, floors: limits, target: { lines: TARGET_LINES, seconds: TARGET_SECONDS },
-    memoryMax: config.memoryMax, timeoutS: config.timeoutS, stopAfterS: config.stopAfterS, series: [], failures: [],
+    memoryMax: config.memoryMax, timeoutS: config.timeoutS, stopAfterS: config.stopAfterS, buildRoot: config.buildRoot, series: [], failures: [],
   };
 }
 
@@ -397,7 +404,7 @@ async function profileTop(config, compiler, shape, layout, point, series, save) 
     series.profilePoint = await measure({ ...config, profile: { wrap: d => profileRun.wrap(d) } }, compiler, corpus(shape, point.n, config.seed, layout), dir);
     save();
   }
-  return profileRun.attribute(dir, phases, { repo: REPO, top: 12, ok: series.profilePoint.ok });
+  return profileRun.attribute(series.profilePoint.build_dir, phases, { repo: REPO, top: 12, ok: series.profilePoint.ok, traceFile: path.join(dir, 'trace.json') });
 }
 
 function summary(point) {
@@ -423,13 +430,14 @@ const USAGE = `Usage: node harness.mjs --compiler LABEL=KIND:PATH [--compiler ..
   --profile              perf-profile the top rung of every failing series (profile.mjs)
   --layout files|single  repeatable; default both (a multi-file failure is a gate failure)
   --work-dir DIR  --receipt FILE  --seed S
+  --build-root DIR       projects/stores/compiler outputs/perf.data (default /mnt/jetscratch/scaling-gate)
 Receipts checkpoint every baseline, rung and profile compile; rerunning the same
 invocation resumes without retrying completed compiles, including timeouts.
 Exit 0 pass, 1 any growth/floor/compile failure, 2 invalid invocation.`;
 
 export function options(args) {
   const config = { compilers: [], shapes: [], bases: {}, ladders: {}, steps: 4, domainLadder: [...DOMAIN_LADDER], memoryMax: '20G', timeoutS: 1800,
-    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [],
+    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [], buildRoot: '/mnt/jetscratch/scaling-gate',
     workDir: path.join(os.homedir(), '.cache/jet-dev/scratch/scaling-gate', new Date().toISOString().replace(/[:.]/g, '-')) };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
@@ -452,6 +460,7 @@ export function options(args) {
       case '--stop-after': config.stopAfterS = Number(value); break;
       case '--jet-command': if (!['build', 'check'].includes(value)) throw new Error('--jet-command is build or check'); config.jetCommand = value; break;
       case '--work-dir': config.workDir = path.resolve(value); break;
+      case '--build-root': config.buildRoot = path.resolve(value); break;
       case '--receipt': config.receipt = path.resolve(value); break;
       case '--layout': if (!LAYOUTS.includes(value)) throw new Error(`--layout is ${LAYOUTS.join(' or ')}`); config.layouts.push(value); break;
       case '--seed': config.seed = Number(value); break;
