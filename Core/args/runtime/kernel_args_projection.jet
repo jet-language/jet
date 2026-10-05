@@ -115,7 +115,7 @@ fn jet_guided_tui_update(model: JetGuidedTuiModel, message: JetGuidedTuiMessage)
                     _ if not code.is_empty() -> {
                         chars := model.value.chars().collect()
                         inserted :: code.chars().collect()
-                        chars.splice(model.cursor..model.cursor, inserted.iter().copied())
+                        chars.splice(model.cursor..<model.cursor, inserted.iter().copied())
                         model.value = chars.collect_string()
                         model.cursor += inserted.len()
                     }
@@ -134,7 +134,7 @@ fn jet_guided_visible_input(model: &JetGuidedTuiModel) -> String {
     width :: (model.width.max(8) - 1).max(0)
     start :: (cursor - (width - 1).max(0)).max(0).min((chars.len() - width).max(0))
     end :: (start + width).min(chars.len())
-    visible := chars[start..end].iter().copied().collect_string()
+    visible := chars[start..<end].iter().copied().collect_string()
     caret :: (cursor - start).max(0)
     caret_byte :: visible.char_indices().nth(caret).map(fn((index, _)) { index }) ?? visible.len()
     visible.insert(caret_byte, '▏')
