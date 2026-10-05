@@ -443,14 +443,14 @@ fn jet_table_estimate_add(left: JetTableEstimate<U128>, right: JetTableEstimate<
     if (left, right) == (.Exact(l), .Exact(r)) {
         if l.checked_add(r) == .Val(sum) -> .Exact(sum)
         else -> JetTableEstimate<U128>.unavailable("integer overflow")
-    } else -> JetTableEstimate<U128>.unavailable(reason)
+    } else { JetTableEstimate<U128>.unavailable(reason) }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:549
 fn jet_table_estimate_mul(left: JetTableEstimate<U128>, right: JetTableEstimate<U128>, reason: String) -> JetTableEstimate<U128> {
     if (left, right) == (.Exact(l), .Exact(r)) {
         if l.checked_mul(r) == .Val(product) -> .Exact(product)
         else -> JetTableEstimate<U128>.unavailable("integer overflow")
-    } else -> JetTableEstimate<U128>.unavailable(reason)
+    } else { JetTableEstimate<U128>.unavailable(reason) }
 }
 // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:563
 fn jet_table_estimate_min(left: JetTableEstimate<U128>, right: U128, reason: String) -> JetTableEstimate<U128> {
