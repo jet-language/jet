@@ -293,7 +293,7 @@ fn jet_browser_command_with_timeout(browser: &JetBrowser, method: &String, param
     loop {
         response :: jet_browser_recv_json(&state, deadline)?
         if jet_browser_capture_event(&state, &response)? { continue }
-        if jet_browser_id(&response) != Val(id) { return Err(JetBrowserError.new("protocol")) }
+        if jet_browser_id(&response) != id { return Err(JetBrowserError.new("protocol")) }
         response_type :: jet_browser_string(&response, "type")?
         if response_type == "error" || jet_browser_get(&response, "error").is_some() {
             jet_browser_trace_push(&state, "error:{id}:{method_hash}")
