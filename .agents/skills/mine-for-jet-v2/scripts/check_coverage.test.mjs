@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, main, sample, seconds, vague } from './check_coverage.mjs';
+import { check, main, render as renderResult, sample, seconds, vague } from './check_coverage.mjs';
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'coverage-pass');
 const read = name => JSON.parse(readFileSync(join(FIXTURE, name), 'utf8'));
@@ -33,6 +33,13 @@ test('missing run files fail with exit 1', () => {
   assert.match(out.data, /coverage\.json: missing/);
   assert.match(out.data, /ledger\.json: missing/);
   assert.equal(main([], sink(), sink()), 2);
+});
+
+test('summary mode caps listed errors per rule but keeps complete counts', () => {
+  const files = run(); files.claims.claims.forEach(row => { row.scale = 'wide'; });
+  const text = renderResult(check(files), { perRule: 3 });
+  assert.match(text, /\[schema\] \.\.\. 7 more/);
+  assert.match(text, /by rule: schema 10, scale 2\nFAIL\n$/);
 });
 
 test('video segments are bounded and contiguous', () => {

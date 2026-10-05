@@ -99,6 +99,19 @@ export function check({ coverage, ledger, claims, audit }, { requireAudit = fals
   const err = (rule, where, message) => errors.push({ rule, where, message });
   const report = { sources: [] };
 
+  // ledger.json
+  let ledgerSegments = {};
+  if (ledger === undefined) err('schema', 'ledger.json', 'missing');
+  else if (!isObj(ledger) || ledger.schema !== SCHEMAS.ledger) err('schema', 'ledger.json', `schema must be "${SCHEMAS.ledger}"`);
+  if (isObj(ledger?.segments)) ledgerSegments = ledger.segments;
+  else if (ledger !== undefined) err('schema', 'ledger.json', 'segments must map segment id -> item array');
+
+  // coverage.json
+  if (coverage === undefined) err('schema', 'coverage.json', 'missing');
+  else if (!isObj(coverage) || coverage.schema !== SCHEMAS.coverage) err('schema', 'coverage.json', `schema must be "${SCHEMAS.coverage}"`);
+  const sources = Array.isArray(coverage?.sources) ? coverage.sources : [];
+  if (coverage !== undefined && !sources.length) err('schema', 'coverage.json', 'sources must be a non-empty array');
+
   // claims.json
   const claimList = Array.isArray(claims) ? claims : claims?.claims;
   const byId = new Map();
@@ -115,19 +128,6 @@ export function check({ coverage, ledger, claims, audit }, { requireAudit = fals
     if (!text(claim.id)) continue;
     if (byId.has(claim.id)) err('schema', where, 'duplicate claim id'); else byId.set(claim.id, claim);
   }
-
-  // ledger.json
-  let ledgerSegments = {};
-  if (ledger === undefined) err('schema', 'ledger.json', 'missing');
-  else if (!isObj(ledger) || ledger.schema !== SCHEMAS.ledger) err('schema', 'ledger.json', `schema must be "${SCHEMAS.ledger}"`);
-  if (isObj(ledger?.segments)) ledgerSegments = ledger.segments;
-  else if (ledger !== undefined) err('schema', 'ledger.json', 'segments must map segment id -> item array');
-
-  // coverage.json
-  if (coverage === undefined) err('schema', 'coverage.json', 'missing');
-  else if (!isObj(coverage) || coverage.schema !== SCHEMAS.coverage) err('schema', 'coverage.json', `schema must be "${SCHEMAS.coverage}"`);
-  const sources = Array.isArray(coverage?.sources) ? coverage.sources : [];
-  if (coverage !== undefined && !sources.length) err('schema', 'coverage.json', 'sources must be a non-empty array');
 
   const segmentById = new Map();
   const sourceOf = new Map();
@@ -370,7 +370,8 @@ const per = (count, size, family) => {
 };
 const sizeLabel = (size, family) => (family === 'av' ? `${(size / 60).toFixed(1)} min` : family === 'text' ? `${size} words` : `${size} modules`);
 
-export function render({ errors, report }) {
+// perRule limits how many errors of each rule are listed (the counts stay complete).
+export function render({ errors, report }, { perRule = Infinity } = {}) {
   const lines = [];
   for (const source of report.sources) {
     lines.push(`source ${source.source_id} (${source.kind}, ${sizeLabel(source.size, source.family)}, ${source.segments.length} segments): `
@@ -386,20 +387,25 @@ export function render({ errors, report }) {
     for (const row of report.audit.segments) lines.push(`  ${row.id}: reviewer ${row.concepts} concepts, missed ${row.missed}, ledger ${row.ledger}`);
   }
   if (errors.length) {
-    const byRule = {};
-    for (const error of errors) byRule[error.rule] = (byRule[error.rule] ?? 0) + 1;
-    lines.push(`errors (${errors.length}):`, ...errors.map(error => `  [${error.rule}] ${error.where}: ${error.message}`));
-    lines.push(`by rule: ${Object.entries(byRule).map(([rule, count]) => `${rule} ${count}`).join(', ')}`);
+    const byRule = new Map();
+    for (const error of errors) byRule.set(error.rule, [...(byRule.get(error.rule) ?? []), error]);
+    lines.push(`errors (${errors.length}):`);
+    for (const [rule, list] of byRule) {
+      for (const error of list.slice(0, perRule)) lines.push(`  [${rule}] ${error.where}: ${error.message}`);
+      if (list.length > perRule) lines.push(`  [${rule}] ... ${list.length - perRule} more`);
+    }
+    lines.push(`by rule: ${[...byRule].map(([rule, list]) => `${rule} ${list.length}`).join(', ')}`);
     lines.push('FAIL');
   } else lines.push('PASS');
   return `${lines.join('\n')}\n`;
 }
 
-const USAGE = 'usage: check_coverage.mjs RUN_DIR [--audit] | check_coverage.mjs RUN_DIR --sample SEED';
+const USAGE = 'usage: check_coverage.mjs RUN_DIR [--audit] [--summary] | check_coverage.mjs RUN_DIR --sample SEED';
 export function main(argv = process.argv.slice(2), out = process.stdout, errOut = process.stderr) {
-  let dir = null; let requireAudit = false; let seed = null;
+  let dir = null; let requireAudit = false; let seed = null; let perRule = Infinity;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--audit') requireAudit = true;
+    else if (argv[i] === '--summary') perRule = 3;
     else if (argv[i] === '--sample') { seed = argv[++i]; if (!text(seed)) { errOut.write(`${USAGE}\n`); return 2; } }
     else if (argv[i].startsWith('--') || dir) { errOut.write(`${USAGE}\n`); return 2; }
     else dir = argv[i];
@@ -420,7 +426,7 @@ export function main(argv = process.argv.slice(2), out = process.stdout, errOut 
   const result = check({ coverage, ledger: load('ledger.json'), claims: load('claims.json'),
     audit: requireAudit ? load('recall-audit.json') : undefined }, { requireAudit });
   for (const message of loadErrors) result.errors.unshift({ rule: 'schema', where: 'load', message });
-  out.write(render(result));
+  out.write(render(result, { perRule }));
   return result.errors.length ? 1 : 0;
 }
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.exitCode = main();
