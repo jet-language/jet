@@ -4,13 +4,10 @@
 //! protocol. This module only marshals checked MIR carriers across Cranelift.
 
 use crate::ambient_interp::InterpreterAmbientContext;
-use crate::runtime_host::{alloc_jit_result, jit_result_parts, JitRuntime};
-use crate::Concurrency;
 use jet_codegen::Comptime::AmbientMirHandleResult;
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{MirNominalRef, MirRuntimeValue, MirType, MirTypeKind};
 use jet_foundation::PluginWire as plugin_wire;
-use jet_rt::JetVal;
 
 pub(crate) mod runtime {
     include!("../../jet-pkg-model/src/Prelude/Plugin.rs");
@@ -26,12 +23,12 @@ enum ParsedType {
     Option(Box<Self>),
     Result {
         ok: Box<Self>,
-        err: Box<Self>,
+        err: Box<Self>
     },
     Record {
         name: String,
-        fields: Vec<(usize, String, Self)>,
-    },
+        fields: Vec<(usize, String, Self)>
+    }
 }
 
 fn parse_decimal(bytes: &[u8], pos: &mut usize) -> Result<usize, String> {
@@ -79,7 +76,7 @@ fn parse_type(bytes: &[u8], pos: &mut usize) -> Result<ParsedType, String> {
         b'o' => Ok(ParsedType::Option(Box::new(parse_type(bytes, pos)?))),
         b'q' => Ok(ParsedType::Result {
             ok: Box::new(parse_type(bytes, pos)?),
-            err: Box::new(parse_type(bytes, pos)?),
+            err: Box::new(parse_type(bytes, pos)?)
         }),
         b'r' => {
             let name = parse_text(bytes, pos)?;
@@ -101,14 +98,14 @@ fn parse_type(bytes: &[u8], pos: &mut usize) -> Result<ParsedType, String> {
             }
             Ok(ParsedType::Record { name, fields })
         }
-        _ => Err("plugin component descriptor has an unknown type tag".to_string()),
+        _ => Err("plugin component descriptor has an unknown type tag".to_string())
     }
 }
 
 #[derive(Clone)]
 struct ParsedSignature {
     params: Vec<ParsedType>,
-    result: ParsedType,
+    result: ParsedType
 }
 
 fn parse_signature(wire: &str) -> Result<ParsedSignature, String> {
@@ -157,7 +154,7 @@ fn mir_type_for_descriptor(ty: &ParsedType) -> MirType {
         ParsedType::Option(inner) => MirTypeKind::Option(Box::new(mir_type_for_descriptor(inner))),
         ParsedType::Result { ok, err } => MirTypeKind::Result {
             ok: Box::new(mir_type_for_descriptor(ok)),
-            err: Box::new(mir_type_for_descriptor(err)),
+            err: Box::new(mir_type_for_descriptor(err))
         },
         ParsedType::Record { name, .. } => {
             MirTypeKind::Apply { name: MirNominalRef::from_name(name.clone()), args: Vec::new() }
@@ -208,7 +205,7 @@ fn mir_to_plugin(
             ParsedType::Record { name, fields, .. },
             MirRuntimeValue::Struct {
                 type_name,
-                fields: values,
+                fields: values
             },
         ) => {
             if type_name != name {
@@ -236,7 +233,7 @@ fn mir_to_plugin(
                 .collect::<Result<Vec<_>, String>>()
                 .map(plugin_wire::PluginValue::Record)
         }
-        _ => Err("plugin parameter does not match the checked component descriptor".to_string()),
+        _ => Err("plugin parameter does not match the checked component descriptor".to_string())
     }
 }
 
@@ -249,7 +246,7 @@ fn plugin_to_mir(
         (ParsedType::Float, plugin_wire::PluginValue::Float(value)) => {
             Ok(MirRuntimeValue::Float {
                 value: *value,
-                f32: false,
+                f32: false
             })
         }
         (ParsedType::Bool, plugin_wire::PluginValue::Bool(value)) => {
@@ -268,8 +265,8 @@ fn plugin_to_mir(
                 value, inner,
             )?))),
             None => Ok(MirRuntimeValue::Absent {
-                element: mir_type_for_descriptor(inner),
-            }),
+                element: mir_type_for_descriptor(inner)
+            })
         },
         (ParsedType::Result { ok, .. }, plugin_wire::PluginValue::ResultOk(Some(value))) => {
             Ok(MirRuntimeValue::Present(Box::new(plugin_to_mir(value, ok)?)))
@@ -305,388 +302,20 @@ fn plugin_to_mir(
                 .collect::<Result<Vec<_>, String>>()
                 .map(|fields| MirRuntimeValue::Struct {
                     type_name: name.clone(),
-                    fields,
+                    fields
                 })
         }
-        _ => Err("plugin result does not match the checked component descriptor".to_string()),
+        _ => Err("plugin result does not match the checked component descriptor".to_string())
     }
 }
 
-
-fn slot_handle(slot: &JetVal) -> Option<i64> {
-    match slot {
-        JetVal::Int(value) | JetVal::RecordRef(value) => Some(*value),
-        _ => None,
-    }
-}
-
-fn list_slots(rt: &JitRuntime, slot: &JetVal) -> Result<Vec<JetVal>, String> {
-    match slot {
-        JetVal::List(values) => Ok(values.clone()),
-        JetVal::IntList(values) => Ok(values.iter().copied().map(JetVal::Int).collect()),
-        JetVal::UninitList { .. } => Err("plugin list carrier is uninitialized".to_string()),
-        _ => slot_handle(slot)
-            .and_then(|handle| rt.heap.clone_list_values(handle))
-            .ok_or_else(|| "plugin list handle is invalid".to_string()),
-    }
-}
-
-fn record_slots(rt: &JitRuntime, slot: &JetVal) -> Result<Vec<JetVal>, String> {
-    match slot {
-        JetVal::Record(values) => Ok(values.clone()),
-        JetVal::RecordRef(handle) | JetVal::Int(handle) => rt
-            .heap
-            .clone_record_values(*handle)
-            .ok_or_else(|| "plugin record handle is invalid".to_string()),
-        _ => Err("plugin record carrier is invalid".to_string()),
-    }
-}
-
-fn string_slot(rt: &JitRuntime, slot: &JetVal) -> Result<String, String> {
-    match slot {
-        JetVal::String(value) => Ok(value.clone()),
-        JetVal::StringView { owner, start, end } => rt
-            .heap
-            .get_string(*owner)
-            .and_then(|value| value.get(*start..*end))
-            .map(str::to_string)
-            .ok_or_else(|| "plugin string view is invalid".to_string()),
-        JetVal::Int(handle) => rt
-            .heap
-            .clone_string(*handle)
-            .ok_or_else(|| "plugin string handle is invalid".to_string()),
-        _ => Err("plugin string carrier is invalid".to_string()),
-    }
-}
-
-fn raw_slot(bits: u64, ty: &ParsedType) -> JetVal {
-    match ty {
-        ParsedType::Int => JetVal::Int(bits as i64),
-        ParsedType::Float => JetVal::Float(f64::from_bits(bits)),
-        ParsedType::Bool => JetVal::Bool(bits != 0),
-        ParsedType::String
-        | ParsedType::List(_)
-        | ParsedType::Option(_)
-        | ParsedType::Result { .. }
-        | ParsedType::Record { .. } => JetVal::Int(bits as i64),
-    }
-}
-
-
-fn slot_to_plugin(rt: &JitRuntime, slot: &JetVal, ty: &ParsedType) -> Result<plugin_wire::PluginValue, String> {
-    match ty {
-        ParsedType::Int => match slot {
-            JetVal::Int(value) => Ok(plugin_wire::PluginValue::Int(*value)),
-            _ => Err("plugin integer carrier is invalid".to_string()),
-        },
-        ParsedType::Float => match slot {
-            JetVal::Float(value) => Ok(plugin_wire::PluginValue::Float(*value)),
-            JetVal::Int(value) => Ok(plugin_wire::PluginValue::Float(f64::from_bits(*value as u64))),
-            _ => Err("plugin float carrier is invalid".to_string()),
-        },
-        ParsedType::Bool => match slot {
-            JetVal::Bool(value) => Ok(plugin_wire::PluginValue::Bool(*value)),
-            JetVal::Int(0) => Ok(plugin_wire::PluginValue::Bool(false)),
-            JetVal::Int(1) => Ok(plugin_wire::PluginValue::Bool(true)),
-            _ => Err("plugin bool carrier is invalid".to_string()),
-        },
-        ParsedType::String => Ok(plugin_wire::PluginValue::Text(string_slot(rt, slot)?)),
-        ParsedType::List(inner) => list_slots(rt, slot)?
-            .iter()
-            .map(|value| slot_to_plugin(rt, value, inner))
-            .collect::<Result<Vec<_>, _>>()
-            .map(plugin_wire::PluginValue::List),
-        ParsedType::Option(inner) => {
-            let handle = slot_handle(slot).ok_or_else(|| "plugin option carrier is invalid".to_string())?;
-            let (present, bits) = jit_result_parts(rt, handle)
-                .ok_or_else(|| "plugin option result handle is invalid".to_string())?;
-            if present {
-                let value = raw_slot(bits, inner);
-                Ok(plugin_wire::PluginValue::Option(Some(Box::new(slot_to_plugin(
-                    rt, &value, inner,
-                )?))))
-            } else {
-                Ok(plugin_wire::PluginValue::Option(None))
-            }
-        }
-        ParsedType::Result { ok, err } => {
-            let handle = slot_handle(slot).ok_or_else(|| "plugin result carrier is invalid".to_string())?;
-            let (success, bits) = jit_result_parts(rt, handle)
-                .ok_or_else(|| "plugin result handle is invalid".to_string())?;
-            if success {
-                let value = raw_slot(bits, ok);
-                Ok(plugin_wire::PluginValue::ResultOk(Some(Box::new(slot_to_plugin(
-                    rt, &value, ok,
-                )?))))
-            } else {
-                let value = raw_slot(bits, err);
-                Ok(plugin_wire::PluginValue::ResultErr(Some(Box::new(slot_to_plugin(
-                    rt, &value, err,
-                )?))))
-            }
-        }
-        ParsedType::Record { fields, .. } => {
-            let slots = record_slots(rt, slot)?;
-            fields
-                .iter()
-                .map(|(index, name, field_ty)| {
-                    let value = slots
-                        .get(*index)
-                        .ok_or_else(|| "plugin record field index is invalid".to_string())?;
-                    Ok((name.clone(), slot_to_plugin(rt, value, field_ty)?))
-                })
-                .collect::<Result<Vec<_>, String>>()
-                .map(plugin_wire::PluginValue::Record)
-        }
-    }
-}
-
-fn plugin_value_to_slot(
-    rt: &mut JitRuntime,
-    value: &plugin_wire::PluginValue,
-    ty: &ParsedType,
-) -> Result<JetVal, String> {
-    match (ty, value) {
-        (ParsedType::Int, plugin_wire::PluginValue::Int(value)) => Ok(JetVal::Int(*value)),
-        (ParsedType::Float, plugin_wire::PluginValue::Float(value)) => Ok(JetVal::Float(*value)),
-        (ParsedType::Bool, plugin_wire::PluginValue::Bool(value)) => Ok(JetVal::Bool(*value)),
-        (ParsedType::String, plugin_wire::PluginValue::Text(value)) => Ok(JetVal::String(value.clone())),
-        (ParsedType::List(inner), plugin_wire::PluginValue::List(values)) => {
-            let slots = values
-                .iter()
-                .map(|value| plugin_value_to_slot(rt, value, inner))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(JetVal::Int(rt.heap.alloc_list_values(slots)))
-        }
-        (ParsedType::Record { fields, .. }, plugin_wire::PluginValue::Record(values)) => {
-            let mut slots = vec![JetVal::Int(0); fields.iter().map(|(index, _, _)| *index + 1).max().unwrap_or(0)];
-            for (index, name, field_ty) in fields {
-                let value = values
-                    .iter()
-                    .find(|(field, _)| field == name)
-                    .map(|(_, value)| value)
-                    .ok_or_else(|| format!("plugin result is missing record field `{name}`"))?;
-                slots[*index] = plugin_value_to_slot(rt, value, field_ty)?;
-            }
-            Ok(JetVal::RecordRef(rt.heap.alloc_record_values(slots)))
-        }
-        (ParsedType::Option(inner), plugin_wire::PluginValue::Option(value)) => {
-            let bits = value
-                .as_deref()
-                .map(|value| plugin_value_to_raw(rt, value, inner))
-                .transpose()?
-                .unwrap_or(0);
-            Ok(JetVal::Int(alloc_jit_result(rt, value.is_some(), bits as u64)))
-        }
-        (ParsedType::Result { ok, .. }, plugin_wire::PluginValue::ResultOk(value)) => {
-            let bits = value
-                .as_deref()
-                .map(|value| plugin_value_to_raw(rt, value, ok))
-                .transpose()?
-                .unwrap_or(0);
-            Ok(JetVal::Int(alloc_jit_result(rt, true, bits as u64)))
-        }
-        (ParsedType::Result { err, .. }, plugin_wire::PluginValue::ResultErr(value)) => {
-            let bits = value
-                .as_deref()
-                .map(|value| plugin_value_to_raw(rt, value, err))
-                .transpose()?
-                .unwrap_or(0);
-            Ok(JetVal::Int(alloc_jit_result(rt, false, bits as u64)))
-        }
-        _ => Err("plugin result does not match the checked component descriptor".to_string()),
-    }
-}
-
-fn plugin_value_to_raw(
-    rt: &mut JitRuntime,
-    value: &plugin_wire::PluginValue,
-    ty: &ParsedType,
-) -> Result<i64, String> {
-    match (ty, value) {
-        (ParsedType::Int, plugin_wire::PluginValue::Int(value)) => Ok(*value),
-        (ParsedType::Float, plugin_wire::PluginValue::Float(value)) => Ok(value.to_bits() as i64),
-        (ParsedType::Bool, plugin_wire::PluginValue::Bool(value)) => Ok(i64::from(*value)),
-        (ParsedType::String, plugin_wire::PluginValue::Text(value)) => Ok(rt.heap.alloc_string(value.clone())),
-        (ParsedType::List(inner), plugin_wire::PluginValue::List(values)) => {
-            let slots = values
-                .iter()
-                .map(|value| plugin_value_to_slot(rt, value, inner))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rt.heap.alloc_list_values(slots))
-        }
-        (ParsedType::Record { fields, .. }, plugin_wire::PluginValue::Record(values)) => {
-            let mut slots = vec![JetVal::Int(0); fields.iter().map(|(index, _, _)| *index + 1).max().unwrap_or(0)];
-            for (index, name, field_ty) in fields {
-                let value = values
-                    .iter()
-                    .find(|(field, _)| field == name)
-                    .map(|(_, value)| value)
-                    .ok_or_else(|| format!("plugin result is missing record field `{name}`"))?;
-                slots[*index] = plugin_value_to_slot(rt, value, field_ty)?;
-            }
-            Ok(rt.heap.alloc_record_values(slots))
-        }
-        (ParsedType::Option(inner), plugin_wire::PluginValue::Option(value)) => {
-            let bits = value
-                .as_deref()
-                .map(|value| plugin_value_to_raw(rt, value, inner))
-                .transpose()?
-                .unwrap_or(0);
-            Ok(alloc_jit_result(rt, value.is_some(), bits as u64))
-        }
-        (ParsedType::Result { ok, .. }, plugin_wire::PluginValue::ResultOk(value)) => {
-            let bits = value
-                .as_deref()
-                .map(|value| plugin_value_to_raw(rt, value, ok))
-                .transpose()?
-                .unwrap_or(0);
-            Ok(alloc_jit_result(rt, true, bits as u64))
-        }
-        (ParsedType::Result { err, .. }, plugin_wire::PluginValue::ResultErr(value)) => {
-            let bits = value
-                .as_deref()
-                .map(|value| plugin_value_to_raw(rt, value, err))
-                .transpose()?
-                .unwrap_or(0);
-            Ok(alloc_jit_result(rt, false, bits as u64))
-        }
-        _ => Err("plugin result does not match the checked component descriptor".to_string()),
-    }
-}
-
-fn plugin_error(rt: &mut JitRuntime, error: plugin_wire::PluginError) -> i64 {
-    use plugin_wire::{PluginError, PluginLimit};
-    let (tag, limit, fault) = match error {
-        PluginError::Guest(fault) => (0, None, fault),
-        PluginError::Denied(fault) => (1, None, fault),
-        PluginError::Budget { limit, fault } => (2, Some(limit), fault),
-        PluginError::Defect(fault) => (3, None, fault),
-    };
-    // String fields stay inline cells (`JetVal::String`), as for every other
-    // host-built record: an `Int` cell is read back as a raw word, not text.
-    let frames = fault.frames.into_iter().map(|frame| {
-        JetVal::RecordRef(rt.heap.alloc_record_values(vec![
-            JetVal::String(frame.function), JetVal::String(frame.component), JetVal::Int(frame.offset),
-        ]))
-    }).collect();
-    let frames = rt.heap.alloc_list_values(frames);
-    let fault = rt.heap.alloc_record_values(vec![
-        JetVal::String(fault.export), JetVal::String(fault.message), JetVal::Int(frames),
-    ]);
-    let mut slots = vec![JetVal::Int(tag)];
-    if let Some(limit) = limit {
-        // A unit variant is a one-cell enum record holding its discriminant,
-        // in the compiler-owned `PluginLimit` row order.
-        let discriminant = match limit {
-            PluginLimit::Fuel => 0, PluginLimit::Memory => 1, PluginLimit::Table => 2,
-            PluginLimit::Time => 3, PluginLimit::Wire => 4,
-        };
-        slots.push(JetVal::RecordRef(rt.heap.alloc_record_values(vec![JetVal::Int(discriminant)])));
-    }
-    slots.push(JetVal::RecordRef(fault));
-    let error = rt.heap.alloc_record_values(slots);
-    alloc_jit_result(rt, false, error as u64)
-}
-
-pub(crate) fn jet_jit_plugin_load(path: i64, authority: i64, declared_needs: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let Some(path) = rt.heap.clone_string(path) else {
-            rt.set_host_fault("MIR plugin path handle is invalid");
-            return 0;
-        };
-        let authority = rt
-            .heap
-            .clone_string(authority)
-            .unwrap_or_else(|| crate::Collections::authority_wire(rt, authority));
-        let Some(needs_wire) = rt.heap.clone_string(declared_needs) else {
-            rt.set_host_fault("MIR plugin authority-needs handle is invalid");
-            return 0;
-        };
-        let declared_needs = needs_wire
-            .split('\n')
-            .filter(|need| !need.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        let wire = runtime::jet_plugin_load_declared(&path, &authority, &declared_needs);
-        match wire.strip_prefix("O:").and_then(|value| value.parse::<u64>().ok()) {
-            Some(handle) if handle > 0 => handle as i64,
-            _ => {
-                rt.set_host_fault(wire.strip_prefix("E:").unwrap_or(&wire));
-                0
-            }
-        }
-    })
-}
-
-pub(crate) fn jet_jit_plugin_call(
-    handle: i64,
-    name: i64,
-    params: i64,
-    descriptor: i64,
-) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let Some(name) = rt.heap.clone_string(name) else {
-            rt.set_host_fault("MIR plugin export name handle is invalid");
-            return 0;
-        };
-        let Some(signature_wire) = rt.heap.clone_string(descriptor) else {
-            rt.set_host_fault("MIR plugin component signature handle is invalid");
-            return 0;
-        };
-        let signature = match parse_signature(&signature_wire) {
-            Ok(signature) => signature,
-            Err(error) => {
-                rt.set_host_fault(&error);
-                return 0;
-            }
-        };
-        let slots = match rt.heap.clone_list_values(params) {
-            Some(slots) => slots,
-            None => {
-                rt.set_host_fault("MIR plugin parameter list handle is invalid");
-                return 0;
-            }
-        };
-        if slots.len() != signature.params.len() {
-            rt.set_host_fault(&format!(
-                "MIR plugin export `{name}` expects {} parameter(s), got {}",
-                signature.params.len(),
-                slots.len()
-            ));
-            return 0;
-        }
-        let values = match slots
-            .iter()
-            .zip(&signature.params)
-            .map(|(slot, ty)| slot_to_plugin(rt, slot, ty))
-            .collect::<Result<Vec<_>, _>>()
-        {
-            Ok(values) => values,
-            Err(error) => {
-                rt.set_host_fault(&error);
-                return 0;
-            }
-        };
-        let params_wire = plugin_wire::plugin_encode_params(&values);
-        let wire = runtime::jet_plugin_call(handle as u64, &name, &params_wire);
-        let value = match plugin_wire::plugin_decode_result(&wire) {
-            Ok(value) => value,
-            Err(error) => return plugin_error(rt, error),
-        };
-        match plugin_value_to_raw(rt, &value, &signature.result) {
-            Ok(bits) => alloc_jit_result(rt, true, bits as u64),
-            Err(error) => plugin_error(rt, plugin_wire::PluginError::defect(&name, error)),
-        }
-    })
-}
 fn plugin_interpreter_error(error: plugin_wire::PluginError) -> Result<AmbientMirHandleResult, Diagnostic> {
     use plugin_wire::{PluginError, PluginLimit};
     let (variant, limit, fault) = match error {
         PluginError::Guest(fault) => ("Guest", None, fault),
         PluginError::Denied(fault) => ("Denied", None, fault),
         PluginError::Budget { limit, fault } => ("Budget", Some(limit), fault),
-        PluginError::Defect(fault) => ("Defect", None, fault),
+        PluginError::Defect(fault) => ("Defect", None, fault)
     };
     let fault = MirRuntimeValue::Struct {
         type_name: "PluginFault".to_string(),
@@ -699,9 +328,9 @@ fn plugin_interpreter_error(error: plugin_wire::PluginError) -> Result<AmbientMi
                     ("function".to_string(), MirRuntimeValue::String(frame.function)),
                     ("component".to_string(), MirRuntimeValue::String(frame.component)),
                     ("offset".to_string(), MirRuntimeValue::Int(frame.offset)),
-                ],
+                ]
             }).collect())),
-        ],
+        ]
     };
     let args = if let Some(limit) = limit {
         vec![
@@ -709,15 +338,15 @@ fn plugin_interpreter_error(error: plugin_wire::PluginError) -> Result<AmbientMi
                 type_name: "PluginLimit".to_string(),
                 variant: match limit {
                     PluginLimit::Fuel => "Fuel", PluginLimit::Memory => "Memory",
-                    PluginLimit::Table => "Table", PluginLimit::Time => "Time", PluginLimit::Wire => "Wire",
+                    PluginLimit::Table => "Table", PluginLimit::Time => "Time", PluginLimit::Wire => "Wire"
                 }.to_string(),
-                args: Vec::new(),
+                args: Vec::new()
             }),
             (Some("fault".to_string()), fault),
         ]
     } else { vec![(None, fault)] };
     Ok(AmbientMirHandleResult::Value(MirRuntimeValue::FailedTold(Box::new(MirRuntimeValue::Enum {
-        type_name: "PluginError".to_string(), variant: variant.to_string(), args,
+        type_name: "PluginError".to_string(), variant: variant.to_string(), args
     }))))
 }
 
@@ -731,7 +360,7 @@ fn plugin_interpreter_string(
         _ => Err(plugin_ambient_diag(
             format!("MIR plugin {label} carrier is not a checked String"),
             span,
-        )),
+        ))
     }
 }
 
@@ -753,16 +382,16 @@ pub(crate) fn ambient_mir_handle(
             }
             let path = match plugin_interpreter_string(&args[0], "path", span) {
                 Ok(path) => path,
-                Err(error) => return Some(Err(error)),
+                Err(error) => return Some(Err(error))
             };
             let authority = match plugin_interpreter_string(&args[1], "authority", span) {
                 Ok(authority) => authority,
-                Err(error) => return Some(Err(error)),
+                Err(error) => return Some(Err(error))
             };
             let needs_wire =
                 match plugin_interpreter_string(&args[2], "declared authority-needs", span) {
                     Ok(needs) => needs,
-                    Err(error) => return Some(Err(error)),
+                    Err(error) => return Some(Err(error))
                 };
             let declared_needs = needs_wire
                 .split('\n')
@@ -777,7 +406,7 @@ pub(crate) fn ambient_mir_handle(
                 _ => Some(Err(plugin_ambient_diag(
                     wire.strip_prefix("E:").unwrap_or(&wire),
                     span,
-                ))),
+                )))
             }
         }
         "jet_plugin_call" => {
@@ -795,16 +424,16 @@ pub(crate) fn ambient_mir_handle(
             }
             let name = match plugin_interpreter_string(&args[0], "export name", span) {
                 Ok(name) => name,
-                Err(error) => return Some(Err(error)),
+                Err(error) => return Some(Err(error))
             };
             let signature_wire =
                 match plugin_interpreter_string(&args[2], "component signature", span) {
                     Ok(signature) => signature,
-                    Err(error) => return Some(Err(error)),
+                    Err(error) => return Some(Err(error))
                 };
             let signature = match parse_signature(&signature_wire) {
                 Ok(signature) => signature,
-                Err(error) => return Some(Err(plugin_ambient_diag(error, span))),
+                Err(error) => return Some(Err(plugin_ambient_diag(error, span)))
             };
             let MirRuntimeValue::List(params) = &args[1] else {
                 return Some(Err(plugin_ambient_diag(
@@ -829,22 +458,22 @@ pub(crate) fn ambient_mir_handle(
                 .collect::<Result<Vec<_>, _>>()
             {
                 Ok(values) => values,
-                Err(error) => return Some(Err(plugin_ambient_diag(error, span))),
+                Err(error) => return Some(Err(plugin_ambient_diag(error, span)))
             };
             let params_wire = plugin_wire::plugin_encode_params(&values);
             let wire = runtime::jet_plugin_call(handle as u64, &name, &params_wire);
             let value = match plugin_wire::plugin_decode_result(&wire) {
                 Ok(value) => value,
-                Err(error) => return Some(plugin_interpreter_error(error)),
+                Err(error) => return Some(plugin_interpreter_error(error))
             };
             match plugin_to_mir(&value, &signature.result) {
                 Ok(value) => Some(Ok(AmbientMirHandleResult::Value(
                     MirRuntimeValue::Present(Box::new(value)),
                 ))),
-                Err(error) => Some(plugin_interpreter_error(plugin_wire::PluginError::defect(&name, error))),
+                Err(error) => Some(plugin_interpreter_error(plugin_wire::PluginError::defect(&name, error)))
             }
         }
-        _ => None,
+        _ => None
     }
 }
 
@@ -855,25 +484,6 @@ pub(crate) fn register_interpreter_ambient(context: &mut InterpreterAmbientConte
 // The rows carry the exact Prelude symbol the checked MIR route names
 // (`jet_plugin_load` / `jet_plugin_call`): lowering resolves a Prelude call by
 // `MirSymbol::name()`, so a `jet_jit_`-prefixed spelling would be unreachable.
-host_fns! {
-    struct PluginHostFns;
-    register: register_plugin_symbols;
-    declare: declare_plugin_host_fns(module) {
-        use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::Module;
-        let cc = module.target_config().default_call_conv;
-        // (path, authority wire, compiler-supplied declared needs) -> handle | Result
-        let mut sig_load = Signature::new(cc);
-        sig_load.params.extend([AbiParam::new(types::I64); 3]);
-        sig_load.returns.push(AbiParam::new(types::I64));
-        // (handle, export name, checked value list, component descriptor) -> Result
-        let mut sig_call = Signature::new(cc);
-        sig_call.params.extend([AbiParam::new(types::I64); 4]);
-        sig_call.returns.push(AbiParam::new(types::I64));
-    }
-    load: "jet_plugin_load" => jet_jit_plugin_load: sig_load;
-    call: "jet_plugin_call" => jet_jit_plugin_call: sig_call;
-}
 
 #[cfg(test)]
 mod failure_tests {

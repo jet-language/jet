@@ -3363,7 +3363,7 @@ mod tests {
                 artifact: ARTIFACT,
                 name: "main".to_string(),
                 kind: MirArtifactKind::NativeExecutable,
-                target: MirArtifactTarget::Cranelift,
+                target: MirArtifactTarget::Interpreter,
                 mode: MirArtifactBuildMode::Dev,
                 provider_identity: String::new(),
                 closure_identity: String::new(),

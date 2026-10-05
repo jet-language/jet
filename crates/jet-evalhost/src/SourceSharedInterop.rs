@@ -10,7 +10,6 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use jet_foundation::MIR::{MirNativeOwned, MirRuntimeValue};
 
@@ -30,14 +29,6 @@ type SourceSharedInteropPayloadFinalizerInstaller = Arc<
         + 'static,
 >;
 
-/// Clone the exact typed view for a currently live native Source Shared guard
-/// token in this invocation. The token is only a lookup key in its origin
-/// runtime, never portable permit authority.
-pub fn native_shared_guard_entry_view(
-    token: i64,
-) -> Option<Result<SourceSharedInteropGuardState, String>> {
-    crate::runtime_host::native_shared_guard_entry_view(token)
-}
 fn finish_physical_operation<T>(
     completion_delivery: &Arc<Mutex<Option<SourceSharedInteropCompletionDelivery>>>,
     mut outcome: crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<T>,
@@ -53,10 +44,9 @@ fn finish_physical_operation<T>(
     }
     outcome.result
 }
-/// Compute the exact JIT descriptor identity for a checked MIR type. Nominal
+/// Compute the exact descriptor identity for a checked MIR type. Nominal
 /// types use their checked identity; structural types (including
-/// `Shared<scalar>`) use the same synthetic canonical-key identity as the
-/// resident runtime descriptor table.
+/// `Shared<scalar>`) use a synthetic canonical-key identity.
 pub fn checked_type_id(ty: &jet_foundation::MIR::MirType) -> u64 {
     ty.identity
         .map(|identity| identity.0)
@@ -83,7 +73,7 @@ pub fn checked_type_id_for_program(
     }
     if let jet_foundation::MIR::MirTypeKind::Apply { name, args } = &ty.kind {
         if args.is_empty() {
-            if let Some(definition) = crate::functions_compile::nominal_ref_definition(program, name) {
+            if let Some(definition) = nominal_ref_definition(program, name) {
                 return definition.id.0;
             }
         }
@@ -91,6 +81,29 @@ pub fn checked_type_id_for_program(
     checked_type_id(ty)
 }
 
+/// The checked declaration a nominal reference names: its identity first,
+/// then its exact key. A bare display name resolves only when exactly one
+/// declaration carries it, so a user type never binds to a same-named Core
+/// declaration, or the reverse (#4003).
+fn nominal_ref_definition<'p>(
+    program: &'p jet_foundation::MIR::MirProgram,
+    name: &jet_foundation::MIR::MirNominalRef,
+) -> Option<&'p jet_foundation::MIR::MirTypeDef> {
+    if let Some(definition) = program
+        .types
+        .iter()
+        .find(|definition| definition.id == name.id)
+        .or_else(|| program.types.iter().find(|definition| definition.key == name.name))
+    {
+        return Some(definition);
+    }
+    let mut named = program
+        .types
+        .iter()
+        .filter(|definition| definition.name == name.name);
+    let definition = named.next()?;
+    named.next().is_none().then_some(definition)
+}
 
 /// The physical operations supplied by the owner of one typed Shared root.
 ///
@@ -128,7 +141,6 @@ pub trait SourceSharedInteropBackend: Send + Sync + 'static {
         Box<dyn SourceSharedInteropGuard>,
     >;
 }
-
 
 /// Physical owner weak handles preserve source Shared lifetime semantics
 /// without retaining a wrapper or a copied payload.
@@ -366,10 +378,6 @@ impl SourceSharedInteropPhysicalLease {
         self.guard.borrow_mut().with_edit(callback)
     }
 
-    pub(crate) fn read_value(&self) -> Result<MirRuntimeValue, String> {
-        self.guard.borrow_mut().read_value()
-    }
-
     pub(crate) fn stage_value(&self, value: MirRuntimeValue) -> Result<(), String> {
         self.guard.borrow_mut().stage_value(value)
     }
@@ -581,19 +589,6 @@ impl SourceSharedInteropGuardState {
         })
     }
 
-    pub(crate) fn canonical_state(
-        &self,
-    ) -> &Arc<crate::Memory::shared_protocol::JetSharedGuardState> {
-        &self.state
-    }
-
-    pub(crate) fn wait_handoff(&self) -> SourceSharedInteropWaitHandoff {
-        SourceSharedInteropWaitHandoff {
-            lease: self.lease.clone(),
-            error: None,
-        }
-    }
-
     pub fn map_path(
         self,
         fields: &[i64],
@@ -726,66 +721,6 @@ impl SourceSharedInteropGuardState {
         self.lease.discard_staged()
     }
 }
-pub(crate) struct SourceSharedInteropWaitHandoff {
-    lease: Rc<SourceSharedInteropPhysicalLease>,
-    error: Option<String>,
-}
-
-impl SourceSharedInteropWaitHandoff {
-    pub(crate) fn take_error(&mut self) -> Option<String> {
-        self.error.take()
-    }
-
-    fn record_error(&mut self, error: String) {
-        if self.error.is_none() {
-            self.error = Some(error);
-        }
-    }
-}
-
-impl crate::Memory::shared_protocol::JetSharedWaitHandoff
-    for SourceSharedInteropWaitHandoff
-{
-    fn suspend(&mut self) -> Result<(), ()> {
-        let value = match self.lease.read_value() {
-            Ok(value) => value,
-            Err(error) => {
-                self.record_error(error);
-                return Err(());
-            }
-        };
-        match self.lease.wait_suspend(value) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                self.record_error(error);
-                Err(())
-            }
-        }
-    }
-
-    fn resume(&mut self, cancelled: bool) -> Result<bool, ()> {
-        let mut should_cancel = || cancelled;
-        match self.lease.wait_resume(&mut should_cancel) {
-            Ok(Some(_)) => Ok(true),
-            Ok(None) => Ok(false),
-            Err(error) => {
-                self.record_error(error);
-                Err(())
-            }
-        }
-    }
-
-    fn abort(&mut self) -> Result<(), ()> {
-        match self.lease.wait_abort() {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                self.record_error(error);
-                Err(())
-            }
-        }
-    }
-}
-
 
 impl SourceSharedInterop {
     pub(crate) fn acquire_physical_lease(
@@ -815,333 +750,6 @@ impl SourceSharedInterop {
         owner_alias: SourceSharedInteropOwnerAlias,
     ) -> Result<SourceSharedInteropGuardState, String> {
         SourceSharedInteropGuardState::acquire(self, editable, Some(owner_alias))
-    }
-}
-
-struct InMemoryState {
-    value: Mutex<MirRuntimeValue>,
-    revision: AtomicU64,
-    protocol: Arc<crate::Memory::shared_protocol::JetSharedProtocol>,
-}
-
-impl InMemoryState {
-    fn acquire(
-        &self,
-        editable: bool,
-    ) -> Result<Arc<crate::Memory::shared_protocol::JetSharedPermit>, String> {
-        crate::Memory::shared_protocol::jet_shared_acquire(
-            &self.protocol,
-            editable,
-            || false,
-        )
-        .ok_or_else(|| "Source Shared interop permit acquisition was cancelled".to_string())
-    }
-
-    fn publish(&self, value: MirRuntimeValue) -> Result<(), String> {
-        let mut current = self
-            .value
-            .lock()
-            .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
-        let next = self
-            .revision
-            .load(Ordering::Acquire)
-            .checked_add(1)
-            .ok_or_else(|| "Source Shared interop revision exhausted".to_string())?;
-        *current = value;
-        self.revision.store(next, Ordering::Release);
-        Ok(())
-    }
-}
-
-struct InMemoryGuard {
-    state: Arc<InMemoryState>,
-    value: MirRuntimeValue,
-    permit: Arc<crate::Memory::shared_protocol::JetSharedPermit>,
-    editable: bool,
-    suspended: bool,
-    dirty: bool,
-}
-
-impl SourceSharedInteropGuard for InMemoryGuard {
-    fn read_value(&mut self) -> Result<MirRuntimeValue, String> {
-        if self.suspended || !self.permit.held() {
-            return Err("Source Shared guard permit is not held".to_string());
-        }
-        Ok(self.value.clone())
-    }
-    fn revision(&self) -> Result<u64, String> {
-        if self.suspended || !self.permit.held() {
-            return Err("Source Shared guard permit is not held".to_string());
-        }
-        Ok(self.state.revision.load(Ordering::Acquire))
-    }
-    fn held(&self) -> bool {
-        !self.suspended && self.permit.held()
-    }
-    fn release(
-        &mut self,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
-        let commit_result = if self.permit.held() && self.dirty {
-            self.state.publish(self.value.clone())
-        } else {
-            Ok(())
-        };
-        self.dirty = false;
-        self.suspended = false;
-        let released =
-            crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref());
-        let crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome {
-            result: release_result,
-            completion,
-        } = released;
-        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
-            commit_result.and(release_result),
-            completion,
-        )
-    }
-
-    fn release_during_drop(&mut self) {
-        if self.permit.held() && self.dirty {
-            let _ = self.state.publish(self.value.clone());
-        }
-        self.dirty = false;
-        self.suspended = false;
-        crate::Memory::shared_protocol::JetSharedCanonicalPermit::release_during_drop(
-            self.permit.as_ref(),
-        );
-    }
-
-    fn stage_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
-        if !self.editable {
-            return Err("read-only Shared guard cannot stage a value".to_string());
-        }
-        if self.suspended || !self.permit.held() {
-            return Err("Source Shared guard permit is not held".to_string());
-        }
-        self.value = value;
-        self.dirty = true;
-        Ok(())
-    }
-
-    fn wait_suspend(
-        &mut self,
-        value: MirRuntimeValue,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
-        if !self.editable {
-            return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
-                Err("read-only Shared guard cannot wait".to_string()),
-                None,
-            );
-        }
-        if self.suspended || !self.permit.held() {
-            return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
-                Err("Source Shared guard permit is not active".to_string()),
-                None,
-            );
-        }
-        self.value = value;
-        if self.dirty {
-            if let Err(error) = self.state.publish(self.value.clone()) {
-                return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
-                    Err(error),
-                    None,
-                );
-            }
-            self.dirty = false;
-        }
-        let released =
-            crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref());
-        self.suspended = true;
-        released
-    }
-
-    fn wait_resume(
-        &mut self,
-        cancelled: &mut dyn FnMut() -> bool,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
-        Option<MirRuntimeValue>,
-    > {
-        if !self.suspended || self.permit.held() {
-            return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
-                Err("Source Shared guard wait lease is not suspended".to_string()),
-                None,
-            );
-        }
-        if !self.permit.reacquire(cancelled) {
-            return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
-                Ok(None),
-                None,
-            );
-        }
-        self.suspended = false;
-        let result = self
-            .state
-            .value
-            .lock()
-            .map_err(|_| "Source Shared interop value lock is poisoned".to_string())
-            .map(|value| {
-                self.value = value.clone();
-                Some(self.value.clone())
-            });
-        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
-    }
-
-    fn wait_abort(
-        &mut self,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
-        self.suspended = false;
-        self.dirty = false;
-        crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref())
-    }
-
-    fn finish_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
-        if !self.permit.held() {
-            self.suspended = false;
-            self.dirty = false;
-            return Ok(());
-        }
-        self.stage_value(value)
-    }
-
-    fn discard_staged(&mut self) -> Result<(), String> {
-        if self.suspended || !self.permit.held() {
-            return Err("Source Shared guard permit is not held".to_string());
-        }
-        self.value = self
-            .state
-            .value
-            .lock()
-            .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?
-            .clone();
-        self.dirty = false;
-        Ok(())
-    }
-}
-
-impl Drop for InMemoryGuard {
-    fn drop(&mut self) {
-        self.release_during_drop();
-    }
-}
-
-struct InMemoryBackend {
-    state: Arc<InMemoryState>,
-}
-
-impl InMemoryBackend {
-    fn new(value: MirRuntimeValue) -> Self {
-        Self {
-            state: Arc::new(InMemoryState {
-                value: Mutex::new(value),
-                revision: AtomicU64::new(0),
-                protocol: crate::Memory::shared_protocol::JetSharedProtocol::new(),
-            }),
-        }
-    }
-}
-
-impl SourceSharedInteropBackend for InMemoryBackend {
-    fn with_read(
-        &self,
-        callback: &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
-        let result = (|| {
-            let _permit = self.state.acquire(false)?;
-            let value = self
-                .state
-                .value
-                .lock()
-                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
-            callback(&value)
-        })();
-        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
-    }
-
-    fn with_read_revision(
-        &self,
-        callback: &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
-        let result = (|| {
-            let _permit = self.state.acquire(false)?;
-            let value = self
-                .state
-                .value
-                .lock()
-                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
-            callback(&value, self.state.revision.load(Ordering::Acquire))
-        })();
-        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
-    }
-
-    fn with_edit(
-        &self,
-        callback: &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
-        let result = (|| {
-            let _permit = self.state.acquire(true)?;
-            let mut value = self
-                .state
-                .value
-                .lock()
-                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
-            let mut edited = value.clone();
-            callback(&mut edited)?;
-            drop(value);
-            self.state.publish(edited)
-        })();
-        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
-    }
-
-    fn replace_if_revision(
-        &self,
-        expected_revision: u64,
-        replacement: MirRuntimeValue,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)> {
-        let result = (|| {
-            let _permit = self.state.acquire(true)?;
-            let mut value = self
-                .state
-                .value
-                .lock()
-                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
-            let current = self.state.revision.load(Ordering::Acquire);
-            if current != expected_revision {
-                return Ok((false, current));
-            }
-            let next = current
-                .checked_add(1)
-                .ok_or_else(|| "Source Shared interop revision exhausted".to_string())?;
-            *value = replacement;
-            self.state.revision.store(next, Ordering::Release);
-            Ok((true, next))
-        })();
-        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
-    }
-
-    fn acquire_guard(
-        &self,
-        editable: bool,
-    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
-        Box<dyn SourceSharedInteropGuard>,
-    > {
-        let result = (|| {
-            let permit = self.state.acquire(editable)?;
-            let value = self
-                .state
-                .value
-                .lock()
-                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?
-                .clone();
-            Ok(Box::new(InMemoryGuard {
-                state: self.state.clone(),
-                value,
-                permit,
-                editable,
-                suspended: false,
-                dirty: editable,
-            }) as Box<dyn SourceSharedInteropGuard>)
-        })();
-        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
     }
 }
 
@@ -1267,7 +875,6 @@ pub struct SourceSharedInteropWeak {
     typed_owner: Option<Arc<dyn Any + Send + Sync>>,
     resource_lease_owner: Option<Arc<dyn Any + Send + Sync>>,
 }
-
 
 impl SourceSharedInterop {
     /// Build a root from owner-supplied permit callbacks. `capture` must
@@ -1567,19 +1174,12 @@ impl SourceSharedInterop {
         self.owner_alias_lease = Some(Arc::new(owner_alias));
         Ok(self)
     }
-    pub(crate) fn without_owner_alias_lease(&self) -> Self {
-        let mut interop = self.clone();
-        interop.owner_alias_lease = None;
-        interop
-    }
-
 
     pub fn owner_alias_token_id(&self) -> Option<i64> {
         self.owner_alias_lease
             .as_ref()
             .map(|owner_alias| owner_alias.token_id())
     }
-
 
     /// Recover the owner-native handle when this carrier originated from the
     /// same typed Shared implementation.
@@ -1599,14 +1199,6 @@ impl SourceSharedInterop {
             .as_ref()?
             .downcast_ref::<T>()
             .cloned()
-    }
-
-    pub(crate) fn mark_resident_root(&mut self) {
-        self.resident_root = true;
-    }
-
-    pub(crate) fn is_resident_root(&self) -> bool {
-        self.resident_root
     }
 
     /// Checked outer `Shared<T>` type identity retained by the physical root.
@@ -1686,7 +1278,6 @@ impl SourceSharedInterop {
                 .replace_if_revision(expected_revision, replacement),
         )
     }
-
 
     /// Hold the canonical edit permit while invoking `callback`; commit is
     /// owner-defined and occurs only when the callback returns `Ok`.
@@ -1786,7 +1377,6 @@ impl SourceSharedInteropWeak {
     }
 }
 
-
 impl std::fmt::Debug for SourceSharedInterop {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -1794,6 +1384,344 @@ impl std::fmt::Debug for SourceSharedInterop {
             .field("type_id", &self.type_id)
             .field("identity", &self.identity())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(test)]
+struct InMemoryGuard {
+    state: Arc<InMemoryState>,
+    value: MirRuntimeValue,
+    permit: Arc<crate::Memory::shared_protocol::JetSharedPermit>,
+    editable: bool,
+    suspended: bool,
+    dirty: bool,
+}
+
+#[cfg(test)]
+impl SourceSharedInteropGuard for InMemoryGuard {
+    fn read_value(&mut self) -> Result<MirRuntimeValue, String> {
+        if self.suspended || !self.permit.held() {
+            return Err("Source Shared guard permit is not held".to_string());
+        }
+        Ok(self.value.clone())
+    }
+    fn revision(&self) -> Result<u64, String> {
+        if self.suspended || !self.permit.held() {
+            return Err("Source Shared guard permit is not held".to_string());
+        }
+        Ok(self.state.revision.load(Ordering::Acquire))
+    }
+    fn held(&self) -> bool {
+        !self.suspended && self.permit.held()
+    }
+    fn release(
+        &mut self,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        let commit_result = if self.permit.held() && self.dirty {
+            self.state.publish(self.value.clone())
+        } else {
+            Ok(())
+        };
+        self.dirty = false;
+        self.suspended = false;
+        let released =
+            crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref());
+        let crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome {
+            result: release_result,
+            completion,
+        } = released;
+        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+            commit_result.and(release_result),
+            completion,
+        )
+    }
+
+    fn release_during_drop(&mut self) {
+        if self.permit.held() && self.dirty {
+            let _ = self.state.publish(self.value.clone());
+        }
+        self.dirty = false;
+        self.suspended = false;
+        crate::Memory::shared_protocol::JetSharedCanonicalPermit::release_during_drop(
+            self.permit.as_ref(),
+        );
+    }
+
+    fn stage_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
+        if !self.editable {
+            return Err("read-only Shared guard cannot stage a value".to_string());
+        }
+        if self.suspended || !self.permit.held() {
+            return Err("Source Shared guard permit is not held".to_string());
+        }
+        self.value = value;
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn wait_suspend(
+        &mut self,
+        value: MirRuntimeValue,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        if !self.editable {
+            return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Err("read-only Shared guard cannot wait".to_string()),
+                None,
+            );
+        }
+        if self.suspended || !self.permit.held() {
+            return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Err("Source Shared guard permit is not active".to_string()),
+                None,
+            );
+        }
+        self.value = value;
+        if self.dirty {
+            if let Err(error) = self.state.publish(self.value.clone()) {
+                return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                    Err(error),
+                    None,
+                );
+            }
+            self.dirty = false;
+        }
+        let released =
+            crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref());
+        self.suspended = true;
+        released
+    }
+
+    fn wait_resume(
+        &mut self,
+        cancelled: &mut dyn FnMut() -> bool,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+        Option<MirRuntimeValue>,
+    > {
+        if !self.suspended || self.permit.held() {
+            return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Err("Source Shared guard wait lease is not suspended".to_string()),
+                None,
+            );
+        }
+        if !self.permit.reacquire(cancelled) {
+            return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+                Ok(None),
+                None,
+            );
+        }
+        self.suspended = false;
+        let result = self
+            .state
+            .value
+            .lock()
+            .map_err(|_| "Source Shared interop value lock is poisoned".to_string())
+            .map(|value| {
+                self.value = value.clone();
+                Some(self.value.clone())
+            });
+        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+    }
+
+    fn wait_abort(
+        &mut self,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        self.suspended = false;
+        self.dirty = false;
+        crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref())
+    }
+
+    fn finish_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
+        if !self.permit.held() {
+            self.suspended = false;
+            self.dirty = false;
+            return Ok(());
+        }
+        self.stage_value(value)
+    }
+
+    fn discard_staged(&mut self) -> Result<(), String> {
+        if self.suspended || !self.permit.held() {
+            return Err("Source Shared guard permit is not held".to_string());
+        }
+        self.value = self
+            .state
+            .value
+            .lock()
+            .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?
+            .clone();
+        self.dirty = false;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl Drop for InMemoryGuard {
+    fn drop(&mut self) {
+        self.release_during_drop();
+    }
+}
+
+#[cfg(test)]
+struct InMemoryState {
+    value: Mutex<MirRuntimeValue>,
+    revision: AtomicU64,
+    protocol: Arc<crate::Memory::shared_protocol::JetSharedProtocol>,
+}
+
+#[cfg(test)]
+impl InMemoryState {
+    fn acquire(
+        &self,
+        editable: bool,
+    ) -> Result<Arc<crate::Memory::shared_protocol::JetSharedPermit>, String> {
+        crate::Memory::shared_protocol::jet_shared_acquire(
+            &self.protocol,
+            editable,
+            || false,
+        )
+        .ok_or_else(|| "Source Shared interop permit acquisition was cancelled".to_string())
+    }
+
+    fn publish(&self, value: MirRuntimeValue) -> Result<(), String> {
+        let mut current = self
+            .value
+            .lock()
+            .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+        let next = self
+            .revision
+            .load(Ordering::Acquire)
+            .checked_add(1)
+            .ok_or_else(|| "Source Shared interop revision exhausted".to_string())?;
+        *current = value;
+        self.revision.store(next, Ordering::Release);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+struct InMemoryBackend {
+    state: Arc<InMemoryState>,
+}
+
+#[cfg(test)]
+impl InMemoryBackend {
+    fn new(value: MirRuntimeValue) -> Self {
+        Self {
+            state: Arc::new(InMemoryState {
+                value: Mutex::new(value),
+                revision: AtomicU64::new(0),
+                protocol: crate::Memory::shared_protocol::JetSharedProtocol::new(),
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+impl SourceSharedInteropBackend for InMemoryBackend {
+    fn with_read(
+        &self,
+        callback: &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        let result = (|| {
+            let _permit = self.state.acquire(false)?;
+            let value = self
+                .state
+                .value
+                .lock()
+                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+            callback(&value)
+        })();
+        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+    }
+
+    fn with_read_revision(
+        &self,
+        callback: &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        let result = (|| {
+            let _permit = self.state.acquire(false)?;
+            let value = self
+                .state
+                .value
+                .lock()
+                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+            callback(&value, self.state.revision.load(Ordering::Acquire))
+        })();
+        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+    }
+
+    fn with_edit(
+        &self,
+        callback: &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+        let result = (|| {
+            let _permit = self.state.acquire(true)?;
+            let mut value = self
+                .state
+                .value
+                .lock()
+                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+            let mut edited = value.clone();
+            callback(&mut edited)?;
+            drop(value);
+            self.state.publish(edited)
+        })();
+        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+    }
+
+    fn replace_if_revision(
+        &self,
+        expected_revision: u64,
+        replacement: MirRuntimeValue,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)> {
+        let result = (|| {
+            let _permit = self.state.acquire(true)?;
+            let mut value = self
+                .state
+                .value
+                .lock()
+                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+            let current = self.state.revision.load(Ordering::Acquire);
+            if current != expected_revision {
+                return Ok((false, current));
+            }
+            let next = current
+                .checked_add(1)
+                .ok_or_else(|| "Source Shared interop revision exhausted".to_string())?;
+            *value = replacement;
+            self.state.revision.store(next, Ordering::Release);
+            Ok((true, next))
+        })();
+        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+    }
+
+    fn acquire_guard(
+        &self,
+        editable: bool,
+    ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+        Box<dyn SourceSharedInteropGuard>,
+    > {
+        let result = (|| {
+            let permit = self.state.acquire(editable)?;
+            let value = self
+                .state
+                .value
+                .lock()
+                .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?
+                .clone();
+            Ok(Box::new(InMemoryGuard {
+                state: self.state.clone(),
+                value,
+                permit,
+                editable,
+                suspended: false,
+                dirty: editable,
+            }) as Box<dyn SourceSharedInteropGuard>)
+        })();
+        crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
     }
 }
 

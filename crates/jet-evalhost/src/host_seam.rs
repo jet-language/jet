@@ -252,10 +252,3 @@ pub(crate) fn guarded<Marker, F: HostSeam<Marker>>(host_fn: F) -> *const u8 {
     host_fn.guarded_ptr()
 }
 
-/// The same boundary for a seam handed to generated code as a plain callable
-/// address rather than as a named import (`core.compute`'s transform adapters).
-/// A raw `host_fn as usize` there would be an unguarded boundary, which is what
-/// `tests/jit_no_unwind_boundary.rs` scans for.
-pub(crate) fn guarded_addr<Marker, F: HostSeam<Marker>>(host_fn: F) -> usize {
-    host_fn.guarded_ptr() as usize
-}

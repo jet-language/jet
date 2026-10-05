@@ -1,29 +1,22 @@
 //! Resident JIT FFI: load the prepared bridge cdylib and call `*_cabi` trampolines.
 //! Same bridge AOT links — no parallel/fake native path.
 
-use super::Concurrency;
-use crate::Marshal::clone_string;
-use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_module::Module;
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{
-    MirAbi, MirAccess, MirArtifactId, MirArtifactTarget, MirCEnumTag, MirForeign, MirForeignAbi,
-    MirForeignId, MirForeignLanguage, MirHandleId, MirHandleToken, MirLinkUnitId, MirProgram,
+    MirAbi, MirAccess, MirArtifactId, MirArtifactTarget, MirCEnumTag, MirForeign, MirForeignAbi, MirForeignLanguage, MirHandleId, MirLinkUnitId, MirProgram,
     MirRuntimeValue, MirScalarKind, MirStructLayout, MirType, MirTypeDefKind, MirTypeId,
-    MirTypeKind, MirVariantPayload,
+    MirTypeKind, MirVariantPayload
 };
 use jet_codegen::Comptime::{AmbientMirExternResult, AmbientMirExternWriteback};
-use jet_rt::JetVal;
-use std::alloc::{alloc, alloc_zeroed, dealloc, handle_alloc_error, Layout};
+use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::ptr::{self, NonNull};
+use std::ptr::NonNull;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
-    Arc, Condvar, Mutex,
+    Arc, Mutex
 };
 #[link(name = "dl")]
 unsafe extern "C" {
@@ -49,40 +42,19 @@ pub fn set_bridge_cdylib(path: Option<PathBuf>) {
 /// The bridge's panic reporter, as a plain Rust `fn`.
 ///
 /// D-JITUNWIND1 (#1995 / #1997): the `extern "C"` frame the bridge actually
-/// calls is the shim `host_seam::guarded` generates below, never this body. That
-/// is the whole point of the rule — rustc gives an `extern "C"` *body* an
-/// abort-on-unwind shim, so had this stayed `extern "C" fn` a panic raised here
-/// would die as `thread caused non-unwinding panic` at its own edge, before any
-/// guarded seam below it could catch.
-///
-/// This seam is worth naming because the bridge calls it *precisely* when
-/// something already went wrong: a foreign function failed inside a `*_cabi`
-/// trampoline that generated code called, so a Cranelift frame is on the stack
-/// below every line of this body — the lossy decode's allocation, the
-/// `ACTIVE_RUNTIME` borrow, and `set_trap`'s report formatting alike.
-fn ffi_reporter(message: *const u8, len: usize) {
-    let message = if message.is_null() {
-        "a foreign function panicked".into()
-    } else {
-        // JET_VETTED_UNSAFE_BEGIN: ffi_reporter
-        String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(message, len) }).into_owned()
-        // JET_VETTED_UNSAFE_END: ffi_reporter
-    };
-    Concurrency::with_runtime_mut(|rt| rt.set_ffi_runtime_stop(&message));
-}
+/// calls is the shim `host_seam::guarded` generates below, never this body,
+/// because rustc gives an `extern "C"` *body* an abort-on-unwind shim. The
+/// failed foreign call itself returns a nonzero status that `call_cabi`
+/// reports as a host fault; the evaluator has no separate channel for the
+/// reporter's message text.
+fn ffi_reporter(_message: *const u8, _len: usize) {}
 
-/// Record a host fault on the active runtime. Every bridge/atomic failure
-/// reports through the runtime's fault path so the resident run stops the same
-/// way AOT's `jet_ffi_*` trampolines stop: by fault, not by silent zero.
-fn trap(msg: &str) {
-    Concurrency::with_runtime_mut(|rt| rt.set_host_fault(msg));
-}
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FfiSlot {
     value: u64,
     ptr: *mut u8,
-    len: usize,
+    len: usize
 }
 
 /// Heap storage kept alive for the duration of one descriptor-driven call.
@@ -92,7 +64,7 @@ struct FfiSlot {
 struct FfiStorage {
     ptr: NonNull<u8>,
     layout: Layout,
-    len: usize,
+    len: usize
 }
 
 impl FfiStorage {
@@ -159,7 +131,7 @@ enum ParamAbi {
     Record,
     /// Managed callback start rows are loaded through their typed callback
     /// helper, never through a uniform `*_cabi` call.
-    Callback,
+    Callback
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -173,14 +145,14 @@ enum RetAbi {
     List,
     /// A checked C record returned by value, copied from the trampoline's
     /// owned byte buffer before the bridge frees it.
-    Record,
+    Record
 }
 
 #[derive(Clone)]
 struct FfiRecordField {
     name: String,
     ty: MirType,
-    offset: usize,
+    offset: usize
 }
 
 #[derive(Clone)]
@@ -193,7 +165,7 @@ struct FfiRecordDesc {
     /// Present for checked C enums. Payload enums use the record carrier;
     /// unit-only enums retain their scalar carrier but still use this
     /// descriptor to validate native discriminants.
-    enum_info: Option<FfiEnumDesc>,
+    enum_info: Option<FfiEnumDesc>
 }
 
 #[derive(Clone)]
@@ -205,7 +177,7 @@ struct FfiEnumVariantDesc {
     size: usize,
     align: usize,
     stride: usize,
-    field_offsets: Vec<usize>,
+    field_offsets: Vec<usize>
 }
 
 #[derive(Clone)]
@@ -213,13 +185,8 @@ struct FfiEnumDesc {
     tag: MirCEnumTag,
     tag_size: usize,
     has_payload: bool,
-    variants: Vec<FfiEnumVariantDesc>,
+    variants: Vec<FfiEnumVariantDesc>
 }
-
-
-type JitNativeCallback = unsafe extern "C" fn(*mut c_void, i64);
-type JitCallbackStart =
-    unsafe extern "C" fn(Option<JitNativeCallback>, *mut c_void) -> *mut c_void;
 
 #[derive(Clone)]
 struct FfiEntrySpec {
@@ -233,7 +200,7 @@ struct FfiEntrySpec {
     ret: RetAbi,
     ret_type: Option<MirType>,
     handle: Option<MirHandleId>,
-    close_handle: Option<MirHandleId>,
+    close_handle: Option<MirHandleId>
 }
 
 #[derive(Clone)]
@@ -247,19 +214,16 @@ struct FfiEntry {
     handle: Option<MirHandleId>,
     close_handle: Option<MirHandleId>,
     /// Function pointer into the loaded cdylib.
-    ptr: *const (),
-    /// Managed native-start rows use a typed callback helper instead of a
-    /// uniform trampoline because the callback pointer is part of the ABI.
-    callback_start: Option<JitCallbackStart>,
+    ptr: *const ()
 }
 
-// Safety: entries are only used from the JIT host thread with the library kept alive.
+// Safety: entries are only used while the loaded library is kept alive.
 unsafe impl Send for FfiEntry {}
 unsafe impl Sync for FfiEntry {}
 /// Owner token for the separate provider handle used by Foundation's reader
 /// slot.  The wrapper handle below may be replaced independently.
 struct FfiProviderLibrary {
-    handle: *mut c_void,
+    handle: *mut c_void
 }
 
 unsafe impl Send for FfiProviderLibrary {}
@@ -277,7 +241,6 @@ impl Drop for FfiProviderLibrary {
     }
 }
 
-
 struct FfiState {
     handle: *mut c_void,
     clear_panic_hook_fn: unsafe extern "C" fn(),
@@ -285,638 +248,25 @@ struct FfiState {
     take_failure_fn: unsafe extern "C" fn() -> i8,
     artifact_identity: String,
     by_wrapper: HashMap<String, FfiEntry>,
-    close_by_handle: HashMap<MirHandleId, String>,
     records: HashMap<MirTypeId, FfiRecordDesc>,
     /// Foundation owns the registration slot; this lease keeps its provider
     /// callback and dynamic owner live until FFI teardown.
-    arrow_provider_lease: Option<jet_foundation::ArrowFileReader::ProviderLease>,
+    arrow_provider_lease: Option<jet_foundation::ArrowFileReader::ProviderLease>
 }
 
 unsafe impl Send for FfiState {}
 
-#[derive(Default)]
-struct FfiHandleRegistry {
-    next_id: i64,
-    by_id: HashMap<i64, MirHandleToken>,
-}
-
-impl FfiHandleRegistry {
-    fn insert(&mut self, handle: MirHandleId, raw: i64) -> i64 {
-        loop {
-            self.next_id = self.next_id.wrapping_add(1).max(1);
-            if self.next_id != 0 && !self.by_id.contains_key(&self.next_id) {
-                self.by_id
-                    .insert(self.next_id, MirHandleToken::new(handle, raw));
-                return self.next_id;
-            }
-        }
-    }
-
-    fn raw(&self, id: i64) -> Option<i64> {
-        self.by_id.get(&id).and_then(MirHandleToken::raw)
-    }
-    fn handle_id(&self, id: i64) -> Option<MirHandleId> {
-        self.by_id.get(&id).map(MirHandleToken::handle_id)
-    }
-
-    fn take(&mut self, id: i64) -> Option<(MirHandleId, i64)> {
-        self.by_id.remove(&id)?.take_raw()
-    }
-
-    fn clear(&mut self) {
-        self.by_id.clear();
-    }
-}
-
 static FFI_STATE: Mutex<Option<FfiState>> = Mutex::new(None);
-static FFI_HANDLES: std::sync::LazyLock<Mutex<FfiHandleRegistry>> =
-    std::sync::LazyLock::new(|| {
-        Mutex::new(FfiHandleRegistry {
-            next_id: 0,
-            by_id: HashMap::new(),
-        })
-    });
-const JIT_CALLBACK_ACTIVE: u8 = 0;
-const JIT_CALLBACK_STOPPING: u8 = 1;
-const JIT_CALLBACK_STOPPED: u8 = 2;
-const JIT_CALLBACK_QUARANTINED: u8 = 3;
-
-struct JitCallbackState {
-    callback: crate::runtime_host::JitCallableSlot,
-    native_stop_wrapper: String,
-    native_token: AtomicUsize,
-    start_complete: AtomicBool,
-    phase: AtomicU8,
-    in_flight: AtomicUsize,
-    stop_started: AtomicBool,
-    owner_consumed: AtomicBool,
-    callback_failure: Mutex<Option<String>>,
-    wait: Mutex<()>,
-    drained: Condvar,
-}
-
-unsafe impl Send for JitCallbackState {}
-unsafe impl Sync for JitCallbackState {}
-
-impl JitCallbackState {
-    fn request_stop(&self) {
-        let _ = self.phase.compare_exchange(
-            JIT_CALLBACK_ACTIVE,
-            JIT_CALLBACK_STOPPING,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
-    }
-
-    fn quarantine(&self, message: impl Into<String>) {
-        if self.phase.load(Ordering::Acquire) != JIT_CALLBACK_STOPPED {
-            self.phase.store(JIT_CALLBACK_QUARANTINED, Ordering::Release);
-        }
-        let mut failure = self
-            .callback_failure
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if failure.is_none() {
-            *failure = Some(message.into());
-        }
-        self.drained.notify_all();
-    }
-
-    fn admission(self: &Arc<Self>) -> Option<JitCallbackGuard> {
-        if self.phase.load(Ordering::Acquire) != JIT_CALLBACK_ACTIVE {
-            return None;
-        }
-        self.in_flight.fetch_add(1, Ordering::AcqRel);
-        if self.phase.load(Ordering::Acquire) != JIT_CALLBACK_ACTIVE {
-            self.release_admission();
-            return None;
-        }
-        Some(JitCallbackGuard {
-            state: Arc::clone(self),
-        })
-    }
-
-    fn release_admission(&self) {
-        if self.in_flight.fetch_sub(1, Ordering::AcqRel) == 1 {
-            self.drained.notify_all();
-        }
-    }
-
-    fn stop_and_drain(&self) -> Result<(), String> {
-        self.request_stop();
-        if self.stop_started.swap(true, Ordering::AcqRel) {
-            let mut guard = self.wait.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            while self.phase.load(Ordering::Acquire) == JIT_CALLBACK_STOPPING
-                || self.in_flight.load(Ordering::Acquire) != 0
-            {
-                guard = self
-                    .drained
-                    .wait(guard)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-            }
-            if self.phase.load(Ordering::Acquire) == JIT_CALLBACK_STOPPED {
-                return self
-                    .callback_failure
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .clone()
-                    .map_or(Ok(()), Err);
-            }
-            return Err(self
-                .callback_failure
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone()
-                .unwrap_or_else(|| "callback is quarantined".to_string()));
-        }
-        let mut guard = self.wait.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        while !self.start_complete.load(Ordering::Acquire) {
-            guard = self
-                .drained
-                .wait(guard)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-        }
-        drop(guard);
-        let token = self.native_token.load(Ordering::Acquire);
-        if token == 0 {
-            let error = self
-                .callback_failure
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone()
-                .unwrap_or_else(|| "managed callback start returned a null native token".to_string());
-            self.quarantine(error.clone());
-            return Err(error);
-        }
-        let native_result = call_runtime_inner(
-            &self.native_stop_wrapper,
-            &[MirRuntimeValue::Int(token as i64)],
-            false,
-            Span::new(0, 0),
-            MirForeignTarget::Cranelift,
-        )
-        .map_err(|error| error.what.clone())
-        .and_then(|result| {
-            if !result.writebacks.is_empty() {
-                return Err("native callback shutdown returned writable parameters".to_string());
-            }
-            match result.value {
-                MirRuntimeValue::Int(0) => Ok(()),
-                MirRuntimeValue::Int(status) => Err(format!(
-                    "native callback shutdown acknowledged with status {status}"
-                )),
-                _ => Err("native callback shutdown returned a non-integer status".to_string()),
-            }
-        });
-        if let Err(error) = native_result {
-            self.quarantine(error.clone());
-            return Err(error);
-        }
-        let mut guard = self.wait.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        while self.in_flight.load(Ordering::Acquire) != 0 {
-            guard = self
-                .drained
-                .wait(guard)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-        }
-        self.phase.store(JIT_CALLBACK_STOPPED, Ordering::Release);
-        self.drained.notify_all();
-        let callback_failure = self
-            .callback_failure
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        callback_failure.map_or(Ok(()), Err)
-    }
-}
-
-struct JitCallbackGuard {
-    state: Arc<JitCallbackState>,
-}
-
-impl Drop for JitCallbackGuard {
-    fn drop(&mut self) {
-        self.state.release_admission();
-    }
-}
-
-thread_local! {
-    static JIT_CALLBACK_CONTEXT: std::cell::Cell<*const JitCallbackState> =
-        const { std::cell::Cell::new(std::ptr::null()) };
-}
-
-static JIT_CALLBACKS: std::sync::LazyLock<Mutex<HashMap<usize, Arc<JitCallbackState>>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
-
-unsafe fn callback_state_from_raw(raw: *mut c_void) -> Option<Arc<JitCallbackState>> {
-    if raw.is_null() {
-        return None;
-    }
-    // SAFETY: registration stores one raw Arc owner for the complete native
-    // lifetime; callback admission takes a temporary strong reference.
-    Arc::increment_strong_count(raw.cast::<JitCallbackState>());
-    Some(Arc::from_raw(raw.cast::<JitCallbackState>()))
-}
-
-unsafe extern "C" fn jet_jit_ffi_callback_trampoline(ctx: *mut c_void, value: i64) {
-    let Some(state) = (unsafe { callback_state_from_raw(ctx) }) else {
-        return;
-    };
-    let Some(_admission) = state.admission() else {
-        return;
-    };
-    let result = Concurrency::try_with_http_jet_runtime(|| {
-        JIT_CALLBACK_CONTEXT.with(|slot| {
-            let previous = slot.replace(Arc::as_ptr(&state));
-            // Managed callback rows are checked as `fn(FfiCallbackEvent<T>)`
-            // with no return. The resident closure ABI is therefore either
-            // `(payload)` or `(environment, payload)`.
-            unsafe {
-                if state.callback.has_env {
-                    let callback: unsafe extern "C" fn(i64, i64) =
-                        std::mem::transmute(state.callback.fn_ptr as usize);
-                    callback(state.callback.env, value);
-                } else {
-                    let callback: unsafe extern "C" fn(i64) =
-                        std::mem::transmute(state.callback.fn_ptr as usize);
-                    callback(value);
-                }
-            }
-            slot.set(previous);
-            Concurrency::task_trap_pending()
-                || Concurrency::with_runtime_mut(|rt| rt.trap_pending())
-        })
-    });
-    match result {
-        None => state.quarantine("managed callback has no attached resident runtime"),
-        Some(true) => state.quarantine("managed callback failed in resident runtime"),
-        Some(false) => {}
-    }
-}
-
-fn jet_jit_ffi_callback_event_stop() -> i64 {
-    let state = JIT_CALLBACK_CONTEXT.with(|slot| {
-        let raw = slot.get();
-        if raw.is_null() {
-            return None;
-        }
-        // SAFETY: the callback admission guard and registry owner keep this
-        // state live until the current trampoline returns. Take an owned Arc
-        // before handing the stop worker to another thread.
-        unsafe {
-            Arc::increment_strong_count(raw);
-            Some(Arc::from_raw(raw))
-        }
-    });
-    let Some(state) = state else {
-        trap("managed callback event.stop called outside a callback");
-        return 0;
-    };
-    state.request_stop();
-    let stop_state = Arc::clone(&state);
-    let task = Concurrency::spawn_ffi_task(move || {
-        if let Err(error) = stop_state.stop_and_drain() {
-            if stop_state.phase.load(Ordering::Acquire) != JIT_CALLBACK_STOPPED {
-                stop_state.quarantine(error);
-            }
-        }
-        0
-    });
-    Concurrency::detach_ffi_task(task);
-    0
-}
-
-fn remove_jit_callback(raw: usize, owner_consumed: bool) {
-    JIT_CALLBACKS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(&raw);
-    if !owner_consumed {
-        // SAFETY: the raw Arc owner is consumed exactly once on teardown.
-        unsafe {
-            drop(Arc::from_raw(raw as *const JitCallbackState));
-        }
-    }
-}
-fn shutdown_jit_callbacks() -> bool {
-    let callbacks = JIT_CALLBACKS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .iter()
-        .map(|(raw, state)| (*raw, Arc::clone(state)))
-        .collect::<Vec<_>>();
-    let mut drained = true;
-    for (raw, state) in callbacks {
-        let result = state.stop_and_drain();
-        if result.is_ok() || state.phase.load(Ordering::Acquire) == JIT_CALLBACK_STOPPED {
-            let owner_consumed = state.owner_consumed.load(Ordering::Acquire);
-            remove_jit_callback(raw, owner_consumed);
-        } else {
-            drained = false;
-        }
-    }
-    drained
-}
-
-
-
-fn register_ffi_handle(handle: MirHandleId, raw: i64) -> i64 {
-    FFI_HANDLES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(handle, raw)
-}
-
-fn ffi_handle_raw(id: i64) -> Option<i64> {
-    FFI_HANDLES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .raw(id)
-}
-fn ffi_handle_id(id: i64) -> Option<MirHandleId> {
-    FFI_HANDLES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .handle_id(id)
-}
-
-fn take_ffi_handle(id: i64) -> Option<(MirHandleId, i64)> {
-    FFI_HANDLES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take(id)
-}
-mod atomic_prelude {
-    // Exact `Int` and fixed-width `I64` have the same i64 ABI but distinct
-    // marker types. The exact marker uses Foundation's owned immutable nodes,
-    // never a resident-heap lock or a raw wrapping operation.
-    include!("../../jet-codegen/src/Prelude/Core/Atomic.rs");
-}
-
-/// Canonical `JetAtomic<T>` carrier retained by the active JIT runtime.
-/// Handles are stable pointers to these boxed values; the runtime owns every
-/// box until the invocation lifetime ends, so method calls never touch a
-/// registry or take a lock.
-pub(crate) enum FfiAtomicCell {
-    Bool(atomic_prelude::JetAtomic<bool>),
-    I32(atomic_prelude::JetAtomic<i32>),
-    U32(atomic_prelude::JetAtomic<u32>),
-    I64(atomic_prelude::JetAtomic<i64>),
-    U64(atomic_prelude::JetAtomic<u64>),
-    Int(atomic_prelude::JetAtomic<atomic_prelude::JetAtomicInt>),
-}
-
-fn try_box_atomic_cell(
-    cell: FfiAtomicCell,
-) -> Result<Box<FfiAtomicCell>, jet_foundation::Outcome::AllocError> {
-    let layout = Layout::new::<FfiAtomicCell>();
-    let raw = unsafe { alloc(layout).cast::<FfiAtomicCell>() };
-    let Some(raw) = NonNull::new(raw) else {
-        return Err(jet_foundation::Outcome::jet_alloc_error(
-            layout.size(),
-            "jit Atomic",
-        ));
-    };
-    // SAFETY: `raw` is a fresh allocation with the exact cell layout.
-    unsafe {
-        ptr::write(raw.as_ptr(), cell);
-        Ok(Box::from_raw(raw.as_ptr()))
-    }
-}
-
-impl FfiAtomicCell {
-    /// JIT scalar arguments are borrowed raw words. Exact `Int` carries an
-    /// owning Foundation node behind that word, so give each atomic cell
-    /// operation its own owner before `JetAtomic` consumes a wire.
-    fn clone_int(value: i64) -> i64 {
-        // SAFETY: checked JIT `Int` arguments are borrowed exact words.
-        unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(value) }.into_raw()
-    }
-    fn new(value: i64, kind_tag: i64) -> Option<Self> {
-        match kind_tag {
-            0 => Some(Self::Bool(atomic_prelude::JetAtomic::new(value != 0))),
-            1 => Some(Self::I32(atomic_prelude::JetAtomic::new(value as i32))),
-            2 => Some(Self::U32(atomic_prelude::JetAtomic::new(value as u32))),
-            3 => Some(Self::I64(atomic_prelude::JetAtomic::new(value))),
-            4 => Some(Self::U64(atomic_prelude::JetAtomic::new(value as u64))),
-            5 => Some(Self::Int(atomic_prelude::JetAtomic::new(value))),
-            _ => None,
-        }
-    }
-
-    fn load(&self) -> i64 {
-        match self {
-            Self::Bool(value) => i64::from(value.load()),
-            Self::I32(value) => i64::from(value.load()),
-            Self::U32(value) => value.load() as i64,
-            Self::I64(value) => value.load(),
-            Self::U64(value) => value.load() as i64,
-            Self::Int(value) => value.load(),
-        }
-    }
-
-
-    fn store(&self, value: i64) {
-        match self {
-            Self::Bool(cell) => cell.store(value != 0),
-            Self::I32(cell) => cell.store(value as i32),
-            Self::U32(cell) => cell.store(value as u32),
-            Self::I64(cell) => cell.store(value),
-            Self::U64(cell) => cell.store(value as u64),
-            Self::Int(cell) => cell.store(Self::clone_int(value)),
-        }
-    }
-    fn add(&self, delta: i64) -> Option<i64> {
-        match self {
-            Self::Bool(_) => None,
-            Self::I32(cell) => Some(i64::from(cell.add(delta as i32))),
-            Self::U32(cell) => Some(cell.add(delta as u32) as i64),
-            Self::I64(cell) => Some(cell.add(delta)),
-            Self::U64(cell) => Some(cell.add(delta as u64) as i64),
-            Self::Int(cell) => Some(cell.add(Self::clone_int(delta))),
-        }
-    }
-    fn compare_exchange(&self, expected: i64, replacement: i64) -> bool {
-        match self {
-            Self::Bool(cell) => cell.compare_exchange(expected != 0, replacement != 0),
-            Self::I32(cell) => cell.compare_exchange(expected as i32, replacement as i32),
-            Self::U32(cell) => cell.compare_exchange(expected as u32, replacement as u32),
-            Self::I64(cell) => cell.compare_exchange(expected, replacement),
-            Self::U64(cell) => cell.compare_exchange(expected as u64, replacement as u64),
-            Self::Int(cell) => cell.compare_exchange(Self::clone_int(expected), Self::clone_int(replacement)),
-        }
-    }
-    fn publish(&self, value: i64) {
-        match self {
-            Self::Bool(cell) => cell.publish(value != 0),
-            Self::I32(cell) => cell.publish(value as i32),
-            Self::U32(cell) => cell.publish(value as u32),
-            Self::I64(cell) => cell.publish(value),
-            Self::U64(cell) => cell.publish(value as u64),
-            Self::Int(cell) => cell.publish(Self::clone_int(value)),
-        }
-    }
-
-    fn observe(&self) -> i64 {
-        match self {
-            Self::Bool(value) => i64::from(value.observe()),
-            Self::I32(value) => i64::from(value.observe()),
-            Self::U32(value) => value.observe() as i64,
-            Self::I64(value) => value.observe(),
-            Self::U64(value) => value.observe() as i64,
-            Self::Int(value) => value.observe(),
-        }
-    }
-
-}
-
-impl FfiAtomicCell {
-    fn try_add(&self, delta: i64) -> Result<i64, jet_foundation::Outcome::AllocError> {
-        match self {
-            Self::Int(cell) => cell.try_add(Self::clone_int(delta)),
-            _ => Err(jet_foundation::Outcome::jet_alloc_error(
-                0,
-                "Atomic.try_add",
-            )),
-        }
-    }
-}
-
-fn with_atomic_cell<R>(
-    handle: i64,
-    operation: impl FnOnce(&FfiAtomicCell) -> R,
-) -> Option<R> {
-    let pointer = NonNull::new(handle as *mut FfiAtomicCell)?;
-    // SAFETY: only `jet_atomic_new` creates these opaque handles, and the
-    // active JIT runtime owns each boxed cell for the full invocation lifetime.
-    Some(unsafe { operation(pointer.as_ref()) })
-}
-
-fn atomic_value_or_fault(handle: i64, operation: impl FnOnce(&FfiAtomicCell) -> i64) -> i64 {
-    with_atomic_cell(handle, operation).unwrap_or_else(|| {
-        trap("jit Atomic handle is invalid");
-        0
-    })
-}
-
-fn jet_atomic_new(value: i64, kind_tag: i64) -> i64 {
-    let Some(cell) = FfiAtomicCell::new(value, kind_tag) else {
-        trap("jit Atomic constructor received an unsupported scalar kind");
-        return 0;
-    };
-    let handle = Concurrency::with_runtime_mut(|rt| {
-        let cell = Box::new(cell);
-        let handle = (&*cell as *const FfiAtomicCell) as i64;
-        rt.atomics.push(cell);
-        handle
-    });
-    if handle == 0 {
-        trap("jit Atomic constructor has no active runtime");
-    }
-    handle
-}
-
-fn jet_atomic_try_new(value: i64, kind_tag: i64) -> i64 {
-    let Some(cell) = FfiAtomicCell::new(value, kind_tag) else {
-        trap("jit Atomic constructor received an unsupported scalar kind");
-        return 0;
-    };
-    Concurrency::with_runtime_mut(|rt| {
-        if rt.results.try_reserve(1).is_err() {
-            rt.set_host_fault("jit Atomic.try_new could not allocate its Result carrier");
-            return 0;
-        }
-        if rt.atomics.try_reserve(1).is_err() {
-            let error = jet_foundation::Outcome::jet_alloc_error(
-                Layout::new::<Box<FfiAtomicCell>>().size(),
-                "jit Atomic",
-            );
-            return crate::Collections::alloc_error_result(rt, error);
-        }
-        let cell = match try_box_atomic_cell(cell) {
-            Ok(cell) => cell,
-            Err(error) => return crate::Collections::alloc_error_result(rt, error),
-        };
-        let handle = (&*cell as *const FfiAtomicCell) as i64;
-        rt.atomics.push(cell);
-        crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
-    })
-}
-
-fn jet_atomic_try_add(handle: i64, delta: i64) -> i64 {
-    let result_slot_ready = Concurrency::with_runtime_mut(|rt| rt.results.try_reserve(1).is_ok());
-    if !result_slot_ready {
-        // The scalar argument is borrowed at this erased ABI boundary; the
-        // cell's exact lane clones it before any publication.
-        trap("jit Atomic.try_add could not allocate its Result carrier");
-        return 0;
-    }
-    let Some(result) = with_atomic_cell(handle, |cell| cell.try_add(delta)) else {
-        trap("jit Atomic handle is invalid");
-        return 0;
-    };
-    match result {
-        Ok(previous) => Concurrency::with_runtime_mut(|rt| {
-            crate::runtime_host::alloc_jit_result(rt, true, previous as u64)
-        }),
-        Err(error) => Concurrency::with_runtime_mut(|rt| {
-            crate::Collections::alloc_error_result(rt, error)
-        }),
-    }
-}
-
-fn jet_atomic_load(handle: i64) -> i64 {
-    atomic_value_or_fault(handle, FfiAtomicCell::load)
-}
-
-fn jet_atomic_store(handle: i64, value: i64) -> i64 {
-    let Some(()) = with_atomic_cell(handle, |cell| cell.store(value)) else {
-        trap("jit Atomic handle is invalid");
-        return 0;
-    };
-    0
-}
-
-fn jet_atomic_add(handle: i64, delta: i64) -> i64 {
-    let Some(result) = with_atomic_cell(handle, |cell| cell.add(delta)) else {
-        trap("jit Atomic handle is invalid");
-        return 0;
-    };
-    result.unwrap_or_else(|| {
-        trap("jit Atomic add received a non-addable scalar kind");
-        0
-    })
-}
-
-fn jet_atomic_compare_exchange(handle: i64, expected: i64, replacement: i64) -> i64 {
-    i64::from(atomic_value_or_fault(handle, |cell| {
-        i64::from(cell.compare_exchange(expected, replacement))
-    }) != 0)
-}
-
-fn jet_atomic_publish(handle: i64, value: i64) -> i64 {
-    let Some(()) = with_atomic_cell(handle, |cell| cell.publish(value)) else {
-        trap("jit Atomic handle is invalid");
-        return 0;
-    };
-    0
-}
-
-fn jet_atomic_observe(handle: i64) -> i64 {
-    atomic_value_or_fault(handle, FfiAtomicCell::observe)
-}
-
 /// Why the native bridge could not be bound.
 pub(crate) enum BindError {
-    Message(String),
+    Message(String)
 }
 
 fn target_applicable(foreign: &MirForeign, target: MirArtifactTarget) -> bool {
     match target {
-        MirArtifactTarget::Cranelift => foreign.target_applicability.cranelift,
         MirArtifactTarget::Interpreter => foreign.target_applicability.interpreter,
         MirArtifactTarget::RustAot => foreign.target_applicability.rust_aot,
-        MirArtifactTarget::Web => foreign.target_applicability.web,
+        MirArtifactTarget::Web => foreign.target_applicability.web
     }
 }
 pub(crate) fn bridge_wrapper_name(foreign: &MirForeign) -> String {
@@ -930,7 +280,7 @@ pub(crate) fn bridge_wrapper_name(foreign: &MirForeign) -> String {
         MirForeignLanguage::C | MirForeignLanguage::Cpp | MirForeignLanguage::Assembly => {
             format!("jet_ffi_{}", foreign.name)
         }
-        MirForeignLanguage::Rust => foreign.symbol.clone(),
+        MirForeignLanguage::Rust => foreign.symbol.clone()
     }
 }
 
@@ -960,53 +310,6 @@ fn bridge_path_for_links(
             })
             .map(|artifact| std::path::PathBuf::from(&artifact.path))
     })
-}
-
-fn source_helper_bridge_path(
-    program: &MirProgram,
-    artifact: &jet_foundation::MIR::MirArtifactPlan,
-    link_ids: &std::collections::BTreeSet<MirLinkUnitId>,
-    needs_data_provider: bool,
-) -> Option<std::path::PathBuf> {
-    if let Some(path) = BRIDGE_CDYLIB.with(|slot| slot.borrow().clone()) {
-        return Some(path);
-    }
-    if !link_ids.is_empty() {
-        return bridge_path_for_links(program, artifact, Some(link_ids));
-    }
-    if !needs_data_provider {
-        return None;
-    }
-    artifact.links.iter().find_map(|link_id| {
-        let link = program.links.iter().find(|link| link.id == *link_id)?;
-        if !link.target_applicability.cranelift {
-            return None;
-        }
-        link.artifacts
-            .iter()
-            .find(|artifact| {
-                matches!(
-                    artifact.kind,
-                    jet_foundation::MIR::MirLinkArtifactKind::DynamicLibrary
-                )
-            })
-            .map(|artifact| std::path::PathBuf::from(&artifact.path))
-    })
-}
-
-#[cfg(unix)]
-fn ensure_source_helper_data_provider(
-    state: &mut FfiState,
-    path: Option<&std::path::Path>,
-    needs_data_provider: bool,
-) -> Result<(), String> {
-    if needs_data_provider && state.arrow_provider_lease.is_none() {
-        let path = path.ok_or_else(|| {
-            "jit ffi: Source helper needs an Arrow Data provider, but no Cranelift-applicable dynamic link is available".to_string()
-        })?;
-        state.arrow_provider_lease = Some(load_arrow_provider(path)?);
-    }
-    Ok(())
 }
 
 #[cfg(not(unix))]
@@ -1049,7 +352,7 @@ fn mir_foreign_handle_type(program: &MirProgram, ty: &MirType) -> bool {
 fn mir_type_identity(ty: &MirType) -> Option<MirTypeId> {
     ty.identity.or_else(|| match ty.kind() {
         MirTypeKind::Apply { name, .. } => Some(name.id),
-        _ => None,
+        _ => None
     })
 }
 
@@ -1084,49 +387,14 @@ fn mir_bridge_specs(
     program: &MirProgram,
     artifact: &jet_foundation::MIR::MirArtifactPlan,
 ) -> Result<Vec<FfiEntrySpec>, BindError> {
-    mir_bridge_specs_selected(program, artifact, None)
-}
-
-fn mir_bridge_specs_for_helpers(
-    program: &MirProgram,
-    artifact: &jet_foundation::MIR::MirArtifactPlan,
-    helper_foreigns: &std::collections::BTreeSet<MirForeignId>,
-) -> Result<Vec<FfiEntrySpec>, BindError> {
-    mir_bridge_specs_selected(program, artifact, Some(helper_foreigns))
-}
-
-fn mir_bridge_specs_selected(
-    program: &MirProgram,
-    artifact: &jet_foundation::MIR::MirArtifactPlan,
-    helper_foreigns: Option<&std::collections::BTreeSet<MirForeignId>>,
-) -> Result<Vec<FfiEntrySpec>, BindError> {
     let records = record_descriptors(program)?;
     let mut specs = Vec::new();
     for foreign in &program.foreign {
-        if helper_foreigns.is_some_and(|selected| !selected.contains(&foreign.id)) {
-            continue;
-        }
         let in_module = artifact.modules.contains(&foreign.module_id);
         let in_link = foreign
             .link
             .is_some_and(|link_id| artifact.links.contains(&link_id));
-        if !(in_module || in_link) {
-            if helper_foreigns.is_some() {
-                return Err(BindError::Message(format!(
-                    "jit ffi: helper foreign `{}` is outside artifact `{}`",
-                    foreign.name, artifact.name
-                )));
-            }
-            continue;
-        }
-        if let Some(_) = helper_foreigns {
-            if !foreign.target_applicability.cranelift {
-                return Err(BindError::Message(format!(
-                    "jit ffi: helper foreign `{}` is not applicable to Cranelift",
-                    foreign.name
-                )));
-            }
-        } else if !target_applicable(foreign, artifact.target) {
+        if !(in_module || in_link) || !target_applicable(foreign, artifact.target) {
             continue;
         }
         let params = foreign
@@ -1207,7 +475,7 @@ fn mir_bridge_specs_selected(
                 .return_type
                 .as_ref()
                 .and_then(|ty| mir_handle_id_for_type(program, ty)),
-            close_handle,
+            close_handle
         });
     }
     specs.sort_by(|left, right| left.wrapper_name.cmp(&right.wrapper_name));
@@ -1253,7 +521,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
                 .filter(|alignment| {
                     alignment.is_power_of_two() && *alignment <= isize::MAX as usize
                 }),
-            None | Some(MirStructLayout::Columnar) => None,
+            None | Some(MirStructLayout::Columnar) => None
         }
     }
 
@@ -1308,7 +576,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
                     MirTypeDefKind::Alias { target } => {
                         layout_for_type(target, defs, memo, active)
                     }
-                    _ => None,
+                    _ => None
                 };
                 active.remove(&id);
                 if let Some(result) = result {
@@ -1325,11 +593,11 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
             _ => {
                 let size = match ty.layout.size {
                     jet_foundation::MIR::MirSize::Static(size) => usize::try_from(size).ok()?,
-                    jet_foundation::MIR::MirSize::Dynamic => return None,
+                    jet_foundation::MIR::MirSize::Dynamic => return None
                 };
                 let align = match ty.layout.align {
                     jet_foundation::MIR::MirSize::Static(align) => usize::try_from(align).ok()?,
-                    jet_foundation::MIR::MirSize::Dynamic => return None,
+                    jet_foundation::MIR::MirSize::Dynamic => return None
                 };
                 Some((size, align.max(1)))
             }
@@ -1366,7 +634,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
             descriptor_fields.push(FfiRecordField {
                 name: field.name.clone(),
                 ty: field.ty.clone(),
-                offset: field_offset,
+                offset: field_offset
             });
             let Some(next) = field_offset.checked_add(size) else {
                 valid = false;
@@ -1390,7 +658,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
                 size,
                 align,
                 fields: descriptor_fields,
-                enum_info: None,
+                enum_info: None
             },
         );
     }
@@ -1446,7 +714,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
             MirCEnumTag::U8 | MirCEnumTag::I8 => 1,
             MirCEnumTag::U16 | MirCEnumTag::I16 => 2,
             MirCEnumTag::U32 | MirCEnumTag::I32 => 4,
-            MirCEnumTag::U64 | MirCEnumTag::I64 => 8,
+            MirCEnumTag::U64 | MirCEnumTag::I64 => 8
         };
         let mut enum_variants = Vec::with_capacity(variants.len());
         let mut has_payload = false;
@@ -1574,7 +842,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
                 size: variant_size,
                 align: variant_align,
                 stride,
-                field_offsets,
+                field_offsets
             });
         }
         descriptors.insert(
@@ -1589,8 +857,8 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
                     tag,
                     tag_size,
                     has_payload,
-                    variants: enum_variants,
-                }),
+                    variants: enum_variants
+                })
             },
         );
         memo.insert(definition.id, (size, align));
@@ -1606,7 +874,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
             let base = match &definition.kind {
                 MirTypeDefKind::Distinct { base, .. } => Some(base),
                 MirTypeDefKind::Alias { target } => Some(target),
-                _ => None,
+                _ => None
             };
             let Some(base) = base else {
                 continue;
@@ -1625,7 +893,7 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
                     size: base_descriptor.size,
                     align: base_descriptor.align,
                     fields: base_descriptor.fields,
-                    enum_info: base_descriptor.enum_info,
+                    enum_info: base_descriptor.enum_info
                 },
             );
             changed = true;
@@ -1633,7 +901,6 @@ fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiReco
     }
     Ok(descriptors)
 }
-
 
 pub(crate) fn bind_mir_ffi(
     program: &MirProgram,
@@ -1647,7 +914,7 @@ pub(crate) fn bind_mir_ffi(
         .ok_or_else(|| BindError::Message(format!("jit ffi: artifact {artifact_id:?} is missing")))?;
     if !matches!(
         artifact.target,
-        MirArtifactTarget::Cranelift | MirArtifactTarget::Interpreter
+        MirArtifactTarget::Interpreter
     ) {
         return Err(BindError::Message(format!(
             "jit ffi: artifact `{}` is not an executable JIT target",
@@ -1696,119 +963,6 @@ pub(crate) fn bind_mir_ffi(
     )
     .map_err(BindError::Message)
 }
-pub(crate) struct SourceHelperFfiBinding {
-    owns_binding: bool,
-}
-
-impl Drop for SourceHelperFfiBinding {
-    fn drop(&mut self) {
-        if self.owns_binding {
-            clear_ffi();
-        }
-    }
-}
-
-fn source_helper_entry_matches_spec(entry: &FfiEntry, spec: &FfiEntrySpec) -> bool {
-    let same_parameter_types = entry.param_types.len() == spec.param_types.len()
-        && entry
-            .param_types
-            .iter()
-            .zip(&spec.param_types)
-            .all(|(entry, spec)| entry.same_checked_type(spec));
-    let same_return_type = match (entry.ret_type.as_ref(), spec.ret_type.as_ref()) {
-        (None, None) => true,
-        (Some(entry), Some(spec)) => entry.same_checked_type(spec),
-        _ => false,
-    };
-    entry.params == spec.params
-        && entry.param_handles == spec.param_handles
-        && same_parameter_types
-        && entry.param_access == spec.param_access
-        && entry.ret == spec.ret
-        && same_return_type
-        && entry.handle == spec.handle
-        && entry.close_handle == spec.close_handle
-}
-
-#[cfg(unix)]
-fn extend_source_helper_ffi_state(
-    state: &mut FfiState,
-    entries: &[FfiEntrySpec],
-) -> Result<(), String> {
-    let mut additions = Vec::with_capacity(entries.len());
-    for spec in entries {
-        if let Some(existing) = state.by_wrapper.get(&spec.wrapper_name) {
-            if !source_helper_entry_matches_spec(existing, spec) {
-                return Err(format!(
-                    "jit ffi: active wrapper `{}` disagrees with the checked Source helper ABI",
-                    spec.wrapper_name
-                ));
-            }
-            continue;
-        }
-        if let Some(handle) = spec.close_handle {
-            if state
-                .close_by_handle
-                .get(&handle)
-                .is_some_and(|wrapper| wrapper != &spec.wrapper_name)
-            {
-                return Err(format!(
-                    "jit ffi: active close wrapper for handle {handle:?} disagrees with the checked Source helper ABI"
-                ));
-            }
-        }
-        if spec.ret == RetAbi::String && state.free_fn.is_none() {
-            return Err(format!(
-                "jit ffi: active bridge cannot release the String result for `{}`",
-                spec.wrapper_name
-            ));
-        }
-        let symbol = if spec.params.contains(&ParamAbi::Callback) {
-            format!("{}_callback_start", spec.wrapper_name)
-        } else {
-            format!("{}_cabi", spec.wrapper_name)
-        };
-        let c_name =
-            CString::new(symbol.as_str()).map_err(|_| "jit ffi: bad symbol".to_string())?;
-        let raw_ptr = unsafe { dlsym(state.handle, c_name.as_ptr()) };
-        if raw_ptr.is_null() {
-            return Err(format!(
-                "jit ffi: active bridge is missing symbol `{symbol}` required by the Source helper"
-            ));
-        }
-        let callback_start = spec
-            .params
-            .contains(&ParamAbi::Callback)
-            .then(|| unsafe {
-                std::mem::transmute::<*mut c_void, JitCallbackStart>(raw_ptr)
-            });
-        additions.push((spec, raw_ptr, callback_start));
-    }
-
-    for (spec, raw_ptr, callback_start) in additions {
-        state.by_wrapper.insert(
-            spec.wrapper_name.clone(),
-            FfiEntry {
-                params: spec.params.clone(),
-                param_handles: spec.param_handles.clone(),
-                param_types: spec.param_types.clone(),
-                param_access: spec.param_access.clone(),
-                ret: spec.ret,
-                ret_type: spec.ret_type.clone(),
-                handle: spec.handle,
-                close_handle: spec.close_handle,
-                ptr: raw_ptr as *const (),
-                callback_start,
-            },
-        );
-        if let Some(handle) = spec.close_handle {
-            state
-                .close_by_handle
-                .insert(handle, spec.wrapper_name.clone());
-        }
-    }
-    Ok(())
-}
 
 #[cfg(not(unix))]
 fn extend_source_helper_ffi_state(
@@ -1819,143 +973,9 @@ fn extend_source_helper_ffi_state(
     Err("jit ffi: cdylib extension unsupported on this host".into())
 }
 
-pub(crate) fn bind_mir_ffi_for_source_helper(
-    program: &MirProgram,
-    artifact_id: MirArtifactId,
-    foreign_ids: &std::collections::BTreeSet<MirForeignId>,
-    link_ids: &std::collections::BTreeSet<MirLinkUnitId>,
-    needs_data_provider: bool,
-) -> Result<SourceHelperFfiBinding, String> {
-    if foreign_ids.is_empty() && !needs_data_provider {
-        return Ok(SourceHelperFfiBinding {
-            owns_binding: false,
-        });
-    }
-    let artifact = program
-        .artifacts
-        .iter()
-        .find(|artifact| artifact.id == artifact_id)
-        .ok_or_else(|| format!("jit ffi: artifact {artifact_id:?} is missing"))?;
-    if !matches!(
-        artifact.target,
-        MirArtifactTarget::RustAot | MirArtifactTarget::Cranelift
-    ) {
-        return Err(format!(
-            "jit ffi: artifact `{}` is not executable by the Source helper native tier",
-            artifact.name
-        ));
-    }
-    for foreign_id in foreign_ids {
-        let mut matches = program
-            .foreign
-            .iter()
-            .filter(|foreign| foreign.id == *foreign_id);
-        let foreign = matches
-            .next()
-            .ok_or_else(|| format!("jit ffi: helper foreign {foreign_id:?} is missing"))?;
-        if matches.next().is_some() {
-            return Err(format!(
-                "jit ffi: helper foreign {foreign_id:?} resolves to multiple rows"
-            ));
-        }
-        if !foreign.target_applicability.cranelift {
-            return Err(format!(
-                "jit ffi: helper foreign `{}` is not applicable to Cranelift",
-                foreign.name
-            ));
-        }
-        if let Some(link_id) = foreign.link {
-            if !link_ids.contains(&link_id) {
-                return Err(format!(
-                    "jit ffi: helper foreign `{}` has no checked Cranelift link authority",
-                    foreign.name
-                ));
-            }
-        } else if !artifact.modules.contains(&foreign.module_id) {
-            return Err(format!(
-                "jit ffi: helper foreign `{}` is outside artifact `{}`",
-                foreign.name, artifact.name
-            ));
-        }
-    }
-
-    let entries = mir_bridge_specs_for_helpers(program, artifact, foreign_ids)
-        .map_err(|error| match error {
-            BindError::Message(message) => message,
-        })?;
-    let path = source_helper_bridge_path(program, artifact, link_ids, needs_data_provider);
-    {
-        let mut state = FFI_STATE.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(state) = state.as_mut() {
-            if state.artifact_identity != artifact.artifact_identity {
-                return Err(
-                    "jit ffi: the active bridge does not match the Source helper artifact"
-                        .to_string(),
-                );
-            }
-            extend_source_helper_ffi_state(state, &entries)?;
-            ensure_source_helper_data_provider(
-                state,
-                path.as_deref(),
-                needs_data_provider,
-            )?;
-            return Ok(SourceHelperFfiBinding {
-                owns_binding: false,
-            });
-        }
-    }
-
-    let Some(path) = path else {
-        let requirement = if needs_data_provider && foreign_ids.is_empty() {
-            "an Arrow Data provider"
-        } else if needs_data_provider {
-            "a bridge for foreign calls and an Arrow Data provider"
-        } else {
-            "a bridge for foreign calls"
-        };
-        return Err(format!(
-            "jit ffi: Source helper artifact `{}` needs {requirement}, but has no Cranelift-applicable dynamic link",
-            artifact.name
-        ));
-    };
-    let records = record_descriptors(program).map_err(|error| match error {
-        BindError::Message(message) => message,
-    })?;
-    load_cdylib(
-        &path,
-        &entries,
-        records,
-        needs_data_provider,
-        artifact.artifact_identity.clone(),
-    )?;
-    Ok(SourceHelperFfiBinding { owns_binding: true })
-}
-
-
-
 pub(crate) fn clear_ffi() {
-    if !shutdown_jit_callbacks() {
-        // A failed native acknowledgement quarantines the loaded module. Keep
-        // the wrapper/library and callback state live; teardown must not retry
-        // or unload a native side that may still retain its trampoline.
-        return;
-    }
     let mut slot = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(mut state) = slot.take() {
-        let token_ids = FFI_HANDLES
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .by_id
-            .keys()
-            .copied()
-            .collect::<Vec<_>>();
-        for token_id in token_ids {
-            let _ = close_ffi_token(&state, token_id, Span::new(0, 0));
-        }
-        FFI_HANDLES
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
         let provider_lease = state.arrow_provider_lease.take();
         // Release Foundation's callback registration before dropping the
         // wrapper reference. Escaped Arrow batches retain the erased provider
@@ -1967,21 +987,9 @@ pub(crate) fn clear_ffi() {
                 dlclose(state.handle);
             }
         }
-    } else {
-        FFI_HANDLES
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
     }
 }
 
-pub(crate) fn has_bound_ffi() -> bool {
-    FFI_STATE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-
-        .is_some()
-}
 #[cfg(unix)]
 fn load_arrow_provider(
     path: &Path,
@@ -2018,7 +1026,7 @@ fn load_arrow_provider(
     let provider: jet_foundation::ArrowFileReader::Provider =
         unsafe { std::mem::transmute(provider_ptr) };
     let owner = Arc::new(FfiProviderLibrary {
-        handle: provider_handle,
+        handle: provider_handle
     });
     let owner_erased: Arc<dyn std::any::Any + Send + Sync> = owner.clone();
     match jet_foundation::ArrowFileReader::register_owned(provider, owner_erased) {
@@ -2147,9 +1155,6 @@ fn load_cdylib(
                     path.display()
                 ));
             }
-            let callback_start = is_callback_start.then(|| unsafe {
-                std::mem::transmute::<*mut c_void, JitCallbackStart>(raw_ptr)
-            });
             by_wrapper.insert(
                 entry.wrapper_name.clone(),
                 FfiEntry {
@@ -2161,19 +1166,10 @@ fn load_cdylib(
                     ret_type: entry.ret_type.clone(),
                     handle: entry.handle,
                     close_handle: entry.close_handle,
-                    ptr: raw_ptr as *const (),
-                    callback_start,
+                    ptr: raw_ptr as *const ()
                 },
             );
         }
-        let close_by_handle = entries
-            .iter()
-            .filter_map(|entry| {
-                entry
-                    .close_handle
-                    .map(|handle| (handle, entry.wrapper_name.clone()))
-            })
-            .collect::<HashMap<_, _>>();
         *FFI_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(FfiState {
             handle,
             clear_panic_hook_fn,
@@ -2181,9 +1177,8 @@ fn load_cdylib(
             take_failure_fn,
             artifact_identity,
             by_wrapper,
-            close_by_handle,
             records,
-            arrow_provider_lease,
+            arrow_provider_lease
         });
         Ok(())
     }
@@ -2226,7 +1221,7 @@ fn call_cabi<R>(
     match (failure, result) {
         (1, _) => Err(ffi_runtime_diag(span)),
         (0, Ok(value)) => Ok(value),
-        _ => Err(ffi_bridge_host_fault(wrapper)),
+        _ => Err(ffi_bridge_host_fault(wrapper))
     }
 }
 fn call_uniform(
@@ -2248,62 +1243,20 @@ fn call_uniform(
     }
 }
 
-fn close_ffi_token(
-    state: &FfiState,
-    token_id: i64,
-    span: Span,
-) -> Result<(), Diagnostic> {
-    let Some((handle, raw)) = take_ffi_handle(token_id) else {
-        return Ok(());
+mod contract_kernel {
+    use jet_foundation::Outcome::{
+        jet_err, jet_render_err, jet_render_runtime_stop, JetAbsent, JetErr, JetRuntimeDiagnostic,
     };
-    let Some(wrapper) = state.close_by_handle.get(&handle) else {
-        return Err(ffi_diag(
-            &format!("{handle:?}"),
-            "has no registered close function",
-            span,
-        ));
-    };
-    let Some(entry) = state.by_wrapper.get(wrapper) else {
-        return Err(ffi_diag(
-            wrapper,
-            "has no loaded close function",
-            span,
-        ));
-    };
-    if entry.params.as_slice() != [ParamAbi::Handle] {
-        return Err(ffi_diag(
-            wrapper,
-            "has an unsupported close signature",
-            span,
-        ));
-    }
-    if !matches!(entry.ret, RetAbi::Unit | RetAbi::Int) {
-        return Err(ffi_diag(
-            wrapper,
-            "has a close function with a non-status return",
-            span,
-        ));
-    }
-    let slots = [FfiSlot {
-        value: raw as u64,
-        ptr: std::ptr::null_mut(),
-        len: 0,
-    }];
-    let mut out = FfiSlot {
-        value: 0,
-        ptr: std::ptr::null_mut(),
-        len: 0,
-    };
-    call_uniform(state, wrapper, entry, &slots, &mut out, span)
+    include!("../../jet-codegen/src/Prelude/Core/Contracts.rs");
 }
 
 fn ffi_int_range_diag(span: Span) -> Diagnostic {
-    let code = crate::runtime_host::contract_kernel::JET_C_INT_RANGE_CODE;
+    let code = contract_kernel::JET_C_INT_RANGE_CODE;
     let row = jet_foundation::Registry::diagnostic(code)
         .expect("C Int range diagnostic must be registered");
     Diagnostic::error(
         code,
-        crate::runtime_host::contract_kernel::jet_c_int_range_message().to_string(),
+        contract_kernel::jet_c_int_range_message().to_string(),
         row.why.to_string(),
         row.fix.to_string(),
         Some(span),
@@ -2354,7 +1307,7 @@ fn runtime_string_arg(
             wrapper,
             format!("argument {index} is not a String"),
             span,
-        )),
+        ))
 
     }
 }
@@ -2364,8 +1317,6 @@ fn runtime_handle_arg(
     index: usize,
     wrapper: &str,
     span: Span,
-    target: MirForeignTarget,
-    expected_handle: Option<MirHandleId>,
 ) -> Result<i64, Diagnostic> {
     let value = match args.get(index) {
         Some(MirRuntimeValue::Moved) => {
@@ -2394,78 +1345,29 @@ fn runtime_handle_arg(
             ));
         }
     };
-    if matches!(target, MirForeignTarget::Interpreter) {
-        return Ok(value);
-    }
-    let actual_handle = ffi_handle_id(value).ok_or_else(|| {
-        ffi_diag(
-            wrapper,
-            format!("argument {index} is not a live opaque handle token"),
-            span,
-        )
-    })?;
-    if let Some(expected_handle) = expected_handle {
-        if actual_handle != expected_handle {
-            return Err(ffi_diag(
-                wrapper,
-                format!("argument {index} has the wrong checked handle type"),
-                span,
-            ));
-        }
-    }
-    ffi_handle_raw(value).ok_or_else(|| {
-        ffi_diag(
-            wrapper,
-            format!("argument {index} is not a live opaque handle token"),
-            span,
-        )
-    })
+    Ok(value)
 }
 
 fn runtime_handle_result(
     handle: Option<MirHandleId>,
     raw: i64,
-    target: MirForeignTarget,
     wrapper: &str,
     span: Span,
 ) -> Result<MirRuntimeValue, Diagnostic> {
-    let Some(handle) = handle else {
+    if handle.is_none() {
         return Err(ffi_diag(
             wrapper,
             "returned a handle without a checked handle identity",
             span,
         ));
-    };
-    let value = if matches!(target, MirForeignTarget::Cranelift) {
-        register_ffi_handle(handle, raw)
-    } else {
-        raw
-    };
-    Ok(MirRuntimeValue::Int(value))
-}
-
-fn retire_handle_args(
-    args: &[MirRuntimeValue],
-    params: &[ParamAbi],
-    close_handle: Option<MirHandleId>,
-    target: MirForeignTarget,
-) {
-    if close_handle.is_none() || !matches!(target, MirForeignTarget::Cranelift) {
-        return;
     }
-    for (arg, abi) in args.iter().zip(params) {
-        if *abi == ParamAbi::Handle {
-            if let MirRuntimeValue::Int(token_id) = arg {
-                let _ = take_ffi_handle(*token_id);
-            }
-        }
-    }
+    Ok(MirRuntimeValue::Int(raw))
 }
 
 fn runtime_float_result(value: f64, ret_f32: bool) -> MirRuntimeValue {
     MirRuntimeValue::Float {
         value: if ret_f32 { value as f32 as f64 } else { value },
-        f32: ret_f32,
+        f32: ret_f32
     }
 }
 
@@ -2485,11 +1387,11 @@ fn type_size_align(
         _ => {
             let size = match ty.layout.size {
                 jet_foundation::MIR::MirSize::Static(size) => usize::try_from(size).ok()?,
-                jet_foundation::MIR::MirSize::Dynamic => return None,
+                jet_foundation::MIR::MirSize::Dynamic => return None
             };
             let align = match ty.layout.align {
                 jet_foundation::MIR::MirSize::Static(align) => usize::try_from(align).ok()?,
-                jet_foundation::MIR::MirSize::Dynamic => return None,
+                jet_foundation::MIR::MirSize::Dynamic => return None
             };
             Some((size, align.max(1)))
         }
@@ -2783,7 +1685,7 @@ fn decode_enum_bytes(
     Ok(MirRuntimeValue::Enum {
         type_name: enum_name.to_string(),
         variant: variant.name.clone(),
-        args,
+        args
     })
 }
 
@@ -2803,7 +1705,7 @@ fn value_int(
             "native-owned payload cannot cross the C bridge",
             span,
         )),
-        _ => Err(ffi_diag(wrapper, "received a non-integer value", span)),
+        _ => Err(ffi_diag(wrapper, "received a non-integer value", span))
     }
 }
 
@@ -3014,7 +1916,7 @@ fn decode_bytes(
             raw.copy_from_slice(&bytes[..8]);
             Ok(MirRuntimeValue::Float {
                 value: f64::from_ne_bytes(raw),
-                f32: false,
+                f32: false
             })
         }
         MirTypeKind::Float32 => {
@@ -3022,7 +1924,7 @@ fn decode_bytes(
             raw.copy_from_slice(&bytes[..4]);
             Ok(MirRuntimeValue::Float {
                 value: f32::from_ne_bytes(raw) as f64,
-                f32: true,
+                f32: true
             })
         }
         MirTypeKind::Bool => Ok(MirRuntimeValue::Bool(bytes[0] != 0)),
@@ -3088,14 +1990,14 @@ fn decode_bytes(
             }
             Ok(MirRuntimeValue::Struct {
                 type_name: descriptor.name.clone(),
-                fields,
+                fields
             })
         }
         _ => Err(ffi_diag(
             wrapper,
             format!("type `{}` cannot cross the C bridge", ty.canonical_key()),
             span,
-        )),
+        ))
     }
 }
 
@@ -3105,7 +2007,6 @@ fn prepare_runtime_call(
     records: &HashMap<MirTypeId, FfiRecordDesc>,
     wrapper: &str,
     span: Span,
-    target: MirForeignTarget,
 ) -> Result<(Vec<FfiSlot>, Vec<FfiStorage>), Diagnostic> {
     let mut slots = Vec::with_capacity(args.len());
     let mut storage = Vec::new();
@@ -3145,7 +2046,7 @@ fn prepare_runtime_call(
                 slots.push(FfiSlot {
                     value: 0,
                     ptr,
-                    len: size,
+                    len: size
                 });
             }
             ParamAbi::List => {
@@ -3173,7 +2074,7 @@ fn prepare_runtime_call(
                 slots.push(FfiSlot {
                     value: 0,
                     ptr,
-                    len,
+                    len
                 });
             }
             ParamAbi::String => {
@@ -3189,22 +2090,15 @@ fn prepare_runtime_call(
                 slots.push(FfiSlot {
                     value: 0,
                     ptr,
-                    len,
+                    len
                 });
             }
             ParamAbi::Handle => {
-                let raw = runtime_handle_arg(
-                    args,
-                    index,
-                    wrapper,
-                    span,
-                    target,
-                    entry.param_handles.get(index).copied().flatten(),
-                )?;
+                let raw = runtime_handle_arg(args, index, wrapper, span)?;
                 slots.push(FfiSlot {
                     value: raw as u64,
                     ptr: std::ptr::null_mut(),
-                    len: 0,
+                    len: 0
                 });
             }
             ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool => {
@@ -3219,7 +2113,7 @@ fn prepare_runtime_call(
                     slots.push(FfiSlot {
                         value: 0,
                         ptr,
-                        len: 0,
+                        len: 0
                     });
                 } else {
                     let bits = if let Some(enum_info) = mir_enum_desc(ty, records) {
@@ -3301,7 +2195,7 @@ fn prepare_runtime_call(
                     slots.push(FfiSlot {
                         value: bits,
                         ptr: std::ptr::null_mut(),
-                        len: 0,
+                        len: 0
                     });
                 }
             }
@@ -3316,7 +2210,6 @@ fn decode_runtime_result(
     out: &FfiSlot,
     wrapper: &str,
     span: Span,
-    target: MirForeignTarget,
     ret_f32: bool,
 ) -> Result<MirRuntimeValue, Diagnostic> {
     match entry.ret {
@@ -3347,7 +2240,7 @@ fn decode_runtime_result(
             Ok(MirRuntimeValue::Enum {
                 type_name: descriptor.name.clone(),
                 variant: variant.name.clone(),
-                args: Vec::new(),
+                args: Vec::new()
             })
         }
         RetAbi::Float => {
@@ -3363,13 +2256,7 @@ fn decode_runtime_result(
             Ok(runtime_float_result(value, ret_f32))
         }
         RetAbi::Bool => Ok(MirRuntimeValue::Bool(out.value != 0)),
-        RetAbi::Handle => runtime_handle_result(
-            entry.handle,
-            out.value as i64,
-            target,
-            wrapper,
-            span,
-        ),
+        RetAbi::Handle => runtime_handle_result(entry.handle, out.value as i64, wrapper, span),
         RetAbi::String => {
             if out.ptr.is_null() && out.len != 0 {
                 return Err(ffi_diag(
@@ -3487,7 +2374,7 @@ fn decode_runtime_writebacks(
                 let value = decode_bytes(bytes, ty, &state.records, wrapper, span)?;
                 writebacks.push(AmbientMirExternWriteback {
                     parameter: index,
-                    value,
+                    value
                 });
             }
             ParamAbi::List => {
@@ -3543,7 +2430,7 @@ fn decode_runtime_writebacks(
                 }
                 writebacks.push(AmbientMirExternWriteback {
                     parameter: index,
-                    value: MirRuntimeValue::List(values),
+                    value: MirRuntimeValue::List(values)
                 });
             }
             ParamAbi::String => {
@@ -3561,7 +2448,7 @@ fn decode_runtime_writebacks(
                     .map_err(|_| ffi_diag(wrapper, "native mutable String is not UTF-8", span))?;
                 writebacks.push(AmbientMirExternWriteback {
                     parameter: index,
-                    value: MirRuntimeValue::String(value),
+                    value: MirRuntimeValue::String(value)
                 });
             }
             ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool
@@ -3575,7 +2462,7 @@ fn decode_runtime_writebacks(
                     .ok_or_else(|| ffi_diag(wrapper, "mutable scalar storage is missing", span))?;
                 writebacks.push(AmbientMirExternWriteback {
                     parameter: index,
-                    value: decode_bytes(bytes, ty, &state.records, wrapper, span)?,
+                    value: decode_bytes(bytes, ty, &state.records, wrapper, span)?
                 });
             }
             ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool => {}
@@ -3597,7 +2484,7 @@ fn decode_runtime_writebacks(
                     // unchanged while the pointee mutation stays in place.
                     writebacks.push(AmbientMirExternWriteback {
                         parameter: index,
-                        value,
+                        value
                     });
                 }
             }
@@ -3615,13 +2502,11 @@ fn decode_runtime_writebacks(
     Ok(writebacks)
 }
 
-
 fn call_runtime_inner(
     wrapper: &str,
     args: &[MirRuntimeValue],
     ret_f32: bool,
     span: Span,
-    target: MirForeignTarget,
 ) -> Result<AmbientMirExternResult, Diagnostic> {
     let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
     let Some(state) = state.as_ref() else {
@@ -3642,17 +2527,16 @@ fn call_runtime_inner(
         ));
     }
     let (slots, storage) =
-        prepare_runtime_call(args, entry, &state.records, wrapper, span, target)?;
+        prepare_runtime_call(args, entry, &state.records, wrapper, span)?;
     let mut out = FfiSlot {
         value: 0,
         ptr: std::ptr::null_mut(),
-        len: 0,
+        len: 0
     };
     call_uniform(state, wrapper, entry, &slots, &mut out, span)?;
-    let value = decode_runtime_result(state, entry, &out, wrapper, span, target, ret_f32)?;
+    let value = decode_runtime_result(state, entry, &out, wrapper, span, ret_f32)?;
     let writebacks =
         decode_runtime_writebacks(state, entry, args, &slots, &storage, wrapper, span)?;
-    retire_handle_args(args, &entry.params, entry.close_handle, target);
     Ok(AmbientMirExternResult { value, writebacks })
 }
 fn managed_callback_type(ty: &MirType) -> bool {
@@ -3703,8 +2587,8 @@ fn mir_param_abi(
             | MirAbi::Function
             | MirAbi::Nominal
             | MirAbi::Dynamic
-            | MirAbi::Never => None,
-        },
+            | MirAbi::Never => None
+        }
     }
 }
 
@@ -3738,37 +2622,17 @@ fn mir_ret_abi(
             | MirAbi::Function
             | MirAbi::Nominal
             | MirAbi::Dynamic
-            | MirAbi::Never => None,
-        },
+            | MirAbi::Never => None
+        }
     }
 }
 
-#[derive(Clone, Copy)]
-enum MirForeignTarget {
-    Cranelift,
-    Interpreter,
-}
-
-fn validate_mir_bridge(
-    foreign: &MirForeign,
-    span: Span,
-    target: MirForeignTarget,
-) -> Result<bool, Diagnostic> {
+fn validate_mir_bridge(foreign: &MirForeign, span: Span) -> Result<bool, Diagnostic> {
     let wrapper = bridge_wrapper_name(foreign);
-    let (applicable, target_name) = match target {
-        MirForeignTarget::Cranelift => (
-            foreign.target_applicability.cranelift,
-            "Cranelift",
-        ),
-        MirForeignTarget::Interpreter => (
-            foreign.target_applicability.interpreter,
-            "interpreter",
-        ),
-    };
-    if !applicable {
+    if !foreign.target_applicability.interpreter {
         return Err(ffi_diag(
             &wrapper,
-            format!("is not applicable to the {target_name} target"),
+            "is not applicable to the interpreter target",
             span,
         ));
     }
@@ -3865,7 +2729,7 @@ fn validate_mir_bridge(
     let same_ret_type = match (entry.ret_type.as_ref(), foreign.return_type.as_ref()) {
         (None, None) => true,
         (Some(left), Some(right)) => left.same_checked_type(right),
-        _ => false,
+        _ => false
     };
     if entry.params != expected_params
         || entry.param_access != expected_access
@@ -3886,1152 +2750,25 @@ fn validate_mir_bridge(
         .is_some_and(|ty| matches!(ty.kind(), MirTypeKind::Float32)))
 }
 
-/// Call the exact typed bridge selected by a canonical MIR foreign row.
-fn call_mir_foreign_for_target(
-    foreign: &MirForeign,
-    args: Vec<MirRuntimeValue>,
-    span: Span,
-    target: MirForeignTarget,
-) -> Result<AmbientMirExternResult, Diagnostic> {
-    let wrapper = bridge_wrapper_name(foreign);
-    let ret_f32 = validate_mir_bridge(foreign, span, target)?;
-    if args.len() != foreign.params.len() {
-        return Err(ffi_diag(
-            &wrapper,
-            format!("argc {} != {}", args.len(), foreign.params.len()),
-            span,
-        ));
-    }
-    call_runtime_inner(&wrapper, &args, ret_f32, span, target)
-}
-
-/// Ambient provider for canonical MIR foreign calls made by the interpreter.
+/// Ambient provider for canonical MIR foreign calls made by the interpreter:
+/// call the exact typed bridge selected by the canonical MIR foreign row.
 pub(crate) fn ambient_mir_extern_call(
     foreign: &MirForeign,
     args: Vec<MirRuntimeValue>,
     span: Span,
 ) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
-    Some(call_mir_foreign_for_target(
-        foreign,
-        args,
-        span,
-        MirForeignTarget::Interpreter,
-    ))
-}
-
-/// Ambient provider for canonical MIR foreign calls made by Cranelift.
-pub(crate) fn ambient_mir_extern_call_cranelift(
-    foreign: &MirForeign,
-    args: Vec<MirRuntimeValue>,
-    span: Span,
-) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
-    Some(call_mir_foreign_for_target(
-        foreign,
-        args,
-        span,
-        MirForeignTarget::Cranelift,
-    ))
-}
-
-/// Convert one erased heap cell using the checked MIR element descriptor.
-fn heap_cell_to_runtime(
-    heap: &jet_rt::JetArena,
-    cell: &JetVal,
-    ty: &MirType,
-    records: &HashMap<MirTypeId, FfiRecordDesc>,
-) -> Result<MirRuntimeValue, String> {
-    match ty.kind() {
-        MirTypeKind::Int
-        | MirTypeKind::IntN { .. }
-        | MirTypeKind::InlineRange { .. }
-        | MirTypeKind::Tagged { .. }
-        | MirTypeKind::Quantity { .. } => match cell {
-            JetVal::Int(value) | JetVal::Word { value, .. } => Ok(MirRuntimeValue::Int(*value)),
-            _ => Err(format!("expected integer cell for `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::Float | MirTypeKind::Float32 => match cell {
-            JetVal::Float(value) => Ok(MirRuntimeValue::Float {
-                value: *value,
-                f32: matches!(ty.kind(), MirTypeKind::Float32),
-            }),
-            _ => Err(format!("expected float cell for `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::Bool => match cell {
-            JetVal::Bool(value) => Ok(MirRuntimeValue::Bool(*value)),
-            JetVal::Int(value) => Ok(MirRuntimeValue::Bool(*value != 0)),
-            _ => Err(format!("expected bool cell for `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::Char => match cell {
-            JetVal::Char(value) => Ok(MirRuntimeValue::Char(*value)),
-            JetVal::Int(value) => char::from_u32(*value as u32)
-                .map(MirRuntimeValue::Char)
-                .ok_or_else(|| "character cell is not valid Unicode".to_string()),
-            _ => Err(format!("expected character cell for `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::String => match cell {
-            JetVal::String(value) => Ok(MirRuntimeValue::String(value.clone())),
-            JetVal::StringView { owner, start, end } => heap
-                .get_string(*owner)
-                .and_then(|text| text.get(*start..*end))
-                .map(|text| MirRuntimeValue::String(text.to_string()))
-                .ok_or_else(|| "string view cell is invalid".to_string()),
-            JetVal::Int(value) => heap
-                .clone_string(*value)
-                .map(MirRuntimeValue::String)
-                .ok_or_else(|| "string handle cell is invalid".to_string()),
-            _ => Err(format!("expected string cell for `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::Apply { name: nominal, .. } => {
-            let id = ty
-                .identity
-                .or(Some(nominal.id))
-                .ok_or_else(|| "record has no checked type identity".to_string())?;
-            let descriptor = records
-                .get(&id)
-                .ok_or_else(|| format!("record `{}` has no checked C layout", nominal.name))?;
-            if let Some(enum_info) = descriptor.enum_info.as_ref() {
-                let fields = if enum_info.has_payload {
-                    match cell {
-                        JetVal::Record(fields) => fields.clone(),
-                        JetVal::Int(handle) | JetVal::RecordRef(handle) => heap
-                            .clone_record_values(*handle)
-                            .ok_or_else(|| "enum record handle is invalid".to_string())?,
-                        _ => return Err(format!("expected enum record for `{}`", nominal.name)),
-                    }
-                } else {
-                    Vec::new()
-                };
-                let discriminant = if enum_info.has_payload {
-                    let Some(JetVal::Int(discriminant)) = fields.first() else {
-                        return Err(format!(
-                            "enum `{}` has no integer discriminant carrier",
-                            nominal.name
-                        ));
-                    };
-                    *discriminant
-                } else {
-                    match cell {
-                        JetVal::Int(discriminant) => *discriminant,
-                        _ => {
-                            return Err(format!(
-                                "expected integer enum carrier for `{}`",
-                                nominal.name
-                            ))
-                        }
-                    }
-                };
-                let variant = enum_info
-                    .variants
-                    .iter()
-                    .find(|variant| variant.discriminant == discriminant)
-                    .ok_or_else(|| {
-                        format!(
-                            "native enum `{}` has invalid discriminant {}",
-                            nominal.name, discriminant
-                        )
-                    })?;
-                let payload_cells = fields.get(1..).unwrap_or(&[]);
-                let mut args = Vec::new();
-                match &variant.payload {
-                    MirVariantPayload::Unit => {
-                        if !payload_cells.is_empty() {
-                            return Err(format!(
-                                "unit enum variant `{}` has a payload",
-                                variant.name
-                            ));
-                        }
-                    }
-                    MirVariantPayload::Single(payload_ty) => {
-                        if payload_cells.len() != 1 {
-                            return Err(format!(
-                                "enum variant `{}` has the wrong payload count",
-                                variant.name
-                            ));
-                        }
-                        args.push((
-                            None,
-                            heap_cell_to_runtime(
-                                heap,
-                                &payload_cells[0],
-                                payload_ty,
-                                records,
-                            )?,
-                        ));
-                    }
-                    MirVariantPayload::Named(payload_fields) => {
-                        if payload_cells.len() != payload_fields.len() {
-                            return Err(format!(
-                                "enum variant `{}` has the wrong payload count",
-                                variant.name
-                            ));
-                        }
-                        for (field, payload_cell) in payload_fields.iter().zip(payload_cells) {
-                            args.push((
-                                Some(field.name.clone()),
-                                heap_cell_to_runtime(heap, payload_cell, &field.ty, records)?,
-                            ));
-                        }
-                    }
-                }
-                return Ok(MirRuntimeValue::Enum {
-                    type_name: descriptor.name.clone(),
-                    variant: variant.name.clone(),
-                    args,
-                });
-            }
-            let fields = match cell {
-                JetVal::Record(fields) => fields.clone(),
-                JetVal::Int(handle) | JetVal::RecordRef(handle) => heap
-                    .clone_record_values(*handle)
-                    .ok_or_else(|| "record handle cell is invalid".to_string())?,
-                _ => return Err(format!("expected record cell for `{}`", nominal.name)),
-            };
-            if fields.len() < descriptor.fields.len() {
-                return Err(format!("record `{}` is missing fields", nominal.name));
-            }
-            let mut out = Vec::with_capacity(descriptor.fields.len());
-            for (index, field) in descriptor.fields.iter().enumerate() {
-                out.push((
-                    field.name.clone(),
-                    heap_cell_to_runtime(heap, &fields[index], &field.ty, records)?,
-                ));
-            }
-            Ok(MirRuntimeValue::Struct {
-                type_name: descriptor.name.clone(),
-                fields: out,
-            })
+    Some((|| {
+        let wrapper = bridge_wrapper_name(foreign);
+        let ret_f32 = validate_mir_bridge(foreign, span)?;
+        if args.len() != foreign.params.len() {
+            return Err(ffi_diag(
+                &wrapper,
+                format!("argc {} != {}", args.len(), foreign.params.len()),
+                span,
+            ));
         }
-        MirTypeKind::FixedList { elem, .. } => heap_cells_to_runtime(heap, cell, elem, records),
-        MirTypeKind::List(inner) => {
-            let JetVal::List(values) = cell else {
-                return Err(format!("nested list `{}` is not a boxed list", ty.canonical_key()));
-            };
-            values
-                .iter()
-                .map(|value| heap_cell_to_runtime(heap, value, inner, records))
-                .collect::<Result<Vec<_>, _>>()
-                .map(MirRuntimeValue::List)
-        }
-        _ => Err(format!("type `{}` cannot cross the C bridge", ty.canonical_key())),
-    }
-}
-
-fn heap_cells_to_runtime(
-    heap: &jet_rt::JetArena,
-    carrier: &JetVal,
-    inner: &MirType,
-    records: &HashMap<MirTypeId, FfiRecordDesc>,
-) -> Result<MirRuntimeValue, String> {
-    match carrier {
-        JetVal::IntList(values) => values
-            .iter()
-            .map(|value| heap_cell_to_runtime(heap, &JetVal::Int(*value), inner, records))
-            .collect::<Result<Vec<_>, _>>()
-            .map(MirRuntimeValue::List),
-        JetVal::List(values) => values
-            .iter()
-            .map(|value| heap_cell_to_runtime(heap, value, inner, records))
-            .collect::<Result<Vec<_>, _>>()
-            .map(MirRuntimeValue::List),
-        JetVal::UninitList {
-            values,
-            initialized,
-        } => {
-            if initialized.iter().any(|initialized| !initialized) {
-                return Err("list contains uninitialized elements".to_string());
-            }
-            values
-                .iter()
-                .map(|value| heap_cell_to_runtime(heap, value, inner, records))
-                .collect::<Result<Vec<_>, _>>()
-                .map(MirRuntimeValue::List)
-        }
-        _ => Err("fixed-array cell does not contain a list".to_string()),
-    }
-}
-
-fn heap_list_to_runtime(
-    heap: &jet_rt::JetArena,
-    list: i64,
-    inner: &MirType,
-    records: &HashMap<MirTypeId, FfiRecordDesc>,
-) -> Result<MirRuntimeValue, String> {
-    let carrier = heap
-        .clone_value(list)
-        .ok_or_else(|| "list handle is invalid".to_string())?;
-    let values = match carrier {
-        JetVal::IntList(values) => values
-            .into_iter()
-            .map(JetVal::Int)
-            .collect::<Vec<_>>(),
-        JetVal::List(values) => values,
-        JetVal::UninitList {
-            values,
-            initialized,
-        } => {
-            if initialized.iter().any(|initialized| !initialized) {
-                return Err("list contains uninitialized elements".to_string());
-            }
-            values
-        }
-        _ => return Err("list handle does not contain a list".to_string()),
-    };
-    values
-        .iter()
-        .map(|value| heap_cell_to_runtime(heap, value, inner, records))
-        .collect::<Result<Vec<_>, _>>()
-        .map(MirRuntimeValue::List)
-}
-
-fn heap_arg_to_runtime(
-    heap: &jet_rt::JetArena,
-    value: i64,
-    abi: ParamAbi,
-    ty: &MirType,
-    records: &HashMap<MirTypeId, FfiRecordDesc>,
-) -> Result<MirRuntimeValue, String> {
-    match abi {
-        ParamAbi::Callback => {
-            Err("managed callback arguments require the callback registration adapter".to_string())
-        }
-        ParamAbi::Record => {
-            let cell = heap
-                .clone_value(value)
-                .ok_or_else(|| "record handle is invalid".to_string())?;
-            heap_cell_to_runtime(heap, &cell, ty, records)
-        }
-        ParamAbi::Int | ParamAbi::Handle => heap
-            .int_to_i64(value)
-            .map(MirRuntimeValue::Int)
-            .ok_or_else(|| "integer argument is not representable".to_string()),
-        ParamAbi::Float => {
-            let bits = value as u64;
-            Ok(MirRuntimeValue::Float {
-                value: if matches!(ty.kind(), MirTypeKind::Float32) {
-                    f32::from_bits(bits as u32) as f64
-                } else {
-                    f64::from_bits(bits)
-                },
-                f32: matches!(ty.kind(), MirTypeKind::Float32),
-            })
-        }
-        ParamAbi::Bool => heap
-            .int_to_i64(value)
-            .map(|value| MirRuntimeValue::Bool(value != 0))
-            .ok_or_else(|| "bool argument is not an integer word".to_string()),
-        ParamAbi::String => heap
-            .clone_string(value)
-            .map(MirRuntimeValue::String)
-            .ok_or_else(|| "string argument is not a valid string handle".to_string()),
-        ParamAbi::List => {
-            let MirTypeKind::List(inner) = ty.kind() else {
-                return Err("list carrier has a non-list type".to_string());
-            };
-            heap_list_to_runtime(heap, value, inner, records)
-        }
-    }
-}
-
-fn heap_runtime_to_jetval(
-    heap: &mut jet_rt::JetArena,
-    value: &MirRuntimeValue,
-    ty: &MirType,
-    records: &HashMap<MirTypeId, FfiRecordDesc>,
-) -> Result<JetVal, String> {
-    if matches!(value, MirRuntimeValue::NativeOwned(_)) {
-        return Err("native-owned payload cannot cross the C bridge".to_string());
-    }
-    match ty.kind() {
-        MirTypeKind::Int
-        | MirTypeKind::IntN { .. }
-        | MirTypeKind::InlineRange { .. }
-        | MirTypeKind::Tagged { .. }
-        | MirTypeKind::Quantity { .. } => match value {
-            MirRuntimeValue::Int(value) => Ok(JetVal::Int(*value)),
-            MirRuntimeValue::BigInt(value) => heap
-                .int_from_str(value)
-                .map(JetVal::Int),
-            _ => Err(format!("native result is not integer `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::Float | MirTypeKind::Float32 => match value {
-            MirRuntimeValue::Float { value, .. } => Ok(JetVal::Float(*value)),
-            _ => Err(format!("native result is not float `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::Bool => match value {
-            MirRuntimeValue::Bool(value) => Ok(JetVal::Bool(*value)),
-            _ => Err(format!("native result is not bool `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::Char => match value {
-            MirRuntimeValue::Char(value) => Ok(JetVal::Char(*value)),
-            _ => Err(format!("native result is not char `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::String => match value {
-            MirRuntimeValue::String(value) => Ok(JetVal::String(value.clone())),
-            _ => Err(format!("native result is not string `{}`", ty.canonical_key())),
-        },
-        MirTypeKind::Apply { name: nominal, .. } => {
-            let id = ty
-                .identity
-                .or(Some(nominal.id))
-                .ok_or_else(|| "record has no checked type identity".to_string())?;
-            let descriptor = records
-                .get(&id)
-                .ok_or_else(|| format!("record `{}` has no checked C layout", nominal.name))?;
-            if let Some(enum_info) = descriptor.enum_info.as_ref() {
-                let MirRuntimeValue::Enum {
-                    variant: variant_name,
-                    args,
-                    ..
-                } = value
-                else {
-                    return Err(format!("native result is not enum `{}`", nominal.name));
-                };
-                let variant = enum_info
-                    .variants
-                    .iter()
-                    .find(|variant| variant.name == variant_name.as_str())
-                    .ok_or_else(|| {
-                        format!(
-                            "native result has unknown enum variant `{}`",
-                            variant_name
-                        )
-                    })?;
-                if !enum_tag_value_valid(
-                    enum_info.tag,
-                    enum_info.tag_size,
-                    variant.discriminant,
-                ) {
-                    return Err(format!(
-                        "enum variant `{}` has an invalid checked discriminant",
-                        variant.name
-                    ));
-                }
-                if !enum_info.has_payload {
-                    if !args.is_empty() {
-                        return Err(format!(
-                            "unit enum variant `{}` has a payload",
-                            variant.name
-                        ));
-                    }
-                    return Ok(JetVal::Int(variant.discriminant));
-                }
-                let mut cells = vec![JetVal::Int(variant.discriminant)];
-                match &variant.payload {
-                    MirVariantPayload::Unit => {
-                        if !args.is_empty() {
-                            return Err(format!(
-                                "unit enum variant `{}` has a payload",
-                                variant.name
-                            ));
-                        }
-                    }
-                    MirVariantPayload::Single(payload_ty) => {
-                        let Some((field, payload)) = args.first() else {
-                            return Err(format!(
-                                "enum variant `{}` is missing its payload",
-                                variant.name
-                            ));
-                        };
-                        if field.is_some() || args.len() != 1 {
-                            return Err(format!(
-                                "enum variant `{}` has the wrong payload shape",
-                                variant.name
-                            ));
-                        }
-                        cells.push(heap_runtime_to_jetval(heap, payload, payload_ty, records)?);
-                    }
-                    MirVariantPayload::Named(payload_fields) => {
-                        if args.len() != payload_fields.len() {
-                            return Err(format!(
-                                "enum variant `{}` has the wrong payload count",
-                                variant.name
-                            ));
-                        }
-                        for (field, (name, payload)) in payload_fields.iter().zip(args) {
-                            if name.as_deref() != Some(field.name.as_str()) {
-                                return Err(format!(
-                                    "enum variant `{}` is missing field `{}`",
-                                    variant.name, field.name
-                                ));
-                            }
-                            cells.push(heap_runtime_to_jetval(
-                                heap,
-                                payload,
-                                &field.ty,
-                                records,
-                            )?);
-                        }
-                    }
-                }
-                return Ok(JetVal::RecordRef(heap.alloc_record_values(cells)));
-            }
-            let MirRuntimeValue::Struct { fields, .. } = value else {
-                return Err(format!("native result is not record `{}`", nominal.name));
-            };
-            let mut cells = Vec::with_capacity(descriptor.fields.len());
-            for (index, field) in descriptor.fields.iter().enumerate() {
-                let field_value = fields
-                    .iter()
-                    .find(|(name, _)| name == &field.name)
-                    .or_else(|| fields.get(index))
-                    .map(|(_, value)| value)
-                    .ok_or_else(|| format!("record `{}` is missing `{}`", nominal.name, field.name))?;
-                cells.push(heap_runtime_to_jetval(heap, field_value, &field.ty, records)?);
-            }
-            Ok(JetVal::RecordRef(heap.alloc_record_values(cells)))
-        }
-        MirTypeKind::FixedList { elem, .. } => {
-            let MirRuntimeValue::List(values) = value else {
-                return Err(format!("native result is not fixed array `{}`", ty.canonical_key()));
-            };
-            values
-                .iter()
-                .map(|value| heap_runtime_to_jetval(heap, value, elem, records))
-                .collect::<Result<Vec<_>, _>>()
-                .map(JetVal::List)
-        }
-        MirTypeKind::List(inner) => {
-            let MirRuntimeValue::List(values) = value else {
-                return Err(format!("native result is not list `{}`", ty.canonical_key()));
-            };
-            values
-                .iter()
-                .map(|value| heap_runtime_to_jetval(heap, value, inner, records))
-                .collect::<Result<Vec<_>, _>>()
-                .map(JetVal::List)
-        }
-        _ => Err(format!("type `{}` cannot cross the C bridge", ty.canonical_key())),
-    }
-}
-
-fn heap_restore_list(
-    heap: &mut jet_rt::JetArena,
-    list: i64,
-    inner: &MirType,
-    values: &[MirRuntimeValue],
-    records: &HashMap<MirTypeId, FfiRecordDesc>,
-) -> Result<(), String> {
-    let original = heap
-        .clone_value(list)
-        .ok_or_else(|| "mutable list handle is invalid".to_string())?;
-    let original_len = match &original {
-        JetVal::IntList(values) => values.len(),
-        JetVal::List(values) | JetVal::UninitList { values, .. } => values.len(),
-        _ => return Err("mutable list handle does not contain a list".to_string()),
-    };
-    if original_len != values.len() {
-        return Err("native mutable list changed its element count".to_string());
-    }
-
-    if matches!(inner.kind(), MirTypeKind::Int | MirTypeKind::IntN { .. })
-        && values.iter().all(|value| matches!(value, MirRuntimeValue::Int(_)))
-    {
-        let values = values
-            .iter()
-            .map(|value| match value {
-                MirRuntimeValue::Int(value) => *value,
-                _ => unreachable!(),
-            })
-            .collect::<Vec<_>>();
-        if matches!(&original, JetVal::IntList(_)) {
-            heap.replace_int_list(list, values)
-                .ok_or_else(|| "mutable integer list cannot be restored".to_string())?;
-            return Ok(());
-        }
-    }
-    if matches!(inner.kind(), MirTypeKind::Float | MirTypeKind::Float32)
-        && values
-            .iter()
-            .all(|value| matches!(value, MirRuntimeValue::Float { .. }))
-        && matches!(&original, JetVal::List(_))
-    {
-        let values = values
-            .iter()
-            .map(|value| match value {
-                MirRuntimeValue::Float { value, .. } => *value,
-                _ => unreachable!(),
-            })
-            .collect::<Vec<_>>();
-        heap.replace_float_list(list, values)
-            .ok_or_else(|| "mutable float list cannot be restored".to_string())?;
-        return Ok(());
-    }
-    if matches!(inner.kind(), MirTypeKind::String)
-        && matches!(&original, JetVal::IntList(_))
-        && values
-            .iter()
-            .all(|value| matches!(value, MirRuntimeValue::String(_)))
-    {
-        let handles = values
-            .iter()
-            .map(|value| match value {
-                MirRuntimeValue::String(value) => heap.alloc_string(value.clone()),
-                _ => unreachable!(),
-            })
-            .collect::<Vec<_>>();
-        heap.replace_int_list(list, handles)
-            .ok_or_else(|| "mutable string list cannot be restored".to_string())?;
-        return Ok(());
-    }
-
-    let cells = values
-        .iter()
-        .map(|value| heap_runtime_to_jetval(heap, value, inner, records))
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut preserve_old = vec![false; cells.len()];
-    if matches!(inner.kind(), MirTypeKind::Apply { .. }) {
-        let old_cells = match &original {
-            JetVal::IntList(values) => values.iter().copied().map(JetVal::Int).collect(),
-            JetVal::List(values) | JetVal::UninitList { values, .. } => values.clone(),
-            _ => Vec::new(),
-        };
-        for (index, old_cell) in old_cells.iter().enumerate() {
-            let Some(old_record) = (match old_cell {
-                JetVal::Int(handle) | JetVal::RecordRef(handle) => Some(*handle),
-                _ => None,
-            }) else {
-                continue;
-            };
-            let Some(JetVal::RecordRef(new_record)) = cells.get(index) else {
-                continue;
-            };
-            if heap.record_assign_from(old_record, *new_record).is_some() {
-                preserve_old[index] = true;
-            }
-        }
-    }
-    let slots = heap
-        .list_values_mut(list)
-        .ok_or_else(|| "mutable list cannot be restored".to_string())?;
-    for (index, (slot, cell)) in slots.iter_mut().zip(cells).enumerate() {
-        if !preserve_old[index] {
-            *slot = cell;
-        }
-    }
-    Ok(())
-}
-fn heap_restore_writeback(
-    heap: &mut jet_rt::JetArena,
-    args_list: i64,
-    parameter: usize,
-    original_arg: i64,
-    abi: ParamAbi,
-    ty: &MirType,
-    value: MirRuntimeValue,
-    records: &HashMap<MirTypeId, FfiRecordDesc>,
-) -> Result<(), String> {
-    match abi {
-        ParamAbi::Record => {
-            let cell = heap_runtime_to_jetval(heap, &value, ty, records)?;
-            if let Some(JetVal::RecordRef(old_record)) = heap.clone_value(original_arg) {
-                if let JetVal::RecordRef(new_record) = &cell {
-                    if heap.record_assign_from(old_record, *new_record).is_some() {
-                        return Ok(());
-                    }
-                }
-            }
-            let slots = heap
-                .list_values_mut(args_list)
-                .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
-            let slot = slots
-                .get_mut(parameter)
-                .ok_or_else(|| "mutable record argument index is out of range".to_string())?;
-            *slot = cell;
-            Ok(())
-        }
-        ParamAbi::List => {
-            let MirTypeKind::List(inner) = ty.kind() else {
-                return Err("mutable list writeback has a non-list type".to_string());
-            };
-            let MirRuntimeValue::List(values) = value else {
-                return Err("mutable list writeback is not a list".to_string());
-            };
-            heap_restore_list(heap, original_arg, inner, &values, records)
-        }
-        ParamAbi::String => {
-            let MirRuntimeValue::String(value) = value else {
-                return Err("mutable String writeback is not a String".to_string());
-            };
-            let handle = heap.alloc_string(value);
-            let slots = heap
-                .list_values_mut(args_list)
-                .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
-            let slot = slots
-                .get_mut(parameter)
-                .ok_or_else(|| "mutable String argument index is out of range".to_string())?;
-            *slot = JetVal::Int(handle);
-            Ok(())
-        }
-        ParamAbi::Handle => {
-            let same = matches!(value, MirRuntimeValue::Int(value) if value == original_arg);
-            if same {
-                Ok(())
-            } else {
-                Err("mutable handle writeback changed its checked token".to_string())
-            }
-        }
-        ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool => {
-            let cell = heap_runtime_to_jetval(heap, &value, ty, records)?;
-            let slots = heap
-                .list_values_mut(args_list)
-                .ok_or_else(|| "foreign argument list cannot be restored".to_string())?;
-            let slot = slots
-                .get_mut(parameter)
-                .ok_or_else(|| "mutable scalar argument index is out of range".to_string())?;
-            *slot = cell;
-            Ok(())
-        }
-        ParamAbi::Callback => Err("managed callback writeback is not supported".to_string()),
-    }
-}
-
-
-fn heap_result_value(
-    heap: &mut jet_rt::JetArena,
-    value: MirRuntimeValue,
-    entry: &FfiEntry,
-    records: &HashMap<MirTypeId, FfiRecordDesc>,
-) -> Result<i64, String> {
-    match value {
-        MirRuntimeValue::Unit => Ok(0),
-        MirRuntimeValue::Int(value) => Ok(heap.int_from_i64(value)),
-        MirRuntimeValue::BigInt(value) => heap.int_from_str(&value),
-        MirRuntimeValue::Float { value, .. } => Ok(value.to_bits() as i64),
-        MirRuntimeValue::Bool(value) => Ok(i64::from(value)),
-        MirRuntimeValue::Char(value) => Ok(i64::from(value as u32)),
-        MirRuntimeValue::String(value) => Ok(heap.alloc_string(value)),
-        MirRuntimeValue::Struct { type_name, fields } => {
-            let Some(ret_type) = entry.ret_type.as_ref() else {
-                return Err("native record result has no type".to_string());
-            };
-            let record = MirRuntimeValue::Struct { type_name, fields };
-            match heap_runtime_to_jetval(heap, &record, ret_type, records)? {
-                JetVal::RecordRef(handle) | JetVal::Int(handle) => Ok(handle),
-                _ => Err("native record result did not produce a record handle".to_string()),
-            }
-        }
-        MirRuntimeValue::Enum {
-            type_name,
-            variant,
-            args,
-        } => {
-            let Some(ret_type) = entry.ret_type.as_ref() else {
-                return Err("native enum result has no type".to_string());
-            };
-            let enum_value = MirRuntimeValue::Enum {
-                type_name,
-                variant,
-                args,
-            };
-            match heap_runtime_to_jetval(heap, &enum_value, ret_type, records)? {
-                JetVal::RecordRef(handle) | JetVal::Int(handle) => Ok(handle),
-                _ => Err("native enum result did not produce a valid carrier".to_string()),
-            }
-        }
-        MirRuntimeValue::List(values) => {
-            let Some(ret_type) = entry.ret_type.as_ref() else {
-                return Err("native list result has no list type".to_string());
-            };
-            let MirTypeKind::List(inner) = ret_type.kind() else {
-                return Err("native list result has a non-list type".to_string());
-            };
-            let cells = values
-                .iter()
-                .map(|value| heap_runtime_to_jetval(heap, value, inner, records))
-                .collect::<Result<Vec<_>, _>>()?;
-            if matches!(inner.kind(), MirTypeKind::Int | MirTypeKind::IntN { .. })
-                && cells.iter().all(|cell| matches!(cell, JetVal::Int(_)))
-            {
-                Ok(heap.alloc_int_list(
-                    cells
-                        .into_iter()
-                        .map(|cell| match cell {
-                            JetVal::Int(value) => value,
-                            _ => unreachable!(),
-                        })
-                        .collect(),
-                ))
-            } else {
-                Ok(heap.alloc_list_values(cells))
-            }
-        }
-        MirRuntimeValue::NativeOwned(_) => {
-            Err("native bridge returned a native-owned payload".to_string())
-        }
-        MirRuntimeValue::Moved => Err("native bridge returned a moved value".to_string()),
-        _ => Err("native bridge returned an unsupported value".to_string()),
-    }
-}
-
-/// `wrapper` / `args` are heap string / int-list handles. Returns a heap
-/// carrier for the canonical MIR runtime value.
-fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
-    let name = clone_string(wrapper);
-    let Some(argv) = Concurrency::with_runtime_mut(|rt| {
-        let values = rt.heap.clone_list_values(args)?;
-        values
-            .into_iter()
-            .map(|value| match value {
-                JetVal::Int(value) => Some(value),
-                JetVal::RecordRef(value) => Some(value),
-                JetVal::Float(value) => Some(value.to_bits() as i64),
-                JetVal::Bool(value) => Some(i64::from(value)),
-                JetVal::Char(value) => Some(i64::from(value as u32)),
-                _ => None,
-            })
-            .collect::<Option<Vec<_>>>()
-    }) else {
-        trap("jit ffi: extern call arguments are not a valid value list");
-        return 0;
-    };
-    let Some(entry) = ({
-        let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
-        state
-            .as_ref()
-            .and_then(|state| state.by_wrapper.get(&name).cloned())
-    }) else {
-        trap(&format!("jit ffi: unbound wrapper `{name}`"));
-        return 0;
-    };
-    let records = {
-        let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
-        state
-            .as_ref()
-            .map(|state| state.records.clone())
-            .unwrap_or_default()
-    };
-    if argv.len() != entry.params.len() {
-        trap(&format!(
-            "jit ffi: `{name}` argc {} != {}",
-            argv.len(),
-            entry.params.len()
-        ));
-        return 0;
-    }
-    let runtime_args = Concurrency::with_runtime_string(|rt| {
-        entry
-            .params
-            .iter()
-            .zip(&entry.param_types)
-            .zip(argv.iter().copied())
-            .map(|((abi, ty), value)| heap_arg_to_runtime(&rt.heap, value, *abi, ty, &records))
-            .collect::<Result<Vec<_>, _>>()
-    });
-    let runtime_args = match runtime_args {
-        Ok(args) => args,
-        Err(error) => {
-            trap(&format!("jit ffi: `{name}` {error}"));
-            return 0;
-        }
-    };
-    let bridge_result = call_runtime_inner(
-        &name,
-        &runtime_args,
-        entry.ret_type.as_ref().is_some_and(|ty| {
-            matches!(ty.kind(), MirTypeKind::Float32)
-        }),
-        Span::new(0, 0),
-        MirForeignTarget::Cranelift,
-    );
-    let result = match bridge_result {
-        Ok(result) => result,
-        Err(error) if error.code == "E3014" => {
-            Concurrency::with_runtime_mut(|rt| rt.set_ffi_runtime_stop(FFI_RUNTIME_PANIC));
-            return 0;
-        }
-        Err(error) if error.runtime_host_fault_parts().is_some() => {
-            trap(&error.what);
-            return 0;
-        }
-        Err(error) => {
-            trap(&error.what);
-            return 0;
-        }
-    };
-    Concurrency::with_runtime_mut(|rt| {
-        for writeback in result.writebacks {
-            let parameter = writeback.parameter;
-            let Some(abi) = entry.params.get(parameter).copied() else {
-                rt.set_host_fault(&format!(
-                    "jit ffi: `{name}` writeback parameter index is out of range"
-                ));
-                return 0;
-            };
-            if entry.param_access.get(parameter) != Some(&MirAccess::Write) {
-                rt.set_host_fault(&format!(
-                    "jit ffi: `{name}` writeback targets a non-writable parameter"
-                ));
-                return 0;
-            }
-            let Some(ty) = entry.param_types.get(parameter) else {
-                rt.set_host_fault(&format!(
-                    "jit ffi: `{name}` writeback type is missing"
-                ));
-                return 0;
-            };
-            let Some(original_arg) = argv.get(parameter).copied() else {
-                rt.set_host_fault(&format!(
-                    "jit ffi: `{name}` writeback argument is missing"
-                ));
-                return 0;
-            };
-            if let Err(error) = heap_restore_writeback(
-                &mut rt.heap,
-                args,
-                parameter,
-                original_arg,
-                abi,
-                ty,
-                writeback.value,
-                &records,
-            ) {
-                rt.set_host_fault(&format!("jit ffi: `{name}` {error}"));
-                return 0;
-            }
-        }
-        match heap_result_value(&mut rt.heap, result.value, &entry, &records) {
-            Ok(value) => value,
-            Err(error) => {
-                rt.set_host_fault(&format!("jit ffi: `{name}` {error}"));
-                0
-            }
-        }
-    })
-}
-
-fn jet_jit_ffi_drop(token_id: i64) {
-    let result = {
-        let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
-        state.as_ref().map_or_else(
-            || {
-                let _ = take_ffi_handle(token_id);
-                Ok(())
-            },
-            |state| close_ffi_token(state, token_id, Span::new(0, 0)),
-        )
-    };
-    if let Err(error) = result {
-        trap(&error.what);
-    }
-}
-
-fn jet_jit_ffi_callback_register(
-    callback_handle: i64,
-    native_start_handle: i64,
-    native_stop_handle: i64,
-    identity_handle: i64,
-    digest_handle: i64,
-) -> i64 {
-    let callback = Concurrency::with_runtime_mut(|rt| {
-        crate::runtime_host::jit_callable_parts(rt, callback_handle)
-    });
-    let Some(callback) = callback else {
-        trap("managed callback registration received an invalid callable");
-        return 0;
-    };
-    let native_start_wrapper = clone_string(native_start_handle);
-    let native_stop_wrapper = clone_string(native_stop_handle);
-    let identity = clone_string(identity_handle);
-    let digest = clone_string(digest_handle);
-    if native_start_wrapper.is_empty()
-        || native_stop_wrapper.is_empty()
-        || identity.is_empty()
-        || digest.is_empty()
-        || digest
-            != jet_foundation::SHA256::sha256_hex(
-                format!("jet-ffi-callback-plan-v1\0{identity}").as_bytes(),
-            )
-    {
-        trap("managed callback registration has incomplete or invalid bridge metadata");
-        return 0;
-    }
-    let native_start = {
-        let state = FFI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        state
-            .as_ref()
-            .and_then(|state| state.by_wrapper.get(&native_start_wrapper))
-            .and_then(|entry| entry.callback_start)
-    };
-    let Some(native_start) = native_start else {
-        trap("managed callback registration has no native-start helper");
-        return 0;
-    };
-    let state = Arc::new(JitCallbackState {
-        callback,
-        native_stop_wrapper,
-        native_token: AtomicUsize::new(0),
-        start_complete: AtomicBool::new(false),
-        phase: AtomicU8::new(JIT_CALLBACK_ACTIVE),
-        in_flight: AtomicUsize::new(0),
-        stop_started: AtomicBool::new(false),
-        owner_consumed: AtomicBool::new(false),
-        callback_failure: Mutex::new(None),
-        wait: Mutex::new(()),
-        drained: Condvar::new(),
-    });
-    let raw = Arc::into_raw(Arc::clone(&state)) as usize;
-    let start_state = Arc::clone(&state);
-    JIT_CALLBACKS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(raw, state);
-    let token = unsafe { native_start(Some(jet_jit_ffi_callback_trampoline), raw as *mut c_void) };
-    if token.is_null() {
-        start_state.quarantine("managed callback native start returned a null token");
-        start_state.start_complete.store(true, Ordering::Release);
-        start_state.drained.notify_all();
-        remove_jit_callback(raw, false);
-        trap("managed callback native start returned a null token");
-        return 0;
-    }
-    start_state.native_token.store(token as usize, Ordering::Release);
-    start_state.start_complete.store(true, Ordering::Release);
-    start_state.drained.notify_all();
-    raw as i64
-}
-
-fn jet_jit_ffi_callback_unsubscribe(handle: i64) -> i64 {
-    let Ok(raw) = usize::try_from(handle) else {
-        trap("managed callback unsubscribe received an invalid registration");
-        return 0;
-    };
-    let state = {
-        let callbacks = JIT_CALLBACKS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        callbacks.get(&raw).cloned()
-    };
-    let Some(state) = state else {
-        trap("managed callback unsubscribe received an unknown registration");
-        return 0;
-    };
-    if state.owner_consumed.swap(true, Ordering::AcqRel) {
-        trap("managed callback registration was already consumed");
-        return 0;
-    }
-    // SAFETY: the successful registry lookup above proves the raw Arc owner is
-    // live; consuming registration is the only path that calls `from_raw`.
-    let owner = unsafe { Arc::from_raw(raw as *const JitCallbackState) };
-    Concurrency::spawn_ffi_task(move || {
-        let result = owner.stop_and_drain();
-        let stopped = owner.phase.load(Ordering::Acquire) == JIT_CALLBACK_STOPPED;
-        if stopped {
-            remove_jit_callback(raw, true);
-        }
-        if let Err(error) = result {
-            Concurrency::set_task_trap(&error);
-        }
-        0
-    })
-}
-
-fn jet_jit_ffi_emit_task(wrapper_handle: i64, value: i64) -> i64 {
-    let wrapper = clone_string(wrapper_handle);
-    if wrapper.is_empty() {
-        trap("managed callback emit task has no native bridge identity");
-        return 0;
-    }
-    Concurrency::spawn_ffi_task(move || {
-        match call_runtime_inner(
-            &wrapper,
-            &[MirRuntimeValue::Int(value)],
-            false,
-            Span::new(0, 0),
-            MirForeignTarget::Cranelift,
-        ) {
-            Ok(result) if result.writebacks.is_empty() => match result.value {
-                MirRuntimeValue::Int(value) => value,
-                _ => {
-                    Concurrency::set_task_trap(
-                        "managed callback emit returned a non-integer value",
-                    );
-                    0
-                }
-            },
-            Ok(_) => {
-                Concurrency::set_task_trap(
-                    "managed callback emit returned an unexpected writable parameter",
-                );
-                0
-            }
-            Err(error) => {
-                Concurrency::set_task_trap(&error.what);
-                0
-            }
-        }
-    })
-}
-
-
-
-host_fns! {
-    struct FfiHostFns;
-    register: register_ffi_host_symbols;
-    declare: declare_ffi_host_fns(module) {
-        let cc = module.target_config().default_call_conv;
-        let mut sig = Signature::new(cc);
-        sig.params.push(AbiParam::new(types::I64));
-        sig.params.push(AbiParam::new(types::I64));
-        sig.returns.push(AbiParam::new(types::I64));
-        let mut sig_callback_register = Signature::new(cc);
-        for _ in 0..5 {
-            sig_callback_register
-                .params
-                .push(AbiParam::new(types::I64));
-        }
-        sig_callback_register.returns.push(AbiParam::new(types::I64));
-        let mut sig_callback_unsubscribe = Signature::new(cc);
-        sig_callback_unsubscribe
-            .params
-            .push(AbiParam::new(types::I64));
-        sig_callback_unsubscribe
-            .returns
-            .push(AbiParam::new(types::I64));
-        let mut sig_callback_event_stop = Signature::new(cc);
-        sig_callback_event_stop
-            .returns
-            .push(AbiParam::new(types::I64));
-        let sig_emit_task = sig.clone();
-        let mut sig_drop_handle = Signature::new(cc);
-        sig_drop_handle.params.push(AbiParam::new(types::I64));
-        let mut sig_atomic_load = Signature::new(cc);
-        sig_atomic_load.params.push(AbiParam::new(types::I64));
-        sig_atomic_load.returns.push(AbiParam::new(types::I64));
-        let mut sig_atomic_store = Signature::new(cc);
-        sig_atomic_store.params.push(AbiParam::new(types::I64));
-        sig_atomic_store.params.push(AbiParam::new(types::I64));
-        sig_atomic_store.returns.push(AbiParam::new(types::I64));
-        let mut sig_atomic_compare_exchange = Signature::new(cc);
-        sig_atomic_compare_exchange
-            .params
-            .push(AbiParam::new(types::I64));
-        sig_atomic_compare_exchange
-            .params
-            .push(AbiParam::new(types::I64));
-        sig_atomic_compare_exchange
-            .params
-            .push(AbiParam::new(types::I64));
-        sig_atomic_compare_exchange
-            .returns
-            .push(AbiParam::new(types::I64));
-        let sig_atomic_try_new = sig_atomic_store.clone();
-        let sig_atomic_try_add = sig_atomic_store.clone();
-    }
-    call: "jet_jit_extern_call" => jet_jit_extern_call: sig;
-    callback_register: "jet_jit_ffi_callback_register" => jet_jit_ffi_callback_register: sig_callback_register;
-    callback_unsubscribe: "jet_jit_ffi_callback_unsubscribe" => jet_jit_ffi_callback_unsubscribe: sig_callback_unsubscribe;
-    callback_event_stop: "jet_jit_ffi_callback_event_stop" => jet_jit_ffi_callback_event_stop: sig_callback_event_stop;
-    emit_task: "jet_jit_ffi_emit_task" => jet_jit_ffi_emit_task: sig_emit_task;
-    drop_handle: "jet_jit_ffi_drop" => jet_jit_ffi_drop: sig_drop_handle;
-    atomic_new: "JetAtomic::new" => jet_atomic_new: sig_atomic_store;
-    atomic_try_new: "JetAtomic::try_new" => jet_atomic_try_new: sig_atomic_try_new;
-    atomic_try_add: "jet_atomic_try_add" => jet_atomic_try_add: sig_atomic_try_add;
-    atomic_load: "jet_atomic_load" => jet_atomic_load: sig_atomic_load;
-    atomic_store: "jet_atomic_store" => jet_atomic_store: sig_atomic_store;
-    atomic_add: "jet_atomic_add" => jet_atomic_add: sig_atomic_store;
-    atomic_compare_exchange: "jet_atomic_compare_exchange" => jet_atomic_compare_exchange: sig_atomic_compare_exchange;
-    atomic_publish: "jet_atomic_publish" => jet_atomic_publish: sig_atomic_store;
-    atomic_observe: "jet_atomic_observe" => jet_atomic_observe: sig_atomic_load;
+        call_runtime_inner(&wrapper, &args, ret_f32, span)
+    })())
 }
 
 #[cfg(test)]
@@ -5053,9 +2790,8 @@ mod tests {
             take_failure_fn: test_take_failure,
             artifact_identity: String::new(),
             by_wrapper: HashMap::new(),
-            close_by_handle: HashMap::new(),
             records: HashMap::new(),
-            arrow_provider_lease: None,
+            arrow_provider_lease: None
         }
     }
 
@@ -5089,53 +2825,8 @@ mod tests {
             ret_type: None,
             handle: None,
             close_handle: None,
-            ptr: std::ptr::null(),
-            callback_start: None,
+            ptr: std::ptr::null()
         }
-    }
-
-    #[test]
-    fn source_helper_wrapper_reuse_requires_the_checked_abi() {
-        let int = MirType::from_kind(MirTypeKind::Int);
-        let entry = FfiEntry {
-            params: vec![ParamAbi::Int],
-            param_handles: vec![None],
-            param_types: vec![int.clone()],
-            param_access: vec![MirAccess::Read],
-            ret: RetAbi::Int,
-            ret_type: Some(int.clone()),
-            handle: None,
-            close_handle: None,
-            ptr: std::ptr::null(),
-            callback_start: None,
-        };
-        let spec = FfiEntrySpec {
-            wrapper_name: "source_helper".to_string(),
-            params: vec![ParamAbi::Int],
-            param_handles: vec![None],
-            param_types: vec![int.clone()],
-            param_access: vec![MirAccess::Read],
-            ret: RetAbi::Int,
-            ret_type: Some(int),
-            handle: None,
-            close_handle: None,
-        };
-        assert!(source_helper_entry_matches_spec(&entry, &spec));
-
-        let mut incompatible = spec;
-        incompatible.params = vec![ParamAbi::Bool];
-        incompatible.param_types = vec![MirType::from_kind(MirTypeKind::Bool)];
-        incompatible.ret = RetAbi::Bool;
-        incompatible.ret_type = Some(MirType::from_kind(MirTypeKind::Bool));
-        assert!(!source_helper_entry_matches_spec(&entry, &incompatible));
-    }
-    #[cfg(unix)]
-    #[test]
-    fn source_helper_rejects_a_missing_data_provider_library() {
-        let mut state = test_state();
-        let error = ensure_source_helper_data_provider(&mut state, None, true).unwrap_err();
-        assert!(error.contains("Arrow Data provider"));
-        assert!(state.arrow_provider_lease.is_none());
     }
 
     unsafe extern "C" fn test_uniform_writeback(
@@ -5180,7 +2871,6 @@ mod tests {
             ],
             false,
             Span::new(0, 0),
-            MirForeignTarget::Interpreter,
         );
         *FFI_STATE.lock().unwrap_or_else(|error| error.into_inner()) = None;
         let result = result.expect("uniform native ABI fixture must return");
@@ -5189,38 +2879,33 @@ mod tests {
             vec![
                 AmbientMirExternWriteback {
                     parameter: 1,
-                    value: MirRuntimeValue::Int(23),
+                    value: MirRuntimeValue::Int(23)
                 },
                 AmbientMirExternWriteback {
                     parameter: 2,
                     value: MirRuntimeValue::List(vec![
                         MirRuntimeValue::Int(4),
                         MirRuntimeValue::Int(5),
-                    ]),
+                    ])
                 },
                 AmbientMirExternWriteback {
                     parameter: 3,
-                    value: MirRuntimeValue::String("new".to_string()),
+                    value: MirRuntimeValue::String("new".to_string())
                 },
                 AmbientMirExternWriteback {
                     parameter: 4,
-                    value: MirRuntimeValue::Int(42),
+                    value: MirRuntimeValue::Int(42)
                 },
             ]
         );
     }
 
-
     #[test]
     fn native_writeback_decode_covers_scalar_list_string_and_indexed_handle_carriers() {
         let state = test_state();
         let entry = test_entry();
-        for target in [MirForeignTarget::Interpreter, MirForeignTarget::Cranelift] {
-            let handle_arg = if matches!(target, MirForeignTarget::Cranelift) {
-                register_ffi_handle(MirHandleId(0xfeed), 42)
-            } else {
-                42
-            };
+        {
+            let handle_arg = 42;
             let args = vec![
                 MirRuntimeValue::Int(3),
                 MirRuntimeValue::Int(7),
@@ -5237,7 +2922,6 @@ mod tests {
                 &state.records,
                 "test_writeback",
                 Span::new(0, 0),
-                target,
             )
             .expect("test arguments have checked carriers");
             assert_eq!(storage.len(), 3);
@@ -5265,70 +2949,25 @@ mod tests {
                 vec![
                     AmbientMirExternWriteback {
                         parameter: 1,
-                        value: MirRuntimeValue::Int(23),
+                        value: MirRuntimeValue::Int(23)
                     },
                     AmbientMirExternWriteback {
                         parameter: 2,
                         value: MirRuntimeValue::List(vec![
                             MirRuntimeValue::Int(4),
                             MirRuntimeValue::Int(5),
-                        ]),
+                        ])
                     },
                     AmbientMirExternWriteback {
                         parameter: 3,
-                        value: MirRuntimeValue::String("new".to_string()),
+                        value: MirRuntimeValue::String("new".to_string())
                     },
                     AmbientMirExternWriteback {
                         parameter: 4,
-                        value: MirRuntimeValue::Int(handle_arg),
+                        value: MirRuntimeValue::Int(handle_arg)
                     },
                 ]
             );
-            if matches!(target, MirForeignTarget::Cranelift) {
-                assert_eq!(take_ffi_handle(handle_arg), Some((MirHandleId(0xfeed), 42)));
-            }
         }
-    }
-
-    #[test]
-    fn native_handle_registry_distinguishes_reused_raw_instances() {
-        let handle = MirHandleId(0xbeef);
-        let first = register_ffi_handle(handle, 17);
-        assert_eq!(take_ffi_handle(first), Some((handle, 17)));
-        let second = register_ffi_handle(handle, 17);
-        assert_ne!(first, second);
-        assert_eq!(ffi_handle_raw(second), Some(17));
-        assert_eq!(take_ffi_handle(second), Some((handle, 17)));
-    }
-    #[test]
-    fn native_handle_registry_validates_each_parameter_type() {
-        let expected = MirHandleId(0x1111);
-        let other = MirHandleId(0x2222);
-        let token = register_ffi_handle(expected, 17);
-        let args = [MirRuntimeValue::Int(token)];
-        assert_eq!(
-            runtime_handle_arg(
-                &args,
-                0,
-                "test_handle_types",
-                Span::new(0, 0),
-                MirForeignTarget::Cranelift,
-                Some(expected),
-            )
-            .unwrap(),
-            17
-        );
-        assert!(
-            runtime_handle_arg(
-                &args,
-                0,
-                "test_handle_types",
-                Span::new(0, 0),
-                MirForeignTarget::Cranelift,
-                Some(other),
-            )
-            .is_err()
-        );
-        assert_eq!(take_ffi_handle(token), Some((expected, 17)));
     }
 }

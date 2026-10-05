@@ -1,7 +1,6 @@
 // This module includes shared Prelude source that several hosts compile,
 // each using a different subset, so dead-code reports here are about the
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
-#![allow(dead_code)]
 
 // D-LIB-CALLGRANT1=A: JIT uses the exact load/check/map Prelude source. This
 // module only translates heap-level handles into a resident table slot.
@@ -49,14 +48,3 @@ pub(crate) fn clear() {
     LOADED.with(|loaded| loaded.borrow_mut().clear());
 }
 
-/// Scope native module handles to one non-resident execution. Resident
-/// hot-swap sessions intentionally keep their table; one-shot runs and
-/// interpreter/deopt invocations install this guard so every return path
-/// closes handles and removes staged payloads.
-pub(crate) struct LoadScope;
-
-impl Drop for LoadScope {
-    fn drop(&mut self) {
-        clear();
-    }
-}

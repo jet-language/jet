@@ -73,18 +73,6 @@ pub(crate) mod process_prelude {
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        pub struct Stat {
-            pub size: i64,
-            pub modified_ms: i64,
-            pub created_ms: i64,
-            pub readonly: bool,
-            pub is_file: bool,
-            pub is_dir: bool,
-            pub is_symlink: bool,
-            pub kind: String,
-        }
-
-        #[derive(Clone, Debug, PartialEq)]
         pub enum IOError {
             InvalidInput(IOContext),
             NotFound(IOContext),
@@ -203,7 +191,6 @@ pub(crate) mod process_prelude {
                 }
             }
         }
-
 
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub struct TerminalSize {
@@ -476,7 +463,7 @@ pub(crate) mod process_prelude {
 
     pub(crate) use jet_std::{
         Duration, IOContext, IOError, IOOperation, ProcessChild, ProcessPlan, ProcessReader,
-        ProcessReceipt, ProcessResourceLimit, ProcessSignal, ProcessSpec, ProcessStreamMode,
+        ProcessReceipt, ProcessResourceLimit, ProcessSpec, ProcessStreamMode,
         TerminalMode, TerminalPolicy, TerminalSession, TerminalSize,
     };
 
@@ -490,7 +477,6 @@ pub(crate) mod process_prelude {
     pub(crate) fn spec_args_extend(spec: ProcessSpec, extra: &Vec<String>) -> ProcessSpec {
         jet_process_spec_args_extend(spec, extra)
     }
-
 
     pub(crate) fn spec_cwd(spec: ProcessSpec, cwd: &String) -> ProcessSpec {
         jet_process_spec_cwd(spec, cwd)
@@ -603,18 +589,12 @@ pub(crate) mod process_prelude {
         jet_process_child_close(child)
     }
 
-
     pub(crate) fn child_stdin_write(child: &ProcessChild, text: &String) -> Result<(), IOError> {
         jet_process_stdin_write(&child.stdin, text)
     }
     pub(crate) fn child_stdin_close(child: &ProcessChild) {
         jet_process_stdin_close(&child.stdin)
     }
-
-    pub(crate) fn process_on_signal(signal: ProcessSignal) {
-        jet_process_on_signal(&signal)
-    }
-
 
     pub(crate) fn child_exited(child: &ProcessChild) -> Result<bool, IOError> {
         jet_process_child_exited(child)
@@ -632,36 +612,12 @@ pub(crate) mod process_prelude {
         jet_process_child_interrupt(child)
     }
 
-    pub(crate) fn stream_next_line(
-        reader: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
-    ) -> Result<Option<String>, IOError> {
-        jet_process_stream_next_line(reader)
-    }
     /// Send-safe owner for a process output reader.  The ordinary process
     /// Prelude keeps an `Rc<RefCell<...>>` because a child binding is
     /// thread-affine; Source loop cursors need the same reader lease behind a
     /// scheduler-safe mutex once the checked owner has been adopted.
     pub(crate) type SourceProcessReader =
         std::sync::Arc<std::sync::Mutex<Option<std::io::BufReader<ProcessReader>>>>;
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(crate) enum SourceProcessStreamKind {
-        Stdout,
-        Stderr,
-    }
-
-    pub(crate) fn source_take_process_stream(
-        child: &ProcessChild,
-        stream: SourceProcessStreamKind,
-    ) -> Result<SourceProcessReader, String> {
-        let reader = match stream {
-            SourceProcessStreamKind::Stdout => child.stdout.borrow_mut().take(),
-            SourceProcessStreamKind::Stderr => child.stderr.borrow_mut().take(),
-        };
-        reader
-            .map(|reader| std::sync::Arc::new(std::sync::Mutex::new(Some(reader))))
-            .ok_or_else(|| "process output stream is already moved or closed".to_string())
-    }
 
     pub(crate) fn source_process_stream_next_line(
         reader: &SourceProcessReader,
@@ -675,7 +631,6 @@ pub(crate) mod process_prelude {
         })?;
         jet_process_child_read_line(&mut *reader)
     }
-
 
     pub(crate) fn terminal_session_resize(
         session: &TerminalSession,

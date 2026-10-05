@@ -13,13 +13,13 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use jet_codegen::Codegen::NativeLoopCursor::{
-    NativeIter, NativeLoopResourceFactory, NativeLoopResourceKey, NativeLoopResourceOutcome,
+    NativeIter, NativeLoopResourceFactory, NativeLoopResourceKey, NativeLoopResourceOutcome
 };
 use jet_foundation::MIR::{
     stable_id, MirCoreOwner, MirHandleId, MirLoopSourceKind, MirNativeCursor,
-    MirNativeCursorError, MirNativeOwned, MirOwnershipMode, MirRuntimeValue, MirType, MirTypeKind,
+    MirNativeCursorError, MirNativeOwned, MirOwnershipMode, MirRuntimeValue, MirType, MirTypeKind
 };
-use crate::backend::{SourceExecutionCompletion, SourceExecutionCompletionScope};
+use crate::SourceEntry::{SourceExecutionCompletion, SourceExecutionCompletionScope};
 
 /// The checked handle identity emitted for the private Prelude cursor carrier.
 pub fn loop_cursor_handle_id() -> MirHandleId {
@@ -43,7 +43,6 @@ pub fn shared_interop_weak_root_handle_id() -> MirHandleId {
     ))
 }
 
-
 /// Exact kind of a Source-owned resource slot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceResourceKind {
@@ -63,7 +62,7 @@ pub enum SourceResourceKind {
     SharedInteropWeakRoot { type_identity: u64 },
     EncodingReader { reader_type: String },
     EncodingWriter { writer_type: String },
-    NativeCursor,
+    NativeCursor
 }
 impl SourceResourceKind {
     pub fn from_loop_source(source: &MirLoopSourceKind) -> Result<Self, String> {
@@ -75,7 +74,7 @@ impl SourceResourceKind {
             MirLoopSourceKind::ChannelReceiver => Ok(Self::ChannelReceiver),
             MirLoopSourceKind::EncodingReader { reader_type } => {
                 Ok(Self::EncodingReader {
-                    reader_type: reader_type.clone(),
+                    reader_type: reader_type.clone()
                 })
             }
             MirLoopSourceKind::Chars => Err("character iteration is not a resource slot".to_string()),
@@ -96,7 +95,7 @@ impl SourceResourceKind {
                 Self::EncodingReader { reader_type: left },
                 MirLoopSourceKind::EncodingReader { reader_type: right },
             ) => left == right,
-            _ => false,
+            _ => false
         }
     }
     pub fn as_loop_source(&self) -> Result<MirLoopSourceKind, String> {
@@ -109,7 +108,7 @@ impl SourceResourceKind {
             Self::ChannelReceiver => Ok(MirLoopSourceKind::ChannelReceiver),
             Self::ChannelSender => Err("channel sender is not a loop producer kind".to_string()),
             Self::EncodingReader { reader_type } => Ok(MirLoopSourceKind::EncodingReader {
-                reader_type: reader_type.clone(),
+                reader_type: reader_type.clone()
             }),
             Self::EncodingWriter { .. } => {
                 Err("encoding writer is not a loop producer kind".to_string())
@@ -118,7 +117,7 @@ impl SourceResourceKind {
                 Err("Source Shared owners are not loop producer kinds".to_string())
             }
             Self::NativeBinding => Err("native binding is not a loop producer kind".to_string()),
-            Self::NativeCursor => Err("native cursor is not a loop producer kind".to_string()),
+            Self::NativeCursor => Err("native cursor is not a loop producer kind".to_string())
         }
     }
 
@@ -174,61 +173,61 @@ impl SourceResourceKind {
             "Sender" => (Self::ChannelSender, 1),
             "JSONReader" => (
                 Self::EncodingReader {
-                    reader_type: "JSONReader".to_string(),
+                    reader_type: "JSONReader".to_string()
                 },
                 0,
             ),
             "JSONWriter" => (
                 Self::EncodingWriter {
-                    writer_type: "JSONWriter".to_string(),
+                    writer_type: "JSONWriter".to_string()
                 },
                 0,
             ),
             "JSONLReader" => (
                 Self::EncodingReader {
-                    reader_type: "JSONLReader".to_string(),
+                    reader_type: "JSONLReader".to_string()
                 },
                 0,
             ),
             "JSONLWriter" => (
                 Self::EncodingWriter {
-                    writer_type: "JSONLWriter".to_string(),
+                    writer_type: "JSONLWriter".to_string()
                 },
                 0,
             ),
             "CSVReader" => (
                 Self::EncodingReader {
-                    reader_type: "CSVReader".to_string(),
+                    reader_type: "CSVReader".to_string()
                 },
                 0,
             ),
             "CSVWriter" => (
                 Self::EncodingWriter {
-                    writer_type: "CSVWriter".to_string(),
+                    writer_type: "CSVWriter".to_string()
                 },
                 0,
             ),
             "XMLReader" => (
                 Self::EncodingReader {
-                    reader_type: "XMLReader".to_string(),
+                    reader_type: "XMLReader".to_string()
                 },
                 0,
             ),
             "XMLWriter" => (
                 Self::EncodingWriter {
-                    writer_type: "XMLWriter".to_string(),
+                    writer_type: "XMLWriter".to_string()
                 },
                 0,
             ),
             "CBORReader" => (
                 Self::EncodingReader {
-                    reader_type: "CBORReader".to_string(),
+                    reader_type: "CBORReader".to_string()
                 },
                 0,
             ),
             "CBORWriter" => (
                 Self::EncodingWriter {
-                    writer_type: "CBORWriter".to_string(),
+                    writer_type: "CBORWriter".to_string()
                 },
                 0,
             ),
@@ -257,7 +256,7 @@ impl SourceResourceHandle {
         Ok(NativeLoopResourceKey {
             handle: self.handle,
             raw: self.raw,
-            source_kind: self.kind.as_loop_source()?,
+            source_kind: self.kind.as_loop_source()?
         })
     }
 }
@@ -269,7 +268,7 @@ pub struct SourceResourceHandle {
     pub handle: MirHandleId,
     pub raw: i64,
     pub kind: SourceResourceKind,
-    pub generation: u32,
+    pub generation: u32
 }
 
 /// Result of releasing one Source capability. A final physical channel
@@ -278,14 +277,14 @@ pub struct SourceResourceHandle {
 #[derive(Debug)]
 pub enum SourceResourceRelease {
     Released,
-    DrainedChannel(Vec<MirRuntimeValue>),
+    DrainedChannel(Vec<MirRuntimeValue>)
 }
 
 impl SourceResourceRelease {
     pub fn drained_values(mut self) -> Vec<MirRuntimeValue> {
         match &mut self {
             Self::Released => Vec::new(),
-            Self::DrainedChannel(values) => std::mem::take(values),
+            Self::DrainedChannel(values) => std::mem::take(values)
         }
     }
 }
@@ -295,9 +294,8 @@ impl SourceResourceRelease {
 #[derive(Debug)]
 pub struct SourceResourceCleanupError {
     pub error: String,
-    pub remaining: Option<MirRuntimeValue>,
+    pub remaining: Option<MirRuntimeValue>
 }
-
 
 /// Retirement could not hand every queued Source value to its origin owner.
 /// `values` contains only carriers that were never passed to Source cleanup;
@@ -308,15 +306,15 @@ pub struct SourceResourceRetireError {
     pub arena: SourceResourceArena,
     pub values: Vec<MirRuntimeValue>,
     pub completions: Vec<SourceExecutionCompletion>,
-    retryable: bool,
+    retryable: bool
 }
 
 #[derive(Debug)]
 pub enum SourceResourceFinalizationOutcome {
     Retired {
-        completions: Vec<SourceExecutionCompletion>,
+        completions: Vec<SourceExecutionCompletion>
     },
-    Failed(SourceResourceRetireError),
+    Failed(SourceResourceRetireError)
 }
 
 /// Active physical resource context and exact MIR carriers handed to the
@@ -324,10 +322,8 @@ pub enum SourceResourceFinalizationOutcome {
 pub struct SourceResourceFinalization {
     arena: SourceResourceArena,
     values: Vec<MirRuntimeValue>,
-    lease: SourceResourceLease,
+    lease: SourceResourceLease
 }
-
-
 
 impl SourceResourceFinalization {
     pub fn arena(&self) -> &SourceResourceArena {
@@ -359,7 +355,7 @@ impl SourceResourceFinalization {
                 return Err(SourceResourceFinalizationError {
                     error,
                     values: self.values,
-                    completions,
+                    completions
                 });
             }
         };
@@ -373,16 +369,15 @@ impl SourceResourceFinalization {
             Ok(()) => Err(SourceResourceFinalizationError {
                 error: "Source finalization left carriers unconsumed".to_string(),
                 values: self.values,
-                completions,
+                completions
             }),
             Err(error) => Err(SourceResourceFinalizationError {
                 error,
                 values: self.values,
-                completions,
-            }),
+                completions
+            })
         }
     }
-
 
 }
 
@@ -402,7 +397,7 @@ impl fmt::Debug for SourceResourceFinalization {
 pub struct SourceResourceFinalizationError {
     pub error: String,
     pub values: Vec<MirRuntimeValue>,
-    pub completions: Vec<SourceExecutionCompletion>,
+    pub completions: Vec<SourceExecutionCompletion>
 }
 
 impl SourceResourceFinalizationError {
@@ -457,8 +452,6 @@ fn route_retire_result(
     }
 }
 
-
-
 /// Checked identity of a physical native value root. Interface method identity
 /// is intentionally absent: SourceInterfaces performs that method check after
 /// it resolves the exact retained interface carrier.
@@ -468,15 +461,15 @@ pub enum SourceNativeBindingIdentity {
     Interface {
         execution: jet_foundation::MIR::MirExecutionIdentity,
         artifact: jet_foundation::MIR::MirArtifactId,
-        receiver_type: MirType,
-    },
+        receiver_type: MirType
+    }
 }
 
 impl SourceNativeBindingIdentity {
     pub fn value_type(&self) -> &MirType {
         match self {
             Self::Callable(identity) => &identity.callable_type,
-            Self::Interface { receiver_type, .. } => receiver_type,
+            Self::Interface { receiver_type, .. } => receiver_type
         }
     }
 
@@ -493,7 +486,7 @@ impl SourceNativeBindingIdentity {
 pub struct SourceNativeBinding {
     carrier: MirNativeOwned,
     object: crate::SourceInterfaces::NativeInterfaceObjectId,
-    identity: SourceNativeBindingIdentity,
+    identity: SourceNativeBindingIdentity
 }
 
 impl SourceNativeBinding {
@@ -515,8 +508,8 @@ impl SourceNativeBinding {
             identity: SourceNativeBindingIdentity::Interface {
                 execution,
                 artifact,
-                receiver_type,
-            },
+                receiver_type
+            }
         })
     }
 
@@ -535,7 +528,7 @@ impl SourceNativeBinding {
         Ok(Self {
             carrier: object.clone_root(),
             object: object.id(),
-            identity: SourceNativeBindingIdentity::Callable(identity),
+            identity: SourceNativeBindingIdentity::Callable(identity)
         })
     }
 
@@ -565,7 +558,7 @@ impl SourceNativeBinding {
 #[derive(Debug)]
 pub struct SourceChannelSendError {
     pub error: MirNativeCursorError,
-    pub value: MirRuntimeValue,
+    pub value: MirRuntimeValue
 }
 
 impl SourceChannelSendError {
@@ -573,7 +566,6 @@ impl SourceChannelSendError {
         (self.error, self.value)
     }
 }
-
 
 /// Result of consuming one Source capability into another typed owner.
 ///
@@ -584,7 +576,7 @@ impl SourceChannelSendError {
 #[derive(Debug, PartialEq)]
 pub struct SourceResourceTransferOutcome {
     pub consumed: Option<SourceResourceHandle>,
-    pub result: Result<SourceResourceHandle, MirNativeCursorError>,
+    pub result: Result<SourceResourceHandle, MirNativeCursorError>
 }
 
 /// A physical owner detached from one checked Source capability.  The lease
@@ -593,7 +585,7 @@ pub struct SourceResourceTransferOutcome {
 pub struct SourceOwnedLease {
     owner: Arc<Mutex<BackendOwner>>,
     consumed: SourceResourceHandle,
-    kind: SourceResourceKind,
+    kind: SourceResourceKind
 }
 
 impl SourceOwnedLease {
@@ -604,7 +596,7 @@ impl SourceOwnedLease {
             value,
             owner: self.owner,
             consumed: self.consumed,
-            kind: self.kind,
+            kind: self.kind
         }
     }
     fn into_owner(self) -> Arc<Mutex<BackendOwner>> {
@@ -623,14 +615,14 @@ pub struct SourceOwnedValue {
     owner: Arc<Mutex<BackendOwner>>,
     value: MirRuntimeValue,
     consumed: SourceResourceHandle,
-    kind: SourceResourceKind,
+    kind: SourceResourceKind
 }
 
 /// Typed payload object stored inside `MirNativeOwned`.  It is public only so
 /// native boundary code can use the MIR carrier's typed downcast; its fields
 /// remain private and it can only be built from a real Source-owned value.
 pub struct SourceOwnedPayload {
-    value: SourceOwnedValue,
+    value: SourceOwnedValue
 }
 
 impl SourceOwnedPayload {
@@ -651,7 +643,6 @@ impl SourceOwnedValue {
     pub fn value(&self) -> &MirRuntimeValue {
         &self.value
     }
-
 
     pub fn kind(&self) -> &SourceResourceKind {
         &self.kind
@@ -692,7 +683,7 @@ pub fn source_owned_from_runtime_value(
 #[derive(Debug)]
 pub struct SourceOwnedTakeError {
     pub error: MirNativeCursorError,
-    pub value: MirRuntimeValue,
+    pub value: MirRuntimeValue
 }
 
 impl SourceOwnedTakeError {
@@ -706,7 +697,7 @@ impl SourceOwnedTakeError {
 /// complete physical/logical owner for Source rollback or cleanup.
 pub struct SourceOwnedTransferFailure {
     pub error: MirNativeCursorError,
-    pub owned: SourceOwnedValue,
+    pub owned: SourceOwnedValue
 }
 
 impl SourceOwnedTransferFailure {
@@ -728,7 +719,7 @@ impl std::fmt::Debug for SourceOwnedTransferFailure {
 /// handle. `result` preserves the complete owned value on every failure.
 pub struct SourceOwnedTransferOutcome {
     pub consumed: SourceResourceHandle,
-    pub result: Result<(SourceResourceHandle, MirRuntimeValue), SourceOwnedTransferFailure>,
+    pub result: Result<(SourceResourceHandle, MirRuntimeValue), SourceOwnedTransferFailure>
 }
 
 /// Cursor acquisition outcome with the source receipt preserved after a
@@ -737,7 +728,7 @@ pub struct SourceOwnedTransferOutcome {
 #[derive(Debug, PartialEq)]
 pub struct SourceCursorInitOutcome {
     pub consumed: Option<SourceResourceHandle>,
-    pub result: Result<(SourceResourceHandle, MirRuntimeValue), MirNativeCursorError>,
+    pub result: Result<(SourceResourceHandle, MirRuntimeValue), MirNativeCursorError>
 }
 
 /// A typed file owner adopted from the canonical FileStream Prelude leaf.
@@ -750,10 +741,6 @@ impl SourceFileReader {
             .map_err(file_error)
     }
 
-    /// Consume a legacy JIT FileReader slot at the typed owner boundary.
-    pub(crate) fn from_handle(handle: i64) -> Result<Self, String> {
-        crate::enc_stream::source_take_file_reader(handle).map(Self)
-    }
 }
 
 /// A typed writer owner.  Source keeps this owner in the same invocation
@@ -773,10 +760,6 @@ impl SourceFileWriter {
             .map_err(file_error)
     }
 
-    /// Consume a legacy JIT FileWriter slot at the typed owner boundary.
-    pub(crate) fn from_handle(handle: i64) -> Result<Self, String> {
-        crate::enc_stream::source_take_file_writer(handle).map(Self)
-    }
 }
 
 /// A process stdout/stderr owner whose reader lease is safe to move into a
@@ -785,12 +768,6 @@ impl SourceFileWriter {
 pub struct SourceProcessStream(crate::ProcessPrelude::process_prelude::SourceProcessReader);
 
 impl SourceProcessStream {
-    pub(crate) fn from_child(
-        child: &crate::ProcessPrelude::process_prelude::ProcessChild,
-        stream: crate::ProcessPrelude::process_prelude::SourceProcessStreamKind,
-    ) -> Result<Self, String> {
-        crate::ProcessPrelude::process_prelude::source_take_process_stream(child, stream).map(Self)
-    }
 }
 /// Public projection of the canonical encoding limits used when an owner is
 /// acquired.  The runtime reader keeps the typed `JetOutcome` carrier
@@ -802,7 +779,7 @@ pub struct SourceEncodingLimits {
     pub max_item_bytes: i64,
     pub max_total_bytes: Option<i64>,
     pub max_expansion_depth: i64,
-    pub max_expansion_bytes: i64,
+    pub max_expansion_bytes: i64
 }
 
 impl SourceEncodingLimits {
@@ -814,10 +791,10 @@ impl SourceEncodingLimits {
             max_item_bytes: limits.max_item_bytes,
             max_total_bytes: match limits.max_total_bytes {
                 Ok(value) => Some(value),
-                Err(_) => None,
+                Err(_) => None
             },
             max_expansion_depth: limits.max_expansion_depth,
-            max_expansion_bytes: limits.max_expansion_bytes,
+            max_expansion_bytes: limits.max_expansion_bytes
         }
     }
 
@@ -831,7 +808,7 @@ impl SourceEncodingLimits {
                 .map(Ok)
                 .unwrap_or(Err(jet_foundation::Outcome::JetAbsent)),
             max_expansion_depth: self.max_expansion_depth,
-            max_expansion_bytes: self.max_expansion_bytes,
+            max_expansion_bytes: self.max_expansion_bytes
         }
     }
 }
@@ -846,7 +823,7 @@ pub struct SourceXmlLimits {
     pub max_text_bytes: i64,
     pub max_entity_declarations: i64,
     pub max_entity_depth: i64,
-    pub max_entity_replacement_bytes: i64,
+    pub max_entity_replacement_bytes: i64
 }
 
 impl SourceXmlLimits {
@@ -861,7 +838,7 @@ impl SourceXmlLimits {
             max_text_bytes: limits.max_text_bytes,
             max_entity_declarations: limits.max_entity_declarations,
             max_entity_depth: limits.max_entity_depth,
-            max_entity_replacement_bytes: limits.max_entity_replacement_bytes,
+            max_entity_replacement_bytes: limits.max_entity_replacement_bytes
         }
     }
 
@@ -880,7 +857,7 @@ impl SourceXmlLimits {
             max_text_bytes: self.max_text_bytes,
             max_entity_declarations: self.max_entity_declarations,
             max_entity_depth: self.max_entity_depth,
-            max_entity_replacement_bytes: self.max_entity_replacement_bytes,
+            max_entity_replacement_bytes: self.max_entity_replacement_bytes
         }
     }
 }
@@ -889,7 +866,7 @@ impl SourceXmlLimits {
 pub enum SourceXmlEntityPolicy {
     Preserve,
     Reject,
-    Resolve(std::collections::BTreeMap<String, String>),
+    Resolve(std::collections::BTreeMap<String, String>)
 }
 
 impl SourceXmlEntityPolicy {
@@ -919,7 +896,7 @@ impl SourceXmlEntityPolicy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceXmlParseOptions {
     pub entities: SourceXmlEntityPolicy,
-    pub limits: SourceXmlLimits,
+    pub limits: SourceXmlLimits
 }
 
 impl SourceXmlParseOptions {
@@ -927,14 +904,14 @@ impl SourceXmlParseOptions {
         let options = crate::enc_stream::runtime::jet_std::XMLParseOptions::safe();
         Self {
             entities: SourceXmlEntityPolicy::from_runtime(options.entities),
-            limits: SourceXmlLimits::from_runtime(options.limits),
+            limits: SourceXmlLimits::from_runtime(options.limits)
         }
     }
 
     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::XMLParseOptions {
         crate::enc_stream::runtime::jet_std::XMLParseOptions {
             entities: self.entities.into_runtime(),
-            limits: self.limits.into_runtime(),
+            limits: self.limits.into_runtime()
         }
     }
 }
@@ -944,7 +921,7 @@ pub enum SourceXmlEncoding {
     Utf8,
     Utf8Bom,
     Utf16Le,
-    Utf16Be,
+    Utf16Be
 }
 
 impl SourceXmlEncoding {
@@ -955,7 +932,7 @@ impl SourceXmlEncoding {
             crate::enc_stream::runtime::jet_std::XMLEncoding::UTF8 => Self::Utf8,
             crate::enc_stream::runtime::jet_std::XMLEncoding::UTF8BOM => Self::Utf8Bom,
             crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16LE => Self::Utf16Le,
-            crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16BE => Self::Utf16Be,
+            crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16BE => Self::Utf16Be
         }
     }
 
@@ -964,7 +941,7 @@ impl SourceXmlEncoding {
             Self::Utf8 => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF8,
             Self::Utf8Bom => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF8BOM,
             Self::Utf16Le => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16LE,
-            Self::Utf16Be => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16BE,
+            Self::Utf16Be => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16BE
         }
     }
 }
@@ -972,7 +949,7 @@ impl SourceXmlEncoding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceXmlLexicalPolicy {
     PreserveValid,
-    Deterministic,
+    Deterministic
 }
 
 impl SourceXmlLexicalPolicy {
@@ -1004,7 +981,7 @@ impl SourceXmlLexicalPolicy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceXmlRenderOptions {
     pub encoding: SourceXmlEncoding,
-    pub lexical: SourceXmlLexicalPolicy,
+    pub lexical: SourceXmlLexicalPolicy
 }
 
 impl SourceXmlRenderOptions {
@@ -1012,18 +989,17 @@ impl SourceXmlRenderOptions {
         let options = crate::enc_stream::runtime::jet_std::XMLRenderOptions::safe();
         Self {
             encoding: SourceXmlEncoding::from_runtime(options.encoding),
-            lexical: SourceXmlLexicalPolicy::from_runtime(options.lexical),
+            lexical: SourceXmlLexicalPolicy::from_runtime(options.lexical)
         }
     }
 
     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::XMLRenderOptions {
         crate::enc_stream::runtime::jet_std::XMLRenderOptions {
             encoding: self.encoding.into_runtime(),
-            lexical: self.lexical.into_runtime(),
+            lexical: self.lexical.into_runtime()
         }
     }
 }
-
 
 /// An encoding reader owner.  The concrete reader remains private so callers
 /// can only obtain it through the canonical typed constructors below.
@@ -1034,7 +1010,7 @@ enum EncodingReader {
     Jsonl(crate::enc_stream::runtime::jet_std::JSONLReader),
     Csv(crate::enc_stream::runtime::jet_std::CSVReader),
     Xml(crate::enc_stream::runtime::jet_std::XMLReader),
-    Cbor(crate::enc_stream::runtime::jet_std::CBORReader),
+    Cbor(crate::enc_stream::runtime::jet_std::CBORReader)
 }
 
 impl SourceEncodingReader {
@@ -1128,32 +1104,13 @@ impl SourceEncodingReader {
             .map_err(|error| encoding_error(&error))
     }
 
-    /// Consume a resident typed codec reader without reopening its input
-    /// file.  The slot is moved exactly once by the enc_stream boundary.
-    pub(crate) fn from_handle(handle: i64, reader_type: &str) -> Result<Self, String> {
-        let reader = match reader_type {
-            "JSONReader" => crate::enc_stream::source_take_json_reader(handle)
-                .map(EncodingReader::Json),
-            "JSONLReader" => crate::enc_stream::source_take_jsonl_reader(handle)
-                .map(EncodingReader::Jsonl),
-            "CSVReader" => crate::enc_stream::source_take_csv_reader(handle)
-                .map(EncodingReader::Csv),
-            "XMLReader" => crate::enc_stream::source_take_xml_reader(handle)
-                .map(EncodingReader::Xml),
-            "CBORReader" => crate::enc_stream::source_take_cbor_reader(handle)
-                .map(EncodingReader::Cbor),
-            _ => return Err(format!("unknown checked encoding reader type `{reader_type}`")),
-        }?;
-        Ok(Self(reader))
-    }
-
     fn reader_type(&self) -> &'static str {
         match &self.0 {
             EncodingReader::Json(_) => "JSONReader",
             EncodingReader::Jsonl(_) => "JSONLReader",
             EncodingReader::Csv(_) => "CSVReader",
             EncodingReader::Xml(_) => "XMLReader",
-            EncodingReader::Cbor(_) => "CBORReader",
+            EncodingReader::Cbor(_) => "CBORReader"
         }
     }
 }
@@ -1167,7 +1124,7 @@ enum EncodingWriter {
     Jsonl(crate::enc_stream::runtime::jet_std::JSONLWriter),
     Csv(crate::enc_stream::runtime::jet_std::CSVWriter),
     Xml(crate::enc_stream::runtime::jet_std::XMLWriter),
-    Cbor(crate::enc_stream::runtime::jet_std::CBORWriter),
+    Cbor(crate::enc_stream::runtime::jet_std::CBORWriter)
 }
 
 impl SourceEncodingWriter {
@@ -1255,7 +1212,7 @@ impl SourceEncodingWriter {
             EncodingWriter::Jsonl(_) => "JSONLWriter",
             EncodingWriter::Csv(_) => "CSVWriter",
             EncodingWriter::Xml(_) => "XMLWriter",
-            EncodingWriter::Cbor(_) => "CBORWriter",
+            EncodingWriter::Cbor(_) => "CBORWriter"
         }
     }
 }
@@ -1272,11 +1229,11 @@ enum BackendOwner {
     SharedInteropRoot(crate::SourceSharedInterop::SourceSharedInterop),
     SharedInteropWeakRoot {
         type_identity: u64,
-        root: Arc<crate::SourceSharedInterop::SourceSharedInteropWeak>,
+        root: Arc<crate::SourceSharedInterop::SourceSharedInteropWeak>
     },
     NativeBinding(SourceNativeBinding),
     Encoding(SourceEncodingReader),
-    EncodingWriter(SourceEncodingWriter),
+    EncodingWriter(SourceEncodingWriter)
 }
 impl BackendOwner {
     fn kind(&self) -> SourceResourceKind {
@@ -1290,20 +1247,20 @@ impl BackendOwner {
             Self::ChannelSender(_) => SourceResourceKind::ChannelSender,
             Self::NativeBinding(_) => SourceResourceKind::NativeBinding,
             Self::SharedInteropRoot(root) => SourceResourceKind::SharedInteropRoot {
-                type_identity: root.type_id(),
+                type_identity: root.type_id()
             },
             Self::SharedInteropWeakRoot {
                 type_identity,
                 ..
             } => SourceResourceKind::SharedInteropWeakRoot {
-                type_identity: *type_identity,
+                type_identity: *type_identity
             },
             Self::Encoding(reader) => SourceResourceKind::EncodingReader {
-                reader_type: reader.reader_type().to_string(),
+                reader_type: reader.reader_type().to_string()
             },
             Self::EncodingWriter(writer) => SourceResourceKind::EncodingWriter {
-                writer_type: writer.writer_type().to_string(),
-            },
+                writer_type: writer.writer_type().to_string()
+            }
         }
     }
 }
@@ -1316,7 +1273,7 @@ impl FromBackendOwner for SourceFileReader {
     fn from_backend_owner(owner: BackendOwner) -> Result<Self, BackendOwner> {
         match owner {
             BackendOwner::File(reader) => Ok(reader),
-            owner => Err(owner),
+            owner => Err(owner)
         }
     }
 }
@@ -1325,21 +1282,21 @@ impl FromBackendOwner for SourceFileWriter {
     fn from_backend_owner(owner: BackendOwner) -> Result<Self, BackendOwner> {
         match owner {
             BackendOwner::FileWriter(writer) => Ok(writer),
-            owner => Err(owner),
+            owner => Err(owner)
         }
     }
 }
 
 enum SlotEntry {
     Backend(Arc<Mutex<BackendOwner>>),
-    Cursor(MirNativeCursor),
+    Cursor(MirNativeCursor)
 }
 
 struct Slot {
     handle: MirHandleId,
     kind: SourceResourceKind,
     generation: u32,
-    entry: SlotEntry,
+    entry: SlotEntry
 }
 
 // Capability generations are globally monotonic, but this atomic is only a
@@ -1360,9 +1317,8 @@ struct ArenaState {
     finalizing: bool,
     retired: bool,
     finalizer: Option<SourceResourceFinalizer>,
-    finalization_handler: Option<SourceResourceFinalizationHandler>,
+    finalization_handler: Option<SourceResourceFinalizationHandler>
 }
-
 
 thread_local! {
     static ACTIVE_SOURCE_ARENA: RefCell<Option<SourceResourceArena>> =
@@ -1377,7 +1333,7 @@ thread_local! {
 /// `Arc` clone, keeps the table alive across session retirement.
 #[derive(Clone)]
 pub struct SourceResourceArena {
-    state: Arc<Mutex<ArenaState>>,
+    state: Arc<Mutex<ArenaState>>
 }
 
 impl fmt::Debug for SourceResourceArena {
@@ -1393,14 +1349,14 @@ impl fmt::Debug for SourceResourceArena {
 /// release.
 #[derive(Clone)]
 pub struct SourceResourceSession {
-    arena: SourceResourceArena,
+    arena: SourceResourceArena
 
 }
 
 struct SourceResourceLeaseInner {
     arena: SourceResourceArena,
     finalization_root: bool,
-    finalization_phase: Option<Arc<AtomicBool>>,
+    finalization_phase: Option<Arc<AtomicBool>>
 }
 
 struct SourceResourceFinalizationPhase<'a>(&'a AtomicBool);
@@ -1415,14 +1371,14 @@ impl Drop for SourceResourceFinalizationPhase<'_> {
 /// keep an arena alive after retirement. Lease aliases share one explicit
 /// retained-root count; only the final alias releases it.
 pub struct SourceResourceLease {
-    inner: Arc<SourceResourceLeaseInner>,
+    inner: Arc<SourceResourceLeaseInner>
 }
 
 /// Non-owning handle to a counted Source resource lease. It cannot keep the
 /// arena alive; upgrading only aliases a lease that still has a strong owner.
 #[derive(Clone)]
 pub struct SourceResourceLeaseWeak {
-    inner: Weak<SourceResourceLeaseInner>,
+    inner: Weak<SourceResourceLeaseInner>
 }
 
 /// Checked permission for narrowly-scoped resource creation/adoption while
@@ -1430,12 +1386,12 @@ pub struct SourceResourceLeaseWeak {
 /// counted lease and is invalid as soon as that finalization ends.
 #[derive(Clone)]
 pub struct SourceResourceCleanupLease {
-    inner: Arc<SourceResourceLeaseInner>,
+    inner: Arc<SourceResourceLeaseInner>
 }
 
 struct SharedInteropAliasReleaseGuard<'a> {
     arena: &'a SourceResourceArena,
-    key: (i64, i64),
+    key: (i64, i64)
 }
 
 impl Drop for SharedInteropAliasReleaseGuard<'_> {
@@ -1462,7 +1418,7 @@ pub struct SourceResourceActivation {
     _current: SourceResourceArena,
     _current_lease: Option<SourceResourceLease>,
     previous: Option<SourceResourceArena>,
-    previous_lease: Option<SourceResourceLease>,
+    previous_lease: Option<SourceResourceLease>
 }
 
 impl Drop for SourceResourceActivation {
@@ -1496,20 +1452,19 @@ impl SourceResourceSession {
         finalization_handler: SourceResourceFinalizationHandler,
     ) -> Self {
         Self {
-            arena: SourceResourceArena::new_with_finalizer(finalizer, finalization_handler),
+            arena: SourceResourceArena::new_with_finalizer(finalizer, finalization_handler)
         }
     }
 
     fn new_without_finalizer() -> Self {
         Self {
-            arena: SourceResourceArena::new(),
+            arena: SourceResourceArena::new()
         }
     }
 
     pub fn arena(&self) -> SourceResourceArena {
         self.arena.clone()
     }
-
 
     pub fn set_finalizer(
         &self,
@@ -1591,7 +1546,7 @@ impl SourceResourceLease {
     pub fn cleanup_lease(&self) -> Result<SourceResourceCleanupLease, String> {
         self.inner.arena.validate_cleanup_lease(self)?;
         Ok(SourceResourceCleanupLease {
-            inner: self.inner.clone(),
+            inner: self.inner.clone()
         })
     }
 }
@@ -1646,7 +1601,7 @@ impl SourceResourceLease {
     /// arena-to-owner-to-callback-to-lease cycle.
     pub fn downgrade(&self) -> SourceResourceLeaseWeak {
         SourceResourceLeaseWeak {
-            inner: Arc::downgrade(&self.inner),
+            inner: Arc::downgrade(&self.inner)
         }
     }
 
@@ -1673,7 +1628,7 @@ impl SourceResourceLease {
 impl Clone for SourceResourceLease {
     fn clone(&self) -> Self {
         Self {
-            inner: self.inner.clone(),
+            inner: self.inner.clone()
         }
     }
 }
@@ -1710,7 +1665,7 @@ fn activate_source_resource_context(
         _current: arena.clone(),
         _current_lease: lease,
         previous,
-        previous_lease,
+        previous_lease
     }
 }
 
@@ -1764,8 +1719,8 @@ impl SourceResourceArena {
                 finalizing: false,
                 retired: false,
                 finalizer: None,
-                finalization_handler: None,
-            })),
+                finalization_handler: None
+            }))
         }
     }
 
@@ -1909,8 +1864,8 @@ impl SourceResourceArena {
             inner: Arc::new(SourceResourceLeaseInner {
                 arena: self.clone(),
                 finalization_root: false,
-                finalization_phase: None,
-            }),
+                finalization_phase: None
+            })
         })
     }
 
@@ -1932,8 +1887,8 @@ impl SourceResourceArena {
             inner: Arc::new(SourceResourceLeaseInner {
                 arena: self.clone(),
                 finalization_root: true,
-                finalization_phase: Some(Arc::new(AtomicBool::new(false))),
-            }),
+                finalization_phase: Some(Arc::new(AtomicBool::new(false)))
+            })
         })
     }
 
@@ -1960,12 +1915,12 @@ impl SourceResourceArena {
         let completions = match self.retire_receivers(receivers, |value| {
             let lease = match self.retain_finalization_root() {
                 Ok(lease) => lease,
-                Err(error) => return Err((error, vec![value], Vec::new())),
+                Err(error) => return Err((error, vec![value], Vec::new()))
             };
             finalizer(SourceResourceFinalization {
                 arena: self.clone(),
                 values: vec![value],
-                lease,
+                lease
             })
             .map_err(|error| (error.error, error.values, error.completions))
         }) {
@@ -2050,12 +2005,12 @@ impl SourceResourceArena {
         let mut process = |value| {
             let lease = match self.retain_finalization_root() {
                 Ok(lease) => lease,
-                Err(error) => return Err((error, vec![value], Vec::new())),
+                Err(error) => return Err((error, vec![value], Vec::new()))
             };
             finalizer(SourceResourceFinalization {
                 arena: self.clone(),
                 values: vec![value],
-                lease,
+                lease
             })
             .map_err(|error| (error.error, error.values, error.completions))
         };
@@ -2143,7 +2098,7 @@ impl SourceResourceArena {
                         handle: slot.handle,
                         raw: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
                         kind: slot.kind.clone(),
-                        generation: slot.generation,
+                        generation: slot.generation
                     }
                 })
             })
@@ -2218,7 +2173,7 @@ impl SourceResourceArena {
             arena,
             values,
             completions,
-            retryable,
+            retryable
         } = error;
         if !retryable || !Arc::ptr_eq(&arena.state, &self.state) {
             return Err(SourceResourceRetireError {
@@ -2226,7 +2181,7 @@ impl SourceResourceArena {
                 arena,
                 values,
                 completions,
-                retryable,
+                retryable
             });
         }
         drop(arena);
@@ -2337,7 +2292,7 @@ impl SourceResourceArena {
             arena: self.clone(),
             values,
             completions,
-            retryable: false,
+            retryable: false
         }
     }
 
@@ -2352,7 +2307,7 @@ impl SourceResourceArena {
             arena: self.clone(),
             values,
             completions,
-            retryable: true,
+            retryable: true
         }
     }
 
@@ -2393,13 +2348,13 @@ impl SourceResourceArena {
                         }
                     },
                     Ok(Some(None)) | Ok(None) => break,
-                    Err(error) => return Err((error, Vec::new(), completions)),
+                    Err(error) => return Err((error, Vec::new(), completions))
                 }
             }
             let drained = match self.close_retirement_receiver(&receiver) {
                 Ok(Some(values)) => values,
                 Ok(None) => Vec::new(),
-                Err(error) => return Err((error, Vec::new(), completions)),
+                Err(error) => return Err((error, Vec::new(), completions))
             };
             match Self::process_values(drained, process) {
                 Ok(done) => completions.extend(done),
@@ -2573,7 +2528,7 @@ impl SourceResourceArena {
                 Some(SourceResourceFinalizationOutcome::Retired { completions })
             }
             Ok(_) => None,
-            Err(error) => Some(SourceResourceFinalizationOutcome::Failed(error)),
+            Err(error) => Some(SourceResourceFinalizationOutcome::Failed(error))
         };
         if let Some(outcome) = outcome {
             finalization_handler(outcome);
@@ -2601,7 +2556,6 @@ impl SourceResourceArena {
         drop(slots);
     }
 
-
     fn lock(&self) -> Result<MutexGuard<'_, ArenaState>, String> {
         self.state
             .lock()
@@ -2618,7 +2572,6 @@ impl SourceResourceArena {
             }
         })
     }
-
 
     fn reserve_slot_handle(
         state: &mut ArenaState,
@@ -2642,7 +2595,7 @@ impl SourceResourceArena {
             handle,
             raw: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
             kind,
-            generation,
+            generation
         })
     }
 
@@ -2657,7 +2610,7 @@ impl SourceResourceArena {
                 handle: capability.handle,
                 kind: capability.kind,
                 generation: capability.generation,
-                entry,
+                entry
             },
         );
     }
@@ -2694,7 +2647,7 @@ impl SourceResourceArena {
             handle,
             raw: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
             kind,
-            generation,
+            generation
         };
         Self::insert_reserved_slot(state, capability.clone(), entry);
         Ok(capability)
@@ -2722,7 +2675,7 @@ impl SourceResourceArena {
                 Ordering::Relaxed,
             ) {
                 Ok(_) => return Ok(next),
-                Err(observed) => current = observed,
+                Err(observed) => current = observed
             }
         }
     }
@@ -2735,7 +2688,6 @@ impl SourceResourceArena {
         let kind = owner.kind();
         self.register_backend_arc(handle, kind, Arc::new(Mutex::new(owner)))
     }
-
 
     fn register_backend_arc(
         &self,
@@ -2785,7 +2737,7 @@ impl SourceResourceArena {
                 drop(owner);
                 Ok(capability)
             }
-            Err((error, _)) => Err((error, owner)),
+            Err((error, _)) => Err((error, owner))
         }
     }
 
@@ -2817,7 +2769,7 @@ impl SourceResourceArena {
                 drop(owner);
                 Ok(capability)
             }
-            Err((error, _)) => Err((error, owner)),
+            Err((error, _)) => Err((error, owner))
         }
     }
 
@@ -2845,16 +2797,6 @@ impl SourceResourceArena {
         self.register_backend(handle, BackendOwner::File(reader))
     }
 
-    /// Adopt a typed reader from the legacy JIT table without retaining the
-    /// integer slot as a second owner.
-    pub fn register_file_handle(
-        &self,
-        handle: MirHandleId,
-        reader_handle: i64,
-    ) -> Result<SourceResourceHandle, String> {
-        self.register_file(handle, SourceFileReader::from_handle(reader_handle)?)
-    }
-
     /// Open and register a file through the canonical FileStream leaf.
     pub fn open_file(
         &self,
@@ -2873,15 +2815,6 @@ impl SourceResourceArena {
         writer: SourceFileWriter,
     ) -> Result<SourceResourceHandle, String> {
         self.register_backend(handle, BackendOwner::FileWriter(writer))
-    }
-
-    /// Adopt a typed writer from the legacy JIT table.
-    pub fn register_file_writer_handle(
-        &self,
-        handle: MirHandleId,
-        writer_handle: i64,
-    ) -> Result<SourceResourceHandle, String> {
-        self.register_file_writer(handle, SourceFileWriter::from_handle(writer_handle)?)
     }
 
     pub fn open_file_writer(
@@ -2921,23 +2854,6 @@ impl SourceResourceArena {
     ) -> Result<SourceResourceHandle, String> {
         self.register_backend(handle, BackendOwner::Process(reader))
     }
-    /// Adopt a process child output reader from the canonical Process owner
-    /// table, then issue the Source arena capability for that stream.
-    pub fn register_process_stream_handle(
-        &self,
-        handle: MirHandleId,
-        child_raw: i64,
-        stdout: bool,
-    ) -> Result<SourceResourceHandle, String> {
-        let stream = if stdout {
-            crate::ProcessPrelude::process_prelude::SourceProcessStreamKind::Stdout
-        } else {
-            crate::ProcessPrelude::process_prelude::SourceProcessStreamKind::Stderr
-        };
-        let reader = crate::Process::source_take_process_stream(child_raw, stream)?;
-        self.register_process_stream(handle, SourceProcessStream(reader))
-    }
-
 
     /// Register a scheduler channel receiver carrying Source runtime values.
     pub fn register_channel_receiver(
@@ -3139,7 +3055,7 @@ impl SourceResourceArena {
                 handle: slot.handle,
                 raw: i64::from_ne_bytes(raw_bits.to_ne_bytes()),
                 kind: slot.kind.clone(),
-                generation: slot.generation,
+                generation: slot.generation
             });
         }
         resolved.ok_or_else(|| "Source Shared root is not registered in this arena".to_string())
@@ -3302,7 +3218,7 @@ impl SourceResourceArena {
                 Some(None) => {
                     return Err("Shared interop owner alias release is in progress".to_string())
                 }
-                None => return Err("Unknown Shared interop owner alias token".to_string()),
+                None => return Err("Unknown Shared interop owner alias token".to_string())
             }
             state
                 .shared_interop_aliases
@@ -3337,7 +3253,7 @@ impl SourceResourceArena {
                 Some(_) => {
                     return Err("Shared interop owner alias release is already in progress".to_string())
                 }
-                None => return Err("Unknown Shared interop owner alias token".to_string()),
+                None => return Err("Unknown Shared interop owner alias token".to_string())
             }
         };
         let release = SharedInteropAliasReleaseGuard { arena: self, key };
@@ -3361,7 +3277,7 @@ impl SourceResourceArena {
             shared_interop_weak_root_handle_id(),
             BackendOwner::SharedInteropWeakRoot {
                 type_identity,
-                root: Arc::new(root),
+                root: Arc::new(root)
             },
         )
     }
@@ -3428,7 +3344,7 @@ impl SourceResourceArena {
         MirNativeCursorError,
     > {
         let SourceResourceKind::SharedInteropWeakRoot {
-            type_identity: stored_type_identity,
+            type_identity: stored_type_identity
         } = &capability.kind
         else {
             return Err(MirNativeCursorError::internal(
@@ -3466,7 +3382,7 @@ impl SourceResourceArena {
             })?;
             let BackendOwner::SharedInteropWeakRoot {
                 type_identity: stored_type_identity,
-                root,
+                root
             } = &*owner
             else {
                 return Err(MirNativeCursorError::internal(
@@ -3569,9 +3485,6 @@ impl SourceResourceArena {
         self.release_capability(capability)
     }
 
-
-
-
     /// Clone a receiver endpoint into a fresh logical arena capability while
     /// retaining the scheduler's physical receiver count.
     pub fn clone_channel_receiver(
@@ -3638,7 +3551,7 @@ impl SourceResourceArena {
     ) -> Result<(SourceResourceHandle, SourceResourceHandle), String> {
         let receiver = match capacity {
             Some(capacity) => jet_codegen::scheduler::JetSchedulerChannel::bounded(capacity),
-            None => jet_codegen::scheduler::JetSchedulerChannel::new(),
+            None => jet_codegen::scheduler::JetSchedulerChannel::new()
         };
         let sender = receiver.sender();
         let sender_capability = self.register_channel_sender(sender_handle, sender)?;
@@ -3673,7 +3586,6 @@ impl SourceResourceArena {
         )
     }
 
-
     /// Register a scheduler stream carrying Source runtime values.
     pub fn register_plain_stream(
         &self,
@@ -3705,20 +3617,6 @@ impl SourceResourceArena {
         reader: SourceEncodingReader,
     ) -> Result<SourceResourceHandle, String> {
         self.register_backend(handle, BackendOwner::Encoding(reader))
-    }
-
-    /// Adopt a resident typed codec reader without reopening the underlying
-    /// file or retaining a second integer slot owner.
-    pub fn register_encoding_reader_handle(
-        &self,
-        handle: MirHandleId,
-        reader_handle: i64,
-        reader_type: &str,
-    ) -> Result<SourceResourceHandle, String> {
-        self.register_encoding_reader(
-            handle,
-            SourceEncodingReader::from_handle(reader_handle, reader_type)?,
-        )
     }
 
     /// Register an already-constructed canonical encoding writer.
@@ -3811,7 +3709,7 @@ impl SourceResourceArena {
         if let Err(error) = SourceEncodingReader::validate_type(reader_type) {
             return SourceResourceTransferOutcome {
                 consumed: None,
-                result: Err(error),
+                result: Err(error)
             };
         }
         let (source, file) = match self
@@ -3824,7 +3722,7 @@ impl SourceResourceArena {
             Err(error) => {
                 return SourceResourceTransferOutcome {
                     consumed: None,
-                    result: Err(error),
+                    result: Err(error)
                 }
             }
         };
@@ -3841,7 +3739,7 @@ impl SourceResourceArena {
             Err(error) => {
                 return SourceResourceTransferOutcome {
                     consumed: Some(source),
-                    result: Err(error),
+                    result: Err(error)
                 }
             }
         };
@@ -3850,7 +3748,7 @@ impl SourceResourceArena {
             .map_err(MirNativeCursorError::internal);
         SourceResourceTransferOutcome {
             consumed: Some(source),
-            result,
+            result
         }
     }
 
@@ -3887,7 +3785,7 @@ impl SourceResourceArena {
         if let Err(error) = SourceEncodingWriter::validate_type(writer_type) {
             return SourceResourceTransferOutcome {
                 consumed: None,
-                result: Err(error),
+                result: Err(error)
             };
         }
         let (source, file) = match self
@@ -3900,7 +3798,7 @@ impl SourceResourceArena {
             Err(error) => {
                 return SourceResourceTransferOutcome {
                     consumed: None,
-                    result: Err(error),
+                    result: Err(error)
                 }
             }
         };
@@ -3915,7 +3813,7 @@ impl SourceResourceArena {
             Err(error) => {
                 return SourceResourceTransferOutcome {
                     consumed: Some(source),
-                    result: Err(error),
+                    result: Err(error)
                 }
             }
         };
@@ -3924,7 +3822,7 @@ impl SourceResourceArena {
             .map_err(MirNativeCursorError::internal);
         SourceResourceTransferOutcome {
             consumed: Some(source),
-            result,
+            result
         }
     }
 
@@ -3977,8 +3875,6 @@ impl SourceResourceArena {
         self.register_encoding_reader(handle, reader)
             .map_err(MirNativeCursorError::internal)
     }
-
-
 
     /// Insert a native cursor carrier under the private checked cursor handle.
     /// The raw slot and generation are allocated by this arena, not supplied by
@@ -4045,7 +3941,7 @@ impl SourceResourceArena {
         }
         match &slot.entry {
             SlotEntry::Cursor(cursor) => Ok(cursor.clone()),
-            SlotEntry::Backend(_) => Err("native cursor capability payload mismatch".to_string()),
+            SlotEntry::Backend(_) => Err("native cursor capability payload mismatch".to_string())
         }
     }
 
@@ -4079,7 +3975,7 @@ impl SourceResourceArena {
                     | BackendOwner::Encoding(_)
                     | BackendOwner::EncodingWriter(_)
                     | BackendOwner::SharedInteropRoot(_)
-                    | BackendOwner::SharedInteropWeakRoot { .. } => Vec::new(),
+                    | BackendOwner::SharedInteropWeakRoot { .. } => Vec::new()
                 }
             }
         };
@@ -4088,14 +3984,6 @@ impl SourceResourceArena {
         } else {
             SourceResourceRelease::DrainedChannel(values)
         }
-    }
-
-    fn drain_removed_slots(slots: HashMap<u32, Slot>) -> Vec<MirRuntimeValue> {
-        let mut values = Vec::new();
-        for slot in slots.into_values() {
-            values.extend(Self::finalize_removed_slot(slot).drained_values());
-        }
-        values
     }
 
     pub fn release_resource(
@@ -4211,7 +4099,7 @@ impl SourceResourceArena {
             handle: slot.handle,
             raw,
             kind: slot.kind.clone(),
-            generation: slot.generation,
+            generation: slot.generation
         })
     }
 
@@ -4288,7 +4176,7 @@ impl SourceResourceArena {
             SlotEntry::Backend(owner) => Ok(Arc::clone(owner)),
             SlotEntry::Cursor(_) => Err(MirNativeCursorError::internal(
                 "Source resource capability payload mismatch",
-            )),
+            ))
         }
     }
 
@@ -4324,7 +4212,7 @@ impl SourceResourceArena {
             handle: slot.handle,
             raw,
             kind: slot.kind.clone(),
-            generation: slot.generation,
+            generation: slot.generation
         };
         let slot = state
             .slots
@@ -4336,7 +4224,7 @@ impl SourceResourceArena {
             handle: slot_handle,
             kind: slot_kind,
             generation: slot_generation,
-            entry,
+            entry
         } = slot;
         let owner = match entry {
             SlotEntry::Backend(owner) => match Arc::try_unwrap(owner) {
@@ -4348,7 +4236,7 @@ impl SourceResourceArena {
                             handle: slot_handle,
                             kind: slot_kind,
                             generation: slot_generation,
-                            entry: SlotEntry::Backend(owner),
+                            entry: SlotEntry::Backend(owner)
                         },
                     );
                     return Err(MirNativeCursorError::internal(
@@ -4363,7 +4251,7 @@ impl SourceResourceArena {
                         handle: slot_handle,
                         kind: slot_kind,
                         generation: slot_generation,
-                        entry: SlotEntry::Cursor(cursor),
+                        entry: SlotEntry::Cursor(cursor)
                     },
                 );
                 return Err(MirNativeCursorError::internal(
@@ -4381,7 +4269,7 @@ impl SourceResourceArena {
                         handle: slot_handle,
                         kind: slot_kind,
                         generation: slot_generation,
-                        entry: SlotEntry::Backend(Arc::new(Mutex::new(owner))),
+                        entry: SlotEntry::Backend(Arc::new(Mutex::new(owner)))
                     },
                 );
                 return Err(MirNativeCursorError::internal(
@@ -4392,7 +4280,7 @@ impl SourceResourceArena {
         let lease = SourceOwnedLease {
             owner: Arc::new(Mutex::new(owner)),
             consumed: consumed.clone(),
-            kind: slot_kind,
+            kind: slot_kind
         };
         Ok((consumed, lease))
     }
@@ -4409,7 +4297,7 @@ impl SourceResourceArena {
     ) -> Result<(SourceResourceHandle, SourceOwnedValue), SourceOwnedTakeError> {
         match self.take_owned(handle, raw, expected_kind) {
             Ok((consumed, lease)) => Ok((consumed, lease.with_value(value))),
-            Err(error) => Err(SourceOwnedTakeError { error, value }),
+            Err(error) => Err(SourceOwnedTakeError { error, value })
         }
     }
 
@@ -4431,7 +4319,7 @@ impl SourceResourceArena {
             Err(error) => {
                 return Err(SourceOwnedTakeError {
                     error: MirNativeCursorError::internal(error),
-                    value,
+                    value
                 })
             }
         };
@@ -4450,7 +4338,7 @@ impl SourceResourceArena {
             value,
             owner,
             consumed,
-            kind,
+            kind
         } = owned;
         if &kind != expected_kind {
             return SourceOwnedTransferOutcome {
@@ -4463,9 +4351,9 @@ impl SourceResourceArena {
                         value,
                         owner,
                         consumed,
-                        kind,
-                    },
-                }),
+                        kind
+                    }
+                })
             };
         }
         let result = match self.register_backend_arc_owned(target_handle, kind, owner) {
@@ -4476,9 +4364,9 @@ impl SourceResourceArena {
                     value,
                     owner,
                     consumed: consumed.clone(),
-                    kind: expected_kind.clone(),
-                },
-            }),
+                    kind: expected_kind.clone()
+                }
+            })
         };
         SourceOwnedTransferOutcome { consumed, result }
     }
@@ -4494,7 +4382,7 @@ impl SourceResourceArena {
             value,
             owner,
             consumed,
-            kind,
+            kind
         } = owned;
         if &kind != expected_kind {
             return SourceOwnedTransferOutcome {
@@ -4507,9 +4395,9 @@ impl SourceResourceArena {
                         value,
                         owner,
                         consumed,
-                        kind,
-                    },
-                }),
+                        kind
+                    }
+                })
             };
         }
         let result = match self.register_cleanup_backend_arc_owned(
@@ -4525,9 +4413,9 @@ impl SourceResourceArena {
                     value,
                     owner,
                     consumed: consumed.clone(),
-                    kind: expected_kind.clone(),
-                },
-            }),
+                    kind: expected_kind.clone()
+                }
+            })
         };
         SourceOwnedTransferOutcome { consumed, result }
     }
@@ -4584,7 +4472,7 @@ impl SourceResourceArena {
             handle: slot.handle,
             raw,
             kind: slot.kind.clone(),
-            generation: slot.generation,
+            generation: slot.generation
         };
         let slot = state
             .slots
@@ -4596,7 +4484,7 @@ impl SourceResourceArena {
             handle: slot_handle,
             kind: slot_kind,
             generation: slot_generation,
-            entry,
+            entry
         } = slot;
         let owner = match entry {
             SlotEntry::Backend(owner) => match Arc::try_unwrap(owner) {
@@ -4608,7 +4496,7 @@ impl SourceResourceArena {
                             handle: slot_handle,
                             kind: slot_kind,
                             generation: slot_generation,
-                            entry: SlotEntry::Backend(owner),
+                            entry: SlotEntry::Backend(owner)
                         },
                     );
                     return Err(MirNativeCursorError::internal(
@@ -4623,7 +4511,7 @@ impl SourceResourceArena {
                         handle: slot_handle,
                         kind: slot_kind,
                         generation: slot_generation,
-                        entry: SlotEntry::Cursor(cursor),
+                        entry: SlotEntry::Cursor(cursor)
                     },
                 );
                 return Err(MirNativeCursorError::internal(
@@ -4641,7 +4529,7 @@ impl SourceResourceArena {
                         handle: slot_handle,
                         kind: slot_kind,
                         generation: slot_generation,
-                        entry: SlotEntry::Backend(Arc::new(Mutex::new(owner))),
+                        entry: SlotEntry::Backend(Arc::new(Mutex::new(owner)))
                     },
                 );
                 return Err(MirNativeCursorError::internal(
@@ -4658,7 +4546,7 @@ impl SourceResourceArena {
                         handle: slot_handle,
                         kind: slot_kind,
                         generation: slot_generation,
-                        entry: SlotEntry::Backend(Arc::new(Mutex::new(owner))),
+                        entry: SlotEntry::Backend(Arc::new(Mutex::new(owner)))
                     },
                 );
                 Err(MirNativeCursorError::internal(
@@ -4821,13 +4709,13 @@ impl SourceResourceArena {
     ) -> Result<(), SourceChannelSendError> {
         let reservation = match self.channel_sender_reserve(handle, raw) {
             Ok(reservation) => reservation,
-            Err(error) => return Err(SourceChannelSendError { error, value }),
+            Err(error) => return Err(SourceChannelSendError { error, value })
         };
         reservation
             .commit(value)
             .map_err(|value| SourceChannelSendError {
                 error: MirNativeCursorError::internal("Source channel sender is closed"),
-                value,
+                value
             })
     }
 
@@ -5102,7 +4990,7 @@ impl SourceResourceArena {
             EncodingWriter::Xml(writer) => crate::enc_stream::runtime::enc_xml_writer_flush(writer)
                 .map_err(|error| encoding_error(&error)),
             EncodingWriter::Cbor(writer) => crate::enc_stream::runtime::enc_cbor_writer_flush(writer)
-                .map_err(|error| encoding_error(&error)),
+                .map_err(|error| encoding_error(&error))
         }
     }
 
@@ -5133,7 +5021,7 @@ impl SourceResourceArena {
             EncodingWriter::Xml(writer) => crate::enc_stream::runtime::enc_xml_writer_finish(writer)
                 .map_err(|error| encoding_error(&error)),
             EncodingWriter::Cbor(writer) => crate::enc_stream::runtime::enc_cbor_writer_finish(writer)
-                .map_err(|error| encoding_error(&error)),
+                .map_err(|error| encoding_error(&error))
         }
     }
 
@@ -5159,7 +5047,7 @@ impl SourceResourceArena {
             EncodingWriter::Jsonl(writer) => &writer.json.output.path,
             EncodingWriter::Csv(writer) => &writer.output.path,
             EncodingWriter::Xml(writer) => &writer.output.path,
-            EncodingWriter::Cbor(writer) => &writer.output.path,
+            EncodingWriter::Cbor(writer) => &writer.output.path
         };
         Ok(path.clone())
     }
@@ -5190,7 +5078,7 @@ impl SourceResourceArena {
             Err(error) => {
                 return SourceCursorInitOutcome {
                     consumed,
-                    result: Err(error),
+                    result: Err(error)
                 }
             }
         };
@@ -5199,7 +5087,7 @@ impl SourceResourceArena {
                 consumed,
                 result: Err(MirNativeCursorError::internal(
                     "canonical resource cursor did not produce a native cursor",
-                )),
+                ))
             };
         };
         let capability = match self.insert_cursor(loop_cursor_handle_id(), cursor) {
@@ -5207,13 +5095,13 @@ impl SourceResourceArena {
             Err(error) => {
                 return SourceCursorInitOutcome {
                     consumed,
-                    result: Err(MirNativeCursorError::internal(error)),
+                    result: Err(MirNativeCursorError::internal(error))
                 }
             }
         };
         SourceCursorInitOutcome {
             consumed,
-            result: Ok((capability, value)),
+            result: Ok((capability, value))
         }
     }
 
@@ -5226,7 +5114,7 @@ impl SourceResourceArena {
             handle: key.handle,
             raw: key.raw,
             kind,
-            generation,
+            generation
         }
     }
 
@@ -5259,7 +5147,7 @@ impl SourceResourceArena {
                 consumed: None,
                 result: Err(MirNativeCursorError::internal(
                     "Source resource kind does not match checked loop source",
-                )),
+                ))
             };
         }
         match self.take_owned(key.handle, key.raw, &expected) {
@@ -5267,14 +5155,14 @@ impl SourceResourceArena {
                 consumed: Some(NativeLoopResourceKey {
                     handle: consumed.handle,
                     raw: consumed.raw,
-                    source_kind: key.source_kind.clone(),
+                    source_kind: key.source_kind.clone()
                 }),
-                result: Ok(lease.into_owner()),
+                result: Ok(lease.into_owner())
             },
             Err(error) => NativeLoopResourceOutcome {
                 consumed: None,
-                result: Err(error),
-            },
+                result: Err(error)
+            }
         }
     }
 
@@ -5290,7 +5178,7 @@ impl SourceResourceArena {
             SlotEntry::Backend(owner) => Ok(Arc::clone(owner)),
             SlotEntry::Cursor(_) => Err(MirNativeCursorError::internal(
                 "native cursor is not a backend producer",
-            )),
+            ))
         }
     }
 
@@ -5305,13 +5193,13 @@ impl SourceResourceArena {
         } else {
             NativeLoopResourceOutcome {
                 consumed: None,
-                result: self.borrow_owner(key, expected),
+                result: self.borrow_owner(key, expected)
             }
         };
         let NativeLoopResourceOutcome { consumed, result } = acquisition;
         NativeLoopResourceOutcome {
             consumed,
-            result: result.and_then(|owner| resource_iterator(owner, &key.source_kind)),
+            result: result.and_then(|owner| resource_iterator(owner, &key.source_kind))
         }
     }
 }
@@ -5366,7 +5254,7 @@ impl NativeLoopResourceFactory for SourceResourceArena {
         self.iterator_for(
             key,
             SourceResourceKind::EncodingReader {
-                reader_type: reader_type.to_string(),
+                reader_type: reader_type.to_string()
             },
             by_value,
         )
@@ -5402,7 +5290,7 @@ fn resource_iterator(
         MirLoopSourceKind::EncodingReader { .. } => Ok(Box::new(EncodingIter { owner })),
         MirLoopSourceKind::Chars | MirLoopSourceKind::Iterable { .. } => Err(MirNativeCursorError::internal(
             "Source resource owner does not match checked loop source",
-        )),
+        ))
     }
 }
 fn runtime_error(
@@ -5411,7 +5299,7 @@ fn runtime_error(
 ) -> MirNativeCursorError {
     MirNativeCursorError::from_runtime_value(MirRuntimeValue::Struct {
         type_name: type_name.into(),
-        fields,
+        fields
     })
 }
 
@@ -5419,14 +5307,14 @@ fn mir_named(name: &str) -> jet_foundation::MIR::MirType {
     jet_foundation::MIR::MirType::from_kind(
         jet_foundation::MIR::MirTypeKind::Apply {
             name: jet_foundation::MIR::MirNominalRef::from_name(name),
-            args: Vec::new(),
+            args: Vec::new()
         },
     )
 }
 
 fn mir_absent_nominal(name: &str) -> MirRuntimeValue {
     MirRuntimeValue::Absent {
-        element: mir_named(name),
+        element: mir_named(name)
     }
 }
 
@@ -5434,23 +5322,22 @@ fn mir_absent_int() -> MirRuntimeValue {
     MirRuntimeValue::Absent {
         element: jet_foundation::MIR::MirType::from_kind(
             jet_foundation::MIR::MirTypeKind::Int,
-        ),
+        )
     }
 }
 
 fn optional_int<E>(value: &Result<i64, E>) -> MirRuntimeValue {
     match value {
         Ok(value) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Int(*value))),
-        Err(_) => mir_absent_int(),
+        Err(_) => mir_absent_int()
     }
 }
-
 
 fn mir_enum(type_name: &str, variant: &str) -> MirRuntimeValue {
     MirRuntimeValue::Enum {
         type_name: type_name.to_string(),
         variant: variant.to_string(),
-        args: Vec::new(),
+        args: Vec::new()
     }
 }
 
@@ -5470,7 +5357,7 @@ fn encoding_kind_value(
         EncodingErrorKind::Unsupported => "Unsupported",
         EncodingErrorKind::Limit => "Limit",
         EncodingErrorKind::IO => "IO",
-        EncodingErrorKind::State => "State",
+        EncodingErrorKind::State => "State"
     };
     mir_enum("EncodingErrorKind", variant)
 }
@@ -5488,9 +5375,9 @@ fn encoding_error(
                     "message".to_string(),
                     MirRuntimeValue::String(cause.message.clone()),
                 ),
-            ],
+            ]
         })),
-        Err(_) => mir_absent_nominal("EncodingCause"),
+        Err(_) => mir_absent_nominal("EncodingCause")
     };
     runtime_error(
         "EncodingError",
@@ -5510,7 +5397,6 @@ fn encoding_error(
     )
 }
 
-
 fn process_error(
     error: crate::ProcessPrelude::process_prelude::jet_std::IOError,
 ) -> MirNativeCursorError {
@@ -5520,8 +5406,6 @@ fn process_error(
 fn file_error(error: crate::enc_stream::SourceIoError) -> MirNativeCursorError {
     MirNativeCursorError::from_runtime_value(crate::Process::mir_io_error(error))
 }
-
-
 
 type OwnerLease = Arc<Mutex<BackendOwner>>;
 
@@ -5534,7 +5418,7 @@ fn owner_lock(
 }
 
 struct PlainIter {
-    owner: OwnerLease,
+    owner: OwnerLease
 }
 
 impl Iterator for PlainIter {
@@ -5543,17 +5427,17 @@ impl Iterator for PlainIter {
     fn next(&mut self) -> Option<Self::Item> {
         let mut owner = match owner_lock(&self.owner) {
             Ok(owner) => owner,
-            Err(error) => return Some(Err(error)),
+            Err(error) => return Some(Err(error))
         };
         match &mut *owner {
             BackendOwner::PlainStream(stream) => stream.pull_checked().map(Ok),
-            _ => Some(Err(MirNativeCursorError::internal("plain stream owner payload mismatch"))),
+            _ => Some(Err(MirNativeCursorError::internal("plain stream owner payload mismatch")))
         }
     }
 }
 
 struct FileIter {
-    owner: OwnerLease,
+    owner: OwnerLease
 }
 
 impl Iterator for FileIter {
@@ -5562,7 +5446,7 @@ impl Iterator for FileIter {
     fn next(&mut self) -> Option<Self::Item> {
         let mut owner = match owner_lock(&self.owner) {
             Ok(owner) => owner,
-            Err(error) => return Some(Err(error)),
+            Err(error) => return Some(Err(error))
         };
         let BackendOwner::File(reader) = &mut *owner else {
             return Some(Err(MirNativeCursorError::internal("file owner payload mismatch")));
@@ -5570,13 +5454,13 @@ impl Iterator for FileIter {
         match crate::enc_stream::source_file_next_line(&mut reader.0) {
             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
             Ok(None) => None,
-            Err(error) => Some(Err(file_error(error))),
+            Err(error) => Some(Err(file_error(error)))
         }
     }
 }
 
 struct StdinIter {
-    owner: OwnerLease,
+    owner: OwnerLease
 }
 
 impl Iterator for StdinIter {
@@ -5585,7 +5469,7 @@ impl Iterator for StdinIter {
     fn next(&mut self) -> Option<Self::Item> {
         let mut owner = match owner_lock(&self.owner) {
             Ok(owner) => owner,
-            Err(error) => return Some(Err(error)),
+            Err(error) => return Some(Err(error))
         };
         let BackendOwner::Stdin(reader) = &mut *owner else {
             return Some(Err(MirNativeCursorError::internal("stdin owner payload mismatch")));
@@ -5593,13 +5477,13 @@ impl Iterator for StdinIter {
         match crate::enc_stream::source_stdin_next_line(reader) {
             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
             Ok(None) => None,
-            Err(error) => Some(Err(process_error(error))),
+            Err(error) => Some(Err(process_error(error)))
         }
     }
 }
 
 struct ProcessIter {
-    owner: OwnerLease,
+    owner: OwnerLease
 }
 
 impl Iterator for ProcessIter {
@@ -5608,7 +5492,7 @@ impl Iterator for ProcessIter {
     fn next(&mut self) -> Option<Self::Item> {
         let mut owner = match owner_lock(&self.owner) {
             Ok(owner) => owner,
-            Err(error) => return Some(Err(error)),
+            Err(error) => return Some(Err(error))
         };
         let BackendOwner::Process(reader) = &mut *owner else {
             return Some(Err(MirNativeCursorError::internal("process stream owner payload mismatch")));
@@ -5616,13 +5500,13 @@ impl Iterator for ProcessIter {
         match crate::ProcessPrelude::process_prelude::source_process_stream_next_line(&reader.0) {
             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
             Ok(None) => None,
-            Err(error) => Some(Err(process_error(error))),
+            Err(error) => Some(Err(process_error(error)))
         }
     }
 }
 
 struct ChannelIter {
-    owner: OwnerLease,
+    owner: OwnerLease
 }
 
 impl Iterator for ChannelIter {
@@ -5631,7 +5515,7 @@ impl Iterator for ChannelIter {
     fn next(&mut self) -> Option<Self::Item> {
         let mut owner = match owner_lock(&self.owner) {
             Ok(owner) => owner,
-            Err(error) => return Some(Err(error)),
+            Err(error) => return Some(Err(error))
         };
         let BackendOwner::ChannelReceiver(receiver) = &mut *owner else {
             return Some(Err(MirNativeCursorError::internal("channel owner payload mismatch")));
@@ -5641,7 +5525,7 @@ impl Iterator for ChannelIter {
 }
 
 struct EncodingIter {
-    owner: OwnerLease,
+    owner: OwnerLease
 }
 
 impl Iterator for EncodingIter {
@@ -5650,7 +5534,7 @@ impl Iterator for EncodingIter {
     fn next(&mut self) -> Option<Self::Item> {
         let mut owner = match owner_lock(&self.owner) {
             Ok(owner) => owner,
-            Err(error) => return Some(Err(error)),
+            Err(error) => return Some(Err(error))
         };
         let BackendOwner::Encoding(reader) = &mut *owner else {
             return Some(Err(MirNativeCursorError::internal("encoding owner payload mismatch")));
@@ -5658,7 +5542,7 @@ impl Iterator for EncodingIter {
         match encoding_next(&mut reader.0) {
             Ok(Some(value)) => Some(Ok(value)),
             Ok(None) => None,
-            Err(error) => Some(Err(error)),
+            Err(error) => Some(Err(error))
         }
     }
 }
@@ -5681,7 +5565,7 @@ fn encoding_next(
             .map_err(|error| encoding_error(&error)),
         EncodingReader::Cbor(reader) => crate::enc_stream::runtime::enc_cbor_reader_next(reader)
             .map(|value| value.map(data_event_value))
-            .map_err(|error| encoding_error(&error)),
+            .map_err(|error| encoding_error(&error))
     }
 }
 
@@ -5702,12 +5586,12 @@ fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> Mi
         DataEvent::ArrayEnd => ("ArrayEnd", Vec::new()),
         DataEvent::ObjectStart => ("ObjectStart", Vec::new()),
         DataEvent::Key(value) => ("Key", vec![MirRuntimeValue::String(value)]),
-        DataEvent::ObjectEnd => ("ObjectEnd", Vec::new()),
+        DataEvent::ObjectEnd => ("ObjectEnd", Vec::new())
     };
     MirRuntimeValue::Enum {
         type_name: "DataEvent".to_string(),
         variant: variant.to_string(),
-        args: args.into_iter().map(|value| (None, value)).collect(),
+        args: args.into_iter().map(|value| (None, value)).collect()
     }
 }
 
@@ -5741,16 +5625,16 @@ fn data_tree_value(tree: crate::enc_stream::runtime::jet_std::DataTree) -> MirRu
                         fields: vec![
                             ("key".to_string(), MirRuntimeValue::String(key)),
                             ("value".to_string(), data_tree_value(value)),
-                        ],
+                        ]
                     })
                     .collect(),
             )],
-        ),
+        )
     };
     MirRuntimeValue::Enum {
         type_name: "DataTree".to_string(),
         variant: variant.to_string(),
-        args: args.into_iter().map(|value| (None, value)).collect(),
+        args: args.into_iter().map(|value| (None, value)).collect()
     }
 }
 
@@ -5768,7 +5652,7 @@ fn csv_row_value(row: crate::enc_stream::runtime::jet_std::CSVRow) -> MirRuntime
                 ),
             ),
             ("line".to_string(), MirRuntimeValue::Int(row.line)),
-        ],
+        ]
     }
 }
 
@@ -5779,7 +5663,7 @@ fn data_event_from_value(
     let MirRuntimeValue::Enum {
         type_name,
         variant,
-        args,
+        args
     } = value
     else {
         return Err(MirNativeCursorError::internal(
@@ -5830,13 +5714,13 @@ fn data_event_from_value(
             MirRuntimeValue::Bool(value) if args.len() == 1 => Ok(DataEvent::Bool(*value)),
             _ => Err(MirNativeCursorError::internal(
                 "DataEvent.Bool carrier has the wrong payload",
-            )),
+            ))
         },
         "Int" => match arg(0)? {
             MirRuntimeValue::Int(value) if args.len() == 1 => Ok(DataEvent::Int(*value)),
             _ => Err(MirNativeCursorError::internal(
                 "DataEvent.Int carrier has the wrong payload",
-            )),
+            ))
         },
         "Float" => match arg(0)? {
             MirRuntimeValue::Float { value, .. } if args.len() == 1 => {
@@ -5844,7 +5728,7 @@ fn data_event_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataEvent.Float carrier has the wrong payload",
-            )),
+            ))
         },
         "Number" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
@@ -5852,7 +5736,7 @@ fn data_event_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataEvent.Number carrier has the wrong payload",
-            )),
+            ))
         },
         "Text" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
@@ -5860,7 +5744,7 @@ fn data_event_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataEvent.Text carrier has the wrong payload",
-            )),
+            ))
         },
         "Key" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
@@ -5868,7 +5752,7 @@ fn data_event_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataEvent.Key carrier has the wrong payload",
-            )),
+            ))
         },
         "Bytes" => match arg(0)? {
             MirRuntimeValue::Bytes(value) if args.len() == 1 => {
@@ -5876,11 +5760,11 @@ fn data_event_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataEvent.Bytes carrier has the wrong payload",
-            )),
+            ))
         },
         _ => Err(MirNativeCursorError::internal(format!(
             "unknown DataEvent variant `{variant}`"
-        ))),
+        )))
     }
 }
 
@@ -5891,7 +5775,7 @@ fn data_tree_from_value(
     let MirRuntimeValue::Enum {
         type_name,
         variant,
-        args,
+        args
     } = value
     else {
         return Err(MirNativeCursorError::internal(
@@ -5926,13 +5810,13 @@ fn data_tree_from_value(
             MirRuntimeValue::Bool(value) if args.len() == 1 => Ok(DataTree::Bool(*value)),
             _ => Err(MirNativeCursorError::internal(
                 "DataTree.Bool carrier has the wrong payload",
-            )),
+            ))
         },
         "Int" => match arg(0)? {
             MirRuntimeValue::Int(value) if args.len() == 1 => Ok(DataTree::Int(*value)),
             _ => Err(MirNativeCursorError::internal(
                 "DataTree.Int carrier has the wrong payload",
-            )),
+            ))
         },
         "Float" => match arg(0)? {
             MirRuntimeValue::Float { value, .. } if args.len() == 1 => {
@@ -5940,7 +5824,7 @@ fn data_tree_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataTree.Float carrier has the wrong payload",
-            )),
+            ))
         },
         "Number" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
@@ -5948,7 +5832,7 @@ fn data_tree_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataTree.Number carrier has the wrong payload",
-            )),
+            ))
         },
         "TypedText" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
@@ -5956,7 +5840,7 @@ fn data_tree_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataTree.TypedText carrier has the wrong payload",
-            )),
+            ))
         },
         "Text" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
@@ -5964,7 +5848,7 @@ fn data_tree_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataTree.Text carrier has the wrong payload",
-            )),
+            ))
         },
         "Bytes" => match arg(0)? {
             MirRuntimeValue::Bytes(value) if args.len() == 1 => {
@@ -5972,7 +5856,7 @@ fn data_tree_from_value(
             }
             _ => Err(MirNativeCursorError::internal(
                 "DataTree.Bytes carrier has the wrong payload",
-            )),
+            ))
         },
         "Array" => {
             let MirRuntimeValue::List(values) = arg(0)? else {
@@ -6027,7 +5911,7 @@ fn data_tree_from_value(
         }
         _ => Err(MirNativeCursorError::internal(format!(
             "unknown DataTree variant `{variant}`"
-        ))),
+        )))
     }
 }
 
@@ -6068,7 +5952,7 @@ fn csv_row_from_value(value: &MirRuntimeValue) -> Result<Vec<String>, MirNativeC
             MirRuntimeValue::String(value) => Ok(value.clone()),
             _ => Err(MirNativeCursorError::internal(
                 "CSV writer row contains a non-string field",
-            )),
+            ))
         })
         .collect()
 }
@@ -6076,98 +5960,18 @@ fn csv_row_from_value(value: &MirRuntimeValue) -> Result<Vec<String>, MirNativeC
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{SourceDeoptError, SourceExecutionCompletionDisposition};
+    use crate::SourceEntry::{SourceEntryError, SourceExecutionCompletionDisposition};
     use crate::enc_stream::runtime::jet_std::{
-        EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat,
+        EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat
     };
     use crate::ProcessPrelude::process_prelude::jet_std::{
-        IOContext, IOError, IOOperation, ProcessResourceLimit,
+        IOContext, IOError, IOOperation, ProcessResourceLimit
     };
     use jet_foundation::Outcome::JetAbsent;
     use std::path::PathBuf;
     use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::{Arc, Mutex};
     use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-
-    fn test_handle(value: u64) -> MirHandleId {
-        MirHandleId(value)
-    }
-
-    fn test_path(label: &str) -> PathBuf {
-        static NEXT_PATH: AtomicU32 = AtomicU32::new(0);
-        let suffix = NEXT_PATH.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::var_os("JET_SCRATCH")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .map(|home| home.join(".cache").join("jet-dev"))
-            })
-            .expect("JET_SCRATCH or HOME must select the Jet scratch directory");
-        std::fs::create_dir_all(&root).expect("create Jet scratch directory");
-        root.join(format!(
-            "source-resources-{label}-{}-{suffix}.tmp",
-            std::process::id()
-        ))
-    }
-
-    fn test_channel_arena() -> SourceResourceArena {
-        SourceResourceArena::new_with_finalizer(
-            Arc::new(|finalization| {
-                finalization.with_live_scope(|_, _, values, _completions| {
-                    if values.is_empty() {
-                        Ok(())
-                    } else {
-                        Err("channel test did not consume its queued values".to_string())
-                    }
-                })
-            }),
-            Arc::new(|error| panic!("channel test finalization failed: {error:?}")),
-        )
-    }
-
-    fn test_shared_interop_session() -> SourceResourceSession {
-        SourceResourceSession::new_with_finalizer(
-            Arc::new(|finalization| {
-                finalization.with_live_scope(|_, _, values, _completions| {
-                    if values.is_empty() {
-                        Ok(())
-                    } else {
-                        Err("Shared interop test did not consume queued values".to_string())
-                    }
-                })
-            }),
-            Arc::new(|outcome| panic!("unexpected automatic Shared finalization: {outcome:?}")),
-        )
-    }
-
-    fn test_completion(id: i64) -> SourceExecutionCompletion {
-        SourceExecutionCompletion {
-            execution: None,
-            function: None,
-            lease: None,
-            disposition: SourceExecutionCompletionDisposition::NotInvoked {
-                cause: SourceDeoptError::Backend(format!("completion-{id}")),
-                entry_values: vec![MirRuntimeValue::Int(id)],
-                write_borrow_indices: vec![id as usize],
-                completions: Vec::new(),
-            },
-        }
-    }
-
-    fn test_nested_completion() -> SourceExecutionCompletion {
-        SourceExecutionCompletion {
-            execution: None,
-            function: None,
-            lease: None,
-            disposition: SourceExecutionCompletionDisposition::NotInvoked {
-                cause: SourceDeoptError::Backend("completion-1".to_string()),
-                entry_values: vec![MirRuntimeValue::Int(1)],
-                write_borrow_indices: vec![1],
-                completions: vec![test_completion(2)],
-            },
-        }
-    }
 
     fn assert_completion_receipt(
         completion: &SourceExecutionCompletion,
@@ -6181,11 +5985,11 @@ mod tests {
                 cause,
                 entry_values,
                 write_borrow_indices,
-                completions,
+                completions
             } => {
                 assert_eq!(
                     cause,
-                    &SourceDeoptError::Backend(format!("completion-{id}"))
+                    &SourceEntryError::InvalidRequest(format!("completion-{id}"))
                 );
                 assert_eq!(entry_values, &[MirRuntimeValue::Int(id)]);
                 assert_eq!(write_borrow_indices, &[id as usize]);
@@ -6196,82 +6000,11 @@ mod tests {
             }
         }
     }
-
     fn assert_nested_completion(completion: &SourceExecutionCompletion) {
         let nested = assert_completion_receipt(completion, 1);
         assert_eq!(nested.len(), 1);
         assert!(assert_completion_receipt(&nested[0], 2).is_empty());
     }
-
-    #[test]
-    fn last_root_retires_empty_no_handler_session() {
-        let session = SourceResourceSession::new();
-        let arena = session.arena();
-        let root = session.retain_root().expect("retain Source session root");
-
-        session.retire().expect("defer retirement while root is live");
-        assert!(!arena.is_retired().expect("root keeps arena live"));
-
-        drop(root);
-        assert!(arena.is_retired().expect("last root completes retirement"));
-    }
-
-    #[test]
-    fn dropping_session_before_last_root_delivers_success_to_live_handler() {
-        let outcomes = Arc::new(Mutex::new(Vec::new()));
-        let handler_target = Arc::downgrade(&outcomes);
-        let session = SourceResourceSession::new_with_finalizer(
-            Arc::new(|finalization| {
-                finalization.with_live_scope(|_, _, values, completions| {
-                    if values.len() != 1 || values[0] != MirRuntimeValue::Int(81) {
-                        return Err("success finalizer received the wrong Source value".to_string());
-                    }
-                    values.clear();
-                    completions.push(test_nested_completion());
-                    Ok(())
-                })
-            }),
-            Arc::new(move |outcome| {
-                if let Some(target) = handler_target.upgrade() {
-                    target
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .push(outcome);
-                }
-            }),
-        );
-        let root = session.retain_root().expect("retain Source session root");
-        let arena = root.arena();
-        let (sender, _) = arena
-            .register_new_channel(test_handle(1140), test_handle(1141), None)
-            .expect("register Source cleanup receiver");
-        arena
-            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(81))
-            .expect("queue Source cleanup value");
-        assert!(session
-            .retire()
-            .expect("defer retirement while the root is live")
-            .is_empty());
-
-        drop(session);
-        drop(root);
-
-        assert!(arena.is_retired().expect("successful cleanup retires arena"));
-        let mut outcomes = outcomes
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        assert_eq!(outcomes.len(), 1);
-        match outcomes.pop().expect("one last-root outcome") {
-            SourceResourceFinalizationOutcome::Retired { completions } => {
-                assert_eq!(completions.len(), 1);
-                assert_nested_completion(&completions[0]);
-            }
-            SourceResourceFinalizationOutcome::Failed(error) => {
-                panic!("successful last-root cleanup failed: {error:?}");
-            }
-        }
-    }
-
     #[test]
     fn dropping_session_before_last_root_delivers_failure_to_live_handler() {
         let outcomes = Arc::new(Mutex::new(Vec::new()));
@@ -6347,6 +6080,381 @@ mod tests {
         assert_nested_completion(&completions[0]);
         assert_eq!(attempts.load(Ordering::Acquire), 2);
         assert!(arena.is_retired().expect("retry consumes retained carrier"));
+    }
+    #[test]
+    fn dropping_session_before_last_root_delivers_success_to_live_handler() {
+        let outcomes = Arc::new(Mutex::new(Vec::new()));
+        let handler_target = Arc::downgrade(&outcomes);
+        let session = SourceResourceSession::new_with_finalizer(
+            Arc::new(|finalization| {
+                finalization.with_live_scope(|_, _, values, completions| {
+                    if values.len() != 1 || values[0] != MirRuntimeValue::Int(81) {
+                        return Err("success finalizer received the wrong Source value".to_string());
+                    }
+                    values.clear();
+                    completions.push(test_nested_completion());
+                    Ok(())
+                })
+            }),
+            Arc::new(move |outcome| {
+                if let Some(target) = handler_target.upgrade() {
+                    target
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(outcome);
+                }
+            }),
+        );
+        let root = session.retain_root().expect("retain Source session root");
+        let arena = root.arena();
+        let (sender, _) = arena
+            .register_new_channel(test_handle(1140), test_handle(1141), None)
+            .expect("register Source cleanup receiver");
+        arena
+            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(81))
+            .expect("queue Source cleanup value");
+        assert!(session
+            .retire()
+            .expect("defer retirement while the root is live")
+            .is_empty());
+
+        drop(session);
+        drop(root);
+
+        assert!(arena.is_retired().expect("successful cleanup retires arena"));
+        let mut outcomes = outcomes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(outcomes.len(), 1);
+        match outcomes.pop().expect("one last-root outcome") {
+            SourceResourceFinalizationOutcome::Retired { completions } => {
+                assert_eq!(completions.len(), 1);
+                assert_nested_completion(&completions[0]);
+            }
+            SourceResourceFinalizationOutcome::Failed(error) => {
+                panic!("successful last-root cleanup failed: {error:?}");
+            }
+        }
+    }
+    #[test]
+    fn failed_finalization_preserves_partial_receipts_through_retry() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let finalizer_attempts = attempts.clone();
+        let session = SourceResourceSession::new_with_finalizer(
+            Arc::new(move |finalization| {
+                let first_attempt = finalizer_attempts.fetch_add(1, Ordering::SeqCst) == 0;
+                finalization.with_live_scope(move |_, _, values, completions| {
+                    completions.push(if first_attempt {
+                        test_nested_completion()
+                    } else {
+                        test_completion(3)
+                    });
+                    if first_attempt {
+                        Err("Source cleanup failed after producing a receipt".to_string())
+                    } else {
+                        values.clear();
+                        Ok(())
+                    }
+                })
+            }),
+            Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
+        );
+        let arena = session.arena();
+        let (sender, _) = arena
+            .register_new_channel(test_handle(1120), test_handle(1121), None)
+            .expect("register retry receiver");
+        arena
+            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(77))
+            .expect("queue retry value");
+
+        let failure = session.retire().expect_err("first finalization fails");
+        assert_eq!(
+            failure.error,
+            "Source cleanup failed after producing a receipt"
+        );
+        assert_eq!(failure.values, vec![MirRuntimeValue::Int(77)]);
+        assert_eq!(failure.completions.len(), 1);
+        assert_nested_completion(&failure.completions[0]);
+
+        let completions = session
+            .retry_retire(failure)
+            .expect("retry full retirement packet");
+        assert_eq!(completions.len(), 2);
+        assert_nested_completion(&completions[0]);
+        assert!(assert_completion_receipt(&completions[1], 3).is_empty());
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert!(arena.is_retired().expect("retry completes retirement"));
+    }
+    #[test]
+    fn failed_receiver_cleanup_preserves_completion_order() {
+        let session = SourceResourceSession::new_with_finalizer(
+            Arc::new(|finalization| {
+                finalization.with_live_scope(|_, _, values, completions| {
+                    let MirRuntimeValue::Int(id) =
+                        values.first().expect("receiver cleanup owns one value")
+                    else {
+                        panic!("test receiver value is an integer")
+                    };
+                    let id = *id;
+                    completions.push(test_completion(id));
+                    if id == 1 {
+                        values.clear();
+                        Ok(())
+                    } else {
+                        Err("receiver cleanup failed after its receipt".to_string())
+                    }
+                })
+            }),
+            Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
+        );
+        let arena = session.arena();
+        let (sender, _) = arena
+            .register_new_channel(test_handle(1130), test_handle(1131), None)
+            .expect("register ordered-completion receiver");
+        arena
+            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
+            .expect("queue first receiver value");
+        arena
+            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(2))
+            .expect("queue second receiver value");
+
+        let failure = session
+            .retire()
+            .expect_err("second receiver cleanup fails");
+        assert_eq!(failure.values, vec![MirRuntimeValue::Int(2)]);
+        assert_eq!(failure.completions.len(), 2);
+        assert!(assert_completion_receipt(&failure.completions[0], 1).is_empty());
+        assert!(assert_completion_receipt(&failure.completions[1], 2).is_empty());
+    }
+    #[test]
+    fn finalizer_returns_full_nested_receipt_without_active_scope() {
+        let pending = Arc::new(Mutex::new(Some(test_nested_completion())));
+        let completion = pending.clone();
+        let session = SourceResourceSession::new_with_finalizer(
+            Arc::new(move |finalization| {
+                let packet = completion
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                    .expect("one queued value owns one completion packet");
+                finalization.with_live_scope(move |_, _, values, completions| {
+                    values.clear();
+                    completions.push(packet);
+                    Ok(())
+                })
+            }),
+            Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
+        );
+        let arena = session.arena();
+        let (sender, _) = arena
+            .register_new_channel(test_handle(1100), test_handle(1101), None)
+            .expect("register completion receiver");
+        arena
+            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
+            .expect("queue Source finalization value");
+
+        let completions = session.retire().expect("retire and return exact receipt");
+        assert_eq!(completions.len(), 1);
+        assert_nested_completion(&completions[0]);
+    }
+    #[test]
+    fn finalizer_routes_full_receipt_into_the_current_execution_scope() {
+        let pending = Arc::new(Mutex::new(Some(test_nested_completion())));
+        let completion = pending.clone();
+        let session = SourceResourceSession::new_with_finalizer(
+            Arc::new(move |finalization| {
+                let packet = completion
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take()
+                    .expect("one queued value owns one completion packet");
+                finalization.with_live_scope(move |_, _, values, completions| {
+                    values.clear();
+                    completions.push(packet);
+                    Ok(())
+                })
+            }),
+            Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
+        );
+        let arena = session.arena();
+        let (sender, _) = arena
+            .register_new_channel(test_handle(1110), test_handle(1111), None)
+            .expect("register completion receiver");
+        arena
+            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
+            .expect("queue Source finalization value");
+
+        let scope = SourceExecutionCompletionScope::new();
+        let returned = scope.with_current(|| session.retire().expect("retire in current scope"));
+        assert!(returned.is_empty());
+        let completions = scope.drain();
+        assert_eq!(completions.len(), 1);
+        assert_nested_completion(&completions[0]);
+    }
+    #[test]
+    fn shared_alias_release_returns_completion_even_when_operation_fails() {
+        let session = test_shared_interop_session();
+        let arena = session.arena();
+        let owner_count = Arc::new(AtomicUsize::new(1));
+        let count_for_count = owner_count.clone();
+        let count_for_retain = owner_count.clone();
+        let completion: crate::Memory::shared_protocol::JetSharedPhysicalCompletion =
+            Box::new(test_nested_completion());
+        let completion_pointer = completion
+            .as_ref()
+            .downcast_ref::<SourceExecutionCompletion>()
+            .expect("test completion is stored as its canonical receipt type")
+            as *const SourceExecutionCompletion as usize;
+        let completion_for_retain = Arc::new(Mutex::new(Some(completion)));
+        let completion_packet = completion_for_retain.clone();
+        let type_identity = 0xdead_beef_cafe_4321;
+        let owner_identity = usize::MAX - 31;
+        let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
+            type_identity,
+            MirRuntimeValue::Int(3),
+        )
+        .with_owner_identity(owner_identity)
+        .with_owner_alias_lifecycle(
+            move || Ok(count_for_count.load(Ordering::Acquire)),
+            move || {
+                let completion = completion_packet
+                    .lock()
+                    .map_err(|_| "test completion packet is poisoned".to_string())?
+                    .take()
+                    .ok_or_else(|| "test completion packet was already consumed".to_string())?;
+                reserve_test_shared_alias_with_completion(
+                    &count_for_retain,
+                    0x117,
+                    Some(completion),
+                    Some("physical alias release failed".to_string()),
+                )?
+                .ok_or_else(|| "test Shared owner has no live logical aliases".to_string())
+            },
+        );
+        let capability = arena
+            .register_shared_interop_root(type_identity, &root)
+            .expect("register Shared owner root");
+        let token_id = arena
+            .retain_shared_interop_alias(&capability)
+            .expect("retain Source Shared logical alias");
+        assert_eq!(token_id, 0x117);
+
+        let outcome = arena
+            .release_shared_interop_alias(&capability, token_id)
+            .expect("release Source Shared logical alias");
+        assert_eq!(
+            outcome.result,
+            Err("physical alias release failed".to_string())
+        );
+        let completion = outcome
+            .completion
+            .expect("physical alias release returns its completion packet");
+        let completion = match completion.downcast::<SourceExecutionCompletion>() {
+            Ok(completion) => completion,
+            Err(_) => panic!("physical completion packet lost its typed Source receipt")
+        };
+        assert_eq!(
+            completion.as_ref() as *const SourceExecutionCompletion as usize,
+            completion_pointer
+        );
+        assert_nested_completion(&completion);
+        assert_eq!(owner_count.load(Ordering::Acquire), 1);
+
+        arena
+            .release_shared_interop_root(&capability)
+            .expect("release Shared owner root");
+        session.retire().expect("retire empty Source session");
+    }
+    fn test_completion(id: i64) -> SourceExecutionCompletion {
+        SourceExecutionCompletion {
+            execution: None,
+            function: None,
+            lease: None,
+            disposition: SourceExecutionCompletionDisposition::NotInvoked {
+                cause: SourceEntryError::InvalidRequest(format!("completion-{id}")),
+                entry_values: vec![MirRuntimeValue::Int(id)],
+                write_borrow_indices: vec![id as usize],
+                completions: Vec::new()
+            }
+        }
+    }
+    fn test_nested_completion() -> SourceExecutionCompletion {
+        SourceExecutionCompletion {
+            execution: None,
+            function: None,
+            lease: None,
+            disposition: SourceExecutionCompletionDisposition::NotInvoked {
+                cause: SourceEntryError::InvalidRequest("completion-1".to_string()),
+                entry_values: vec![MirRuntimeValue::Int(1)],
+                write_borrow_indices: vec![1],
+                completions: vec![test_completion(2)]
+            }
+        }
+    }
+
+    fn test_handle(value: u64) -> MirHandleId {
+        MirHandleId(value)
+    }
+
+    fn test_path(label: &str) -> PathBuf {
+        static NEXT_PATH: AtomicU32 = AtomicU32::new(0);
+        let suffix = NEXT_PATH.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::var_os("JET_SCRATCH")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|home| home.join(".cache").join("jet-dev"))
+            })
+            .expect("JET_SCRATCH or HOME must select the Jet scratch directory");
+        std::fs::create_dir_all(&root).expect("create Jet scratch directory");
+        root.join(format!(
+            "source-resources-{label}-{}-{suffix}.tmp",
+            std::process::id()
+        ))
+    }
+
+    fn test_channel_arena() -> SourceResourceArena {
+        SourceResourceArena::new_with_finalizer(
+            Arc::new(|finalization| {
+                finalization.with_live_scope(|_, _, values, _completions| {
+                    if values.is_empty() {
+                        Ok(())
+                    } else {
+                        Err("channel test did not consume its queued values".to_string())
+                    }
+                })
+            }),
+            Arc::new(|error| panic!("channel test finalization failed: {error:?}")),
+        )
+    }
+
+    fn test_shared_interop_session() -> SourceResourceSession {
+        SourceResourceSession::new_with_finalizer(
+            Arc::new(|finalization| {
+                finalization.with_live_scope(|_, _, values, _completions| {
+                    if values.is_empty() {
+                        Ok(())
+                    } else {
+                        Err("Shared interop test did not consume queued values".to_string())
+                    }
+                })
+            }),
+            Arc::new(|outcome| panic!("unexpected automatic Shared finalization: {outcome:?}")),
+        )
+    }
+
+    #[test]
+    fn last_root_retires_empty_no_handler_session() {
+        let session = SourceResourceSession::new();
+        let arena = session.arena();
+        let root = session.retain_root().expect("retain Source session root");
+
+        session.retire().expect("defer retirement while root is live");
+        assert!(!arena.is_retired().expect("root keeps arena live"));
+
+        drop(root);
+        assert!(arena.is_retired().expect("last root completes retirement"));
     }
 
     #[test]
@@ -6434,169 +6542,10 @@ mod tests {
         assert!(arena.is_retired().expect("empty no-handler arena retires"));
     }
 
-    #[test]
-    fn finalizer_returns_full_nested_receipt_without_active_scope() {
-        let pending = Arc::new(Mutex::new(Some(test_nested_completion())));
-        let completion = pending.clone();
-        let session = SourceResourceSession::new_with_finalizer(
-            Arc::new(move |finalization| {
-                let packet = completion
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .take()
-                    .expect("one queued value owns one completion packet");
-                finalization.with_live_scope(move |_, _, values, completions| {
-                    values.clear();
-                    completions.push(packet);
-                    Ok(())
-                })
-            }),
-            Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
-        );
-        let arena = session.arena();
-        let (sender, _) = arena
-            .register_new_channel(test_handle(1100), test_handle(1101), None)
-            .expect("register completion receiver");
-        arena
-            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
-            .expect("queue Source finalization value");
-
-        let completions = session.retire().expect("retire and return exact receipt");
-        assert_eq!(completions.len(), 1);
-        assert_nested_completion(&completions[0]);
-    }
-
-    #[test]
-    fn finalizer_routes_full_receipt_into_the_current_execution_scope() {
-        let pending = Arc::new(Mutex::new(Some(test_nested_completion())));
-        let completion = pending.clone();
-        let session = SourceResourceSession::new_with_finalizer(
-            Arc::new(move |finalization| {
-                let packet = completion
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .take()
-                    .expect("one queued value owns one completion packet");
-                finalization.with_live_scope(move |_, _, values, completions| {
-                    values.clear();
-                    completions.push(packet);
-                    Ok(())
-                })
-            }),
-            Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
-        );
-        let arena = session.arena();
-        let (sender, _) = arena
-            .register_new_channel(test_handle(1110), test_handle(1111), None)
-            .expect("register completion receiver");
-        arena
-            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
-            .expect("queue Source finalization value");
-
-        let scope = SourceExecutionCompletionScope::new();
-        let returned = scope.with_current(|| session.retire().expect("retire in current scope"));
-        assert!(returned.is_empty());
-        let completions = scope.drain();
-        assert_eq!(completions.len(), 1);
-        assert_nested_completion(&completions[0]);
-    }
-
-    #[test]
-    fn failed_receiver_cleanup_preserves_completion_order() {
-        let session = SourceResourceSession::new_with_finalizer(
-            Arc::new(|finalization| {
-                finalization.with_live_scope(|_, _, values, completions| {
-                    let MirRuntimeValue::Int(id) =
-                        values.first().expect("receiver cleanup owns one value")
-                    else {
-                        panic!("test receiver value is an integer")
-                    };
-                    let id = *id;
-                    completions.push(test_completion(id));
-                    if id == 1 {
-                        values.clear();
-                        Ok(())
-                    } else {
-                        Err("receiver cleanup failed after its receipt".to_string())
-                    }
-                })
-            }),
-            Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
-        );
-        let arena = session.arena();
-        let (sender, _) = arena
-            .register_new_channel(test_handle(1130), test_handle(1131), None)
-            .expect("register ordered-completion receiver");
-        arena
-            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
-            .expect("queue first receiver value");
-        arena
-            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(2))
-            .expect("queue second receiver value");
-
-        let failure = session
-            .retire()
-            .expect_err("second receiver cleanup fails");
-        assert_eq!(failure.values, vec![MirRuntimeValue::Int(2)]);
-        assert_eq!(failure.completions.len(), 2);
-        assert!(assert_completion_receipt(&failure.completions[0], 1).is_empty());
-        assert!(assert_completion_receipt(&failure.completions[1], 2).is_empty());
-    }
-
-    #[test]
-    fn failed_finalization_preserves_partial_receipts_through_retry() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let finalizer_attempts = attempts.clone();
-        let session = SourceResourceSession::new_with_finalizer(
-            Arc::new(move |finalization| {
-                let first_attempt = finalizer_attempts.fetch_add(1, Ordering::SeqCst) == 0;
-                finalization.with_live_scope(move |_, _, values, completions| {
-                    completions.push(if first_attempt {
-                        test_nested_completion()
-                    } else {
-                        test_completion(3)
-                    });
-                    if first_attempt {
-                        Err("Source cleanup failed after producing a receipt".to_string())
-                    } else {
-                        values.clear();
-                        Ok(())
-                    }
-                })
-            }),
-            Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
-        );
-        let arena = session.arena();
-        let (sender, _) = arena
-            .register_new_channel(test_handle(1120), test_handle(1121), None)
-            .expect("register retry receiver");
-        arena
-            .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(77))
-            .expect("queue retry value");
-
-        let failure = session.retire().expect_err("first finalization fails");
-        assert_eq!(
-            failure.error,
-            "Source cleanup failed after producing a receipt"
-        );
-        assert_eq!(failure.values, vec![MirRuntimeValue::Int(77)]);
-        assert_eq!(failure.completions.len(), 1);
-        assert_nested_completion(&failure.completions[0]);
-
-        let completions = session
-            .retry_retire(failure)
-            .expect("retry full retirement packet");
-        assert_eq!(completions.len(), 2);
-        assert_nested_completion(&completions[0]);
-        assert!(assert_completion_receipt(&completions[1], 3).is_empty());
-        assert_eq!(attempts.load(Ordering::SeqCst), 2);
-        assert!(arena.is_retired().expect("retry completes retirement"));
-    }
-
     fn test_native_binding(artifact_id: u64, scope: &str) -> SourceNativeBinding {
         use jet_foundation::MIR::{
             MirArtifactBuildMode, MirArtifactIdentity, MirArtifactId, MirArtifactKind,
-            MirArtifactTarget, MirExecutionIdentity, MirProgramIdentity, MIR_SCHEMA_VERSION,
+            MirArtifactTarget, MirExecutionIdentity, MirProgramIdentity, MIR_SCHEMA_VERSION
         };
 
         let artifact = MirArtifactId(artifact_id);
@@ -6610,7 +6559,7 @@ mod tests {
                 artifact,
                 name: scope.to_string(),
                 kind: MirArtifactKind::NativeExecutable,
-                target: MirArtifactTarget::Cranelift,
+                target: MirArtifactTarget::Interpreter,
                 mode: MirArtifactBuildMode::Dev,
                 provider_identity: String::new(),
                 closure_identity: String::new(),
@@ -6618,8 +6567,8 @@ mod tests {
                 program_identity: std::sync::Arc::new(MirProgramIdentity::unavailable(
                     String::new(),
                     Vec::new(),
-                )),
-            },
+                ))
+            }
         };
         let bindings = crate::SourceInterfaces::NativeInterfaceBindings::new();
         let object = bindings
@@ -6740,7 +6689,7 @@ mod tests {
         owner_count: Arc<AtomicUsize>,
         token_id: i64,
         completion: Mutex<Option<crate::Memory::shared_protocol::JetSharedPhysicalCompletion>>,
-        result_error: Option<String>,
+        result_error: Option<String>
     }
 
     impl crate::SourceSharedInterop::SourceSharedInteropOwnerAliasLease
@@ -6807,10 +6756,10 @@ mod tests {
                         owner_count: owner_count.clone(),
                         token_id,
                         completion: Mutex::new(completion),
-                        result_error,
+                        result_error
                     })))
                 }
-                Err(observed) => current = observed,
+                Err(observed) => current = observed
             }
         }
     }
@@ -6831,7 +6780,7 @@ mod tests {
         owner_slot:
             std::sync::Weak<Mutex<Option<crate::SourceSharedInterop::SourceSharedInterop>>>,
         owner_count: Arc<AtomicUsize>,
-        next_token_id: Arc<AtomicU32>,
+        next_token_id: Arc<AtomicU32>
     }
 
     impl crate::SourceSharedInterop::SourceSharedInteropWeakOwner for TestSharedInteropWeakOwner {
@@ -6866,7 +6815,7 @@ mod tests {
     struct ReentrantLeaseDrop {
         lease: Option<SourceResourceLease>,
         arena: SourceResourceArena,
-        reentered_after_release: Arc<AtomicUsize>,
+        reentered_after_release: Arc<AtomicUsize>
     }
 
     impl Drop for ReentrantLeaseDrop {
@@ -7000,7 +6949,6 @@ mod tests {
             .release_resource(capability.handle, capability.raw)
             .expect("release stdin owner");
     }
-
 
     #[test]
     fn taking_file_reader_rolls_back_when_cursor_aliases_owner() {
@@ -7553,7 +7501,7 @@ mod tests {
             Box::new(TestSharedInteropWeakOwner {
                 owner_slot: weak_owner_slot.clone(),
                 owner_count: weak_count.clone(),
-                next_token_id: weak_token_id.clone(),
+                next_token_id: weak_token_id.clone()
             })
         })
         .with_owner_alias_lifecycle(
@@ -7611,7 +7559,7 @@ mod tests {
     fn finalizer_cleanup_lease_adopts_queued_owner_and_registers_fresh_binding() {
         use jet_foundation::MIR::{
             MirArtifactBuildMode, MirArtifactIdentity, MirArtifactKind, MirArtifactTarget,
-            MirExecutionIdentity, MirProgramIdentity, MIR_SCHEMA_VERSION,
+            MirExecutionIdentity, MirProgramIdentity, MIR_SCHEMA_VERSION
         };
 
         let logical_values = Arc::new(Mutex::new(Vec::new()));
@@ -7627,7 +7575,7 @@ mod tests {
                 artifact,
                 name: "owned-root-cleanup".to_string(),
                 kind: MirArtifactKind::NativeExecutable,
-                target: MirArtifactTarget::Cranelift,
+                target: MirArtifactTarget::Interpreter,
                 mode: MirArtifactBuildMode::Dev,
                 provider_identity: String::new(),
                 closure_identity: String::new(),
@@ -7635,8 +7583,8 @@ mod tests {
                 program_identity: std::sync::Arc::new(MirProgramIdentity::unavailable(
                     String::new(),
                     Vec::new(),
-                )),
-            },
+                ))
+            }
         };
         let session = SourceResourceSession::new_with_finalizer(
             Arc::new(move |finalization| {
@@ -7859,7 +7807,6 @@ mod tests {
         assert!(arena.lookup_capability(nested.handle, nested.raw).is_err());
     }
 
-
     #[test]
     fn shared_interop_weak_root_upgrades_only_a_live_owner() {
         let session = test_shared_interop_session();
@@ -7884,7 +7831,7 @@ mod tests {
             Box::new(TestSharedInteropWeakOwner {
                 owner_slot: weak_slot.clone(),
                 owner_count: count_for_weak.clone(),
-                next_token_id: token_for_weak.clone(),
+                next_token_id: token_for_weak.clone()
             })
         })
         .with_owner_alias_lifecycle(
@@ -7997,81 +7944,6 @@ mod tests {
         drop(weak);
         drop(weak_lease);
         assert!(arena.is_retired().expect("last weak alias releases arena"));
-    }
-
-    #[test]
-    fn shared_alias_release_returns_completion_even_when_operation_fails() {
-        let session = test_shared_interop_session();
-        let arena = session.arena();
-        let owner_count = Arc::new(AtomicUsize::new(1));
-        let count_for_count = owner_count.clone();
-        let count_for_retain = owner_count.clone();
-        let completion: crate::Memory::shared_protocol::JetSharedPhysicalCompletion =
-            Box::new(test_nested_completion());
-        let completion_pointer = completion
-            .as_ref()
-            .downcast_ref::<SourceExecutionCompletion>()
-            .expect("test completion is stored as its canonical receipt type")
-            as *const SourceExecutionCompletion as usize;
-        let completion_for_retain = Arc::new(Mutex::new(Some(completion)));
-        let completion_packet = completion_for_retain.clone();
-        let type_identity = 0xdead_beef_cafe_4321;
-        let owner_identity = usize::MAX - 31;
-        let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
-            type_identity,
-            MirRuntimeValue::Int(3),
-        )
-        .with_owner_identity(owner_identity)
-        .with_owner_alias_lifecycle(
-            move || Ok(count_for_count.load(Ordering::Acquire)),
-            move || {
-                let completion = completion_packet
-                    .lock()
-                    .map_err(|_| "test completion packet is poisoned".to_string())?
-                    .take()
-                    .ok_or_else(|| "test completion packet was already consumed".to_string())?;
-                reserve_test_shared_alias_with_completion(
-                    &count_for_retain,
-                    0x117,
-                    Some(completion),
-                    Some("physical alias release failed".to_string()),
-                )?
-                .ok_or_else(|| "test Shared owner has no live logical aliases".to_string())
-            },
-        );
-        let capability = arena
-            .register_shared_interop_root(type_identity, &root)
-            .expect("register Shared owner root");
-        let token_id = arena
-            .retain_shared_interop_alias(&capability)
-            .expect("retain Source Shared logical alias");
-        assert_eq!(token_id, 0x117);
-
-        let outcome = arena
-            .release_shared_interop_alias(&capability, token_id)
-            .expect("release Source Shared logical alias");
-        assert_eq!(
-            outcome.result,
-            Err("physical alias release failed".to_string())
-        );
-        let completion = outcome
-            .completion
-            .expect("physical alias release returns its completion packet");
-        let completion = match completion.downcast::<SourceExecutionCompletion>() {
-            Ok(completion) => completion,
-            Err(_) => panic!("physical completion packet lost its typed Source receipt"),
-        };
-        assert_eq!(
-            completion.as_ref() as *const SourceExecutionCompletion as usize,
-            completion_pointer
-        );
-        assert_nested_completion(&completion);
-        assert_eq!(owner_count.load(Ordering::Acquire), 1);
-
-        arena
-            .release_shared_interop_root(&capability)
-            .expect("release Shared owner root");
-        session.retire().expect("retire empty Source session");
     }
 
     #[test]
@@ -8202,7 +8074,7 @@ mod tests {
         let value = MirRuntimeValue::Enum {
             type_name: "DataTree".to_string(),
             variant: "Int".to_string(),
-            args: vec![(None, MirRuntimeValue::Int(7))],
+            args: vec![(None, MirRuntimeValue::Int(7))]
         };
         arena
             .encoding_writer_write(writer.handle, writer.raw, &value)
@@ -8247,7 +8119,7 @@ mod tests {
             Some(Ok(MirRuntimeValue::Enum {
                 type_name: "DataTree".to_string(),
                 variant: "Int".to_string(),
-                args: vec![(None, MirRuntimeValue::Int(7))],
+                args: vec![(None, MirRuntimeValue::Int(7))]
             }))
         );
         assert_eq!(iterator.next(), None);
@@ -8299,7 +8171,7 @@ mod tests {
             post_take_file.raw,
             "CSVReader",
             SourceEncodingLimits::safe(),
-            ",,",
+            ",",
             false,
             false,
         );
@@ -8320,13 +8192,13 @@ mod tests {
             &path_text.to_string(),
         ) {
             Ok(mapped) => mapped,
-            Err(_) => panic!("mapped source must be admitted"),
+            Err(_) => panic!("mapped source must be admitted")
         };
         let result = SourceResourceArena::new().open_file_writer(test_handle(10), path_text);
         drop(mapped);
         let error = match result {
             Ok(_) => panic!("writer must refuse a path held by a mapped reader"),
-            Err(error) => error,
+            Err(error) => error
         };
         let value = value_of(error);
         assert!(matches!(
@@ -8365,7 +8237,7 @@ mod tests {
         let wrong_kind = NativeLoopResourceKey {
             handle: key.handle,
             raw: key.raw,
-            source_kind: MirLoopSourceKind::Plain,
+            source_kind: MirLoopSourceKind::Plain
         };
         assert!(arena.lines_file(&wrong_kind, false).result.is_err());
 
@@ -8451,7 +8323,7 @@ mod tests {
         let MirRuntimeValue::Enum {
             type_name,
             variant,
-            args,
+            args
         } = file_value
         else {
             panic!("file error was not an IOError enum");
@@ -8496,7 +8368,7 @@ mod tests {
         .with_cause(EncodingCause {
             kind: "os".to_string(),
             os_code: Ok(2),
-            message: "parse".to_string(),
+            message: "parse".to_string()
         });
         let encoding_value = value_of(encoding_error(&encoding));
         assert!(matches!(
@@ -8559,7 +8431,7 @@ mod tests {
             value.clone(),
         ) {
             Err(error) => error,
-            Ok(_) => panic!("stale owner was accepted"),
+            Ok(_) => panic!("stale owner was accepted")
         };
         assert_eq!(error.value, value);
     }
@@ -8735,7 +8607,7 @@ mod tests {
         let cleanup = ReentrantLeaseDrop {
             lease: Some(root),
             arena: arena.clone(),
-            reentered_after_release: reentered_after_release.clone(),
+            reentered_after_release: reentered_after_release.clone()
         };
         drop(cleanup);
 

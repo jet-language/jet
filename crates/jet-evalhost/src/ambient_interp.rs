@@ -2084,7 +2084,7 @@ fn active_context() -> Option<InterpreterAmbientContext> {
 pub fn with_interpreter_ambient<R>(
     body: impl FnOnce(&mut InterpreterAmbientContext) -> R,
 ) -> R {
-    crate::Process::with_interpreter_process_state(|| {
+    crate::Process::with_interpreter_process_state(|| crate::Crypto::with_interpreter_crypto_state(|| {
         let mut context = InterpreterAmbientContext::default();
         context.register_core_call(crate::Process::ambient_core_call);
         context.register_core_call(sys_getpid_ambient_core_call);
@@ -2119,7 +2119,7 @@ pub fn with_interpreter_ambient<R>(
                 },
             )
         })
-    })
+    }))
 }
 fn dispatch_core_closure(
     module: &str,
