@@ -309,14 +309,14 @@ fn jet_job_declared_paths(job: JetJobSpec, pattern: String) -> [OSPath] {
     #Unsafe("enumerate real selected host filesystem without fabricating missing entries") {
         while pending.pop() == .Val(directory) {
             entries_result :: fs.read_dir(directory)
-            if entries_result == .Err(_) -> continue
+            if entries_result == .Err(_) -> next
             entries := entries_result.unwrap().filter_map(entry -> entry.ok()).collect()
             &entries.sort_by_key(entry -> entry.path())
             loop entry in entries {
                 path :: entry.path()
                 if path.is_dir() -> &pending.push(~path)
                 relative_result :: path.strip_prefix(base)
-                if relative_result == .Err(_) -> continue
+                if relative_result == .Err(_) -> next
                 relative :: relative_result.unwrap().to_string_lossy().replace('\\', "/")
                 if jet_job_glob_match(normalized, relative) -> &paths.push(^path)
             }
@@ -734,7 +734,7 @@ where F: fn() -> G? Err! {
                 if validate(args) == .Err(reason) {
                     // GATE #4565: kernel primitive
                     #Unsafe("report scheduled argument failure without invoking invalid job") { env.eprintln("Error [E1331]: job `{jobs[index].entry.name}` received invalid scheduled arguments: {reason}") }
-                    continue
+                    next
                 }
             }
             &due_roots.push(index)
