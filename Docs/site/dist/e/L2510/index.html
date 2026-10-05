@@ -37,13 +37,22 @@
 <p class="diag-copy fix" data-registry-field="fix">Insert `{fix}` before the highlighted expression to make the copy explicit.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L2510</code>: <code>tests/ui_lint/cost_hidden_in_loop.warn</code>.</p>
-<pre class="diag">Warning [L2510] (hidden_cost_in_loop): This copy of `String (text)` view into an owned slot repeats inside a loop.
-  --&gt; tests/ui_lint/cost_hidden_in_loop.jet:12:33
+<pre class="diag">Warning [L0530] (redundant_final_return): An explicit `return` is used on the final value line
+  --&gt; cost_hidden_in_loop.jet:5:5
     |
- 12 |     loop _ in 0..&lt;3 -&gt; out.push(view)
-    |                                 ^^^^
+  5 |     return Val(0)
+    |     ^^^^^^
+ Why: An unadorned expression on the final value line is Jet&#39;s implicit return; `return` is for early exits
+ Fix: Remove the final `return` and leave the expression as the block tail
+More: jet-lang.dev/e/L0530
+
+Warning [L2510] (hidden_cost_in_loop): This copy of `String (text)` view into an owned slot repeats inside a loop.
+  --&gt; cost_hidden_in_loop.jet:12:34
+    |
+ 12 |     loop _ in 0..&lt;3 -&gt; &amp;out.push(view)
+    |                                  ^^^^
  Why: A repeated copy or representation fallback can make a growing value&#39;s cost super-linear.
- Fix: Bind the copy once outside the loop, or keep views with `[View&lt;str&gt;]`
+ Fix: Insert `~` before the highlighted expression to make the copy explicit.
 More: jet-lang.dev/e/L2510
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

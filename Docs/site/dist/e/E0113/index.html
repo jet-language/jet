@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0113 — Jet diagnostic</title>
-<meta name="description" content="`return` value mismatch (wrong/missing/unexpected)">
+<meta name="description" content="This value is String (text), but `name` returns Int">
 <meta property="og:title" content="E0113 — Jet diagnostic">
-<meta property="og:description" content="`return` value mismatch (wrong/missing/unexpected)">
+<meta property="og:description" content="This value is String (text), but `name` returns Int">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,22 +25,22 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0113</h1>
-<p>`return` value mismatch (wrong/missing/unexpected)</p>
+<p>This value is String (text), but `name` returns Int</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`return` value mismatch (wrong/missing/unexpected)</p>
+<p class="diag-copy what" data-registry-field="what">This value is String (text), but `name` returns Int</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
+<p class="diag-copy why" data-registry-field="why">A written return type is the function&#39;s contract, so the value it hands back must have that type</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Return a value matching the enclosing function&#39;s declared result.</p>
+<p class="diag-copy fix" data-registry-field="fix">Convert or reshape the value into the declared type (for example `/%` for whole-number division, `[value]` for a list, `&quot;{value}&quot;` for text); the declared return type stays as written</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0113</code>: <code>tests/ui/ffi_undo_non_unit_return.stderr</code>.</p>
 <pre class="diag">Error [E0113]: Undo function `undo_mutate` returns `Int`, but rollback functions must return Unit
   --&gt; tests/ui/ffi_undo_non_unit_return.jet:2:11
     |
-  2 |     #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = &quot;std::cmp::max&quot;
+  2 |     #Undo(undo_mutate) fn mutate(left: Int, right: Int) -&gt; Int = &quot;std::cmp::max&quot;
     |           ^^^^^^^^^^^
  Why: Rollback invokes the inverse for its side effect and cannot use a returned value
  Fix: Remove `Int` from `undo_mutate` so it returns Unit

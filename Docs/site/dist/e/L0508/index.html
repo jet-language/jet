@@ -37,8 +37,17 @@
 <p class="diag-copy fix" data-registry-field="fix">Bind the loop with `::` to collect its values, or write `loop v in &amp;values -&gt; v *= 2` so it takes write access (&amp;) for items.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0508</code>: <code>tests/ui_lint/arrow_loop_value_drop.warn</code>.</p>
-<pre class="diag">Warning [L0508] (arrow_loop_value_drop): This arrow loop body computes a value and drops it
-  --&gt; tests/ui_lint/arrow_loop_value_drop.jet:3:25
+<pre class="diag">Warning [L0528] (mutable_never_reassigned): This mutable binding receives no later write, so its mutability is unused
+  --&gt; arrow_loop_value_drop.jet:2:5
+    |
+  2 |     values := [1, 2]
+    |     ^^^^^^
+ Why: The binding is marked mutable but receives no later write.
+ Fix: Declare it with `::` instead of `:=`
+More: jet-lang.dev/e/L0528
+
+Warning [L0508] (arrow_loop_value_drop): This arrow loop body computes a value and drops it
+  --&gt; arrow_loop_value_drop.jet:3:25
     |
   3 |     loop v in values -&gt; v * 2
     |                         ^^^^^

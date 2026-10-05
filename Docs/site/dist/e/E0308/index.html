@@ -36,12 +36,15 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Give `None` a known optional type such as `Int?`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0308</code>: <code>tests/ui/ffi_bad_path.stderr</code>.</p>
-<pre class="diag">Error [E0705]: The Rust item doesn&#39;t match the Jet signature at `bad` in `extern rust &quot;base64@0.22&quot;`
- Why: The `= &quot;rust::path&quot;` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote
- Fix: Check the path and types on `bad` in `extern rust &quot;base64@0.22&quot;`, or pick a different Rust function
-  cargo said:\n       Compiling jet_ffi_ef188a0424bcbabad445d97ca4272af90b6bd81c976cdd875944f0094b2664e0 v0.1.0 (/work/source)\n    error[E0308]: mismatched types\n       --&gt; src/lib.rs:111:18\n        |\n    109 | pub fn jet_ffi_bad(p0: String) -&gt; i64 {\n        |                                   --- expected `i64` because of return type\n    110 |     match ffi_catch_unwind(&lt;generated wrapper&gt;)\n    111 |         Ok(v) =&gt; v,\n        |                  ^ expected `i64`, found `String`\n    For more information about this error, try `rustc --explain E0308`.\n    error: could not compile `jet_ffi_ef188a0424bcbabad445d97ca4272af90b6bd81c976cdd875944f0094b2664e0` (lib) due to 1 previous error
-More: jet-lang.dev/e/E0705
+<p>First UI snapshot mentioning <code>E0308</code>: <code>tests/ui/binding_none_in_value_arm.stderr</code>.</p>
+<pre class="diag">Error [E0308]: Bare `None` needs a known optional type here
+  --&gt; binding_none_in_value_arm.jet:3:18
+    |
+  3 |         empty :: None
+    |                  ^^^^
+ Why: `None` only fits where a `T?` is expected (S32)
+ Fix: Add a type annotation, or use `None` where the type is already known
+More: jet-lang.dev/e/E0308
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

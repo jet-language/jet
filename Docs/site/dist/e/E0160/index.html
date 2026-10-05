@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0160 — Jet diagnostic</title>
-<meta name="description" content="This value can&#39;t be incremented or decremented.">
+<meta name="description" content="`++` and `--` are not Jet operators.">
 <meta property="og:title" content="E0160 — Jet diagnostic">
-<meta property="og:description" content="This value can&#39;t be incremented or decremented.">
+<meta property="og:description" content="`++` and `--` are not Jet operators.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,34 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0160</h1>
-<p>This value can&#39;t be incremented or decremented.</p>
+<p>`++` and `--` are not Jet operators.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">This value can&#39;t be incremented or decremented.</p>
+<p class="diag-copy what" data-registry-field="what">`++` and `--` are not Jet operators.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1).</p>
+<p class="diag-copy why" data-registry-field="why">Jet updates a number with compound assignment only; an update hidden inside an expression reads one value and stores another.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Use a `:=` binding and write `name += 1` / `name -= 1`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `x += 1` or `x -= 1` as its own statement; inside an expression, move the update into its own statement before or after the use.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0160</code>: <code>tests/ui/incr_not_lvalue.stderr</code>.</p>
-<pre class="diag">Error [E0160]: This value can&#39;t be incremented or decremented
-  --&gt; tests/ui/incr_not_lvalue.jet:3:14
+<p>First UI snapshot mentioning <code>E0160</code>: <code>tests/ui/incr_retired_double_minus.stderr</code>.</p>
+<pre class="diag">Error [E0160]: `--` is not a Jet operator
+  --&gt; tests/ui/incr_retired_double_minus.jet:4:14
     |
-  3 |     print(++(n + 1))
-    |              ^^^^^
- Why: Only a mutable name or field like `count` or `self.hits` accepts `++`/`--`
- Fix: Use a `:=` binding and write `name += 1` / `name -= 1`
+  4 |     print(&quot;{a--b}&quot;)
+    |              ^^
+ Why: Jet retired `++` and `--`; reading `a--b` as `a - -b` would hide a sign inside an operator
+ Fix: Write `a - -b` with a space, or `a - b` if one sign was meant
+More: jet-lang.dev/e/E0160
+
+Error [E0160]: `--` is not a Jet operator
+  --&gt; tests/ui/incr_retired_double_minus.jet:5:11
+    |
+  5 |     c :: a--b
+    |           ^^
+ Why: Jet retired `++` and `--`; reading `a--b` as `a - -b` would hide a sign inside an operator
+ Fix: Write `a - -b` with a space, or `a - b` if one sign was meant
 More: jet-lang.dev/e/E0160
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

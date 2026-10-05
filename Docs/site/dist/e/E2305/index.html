@@ -36,33 +36,15 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive, preserve the declared view boundary, or remove `copies: .Explicit` / write `~view` when an owning destination is intended.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2305</code>: <code>tests/ui/task_detach_view_capture.stderr</code>.</p>
-<pre class="diag">Error [E2305]: a returned view cannot borrow from a temporary argument
-  --&gt; tests/ui/task_detach_view_capture.jet:6:20
+<p>First UI snapshot mentioning <code>E2305</code>: <code>tests/ui/nested_payload_view_escape.stderr</code>.</p>
+<pre class="diag">Error [E2305]: This view points into `items`, which this function owns
+  --&gt; tests/ui/nested_payload_view_escape.jet:8:46
     |
-  6 |     t :: task peek([1, 2, 3])
-    |                    ^^^^^^^^^
- Why: the temporary owner is dropped at the end of this statement, while the returned view remains live
- Fix: store the owner in a named binding first, then pass that binding to the view-returning call
+  8 |     if packet == .Data(items) -&gt; return items[0..1]
+    |                                              ^^^^^^
+ Why: `items` is made here and freed when the function returns, so a read window into it would outlive what owns it — there&#39;d be nothing left to look at
+ Fix: Return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it
 More: jet-lang.dev/e/E2305
-
-Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --&gt; tests/ui/task_detach_view_capture.jet:6:15
-    |
-  6 |     t :: task peek([1, 2, 3])
-    |               ^^^^
- Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
-More: jet-lang.dev/e/E1102
-
-Error [E1106]: can&#39;t detach task `t` — it captured a `view` borrow that may not live long enough
-  --&gt; tests/ui/task_detach_view_capture.jet:7:7
-    |
-  7 |     t.detach()
-    |       ^^^^^^
- Why: a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle
- Fix: pass an owned `copy`, or a `Shared&lt;T&gt;` handle, to the task instead of a `view`
-More: jet-lang.dev/e/E1106
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
