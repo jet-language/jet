@@ -134,7 +134,7 @@ module jet_text_wasm {
             assert(length <= bytes.len(), "text Wasm input length exceeds the allocated slot")
             bytes[0..<length].to_vec()
         })
-        String.from_utf8(^bytes).expect("text Wasm input is not valid UTF-8")
+        String.from_utf8(^bytes) ?? panic("text Wasm input is not valid UTF-8")
     }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:2019
     // GATE #4565: kernel primitive
@@ -155,7 +155,7 @@ module jet_text_wasm {
     // GATE #4565: kernel primitive
     #FFI(c)
     #Unsafe("read retained output length under immutable thread-local borrow")
-    pub fn jet_text_wasm_output_len() -> U32 { JET_TEXT_WASM_OUTPUT.with(fn(cell) { U32.try_from(cell.borrow().len()).expect("text Wasm output exceeds the u32 ABI") }) }
+    pub fn jet_text_wasm_output_len() -> U32 { JET_TEXT_WASM_OUTPUT.with(fn(cell) { U32.try_from(cell.borrow().len()) ?? panic("text Wasm output exceeds the u32 ABI") }) }
     // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:2053
     // GATE #4565: kernel primitive
     #FFI(c)
