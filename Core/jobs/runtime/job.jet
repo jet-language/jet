@@ -48,13 +48,19 @@ impl JetJobClock {
                         .None -> true,
                         .Val(last) -> now.duration_since(last).as_nanos() >= nanos.max(I64{0}) as U128,
                     }
-                    if due { &self.last_interval_run.insert(name, now); &fired.push(name) }
+                    if due {
+                        &self.last_interval_run.insert(name, now)
+                        &fired.push(name)
+                    }
                 },
                 .WallClockTime { hour, minute } -> {
                     target_secs :: hour as U64 * U64{3600} + minute as U64 * U64{60}
                     in_window :: secs_of_day >= target_secs && secs_of_day < target_secs + U64{60}
                     already_ran_today :: self.last_daily_run_day.get(name) == Val(day)
-                    if in_window && !already_ran_today { &self.last_daily_run_day.insert(name, day); &fired.push(name) }
+                    if in_window && !already_ran_today {
+                        &self.last_daily_run_day.insert(name, day)
+                        &fired.push(name)
+                    }
                 },
             }
         }
@@ -226,7 +232,7 @@ impl JetJobDirectoryGuard {
         #Unsafe("hold cwd lock until guard restores the previous process directory") {
             lock :: JET_JOB_CWD_LOCK.lock().expect("job cwd lock poisoned")
             previous :: directory.and_then(_ -> env.current_dir().ok())
-            if directory is Val(path) -> _ :: env.set_current_dir(path)
+            if directory == .Val(path) -> _ :: env.set_current_dir(path)
             JetJobDirectoryGuard{previous: previous, lock: Val(^lock)}
         }
     }
@@ -236,7 +242,7 @@ impl Drop for JetJobDirectoryGuard {
     fn drop(self: &JetJobDirectoryGuard) -> {
         // GATE #4565: kernel primitive
         #Unsafe("restore saved directory before releasing process cwd mutex") {
-            if self.previous.take() is Val(previous) -> _ :: env.set_current_dir(previous)
+            if self.previous.take() == .Val(previous) -> _ :: env.set_current_dir(previous)
             _ :: self.lock.take()
         }
     }
@@ -265,7 +271,10 @@ fn jet_job_base_directory(job: JetJobSpec) -> OSPath {
     // GATE #4565: kernel primitive
     current :: #Unsafe("query selected host process directory") { env.current_dir().unwrap_or_else(_ -> OSPath.new(".")) }
     match job.working_directory {
-        .Val(directory) -> { path :: OSPath.new(directory); if path.is_absolute() { ^path } else { current.join(path) } },
+        .Val(directory) -> {
+            path :: OSPath.new(directory)
+            if path.is_absolute() { ^path } else { current.join(path) }
+        },
         .None -> ^current,
     }
 }
@@ -298,16 +307,16 @@ fn jet_job_declared_paths(job: JetJobSpec, pattern: String) -> [OSPath] {
     paths := [OSPath]{}
     // GATE #4565: kernel primitive
     #Unsafe("enumerate real selected host filesystem without fabricating missing entries") {
-        while pending.pop() is Val(directory) {
+        while pending.pop() == .Val(directory) {
             entries_result :: fs.read_dir(directory)
-            if entries_result is Err(_) -> continue
+            if entries_result == .Err(_) -> continue
             entries := entries_result.unwrap().filter_map(entry -> entry.ok()).collect()
             &entries.sort_by_key(entry -> entry.path())
             loop entry in entries {
                 path :: entry.path()
                 if path.is_dir() -> &pending.push(~path)
                 relative_result :: path.strip_prefix(base)
-                if relative_result is Err(_) -> continue
+                if relative_result == .Err(_) -> continue
                 relative :: relative_result.unwrap().to_string_lossy().replace('\\', "/")
                 if jet_job_glob_match(normalized, relative) -> &paths.push(^path)
             }
@@ -328,7 +337,7 @@ fn jet_job_latest_modified(path: OSPath) -> SystemTime? {
             children := entries.filter_map(entry -> entry.ok()).map(entry -> entry.path()).collect()
             &children.sort()
             loop child in children {
-                if jet_job_latest_modified(child) is Val(modified) -> latest = Val(latest.map_or(modified, current -> current.max(modified)))
+                if jet_job_latest_modified(child) == .Val(modified) -> latest = Val(latest.map_or(modified, current -> current.max(modified)))
             }
         }
         latest
@@ -336,20 +345,26 @@ fn jet_job_latest_modified(path: OSPath) -> SystemTime? {
 }
 // Rust: crates/jet-codegen/src/Prelude/Job.rs:433
 fn jet_job_hash_bytes(hash: &U64, bytes: View<U8>) -> {
-    loop byte in bytes { hash = hash ^ byte as U64; hash = hash.wrapping_mul(U64{1099511628211}) }
+    loop byte in bytes {
+        hash = hash ^ byte as U64
+        hash = hash.wrapping_mul(U64{1099511628211})
+    }
 }
 // Rust: crates/jet-codegen/src/Prelude/Job.rs:440
 fn jet_job_hash_path(path: OSPath, hash: &U64) -> {
     // GATE #4565: kernel primitive
     #Unsafe("hash real symlink targets, file bytes and sorted directory children") {
         result :: fs.symlink_metadata(path)
-        if result is Err(_) { jet_job_hash_bytes(&hash, "<missing>".as_bytes()); return }
+        if result == .Err(_) {
+            jet_job_hash_bytes(&hash, "<missing>".as_bytes())
+            return
+        }
         metadata :: result.unwrap()
         if metadata.file_type().is_symlink() {
             jet_job_hash_bytes(&hash, "<symlink>".as_bytes())
-            if fs.read_link(path) is Ok(target_path) -> jet_job_hash_bytes(&hash, target_path.to_string_lossy().as_bytes())
+            if fs.read_link(path) == .Ok(target_path) -> jet_job_hash_bytes(&hash, target_path.to_string_lossy().as_bytes())
         } else if metadata.is_file() {
-            if fs.read(path) is Ok(bytes) -> jet_job_hash_bytes(&hash, bytes)
+            if fs.read(path) == .Ok(bytes) -> jet_job_hash_bytes(&hash, bytes)
         } else if metadata.is_dir() {
             entries := fs.read_dir(path).ok().into_iter().flat_map(entries -> entries.filter_map(entry -> entry.ok()).map(entry -> entry.path())).collect()
             &entries.sort()
@@ -374,7 +389,7 @@ pub fn jet_job_freshness(job: JetJobSpec) -> JetJobFreshness {
             jet_job_hash_path(path, &fingerprint)
             // GATE #4565: kernel primitive
             if #Unsafe("observe input existence on selected host") { !path.exists() } -> missing_input = Val(pattern)
-            if jet_job_latest_modified(path) is Val(modified) -> newest_input = Val(newest_input.map_or(modified, current -> current.max(modified)))
+            if jet_job_latest_modified(path) == .Val(modified) -> newest_input = Val(newest_input.map_or(modified, current -> current.max(modified)))
             &input_paths.push(path)
         }
     }
@@ -386,14 +401,14 @@ pub fn jet_job_freshness(job: JetJobSpec) -> JetJobFreshness {
             jet_job_hash_path(path, &fingerprint)
             // GATE #4565: kernel primitive
             if #Unsafe("observe output existence on selected host") { !path.exists() } -> missing_output = Val(pattern)
-            if jet_job_latest_modified(path) is Val(modified) -> newest_output = Val(newest_output.map_or(modified, current -> current.max(modified)))
+            if jet_job_latest_modified(path) == .Val(modified) -> newest_output = Val(newest_output.map_or(modified, current -> current.max(modified)))
             &output_paths.push(path)
         }
     }
     (fresh, reason) :: if job.cache == .Uncached { (false, "cache policy is uncached") }
         else if job.output_paths.is_empty() { (false, "no declared outputs") }
-        else if missing_output is Val(path) { (false, "output `{path}` is missing") }
-        else if missing_input is Val(path) { (false, "input `{path}` is missing") }
+        else if missing_output == .Val(path) { (false, "output `{path}` is missing") }
+        else if missing_input == .Val(path) { (false, "input `{path}` is missing") }
         else if newest_input > newest_output { (false, "an input is newer than the declared outputs") }
         else { (true, "all declared outputs are newer than declared inputs") }
     _ :: (input_paths, output_paths)
@@ -443,7 +458,7 @@ fn jet_job_emit(sink: JetJobEventSinkHandle, timestamp_ms: U64, kind: String, st
     request_json :: request_id.map(jet_job_json_string).unwrap_or_else(fn() -> "null")
     failure_json :: failure.map(jet_job_json_string).unwrap_or_else(fn() -> "null")
     fields :: "{{\"event\":{jet_job_json_string(kind)},\"state\":{jet_job_json_string(state)},\"job_id\":{jet_job_json_string(job_id)},\"name\":{jet_job_json_string(name)},\"queue\":{jet_job_json_string(queue)},\"attempts\":{attempts},\"duration_ms\":{duration},\"worker\":{worker_json},\"request_id\":{request_json},\"failure\":{failure_json}}}"
-    if JetDevtoolsEvent.from_parts(timestamp_ms, "job-runtime", "Job", job_id, fields) is Ok(event) {
+    if JetDevtoolsEvent.from_parts(timestamp_ms, "job-runtime", "Job", job_id, fields) == .Ok(event) {
         sink.publish(~event)
         jet_devtools_publish_event(^event)
     }
@@ -551,7 +566,7 @@ fn jet_job_validate_graph(jobs: [JetJobSpec]) -> () Err! {
         state[index] = U8{1}
         &stack.push(index)
         loop dependency in jobs[index].after {
-            if names.get(dependency).and_then(indices -> indices.first()) is Val(candidate) -> visit(candidate, jobs, names, &state, &stack)?
+            if names.get(dependency).and_then(indices -> indices.first()) == .Val(candidate) -> visit(candidate, jobs, names, &state, &stack)?
         }
         _ :: stack.pop()
         state[index] = U8{2}
@@ -657,10 +672,10 @@ where F: fn() -> G? Err! {
     if argv.get(1) == Val(JET_JOB_PRIVATE_DISPATCH_FLAG) {
         name :: argv.get(2) ?? jet_job_graph_failure("private job dispatch is missing a job name")
         index :: jobs.iter().position(job -> job.entry.name == name) ?? jet_job_graph_failure("private job dispatch names unknown job `{name}`")
-        if jet_job_validate_graph(jobs) is Err(reason) -> jet_job_graph_failure(reason)
+        if jet_job_validate_graph(jobs) == .Err(reason) -> jet_job_graph_failure(reason)
         args :: argv[3..].to_vec()
-        if jobs[index].validate is Val(validate) {
-            if validate(args) is Err(reason) -> jet_job_graph_failure("job `{jobs[index].entry.name}` received invalid arguments: {reason}")
+        if jobs[index].validate == .Val(validate) {
+            if validate(args) == .Err(reason) -> jet_job_graph_failure("job `{jobs[index].entry.name}` received invalid arguments: {reason}")
         }
         jet_job_run_graph(index, jobs, argv.first().cloned().unwrap_or_else(fn() -> "program"), args, sink, scope_enter.clone())
         return true
@@ -672,13 +687,16 @@ where F: fn() -> G? Err! {
     }
     match jet_job_select(argv, specs) {
         .Ordinary -> false,
-        .Help -> { jet_job_help(argv, specs); true },
+        .Help -> {
+            jet_job_help(argv, specs)
+            true
+        },
         .Job(index) -> {
-            if jet_job_validate_graph(jobs) is Err(reason) -> jet_job_graph_failure(reason)
+            if jet_job_validate_graph(jobs) == .Err(reason) -> jet_job_graph_failure(reason)
             // Wrapper and validator both take job args only, excluding program/job.
             args :: argv[2..].to_vec()
-            if jobs[index].validate is Val(validate) {
-                if validate(args) is Err(reason) -> jet_job_graph_failure("job `{jobs[index].entry.name}` received invalid arguments: {reason}")
+            if jobs[index].validate == .Val(validate) {
+                if validate(args) == .Err(reason) -> jet_job_graph_failure("job `{jobs[index].entry.name}` received invalid arguments: {reason}")
             }
             jet_job_run_graph(index, jobs, argv.first().cloned().unwrap_or_else(fn() -> "program"), args, sink, scope_enter.clone())
             true
@@ -702,7 +720,7 @@ where F: fn() -> G? Err! {
 // Rust: crates/jet-codegen/src/Prelude/Job.rs:1251
 pub fn jet_job_service_tick_specs_with_sink<F: Clone + Send + Sync, G: Send>(clock: &JetJobClock, jobs: [JetJobSpec], program: String, sink: JetJobEventSinkHandle, scope_enter: F) ->
 where F: fn() -> G? Err! {
-    if jet_job_validate_graph(jobs) is Err(reason) {
+    if jet_job_validate_graph(jobs) == .Err(reason) {
         // GATE #4565: kernel primitive
         #Unsafe("report invalid scheduled graph on stderr without executing it") { env.eprintln("Error [E1331]: {reason}") }
         return
@@ -710,10 +728,10 @@ where F: fn() -> G? Err! {
     schedules :: jobs.iter().filter(job -> jet_job_schedule_enabled(job.entry.scope)).filter_map(job -> job.entry.schedule.map(schedule -> (job.entry.name, schedule))).collect()
     due_roots := [Int]{}
     loop name in jet_job_schedule_due(&clock, schedules) {
-        if jobs.iter().position(job -> job.entry.name == name) is Val(index) {
+        if jobs.iter().position(job -> job.entry.name == name) == .Val(index) {
             args :: [String]{}
-            if jobs[index].validate is Val(validate) {
-                if validate(args) is Err(reason) {
+            if jobs[index].validate == .Val(validate) {
+                if validate(args) == .Err(reason) {
                     // GATE #4565: kernel primitive
                     #Unsafe("report scheduled argument failure without invoking invalid job") { env.eprintln("Error [E1331]: job `{jobs[index].entry.name}` received invalid scheduled arguments: {reason}") }
                     continue
