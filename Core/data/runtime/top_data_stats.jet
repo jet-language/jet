@@ -198,9 +198,9 @@ fn jet_data_rolling_mean_checked(values: &[F64], width: I64) -> Result<[F64], Da
     jet_data_reject_nonfinite("rolling_mean", values)?
     width :: width as USize
     out := [F64].with_capacity(values.len())
-    for i in 0..values.len() {
+    for i in 0..<values.len() {
         start :: i.saturating_add(1).saturating_sub(width)
-        window :: &values[start..=i]
+        window :: &values[start..i]
         mean :: jet_data_neumaier_sum(window)? / (window.len() as F64)
         out.push(jet_data_normalize_zero(mean))
     }

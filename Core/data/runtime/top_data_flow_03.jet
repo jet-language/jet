@@ -177,7 +177,7 @@ fn jet_data_query_arrow<T: ArrowRow + Clone>(batch: DataArrowBatch<T>) -> DataQu
     max_rows :: USize.try_from(limits.max_output_rows).map_err(fn(_) { jet_data_error(DataErrorKind.Limit, "data.query_arrow", "max_output_rows cannot be represented by this target") })?
     if batch.row_count() > max_rows { return Err(jet_data_error(DataErrorKind.Limit, "data.query_arrow", "max_output_rows {limits.max_output_rows} exceeded")) }
     rows := [T].with_capacity(batch.row_count())
-    for index in 0..batch.row_count() {
+    for index in 0..<batch.row_count() {
         row :: batch.row(index).map_err(fn(error) { DataError{kind: DataErrorKind.Bridge, operation: "data.query_arrow", row: Ok(I64{index}), column: Err(JetAbsent), index: Err(JetAbsent), reason: error.to_string(), cause: Err(JetAbsent)} })?
         rows.push(^row)
     }

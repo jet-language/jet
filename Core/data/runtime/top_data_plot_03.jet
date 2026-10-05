@@ -391,7 +391,7 @@ fn jet_data_plot_svg_draw_axes(out: &String, plan: &JetDataPlotPlan, encodings: 
         out.push_str("<line class=\"axis x\" x1=\"{jet_data_plot_number(left)}\" y1=\"{jet_data_plot_number(top + height)}\" x2=\"{jet_data_plot_number(left + width)}\" y2=\"{jet_data_plot_number(top + height)}\"/>")
     }
     y_ticks :: y_axis.map_or(5, fn(axis) { axis.ticks }).clamp(0, 32) as USize
-    loop tick in 0..=y_ticks {
+    loop tick in 0..y_ticks {
         ratio :: if y_ticks == 0 { 0.0 } else { (tick as F64) / (y_ticks as F64) }
         value :: y_minimum + (y_maximum - y_minimum) * ratio
         position :: jet_data_plot_svg_y(&JetDataPlotValue.Number(value), y_scale, y_minimum, y_maximum, top, height)
@@ -403,7 +403,7 @@ fn jet_data_plot_svg_draw_axes(out: &String, plan: &JetDataPlotPlan, encodings: 
     }
     if x_numeric {
         x_ticks :: x_axis.map_or(5, fn(axis) { axis.ticks }).clamp(0, 32) as USize
-        loop tick in 0..=x_ticks {
+        loop tick in 0..x_ticks {
             ratio :: if x_ticks == 0 { 0.0 } else { (tick as F64) / (x_ticks as F64) }
             value :: x_minimum + (x_maximum - x_minimum) * ratio
             position :: jet_data_plot_svg_x(&JetDataPlotValue.Number(value), x_scale, x_categories, x_minimum, x_maximum, left, width)

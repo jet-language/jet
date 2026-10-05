@@ -157,7 +157,7 @@ impl JetCountMinSketch {
         // GATE #4565: kernel primitive
         #Unsafe("exclusive saturating counter update; preserve poison panic") {
             rows := self.state.lock().unwrap()
-            for row in 0..4 {
+            for row in 0..<4 {
                 column :: (first.wrapping_add(second.wrapping_mul(row as U64 + 1)) & 0xff) as Usize
                 rows[row][column] = rows[row][column].saturating_add(1)
             }
@@ -171,7 +171,7 @@ impl JetCountMinSketch {
         // GATE #4565: kernel primitive
         #Unsafe("read all four counters under one mutex; preserve poison panic") {
             rows :: self.state.lock().unwrap()
-            (0..4).map(fn(row) {
+            (0..<4).map(fn(row) {
                 column :: (first.wrapping_add(second.wrapping_mul(row as U64 + 1)) & 0xff) as Usize
                 rows[row][column]
             }).min().unwrap() as I64
