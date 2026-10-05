@@ -4164,13 +4164,14 @@ fn sema_finalize_result_empty() -> SemaFinalizeModulesResult Never! {
 }
 
 fn sema_finalize_result_push(checked: &SemaFinalizeModulesResult, module: ^SemaFinalizeModuleResult) {
-    &module.diagnostics.reverse()
-    loop module.diagnostics.len() > 0 {
-        diagnostic :: &module.diagnostics.pop() ?? break
+    owned := ^module
+    &owned.diagnostics.reverse()
+    loop owned.diagnostics.len() > 0 {
+        diagnostic :: &owned.diagnostics.pop() ?? break
         &checked.diagnostics.push(diagnostic)
     }
-    if !module.complete -> checked.complete = false
-    &checked.cores.push(^module.core)
+    if !owned.complete -> checked.complete = false
+    &checked.cores.push(^owned.core)
 }
 
 fn sema_finalize_module(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy], module_index: Int) -> SemaFinalizeModuleResult {
