@@ -479,17 +479,13 @@ JET_RUST_EMIT_MIN_INSTRUCTIONS_PER_THREAD :: 20000
 JET_RUST_EMIT_CONTEXT_BYTES_PER_INSTRUCTION :: 256
 JET_RUST_EMIT_PRINT_BYTES_PER_INSTRUCTION :: 4096
 
-// One function row a printing thread holds, and whether it prints it. A row
-// it does not print travels with its part, so every row comes back in order.
-struct JetRustEmitJob {
-    pub prints: Bool
-    pub function: MIRFunction
-}
-
-// One printing thread's result: its rows in order, the lines of each row it
-// printed, and the failures printing them reported.
-struct JetRustEmitPart {
+// One printing thread's slot: its rows (last-first) and whether it prints
+// each, moved in by single-element moves; then the lines of each row it
+// printed (first-first) and the failures printing them reported. The thread
+// prints the rows in place behind the slot's guard, so no row is copied.
+struct JetRustEmitSlot {
     pub functions: [MIRFunction]
+    pub prints: [Bool]
     pub texts: [[String]]
     pub failure: JetRustEmitFailure?
     pub kept_failures: [JetRustEmitKeptFailure]
@@ -578,13 +574,13 @@ fn jet_rust_emit_signature_row(function: MIRFunction) -> MIRFunction Never! {
 
 // Prints the printed functions on `workers` threads, the same as one thread
 // would. The rows leave the program in consecutive parts of about equal
-// printed instructions (compiler_threads_partition), and while the threads
-// print, the program holds only signature rows, so each thread's copy of the
-// context carries no body. Each part prints its rows in order on its own
-// copy and the parts join in part order: the rows come back in program
-// order, the first failure is the first in program order after any already
-// reported, and kept failures stay in program order. Returns each printed
-// function's lines, in program order.
+// printed instructions (compiler_threads_partition), one slot per part, and
+// while the threads print, the program holds only signature rows, so the
+// context the threads share carries no body. Each thread prints its part's
+// rows in order on its own copy of that context; the slots drain in part
+// order: the rows come back in program order, the first failure is the first
+// in program order after any already reported, and kept failures stay in
+// program order. Returns each printed function's lines, in program order.
 fn jet_rust_emit_functions_on_threads(ctx: &JetRustEmitContext, workers: Int) -> [[String]] {
     prints := [Bool]{}
     weights := [Int]{}
@@ -594,8 +590,11 @@ fn jet_rust_emit_functions_on_threads(ctx: &JetRustEmitContext, workers: Int) ->
         &weights.push(if prints_row -> jet_rust_emit_function_instructions(ctx.program.functions[position]) else -> 0)
     }
     bounds :: compiler_threads_partition(weights, workers)
-    parts := [[JetRustEmitJob]]{}
-    loop _ in 0..<workers -> &parts.push([JetRustEmitJob]{})
+    slots := [Shared<JetRustEmitSlot>]{}
+    loop _ in 0..<workers {
+        slot :: shared JetRustEmitSlot{functions: [MIRFunction]{}, prints: [Bool]{}, texts: [[String]]{}, failure: None, kept_failures: [JetRustEmitKeptFailure]{}}
+        &slots.push(slot)
+    }
     signatures := [MIRFunction]{}
     part := workers - 1
     loop {
@@ -603,61 +602,78 @@ fn jet_rust_emit_functions_on_threads(ctx: &JetRustEmitContext, workers: Int) ->
         position :: ctx.program.functions.len()
         part = compiler_threads_part_of(bounds, part, position)
         &signatures.push(jet_rust_emit_signature_row(function))
-        &parts[part].push(JetRustEmitJob{prints: prints[position], function: function})
+        jet_rust_emit_slot_fill(slots[part], ^function, prints[position])
     }
     &signatures.reverse()
     ctx.program.functions = signatures
-    &parts.reverse()
-    done := jet_rust_emit_function_parts(ctx, ^parts)
-    functions := [MIRFunction]{}
+    shared_ctx :: shared ctx
+    printed :: jet_rust_emit_slots(slots, 0, shared_ctx)
     texts := [[String]]{}
-    loop {
-        finished := &done.pop() ?? break
-        if ctx.failure == None -> ctx.failure = finished.failure
-        kept := ^finished.kept_failures
-        &ctx.kept_failures.extend(kept)
-        rows := ^finished.functions
-        &functions.extend(rows)
-        printed := ^finished.texts
-        &texts.extend(printed)
-    }
-    ctx.program.functions = functions
+    loop slot in slots -> jet_rust_emit_slot_drain(&ctx, slot, &texts)
+    if texts.len() != printed -> panic("emit threads returned {texts.len()} printed functions for {printed}")
     texts
 }
 
-// Prints the parts popped from `parts` (first part on top), one task per
-// part and the last part on this thread; each task holds its own copy of the
-// context. Returns the parts last part first, so popping yields them in part
-// order.
-fn jet_rust_emit_function_parts(ctx: JetRustEmitContext, parts: ^[[JetRustEmitJob]]) -> [JetRustEmitPart] {
-    remaining := ^parts
-    jobs :: &remaining.pop() ?? return [JetRustEmitPart]{}
-    if remaining.len() == 0 -> return [JetRustEmitPart]{jet_rust_emit_function_part(ctx, jobs)}
-    done := [JetRustEmitPart]{}
-    task.group emit_threads {
-        head :: task jet_rust_emit_function_part(ctx, jobs)
-        done = jet_rust_emit_function_parts(ctx, ^remaining)
-        &done.push(^^head.join() ?? panic(compiler_threads_failure_text(err)))
-    }
-    done
+// Moves one row into its part's slot (rows arrive last-first).
+fn jet_rust_emit_slot_fill(slot: Shared<JetRustEmitSlot>, function: ^MIRFunction, prints: Bool) {
+    permit :: slot.guard_edit()
+    &permit.value.functions.push(^function)
+    &permit.value.prints.push(prints)
 }
 
-// One thread: its rows, held last-first, printed first-first on its own
-// copy of the context, which starts with no failure so the part reports only
-// its own.
-fn jet_rust_emit_function_part(ctx: JetRustEmitContext, jobs: [JetRustEmitJob]) -> JetRustEmitPart {
-    worker := ctx
+// Moves a slot's rows back onto the end of the program (popping its
+// last-first rows restores program order), appends its printed lines, and
+// merges its failures after the ones already held.
+fn jet_rust_emit_slot_drain(ctx: &JetRustEmitContext, slot: Shared<JetRustEmitSlot>, texts: &[[String]]) {
+    permit :: slot.guard_edit()
+    loop permit.value.functions.len() > 0 {
+        function :: &permit.value.functions.pop() ?? break
+        &ctx.program.functions.push(function)
+    }
+    loop permit.value.texts.len() > 0 {
+        lines :: &permit.value.texts.pop() ?? break
+        &texts.push(lines)
+    }
+    if ctx.failure == None -> ctx.failure = permit.value.failure
+    &ctx.kept_failures.extend(permit.value.kept_failures)
+}
+
+// Prints `slots[from..]`, one task per slot and the last slot on this
+// thread, and returns how many functions they printed.
+fn jet_rust_emit_slots(slots: [Shared<JetRustEmitSlot>], from: Int, shared_ctx: Shared<JetRustEmitContext>) -> Int {
+    if from >= slots.len() - 1 -> return jet_rust_emit_slot(slots[from], shared_ctx)
+    printed := 0
+    task.group emit_threads {
+        head :: task jet_rust_emit_slot(slots[from], shared_ctx)
+        printed = jet_rust_emit_slots(slots, from + 1, shared_ctx)
+        printed += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    printed
+}
+
+// One thread: prints its slot's rows first-first, in place, on its own copy
+// of the shared context, which starts with no failure so the slot reports
+// only its own. The lines are held last-first, so draining pops them in
+// program order.
+fn jet_rust_emit_slot(slot: Shared<JetRustEmitSlot>, shared_ctx: Shared<JetRustEmitContext>) -> Int {
+    worker := shared_ctx.guard_read().value
     worker.failure = None
     worker.kept_failures = [JetRustEmitKeptFailure]{}
-    functions := [MIRFunction]{}
-    texts := [[String]]{}
-    index := jobs.len()
+    permit :: slot.guard_edit()
+    printed := [[String]]{}
+    index := permit.value.functions.len()
     loop index > 0 {
         index -= 1
-        if jobs[index].prints -> &texts.push(jet_rust_emit_function(&worker, jobs[index].function))
-        &functions.push(jobs[index].function)
+        if permit.value.prints[index] -> &printed.push(jet_rust_emit_function(&worker, permit.value.functions[index]))
     }
-    JetRustEmitPart{functions: ^functions, texts: ^texts, failure: worker.failure, kept_failures: worker.kept_failures}
+    count :: printed.len()
+    loop printed.len() > 0 {
+        lines :: &printed.pop() ?? break
+        &permit.value.texts.push(lines)
+    }
+    permit.value.failure = worker.failure
+    permit.value.kept_failures = worker.kept_failures
+    count
 }
 
 // MIRRust EmissionUnits: build units of one emitted program. An item's unit
