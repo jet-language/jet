@@ -168,12 +168,19 @@ module-binding = [ "#Track" ] ident ( "::" | ":=" ) expr NL ;
 comptime = "@" ident "::" expr NL ;
 stmt     = binding | assign | if | loop | "break" | "next"
          | "return" [ expr ] | result-handler | expr ;
-pattern  = ident | ".{" ident { "," ident } [ "," ".." ] "}"
+pattern  = ident | "(" ident "," ident { "," ident } ")"
+         | [ ident ] "{" pattern-field { "," pattern-field } [ "," ".." ] "}"
          | "[" [ ident { "," ident } ] "]" ;
+pattern-field = ident [ ":" ident ] ;
 fence    = "<:" ( ident | expr ) { "," ( ident | expr ) } ":>" ;
 assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 ```
+
+Tuple binding parentheses name members in any order, never positions.
+Dotless record patterns rename tuple members (`{ before: head, after: tail }`)
+or bind a subset with mandatory `..`; unknown parenthesized names, including
+`_`, are E0314. Two-binding loop headers keep their iteration meaning.
 
 A parameter's access marker is on its type (`x: &T` or `x: ^T`); receivers
 write `&self` or `^self`. A type is never written between a binding name and its
@@ -2183,7 +2190,7 @@ cancelled (D-CANCELMODEL1=C, D-SHIELDNAME1=A).
 at the call site:
 
 ```jet
-(tx, rx) :: channel<Int>()
+{ sender: tx, receiver: rx } :: channel<Int>()
 tx.send(7)
 value :: rx.receive() ?? panic("channel closed")
 ```

@@ -156,7 +156,7 @@ fn map_left(handle: Shared<Pair>) {
 }
 
 fn split_pair(handle: Shared<Pair>) {
-    (left, right) := handle.guard_edit().split(
+    { first: left, second: right } := handle.guard_edit().split(
         value -> value.left,
         value -> value.right
     )

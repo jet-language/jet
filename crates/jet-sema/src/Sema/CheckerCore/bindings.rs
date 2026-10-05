@@ -2421,6 +2421,9 @@ impl<'a> Checker<'a> {
                     elems: fields.clone(),
                     span: *pat_span,
                 });
+                if matches!(&it, Type::Apply { .. }) {
+                    return;
+                }
             }
             BindPattern::Struct {
                 type_name,

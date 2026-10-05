@@ -797,11 +797,17 @@ leading-dot patterns.
 destructure structs, tuples, and lists:
 
 ```jet
-.{ id, severity: sev } :: incident      // struct: bind id, rename severity
-.{ kind, .. } :: event                  // partial needs mandatory `..` (E0326)
-(x, y) :: point                         // named tuple, canonical order
+{ id, severity: sev } :: incident       // struct: bind id, rename severity
+{ kind, .. } :: event                   // partial needs mandatory `..` (E0326)
+(y, x) :: point                         // tuple: bind members by name, in any order
+{ x: a, y: b } :: point                 // tuple: rename members explicitly
 [a, b] :: xs                            // list, runtime length check (E0315)
 ```
+
+Tuple parentheses bind only member names, never positions. A name that is not
+a member (including `_`) is E0314; use a dotless `{ member: local }` pattern
+to rename. A partial tuple record pattern requires `..` (E0326). Two-binding
+loops, such as `loop (i, item) in xs`, are unchanged.
 
 Redundant `..` on a full pattern is E0327. Nesting one level. Refutable
 statement tests use subject-first `subject == pattern ?? route` (D-CHOOSE-TEST1=A);
@@ -2584,9 +2590,10 @@ combinators. The current surface is one `task` word with nested
 borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 `async`/`await` coloring (gated on scheduler work). **D-TUPLE-DESTRUCT1**
 *(ratified/implemented 2026-07-04)*: `channel<T>()` returns
-`(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
-`.sender()` method. Destructure with the existing tuple form:
-`(tx, rx) :: channel<T>()`; a second sender is `~tx`. A
+`(sender: Sender<T>, receiver: Receiver<T>)` directly — no combined "Channel"
+handle, no `.sender()` method. Bind by member name with
+`(sender, receiver) :: channel<T>()`, or rename with
+`{ sender: tx, receiver: rx } :: channel<T>()`; a second sender is `~tx`. A
 `Receiver<T>` is a plain endpoint for a readiness arm table.
 
 **D-CONC-UNIT1=A — one substrate for state, duty, and reach** *(ratified

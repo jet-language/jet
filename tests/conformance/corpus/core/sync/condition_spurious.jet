@@ -27,9 +27,9 @@ fn wait_for_ready(
 fn run() {
     state :: shared State{ready: false}
     changed :: Condition.new()
-    (armed_sender, armed) :: channel<Int>(capacity: 1)
-    (checks_sender, checks) :: channel<Int>(capacity: 4)
-    (woke_sender, woke) :: channel<Bool>(capacity: 1)
+    { sender: armed_sender, receiver: armed } :: channel<Int>(capacity: 1)
+    { sender: checks_sender, receiver: checks } :: channel<Int>(capacity: 4)
+    { sender: woke_sender, receiver: woke } :: channel<Bool>(capacity: 1)
 
     waiter :: task wait_for_ready(state, changed, armed_sender, checks_sender, woke_sender)
     armed.receive() ?? panic("waiter was not armed")

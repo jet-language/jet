@@ -43,6 +43,12 @@ fixed-width FNV results in record fields, direct and wrapper calls, and record
 copies. Its [golden](features/expected/basics/struct_call_word.out) preserves all
 64 bits independently of the exact `Int` representation.
 
+[`tuple_destructure_names.jet`](features/basics/tuple_destructure_names.jet)
+binds tuple members by name in any order, renames them with dotless record
+patterns, and selects a subset with `..`. Its
+[golden](features/expected/basics/tuple_destructure_names.out) makes the
+member-to-binding mapping visible.
+
 ## Auxiliary golden stream suffix
 
 The feature runner discovers `.jet` files and project directories containing a

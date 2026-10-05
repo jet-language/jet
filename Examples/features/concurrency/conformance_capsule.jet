@@ -19,9 +19,9 @@ fn failure_label(error: TaskFailure) -> String {
 // Capacity one: the second send is still blocked after a bounded wait and
 // completes only after the receiver drains the slot.
 fn backpressure_cell() {
-    (tx, values) :: channel<Int>(capacity: 1)
-    (started_tx, started) :: channel<Int>(capacity: 4)
-    (sent_tx, sent) :: channel<Int>(capacity: 4)
+    { sender: tx, receiver: values } :: channel<Int>(capacity: 1)
+    { sender: started_tx, receiver: started } :: channel<Int>(capacity: 4)
+    { sender: sent_tx, receiver: sent } :: channel<Int>(capacity: 4)
     tx.send(10)
     second_tx :: ~tx
     sender :: task {
@@ -52,8 +52,8 @@ fn worker(id: Int, token: Int, token_tx: Sender<Int>, events: Sender<Int>) -> In
 // Two tokens bound the pool. Workers log +1/-1 while holding a token; the
 // running maximum over the log is the observed in-flight bound.
 fn worker_limit_cell() {
-    (token_tx, tokens) :: channel<Int>(capacity: 2)
-    (events_tx, events) :: channel<Int>(capacity: 16)
+    { sender: token_tx, receiver: tokens } :: channel<Int>(capacity: 2)
+    { sender: events_tx, receiver: events } :: channel<Int>(capacity: 16)
     token_tx.send(1)
     token_tx.send(2)
     t1 :: ~token_tx
@@ -119,7 +119,7 @@ fn sibling(done: Sender<Int>) -> Int {
 // task.all: first failure keeps its identity; the sibling is cancelled at
 // its sleep wait point and never reports completion.
 fn failfast_cell() {
-    (done_tx, done) :: channel<Int>(capacity: 2)
+    { sender: done_tx, receiver: done } :: channel<Int>(capacity: 2)
     _ :: task.all {fail_fast("first"), fail_late("second"), sibling(done_tx)} ?? {
         print("failfast: error {failure_label(err)}")
         [0, 0, 0]
