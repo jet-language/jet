@@ -426,7 +426,7 @@ fn mir_pass_wave_restore(program: &MIRProgram, slot: Shared<MIRPassWaveSlot>) {
 fn mir_pass_wave_slot(slot: Shared<MIRPassWaveSlot>, first: Int, last: Int, shared_inputs: Shared<MIRPassWaveInputs>) -> MIRPassWaveCounts {
     counts := mir_pass_wave_counts()
     inputs :: shared_inputs.guard_read()
-    permit :: slot.guard_edit()
+    permit := slot.guard_edit()
     loop index in 0..<permit.value.functions.len() {
         mir_pass_function_steps(&permit.value.functions[index], first, last, inputs.value, &counts)
     }
