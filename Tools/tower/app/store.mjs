@@ -113,9 +113,9 @@ function withStorePairTransaction(dataDir, liveFile, config, work, prepare = nul
   });
 }
 
-// A board is born with one active epoch: every card must live in an epoch, be
-// a sidequest, or be frozen (owner ruling 2026-08-05), so an epoch-less board
-// would have nowhere to put epoch-track work.
+// A board is born with one active epoch: every card must live in an epoch or
+// be a sidequest (owner rulings 2026-08-05 and 2026-10-04), so an epoch-less
+// board would have nowhere to put epoch-track work.
 export const empty = (project = 'Project') => ({
   meta: { version: VERSION, project, currentEpoch: null, nextNum: 1, rev: 0, ui: { toggled: [] } },
   epochs: [{ id: 'e1', name: 'Epoch 1', goal: '', status: 'active' }],
@@ -528,6 +528,8 @@ export function validateStoredState(state, source = 'live store') {
   (state.cards || []).forEach((card, index) => validateStoredCard(card, index, source, seenNums, seenIds));
   (state.decisions || []).forEach((decision, index) => validateStoredDecision(decision, index, source));
   (state.briefings || []).forEach(validateBriefing);
+  // The owner-actions report was removed 2026-10-04; a board written before then still carries the key. Drop it on read; the next write persists the board without it.
+  if (state.statusSnapshot != null) delete state.statusSnapshot.ownerActions;
   if (state.statusSnapshot != null) validateStatusSnapshot(state.statusSnapshot);
   return state;
 }
@@ -708,11 +710,6 @@ export function normalize(s, historyCards = null, sync = true) {
   delete s.meta.digestCursor;
   for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events', 'briefings']) s[k] ||= [];
   s.statusSnapshot ??= null;
-  // Existing snapshots get deterministic ids until the next normal mutation
-  // persists them; repeated reads must identify the same owner action.
-  s.statusSnapshot?.ownerActions.forEach((action, index) => {
-    action.id ??= `${s.statusSnapshot.id}:action:${index + 1}`;
-  });
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
   // One-time reconcile of the retired meta.currentEpoch pointer, then drop it so
@@ -1256,12 +1253,13 @@ const checkEnum = (val, list, what) => {
 };
 const checkEpoch = (s, id) => { if (id != null && !s.epochs.find(e => e.id === id)) fail('E_NOT_FOUND', `no epoch ${id}`); };
 
-// Owner ruling 2026-08-05: every card lives in an epoch, is a sidequest, or is
-// frozen. An epoch-track card with no epoch is unreachable from every board
-// view, so the state is rejected at the store boundary (CLI and API alike).
-const checkCardHome = ({ track, epoch, phase }) => {
-  if (track === 'epoch' && epoch == null && phase !== 'frozen')
-    fail('E_INVALID', 'a card must live in an epoch, be a sidequest, or be frozen — pass --epoch <id> (no epoch is active to inherit) or --track sidequest');
+// Owner rulings 2026-08-05 / 2026-10-04: every card lives in an epoch or is a
+// sidequest — frozen cards included; frozen is a phase, not a home. An
+// epoch-track card with no epoch is unreachable from every board view, so the
+// state is rejected at the store boundary (CLI and API alike).
+const checkCardHome = ({ track, epoch }) => {
+  if (track === 'epoch' && epoch == null)
+    fail('E_INVALID', 'a card must live in an epoch or be a sidequest (frozen cards too) — pass --epoch <id> (no epoch is active to inherit) or --track sidequest');
 };
 const checkMilestone = (s, id) => { if (id != null && !s.milestones.find(m => m.id === id)) fail('E_NOT_FOUND', `no milestone ${id}`); };
 function checkCardMilestone(s, { epoch, track, milestoneId }) {
@@ -1376,7 +1374,7 @@ export function addCard(s, p, config, history = emptyHistory()) {
   const epoch = p.epoch ?? activeEpoch(s);
   const track = p.track || config.tracks[0];
   checkEpoch(s, epoch); checkMilestone(s, p.milestoneId);
-  checkCardHome({ track, epoch, phase: p.phase || 'planning' });
+  checkCardHome({ track, epoch });
   checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
   validateStoredString(p.probe, 'card.probe', { nullable: true, nonEmpty: true });
@@ -1703,7 +1701,6 @@ export function updateCard(s, ref, patch, config) {
   checkCardHome({
     track: 'track' in patch ? patch.track : c.track,
     epoch: 'epoch' in patch ? patch.epoch : c.epoch,
-    phase: 'phase' in patch ? patch.phase : c.phase,
   });
   checkCardMilestone(s, {
     epoch: 'epoch' in patch ? patch.epoch : c.epoch,
@@ -1856,29 +1853,65 @@ export function reopenCriterion(s, ref, n, { reason, by } = {}) {
   return { ...item, cardId: c.id, cardNum: c.num };
 }
 
-// D-TWRGUARD1=C (#458): a card with any ratified decision refuses delete for
-// everyone, owner included — a ratified decision is durable record, never a
-// casualty of tidying up. #461 gives it a real way out: the decisions retire
-// to history.json on their own (`tower archive status`) once their buffer
-// window passes, or bring one back early with `tower archive restore <id>`;
-// either way, delete only once none are live on the card.
-export function deleteCard(s, ref, p = {}) {
+// D-TWRGUARD1=C (#458): a card with any ratified decision refuses delete — a
+// ratified decision is durable record, never a casualty of tidying up. The
+// only override is the owner's own Tower UI session (owner 2026-10-04): the
+// server passes `ownerUi` provenance only for a same-origin request carrying
+// the owner session cookie, and the owner must tick a separate box for every
+// ratified decision (`p.deleteRatified`). CLI and agent callers, `--by owner`
+// included, never carry that provenance, so for them the guard still holds:
+// let the decisions retire to history.json (`tower archive status`), or
+// `tower archive restore <id>` and re-detach, then delete.
+//
+// Open ballots go with the card. `p.decisions`, when given, is the ballot list
+// the caller showed for confirmation; any drift since then is E_CONFLICT so a
+// ballot added after the dialog opened is never deleted unseen. Every removed
+// ballot is written to the event log with its status and outcome.
+export function deleteCard(s, ref, p = {}, ownerUi = null) {
   const c = mustCard(s, ref);
   const oldMilestoneId = c.milestoneId;
   const openMessages = s.questions.filter(q => q.cardId === c.id && q.kind === 'message' && q.status === 'open');
   if (openMessages.length)
     fail('E_INVALID', `card #${c.num} has ${openMessages.length} open message${openMessages.length === 1 ? '' : 's'} — mark each message done before deleting the card`);
-  const ratified = s.decisions.filter(d => d.cardId === c.id && d.status === 'ratified');
-  if (ratified.length)
-    fail('E_HAS_RATIFIED', `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ratified.map(d => d.id).join(', ')}) — they retire to \`tower archive\` on their own once the buffer window passes; delete once none are live on the card`);
+  const attached = s.decisions.filter(d => d.cardId === c.id);
+  const attachedIds = new Set(attached.map(d => d.id));
+  if (p.decisions != null) {
+    const shown = new Set(idList(p.decisions));
+    if (shown.size !== attachedIds.size || [...attachedIds].some(id => !shown.has(id)))
+      fail('E_CONFLICT', `card #${c.num} ballots changed since the delete confirmation was shown (now: ${[...attachedIds].join(', ') || 'none'}) — review them and confirm again`);
+  }
+  const ratified = attached.filter(d => d.status === 'ratified');
+  const owner = ownerUi?.kind === 'owner-ui' && !!ownerUi.session;
+  if (ratified.length) {
+    const confirmed = new Set(idList(p.deleteRatified));
+    const unconfirmed = ratified.filter(d => !confirmed.has(d.id));
+    if (!owner || unconfirmed.length) {
+      const ids = (owner ? unconfirmed : ratified).map(d => d.id).join(', ');
+      fail('E_HAS_RATIFIED', owner
+        ? `card #${c.num} still has ratified decision${unconfirmed.length > 1 ? 's' : ''} ${ids} — tick "also delete ratified decision" for each one to delete them with the card`
+        : `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ids}) — they retire to \`tower archive\` on their own once the buffer window passes; only the owner can delete them with the card, from the card's Delete button in the Tower UI`);
+    }
+  }
+  const referencing = s.decisions.filter(d => !attachedIds.has(d.id) && attachedIds.has(d.supersededBy));
+  if (referencing.length)
+    fail('E_REFERENCED', `cannot delete card #${c.num}; its decisions are the supersession link of ${referencing.map(d => d.id).join(', ')}`);
+  const by = owner ? 'owner' : p.by;
   s.cards = s.cards.filter(x => x.id !== c.id);
   s.decisions = s.decisions.filter(d => d.cardId !== c.id);
   s.questions = s.questions.filter(q => q.cardId !== c.id);
-  for (const x of s.cards) x.blockedBy = (x.blockedBy || []).filter(id => id !== c.id);
+  for (const x of s.cards) x.blockedBy = (x.blockedBy || []).filter(id => id !== c.id && !attachedIds.has(id));
   syncMilestones(s, [oldMilestoneId]);
-  logEvent(s, { by: p.by, action: 'card.delete', ref: c.id, note: c.title });
-  return { ok: true, id: c.id, num: c.num };
+  const removed = attached.map(d => ({ id: d.id, title: d.title, status: d.status, outcome: d.outcome ?? null }));
+  for (const d of removed)
+    logEvent(s, { by, action: 'decision.delete', ref: d.id,
+      note: `deleted with card #${c.num} — ${d.status}${d.status === 'ratified' ? ` (outcome ${d.outcome})` : ''}: ${d.title}` });
+  const withBallots = removed.length ? ` — with ballot${removed.length > 1 ? 's' : ''} ${removed.map(d => `${d.id} (${d.status})`).join(', ')}` : '';
+  logEvent(s, { by, action: 'card.delete', ref: c.id, note: `${c.title}${withBallots}${owner ? ` · owner-ui session=${ownerUi.session}` : ''}` });
+  return { ok: true, id: c.id, num: c.num, decisions: removed };
 }
+
+const idList = (value) => (value == null ? [] : Array.isArray(value) ? value : String(value).split(','))
+  .map(x => String(x).trim()).filter(Boolean);
 
 // Owner-only gate used by ratify (D-TWRGUARD1=C #458). An agent may act "on
 // behalf of" the owner by quoting his words verbatim — recorded in the event
@@ -2765,6 +2798,7 @@ function validateBriefing(record) {
 
 function validateStatusSnapshot(record) {
   if (!plainObject(record)) fail('E_INVALID', 'status snapshot must be an object');
+  if (Object.hasOwn(record, 'ownerActions')) fail('E_INVALID', 'status.ownerActions has been removed; omit this field');
   for (const key of ['id', 'by']) reportText(record[key], `status.${key}`);
   reportTime(record.created, 'status.created');
   if (record.updatedAt !== undefined) reportTime(record.updatedAt, 'status.updatedAt');
@@ -2789,25 +2823,6 @@ function validateStatusSnapshot(record) {
     for (const blocker of reportArray(stream.blockers, 'workstream.blockers')) reportText(blocker, 'blocker');
     if (stream.updatedAt !== undefined) reportTime(stream.updatedAt, 'workstream.updatedAt');
     reportLinks(stream.links);
-  }
-  const actionIds = new Set();
-  for (const action of reportArray(record.ownerActions, 'status.ownerActions')) {
-    if (!plainObject(action)) fail('E_INVALID', 'owner action must be an object');
-    if (action.id !== undefined) {
-      reportText(action.id, 'owner action id');
-      if (actionIds.has(action.id)) fail('E_INVALID', `duplicate owner action id ${action.id}`);
-      actionIds.add(action.id);
-    }
-    if (action.details !== undefined && typeof action.details !== 'string')
-      fail('E_INVALID', 'owner action details must be markdown text');
-    if (action.doneAt !== undefined) {
-      reportTime(action.doneAt, 'owner action doneAt');
-      if (action.doneBy !== 'owner') fail('E_INVALID', 'owner action doneBy must be owner');
-    } else if (action.doneBy !== undefined) {
-      fail('E_INVALID', 'owner action doneBy needs doneAt');
-    }
-    reportText(action.text, 'owner action text');
-    reportLinks(action.links);
   }
 }
 
@@ -2835,35 +2850,16 @@ export function postBriefing(s, p) {
 
 export function postStatus(s, p) {
   if (!plainObject(p.snapshot)) fail('E_INVALID', 'status post needs a JSON snapshot object');
-  const { summary, updatedAt, milestones, workstreams, ownerActions = [] } = structuredClone(p.snapshot);
-  for (const action of reportArray(ownerActions, 'status.ownerActions')) {
-    if (!plainObject(action)) fail('E_INVALID', 'owner action must be an object');
-    if (action.id === undefined) action.id = newId('owner-action');
-    // Posting a report cannot impersonate an owner completion.
-    delete action.doneAt;
-    delete action.doneBy;
-  }
+  if (Object.hasOwn(p.snapshot, 'ownerActions')) fail('E_INVALID', 'status.ownerActions has been removed; omit this field');
+  const { summary, updatedAt, milestones, workstreams } = structuredClone(p.snapshot);
   const record = { id: newId('status'), by: p.by, created: now(),
     ...(summary !== undefined ? { summary } : {}), ...(updatedAt !== undefined ? { updatedAt } : {}),
-    milestones, workstreams, ownerActions };
+    milestones, workstreams };
   validateStatusSnapshot(record);
-  resolveReportLinks(s, [...record.milestones, ...record.workstreams, ...record.ownerActions]);
+  resolveReportLinks(s, [...record.milestones, ...record.workstreams]);
   s.statusSnapshot = record;
   logEvent(s, { by: record.by, action: 'status.post', ref: record.id, note: record.summary || '' });
   return record;
-}
-
-export function doneOwnerAction(s, snapshotId, id, by) {
-  if (by !== 'owner') fail('E_OWNER_ONLY', 'snapshot action completion is owner-only');
-  const snapshot = s.statusSnapshot;
-  if (!snapshot || snapshot.id !== snapshotId) fail('E_NOT_FOUND', `no status snapshot ${snapshotId}`);
-  const action = snapshot.ownerActions.find(action => action.id === id)
-    || fail('E_NOT_FOUND', `no owner action ${id}`);
-  if (action.doneAt) return action;
-  action.doneAt = now();
-  action.doneBy = by;
-  logEvent(s, { by, action: 'status.action.done', ref: id, note: snapshot.id });
-  return action;
 }
 
 // ---- mutations: ideas ------------------------------------------------------

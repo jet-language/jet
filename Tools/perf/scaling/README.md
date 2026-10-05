@@ -19,6 +19,10 @@ Only the selected dimension scales; necessary consuming statements also scale.
 Modules contain only a constant, not additional function/type definitions.
 Generated programs have a runnable entry; no runtime timing is included.
 The generator refuses to overwrite source files; use a new output directory.
+`mixed` (`mixed.mjs`) is the compile-throughput cell's whole-program profile:
+`node Tools/perf/scaling/generate.mjs mixed --code-lines N --seed S DIR` writes
+one package of at least N code lines and prints its digest, golden stdout and
+shape as JSON (Tools/perf/throughput measures it).
 `trait-facts-fix.json` records the module allocation evidence and dual-compiler fix spec.
 Default ladders: 256/512/1024; modules 64/128/256 (8 GiB memory cap), depth
 16/32/64, match arms 48/96/192 (nesting limits), literal bytes 1/2/4 MiB.

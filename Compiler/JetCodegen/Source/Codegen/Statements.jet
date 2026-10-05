@@ -2586,9 +2586,17 @@ fn jet_codegen_lower_fallback_failure(builder: &JetCodegenBuilder, expression: T
 // route names the payload in place, so the binding copies nothing. Returns
 // the payload place with lowering continuing on the success route; None
 // (nothing emitted) when `subject` is not such a place or the fallback can
-// produce a value.
+// produce a value. A `.Value` fallback qualifies when it always leaves
+// (jet_codegen_fallback_value_exits): the exit block of `x :: p ?? { ...;
+// return }` and of the D-FLOWTYPE1 guard `if p == None -> return`, and the
+// `<no else arm>` of an else-complement refinement.
+// Rust: tir_to_mir_expr.rs lower_or_fallback_window / inline_block_diverges.
 fn jet_codegen_lower_or_fallback_window(builder: &JetCodegenBuilder, expression: TExpr, subject: TExpr, fallback: TOrFallback, ambient_err: TLocal?) -> MIRPlaceID? {
-    if fallback == .Value(_) -> return None
+    value_fallback := false
+    if fallback == .Value(fallback_value) {
+        if !jet_codegen_fallback_value_exits(fallback_value) -> return None
+        value_fallback = true
+    }
     never :: Type.Named{name: "Never"}
     optional := false
     payload_type := never
@@ -2615,11 +2623,33 @@ fn jet_codegen_lower_or_fallback_window(builder: &JetCodegenBuilder, expression:
     failure_block := jet_codegen_new_block(&builder, expression.span, "fallback-failure")
     jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: condition, then_target: success_block, else_target: failure_block})
     jet_codegen_switch_block(&builder, failure_block)
-    if jet_codegen_lower_fallback_failure(&builder, expression, value, error_type, fallback, ambient_err) != None -> panic("checked diverging fallback produced a value")
+    // An exiting `.Value` fallback never reaches its value: a Never-typed
+    // tail that leaves the block open ends in Unreachable like any other.
+    produced :: jet_codegen_lower_fallback_failure(&builder, expression, value, error_type, fallback, ambient_err)
+    if produced != None && !value_fallback -> panic("checked diverging fallback produced a value")
     if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: "diverging fallback"})
     jet_codegen_switch_block(&builder, success_block)
     kind :: if optional -> MIRPayloadKind.Option else -> MIRPayloadKind.Result{ok: true}
     Val(jet_codegen_payload_window_place(&builder, window, kind, payload_type, expression.span))
+}
+
+// A `??` `.Value` fallback that always leaves the current route: a
+// Never-typed value, or an inline block whose last statement exits (a
+// return, break, or continue, labelled or not) or is an exiting value.
+// Every route through such a block either leaves early or reaches that exit.
+fn jet_codegen_fallback_value_exits(value: TExpr) -> Bool Never! {
+    if value.ty == (Type.Named{name: "Never"}) -> return true
+    if value.kind == {
+        .InlineBlock(body) -> {
+            if body.len() == 0 -> return false
+            if body[body.len() - 1] == {
+                .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> true
+                .ExprStmt(tail, _) -> jet_codegen_fallback_value_exits(tail)
+                else -> false
+            }
+        }
+        else -> false
+    }
 }
 
 fn jet_codegen_lower_result_handler_arm(builder: &JetCodegenBuilder, expression: TExpr, body: [TStmt], value: TExpr, join: MIRBlockID, incoming: &[MIRPhiIncoming]) {

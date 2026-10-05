@@ -11,7 +11,7 @@ import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 import { lint, ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution,
   ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleSpecReferenceGaps,
-  ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects } from '../app/lint.mjs';
+  ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects, ruleUnhomedCard } from '../app/lint.mjs';
 
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 
@@ -311,6 +311,24 @@ test('duplicate-suspect: flags shared test references only among open cards', ()
   assert.equal(findings[0].rule, 'duplicate-suspect');
   assert.equal(findings[0].ref, '#1,#2');
   assert.match(findings[0].msg, /tests\/parser\.rs/);
+});
+
+// Owner 2026-10-04: frozen is a phase, not a home — a frozen card lives in an
+// epoch or on the sidequest track like every other card.
+test('card home: the store refuses an epoch-less frozen card and lint flags one that predates the guard', () => {
+  const st = fresh();
+  st.mutate((s) => db.updateEpoch(s, 'e1', { status: 'planned' }));
+  assert.throws(
+    () => st.mutate((s, cfg) => db.addCard(s, { title: 'Loose frozen', phase: 'frozen', by: 'owner' }, cfg)),
+    (e) => e.code === 'E_INVALID' && /epoch or be a sidequest/.test(e.message));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Frozen JetOS', phase: 'frozen', epoch: 'e1', by: 'owner' }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Frozen sidequest', phase: 'frozen', track: 'sidequest', by: 'owner' }, cfg));
+  assert.throws(
+    () => st.mutate((s, cfg) => db.updateCard(s, '#1', { epoch: null, by: 'owner' }, cfg)),
+    (e) => e.code === 'E_INVALID');
+  assert.deepEqual(ruleUnhomedCard(st.load()), []);
+  st.mutate((s) => { s.cards[0].epoch = null; });
+  assert.deepEqual(ruleUnhomedCard(st.load()).map(f => [f.rule, f.ref]), [['unhomed-card', '#1']]);
 });
 
 // ---- 9. lint() aggregator ------------------------------------------------------------

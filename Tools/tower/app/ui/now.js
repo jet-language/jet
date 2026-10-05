@@ -32,23 +32,8 @@ const links = (items = []) => items.length ? `<div class="report__links">${items
   `<button class="btn btn--ghost btn--sm" ${link.decision ? `data-report-decision="${esc(link.decision)}"` : ''} ${link.card || link.cardId ? `data-report-card="${esc(link.card || link.cardId)}"` : ''}>${esc(link.label || link.card || link.decision)} →</button>`
 ).join('')}</div>` : '';
 
-// A visual check is an owner action only once its screen capture is attached
-// (the same rule as board-state.js ownerVerifyQueue).
-export function buildOwnerActions({ statusSnapshot, decisions = [] } = {}) {
-  return [
-    ...decisions.filter(d => d.status !== 'ratified' && !d.draft
-      && (d.group !== 'acceptance' || (d.visualMedia || []).length)).map(d => ({
-      text: `${d.group === 'acceptance' ? 'Visual check' : 'Vote'}: ${d.title}`,
-      links: [{ decision: d.id, label: d.id }],
-    })),
-    ...(statusSnapshot?.ownerActions || []).filter(action => !action.doneAt).map(action => ({
-      ...action, snapshotId: statusSnapshot.id,
-    })),
-  ];
-}
-
 // Sections open by default; nested history folds by default.
-export const REPORT_DEFAULTS = Object.freeze({ briefing: true, status: true, actions: true, 'briefing-history': false });
+export const REPORT_DEFAULTS = Object.freeze({ briefing: true, status: true, 'briefing-history': false });
 const defaultOpen = key => REPORT_DEFAULTS[key] ?? false;
 
 function section({ key, cls = '', label, title = '', meta = '', body, isOpen }) {
@@ -64,7 +49,7 @@ const briefingBody = record => `<div class="report__body">${renderMarkdown(recor
 ).join('')}</div>`;
 
 // isOpen(key, fallback) supplies the owner's saved open/closed choice.
-export function renderNowReports({ briefings = [], statusSnapshot = null, decisions = [] } = {}, { isOpen = (_key, fallback) => fallback } = {}) {
+export function renderNowReports({ briefings = [], statusSnapshot = null } = {}, { isOpen = (_key, fallback) => fallback } = {}) {
   const [latest, ...history] = briefings;
   const historyKey = 'briefing-history';
   const past = history.length ? `<details class="report__history" data-report="${historyKey}"${isOpen(historyKey, defaultOpen(historyKey)) ? ' open' : ''}><summary>Briefing history · ${history.length}</summary>${history.map(record => {
@@ -98,14 +83,5 @@ export function renderNowReports({ briefings = [], statusSnapshot = null, decisi
       : '<p class="report__empty">No status snapshot posted yet.</p>',
   });
 
-  const actions = buildOwnerActions({ statusSnapshot: s, decisions });
-  const owner = section({
-    key: 'actions', cls: 'report--actions', label: 'Owner action needed', isOpen,
-    title: `<span class="report__count${actions.length ? ' report__count--hot' : ''}">${actions.length}</span>`,
-    meta: actions.length ? '' : 'nothing waiting',
-    body: actions.length
-      ? `<ul class="report__actions">${actions.map(action => `<li><span>${esc(action.text)}</span>${action.snapshotId ? ` <button class="btn btn--ghost btn--sm" data-report-action-done="${esc(action.id)}" data-report-snapshot="${esc(action.snapshotId)}" aria-label="${esc(`Done: ${action.text}`)}">Done</button>` : ''}${links(action.links)}${action.details ? `<div class="report__body">${renderMarkdown(action.details)}</div>` : ''}</li>`).join('')}</ul>`
-      : '<p class="report__empty">No open ballots or reported actions.</p>',
-  });
-  return brief + status + owner;
+  return brief + status;
 }

@@ -16,6 +16,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 PERF_DIR="$ROOT/Tools/perf"
+BASELINE="$PERF_DIR/baseline.json"
 SOURCE_IMPLEMENTATION_REPORT=
 if [ "${1:-}" = "--source-implementation" ]; then
     [ "$#" -eq 2 ] || {

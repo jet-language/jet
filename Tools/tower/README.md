@@ -102,14 +102,11 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 - **Ideas** — capture bay; promote to a card when real.
 - **Events** — append-only audit trail of every mutation, with `--by` attribution.
 - **Now reports** — `tower status post --file snapshot.json --by me` posts the
-  latest status snapshot. Each `ownerActions[]` item has `text`, optional `id`
-  (assigned when omitted), optional `details` markdown for decision context,
-  and optional card/decision `links`. The owner can click **Done** on a reported
-  action; completion is saved on the snapshot with owner attribution and an
-  audit event, and disappears from everyone's Now page. Ballot-derived actions
-  still open the ballot and are cleared by voting, not by **Done**. The HTTP
-  route `POST /api/status/action-done` takes `{snapshotId, id}` and requires a
-  same-origin owner UI session plus `X-Tower-Owner-Action: done`.
+  latest status snapshot with milestone progress, workstreams, workers,
+  blockers, and optional card/decision links. Briefings and the status board
+  provide context; ballots, owner verification, messages, and card closures
+  remain their own authoritative surfaces. Snapshots containing the removed
+  `ownerActions` field are rejected with `E_INVALID`; omit that field.
 - **History** — a done card, or a ratified decision, sits live for
   `config.retireAfterDays` (default 3) before it retires into
   `Tools/tower/.tower/history.json` — the walk-back buffer. A card's own decisions and
@@ -264,8 +261,10 @@ and goes dark as you clear them. Two views:
   adversarial. The recommendation is blue, while reasons against alternatives
   are muted red. Labels and icons repeat every color's meaning. Empty state =
   tower clear.
-- **Board** — idea capture, sidequests, epochs → milestones → cards, frozen
-  bay; card modal for editing, decisions, questions, log.
+- **Board** — idea capture, sidequests, epochs → milestones → cards (frozen
+  cards stay in their epoch or sidequest section with a Frozen badge; the
+  Frozen filter shows only them); card modal for editing, decisions,
+  questions, log, and delete (a card's ballots are listed and deleted with it).
 - **Radar** *(prototype, owner-acceptance pending)* — roadmap ledger ×
   ops-table hybrid: per active epoch, a 30-day burndown sparkline, milestone
   progress with stall badges, and a sortable/filterable/inline-editable

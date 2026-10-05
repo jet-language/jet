@@ -467,73 +467,38 @@ test('stored recommendation losses migrate on live and history reads, then persi
   assertMigrated(JSON.parse(readFileSync(historyFile, 'utf8')).decisions[0]);
 });
 
-test('snapshot owner actions have stable ids and owner-only persisted, audited completion', () => {
+test('status snapshots persist the current form and reject removed ownerActions without writes', () => {
   const st = fresh();
-  const input = { milestones: [], workstreams: [], ownerActions: [
-    { text: 'Choose a layout', details: '**Compare** both layouts.' },
-    { id: 'inspect-colors', text: 'Inspect colors', doneAt: '2026-10-04T12:00:00Z', doneBy: 'owner' },
-  ] };
+  const input = { milestones: [], workstreams: [] };
   const { result: posted } = st.mutate(s => db.postStatus(s, { snapshot: input, by: 'agent' }));
-  const [action, other] = posted.ownerActions;
-  assert.ok(action.id);
-  assert.notEqual(action.id, other.id);
-  assert.equal(other.id, 'inspect-colors');
-  assert.equal(other.doneAt, undefined, 'agents cannot post owner completion');
-  assert.equal(input.ownerActions[0].id, undefined, 'posting does not mutate its input');
-  assert.equal(openStore(st.dataDir).load().statusSnapshot.ownerActions[0].id, action.id);
-  const rev = st.load().meta.rev;
-  for (const by of ['agent', undefined]) {
-    assert.throws(() => st.mutate(s => db.doneOwnerAction(s, posted.id, action.id, by)),
-      error => error.code === 'E_OWNER_ONLY');
+  assert.equal(Object.hasOwn(posted, 'ownerActions'), false);
+  assert.deepEqual(input, { milestones: [], workstreams: [] }, 'posting does not mutate its input');
+  const before = st.load();
+  assert.deepEqual(openStore(st.dataDir).load().statusSnapshot, posted);
+  for (const ownerActions of [undefined, null, false, [], [{ text: 'Choose a layout' }]]) {
+    assert.throws(() => st.mutate(s => db.postStatus(s, {
+      snapshot: { ...input, ownerActions }, by: 'agent',
+    })), error => error.code === 'E_INVALID' && /status\.ownerActions.*removed/.test(error.message));
+    assert.deepEqual(st.load(), before, 'a rejected snapshot changes neither revision, reports nor events');
   }
-  for (const [snapshotId, id] of [['missing', action.id], [posted.id, 'missing']]) {
-    assert.throws(() => st.mutate(s => db.doneOwnerAction(s, snapshotId, id, 'owner')),
-      error => error.code === 'E_NOT_FOUND');
-  }
-  assert.equal(st.load().meta.rev, rev, 'rejected completions do not write');
-  const { result: done } = st.mutate(s => db.doneOwnerAction(s, posted.id, action.id, 'owner'));
-  assert.equal(done.doneBy, 'owner');
-  assert.ok(Number.isFinite(Date.parse(done.doneAt)));
-  const reloaded = openStore(st.dataDir).load();
-  assert.deepEqual(reloaded.statusSnapshot.ownerActions[0], done);
-  assert.equal(reloaded.statusSnapshot.ownerActions[1].doneAt, undefined);
-  assert.equal(reloaded.statusSnapshot.ownerActions[0].details, '**Compare** both layouts.');
-  assert.equal(reloaded.events[0].action, 'status.action.done');
-  assert.equal(reloaded.events[0].ref, action.id);
-  assert.equal(reloaded.events[0].by, 'owner');
-  st.mutate(s => db.doneOwnerAction(s, posted.id, action.id, 'owner'));
-  assert.equal(st.load().statusSnapshot.ownerActions[0].doneAt, done.doneAt);
-  assert.equal(st.load().events.filter(e => e.action === 'status.action.done').length, 1);
-  const replacement = st.mutate(s => db.postStatus(s, { snapshot: input, by: 'agent' })).result;
-  assert.throws(() => st.mutate(s => db.doneOwnerAction(s, posted.id, 'inspect-colors', 'owner')),
-    error => error.code === 'E_NOT_FOUND', 'a stale browser cannot complete a replacement snapshot');
-  assert.equal(st.load().statusSnapshot.id, replacement.id);
+  const replacement = st.mutate(s => db.postStatus(s, {
+    snapshot: { ...input, summary: 'Current progress' }, by: 'agent',
+  })).result;
+  assert.notEqual(replacement.id, posted.id);
+  assert.deepEqual(openStore(st.dataDir).load().statusSnapshot, replacement);
 });
 
-test('existing snapshots acquire deterministic ids, and action fields are validated', () => {
-  const s = empty();
-  s.statusSnapshot = { id: 'existing-status', by: 'agent', created: '2026-10-04T12:00:00Z',
-    milestones: [], workstreams: [], ownerActions: [{ text: 'Read the proposal' }] };
-  const first = db.normalize(structuredClone(s)).statusSnapshot.ownerActions[0].id;
-  assert.ok(first);
-  assert.equal(db.normalize(structuredClone(s)).statusSnapshot.ownerActions[0].id, first);
-  const normalized = db.normalize(s);
-  db.doneOwnerAction(normalized, 'existing-status', first, 'owner');
-  assert.equal(normalized.statusSnapshot.ownerActions[0].doneBy, 'owner');
-  for (const ownerActions of [
-    [{ id: '', text: 'x' }], [{ id: 7, text: 'x' }], [{ id: null, text: 'x' }],
-    [{ id: 'same', text: 'x' }, { id: 'same', text: 'y' }],
-    [{ text: 'x', details: {} }], [{ text: 'x', details: null }],
-  ]) {
-    assert.throws(() => db.postStatus(empty(), { snapshot: { milestones: [], workstreams: [], ownerActions }, by: 'agent' }),
-      error => error.code === 'E_INVALID');
-  }
-  for (const patch of [{ doneAt: 'yesterday', doneBy: 'owner' },
-    { doneAt: '2026-10-04T12:00:00Z', doneBy: 'agent' }, { doneBy: 'owner' }]) {
-    const corrupt = structuredClone(s);
-    delete corrupt.statusSnapshot.ownerActions[0].doneAt;
-    delete corrupt.statusSnapshot.ownerActions[0].doneBy;
-    Object.assign(corrupt.statusSnapshot.ownerActions[0], patch);
-    assert.throws(() => db.normalize(corrupt), error => error.code === 'E_INVALID');
+test('a stored board written before the owner-actions removal loads without the field', () => {
+  const st = fresh();
+  const state = empty();
+  const statusSnapshot = { id: 'existing-status', by: 'agent', created: '2026-10-04T12:00:00Z',
+    milestones: [], workstreams: [] };
+  state.statusSnapshot = statusSnapshot;
+  assert.deepEqual(db.normalize(structuredClone(state)).statusSnapshot, statusSnapshot);
+  for (const ownerActions of [null, [], [{ id: 'review', text: 'Read the proposal' }]]) {
+    const old = structuredClone(state);
+    old.statusSnapshot.ownerActions = ownerActions;
+    writeJSON(st.file, old);
+    assert.deepEqual(openStore(st.dataDir).load().statusSnapshot, statusSnapshot);
   }
 });

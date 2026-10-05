@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness } from '../app/ui/board-state.js';
+import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness, cardDeletePlan, cardDeletePayload } from '../app/ui/board-state.js';
 
 const card = (num, lane, phase = lane, extra = {}) => ({
   num, title: `Card ${num}`, phase, priority: 'P1', lane: { lane, label: lane }, ...extra,
@@ -80,6 +80,55 @@ test('show closed adds finished epochs that the active radar omits', () => {
       total: 1, done: 1, reviewReady: true, met: true, stalledDays: null,
     }],
   });
+});
+
+// Owner 2026-10-04: frozen cards live in their epoch section, shown by
+// default; the Frozen filter narrows the board to them alone.
+test('frozen cards show by default and the Frozen filter shows only them', () => {
+  const frozen = card(30, 'frozen', 'frozen', { title: 'jetos disks', priority: 'P2', kind: 'feature' });
+  const ready = card(31, 'implement', 'ready', { title: 'jetos boot' });
+  const done = card(32, 'done', 'done');
+  assert.equal(cardMatches(frozen), true);
+  assert.equal(cardMatches(frozen, { workflow: 'frozen' }), true);
+  assert.equal(cardMatches(ready, { workflow: 'frozen' }), false);
+  assert.equal(cardMatches(done, { workflow: 'frozen', showClosed: true }), false);
+  assert.equal(cardMatches(frozen, { workflow: 'frozen', text: 'disks', priority: 'P2', kind: 'feature' }), true);
+  assert.equal(cardMatches(frozen, { workflow: 'frozen', priority: 'P0' }), false);
+  for (const workflow of ['0', '1', '2', '3']) assert.equal(cardMatches(frozen, { workflow }), false);
+});
+
+test('an epoch the active radar omits still gets a section for its frozen cards', () => {
+  const radar = [{ id: 'e9', name: 'jetos' }];
+  const epochs = [{ id: 'e2', name: 'Arrived' }, { id: 'e9', name: 'jetos' }, { id: 'e3', name: 'Empty' }];
+  const cards = [
+    card(40, 'frozen', 'frozen', { epoch: 'e2', track: 'epoch' }),
+    card(41, 'frozen', 'frozen', { epoch: 'e3', track: 'sidequest' }),
+  ];
+  const shown = boardEpochs(radar, epochs, cards, [], false);
+  assert.deepEqual(shown.map(e => e.id), ['e9', 'e2']);
+  assert.equal(shown[1].active, 0);
+  assert.equal(shown[1].done, 0);
+  assert.equal(boardEpochs(radar, epochs, [cards[1]], [], false), radar, 'sidequest frozen cards stay in the sidequest section');
+});
+
+test('card delete payload lists every ballot and needs a tick per ratified one', () => {
+  const c = { id: 'c7', num: 7, decisions: [
+    { id: 'D-OPEN', title: 'open one', status: 'open' },
+    { id: 'D-RAT', title: 'ratified one', status: 'ratified', outcome: 'B' },
+  ] };
+  assert.deepEqual(cardDeletePlan(c), {
+    ballots: [
+      { id: 'D-OPEN', title: 'open one', status: 'open', outcome: null, ratified: false },
+      { id: 'D-RAT', title: 'ratified one', status: 'ratified', outcome: 'B', ratified: true },
+    ],
+    ratified: ['D-RAT'],
+  });
+  assert.equal(cardDeletePayload(c), null);
+  assert.equal(cardDeletePayload(c, ['D-OPEN']), null);
+  assert.deepEqual(cardDeletePayload(c, ['D-RAT']),
+    { id: 'c7', by: 'owner', decisions: ['D-OPEN', 'D-RAT'], deleteRatified: ['D-RAT'] });
+  assert.deepEqual(cardDeletePayload({ id: 'c8', decisions: [] }),
+    { id: 'c8', by: 'owner', decisions: [], deleteRatified: [] });
 });
 
 const capture = [{ kind: 'image', path: 'docs/proposals/visual-acceptance/media/360/screen.png', alt: 'Settings screen', caption: 'after' }];

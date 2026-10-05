@@ -1,6 +1,6 @@
 import {
   boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot,
-  evidenceMedia, acceptanceReadiness,
+  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
@@ -561,18 +561,6 @@ function viewNow() {
       if (cardId) showDetail(cardId);
     });
   });
-  reports.querySelectorAll('[data-report-action-done]').forEach(button => {
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        await api('status/action-done', {
-          snapshotId: button.dataset.reportSnapshot, id: button.dataset.reportActionDone,
-        }, { 'x-tower-owner-action': 'done' });
-      } catch {
-        button.disabled = false;
-      }
-    });
-  });
   v.appendChild(reports);
 
   const queue = doneMessageBlock();
@@ -858,6 +846,7 @@ function cardTile(c) {
         <span class="prio prio-${esc(c.priority)}">${esc(c.priority)}</span>
         ${ms ? `<span class="card__mile" title="${esc(ms.title)}">${esc(milestoneTag(ms))}</span>` : ''}
         <span class="card__kind">${esc(c.kind)}</span>
+        ${phase === 'frozen' ? FROZEN_BADGE : ''}
         ${c.openQ ? `<span class="card__q">✎ ${esc(c.openQ)}</span>` : ''}
       </div>
       <h3 class="card__title">${esc(c.title)}</h3>
@@ -871,6 +860,7 @@ function cardTile(c) {
   return node;
 }
 const grid = (cards) => { const g = el('<div class="grid"></div>'); cards.forEach(c => g.appendChild(cardTile(c))); return g; };
+const FROZEN_BADGE = '<span class="frozen-badge" title="Frozen — owner-paused until you unfreeze it">❄ Frozen</span>';
 
 function collapsible(key, def, headHTML, extraClass, buildBody) {
   const open = isOpen(key, def);
@@ -970,6 +960,7 @@ function viewBoard() {
         <option value="1" ${radarWorkflow === '1' ? 'selected' : ''}>Ready</option>
         <option value="2" ${radarWorkflow === '2' ? 'selected' : ''}>Plan</option>
         <option value="3" ${radarWorkflow === '3' ? 'selected' : ''}>Blocked</option>
+        <option value="frozen" ${radarWorkflow === 'frozen' ? 'selected' : ''}>Frozen</option>
       </select>
       <select id="radar-priority" aria-label="Filter by priority">
         <option value="all">All priorities</option>
@@ -1100,7 +1091,8 @@ function renderRadarBody() {
   }
 
   // Sidequests: their own section — off-plan work, not part of any epoch.
-  const sq = cards.filter(c => c.track === 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
+  // Frozen sidequests stay here too, badged like frozen epoch cards.
+  const sq = cards.filter(c => c.track === 'sidequest' && (radarShowClosed || c.phase !== 'done'));
   if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
 
   if (!radar.length && !sq.length) {
@@ -1108,10 +1100,6 @@ function renderRadarBody() {
     return;
   }
   for (const r of radar) body.appendChild(radarEpochSection(r, needle, cardsMode));
-
-  // Frozen: parked on purpose, any track — its own section, collapsed by default.
-  const fz = cards.filter(c => c.phase === 'frozen');
-  if (fz.length) body.appendChild(radarListSection('radar-frozen', 'Frozen', 'parked on purpose', fz.filter(c => radarMatches(c, needle)), fz.length, cardsMode, false));
 
   if (focused) $('#radar-filter')?.focus();
 }
@@ -1173,7 +1161,7 @@ const STAGE_HELP = [
   ['building', 'Building', 'Implementation in progress'],
   ['verify', 'Review', 'Owner visual review for flagged cards; no separate agent verify step'],
   ['done', 'Done', 'Closed when exit criteria are met; hidden unless Show closed is on'],
-  ['frozen', 'Frozen', 'Owner-paused — untouched until you unfreeze it'],
+  ['frozen', 'Frozen', 'Owner-paused — stays in its epoch or sidequest section with a ❄ badge; the Frozen filter shows only these'],
 ];
 
 function openLegend() {
@@ -1227,9 +1215,12 @@ function epochProgressLabel(r, { pct = false } = {}) {
 
 function radarEpochSection(r, needle, cardsMode) {
   const e = S.epochs.find(x => x.id === r.id);
+  // Every card of the epoch, frozen included (badged); done only with Show closed.
+  const cards = boardCards(radarShowClosed).filter(c => c.epoch === r.id && c.track !== 'sidequest' && (radarShowClosed || c.phase !== 'done'));
+  const frozen = cards.filter(c => c.phase === 'frozen').length;
   return collapsible('radar:' + r.id, true,
     `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>
-     <span class="epoch__count">${epochProgressLabel(r, { pct: true })}</span>`,
+     <span class="epoch__count">${epochProgressLabel(r, { pct: true })}${frozen ? ` · ${frozen} frozen` : ''}</span>`,
     '', (body) => {
       if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
       body.appendChild(radarHead(r));
@@ -1239,10 +1230,9 @@ function radarEpochSection(r, needle, cardsMode) {
       body.appendChild(ledgerLine);
       archivedCountFor(r.id).then(n => { if (n) ledgerLine.textContent = `ledger: ${r.done} done live · ${n} archived`; });
 
-      const active = boardCards(radarShowClosed).filter(c => c.epoch === r.id && c.track !== 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
-      const activeShown = active.filter(c => radarMatches(c, needle));
-      body.appendChild(el(`<div class="radar__subhead">${radarShowClosed ? 'Cards' : 'Active'}</div>`));
-      body.appendChild(activeShown.length ? radarList(r.id, activeShown, cardsMode) : el(`<p class="epoch__goal">${active.length ? 'no match' : 'no cards'}</p>`));
+      const shown = cards.filter(c => radarMatches(c, needle));
+      body.appendChild(el(`<div class="radar__subhead">Cards</div>`));
+      body.appendChild(shown.length ? radarList(r.id, shown, cardsMode) : el(`<p class="epoch__goal">${cards.length ? 'no match' : 'no cards'}</p>`));
     });
 }
 
@@ -1318,7 +1308,7 @@ function opsRow(c) {
   const ms = milestoneOf(c);
   const tr = el(`<tr>
       <td class="num">${ticket(c)}</td>
-      <td class="ops__title" title="${esc(c.title)}">${esc(title)}</td>
+      <td class="ops__title" title="${esc(c.title)}">${c.phase === 'frozen' ? FROZEN_BADGE + ' ' : ''}${esc(title)}</td>
       <td class="ops__mile">${ms ? `<button class="card__mile" data-mile title="${esc(ms.title)}">${esc(milestoneTag(ms))}</button>` : ''}</td>
       <td><span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span></td>
       <td class="ops__prio"></td>
@@ -1547,13 +1537,58 @@ function renderDetail(c) {
     }
   });
   $('.modal__x', m).addEventListener('click', closeDetail);
-  $('#del-card', m).addEventListener('click', async () => { await api('card/delete', { id, by: 'owner' }); closeDetail(); });
+  $('#del-card', m).addEventListener('click', () => confirmDeleteCard(c));
   $('#cta-unfreeze', m)?.addEventListener('click', () => api('card/update', { id, phase: 'planning', logEntry: 'Unfrozen.', by: 'owner' }));
   $('#cta-done', m)?.addEventListener('click', () => acceptanceBallot
     ? ownerAcceptance(acceptanceBallot.id, 'accept')
     : api('card/update', { id, phase: 'done', logEntry: 'Accepted — closed after visual review.', by: 'owner' }));
   m.onclick = (e) => { if (e.target === m) closeDetail(); };
   m.hidden = false; $('#scrim').hidden = false;
+}
+
+// Card delete (owner 2026-10-04). A card with ballots asks first and lists
+// every ballot that goes with it; each ratified ballot needs its own tick.
+// The owner-action header lets the server attach owner-UI provenance — the
+// only way past the ratified-decision guard (agents and the CLI never get it).
+async function deleteCardNow(payload) {
+  await api('card/delete', payload, { 'x-tower-owner-action': 'delete-card' });
+  closeDetail();
+}
+
+function confirmDeleteCard(card) {
+  const plan = cardDeletePlan(card);
+  if (!plan.ballots.length) return deleteCardNow(cardDeletePayload(card)).catch(() => {});
+  const what = plan.ballots.length === 1 ? 'its ballot' : `its ${plan.ballots.length} ballots`;
+  const dlg = el(`<dialog class="confirm" aria-labelledby="confirm-title">
+      <h3 class="confirm__h" id="confirm-title">Delete #${esc(card.num)} and ${what}?</h3>
+      <p class="prose">${esc(card.title)}</p>
+      <p class="prose">These ballots are deleted with the card. The event log records each one.</p>
+      <ul class="confirm__list">${plan.ballots.map(b => `<li>
+          <span class="decrow__id">${esc(b.id)}</span>
+          <span class="card__lane ${b.ratified ? 'lane-agent' : 'lane-owner'}">${b.ratified ? `ratified · ${esc(b.outcome)}` : esc(b.status)}</span>
+          <span class="confirm__t">${esc(b.title)}</span></li>`).join('')}</ul>
+      ${plan.ratified.map(rid => `<label class="confirm__check"><input type="checkbox" data-ratified="${esc(rid)}"> also delete ratified decision ${esc(rid)}</label>`).join('')}
+      <div class="confirm__actions">
+        <button class="btn btn--ghost btn--sm" data-cancel>Cancel</button>
+        <button class="btn btn--danger btn--sm" data-go ${plan.ratified.length ? 'disabled' : ''}>Delete card and ${what}</button>
+      </div></dialog>`);
+  const go = $('[data-go]', dlg);
+  const ticked = () => [...dlg.querySelectorAll('[data-ratified]')].filter(x => x.checked).map(x => x.dataset.ratified);
+  dlg.querySelectorAll('[data-ratified]').forEach(box => box.addEventListener('change', () => { go.disabled = !cardDeletePayload(card, ticked()); }));
+  $('[data-cancel]', dlg).addEventListener('click', () => dlg.close());
+  go.addEventListener('click', () => {
+    const payload = cardDeletePayload(card, ticked());
+    if (!payload) return;
+    go.disabled = true;
+    // A refusal (e.g. the ballots changed) is already toasted; close so the
+    // owner reopens the dialog against the card's current ballots.
+    deleteCardNow(payload).catch(() => {}).finally(() => dlg.close());
+  });
+  // Esc closes only this dialog, not the card behind it.
+  dlg.addEventListener('keydown', (e) => { if (e.key === 'Escape') e.stopPropagation(); });
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.appendChild(dlg);
+  dlg.showModal();
 }
 const commit = (id, k, v) => {
   let val = v;

@@ -9,15 +9,15 @@ import { fileURLToPath } from 'node:url';
 import * as db from '../app/store.mjs';
 import { DEFAULTS } from '../app/config.mjs';
 import { serve } from '../app/server.mjs';
-import { buildOwnerActions, renderNowReports, relativeTime } from '../app/ui/now.js';
+import { renderNowReports, relativeTime } from '../app/ui/now.js';
 
 const towerRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tower = join(towerRoot, 'tower.mjs');
+// Exercise this checkout's CLI; tower.mjs intentionally redirects worktrees to main.
+const cliModule = new URL('../app/cli.mjs', import.meta.url).href;
 const sample = JSON.parse(readFileSync(join(towerRoot, 'examples/status.sample.json'), 'utf8'));
 const snapshot = () => ({ milestones: [{ title: 'Full Rust port', state: 'Building',
   progress: { 'Source ported': 75, Verified: 25, Gated: 0 } }],
-  workstreams: [{ title: 'Compiler', state: 'Active', workers: ['Pip'], blockers: ['Waiting for integration'] }],
-  ownerActions: [{ text: 'Inspect layout' }] });
+  workstreams: [{ title: 'Compiler', state: 'Active', workers: ['Pip'], blockers: ['Waiting for integration'] }] });
 const invalid = fn => assert.throws(fn, error => error.code === 'E_INVALID');
 
 function board() {
@@ -54,11 +54,7 @@ test('reports are attributed, retained/projected, link canonical cards and do no
   const projected = db.projectBoard(db.normalize(s));
   assert.equal(projected.statusSnapshot.id, status.id);
   assert.equal(projected.briefings.length, 2);
-  const actions = buildOwnerActions(projected);
-  assert.deepEqual(actions.map(a => a.text), ['Vote: Pick behavior', 'Visual check: Check presentation', 'Inspect layout']);
-  s.decisions[0].status = 'ratified';
-  assert.deepEqual(buildOwnerActions(db.projectBoard(s)).map(a => a.text), ['Visual check: Check presentation', 'Inspect layout']);
-  s.decisions[0].status = 'open';
+  assert.equal(Object.hasOwn(projected.statusSnapshot, 'ownerActions'), false);
   assert.equal(JSON.stringify({ cards: s.cards, milestones: s.milestones, decisions: s.decisions }), before);
   assert.equal(s.events[0].action, 'status.post');
   db.postStatus(s, { snapshot: sample, by: 'Pip' });
@@ -76,7 +72,7 @@ test('invalid report structures and progress fail without modifying reports', ()
     invalid(() => db.postStatus(s, { snapshot: p, by: 'Pip' }));
   }
   for (const p of [null, [], { ...snapshot(), workstreams: null }, { ...snapshot(), updatedAt: 'today' },
-    { ...snapshot(), ownerActions: [{ text: 'x', links: [{ card: null, decision: 'D' }] }] }]) {
+    { ...snapshot(), workstreams: [{ ...snapshot().workstreams[0], links: [{ card: null, decision: 'D' }] }] }]) {
     invalid(() => db.postStatus(s, { snapshot: p, by: 'Pip' }));
   }
   const p = snapshot(); p.workstreams[0].links = [{ card: '#99' }];
@@ -89,14 +85,18 @@ test('invalid report structures and progress fail without modifying reports', ()
   invalid(() => db.normalize(corrupt));
 });
 
-test('Now renders latest briefing expanded, collapsed history, metrics, workers and live owner actions safely', () => {
+test('Now renders only briefing and status reports, with safe markdown, links, metrics and workers', () => {
   const { s } = board();
   db.postBriefing(s, { title: 'Old', body: 'History body', by: 'Pip' });
   db.postBriefing(s, { title: '<script>Morning</script>', body: '# Progress\n\n**Verified**\n\n<script>alert(1)</script>', by: 'Pip',
     sections: [{ title: 'Next', body: '- Integrate', links: [{ card: '#1' }] }] });
-  db.postStatus(s, { snapshot: snapshot(), by: 'Pip' });
+  const p = snapshot();
+  p.milestones[0].links = [{ decision: 'D-OPEN' }];
+  db.postStatus(s, { snapshot: p, by: 'Pip' });
   const html = renderNowReports(db.projectBoard(s));
   assert.ok(html.indexOf('Latest briefing') < html.indexOf('Status board'));
+  assert.equal((html.match(/<details class="report /g) || []).length, 2);
+  assert.doesNotMatch(html, /Owner action needed|data-report="actions"|data-report-action-done|Vote:|Visual check:/);
   assert.match(html, /&lt;script&gt;Morning/);
   assert.match(html, /<h1 class="md__h md__h1">Progress<\/h1>/);
   assert.match(html, /<strong>Verified<\/strong>/);
@@ -112,37 +112,7 @@ test('Now renders latest briefing expanded, collapsed history, metrics, workers 
   const empty = renderNowReports({ decisions: s.decisions });
   assert.match(empty, /No briefing posted yet/);
   assert.match(empty, /No status snapshot posted yet/);
-  assert.match(empty, /Vote: Pick behavior/);
-});
-
-test('Now shows markdown context and Done only for pending snapshot actions, leaving ballots linked', () => {
-  const { s } = board();
-  const status = db.postStatus(s, { by: 'Pip', snapshot: { ...snapshot(), ownerActions: [
-    { id: 'review-layout', text: 'Inspect <layout>', details: '**Compare** layouts.\n\n<script>bad()</script>',
-      links: [{ decision: 'D-OPEN' }] },
-    { text: 'Another action', details: 'Use `preview`.' },
-  ] } });
-  const html = renderNowReports(db.projectBoard(s));
-  assert.equal((html.match(/data-report-action-done=/g) || []).length, 2);
-  assert.match(html, /data-report-action-done="review-layout"/);
-  assert.ok(html.includes(`data-report-snapshot="${status.id}"`));
-  assert.match(html, /aria-label="Done: Inspect &lt;layout&gt;"/);
-  assert.match(html, /<strong>Compare<\/strong>/);
-  assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
-  assert.match(html, /<code class="md__code">preview<\/code>/);
-  assert.doesNotMatch(html, /<script>/);
-  const vote = /<li><span>Vote: Pick behavior<\/span>(.*?)<\/li>/s.exec(html)[1];
-  assert.match(vote, /data-report-decision="D-OPEN"/);
-  assert.doesNotMatch(vote, /data-report-action-done/);
-  db.doneOwnerAction(s, status.id, 'review-layout', 'owner');
-  const updated = renderNowReports(db.projectBoard(db.normalize(JSON.parse(JSON.stringify(s)))));
-  assert.doesNotMatch(updated, /Inspect &lt;layout&gt;|<strong>Compare<\/strong>|review-layout/);
-  assert.equal((updated.match(/data-report-action-done=/g) || []).length, 1);
-  assert.match(updated, /Vote: Pick behavior/);
-  assert.equal(buildOwnerActions(db.projectBoard(s)).length, 3);
-  for (const action of status.ownerActions) db.doneOwnerAction(s, status.id, action.id, 'owner');
-  s.decisions = [];
-  assert.match(renderNowReports(db.projectBoard(s)), /No open ballots or reported actions/);
+  assert.doesNotMatch(empty, /Owner action needed|data-report="actions"|Vote:|Visual check:/);
 });
 
 test('Now reports fold to a one-line summary with title and update time, honoring saved choices', () => {
@@ -151,7 +121,7 @@ test('Now reports fold to a one-line summary with title and update time, honorin
   db.postStatus(s, { snapshot: { ...snapshot(), summary: 'Port is 80% done' }, by: 'Pip' });
   const projected = db.projectBoard(s);
   const open = renderNowReports(projected);
-  for (const key of ['briefing', 'status', 'actions']) assert.match(open, new RegExp(`<details class="report [^"]*" data-report="${key}" open>`));
+  for (const key of ['briefing', 'status']) assert.match(open, new RegExp(`<details class="report [^"]*" data-report="${key}" open>`));
   const folded = renderNowReports(projected, { isOpen: (key) => key !== 'status' });
   assert.match(folded, /data-report="status">\s*<summary class="report__summary">/, 'status folds when the owner closed it');
   const summary = /data-report="status">\s*<summary class="report__summary">([\s\S]*?)<\/summary>/.exec(folded)[1];
@@ -178,7 +148,9 @@ test('CLI posts persist with history/list/show, rev guards, help and live HTTP/S
   const cwd = mkdtempSync(join(scratch, 'tower-now-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const cli = (args, ok = true) => {
-    const r = spawnSync(process.execPath, [tower, ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } });
+    const r = spawnSync(process.execPath, ['--input-type=module', '--eval',
+      `const { run } = await import(${JSON.stringify(cliModule)}); await run(process.argv.slice(1));`,
+      '--', ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } });
     assert.equal(r.status === 0, ok, `${args.join(' ')}: ${r.stderr}\n${r.stdout}`);
     return r.stdout;
   };
@@ -197,6 +169,10 @@ test('CLI posts persist with history/list/show, rev guards, help and live HTTP/S
   writeFileSync(join(cwd, 'status.json'), JSON.stringify(sample));
   cli(['status', 'post', '--file', 'status.json', '--by', 'Pip', '--expect-rev', '0', '--json'], false);
   const status = JSON.parse(cli(['status', 'post', '--file', 'status.json', '--by', 'Pip', '--json']));
+  writeFileSync(join(cwd, 'removed-field.json'), JSON.stringify({ ...sample, ownerActions: [] }));
+  const rejectedCli = JSON.parse(cli(['status', 'post', '--file', 'removed-field.json', '--by', 'Pip', '--json'], false));
+  assert.equal(rejectedCli.error, 'E_INVALID');
+  assert.match(rejectedCli.message, /status\.ownerActions.*removed/);
   assert.equal(JSON.parse(cli(['status', 'show', '--json'])).id, status.id);
   cli(['status', 'show', '--days', '7'], false);
   const server = serve(db.openStore(join(cwd, '.tower')), 0, false);
@@ -236,50 +212,22 @@ test('CLI posts persist with history/list/show, rev guards, help and live HTTP/S
   assert.equal(httpStatus.status, 200);
   const statusReply = await httpStatus.json();
   assert.equal(statusReply.state.statusSnapshot.workstreams[0].title, 'Compiler');
-  const current = statusReply.result;
-  const actionId = current.ownerActions[0].id;
-  const payload = { snapshotId: current.id, id: actionId, by: 'owner' };
-  const complete = (headers, body = payload) => fetch(`${url}/api/status/action-done`, { method: 'POST',
-    headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
-  const cliRejected = await complete({ 'x-tower-client': 'cli' });
-  assert.equal(cliRejected.status, 403);
-  assert.equal((await cliRejected.json()).error, 'E_OWNER_ONLY');
-  const forged = await complete({ origin: url, cookie: 'tower-owner-session=forged', 'x-tower-owner-action': 'done' });
-  assert.equal(forged.status, 403);
-  const page = await fetch(url);
-  const cookie = page.headers.get('set-cookie').split(';', 1)[0];
-  const headers = { origin: url, cookie, 'x-tower-owner-action': 'done' };
-  const csrf = await complete({ ...headers, origin: 'https://evil.example' });
-  assert.equal(csrf.status, 403);
-  assert.equal((await csrf.json()).error, 'E_CSRF');
-  const noMarker = await complete({ origin: url, cookie });
-  assert.equal(noMarker.status, 403);
-  const missing = await complete(headers, { ...payload, id: 'missing' });
-  assert.equal(missing.status, 404);
-  const stale = await complete(headers, { ...payload, snapshotId: status.id });
-  assert.equal(stale.status, 404);
-  const observer = new AbortController();
-  t.after(() => observer.abort());
-  const updates = await fetch(`${url}/api/stream`, { signal: observer.signal });
-  const updatesReader = updates.body.getReader();
-  await updatesReader.read(); // initial state
-  const completed = await complete(headers, { ...payload, by: 'Pip' });
-  assert.equal(completed.status, 200);
-  const completedReply = await completed.json();
-  assert.equal(completedReply.result.doneBy, 'owner', 'server assigns owner attribution from the session');
-  assert.ok(completedReply.result.doneAt);
-  assert.doesNotMatch(renderNowReports(completedReply.state), /Inspect layout/);
-  let updateText = '';
-  while (!updateText.includes('"doneBy":"owner"')) {
-    const chunk = await updatesReader.read();
-    assert.equal(chunk.done, false);
-    updateText += new TextDecoder().decode(chunk.value);
-  }
-  observer.abort();
+  assert.equal(Object.hasOwn(statusReply.result, 'ownerActions'), false);
+  const removedField = await fetch(`${url}/api/status/post`, { method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-tower-client': 'cli' },
+    body: JSON.stringify({ by: 'Pip', snapshot: { ...snapshot(), ownerActions: [] } }) });
+  assert.equal(removedField.status, 400);
+  const rejected = await removedField.json();
+  assert.equal(rejected.error, 'E_INVALID');
+  assert.match(rejected.message, /status\.ownerActions.*removed/);
+  const removedRoute = await fetch(`${url}/api/status/action-done`, { method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-tower-client': 'cli' },
+    body: JSON.stringify({ snapshotId: statusReply.result.id, id: 'missing', by: 'owner' }) });
+  assert.equal(removedRoute.status, 404);
+  assert.equal((await removedRoute.json()).error, 'E_USAGE');
   const otherDevice = await (await fetch(`${url}/api/state`)).json();
-  assert.equal(otherDevice.statusSnapshot.ownerActions[0].doneAt, completedReply.result.doneAt);
-  assert.doesNotMatch(renderNowReports(otherDevice), /Inspect layout/);
+  assert.deepEqual(otherDevice.statusSnapshot, statusReply.state.statusSnapshot);
   const disk = db.openStore(join(cwd, '.tower')).load();
-  assert.equal(disk.statusSnapshot.ownerActions[0].doneBy, 'owner');
-  assert.equal(disk.events[0].action, 'status.action.done');
+  assert.deepEqual(disk.statusSnapshot, statusReply.result);
+  assert.equal(disk.events[0].action, 'status.post');
 });
