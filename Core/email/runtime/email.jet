@@ -189,7 +189,7 @@ pub fn decode_pem_base64(raw: View<U8>) -> [U8] EmailError! {
     used := 0
     padded := false
     loop byte in raw {
-        if ascii_space(byte) -> continue
+        if ascii_space(byte) -> next
         if padded -> return Err(configuration_error("smtp", "custom CA PEM has data after base64 padding"))
         quartet[used] = byte
         used += 1
@@ -426,7 +426,7 @@ pub fn relaxed_header(header: [U8]) -> [U8] EmailError! {
         if at + 2 < header.len() && header[at] == (U8{13}) && header[at + 1] == (U8{10}) && (header[at + 2] == (U8{32}) || header[at + 2] == (U8{9})) {
             whitespace = true
             at += 3
-            continue
+            next
         }
         byte :: header[at]
         if byte == (U8{32}) || byte == (U8{9}) -> whitespace = true else {
