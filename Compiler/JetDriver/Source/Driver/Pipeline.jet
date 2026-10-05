@@ -21,8 +21,6 @@ use jet_foundation.[
     MIRCallbackAdapter,
     MIRCffiFacts,
     MIRCloseAdapter,
-    MIRConstantDef,
-    MIRConstantID,
     MIREntryKind,
     MIREntryOutput,
     MIREntrySpec,
@@ -36,8 +34,6 @@ use jet_foundation.[
     MIRInstruction,
     MIRHardwareSetup,
     MIRHarnessPlan,
-    MIRImplDef,
-    MIRImplID,
     MIRImport,
     MIRImportID,
     MIRImportItem,
@@ -63,12 +59,8 @@ use jet_foundation.[
     MIRTargetHardwareUse,
     MIRTargetMachine,
     MIRTestCase,
-    MIRTraitDef,
-    MIRTraitID,
     MIRTerminator,
     MIRType,
-    MIRTypeDef,
-    MIRTypeID,
     MIRUnreachable,
     MIRVisibility,
     MIRValueFact,
@@ -190,12 +182,6 @@ use jet_eval.[
     jet_eval_retire_result,
 ]
 
-fn jet_driver_has_source_file_id(files: [MIRSourceFile], identity: MIRSourceFileID) -> Bool Never! {
-    loop file in files {
-        if file.id.value == identity.value -> return true
-    }
-    false
-}
 fn jet_driver_source_location_for_load_module(load: JetDriverLoadResult, module_identity: String, site: Span) -> SemaSourceLocation? {
     selected_index := Int?{None}
     index := 0
@@ -325,49 +311,6 @@ fn jet_driver_find_lowered_function_id(functions: [MIRFunction], key: String) ->
     }
     found
 }
-fn jet_driver_find_lowered_type_id(types: [MIRTypeDef], key: String) -> MIRTypeID? {
-    found := MIRTypeID?{None}
-    loop definition in types {
-        if definition.key == key {
-            if found != None -> return None
-            found = Val(definition.id)
-        }
-    }
-    found
-}
-
-fn jet_driver_find_lowered_trait_id(traits: [MIRTraitDef], key: String) -> MIRTraitID? {
-    found := MIRTraitID?{None}
-    loop definition in traits {
-        if definition.key == key {
-            if found != None -> return None
-            found = Val(definition.id)
-        }
-    }
-    found
-}
-
-fn jet_driver_find_lowered_impl_id(impls: [MIRImplDef], key: String) -> MIRImplID? {
-    found := MIRImplID?{None}
-    loop definition in impls {
-        if definition.key == key {
-            if found != None -> return None
-            found = Val(definition.id)
-        }
-    }
-    found
-}
-
-fn jet_driver_find_lowered_constant_id(constants: [MIRConstantDef], key: String) -> MIRConstantID? {
-    found := MIRConstantID?{None}
-    loop definition in constants {
-        if definition.key == key {
-            if found != None -> return None
-            found = Val(definition.id)
-        }
-    }
-    found
-}
 fn jet_driver_has_mir_function_id(functions: [MIRFunction], identity: MIRFunctionID) -> Bool Never! {
     loop function in functions {
         if function.id.value == identity.value -> return true
@@ -414,13 +357,103 @@ fn jet_driver_loaded_module_index_for_mir_module(load: JetDriverLoadResult, iden
     selected
 }
 
-fn jet_driver_source_file_for_loaded_module(load: JetDriverLoadResult, module_index: Int) -> MIRSourceFileID? {
-    if module_index < 0 || module_index >= load.modules.len() -> return None
-    source_unit_index := load.modules[module_index].source_unit_index
-    if source_unit_index < 0 || source_unit_index >= load.source_units.len() -> return None
-    source_file := mir_source_file_id(load.source_units[source_unit_index].path)
-    if !jet_driver_has_source_file_id(load.source_files, source_file) -> return None
-    Val(source_file)
+// The loaded-module lookups of one MIR assembly, built once instead of
+// rescanning (and rehashing) every loaded module and source file per row:
+// the loaded module of each MIR module ID (-1 when several loaded modules
+// share it, as jet_driver_loaded_module_index_for_mir_module), the authorized
+// source file of each loaded module (None without an exact record), and the
+// authorized source-file IDs.
+struct JetDriverAssemblyIndex {
+    module_rows: [U64:Int]
+    module_source_files: [MIRSourceFileID?]
+    source_files: [U64:Bool]
+}
+
+fn jet_driver_assembly_index(load: JetDriverLoadResult) -> JetDriverAssemblyIndex Never! {
+    index := JetDriverAssemblyIndex{module_rows: [U64:Int]{}, module_source_files: [MIRSourceFileID?]{}, source_files: [U64:Bool]{}}
+    loop file in load.source_files -> index.source_files[file.id.value] = true
+    loop (row, loaded_module) in load.modules {
+        module_value :: mir_module_id(loaded_module.module_identity).value
+        if index.module_rows.get(module_value) == None {
+            index.module_rows[module_value] = row
+        } else {
+            index.module_rows[module_value] = -1
+        }
+        source_file := MIRSourceFileID?{None}
+        unit_index :: loaded_module.source_unit_index
+        if unit_index >= 0 && unit_index < load.source_units.len() {
+            unit_file :: mir_source_file_id(load.source_units[unit_index].path)
+            if index.source_files.get(unit_file.value) != None -> source_file = Val(unit_file)
+        }
+        &index.module_source_files.push(source_file)
+    }
+    index
+}
+
+fn jet_driver_assembly_module_index(index: JetDriverAssemblyIndex, identity: MIRModuleID) -> Int? Never! {
+    row :: index.module_rows.get(identity.value) ?? return None
+    if row < 0 -> return None
+    Val(row)
+}
+
+// Rows grouped by a U64 key without copying a per-key list on each append:
+// `heads` maps a key to its first row and `next` links each row to the next
+// row with the same key (-1 after the last), in row order.
+struct JetDriverRowChains {
+    heads: [U64:Int]
+    tails: [U64:Int]
+    next: [Int]
+}
+
+fn jet_driver_row_chains_new() -> JetDriverRowChains Never! {
+    JetDriverRowChains{heads: [U64:Int]{}, tails: [U64:Int]{}, next: [Int]{}}
+}
+
+// Appends the next row (row number = rows added so far) under `key`.
+fn jet_driver_row_chains_add(chains: &JetDriverRowChains, key: U64) Never! {
+    row :: chains.next.len()
+    &chains.next.push(-1)
+    if chains.tails.get(key) == .Val(tail) {
+        chains.next[tail] = row
+    } else {
+        chains.heads[key] = row
+    }
+    chains.tails[key] = row
+}
+
+// Lowered declaration key -> its row, or -1 when the key repeats (the
+// unique-match rule of jet_driver_find_lowered_function_id), for the import
+// bindings of one assembly.
+struct JetDriverLoweredKeyRows {
+    functions: [String:Int]
+    types: [String:Int]
+    traits: [String:Int]
+    constants: [String:Int]
+}
+
+fn jet_driver_key_row_add(rows: &[String:Int], key: String, row: Int) Never! {
+    if rows.get(key) == None {
+        rows[key] = row
+    } else {
+        rows[key] = -1
+    }
+}
+
+fn jet_driver_lowered_key_rows(lowered: JetCodegenFunctions) -> JetDriverLoweredKeyRows Never! {
+    rows := JetDriverLoweredKeyRows{functions: [String:Int]{}, types: [String:Int]{}, traits: [String:Int]{}, constants: [String:Int]{}}
+    loop (row, function) in lowered.functions {
+        jet_driver_key_row_add(&rows.functions, function.key, row)
+    }
+    loop (row, definition) in lowered.types {
+        jet_driver_key_row_add(&rows.types, definition.key, row)
+    }
+    loop (row, definition) in lowered.traits {
+        jet_driver_key_row_add(&rows.traits, definition.key, row)
+    }
+    loop (row, definition) in lowered.constants {
+        jet_driver_key_row_add(&rows.constants, definition.key, row)
+    }
+    rows
 }
 
 fn jet_driver_diagnostic_at_loaded_module_index(
@@ -665,17 +698,18 @@ fn jet_driver_merge_comptime_function(
 }
 fn jet_driver_validate_lowered_function_owner(
     load: JetDriverLoadResult,
+    assembly: JetDriverAssemblyIndex,
     function: MIRFunction,
     diagnostics: &[Diagnostic],
 ) {
-    module_index := jet_driver_loaded_module_index_for_mir_module(load, function.module_id)
+    module_index := jet_driver_assembly_module_index(assembly, function.module_id)
     if {
         module_index == None -> {
             &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "a lowered function has no exact loaded-module owner", "lowered MIR functions retain the exact module identity of their loaded source owner", "retain the loaded module identity through nested lambda lowering"))
         }
         else -> {
             module_index_value :: module_index ?? return
-            expected_source_file := jet_driver_source_file_for_loaded_module(load, module_index_value)
+            expected_source_file := assembly.module_source_files[module_index_value]
             if {
                 expected_source_file == None -> {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, module_index, "E0003", function.span, "a lowered function owner has no exact authorized source-file record", "module ownership resolves through one loaded source unit and immutable source-file identity", "preserve the exact loaded module source identity through Codegen"))
@@ -746,11 +780,12 @@ fn jet_driver_core_list_module(prefix: String, member: String) -> String? Never!
 }
 
 // The member rows of one checked unqualified import, each naming its
-// canonical lowered MIR declaration.
+// canonical lowered MIR declaration (found through `key_rows`).
 fn jet_driver_mir_import_items(
     load: JetDriverLoadResult,
     import: SemaRegistrationImport,
     lowered: JetCodegenFunctions,
+    key_rows: JetDriverLoweredKeyRows,
     diagnostics: &[Diagnostic],
 ) -> [MIRImportItem]? {
     items := [MIRImportItem]{}
@@ -758,35 +793,32 @@ fn jet_driver_mir_import_items(
         item := MIRItemRef?{None}
         if binding.symbol.kind == {
             SymbolKind.Function -> {
-                function_id := jet_driver_find_lowered_function_id(lowered.functions, binding.symbol.id.key)
-                if function_id == None {
+                function_row :: key_rows.functions.get(binding.symbol.id.key) ?? -1
+                if function_row < 0 {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported function has no matching lowered MIR function", "import bindings preserve canonical target symbol identities", "retain the exact checked function key through code generation"))
                     return None
                 }
-                function_value :: function_id ?? return None
-                item = Val(MIRItemRef.Function{id: function_value})
+                item = Val(MIRItemRef.Function{id: lowered.functions[function_row].id})
             }
             SymbolKind.Type -> {
-                type_id := jet_driver_find_lowered_type_id(lowered.types, binding.symbol.id.key)
-                if type_id == None {
+                type_row :: key_rows.types.get(binding.symbol.id.key) ?? -1
+                if type_row < 0 {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported type has no matching lowered MIR type", "type import bindings preserve canonical target symbol identities", "retain the exact checked type key through code generation"))
                     return None
                 }
-                type_value :: type_id ?? return None
-                item = Val(MIRItemRef.Type{id: type_value})
+                item = Val(MIRItemRef.Type{id: lowered.types[type_row].id})
             }
             SymbolKind.Trait -> {
-                trait_id := jet_driver_find_lowered_trait_id(lowered.traits, binding.symbol.id.key)
-                if trait_id == None {
+                trait_row :: key_rows.traits.get(binding.symbol.id.key) ?? -1
+                if trait_row < 0 {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported trait has no matching lowered MIR trait", "trait import bindings preserve canonical target symbol identities", "retain the exact checked trait key through code generation"))
                     return None
                 }
-                trait_value :: trait_id ?? return None
-                item = Val(MIRItemRef.Trait{id: trait_value})
+                item = Val(MIRItemRef.Trait{id: lowered.traits[trait_row].id})
             }
             SymbolKind.Constant -> {
-                constant_id := jet_driver_find_lowered_constant_id(lowered.constants, binding.symbol.id.key)
-                if constant_id == None {
+                constant_row :: key_rows.constants.get(binding.symbol.id.key) ?? -1
+                if constant_row < 0 {
                     comptime_only := false
                     if binding.declaration == {
                         Val(declaration) -> {
@@ -801,8 +833,7 @@ fn jet_driver_mir_import_items(
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "an imported runtime constant has no matching lowered MIR constant", "runtime import bindings preserve canonical target constant identities", "retain the lowered constant row or erase only a checked compile-time-only import"))
                     return None
                 }
-                constant_value :: constant_id ?? return None
-                item = Val(MIRItemRef.Constant{id: constant_value})
+                item = Val(MIRItemRef.Constant{id: lowered.constants[constant_row].id})
             }
             else -> {
                 &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, binding.target_module_identity, "E0003", binding.symbol.span, "the checked import refers to an item kind that MIR lowering does not support", "the backend-neutral import graph lowers canonical type, trait, function, and constant identities", "add a canonical MIR item reference before lowering this import kind"))
@@ -826,6 +857,7 @@ fn jet_driver_mir_import(
     load: JetDriverLoadResult,
     import: SemaRegistrationImport,
     lowered: JetCodegenFunctions,
+    key_rows: JetDriverLoweredKeyRows,
     diagnostics: &[Diagnostic],
 ) -> MIRImport? {
     kind := MIRImportKind?{None}
@@ -836,7 +868,7 @@ fn jet_driver_mir_import(
             core_path :: jet_driver_core_import_module_path(module_alias, members)
             if core_path == .Val(path) -> kind = Val(MIRImportKind.Module{path: path})
             if core_path == None {
-                items :: jet_driver_mir_import_items(load, import, lowered, &diagnostics) ?? return None
+                items :: jet_driver_mir_import_items(load, import, lowered, key_rows, &diagnostics) ?? return None
                 kind = Val(MIRImportKind.Unqualified{module_id: mir_module_id(import.target_module_identity), items: items})
             }
         }
@@ -1536,6 +1568,7 @@ fn jet_driver_assemble_mir(
     // A changeable owner: its function lists are moved out below.
     lowered := ^lowered_rows
     if semantic_modules.len() != load.modules.len() -> return None
+    assembly := jet_driver_assembly_index(load)
     expected_foreign_count := 0
     loop semantic_module in semantic_modules {
         expected_foreign_count += semantic_module.foreign_functions.len()
@@ -1544,54 +1577,62 @@ fn jet_driver_assemble_mir(
         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked foreign declaration", "the foreign table is the complete normalized Sema ABI set, never an empty placeholder or AST re-inference", "preserve every checked foreign row through Codegen"))
         return None
     }
-    foreign_index := 0
-    loop foreign in foreign_artifacts.foreign {
-        earlier_foreign := 0
-        loop earlier_foreign < foreign_index {
-            previous := foreign_artifacts.foreign[earlier_foreign]
-            if previous.id.value == foreign.id.value || previous.key == foreign.key {
-                &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering produced duplicate canonical foreign identities", "each checked foreign key and MirForeignId resolves to exactly one row", "preserve stable foreign identities from normalized Sema facts"))
-                return None
+    // Earlier foreign identities, and each checked foreign row by
+    // `module id\nkey` (the Sema module and row, or -1 when the key repeats
+    // in that module), so each lowered row is validated without rescanning.
+    foreign_ids := [U64:Bool]{}
+    foreign_keys := [String:Bool]{}
+    checked_foreign_modules := [String:Int]{}
+    checked_foreign_rows := [String:Int]{}
+    loop (semantic_index, semantic_module) in semantic_modules {
+        module_value :: mir_module_id(semantic_module.module_identity).value
+        loop (row, checked_foreign) in semantic_module.foreign_functions {
+            checked_key :: "{module_value}\n{checked_foreign.key}"
+            if checked_foreign_modules.get(checked_key) == None {
+                checked_foreign_modules[checked_key] = semantic_index
+                checked_foreign_rows[checked_key] = row
+            } else {
+                checked_foreign_modules[checked_key] = -1
             }
-            earlier_foreign += 1
         }
-        owner_module_index :: jet_driver_loaded_module_index_for_mir_module(load, foreign.module_id) ?? {
+    }
+    loop foreign in foreign_artifacts.foreign {
+        if foreign_ids.get(foreign.id.value) != None || foreign_keys.get(foreign.key) != None {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering produced duplicate canonical foreign identities", "each checked foreign key and MirForeignId resolves to exactly one row", "preserve stable foreign identities from normalized Sema facts"))
+            return None
+        }
+        foreign_ids[foreign.id.value] = true
+        foreign_keys[foreign.key] = true
+        owner_module_index :: jet_driver_assembly_module_index(assembly, foreign.module_id) ?? {
             &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a lowered foreign row has no exact loaded-module owner", "MirForeign.module_id derives from the checked source module identity", "retain the normalized foreign row's module identity through Codegen"))
             return None
         }
-        expected := SemaCheckedForeignFunction?{None}
-        loop semantic_module in semantic_modules {
-            if mir_module_id(semantic_module.module_identity).value != foreign.module_id.value -> next
-            loop checked_foreign in semantic_module.foreign_functions {
-                if checked_foreign.key != foreign.key -> next
-                if expected != None {
-                    &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a checked foreign key resolves to more than one normalized Sema row", "canonical foreign ABI identities are unique within the checked module graph", "report the duplicate normalized foreign key"))
-                    return None
-                }
-                expected = Val(checked_foreign)
-            }
-        }
-        checked :: expected ?? {
+        checked_key :: "{foreign.module_id.value}\n{foreign.key}"
+        semantic_index :: checked_foreign_modules.get(checked_key) ?? {
             &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a lowered foreign row has no matching normalized checked Sema owner", "Codegen consumes only SemaCheckedForeignFunction facts from the same module identity", "preserve the checked foreign key, module, and ABI provenance"))
             return None
         }
-        if !jet_driver_mir_foreign_matches_checked(foreign, checked) {
+        if semantic_index < 0 {
+            &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a checked foreign key resolves to more than one normalized Sema row", "canonical foreign ABI identities are unique within the checked module graph", "report the duplicate normalized foreign key"))
+            return None
+        }
+        checked_row :: checked_foreign_rows.get(checked_key) ?? return None
+        if !jet_driver_mir_foreign_matches_checked(foreign, semantic_modules[semantic_index].foreign_functions[checked_row]) {
             &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", foreign.span, "a lowered foreign row disagrees with its normalized checked Sema facts", "MIR preserves the canonical module, symbol, source site, parameter order, access, and native path", "lower the checked foreign row without reconstructing or changing its ABI"))
             return None
         }
-        foreign_index += 1
     }
     imports := [MIRImport]{}
     if include_imports {
+        key_rows := jet_driver_lowered_key_rows(lowered)
+        import_ids := [U64:Bool]{}
         loop import in semantic_imports {
-            lowered_import :: jet_driver_mir_import(load, import, lowered, &diagnostics) ?? return None
-            import_id := lowered_import.id
-            loop previous in imports {
-                if previous.id.value == import_id.value {
-                    &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, import.source_module_identity, "E0003", import.declaration.span, "two semantic imports have the same stable MIR identity", "MIR import IDs are stable functions of source module, declaration span, and target identity", "report the duplicate resolved import edge"))
-                    return None
-                }
+            lowered_import :: jet_driver_mir_import(load, import, lowered, key_rows, &diagnostics) ?? return None
+            if import_ids.get(lowered_import.id.value) != None {
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, import.source_module_identity, "E0003", import.declaration.span, "two semantic imports have the same stable MIR identity", "MIR import IDs are stable functions of source module, declaration span, and target identity", "report the duplicate resolved import edge"))
+                return None
             }
+            import_ids[lowered_import.id.value] = true
             &imports.push(lowered_import)
         }
     }
@@ -1610,28 +1651,27 @@ fn jet_driver_assemble_mir(
     next_key := (loop _ in all_functions -> -1)
     index := all_functions.len() - 1
     loop index >= 0 {
-        function :: all_functions[index]
-        next_id[index] = id_heads.get(function.id.value) ?? -1
-        next_key[index] = key_heads.get(function.key) ?? -1
-        id_heads[function.id.value] = index
-        key_heads[function.key] = index
+        next_id[index] = id_heads.get(all_functions[index].id.value) ?? -1
+        next_key[index] = key_heads.get(all_functions[index].key) ?? -1
+        id_heads[all_functions[index].id.value] = index
+        key_heads[all_functions[index].key] = index
         index -= 1
     }
     function_index := 0
     loop function_index < all_functions.len() {
-        function := all_functions[function_index]
-        jet_driver_validate_lowered_function_owner(load, function, &diagnostics)
-        owner_module_index := jet_driver_loaded_module_index_for_mir_module(load, function.module_id)
+        jet_driver_validate_lowered_function_owner(load, assembly, all_functions[function_index], &diagnostics)
+        owner_module_index := jet_driver_assembly_module_index(assembly, all_functions[function_index].module_id)
+        span :: all_functions[function_index].span
         id_later := next_id[function_index]
         key_later := next_key[function_index]
         loop id_later >= 0 || key_later >= 0 {
             later :: if id_later < 0 -> key_later else -> if key_later < 0 || id_later < key_later -> id_later else -> key_later
             if id_later == later {
-                &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", function.span, "MIR lowering produced duplicate function IDs", "every MIR function ID resolves to exactly one checked function", "report the duplicate Codegen function identity"))
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", span, "MIR lowering produced duplicate function IDs", "every MIR function ID resolves to exactly one checked function", "report the duplicate Codegen function identity"))
                 id_later = next_id[id_later]
             }
             if key_later == later {
-                &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", function.span, "MIR lowering produced duplicate function keys", "every checked function key resolves to one MIR function", "report the duplicate Codegen function key"))
+                &diagnostics.push(jet_driver_diagnostic_at_loaded_module_index(load, owner_module_index, "E0003", span, "MIR lowering produced duplicate function keys", "every checked function key resolves to one MIR function", "report the duplicate Codegen function key"))
                 key_later = next_key[key_later]
             }
         }
@@ -1647,66 +1687,98 @@ fn jet_driver_assemble_mir(
     assigned_traits := 0
     assigned_impls := 0
     assigned_constants := 0
+    // Each kind of row chained by module ID (and imports and load edges by
+    // source module), in row order, so a module visits only its own rows.
+    function_chains := jet_driver_row_chains_new()
+    loop function in all_functions -> jet_driver_row_chains_add(&function_chains, function.module_id.value)
+    foreign_chains := jet_driver_row_chains_new()
+    loop foreign in foreign_artifacts.foreign -> jet_driver_row_chains_add(&foreign_chains, foreign.module_id.value)
+    type_chains := jet_driver_row_chains_new()
+    loop definition in lowered.types -> jet_driver_row_chains_add(&type_chains, definition.module_id.value)
+    trait_chains := jet_driver_row_chains_new()
+    loop definition in lowered.traits -> jet_driver_row_chains_add(&trait_chains, definition.module_id.value)
+    impl_chains := jet_driver_row_chains_new()
+    loop definition in lowered.impls -> jet_driver_row_chains_add(&impl_chains, definition.module_id.value)
+    constant_chains := jet_driver_row_chains_new()
+    loop definition in lowered.constants -> jet_driver_row_chains_add(&constant_chains, definition.module_id.value)
+    import_chains := jet_driver_row_chains_new()
+    edge_chains := jet_driver_row_chains_new()
+    if include_imports {
+        loop import in semantic_imports -> jet_driver_row_chains_add(&import_chains, mir_module_id(import.source_module_identity).value)
+        loop edge in load.imports -> jet_driver_row_chains_add(&edge_chains, mir_module_id(edge.source_module_identity).value)
+    }
     loop loaded_module in load.modules {
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() -> return None
         unit := load.source_units[loaded_module.source_unit_index]
         module_id := mir_module_id(loaded_module.module_identity)
         module_source_file := mir_source_file_id(unit.path)
-        if !jet_driver_has_source_file_id(load.source_files, module_source_file) -> return None
+        if assembly.source_files.get(module_source_file.value) == None -> return None
         module_import_ids := [MIRImportID]{}
         children := [MIRModuleID]{}
+        child_ids := [U64:Bool]{}
         ordered_items := [JetDriverMIRItemOrderRow]{}
         if include_imports {
-            loop import in semantic_imports {
+            import_row := import_chains.heads.get(module_id.value) ?? -1
+            loop import_row >= 0 {
+                import :: semantic_imports[import_row]
+                import_row = import_chains.next[import_row]
                 if import.source_module_identity != loaded_module.module_identity -> next
                 import_id := jet_driver_mir_import_id(import)
                 &module_import_ids.push(import_id)
                 jet_driver_add_mir_item_order(&ordered_items, import.declaration.span.start, MIRItemRef.Import{id: import_id})
-                loop edge in load.imports {
+                edge_row := edge_chains.heads.get(module_id.value) ?? -1
+                loop edge_row >= 0 {
+                    edge :: load.imports[edge_row]
+                    edge_row = edge_chains.next[edge_row]
                     if edge.source_module_identity == loaded_module.module_identity && edge.declaration.span.start == import.declaration.span.start && edge.declaration.span.end == import.declaration.span.end && jet_driver_import_is_module_edge(edge.declaration.kind) && edge.target_package_identity == loaded_module.package_identity && !jet_driver_is_namespace_binding(edge.declaration) {
                         child_id := mir_module_id(edge.target_module_identity)
-                        found_child := false
-                        loop child in children {
-                            if child.value == child_id.value -> found_child = true
+                        if child_ids.get(child_id.value) == None {
+                            child_ids[child_id.value] = true
+                            &children.push(child_id)
                         }
-                        if !found_child -> &children.push(child_id)
                     }
                 }
             }
         }
-        loop function in all_functions {
-            if function.module_id.value != module_id.value -> next
-            if !jet_driver_has_source_file_id(load.source_files, function.source_file) -> return None
-            jet_driver_add_mir_item_order(&ordered_items, function.span.start, MIRItemRef.Function{id: function.id})
+        row := function_chains.heads.get(module_id.value) ?? -1
+        loop row >= 0 {
+            if assembly.source_files.get(all_functions[row].source_file.value) == None -> return None
+            jet_driver_add_mir_item_order(&ordered_items, all_functions[row].span.start, MIRItemRef.Function{id: all_functions[row].id})
             assigned_functions += 1
+            row = function_chains.next[row]
         }
-        loop foreign in foreign_artifacts.foreign {
-            if foreign.module_id.value != module_id.value -> next
-            jet_driver_add_mir_item_order(&ordered_items, foreign.span.start, MIRItemRef.Foreign{id: foreign.id})
+        row = foreign_chains.heads.get(module_id.value) ?? -1
+        loop row >= 0 {
+            jet_driver_add_mir_item_order(&ordered_items, foreign_artifacts.foreign[row].span.start, MIRItemRef.Foreign{id: foreign_artifacts.foreign[row].id})
             assigned_foreigns += 1
+            row = foreign_chains.next[row]
         }
-        loop definition in lowered.types {
-            if definition.module_id.value != module_id.value -> next
-            jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Type{id: definition.id})
+        row = type_chains.heads.get(module_id.value) ?? -1
+        loop row >= 0 {
+            jet_driver_add_mir_item_order(&ordered_items, lowered.types[row].span.start, MIRItemRef.Type{id: lowered.types[row].id})
             assigned_types += 1
+            row = type_chains.next[row]
         }
-        loop definition in lowered.traits {
-            if definition.module_id.value != module_id.value -> next
-            jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Trait{id: definition.id})
+        row = trait_chains.heads.get(module_id.value) ?? -1
+        loop row >= 0 {
+            jet_driver_add_mir_item_order(&ordered_items, lowered.traits[row].span.start, MIRItemRef.Trait{id: lowered.traits[row].id})
             assigned_traits += 1
+            row = trait_chains.next[row]
         }
-        loop definition in lowered.impls {
-            if definition.module_id.value != module_id.value -> next
-            jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Impl{id: definition.id})
+        row = impl_chains.heads.get(module_id.value) ?? -1
+        loop row >= 0 {
+            jet_driver_add_mir_item_order(&ordered_items, lowered.impls[row].span.start, MIRItemRef.Impl{id: lowered.impls[row].id})
             assigned_impls += 1
+            row = impl_chains.next[row]
         }
-        loop definition in lowered.constants {
-            if definition.module_id.value != module_id.value -> next
-            jet_driver_add_mir_item_order(&ordered_items, definition.span.start, MIRItemRef.Constant{id: definition.id})
+        row = constant_chains.heads.get(module_id.value) ?? -1
+        loop row >= 0 {
+            jet_driver_add_mir_item_order(&ordered_items, lowered.constants[row].span.start, MIRItemRef.Constant{id: lowered.constants[row].id})
             assigned_constants += 1
+            row = constant_chains.next[row]
         }
         positions := [U64]{}
-        loop row in ordered_items -> &positions.push(U64.from_int(row.position) ?? U64{0})
+        loop item_row in ordered_items -> &positions.push(U64.from_int(item_row.position) ?? U64{0})
         item_order := [MIRItemRef]{}
         loop row_index in jet_codegen_sorted_order(positions, [String]{}) -> &item_order.push(ordered_items[row_index].item)
         &modules.push(MIRModule{
