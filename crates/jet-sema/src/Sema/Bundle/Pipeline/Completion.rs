@@ -1052,11 +1052,7 @@ fn record_import_edge_facts(
             let Some(target) = ledger.module_path(target_idx).map(str::to_string) else {
                 continue;
             };
-            if ledger.structure_facts().iter().any(|fact| {
-                fact.kind == jet_foundation::Names::StructureFactKind::ImportEdge
-                    && fact.source == source
-                    && fact.span == import.span
-            }) {
+            if ledger.has_import_fact(&source, import.span) {
                 continue;
             }
             ledger.record_structure_fact(jet_foundation::Names::StructureFact::new(

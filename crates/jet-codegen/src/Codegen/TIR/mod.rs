@@ -6332,7 +6332,7 @@ fn lower_checked_tir_program_on_stack(
         }
         let mut program = TirProgram {
             package_identity: bundle.build_facts.package_name.clone(),
-            entry_sibling_calls: (!bundle.name_ledger.namespace_siblings(bundle.entry).is_empty())
+            entry_sibling_calls: (bundle.name_ledger.namespace_siblings(bundle.entry).next().is_some())
                 .then(|| {
                     (
                         entry_module_identity.clone(),

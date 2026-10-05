@@ -19,12 +19,15 @@ use std::path::Path;
 /// Walk the entry module for the App-returning `fn run` and record the static
 /// builder graph.
 pub fn extract_app_graph(bundle: &ProgramBundle) -> (Option<AppGraph>, Vec<Diagnostic>) {
+    // Most programs are not Apps. Do not compute bundle-wide structural trait
+    // facts before the same entry predicate used by graph extraction.
+    if bundle.modules.get(bundle.entry)
+        .and_then(|module| crate::AST::app_entry_run_fn(&module.items)).is_none()
+    {
+        return (None, Vec::new());
+    }
     let registries = TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-    let registry = registries
-        .get(bundle.entry)
-        .cloned()
-        .unwrap_or_default();
-    extract_app_graph_inner(bundle, None, &registry)
+    extract_app_graph_inner(bundle, None, &registries[bundle.entry])
 }
 
 pub fn extract_app_graph_with_effects_and_registry(

@@ -1267,27 +1267,25 @@ fn body_edit_rechecks_only_the_edited_item() {
             .collect::<Vec<_>>();
         (String::from_utf8_lossy(&output.stderr).into_owned(), rows)
     };
-    // One row per checked module: `...; items: N reused, M checked [names], ...`.
-    let items = |rows: &[(String, String)], module: &str| {
+    // One row per checked package aggregates all of its member-file items.
+    let items = |rows: &[(String, String)]| {
         rows.iter()
-            .find(|(subject, _)| subject.ends_with(module))
+            .find(|(subject, _)| subject == "pkg:.")
             .and_then(|(_, why)| why.split_once("items: ").map(|(_, items)| items.to_string()))
-            .unwrap_or_else(|| panic!("no item row for {module}: {rows:?}"))
+            .unwrap_or_else(|| panic!("no item row for the root package: {rows:?}"))
     };
     let store = root.join("store");
 
     write(&shapes, &source(""));
     let (_, first) = check(&store);
-    assert!(items(&first, "shapes.jet").starts_with("0 reused, 4 checked"), "{first:?}");
-    assert!(items(&first, "lib.jet").starts_with("0 reused, 2 checked"), "{first:?}");
+    assert!(items(&first).starts_with("0 reused, 6 checked"), "{first:?}");
 
     write(&shapes, &source(" * 3"));
     let (warm, second) = check(&store);
     assert!(
-        items(&second, "shapes.jet").starts_with("3 reused, 1 checked [fn:area]"),
+        items(&second).starts_with("5 reused, 1 checked [fn:area]"),
         "{second:?}"
     );
-    assert!(items(&second, "lib.jet").starts_with("2 reused, 0 checked"), "{second:?}");
     let (fresh, _) = check(&root.join("fresh-store"));
     assert!(warm.contains("L0104"), "{warm}");
     assert_eq!(warm, fresh, "reused items must not change the diagnostics");
