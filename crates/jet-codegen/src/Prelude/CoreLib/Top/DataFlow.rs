@@ -3063,7 +3063,7 @@ fn jet_data_loader_canonical_tree(tree: &jet_std::Dyn) -> String {
         jet_std::Dyn::Int(value) => jet_std::jet_int_to_string(*value),
         jet_std::Dyn::Float(value) => format!("{value:?}"),
         jet_std::Dyn::Number(value) => value.clone(),
-        jet_std::Dyn::TypedText(value) | jet_std::Dyn::Text(value) => {
+        jet_std::Dyn::Text(value) => {
             jet_data_loader_quote(value)
         }
         jet_std::Dyn::Bytes(values) => jet_data_loader_quote(&jet_std::Dyn::bytes_text(values)),
@@ -3189,7 +3189,7 @@ fn jet_data_loader_jsonl_tree(
                 format!("max_output_rows {} exceeded", limits.max_output_rows),
             ));
         }
-        let value = jet_std::parse_json_typed_dyn(line).map_err(|error| {
+        let value = jet_std::parse_json_dyn(line).map_err(|error| {
             jet_data_loader_error(
                 jet_std::DataErrorKind::Decode,
                 "data.loader.jsonl",
@@ -3334,7 +3334,7 @@ fn jet_data_loader_tree(
     })?;
     let tree = match format {
         jet_std::DataFormat::JSON => {
-            jet_std::parse_json_typed_dyn(&text).map_err(|error| {
+            jet_std::parse_json_dyn(&text).map_err(|error| {
                 jet_data_loader_error(
                     jet_std::DataErrorKind::Decode,
                     "data.loader.json",
@@ -4095,7 +4095,7 @@ mod jet_data_web {
     }
     fn text(value: &jet_std::Dyn, operation: &str) -> Result<String, jet_std::DataError> {
         match value {
-            jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => Ok(value.clone()),
+            jet_std::Dyn::Text(value) => Ok(value.clone()),
             _ => Err(error(jet_std::DataErrorKind::InvalidArgument, operation, "expected text")),
         }
     }
@@ -4345,7 +4345,7 @@ mod jet_data_web {
             }
         };
         INPUTS.with(|cell| cell.borrow_mut()[3].clear());
-        let value = jet_std::parse_json_typed_dyn(&value).map_err(|_| {
+        let value = jet_std::parse_json_dyn(&value).map_err(|_| {
             error(
                 jet_std::DataErrorKind::Decode,
                 operation,
@@ -4378,7 +4378,7 @@ mod jet_data_web {
     }
     fn callback_key_value(value: &jet_std::Dyn) -> String {
         match value {
-            jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => value.clone(),
+            jet_std::Dyn::Text(value) => value.clone(),
             jet_std::Dyn::Int(value) => value.to_string(),
             jet_std::Dyn::Float(value) => value.to_string(),
             jet_std::Dyn::Number(value) => value.clone(),
@@ -4983,7 +4983,7 @@ mod jet_data_web {
     #[no_mangle]
     pub extern "C" fn jet_data_web_call(pointer: u32, length: u32) -> i32 {
         let input = unsafe { std::slice::from_raw_parts(pointer as *const u8, length as usize) };
-        let parsed = std::str::from_utf8(input).ok().and_then(|value| jet_std::parse_json_typed_dyn(value).ok());
+        let parsed = std::str::from_utf8(input).ok().and_then(|value| jet_std::parse_json_dyn(value).ok());
         let result = parsed.map_or_else(
             || Err(error(jet_std::DataErrorKind::Decode, "data.web", "invalid Web DataFlow wire JSON")),
             |value| dispatch(&value),

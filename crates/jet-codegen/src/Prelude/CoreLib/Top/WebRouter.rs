@@ -258,7 +258,7 @@ fn jet_web_router_parse_json_search(
 
 fn jet_web_router_json_value_text(value: &jet_std::Dyn) -> Result<String, String> {
     match value {
-        jet_std::Dyn::Text(text) | jet_std::Dyn::TypedText(text) => Ok(text.clone()),
+        jet_std::Dyn::Text(text) => Ok(text.clone()),
         jet_std::Dyn::Bool(value) => Ok(value.to_string()),
         jet_std::Dyn::Int(value) => Ok(value.to_string()),
         jet_std::Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),

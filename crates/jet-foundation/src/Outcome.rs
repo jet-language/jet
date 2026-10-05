@@ -888,7 +888,7 @@ fn jet_error_json_encode_value(value: &crate::Dyn::Dyn) -> String {
         crate::Dyn::Dyn::Int(value) => value.to_string(),
         crate::Dyn::Dyn::Float(value) => value.to_string(),
         crate::Dyn::Dyn::Number(value) => value.clone(),
-        crate::Dyn::Dyn::Text(value) | crate::Dyn::Dyn::TypedText(value) => {
+        crate::Dyn::Dyn::Text(value) => {
             format!("\"{}\"", jet_error_json_escape(value))
         }
         crate::Dyn::Dyn::Bytes(bytes) => format!("\"{}\"", crate::Dyn::Dyn::bytes_text(bytes)),

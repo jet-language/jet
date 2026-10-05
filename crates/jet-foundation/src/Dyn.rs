@@ -137,10 +137,8 @@ pub enum Dyn {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// Exact numeric lexeme retained for typed decoding before a target type is known.
+    /// Exact numeric lexeme retained until a typed read checks its range.
     Number(String),
-    /// Text retained by typed decoding before a target type is known.
-    TypedText(String),
     Text(String),
     Bytes(Vec<u8>),
     DateTime(DynDateTime),
@@ -174,7 +172,7 @@ impl Dyn {
 
     pub fn as_str(&self) -> Result<&str, String> {
         match self {
-            Self::Text(value) | Self::TypedText(value) => Ok(value),
+            Self::Text(value) => Ok(value),
             _ => Err("expected a Dyn string".to_string()),
         }
     }

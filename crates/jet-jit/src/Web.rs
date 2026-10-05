@@ -483,7 +483,7 @@ fn web_form_encoded_callback(
     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
     body: &str,
 ) -> Result<String, String> {
-    let tree = web_rt::jet_std::parse_json_typed_dyn(body)
+    let tree = web_rt::jet_std::parse_json_dyn(body)
         .map_err(|_| "typed form action input is not valid JSON".to_string())?;
     web_encoded_callback(callback, &[tree])
 }

@@ -1264,7 +1264,7 @@ fn loader_tree(
             .map_err(|error| err(DataErrorKind::Decode, "data.loader", error.to_string()))
     };
     let tree = match format {
-        LoaderFormat::JSON => crate::Encoding::json_rt::parse_dyn_typed_ordered(text()?)
+        LoaderFormat::JSON => crate::Encoding::json_rt::parse_dyn(text()?)
             .map_err(|error| err(DataErrorKind::Decode, "data.loader.json", error.to_string()))?,
         LoaderFormat::JSONL => {
             let mut rows = Vec::new();
@@ -1272,7 +1272,7 @@ fn loader_tree(
                 if value.trim().is_empty() {
                     continue;
                 }
-                let row = crate::Encoding::json_rt::parse_dyn_typed_ordered(value)
+                let row = crate::Encoding::json_rt::parse_dyn(value)
                     .map_err(|error| {
                         err(
                             DataErrorKind::Decode,

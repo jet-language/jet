@@ -1026,7 +1026,7 @@ pub mod game_dev_protocol {
                 Dyn::Int(value) => value.to_string(),
                 Dyn::Float(value) => format!("{value:?}"),
                 Dyn::Number(value) => value.clone(),
-                Dyn::TypedText(value) | Dyn::Text(value) => quote(value),
+                Dyn::Text(value) => quote(value),
                 Dyn::Array(values) => format!(
                     "[{}]",
                     values

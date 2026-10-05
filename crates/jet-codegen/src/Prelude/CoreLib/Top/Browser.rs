@@ -292,7 +292,7 @@ fn jet_browser_string(
     key: &str,
 ) -> Result<String, JetBrowserError> {
     match jet_browser_get(value, key) {
-        Some(jet_std::Dyn::Text(text) | jet_std::Dyn::TypedText(text)) => {
+        Some(jet_std::Dyn::Text(text)) => {
             Ok(text.clone())
         }
         _ => Err(JetBrowserError::new("protocol")),
@@ -431,7 +431,7 @@ fn jet_browser_capture_event(
     state: &mut JetBrowserState,
     value: &jet_std::Dyn,
 ) -> Result<bool, JetBrowserError> {
-    let Some(jet_std::Dyn::Text(kind) | jet_std::Dyn::TypedText(kind)) =
+    let Some(jet_std::Dyn::Text(kind)) =
         jet_browser_get(value, "type")
     else {
         return Err(JetBrowserError::new("protocol"));
@@ -763,7 +763,7 @@ fn jet_browser_connect_profile(
     )
         || !matches!(
             jet_browser_get(&status, "message"),
-            Some(jet_std::Dyn::Text(_) | jet_std::Dyn::TypedText(_))
+            Some(jet_std::Dyn::Text(_))
         )
     {
         return Err(JetBrowserError::new("protocol"));

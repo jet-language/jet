@@ -119,8 +119,7 @@ impl StatusValue {
                     Ok(Self::Float(value.clone()))
                 }
             }
-            crate::Dyn::Dyn::TypedText(value)
-            | crate::Dyn::Dyn::Text(value) => Ok(Self::String(value.clone())),
+            crate::Dyn::Dyn::Text(value) => Ok(Self::String(value.clone())),
             crate::Dyn::Dyn::Bytes(values) => Ok(Self::String(crate::Dyn::Dyn::bytes_text(values))),
             crate::Dyn::Dyn::DateTime(value) => Ok(Self::String(value.to_rfc3339())),
             crate::Dyn::Dyn::Array(values) => Ok(Self::Array(

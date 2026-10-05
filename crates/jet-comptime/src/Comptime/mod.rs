@@ -587,7 +587,7 @@ pub fn render_dyn_pretty_for_tir(value: &CtValue) -> String {
 /// TIR typed JSON decode uses the ordered Dyn shape. Dynamic JSON keeps
 /// its BTreeMap shape, so this adapter is separate from `core.encoding.json.parse`.
 pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
-    match JSONInterp::parse_json_typed_ordered(text) {
+    match JSONInterp::parse_json(text) {
         Ok(value) => CtValue::Present(Box::new(value)),
         Err(error) => CtValue::failed(Box::new(JSONInterp::encoding_error_value(error))),
     }

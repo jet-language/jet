@@ -414,18 +414,21 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
             .filter(|value| value.is_finite())
             .map(|value| CtValue::Float(CtFloat::f64(value)))
             .ok_or_else(|| decode_error("expected Float, found out-of-range Int")),
-        Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
-            let value = text
-                .trim()
-                .parse::<f64>()
-                .map_err(|_| decode_error(format!("expected Float, found text {:?}", text)))?;
-            if value.is_finite() {
-                Ok(CtValue::Float(CtFloat::f64(value)))
-            } else {
-                Err(decode_error("expected Float, found out-of-range Float"))
-            }
-        }
-        Some(("TypedText", Some(CtValue::Str(text)))) => Err(decode_error(format!(
+        Some(("Number", Some(CtValue::Str(text)))) => match text.parse::<f64>() {
+            Ok(value) if value.is_finite() => Ok(CtValue::Float(CtFloat::f64(value))),
+            Ok(_) => Err(decode_error(format!(
+                "expected Float, found out-of-range number {text}"
+            ))),
+            Err(_) => Err(decode_error(format!("expected Float, found number {text}"))),
+        },
+        Some(("Text", Some(CtValue::Str(text)))) if super::SyncLite::text_cells_active() => text
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(|value| CtValue::Float(CtFloat::f64(value)))
+            .ok_or_else(|| decode_error(format!("expected Float, found text {:?}", text))),
+        Some(("Text", Some(CtValue::Str(text)))) => Err(decode_error(format!(
             "expected Float, found text {:?}",
             text
         ))),
@@ -438,18 +441,20 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
 fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Bool(*b)),
-        Some(("TypedText", Some(CtValue::Str(text)))) => Err(decode_error(format!(
+        Some(("Text", Some(CtValue::Str(text)))) if super::SyncLite::text_cells_active() => {
+            match text.trim() {
+                "true" => Ok(CtValue::Bool(true)),
+                "false" => Ok(CtValue::Bool(false)),
+                _ => Err(decode_error(format!(
+                    "expected Bool, found text {:?}",
+                    text
+                ))),
+            }
+        }
+        Some(("Text", Some(CtValue::Str(text)))) => Err(decode_error(format!(
             "expected Bool, found text {:?}",
             text
         ))),
-        Some(("Text", Some(CtValue::Str(text)))) => match text.trim() {
-            "true" => Ok(CtValue::Bool(true)),
-            "false" => Ok(CtValue::Bool(false)),
-            _ => Err(decode_error(format!(
-                "expected Bool, found text {:?}",
-                text
-            ))),
-        },
         _ => Err(decode_error(format!(
             "expected Bool, found {}",
             dyn_kind_for(tree)
@@ -458,15 +463,10 @@ fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
 }
 fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
-        Some(("Text", Some(CtValue::Str(text))))
-        | Some(("TypedText", Some(CtValue::Str(text)))) => Ok(CtValue::Str(text.clone())),
+        Some(("Text", Some(CtValue::Str(text)))) => Ok(CtValue::Str(text.clone())),
         Some(("Number", Some(CtValue::Str(text)))) => {
             Err(decode_error(format!("expected Text, found number {text}")))
         }
-        Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Str(n.to_string())),
-        Some(("Int", Some(CtValue::BigInt(n)))) => Ok(CtValue::Str(n.to_string_rep())),
-        Some(("Float", Some(CtValue::Float(f)))) => Ok(CtValue::Str(format!("{:?}", f))),
-        Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Str(b.to_string())),
         _ => Err(decode_error(format!(
             "expected Text, found {}",
             dyn_kind_for(tree)
@@ -495,12 +495,20 @@ fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
     let value = match variant_of(tree) {
         Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
         Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
-        Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
-            text.trim()
-                .parse::<f64>()
-                .map_err(|_| decode_error(format!("expected F32, found text {:?}", text)))?
-        }
-        Some(("TypedText", Some(CtValue::Str(text)))) => {
+        Some(("Number", Some(CtValue::Str(text)))) => match text.parse::<f64>() {
+            Ok(value) if value.is_finite() => value,
+            Ok(_) => {
+                return Err(decode_error(format!(
+                    "expected F32, found out-of-range number {text}"
+                )))
+            }
+            Err(_) => return Err(decode_error(format!("expected F32, found number {text}"))),
+        },
+        Some(("Text", Some(CtValue::Str(text)))) if super::SyncLite::text_cells_active() => text
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| decode_error(format!("expected F32, found text {:?}", text)))?,
+        Some(("Text", Some(CtValue::Str(text)))) => {
             return Err(decode_error(format!("expected F32, found text {:?}", text)))
         }
         _ => {
@@ -521,12 +529,6 @@ fn decode_decimal(tree: &CtValue) -> Result<CtValue, CtValue> {
     let parsed = match variant_of(tree) {
         Some(("Number", Some(CtValue::Str(text)))) => {
             crate::Numeric::CtDecimal::from_json_number(text)
-        }
-        Some(("TypedText", Some(CtValue::Str(text)))) => {
-            return Err(decode_error(format!(
-                "expected Decimal, found text {:?}",
-                text
-            )))
         }
         Some(("Text", Some(CtValue::Str(text)))) => crate::Numeric::CtDecimal::from_str(text),
         Some(("Int", Some(CtValue::Int(value)))) => {
@@ -1667,7 +1669,7 @@ impl<'a> Interp<'a> {
         }
         let parsed: Result<CtValue, CtValue> = match module {
             "core.encoding.json" => {
-                super::JSONInterp::parse_json_typed_ordered(text).map_err(|e| {
+                super::JSONInterp::parse_json(text).map_err(|e| {
                     json_parse_err_to_decode("JSON", super::JSONInterp::encoding_error_value(e))
                 })
             }

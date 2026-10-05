@@ -34,17 +34,14 @@ mod tests {
     }
 
     #[test]
-    fn typed_json_keeps_quoted_numbers_distinct() {
+    fn exact_json_keeps_quoted_numbers_distinct() {
         assert_eq!(
-            parse_json_typed(r#"["123",123]"#, false),
+            parse_json_exact_numbers(r#"["123",123,1.50]"#, false),
             Ok(Dyn::Array(vec![
-                Dyn::TypedText("123".to_string()),
+                Dyn::Text("123".to_string()),
                 Dyn::Number("123".to_string()),
+                Dyn::Number("1.50".to_string()),
             ]))
-        );
-        assert_eq!(
-            parse_json_exact_numbers(r#""123""#, false),
-            Ok(Dyn::Text("123".to_string()))
         );
     }
 
@@ -75,36 +72,31 @@ pub struct Error {
     pub message: String,
 }
 
+/// Host-internal parse: integers that fit `i64` become `Int`, other integers
+/// keep their lexeme as `Number`, and fractions become `Float`.
 pub fn parse_json(text: &str, reject_duplicate_keys: bool) -> Result<Dyn, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, false, false)
+    parse_json_with_modes(text, reject_duplicate_keys, false)
 }
 
+/// The Jet `json.parse` meaning (#4602): every number token keeps its exact
+/// lexeme as `Number` until a typed read range-checks it.
 pub fn parse_json_exact_numbers(
     text: &str,
     reject_duplicate_keys: bool,
 ) -> Result<Dyn, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, true, false)
-}
-
-pub fn parse_json_typed(
-    text: &str,
-    reject_duplicate_keys: bool,
-) -> Result<Dyn, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, true, true)
+    parse_json_with_modes(text, reject_duplicate_keys, true)
 }
 
 fn parse_json_with_modes(
     text: &str,
     reject_duplicate_keys: bool,
     preserve_numbers: bool,
-    preserve_strings: bool,
 ) -> Result<Dyn, Error> {
     let mut parser = Parser {
         chars: text.chars().collect(),
         pos: 0,
         reject_duplicate_keys,
         preserve_numbers,
-        preserve_strings,
     };
     let value = parser.value(0)?;
     parser.ws();
@@ -123,7 +115,6 @@ struct Parser {
     pos: usize,
     reject_duplicate_keys: bool,
     preserve_numbers: bool,
-    preserve_strings: bool,
 }
 
 impl Parser {
@@ -155,14 +146,7 @@ impl Parser {
             Some('n') => self.word("null", Dyn::Null),
             Some('t') => self.word("true", Dyn::Bool(true)),
             Some('f') => self.word("false", Dyn::Bool(false)),
-            Some('"') => {
-                let text = self.string()?;
-                Ok(if self.preserve_strings {
-                    Dyn::TypedText(text)
-                } else {
-                    Dyn::Text(text)
-                })
-            }
+            Some('"') => Ok(Dyn::Text(self.string()?)),
             Some('[') => self.array(depth),
             Some('{') => self.object(depth),
             Some('-') | Some('0'..='9') => self.number(),
@@ -416,7 +400,7 @@ impl Parser {
                 format!("{value:?}")
             }
             Dyn::Number(value) => value.clone(),
-            Dyn::TypedText(value) | Dyn::Text(value) => quote_json(value),
+            Dyn::Text(value) => quote_json(value),
             Dyn::Bytes(value) => quote_json(&Dyn::bytes_text(value)),
             Dyn::DateTime(value) => quote_json(&value.to_rfc3339()),
             Dyn::Array(items) => {

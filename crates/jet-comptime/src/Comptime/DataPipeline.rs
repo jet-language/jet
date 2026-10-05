@@ -1698,7 +1698,7 @@ fn data_dynamic_tree(
         )
     })?;
     let tree = match format {
-        "json" => super::JSONInterp::parse_json_typed_ordered(&text).map_err(|error| {
+        "json" => super::JSONInterp::parse_json(&text).map_err(|error| {
             data_loader_failure(
                 "Decode",
                 "data.loader.json",
@@ -1719,7 +1719,7 @@ fn data_dynamic_tree(
                         format!("max_output_rows {} exceeded", limits.max_output_rows),
                     ));
                 }
-                let value = super::JSONInterp::parse_json_typed_ordered(line).map_err(|error| {
+                let value = super::JSONInterp::parse_json(line).map_err(|error| {
                     data_loader_failure(
                         "Decode",
                         "data.loader.jsonl",

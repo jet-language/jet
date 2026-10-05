@@ -181,25 +181,6 @@ pub(crate) mod json_rt {
     pub fn parse_dyn(text: &str) -> Result<Dyn, EncodingError> {
         parse_json_dyn(text)
     }
-
-    pub fn parse_dyn_typed_ordered(text: &str) -> Result<Dyn, EncodingError> {
-        parse_json_typed_dyn(text)
-    }
-
-    /// D-JSON3 lenient decode. The walk, the coercion message and the audit-line
-    /// shape are ONE policy in the included `JSONDyn.rs`; this host used to
-    /// carry a byte-equivalent `coerce_walk` copy self-documented as "same as"
-    /// AOT's (I8/I9). Only the sink is per-tier, and picking it is the resident
-    /// output adapter's job — a raw `eprintln!` would escape `ProgramOutput`,
-    /// and a raw buffer push would escape the program's own output order.
-    pub fn decode_lenient(text: &str) -> Result<Dyn, EncodingError> {
-        jet_std_json_decode_lenient(text, &mut |line| {
-            let _ = crate::runtime_host::write_jit_stderr(
-                &crate::IO::term_prelude::jet_term_print_frame(&line),
-                false,
-            );
-        })
-    }
 }
 /// Shared CSV/data query kernel. The resident layer only marshals heap
 /// `Dyn` values; plan parsing and comparison stay in the Prelude.
@@ -231,19 +212,11 @@ const DT_NULL: i64 = crate::types_meta::PRELUDE_DYN_NULL;
 const DT_BOOL: i64 = crate::types_meta::PRELUDE_DYN_BOOL;
 const DT_INT: i64 = crate::types_meta::PRELUDE_DYN_INT;
 const DT_FLOAT: i64 = crate::types_meta::PRELUDE_DYN_FLOAT;
+const DT_NUMBER: i64 = crate::types_meta::PRELUDE_DYN_NUMBER;
 const DT_TEXT: i64 = crate::types_meta::PRELUDE_DYN_TEXT;
 const DT_BYTES: i64 = crate::types_meta::PRELUDE_DYN_BYTES;
 const DT_ARRAY: i64 = crate::types_meta::PRELUDE_DYN_ARRAY;
 const DT_OBJECT: i64 = crate::types_meta::PRELUDE_DYN_OBJECT;
-// Private adapter tags: these carriers never escape a typed JSON decode.
-const DT_NUMBER: i64 = -1;
-const DT_TYPED_TEXT: i64 = -2;
-// Hidden JSON lexical variants cross generated Decode copies through the
-// public Text enum arm. Plain Text stays untagged so dynamic pattern captures
-// receive the source string; the legacy text prefix remains readable below.
-const DT_TEXT_PREFIX: &str = "\u{0}jet-dt-text\0";
-const DT_NUMBER_PREFIX: &str = "\u{0}jet-dt-number\0";
-const DT_TYPED_TEXT_PREFIX: &str = "\u{0}jet-dt-typed-text\0";
 
 /// One enum-record ABI: slot 0 is the discriminant and slot 1 holds the
 /// payload under its own `JetVal` tag, exactly as `pack_enum_record` writes a
@@ -269,7 +242,7 @@ fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
                     .heap
                     .record_set_float(h, 1, f64::from_bits(payload as u64));
             }
-            DT_TEXT | DT_NUMBER | DT_TYPED_TEXT => {
+            DT_TEXT | DT_NUMBER => {
                 let _ = rt.heap.record_set_string(h, 1, payload);
             }
             DT_ARRAY | DT_BYTES | DT_OBJECT => {
@@ -284,13 +257,6 @@ fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
         h
     })
 }
-fn tagged_dyn_text(prefix: &str, text: &str) -> String {
-    let mut tagged = String::with_capacity(prefix.len() + text.len());
-    tagged.push_str(prefix);
-    tagged.push_str(text);
-    tagged
-}
-
 pub(crate) fn alloc_dyn(tree: &json_rt::Dyn) -> i64 {
     match tree {
         json_rt::Dyn::Null => alloc_dt_record(DT_NULL, 0),
@@ -298,14 +264,8 @@ pub(crate) fn alloc_dyn(tree: &json_rt::Dyn) -> i64 {
         json_rt::Dyn::Int(n) => alloc_dt_record(DT_INT, *n),
         json_rt::Dyn::Float(f) => alloc_dt_record(DT_FLOAT, f.to_bits() as i64),
         json_rt::Dyn::Number(text) => {
-            let text = tagged_dyn_text(DT_NUMBER_PREFIX, text);
-            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
-            alloc_dt_record(DT_TEXT, sid)
-        }
-        json_rt::Dyn::TypedText(text) => {
-            let text = tagged_dyn_text(DT_TYPED_TEXT_PREFIX, text);
-            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
-            alloc_dt_record(DT_TEXT, sid)
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text.clone()));
+            alloc_dt_record(DT_NUMBER, sid)
         }
         json_rt::Dyn::Text(s) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s.clone()));
@@ -404,7 +364,7 @@ pub(crate) fn read_dyn(handle: i64) -> Option<json_rt::Dyn> {
                     let f = rt.heap.record_get_float(handle, 1)?;
                     Some((disc, 0i64, None, None, None, Some(f)))
                 }
-                DT_TEXT | DT_NUMBER | DT_TYPED_TEXT => {
+                DT_TEXT | DT_NUMBER => {
                     let s = dyn_string_slot(rt, rt.heap.record_get(handle, 1)?)?;
                     Some((disc, 0i64, Some(s), None, None, None))
                 }
@@ -451,20 +411,8 @@ pub(crate) fn read_dyn(handle: i64) -> Option<json_rt::Dyn> {
         DT_BOOL => Some(json_rt::Dyn::Bool(payload != 0)),
         DT_INT => Some(json_rt::Dyn::Int(payload)),
         DT_FLOAT => Some(json_rt::Dyn::Float(float_val?)),
-        DT_TEXT => {
-            let text = text?;
-            if let Some(text) = text.strip_prefix(DT_NUMBER_PREFIX) {
-                Some(json_rt::Dyn::Number(text.to_owned()))
-            } else if let Some(text) = text.strip_prefix(DT_TYPED_TEXT_PREFIX) {
-                Some(json_rt::Dyn::TypedText(text.to_owned()))
-            } else if let Some(text) = text.strip_prefix(DT_TEXT_PREFIX) {
-                Some(json_rt::Dyn::Text(text.to_owned()))
-            } else {
-                Some(json_rt::Dyn::Text(text))
-            }
-        }
+        DT_TEXT => Some(json_rt::Dyn::Text(text?)),
         DT_NUMBER => Some(json_rt::Dyn::Number(text?)),
-        DT_TYPED_TEXT => Some(json_rt::Dyn::TypedText(text?)),
         DT_ARRAY => {
             let items = child_handles?
                 .into_iter()
@@ -1415,22 +1363,6 @@ fn jet_jit_json_parse(text: i64) -> i64 {
         Err(error) => result_err_encoding(error),
     }
 }
-
-/// Ordered JSON parsing is the front half of typed `json.decode`. Its failure
-/// uses the same canonical `EncodingError` carrier as every format parser.
-fn jet_jit_json_parse_ordered(text: i64) -> i64 {
-    match json_rt::parse_dyn_typed_ordered(&clone_string(text)) {
-        Ok(tree) => result_ok(alloc_dyn(&tree) as u64),
-        Err(error) => result_err_encoding(error),
-    }
-}
-
-fn jet_jit_json_decode(text: i64) -> i64 {
-    match json_rt::decode_lenient(&clone_string(text)) {
-        Ok(tree) => result_ok(alloc_dyn(&tree) as u64),
-        Err(error) => result_err_encoding(error),
-    }
-}
 fn typed_runtime_descriptor(type_key: &str) -> Option<runtime_host::RuntimeTypeDescriptor> {
     Concurrency::with_runtime_mut(|rt| {
         let id = type_key
@@ -2359,7 +2291,7 @@ fn jet_jit_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i64 {
         Ok(callback) => callback,
         Err(()) => return 0,
     };
-    match json_rt::parse_dyn_typed_ordered(&text) {
+    match json_rt::parse_dyn(&text) {
         Ok(tree) => {
             let tree = match migration.as_ref() {
                 Some(plan) => match migrate_typed_tree(&tree, plan) {
@@ -2420,7 +2352,7 @@ fn jet_jit_data_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i6
         Ok(callback) => callback,
         Err(()) => return 0,
     };
-    match json_rt::parse_dyn_typed_ordered(&text) {
+    match json_rt::parse_dyn(&text) {
         Ok(json_rt::Dyn::Array(items)) => {
             let Some(descriptor) = typed_runtime_descriptor(&type_key) else {
                 return result_err_fields(json_rt::FieldError::one(format!(
@@ -4503,8 +4435,6 @@ host_fns! {
     uuid_v5: "jet_jit_uuid_v5" => jet_jit_uuid_v5: sig_binary;
     uuid_parse: "jet_jit_uuid_parse" => jet_jit_uuid_parse: sig_unary;
     json_parse: "jet_jit_json_parse" => jet_jit_json_parse: sig_unary;
-    json_parse_ordered: "jet_jit_json_parse_ordered" => jet_jit_json_parse_ordered: sig_unary;
-    json_decode: "jet_jit_json_decode" => jet_jit_json_decode: sig_unary;
     json_decode_typed: "jet_jit_json_decode_typed" => jet_jit_json_decode_typed: sig_ternary;
     data_json_decode_typed: "jet_jit_data_json_decode_typed" => jet_jit_data_json_decode_typed: sig_ternary;
     data_json_decode: "jet_data_json_decode" => jet_jit_data_json_decode_typed: sig_ternary;

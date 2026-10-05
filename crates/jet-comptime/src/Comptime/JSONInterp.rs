@@ -8,13 +8,10 @@ fn from_json_int(value: i64) -> CtValue {
     exact_int_value(crate::Numeric::CtBigInt::from_int(value))
 }
 
-fn from_json_number(value: String) -> CtValue {
-    let number = crate::Numeric::CtBigInt::from_str(&value)
-        .expect("dynamic JSON integer token must be valid exact integer text");
-    exact_int_value(number)
-}
-
-fn from_json(value: jet_foundation::Dyn::Dyn) -> CtValue {
+/// One carrier node as the interpreter's `Dyn` enum value. JSON parsing
+/// keeps every number token as `Number` (#4602); `Int`/`Float`/`Bytes` arrive
+/// from other formats and typed encoders.
+pub(super) fn from_json(value: jet_foundation::Dyn::Dyn) -> CtValue {
     match value {
         jet_foundation::Dyn::Dyn::Null => json_variant("Null", None),
         jet_foundation::Dyn::Dyn::Bool(value) => {
@@ -27,11 +24,13 @@ fn from_json(value: jet_foundation::Dyn::Dyn) -> CtValue {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
         jet_foundation::Dyn::Dyn::Number(value) => {
-            json_variant("Int", Some(from_json_number(value)))
+            json_variant("Number", Some(CtValue::Str(value)))
         }
-        jet_foundation::Dyn::Dyn::TypedText(value)
-        | jet_foundation::Dyn::Dyn::Text(value) => {
+        jet_foundation::Dyn::Dyn::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
+        }
+        jet_foundation::Dyn::Dyn::Bytes(value) => {
+            json_variant("Bytes", Some(CtValue::Bytes(value)))
         }
         jet_foundation::Dyn::Dyn::Array(values) => json_variant(
             "Array",
@@ -43,79 +42,10 @@ fn from_json(value: jet_foundation::Dyn::Dyn) -> CtValue {
                 .map(|(key, value)| (key, from_json(value)))
                 .collect(),
         ),
-        jet_foundation::Dyn::Dyn::Bytes(_) | jet_foundation::Dyn::Dyn::DateTime(_) => {
-            unreachable!("JSON parser does not produce native binary or temporal nodes")
-        }
-    }
-}
-
-fn from_ordered_json(value: jet_foundation::Dyn::Dyn) -> CtValue {
-    match value {
-        jet_foundation::Dyn::Dyn::Object(fields) => json_object(
-            fields
-                .into_iter()
-                .map(|(key, value)| (key, from_ordered_json(value)))
-                .collect(),
+        jet_foundation::Dyn::Dyn::DateTime(value) => json_variant(
+            "DateTime",
+            Some(super::CorePureParity::dyn_datetime_value(value)),
         ),
-        jet_foundation::Dyn::Dyn::Null => json_variant("Null", None),
-        jet_foundation::Dyn::Dyn::Bool(value) => {
-            json_variant("Bool", Some(CtValue::Bool(value)))
-        }
-        jet_foundation::Dyn::Dyn::Int(value) => {
-            json_variant("Int", Some(from_json_int(value)))
-        }
-        jet_foundation::Dyn::Dyn::Float(value) => {
-            json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
-        }
-        jet_foundation::Dyn::Dyn::Number(value) => {
-            json_variant("Int", Some(from_json_number(value)))
-        }
-        jet_foundation::Dyn::Dyn::TypedText(value)
-        | jet_foundation::Dyn::Dyn::Text(value) => {
-            json_variant("Text", Some(CtValue::Str(value)))
-        }
-        jet_foundation::Dyn::Dyn::Array(values) => json_variant(
-            "Array",
-            Some(CtValue::List(
-                values.into_iter().map(from_ordered_json).collect(),
-            )),
-        ),
-        jet_foundation::Dyn::Dyn::Bytes(_) | jet_foundation::Dyn::Dyn::DateTime(_) => {
-            unreachable!("JSON parser does not produce native binary or temporal nodes")
-        }
-    }
-}
-
-fn from_typed_ordered_json(value: jet_foundation::Dyn::Dyn) -> CtValue {
-    match value {
-        jet_foundation::Dyn::Dyn::Object(fields) => json_object(
-            fields
-                .into_iter()
-                .map(|(key, value)| (key, from_typed_ordered_json(value)))
-                .collect(),
-        ),
-        jet_foundation::Dyn::Dyn::Null => json_variant("Null", None),
-        jet_foundation::Dyn::Dyn::Bool(value) => {
-            json_variant("Bool", Some(CtValue::Bool(value)))
-        }
-        jet_foundation::Dyn::Dyn::Number(value) => {
-            json_variant("Number", Some(CtValue::Str(value)))
-        }
-        jet_foundation::Dyn::Dyn::TypedText(value)
-        | jet_foundation::Dyn::Dyn::Text(value) => {
-            json_variant("TypedText", Some(CtValue::Str(value)))
-        }
-        jet_foundation::Dyn::Dyn::Array(values) => json_variant(
-            "Array",
-            Some(CtValue::List(
-                values.into_iter().map(from_typed_ordered_json).collect(),
-            )),
-        ),
-        jet_foundation::Dyn::Dyn::Int(_)
-        | jet_foundation::Dyn::Dyn::Float(_)
-        | jet_foundation::Dyn::Dyn::Bytes(_) | jet_foundation::Dyn::Dyn::DateTime(_) => {
-            unreachable!("lossless JSON parsing projected a number early")
-        }
     }
 }
 
@@ -160,19 +90,7 @@ pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtVa
 }
 
 pub(super) fn parse_json(text: &str) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-    jet_foundation::EncodingJson::parse_json(text, true).map(from_json)
-}
-
-pub(super) fn parse_json_ordered(
-    text: &str,
-) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-    jet_foundation::EncodingJson::parse_json(text, true).map(from_ordered_json)
-}
-
-pub(super) fn parse_json_typed_ordered(
-    text: &str,
-) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-    jet_foundation::EncodingJson::parse_json_typed(text, true).map(from_typed_ordered_json)
+    jet_foundation::EncodingJson::parse_json_exact_numbers(text, true).map(from_json)
 }
 
 pub(super) fn encoding_error_value(e: jet_foundation::EncodingJson::Error) -> CtValue {
@@ -488,11 +406,7 @@ mod tests {
     #[test]
     fn comptime_json_routes_share_the_depth_boundary() {
         type ParseRoute = fn(&str) -> Result<CtValue, jet_foundation::EncodingJson::Error>;
-        let routes: &[(&str, ParseRoute)] = &[
-            ("parse_json", parse_json),
-            ("parse_json_ordered", parse_json_ordered),
-            ("parse_json_typed_ordered", parse_json_typed_ordered),
-        ];
+        let routes: &[(&str, ParseRoute)] = &[("parse_json", parse_json)];
 
         for (name, parse) in routes {
             let boundary = nested_json(jet_foundation::EncodingJson::MAX_JSON_DEPTH);

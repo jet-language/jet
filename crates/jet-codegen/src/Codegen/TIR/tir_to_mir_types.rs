@@ -2295,6 +2295,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Bool",
             "Int",
             "Float",
+            "Number",
             "Text",
             "Bytes",
             "DateTime",
@@ -3670,7 +3671,7 @@ fn compiler_owned_type_defs<'a>(
                                 "Int" => TirVariantPayload::Single(Type::Int),
                                 "Float" => TirVariantPayload::Single(Type::Float),
                                 "DateTime" => TirVariantPayload::Single(Type::Named("ZonedDateTime".to_string())),
-                                "Number" | "TypedText" | "Text" => {
+                                "Number" | "Text" => {
                                     TirVariantPayload::Single(Type::String)
                                 }
                                 "Bytes" => {

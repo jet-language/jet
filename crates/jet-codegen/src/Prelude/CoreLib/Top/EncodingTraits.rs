@@ -443,10 +443,6 @@ impl __jet_Decode for jet_std::JetDecimal {
                     jet_std::FieldError::one(format!("expected Decimal: {error}"))
                 })
             }
-            jet_std::Dyn::TypedText(text) => Err(jet_std::FieldError::one(format!(
-                "expected Decimal, found text {:?}",
-                text
-            ))),
             jet_std::Dyn::Text(text) => {
                 jet_codec_decimal_decode_text(text).map_err(|error| {
                     jet_std::FieldError::one(format!("expected Decimal: {error}"))
@@ -697,7 +693,7 @@ fn jet_enc_json_to_string_shape_pretty<T: __jet_Encode>(
     Ok(jet_std::render_dyn_json(&projected, true, 0))
 }
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = jet_std::parse_json_typed_dyn(text).map_err(|e| {
+    let tree = jet_std::parse_json_dyn(text).map_err(|e| {
         let line = e.line.ok().unwrap_or(0);
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", line, e.reason))
     })?;

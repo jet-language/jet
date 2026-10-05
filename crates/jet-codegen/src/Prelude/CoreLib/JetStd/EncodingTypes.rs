@@ -116,6 +116,7 @@ impl EncodingError {
 /// including rows after the first failure, so accumulated errors retain source
 /// order. `frame_errors` supplies the carrier-specific row-path projection;
 /// `make_text` and `make_object` keep this kernel independent of the carrier.
+/// CSV cells are text-native, so each row decodes inside the text-cell scope.
 pub(crate) fn jet_enc_csv_decode_rows<T, I, V, F, E, P, C, O>(
     rows: I,
     mut decode: F,
@@ -142,7 +143,7 @@ where
             .iter()
             .map(|name| (name.clone(), make_text(cells.next().unwrap_or_default())))
             .collect();
-        match decode(make_object(object)) {
+        match jet_decode_text_cells(|| decode(make_object(object))) {
             Ok(value) => values.push(value),
             Err(error) => {
                 let row = format!("row {}", index + 1);

@@ -442,9 +442,9 @@ fn http_decode_route_value(raw: &str, schema: &HttpTree) -> Result<MirRuntimeVal
             }
             HttpTree::Null
         }
-        "array" | "object" => crate::net_http_rt::jet_std::parse_json_typed_dyn(raw)
+        "array" | "object" => crate::net_http_rt::jet_std::parse_json_dyn(raw)
             .map_err(|_| "HTTP route structured parameter is invalid JSON".to_string())?,
-        _ => crate::net_http_rt::jet_std::parse_json_typed_dyn(raw)
+        _ => crate::net_http_rt::jet_std::parse_json_dyn(raw)
             .unwrap_or_else(|_| HttpTree::Text(raw.to_string())),
     };
     if !crate::net_http_rt::jet_http_route_schema_matches(&tree, schema) {
@@ -456,7 +456,7 @@ fn http_decode_route_value(raw: &str, schema: &HttpTree) -> Result<MirRuntimeVal
 fn http_contract_parts(
     contract_json: &str,
 ) -> Result<(Vec<InterpreterHttpParameter>, Option<(bool, HttpTree)>), String> {
-    let contract = crate::net_http_rt::jet_std::parse_json_typed_dyn(contract_json)
+    let contract = crate::net_http_rt::jet_std::parse_json_dyn(contract_json)
         .map_err(|_| "HTTP route contract is not valid JSON".to_string())?;
     let object = http_object(&contract)
         .ok_or_else(|| "HTTP route contract is not a JSON object".to_string())?;
@@ -841,7 +841,7 @@ fn http_route_invocation(
         } else {
             let text = std::str::from_utf8(body)
                 .map_err(|_| "HTTP route request body is not UTF-8".to_string())?;
-            let tree = crate::net_http_rt::jet_std::parse_json_typed_dyn(text)
+            let tree = crate::net_http_rt::jet_std::parse_json_dyn(text)
                 .map_err(|_| "HTTP route request body is invalid JSON".to_string())?;
             if !crate::net_http_rt::jet_http_route_schema_matches(&tree, &schema) {
                 return Err("HTTP route request body does not match its checked schema".to_string());
@@ -1422,7 +1422,7 @@ impl InterpreterAmbientState {
                     )));
                 };
                 let Ok(contract) =
-                    crate::net_http_rt::jet_std::parse_json_typed_dyn(contract_json)
+                    crate::net_http_rt::jet_std::parse_json_dyn(contract_json)
                 else {
                     return Some(Err(http_router_diag(
                         "HTTPRouter registration contract is not valid JSON",

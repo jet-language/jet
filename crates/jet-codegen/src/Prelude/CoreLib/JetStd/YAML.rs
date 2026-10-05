@@ -80,7 +80,7 @@
                 Dyn::parse_datetime(s).map_err(FlowError::Unsupported)?
             } else { scalar_value(s) };
             let payload = match &value {
-                Dyn::Number(text) | Dyn::TypedText(text) | Dyn::Text(text) => {
+                Dyn::Number(text) | Dyn::Text(text) => {
                     text.len()
                 }
                 Dyn::Bytes(bytes) => bytes.len(),
@@ -95,7 +95,7 @@
                 Dyn::Null | Dyn::Bool(_) | Dyn::Int(_) | Dyn::Float(_) | Dyn::DateTime(_) => {
                     budget.node(0)?;
                 }
-                Dyn::Number(text) | Dyn::TypedText(text) | Dyn::Text(text) => {
+                Dyn::Number(text) | Dyn::Text(text) => {
                     budget.node(text.len())?;
                 }
                 Dyn::Bytes(bytes) => {
@@ -770,17 +770,10 @@
                 ".nan" | ".NaN" | ".NAN" => return Dyn::Float(f64::NAN),
                 _ => {}
             }
-            // Integer (decimal, with optional sign).
-            if let Ok(n) = s.parse::<i64>() {
-                return Dyn::Int(n);
-            }
-            // Float: must contain a `.`, `e`/`E` and parse cleanly.
-            if (s.contains('.') || s.contains('e') || s.contains('E'))
-                && s.chars()
-                    .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
-            {
-                if let Ok(f) = s.parse::<f64>() {
-                    return Dyn::Float(f);
+            // #4602: a core-schema number keeps its exact lexeme as `Number`.
+            if s.starts_with(|ch: char| ch.is_ascii_digit() || matches!(ch, '-' | '+' | '.')) {
+                if let Some(lexeme) = crate::jet_json_number::number_lexeme(s) {
+                    return Dyn::Number(lexeme);
                 }
             }
             Dyn::Text(s.to_string())
@@ -859,9 +852,7 @@
                 Dyn::Bool(b) => b.to_string(),
                 Dyn::Int(n) => n.to_string(),
                 Dyn::Float(f) => format!("{:?}", f),
-                Dyn::Number(_) | Dyn::TypedText(_) => {
-                    unreachable!("internal JSON carrier escaped typed decode")
-                }
+                Dyn::Number(text) => text.clone(),
                 Dyn::Text(s) => {
                     if needs_quote(s) {
                         format!("{:?}", s)

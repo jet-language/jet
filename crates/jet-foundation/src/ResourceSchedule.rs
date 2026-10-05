@@ -1140,8 +1140,7 @@ fn json_u64(value: &crate::Dyn::Dyn, what: &str) -> Result<u64, String> {
     let text = match value {
         crate::Dyn::Dyn::Int(value) if *value >= 0 => value.to_string(),
         crate::Dyn::Dyn::Number(value)
-        | crate::Dyn::Dyn::Text(value)
-        | crate::Dyn::Dyn::TypedText(value) => value.clone(),
+        | crate::Dyn::Dyn::Text(value) => value.clone(),
         _ => return Err(format!("expected {what} unsigned integer")),
     };
     text.parse::<u64>()

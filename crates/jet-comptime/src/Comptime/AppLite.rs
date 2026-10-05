@@ -215,10 +215,10 @@ mod web_kernel {
 
             /// Strict JSON validity through the one Foundation parser; the
             /// server-fn kernel only asks whether a body parses.
-            pub fn parse_json_typed_dyn(
+            pub fn parse_json_dyn(
                 text: &str,
             ) -> Result<Dyn, jet_foundation::EncodingJson::Error> {
-                jet_foundation::EncodingJson::parse_json_typed(text, true)
+                jet_foundation::EncodingJson::parse_json_exact_numbers(text, true)
             }
         }
 
@@ -260,9 +260,7 @@ mod web_kernel {
     impl __jet_Decode for String {
         fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
             match tree {
-                jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => {
-                    Ok(value.clone())
-                }
+                jet_std::Dyn::Text(value) => Ok(value.clone()),
                 _ => Err(jet_std::FieldError::one("expected Text")),
             }
         }
@@ -1063,9 +1061,7 @@ fn app_callback(
 
 fn tree_text(tree: &web_kernel::Dyn) -> Option<String> {
     match tree {
-        web_kernel::Dyn::Text(value) | web_kernel::Dyn::TypedText(value) => {
-            Some(value.clone())
-        }
+        web_kernel::Dyn::Text(value) => Some(value.clone()),
         web_kernel::Dyn::Int(value) => Some(value.to_string()),
         web_kernel::Dyn::Float(value) => Some(value.to_string()),
         web_kernel::Dyn::Bool(value) => Some(value.to_string()),
@@ -1085,10 +1081,6 @@ fn tree_to_untyped(tree: &web_kernel::Dyn, span: Span) -> Result<CtValue, String
             .map(CtValue::Int)
             .or_else(|_| value.parse::<f64>().map(|value| CtValue::Float(crate::AST::CtFloat::f64(value))))
             .map_err(|_| format!("invalid JSON number `{value}`")),
-        web_kernel::Dyn::TypedText(value) => {
-            let tree = parse_app_json_tree(value)?;
-            tree_to_untyped(&tree, span)
-        }
         web_kernel::Dyn::Text(value) => Ok(CtValue::Str(value.clone())),
         web_kernel::Dyn::Bytes(value) => Ok(CtValue::Bytes(value.clone())),
         web_kernel::Dyn::DateTime(_) => Err("Dyn.DateTime requires the AOT time payload boundary".to_owned()),
@@ -1314,8 +1306,9 @@ fn decode_route_inputs(
                     })
             }
             web_kernel::JetAppRouteBinding::Data => {
+                // Loader data is JSON text; the one JSON parser owns it.
                 let tree = match tree {
-                    web_kernel::Dyn::TypedText(value) => parse_app_json_tree(value)?,
+                    web_kernel::Dyn::Text(value) => parse_app_json_tree(value)?,
                     tree => tree.clone(),
                 };
                 mir_tree_to_ct(&tree, ty, span)

@@ -80,7 +80,6 @@ pub fn render_dyn_json(tree: &Dyn, pretty: bool, depth: usize) -> String {
             format!("{:?}", value)
         }
         Dyn::Number(text) => text.clone(),
-        Dyn::TypedText(text) => quote_json(text),
         Dyn::Text(value) => quote_json(value),
         Dyn::Bytes(values) => quote_json(&Dyn::bytes_text(values)),
         Dyn::DateTime(value) => quote_json(&value.to_rfc3339()),

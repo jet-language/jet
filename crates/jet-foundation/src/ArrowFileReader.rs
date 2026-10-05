@@ -419,7 +419,7 @@ fn temporal_tree_value(
     } else {
         return Ok(None);
     };
-    Ok(Some(Dyn::TypedText(text)))
+    Ok(Some(Dyn::Text(text)))
 }
 
 fn scale_temporal(value: i64, unit: &str) -> Result<i128, ArrowError> {

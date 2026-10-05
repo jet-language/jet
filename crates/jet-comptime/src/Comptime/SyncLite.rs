@@ -127,10 +127,6 @@ fn dyn_from_ct(value: &CtValue) -> Option<jet_std::Dyn> {
                     Some(CtValue::Str(value)) => Some(jet_std::Dyn::Number(value.clone())),
                     _ => None,
                 },
-                "TypedText" => match payload {
-                    Some(CtValue::Str(value)) => Some(jet_std::Dyn::TypedText(value.clone())),
-                    _ => None,
-                },
                 "Text" => match payload {
                     Some(CtValue::Str(value)) => Some(jet_std::Dyn::Text(value.clone())),
                     _ => None,
@@ -212,6 +208,16 @@ pub fn dyn_equal_unordered(left: &CtValue, right: &CtValue) -> bool {
         (Some(left), Some(right)) => left.equal_unordered(&right),
         _ => false,
     }
+}
+
+/// The text-cell decode scope of the shared Prelude policy (#4602): only a
+/// text-native source's decode parses `Text` leaves into scalars.
+pub(super) fn decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+    jet_std::jet_decode_text_cells(decode)
+}
+
+pub(super) fn text_cells_active() -> bool {
+    jet_std::jet_text_cells_active()
 }
 
 /// Route comptime Int decoding through the shared Prelude coercion policy.

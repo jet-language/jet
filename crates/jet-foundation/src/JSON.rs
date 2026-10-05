@@ -340,7 +340,7 @@ pub fn json_get<'a>(v: &'a Dyn, key: &str) -> Option<&'a Dyn> {
 
 pub fn json_str(v: &Dyn) -> Option<&str> {
     match v {
-        Dyn::Text(s) | Dyn::TypedText(s) => Some(s),
+        Dyn::Text(s) => Some(s),
         _ => None,
     }
 }
