@@ -257,7 +257,7 @@ pub fn jet_term_choose_retry_error() -> String { "no valid choice after {JET_TER
 pub fn jet_term_choose_with_io<E>(prompt: &String, items: &[String], write: fn(&String) -> () E!, read: fn() -> JetTermRead E!, stop: fn(&String) -> E) -> String E! {
     if items.is_empty() { return Err(stop(jet_term_choose_empty_error())) }
     write(&jet_term_choose_menu(prompt, items))?
-    for _ in 0..=JET_TERM_CHOOSE_RETRY_LIMIT {
+    for _ in 0..JET_TERM_CHOOSE_RETRY_LIMIT {
         answer :: match write("> ").and_then(fn(_) { read() })? { .Line(answer) -> answer, .EndOfInput -> return Err(stop(jet_term_choose_closed_error())) }
         if Ok(index) :: answer.trim().parse<Usize>() {
             if Val(item) :: index.checked_sub(1).and_then(fn(index) { items.get(index) }) { return Ok(item.clone()) }
