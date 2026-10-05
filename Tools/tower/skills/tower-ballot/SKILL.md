@@ -47,8 +47,10 @@ an executable candidate/plain two-program cell in the canonical gauntlet
 matrix before ratification. Apply the standing comparator and keep every loss
 carded.
 
-All owner decisions, including choices awaiting approval, live in Tower
-ballots. A card log or briefing may link one, never record a substitute decision.
+Substantive owner decisions, including durable choices awaiting approval, live
+in Tower ballots. A card log or briefing may link one, never record a substitute
+decision. Use the [Tower distinction](../tower/SKILL.md#board-model) for transient
+or minimally impactful chat questions.
 Apply the [ten clarity rules](references/clarity.md) before drafting; these
 owner rules are stricter than schema maxima, not permission to omit required
 fields. Research the proven approaches and failures first.

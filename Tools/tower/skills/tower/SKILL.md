@@ -79,9 +79,12 @@ The board's open questions and decisions stay attached to their cards.
 The owner's decisions are the only allowed bottleneck. Raise a ballot for an
 unresolved owner gate, but do not wait for generic approval before working a
 fresh ungated card. Use the current short/full ballot profile through
-`tower-ballot`. All owner decisions and choices needing one are Tower ballots,
-never card logs or briefing text. Those may link a ballot, but cannot substitute
-for it.
+`tower-ballot`.
+
+Substantive decisions (language/API/product behavior, scope, anything durable)
+are Tower ballots. Transient or minimally impactful questions may be asked in
+chat; record nothing durable from them as a decision. Card logs and briefings
+may link a ballot, but cannot substitute for it.
 
 Every ballot view opens with the decision's top-level `situation`: at most four
 short plain sentences covering what a programmer sees today, the problem, and
